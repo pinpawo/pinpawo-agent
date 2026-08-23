@@ -1558,7 +1558,7 @@ test('a submitted plan commits once without a final ordinary-text reply', async 
   assert.equal(model.invocations.length, 1);
 });
 
-test('Planner repairs one ordinary-text response into a terminal commit without persisting it', async (t) => {
+test('Planner preserves an ordinary-text response for Answer without retrying', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1566,31 +1566,20 @@ test('Planner repairs one ordinary-text response into a terminal commit without 
       instructions: 'Complete the requested work.',
     }),
   });
-  const tasks = [{
-    capability: 'general',
-    task: 'Apply the requested repository change and verify it.',
-  }];
   const model = new ScriptedPlannerModel([{
     content: '开始执行计划任务：Apply the requested repository change and verify it。',
-  }, {
-    structuredOutput: {
-      kind: 'plan',
-      args: { tasks },
-    },
   }]);
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(
     plannerInput(workspace),
   );
 
-  assert.deepEqual(commitOnly(result), { action: 'execute_plan', tasks });
-  assert.equal(model.invocations.length, 2);
-  assert.match(
-    model.invocations[1]?.map(readMessageText).join('\n') ?? '',
-    /没有调用任何工具/,
-  );
+  assert.ok('plannerStatus' in result);
+  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
+  assert.equal(result.plannerStatus, 'incomplete');
+  assert.equal(model.invocations.length, 1);
   assert.equal(result.messageUpdates?.some((message) =>
-    readMessageText(message).startsWith('开始执行计划任务：')), false);
+    readMessageText(message).startsWith('开始执行计划任务：')), true);
 });
 
 test('Planner can return bounded facts to Answer without submitting a plan', async (t) => {
@@ -2089,7 +2078,7 @@ test('Planner reports an incomplete result when it exits without a commit', asyn
   if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
   assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(result.reason, 'terminal_commit_missing');
-  assert.equal(model.invocations.length, 2);
+  assert.equal(model.invocations.length, 1);
   assert.equal(result.messageUpdates?.some((message) =>
     ToolMessage.isInstance(message)
     && message.name === 'report_unavailable'), false);
@@ -2122,11 +2111,11 @@ test('Planner keeps search auto when closed exploration ends without a commit', 
   if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
   assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(result.reason, 'terminal_commit_missing');
-  assert.equal(model.invocations.length, 4);
-  assert.equal(model.boundToolNameHistory[3]?.includes(
+  assert.equal(model.invocations.length, 3);
+  assert.equal(model.boundToolNameHistory[2]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
-  assert.equal(model.boundToolOptions[3]?.tool_choice, undefined);
+  assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
   assert.equal(result.messageUpdates?.some((message) =>
     ToolMessage.isInstance(message)
     && message.name === 'submit_plan'
@@ -2143,7 +2132,6 @@ test('boundary Planner reports incomplete without accepting its delegation', asy
   });
   const model = new ScriptedPlannerModel([
     { content: 'The current task should be handed over.' },
-    { content: 'Still no terminal tool call.' },
   ]);
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace, {

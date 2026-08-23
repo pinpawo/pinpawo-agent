@@ -34,11 +34,10 @@ type CapabilityPlannerResult =
 ```
 
 `PlannerCommit` remains the sole model-to-graph control protocol. If a provider
-returns ordinary text instead of any tool call, the invocation makes one
-same-turn repair request with the same tool contract and does not persist the
-invalid text. If that repair still does not commit, the runner returns
-`plannerStatus: 'incomplete'`; it does not synthesize a terminal tool message
-or choose a Capability.
+returns ordinary text instead of any tool call, the runner keeps that authentic
+Planner output, returns `plannerStatus: 'incomplete'`, and routes to Answer.
+The text is presented to Answer as low-authority blocked-context evidence; it
+does not synthesize a terminal tool message or choose a Capability.
 
 Capability disclosure is a bounded phase policy rather than a retry middleware
 or dynamic tool-binding policy. Search observations are written by the tool

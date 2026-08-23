@@ -5,6 +5,7 @@ import {
   formatHandoffArtifactRefsForMessage,
 } from '../../artifacts/handoff';
 import {
+  getPinpetMeta,
   getMessageHandoffSource,
   mainConversationMessages,
   readLatestAnnounce,
@@ -12,6 +13,7 @@ import {
   readLatestHumanRequest,
   stampMessageCreatedAtUtc,
 } from '../../messageLanes';
+import { CAPABILITY_PLANNER_MESSAGE_SOURCE } from '../../capabilityPlanner/messageContext';
 import { getDelegationAnnounce } from '../../delegationAnnounce';
 import {
   buildAnswerInvocationMessages,
@@ -81,6 +83,22 @@ export function projectAcceptedRunResults(params: {
 
 export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
   '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。';
+
+function readLatestPlannerIncompleteOutput(state: OrchestratorStateType) {
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    const meta = getPinpetMeta(message);
+    if (meta.source !== CAPABILITY_PLANNER_MESSAGE_SOURCE
+      || meta.traceId !== state.traceId
+      || !AIMessage.isInstance(message)
+      || message.tool_calls?.length) {
+      continue;
+    }
+    const content = readMessageText(message).trim();
+    if (content) return content;
+  }
+  return null;
+}
 
 export function createAnswerNode(config: OrchestratorConfig) {
   // Node: answer — the dedicated final-reply node. The decision nodes only route
@@ -223,7 +241,9 @@ export function selectAnswerContextFacts(params: {
       unfinishedTask: params.state.taskActiveDelegation?.task
         ?? params.state.runUserRequest
         ?? null,
-      detail: null,
+      // Ordinary Planner text is not a control action, but it is still useful
+      // evidence for Answer to explain why planning stopped.
+      detail: readLatestPlannerIncompleteOutput(params.state),
     };
   }
 

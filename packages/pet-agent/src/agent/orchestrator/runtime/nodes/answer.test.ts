@@ -3,6 +3,7 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentModels } from '../../../../types/agent';
 import { setPinpetMeta } from '../../messageLanes';
+import { CAPABILITY_PLANNER_MESSAGE_SOURCE } from '../../capabilityPlanner/messageContext';
 import { DelegationAnnounceMessage } from '../../delegationAnnounce';
 import type { OrchestratorStateType } from '../../state';
 import {
@@ -90,6 +91,36 @@ test('Answer runtime recognizes the run user request when canonical history has 
     mode: 'goal_done',
     hasUserRequest: true,
     acceptedResults: [],
+  });
+});
+
+test('Answer carries an ordinary Planner response as blocked-context detail', () => {
+  const plannerOutput = new AIMessage('开始执行计划任务，但没有提交结构化计划。');
+  setPinpetMeta(plannerOutput, {
+    lane: 'orchestrator',
+    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
+    traceId: 'trace-planner-incomplete',
+  });
+
+  assert.deepEqual(selectAnswerContextFacts({
+    state: state({
+      messages: [plannerOutput],
+      runUserRequest: '修改当前仓库的 Planner 行为。',
+      runLatestDelegationOutcome: 'planner_incomplete',
+      traceId: 'trace-planner-incomplete',
+    }),
+    history: [],
+    acceptedHandoffOutcome: null,
+    acceptedResults: [],
+    awaitingUserInput: false,
+    runIterationLimit: 4,
+  }), {
+    mode: 'blocked',
+    hasUserRequest: true,
+    acceptedResults: [],
+    reason: 'planner_incomplete',
+    unfinishedTask: '修改当前仓库的 Planner 行为。',
+    detail: '开始执行计划任务，但没有提交结构化计划。',
   });
 });
 

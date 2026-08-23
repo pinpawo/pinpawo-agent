@@ -1,5 +1,4 @@
 import {
-  AIMessage,
   SystemMessage,
   ToolMessage,
 } from '@langchain/core/messages';
@@ -13,11 +12,6 @@ import {
   plannerInvocationStateSchema,
 } from './plannerState';
 import { PLANNER_TERMINAL_TOOL_NAMES } from './terminalTools';
-
-const PLANNER_TERMINAL_COMMIT_REPAIR = [
-  '上一轮回复没有调用任何工具，不能作为 Planner 结果接受，也不会开始执行。',
-  '请重新完成当前规划：可继续调用 capability_search；一旦可以结束本轮，必须调用一个适用的结构化结果工具。不要输出普通文本。',
-].join('\n');
 
 function readTerminalCommit(message: ToolMessage): unknown {
   if (message.status === 'error' || typeof message.content !== 'string') {
@@ -54,19 +48,7 @@ export function createPlannerMiddleware() {
         input,
         request.state.defaultCapability ?? null,
       );
-      const response = await handler({ ...request, systemMessage });
-      if (!AIMessage.isInstance(response) || response.tool_calls?.length) {
-        return response;
-      }
-      // Do not persist a provider's ordinary-text Planner answer. Make one
-      // same-turn repair attempt with the identical tool contract instead.
-      return handler({
-        ...request,
-        systemMessage: new SystemMessage([
-          String(systemMessage.content),
-          PLANNER_TERMINAL_COMMIT_REPAIR,
-        ].join('\n\n')),
-      });
+      return handler({ ...request, systemMessage });
     },
     wrapToolCall: async (request, handler) => {
       const result = await handler(request);

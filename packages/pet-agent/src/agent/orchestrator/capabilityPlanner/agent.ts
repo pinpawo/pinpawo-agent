@@ -369,6 +369,50 @@ function capabilitySearchLimitExceeded(
   });
 }
 
+function capabilitySearchPlanningGuidance(params: {
+  input: CapabilityPlannerInput;
+  defaultCandidate: string | null;
+  specificCandidates: readonly string[];
+  nextSearchCandidates: readonly string[];
+  successfulMiss: boolean;
+  limitExceeded: boolean;
+}) {
+  const {
+    input,
+    defaultCandidate,
+    specificCandidates,
+    nextSearchCandidates,
+    successfulMiss,
+    limitExceeded,
+  } = params;
+  if (input.mode === 'boundary') {
+    const activeCapability = input.activeDelegation?.capability ?? null;
+    return {
+      objective: 'stably_advance_existing_plan' as const,
+      activeCapability,
+      activeCapabilityMatched: activeCapability !== null
+        && specificCandidates.includes(activeCapability),
+      capabilityMatchMeaning: 'candidate_document_not_new_task_assignment' as const,
+      continueCurrentWhen: 'current_task_still_has_executable_work' as const,
+      changePlanWhen: 'latest_evidence_requires_a_minimal_change' as const,
+      continueSearchCandidates: nextSearchCandidates,
+      reportUnavailableWhen: 'unfinished_goal_has_no_executable_path' as const,
+    };
+  }
+  if (!successfulMiss && !limitExceeded) return null;
+  return {
+    objective: 'select_most_specific_capability_for_current_request' as const,
+    defaultCandidate,
+    ...(defaultCandidate
+      ? {
+          useDefaultWhen: 'no_more_specific_candidate_can_better_deliver_current_request' as const,
+        }
+      : {}),
+    continueSearchCandidates: nextSearchCandidates,
+    reportUnavailableWhen: 'no_available_capability_can_deliver_remaining_work' as const,
+  };
+}
+
 function annotateCapabilitySearchResult(
   message: ToolMessage,
   state: Partial<PlannerInvocationState> & { messages?: BaseMessage[] },
@@ -404,9 +448,10 @@ function annotateCapabilitySearchResult(
         : [];
     }),
   )];
-  const defaultCandidate = state.defaultCapability?.capabilityName ?? null;
+  const defaultCapabilityName = state.defaultCapability?.capabilityName ?? null;
+  const defaultCandidate = input.mode === 'entry' ? defaultCapabilityName : null;
   const availableSpecificCandidates = input.workspace.capabilityNames.filter(
-    (capabilityName) => capabilityName !== defaultCandidate,
+    (capabilityName) => capabilityName !== defaultCapabilityName,
   );
   const discoverableSpecificCandidates = input.mode === 'boundary'
     ? availableSpecificCandidates.filter(
@@ -417,6 +462,21 @@ function annotateCapabilitySearchResult(
     && exploration.status === 'open'
     ? discoverableSpecificCandidates.slice(0, MAX_CAPABILITY_DISCOVERY_HINTS)
     : [];
+  const error = payload.error && typeof payload.error === 'object'
+    ? payload.error as { code?: unknown }
+    : null;
+  const limitExceeded = error?.code === 'capability_search_round_limit_exceeded';
+  const successfulMiss = payload.ok === true
+    && Array.isArray(data?.matches)
+    && data.matches.length === 0;
+  const planningGuidance = capabilitySearchPlanningGuidance({
+    input,
+    defaultCandidate,
+    specificCandidates,
+    nextSearchCandidates,
+    successfulMiss,
+    limitExceeded,
+  });
   message.content = JSON.stringify({
     ...payload,
     exploration: {
@@ -429,6 +489,7 @@ function annotateCapabilitySearchResult(
         === discoverableSpecificCandidates.length,
       defaultCandidate,
     },
+    ...(planningGuidance ? { planningGuidance } : {}),
   });
   return message;
 }

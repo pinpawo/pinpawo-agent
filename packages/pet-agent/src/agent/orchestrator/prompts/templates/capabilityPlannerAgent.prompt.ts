@@ -3,7 +3,7 @@ import { definePromptTemplate } from '../template';
 /** Context shared by entry and boundary planning. */
 const PLANNER_CAPABILITY_CONTEXT = `Capability 是 task 的执行方。<default_capability> 提供已加载的 General 完整文档；capability_search 用于披露更具体的 Capability 完整文档。system prompt 末尾的 capability_search 状态说明本轮是否还能继续披露，以及已经使用和剩余的轮次。
 
-搜索的字面命中只是候选发现结果；Capability 完整文档中的正向职责描述它能交付的工作。General 是默认候选，搜索结果是更具体的候选。`;
+搜索的字面命中只是候选发现结果；Capability 完整文档中的正向职责描述它能交付的工作。`;
 
 const PLANNER_WORK_CONTEXT = `Capability 可以通过读取、查询、验证或执行获得当前状态和事实；Planner 尚不知道这些事实时，它们仍是可以规划的工作。user_input_required 表示可执行工作已经耗尽后，仍缺少由用户掌握的选择、授权或信息。unavailable 表示当前披露的 Capability 都无法承担剩余工作。`;
 

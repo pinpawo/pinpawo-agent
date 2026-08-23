@@ -928,15 +928,30 @@ test('a first-round miss discloses exact specific names before General becomes e
         specificCandidates?: string[];
         nextSearchCandidates?: string[];
       };
+      planningGuidance?: {
+        objective?: string;
+        defaultCandidate?: string | null;
+        useDefaultWhen?: string;
+        continueSearchCandidates?: string[];
+        reportUnavailableWhen?: string;
+      };
     }]),
   ).values()];
   assert.deepEqual(searchResults[0]?.exploration?.specificCandidates, []);
   assert.deepEqual(searchResults[0]?.exploration?.nextSearchCandidates, ['explore']);
   assert.equal(searchResults[0]?.exploration?.status, 'open');
   assert.equal(searchResults[0]?.exploration?.remainingRounds, 1);
+  assert.deepEqual(searchResults[0]?.planningGuidance, {
+    objective: 'select_most_specific_capability_for_current_request',
+    defaultCandidate: 'general',
+    useDefaultWhen: 'no_more_specific_candidate_can_better_deliver_current_request',
+    continueSearchCandidates: ['explore'],
+    reportUnavailableWhen: 'no_available_capability_can_deliver_remaining_work',
+  });
   assert.deepEqual(searchResults[1]?.exploration?.specificCandidates, ['explore']);
   assert.equal(searchResults[1]?.exploration?.status, 'closed');
   assert.equal(searchResults[1]?.exploration?.remainingRounds, 0);
+  assert.equal(searchResults[1]?.planningGuidance, undefined);
 });
 
 test('a boundary literal match still requires positive unfinished-work scope', async (t) => {
@@ -984,12 +999,34 @@ test('a boundary literal match still requires positive unfinished-work scope', a
       remainingRounds?: number;
       specificCandidates?: string[];
       nextSearchCandidates?: string[];
+      defaultCandidate?: string | null;
+    };
+    planningGuidance?: {
+      objective?: string;
+      activeCapability?: string | null;
+      activeCapabilityMatched?: boolean;
+      capabilityMatchMeaning?: string;
+      continueCurrentWhen?: string;
+      changePlanWhen?: string;
+      continueSearchCandidates?: string[];
+      reportUnavailableWhen?: string;
     };
   };
   assert.deepEqual(payload.exploration?.specificCandidates, ['explore']);
   assert.deepEqual(payload.exploration?.nextSearchCandidates, []);
+  assert.equal(payload.exploration?.defaultCandidate, null);
   assert.equal(payload.exploration?.status, 'open');
   assert.equal(payload.exploration?.remainingRounds, 1);
+  assert.deepEqual(payload.planningGuidance, {
+    objective: 'stably_advance_existing_plan',
+    activeCapability: 'explore',
+    activeCapabilityMatched: true,
+    capabilityMatchMeaning: 'candidate_document_not_new_task_assignment',
+    continueCurrentWhen: 'current_task_still_has_executable_work',
+    changePlanWhen: 'latest_evidence_requires_a_minimal_change',
+    continueSearchCandidates: [],
+    reportUnavailableWhen: 'unfinished_goal_has_no_executable_path',
+  });
 });
 
 test('a boundary miss discloses non-active specific names for newly revealed work', async (t) => {
@@ -1056,9 +1093,33 @@ test('a boundary miss discloses non-active specific names for newly revealed wor
     && message.tool_call_id === 'boundary-miss');
   assert.ok(ToolMessage.isInstance(firstSearchResult));
   const payload = JSON.parse(String(firstSearchResult.content)) as {
-    exploration?: { nextSearchCandidates?: string[] };
+    exploration?: {
+      nextSearchCandidates?: string[];
+      defaultCandidate?: string | null;
+    };
+    planningGuidance?: {
+      objective?: string;
+      activeCapability?: string | null;
+      activeCapabilityMatched?: boolean;
+      capabilityMatchMeaning?: string;
+      continueCurrentWhen?: string;
+      changePlanWhen?: string;
+      continueSearchCandidates?: string[];
+      reportUnavailableWhen?: string;
+    };
   };
   assert.deepEqual(payload.exploration?.nextSearchCandidates, ['document_writer']);
+  assert.equal(payload.exploration?.defaultCandidate, null);
+  assert.deepEqual(payload.planningGuidance, {
+    objective: 'stably_advance_existing_plan',
+    activeCapability: 'explore',
+    activeCapabilityMatched: false,
+    capabilityMatchMeaning: 'candidate_document_not_new_task_assignment',
+    continueCurrentWhen: 'current_task_still_has_executable_work',
+    changePlanWhen: 'latest_evidence_requires_a_minimal_change',
+    continueSearchCandidates: ['document_writer'],
+    reportUnavailableWhen: 'unfinished_goal_has_no_executable_path',
+  });
 });
 
 test('Planner counts parallel capability_search calls as one disclosure round', async (t) => {
@@ -1242,6 +1303,13 @@ test('Planner returns a stable limit result for every search after max rounds', 
       ok?: boolean;
       error?: { code?: string; message?: string };
       exploration?: { status?: string; roundsUsed?: number; remainingRounds?: number };
+      planningGuidance?: {
+        objective?: string;
+        defaultCandidate?: string | null;
+        useDefaultWhen?: string;
+        continueSearchCandidates?: string[];
+        reportUnavailableWhen?: string;
+      };
     };
     assert.equal(payload.ok, false);
     assert.equal(payload.error?.code, 'capability_search_round_limit_exceeded');
@@ -1249,6 +1317,13 @@ test('Planner returns a stable limit result for every search after max rounds', 
     assert.equal(payload.exploration?.status, 'closed');
     assert.equal(payload.exploration?.roundsUsed, offset + 3);
     assert.equal(payload.exploration?.remainingRounds, 0);
+    assert.deepEqual(payload.planningGuidance, {
+      objective: 'select_most_specific_capability_for_current_request',
+      defaultCandidate: 'general',
+      useDefaultWhen: 'no_more_specific_candidate_can_better_deliver_current_request',
+      continueSearchCandidates: [],
+      reportUnavailableWhen: 'no_available_capability_can_deliver_remaining_work',
+    });
   }
   assert.ok(model.boundToolNameHistory.every((toolNames) =>
     toolNames.includes(CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME)));

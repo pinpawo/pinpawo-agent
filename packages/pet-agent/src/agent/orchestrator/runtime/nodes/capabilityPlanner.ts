@@ -31,10 +31,7 @@ import type {
   RunNextDelegation,
   TaskActiveDelegation,
 } from '../../types';
-import {
-  buildHandoffArtifactRefs,
-  findLatestHandoffCopyForDelegation,
-} from '../../artifacts/handoff';
+import { findLatestHandoffCopyForDelegation } from '../../artifacts/handoff';
 import {
   buildSubagentHandoff,
   getMessageHandoffSource,
@@ -128,15 +125,6 @@ function buildAcceptedDelegationUpdate(
   if (completionReason === 'limit_reached') {
     return null;
   }
-  const capabilityId = readCapabilityNameFromLane(activeDelegation.lane);
-  const artifactRefs = buildHandoffArtifactRefs(
-    state.sessionCapabilityArtifacts,
-    {
-      delegationId: activeDelegation.id,
-      runId: activeDelegation.transcriptRunId,
-      capabilityId,
-    },
-  );
   const existingCopy = findLatestHandoffCopyForDelegation(
     state.messages,
     activeDelegation.id,
@@ -149,7 +137,6 @@ function buildAcceptedDelegationUpdate(
     lane: activeDelegation.lane,
     transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
-    artifactRefs,
     clearLane: true,
     includeCopy: !existingCopy,
   });

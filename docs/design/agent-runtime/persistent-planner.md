@@ -149,7 +149,7 @@ threadId
 这些内容不得进入：
 
 - main message lane；
-- Capability handoff copy；
+- Capability delegation announce；
 - Answer prompt；
 - main-conversation compaction input；
 - 面向调用方的投影或 API response；

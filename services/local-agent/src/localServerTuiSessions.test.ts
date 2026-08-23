@@ -67,20 +67,21 @@ test('readTuiCheckpointMessages keeps visible conversation, starts, and handoffs
       },
     }),
     new AIMessage({
-      content: 'malformed handoff hidden',
-      additional_kwargs: {
-        pinpawo: {
-          handoffFrom: 'capability:general',
-        },
-      },
-    }),
-    new AIMessage({
       content: 'handoff result visible',
       additional_kwargs: {
         pinpawo: {
-          handoffFrom: 'capability:general',
-          delegationId: 'delegation-1',
-          runId: 'run-1',
+          delegationAnnounce: {
+            version: 1,
+            sourceLane: 'capability:general',
+            delegationId: 'delegation-1',
+            transcriptRunId: 'run-1',
+            announceMessageId: 'announce-1',
+            task: '关闭 Issue #272',
+            completionReason: 'natural',
+            result: 'handoff result visible',
+            artifactRefs: [],
+            createdAt: '2026-06-01T01:00:00.000Z',
+          },
         },
       },
     }),

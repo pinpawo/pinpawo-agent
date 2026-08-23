@@ -10,6 +10,7 @@ import { createOrchestratorGraph } from '../graph';
 import { PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
+import { DelegationAnnounceMessage } from '../../delegationAnnounce';
 
 function readLatestHumanText(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -241,6 +242,46 @@ test('Entry Answer receives normalized main conversation and excludes delegation
     currentRequest,
   ]);
   assert.equal(entryMessages.includes(laneMessage), false);
+});
+
+test('Entry Answer receives an accepted delegation result as execution data, not ordinary assistant prose', async () => {
+  let entryMessages: BaseMessage[] = [];
+  const scripted = entryAnswerModel('direct', (messages) => {
+    entryMessages = messages;
+  });
+  const graph = createOrchestratorGraph({
+    models: { act: scripted.model, answer: scripted.model },
+    actor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        throw new Error('Planner must not run for a direct reply.');
+      },
+    },
+  });
+  const announce = new DelegationAnnounceMessage({
+    id: 'delegation-announce:run-1:delegation-1:announce-1',
+    sourceLane: 'capability:general',
+    delegationId: 'delegation-1',
+    transcriptRunId: 'run-1',
+    announceMessageId: 'announce-1',
+    task: '检查仓库状态',
+    completionReason: 'natural',
+    result: 'EXECUTED_RESULT_MARKER',
+    createdAt: '2026-08-23T00:00:00.000Z',
+  });
+
+  await graph.invoke(buildOrchestratorRunInput([
+    new HumanMessage('帮我检查仓库状态。'),
+    announce,
+    new HumanMessage('把刚才的执行结果再说明一下。'),
+  ]), invokeConfig());
+
+  const projected = entryMessages.find((message) => message.id === announce.id);
+  assert.ok(projected);
+  assert.notEqual(projected, announce);
+  assert.notEqual(projected.content, announce.content);
+  assert.equal(projected._getType(), 'ai');
+  assert.doesNotMatch(String(projected.content), /<artifacts>/);
 });
 
 test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {

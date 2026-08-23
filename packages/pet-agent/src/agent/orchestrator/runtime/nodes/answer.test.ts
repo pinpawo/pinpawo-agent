@@ -3,6 +3,7 @@ import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentModels } from '../../../../types/agent';
 import { setPinpetMeta } from '../../messageLanes';
+import { DelegationAnnounceMessage } from '../../delegationAnnounce';
 import type { OrchestratorStateType } from '../../state';
 import {
   createAnswerNode,
@@ -20,6 +21,22 @@ function state(
     runIterationCount: 0,
     ...patch,
   } as OrchestratorStateType;
+}
+
+function delegationAnnounce(params: {
+  id: string;
+  sourceLane: `capability:${string}`;
+  delegationId: string;
+  transcriptRunId: string;
+  task: string;
+  result: string;
+}) {
+  return new DelegationAnnounceMessage({
+    ...params,
+    announceMessageId: params.id,
+    completionReason: 'natural',
+    createdAt: '2026-08-23T00:00:00.000Z',
+  });
 }
 
 test('Answer runtime projects accepted terminal meaning into closed facts', () => {
@@ -78,36 +95,29 @@ test('Answer runtime recognizes the run user request when canonical history has 
 
 test('Answer projects only current-run completed handoffs in delegation order', () => {
   const historical = new AIMessage('旧 run 的结果。');
-  setPinpetMeta(historical, {
-    handoffFrom: 'capability:general',
-    delegationId: 'old-delegation',
-    runId: 'old-run',
-    task: '旧任务',
-    announceMessageId: 'old-announce',
-  });
-  const second = new AIMessage('第二项结果。');
-  setPinpetMeta(second, {
-    handoffFrom: 'capability:general',
+  const second = delegationAnnounce({
+    id: 'announce-2',
+    sourceLane: 'capability:general',
     delegationId: 'delegation-2',
-    runId: 'run-2',
+    transcriptRunId: 'run-2',
     task: '提交 PR',
-    announceMessageId: 'announce-2',
+    result: '第二项结果。',
   });
-  const first = new AIMessage('第一项结果。');
-  setPinpetMeta(first, {
-    handoffFrom: 'capability:explore',
+  const first = delegationAnnounce({
+    id: 'announce-1',
+    sourceLane: 'capability:explore',
     delegationId: 'delegation-1',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     task: '审查风险',
-    announceMessageId: 'announce-1',
+    result: '第一项结果。',
   });
-  const supersededFirst = new AIMessage('第一项旧副本。');
-  setPinpetMeta(supersededFirst, {
-    handoffFrom: 'capability:explore',
+  const supersededFirst = delegationAnnounce({
+    id: 'announce-1-old',
+    sourceLane: 'capability:explore',
     delegationId: 'delegation-1',
-    runId: 'run-1',
+    transcriptRunId: 'run-1',
     task: '审查风险',
-    announceMessageId: 'announce-1',
+    result: '第一项旧副本。',
   });
   const delegationStarted = new AIMessage('开始执行计划任务：审查风险');
   setPinpetMeta(delegationStarted, {
@@ -184,13 +194,13 @@ test('goal_done asks Answer to summarize the completed task from canonical histo
     '使用浏览器打开已脱敏的账号主页，复用登录态，等待页面渲染，',
     '然后提取昵称、简介和公开内容。',
   ].join('');
-  const handoff = new AIMessage('公开信息已经提取并结构化返回。');
-  setPinpetMeta(handoff, {
-    handoffFrom: 'capability:explore',
+  const handoff = delegationAnnounce({
+    id: 'announce-browser',
+    sourceLane: 'capability:explore',
     delegationId: 'delegation-browser',
-    runId: 'run-browser',
+    transcriptRunId: 'run-browser',
     task: completedTask,
-    announceMessageId: 'announce-browser',
+    result: '公开信息已经提取并结构化返回。',
   });
   const answerNode = createAnswerNode({
     models: { act: model },

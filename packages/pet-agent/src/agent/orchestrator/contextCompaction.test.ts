@@ -11,6 +11,7 @@ import {
 } from './contextCompaction';
 import { getPinpetMeta, setPinpetMeta } from './messageLanes';
 import { materializeDelegation } from './delegationBriefing';
+import { DelegationAnnounceMessage } from './delegationAnnounce';
 
 function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: unknown[], config?: RunnableConfig) => void) {
   return {
@@ -148,7 +149,7 @@ test('orchestrator context compaction replaces the prior summary with one cumula
   assert.doesNotMatch(summaryInput, /### 主线 agent 回复[\s\S]*第一次压缩摘要/);
 });
 
-test('orchestrator context compaction reserves transcript space for new messages', async () => {
+test('orchestrator context compaction passes the complete old history to the summarizer', async () => {
   let summaryInput = '';
   const priorSummary = createContextCompactionMessage(`prior ${'p'.repeat(2000)}`, 12);
   const messages: BaseMessage[] = [
@@ -162,11 +163,44 @@ test('orchestrator context compaction reserves transcript space for new messages
     model: fakeSummaryModel('combined summary', (input) => {
       summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
     }),
-    options: { keepMessages: 1, summaryTranscriptChars: 600 },
+    options: { keepMessages: 1 },
   });
 
   assert.match(summaryInput, /prior/);
+  assert.match(summaryInput, /p{2000}/);
   assert.match(summaryInput, /new-context-marker/);
+});
+
+test('orchestrator context compaction retains a complete large delegation result', async () => {
+  let summaryInput = '';
+  const resultTail = 'DELEGATION_RESULT_TAIL_MARKER';
+  const messages: BaseMessage[] = [
+    new HumanMessage('用户目标：保留完整的委派结果并总结。'),
+    new DelegationAnnounceMessage({
+      id: 'delegation-announce:run-1:delegation-1:announce-1',
+      sourceLane: 'capability:general',
+      delegationId: 'delegation-1',
+      transcriptRunId: 'run-1',
+      announceMessageId: 'announce-1',
+      task: '生成完整报告',
+      completionReason: 'natural',
+      result: `${'大结果内容 '.repeat(6000)}${resultTail}`,
+      createdAt: '2026-08-24T00:00:00.000Z',
+    }),
+    usageMessage('保留在当前上下文的最新消息。', 900),
+  ];
+
+  await compactOrchestratorMessages({
+    messages,
+    model: fakeSummaryModel('summary', (input) => {
+      summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
+    }),
+    options: { keepMessages: 1 },
+  });
+
+  assert.match(summaryInput, /用户目标：保留完整的委派结果并总结。/);
+  assert.match(summaryInput, /<delegation_announce/);
+  assert.match(summaryInput, new RegExp(resultTail));
 });
 
 test('orchestrator context compaction falls back when summary model fails', async () => {

@@ -49,6 +49,7 @@ import {
   setPinpetMeta,
   stampMessageCreatedAtUtc,
 } from '../messageLanes';
+import { projectDelegationAnnouncesForModel } from '../delegationAnnounce';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS = 2;
@@ -649,7 +650,7 @@ export function createCapabilityPlannerAgent(params: {
             });
         const result = await agent.invoke({
           messages: [
-            ...selectedMessages,
+            ...projectDelegationAnnouncesForModel(selectedMessages),
             new HumanMessage({
               id: `planner:${input.inputId}`,
               content: buildCapabilityPlannerAgentInput(input),

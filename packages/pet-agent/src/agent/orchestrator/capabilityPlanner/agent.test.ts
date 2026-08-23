@@ -954,7 +954,7 @@ test('a first-round miss discloses exact specific names before General becomes e
   assert.equal(searchResults[1]?.planningGuidance, undefined);
 });
 
-test('a General-only search hit still discloses remaining specific candidates', async (t) => {
+test('a term matching only preloaded General still discloses specific candidates', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -992,6 +992,7 @@ test('a General-only search hit still discloses remaining specific candidates', 
     && message.tool_call_id === 'search-default-only');
   assert.ok(ToolMessage.isInstance(searchResult));
   const payload = JSON.parse(String(searchResult.content)) as {
+    data?: { matches?: unknown[] };
     exploration?: {
       specificCandidates?: string[];
       nextSearchCandidates?: string[];
@@ -1002,6 +1003,7 @@ test('a General-only search hit still discloses remaining specific candidates', 
       continueSearchCandidates?: string[];
     };
   };
+  assert.deepEqual(payload.data?.matches, []);
   assert.deepEqual(payload.exploration?.specificCandidates, []);
   assert.deepEqual(payload.exploration?.nextSearchCandidates, ['explore']);
   assert.equal(
@@ -1180,7 +1182,7 @@ test('a boundary miss discloses non-active specific names for newly revealed wor
   });
 });
 
-test('a Boundary search reports a matched active General accurately', async (t) => {
+test('a Boundary search does not redisclose its preloaded active General', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1221,15 +1223,17 @@ test('a Boundary search reports a matched active General accurately', async (t) 
     && message.tool_call_id === 'search-active-default');
   assert.ok(ToolMessage.isInstance(searchResult));
   const payload = JSON.parse(String(searchResult.content)) as {
+    data?: { matches?: unknown[] };
     exploration?: { specificCandidates?: string[] };
     planningGuidance?: {
       activeCapability?: string | null;
       activeCapabilityMatched?: boolean;
     };
   };
+  assert.deepEqual(payload.data?.matches, []);
   assert.deepEqual(payload.exploration?.specificCandidates, []);
   assert.equal(payload.planningGuidance?.activeCapability, 'general');
-  assert.equal(payload.planningGuidance?.activeCapabilityMatched, true);
+  assert.equal(payload.planningGuidance?.activeCapabilityMatched, false);
 });
 
 test('Planner counts parallel capability_search calls as one disclosure round', async (t) => {
@@ -1412,7 +1416,12 @@ test('Planner returns a stable limit result for every search after max rounds', 
     const payload = JSON.parse(String(message.content)) as {
       ok?: boolean;
       error?: { code?: string; message?: string };
-      exploration?: { status?: string; roundsUsed?: number; remainingRounds?: number };
+      exploration?: {
+        status?: string;
+        roundsUsed?: number;
+        attemptedRounds?: number;
+        remainingRounds?: number;
+      };
       planningGuidance?: {
         objective?: string;
         defaultCandidate?: string | null;
@@ -1425,7 +1434,8 @@ test('Planner returns a stable limit result for every search after max rounds', 
     assert.equal(payload.error?.code, 'capability_search_round_limit_exceeded');
     assert.match(payload.error?.message ?? '', /No search was executed/);
     assert.equal(payload.exploration?.status, 'closed');
-    assert.equal(payload.exploration?.roundsUsed, offset + 3);
+    assert.equal(payload.exploration?.roundsUsed, 2);
+    assert.equal(payload.exploration?.attemptedRounds, offset + 3);
     assert.equal(payload.exploration?.remainingRounds, 0);
     assert.deepEqual(payload.planningGuidance, {
       objective: 'select_most_specific_capability_for_current_request',

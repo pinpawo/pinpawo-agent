@@ -39,8 +39,8 @@ returns `plannerStatus: 'incomplete'`; it does not synthesize a terminal tool
 message or choose a Capability.
 
 Capability disclosure is a bounded phase policy rather than a retry
-middleware or tool-call counter. The default maximum is two model rounds and
-is configurable through `capabilityPlannerMaxSearchRounds`:
+middleware or dynamic tool-binding policy. The default maximum is two model
+rounds and is configurable through `capabilityPlannerMaxSearchRounds`:
 
 ```text
 exploration=open, rounds_used=0, remaining_rounds=2
@@ -48,25 +48,34 @@ exploration=open, rounds_used=0, remaining_rounds=2
   -> result declares exploration=open, rounds_used=1, remaining_rounds=1
   -> choose a terminal action now, or issue one more search batch
   -> result declares exploration=closed, rounds_used=2, remaining_rounds=0
-  -> next model call binds terminal tools only with tool_choice=required
+  -> later capability_search attempts remain callable with tool_choice=auto
+  -> the tool returns a stable limit result without disclosing more documents
 ```
 
 Parallel search calls in one model response form one disclosure batch and count
-as one round. The result supplies the disclosed candidates, the verified
-default fallback (when present), its lower selection priority, and explicit
-remaining-round state. An applicable disclosed specific Capability takes
-precedence over General; General becomes eligible only after the Planner judges
-every disclosed specific candidate unsuitable. A literal match is not proof of
+as one round. `roundsUsed` reports only document-disclosure rounds, while a
+separate attempted-round count can explain repeated calls after the limit.
+
+General is loaded once as the verified default Capability and is excluded from
+the `capability_search` index. Search therefore discloses only specific
+Capability documents and never spends the document budget redisclosing General.
+The final tool result is assembled once inside the state-aware search tool from
+a typed registry result; middleware does not parse and rewrite a JSON tool
+message after execution.
+
+The result supplies disclosed specific candidates, explicit remaining-round
+state, and mode-specific planning guidance. An applicable disclosed specific
+Capability takes precedence over General. A literal match is not proof of
 applicability: the complete document must positively authorize the unfinished
 task, and a term appearing only in negative or limiting text does not increase
-the candidate's priority. When the first literal search misses, the
-result discloses a bounded catalog of exact specific Capability
-names and defers General while another search round remains; the next round can
-use one of those names to retrieve the complete document. Boundary mode excludes
-the active Capability from this catalog, so completed work is not reintroduced
-merely by name while a newly required executor remains discoverable. The
-Planner never has to consume all rounds: it should commit as soon as the
-candidates are sufficient.
+the candidate's priority. When the first literal search misses, the result
+discloses a bounded catalog of exact specific Capability names and defers
+General while another search round remains; the next round can use one of those
+names to retrieve the complete document. Boundary mode excludes the active
+Capability from this catalog, so completed work is not reintroduced merely by
+name while a newly required executor remains discoverable. The Planner never
+has to consume all rounds: it should commit as soon as the candidates are
+sufficient.
 
 The root Capability Planner node owns the recovery route:
 

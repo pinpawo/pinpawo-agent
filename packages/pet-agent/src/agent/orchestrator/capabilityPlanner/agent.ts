@@ -23,6 +23,7 @@ import {
   createCapabilityPlannerSearchTool,
   type CapabilityPlannerDefaultCapability,
   type CapabilityPlannerFileExplorer,
+  type CapabilityPlannerSearchResult,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
 import {
@@ -68,7 +69,10 @@ const plannerInvocationStateSchema = z4.object({
 });
 
 type PlannerInvocationState = z4.infer<typeof plannerInvocationStateSchema>;
-type PlannerSearchToolState = Pick<PlannerInvocationState, 'currentInput'> & {
+type PlannerSearchToolState = Pick<
+  PlannerInvocationState,
+  'currentInput' | 'defaultCapability'
+> & {
   messages?: BaseMessage[];
 };
 
@@ -326,7 +330,10 @@ function currentPlannerInput(state: Partial<PlannerInvocationState>) {
 
 type CapabilityExplorationState = {
   status: 'open' | 'closed';
+  /** Search rounds that were allowed to disclose Capability documents. */
   roundsUsed: number;
+  /** All model rounds containing capability_search, including over-limit attempts. */
+  attemptedRounds: number;
   maxRounds: number;
 };
 
@@ -343,30 +350,44 @@ function capabilityExplorationState(
       break;
     }
   }
-  const roundsUsed = inputIndex < 0
+  const attemptedRounds = inputIndex < 0
     ? 0
     : state.messages?.slice(inputIndex + 1).filter((message) =>
         AIMessage.isInstance(message)
         && message.tool_calls?.some((toolCall) =>
           toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME))
       .length ?? 0;
+  const roundsUsed = Math.min(attemptedRounds, maxRounds);
   return {
     status: roundsUsed >= maxRounds ? 'closed' : 'open',
     roundsUsed,
+    attemptedRounds,
     maxRounds,
   };
 }
 
+type CapabilitySearchLimitResult = {
+  readonly ok: false;
+  readonly error: {
+    readonly code: 'capability_search_round_limit_exceeded';
+    readonly message: string;
+  };
+};
+
+type CapabilitySearchExecutionResult =
+  | CapabilityPlannerSearchResult
+  | CapabilitySearchLimitResult;
+
 function capabilitySearchLimitExceeded(
   exploration: CapabilityExplorationState,
-) {
-  return JSON.stringify({
+): CapabilitySearchLimitResult {
+  return {
     ok: false,
     error: {
       code: 'capability_search_round_limit_exceeded',
       message: `Capability search limit exceeded after ${exploration.maxRounds.toString()} rounds. No search was executed and no new Capability documents were disclosed. Finish planning from the Capability documents and facts already available.`,
     },
-  });
+  };
 }
 
 function capabilitySearchPlanningGuidance(params: {
@@ -386,7 +407,7 @@ function capabilitySearchPlanningGuidance(params: {
     limitExceeded,
   } = params;
   if (input.mode === 'boundary') {
-    const activeCapability = input.activeDelegation?.capability ?? null;
+    const activeCapability = input.activeDelegation.capability;
     return {
       objective: 'stably_advance_existing_plan' as const,
       activeCapability,
@@ -413,62 +434,38 @@ function capabilitySearchPlanningGuidance(params: {
   };
 }
 
-function annotateCapabilitySearchResult(
-  message: ToolMessage,
+function formatCapabilitySearchResult(
+  payload: CapabilitySearchExecutionResult,
   state: Partial<PlannerInvocationState> & { messages?: BaseMessage[] },
   maxSearchRounds: number,
 ) {
   const input = currentPlannerInput(state);
   const exploration = capabilityExplorationState(state, maxSearchRounds);
   const remainingRounds = Math.max(0, exploration.maxRounds - exploration.roundsUsed);
-  let payload: Record<string, unknown>;
-  try {
-    const parsed = typeof message.content === 'string'
-      ? JSON.parse(message.content) as unknown
-      : null;
-    payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : { ok: false, data: message.content };
-  } catch {
-    payload = { ok: false, data: message.content };
-  }
-  const data = payload.data && typeof payload.data === 'object'
-    ? payload.data as { matches?: unknown[] }
-    : null;
   const matchedCandidates = [...new Set(
-    (Array.isArray(data?.matches) ? data.matches : []).flatMap((match) => {
-      if (!match || typeof match !== 'object' || !('path' in match)
-        || typeof match.path !== 'string') {
-        return [];
-      }
+    (payload.ok ? payload.data.matches : []).flatMap((match) => {
       const [capabilityName] = match.path.split('/');
       return capabilityName ? [capabilityName] : [];
     }),
   )];
   const defaultCapabilityName = state.defaultCapability?.capabilityName ?? null;
-  const specificCandidates = matchedCandidates.filter(
-    (capabilityName) => capabilityName !== defaultCapabilityName,
-  );
+  const specificCandidates = matchedCandidates;
   const defaultCandidate = input.mode === 'entry' ? defaultCapabilityName : null;
   const availableSpecificCandidates = input.workspace.capabilityNames.filter(
     (capabilityName) => capabilityName !== defaultCapabilityName,
   );
   const discoverableSpecificCandidates = input.mode === 'boundary'
     ? availableSpecificCandidates.filter(
-        (capabilityName) => capabilityName !== input.activeDelegation?.capability,
+        (capabilityName) => capabilityName !== input.activeDelegation.capability,
       )
     : availableSpecificCandidates;
   const nextSearchCandidates = specificCandidates.length === 0
     && exploration.status === 'open'
     ? discoverableSpecificCandidates.slice(0, MAX_CAPABILITY_DISCOVERY_HINTS)
     : [];
-  const error = payload.error && typeof payload.error === 'object'
-    ? payload.error as { code?: unknown }
-    : null;
-  const limitExceeded = error?.code === 'capability_search_round_limit_exceeded';
-  const successfulSpecificMiss = payload.ok === true
-    && Array.isArray(data?.matches)
-    && specificCandidates.length === 0;
+  const limitExceeded = !payload.ok
+    && payload.error.code === 'capability_search_round_limit_exceeded';
+  const successfulSpecificMiss = payload.ok && specificCandidates.length === 0;
   const planningGuidance = capabilitySearchPlanningGuidance({
     input,
     defaultCandidate,
@@ -477,11 +474,12 @@ function annotateCapabilitySearchResult(
     successfulSpecificMiss,
     limitExceeded,
   });
-  message.content = JSON.stringify({
+  return JSON.stringify({
     ...payload,
     exploration: {
       status: exploration.status,
       roundsUsed: exploration.roundsUsed,
+      attemptedRounds: exploration.attemptedRounds,
       remainingRounds,
       specificCandidates,
       nextSearchCandidates,
@@ -491,7 +489,6 @@ function annotateCapabilitySearchResult(
     },
     ...(planningGuidance ? { planningGuidance } : {}),
   });
-  return message;
 }
 
 function createPlannerMiddleware(maxSearchRounds: number) {
@@ -521,10 +518,6 @@ function createPlannerMiddleware(maxSearchRounds: number) {
     wrapToolCall: async (request, handler) => {
       const input = currentPlannerInput(request.state);
       const result = await handler(request);
-      if (ToolMessage.isInstance(result)
-        && request.toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) {
-        return annotateCapabilitySearchResult(result, request.state, maxSearchRounds);
-      }
       if (!ToolMessage.isInstance(result)
         || ![
           CONTINUE_CURRENT_TOOL_NAME,
@@ -599,14 +592,12 @@ export function createCapabilityPlannerAgent(params: {
   const terminalTools = createPlannerTerminalTools();
   const additionalTools = params.additionalTools ?? [];
   const capabilitySearchTool = createCapabilityPlannerSearchTool<PlannerSearchToolState>(
-    (terms, state, signal) => {
+    async (terms, state, signal) => {
       const exploration = capabilityExplorationState(state, maxSearchRounds);
-      if (exploration.roundsUsed > exploration.maxRounds) {
-        return Promise.resolve(capabilitySearchLimitExceeded(exploration));
-      }
-      return explorerForInput(
-        currentPlannerInput(state),
-      ).search(terms, signal);
+      const payload = exploration.attemptedRounds > exploration.maxRounds
+        ? capabilitySearchLimitExceeded(exploration)
+        : await explorerForInput(currentPlannerInput(state)).search(terms, signal);
+      return formatCapabilitySearchResult(payload, state, maxSearchRounds);
     },
   );
   const middleware = createPlannerMiddleware(maxSearchRounds);
@@ -640,7 +631,7 @@ export function createCapabilityPlannerAgent(params: {
         const defaultCapability = await explorer.readDefaultCapability(
           timeout.signal,
         );
-        const selectedMessages = input.mode === 'boundary' && input.activeDelegation
+        const selectedMessages = input.mode === 'boundary'
           ? selectCapabilityPlannerMessages({
               mode: 'boundary',
               messages: input.messages,

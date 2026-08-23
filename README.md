@@ -116,7 +116,7 @@ The main boundaries are:
 | `tests/studio-e2e/` | Cross-package Studio dispatch/event acceptance tests. |
 | `plugins/studio-http/` | Optional Studio HTTP dispatch and SSE event Plugin. |
 | `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
-| `toolkits/studio-kanban/` | Optional Studio Kanban Plugin and its Agent Toolkit. |
+| `plugins/kanban/` | Optional Kanban Plugin, its Agent Toolkit, and Console UI. |
 | `tools/agent-macos/` | macOS desktop companion. |
 | `docs/concepts/` | Project vocabulary and architecture for new contributors. |
 | `docs/guides/` | Installation, configuration, and browser-operation guides. |

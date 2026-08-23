@@ -9,7 +9,7 @@ import {
 import {
   createKanbanPlugin,
   type KanbanPlugin,
-} from '@pinpawo-toolkit/studio-kanban';
+} from '@pinpawo-plugin/kanban';
 
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 

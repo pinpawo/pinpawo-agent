@@ -15,6 +15,10 @@ context.subscribe(event)
 Kanban Plugin ──contribute──> http/routes hook ──> GET /kanban
 ```
 
+实现使用 Hono 与 `@hono/node-server` 处理 router、middleware、body limit、CORS 和
+SSE response；这些都是 HTTP Plugin 的内部依赖。Studio 和贡献 route 的 Plugin 只依赖本
+文的 HTTP contract，不感知该实现选择。
+
 该 Plugin 定义零个 Toolkit，不注册 Capability，也不依赖 Kanban 或其他 Plugin。
 它只暴露 HTTP-owned `routes` hook；具体 Plugin 可以反向贡献 route，HTTP 不解释
 route 背后的领域。

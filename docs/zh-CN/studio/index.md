@@ -33,7 +33,7 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 - 按配置顺序启动插件、逆序停止插件，并广播插件通知而不解释内容。
 
 任务如何拆分、依赖和进度如何保存、何时重试、scheduler / webhook / UI / 传输如何
-工作，都不属于 Studio。可选 `studio-kanban` package 提供一个 Plugin：它定义供 Pet
+工作，都不属于 Studio。可选 `@pinpawo-plugin/kanban` package 提供一个 Plugin：它定义供 Pet
 使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
 不是 Toolkit。
 

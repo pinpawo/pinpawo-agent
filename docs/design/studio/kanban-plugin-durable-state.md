@@ -1,70 +1,129 @@
-# Kanban Plugin Durable State
+# Studio Kanban Plugin Adapter
 
-> 状态：Draft implementation contract
-> 对应：#638 后续清理
+> 状态：Draft integration contract
+> 对应：#638 后续阶段
 > 更新：2026-08-23
+> Kanban 数据设计：[Kanban SQLite Task Store](../kanban/sqlite-task-store.md)
+> Console UI：[Kanban Console UI](../kanban/ui-console.md)
 
-本文只定义可选 Kanban Plugin 自己的状态与派发闭环。Studio core 不认识 task、
-board、Kanban 文件或恢复策略；Pet runtime 和 local-agent 也不承担这些职责。
+Kanban 是独立领域。Studio Kanban Plugin 只是把一个 `KanbanTaskService` 接到 Studio
+的 dispatch、event、Toolkit 和 Plugin hook；它不定义 task storage，也不让 Studio
+拥有 Kanban 数据。
 
-## 1. 所有权边界
+## 1. 适配边界
 
 ```text
-application composition root
-  └─ 为具体 Kanban Plugin instance 选择 state store / file path
+KanbanTaskService
+  ├─ Studio Toolkit adapter ──> ordinary Agent tool calls
+  ├─ Studio runner adapter  ──> context.dispatch()
+  ├─ Studio event adapter   ──> context.notify()
+  └─ HTTP routes adapter    ──> context.hooks.contribute('http', 'routes', ...)
 
-Kanban Plugin
-  ├─ KanbanBoard domain state
-  ├─ durable snapshot load/save
-  ├─ task -> dispatch receipt closure
-  └─ task status projection
-
-Studio
-  └─ opaque dispatch + receipt
+Studio core -X-> Kanban repository / SQLite
+Pet runtime  -X-> Kanban repository / SQLite
 ```
 
-- `StudioPluginContext` 不增加 Kanban 专属字段，也不提供通用隐式数据库。
-- Plugin factory 接受可选的 `KanbanStateStore`；没有 store 时仍可作为纯内存 Plugin 使用。
-- 文件 store 是 Kanban package 的实现。应用装配者决定文件路径；推荐位置是
-  `<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json`。
-- Plugin 不把 `taskId`、route 或其他内部状态塞入 Studio metadata，也不读取
-  `threadId`。task 与 invocation 的关联只存在于发起 dispatch 的闭包中。
+- Plugin factory 接收或创建 Kanban application service；database path 和 repository
+  options 由 Kanban/application composition 校验。
+- `StudioPluginContext` 不增加 Kanban 字段，也不提供数据库。
+- Plugin 定义的 Toolkit 是 Studio/Agent adapter，不是 Kanban domain 的所有权证明。
+- Agent 只看到普通 tool input/output，不看到 SQLite、history sequence、HTTP route、
+  invocation identity 或 UI 授权状态。
+- task 与 receipt 的临时关联只存在于 Plugin dispatch closure，不写入 Studio metadata。
 
-## 2. Durable snapshot
+## 2. Toolkit adapter
 
-文件格式带显式版本，读取时严格校验；损坏或不支持的状态必须让 Plugin 启动失败，
-不能静默清空看板。保存使用同目录临时文件加原子 rename，Plugin 串行提交 snapshot，
-避免较旧的异步写覆盖较新的状态。
+当前 Studio-facing Toolkit 可以继续使用 Pet 语义：
 
-Plugin 在向 Studio dispatch 前，必须先把 task 的 `doing` 状态持久化。这样进程在
-“已决定派发”和“dispatch 已接受”之间崩溃时，重启会把该 task 恢复为 `blocked`，
-而不是静默重复执行外部动作。
+```text
+kanban_task_add({ petId, brief, dependsOn })
+kanban_task_list()
+kanban_task_complete({ taskId, result })
+kanban_task_block({ taskId, reason })
+```
 
-恢复规则：
+adapter 把 `petId` 映射成独立 Kanban model 的 `assigneeId`，然后调用
+`KanbanTaskService` command。Tool 不直接访问 repository，更不能执行 SQL。
 
-- `todo` / `done` / `blocked` 保持原状；
-- `doing` 变为 `blocked`，原因是进程中断后无法证明旧 invocation 是否仍在执行；
-- `waiting` 保持 `waiting`，因为 pending interrupt 已由 Pet checkpoint 持久化，
-  后续 interaction Plugin 仍可以恢复它。
+## 3. Dispatch adapter
 
-## 3. Dispatch result projection
+Kanban domain 把 ready/claim 表达成 committed mutation；Studio Plugin 决定如何用 Pet
+执行它：
 
-Kanban Plugin 消费自己拿到的 `StudioDispatchReceipt.completion`：
+```text
+service.claimNextReadyTask()
+        |
+        | committed doing + claimed event
+        v
+context.notify(task.doing)
+context.dispatch({
+  petId: task.assigneeId,
+  input: { kind: 'request', request: buildTaskRequest(task) }
+})
+        |
+        v
+receipt.completion
+  ├─ pending_interrupt -> service.waitTask(...)
+  ├─ failed/cancelled  -> service.blockTask(...)
+  ├─ Toolkit completed -> service.completeTask(...)
+  └─ completed without outcome -> service.blockTask(...)
+```
 
-- Agent 已通过 Kanban Toolkit 把 task 标成 `done` 或 `blocked`：保持 Agent 决定；
-- `pending_interrupt`：task 变为 `waiting`；
-- `failed` / `cancelled`：task 变为 `blocked` 并记录原因；
-- invocation `completed` 但 task 仍是 `doing`：变为 `blocked`，明确记录 Agent
-  没有报告 task outcome，避免永久假运行。
+claim transaction 失败时不得 dispatch。Plugin 只消费自己发出的 receipt，不订阅 Agent
+graph state，不读取 `threadId`，也不把 `taskId` 塞进 execution metadata。taskId 只作为
+自然语言 request 和普通 Toolkit command 的领域参数。
 
-`waiting` task 仍允许 Kanban complete/block 工具收口。interaction Plugin 恢复同一个
-Pet checkpoint 后，Agent 可以继续执行原调用并更新该 task；Kanban 不需要知道恢复
-dispatch 的 thread 或 invocation identity。
+## 4. Event adapter
 
-## 4. 非目标
+每个 committed `KanbanDomainEvent` 由 Plugin 投射为 live Studio event：
 
-- Plugin discovery / 安装策略；
-- interaction Plugin 与 pending-action 索引；
-- HTTP 页面、Wiki ingest、trigger 或 scheduler；
-- durable Studio event log；
-- 把 Kanban 状态或策略提升进 Studio core。
+```ts
+context.notify({
+  type: `task.${task.status}`,
+  payload: {
+    sequence: event.sequence,
+    taskId: task.taskId,
+    petId: task.assigneeId,
+    note: task.note,
+  },
+});
+```
+
+Studio event 是实时通知，不是 Kanban 数据库。丢失 live event 后，Kanban Web/HTTP adapter
+可用 service snapshot/history 恢复；Studio 不负责 replay Kanban history。
+
+## 5. HTTP hook adapter
+
+Kanban 可继续向可选 HTTP Plugin 贡献 route，但 handler 只调用 Kanban service：
+
+- `GET /kanban`：current task snapshot + `lastEventSequence`；
+- `GET /kanban/events?after=<sequence>&limit=<n>`：Kanban history。
+
+HTTP Plugin 负责 server、Bearer auth、Origin/CORS 和 response；Kanban 负责 read model。
+HTTP 不 import Kanban，Kanban 在没有 HTTP Plugin 时仍可通过 CLI、内嵌 Web 或其他 adapter
+独立运行。
+
+## 6. 生命周期
+
+若 Plugin factory 自己创建 service，它在 `start()` 中初始化 repository 和 recovery，在
+`stop()` 中停止 claim、等待 tracked receipt projection、移除 hook 后关闭 service。
+
+若 composition 注入共享 application service，service lifecycle 由 composition root 持有，
+Plugin 只注册和释放 Studio adapters。两种模式必须显式区分，避免 Plugin stop 意外关闭
+仍被独立 Kanban Web/CLI 使用的 service。
+
+## 7. 验收标准
+
+- Studio、pet-agent、local-agent 不 import Kanban repository 或 SQLite 类型。
+- Kanban domain/service/repository 不 import Studio 类型。
+- 所有 Studio 派活只走 `context.dispatch()`，所有 live 通知只走 `context.notify()`。
+- Agent 侧只有普通 Toolkit，不新增 Kanban graph state、checkpoint 或 execution metadata。
+- HTTP hook handler、Toolkit 和 dispatch adapter 共用同一个 Kanban service。
+- 没有 Studio 时，同一个 Kanban service 仍可被 Kanban CLI/Web 使用。
+
+## 8. 非目标
+
+- 把 Kanban 数据提升为 Studio state；
+- 让 Studio event 代替 Kanban task history；
+- 让 HTTP Plugin 或 Studio core 直接读写 Kanban SQLite；
+- interaction Plugin、知识图谱或 UI 视觉设计。

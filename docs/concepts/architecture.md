@@ -39,7 +39,7 @@ flowchart TB
   C --> K["Toolkit tools"]
   K --> L["Local filesystem, shell, browser, or configured services"]
   O --> A["Checkpoint and artifact refs"]
-  H --> ST["Optional Studio runtime\npackages/studio + studio-kanban"]
+  H --> ST["Optional Studio runtime\npackages/studio + plugins/kanban"]
   ST --> O
 ```
 

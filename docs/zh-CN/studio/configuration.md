@@ -200,7 +200,7 @@ const host = new StudioHost({
 ```
 
 `options` 原样传给 resolver。未安装或不认识的 id 必须 fail fast，不能静默跳过。
-`studio-kanban` 自己拥有 Kanban Plugin 与 Toolkit 实现；依赖方向是
+`@pinpawo-plugin/kanban` 自己拥有 Kanban Plugin 与 Toolkit 实现；依赖方向是
 Plugin package → Studio contract，不是 Studio → Kanban。`studio_planning`
 Capability 由对应 Pet 的约定目录独立提供。
 

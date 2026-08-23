@@ -55,7 +55,7 @@ The following are plugin or host responsibilities, not Studio concepts:
 - schedules, webhooks, concrete HTTP adapters, UI state, and authentication;
 - shared knowledge stores or private agent scratch state.
 
-The optional `studio-kanban` package is the first example: its Plugin defines a
+The optional `@pinpawo-plugin/kanban` package is the first example: its Plugin defines a
 Toolkit that pets use to manage Kanban tasks, while the Plugin lifecycle dispatches
 tasks whose dependencies are ready. The Plugin is not itself a Toolkit. Future
 scheduler or trigger integrations must use the same Plugin boundary rather than

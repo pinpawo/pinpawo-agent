@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   isDelegationBriefingMessage,
-  isDelegationStartedMessage,
   materializeDelegation,
-  materializeDelegationStarted,
 } from './delegationBriefing';
 import {
   getMessageDelegationId,
@@ -15,7 +13,7 @@ import {
   getPinpetMeta,
 } from './messageLanes';
 
-test('initial delegation materializes one canonical start and one scoped briefing', () => {
+test('initial delegation materializes one scoped private briefing', () => {
   const materialized = materializeDelegation({
     mode: 'initial',
     lane: 'capability:github',
@@ -27,34 +25,12 @@ test('initial delegation materializes one canonical start and one scoped briefin
   const [briefing] = materialized.laneMessages;
   const text = String(briefing.content);
 
-  assert.equal(materialized.mainMessages.length, 1);
-  assert.equal(isDelegationStartedMessage(materialized.mainMessages[0]), true);
   assert.match(text, /^<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">/);
   assert.match(text, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
   assert.match(text, /<essential_context>[\s\S]*Capability intent: GitHub issue 操作[\s\S]*<\/essential_context>/);
   assert.doesNotMatch(text, /run-1|task-b|capability:github/);
   assert.equal(getMessageLane(briefing), 'capability:github');
   assert.ok(briefing.id);
-});
-
-test('delegation start is a stable canonical lifecycle record', () => {
-  const spec = {
-    lane: 'capability:github' as const,
-    transcriptRunId: 'run-1',
-    delegationId: 'task-b',
-    task: '关闭 GitHub Issue #272。',
-  };
-  const first = materializeDelegationStarted(spec);
-  const replayed = materializeDelegationStarted(spec);
-
-  assert.equal(first.id, replayed.id);
-  assert.equal(isDelegationStartedMessage(first), true);
-  assert.equal(getMessageLane(first), null);
-  assert.equal(getMessageTranscriptRunId(first), 'run-1');
-  assert.equal(getMessageDelegationId(first), 'task-b');
-  assert.match(String(first.content), /关闭 GitHub Issue #272。/);
-  assert.equal(getPinpetMeta(first).task, spec.task);
-  assert.notEqual(getPinpetMeta(first).synthetic, true);
 });
 
 test('initial delegation omits empty essential context', () => {
@@ -82,7 +58,6 @@ test('continuation delegation carries task and explicit user guidance', () => {
   const [briefing] = withGuidance.laneMessages;
   const text = String(briefing.content);
 
-  assert.deepEqual(withGuidance.mainMessages, []);
   assert.match(text, /^<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">/);
   assert.match(text, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
   assert.match(text, /<guidance>[\s\S]*未验证 issue 状态，请确认已关闭。[\s\S]*<\/guidance>/);

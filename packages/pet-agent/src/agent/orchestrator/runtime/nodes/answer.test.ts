@@ -119,13 +119,6 @@ test('Answer projects only current-run completed handoffs in delegation order', 
     task: '审查风险',
     result: '第一项旧副本。',
   });
-  const delegationStarted = new AIMessage('开始执行计划任务：审查风险');
-  setPinpetMeta(delegationStarted, {
-    source: 'delegation_started',
-    delegationId: 'delegation-1',
-    runId: 'run-1',
-    task: '审查风险',
-  });
   const projection = projectAcceptedRunResults({
     state: state({
       runDelegationSummaries: [
@@ -162,7 +155,6 @@ test('Answer projects only current-run completed handoffs in delegation order', 
       new HumanMessage('完成发布准备'),
       historical,
       supersededFirst,
-      delegationStarted,
       second,
       first,
     ],

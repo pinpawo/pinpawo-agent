@@ -39,7 +39,11 @@ export function createPlannerTerminalTools(): StructuredTool[] {
   return [
     tool(async () => JSON.stringify({ action: 'continue_current', tasks: [] }), {
       name: CONTINUE_CURRENT_TOOL_NAME,
-      description: 'Submit continue_current with no tasks.',
+      description: [
+        'Keep the active delegation and its existing remaining plan unchanged.',
+        'Use when the latest announce does not establish that the current task is accepted,',
+        'including an intended-work plan, an unexecuted attempt, or incomplete evidence.',
+      ].join(' '),
       schema: z.object({}).strict(),
     }),
     tool(
@@ -56,7 +60,12 @@ export function createPlannerTerminalTools(): StructuredTool[] {
         JSON.stringify({ action: 'advance_plan', tasks }),
       {
         name: ADVANCE_PLAN_TOOL_NAME,
-        description: 'Submit advance_plan with the ordered remaining tasks.',
+        description: [
+          'After the active task is accepted, submit the ordered remaining tasks.',
+          'Start from the existing remaining-plan tasks exactly as written.',
+          'Change, remove, or add a task only when the latest announce provides concrete',
+          'evidence that requires that specific change; do not rewrite a task merely to add detail.',
+        ].join(' '),
         schema: z.object({ tasks: plannerTasksSchema() }),
       },
     ),

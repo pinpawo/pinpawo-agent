@@ -1,4 +1,4 @@
-import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
+import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { GENERAL_CAPABILITY_NAME } from '../../../types/capability';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
@@ -6,15 +6,17 @@ import {
   CAPABILITY_REGISTRY_BACKEND,
   createCapabilityRegistryDocuments,
   type CapabilityRegistryBackend,
+  type CapabilityRegistrySearchResult,
 } from './registryDocuments';
 import {
   CapabilityPlannerWorkspaceReader,
   PlannerFileToolError,
   stablePlannerFileToolError,
+  type PlannerFileToolErrorCode,
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capability documents by literal terms. Each match contains the complete CAPABILITY.md document; the result also reports remaining search rounds and exact Capability names available for a later query.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capability documents by literal terms. Each match contains the complete CAPABILITY.md document. An unmatched result reports the remaining search opportunity and mode-specific planning guidance.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
@@ -22,16 +24,11 @@ const MAX_CAPABILITY_SEARCH_TERM_CHARS = 40;
 const MAX_CAPABILITY_SEARCH_TERM_WORDS = 4;
 const MAX_CAPABILITY_SEARCH_RESULT_BYTES = 64 * 1024;
 export type CapabilityPlannerFileExplorer = {
-  /**
-   * Framework-private tools for a Capability Planner Agent. They are not an
-   * AgentToolkit and must never enter Capability authorization or review.
-   */
-  readonly tools: readonly StructuredTool[];
   readonly didReachDocumentReadLimit: () => boolean;
   readonly search: (
     terms: readonly string[],
     signal?: AbortSignal,
-  ) => Promise<string>;
+  ) => Promise<CapabilityPlannerSearchResult>;
   /**
    * Read the well-known default Capability into the Planner's private input
    * context. It is not a search result and never enters parent graph state.
@@ -45,6 +42,17 @@ export type CapabilityPlannerDefaultCapability = {
   readonly capabilityName: typeof GENERAL_CAPABILITY_NAME;
   readonly path: string;
   readonly content: string;
+};
+
+export type CapabilityPlannerSearchResult = {
+  readonly ok: true;
+  readonly data: CapabilityRegistrySearchResult;
+} | {
+  readonly ok: false;
+  readonly error: {
+    readonly code: PlannerFileToolErrorCode;
+    readonly message: string;
+  };
 };
 
 export function createCapabilityPlannerSearchTool<
@@ -81,24 +89,15 @@ function utf8Bytes(content: string) {
   return Buffer.byteLength(content, 'utf8');
 }
 
-function formatSuccess(
-  data: unknown,
-) {
-  return JSON.stringify({
-    ok: true,
-    data,
-  });
-}
-
-function formatError(error: unknown) {
+function searchError(error: unknown): CapabilityPlannerSearchResult {
   const stable = stablePlannerFileToolError(error);
-  return JSON.stringify({
+  return {
     ok: false,
     error: {
       code: stable.code,
       message: stable.message,
     },
-  });
+  };
 }
 
 function normalizeCapabilitySearchTerms(input: readonly string[]) {
@@ -128,9 +127,13 @@ export function createCapabilityPlannerFileExplorer(params: {
   const { workspace } = params;
   const registryBackend = params.registryBackend
     ?? CAPABILITY_REGISTRY_BACKEND.FILESYSTEM;
+  const defaultEntry = workspace.entries.find(
+    ({ capabilityName }) => capabilityName === GENERAL_CAPABILITY_NAME,
+  );
   const registryDocuments = createCapabilityRegistryDocuments({
     workspace,
     backend: registryBackend,
+    ...(defaultEntry ? { excludedPaths: [defaultEntry.relativePath] } : {}),
   });
   const workspaceReader = new CapabilityPlannerWorkspaceReader(workspace);
   const maxDocumentReadBytes = params.maxDocumentReadBytes
@@ -144,14 +147,11 @@ export function createCapabilityPlannerFileExplorer(params: {
   const readDefaultCapability = async (
     signal?: AbortSignal,
   ): Promise<CapabilityPlannerDefaultCapability | null> => {
-    const entry = workspace.entries.find(
-      ({ capabilityName }) => capabilityName === GENERAL_CAPABILITY_NAME,
-    );
-    if (!entry) return null;
-    const content = await workspaceReader.readDocument(entry.relativePath, signal);
+    if (!defaultEntry) return null;
+    const content = await workspaceReader.readDocument(defaultEntry.relativePath, signal);
     const defaultCapability = {
       capabilityName: GENERAL_CAPABILITY_NAME,
-      path: entry.relativePath,
+      path: defaultEntry.relativePath,
       content,
     } as const;
     const defaultCapabilityBytes = utf8Bytes(content);
@@ -179,7 +179,7 @@ export function createCapabilityPlannerFileExplorer(params: {
   const search = async (
     terms: readonly string[],
     signal: AbortSignal | undefined,
-  ) => {
+  ): Promise<CapabilityPlannerSearchResult> => {
     try {
       const normalizedTerms = normalizeCapabilitySearchTerms(terms);
       const remainingDocumentReadBytes = Math.max(
@@ -216,24 +216,13 @@ export function createCapabilityPlannerFileExplorer(params: {
       if (consumedDocumentReadBytes >= maxDocumentReadBytes) {
         documentReadLimitReached = true;
       }
-      return formatSuccess(
-        {
-          matches: result.matches,
-          complete: result.complete,
-          stoppedBy: result.stoppedBy,
-        },
-      );
+      return { ok: true, data: result };
     } catch (error) {
-      return formatError(error);
+      return searchError(error);
     }
   };
 
-  const capabilitySearch = createCapabilityPlannerSearchTool(
-    (terms, _state, signal) => search(terms, signal),
-  );
-
   return Object.freeze({
-    tools: Object.freeze([capabilitySearch]),
     didReachDocumentReadLimit: () => documentReadLimitReached,
     search,
     readDefaultCapability,

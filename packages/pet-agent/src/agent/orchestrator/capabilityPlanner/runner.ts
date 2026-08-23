@@ -47,16 +47,23 @@ type CapabilityPlannerInputBase = {
   readonly userRequest: UserRequest;
   /** Canonical root messages. The Planner domain owns invocation projection. */
   readonly messages: readonly BaseMessage[];
-  readonly activeDelegation: PlannerDelegationInput | null;
-  /** Boundary identity and stop reason. Evidence remains in canonical messages. */
-  readonly latestAnnounce: PlannerAnnounceInput | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;
 };
 
-export type CapabilityPlannerInput = CapabilityPlannerInputBase & {
-  readonly mode: CapabilityPlannerMode;
-};
+export type CapabilityPlannerInput = CapabilityPlannerInputBase & (
+  | {
+      readonly mode: 'entry';
+      readonly activeDelegation: null;
+      readonly latestAnnounce: null;
+    }
+  | {
+      readonly mode: 'boundary';
+      readonly activeDelegation: PlannerDelegationInput;
+      /** Boundary identity and stop reason. Evidence remains in canonical messages. */
+      readonly latestAnnounce: PlannerAnnounceInput | null;
+    }
+);
 
 export type CapabilityPlannerCommitResult = PlannerCommit & {
   /** Planner-lane updates to merge into the root orchestrator messages. */

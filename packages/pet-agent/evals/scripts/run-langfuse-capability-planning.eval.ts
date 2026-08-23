@@ -8,6 +8,7 @@ import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capab
 import { CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
 import {
   isCapabilityPlannerIncompleteResult,
+  type CapabilityPlannerInput,
   type CapabilityPlannerResult,
 } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
@@ -242,41 +243,48 @@ async function main() {
           registry,
           cacheRoot,
         });
+        const plannerInputBase = {
+          inputId: `${testCase.input.mode}:${testCase.id}`,
+          traceId: `eval:${testCase.id}`,
+          runId: `eval:${testCase.id}`,
+          userRequest: testCase.input.userRequest,
+          messages: [
+            ...buildCapabilityPlanningMessages(testCase.input.messages),
+            ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
+              ? [new AIMessage(testCase.input.latestAnnounce)]
+              : []),
+          ],
+          remainingPlan: testCase.input.remainingPlan ?? [],
+          workspace,
+        };
+        const plannerInput: CapabilityPlannerInput = testCase.input.mode === 'boundary'
+          ? {
+              ...plannerInputBase,
+              mode: 'boundary',
+              activeDelegation: {
+                delegationId: 'eval-delegation',
+                transcriptRunId: `eval:${testCase.id}`,
+                capability: testCase.input.activeCapability
+                  ?? testCase.input.remainingPlan?.[0]?.capability
+                  ?? workspace.capabilityNames[0]
+                  ?? 'unavailable',
+                task: testCase.input.activeTask ?? 'Evaluate the current task.',
+              },
+              latestAnnounce: {
+                messageId: 'eval-announce',
+                completionReason: 'natural',
+              },
+            }
+          : {
+              ...plannerInputBase,
+              mode: 'entry',
+              activeDelegation: null,
+              latestAnnounce: null,
+            };
         const result = await createCapabilityPlannerAgent({
           model: modelConfig.model,
         }).invoke(
-          {
-            mode: testCase.input.mode,
-            inputId: `${testCase.input.mode}:${testCase.id}`,
-            traceId: `eval:${testCase.id}`,
-            runId: `eval:${testCase.id}`,
-            userRequest: testCase.input.userRequest,
-            messages: [
-              ...buildCapabilityPlanningMessages(testCase.input.messages),
-              ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
-                ? [new AIMessage(testCase.input.latestAnnounce)]
-                : []),
-            ],
-            activeDelegation: testCase.input.mode === 'boundary'
-              ? {
-                  delegationId: 'eval-delegation',
-                  transcriptRunId: `eval:${testCase.id}`,
-                  capability: testCase.input.activeCapability
-                    ?? testCase.input.remainingPlan?.[0]?.capability
-                    ?? workspace.capabilityNames[0]
-                    ?? 'unavailable',
-                  task: testCase.input.activeTask ?? 'Evaluate the current task.',
-                }
-              : null,
-            latestAnnounce: testCase.input.mode === 'boundary'
-              ? {
-                  messageId: 'eval-announce',
-                  completionReason: 'natural',
-                }
-              : null,
-            remainingPlan: testCase.input.remainingPlan ?? [],
-            workspace,
-          },
+          plannerInput,
           {
             configurable: {
               thread_id: `capability-planning-eval:${testCase.id}`,

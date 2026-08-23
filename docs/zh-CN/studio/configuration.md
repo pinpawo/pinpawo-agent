@@ -285,10 +285,10 @@ resume Command。waiting/interrupt 由 LangGraph checkpoint 持久化,不依赖 
 内存；没有交互 Plugin 时，Pet thread 可以一直停在 checkpoint 上，但不会占住一次
 内存 invocation。
 
-> **看板上目前看不出来。** Plugin 可以经 `context.onInvocation` 订阅自己派出去
-> 那些 invocation 的 `pending_interrupt` / `failed` 终态并标到任务上 —— 但 kanban
-> **尚未接上这条**,它现在只从 pet 调 `kanban_task_*` 得知进展。要不要标、
-> 怎么标,是 kanban 的领域判断。
+> **Kanban 已接上自己的 receipt。** 它消费自己发起 dispatch 的 completion：
+> `pending_interrupt` 把 task 标为 `waiting`，`failed` / `cancelled` 标为 `blocked`，
+> 而 completed 但 Agent 未调用 Kanban 收口工具的 task 也会明确标为 `blocked`。
+> 这是 Kanban 对自己派发工作的领域投射；它不订阅或解释其他 Plugin 的 invocation。
 
 ---
 
@@ -303,6 +303,8 @@ resume Command。waiting/interrupt 由 LangGraph checkpoint 持久化,不依赖 
 ## 6. 开放问题
 
 1. **第三方插件从哪加载。** 目前只有宿主的内置注册表。
-2. **插件状态的落盘位置。** `KanbanBoard` 只活在内存里,进程重启看板归零;
-   scheduler 会面对同一个问题。大概是
-   `<workdir>/.pinpawo/studio/<plugin-id>/`,但这属于宿主约定,不进契约。
+2. **插件状态的落盘策略。** Kanban 已可由 application resolver 注入自己的
+   `KanbanStateStore`；推荐路径为
+   `<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json`，但路径选择和 store
+   实现仍属于具体 Plugin / application composition，不进入 Studio 契约。scheduler
+   将来需要遵循同一所有权原则。

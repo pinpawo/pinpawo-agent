@@ -8,7 +8,19 @@ export {
   KANBAN_TOOLKIT_NAME,
 } from './kanbanPlugin';
 export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
-export { KanbanBoard } from './kanbanBoard';
-export type { KanbanTask, KanbanTaskStatus, KanbanBoardSnapshot } from './kanbanBoard';
-export { createFileKanbanStateStore } from './kanbanStateStore';
-export type { KanbanStateStore } from './kanbanStateStore';
+export {
+  createInMemoryKanbanTaskService,
+  KanbanTaskService,
+  SqliteKanbanTaskRepository,
+} from './kanbanTaskService';
+export type {
+  CreateKanbanTaskInput,
+  KanbanTask,
+  KanbanTaskEvent,
+  KanbanTaskMutation,
+  KanbanTaskRepository,
+  KanbanTaskSnapshot,
+  KanbanTaskStatus,
+} from './kanbanTaskService';
+export { migrateKanbanSnapshotToSqlite } from './migrateKanbanSnapshotToSqlite';
+export type { MigrateKanbanSnapshotToSqliteInput } from './migrateKanbanSnapshotToSqlite';

@@ -216,10 +216,15 @@ pet 实际拿到哪些工具,由它目录中 Capability 声明的 `uses` 筛出�
 > Plugin 的安装/discovery 策略仍由外部装配者负责。
 
 Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver 可以构造
-`createKanbanPlugin({ stateStore: createFileKanbanStateStore(...) })`，并选择
-`<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json` 这样的绝对路径。Studio
-既不推导该路径，也不读取 snapshot；没有注入 state store 时，同一个 Plugin 明确
-以纯内存方式运行。
+`createKanbanPlugin({ databasePath: ... })`，并选择
+`<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite` 这样的绝对 SQLite 路径。Studio
+既不推导该路径，也不读取 task state；没有注入 databasePath 时，同一个 Plugin 明确
+以纯内存方式运行。较大的 Kanban application 也可以自己持有 `KanbanTaskService`，再把它
+注入 Studio adapter。
+
+已有 file-backed `kanban.json` 不会被隐式加载。把已有 resolver 改为 `databasePath` 前，先
+运行一次导出的 `migrateKanbanSnapshotToSqlite({ snapshotFile, databaseFile })`；它保留 JSON
+源文件，并拒绝写入非空 destination。
 
 已安装 Plugin 可以通过不透明的 `StudioPluginContext.hooks` broker 进行装配。Studio
 只匹配 Plugin/hook 名称并托管生命周期清理，不 import 或解释扩展契约。HTTP Plugin
@@ -238,7 +243,7 @@ Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver �
        ↓  返回 { threadId, invocationId, completion },立即确认
 2. planner 排进它自己的队列;轮到它就跑,调 kanban toolkit 贴了三张任务
        ↓
-3. kanban 插件感知到自己的领域数据变了(它订阅的是自己的 board)
+3. kanban 插件感知到自己的领域数据变了(它订阅的是自己的 KanbanTaskService)
        ↓
 4. kanban 调 context.dispatch({ petId: "writer",
                                 input: { kind: "request",
@@ -303,8 +308,7 @@ resume Command。waiting/interrupt 由 LangGraph checkpoint 持久化,不依赖 
 ## 6. 开放问题
 
 1. **第三方插件从哪加载。** 目前只有宿主的内置注册表。
-2. **插件状态的落盘策略。** Kanban 已可由 application resolver 注入自己的
-   `KanbanStateStore`；推荐路径为
-   `<workdir>/.pinpawo/studio/<plugin-instance>/kanban.json`，但路径选择和 store
-   实现仍属于具体 Plugin / application composition，不进入 Studio 契约。scheduler
-   将来需要遵循同一所有权原则。
+2. **插件状态的落盘策略。** Kanban 已可由 application resolver 选择自己的 SQLite
+   databasePath，或注入 application-owned `KanbanTaskService`；推荐路径为
+   `<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite`，但路径选择和 application
+   composition 仍属于具体 Plugin，不进入 Studio 契约。scheduler 将来需要遵循同一所有权原则。

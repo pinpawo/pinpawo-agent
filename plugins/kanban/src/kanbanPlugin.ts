@@ -1,19 +1,14 @@
 /**
- * Kanban Plugin —— Studio 的第一个 layout Plugin。
+ * Studio adapter for the independent Kanban task domain.
  *
- * Plugin 定义供 Agent 使用的 Kanban Toolkit,并在 Studio 生命周期内负责
- * 依赖派发与事件通知。Plugin 本身不是 Toolkit。
- *
- * 闭环:pet 调工具 → 看板状态变 → 插件 dispatch 下一棒 / 发 event。
- * 全程 studio 不理解任何看板概念,pet 也不知道自己在驱动一块看板。
+ * The domain service owns tasks, dependencies, SQLite transactions and history.
+ * This Plugin only maps a Kanban assignee to a Studio pet, exposes agent tools,
+ * and projects committed mutations into Studio dispatch/events/HTTP hooks.
  */
 
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import type {
-  AgentToolkit,
-  NamedStructuredTool,
-} from '@pinpawo/pet-agent';
+import type { AgentToolkit, NamedStructuredTool } from '@pinpawo/pet-agent';
 import type {
   StudioDispatchResult,
   StudioPlugin,
@@ -21,8 +16,12 @@ import type {
 } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 
-import { KanbanBoard, type KanbanTask } from './kanbanBoard';
-import type { KanbanStateStore } from './kanbanStateStore';
+import {
+  createInMemoryKanbanTaskService,
+  KanbanTaskService,
+  SqliteKanbanTaskRepository,
+  type KanbanTask,
+} from './kanbanTaskService';
 
 export const KANBAN_TOOLKIT_NAME = 'kanban';
 
@@ -31,7 +30,7 @@ const TOOL_TITLES = ['查看任务', '新增任务', '完成任务', '阻塞任�
 function describeTask(task: KanbanTask): string {
   const deps = task.deps.length > 0 ? ` deps=[${task.deps.join(', ')}]` : '';
   const note = task.note ? ` note=${task.note}` : '';
-  return `${task.taskId} [${task.status}] pet=${task.petId}${deps} ${task.brief}${note}`;
+  return `${task.taskId} [${task.status}] assignee=${task.assigneeId}${deps} ${task.brief}${note}`;
 }
 
 function buildTaskRequest(task: KanbanTask): string {
@@ -44,13 +43,27 @@ function buildTaskRequest(task: KanbanTask): string {
   ].join('\n');
 }
 
-function buildTools(board: KanbanBoard): NamedStructuredTool[] {
-  const canFinish = (task: KanbanTask) => (
-    task.status === 'doing' || task.status === 'waiting'
-  );
+function isActive(task: KanbanTask): boolean {
+  return task.status === 'doing' || task.status === 'waiting';
+}
+
+function readNonNegativeQueryInteger(
+  value: string | null,
+  field: string,
+): number | undefined {
+  if (value === null) return undefined;
+  if (!/^\d+$/.test(value)) throw new Error(`Kanban ${field} must be a non-negative integer.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`Kanban ${field} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function buildTools(service: KanbanTaskService): NamedStructuredTool[] {
   const listTasks = tool(
     async () => {
-      const tasks = board.list();
+      const tasks = (await service.readSnapshot()).tasks;
       return tasks.length === 0 ? '(no tasks yet)' : tasks.map(describeTask).join('\n');
     },
     {
@@ -62,12 +75,14 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
 
   const addTask = tool(
     async (input) => {
-      const task = board.add({
-        petId: input.petId,
+      // `petId` belongs to this Studio-facing Toolkit adapter. The domain only
+      // receives the generic assigneeId.
+      const mutation = await service.createTask({
+        assigneeId: input.petId,
         brief: input.brief,
-        ...(input.dependsOn ? { deps: input.dependsOn } : {}),
+        ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
       });
-      return `added ${task.taskId}`;
+      return `added ${mutation.task.taskId}`;
     },
     {
       name: 'kanban_task_add',
@@ -75,7 +90,7 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
         '新增一个任务并指派给某个 pet。用 dependsOn 声明它依赖哪些任务先完成;'
         + '依赖全部完成后该任务才会被派发。',
       schema: z.object({
-        petId: z.string().describe('由哪个 pet 执行'),
+        petId: z.string().describe('由哪个 Studio pet 执行'),
         brief: z.string().describe('任务描述，接收方将以此为唯一输入'),
         dependsOn: z.array(z.string()).optional().describe('依赖的 taskId'),
       }),
@@ -84,12 +99,10 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
 
   const completeTask = tool(
     async (input) => {
-      const task = board.get(input.taskId);
+      const task = await service.getTask(input.taskId);
       if (!task) return `unknown Kanban taskId "${input.taskId}"`;
-      if (!canFinish(task)) {
-        return `Kanban task "${input.taskId}" is ${task.status}, not active`;
-      }
-      board.complete(task.taskId, input.result);
+      if (!isActive(task)) return `Kanban task "${input.taskId}" is ${task.status}, not active`;
+      await service.completeTask(task.taskId, input.result);
       return `completed ${task.taskId}`;
     },
     {
@@ -104,12 +117,10 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
 
   const blockTask = tool(
     async (input) => {
-      const task = board.get(input.taskId);
+      const task = await service.getTask(input.taskId);
       if (!task) return `unknown Kanban taskId "${input.taskId}"`;
-      if (!canFinish(task)) {
-        return `Kanban task "${input.taskId}" is ${task.status}, not active`;
-      }
-      board.block(task.taskId, input.reason);
+      if (!isActive(task)) return `Kanban task "${input.taskId}" is ${task.status}, not active`;
+      await service.blockTask(task.taskId, input.reason);
       return `blocked ${task.taskId}`;
     },
     {
@@ -128,9 +139,10 @@ function buildTools(board: KanbanBoard): NamedStructuredTool[] {
 }
 
 export type CreateKanbanPluginOptions = {
-  board?: KanbanBoard;
-  /** Optional Plugin-owned durable state. Studio does not select or interpret it. */
-  stateStore?: KanbanStateStore;
+  /** An application-owned Kanban service. Supplied services are not closed by this adapter. */
+  service?: KanbanTaskService;
+  /** Persistent SQLite file for a Plugin-owned service. Omit for ephemeral in-memory state. */
+  databasePath?: string;
   /** Optional reverse contribution into an installed Studio HTTP Plugin. */
   httpRoute?: false | {
     pluginName?: string;
@@ -138,10 +150,10 @@ export type CreateKanbanPluginOptions = {
   };
 };
 
-export type KanbanPlugin = StudioPlugin & { board: KanbanBoard };
+export type KanbanPlugin = StudioPlugin & { service: KanbanTaskService };
 
-export function createKanbanToolkit(board: KanbanBoard): AgentToolkit {
-  const declaredTools = buildTools(board);
+export function createKanbanToolkit(service: KanbanTaskService): AgentToolkit {
+  const declaredTools = buildTools(service);
   return {
     name: KANBAN_TOOLKIT_NAME,
     description: '共享任务看板：查看、拆解、完成与阻塞任务。',
@@ -153,14 +165,14 @@ export function createKanbanToolkit(board: KanbanBoard): AgentToolkit {
 }
 
 export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): KanbanPlugin {
-  const board = options.board ?? new KanbanBoard();
-  const toolkit = createKanbanToolkit(board);
-  const stateStore = options.stateStore;
+  const ownsService = !options.service;
+  const service = options.service ?? (options.databasePath
+    ? new KanbanTaskService(new SqliteKanbanTaskRepository(options.databasePath))
+    : createInMemoryKanbanTaskService());
+  const toolkit = createKanbanToolkit(service);
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHttpRoute: (() => void) | undefined;
-  let persistenceTail = Promise.resolve();
-  let persistenceError: Error | undefined;
   let dispatchRequested = false;
   let dispatchLoop: Promise<void> | undefined;
   let dispatchEnabled = false;
@@ -170,84 +182,53 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     return error instanceof Error ? error : new Error(String(error));
   }
 
-  function schedulePersistence(): void {
-    if (!stateStore) return;
-    const snapshot = board.snapshot();
-    persistenceTail = persistenceTail
-      .then(() => stateStore.save(snapshot))
-      .then(() => {
-        persistenceError = undefined;
-      })
-      .catch((error) => {
-        persistenceError = asError(error);
-        context?.notify({
-          type: 'kanban.persistence_failed',
-          payload: { message: persistenceError.message },
-        });
-      });
-  }
-
-  function finishUnreportedTask(taskId: string, result: StudioDispatchResult): void {
-    const task = board.get(taskId);
-    if (!task || (task.status !== 'doing' && task.status !== 'waiting')) return;
+  async function finishUnreportedTask(taskId: string, result: StudioDispatchResult): Promise<void> {
+    const task = await service.getTask(taskId);
+    if (!task || !isActive(task)) return;
     if (result.status === 'pending_interrupt') {
       if (task.status === 'doing') {
-        board.wait(taskId, 'Pet invocation is waiting for external interaction.');
+        await service.waitTask(taskId, 'Pet invocation is waiting for external interaction.');
       }
       return;
     }
     if (result.status === 'failed') {
-      board.block(taskId, result.error ?? 'Pet invocation failed.');
+      await service.blockTask(taskId, result.error ?? 'Pet invocation failed.');
       return;
     }
     if (result.status === 'cancelled') {
-      board.block(taskId, 'Pet invocation was cancelled.');
+      await service.blockTask(taskId, 'Pet invocation was cancelled.');
       return;
     }
-    board.block(taskId, 'Pet invocation completed without reporting a Kanban task outcome.');
+    await service.blockTask(taskId, 'Pet invocation completed without reporting a Kanban task outcome.');
   }
 
   function trackDispatch(taskId: string, completion: Promise<StudioDispatchResult>): void {
     const tracked = completion
       .then((result) => finishUnreportedTask(taskId, result))
-      .catch((error) => {
-        const task = board.get(taskId);
-        if (task?.status === 'doing' || task?.status === 'waiting') {
-          board.block(taskId, asError(error).message);
-        }
+      .catch(async (error) => {
+        const task = await service.getTask(taskId);
+        if (task && isActive(task)) await service.blockTask(taskId, asError(error).message);
       });
     activeDispatches.add(tracked);
     void tracked.finally(() => activeDispatches.delete(tracked));
   }
 
-  /**
-   * 依赖满足即派发。
-   *
-   * 它逐个检查 ready 的任务 —— 一个任务排不上**不连累**其他已就绪的任务
-   * (这正是旧 orchestrator 的 strict global FIFO 要避免的)。
-   */
+  /** Claim is already a committed Kanban operation before Studio dispatch begins. */
   async function runDispatchLoop(): Promise<void> {
     while (dispatchEnabled && context && dispatchRequested) {
       dispatchRequested = false;
-      await persistenceTail;
-      for (const task of board.ready()) {
-        if (!dispatchEnabled || !context) return;
-        // Persist doing before the external dispatch. A crash after this point
-        // restores the task as blocked instead of silently dispatching twice.
-        board.markDispatched(task.taskId);
-        await persistenceTail;
-        if (persistenceError) {
-          board.block(task.taskId, `Kanban persistence failed: ${persistenceError.message}`);
-          continue;
-        }
+      while (dispatchEnabled && context) {
+        const mutation = await service.claimNextReadyTask();
+        if (!mutation) break;
+        const task = mutation.task;
         try {
           const receipt = await context.dispatch({
-            petId: task.petId,
+            petId: task.assigneeId,
             input: { kind: 'request', request: buildTaskRequest(task) },
           });
           trackDispatch(task.taskId, receipt.completion);
         } catch (error) {
-          board.block(task.taskId, asError(error).message);
+          await service.blockTask(task.taskId, asError(error).message);
         }
       }
     }
@@ -275,54 +256,95 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   }
 
   return {
-    board,
+    service,
     name: KANBAN_TOOLKIT_NAME,
     toolkits: [toolkit],
     start: async (pluginContext) => {
       if (context) throw new Error('Kanban Plugin is already started.');
-      if (stateStore) {
-        const snapshot = await stateStore.load();
-        if (snapshot) board.restore(snapshot);
-        // Persist recovery transitions (notably doing -> blocked) before the
-        // Plugin can dispatch any remaining todo task.
-        await stateStore.save(board.snapshot());
-      }
       context = pluginContext;
-      const httpRoute = options.httpRoute;
-      if (httpRoute !== false) {
-        unsubscribeHttpRoute = pluginContext.hooks.contribute<StudioHttpRoutesHook>(
-          httpRoute?.pluginName ?? 'http',
-          'routes',
-          (routes) => routes.register({
-            method: 'GET',
-            path: httpRoute?.path ?? '/kanban',
-            handle: () => ({ kind: 'json', body: board.snapshot() }),
-          }),
-        );
-      }
-      dispatchEnabled = true;
-      unsubscribe = board.subscribe((task) => {
+      unsubscribe = service.subscribe((mutation) => {
         pluginContext.notify({
-          type: `task.${task.status}`,
-          payload: { taskId: task.taskId, petId: task.petId, note: task.note },
+          type: `task.${mutation.task.status}`,
+          payload: {
+            taskId: mutation.task.taskId,
+            // This is a Studio event projection, so retain the Studio-facing
+            // target name. The Kanban domain itself only has assigneeId.
+            petId: mutation.task.assigneeId,
+            note: mutation.task.note,
+            sequence: mutation.event.sequence,
+          },
         });
-        schedulePersistence();
-        // 任一状态变化都可能解锁别的任务的依赖。
         dispatchReady();
       });
-      dispatchReady();
+      try {
+        await service.init();
+        const httpRoute = options.httpRoute;
+        if (httpRoute !== false) {
+          unsubscribeHttpRoute = pluginContext.hooks.contribute<StudioHttpRoutesHook>(
+            httpRoute?.pluginName ?? 'http',
+            'routes',
+            (routes) => {
+              const snapshotPath = httpRoute?.path ?? '/kanban';
+              const unregisterSnapshot = routes.register({
+                method: 'GET',
+                path: snapshotPath,
+                handle: async () => ({ kind: 'json', body: await service.readSnapshot() }),
+              });
+              let unregisterEvents: (() => void) | undefined;
+              try {
+                unregisterEvents = routes.register({
+                  method: 'GET',
+                  path: `${snapshotPath}/events`,
+                  handle: async ({ url }) => {
+                    try {
+                      const events = await service.listTaskEvents(
+                        readNonNegativeQueryInteger(url.searchParams.get('after'), 'event cursor'),
+                        readNonNegativeQueryInteger(url.searchParams.get('limit'), 'event limit'),
+                      );
+                      return { kind: 'json', body: { events } };
+                    } catch (error) {
+                      return {
+                        kind: 'json',
+                        status: 400,
+                        body: { error: asError(error).message },
+                      };
+                    }
+                  },
+                });
+              } catch (error) {
+                unregisterSnapshot();
+                throw error;
+              }
+              return () => {
+                unregisterEvents?.();
+                unregisterSnapshot();
+              };
+            },
+          );
+        }
+        dispatchEnabled = true;
+        dispatchReady();
+      } catch (error) {
+        unsubscribeHttpRoute?.();
+        unsubscribeHttpRoute = undefined;
+        unsubscribe?.();
+        unsubscribe = undefined;
+        context = undefined;
+        if (ownsService) await service.close().catch(() => undefined);
+        throw error;
+      }
     },
     stop: async () => {
       dispatchEnabled = false;
       dispatchRequested = false;
       await dispatchLoop;
       await Promise.allSettled([...activeDispatches]);
-      await persistenceTail;
       unsubscribeHttpRoute?.();
       unsubscribeHttpRoute = undefined;
       unsubscribe?.();
       unsubscribe = undefined;
       context = undefined;
+      if (ownsService) await service.close();
     },
   };
 }

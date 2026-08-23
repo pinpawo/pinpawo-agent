@@ -62,7 +62,8 @@ HTTP Plugin 在自己的 `StudioPluginContext.hooks` 上暴露 `routes`。贡献
 `method + absolute path + handler`，HTTP 统一负责监听、Bearer 鉴权、Origin/CORS、
 body 上限和响应发送。内置 `/dispatch` 与 `/events` 是保留路径，贡献方不能覆盖。
 
-Kanban 默认向名为 `http` 的 Plugin 贡献 `GET /kanban`，返回当前 board snapshot。
+Kanban 默认向名为 `http` 的 Plugin 贡献 `GET /kanban`，返回当前 task snapshot（含
+`lastEventSequence`），并贡献 `GET /kanban/events` 读取 Kanban 自己的 durable history。
 它可以在没有 HTTP Plugin 时独立运行：hook contribution 会保持未挂载状态，不会让
 Kanban 启动失败。Plugin 启动顺序也不影响挂载；任一方停止时，Studio 托管的 hook
 lifecycle 会移除 route。
@@ -73,7 +74,8 @@ lifecycle 会移除 route。
 - dispatch 与 SSE 都要求 Bearer token；SSE 前端使用支持自定义 header 的 streaming
   `fetch`，不把 token 放入 query string；
 - 浏览器携带 `Origin` 时必须命中显式 `allowedOrigins`；Plugin 处理受限 CORS preflight；
-- POST body 有明确字节上限；SSE client 数量有上限；慢客户端遇到 backpressure 时断开；
+- POST body 有明确字节上限；SSE client 数量有上限；慢客户端背压治理仍须在 HTTP Plugin
+  内收紧，不能由 Kanban 或 Studio core 处理；
 - Plugin 贡献的 route 进入同一 Bearer 与 Origin 边界，不能绕过 HTTP Plugin 鉴权；
 - Plugin options 与 token 由外部 resolver/application composition root 提供，Studio
   config schema 不解释这些字段，也不读取 token。

@@ -147,7 +147,7 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
     { headers: authorization },
   );
   assert.equal(emptyBoardResponse.status, 200);
-  assert.deepEqual(await emptyBoardResponse.json(), { tasks: [] });
+  assert.deepEqual(await emptyBoardResponse.json(), { tasks: [], lastEventSequence: 0 });
 
   const eventResponse = await fetch(
     `http://${address.host}:${address.port.toString()}/events`,
@@ -190,8 +190,9 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
     ['task.todo', 'task.doing', 'task.done'],
   );
   assert.match(writerRequest, /Kanban taskId:/);
-  assert.equal(kanban.board.list()[0]?.status, 'done');
-  assert.equal(kanban.board.list()[0]?.note, 'article ready');
+  const kanbanSnapshot = await kanban.service.readSnapshot();
+  assert.equal(kanbanSnapshot.tasks[0]?.status, 'done');
+  assert.equal(kanbanSnapshot.tasks[0]?.note, 'article ready');
 
   const boardResponse = await fetch(
     `http://${address.host}:${address.port.toString()}/kanban`,
@@ -204,5 +205,22 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
   assert.deepEqual(
     snapshot.tasks.map(({ status, note }) => ({ status, note })),
     [{ status: 'done', note: 'article ready' }],
+  );
+
+  const historyResponse = await fetch(
+    `http://${address.host}:${address.port.toString()}/kanban/events?after=0`,
+    { headers: authorization },
+  );
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json() as {
+    events: Array<{ eventType: string; sequence: number }>;
+  };
+  assert.deepEqual(
+    history.events.map(({ eventType }) => eventType),
+    ['created', 'claimed', 'completed'],
+  );
+  assert.deepEqual(
+    history.events.map(({ sequence }) => sequence),
+    [1, 2, 3],
   );
 });

@@ -385,11 +385,18 @@ message metadata，作为 lane 的生命周期身份；调用方不管理 Planne
 checkpoint namespace。Planner agent 在 orchestrator 构建时创建一次，但每次 invocation
 从 root messages 重新选择上下文并以 stateless adapter 运行。
 
-Capability discovery 使用显式的有限披露阶段，不使用 retry middleware 或 tool-call counter：
-Planner input 默认最多允许两个搜索模型轮次，可由 `capabilityPlannerMaxSearchRounds` 配置；同一
-模型回复中的并行 `capability_search` 属于一个候选批次，只计一个轮次。每次 ToolMessage 都返回
-`roundsUsed`、`remainingRounds` 和 open/closed 状态；候选足够时模型应立即终结，不必耗尽轮次。
-达到上限后下一次 model call 动态移除 search，只绑定 terminal tools 并要求必须调用工具。
+Capability discovery 使用显式的有限披露阶段，而不是 retry middleware 或由 middleware 扫描
+message 历史的 tool-call counter。`capability_search` 通过 `ToolRuntime.state` 读取本 invocation
+的 search observations，并以 `Command.update` 写回一条不可变 observation。它们由独立的
+LangGraph reducer channel 合并；同一模型回复的并行 search 因而共享一个 model-message identity。
+
+Planner input 默认最多允许两个**整轮均未命中**的搜索模型轮次，可由
+`capabilityPlannerMaxSearchRounds` 配置。任一并行 search 命中 Capability 文档时，该轮不消耗额度；
+只有整批都未命中才计一轮。每次 ToolMessage 返回 `emptyRoundsUsed`、
+`remainingEmptyRounds`、本次是否命中以及下一步 planning guidance；候选足够时模型应立即终结，
+不必耗尽轮次。达到上限后 search 仍保持 `tool_choice=auto`、也不从 tools 中移除：下一次调用
+返回稳定的 `capability_search_round_limit_exceeded`，不披露新文档，并引导模型基于已知事实提交
+合适的结构化 Planner 结果。
 若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
 workspace 校验的完整 General 文档，并只把它注入当前 Planner invocation，作为不依赖字面搜索的
 兜底候选。`capability_search` 只负责发现更具体的 Capability；每个 ToolMessage 会列出具体候选，

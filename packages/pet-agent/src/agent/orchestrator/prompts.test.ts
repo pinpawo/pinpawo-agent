@@ -52,24 +52,6 @@ test('Capability Planner system prompt carries the verified default Capability',
   assert.doesNotMatch(systemPrompt, /general\/CAPABILITY\.md/);
   assert.doesNotMatch(systemPrompt, /role=|priority=|source=|trust=/);
   assert.match(systemPrompt, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
-  assert.match(
-    systemPrompt,
-    /capability_search 当前状态：OPEN；已使用 0 轮；剩余 2 轮。/,
-  );
-});
-
-test('Capability Planner system prompt renders search control as one data-only state', () => {
-  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt(
-    'boundary',
-    null,
-    { status: 'closed', roundsUsed: 2, maxRounds: 2 },
-  );
-
-  assert.match(
-    systemPrompt,
-    /capability_search 当前状态：CLOSED；已使用 2 轮；剩余 0 轮。$/,
-  );
-  assert.doesNotMatch(systemPrompt, /<capability_(?:exploration|search_state)/);
 });
 
 test('Capability Planner system prompt omits the block when the workspace has no default', () => {

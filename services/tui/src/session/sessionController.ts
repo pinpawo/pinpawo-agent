@@ -111,12 +111,16 @@ export class TuiSessionController {
         this.setConnection(connection, detail);
       },
       onSnapshot: (snapshot, reason) => {
+        const liveSession = this.state.session;
         const session = reconcileSessionSnapshot(
-          this.state.session,
+          liveSession,
           snapshot,
           reason,
           this.now(),
         );
+        if (reason === 'manual' && !liveSession.activeRun && !session.activeRun) {
+          options.onManualSnapshotApplied?.(reason);
+        }
         if (reason === 'startup' || reason === 'reconnect') {
           this.state = {
             connection: 'ready',
@@ -235,7 +239,7 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
     }
-    this.transport.requestCompletionSnapshot();
+    this.transport.requestManualSnapshot();
     return { ok: true };
   }
 

@@ -673,5 +673,5 @@ test('text resuming after a tool becomes its own assistant entry', () => {
   // The pre-tool paragraph is not extended by post-tool text.
   assert.equal(assistants[0]?.text, 'let me check');
   assert.equal(assistants[1]?.text, 'port is 3210');
-  assert.equal(assistants[0]?.status, 'completed');
+  assert.equal(assistants[0]?.status, 'streaming');
 });

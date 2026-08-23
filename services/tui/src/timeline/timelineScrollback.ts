@@ -29,7 +29,6 @@ import {
 import {
   createAssistantMarkdownStyle,
   createAssistantMarkdownSurface,
-  stableAssistantMarkdownRows,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
 import { subagentDisplayText } from './messageDisplay';
@@ -98,6 +97,23 @@ export class TimelineScrollback {
       };
     });
     this.welcomeRendered = true;
+  }
+
+  /**
+   * Discard terminal-local scrollback and replay the next canonical session
+   * snapshot. This is intentionally explicit: committed terminal rows cannot
+   * otherwise be removed when a snapshot corrects provisional live output.
+   */
+  resetForReplay() {
+    this.destroyTimelineSurface();
+    this.renderer.resetSplitFooterForReplay({ clearSavedLines: true });
+    this.welcomeRendered = false;
+    this.sessionId = null;
+    this.committedFingerprints = [];
+    this.reconciliationCache = {
+      prefixLength: 0,
+      tailEntry: null,
+    };
   }
 
   render(session: AgentSession) {
@@ -515,12 +531,13 @@ function stableRowsForLiveMode(
     return 0;
   }
   if (assistantMarkdown) {
-    return Math.min(
-      height,
-      stableAssistantMarkdownRows(assistantMarkdown),
-    );
+    // A live assistant message may be superseded by a later model lifecycle
+    // before the run's checkpoint is written. Keep it entirely mutable until
+    // the canonical snapshot confirms it, rather than committing rows the
+    // terminal cannot retract.
+    return 0;
   }
-  return Math.max(0, height - 1);
+  return 0;
 }
 
 function createTimelineRoot(

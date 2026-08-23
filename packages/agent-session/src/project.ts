@@ -303,7 +303,13 @@ function completeAssistantMessage(
   const text = completedText.trim() || findMessageEntry(session.timeline, id)?.text.trim() || '...';
   const withMessage = finalizeAssistantMessage(session, requestId, id, text, message, context);
   if (ownsActiveRun) {
-    return finishOwnedRun(withMessage, requestId, [], usage ?? null, context);
+    // This completion belongs to one model lifecycle, not every lifecycle
+    // that happened during the run. Earlier assistant deltas remain
+    // provisional until the checkpoint snapshot confirms the canonical
+    // message sequence.
+    return finishOwnedRun(withMessage, requestId, [], usage ?? null, context, {
+      settleStreamingMessages: false,
+    });
   }
   return usage ? applyTokenUsage(withMessage, usage) : withMessage;
 }
@@ -424,12 +430,17 @@ function finishOwnedRun(
   messages: AgentSessionMessageInput[],
   tokenUsage: TokenUsageSnapshot | null | undefined,
   context: AgentSessionReductionContext,
-  options: { preservePendingInterrupt?: boolean } = {},
+  options: {
+    preservePendingInterrupt?: boolean;
+    settleStreamingMessages?: boolean;
+  } = {},
 ) {
   if (!ownsRun(session, requestId)) return session;
   let nextSession: AgentSession = {
     ...session,
-    timeline: finalizeRunMessages(session.timeline, requestId),
+    timeline: options.settleStreamingMessages === false
+      ? session.timeline
+      : finalizeRunMessages(session.timeline, requestId),
     activeRun: null,
     ...(options.preservePendingInterrupt ? {} : { pendingInterrupt: null }),
   };

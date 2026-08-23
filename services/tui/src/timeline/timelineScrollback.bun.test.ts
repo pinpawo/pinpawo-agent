@@ -19,7 +19,7 @@ import {
   TimelineScrollback,
 } from './timelineScrollback';
 
-test('streaming timeline commits stable rows incrementally and finalizes once', async () => {
+test('streaming assistant text remains mutable until completion', async () => {
   const setup = await createTimelineRenderer(20);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
@@ -28,23 +28,21 @@ test('streaming timeline commits stable rows incrementally and finalizes once', 
       'streaming',
     );
     timeline.render(session([streaming], 'request-1'));
-    const first = setup.externalOutput.take();
-    assert.ok(first.length > 0);
+    assert.deepEqual(setup.externalOutput.take(), []);
 
     const grown = {
       ...streaming,
       text: `${streaming.text}ABCDEFGHIJKLMNOPQRSTUVWXYZ`,
     };
     timeline.render(session([grown], 'request-1'));
-    const second = setup.externalOutput.take();
-    assert.ok(second.length > 0);
+    assert.deepEqual(setup.externalOutput.take(), []);
 
     const completed = { ...grown, status: 'completed' as const };
     timeline.render(session([completed]));
     const final = setup.externalOutput.take();
     assert.ok(final.length > 0);
 
-    const committedText = [...first, ...second, ...final]
+    const committedText = final
       .flatMap((commit) => commit.rows)
       .join('');
     assert.equal(
@@ -53,6 +51,34 @@ test('streaming timeline commits stable rows incrementally and finalizes once', 
     );
     timeline.render(session([completed]));
     assert.deepEqual(setup.externalOutput.take(), []);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});
+
+test('a canonical snapshot replaces earlier provisional assistant lifecycles', async () => {
+  const setup = await createTimelineRenderer(48);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const user = userMessage('inspect', 'user');
+    const provisional = assistantMessage('I will check that first.', 'streaming');
+    const completed = {
+      ...assistantMessage('Here is the final result.', 'completed'),
+      id: 'final-live',
+    };
+    timeline.render(session([user, provisional], 'request-1'));
+    setup.externalOutput.clear();
+    setup.cellOutput.clear();
+
+    timeline.render(session([user, provisional, completed]));
+    assert.deepEqual(setup.externalOutput.take(), []);
+
+    const canonical = { ...completed, id: 'final-checkpoint' };
+    timeline.render(session([user, canonical]));
+    const output = setup.cellOutput.takeText();
+    assert.match(output, /Here is the final result\./);
+    assert.doesNotMatch(output, /I will check that first\./);
   } finally {
     timeline.destroy();
     setup.renderer.destroy();

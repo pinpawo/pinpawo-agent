@@ -11,6 +11,7 @@ import {
 export type SessionSnapshotReason =
   | 'startup'
   | 'reconnect'
+  | 'manual'
   | 'completion'
   | 'completion-metadata';
 
@@ -20,7 +21,7 @@ export function reconcileSessionSnapshot(
   reason: SessionSnapshotReason,
   observedAt: number,
 ): AgentSession {
-  if (reason === 'completion') {
+  if (reason === 'completion' || reason === 'manual') {
     return reconcileCompletionSnapshot(live, snapshot, observedAt);
   }
   if (reason === 'completion-metadata') {

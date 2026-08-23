@@ -191,6 +191,29 @@ test('manual refresh requests a snapshot without waiting for the active run', ()
   controller.stop();
 });
 
+test('an idle manual refresh marks its canonical snapshot for timeline replay', () => {
+  const requestIds = ['startup', 'refresh'];
+  let connection!: FakeConnection;
+  const applied: string[] = [];
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    onManualSnapshotApplied: (reason) => applied.push(reason),
+  });
+
+  controller.start();
+  connection.open();
+  connection.receive(snapshotResult('startup', 'chat:one'));
+  assert.deepEqual(controller.refreshSession(), { ok: true });
+  connection.receive(snapshotResult('refresh', 'chat:one'));
+
+  assert.deepEqual(applied, ['manual']);
+  controller.stop();
+});
+
 test('a pending interrupt invalidates an older in-flight refresh snapshot', () => {
   const requestIds = ['startup', 'chat', 'refresh'];
   let connection!: FakeConnection;

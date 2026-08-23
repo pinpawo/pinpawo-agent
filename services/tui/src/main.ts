@@ -261,6 +261,7 @@ const composerMode = 'chat' as const;
 let focusedSessionId = 'pending';
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
+let timelineReplayPending = false;
 const controller = new TuiSessionController({
   connectionFactory: launchOptions.useDemoConnection
     ? createDemoConnectionFactory({
@@ -268,6 +269,9 @@ const controller = new TuiSessionController({
         qa: demo.qa,
       })
     : createLocalHostConnectionFactory({ port }),
+  onManualSnapshotApplied: () => {
+    timelineReplayPending = true;
+  },
 });
 const interruptPendingNoticeController =
   new InterruptPendingNoticeController({
@@ -402,6 +406,10 @@ const qaLifecycle = new QaLifecycleDriver(launchOptions, {
 });
 
 const unsubscribe = controller.subscribe((state) => {
+  if (timelineReplayPending && !terminalHandoffOpen) {
+    timelineReplayPending = false;
+    timeline.resetForReplay();
+  }
   liveActivityController.sync(state.session.activeRun);
   syncOverlayLoading();
   if (state.session.sessionId !== focusedSessionId) {
@@ -1817,6 +1825,16 @@ function openTranscriptPager() {
 
 function reconcileTimelineAfterHandoff() {
   try {
+    if (timelineReplayPending) {
+      timelineReplayPending = false;
+      timeline.resetForReplay();
+      timeline.renderWelcome(buildWelcomeLines({
+        session: controller.getState().session,
+        width: renderer.width,
+        connection: formatConnection(controller.getState().connection),
+        hostMetadata,
+      }));
+    }
     timeline.render(controller.getState().session);
   } catch (error) {
     localNotice = `timeline refresh failed: ${errorMessage(error)}`;

@@ -5,6 +5,7 @@ import type {
 import type {
   AgentHostConnectionFactory,
 } from '../client/localHostConnection';
+import type { SessionSnapshotReason } from './sessionSnapshot';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
@@ -87,6 +88,8 @@ export type TuiSessionControllerOptions = {
   sessionCommandTimeoutMs?: number;
   /** Manual compaction includes a model call and therefore needs a longer timeout. */
   sessionCompactTimeoutMs?: number;
+  /** Called before a manually requested canonical snapshot updates UI state. */
+  onManualSnapshotApplied?: (reason: Extract<SessionSnapshotReason, 'manual'>) => void;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer?: (timer: TimerHandle) => void;
 };

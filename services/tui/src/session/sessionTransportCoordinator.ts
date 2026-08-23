@@ -83,9 +83,13 @@ export class SessionTransportCoordinator {
     this.requestSnapshot('completion');
   }
 
+  requestManualSnapshot() {
+    this.requestSnapshot('manual');
+  }
+
   invalidateCompletionSnapshotState() {
     for (const [requestId, reason] of this.snapshotRequests) {
-      if (reason === 'completion') {
+      if (reason === 'completion' || reason === 'manual') {
         this.snapshotRequests.set(requestId, 'completion-metadata');
       }
     }
@@ -228,7 +232,9 @@ export class SessionTransportCoordinator {
 }
 
 function isCompletionSnapshotReason(reason: SessionSnapshotReason) {
-  return reason === 'completion' || reason === 'completion-metadata';
+  return reason === 'completion'
+    || reason === 'completion-metadata'
+    || reason === 'manual';
 }
 
 function formatDelay(delayMs: number) {

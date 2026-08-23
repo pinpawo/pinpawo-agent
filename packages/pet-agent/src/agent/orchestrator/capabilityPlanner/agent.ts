@@ -372,17 +372,17 @@ function capabilitySearchLimitExceeded(
 function capabilitySearchPlanningGuidance(params: {
   input: CapabilityPlannerInput;
   defaultCandidate: string | null;
-  specificCandidates: readonly string[];
+  matchedCandidates: readonly string[];
   nextSearchCandidates: readonly string[];
-  successfulMiss: boolean;
+  successfulSpecificMiss: boolean;
   limitExceeded: boolean;
 }) {
   const {
     input,
     defaultCandidate,
-    specificCandidates,
+    matchedCandidates,
     nextSearchCandidates,
-    successfulMiss,
+    successfulSpecificMiss,
     limitExceeded,
   } = params;
   if (input.mode === 'boundary') {
@@ -391,7 +391,7 @@ function capabilitySearchPlanningGuidance(params: {
       objective: 'stably_advance_existing_plan' as const,
       activeCapability,
       activeCapabilityMatched: activeCapability !== null
-        && specificCandidates.includes(activeCapability),
+        && matchedCandidates.includes(activeCapability),
       capabilityMatchMeaning: 'candidate_document_not_new_task_assignment' as const,
       continueCurrentWhen: 'current_task_still_has_executable_work' as const,
       changePlanWhen: 'latest_evidence_requires_a_minimal_change' as const,
@@ -399,7 +399,7 @@ function capabilitySearchPlanningGuidance(params: {
       reportUnavailableWhen: 'unfinished_goal_has_no_executable_path' as const,
     };
   }
-  if (!successfulMiss && !limitExceeded) return null;
+  if (!successfulSpecificMiss && !limitExceeded) return null;
   return {
     objective: 'select_most_specific_capability_for_current_request' as const,
     defaultCandidate,
@@ -435,20 +435,20 @@ function annotateCapabilitySearchResult(
   const data = payload.data && typeof payload.data === 'object'
     ? payload.data as { matches?: unknown[] }
     : null;
-  const specificCandidates = [...new Set(
+  const matchedCandidates = [...new Set(
     (Array.isArray(data?.matches) ? data.matches : []).flatMap((match) => {
       if (!match || typeof match !== 'object' || !('path' in match)
         || typeof match.path !== 'string') {
         return [];
       }
       const [capabilityName] = match.path.split('/');
-      return capabilityName
-        && capabilityName !== state.defaultCapability?.capabilityName
-        ? [capabilityName]
-        : [];
+      return capabilityName ? [capabilityName] : [];
     }),
   )];
   const defaultCapabilityName = state.defaultCapability?.capabilityName ?? null;
+  const specificCandidates = matchedCandidates.filter(
+    (capabilityName) => capabilityName !== defaultCapabilityName,
+  );
   const defaultCandidate = input.mode === 'entry' ? defaultCapabilityName : null;
   const availableSpecificCandidates = input.workspace.capabilityNames.filter(
     (capabilityName) => capabilityName !== defaultCapabilityName,
@@ -466,15 +466,15 @@ function annotateCapabilitySearchResult(
     ? payload.error as { code?: unknown }
     : null;
   const limitExceeded = error?.code === 'capability_search_round_limit_exceeded';
-  const successfulMiss = payload.ok === true
+  const successfulSpecificMiss = payload.ok === true
     && Array.isArray(data?.matches)
-    && data.matches.length === 0;
+    && specificCandidates.length === 0;
   const planningGuidance = capabilitySearchPlanningGuidance({
     input,
     defaultCandidate,
-    specificCandidates,
+    matchedCandidates,
     nextSearchCandidates,
-    successfulMiss,
+    successfulSpecificMiss,
     limitExceeded,
   });
   message.content = JSON.stringify({

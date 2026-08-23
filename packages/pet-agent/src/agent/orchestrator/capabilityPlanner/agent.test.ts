@@ -954,6 +954,64 @@ test('a first-round miss discloses exact specific names before General becomes e
   assert.equal(searchResults[1]?.planningGuidance, undefined);
 });
 
+test('a General-only search hit still discloses remaining specific candidates', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Inspect code structure and risks.',
+      instructions: 'Investigate the repository and report evidence.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'search-default-only',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['ordinary'] },
+    }],
+  }, {
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Complete the ordinary workspace task.',
+        }],
+      },
+    },
+  }]);
+
+  await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace));
+
+  const searchResult = model.invocations[1]?.find((message) =>
+    ToolMessage.isInstance(message)
+    && message.tool_call_id === 'search-default-only');
+  assert.ok(ToolMessage.isInstance(searchResult));
+  const payload = JSON.parse(String(searchResult.content)) as {
+    exploration?: {
+      specificCandidates?: string[];
+      nextSearchCandidates?: string[];
+    };
+    planningGuidance?: {
+      objective?: string;
+      defaultCandidate?: string | null;
+      continueSearchCandidates?: string[];
+    };
+  };
+  assert.deepEqual(payload.exploration?.specificCandidates, []);
+  assert.deepEqual(payload.exploration?.nextSearchCandidates, ['explore']);
+  assert.equal(
+    payload.planningGuidance?.objective,
+    'select_most_specific_capability_for_current_request',
+  );
+  assert.equal(payload.planningGuidance?.defaultCandidate, 'general');
+  assert.deepEqual(payload.planningGuidance?.continueSearchCandidates, ['explore']);
+});
+
 test('a boundary literal match still requires positive unfinished-work scope', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
@@ -1120,6 +1178,58 @@ test('a boundary miss discloses non-active specific names for newly revealed wor
     continueSearchCandidates: ['document_writer'],
     reportUnavailableWhen: 'unfinished_goal_has_no_executable_path',
   });
+});
+
+test('a Boundary search reports a matched active General accurately', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary workspace tasks.',
+      instructions: 'Complete and verify the requested work.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'search-active-default',
+      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      args: { terms: ['ordinary'] },
+    }],
+  }, {
+    toolCalls: [{
+      id: 'continue-active-default',
+      name: 'continue_current',
+      args: {},
+    }],
+  }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-general',
+        transcriptRunId: 'transcript-general',
+        capability: 'general',
+        task: 'Complete the ordinary workspace task.',
+      },
+      remainingPlan: [],
+    }),
+  );
+
+  assert.deepEqual(commitOnly(result), { action: 'continue_current', tasks: [] });
+  const searchResult = model.invocations[1]?.find((message) =>
+    ToolMessage.isInstance(message)
+    && message.tool_call_id === 'search-active-default');
+  assert.ok(ToolMessage.isInstance(searchResult));
+  const payload = JSON.parse(String(searchResult.content)) as {
+    exploration?: { specificCandidates?: string[] };
+    planningGuidance?: {
+      activeCapability?: string | null;
+      activeCapabilityMatched?: boolean;
+    };
+  };
+  assert.deepEqual(payload.exploration?.specificCandidates, []);
+  assert.equal(payload.planningGuidance?.activeCapability, 'general');
+  assert.equal(payload.planningGuidance?.activeCapabilityMatched, true);
 });
 
 test('Planner counts parallel capability_search calls as one disclosure round', async (t) => {

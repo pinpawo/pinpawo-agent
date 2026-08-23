@@ -41,4 +41,15 @@ contracts in [reference/](../reference/index.md).
   draft identity/lifecycle model for one durable thread per Pet, one invocation
   per dispatch, and interrupt resumes delivered through dispatch
 
+## Kanban
+
+- [Kanban SQLite task store](kanban/sqlite-task-store.md) — independent Kanban
+  task, dependency, history, transaction, and recovery design
+- [Kanban Console UI](kanban/ui-console.md) — mouse-first desktop console for
+  dispatch, tasks, events, authorization, and Markdown context
+- [Studio Kanban Plugin adapter](studio/kanban-plugin-durable-state.md) — optional
+  dispatch/event/Toolkit/hook integration without Studio data ownership
+- [Studio CLI Plugin Web Composition](studio/cli-plugin-web-composition.md) — generic
+  CLI loading plus one HTTP container for Plugin-contributed APIs and UI assets
+
 Completed or superseded work belongs in [history/](../history/index.md).

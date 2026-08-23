@@ -1,4 +1,4 @@
-/** `@pinpawo-toolkit/studio-kanban` —— optional Studio Kanban Plugin. */
+/** `@pinpawo-plugin/kanban` —— optional Studio Kanban Plugin. */
 
 /* ─────────────── Studio 插件 ─────────────── */
 

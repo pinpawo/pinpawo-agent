@@ -9,7 +9,10 @@ import type {
   StudioPluginContext,
 } from '@pinpawo/studio';
 
-import { createStudioHttpPlugin } from './studioHttpPlugin';
+import {
+  createStudioHttpPlugin,
+  type StudioHttpRoutesHook,
+} from './studioHttpPlugin';
 
 const AUTH_TOKEN = 'test-token-with-at-least-16-characters';
 
@@ -223,6 +226,54 @@ test('HTTP Plugin validates media type, body size, dispatch shape, and domain re
   assert.deepEqual(await rejected.json(), { error: 'unknown pet' });
 });
 
+test('HTTP Plugin dispatches contributed routes through its shared Hono middleware', async (t) => {
+  const harness = createContext();
+  let routes: StudioHttpRoutesHook | undefined;
+  harness.context.hooks = {
+    expose: (hookName, hook) => {
+      assert.equal(hookName, 'routes');
+      routes = hook as StudioHttpRoutesHook;
+      return () => {
+        routes = undefined;
+      };
+    },
+    contribute: () => () => undefined,
+  };
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  assert.ok(routes);
+  const unregister = routes.register({
+    method: 'GET',
+    path: '/plugin-status',
+    handle: ({ headers }) => ({
+      kind: 'json',
+      body: { accepted: headers.authorization === `Bearer ${AUTH_TOKEN}` },
+    }),
+  });
+  const address = plugin.address();
+  assert.ok(address);
+
+  const response = await fetch(pluginUrl(address.port, '/plugin-status'), {
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { accepted: true });
+
+  const wrongMethod = await fetch(pluginUrl(address.port, '/plugin-status'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  assert.equal(wrongMethod.status, 405);
+  assert.equal(wrongMethod.headers.get('allow'), 'GET, OPTIONS');
+
+  unregister();
+  const unregistered = await fetch(pluginUrl(address.port, '/plugin-status'), {
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  assert.equal(unregistered.status, 404);
+});
+
 test('HTTP Plugin projects live Studio events over SSE and releases the subscription on stop', async () => {
   const harness = createContext();
   const plugin = createStudioHttpPlugin({
@@ -242,6 +293,8 @@ test('HTTP Plugin projects live Studio events over SSE and releases the subscrip
   });
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/);
+  assert.equal(response.headers.get('cache-control'), 'no-cache, no-transform');
+  assert.equal(response.headers.get('x-accel-buffering'), 'no');
   assert.ok(response.body);
   const reader = response.body.getReader();
   await readStreamUntil(reader, (text) => text.includes(': connected'));

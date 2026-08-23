@@ -1,5 +1,5 @@
 {
-  "name": "@pinpawo-toolkit/studio-kanban",
+  "name": "@pinpawo-plugin/kanban",
   "version": "0.1.0",
   "private": true,
   "description": "Optional Kanban Plugin and Agent Toolkit for PinPawo Studio",

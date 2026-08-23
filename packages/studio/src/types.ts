@@ -95,5 +95,5 @@ export type PetAgentRuntime = {
 /*
  * run / task / 依赖 / 进度 / 重试 的类型曾经住在这里。它们**全部属于插件**
  * (设计 §5)—— studio 甚至不需要知道 "run" 这个词,已随旧 orchestrator
- * 一并迁出。看板的领域模型见 `@pinpawo-toolkit/studio-kanban`。
+ * 一并迁出。看板的领域模型见 `@pinpawo-plugin/kanban`。
  */

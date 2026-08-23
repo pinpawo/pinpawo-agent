@@ -100,7 +100,7 @@ registry and imports no concrete Plugin. A Host caller maps installed IDs to
 Plugin implementations and passes `resolvePlugin` to `StudioHost`. Options pass
 through unchanged for the Plugin to validate.
 
-`@pinpawo-toolkit/studio-kanban` provides a concrete Kanban Plugin and is not a
+`@pinpawo-plugin/kanban` provides a concrete Kanban Plugin and is not a
 Studio dependency. The Plugin defines its Kanban Toolkit but does not contribute
 the matching `studio_planning` Capability. A Pet selects that independent Agent
 Capability by placing its `CAPABILITY.md` directory under the conventional

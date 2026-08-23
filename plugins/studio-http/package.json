@@ -13,7 +13,9 @@
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@pinpawo/studio": "*"
+    "@hono/node-server": "^2.1.1",
+    "@pinpawo/studio": "*",
+    "hono": "^4.13.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

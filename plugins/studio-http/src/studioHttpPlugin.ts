@@ -1,11 +1,15 @@
 import { timingSafeEqual } from 'node:crypto';
 import {
   createServer,
-  type IncomingMessage,
   type IncomingHttpHeaders,
   type Server,
-  type ServerResponse,
 } from 'node:http';
+
+import { getRequestListener, type HttpBindings } from '@hono/node-server';
+import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { cors } from 'hono/cors';
+import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import {
   parseStudioDispatchRequest,
@@ -20,6 +24,9 @@ const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
 const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/events']);
+
+type StudioHttpEnvironment = { Bindings: HttpBindings };
+type StudioHttpContext = Context<StudioHttpEnvironment>;
 
 export type StudioHttpRouteRequest = {
   readonly url: URL;
@@ -66,13 +73,17 @@ export type StudioHttpPlugin = StudioPlugin & {
   stop: () => Promise<void>;
 };
 
+type EventClient = {
+  stream: SSEStreamingApi;
+  close: () => void;
+};
+
 class HttpRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
   ) {
     super(message);
-    this.name = 'HttpRequestError';
   }
 }
 
@@ -108,22 +119,19 @@ function normalizeAllowedOrigins(origins: readonly string[] | undefined): Set<st
   return normalized;
 }
 
-function readOrigin(request: IncomingMessage): string | null | undefined {
-  const origin = request.headers.origin;
-  if (origin === undefined) return undefined;
-  if (Array.isArray(origin) || !origin.trim() || origin === 'null') return null;
+function readOrigin(header: string | undefined): string | null | undefined {
+  if (header === undefined) return undefined;
+  if (!header.trim() || header === 'null') return null;
   try {
-    const parsed = new URL(origin);
-    return parsed.origin === origin ? origin : null;
+    const parsed = new URL(header);
+    return parsed.origin === header ? header : null;
   } catch {
     return null;
   }
 }
 
-function readBearerToken(request: IncomingMessage): string | null {
-  const authorization = request.headers.authorization;
-  if (Array.isArray(authorization)) return null;
-  const match = authorization?.match(/^Bearer\s+(.+)$/i);
+function readBearerToken(header: string | undefined): string | null {
+  const match = header?.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || null;
 }
 
@@ -132,45 +140,6 @@ function safeTokenEqual(provided: string, expected: string): boolean {
   const expectedBuffer = Buffer.from(expected);
   return providedBuffer.length === expectedBuffer.length
     && timingSafeEqual(providedBuffer, expectedBuffer);
-}
-
-function applyCommonHeaders(response: ServerResponse): void {
-  response.setHeader('X-Content-Type-Options', 'nosniff');
-  response.setHeader('Cache-Control', 'no-store');
-}
-
-function applyCorsHeaders(response: ServerResponse, origin: string | undefined): void {
-  if (!origin) return;
-  response.setHeader('Access-Control-Allow-Origin', origin);
-  response.setHeader('Vary', 'Origin');
-}
-
-function sendJson(response: ServerResponse, status: number, value: unknown): void {
-  if (response.headersSent) return;
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined) throw new Error('Studio HTTP JSON response is not serializable.');
-  const body = `${serialized}\n`;
-  applyCommonHeaders(response);
-  response.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-  });
-  response.end(body);
-}
-
-function sendText(
-  response: ServerResponse,
-  status: number,
-  body: string,
-  contentType = 'text/plain; charset=utf-8',
-): void {
-  if (response.headersSent) return;
-  applyCommonHeaders(response);
-  response.writeHead(status, {
-    'Content-Type': contentType,
-    'Content-Length': Buffer.byteLength(body),
-  });
-  response.end(body);
 }
 
 function readRouteStatus(status: number | undefined): number {
@@ -208,29 +177,45 @@ function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
   return { ...route, method, path: parsed.pathname };
 }
 
-async function readJsonBody(request: IncomingMessage, maxBytes: number): Promise<unknown> {
-  const contentType = request.headers['content-type'];
-  if (
-    Array.isArray(contentType)
-    || contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json'
-  ) {
+async function readJsonBody(context: StudioHttpContext): Promise<unknown> {
+  const contentType = context.req.header('content-type');
+  if (contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
     throw new HttpRequestError(415, 'Content-Type must be application/json.');
   }
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += bytes.length;
-    if (size > maxBytes) {
-      throw new HttpRequestError(413, `Request body exceeds ${maxBytes.toString()} bytes.`);
-    }
-    chunks.push(bytes);
-  }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+    return await context.req.json();
   } catch {
     throw new HttpRequestError(400, 'Request body must contain valid JSON.');
   }
+}
+
+function noStoreHeaders(context: StudioHttpContext): void {
+  context.header('X-Content-Type-Options', 'nosniff');
+  context.header('Cache-Control', 'no-store');
+}
+
+function methodNotAllowed(context: StudioHttpContext, methods: readonly string[]) {
+  context.header('Allow', [...methods, 'OPTIONS'].join(', '));
+  return context.json({ error: 'Method not allowed.' }, 405);
+}
+
+function jsonResponse(context: StudioHttpContext, status: number, value: unknown): Response {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error('Studio HTTP JSON response is not serializable.');
+  const headers = new Headers(context.res.headers);
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  return new Response(`${serialized}\n`, { status, headers });
+}
+
+function textResponse(
+  context: StudioHttpContext,
+  status: number,
+  body: string,
+  contentType: string,
+): Response {
+  const headers = new Headers(context.res.headers);
+  headers.set('Content-Type', contentType);
+  return new Response(body, { status, headers });
 }
 
 function listen(server: Server, port: number): Promise<StudioHttpPluginAddress> {
@@ -303,7 +288,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   let unexposeRoutes: (() => void) | undefined;
   let started = false;
   let stopped = false;
-  const eventClients = new Set<ServerResponse>();
+  const eventClients = new Set<EventClient>();
   const routes = new Map<string, StudioHttpRoute>();
 
   const routesHook: StudioHttpRoutesHook = {
@@ -318,16 +303,18 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     },
   };
 
-  function broadcastChunk(chunk: string): void {
-    for (const client of eventClients) {
-      if (client.destroyed || !client.write(chunk)) {
+  async function broadcastChunk(chunk: string): Promise<void> {
+    await Promise.all([...eventClients].map(async (client) => {
+      try {
+        await client.stream.write(chunk);
+      } catch {
         eventClients.delete(client);
-        client.end();
+        client.close();
       }
-    }
+    }));
   }
 
-  function broadcastEvent(event: StudioEvent): void {
+  async function broadcastEvent(event: StudioEvent): Promise<void> {
     let data: string;
     try {
       data = JSON.stringify(event);
@@ -338,117 +325,133 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       );
       return;
     }
-    broadcastChunk(`event: studio.event\ndata: ${data}\n\n`);
+    await broadcastChunk(`event: studio.event\ndata: ${data}\n\n`);
   }
 
-  async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const requestUrl = new URL(request.url ?? '/', 'http://studio-http.local');
-    const origin = readOrigin(request);
-    if (origin === null || (origin !== undefined && !allowedOrigins.has(origin))) {
-      sendJson(response, 403, { error: 'Origin is not allowed.' });
-      return;
-    }
-    applyCorsHeaders(response, origin);
+  function createApp(): Hono<StudioHttpEnvironment> {
+    const app = new Hono<StudioHttpEnvironment>();
 
-    if (request.method === 'OPTIONS') {
-      applyCommonHeaders(response);
-      response.writeHead(204, {
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-        'Access-Control-Max-Age': '600',
-      });
-      response.end();
-      return;
-    }
-
-    const providedToken = readBearerToken(request);
-    if (!providedToken || !safeTokenEqual(providedToken, options.authToken)) {
-      response.setHeader('WWW-Authenticate', 'Bearer');
-      sendJson(response, 401, { error: 'Unauthorized.' });
-      return;
-    }
-
-    if (requestUrl.pathname === '/dispatch') {
-      if (request.method !== 'POST') {
-        response.setHeader('Allow', 'POST, OPTIONS');
-        sendJson(response, 405, { error: 'Method not allowed.' });
-        return;
+    app.use('*', async (requestContext, next) => {
+      noStoreHeaders(requestContext);
+      await next();
+    });
+    app.use('*', async (requestContext, next) => {
+      const origin = readOrigin(requestContext.req.header('origin'));
+      if (origin === null || (origin !== undefined && !allowedOrigins.has(origin))) {
+        return requestContext.json({ error: 'Origin is not allowed.' }, 403);
       }
-      const parsed = parseStudioDispatchRequest(await readJsonBody(request, maxBodyBytes));
+      await next();
+    });
+    app.use('*', cors({
+      origin: (origin) => allowedOrigins.has(origin) ? origin : undefined,
+      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      allowHeaders: ['Authorization', 'Content-Type'],
+      maxAge: 600,
+    }));
+    app.use('*', async (requestContext, next) => {
+      const providedToken = readBearerToken(requestContext.req.header('authorization'));
+      if (!providedToken || !safeTokenEqual(providedToken, options.authToken)) {
+        requestContext.header('WWW-Authenticate', 'Bearer');
+        return requestContext.json({ error: 'Unauthorized.' }, 401);
+      }
+      await next();
+    });
+    app.use('*', bodyLimit({
+      maxSize: maxBodyBytes,
+      onError: (requestContext) => requestContext.json(
+        { error: `Request body exceeds ${maxBodyBytes.toString()} bytes.` },
+        413,
+      ),
+    }));
+
+    app.post('/dispatch', async (requestContext) => {
+      const parsed = parseStudioDispatchRequest(await readJsonBody(requestContext));
       if (!parsed) throw new HttpRequestError(400, 'Invalid Studio dispatch request.');
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
       try {
         const receipt = await context.dispatch(parsed);
-        sendJson(response, 202, {
+        return requestContext.json({
           petId: receipt.petId,
           threadId: receipt.threadId,
           invocationId: receipt.invocationId,
           ...(receipt.metadata ? { metadata: receipt.metadata } : {}),
-        });
+        }, 202);
       } catch (error) {
         throw new HttpRequestError(
           422,
           error instanceof Error ? error.message : String(error),
         );
       }
-      return;
-    }
+    });
+    app.all('/dispatch', (requestContext) => methodNotAllowed(requestContext, ['POST']));
 
-    if (requestUrl.pathname === '/events') {
-      if (request.method !== 'GET') {
-        response.setHeader('Allow', 'GET, OPTIONS');
-        sendJson(response, 405, { error: 'Method not allowed.' });
-        return;
-      }
+    app.get('/events', (requestContext) => {
       if (eventClients.size >= maxEventClients) {
-        sendJson(response, 503, { error: 'Too many event clients.' });
-        return;
+        return requestContext.json({ error: 'Too many event clients.' }, 503);
       }
-      response.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
+      const response = streamSSE(requestContext, async (stream) => {
+        let resolveClosed: (() => void) | undefined;
+        const closed = new Promise<void>((resolve) => {
+          resolveClosed = resolve;
+        });
+        const close = () => resolveClosed?.();
+        const client: EventClient = { stream, close };
+        const abort = () => close();
+        eventClients.add(client);
+        requestContext.req.raw.signal.addEventListener('abort', abort, { once: true });
+        try {
+          await stream.write('retry: 3000\n: connected\n\n');
+          await closed;
+        } finally {
+          requestContext.req.raw.signal.removeEventListener('abort', abort);
+          eventClients.delete(client);
+        }
       });
-      response.flushHeaders();
-      response.socket?.setTimeout(0);
-      eventClients.add(response);
-      response.on('close', () => eventClients.delete(response));
-      response.write('retry: 3000\n: connected\n\n');
-      return;
-    }
+      response.headers.set('Cache-Control', 'no-cache, no-transform');
+      response.headers.set('X-Accel-Buffering', 'no');
+      return response;
+    });
+    app.all('/events', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
-    const method = request.method ?? 'GET';
-    const route = routes.get(`${method} ${requestUrl.pathname}`);
-    if (route) {
-      let body: Promise<unknown> | undefined;
-      const result = await route.handle({
-        url: requestUrl,
-        headers: request.headers,
-        readJson: () => {
-          body ??= readJsonBody(request, maxBodyBytes);
-          return body;
-        },
-      });
-      const status = readRouteStatus(result.status);
-      if (result.kind === 'json') sendJson(response, status, result.body);
-      else if (result.kind === 'text') {
-        sendText(response, status, result.body, result.contentType);
-      } else {
+    app.all('*', async (requestContext) => {
+      const route = routes.get(`${requestContext.req.method} ${requestContext.req.path}`);
+      if (route) {
+        let body: Promise<unknown> | undefined;
+        const result = await route.handle({
+          url: new URL(requestContext.req.url),
+          headers: requestContext.env.incoming.headers,
+          readJson: () => {
+            body ??= readJsonBody(requestContext);
+            return body;
+          },
+        });
+        const status = readRouteStatus(result.status);
+        if (result.kind === 'json') return jsonResponse(requestContext, status, result.body);
+        if (result.kind === 'text') {
+          return textResponse(
+            requestContext,
+            status,
+            result.body,
+            result.contentType ?? 'text/plain; charset=utf-8',
+          );
+        }
         throw new Error('Studio HTTP route returned an invalid result.');
       }
-      return;
-    }
-    const allowedMethods = [...routes.values()]
-      .filter(({ path }) => path === requestUrl.pathname)
-      .map(({ method: routeMethod }) => routeMethod);
-    if (allowedMethods.length > 0) {
-      response.setHeader('Allow', [...new Set([...allowedMethods, 'OPTIONS'])].join(', '));
-      sendJson(response, 405, { error: 'Method not allowed.' });
-      return;
-    }
 
-    sendJson(response, 404, { error: 'Not found.' });
+      const allowedMethods = [...routes.values()]
+        .filter(({ path }) => path === requestContext.req.path)
+        .map(({ method }) => method);
+      if (allowedMethods.length > 0) return methodNotAllowed(requestContext, [...new Set(allowedMethods)]);
+      return requestContext.json({ error: 'Not found.' }, 404);
+    });
+
+    app.onError((error, requestContext) => {
+      const requestError = error instanceof HttpRequestError
+        ? error
+        : new HttpRequestError(500, 'Internal server error.');
+      return jsonResponse(requestContext, requestError.status, { error: requestError.message });
+    });
+    return app;
   }
 
   return {
@@ -459,18 +462,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       if (started || stopped) throw new Error('Studio HTTP Plugin can only be started once.');
       started = true;
       context = pluginContext;
-      const nextServer = createServer((request, response) => {
-        void handleRequest(request, response).catch((error) => {
-          const requestError = error instanceof HttpRequestError
-            ? error
-            : new HttpRequestError(500, 'Internal server error.');
-          if (!response.headersSent) {
-            sendJson(response, requestError.status, { error: requestError.message });
-          } else {
-            response.destroy(error instanceof Error ? error : undefined);
-          }
-        });
-      });
+      const app = createApp();
+      const nextServer = createServer(getRequestListener(app.fetch));
       nextServer.requestTimeout = 15_000;
       nextServer.headersTimeout = 10_000;
       nextServer.keepAliveTimeout = 5_000;
@@ -482,7 +475,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         );
         currentAddress = await listen(nextServer, options.port);
         unsubscribeEvents = pluginContext.subscribe(broadcastEvent);
-        heartbeat = setInterval(() => broadcastChunk(': heartbeat\n\n'), heartbeatIntervalMs);
+        heartbeat = setInterval(() => {
+          void broadcastChunk(': heartbeat\n\n');
+        }, heartbeatIntervalMs);
         heartbeat.unref();
       } catch (error) {
         unexposeRoutes?.();
@@ -504,7 +499,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       unsubscribeEvents = undefined;
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = undefined;
-      for (const client of eventClients) client.end();
+      for (const client of eventClients) client.close();
       eventClients.clear();
       const activeServer = server;
       server = undefined;

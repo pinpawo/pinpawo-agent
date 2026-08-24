@@ -53,6 +53,10 @@ capability
   `user_input_required` 专用的单个结构化问题；
 - Planner transcript、工具消息、Capability 文档观察和内部摘要进入 root checkpoint
   的 Planner lane，但不进入 main conversation、Answer input 或 handoff。
+- Capability 渐进披露是 trace-scoped 状态：`general`（若存在）作为第一项，Entry
+  搜索命中的 Capability 追加后在后续 Boundary 中继续可见，Boundary 新命中的项也继续追加；
+- Planner system prompt 只描述稳定目标与上下文语义；Capability 文档和搜索状态不再拼入
+  system prompt。
 
 目标流程：
 
@@ -141,7 +145,7 @@ threadId
 以下内容只能存在于 root `messages` 的 Planner lane：
 
 - Planner human/AI/tool messages；
-- `capability_search` 结果和 Capability 文档观察；
+- `capability_search` ToolMessage 与当时的文档披露结果；
 - 规划过程、被拒绝的候选计划和内部推理；
 - terminal ToolMessage 及其 `plannerInputId`；
 - registry digest metadata。
@@ -328,7 +332,16 @@ type PlannerInput = {
     completionReason: SubagentCompletionReason | null;
   } | null;
   remainingPlan: CapabilityPlanTask[];
+  capabilityDisclosure: CapabilityDisclosureState;
   registryDigest: string;
+};
+
+type CapabilityDisclosureState = {
+  registryDigest: string;
+  disclosedCapabilityNames: string[];
+  emptySearchRounds: number;
+  maxEmptySearchRounds: number;
+  status: 'open' | 'closed';
 };
 ```
 
@@ -341,6 +354,8 @@ type PlannerInput = {
   完整 tool-protocol-safe lane transcript，以及当前 trace 的 Planner lane；
 - announce 字段只保留 boundary identity 与 stop reason；announce 内容、用户追问和执行
   进展直接从原始消息读取，不再重复投影为字符串字段；
+- `capabilityDisclosure` 是当前 trace 已经披露给 Planner 的有序 Capability 集合和空搜索
+  额度；Entry 与 Boundary 使用同一个状态，而不是每次 invocation 重新创建默认候选；
 - registry 变化：在下一次正常 Planner input 中提供新的 digest。
 
 `messages` 是 root checkpoint 已经持久化的 canonical 输入。Planner 领域根据 mode 选择
@@ -378,6 +393,105 @@ checkpoint lineage；不得为此恢复第二套私有 message checkpoint。
 
 这是同一持久 actor 收到下一条输入，不应伪装成 LangGraph interrupt resume。
 
+### Capability 渐进披露状态
+
+Capability discovery 是 trace-scoped、单调增长的状态，不从 message 历史推导。新 trace
+以 `general`（若存在）作为第一项：
+
+```ts
+{
+  registryDigest,
+  disclosedCapabilityNames: ['general'],
+  emptySearchRounds: 0,
+  maxEmptySearchRounds: capabilityPlannerMaxSearchRounds,
+  status: 'open',
+}
+```
+
+search 命中项按首次发现顺序去重追加，Entry 和 Boundary 共享该集合。状态只保存名称与
+registry digest；完整文档在每次调用时从 workspace 重新解析。顺序不表示优先级。
+
+空搜索额度也跨 Entry 和 Boundary 保留：
+
+- 同一模型回复中的并行搜索构成一个搜索轮次；
+- 任一调用命中则该轮不计数，整轮未命中才增加 `emptySearchRounds`；
+- 达到 `maxEmptySearchRounds` 后将 `status` 设为 `closed`；
+- search 始终保持可调用；closed 后稳定返回 `capability_search_round_limit_exceeded`。
+
+closed 只停止 discovery。Planner 仍须基于已披露 Capability 提交合法终态，不得因此返回
+`planner_incomplete`。
+
+### 完整 Boundary 模型输入示例
+
+下面固定完整的 provider-visible message 层级；system prompt 的具体措辞仍由稳定模板维护，
+其余省略号只代表历史消息、Capability 文档正文或执行结果：
+
+```ts
+[
+  new SystemMessage(`
+你是框架内部的 Planner。
+
+目标：验收当前 task 的结果，并让剩余计划准确表达仍需完成的工作。
+上下文：本轮消息提供用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
+`),
+
+  // announce 之前按时间保留的当前 trace/delegation Human、AI 与 Tool messages。
+  ...selectedMessagesBeforeAnnounce,
+
+  new AIMessage(`
+<delegation_announce version="1" role="data" authority="none">
+  <source lane="capability:explore" />
+  <completion reason="natural" />
+  <task><![CDATA[调查 auth 模块的结构和风险]]></task>
+  <result format="markdown" role="data"><![CDATA[
+auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接口。
+  ]]></result>
+</delegation_announce>
+`),
+
+  new HumanMessage(`
+<run_user_request role="task_boundary" source="orchestrator_state" trust="read_only">
+  <request><![CDATA[在当前仓库中完成 auth 模块重构并验证。]]></request>
+</run_user_request>
+
+<capability_context source="planner_state" trust="read_only">
+  <capability name="general"><![CDATA[完整 General CAPABILITY.md]]></capability>
+  <capability name="explore"><![CDATA[完整 Explore CAPABILITY.md]]></capability>
+</capability_context>
+
+<planning_boundary source="orchestrator_state" trust="read_only">
+  <active_delegation capability="explore">
+    <task><![CDATA[调查 auth 模块的结构和风险]]></task>
+  </active_delegation>
+  <remaining_plan>
+    <task capability="general"><![CDATA[根据调查结论重构 auth 模块并验证]]></task>
+  </remaining_plan>
+</planning_boundary>
+`),
+]
+```
+
+同次调用绑定以下 tools，`tool_choice` 保持 `auto`：
+
+```text
+capability_search
+continue_current
+submit_plan
+advance_plan
+complete_goal
+request_user_input
+report_unavailable
+```
+
+`capability_context` 是 `CapabilityDisclosureState` 的临时投影，不写入 canonical
+conversation。system prompt 不包含 Capability 文档或搜索轮次；搜索后的状态只出现在
+`capability_search` ToolMessage 中。
+
+已接受的 handoff 从 typed `DelegationAnnounceMessage` 投影；尚待当前 Boundary 验收的
+announce 仍保留在私有 execution lane，只在 Planner 模型边界按 root 持有的 delegation、task
+和 completion identity 临时投影成同一 `<delegation_announce>` 结构。该投影不得提前创建或
+持久化 handoff copy。
+
 ### 持久化作用域
 
 Planner 使用 root 已配置的持久化 backend 和相同 `thread_id`。`traceId` 写入 Planner
@@ -385,23 +499,11 @@ message metadata，作为 lane 的生命周期身份；调用方不管理 Planne
 checkpoint namespace。Planner agent 在 orchestrator 构建时创建一次，但每次 invocation
 从 root messages 重新选择上下文并以 stateless adapter 运行。
 
-Capability discovery 使用显式的有限披露阶段，不使用 retry middleware 或 tool-call counter：
-Planner input 默认最多允许两个搜索模型轮次，可由 `capabilityPlannerMaxSearchRounds` 配置；同一
-模型回复中的并行 `capability_search` 属于一个候选批次，只计一个轮次。每次 ToolMessage 都返回
-`roundsUsed`、`remainingRounds` 和 open/closed 状态；候选足够时模型应立即终结，不必耗尽轮次。
-达到上限后下一次 model call 动态移除 search，只绑定 terminal tools 并要求必须调用工具。
-若 effective workspace 包含 `general`，runtime 必须在模型首次决策前读取经过
-workspace 校验的完整 General 文档，并只把它注入当前 Planner invocation，作为不依赖字面搜索的
-兜底候选。`capability_search` 只负责发现更具体的 Capability；每个 ToolMessage 会列出具体候选，
-并将 General 标记为 `fallback_only`。任何具体候选能执行当前 task 时必须优先选择最贴合者；只有
-全部具体候选都不适用时 General 才重新具备选择资格，不能用它吞并调查、修改等自然任务边界。
-字面命中本身不提高优先级：完整文档必须以正向职责覆盖仍待完成的 task，命中禁止或限制说明的
-候选不适用。首轮字面搜索无结果时，ToolMessage 返回有界的具体 Capability 名称目录；仍有披露
-轮次时 General 标记为 deferred，模型可用精确名称在下一轮读取完整文档。Boundary 的目录排除
-active Capability，既避免按名称重复已完成工作，也保留最新结果新揭示的其他执行方。
-ToolMessage 只表达选择优先级，不替 root 生成 fallback commit。Planner 在提交
-`report_unavailable` 前必须先评估默认 General；它能执行当前工作时应选择它。显式受限 workspace
-可以没有 General，此时只有全部可见 Capability 都不能执行时才能提交 `unavailable`。
+单个 Planner agent invocation 内，`capability_search` 仍通过 `ToolRuntime.state` 读取本轮搜索
+observations，并以 `Command.update` 合并并行调用；invocation 结束时，runner 将新增披露名称和
+空搜索轮次回写 trace-scoped `CapabilityDisclosureState`。middleware 不扫描 message 历史，也不
+拥有披露状态。ToolMessage 只报告本次结果、更新后的额度与稳定的 discovery 状态，不替 root
+生成 fallback commit，也不提供另一份 action 决策树。
 
 ### 幂等输入消费
 
@@ -443,6 +545,7 @@ type OrchestratorTraceState = {
   runId: string;
   plannerInitialized: boolean;
   runCapabilityPlan: CapabilityPlanTask[];
+  runCapabilityDisclosure: CapabilityDisclosureState;
   taskActiveDelegation: TaskActiveDelegation | null;
   runLatestDelegationOutcome: AcceptedDelegationOutcome | null;
 };
@@ -550,16 +653,32 @@ report_unavailable()
 Planner system prompt 以目标和上下文为中心：说明 Planner 要形成的产物、
 各类输入代表什么，以及可执行计划应达到的质量目标；不提供 Capability 搜索、
 action 选择或计划改写的条件树。Terminal tool description 只说明提交的 action
-和参数形状。`capability_search` 返回只提供本次披露的候选与轮次事实，不提供
-`nextAction`、候选优先级或另一份决策政策。
+和参数形状。`capability_search` 返回本次披露、持久轮次事实、miss 后可供下一次精确搜索的
+未披露 Capability 名称，以及一个与当前披露状态一致的
+下一步规划目标；它不提供 `nextAction`、候选优先级或另一份 action 条件树。空搜索或
+closed 状态下，这个目标应明确：已披露的 General 能交付就结束探索，只有没有任何已披露
+Capability 能承担剩余工作时才是 unavailable。
 
-Planner system message 中的动态结构也保持单一职责：`<default_capability>`
-只携带默认 Capability 的名称和完整文档，不再重复 role、priority、trust 或
-registry path。搜索状态是 system prompt 末尾的一行可信控制事实，不使用 XML；
-实际工具绑定决定 capability_search 是否可用。
+Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 使用相同
+`<capability_context>`，但没有 announce、active delegation 和 remaining-plan baseline。
 
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。
+
+### 当前实现到目标结构的迁移边界
+
+本轮后续实现应作为一次结构替换完成，不保留两套并行机制：
+
+1. 用 trace/root `CapabilityDisclosureState` 替换 `defaultCapability` 及其 system block；
+2. search tool 通过 `ToolRuntime.state` / `Command.update` 产生增量，runner 与 root transition
+   持久化披露名称和空轮次；
+3. Entry 与 Boundary 从同一状态构建 `<capability_context>`，Boundary search 不重置状态；
+4. 保持标准 announce 投影，删除 `PRIOR_CONTEXT_SUMMARY` 和解释性 planning-state 文本；
+5. 不增加兼容读取；缺少 disclosure state 的旧 checkpoint 按既有不兼容边界处理。
+
+迁移完成后，Capability context 的唯一来源是 `CapabilityDisclosureState`，execution
+Boundary evidence 的唯一来源是 canonical delegation announce 与选中的原始 transcript；
+system prompt、Planner lane 文本和 result 字符串扫描都不能成为第二来源。
 
 ## 迁移计划
 
@@ -731,6 +850,13 @@ Planner lane 不做独立压缩；它与 root messages 一起保留。新 trace 
 - [ ] Planner 只输出 `PlannerCommit.action + tasks`；
 - [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
 - [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或 Answer；
+- [ ] 新 trace 的 disclosed Capability 以 `general`（若存在）为第一项，Entry/Boundary
+      search 命中项按首次发现顺序追加；
+- [ ] `CapabilityDisclosureState` 在同一 trace 的 Entry 与所有 Boundary 之间保留，
+      registry digest 变化时重新初始化；
+- [ ] system prompt 不包含 `<default_capability>` 或 capability search 轮次；
+- [ ] search closed 后工具仍可调用并稳定返回超限结果，Planner 必须提交终态而不是
+      `planner_incomplete`；
 - [ ] `continue_current` 保持 delegation ID、lane 和 transcript；
 - [ ] `execute_plan` 只用于 Entry 初始计划；
 - [ ] `advance_plan` 与 `goal_done` 只在 graph 接受 handoff 后推进；

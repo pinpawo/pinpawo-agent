@@ -34,6 +34,33 @@ export function buildCapabilityPlanningMessages(
   ));
 }
 
+/**
+ * Build canonical history for one Planner eval invocation. A Boundary's
+ * current result belongs to the private delegation lane and is appended by the
+ * runner with announce metadata, so remove one legacy transcript copy of that
+ * same result from ordinary main history when present.
+ */
+export function buildCapabilityPlanningHistoryMessages(
+  input: CapabilityPlanningInput,
+): BaseMessage[] {
+  let currentAnnounceIndex = -1;
+  if (input.mode === 'boundary' && input.latestAnnounce) {
+    for (let index = input.messages.length - 1; index >= 0; index -= 1) {
+      const message = input.messages[index];
+      if (message?.role === 'assistant'
+        && message.content.trim() === input.latestAnnounce.trim()) {
+        currentAnnounceIndex = index;
+        break;
+      }
+    }
+  }
+  return buildCapabilityPlanningMessages(
+    currentAnnounceIndex < 0
+      ? input.messages
+      : input.messages.filter((_message, index) => index !== currentAnnounceIndex),
+  );
+}
+
 export function buildCapabilityPlanningGoalContract(
   expected: CapabilityPlanningExpected,
 ): {

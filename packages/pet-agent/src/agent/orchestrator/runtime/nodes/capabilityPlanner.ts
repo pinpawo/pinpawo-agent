@@ -5,7 +5,11 @@ import { Command } from '@langchain/langgraph';
 import { type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
-import { createCapabilityPlannerAgent } from '../../capabilityPlanner/agent';
+import {
+  createCapabilityPlannerAgent,
+  DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS,
+} from '../../capabilityPlanner/agent';
+import { resolveCapabilityDisclosureState } from '../../capabilityPlanner/capabilityDisclosure';
 import {
   type CapabilityPlannerDispatch,
   type CapabilityPlannerInput,
@@ -225,9 +229,6 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
   return createCapabilityPlannerAgent({
     model: config.models.act,
     registryBackend: config.capabilityRegistryBackend ?? 'filesystem',
-    ...(config.capabilityPlannerMaxSearchRounds !== undefined
-      ? { maxSearchRounds: config.capabilityPlannerMaxSearchRounds }
-      : {}),
   });
 }
 
@@ -241,14 +242,16 @@ function runtimeStateFromRoot(state: OrchestratorStateType): CapabilityPlannerRu
     runUserRequest: state.runUserRequest,
     runDelegationSummaries: state.runDelegationSummaries,
     runCapabilityPlan: state.runCapabilityPlan,
+    runCapabilityDisclosure: state.runCapabilityDisclosure,
   };
 }
 
 function buildPlannerInput(params: {
   nodeInput: OrchestratorStateType | CapabilityPlannerDispatch;
   workspace: CapabilityPlannerInput['workspace'];
+  capabilityDisclosure: CapabilityPlannerInput['capabilityDisclosure'];
 }): { input: CapabilityPlannerInput; state: CapabilityPlannerRuntimeState } {
-  const { nodeInput, workspace } = params;
+  const { nodeInput, workspace, capabilityDisclosure } = params;
   if (isPlannerDispatch(nodeInput)) {
     const state = nodeInput.plannerState;
     return {
@@ -264,6 +267,7 @@ function buildPlannerInput(params: {
         latestAnnounce: null,
         remainingPlan: state.runCapabilityPlan,
         workspace,
+        capabilityDisclosure,
       },
     };
   }
@@ -317,6 +321,7 @@ function buildPlannerInput(params: {
         : null,
       remainingPlan: state.runCapabilityPlan,
       workspace,
+      capabilityDisclosure,
     },
   };
 }
@@ -328,6 +333,18 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     nodeInput: OrchestratorStateType | CapabilityPlannerDispatch,
     runnableConfig?: RunnableConfig,
   ) {
+    if (!isPlannerDispatch(nodeInput) && !nodeInput.runCapabilityDisclosure) {
+      return new Command({
+        update: {
+          runNextDelegation: null,
+          runCapabilityPlan: [],
+          runLatestDelegationOutcome: null,
+          runUserInputRequest: null,
+          runRuntimeFailure: 'checkpoint_incompatible' as const,
+        },
+        goto: 'answer',
+      });
+    }
     const registry = getInvokeRegistry(runnableConfig);
     const allowedCapabilityNames = getInvokeOptions(runnableConfig).allowedCapabilityNames;
     const workspace = await materializeCapabilityDocumentWorkspace({
@@ -335,9 +352,24 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
-    const { input, state } = buildPlannerInput({ nodeInput, workspace });
+    const currentDisclosure = isPlannerDispatch(nodeInput)
+      ? nodeInput.plannerState.runCapabilityDisclosure
+      : nodeInput.runCapabilityDisclosure;
+    const capabilityDisclosure = resolveCapabilityDisclosureState({
+      current: currentDisclosure,
+      workspace,
+      maxEmptySearchRounds: config.capabilityPlannerMaxSearchRounds
+        ?? DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS,
+    });
+    const { input, state } = buildPlannerInput({
+      nodeInput,
+      workspace,
+      capabilityDisclosure,
+    });
     const result = await runner.invoke(input, runnableConfig);
     const plannerMessageUpdates = [...(result.messageUpdates ?? [])];
+    const updatedCapabilityDisclosure = result.capabilityDisclosure
+      ?? input.capabilityDisclosure;
     // A non-commit is not a model terminal action: do not invent General, do
     // not fabricate a ToolMessage, and do not accept an active delegation.
     // Root owns the truthful fallback route to Answer.
@@ -345,6 +377,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       const includeIncompletePlannerMessages = <T extends object>(update: T) => ({
         ...update,
         ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
+        runCapabilityDisclosure: updatedCapabilityDisclosure,
         ...(plannerMessageUpdates.length > 0 ? { messages: plannerMessageUpdates } : {}),
       });
       return new Command({
@@ -391,6 +424,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       return {
         ...update,
         ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
+        runCapabilityDisclosure: updatedCapabilityDisclosure,
         ...(plannerMessageUpdates.length > 0 || existingMessages.length > 0
           ? { messages: [...plannerMessageUpdates, ...existingMessages] }
           : {}),

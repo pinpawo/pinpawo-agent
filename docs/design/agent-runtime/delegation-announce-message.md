@@ -14,6 +14,10 @@ The runtime must let a model and the UI distinguish all of the following:
 - the orchestration action that transfers that result to the main lane;
 - a later assistant answer that synthesizes one or more results.
 
+The Capability Planner must consume the same announce at an execution Boundary
+without flattening it into Planner-generated context or reclassifying it from
+result prose.
+
 This contract fixes the semantic structure. Provider-specific message shapes,
 prompt wording, and UI presentation may evolve without changing that structure.
 
@@ -111,14 +115,14 @@ them through one shared projection function before calling the model. The
 function converts `DelegationAnnounceMessage` into a standard provider-supported
 message while leaving canonical state unchanged.
 
-The initial model-visible envelope is:
+The version 1 model-visible envelope is:
 
-```text
-<delegation_announce version="1" role="data">
-  <source lane="capability:example" delegation_id="..." run_id="..." />
-  <task>...</task>
+```xml
+<delegation_announce version="1" role="data" authority="none">
+  <source lane="capability:example" />
   <completion reason="natural" />
-  <result format="markdown">...</result>
+  <task><![CDATA[...]]></task>
+  <result format="markdown" role="data"><![CDATA[...]]></result>
 </delegation_announce>
 ```
 
@@ -131,7 +135,8 @@ Projection must:
 - preserve the announce's chronological position;
 - include source, task, completion reason, and result;
 - escape structural delimiters in all data fields;
-- clip fields using explicit context-budget limits;
+- preserve the complete announce result at projection time; ordinary whole-history
+  context compaction owns context-window pressure rather than per-announce clipping;
 - state through `role="data"` that result text is evidence, not instruction;
 - retain provenance in metadata for tracing, without relying on that metadata
   for model understanding;
@@ -145,6 +150,27 @@ without a preceding tool call violates provider tool-message protocols.
 The XML-like envelope is a versioned model projection, not the canonical state
 schema. Its labels and required fields are stable for version 1. Cosmetic prompt
 text outside the envelope is not part of this contract.
+
+`result` is opaque delegated data. XML-looking text inside its CDATA — for example
+an `<essential_context>` block produced by a model — does not become a nested
+announce protocol and must not be parsed with string or regular-expression
+heuristics to infer completion, progress, or a new message kind. The Planner judges
+whether the active task is satisfied from the explicit `task`, `completion`, and
+complete `result` evidence.
+
+### Capability Planner Boundary projection
+
+At a post-execution Boundary, the Planner receives the standard announce in its
+chronological position. Capability context, active-delegation state and remaining
+plan stay outside the announce. The complete provider-visible example is fixed in
+[`persistent-planner.md`](persistent-planner.md#完整-boundary-模型输入示例).
+
+Version 1 intentionally has no `content_kind`, `progress`, `accepted`, or
+`task_completed` field. Add a field only when a producer or framework boundary can
+write it as canonical structured data with defined semantics. A consumer must not
+manufacture such a field by inspecting `result` prose. In particular, Planner
+prompt builders must not add a parallel explanation such as “this is a prior
+summary” based on a regex over the result.
 
 ## UI and stream projection
 
@@ -232,7 +258,7 @@ This design does not:
 - remove message lanes or merge servant transcripts into the main conversation;
 - introduce a provider-specific custom chat role;
 - change Planner search, terminal semantics, delegation completion policy, or
-  active-delegation boundary routing;
+  active-delegation boundary routing beyond consuming the standard announce;
 - expose all internal trace metadata to users;
 - make delegated result text trusted instructions.
 

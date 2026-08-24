@@ -16,12 +16,11 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Progressively disclose specific Capability documents by literal terms. Each match contains the complete CAPABILITY.md document. An unmatched result reports the remaining search opportunity and mode-specific planning guidance.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Disclose a more specific Capability document. When the request centers on a distinct domain or specialist responsibility, make one focused search before assigning broad General, even if General could attempt ordinary work. Skip discovery when the work is genuinely general or an already disclosed specific Capability clearly matches. Search with literal terms from the desired responsibility. Each new match returns the complete CAPABILITY.md and remains disclosed for later planning boundaries. Empty-search allowance is shared across the whole task; once search is closed, finish planning from already disclosed Capabilities.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
-const MAX_CAPABILITY_SEARCH_TERM_CHARS = 40;
-const MAX_CAPABILITY_SEARCH_TERM_WORDS = 4;
+const MAX_CAPABILITY_SEARCH_TERM_CHARS = 80;
 const MAX_CAPABILITY_SEARCH_RESULT_BYTES = 64 * 1024;
 export type CapabilityPlannerFileExplorer = {
   readonly didReachDocumentReadLimit: () => boolean;
@@ -29,17 +28,15 @@ export type CapabilityPlannerFileExplorer = {
     terms: readonly string[],
     signal?: AbortSignal,
   ) => Promise<CapabilityPlannerSearchResult>;
-  /**
-   * Read the well-known default Capability into the Planner's private input
-   * context. It is not a search result and never enters parent graph state.
-   */
-  readonly readDefaultCapability: (
+  /** Read already-disclosed documents for the current Planner invocation. */
+  readonly readCapabilities: (
+    capabilityNames: readonly string[],
     signal?: AbortSignal,
-  ) => Promise<CapabilityPlannerDefaultCapability | null>;
+  ) => Promise<CapabilityPlannerCapabilityDocument[]>;
 };
 
-export type CapabilityPlannerDefaultCapability = {
-  readonly capabilityName: typeof GENERAL_CAPABILITY_NAME;
+export type CapabilityPlannerCapabilityDocument = {
+  readonly capabilityName: string;
   readonly path: string;
   readonly content: string;
 };
@@ -60,24 +57,19 @@ export function createCapabilityPlannerSearchTool<
 >(
   search: (
     terms: readonly string[],
-    state: ToolRuntime<TState>['state'],
-    signal?: AbortSignal,
-  ) => Promise<string>,
+    runtime: ToolRuntime<TState>,
+  ) => Promise<unknown>,
 ) {
   return tool(
     async ({ terms }: { terms: string[] }, runtime: ToolRuntime<TState>) =>
-      search(terms, runtime.state, runtime.signal),
+      search(terms, runtime),
     {
       name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
       description: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION,
       schema: z.object({
         terms: z.array(
           z.string().trim().min(1).max(MAX_CAPABILITY_SEARCH_TERM_CHARS)
-            .refine(
-              (term) => term.split(/\s+/u).length <= MAX_CAPABILITY_SEARCH_TERM_WORDS,
-              'Each term must be a literal word or short phrase, not a search instruction.',
-            )
-            .describe('A literal word or short phrase expected in a Capability name, description, or document; not an action or search instruction.'),
+            .describe('Literal text expected in a Capability name, description, or document; concise phrases produce better matches.'),
         ).min(1)
           .describe('Alternative terms for one Capability. Any matching term may select a document.'),
       }),
@@ -144,36 +136,52 @@ export function createCapabilityPlannerFileExplorer(params: {
   let consumedDocumentReadBytes = 0;
   let documentReadLimitReached = false;
 
-  const readDefaultCapability = async (
+  const readCapabilities = async (
+    capabilityNames: readonly string[],
     signal?: AbortSignal,
-  ): Promise<CapabilityPlannerDefaultCapability | null> => {
-    if (!defaultEntry) return null;
-    const content = await workspaceReader.readDocument(defaultEntry.relativePath, signal);
-    const defaultCapability = {
-      capabilityName: GENERAL_CAPABILITY_NAME,
-      path: defaultEntry.relativePath,
-      content,
-    } as const;
-    const defaultCapabilityBytes = utf8Bytes(content);
+  ): Promise<CapabilityPlannerCapabilityDocument[]> => {
+    const entryByName = new Map(workspace.entries.map((entry) => [
+      entry.capabilityName,
+      entry,
+    ]));
+    const documents: CapabilityPlannerCapabilityDocument[] = [];
+    for (const capabilityName of [...new Set(capabilityNames)]) {
+      const entry = entryByName.get(capabilityName);
+      if (!entry) {
+        throw new PlannerFileToolError(
+          'invalid_query',
+          `Disclosed Capability "${capabilityName}" is not present in the workspace.`,
+        );
+      }
+      documents.push({
+        capabilityName,
+        path: entry.relativePath,
+        content: await workspaceReader.readDocument(entry.relativePath, signal),
+      });
+    }
+    const documentBytes = documents.reduce(
+      (total, document) => total + utf8Bytes(document.content),
+      0,
+    );
     const remainingDocumentReadBytes = Math.max(
       0,
       maxDocumentReadBytes - consumedDocumentReadBytes,
     );
     if (
-      defaultCapabilityBytes > remainingDocumentReadBytes
-      || defaultCapabilityBytes > MAX_CAPABILITY_SEARCH_RESULT_BYTES
+      documentBytes > remainingDocumentReadBytes
+      || documentBytes > MAX_CAPABILITY_SEARCH_RESULT_BYTES
     ) {
       documentReadLimitReached = true;
       throw new PlannerFileToolError(
         'planning_limit_reached',
-        'Capability Planner default Capability document exceeds the remaining read limit.',
+        'Disclosed Capability documents exceed the remaining Planner read limit.',
       );
     }
-    consumedDocumentReadBytes += defaultCapabilityBytes;
+    consumedDocumentReadBytes += documentBytes;
     if (consumedDocumentReadBytes >= maxDocumentReadBytes) {
       documentReadLimitReached = true;
     }
-    return defaultCapability;
+    return documents;
   };
 
   const search = async (
@@ -225,6 +233,6 @@ export function createCapabilityPlannerFileExplorer(params: {
   return Object.freeze({
     didReachDocumentReadLimit: () => documentReadLimitReached,
     search,
-    readDefaultCapability,
+    readCapabilities,
   });
 }

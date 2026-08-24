@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlanner/agent.ts';
+import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/capabilityPlanner/capabilityDisclosure.ts';
 import { CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
 import {
   isCapabilityPlannerIncompleteResult,
@@ -13,6 +14,7 @@ import {
 } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
+import { setPinpetMeta } from '../../src/agent/orchestrator/messageLanes.ts';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -21,7 +23,7 @@ import {
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import {
   evaluateCapabilityPlanningOutput,
-  buildCapabilityPlanningMessages,
+  buildCapabilityPlanningHistoryMessages,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
 import {
@@ -63,6 +65,27 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
       ].join('\n'),
     }),
   });
+}
+
+function currentBoundaryAnnounce(params: {
+  content: string;
+  capability: string;
+  activeTask: string;
+  transcriptRunId: string;
+}) {
+  const message = new AIMessage({
+    id: 'eval-announce',
+    content: params.content,
+  });
+  setPinpetMeta(message, {
+    lane: `capability:${params.capability}`,
+    runId: params.transcriptRunId,
+    delegationId: 'eval-delegation',
+    isAnnounce: true,
+    task: params.activeTask,
+    completionReason: 'natural',
+  });
+  return message;
 }
 
 function plannerOutput(
@@ -130,11 +153,11 @@ function plannerDiagnostics(result: CapabilityPlannerResult) {
     try {
       const payload = JSON.parse(message.content) as {
         data?: { matches?: Array<{ path?: unknown }> };
-        exploration?: {
-          specificCandidates?: unknown;
-          defaultCandidate?: unknown;
+        capabilityDiscovery?: {
+          newlyDisclosedCapabilityNames?: unknown;
+          disclosedCapabilityNames?: unknown;
           status?: unknown;
-          remainingRounds?: unknown;
+          remainingEmptyRounds?: unknown;
         };
       };
       return [{
@@ -142,19 +165,25 @@ function plannerDiagnostics(result: CapabilityPlannerResult) {
         matchedPaths: Array.isArray(payload.data?.matches)
           ? payload.data.matches.flatMap(({ path }) => typeof path === 'string' ? [path] : [])
           : [],
-        specificCandidates: Array.isArray(payload.exploration?.specificCandidates)
-          ? payload.exploration.specificCandidates.filter(
+        specificCandidates: Array.isArray(
+          payload.capabilityDiscovery?.newlyDisclosedCapabilityNames,
+        )
+          ? payload.capabilityDiscovery.newlyDisclosedCapabilityNames.filter(
               (candidate): candidate is string => typeof candidate === 'string',
             )
           : [],
-        defaultCandidate: typeof payload.exploration?.defaultCandidate === 'string'
-          ? payload.exploration.defaultCandidate
+        disclosedCapabilityNames: Array.isArray(
+          payload.capabilityDiscovery?.disclosedCapabilityNames,
+        )
+          ? payload.capabilityDiscovery.disclosedCapabilityNames.filter(
+              (candidate): candidate is string => typeof candidate === 'string',
+            )
+          : [],
+        status: typeof payload.capabilityDiscovery?.status === 'string'
+          ? payload.capabilityDiscovery.status
           : null,
-        status: typeof payload.exploration?.status === 'string'
-          ? payload.exploration.status
-          : null,
-        remainingRounds: typeof payload.exploration?.remainingRounds === 'number'
-          ? payload.exploration.remainingRounds
+        remainingRounds: typeof payload.capabilityDiscovery?.remainingEmptyRounds === 'number'
+          ? payload.capabilityDiscovery.remainingEmptyRounds
           : null,
       }];
     } catch {
@@ -162,7 +191,7 @@ function plannerDiagnostics(result: CapabilityPlannerResult) {
         toolCallId: message.tool_call_id,
         matchedPaths: [],
         specificCandidates: [],
-        defaultCandidate: null,
+        disclosedCapabilityNames: [],
         status: null,
         remainingRounds: null,
       }];
@@ -243,19 +272,48 @@ async function main() {
           registry,
           cacheRoot,
         });
+        const activeCapability = testCase.input.activeCapability
+          ?? testCase.input.remainingPlan?.[0]?.capability
+          ?? workspace.capabilityNames[0]
+          ?? 'unavailable';
+        const baseDisclosure = createCapabilityDisclosureState({
+          workspace,
+          maxEmptySearchRounds: 2,
+        });
+        const boundaryCapabilityNames = testCase.input.mode === 'boundary'
+          ? [
+              activeCapability,
+              ...(testCase.input.remainingPlan ?? []).map(({ capability }) => capability),
+            ]
+          : [];
+        const capabilityDisclosure = {
+          ...baseDisclosure,
+          disclosedCapabilityNames: [...new Set([
+            ...baseDisclosure.disclosedCapabilityNames,
+            ...boundaryCapabilityNames.filter((capabilityName) =>
+              workspace.capabilityNames.includes(capabilityName)),
+          ])],
+        };
+        const activeTask = testCase.input.activeTask ?? 'Evaluate the current task.';
         const plannerInputBase = {
           inputId: `${testCase.input.mode}:${testCase.id}`,
           traceId: `eval:${testCase.id}`,
           runId: `eval:${testCase.id}`,
           userRequest: testCase.input.userRequest,
           messages: [
-            ...buildCapabilityPlanningMessages(testCase.input.messages),
+            ...buildCapabilityPlanningHistoryMessages(testCase.input),
             ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
-              ? [new AIMessage(testCase.input.latestAnnounce)]
+              ? [currentBoundaryAnnounce({
+                  content: testCase.input.latestAnnounce,
+                  capability: activeCapability,
+                  activeTask,
+                  transcriptRunId: `eval:${testCase.id}`,
+                })]
               : []),
           ],
           remainingPlan: testCase.input.remainingPlan ?? [],
           workspace,
+          capabilityDisclosure,
         };
         const plannerInput: CapabilityPlannerInput = testCase.input.mode === 'boundary'
           ? {
@@ -264,11 +322,8 @@ async function main() {
               activeDelegation: {
                 delegationId: 'eval-delegation',
                 transcriptRunId: `eval:${testCase.id}`,
-                capability: testCase.input.activeCapability
-                  ?? testCase.input.remainingPlan?.[0]?.capability
-                  ?? workspace.capabilityNames[0]
-                  ?? 'unavailable',
-                task: testCase.input.activeTask ?? 'Evaluate the current task.',
+                capability: activeCapability,
+                task: activeTask,
               },
               latestAnnounce: {
                 messageId: 'eval-announce',

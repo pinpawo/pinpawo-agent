@@ -11,6 +11,7 @@ import type {
   PlannerCommit,
   PlannerDelegationInput,
 } from './protocol';
+import type { CapabilityDisclosureState } from './capabilityDisclosure';
 
 export type CapabilityPlannerMode = 'entry' | 'boundary';
 
@@ -25,12 +26,14 @@ export type CapabilityPlannerRuntimeState = Pick<
     runUserRequest: UserRequest;
     runDelegationSummaries: RunDelegationSummary[];
     runCapabilityPlan: CapabilityPlanTask[];
+    runCapabilityDisclosure: CapabilityDisclosureState | null;
   },
   | 'runId'
   | 'traceId'
   | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runCapabilityPlan'
+  | 'runCapabilityDisclosure'
 >;
 
 export type CapabilityPlannerDispatch =
@@ -49,6 +52,7 @@ type CapabilityPlannerInputBase = {
   readonly messages: readonly BaseMessage[];
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;
+  readonly capabilityDisclosure: CapabilityDisclosureState;
 };
 
 export type CapabilityPlannerInput = CapabilityPlannerInputBase & (
@@ -68,6 +72,8 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & (
 export type CapabilityPlannerCommitResult = PlannerCommit & {
   /** Planner-lane updates to merge into the root orchestrator messages. */
   readonly messageUpdates?: readonly BaseMessage[];
+  /** Production runners always return the updated trace-scoped disclosure. */
+  readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
 /** A Planner turn ended without a valid terminal control action. */
@@ -76,6 +82,8 @@ export type CapabilityPlannerIncompleteResult = {
   readonly reason: 'terminal_commit_missing';
   /** Authentic Planner-lane updates to merge into the root orchestrator messages. */
   readonly messageUpdates?: readonly BaseMessage[];
+  /** Production runners always return the updated trace-scoped disclosure. */
+  readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
 export type CapabilityPlannerResult =

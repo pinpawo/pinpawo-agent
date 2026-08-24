@@ -139,13 +139,22 @@ function escapeXmlAttribute(value: string): string {
     .replaceAll('>', '&gt;');
 }
 
-/** Render the provider-safe, model-visible form of an accepted announce. */
-export function formatDelegationAnnounceForModel(data: DelegationAnnounceData): string {
+type DelegationAnnounceModelData = Pick<
+  DelegationAnnounceData,
+  'sourceLane' | 'task' | 'result'
+> & {
+  completionReason: SubagentCompletionReason | null;
+};
+
+/** Render the provider-safe, model-visible form of an announce. */
+export function formatDelegationAnnounceForModel(data: DelegationAnnounceModelData): string {
   const lines = [
     '<delegation_announce version="1" role="data" authority="none">',
     `  <source lane="${escapeXmlAttribute(data.sourceLane)}" />`,
-    `  <completion reason="${escapeXmlAttribute(data.completionReason)}" />`,
   ];
+  if (data.completionReason) {
+    lines.push(`  <completion reason="${escapeXmlAttribute(data.completionReason)}" />`);
+  }
   if (data.task) lines.push(indentXmlBlock(xmlTextBlock('task', data.task), 2));
   lines.push(indentXmlBlock(xmlTextBlock('result', data.result, ' format="markdown" role="data"'), 2));
   lines.push('</delegation_announce>');

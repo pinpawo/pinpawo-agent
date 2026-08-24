@@ -10,15 +10,33 @@ import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
 const plannerPromptWorkspace = {
   rootPath: '/tmp/capabilities',
   registryDigest: 'a'.repeat(64),
-  capabilityNames: ['browser'],
-  entries: [{
-    capabilityName: 'browser',
-    relativePath: 'browser/CAPABILITY.md',
+  capabilityNames: ['general', 'browser'],
+  entries: ['general', 'browser'].map((capabilityName) => ({
+    capabilityName,
+    relativePath: `${capabilityName}/CAPABILITY.md`,
     documentDigest: 'b'.repeat(64),
     provenance: 'authored' as const,
-  }],
+  })),
   reused: false,
 };
+
+const plannerDisclosure = {
+  registryDigest: plannerPromptWorkspace.registryDigest,
+  disclosedCapabilityNames: ['general', 'browser'],
+  emptySearchRounds: 0,
+  maxEmptySearchRounds: 2,
+  status: 'open' as const,
+};
+
+const disclosedDocuments = [{
+  capabilityName: 'general',
+  path: 'general/CAPABILITY.md',
+  content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
+}, {
+  capabilityName: 'browser',
+  path: 'browser/CAPABILITY.md',
+  content: '# Browser\n\n浏览网页。',
+}];
 
 test('Capability Planner entry input leads with the run user request', () => {
   const input = buildCapabilityPlannerAgentInput({
@@ -32,53 +50,26 @@ test('Capability Planner entry input leads with the run user request', () => {
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
-  } satisfies CapabilityPlannerInput);
+    capabilityDisclosure: plannerDisclosure,
+  } satisfies CapabilityPlannerInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /打开示例站点并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
-  assert.equal(input.trimEnd().endsWith('</run_user_request>'), true);
+  assert.match(input, /<capability_context source="planner_state" trust="read_only">/);
+  assert.match(input, /<capability name="general">/);
+  assert.match(input, /<capability name="browser">/);
+  assert.match(input, /保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
-test('Capability Planner system prompt carries the verified default Capability', () => {
-  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt('entry', {
-    capabilityName: 'general',
-    path: 'general/CAPABILITY.md',
-    content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
-  });
-
-  assert.match(systemPrompt, /<default_capability name="general">/);
-  assert.doesNotMatch(systemPrompt, /general\/CAPABILITY\.md/);
-  assert.doesNotMatch(systemPrompt, /role=|priority=|source=|trust=/);
-  assert.match(systemPrompt, /使用本地工具；保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
-  assert.match(
-    systemPrompt,
-    /capability_search 当前状态：OPEN；已使用 0 轮；剩余 2 轮。/,
-  );
-});
-
-test('Capability Planner system prompt renders search control as one data-only state', () => {
-  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt(
-    'boundary',
-    null,
-    { status: 'closed', roundsUsed: 2, maxRounds: 2 },
-  );
-
-  assert.match(
-    systemPrompt,
-    /capability_search 当前状态：CLOSED；已使用 2 轮；剩余 0 轮。$/,
-  );
-  assert.doesNotMatch(systemPrompt, /<capability_(?:exploration|search_state)/);
-});
-
-test('Capability Planner system prompt omits the block when the workspace has no default', () => {
+test('Capability Planner system prompt contains no dynamic Capability state', () => {
   const systemPrompt = buildCapabilityPlannerAgentSystemPrompt('entry');
-  // The contract paragraph still names the tag; only the rendered block is absent.
-  assert.doesNotMatch(systemPrompt, /<default_capability name=/);
+  assert.doesNotMatch(systemPrompt, /<capability_context|<default_capability|registry_digest/);
+  assert.doesNotMatch(systemPrompt, /# General|# Browser/);
 });
 
-test('Capability Planner input carries the run user request alone', () => {
+test('Capability Planner entry input represents an empty disclosure explicitly', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
@@ -90,12 +81,14 @@ test('Capability Planner input carries the run user request alone', () => {
     activeDelegation: null,
     latestAnnounce: null,
     remainingPlan: [],
-  } satisfies CapabilityPlannerInput);
+    capabilityDisclosure: {
+      ...plannerDisclosure,
+      disclosedCapabilityNames: [],
+    },
+  } satisfies CapabilityPlannerInput, []);
 
-  // The default Capability is a workspace property, not part of this turn's
-  // request, so it must not share the block that changes every turn.
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.doesNotMatch(input, /<default_capability name=/);
+  assert.match(input, /<capability_context[^>]*>\n  <none \/>\n<\/capability_context>/);
 });
 
 test('Capability Planner boundary input carries the run user request and boundary facts', () => {
@@ -121,12 +114,17 @@ test('Capability Planner boundary input carries the run user request and boundar
       capability: 'browser',
       task: '浏览相关内容',
     }],
-  } satisfies CapabilityPlannerInput);
+    capabilityDisclosure: plannerDisclosure,
+  } satisfies CapabilityPlannerInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /当前任务：确认浏览器可用/);
-  assert.match(input, /执行停止原因：natural/);
-  assert.match(input, /- \[browser\] 浏览相关内容/);
+  assert.match(input, /<planning_boundary source="orchestrator_state" trust="read_only">/);
+  assert.match(input, /<active_delegation capability="browser">/);
+  assert.match(input, /确认浏览器可用/);
+  assert.match(input, /<remaining_plan>/);
+  assert.match(input, /<task capability="browser">/);
+  assert.match(input, /浏览相关内容/);
+  assert.doesNotMatch(input, /执行停止原因/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
@@ -150,13 +148,13 @@ test('Capability Planner boundary input omits the follow-up section once the pla
       completionReason: 'natural',
     },
     remainingPlan: [],
-  } satisfies CapabilityPlannerInput);
+    capabilityDisclosure: plannerDisclosure,
+  } satisfies CapabilityPlannerInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /当前任务：确认浏览器可用/);
-  assert.match(input, /执行停止原因：natural/);
-  assert.doesNotMatch(input, /此前保留的后续任务/);
-  assert.doesNotMatch(input, /planner_request_briefing/);
+  assert.match(input, /<active_delegation capability="browser">/);
+  assert.match(input, /<remaining_plan \/>/);
+  assert.doesNotMatch(input, /此前保留的后续任务|planner_request_briefing/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {

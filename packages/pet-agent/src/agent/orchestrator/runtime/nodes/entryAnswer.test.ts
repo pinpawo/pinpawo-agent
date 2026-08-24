@@ -5,9 +5,10 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { compileAgentRegistry } from '../../registry';
 import type { CapabilityPlannerInput } from '../../capabilityPlanner/runner';
 import { buildOrchestratorRunInput } from '../../state';
+import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { createOrchestratorGraph } from '../graph';
-import { PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
+import { captureRunUserRequest, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
 import { DelegationAnnounceMessage } from '../../delegationAnnounce';
@@ -77,6 +78,59 @@ const actor = {
   stage: null,
   species: null,
 };
+
+test('a fresh trace clears disclosure when resume_active has no delegation to resume', () => {
+  const input = {
+    ...buildOrchestratorRunInput(
+      [new HumanMessage('开始一个新的任务。')],
+      { activeDelegationTransition: 'resume_active', traceId: 'new-trace' },
+    ),
+    taskActiveDelegation: null,
+    runCapabilityDisclosure: {
+      registryDigest: 'old-registry',
+      disclosedCapabilityNames: ['general', 'old-specialist'],
+      emptySearchRounds: 2,
+      maxEmptySearchRounds: 2,
+      status: 'closed',
+    },
+  } as unknown as OrchestratorStateType;
+  const update = captureRunUserRequest(input);
+
+  assert.equal(update.runCapabilityDisclosure, null);
+});
+
+test('resuming an active delegation preserves its capability disclosure', () => {
+  const input = {
+    ...buildOrchestratorRunInput(
+      [new HumanMessage('继续。')],
+      { activeDelegationTransition: 'resume_active', traceId: 'active-trace' },
+    ),
+    taskActiveDelegation: {
+      id: 'active-delegation',
+      lane: 'capability:general',
+      task: '继续当前任务。',
+      contextSummary: null,
+      transcriptRunId: 'previous-run',
+      traceId: 'active-trace',
+      status: 'awaiting_decision',
+      resultPreview: null,
+      userRequest: '完成当前任务。',
+    },
+    runCapabilityDisclosure: {
+      registryDigest: 'current-registry',
+      disclosedCapabilityNames: ['general'],
+      emptySearchRounds: 0,
+      maxEmptySearchRounds: 2,
+      status: 'open',
+    },
+  } as unknown as OrchestratorStateType;
+  const update = captureRunUserRequest(input);
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(update, 'runCapabilityDisclosure'),
+    false,
+  );
+});
 
 test('Entry Answer returns an ordinary reply without invoking Planner', async () => {
   const scripted = entryAnswerModel('direct');

@@ -33,28 +33,33 @@ type CapabilityPlannerResult =
     };
 ```
 
-`PlannerCommit` remains the sole model-to-graph control protocol. The runner
-does not retry an ordinary-text completion. If the model does not commit it
-returns `plannerStatus: 'incomplete'`; it does not synthesize a terminal tool
-message or choose a Capability.
+`PlannerCommit` remains the sole model-to-graph control protocol. If a provider
+returns ordinary text instead of any tool call, the runner keeps that authentic
+Planner output, returns `plannerStatus: 'incomplete'`, and routes to Answer.
+The text is presented to Answer as low-authority blocked-context evidence; it
+does not synthesize a terminal tool message or choose a Capability.
 
-Capability disclosure is a bounded phase policy rather than a retry
-middleware or dynamic tool-binding policy. The default maximum is two model
-rounds and is configurable through `capabilityPlannerMaxSearchRounds`:
+Capability disclosure is a bounded phase policy rather than a retry middleware
+or dynamic tool-binding policy. Search observations are written by the tool
+with `Command.update` and merged by a dedicated graph-state reducer; middleware
+does not scan messages to count searches. The default maximum is two wholly
+empty model rounds and is configurable through `capabilityPlannerMaxSearchRounds`:
 
 ```text
-exploration=open, rounds_used=0, remaining_rounds=2
+exploration=open, empty_rounds_used=0, remaining_empty_rounds=2
   -> optional capability_search batch
-  -> result declares exploration=open, rounds_used=1, remaining_rounds=1
+  -> if the whole batch misses: result declares exploration=open,
+     empty_rounds_used=1, remaining_empty_rounds=1
   -> choose a terminal action now, or issue one more search batch
-  -> result declares exploration=closed, rounds_used=2, remaining_rounds=0
+  -> if the next whole batch also misses: result declares exploration=closed,
+     empty_rounds_used=2, remaining_empty_rounds=0
   -> later capability_search attempts remain callable with tool_choice=auto
   -> the tool returns a stable limit result without disclosing more documents
 ```
 
-Parallel search calls in one model response form one disclosure batch and count
-as one round. `roundsUsed` reports only document-disclosure rounds, while a
-separate attempted-round count can explain repeated calls after the limit.
+Parallel search calls in one model response form one disclosure batch. A match
+in any call means that batch does not consume an empty-search round; repeated
+calls after closure do not change the state.
 
 General is loaded once as the verified default Capability and is excluded from
 the `capability_search` index. Search therefore discloses only specific

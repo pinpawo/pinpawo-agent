@@ -22,6 +22,8 @@ function stampLane(
 }
 
 test('Planner message context selects canonical messages for each planning mode', () => {
+  const priorMainRequest = new HumanMessage('先确认一下任务背景。');
+  const priorMainReply = new AIMessage('任务背景已经确认。');
   const mainRequest = new HumanMessage({
     content: [{ type: 'text', text: '检查这张图片并继续任务。' }, {
       type: 'image_url',
@@ -59,6 +61,8 @@ test('Planner message context selects canonical messages for each planning mode'
     registryDigest: 'digest-1',
   });
   const messages = [
+    priorMainRequest,
+    priorMainReply,
     mainRequest,
     priorPlannerMessage,
     toolCall,
@@ -75,7 +79,12 @@ test('Planner message context selects canonical messages for each planning mode'
     traceId: 'trace-1',
     registryDigest: 'digest-1',
   });
-  assert.deepEqual(entry, [priorPlannerMessage, mainRequest]);
+  assert.deepEqual(entry, [
+    priorPlannerMessage,
+    priorMainRequest,
+    priorMainReply,
+    mainRequest,
+  ]);
 
   const boundary = selectCapabilityPlannerMessages({
     mode: 'boundary',
@@ -89,6 +98,9 @@ test('Planner message context selects canonical messages for each planning mode'
   });
   assert.deepEqual(boundary, [
     priorPlannerMessage,
+    priorMainRequest,
+    priorMainReply,
+    mainRequest,
     announce,
   ]);
   assert.equal(boundary.includes(toolCall), false);

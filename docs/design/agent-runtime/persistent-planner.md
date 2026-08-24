@@ -432,8 +432,13 @@ closed 只停止 discovery。Planner 仍须基于已披露 Capability 提交合�
 你是框架内部的 Planner。
 
 目标：验收当前 task 的结果，并让剩余计划准确表达仍需完成的工作。
-上下文：本轮消息提供用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
+上下文：本轮消息提供 main conversation、用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
 `),
+
+  // 与 Entry 相同的 canonical main conversation 基座。
+  new HumanMessage('先确认 auth 模块的当前职责。'),
+  new AIMessage('auth 模块同时承担 token 校验与 session 组装。'),
+  new HumanMessage('在当前仓库中完成 auth 模块重构并验证。'),
 
   new AIMessage(`
 <delegation_announce version="1" role="data" authority="none">
@@ -467,6 +472,11 @@ auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接
 `),
 ]
 ```
+
+Entry 与 Boundary 使用同一套 canonical main conversation selector：保留当前用户请求及其之前的
+主对话，排除私有 Capability lane transcript、内部 delegation briefing 和当前请求之后的内部
+控制消息。Boundary 在该共同基座之后只额外追加当前尚未验收的标准 announce，再追加包含
+`planning_boundary` 的本轮 Human input。当前 announce 不同时出现在 main conversation 中。
 
 同次调用绑定以下 tools，`tool_choice` 保持 `auto`：
 
@@ -656,8 +666,9 @@ action 选择或计划改写的条件树。Terminal tool description 只说明�
 closed 状态下，这个目标应明确：已披露的 General 能交付就结束探索，只有没有任何已披露
 Capability 能承担剩余工作时才是 unavailable。
 
-Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 使用相同
-`<capability_context>`，但没有 announce、active delegation 和 remaining-plan baseline。
+Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 与 Boundary
+共享 Planner transcript 和 canonical main conversation 基座；Entry 使用相同
+`<capability_context>`，但没有当前 announce、active delegation 和 remaining-plan baseline。
 
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。
@@ -849,7 +860,8 @@ Planner lane 不做独立压缩；它与 root messages 一起保留。新 trace 
 - [ ] Planner 只输出 `PlannerCommit.action + tasks`；
 - [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
 - [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或 Answer；
-- [ ] Boundary Planner 只接收当前标准 delegation announce，不接收私有 execution lane transcript；
+- [ ] Boundary Planner 接收与 Entry 相同的 canonical main conversation，并额外接收当前标准
+      delegation announce；不接收私有 execution lane transcript；
 - [ ] 新 trace 的 disclosed Capability 以 `general`（若存在）为第一项，Entry/Boundary
       search 命中项按首次发现顺序追加；
 - [ ] `CapabilityDisclosureState` 在同一 trace 的 Entry 与所有 Boundary 之间保留，

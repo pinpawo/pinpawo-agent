@@ -41,6 +41,20 @@ export function removeStaleCapabilityPlannerMessages(
   });
 }
 
+function selectCurrentMainConversation(messages: readonly BaseMessage[]) {
+  const mainMessages = mainConversationMessages([...messages]);
+  let currentRequestIndex = -1;
+  for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
+    if (mainMessages[index]?._getType() === 'human') {
+      currentRequestIndex = index;
+      break;
+    }
+  }
+  return currentRequestIndex >= 0
+    ? mainMessages.slice(0, currentRequestIndex + 1)
+    : mainMessages;
+}
+
 export function selectCapabilityPlannerMessages(params: {
   mode: 'entry';
   messages: readonly BaseMessage[];
@@ -59,18 +73,8 @@ export function selectCapabilityPlannerMessages(params: {
   const plannerMessages = params.messages.filter((message) =>
     isCapabilityPlannerMessage(message, params.traceId, params.registryDigest),
   );
+  const currentMainMessages = selectCurrentMainConversation(params.messages);
   if (params.mode === 'entry') {
-    const mainMessages = mainConversationMessages([...params.messages]);
-    let currentRequestIndex = -1;
-    for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
-      if (mainMessages[index]?._getType() === 'human') {
-        currentRequestIndex = index;
-        break;
-      }
-    }
-    const currentMainMessages = currentRequestIndex >= 0
-      ? mainMessages.slice(0, currentRequestIndex + 1)
-      : mainMessages;
     return toolProtocolSafeMessages([
       ...plannerMessages,
       ...currentMainMessages,
@@ -87,6 +91,7 @@ export function selectCapabilityPlannerMessages(params: {
     : [...currentContext].reverse().find(getMessageIsAnnounce);
   return toolProtocolSafeMessages([
     ...plannerMessages,
+    ...currentMainMessages,
     ...(currentAnnounce ? [currentAnnounce] : []),
   ]);
 }

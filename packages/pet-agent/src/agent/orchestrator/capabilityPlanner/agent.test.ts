@@ -944,6 +944,18 @@ test('boundary projects the current lane announce into the standard model-visibl
     runId: 'transcript-current',
     delegationId: 'delegation-current',
   });
+  const priorMainRequest = new HumanMessage({
+    id: 'main-prior-request',
+    content: 'First establish the repository constraints.',
+  });
+  const priorMainReply = new AIMessage({
+    id: 'main-prior-reply',
+    content: 'The repository constraints are established.',
+  });
+  const currentMainRequest = new HumanMessage({
+    id: 'main-current-request',
+    content: 'Inspect the repository and implement the required changes.',
+  });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
       id: 'continue-current',
@@ -965,7 +977,13 @@ test('boundary projects the current lane announce into the standard model-visibl
         messageId: 'announce-current',
         completionReason: 'limit_reached',
       },
-      messages: [privateLaneTranscript, currentAnnounce],
+      messages: [
+        priorMainRequest,
+        priorMainReply,
+        currentMainRequest,
+        privateLaneTranscript,
+        currentAnnounce,
+      ],
       remainingPlan: [{
         capability: 'general',
         task: 'Implement the verified dependency changes.',
@@ -990,6 +1008,13 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.equal(model.invocations[0]?.includes(privateLaneTranscript), false);
   assert.equal(model.invocations[0]?.some((message) =>
     readMessageText(message).includes('PRIVATE_RAW_EXECUTOR_TRANSCRIPT')), false);
+  assert.equal(model.invocations[0]?.includes(priorMainRequest), true);
+  assert.equal(model.invocations[0]?.includes(priorMainReply), true);
+  assert.equal(model.invocations[0]?.includes(currentMainRequest), true);
+  assert.ok(
+    (model.invocations[0]?.indexOf(currentMainRequest) ?? -1)
+      < (model.invocations[0]?.indexOf(projectedAnnounce) ?? -1),
+  );
 
   const boundaryInput = [...(model.invocations[0] ?? [])].reverse().find(
     (message) => message instanceof HumanMessage,

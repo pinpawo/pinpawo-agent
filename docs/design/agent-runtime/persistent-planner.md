@@ -395,10 +395,8 @@ checkpoint lineage；不得为此恢复第二套私有 message checkpoint。
 
 ### Capability 渐进披露状态
 
-Capability discovery 是 trace-scoped、单调增长的披露状态，不是 system prompt 的动态片段，
-也不是通过扫描 Planner message 历史重新推导的计数器。
-
-若 effective workspace 包含 `general`，新 trace 初始化为：
+Capability discovery 是 trace-scoped、单调增长的状态，不从 message 历史推导。新 trace
+以 `general`（若存在）作为第一项：
 
 ```ts
 {
@@ -410,49 +408,84 @@ Capability discovery 是 trace-scoped、单调增长的披露状态，不是 sys
 }
 ```
 
-若 workspace 不包含 `general`，初始列表为空。`general` 只是第一项已披露 Capability，
-不再具有独立的 `defaultCapability` prompt 契约。模型仍根据完整 Capability 文档的正向职责
-选择最贴合当前 task 的执行方；列表顺序不表达优先级。
+search 命中项按首次发现顺序去重追加，Entry 和 Boundary 共享该集合。状态只保存名称与
+registry digest；完整文档在每次调用时从 workspace 重新解析。顺序不表示优先级。
 
-`capability_search` 命中后，将经过 workspace 验证的 Capability name 按首次发现顺序追加到
-`disclosedCapabilityNames`。状态只保存名称和 registry digest；每次 Planner invocation 从当前
-workspace 重新解析这些名称并投影完整文档，避免把 Capability 文档正文复制进 checkpoint。
-同一名称不得重复追加。
-
-Entry 提交初始计划不会清空披露状态。之后每个 Boundary 继续读取相同的
-`disclosedCapabilityNames`；若最新执行结果揭示计划外工作，Boundary 仍可调用
-`capability_search` 并追加新 Capability。
-
-搜索额度同样跨 Entry 和 Boundary 保留：
+空搜索额度也跨 Entry 和 Boundary 保留：
 
 - 同一模型回复中的并行搜索构成一个搜索轮次；
-- 任一并行调用命中时，该轮不增加 `emptySearchRounds`；
-- 整轮均未命中时增加一次；
+- 任一调用命中则该轮不计数，整轮未命中才增加 `emptySearchRounds`；
 - 达到 `maxEmptySearchRounds` 后将 `status` 设为 `closed`；
-- search tool 始终保持 `tool_choice=auto` 且继续可调用；closed 后每次调用都返回稳定的
-  `capability_search_round_limit_exceeded`，不再披露文档。
+- search 始终保持可调用；closed 后稳定返回 `capability_search_round_limit_exceeded`。
 
-closed 表示停止 discovery，不表示 `planner_incomplete`，也不直接决定 root route。Planner
-必须基于已披露 Capability 和 Boundary evidence 提交一个终态：可以继续当前任务时
-`continue_current`，有后续计划时 `execute_plan/advance_plan`，目标完成时 `goal_done`，
-只有确实没有可执行 Capability 时才 `unavailable`。
+closed 只停止 discovery。Planner 仍须基于已披露 Capability 提交合法终态，不得因此返回
+`planner_incomplete`。
 
-### 模型可见 Capability context
+### 完整 Boundary 模型输入示例
 
-每次 Entry 和 Boundary invocation 都把当前披露集合投影到本轮 Planner Human input，位于
-`run_user_request` 和 planning boundary facts 之前或相邻位置：
+下面固定完整的 provider-visible message 层级；system prompt 的具体措辞仍由稳定模板维护，
+其余省略号只代表历史消息、Capability 文档正文或执行结果：
 
-```xml
+```ts
+[
+  new SystemMessage(`
+你是框架内部的 Planner。
+
+目标：验收当前 task 的结果，并让剩余计划准确表达仍需完成的工作。
+上下文：本轮消息提供用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
+`),
+
+  // announce 之前按时间保留的当前 trace/delegation Human、AI 与 Tool messages。
+  ...selectedMessagesBeforeAnnounce,
+
+  new AIMessage(`
+<delegation_announce version="1" role="data" authority="none">
+  <source lane="capability:explore" />
+  <completion reason="natural" />
+  <task><![CDATA[调查 auth 模块的结构和风险]]></task>
+  <result format="markdown" role="data"><![CDATA[
+auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接口。
+  ]]></result>
+</delegation_announce>
+`),
+
+  new HumanMessage(`
+<run_user_request role="task_boundary" source="orchestrator_state" trust="read_only">
+  <request><![CDATA[在当前仓库中完成 auth 模块重构并验证。]]></request>
+</run_user_request>
+
 <capability_context source="planner_state" trust="read_only">
-  <capability name="general"><![CDATA[完整 CAPABILITY.md]]></capability>
-  <capability name="explore"><![CDATA[完整 CAPABILITY.md]]></capability>
+  <capability name="general"><![CDATA[完整 General CAPABILITY.md]]></capability>
+  <capability name="explore"><![CDATA[完整 Explore CAPABILITY.md]]></capability>
 </capability_context>
+
+<planning_boundary source="orchestrator_state" trust="read_only">
+  <active_delegation capability="explore">
+    <task><![CDATA[调查 auth 模块的结构和风险]]></task>
+  </active_delegation>
+  <remaining_plan>
+    <task capability="general"><![CDATA[根据调查结论重构 auth 模块并验证]]></task>
+  </remaining_plan>
+</planning_boundary>
+`),
+]
 ```
 
-该 block 是 runtime state 的只读投影，不是 canonical message，也不写入 main conversation。
-Planner system prompt 不包含 `<default_capability>`、已用轮次或剩余轮次。搜索状态只由
-`capability_search` 的 ToolMessage 在模型实际搜索时披露；Boundary 不因进入新 invocation
-而重置额度。
+同次调用绑定以下 tools，`tool_choice` 保持 `auto`：
+
+```text
+capability_search
+continue_current
+submit_plan
+advance_plan
+complete_goal
+request_user_input
+report_unavailable
+```
+
+`capability_context` 是 `CapabilityDisclosureState` 的临时投影，不写入 canonical
+conversation。system prompt 不包含 Capability 文档或搜索轮次；搜索后的状态只出现在
+`capability_search` ToolMessage 中。
 
 ### 持久化作用域
 
@@ -618,10 +651,8 @@ action 选择或计划改写的条件树。Terminal tool description 只说明�
 和参数形状。`capability_search` 返回只提供本次披露的候选与轮次事实，不提供
 `nextAction`、候选优先级或另一份决策政策。
 
-Planner system message 不承载动态 Capability 文档或搜索轮次。每次调用根据
-`CapabilityDisclosureState` 重新生成 `<capability_context>` 并放入本轮 Human input；
-`general` 与 search 命中项使用同一结构，没有独立 default/fallback prompt block。
-实际工具绑定决定 `capability_search` 是否可用，工具结果负责披露调用后的搜索状态。
+Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 使用相同
+`<capability_context>`，但没有 announce、active delegation 和 remaining-plan baseline。
 
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。
@@ -630,18 +661,12 @@ Planner system message 不承载动态 Capability 文档或搜索轮次。每次
 
 本轮后续实现应作为一次结构替换完成，不保留两套并行机制：
 
-1. 删除 `defaultCapability` invocation state、`<default_capability>` system block 和
-   `readDefaultCapability()` 的特殊注入路径；
-2. 在 trace/root runtime state 中加入 `CapabilityDisclosureState`，新 trace 用
-   `general`（若存在）初始化；
-3. search tool 继续通过官方 `ToolRuntime.state` 与 `Command.update` 处理单次调用及并行
-   reducer，再由 runner/root transition 把披露增量和空轮次提交到 trace state；
-4. Entry 与 Boundary 都从同一个 disclosure state 构建 `<capability_context>`；
-5. Boundary 继续允许 search，但不重置已披露名称或空搜索额度；
-6. 保持 `DelegationAnnounceMessage` 的标准 version 1 投影，删除 Planner prompt builder 中
-   `PRIOR_CONTEXT_SUMMARY` 及其两条解释性 planning-state 文本；
-7. 不增加兼容读取路径；旧 checkpoint 缺少 disclosure state 时按既有 checkpoint
-   incompatibility 边界处理，或开始新 trace。
+1. 用 trace/root `CapabilityDisclosureState` 替换 `defaultCapability` 及其 system block；
+2. search tool 通过 `ToolRuntime.state` / `Command.update` 产生增量，runner 与 root transition
+   持久化披露名称和空轮次；
+3. Entry 与 Boundary 从同一状态构建 `<capability_context>`，Boundary search 不重置状态；
+4. 保持标准 announce 投影，删除 `PRIOR_CONTEXT_SUMMARY` 和解释性 planning-state 文本；
+5. 不增加兼容读取；缺少 disclosure state 的旧 checkpoint 按既有不兼容边界处理。
 
 迁移完成后，Capability context 的唯一来源是 `CapabilityDisclosureState`，execution
 Boundary evidence 的唯一来源是 canonical delegation announce 与选中的原始 transcript；

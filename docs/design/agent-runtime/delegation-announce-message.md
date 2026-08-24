@@ -161,29 +161,9 @@ complete `result` evidence.
 ### Capability Planner Boundary projection
 
 At a post-execution Boundary, the Planner receives the standard announce in its
-chronological message position. The rest of the Boundary input remains separate:
-
-```text
-SystemMessage
-  stable Boundary Planner goal and context semantics
-
-Human/AI history selected for the current trace and delegation
-
-AIMessage
-  <delegation_announce ...>...</delegation_announce>
-
-HumanMessage
-  <run_user_request>...</run_user_request>
-  <capability_context>...</capability_context>
-  active delegation facts
-  committed remaining plan
-```
-
-The Planner system prompt does not contain a default Capability document or
-capability-search counters. Capability disclosure is a separate trace-scoped
-Planner state projected through `<capability_context>`; search results remain tool
-observations. The announce does not contain the remaining plan and the remaining
-plan does not copy announce result details.
+chronological position. Capability context, active-delegation state and remaining
+plan stay outside the announce. The complete provider-visible example is fixed in
+[`persistent-planner.md`](persistent-planner.md#完整-boundary-模型输入示例).
 
 Version 1 intentionally has no `content_kind`, `progress`, `accepted`, or
 `task_completed` field. Add a field only when a producer or framework boundary can
@@ -267,11 +247,6 @@ The implementation should keep responsibilities separated:
 - model nodes call one shared conversation projector before model invocation;
 - stream adapters own UI projection;
 - Answer resolves accepted announces and owns final synthesis.
-
-The current Planner-side `PRIOR_CONTEXT_SUMMARY` detection and its additional
-planning-state prose are temporary implementation divergence. The target migration
-removes both after the standard announce projection and trace-scoped Capability
-context are wired into Boundary input.
 
 Artifacts remain independent capability state. They are not part of the
 announce contract or its model/UI projection.

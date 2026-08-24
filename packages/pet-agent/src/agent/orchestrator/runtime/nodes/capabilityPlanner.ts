@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
-import { type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
 import {
@@ -50,6 +50,7 @@ import {
   createTaskActiveDelegation,
   readCapabilityNameFromLane,
 } from '../decisions/delegationLifecycle';
+import { readMessageText } from '../../utils';
 
 const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
   tmpdir(),
@@ -60,6 +61,16 @@ function isPlannerDispatch(
   input: OrchestratorStateType | CapabilityPlannerDispatch,
 ): input is CapabilityPlannerDispatch {
   return 'plannerState' in input && input.mode === 'entry';
+}
+
+function readPlannerOrdinaryOutput(messages: readonly BaseMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!AIMessage.isInstance(message) || message.tool_calls?.length) continue;
+    const content = readMessageText(message).trim();
+    if (content) return content;
+  }
+  return null;
 }
 
 function materializeNextDelegation(params: {
@@ -372,8 +383,12 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       ?? input.capabilityDisclosure;
     // A non-commit is not a model terminal action: do not invent General, do
     // not fabricate a ToolMessage, and do not accept an active delegation.
-    // Root owns the truthful fallback route to Answer.
+    // Entry reports incomplete planning; Boundary can deliver ordinary text as
+    // a direct Answer fallback because execution has already taken place.
     if (isCapabilityPlannerIncompleteResult(result)) {
+      const plannerDirectAnswer = input.mode === 'boundary'
+        ? readPlannerOrdinaryOutput(plannerMessageUpdates)
+        : null;
       const includeIncompletePlannerMessages = <T extends object>(update: T) => ({
         ...update,
         ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
@@ -386,7 +401,9 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
           runCapabilityPlan: input.mode === 'boundary'
             ? [...state.runCapabilityPlan]
             : [],
-          runLatestDelegationOutcome: 'planner_incomplete' as const,
+          runLatestDelegationOutcome: plannerDirectAnswer
+            ? 'planner_direct_answer' as const
+            : 'planner_incomplete' as const,
           runUserInputRequest: null,
           runRuntimeFailure: null,
         }),

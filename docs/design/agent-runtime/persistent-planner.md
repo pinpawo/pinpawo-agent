@@ -435,9 +435,6 @@ closed 只停止 discovery。Planner 仍须基于已披露 Capability 提交合�
 上下文：本轮消息提供用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
 `),
 
-  // announce 之前按时间保留的当前 trace/delegation Human、AI 与 Tool messages。
-  ...selectedMessagesBeforeAnnounce,
-
   new AIMessage(`
 <delegation_announce version="1" role="data" authority="none">
   <source lane="capability:explore" />
@@ -677,8 +674,9 @@ Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例�
 5. 不增加兼容读取；缺少 disclosure state 的旧 checkpoint 按既有不兼容边界处理。
 
 迁移完成后，Capability context 的唯一来源是 `CapabilityDisclosureState`，execution
-Boundary evidence 的唯一来源是 canonical delegation announce 与选中的原始 transcript；
-system prompt、Planner lane 文本和 result 字符串扫描都不能成为第二来源。
+Boundary evidence 的唯一来源是 canonical delegation announce。私有 execution lane 的
+Human、AI 与 Tool transcript 不进入 Planner model input；system prompt、Planner lane 文本和
+result 字符串扫描也不能成为第二来源。
 
 ## 迁移计划
 
@@ -723,7 +721,8 @@ system prompt、Planner lane 文本和 result 字符串扫描都不能成为第�
 
 - 删除独立 Outcome graph node、runner、schema 和 prompt；
 - 删除 `runPlannerReturn` / `PlannerAnswerDisposition`；
-- 删除 Planner direct text fallback 和普通文本确认轮；
+- 删除旧 Planner direct text 路径和普通文本确认轮；Boundary 模型违反终态协议而直接返回
+  文本时，仅保留一个经 Answer 输出的故障兜底，不从文本推导 PlannerCommit；
 - 更新 Answer context builder；
 - 更新 raw `../..` 设计文档；
 - 不修改 `../../wiki`，等待单独 ingest 请求。
@@ -850,6 +849,7 @@ Planner lane 不做独立压缩；它与 root messages 一起保留。新 trace 
 - [ ] Planner 只输出 `PlannerCommit.action + tasks`；
 - [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
 - [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或 Answer；
+- [ ] Boundary Planner 只接收当前标准 delegation announce，不接收私有 execution lane transcript；
 - [ ] 新 trace 的 disclosed Capability 以 `general`（若存在）为第一项，Entry/Boundary
       search 命中项按首次发现顺序追加；
 - [ ] `CapabilityDisclosureState` 在同一 trace 的 Entry 与所有 Boundary 之间保留，

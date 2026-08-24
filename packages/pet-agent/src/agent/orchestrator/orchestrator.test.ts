@@ -884,6 +884,97 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
   assert.equal(state.runNextDelegation, null);
 });
 
+test('Planner boundary ordinary text becomes a complete direct Answer fallback', async () => {
+  let answerInvocationText = '';
+  const plannerAnswer = [
+    '网络检查已经完成：en1 已获取 IP，外网连通正常。',
+    '完整诊断证据。'.repeat(100),
+    'Handoff 根因是 Manatee/CDP circle failure -5403。',
+  ].join('');
+  const model = {
+    invoke: async (messages: BaseMessage[]) => {
+      answerInvocationText = messages.map(readMessageText).join('\n');
+      return new AIMessage('网络正常；Handoff 根因是 Manatee/CDP -5403。');
+    },
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: {
+      act: model,
+      observe: model,
+      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
+    },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(plannerInput) {
+        const output = new AIMessage(plannerAnswer);
+        setPinpetMeta(output, {
+          lane: 'orchestrator',
+          source: 'capability_planner',
+          traceId: plannerInput.traceId,
+          runId: plannerInput.runId,
+          plannerInputId: plannerInput.inputId,
+          registryDigest: plannerInput.workspace.registryDigest,
+        });
+        return {
+          plannerStatus: 'incomplete',
+          reason: 'terminal_commit_missing',
+          messageUpdates: [output],
+        };
+      },
+    },
+  });
+  const remainingPlan = [{
+    capability: 'release',
+    task: '发布已经验证的改动。',
+  }];
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('重新检查网络并核对 Handoff。'),
+    ], { activeDelegationTransition: 'resume_active' }),
+    runCapabilityPlan: remainingPlan,
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
+  input.runDelegationSummaries = [{
+    id: 'active-network-check',
+    lane: 'capability:general',
+    task: '重新检查网络并核对 Handoff。',
+    status: 'progress',
+    resultPreview: '网络检查已完成。',
+  }];
+  input.taskActiveDelegation = {
+    id: 'active-network-check',
+    lane: 'capability:general',
+    task: '重新检查网络并核对 Handoff。',
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    traceId: input.traceId,
+    status: 'awaiting_decision',
+    resultPreview: '网络检查已完成。',
+    userRequest: '重新检查网络并核对 Handoff。',
+  };
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'planner-boundary-direct-answer-fallback',
+      actor: testActor,
+      capabilities: [
+        capability('general', 'General-purpose capability.'),
+        capability('release', '发布已经验证的改动。'),
+      ],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.match(answerInvocationText, /<reply_mode>direct<\/reply_mode>/);
+  assert.match(answerInvocationText, /<direct_answer format="markdown" role="data">/);
+  assert.match(answerInvocationText, /Manatee\/CDP circle failure -5403/);
+  assert.doesNotMatch(answerInvocationText, /<blocked_reason/);
+  assert.equal(answerInvocationText.includes(plannerAnswer), true);
+  assert.equal(state.taskActiveDelegation?.id, 'active-network-check');
+  assert.deepEqual(state.runCapabilityPlan, remainingPlan);
+});
+
 test('a boundary checkpoint without disclosure state is rejected before Planner invocation', async () => {
   let plannerCalls = 0;
   const model = {

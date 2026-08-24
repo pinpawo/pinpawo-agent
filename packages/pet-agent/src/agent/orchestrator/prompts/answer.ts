@@ -52,7 +52,7 @@ type AnswerContextBaseFacts = {
 };
 
 export type AnswerContextFacts = AnswerContextBaseFacts & (
-  | { mode: 'direct' }
+  | { mode: 'direct'; answer: string | null }
   | {
       mode: 'goal_done';
     }
@@ -153,6 +153,13 @@ function renderAnswerContext(facts: ModelAnswerContextFacts): string {
         clipForPrompt(facts.detail, ANSWER_CONTEXT_LIMITS.detailChars),
       ), 2));
     }
+  }
+  if (facts.mode === 'direct' && facts.answer) {
+    lines.push(indentXmlBlock(xmlTextBlock(
+      'direct_answer',
+      facts.answer,
+      ' format="markdown" role="data"',
+    ), 2));
   }
   if (facts.mode === 'user_input_required') {
     if (facts.question) {

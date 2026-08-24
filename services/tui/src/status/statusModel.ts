@@ -105,6 +105,9 @@ export function formatConnection(status: TuiConnectionStatus) {
 export function formatComposerPlaceholder(
   session: AgentSession,
   composerMode: AgentSession['kind'] = session.kind,
+  options: {
+    pausedDelegation?: boolean;
+  } = {},
 ) {
   const actor = sessionActorLabel(session);
   const run = session.activeRun;
@@ -122,6 +125,9 @@ export function formatComposerPlaceholder(
   }
   if (run) {
     return `Waiting for ${actor} · draft next message · Esc interrupt`;
+  }
+  if (options.pausedDelegation) {
+    return 'Task paused · Enter to continue · Esc starts a new task';
   }
   return COMPOSER_PLACEHOLDER;
 }

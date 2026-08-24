@@ -70,6 +70,10 @@ test('composer placeholder acknowledges active work without blocking drafting', 
     'Message · Enter to send · Shift+Enter newline',
   );
   assert.equal(
+    formatComposerPlaceholder(session, 'chat', { pausedDelegation: true }),
+    'Task paused · Enter to continue · Esc starts a new task',
+  );
+  assert.equal(
     formatComposerPlaceholder({
       ...session,
       activeRun: {

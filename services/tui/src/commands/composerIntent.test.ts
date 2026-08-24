@@ -47,21 +47,21 @@ test('composer intent routes a session snapshot refresh', () => {
   }), { type: 'refresh-session' });
 });
 
-test('composer intent requires continuation guidance before execution', () => {
+test('composer intent treats the removed continuation command as unknown', () => {
   assert.deepEqual(resolveComposerIntent({
     text: '/continue',
     attachmentCount: 0,
     mode: 'chat',
   }), {
     type: 'notice',
-    message: 'provide guidance: /continue <guidance>',
+    message: 'unknown command: /continue · use /help',
   });
   assert.deepEqual(resolveComposerIntent({
     text: '/continue keep the exact patch',
     attachmentCount: 0,
     mode: 'chat',
   }), {
-    type: 'continue-delegation',
-    guidance: 'keep the exact patch',
+    type: 'notice',
+    message: 'unknown command: /continue keep the exact patch · use /help',
   });
 });

@@ -24,6 +24,7 @@ import { parsePlannerCommit } from './protocol';
 import {
   CAPABILITY_PLANNER_MESSAGE_SOURCE,
   isCapabilityPlannerMessage,
+  projectCapabilityPlannerMessagesForModel,
   selectCapabilityPlannerMessages,
 } from './messageContext';
 import {
@@ -31,7 +32,6 @@ import {
   setPinpetMeta,
   stampMessageCreatedAtUtc,
 } from '../messageLanes';
-import { projectDelegationAnnouncesForModel } from '../delegationAnnounce';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import { applyCapabilitySearchObservations } from './capabilityDisclosure';
@@ -275,7 +275,7 @@ export function createCapabilityPlannerAgent(params: {
             });
         const result = await agent.invoke({
           messages: [
-            ...projectDelegationAnnouncesForModel(selectedMessages),
+            ...projectCapabilityPlannerMessagesForModel(selectedMessages, input),
             new HumanMessage({
               id: `planner:${input.inputId}`,
               content: buildCapabilityPlannerAgentInput(

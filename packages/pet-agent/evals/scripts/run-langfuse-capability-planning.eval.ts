@@ -14,7 +14,7 @@ import {
 } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
-import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegationAnnounce.ts';
+import { setPinpetMeta } from '../../src/agent/orchestrator/messageLanes.ts';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -65,6 +65,27 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
       ].join('\n'),
     }),
   });
+}
+
+function currentBoundaryAnnounce(params: {
+  content: string;
+  capability: string;
+  activeTask: string;
+  transcriptRunId: string;
+}) {
+  const message = new AIMessage({
+    id: 'eval-announce',
+    content: params.content,
+  });
+  setPinpetMeta(message, {
+    lane: `capability:${params.capability}`,
+    runId: params.transcriptRunId,
+    delegationId: 'eval-delegation',
+    isAnnounce: true,
+    task: params.activeTask,
+    completionReason: 'natural',
+  });
+  return message;
 }
 
 function plannerOutput(
@@ -282,16 +303,11 @@ async function main() {
           messages: [
             ...buildCapabilityPlanningMessages(testCase.input.messages),
             ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
-              ? [new DelegationAnnounceMessage({
-                  id: 'eval-announce',
-                  sourceLane: `capability:${activeCapability}`,
-                  delegationId: 'eval-delegation',
+              ? [currentBoundaryAnnounce({
+                  content: testCase.input.latestAnnounce,
+                  capability: activeCapability,
+                  activeTask,
                   transcriptRunId: `eval:${testCase.id}`,
-                  announceMessageId: 'eval-announce',
-                  task: activeTask,
-                  completionReason: 'natural',
-                  result: testCase.input.latestAnnounce,
-                  createdAt: '2026-01-01T00:00:00.000Z',
                 })]
               : []),
           ],

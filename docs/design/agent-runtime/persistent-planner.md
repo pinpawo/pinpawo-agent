@@ -487,6 +487,11 @@ report_unavailable
 conversation。system prompt 不包含 Capability 文档或搜索轮次；搜索后的状态只出现在
 `capability_search` ToolMessage 中。
 
+已接受的 handoff 从 typed `DelegationAnnounceMessage` 投影；尚待当前 Boundary 验收的
+announce 仍保留在私有 execution lane，只在 Planner 模型边界按 root 持有的 delegation、task
+和 completion identity 临时投影成同一 `<delegation_announce>` 结构。该投影不得提前创建或
+持久化 handoff copy。
+
 ### 持久化作用域
 
 Planner 使用 root 已配置的持久化 backend 和相同 `thread_id`。`traceId` 写入 Planner

@@ -36,6 +36,7 @@ import {
 import type { CapabilityPlannerInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { isCapabilityPlannerMessage } from './messageContext';
+import { setPinpetMeta } from '../messageLanes';
 
 function commitOnly(value: unknown) {
   const result = value as {
@@ -898,6 +899,84 @@ test('Planner receives verified General before discovery starts', async (t) => {
     (message) => message instanceof ToolMessage
       && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), false);
+});
+
+test('boundary projects the current lane announce into the standard model-visible shape', async (t) => {
+  const workspace = await createWorkspace(t, {
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'Inspect repository evidence.',
+    }),
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+  });
+  const currentAnnounce = new AIMessage({
+    id: 'announce-current',
+    content: 'The repository inspection is incomplete; dependency evidence is missing.',
+  });
+  setPinpetMeta(currentAnnounce, {
+    lane: 'capability:explore',
+    runId: 'transcript-current',
+    delegationId: 'delegation-current',
+    isAnnounce: true,
+    task: 'Inspect repository dependencies.',
+    completionReason: 'limit_reached',
+  });
+  const model = new ScriptedPlannerModel([{
+    toolCalls: [{
+      id: 'continue-current',
+      name: 'continue_current',
+      args: {},
+    }],
+  }]);
+
+  await createCapabilityPlannerAgent({ model }).invoke(
+    plannerInput(workspace, {
+      mode: 'boundary',
+      activeDelegation: {
+        delegationId: 'delegation-current',
+        transcriptRunId: 'transcript-current',
+        capability: 'explore',
+        task: 'Inspect repository dependencies.',
+      },
+      latestAnnounce: {
+        messageId: 'announce-current',
+        completionReason: 'limit_reached',
+      },
+      messages: [currentAnnounce],
+      remainingPlan: [{
+        capability: 'general',
+        task: 'Implement the verified dependency changes.',
+      }],
+    }),
+  );
+
+  const projectedAnnounce = model.invocations[0]?.find(
+    (message) => message.id === 'announce-current',
+  );
+  assert.ok(projectedAnnounce instanceof AIMessage);
+  assert.notEqual(projectedAnnounce, currentAnnounce);
+  assert.match(
+    readMessageText(projectedAnnounce),
+    /^<delegation_announce version="1" role="data" authority="none">/,
+  );
+  assert.match(readMessageText(projectedAnnounce), /<source lane="capability:explore" \/>/);
+  assert.match(readMessageText(projectedAnnounce), /<completion reason="limit_reached" \/>/);
+  assert.match(readMessageText(projectedAnnounce), /Inspect repository dependencies\./);
+  assert.match(readMessageText(projectedAnnounce), /dependency evidence is missing/);
+  assert.equal(currentAnnounce.content, 'The repository inspection is incomplete; dependency evidence is missing.');
+
+  const boundaryInput = [...(model.invocations[0] ?? [])].reverse().find(
+    (message) => message instanceof HumanMessage,
+  );
+  assert.ok(boundaryInput instanceof HumanMessage);
+  assert.match(readMessageText(boundaryInput), /<run_user_request[^>]*>/);
+  assert.match(readMessageText(boundaryInput), /<capability_context[^>]*>/);
+  assert.match(readMessageText(boundaryInput), /<planning_boundary[^>]*>/);
 });
 
 test('an explicit second search discloses a specific Capability after a miss', async (t) => {

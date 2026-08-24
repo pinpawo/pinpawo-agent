@@ -419,7 +419,15 @@ export function createResidentPetAgentRuntime(
       setGate('open');
       return { status: 'completed', reply: readReply(result) };
     } catch (error) {
-      setGate('blocked');
+      // An invocation can fail after LangGraph has persisted an interrupt
+      // (for example because its caller was cancelled). The checkpoint, not
+      // the thrown error, is authoritative for whether this Pet is still
+      // waiting on a resumable continuation.
+      const recoverySnapshot = config.checkpoint
+        ? await graph.getState({ configurable }).catch(() => null)
+        : null;
+      const recoveryPending = projectPendingHumanReview(recoverySnapshot);
+      setGate(recoveryPending ? 'waiting' : 'blocked');
       throw error;
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;

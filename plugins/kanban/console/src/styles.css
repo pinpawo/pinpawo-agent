@@ -60,6 +60,7 @@ button { cursor: pointer; }
 .authorization-copy strong { display: block; color: #e5ecea; font-size: 14px; }
 .authorization-copy p, .authorization > p { margin: 5px 0 0; color: #8b9a9a; font-size: 12px; }
 .authorization-actions { display: flex; gap: 7px; }
+.authorization-actions select { max-width: 190px; padding: 7px; color: #c7d7d5; border: 1px solid #344448; border-radius: 3px; background: #0d1315; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .authorization-actions textarea { width: 260px; min-height: 56px; resize: vertical; padding: 7px; color: #c7d7d5; border: 1px solid #344448; border-radius: 3px; background: #0d1315; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .authorization-actions button, .events-heading button, .dispatch-bar button { border: 1px solid #344448; padding: 8px 10px; color: #c7d7d5; background: #162024; border-radius: 3px; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
 .authorization-actions button:hover, .events-heading button:hover { filter: brightness(1.15); }

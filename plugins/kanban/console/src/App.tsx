@@ -82,6 +82,7 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
+  const [selectedContinuationTaskId, setSelectedContinuationTaskId] = useState<string>();
   const [selectedEventId, setSelectedEventId] = useState<string>();
   const [selectedKnowledgePath, setSelectedKnowledgePath] = useState(knowledgeFiles[0].path);
   const [dispatchTarget, setDispatchTarget] = useState('');
@@ -94,7 +95,9 @@ export function App() {
 
   const selectedKnowledge = knowledgeFiles.find((file) => file.path === selectedKnowledgePath) ?? knowledgeFiles[0];
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
-  const waitingTask = tasks.find((task) => task.status === 'waiting' && task.continuation);
+  const waitingTasks = tasks.filter((task) => task.status === 'waiting' && task.continuation);
+  const waitingTask = waitingTasks.find((task) => task.taskId === selectedContinuationTaskId)
+    ?? waitingTasks[0];
   const visibleEvents = selectedTaskId
     ? events.filter((event) => event.taskId === selectedTaskId)
     : events;
@@ -283,7 +286,12 @@ export function App() {
                         <button
                           className={`task-row ${selectedTaskId === task.taskId ? 'selected' : ''}`}
                           key={task.taskId}
-                          onClick={() => setSelectedTaskId((current) => current === task.taskId ? undefined : task.taskId)}
+                          onClick={() => {
+                            setSelectedTaskId((current) => current === task.taskId ? undefined : task.taskId);
+                            if (task.status === 'waiting' && task.continuation) {
+                              setSelectedContinuationTaskId(task.taskId);
+                            }
+                          }}
                           title={task.note ?? task.brief}
                           type="button"
                         >
@@ -341,6 +349,19 @@ export function App() {
                   </div>
                 </div>
                 <div className="authorization-actions">
+                  {waitingTasks.length > 1 && (
+                    <select
+                      aria-label="Waiting continuation"
+                      onChange={(event) => setSelectedContinuationTaskId(event.target.value)}
+                      value={waitingTask.taskId}
+                    >
+                      {waitingTasks.map((task) => (
+                        <option key={task.taskId} value={task.taskId}>
+                          {task.taskId} · {task.assigneeId}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <textarea
                     aria-label="Opaque continuation payload"
                     onChange={(event) => setResumePayload(event.target.value)}

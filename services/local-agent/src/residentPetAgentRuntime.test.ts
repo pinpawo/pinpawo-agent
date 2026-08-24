@@ -299,6 +299,54 @@ test('resident Pet resumes a matching interrupt through a keyed LangGraph Comman
   });
 });
 
+test('a failed invocation retains a persisted resumable continuation as waiting', async () => {
+  let state: unknown = { tasks: [], next: [] };
+  let invokes = 0;
+  const graph = {
+    invoke: async () => {
+      invokes += 1;
+      if (invokes === 1) {
+        state = {
+          tasks: [{ interrupts: [{ id: 'interrupt-1', value: sampleReviewInterrupt }] }],
+        };
+        throw new Error('invocation cancelled');
+      }
+      state = { tasks: [], next: [] };
+      return { messages: [new AIMessage('resumed')] };
+    },
+    getState: async () => state,
+  } as unknown as OrchestratorGraph;
+  const runtime = createResidentPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  await assert.rejects(
+    () => runtime.invoke({
+      input: { kind: 'request', request: 'requires review' },
+      threadId: 'studio:s1:pet:p1',
+    }),
+    /cancelled/i,
+  );
+  assert.equal(runtime.gate(), 'waiting');
+
+  const result = await runtime.invoke({
+    input: {
+      kind: 'resume',
+      continuationId: 'interrupt-1',
+      payload: {
+        kind: 'human_review_response',
+        responses: [{ interactionId: 'review-direct', selectedOptionId: 'approve' }],
+      },
+    },
+    threadId: 'studio:s1:pet:p1',
+  });
+  assert.equal(result.status, 'completed');
+  assert.equal(runtime.gate(), 'open');
+});
+
 test('invoke starts Toolkit roots before evaluating runtime-dependent availability', async () => {
   const events: string[] = [];
   let started = false;

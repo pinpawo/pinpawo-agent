@@ -13,7 +13,7 @@ import {
   readLatestHumanRequest,
   stampMessageCreatedAtUtc,
 } from '../../messageLanes';
-import { CAPABILITY_PLANNER_MESSAGE_SOURCE } from '../../capabilityPlanner/messageContext';
+import { isCapabilityPlannerMessage } from '../../capabilityPlanner/messageContext';
 import { getDelegationAnnounce } from '../../delegationAnnounce';
 import {
   buildAnswerInvocationMessages,
@@ -85,15 +85,16 @@ export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
   '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。';
 
 function readLatestPlannerIncompleteOutput(state: OrchestratorStateType) {
+  let latestPlannerInputId: string | null = null;
   for (let index = state.messages.length - 1; index >= 0; index -= 1) {
     const message = state.messages[index];
-    const meta = getPinpetMeta(message);
-    if (meta.source !== CAPABILITY_PLANNER_MESSAGE_SOURCE
-      || meta.traceId !== state.traceId
+    if (!isCapabilityPlannerMessage(message, state.traceId)) continue;
+    const plannerInputId = getPinpetMeta(message).plannerInputId;
+    if (typeof plannerInputId !== 'string' || !plannerInputId) continue;
+    latestPlannerInputId ??= plannerInputId;
+    if (plannerInputId !== latestPlannerInputId
       || !AIMessage.isInstance(message)
-      || message.tool_calls?.length) {
-      continue;
-    }
+      || message.tool_calls?.length) continue;
     const content = readMessageText(message).trim();
     if (content) return content;
   }

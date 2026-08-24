@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
+  buildCapabilityPlanningHistoryMessages,
   buildCapabilityPlanningMessages,
   buildCapabilityPlanningGoalContract,
   evaluateCapabilityPlanningOutput,
@@ -41,6 +42,23 @@ test('planner eval preserves the complete conversation with message roles', () =
   assert.equal(String(projected.at(-1)?.content), 'message-11');
   assert.ok(projected[0] instanceof HumanMessage);
   assert.ok(projected[1] instanceof AIMessage);
+});
+
+test('boundary eval history does not duplicate the current lane announce', () => {
+  const boundaryCases = capabilityPlanningBasicsDataset.cases.filter(
+    ({ input }) => input.mode === 'boundary' && input.latestAnnounce,
+  );
+  assert.ok(boundaryCases.length > 0);
+  for (const testCase of boundaryCases) {
+    const projected = buildCapabilityPlanningHistoryMessages(testCase.input);
+    assert.equal(
+      projected.filter((message) =>
+        String(message.content).trim() === testCase.input.latestAnnounce?.trim(),
+      ).length,
+      0,
+      testCase.name,
+    );
+  }
 });
 
 test('boundary planning cases identify the active Capability explicitly', () => {

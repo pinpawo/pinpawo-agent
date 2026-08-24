@@ -100,6 +100,7 @@ test('Answer carries an ordinary Planner response as blocked-context detail', ()
     lane: 'orchestrator',
     source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
     traceId: 'trace-planner-incomplete',
+    plannerInputId: 'trace_started:trace-planner-incomplete',
   });
 
   assert.deepEqual(selectAnswerContextFacts({
@@ -122,6 +123,48 @@ test('Answer carries an ordinary Planner response as blocked-context detail', ()
     unfinishedTask: '修改当前仓库的 Planner 行为。',
     detail: '开始执行计划任务，但没有提交结构化计划。',
   });
+});
+
+test('Answer does not reuse ordinary text from an older Planner invocation', () => {
+  const olderOutput = new AIMessage('旧 Planner invocation 的普通文本。');
+  setPinpetMeta(olderOutput, {
+    lane: 'orchestrator',
+    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
+    traceId: 'trace-planner-incomplete',
+    plannerInputId: 'planner-input-old',
+  });
+  const currentInput = new HumanMessage('当前 Planner 结构化输入。');
+  setPinpetMeta(currentInput, {
+    lane: 'orchestrator',
+    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
+    traceId: 'trace-planner-incomplete',
+    plannerInputId: 'planner-input-current',
+  });
+  const currentEmptyOutput = new AIMessage('');
+  setPinpetMeta(currentEmptyOutput, {
+    lane: 'orchestrator',
+    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
+    traceId: 'trace-planner-incomplete',
+    plannerInputId: 'planner-input-current',
+  });
+
+  const facts = selectAnswerContextFacts({
+    state: state({
+      messages: [olderOutput, currentInput, currentEmptyOutput],
+      runUserRequest: '修改 Planner。',
+      runLatestDelegationOutcome: 'planner_incomplete',
+      traceId: 'trace-planner-incomplete',
+    }),
+    history: [],
+    acceptedHandoffOutcome: null,
+    acceptedResults: [],
+    awaitingUserInput: false,
+    runIterationLimit: 4,
+  });
+
+  assert.equal(facts.mode, 'blocked');
+  if (facts.mode !== 'blocked') assert.fail('expected blocked Answer facts');
+  assert.equal(facts.detail, null);
 });
 
 test('Answer projects only current-run completed handoffs in delegation order', () => {

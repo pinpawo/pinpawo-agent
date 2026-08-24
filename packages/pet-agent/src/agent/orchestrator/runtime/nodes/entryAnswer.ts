@@ -50,7 +50,8 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
     runUserRequest,
     runNextDelegation: null,
     runCapabilityPlan: [],
-    ...(state.runActiveDelegationTransition === 'supersede_active'
+    ...((state.runActiveDelegationTransition === 'supersede_active'
+      || !state.taskActiveDelegation)
       ? { runCapabilityDisclosure: null }
       : {}),
   };

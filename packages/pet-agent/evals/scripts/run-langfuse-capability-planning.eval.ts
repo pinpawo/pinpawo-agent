@@ -23,7 +23,7 @@ import {
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import {
   evaluateCapabilityPlanningOutput,
-  buildCapabilityPlanningMessages,
+  buildCapabilityPlanningHistoryMessages,
   type CapabilityPlanningEvalOutput,
 } from '../capability-planning-evaluation.ts';
 import {
@@ -301,7 +301,7 @@ async function main() {
           runId: `eval:${testCase.id}`,
           userRequest: testCase.input.userRequest,
           messages: [
-            ...buildCapabilityPlanningMessages(testCase.input.messages),
+            ...buildCapabilityPlanningHistoryMessages(testCase.input),
             ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
               ? [currentBoundaryAnnounce({
                   content: testCase.input.latestAnnounce,

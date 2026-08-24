@@ -2204,6 +2204,69 @@ test('oversized discovery is reported as planning_limit_reached', async (t) => {
   );
 });
 
+test('oversized persisted disclosure drops searched Capabilities and continues with General', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary tasks.',
+      instructions: 'Complete the requested work.',
+    }),
+    explore: capabilityDocument({
+      name: 'explore',
+      description: 'Investigate repositories.',
+      instructions: 'EXPLORE_ONLY '.repeat(25),
+    }),
+    writer: capabilityDocument({
+      name: 'writer',
+      description: 'Write long reports.',
+      instructions: 'WRITER_ONLY '.repeat(25),
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'general',
+          task: 'Complete the requested work.',
+        }],
+      },
+    },
+  }]);
+  const initialDisclosure = {
+    ...createCapabilityDisclosureState({
+      workspace,
+      maxEmptySearchRounds: 2,
+    }),
+    disclosedCapabilityNames: ['general', 'explore', 'writer'],
+    emptySearchRounds: 1,
+  };
+
+  const result = await createCapabilityPlannerAgent({
+    model,
+    maxDocumentReadBytes: 600,
+  }).invoke(plannerInput(workspace, {
+    capabilityDisclosure: initialDisclosure,
+  }));
+
+  assert.deepEqual(commitOnly(result), {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'general',
+      task: 'Complete the requested work.',
+    }],
+  });
+  assert.deepEqual(result.capabilityDisclosure, {
+    ...initialDisclosure,
+    disclosedCapabilityNames: ['general'],
+  });
+  const invocationText = model.invocations[0]
+    ?.map((message) => readMessageText(message))
+    .join('\n') ?? '';
+  assert.match(invocationText, /Complete the requested work\./);
+  assert.doesNotMatch(invocationText, /EXPLORE_ONLY|WRITER_ONLY/);
+});
+
 test('Planner reports an incomplete result when it exits without a commit', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{

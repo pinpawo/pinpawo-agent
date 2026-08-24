@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { createAgent } from 'langchain';
 import {
   createCapabilityPlannerFileExplorer,
+  type CapabilityPlannerCapabilityDocument,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -34,12 +35,16 @@ import {
 } from '../messageLanes';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
-import { applyCapabilitySearchObservations } from './capabilityDisclosure';
+import {
+  applyCapabilitySearchObservations,
+  removeSearchedCapabilities,
+} from './capabilityDisclosure';
 import {
   createPlannerCapabilitySearchTool,
   createPlannerSearchStateMiddleware,
 } from './searchTool';
 import { createPlannerTerminalTools } from './terminalTools';
+import { PlannerFileToolError } from './workspaceReader';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS = 2;
@@ -252,11 +257,36 @@ export function createCapabilityPlannerAgent(params: {
             capabilityDisclosure: input.capabilityDisclosure,
           };
         }
-        const explorer = explorerForInput(input);
-        const disclosedCapabilities = await explorer.readCapabilities(
-          input.capabilityDisclosure.disclosedCapabilityNames,
-          timeout.signal,
-        );
+        let effectiveInput = input;
+        let explorer = explorerForInput(effectiveInput);
+        let disclosedCapabilities: CapabilityPlannerCapabilityDocument[];
+        try {
+          disclosedCapabilities = await explorer.readCapabilities(
+            effectiveInput.capabilityDisclosure.disclosedCapabilityNames,
+            timeout.signal,
+          );
+        } catch (error) {
+          if (!(error instanceof PlannerFileToolError)
+            || error.code !== 'planning_limit_reached') {
+            throw error;
+          }
+          effectiveInput = {
+            ...input,
+            capabilityDisclosure: removeSearchedCapabilities({
+              current: input.capabilityDisclosure,
+              workspace: input.workspace,
+            }),
+          };
+          // The failed explorer has already marked its budget as exhausted.
+          // Recreate it so General and any later search use a clean invocation
+          // budget after the oversized searched disclosures are discarded.
+          explorers.delete(input.inputId);
+          explorer = explorerForInput(effectiveInput);
+          disclosedCapabilities = await explorer.readCapabilities(
+            effectiveInput.capabilityDisclosure.disclosedCapabilityNames,
+            timeout.signal,
+          );
+        }
         const selectedMessages = input.mode === 'boundary'
           ? selectCapabilityPlannerMessages({
               mode: 'boundary',
@@ -279,16 +309,16 @@ export function createCapabilityPlannerAgent(params: {
             new HumanMessage({
               id: `planner:${input.inputId}`,
               content: buildCapabilityPlannerAgentInput(
-                input,
+                effectiveInput,
                 disclosedCapabilities,
               ),
             }),
           ],
-          currentInput: input,
+          currentInput: effectiveInput,
         }, config);
         timeout.signal.throwIfAborted();
         const capabilityDisclosure = applyCapabilitySearchObservations(
-          input.capabilityDisclosure,
+          effectiveInput.capabilityDisclosure,
           result.capabilitySearchObservations ?? [],
         );
         if (result.plannerCommit) {

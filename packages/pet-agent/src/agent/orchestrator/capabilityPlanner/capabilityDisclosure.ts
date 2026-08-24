@@ -57,6 +57,24 @@ export function resolveCapabilityDisclosureState(params: {
 }
 
 /**
+ * Drop every Capability learned through search while retaining the trace's
+ * discovery-round accounting. General is the only default disclosure and is
+ * therefore the only document that survives this size-limit fallback.
+ */
+export function removeSearchedCapabilities(params: {
+  current: CapabilityDisclosureState;
+  workspace: CapabilityDocumentWorkspace;
+}): CapabilityDisclosureState {
+  const disclosedCapabilityNames = params.workspace.capabilityNames.includes(
+    GENERAL_CAPABILITY_NAME,
+  ) ? [GENERAL_CAPABILITY_NAME] : [];
+  return {
+    ...params.current,
+    disclosedCapabilityNames,
+  };
+}
+
+/**
  * Project invocation-local search observations back into persistent trace
  * state. Parallel calls owned by one AI message form one search round.
  */

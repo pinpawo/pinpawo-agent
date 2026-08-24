@@ -30,6 +30,7 @@ test('Planner message context selects canonical messages for each planning mode'
       image_url: { url: 'data:image/png;base64,planner-media' },
     }],
   });
+  const currentMainReply = new AIMessage('CURRENT_MAIN_CONTEXT');
   const toolCall = stampLane(new AIMessage({
     content: '',
     tool_calls: [{ id: 'call-1', name: 'read_file', args: { path: 'a.ts' } }],
@@ -64,6 +65,7 @@ test('Planner message context selects canonical messages for each planning mode'
     priorMainRequest,
     priorMainReply,
     mainRequest,
+    currentMainReply,
     priorPlannerMessage,
     toolCall,
     toolResult,
@@ -84,6 +86,7 @@ test('Planner message context selects canonical messages for each planning mode'
     priorMainRequest,
     priorMainReply,
     mainRequest,
+    currentMainReply,
   ]);
 
   const boundary = selectCapabilityPlannerMessages({
@@ -101,6 +104,7 @@ test('Planner message context selects canonical messages for each planning mode'
     priorMainRequest,
     priorMainReply,
     mainRequest,
+    currentMainReply,
     announce,
   ]);
   assert.equal(boundary.includes(toolCall), false);

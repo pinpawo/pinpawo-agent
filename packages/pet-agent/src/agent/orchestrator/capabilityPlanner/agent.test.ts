@@ -956,6 +956,10 @@ test('boundary projects the current lane announce into the standard model-visibl
     id: 'main-current-request',
     content: 'Inspect the repository and implement the required changes.',
   });
+  const currentMainContext = new AIMessage({
+    id: 'main-current-context',
+    content: 'The current repository constraint remains user-visible context.',
+  });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
       id: 'continue-current',
@@ -981,6 +985,7 @@ test('boundary projects the current lane announce into the standard model-visibl
         priorMainRequest,
         priorMainReply,
         currentMainRequest,
+        currentMainContext,
         privateLaneTranscript,
         currentAnnounce,
       ],
@@ -1011,8 +1016,9 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.equal(model.invocations[0]?.includes(priorMainRequest), true);
   assert.equal(model.invocations[0]?.includes(priorMainReply), true);
   assert.equal(model.invocations[0]?.includes(currentMainRequest), true);
+  assert.equal(model.invocations[0]?.includes(currentMainContext), true);
   assert.ok(
-    (model.invocations[0]?.indexOf(currentMainRequest) ?? -1)
+    (model.invocations[0]?.indexOf(currentMainContext) ?? -1)
       < (model.invocations[0]?.indexOf(projectedAnnounce) ?? -1),
   );
 

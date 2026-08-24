@@ -41,20 +41,6 @@ export function removeStaleCapabilityPlannerMessages(
   });
 }
 
-function selectCurrentMainConversation(messages: readonly BaseMessage[]) {
-  const mainMessages = mainConversationMessages([...messages]);
-  let currentRequestIndex = -1;
-  for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
-    if (mainMessages[index]?._getType() === 'human') {
-      currentRequestIndex = index;
-      break;
-    }
-  }
-  return currentRequestIndex >= 0
-    ? mainMessages.slice(0, currentRequestIndex + 1)
-    : mainMessages;
-}
-
 export function selectCapabilityPlannerMessages(params: {
   mode: 'entry';
   messages: readonly BaseMessage[];
@@ -73,7 +59,7 @@ export function selectCapabilityPlannerMessages(params: {
   const plannerMessages = params.messages.filter((message) =>
     isCapabilityPlannerMessage(message, params.traceId, params.registryDigest),
   );
-  const currentMainMessages = selectCurrentMainConversation(params.messages);
+  const currentMainMessages = mainConversationMessages([...params.messages]);
   if (params.mode === 'entry') {
     return toolProtocolSafeMessages([
       ...plannerMessages,

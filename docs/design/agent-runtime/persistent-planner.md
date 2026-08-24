@@ -473,9 +473,10 @@ auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接
 ]
 ```
 
-Entry 与 Boundary 使用同一套 canonical main conversation selector：保留当前用户请求及其之前的
-主对话，排除私有 Capability lane transcript、内部 delegation briefing 和当前请求之后的内部
-控制消息。Boundary 在该共同基座之后只额外追加当前尚未验收的标准 announce，再追加包含
+Entry 与 Boundary 直接复用 `mainConversationMessages()` 作为 canonical main conversation
+selector：保留完整主对话，排除私有 Capability lane transcript 和内部 delegation briefing，
+并由既有 tool-protocol safety projection 排除不完整的内部工具调用。Boundary 在该共同基座
+之后只额外追加当前尚未验收的标准 announce，再追加包含
 `planning_boundary` 的本轮 Human input。当前 announce 不同时出现在 main conversation 中。
 
 同次调用绑定以下 tools，`tool_choice` 保持 `auto`：

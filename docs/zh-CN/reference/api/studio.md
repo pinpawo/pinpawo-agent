@@ -44,31 +44,28 @@ type StudioDispatchReceipt = {
 
 每个 `(studioId, petId)` 只有一个稳定、可持久化的 `threadId`；每次接收的
 dispatch 有不同的 `invocationId`。同一个 Pet 的 active invocation 串行，不同 Pet
-可以并行。`completion` 最终得到 `completed`、`pending_interrupt`、`failed` 或
+可以并行。`completion` 最终得到 `completed`、`waiting`、`failed` 或
 `cancelled`。显式 `idempotencyKey` 在当前 Host generation 内按 Pet 去重。
 
 `metadata` 完全由 producer 所有，Studio 只透传。任务号、关联号或来源可以放在
-其中，但不能替代 `petId`、`threadId`、`invocationId` 或 `interruptId`。
+其中，但不能替代 `petId`、`threadId` 或 `invocationId`。
 
 `receipt.onInvocation()` 只观察这一次 invocation，订阅时会立即回放已知的最新
 event。因此 transport 可以先发 `studio.accepted`，再安全订阅 progress，无需向
 producer metadata 注入私有 route id。
 
-## interrupt 与 resume
+## continuation 与 resume
 
-持久化 interrupt 会结束当前 invocation，但不会结束 Pet thread。后续交互层通过
+持久化 continuation 会结束当前 invocation，但不会结束 Pet thread。后续交互层通过
 一次新的 dispatch 恢复同一 thread：
 
 ```ts
 await studio.dispatch({
   petId: 'writer',
   input: {
-    kind: 'resume_interrupt',
-    interruptId: 'interrupt-7',
-    payload: {
-      kind: 'human_review_response',
-      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
-    },
+    kind: 'resume',
+    continuationId: 'continuation-7',
+    payload: { response: 'Pet-defined value' },
   },
 });
 ```
@@ -95,7 +92,9 @@ Studio 不复用 Chat 的 session、route cache 或 review message。独立 inte
   metadata 与可选 pending 投射，但不持久化、不重放。
 - `notify(event)` / `subscribe(handler)`：独立的通用 Plugin event 总线。Studio
   不解释、关联或持久化 payload。
-- `listPets()`：只返回 descriptor，不暴露 runtime 引用。
+- `listPets()`：返回 Studio 的只读 Pet 注册表，不暴露 runtime 引用或 Agent 私有
+  actor 字段。每项包含 `petId`、`name`、role/service summary、startup/status 与公开的
+  Capability 摘要，供 control client 发现可派发目标。
 - `shutdown()`：拒绝新 dispatch、取消 active invocation、等待已接收队列收口，
   再逆序停止 Plugin。
 

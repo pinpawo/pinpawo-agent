@@ -100,6 +100,28 @@ test('SQLite task service persists waiting and blocked state transitions in hist
   );
 });
 
+test('SQLite task service persists an opaque continuation and clears it after completion', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-sqlite-'));
+  const databasePath = path.join(root, 'kanban.sqlite');
+  const firstProcess = await createService(databasePath);
+  const task = await firstProcess.createTask({ assigneeId: 'worker', brief: 'needs continuation' });
+  await firstProcess.claimNextReadyTask();
+  await firstProcess.waitForContinuation(task.task.taskId, {
+    continuationId: 'continuation-1',
+    payload: { kind: 'example_interaction', prompt: 'Continue?' },
+  });
+  await firstProcess.close();
+
+  const secondProcess = await createService(databasePath);
+  t.after(() => secondProcess.close());
+  assert.deepEqual((await secondProcess.getTask(task.task.taskId))?.continuation, {
+    continuationId: 'continuation-1',
+    payload: { kind: 'example_interaction', prompt: 'Continue?' },
+  });
+  await secondProcess.completeTask(task.task.taskId, 'continued');
+  assert.equal((await secondProcess.getTask(task.task.taskId))?.continuation, undefined);
+});
+
 test('SQLite task service records interrupted work as a recovered block on restart', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-sqlite-'));
   const databasePath = path.join(root, 'kanban.sqlite');

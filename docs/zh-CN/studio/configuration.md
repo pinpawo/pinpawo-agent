@@ -276,7 +276,7 @@ Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver �
 ```text
 5'. LangGraph 创建 interrupt,把 pending continuation 写入 checkpoint
        ↓
-6'. 当前 invocation 以 pending_interrupt 结束；checkpoint 保持 waiting
+6'. 当前 invocation 以 waiting 结束；checkpoint 保持 waiting
        ↓
 7'. 独立交互 plugin/Host adapter 把 pending action 作为 event 告知用户层
        ↓
@@ -291,7 +291,7 @@ resume Command。waiting/interrupt 由 LangGraph checkpoint 持久化,不依赖 
 内存 invocation。
 
 > **Kanban 已接上自己的 receipt。** 它消费自己发起 dispatch 的 completion：
-> `pending_interrupt` 把 task 标为 `waiting`，`failed` / `cancelled` 标为 `blocked`，
+> `waiting` 把 task 标为 `waiting`，`failed` / `cancelled` 标为 `blocked`，
 > 而 completed 但 Agent 未调用 Kanban 收口工具的 task 也会明确标为 `blocked`。
 > 这是 Kanban 对自己派发工作的领域投射；它不订阅或解释其他 Plugin 的 invocation。
 

@@ -1,8 +1,8 @@
 /**
- * `PetAgentRuntime` port 的 Studio Host 适配器。
+ * Resident Pet Agent runtime for local Hosts.
  *
- * 它位于 Studio package 的 Host 层，把 core port 接到具体 LangGraph
- * 执行路径。core 目录本身仍不依赖 Host 或本机服务实现。
+ * 它位于 local-agent 的 Host 层，把 Host 的 dispatch port 接到具体
+ * LangGraph 执行路径。Studio 只依赖这个 port 的结构，不参与 Pet 的构造。
  *
  * LangGraph 把 interrupt 与 pending continuation 持久化到 checkpoint；runtime
  * 负责把它投射成公开 PendingInterrupt、校验 typed resume，并构造 Command。
@@ -11,6 +11,11 @@
 import { HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
+import {
+  isJsonObject,
+  parseHumanReviewResponse,
+  type JsonObject,
+} from '@pinpawo/agent-contracts';
 
 import type { AgentCapability } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
@@ -19,11 +24,6 @@ import {
   type AgentToolkit,
 } from '@pinpawo/pet-agent';
 import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
-import type {
-  PetAgentCapabilitySummary,
-  PetAgentStartupMode,
-  PetAgentStatus,
-} from '../petAgentTypes';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
@@ -39,32 +39,74 @@ import {
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
-import type {
-  PetAgentRuntime,
-  PetAgentRuntimeDescriptor,
-  PetAgentRuntimeInvokeInput,
-  PetAgentRuntimeInvokeResult,
-  PetGateState,
-} from '../types';
-import type { PendingInterruptProjection } from '../studioInvocation';
 
 /**
- * Studio runtime 允许 LangGraph 生成可持久化的 review interrupt。当前内建
- * transport 不复用 Chat review 消息；独立交互 Plugin 可以观察 pending
- * invocation event，并通过 Studio dispatch 对同一 Pet thread 提交 typed resume。
+ * Local Host owns these Pet runtime semantics. Concrete Hosts (Studio, Chat,
+ * or a future transport) consume this object structurally through their own
+ * ports; this module deliberately does not import any Host package.
  */
-const STUDIO_REVIEW_CAPABILITIES = {
+export type ResidentPetAgentStartupMode = 'standby' | 'lazy' | 'disabled';
+export type ResidentPetAgentStatus =
+  | 'disabled'
+  | 'loading'
+  | 'standby'
+  | 'active'
+  | 'degraded'
+  | 'unavailable';
+export type ResidentPetGateState = 'open' | 'busy' | 'waiting' | 'blocked';
+export type ResidentPetAgentCapabilitySummary = {
+  name: string;
+  description: string;
+  available: boolean;
+  reason?: string | null;
+};
+export type ResidentPetContinuation = {
+  continuationId: string;
+  payload: JsonObject;
+};
+export type ResidentPetDispatchInput =
+  | { kind: 'request'; request: string }
+  | { kind: 'resume'; continuationId: string; payload: JsonObject };
+export type ResidentPetRuntimeDescriptor = AgentActor & {
+  role?: string | null;
+  serviceSummary?: string | null;
+  startupMode: ResidentPetAgentStartupMode;
+  status: ResidentPetAgentStatus;
+  capabilities: ResidentPetAgentCapabilitySummary[];
+};
+export type ResidentPetRuntimeInvokeInput = {
+  input: ResidentPetDispatchInput;
+  threadId: string;
+  signal?: AbortSignal;
+};
+export type ResidentPetRuntimeInvokeResult =
+  | { status: 'completed'; reply: string }
+  | { status: 'waiting'; pendingContinuation: ResidentPetContinuation };
+export type ResidentPetRuntime = {
+  descriptor: () => ResidentPetRuntimeDescriptor;
+  invoke: (input: ResidentPetRuntimeInvokeInput) => Promise<ResidentPetRuntimeInvokeResult>;
+  gate: () => ResidentPetGateState;
+  onGateChange: (listener: (state: ResidentPetGateState) => void) => () => void;
+  shutdown?: () => Promise<void>;
+};
+
+/**
+ * Local runtime allows LangGraph to create durable review interrupts. A Host
+ * forwards the opaque projection to its interaction layer and later returns a
+ * typed resume dispatch for this Pet thread.
+ */
+const DEFAULT_PET_REVIEW_CAPABILITIES = {
   humanReview: true,
   sessionAuthorization: true,
 } as const;
 
-export type PetAgentRuntimeConfig = {
+export type ResidentPetAgentRuntimeConfig = {
   models: AgentModels;
   actor: AgentActor;
   role?: string | null;
   serviceSummary?: string | null;
-  startupMode?: PetAgentStartupMode;
-  status?: PetAgentStatus;
+  startupMode?: ResidentPetAgentStartupMode;
+  status?: ResidentPetAgentStatus;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
   workdir?: string;
@@ -79,7 +121,9 @@ export type PetAgentRuntimeConfig = {
   toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 
-function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabilitySummary[] {
+function buildCapabilitySummaries(
+  config: ResidentPetAgentRuntimeConfig,
+): ResidentPetAgentCapabilitySummary[] {
   // descriptor() is synchronous and therefore reports static dependency
   // resolution against the configured Toolkit inventory. Runtime availability
   // is evaluated for each async invoke generation below.
@@ -107,13 +151,13 @@ function buildCapabilitySummaries(config: PetAgentRuntimeConfig): PetAgentCapabi
   });
 }
 
-function initialStatus(config: PetAgentRuntimeConfig): PetAgentStatus {
+function initialStatus(config: ResidentPetAgentRuntimeConfig): ResidentPetAgentStatus {
   if (config.startupMode === 'disabled') return 'disabled';
   if (config.startupMode === 'lazy') return config.status ?? 'unavailable';
   return config.status ?? 'standby';
 }
 
-function canInvokeStatus(status: PetAgentStatus): boolean {
+function canInvokeStatus(status: ResidentPetAgentStatus): boolean {
   return status === 'standby' || status === 'degraded';
 }
 
@@ -134,7 +178,7 @@ function hasPendingContinuation(snapshot: unknown): boolean {
 }
 
 type PendingHumanReview = {
-  projection: PendingInterruptProjection;
+  projection: ResidentPetContinuation;
   reviews: ReviewSpec[];
 };
 
@@ -167,7 +211,7 @@ function projectPendingHumanReview(snapshot: unknown): PendingHumanReview | null
   if (reviews.length === 0) return null;
   return {
     projection: {
-      interruptId: interrupt.id,
+      continuationId: interrupt.id,
       payload: {
         kind: 'human_review',
         interactions: reviews.map(projectHumanReviewRequest),
@@ -184,7 +228,7 @@ function buildHumanReviewResume(
   const decisions = responses.map(toInternalReviewResponse);
   if (decisions.length === 0 || decisions.length > pending.reviews.length) {
     throw new Error(
-      `Interrupt "${pending.projection.interruptId}" expects ${pending.reviews.length} review response(s).`,
+      `Continuation "${pending.projection.continuationId}" expects ${pending.reviews.length} review response(s).`,
     );
   }
   for (let index = 0; index < decisions.length; index += 1) {
@@ -208,15 +252,31 @@ function buildHumanReviewResume(
       throw new Error(`Review response batch is incomplete after "${decision.reviewId}".`);
     }
   }
-  return { [pending.projection.interruptId]: { decisions: decisions as ReviewResponse[] } };
+  return { [pending.projection.continuationId]: { decisions: decisions as ReviewResponse[] } };
 }
 
-export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRuntime {
-  let status = initialStatus(config);
-  let gateState: PetGateState = 'open';
-  const gateListeners = new Set<(state: PetGateState) => void>();
+function parseHumanReviewContinuationPayload(
+  payload: Record<string, unknown>,
+): Parameters<typeof toInternalReviewResponse>[0][] | null {
+  if (
+    payload.kind !== 'human_review_response'
+    || !Array.isArray(payload.responses)
+    || payload.responses.length === 0
+  ) return null;
+  const responses = payload.responses.map(parseHumanReviewResponse);
+  return responses.some((response) => response === null)
+    ? null
+    : responses as Parameters<typeof toInternalReviewResponse>[0][];
+}
 
-  function setGate(next: PetGateState): void {
+export function createResidentPetAgentRuntime(
+  config: ResidentPetAgentRuntimeConfig,
+): ResidentPetRuntime {
+  let status = initialStatus(config);
+  let gateState: ResidentPetGateState = 'open';
+  const gateListeners = new Set<(state: ResidentPetGateState) => void>();
+
+  function setGate(next: ResidentPetGateState): void {
     if (gateState === next) return;
     gateState = next;
     for (const listener of gateListeners) {
@@ -248,7 +308,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     toolkitRuntimeManager: toolkitRuntimeManager ?? undefined,
   });
 
-  function descriptor(): PetAgentRuntimeDescriptor {
+  function descriptor(): ResidentPetRuntimeDescriptor {
     return {
       ...config.actor,
       role: config.role ?? null,
@@ -259,7 +319,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     };
   }
 
-  async function invoke(input: PetAgentRuntimeInvokeInput): Promise<PetAgentRuntimeInvokeResult> {
+  async function invoke(input: ResidentPetRuntimeInvokeInput): Promise<ResidentPetRuntimeInvokeResult> {
     if (startupMode === 'disabled' || !canInvokeStatus(status)) {
       throw new Error(`Pet agent "${config.actor.petId}" is not dispatchable: ${status}`);
     }
@@ -283,7 +343,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
         setGate(pending ? 'waiting' : 'blocked');
         throw new Error(
           pending
-            ? `Pet "${config.actor.petId}" is waiting on interrupt "${pending.projection.interruptId}".`
+            ? `Pet "${config.actor.petId}" is waiting on continuation "${pending.projection.continuationId}".`
             : `Pet "${config.actor.petId}" has an unsupported pending continuation.`,
         );
       }
@@ -293,21 +353,26 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
     } else {
       if (!pending) {
         setGate(hasPendingContinuation(initialSnapshot) ? 'blocked' : 'open');
-        throw new Error(`Pet "${config.actor.petId}" has no pending human-review interrupt.`);
+        throw new Error(`Pet "${config.actor.petId}" has no resumable continuation.`);
       }
-      if (pending.projection.interruptId !== input.input.interruptId) {
+      if (pending.projection.continuationId !== input.input.continuationId) {
         setGate('waiting');
         throw new Error(
-          `Interrupt "${input.input.interruptId}" is stale; `
-          + `Pet "${config.actor.petId}" is waiting on "${pending.projection.interruptId}".`,
+          `Continuation "${input.input.continuationId}" is stale; `
+          + `Pet "${config.actor.petId}" is waiting on "${pending.projection.continuationId}".`,
         );
       }
-      if (input.input.payload.kind !== 'human_review_response') {
+      if (!isJsonObject(input.input.payload)) {
         setGate('waiting');
-        throw new Error(`Interrupt "${input.input.interruptId}" received an unsupported payload.`);
+        throw new Error(`Continuation "${input.input.continuationId}" received an unsupported payload.`);
+      }
+      const responses = parseHumanReviewContinuationPayload(input.input.payload);
+      if (!responses) {
+        setGate('waiting');
+        throw new Error(`Continuation "${input.input.continuationId}" received an unsupported payload.`);
       }
       graphInput = new Command({
-        resume: buildHumanReviewResume(pending, input.input.payload.responses),
+        resume: buildHumanReviewResume(pending, responses),
       });
     }
 
@@ -322,7 +387,7 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       actor: config.actor,
       thread_id: input.threadId,
       registry,
-      reviewCapabilities: STUDIO_REVIEW_CAPABILITIES,
+      reviewCapabilities: DEFAULT_PET_REVIEW_CAPABILITIES,
       execution: {
         threadId: input.threadId,
       },
@@ -341,8 +406,8 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       if (finalPending) {
         setGate('waiting');
         return {
-          status: 'pending_interrupt',
-          pendingInterrupt: finalPending.projection,
+          status: 'waiting',
+          pendingContinuation: finalPending.projection,
         };
       }
       if (hasPendingContinuation(finalSnapshot)) {
@@ -354,7 +419,15 @@ export function createPetAgentRuntime(config: PetAgentRuntimeConfig): PetAgentRu
       setGate('open');
       return { status: 'completed', reply: readReply(result) };
     } catch (error) {
-      setGate('blocked');
+      // An invocation can fail after LangGraph has persisted an interrupt
+      // (for example because its caller was cancelled). The checkpoint, not
+      // the thrown error, is authoritative for whether this Pet is still
+      // waiting on a resumable continuation.
+      const recoverySnapshot = config.checkpoint
+        ? await graph.getState({ configurable }).catch(() => null)
+        : null;
+      const recoveryPending = projectPendingHumanReview(recoverySnapshot);
+      setGate(recoveryPending ? 'waiting' : 'blocked');
       throw error;
     } finally {
       status = previousStatus === 'active' ? 'standby' : previousStatus;

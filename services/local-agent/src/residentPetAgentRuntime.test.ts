@@ -10,9 +10,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createPetAgentRuntime } from './createPetAgentRuntime';
+import { createResidentPetAgentRuntime } from './residentPetAgentRuntime';
 import { createOrchestratorGraph } from '@pinpawo/pet-agent';
-import { FileSaver } from 'pinpawo/host-runtime';
+import { FileSaver } from './fileSaver';
 import type { OrchestratorGraph } from '@pinpawo/pet-agent';
 import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import type { AgentActor, AgentModels } from '@pinpawo/pet-agent';
@@ -86,7 +86,7 @@ const sampleReviewInterrupt = {
 };
 
 test('descriptor derives Capability status from registry compilation', () => {
-  const runtime = createPetAgentRuntime({
+  const runtime = createResidentPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     capabilities: [{
@@ -113,7 +113,7 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
   const { graph, calls } = makeStubGraph([
     { messages: [new AIMessage('done')] },
   ]);
-  const runtime = createPetAgentRuntime({
+  const runtime = createResidentPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     capabilities: [{
@@ -167,7 +167,7 @@ test('invoke evaluates Toolkit availability before compiling its registry genera
   );
 });
 
-test('Studio pet invocation preserves a checkpointed review as a waiting gate', async () => {
+test('resident Pet invocation preserves a checkpointed review as a waiting gate', async () => {
   const calls: { input: unknown; options?: unknown }[] = [];
   const graph = {
     invoke: async (input: unknown, options?: unknown) => {
@@ -180,13 +180,13 @@ test('Studio pet invocation preserves a checkpointed review as a waiting gate', 
           tasks: [{ interrupts: [{ id: 'interrupt-1', value: sampleReviewInterrupt }] }],
         },
   } as unknown as OrchestratorGraph;
-  const runtime = createPetAgentRuntime({
+  const runtime = createResidentPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     graph,
     // A Host-owned checkpointer makes continuation inspection available. The
     // stub graph above models the durable snapshot returned by LangGraph.
-    checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
   });
 
   const result = await runtime.invoke({
@@ -200,17 +200,17 @@ test('Studio pet invocation preserves a checkpointed review as a waiting gate', 
     } | undefined)?.configurable?.reviewCapabilities,
     { humanReview: true, sessionAuthorization: true },
   );
-  assert.equal(result.status, 'pending_interrupt');
+  assert.equal(result.status, 'waiting');
   assert.equal(
-    result.status === 'pending_interrupt'
-      ? result.pendingInterrupt.interruptId
+    result.status === 'waiting'
+      ? result.pendingContinuation.continuationId
       : null,
     'interrupt-1',
   );
   assert.equal(runtime.gate(), 'waiting');
 });
 
-test('Studio pet rejects a stale interrupt id without invoking or mutating the graph', async () => {
+test('resident Pet rejects a stale interrupt id without invoking or mutating the graph', async () => {
   let invokes = 0;
   const snapshot = {
     tasks: [{ interrupts: [{ id: 'interrupt-current', value: sampleReviewInterrupt }] }],
@@ -222,18 +222,18 @@ test('Studio pet rejects a stale interrupt id without invoking or mutating the g
     },
     getState: async () => snapshot,
   } as unknown as OrchestratorGraph;
-  const runtime = createPetAgentRuntime({
+  const runtime = createResidentPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     graph,
-    checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
   });
 
   await assert.rejects(
     () => runtime.invoke({
       input: {
-        kind: 'resume_interrupt',
-        interruptId: 'interrupt-stale',
+        kind: 'resume',
+        continuationId: 'interrupt-stale',
         payload: {
           kind: 'human_review_response',
           responses: [{
@@ -251,7 +251,7 @@ test('Studio pet rejects a stale interrupt id without invoking or mutating the g
   assert.equal((await graph.getState({} as never)), snapshot);
 });
 
-test('Studio pet resumes a matching interrupt through a keyed LangGraph Command', async () => {
+test('resident Pet resumes a matching interrupt through a keyed LangGraph Command', async () => {
   let waiting = true;
   const calls: unknown[] = [];
   const graph = {
@@ -266,17 +266,17 @@ test('Studio pet resumes a matching interrupt through a keyed LangGraph Command'
         }
       : { tasks: [], next: [] },
   } as unknown as OrchestratorGraph;
-  const runtime = createPetAgentRuntime({
+  const runtime = createResidentPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     graph,
-    checkpoint: {} as NonNullable<Parameters<typeof createPetAgentRuntime>[0]['checkpoint']>,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
   });
 
   const result = await runtime.invoke({
     input: {
-      kind: 'resume_interrupt',
-      interruptId: 'interrupt-1',
+      kind: 'resume',
+      continuationId: 'interrupt-1',
       payload: {
         kind: 'human_review_response',
         responses: [{
@@ -299,6 +299,54 @@ test('Studio pet resumes a matching interrupt through a keyed LangGraph Command'
   });
 });
 
+test('a failed invocation retains a persisted resumable continuation as waiting', async () => {
+  let state: unknown = { tasks: [], next: [] };
+  let invokes = 0;
+  const graph = {
+    invoke: async () => {
+      invokes += 1;
+      if (invokes === 1) {
+        state = {
+          tasks: [{ interrupts: [{ id: 'interrupt-1', value: sampleReviewInterrupt }] }],
+        };
+        throw new Error('invocation cancelled');
+      }
+      state = { tasks: [], next: [] };
+      return { messages: [new AIMessage('resumed')] };
+    },
+    getState: async () => state,
+  } as unknown as OrchestratorGraph;
+  const runtime = createResidentPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    graph,
+    checkpoint: {} as NonNullable<Parameters<typeof createResidentPetAgentRuntime>[0]['checkpoint']>,
+  });
+
+  await assert.rejects(
+    () => runtime.invoke({
+      input: { kind: 'request', request: 'requires review' },
+      threadId: 'studio:s1:pet:p1',
+    }),
+    /cancelled/i,
+  );
+  assert.equal(runtime.gate(), 'waiting');
+
+  const result = await runtime.invoke({
+    input: {
+      kind: 'resume',
+      continuationId: 'interrupt-1',
+      payload: {
+        kind: 'human_review_response',
+        responses: [{ interactionId: 'review-direct', selectedOptionId: 'approve' }],
+      },
+    },
+    threadId: 'studio:s1:pet:p1',
+  });
+  assert.equal(result.status, 'completed');
+  assert.equal(runtime.gate(), 'open');
+});
+
 test('invoke starts Toolkit roots before evaluating runtime-dependent availability', async () => {
   const events: string[] = [];
   let started = false;
@@ -306,7 +354,7 @@ test('invoke starts Toolkit roots before evaluating runtime-dependent availabili
     { messages: [new AIMessage('done')] },
   ]);
   const toolkitRuntimeManager = new ToolkitRuntimeManager();
-  const runtime = createPetAgentRuntime({
+  const runtime = createResidentPetAgentRuntime({
     models: fakeModels(),
     actor: fakeActor(),
     capabilities: [{

@@ -43,8 +43,8 @@ LangGraph 可以持久化 interrupt 并返回公开 pending 投射。这个状�
 内存，可以一直等待外部交互层对同一个稳定 Pet thread 提交 resume。
 
 内建 Studio transport 不接收 Chat 的 review/session 消息，但接收 Studio 自己的 typed
-`resume_interrupt` dispatch。独立 Studio Plugin 或 Host adapter 可以消费 pending
-invocation event、与用户交互，再提交 typed resume。Pet runtime 负责校验 checkpoint
+`resume` dispatch。独立 Studio Plugin 或 Host adapter 可以消费 waiting invocation event、
+与用户交互，再提交 typed resume。Pet runtime 负责校验 checkpoint
 并构造 graph command。
 
 ## 协议语义

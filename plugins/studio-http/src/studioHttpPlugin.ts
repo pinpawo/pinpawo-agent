@@ -23,7 +23,7 @@ const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
-const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/events']);
+const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/events', '/pets']);
 
 type StudioHttpEnvironment = { Bindings: HttpBindings };
 type StudioHttpContext = Context<StudioHttpEnvironment>;
@@ -384,6 +384,12 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       }
     });
     app.all('/dispatch', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+
+    app.get('/pets', (requestContext) => {
+      if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
+      return requestContext.json({ pets: context.listPets() });
+    });
+    app.all('/pets', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/events', (requestContext) => {
       if (eventClients.size >= maxEventClients) {

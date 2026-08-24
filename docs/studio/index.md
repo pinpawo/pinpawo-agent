@@ -27,6 +27,8 @@ may also report domain outcomes through a Toolkit owned by the relevant Plugin.
 
 - [Push model and boundaries](push-model.md) — the current coordination model,
   thread/invocation semantics, durable resume, event rules, and Plugin lifecycle.
+- [Plugin control-plane boundary](../design/studio/plugin-control-plane-boundary.md) — the target
+  separation between Studio Plugins and Pet Agent assembly.
 - [Configuration](configuration.md) — `studio.json`, per-pet files, validation,
   and Plugin injection.
 - [Local-host integration](host-integration.md) — workdir assembly, WebSocket

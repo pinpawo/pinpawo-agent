@@ -7,8 +7,8 @@
 > Console UI：[Kanban Console UI](../kanban/ui-console.md)
 
 Kanban 是独立领域。Studio Kanban Plugin 只是把一个 `KanbanTaskService` 接到 Studio
-的 dispatch、event、Toolkit 和 Plugin hook；它不定义 task storage，也不让 Studio
-拥有 Kanban 数据。
+的 dispatch、event、Toolkit definition 和 Plugin hook；它不定义 task storage，也不让
+Studio 拥有 Kanban 数据。
 
 ## 1. 适配边界
 
@@ -26,7 +26,9 @@ Pet runtime  -X-> Kanban repository / SQLite
 - Plugin factory 接收或创建 Kanban application service；database path 和 repository
   options 由 Kanban/application composition 校验。
 - `StudioPluginContext` 不增加 Kanban 字段，也不提供数据库。
-- Plugin 定义的 Toolkit 是 Studio/Agent adapter，不是 Kanban domain 的所有权证明。
+- Plugin 可定义 Kanban Toolkit；Host 将 definition 放入统一 inventory，Capability 决定哪个
+  Pet 使用它。Plugin lifecycle 不参与 Capability 选择或 Pet runtime 装配，见
+  [Plugin control-plane boundary](plugin-control-plane-boundary.md)。
 - Agent 只看到普通 tool input/output，不看到 SQLite、history sequence、HTTP route、
   invocation identity 或 UI 授权状态。
 - task 与 receipt 的临时关联只存在于 Plugin dispatch closure，不写入 Studio metadata。
@@ -63,11 +65,16 @@ context.dispatch({
         |
         v
 receipt.completion
-  ├─ pending_interrupt -> service.waitTask(...)
+  ├─ waiting           -> service.waitForContinuation(...)
   ├─ failed/cancelled  -> service.blockTask(...)
   ├─ Toolkit completed -> service.completeTask(...)
   └─ completed without outcome -> service.blockTask(...)
 ```
+
+`waiting` 的公开 `continuationId` 与 opaque JSON payload 被 Kanban 持久化为 waiting task 的
+continuation item；它不是 checkpoint，也不要求 Kanban 读取或恢复 checkpoint。UI 从 Kanban
+snapshot 获得该项后，通过 HTTP 的普通 typed `resume` dispatch 提交 Pet-defined payload；Pet
+runtime 仍是唯一校验 checkpoint 与 payload 的组件。
 
 claim transaction 失败时不得 dispatch。Plugin 只消费自己发出的 receipt，不订阅 Agent
 graph state，不读取 `threadId`，也不把 `taskId` 塞进 execution metadata。taskId 只作为
@@ -126,4 +133,4 @@ Plugin 只注册和释放 Studio adapters。两种模式必须显式区分，避
 - 把 Kanban 数据提升为 Studio state；
 - 让 Studio event 代替 Kanban task history；
 - 让 HTTP Plugin 或 Studio core 直接读写 Kanban SQLite；
-- interaction Plugin、知识图谱或 UI 视觉设计。
+- 专门解释某种 Pet continuation payload 的 interaction Plugin、知识图谱或 UI 视觉设计。

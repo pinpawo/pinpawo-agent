@@ -7,7 +7,7 @@
 export { createStudio } from './createStudio';
 export type { CreateStudioInput } from './createStudio';
 export type {
-  PendingInterruptProjection,
+  PendingContinuationProjection,
   Studio,
   StudioDispatchInput,
   StudioDispatchReceipt,
@@ -60,8 +60,6 @@ export type {
   ResolveStudioHostConfigInput,
   StudioPluginResolver,
 } from './host/buildStudio';
-export { createPetAgentRuntime } from './host/createPetAgentRuntime';
-export type { PetAgentRuntimeConfig } from './host/createPetAgentRuntime';
 export {
   StudioRequestHandler,
   createStudioWireHandlers,

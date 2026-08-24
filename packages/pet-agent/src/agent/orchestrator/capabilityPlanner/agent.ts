@@ -34,6 +34,7 @@ import {
 import { projectDelegationAnnouncesForModel } from '../delegationAnnounce';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
+import { applyCapabilitySearchObservations } from './capabilityDisclosure';
 import {
   createPlannerCapabilitySearchTool,
   createPlannerSearchStateMiddleware,
@@ -189,18 +190,13 @@ function buildPlannerRunnableConfig(params: {
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
   timeoutMs?: number;
-  /** Maximum wholly-empty capability_search model rounds. Defaults to 2. */
-  maxSearchRounds?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
   /** Additional invocation-scoped Planner tools. */
   additionalTools?: StructuredTool[];
 }): CapabilityPlannerRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxSearchRounds = params.maxSearchRounds
-    ?? DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS;
   assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
-  assertPositiveInteger(maxSearchRounds, 'Capability Planner maxSearchRounds');
   if (params.maxDocumentReadBytes !== undefined) {
     assertPositiveInteger(
       params.maxDocumentReadBytes,
@@ -224,7 +220,6 @@ export function createCapabilityPlannerAgent(params: {
   const terminalTools = createPlannerTerminalTools();
   const additionalTools = params.additionalTools ?? [];
   const capabilitySearchTool = createPlannerCapabilitySearchTool({
-    maxEmptySearchRounds: maxSearchRounds,
     explorerForInput,
   });
   const middleware = createPlannerMiddleware();
@@ -252,10 +247,14 @@ export function createCapabilityPlannerAgent(params: {
         timeout.signal.throwIfAborted();
         const cachedCommit = readCachedPlannerCommit(input);
         if (cachedCommit) {
-          return parsePlannerCommit(cachedCommit, plannerCommitContext(input));
+          return {
+            ...parsePlannerCommit(cachedCommit, plannerCommitContext(input)),
+            capabilityDisclosure: input.capabilityDisclosure,
+          };
         }
         const explorer = explorerForInput(input);
-        const defaultCapability = await explorer.readDefaultCapability(
+        const disclosedCapabilities = await explorer.readCapabilities(
+          input.capabilityDisclosure.disclosedCapabilityNames,
           timeout.signal,
         );
         const selectedMessages = input.mode === 'boundary'
@@ -279,13 +278,19 @@ export function createCapabilityPlannerAgent(params: {
             ...projectDelegationAnnouncesForModel(selectedMessages),
             new HumanMessage({
               id: `planner:${input.inputId}`,
-              content: buildCapabilityPlannerAgentInput(input),
+              content: buildCapabilityPlannerAgentInput(
+                input,
+                disclosedCapabilities,
+              ),
             }),
           ],
           currentInput: input,
-          defaultCapability,
         }, config);
         timeout.signal.throwIfAborted();
+        const capabilityDisclosure = applyCapabilitySearchObservations(
+          input.capabilityDisclosure,
+          result.capabilitySearchObservations ?? [],
+        );
         if (result.plannerCommit) {
           const commit = parsePlannerCommit(
             result.plannerCommit,
@@ -293,6 +298,7 @@ export function createCapabilityPlannerAgent(params: {
           );
           return {
             ...commit,
+            capabilityDisclosure,
             messageUpdates: buildPlannerMessageUpdates({
               input,
               resultMessages: result.messages,
@@ -308,6 +314,7 @@ export function createCapabilityPlannerAgent(params: {
         return {
           plannerStatus: 'incomplete',
           reason: 'terminal_commit_missing',
+          capabilityDisclosure,
           messageUpdates: buildPlannerMessageUpdates({
             input,
             resultMessages: result.messages,

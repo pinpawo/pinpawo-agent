@@ -8,14 +8,18 @@ import {
   type CapabilityPlannerSearchResult,
 } from './fileExplorer';
 import {
-  currentPlannerInput,
+  applyCapabilitySearchObservations,
+  type CapabilityDisclosureState,
   type CapabilitySearchObservation,
+} from './capabilityDisclosure';
+import {
+  currentPlannerInput,
   type PlannerSearchToolState,
   plannerSearchStateSchema,
 } from './plannerState';
 import type { CapabilityPlannerInput } from './runner';
 
-const MAX_CAPABILITY_DISCOVERY_HINTS = 50;
+const MAX_UNDISCLOSED_CAPABILITY_NAMES = 50;
 
 type CapabilitySearchLimitResult = {
   readonly ok: false;
@@ -29,13 +33,7 @@ type CapabilitySearchExecutionResult =
   | CapabilityPlannerSearchResult
   | CapabilitySearchLimitResult;
 
-type CapabilitySearchState = {
-  readonly emptyRoundsUsed: number;
-  readonly maxEmptyRounds: number;
-  readonly status: 'open' | 'closed';
-};
-
-function searchRoundId(messages: readonly BaseMessage[] | undefined, toolCallId: string) {
+function searchRound(messages: readonly BaseMessage[] | undefined, toolCallId: string) {
   const message = [...(messages ?? [])].reverse().find((candidate) =>
     AIMessage.isInstance(candidate)
     && candidate.tool_calls?.some((toolCall) => toolCall.id === toolCallId),
@@ -46,147 +44,120 @@ function searchRoundId(messages: readonly BaseMessage[] | undefined, toolCallId:
   // Providers normally assign an AI message id. Scripted or legacy providers
   // may not; its complete tool-call batch is still a stable round identity.
   const toolCalls = (message as AIMessage).tool_calls ?? [];
-  return message.id ?? `tool-batch:${toolCalls
+  return {
+    id: message.id ?? `tool-batch:${toolCalls
     .map((toolCall) => toolCall.id)
     .sort()
-    .join(':')}`;
-}
-
-function emptySearchRounds(observations: readonly CapabilitySearchObservation[]) {
-  const rounds = new Map<string, boolean>();
-  for (const observation of observations) {
-    rounds.set(
-      observation.modelMessageId,
-      Boolean(rounds.get(observation.modelMessageId)) || observation.matched,
-    );
-  }
-  return [...rounds.values()].filter((hasMatch) => !hasMatch).length;
-}
-
-function capabilitySearchState(
-  observations: readonly CapabilitySearchObservation[],
-  maxEmptyRounds: number,
-): CapabilitySearchState {
-  const emptyRoundsUsed = emptySearchRounds(observations);
-  return {
-    emptyRoundsUsed,
-    maxEmptyRounds,
-    status: emptyRoundsUsed >= maxEmptyRounds ? 'closed' : 'open',
+    .join(':')}`,
+    searchCallCount: toolCalls.filter(({ name }) =>
+      name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    ).length,
   };
 }
 
 function capabilitySearchLimitExceeded(
-  state: CapabilitySearchState,
+  state: CapabilityDisclosureState,
 ): CapabilitySearchLimitResult {
   return {
     ok: false,
     error: {
       code: 'capability_search_round_limit_exceeded',
-      message: `Capability search is closed after ${state.maxEmptyRounds.toString()} empty search rounds. No search was executed and no new Capability documents were disclosed. Finish planning from the Capability documents and facts already available.`,
+      message: `Capability search is closed after ${state.maxEmptySearchRounds.toString()} empty search rounds. No search was executed and no new Capability documents were disclosed. Finish planning from the Capability documents and facts already available.`,
     },
-  };
-}
-
-function capabilitySearchPlanningGuidance(params: {
-  input: CapabilityPlannerInput;
-  defaultCandidate: string | null;
-  matchedCandidates: readonly string[];
-  nextSearchCandidates: readonly string[];
-  successfulSpecificMiss: boolean;
-  limitExceeded: boolean;
-}) {
-  const {
-    input,
-    defaultCandidate,
-    matchedCandidates,
-    nextSearchCandidates,
-    successfulSpecificMiss,
-    limitExceeded,
-  } = params;
-  if (input.mode === 'boundary') {
-    const activeCapability = input.activeDelegation.capability;
-    return {
-      objective: 'stably_advance_existing_plan' as const,
-      activeCapability,
-      activeCapabilityMatched: activeCapability !== null
-        && matchedCandidates.includes(activeCapability),
-      capabilityMatchMeaning: 'candidate_document_not_new_task_assignment' as const,
-      continueCurrentWhen: 'current_task_still_has_executable_work' as const,
-      changePlanWhen: 'latest_evidence_requires_a_minimal_change' as const,
-      continueSearchCandidates: nextSearchCandidates,
-      reportUnavailableWhen: 'unfinished_goal_has_no_executable_path' as const,
-    };
-  }
-  if (!successfulSpecificMiss && !limitExceeded) return null;
-  return {
-    objective: 'select_most_specific_capability_for_current_request' as const,
-    defaultCandidate,
-    ...(defaultCandidate
-      ? {
-          useDefaultWhen: 'no_more_specific_candidate_can_better_deliver_current_request' as const,
-        }
-      : {}),
-    continueSearchCandidates: nextSearchCandidates,
-    reportUnavailableWhen: 'no_available_capability_can_deliver_remaining_work' as const,
   };
 }
 
 function formatCapabilitySearchResult(params: {
   payload: CapabilitySearchExecutionResult;
-  state: PlannerSearchToolState;
-  searchState: CapabilitySearchState;
-  currentSearchMatched: boolean | null;
+  disclosure: CapabilityDisclosureState;
+  priorDisclosure: CapabilityDisclosureState;
+  newlyDisclosedCapabilityNames: readonly string[] | null;
+  roundSearchCallCount: number;
+  availableCapabilityNames: readonly string[];
 }) {
-  const { payload, state, searchState, currentSearchMatched } = params;
-  const input = currentPlannerInput(state);
-  const matchedCandidates = [...new Set(
-    (payload.ok ? payload.data.matches : []).flatMap((match) => {
-      const [capabilityName] = match.path.split('/');
-      return capabilityName ? [capabilityName] : [];
-    }),
-  )];
-  const defaultCapabilityName = state.defaultCapability?.capabilityName ?? null;
-  const availableSpecificCandidates = input.workspace.capabilityNames.filter(
-    (capabilityName) => capabilityName !== defaultCapabilityName,
-  );
-  const discoverableSpecificCandidates = input.mode === 'boundary'
-    ? availableSpecificCandidates.filter(
-        (capabilityName) => capabilityName !== input.activeDelegation.capability,
+  const {
+    payload,
+    disclosure,
+    priorDisclosure,
+    newlyDisclosedCapabilityNames,
+    roundSearchCallCount,
+    availableCapabilityNames,
+  } = params;
+  const pendingParallelBatch = priorDisclosure.status === 'open'
+    && roundSearchCallCount > 1
+    && newlyDisclosedCapabilityNames !== null;
+  const reportedDisclosure = pendingParallelBatch ? priorDisclosure : disclosure;
+  const disclosedCapabilityNames = [...new Set([
+    ...reportedDisclosure.disclosedCapabilityNames,
+    ...(newlyDisclosedCapabilityNames ?? []),
+  ])];
+  const shouldRevealUndisclosedCapabilityNames = reportedDisclosure.status === 'open'
+    && newlyDisclosedCapabilityNames?.length === 0;
+  const undisclosedCapabilityNames = shouldRevealUndisclosedCapabilityNames
+    ? availableCapabilityNames.filter((capabilityName) =>
+        !disclosedCapabilityNames.includes(capabilityName),
       )
-    : availableSpecificCandidates;
-  const nextSearchCandidates = matchedCandidates.length === 0
-    && searchState.status === 'open'
-    ? discoverableSpecificCandidates.slice(0, MAX_CAPABILITY_DISCOVERY_HINTS)
     : [];
-  const limitExceeded = !payload.ok
-    && payload.error.code === 'capability_search_round_limit_exceeded';
-  const planningGuidance = capabilitySearchPlanningGuidance({
-    input,
-    defaultCandidate: input.mode === 'entry' ? defaultCapabilityName : null,
-    matchedCandidates,
-    nextSearchCandidates,
-    successfulSpecificMiss: payload.ok && matchedCandidates.length === 0,
-    limitExceeded,
-  });
+  const planningObjective = pendingParallelBatch
+    ? 'Evaluate the complete parallel search batch. If any result disclosed a Capability, this round consumes no empty-search allowance; otherwise it consumes one. Finish planning from disclosed Capabilities, including General when it can deliver the work.'
+    : reportedDisclosure.status === 'closed'
+      ? 'Discovery is finished. Submit a plan with an already disclosed Capability, including General when it can deliver the work. Report unavailable only when none of the disclosed Capabilities can deliver the remaining goal.'
+      : newlyDisclosedCapabilityNames && newlyDisclosedCapabilityNames.length > 0
+        ? 'Evaluate the newly disclosed Capability documents and finish planning as soon as one can deliver the work. Prefer a newly disclosed specific Capability over broad General when its positive responsibility covers the task.'
+        : 'If an already disclosed Capability, including General, can deliver the work, finish planning now. Otherwise use an undisclosed Capability name from this result for one precise search of the concrete executor responsibility that is still missing.';
   return JSON.stringify({
     ...payload,
-    exploration: {
-      status: searchState.status,
-      emptyRoundsUsed: searchState.emptyRoundsUsed,
-      maxEmptyRounds: searchState.maxEmptyRounds,
+    capabilityDiscovery: {
+      status: reportedDisclosure.status,
+      emptySearchRounds: reportedDisclosure.emptySearchRounds,
+      maxEmptySearchRounds: reportedDisclosure.maxEmptySearchRounds,
       remainingEmptyRounds: Math.max(
         0,
-        searchState.maxEmptyRounds - searchState.emptyRoundsUsed,
+        reportedDisclosure.maxEmptySearchRounds - reportedDisclosure.emptySearchRounds,
       ),
-      currentSearchMatched,
-      specificCandidates: matchedCandidates,
-      nextSearchCandidates,
-      nextSearchCandidatesComplete: nextSearchCandidates.length
-        === discoverableSpecificCandidates.length,
-      defaultCandidate: input.mode === 'entry' ? defaultCapabilityName : null,
+      newlyDisclosedCapabilityNames,
+      disclosedCapabilityNames,
+      ...(shouldRevealUndisclosedCapabilityNames ? {
+        undisclosedCapabilityNames: undisclosedCapabilityNames.slice(
+          0,
+          MAX_UNDISCLOSED_CAPABILITY_NAMES,
+        ),
+        undisclosedCapabilityNamesComplete: undisclosedCapabilityNames.length
+          <= MAX_UNDISCLOSED_CAPABILITY_NAMES,
+      } : {}),
+      ...(pendingParallelBatch ? {
+        roundAccounting: {
+          status: 'pending_parallel_batch',
+          emptySearchRoundsIfBatchEmpty: Math.min(
+            reportedDisclosure.maxEmptySearchRounds,
+            reportedDisclosure.emptySearchRounds + 1,
+          ),
+        },
+      } : {}),
     },
-    ...(planningGuidance ? { planningGuidance } : {}),
+    planningObjective,
   });
+}
+
+function capabilityNameFromPath(path: string) {
+  return path.split('/')[0] ?? '';
+}
+
+function expandCapabilityNameTerms(
+  terms: readonly string[],
+  capabilityNames: readonly string[],
+) {
+  const expandedTerms = [...terms];
+  const normalizedTokens = new Set(terms.flatMap((term) =>
+    term.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(Boolean),
+  ));
+  for (const capabilityName of capabilityNames) {
+    if (normalizedTokens.has(capabilityName.toLowerCase())
+      && !expandedTerms.includes(capabilityName)) {
+      expandedTerms.push(capabilityName);
+    }
+  }
+  return expandedTerms;
 }
 
 /**
@@ -195,40 +166,58 @@ function formatCapabilitySearchResult(params: {
  * safe and later model turns derive empty rounds from their shared AI message.
  */
 export function createPlannerCapabilitySearchTool(params: {
-  maxEmptySearchRounds: number;
   explorerForInput: (input: CapabilityPlannerInput) => CapabilityPlannerFileExplorer;
 }) {
   return createCapabilityPlannerSearchTool<PlannerSearchToolState>(
     async (terms, runtime) => {
       const state = runtime.state;
       const observations = state.capabilitySearchObservations ?? [];
-      const priorSearchState = capabilitySearchState(
+      const input = currentPlannerInput(state);
+      const priorDisclosure = applyCapabilitySearchObservations(
+        input.capabilityDisclosure,
         observations,
-        params.maxEmptySearchRounds,
       );
-      const payload = priorSearchState.status === 'closed'
-        ? capabilitySearchLimitExceeded(priorSearchState)
-        : await params.explorerForInput(currentPlannerInput(state))
-          .search(terms, runtime.signal);
-      const currentSearchMatched = payload.ok
-        ? payload.data.matches.length > 0
+      const rawPayload = priorDisclosure.status === 'closed'
+        ? capabilitySearchLimitExceeded(priorDisclosure)
+        : await params.explorerForInput(input)
+          .search(
+            expandCapabilityNameTerms(terms, input.workspace.capabilityNames),
+            runtime.signal,
+          );
+      const knownCapabilityNames = new Set(priorDisclosure.disclosedCapabilityNames);
+      const payload: CapabilitySearchExecutionResult = rawPayload.ok ? {
+        ok: true,
+        data: {
+          ...rawPayload.data,
+          matches: rawPayload.data.matches.filter((match) =>
+            !knownCapabilityNames.has(capabilityNameFromPath(match.path)),
+          ),
+        },
+      } : rawPayload;
+      const newlyDisclosedCapabilityNames = payload.ok
+        ? [...new Set(payload.data.matches
+          .map((match) => capabilityNameFromPath(match.path))
+          .filter(Boolean))]
         : null;
-      const observation = payload.ok ? {
-        modelMessageId: searchRoundId(state.messages, runtime.toolCallId),
+      const owningRound = searchRound(state.messages, runtime.toolCallId);
+      const observation: CapabilitySearchObservation | null = payload.ok ? {
+        modelMessageId: owningRound.id,
         toolCallId: runtime.toolCallId,
-        matched: currentSearchMatched === true,
+        disclosedCapabilityNames: newlyDisclosedCapabilityNames ?? [],
       } : null;
       // Return the post-call state to the model. The graph reducer will merge
       // all observations from a parallel tool batch before the next model turn.
-      const searchState = capabilitySearchState(
+      const disclosure = applyCapabilitySearchObservations(
+        input.capabilityDisclosure,
         observation ? [...observations, observation] : observations,
-        params.maxEmptySearchRounds,
       );
       const content = formatCapabilitySearchResult({
         payload,
-        state,
-        searchState,
-        currentSearchMatched,
+        disclosure,
+        priorDisclosure,
+        newlyDisclosedCapabilityNames,
+        roundSearchCallCount: owningRound.searchCallCount,
+        availableCapabilityNames: input.workspace.capabilityNames,
       });
       const messages = [new ToolMessage({
         content,

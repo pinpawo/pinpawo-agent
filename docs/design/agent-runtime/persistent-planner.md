@@ -648,8 +648,11 @@ report_unavailable()
 Planner system prompt 以目标和上下文为中心：说明 Planner 要形成的产物、
 各类输入代表什么，以及可执行计划应达到的质量目标；不提供 Capability 搜索、
 action 选择或计划改写的条件树。Terminal tool description 只说明提交的 action
-和参数形状。`capability_search` 返回只提供本次披露的候选与轮次事实，不提供
-`nextAction`、候选优先级或另一份决策政策。
+和参数形状。`capability_search` 返回本次披露、持久轮次事实、miss 后可供下一次精确搜索的
+未披露 Capability 名称，以及一个与当前披露状态一致的
+下一步规划目标；它不提供 `nextAction`、候选优先级或另一份 action 条件树。空搜索或
+closed 状态下，这个目标应明确：已披露的 General 能交付就结束探索，只有没有任何已披露
+Capability 能承担剩余工作时才是 unavailable。
 
 Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 使用相同
 `<capability_context>`，但没有 announce、active delegation 和 remaining-plan baseline。

@@ -168,16 +168,43 @@ function createOrchestratorGraph(
       },
     };
   };
+  const withCurrentPlannerCheckpoint = (input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+    const state = input as Record<string, unknown>;
+    if (!state.taskActiveDelegation
+      || Object.prototype.hasOwnProperty.call(state, 'runCapabilityDisclosure')) {
+      return input;
+    }
+    // Direct boundary fixtures represent checkpoints created by the current
+    // schema. A deliberately null field remains available to test the breaking
+    // old-checkpoint boundary.
+    return {
+      ...state,
+      runCapabilityDisclosure: {
+        registryDigest: 'test-fixture-registry-generation',
+        disclosedCapabilityNames: [],
+        emptySearchRounds: 0,
+        maxEmptySearchRounds: 2,
+        status: 'open',
+      },
+    };
+  };
   return new Proxy(graph, {
     get(target, property, receiver) {
       if (property === 'invoke' || property === 'streamEvents') {
         return (input: unknown, options: {
           configurable?: Record<string, unknown>;
-        } = {}) => target[property](input as never, withRegistry(options) as never);
+        } = {}) => target[property](
+          withCurrentPlannerCheckpoint(input) as never,
+          withRegistry(options) as never,
+        );
       }
       if (property === 'updateState') {
         return (options: { configurable?: Record<string, unknown> }, values: unknown) =>
-          target.updateState(withRegistry(options) as never, values as never);
+          target.updateState(
+            withRegistry(options) as never,
+            withCurrentPlannerCheckpoint(values) as never,
+          );
       }
       const value = Reflect.get(target, property, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
@@ -405,6 +432,11 @@ test('execution boundary routes through capabilityPlanner before the next task',
             capability: 'explore',
             task: '读取 issue #269 并提炼需求点。',
           }],
+          capabilityDisclosure: {
+            ...input.capabilityDisclosure,
+            disclosedCapabilityNames: ['explore'],
+            emptySearchRounds: 1,
+          },
         };
       }
       if (plannerInputs.length === 3) {
@@ -455,6 +487,14 @@ test('execution boundary routes through capabilityPlanner before the next task',
   const boundaryPlannerInput = plannerInputs[1];
   assert.equal(entryPlannerInput?.mode, 'entry');
   assert.equal(boundaryPlannerInput?.mode, 'boundary');
+  assert.deepEqual(boundaryPlannerInput?.capabilityDisclosure, {
+    registryDigest: entryPlannerInput?.workspace.registryDigest,
+    disclosedCapabilityNames: ['explore'],
+    emptySearchRounds: 1,
+    maxEmptySearchRounds: 2,
+    status: 'open',
+  });
+  assert.deepEqual(plannerInputs[2]?.capabilityDisclosure, boundaryPlannerInput?.capabilityDisclosure);
   assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
   assert.deepEqual(boundaryPlannerInput?.userRequest, entryPlannerInput?.userRequest);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
@@ -468,6 +508,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.deepEqual(state.runCapabilityPlan, []);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
+  assert.deepEqual(state.runCapabilityDisclosure, boundaryPlannerInput?.capabilityDisclosure);
   const answerInput = readMessageText(answerMessages.at(-1) ?? new HumanMessage(''));
   assert.match(answerInput, /<accepted_results>/);
   assert.equal(answerInput.match(/<accepted_result order=/g)?.length, 2);
@@ -841,6 +882,59 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
   assert.deepEqual(state.runCapabilityPlan, remainingPlan);
   assert.equal(state.runNextDelegation, null);
+});
+
+test('a boundary checkpoint without disclosure state is rejected before Planner invocation', async () => {
+  let plannerCalls = 0;
+  const model = {
+    invoke: async () => new AIMessage('must not run'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: model },
+    actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke() {
+        plannerCalls += 1;
+        return { action: 'goal_done', tasks: [] };
+      },
+    },
+  });
+  const input = {
+    ...buildOrchestratorRunInput([
+      new HumanMessage('继续旧任务'),
+    ], { activeDelegationTransition: 'resume_active' }),
+    runCapabilityDisclosure: null,
+    taskActiveDelegation: null as TaskActiveDelegation | null,
+  };
+  input.taskActiveDelegation = {
+    id: 'legacy-active',
+    lane: 'capability:general',
+    task: '继续旧任务',
+    contextSummary: null,
+    transcriptRunId: input.runId,
+    traceId: input.traceId,
+    status: 'awaiting_decision',
+    resultPreview: '旧版本结果',
+    userRequest: '继续旧任务',
+  };
+
+  const state = await graph.invoke(input, {
+    configurable: {
+      thread_id: 'legacy-planner-disclosure-checkpoint',
+      actor: testActor,
+      capabilities: [capability('general', 'General-purpose capability.')],
+      toolkits: [],
+    },
+  }) as OrchestratorStateType;
+
+  assert.equal(plannerCalls, 0);
+  assert.equal(state.runRuntimeFailure, null);
+  assert.equal(state.taskActiveDelegation, null);
+  assert.match(
+    String(mainConversationMessages(state.messages).at(-1)?.content ?? ''),
+    /旧版本创建，当前版本无法继续/,
+  );
 });
 
 test('capability planner reports an empty compiled registry without inventing General', async () => {

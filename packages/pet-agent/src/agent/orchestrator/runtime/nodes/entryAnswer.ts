@@ -50,6 +50,9 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
     runUserRequest,
     runNextDelegation: null,
     runCapabilityPlan: [],
+    ...(state.runActiveDelegationTransition === 'supersede_active'
+      ? { runCapabilityDisclosure: null }
+      : {}),
   };
 }
 
@@ -121,6 +124,7 @@ function plannerDispatch(
       runUserRequest,
       runDelegationSummaries: state.runDelegationSummaries,
       runCapabilityPlan: [],
+      runCapabilityDisclosure: state.runCapabilityDisclosure,
     },
     messages: state.messages,
   };

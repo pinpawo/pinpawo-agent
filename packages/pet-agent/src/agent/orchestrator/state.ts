@@ -21,6 +21,7 @@ import type {
   PlannerRouteOutcome,
   PlannerUserInputRequest,
 } from './capabilityPlanner/protocol';
+import type { CapabilityDisclosureState } from './capabilityPlanner/capabilityDisclosure';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -39,6 +40,10 @@ const orchestratorStateChannels = {
   runCapabilityPlan: Annotation<CapabilityPlanTask[]>({
     reducer: (_prev, next) => next,
     default: () => [],
+  }),
+  runCapabilityDisclosure: Annotation<CapabilityDisclosureState | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
   }),
   runUserRequest: Annotation<UserRequest | null>({
     reducer: (_prev, next) => next,

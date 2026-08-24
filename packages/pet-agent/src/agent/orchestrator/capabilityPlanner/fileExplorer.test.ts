@@ -153,15 +153,19 @@ test('capability_search searches complete Capability documents', async (t) => {
   );
 });
 
-test('Planner reads verified General as its default Capability context', async (t) => {
+test('Planner reads every disclosed Capability in stable order', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
-  const defaultCapability = await explorer.readDefaultCapability();
+  const documents = await explorer.readCapabilities(['general', 'browser']);
 
-  assert.equal(defaultCapability?.capabilityName, 'general');
-  assert.equal(defaultCapability?.path, 'general/CAPABILITY.md');
-  assert.match(defaultCapability?.content ?? '', /Handle ordinary local work/);
+  assert.deepEqual(documents.map(({ capabilityName }) => capabilityName), [
+    'general',
+    'browser',
+  ]);
+  assert.equal(documents[0]?.path, 'general/CAPABILITY.md');
+  assert.match(documents[0]?.content ?? '', /Handle ordinary local work/);
+  assert.match(documents[1]?.content ?? '', /Open and inspect web pages/);
 });
 
 test('capability_search excludes the preloaded General Capability', async (t) => {
@@ -202,25 +206,19 @@ test('memory backend is explicit and preserves complete registry search results'
   assert.deepEqual(memorySearch.data.matches, filesystemSearch.data.matches);
 });
 
-test('capability_search enforces compact literal terms without an active Planner graph', async (t) => {
+test('capability_search bounds literal terms without an active Planner graph', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const searchTool = createCapabilityPlannerSearchTool(
     async () => JSON.stringify({ ok: true }),
   );
   // The term count is unbounded: per-term shape is what keeps a search literal.
   assert.ok(await searchTool.invoke({ terms: ['one', 'two', 'three', 'four'] }));
-  await assert.rejects(
-    searchTool.invoke({
-      terms: ['scan project files find AI model names'],
-    }),
-    /literal word or short phrase, not a search instruction/,
-  );
-  await assert.rejects(
-    searchTool.invoke({
-      terms: ['web fetch URL scrape pricing'],
-    }),
-    /literal word or short phrase, not a search instruction/,
-  );
+  assert.ok(await searchTool.invoke({
+    terms: ['failing test root cause analysis'],
+  }));
+  await assert.rejects(searchTool.invoke({
+    terms: ['x'.repeat(81)],
+  }), /String must contain at most 80 character/);
 
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
   const first = await search(explorer, ['browser']);
@@ -237,7 +235,7 @@ test('Planner document reads reject tampered workspace content', async (t) => {
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   await assert.rejects(
-    explorer.readDefaultCapability(),
+    explorer.readCapabilities(['general']),
     { code: 'document_tampered' },
   );
 
@@ -299,5 +297,5 @@ test('capability_search returns no candidates for an empty Capability workspace'
   assert.equal(result.ok, true);
   assert.deepEqual(result.data?.matches, []);
   assert.equal(result.data?.complete, true);
-  assert.equal(await explorer.readDefaultCapability(), null);
+  assert.deepEqual(await explorer.readCapabilities([]), []);
 });

@@ -42,7 +42,8 @@ export function createPlannerTerminalTools(): StructuredTool[] {
       description: [
         'Keep the active delegation and its existing remaining plan unchanged.',
         'Use when the latest announce does not establish that the current task is accepted,',
-        'including an intended-work plan, an unexecuted attempt, or incomplete evidence.',
+        'including an intended-work plan, an unexecuted attempt, incomplete evidence,',
+        'or a delivered result that contradicts an explicit user acceptance criterion.',
       ].join(' '),
       schema: z.object({}).strict(),
     }),

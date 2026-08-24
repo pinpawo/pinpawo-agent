@@ -1,15 +1,9 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { ReducedValue, StateSchema } from '@langchain/langgraph';
 import { z as z4 } from 'zod/v4';
-import type { CapabilityPlannerDefaultCapability } from './fileExplorer';
+import type { CapabilitySearchObservation } from './capabilityDisclosure';
 import type { CapabilityPlannerInput } from './runner';
 import type { PlannerCommit } from './protocol';
-
-export type CapabilitySearchObservation = {
-  modelMessageId: string;
-  toolCallId: string;
-  matched: boolean;
-};
 
 function mergeCapabilitySearchObservation(
   current: CapabilitySearchObservation[],
@@ -26,13 +20,12 @@ function mergeCapabilitySearchObservation(
 const capabilitySearchObservationSchema = z4.object({
   modelMessageId: z4.string(),
   toolCallId: z4.string(),
-  matched: z4.boolean(),
+  disclosedCapabilityNames: z4.array(z4.string()),
 });
 
 /** Private invocation state used by Planner model and terminal-tool middleware. */
 export const plannerInvocationStateSchema = z4.object({
   currentInput: z4.custom<CapabilityPlannerInput>(),
-  defaultCapability: z4.custom<CapabilityPlannerDefaultCapability | null>().default(null),
   plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
 });
 
@@ -62,7 +55,6 @@ export const plannerSearchStateSchema = new StateSchema({
 
 export type PlannerInvocationState = {
   currentInput: CapabilityPlannerInput;
-  defaultCapability: CapabilityPlannerDefaultCapability | null;
   plannerCommit: PlannerCommit | null;
   capabilitySearchObservations: CapabilitySearchObservation[];
 };

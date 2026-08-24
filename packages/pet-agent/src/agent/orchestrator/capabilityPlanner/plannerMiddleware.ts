@@ -3,7 +3,8 @@ import {
   ToolMessage,
 } from '@langchain/core/messages';
 import { Command, END } from '@langchain/langgraph';
-import { createMiddleware } from 'langchain';
+import { createMiddleware, ToolInvocationError } from 'langchain';
+import { ToolInputParsingException } from '@langchain/core/tools';
 import { buildCapabilityPlannerAgentSystemPrompt } from '../prompts/capabilityPlannerAgent';
 import { parsePlannerCommit, type PlannerCommit } from './protocol';
 import {
@@ -24,11 +25,8 @@ function readTerminalCommit(message: ToolMessage): unknown {
   }
 }
 
-function plannerSystemMessage(input: ReturnType<typeof currentPlannerInput>, defaultCapability: Parameters<typeof buildCapabilityPlannerAgentSystemPrompt>[1]) {
-  return new SystemMessage(buildCapabilityPlannerAgentSystemPrompt(
-    input.mode,
-    defaultCapability,
-  ));
+function plannerSystemMessage(input: ReturnType<typeof currentPlannerInput>) {
+  return new SystemMessage(buildCapabilityPlannerAgentSystemPrompt(input.mode));
 }
 
 /** Framework lifecycle control only: model protocol and terminal commit. */
@@ -44,14 +42,30 @@ export function createPlannerMiddleware() {
           goto: END,
         });
       }
-      const systemMessage = plannerSystemMessage(
-        input,
-        request.state.defaultCapability ?? null,
-      );
+      const systemMessage = plannerSystemMessage(input);
       return handler({ ...request, systemMessage });
     },
     wrapToolCall: async (request, handler) => {
-      const result = await handler(request);
+      let result: Awaited<ReturnType<typeof handler>>;
+      try {
+        result = await handler(request);
+      } catch (error) {
+        const parsingError = error instanceof ToolInputParsingException
+          ? error
+          : error instanceof ToolInvocationError
+            && error.toolError instanceof ToolInputParsingException
+            ? error.toolError
+            : null;
+        if (!parsingError || !request.toolCall.id) {
+          throw error;
+        }
+        return new ToolMessage({
+          content: parsingError.message,
+          name: request.toolCall.name,
+          status: 'error',
+          tool_call_id: request.toolCall.id,
+        });
+      }
       if (!ToolMessage.isInstance(result)
         || !PLANNER_TERMINAL_TOOL_NAMES.has(request.toolCall.name)) {
         return result;

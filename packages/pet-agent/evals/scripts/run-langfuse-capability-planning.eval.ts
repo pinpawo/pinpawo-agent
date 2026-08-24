@@ -251,7 +251,10 @@ async function main() {
           messages: [
             ...buildCapabilityPlanningMessages(testCase.input.messages),
             ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
-              ? [new AIMessage(testCase.input.latestAnnounce)]
+              ? [new AIMessage({
+                  id: 'eval-announce',
+                  content: testCase.input.latestAnnounce,
+                })]
               : []),
           ],
           remainingPlan: testCase.input.remainingPlan ?? [],

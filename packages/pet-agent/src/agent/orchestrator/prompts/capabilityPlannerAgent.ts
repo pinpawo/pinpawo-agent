@@ -8,6 +8,18 @@ import {
 } from './templates/capabilityPlannerAgent.prompt';
 import { buildRunUserRequestContext } from './context';
 import { promptBlock, xmlTextBlock } from './shared';
+import { getDelegationAnnounce } from '../delegationAnnounce';
+import { readMessageText } from '../utils';
+
+const PRIOR_CONTEXT_SUMMARY = /<essential_context\b[^>]*\bsource=(?:"prior_summary"|'prior_summary')/i;
+
+function latestAnnounceText(input: CapabilityPlannerInput) {
+  const messageId = input.latestAnnounce?.messageId;
+  if (!messageId) return null;
+  const message = input.messages.find(({ id }) => id === messageId);
+  if (!message) return null;
+  return getDelegationAnnounce(message)?.result ?? readMessageText(message);
+}
 
 function buildDefaultCapabilityContext(
   defaultCapability: CapabilityPlannerDefaultCapability | null,
@@ -30,12 +42,17 @@ function buildPlanningState(input: CapabilityPlannerInput) {
     if (input.latestAnnounce.completionReason) {
       lines.push(`执行停止原因：${input.latestAnnounce.completionReason}`);
     }
+    const announceText = latestAnnounceText(input);
+    if (announceText && PRIOR_CONTEXT_SUMMARY.test(announceText)) {
+      lines.push('最新交接消息类型：此前上下文摘要；它描述已知状态，不表示当前任务已实际执行或验收。');
+    }
   }
   if (input.remainingPlan.length > 0) {
     lines.push('此前保留的后续任务：');
     for (const task of input.remainingPlan) {
       lines.push(`- [${task.capability}] ${task.task}`);
     }
+    lines.push('交接事实会随执行 lane 传递给后续 Capability；这些任务文本只定义待交付的边界。');
   }
   return lines.length > 0 ? lines.join('\n') : '无。';
 }

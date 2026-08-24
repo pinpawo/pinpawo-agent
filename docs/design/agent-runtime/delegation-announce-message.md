@@ -165,6 +165,11 @@ chronological position. Capability context, active-delegation state and remainin
 plan stay outside the announce. The complete provider-visible example is fixed in
 [`persistent-planner.md`](persistent-planner.md#完整-boundary-模型输入示例).
 
+The announce is the complete execution evidence at this boundary. The private
+Capability-lane Human, AI, and Tool transcript is not projected alongside it;
+doing so would duplicate evidence, expose executor implementation detail, and let
+large tool results displace the Planner's control context.
+
 Version 1 intentionally has no `content_kind`, `progress`, `accepted`, or
 `task_completed` field. Add a field only when a producer or framework boundary can
 write it as canonical structured data with defined semantics. A consumer must not

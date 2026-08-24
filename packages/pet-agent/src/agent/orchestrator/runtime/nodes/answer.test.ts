@@ -125,6 +125,40 @@ test('Answer carries an ordinary Planner response as blocked-context detail', ()
   });
 });
 
+test('Answer carries complete Boundary Planner text as a direct answer', () => {
+  const plannerAnswer = [
+    '网络检查已完成：en1 已获取 IP，外网连通正常。',
+    '诊断证据。'.repeat(100),
+    '最终根因是 Manatee/CDP circle failure -5403。',
+  ].join('');
+  const plannerOutput = new AIMessage(plannerAnswer);
+  setPinpetMeta(plannerOutput, {
+    lane: 'orchestrator',
+    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
+    traceId: 'trace-planner-direct',
+    plannerInputId: 'announce:delegation-1:announce-1',
+  });
+
+  assert.deepEqual(selectAnswerContextFacts({
+    state: state({
+      messages: [plannerOutput],
+      runUserRequest: '重新检查网络并核对 Handoff。',
+      runLatestDelegationOutcome: 'planner_direct_answer',
+      traceId: 'trace-planner-direct',
+    }),
+    history: [],
+    acceptedHandoffOutcome: null,
+    acceptedResults: [],
+    awaitingUserInput: false,
+    runIterationLimit: 4,
+  }), {
+    mode: 'direct',
+    hasUserRequest: true,
+    acceptedResults: [],
+    answer: plannerAnswer,
+  });
+});
+
 test('Answer does not reuse ordinary text from an older Planner invocation', () => {
   const olderOutput = new AIMessage('旧 Planner invocation 的普通文本。');
   setPinpetMeta(olderOutput, {

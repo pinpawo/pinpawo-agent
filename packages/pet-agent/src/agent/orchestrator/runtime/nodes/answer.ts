@@ -84,7 +84,7 @@ export function projectAcceptedRunResults(params: {
 export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
   '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。';
 
-function readLatestPlannerIncompleteOutput(state: OrchestratorStateType) {
+function readLatestPlannerOrdinaryOutput(state: OrchestratorStateType) {
   let latestPlannerInputId: string | null = null;
   for (let index = state.messages.length - 1; index >= 0; index -= 1) {
     const message = state.messages[index];
@@ -233,6 +233,14 @@ export function selectAnswerContextFacts(params: {
       detail: null,
     };
   }
+  if (params.state.runLatestDelegationOutcome === 'planner_direct_answer') {
+    return {
+      mode: 'direct',
+      hasUserRequest,
+      acceptedResults: params.acceptedResults,
+      answer: readLatestPlannerOrdinaryOutput(params.state),
+    };
+  }
   if (params.state.runLatestDelegationOutcome === 'planner_incomplete') {
     return {
       mode: 'blocked',
@@ -244,7 +252,7 @@ export function selectAnswerContextFacts(params: {
         ?? null,
       // Ordinary Planner text is not a control action, but it is still useful
       // evidence for Answer to explain why planning stopped.
-      detail: readLatestPlannerIncompleteOutput(params.state),
+      detail: readLatestPlannerOrdinaryOutput(params.state),
     };
   }
 
@@ -275,11 +283,19 @@ export function selectAnswerContextFacts(params: {
     };
   }
 
-  return { mode: 'direct', hasUserRequest, acceptedResults: params.acceptedResults };
+  return {
+    mode: 'direct',
+    hasUserRequest,
+    acceptedResults: params.acceptedResults,
+    answer: null,
+  };
 }
 
 function buildAnswerCleanup(state: OrchestratorStateType) {
-  const preserveBoundaryPlan = state.runLatestDelegationOutcome === 'planner_incomplete'
+  const preserveBoundaryPlan = (
+    state.runLatestDelegationOutcome === 'planner_incomplete'
+    || state.runLatestDelegationOutcome === 'planner_direct_answer'
+  )
     && state.runRuntimeFailure === null
     && state.taskActiveDelegation !== null;
   return {

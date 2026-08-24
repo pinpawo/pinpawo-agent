@@ -21,7 +21,7 @@ function stampLane(
   return message;
 }
 
-test('Planner message context selects complete messages for each planning mode', () => {
+test('Planner message context selects canonical messages for each planning mode', () => {
   const mainRequest = new HumanMessage({
     content: [{ type: 'text', text: '检查这张图片并继续任务。' }, {
       type: 'image_url',
@@ -36,7 +36,11 @@ test('Planner message context selects complete messages for each planning mode',
     content: 'FILE_CONTENT',
     tool_call_id: 'call-1',
   }), 'delegation-1');
-  const announce = stampLane(new AIMessage('CURRENT_DELEGATION_ANNOUNCE'), 'delegation-1');
+  const announce = stampLane(new AIMessage({
+    id: 'announce-current',
+    content: 'CURRENT_DELEGATION_ANNOUNCE',
+  }), 'delegation-1');
+  setPinpetMeta(announce, { isAnnounce: true });
   const otherLane = stampLane(new AIMessage('OTHER_DELEGATION_CONTENT'), 'delegation-2');
   const staleTranscript = stampLane(
     new AIMessage('STALE_TRANSCRIPT_CONTENT'),
@@ -81,15 +85,14 @@ test('Planner message context selects complete messages for each planning mode',
     lane: 'capability:general',
     transcriptRunId: 'transcript-1',
     delegationId: 'delegation-1',
+    announceMessageId: 'announce-current',
   });
   assert.deepEqual(boundary, [
     priorPlannerMessage,
-    mainRequest,
-    toolCall,
-    toolResult,
     announce,
   ]);
-  assert.equal(boundary[1], mainRequest, 'media content blocks stay intact');
+  assert.equal(boundary.includes(toolCall), false);
+  assert.equal(boundary.includes(toolResult), false);
 });
 
 test('a fresh trace removes Planner messages owned by older traces', () => {

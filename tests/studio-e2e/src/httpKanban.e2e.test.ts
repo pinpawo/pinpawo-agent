@@ -149,6 +149,34 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
   assert.ok(address);
   const authorization = { Authorization: `Bearer ${AUTH_TOKEN}` };
 
+  const petsResponse = await fetch(
+    `http://${address.host}:${address.port.toString()}/pets`,
+    { headers: authorization },
+  );
+  assert.equal(petsResponse.status, 200);
+  assert.deepEqual(await petsResponse.json(), {
+    pets: [
+      {
+        petId: 'planner',
+        name: 'planner',
+        role: null,
+        serviceSummary: null,
+        startupMode: 'standby',
+        status: 'standby',
+        capabilities: [],
+      },
+      {
+        petId: 'writer',
+        name: 'writer',
+        role: null,
+        serviceSummary: null,
+        startupMode: 'standby',
+        status: 'standby',
+        capabilities: [],
+      },
+    ],
+  });
+
   const unauthorizedBoardResponse = await fetch(
     `http://${address.host}:${address.port.toString()}/kanban`,
   );

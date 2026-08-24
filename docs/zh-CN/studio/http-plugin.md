@@ -3,7 +3,7 @@
 [English](../../studio/http-plugin.md)
 
 `@pinpawo-plugin/studio-http` 是一个可选、零 Toolkit 的 Studio Plugin。它提供
-loopback HTTP dispatch 入口，并把 Studio Plugin event bus 投射成 live SSE。它不提供
+loopback HTTP dispatch 入口、只读 Studio Pet 注册表，并把 Studio Plugin event bus 投射成 live SSE。它不提供
 内置领域页面，但会暴露 route hook 供其他 Plugin 贡献页面或 API；它也不是 Studio
 Host 自己的 WebSocket/stdio transport。
 
@@ -43,11 +43,22 @@ Content-Type: application/json
 HTTP 连接不拥有 cancellation，也不等待 invocation completion。非法 JSON/dispatch
 返回 `400`，错误 media type 返回 `415`，Studio 拒绝 dispatch 返回 `422`。
 
+## Pet 注册表
+
+```http
+GET /pets
+Authorization: Bearer ...
+```
+
+它返回当前 Studio Pet 注册表，包含 `petId`、name、role/service summary、startup/status 与
+公开 Capability 摘要。注册表只读，刻意不包含 Agent 私有 actor 字段、runtime 引用、checkpoint
+或 execution context；`/pets` 由 HTTP Plugin 自己拥有，不能被贡献 route 替换。
+
 ## Plugin 贡献的 route
 
 HTTP Plugin 暴露由生命周期托管的 `routes` hook。其他已安装 Plugin 可以反向贡献
 HTTP handler，HTTP 无需 import 或理解其领域。所有贡献 route 都经过相同的 Bearer
-鉴权与 Origin 策略；`/dispatch` 和 `/events` 是保留路径。
+鉴权与 Origin 策略；`/dispatch`、`/pets` 和 `/events` 是保留路径。
 
 同时安装 Kanban Plugin 时，它会贡献 `GET /kanban`，返回当前 task snapshot 与 event
 cursor，并贡献 `GET /kanban/events` 读取 Kanban 自己的 durable task history。Kanban

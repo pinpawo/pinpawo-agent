@@ -21,7 +21,7 @@
 import type { JsonObject } from '@pinpawo/agent-contracts';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 
-import type { PetAgentRuntimeDescriptor } from './types';
+import type { StudioPetRegistration } from './types';
 import type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
@@ -99,7 +99,7 @@ export type StudioPluginContext = {
   onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEventInput) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
-  listPets: () => PetAgentRuntimeDescriptor[];
+  listPets: () => StudioPetRegistration[];
   hooks: StudioPluginHooks;
 };
 
@@ -147,6 +147,6 @@ export type Studio = {
   onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEvent) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
-  listPets: () => PetAgentRuntimeDescriptor[];
+  listPets: () => StudioPetRegistration[];
   shutdown: () => Promise<void>;
 };

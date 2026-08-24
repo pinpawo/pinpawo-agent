@@ -6,6 +6,7 @@ import type {
   StudioDispatchRequest,
   StudioEvent,
   StudioEventHandler,
+  StudioPetRegistration,
   StudioPluginContext,
 } from '@pinpawo/studio';
 
@@ -39,6 +40,7 @@ function receipt(request: StudioDispatchRequest): StudioDispatchReceipt {
 
 function createContext(options: {
   dispatch?: (request: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
+  pets?: StudioPetRegistration[];
 } = {}) {
   const eventHandlers = new Set<StudioEventHandler>();
   const requests: StudioDispatchRequest[] = [];
@@ -53,7 +55,7 @@ function createContext(options: {
       eventHandlers.add(handler);
       return () => eventHandlers.delete(handler);
     },
-    listPets: () => [],
+    listPets: () => options.pets ?? [],
     hooks: {
       expose: () => () => undefined,
       contribute: () => () => undefined,
@@ -134,6 +136,36 @@ test('HTTP Plugin dispatches a validated request and returns receipt identity', 
     input: { kind: 'request', request: 'plan this work' },
     idempotencyKey: 'retry-1',
   }]);
+});
+
+test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor fields', async (t) => {
+  const harness = createContext({
+    pets: [{
+      petId: 'planner',
+      name: 'Planner',
+      role: 'plans work',
+      serviceSummary: null,
+      startupMode: 'standby',
+      status: 'standby',
+      capabilities: [{
+        name: 'plan',
+        description: 'Plans work.',
+        available: true,
+        reason: null,
+      }],
+    }],
+  });
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+
+  const response = await fetch(pluginUrl(address.port, '/pets'), {
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { pets: harness.context.listPets() });
 });
 
 test('HTTP Plugin requires bearer auth and an explicitly allowed browser origin', async (t) => {

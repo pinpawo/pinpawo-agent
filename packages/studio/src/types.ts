@@ -21,6 +21,24 @@ export type PetAgentRuntimeDescriptor = AgentActor & {
 };
 
 /**
+ * Read-only Pet registration exposed from Studio's control plane.
+ *
+ * It intentionally omits Agent-private actor fields such as `userId` and
+ * `personality`. Callers receive enough information to target a Pet through
+ * dispatch, but never a runtime reference or Agent execution context.
+ */
+export type StudioPetRegistration = Pick<
+  PetAgentRuntimeDescriptor,
+  | 'petId'
+  | 'name'
+  | 'role'
+  | 'serviceSummary'
+  | 'startupMode'
+  | 'status'
+  | 'capabilities'
+>;
+
+/**
  * pet runtime 的 invoke 参数。Studio↔pet 边界是函数调用,而非 envelope 协议。
  *
  * - input: 普通请求或显式 continuation resume。Pet runtime 负责对 checkpoint 校验。

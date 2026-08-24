@@ -45,6 +45,23 @@ type StudioEvent = {
   occurredAt: string;
 };
 
+type StudioPetRegistration = {
+  petId: string;
+  name: string;
+  role?: string | null;
+  serviceSummary?: string | null;
+  startupMode: 'standby' | 'lazy' | 'disabled';
+  status: 'disabled' | 'loading' | 'standby' | 'active' | 'degraded' | 'unavailable';
+  capabilities: Array<{
+    name: string;
+    description: string;
+    available: boolean;
+    reason?: string | null;
+  }>;
+};
+
+type StudioPetsSnapshot = { pets: StudioPetRegistration[] };
+
 type KnowledgeFile = {
   path: string;
   title: string;
@@ -80,6 +97,7 @@ function statusLabel(status: TaskStatus): string {
 
 export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [pets, setPets] = useState<StudioPetRegistration[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [selectedContinuationTaskId, setSelectedContinuationTaskId] = useState<string>();
@@ -113,19 +131,25 @@ export function App() {
     const headers = { Authorization: `Bearer ${studioHttpToken}` };
 
     const refresh = async () => {
-      const [snapshotResponse, historyResponse] = await Promise.all([
+      const [snapshotResponse, historyResponse, petsResponse] = await Promise.all([
         fetch(`${studioHttpUrl}/kanban`, { headers, signal: abort.signal }),
         fetch(`${studioHttpUrl}/kanban/events?after=${historySequence.toString()}`, {
           headers,
           signal: abort.signal,
         }),
+        fetch(`${studioHttpUrl}/pets`, { headers, signal: abort.signal }),
       ]);
-      if (!snapshotResponse.ok || !historyResponse.ok) {
-        throw new Error(`Kanban HTTP request failed (${snapshotResponse.status.toString()}/${historyResponse.status.toString()}).`);
+      if (!snapshotResponse.ok || !historyResponse.ok || !petsResponse.ok) {
+        throw new Error(
+          `Kanban HTTP request failed (${snapshotResponse.status.toString()}/${historyResponse.status.toString()}/${petsResponse.status.toString()}).`,
+        );
       }
       const snapshot = await snapshotResponse.json() as KanbanSnapshot;
       const history = await historyResponse.json() as { events: KanbanHistoryEvent[] };
+      const petSnapshot = await petsResponse.json() as StudioPetsSnapshot;
       setTasks(snapshot.tasks);
+      setPets(petSnapshot.pets);
+      setDispatchTarget((current) => current || petSnapshot.pets[0]?.petId || '');
       if (history.events.length > 0) {
         historySequence = history.events.at(-1)?.sequence ?? historySequence;
         setEvents((current) => [
@@ -407,7 +431,14 @@ export function App() {
 
       <form className="dispatch-bar" onSubmit={submitDispatch}>
         <label htmlFor="dispatch-target">DISPATCH</label>
-        <input id="dispatch-target" onChange={(event) => setDispatchTarget(event.target.value)} placeholder="pet id" value={dispatchTarget} />
+        <select id="dispatch-target" onChange={(event) => setDispatchTarget(event.target.value)} value={dispatchTarget}>
+          <option value="">Select Pet</option>
+          {pets.map((pet) => (
+            <option disabled={pet.startupMode === 'disabled'} key={pet.petId} value={pet.petId}>
+              {pet.name} · {pet.petId} · {pet.status}
+            </option>
+          ))}
+        </select>
         <input aria-label="Dispatch goal" onChange={(event) => setDispatchGoal(event.target.value)} placeholder="Describe the next goal…" value={dispatchGoal} />
         <button type="submit">SEND</button>
       </form>

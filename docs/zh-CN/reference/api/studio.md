@@ -92,7 +92,9 @@ Studio 不复用 Chat 的 session、route cache 或 review message。独立 inte
   metadata 与可选 pending 投射，但不持久化、不重放。
 - `notify(event)` / `subscribe(handler)`：独立的通用 Plugin event 总线。Studio
   不解释、关联或持久化 payload。
-- `listPets()`：只返回 descriptor，不暴露 runtime 引用。
+- `listPets()`：返回 Studio 的只读 Pet 注册表，不暴露 runtime 引用或 Agent 私有
+  actor 字段。每项包含 `petId`、`name`、role/service summary、startup/status 与公开的
+  Capability 摘要，供 control client 发现可派发目标。
 - `shutdown()`：拒绝新 dispatch、取消 active invocation、等待已接收队列收口，
   再逆序停止 Plugin。
 

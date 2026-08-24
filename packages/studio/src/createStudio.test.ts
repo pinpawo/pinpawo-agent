@@ -147,6 +147,24 @@ test('different Pets own different stable threads', async () => {
   await Promise.all([a.completion, b.completion]);
 });
 
+test('the Studio registry exposes a read-only Pet registration rather than actor internals', async () => {
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [pet({ petId: 'worker' })],
+  });
+
+  assert.deepEqual(studio.listPets(), [{
+    petId: 'worker',
+    name: 'worker',
+    role: null,
+    serviceSummary: null,
+    startupMode: 'standby',
+    status: 'standby',
+    capabilities: [],
+  }]);
+});
+
 test('concurrent dispatches never invoke one Pet concurrently', async () => {
   const started: string[] = [];
   let releaseFirst!: () => void;

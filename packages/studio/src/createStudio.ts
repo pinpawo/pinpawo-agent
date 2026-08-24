@@ -16,7 +16,10 @@ import {
   type StudioInvocationEvent,
   type StudioInvocationEventHandler,
 } from './studioInvocation';
-import type { PetAgentRuntime, PetAgentRuntimeDescriptor } from './types';
+import type {
+  PetAgentRuntime,
+  StudioPetRegistration,
+} from './types';
 import { StudioPluginHookRegistry } from './studioPluginHooks';
 
 export type CreateStudioInput = {
@@ -69,8 +72,19 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const pluginHooks = new StudioPluginHookRegistry();
   let stopped = false;
 
-  function listPets(): PetAgentRuntimeDescriptor[] {
-    return [...petsById.values()].map((pet) => pet.descriptor());
+  function listPets(): StudioPetRegistration[] {
+    return [...petsById.values()].map((pet) => {
+      const descriptor = pet.descriptor();
+      return {
+        petId: descriptor.petId,
+        name: descriptor.name,
+        role: descriptor.role,
+        serviceSummary: descriptor.serviceSummary,
+        startupMode: descriptor.startupMode,
+        status: descriptor.status,
+        capabilities: descriptor.capabilities.map((capability) => ({ ...capability })),
+      };
+    });
   }
 
   function subscribe(handler: StudioEventHandler): () => void {

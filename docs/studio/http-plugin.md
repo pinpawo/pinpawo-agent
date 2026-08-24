@@ -3,10 +3,10 @@
 [简体中文](../zh-CN/studio/http-plugin.md)
 
 `@pinpawo-plugin/studio-http` is an optional zero-Toolkit Studio Plugin. It
-provides a loopback HTTP dispatch endpoint and a live SSE projection of the
-Studio Plugin event bus. It does not bundle a domain page, but exposes a route
-hook through which another Plugin may contribute one. It is not the Studio Host
-WebSocket/stdio transport.
+provides a loopback HTTP dispatch endpoint, the read-only Studio Pet registry,
+and a live SSE projection of the Studio Plugin event bus. It does not bundle a
+domain page, but exposes a route hook through which another Plugin may
+contribute one. It is not the Studio Host WebSocket/stdio transport.
 
 ## Assembly
 
@@ -56,12 +56,39 @@ correlation field.
 Invalid JSON/dispatch shapes return `400`, unsupported media returns `415`, and
 a Studio dispatch rejection returns `422`.
 
+## Pet registry
+
+```http
+GET /pets
+Authorization: Bearer ...
+```
+
+This returns the current Studio registrations for control clients:
+
+```json
+{
+  "pets": [{
+    "petId": "planner",
+    "name": "Planner",
+    "role": "plans work",
+    "serviceSummary": null,
+    "startupMode": "standby",
+    "status": "standby",
+    "capabilities": []
+  }]
+}
+```
+
+The registry is read-only. It deliberately excludes Agent-private actor fields,
+runtime references, checkpoint data, and execution context. `/pets` is owned by
+the HTTP Plugin and cannot be replaced through the contributed-route hook.
+
 ## Plugin-contributed routes
 
 The HTTP Plugin exposes a lifecycle-managed `routes` hook. Other installed
 Plugins can contribute HTTP handlers without the HTTP Plugin importing their
 domain. Every contributed route passes through the same Bearer authentication
-and Origin policy; `/dispatch` and `/events` remain reserved.
+and Origin policy; `/dispatch`, `/pets`, and `/events` remain reserved.
 
 When the Kanban Plugin is also installed, it contributes `GET /kanban`, which
 returns its current task snapshot and event cursor, plus `GET /kanban/events`

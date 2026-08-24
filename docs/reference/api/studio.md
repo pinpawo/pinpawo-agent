@@ -38,7 +38,7 @@ type Studio = {
   onInvocation(handler: StudioInvocationEventHandler): () => void;
   notify(event: StudioEvent): void;
   subscribe(handler: StudioEventHandler): () => void;
-  listPets(): PetAgentRuntimeDescriptor[];
+  listPets(): StudioPetRegistration[];
   shutdown(): Promise<void>;
 };
 
@@ -113,8 +113,11 @@ Unlike the generic event bus, both are execution observation channels with
 explicit Pet/thread/invocation identity. They are in-memory; only the receipt
 observer replays its latest event.
 
-`listPets()` returns descriptors only, not runtime references. This keeps all
-plugin-originated work on the dispatch boundary.
+`listPets()` returns the Studio Pet registry only, not runtime references or
+Agent-private actor fields. Each registration contains `petId`, `name`,
+`role`, `serviceSummary`, `startupMode`, `status`, and the public Capability
+summary. This keeps all work on the dispatch boundary while allowing a control
+client to discover valid dispatch targets.
 
 ### Transport-neutral dispatch parsing
 
@@ -153,7 +156,7 @@ type StudioPluginContext = {
   onInvocation(handler: StudioInvocationEventHandler): () => void;
   notify(event: StudioEventInput): void;
   subscribe(handler: StudioEventHandler): () => void;
-  listPets(): PetAgentRuntimeDescriptor[];
+  listPets(): StudioPetRegistration[];
   hooks: StudioPluginHooks;
 };
 ```

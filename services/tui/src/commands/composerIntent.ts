@@ -7,7 +7,6 @@ export type ComposerIntent =
   | { type: 'notice'; message: string }
   | { type: 'quit' }
   | { type: 'open-help' }
-  | { type: 'continue-delegation'; guidance: string }
   | { type: 'refresh-session' }
   | { type: 'compact-session' }
   | { type: 'open-resume' }
@@ -45,17 +44,6 @@ export function resolveComposerIntent(input: {
       return { type: 'quit' };
     case 'help':
       return { type: 'open-help' };
-    case 'continue':
-      if (!parsed.args) {
-        return {
-          type: 'notice',
-          message: 'provide guidance: /continue <guidance>',
-        };
-      }
-      return {
-        type: 'continue-delegation',
-        guidance: parsed.args,
-      };
     case 'refresh':
       return { type: 'refresh-session' };
     case 'compact':

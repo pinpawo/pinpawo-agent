@@ -17,7 +17,6 @@ test('command registry exposes only implemented OpenTUI commands', () => {
       'transcript',
       'export',
       'edit',
-      'continue',
       'refresh',
       'compact',
       'resume',
@@ -38,13 +37,7 @@ test('command parser resolves commands and aliases', () => {
     args: '',
   });
   assert.equal(parseTuiCommand('/ReSuMe').type, 'command');
-  assert.deepEqual(parseTuiCommand('/continue   apply the new constraints'), {
-    type: 'command',
-    command: command('continue'),
-    name: 'continue',
-    raw: '/continue   apply the new constraints',
-    args: 'apply the new constraints',
-  });
+  assert.equal(parseTuiCommand('/continue apply the new constraints').type, 'unknown');
   assert.deepEqual(parseTuiCommand('/export transcripts/today.md'), {
     type: 'command',
     command: command('export'),

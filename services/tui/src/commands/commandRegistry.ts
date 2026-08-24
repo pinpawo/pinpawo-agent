@@ -7,7 +7,6 @@ export type TuiCommandName =
   | 'transcript'
   | 'export'
   | 'edit'
-  | 'continue'
   | 'refresh'
   | 'compact'
   | 'resume'
@@ -71,10 +70,6 @@ const COMMANDS: readonly TuiCommandDefinition[] = [{
   name: 'edit',
   usage: '/edit [text]',
   description: 'Edit a composer draft with VISUAL or EDITOR',
-}, {
-  name: 'continue',
-  usage: '/continue <guidance>',
-  description: 'Continue the unfinished delegation in this session',
 }, {
   name: 'refresh',
   usage: '/refresh',

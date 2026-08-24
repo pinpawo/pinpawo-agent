@@ -90,6 +90,8 @@ export type TuiSessionControllerOptions = {
   sessionCompactTimeoutMs?: number;
   /** Called before a manually requested canonical snapshot updates UI state. */
   onManualSnapshotApplied?: (reason: Extract<SessionSnapshotReason, 'manual'>) => void;
+  /** A local run has authoritatively settled as interrupted. */
+  onRunInterrupted?: (requestId: string) => void;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer?: (timer: TimerHandle) => void;
 };

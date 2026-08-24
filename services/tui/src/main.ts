@@ -64,6 +64,13 @@ import {
   type InteractionOwner,
 } from './input/inputRouter';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
+import {
+  isDelegationPaused,
+  leaveDelegationPauseMode,
+  resumesPausedDelegationOnEmptySubmit,
+  syncDelegationPauseMode,
+  type DelegationPauseMode,
+} from './session/delegationPause';
 import { TuiSessionController } from './session/sessionController';
 import {
   APPROVAL_FOOTER_ROWS,
@@ -262,6 +269,7 @@ let focusedSessionId = 'pending';
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
 let timelineReplayPending = false;
+let delegationPauseMode: DelegationPauseMode = 'ordinary';
 const controller = new TuiSessionController({
   connectionFactory: launchOptions.useDemoConnection
     ? createDemoConnectionFactory({
@@ -271,6 +279,10 @@ const controller = new TuiSessionController({
     : createLocalHostConnectionFactory({ port }),
   onManualSnapshotApplied: () => {
     timelineReplayPending = true;
+  },
+  onRunInterrupted: () => {
+    delegationPauseMode = 'paused';
+    localNotice = 'task paused · Enter continues · Esc starts a new task';
   },
 });
 const interruptPendingNoticeController =
@@ -414,7 +426,12 @@ const unsubscribe = controller.subscribe((state) => {
   syncOverlayLoading();
   if (state.session.sessionId !== focusedSessionId) {
     focusedSessionId = state.session.sessionId;
+    delegationPauseMode = 'ordinary';
   }
+  delegationPauseMode = syncDelegationPauseMode(
+    delegationPauseMode,
+    state.session,
+  );
   syncApprovalFromSession();
   syncNoticeFromSession();
   syncComposerInputOverlays();
@@ -592,6 +609,19 @@ renderer.keyInput.on('keypress', (key) => {
     return;
   }
   if (
+    owner.type === 'composer'
+    && key.name === 'escape'
+    && isDelegationPaused(delegationPauseMode)
+  ) {
+    key.preventDefault();
+    key.stopPropagation();
+    delegationPauseMode = leaveDelegationPauseMode(delegationPauseMode);
+    localNotice = 'paused task left · next message starts a new task';
+    syncComposerModeUi();
+    refreshStatus();
+    return;
+  }
+  if (
     key.name === 'escape'
     && controller.getState().session.activeRun
   ) {
@@ -721,6 +751,9 @@ function syncComposerModeUi() {
   composer.placeholder = formatComposerPlaceholder(
     controller.getState().session,
     composerMode,
+    {
+      pausedDelegation: isDelegationPaused(delegationPauseMode),
+    },
   );
   refreshHeader();
 }
@@ -1561,6 +1594,13 @@ function submitComposerInput(input = composer.plainText) {
 
   switch (intent.type) {
     case 'none':
+      if (resumesPausedDelegationOnEmptySubmit(
+        delegationPauseMode,
+        input,
+        attachments.length,
+      )) {
+        submitChatInput('');
+      }
       return;
     case 'notice':
       clearComposerPreservingNotice();
@@ -1575,24 +1615,6 @@ function submitComposerInput(input = composer.plainText) {
       localNotice = null;
       openCommandHelpUi();
       return;
-    case 'continue-delegation': {
-      enterChatMode(false);
-      const result = controller.continueActiveDelegation(intent.guidance);
-      if (result.ok) {
-        composerHistory = recordComposerHistoryEntry(
-          composerHistory,
-          intent.guidance,
-        );
-        composer.clear();
-        localNotice = null;
-        refreshHeader();
-        syncComposerLayout();
-      } else {
-        localNotice = submitFailureText(result.reason);
-        refreshStatus();
-      }
-      return;
-    }
     case 'refresh-session': {
       clearComposerPreservingNotice();
       const result = controller.refreshSession();
@@ -1659,24 +1681,28 @@ function submitComposerInput(input = composer.plainText) {
         showErrorNotice(errorMessage(error));
       });
       return;
-    case 'submit-chat': {
-      const result = controller.submitChat(intent.text, attachments);
-      if (result.ok) {
-        composerHistory = recordComposerHistoryEntry(
-          composerHistory,
-          intent.text,
-        );
-        attachments = [];
-        composer.clear();
-        localNotice = null;
-        refreshHeader();
-        syncComposerLayout();
-      } else {
-        localNotice = submitFailureText(result.reason);
-        refreshStatus();
-      }
-    }
+    case 'submit-chat':
+      submitChatInput(intent.text);
   }
+}
+
+function submitChatInput(text: string) {
+  const result = isDelegationPaused(delegationPauseMode)
+    ? controller.continueActiveDelegation(text, attachments)
+    : controller.submitChat(text, attachments);
+  if (result.ok) {
+    if (text.trim() || attachments.length > 0) {
+      composerHistory = recordComposerHistoryEntry(composerHistory, text);
+    }
+    attachments = [];
+    composer.clear();
+    localNotice = null;
+    refreshHeader();
+    syncComposerLayout();
+    return;
+  }
+  localNotice = submitFailureText(result.reason);
+  refreshStatus();
 }
 
 function enterChatMode(clearComposer = true) {

@@ -100,13 +100,12 @@ unchanged until server-observed progress clears or replaces it. This models two
 facts directly instead of making invocation ownership optional on a wait.
 
 Delegation continuation is checkpoint-owned rather than inferred from a
-particular client's review-cancellation history. Continuation availability is
-not projected into `AgentSession`: `/continue <guidance>` is an explicit client
-command that sends `resume_active`, while ordinary chat sends
-`supersede_active`. The checkpoint's `taskActiveDelegation` pointer is the sole
-authority for either transition. When no active delegation exists,
-`resume_active` is a no-op and the supplied guidance proceeds as an ordinary
-chat turn.
+particular client's review-cancellation history. The checkpoint's
+`taskActiveDelegation` pointer remains the sole authority for both transitions.
+After an authoritative `interrupted` event, the TUI may temporarily enter a
+local paused mode: Enter sends `resume_active`, while a second Esc leaves that
+mode and makes the following submission `supersede_active`. This local mode is
+not projected, persisted, or used to infer delegation availability.
 
 Live TUI actions carry `AgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`

@@ -85,6 +85,7 @@ export class TuiSessionController {
   private readonly sessionCommands: SessionCommandCoordinator;
   private readonly modelProfiles: ModelProfileCoordinator;
   private readonly runtimeConfig: RuntimeConfigCoordinator;
+  private readonly onRunInterrupted?: (requestId: string) => void;
   private state: TuiSessionState = {
     connection: 'idle',
     session: createPendingSession(),
@@ -93,6 +94,7 @@ export class TuiSessionController {
   constructor(options: TuiSessionControllerOptions) {
     this.now = options.now ?? Date.now;
     this.requestIdFactory = options.requestIdFactory ?? (() => crypto.randomUUID());
+    this.onRunInterrupted = options.onRunInterrupted;
     const sessionCommandTimeoutMs = options.sessionCommandTimeoutMs
       ?? DEFAULT_SESSION_COMMAND_TIMEOUT_MS;
     const setTimer = options.setTimer ?? setTimeout;
@@ -231,8 +233,11 @@ export class TuiSessionController {
     );
   }
 
-  continueActiveDelegation(message: string): SubmitChatResult {
-    return this.submitChatWithTransition(message, [], 'resume_active');
+  continueActiveDelegation(
+    message: string,
+    attachments: readonly AgentLocalAttachment[] = [],
+  ): SubmitChatResult {
+    return this.submitChatWithTransition(message, attachments, 'resume_active');
   }
 
   refreshSession(): { ok: true } | { ok: false; reason: 'not-ready' } {
@@ -248,7 +253,11 @@ export class TuiSessionController {
     attachments: readonly AgentLocalAttachment[],
     activeDelegationTransition?: ActiveDelegationTransition,
   ): SubmitChatResult {
-    if (!message.trim() && attachments.length === 0) {
+    if (
+      !message.trim()
+      && attachments.length === 0
+      && activeDelegationTransition !== 'resume_active'
+    ) {
       return { ok: false, reason: 'empty' };
     }
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
@@ -546,7 +555,7 @@ export class TuiSessionController {
     }
 
     if (message.type === 'interrupted') {
-      this.updateSession(reduceSession(this.state.session, {
+      const session = reduceSession(this.state.session, {
         type: 'run.finished',
         requestId: message.requestId,
         messages: [{
@@ -554,7 +563,11 @@ export class TuiSessionController {
           requestId: message.requestId,
           text: message.message?.trim() || 'Run interrupted.',
         }],
-      }, { observedAt: this.now() }));
+      }, { observedAt: this.now() });
+      if (session !== this.state.session) {
+        this.onRunInterrupted?.(message.requestId);
+      }
+      this.updateSession(session);
       this.transport.requestCompletionSnapshot();
       return;
     }

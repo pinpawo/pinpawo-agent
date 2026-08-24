@@ -1231,7 +1231,7 @@ test('manual compaction binds the active session and uses its model-call timeout
   controller.stop();
 });
 
-test('delegation continuation sends resume_active without client-owned availability', async () => {
+test('delegation continuation sends resume_active and permits an empty paused resume', async () => {
   const requestIds = [
     'startup',
     'review-cancel',
@@ -1239,16 +1239,18 @@ test('delegation continuation sends resume_active without client-owned availabil
     'resume-other',
     'resume-original',
     'continue-failed',
-    'continue-sent',
+    'continue-empty',
     'continue-refresh',
   ];
   let connection!: FakeConnection;
+  const interruptedRequestIds: string[] = [];
   const controller = new TuiSessionController({
     connectionFactory: (handlers) => {
       connection = new FakeConnection(handlers);
       return connection;
     },
     requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+    onRunInterrupted: (requestId) => interruptedRequestIds.push(requestId),
   });
   controller.start();
   connection.open();
@@ -1272,6 +1274,7 @@ test('delegation continuation sends resume_active without client-owned availabil
     type: 'session.snapshot.get',
     requestId: 'interrupted-refresh',
   });
+  assert.deepEqual(interruptedRequestIds, ['review-cancel']);
   connection.receive({
     type: 'session.snapshot.result',
     requestId: 'interrupted-refresh',
@@ -1320,14 +1323,14 @@ test('delegation continuation sends resume_active without client-owned availabil
     { ok: false, reason: 'send-failed' },
   );
 
-  assert.deepEqual(
-    controller.continueActiveDelegation('apply the new constraints'),
-    { ok: true, requestId: 'continue-sent' },
-  );
+  assert.deepEqual(controller.continueActiveDelegation(''), {
+    ok: true,
+    requestId: 'continue-empty',
+  });
   assert.deepEqual(connection.sent.at(-1), {
     type: 'chat_request',
-    requestId: 'continue-sent',
-    message: 'apply the new constraints',
+    requestId: 'continue-empty',
+    message: '',
     activeDelegationTransition: 'resume_active',
   });
   assert.deepEqual(
@@ -1336,8 +1339,8 @@ test('delegation continuation sends resume_active without client-owned availabil
   );
   connection.receive(eventMessage({
     type: 'message.completed',
-    requestId: 'continue-sent',
-    messageId: 'continue-sent:assistant',
+    requestId: 'continue-empty',
+    messageId: 'continue-empty:assistant',
     role: 'assistant',
     text: 'continued',
   }));

@@ -38,10 +38,9 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
-- it keeps delegation continuation out of the Session projection:
-  `/continue <guidance>` explicitly sends `resume_active`, ordinary chat sends
-  `supersede_active`, and the checkpoint's `taskActiveDelegation` pointer alone
-  decides whether an exact delegation is resumed.
+- after an authoritative interrupted event it enters a local paused mode:
+  ordinary Enter sends `resume_active`; Esc leaves paused mode and the next
+  ordinary message sends `supersede_active`.
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
@@ -154,9 +153,7 @@ Production client controls:
   projection, `/policy` chooses the host review policy, `/resume` opens the
   session picker, `/transcript` (or `/history`) opens the timeline pager,
   `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
-  Markdown transcript, `/continue <guidance>` resumes the current session's
-  unfinished checkpointed delegation, `/review-policy` aliases `/policy`, and
-  `/quit` exits;
+  Markdown transcript, `/review-policy` aliases `/policy`, and `/quit` exits;
 - `/studio [task]` enters Studio mode and optionally starts a task; subsequent
   prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
@@ -199,12 +196,11 @@ response against the currently focused canonical review action before sending
 the local one-shot marker continues to gate duplicate decisions across timeout
 and reconnect; only a server-observed review or run transition clears it.
 Esc or Ctrl+C after that marker sends an ordered `run.interrupt`, while another
-Ctrl+C exits. Cancellation does not masquerade as rejection. Delegation
-continuation is an explicit command rather than Session state: the controller
-sends `resume_active` for `/continue <guidance>` and `supersede_active` for
-ordinary chat input. The orchestrator applies that intent to its authoritative
-`taskActiveDelegation`; no client-local availability flag or cancellation
-history participates.
+Ctrl+C exits. Cancellation does not masquerade as rejection. After the
+authoritative `interrupted` event, the TUI enters local paused mode: Enter sends
+`resume_active`; a second Esc leaves that mode, so the next ordinary message
+sends `supersede_active`. The orchestrator remains authoritative for the
+checkpoint pointer; the TUI never owns it.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists

@@ -58,6 +58,12 @@ export type HostCapabilityAssemblyOptions = {
   checkpointPath?: string;
   /** Chat loads the global user registry; per-Pet hosts may own stricter sources. */
   loadUserCapabilities?: boolean;
+  /**
+   * Whether this Host includes the local Browser runtime and its global bridge.
+   * Chat keeps the user-selected default; a Studio must opt in explicitly
+   * instead of inheriting a Chat-only process resource.
+   */
+  includeBrowser?: boolean;
 };
 
 export type HostCapabilityAssemblyInitOptions = {
@@ -122,7 +128,8 @@ export class HostCapabilityAssembly {
   constructor(options: HostCapabilityAssemblyOptions) {
     this.runtimeConfig = options.runtimeConfig;
     this.sourceId = options.sourceId;
-    const browserSelected = loadStoredConfig().capabilities?.browser !== false;
+    const browserSelected = options.includeBrowser
+      ?? loadStoredConfig().capabilities?.browser !== false;
     this.hostBuiltInToolkits = [
       createBashToolkit(),
       createGitToolkit(),

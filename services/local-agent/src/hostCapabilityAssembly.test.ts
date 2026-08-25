@@ -44,6 +44,20 @@ test('HostCapabilityAssembly refuses early ownership when another Host owns its 
   }
 });
 
+test('HostCapabilityAssembly can omit the global Browser runtime for an independent Host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-no-browser-'));
+  const caps = new HostCapabilityAssembly({
+    runtimeConfig: buildTestConfig(root),
+    sourceId: 'studio-test',
+    includeBrowser: false,
+  });
+
+  const builtIns = (caps as unknown as {
+    hostBuiltInToolkits: readonly { name: string }[];
+  }).hostBuiltInToolkits;
+  assert.equal(builtIns.some(({ name }) => name === 'browser'), false);
+});
+
 test('HostCapabilityAssembly rejects extension definitions omitted from the first init call', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-caps-init-sources-'));
   const caps = new HostCapabilityAssembly({

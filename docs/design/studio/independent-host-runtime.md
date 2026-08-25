@@ -1,8 +1,8 @@
 # Studio Independent Host Runtime
 
-> 状态：Draft implementation contract
-> 对应：#643，基于 `origin/main@80b6f2ac` 的运行时复核
-> 更新：2026-08-23
+> 状态：Accepted design，implementation pending
+> 对应：#643，基于 `origin/main@6e960b82` 的运行时复核
+> 更新：2026-08-26
 
 本文补足“Studio 已提取成独立类”之后仍需成立的运行时边界。它不重新定义
 Host / Agent / Capability / Toolkit 领域关系；该关系以
@@ -11,28 +11,32 @@ Host / Agent / Capability / Toolkit 领域关系；该关系以
 ## 1. 目标边界
 
 ```text
-Chat Host                         Studio Host
-  Chat/TUI session stack            resident Studio
-  chat checkpoint root              Studio checkpoint root
-  chat HITL/control face             invocation projection + optional interaction plugins
-          \                         /
-             pinpawo/host-runtime
-             HostCapabilityAssembly
-
-  local wire adapter (optional for either Host)
-             pinpawo/local-server-transport
+Chat Host                         Studio Host process
+  Chat/TUI session stack            resident Pet runtime(s)
+          \                         /       │
+             pinpawo/host-runtime           ├─ local-agent Agent Session WebSocket
+             HostCapabilityAssembly         │      (只与内部 Pet 交互)
+                                            └─ Studio core + HTTP Plugin
+                                                   dispatch/event/hook
 ```
 
 两个 Host 可作为独立 CLI、systemd unit 或容器启动。共享的是 Capability、Toolkit、
 模型和 checkpointer 的**装配方式**，不是 Chat session、transport handler、进程内锁，
-也不是同一个 checkpoint writer root。
+也不是同一个 checkpoint writer root。Studio Host process 内可以同时运行两种入口，但
+Studio control plane 只有 HTTP；Agent Session WebSocket 属于 local-agent interaction
+adapter，不是 Studio transport，也不进入 Studio core。
 
 `host-runtime` 是按 Host 职责划分的中性公共面，不是为了 Studio 建立的 support
-facade。`local-server-transport` 只暴露 protocol-neutral framing、peer 与 loopback
-认证原语；Chat 与 Studio 分别拥有自己的 message contract、parser 和 dispatcher。
-这些 transport 原语不冒充 Host runtime，也不属于 transport-independent Studio core。
-Pet graph/runtime 的构造也属于 `host-runtime`：它返回一个结构化的 Pet dispatch port；
-Studio 只保存该 port 并转发 dispatch，不读取 checkpoint 或构造 LangGraph command。
+facade。local-agent 分开暴露 resident runtime builder 与 Agent Session interaction
+builder；两者可以独立使用，也可以在 Studio Host process 内配套构造。interaction
+transport 直接复用 `@pinpawo/agent-session` contract，不再为 Studio 定义第二套 Agent
+message contract。
+Pet graph/runtime 的构造也属于 `host-runtime`。local-agent 分别构造 `ResidentPet` 与
+`ResidentPetInteraction`，再由 `ResidentPetHost` 配套持有；Studio 只取得并保存
+`PetDispatchPort`，不取得 interaction、不读取 checkpoint，也不构造 LangGraph command。
+TUI 通过 local-agent 的 Agent Session adapter 消费 conversation，不连接 Studio
+control plane。完整契约见
+[Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md)。
 
 package 依赖方向固定为：
 
@@ -46,8 +50,9 @@ Studio 不 import kanban 或任何具体 Plugin。配置中的 Plugin id 由外�
 `StudioPluginResolver` 解析；未安装 resolver 或找不到 Plugin 时 fail fast。Plugin 是
 Studio control-plane lifecycle 的扩展单元。Plugin 可定义 Agent Toolkit；Host 将 definitions
 与其他来源一起放入统一 inventory，再由 Agent Capability 选择。Plugin lifecycle 只通过
-dispatch/event/hook 与 Studio 交互，不参与 Capability 选择或 Pet runtime 装配。详见
-[Plugin control-plane boundary](plugin-control-plane-boundary.md)。
+dispatch/event/hook 与 Studio 交互，不参与 Capability 选择或 Pet runtime 装配。它不读取
+Pet runtime、checkpoint、thread、Agent Session 或 execution metadata，也不能通过 event 或
+hook 获得这些引用。Toolkit definition 是 Plugin 与 Agent 装配的唯一连接。
 
 Capability 属于 Agent，与 Studio Plugin 无关。Resolver 不返回 Capability，Plugin 也不
 注册 Capability；Studio Host 按 `petId` 推导
@@ -65,7 +70,9 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 - `StudioHost.init()` 必须在 transport 监听前完成 Capability 装配与 resident Studio 构建。
 - 并发 `init()` 共享同一次初始化；`shutdown()` 与初始化串行，并且开始关闭后 Host
   不得再次初始化。
-- resident Studio 构建失败时，Host 必须关闭已经初始化的 Capability/Toolkit runtime。
+- 所有配置 Pet 都 eager start；任一 resident Pet 或其配套 interaction adapter 启动失败，
+  整个 Host 启动失败并关闭本轮已创建的全部资源。不存在 `lazy`、`disabled` 或兼容回退。
+- Pet 启动和关闭不定义顺序；Host 必须等待所有 close settle。
 - 插件按配置顺序启动；任一 `start()` 失败时，包含失败插件在内的已启动前缀必须逆序
   `stop()`。
 - `shutdown()` 之后拒绝新 dispatch；已经入队但尚未开始的 dispatch 不得再调用 pet。
@@ -89,10 +96,50 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 - 独立 root 与 Host lifetime lease 是正常部署的所有权边界；mutation lock 只保证单次事务，
   不允许多个 Host 共同驱动同一 thread。
 
-### 2.3 Transport 与关联
+### 2.3 Transport、registry 与关联
 
-- Studio Host 不构造 `LocalAgentGraphService`、`LocalServerTuiSessionService` 或
-  `LocalServerChatHandler`。
+- Studio core 不构造 Agent Session service 或 conversation handler。Studio Host 的外层
+  composition 使用 local-agent interaction builder 为每个 resident Pet 配套构造并启动
+  Agent Session WebSocket；该 listener 只与内部 Pet runtime 交互。
+- Studio registry 只持有 `PetDispatchPort`。Resident Pet 的 conversation surface 与
+  Agent Session adapter 由 local-agent 装配，不进入 Studio package 或 Plugin context。
+- Studio control plane 通过 HTTP Plugin 暴露 dispatch、event 与 Plugin hook；目标形态不再
+  保留内置 Studio WebSocket/stdio transport。
+- `listPets()` 只返回 Host runtime registry 中当前存活的 Pet，并把 Studio 配置中的
+  registration metadata 与 runtime liveness 合并；不返回 Capability summary、lazy 或
+  disabled 状态。
+
+Studio target dispatch contract 只包含单向 request，不携带 thread 或 continuation：
+
+```ts
+type StudioDispatchRequest = {
+  petId: string;
+  request: string;
+  metadata?: JsonObject;
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+};
+
+type StudioDispatchReceipt = {
+  petId: string;
+  invocationId: string;
+  onInvocation(handler: StudioInvocationEventHandler): () => void;
+  completion: Promise<StudioDispatchResult>;
+};
+
+type StudioDispatchResult = {
+  petId: string;
+  invocationId: string;
+  status: 'completed' | 'waiting' | 'failed' | 'cancelled';
+  output?: string;
+  error?: string;
+};
+```
+
+receipt/event 不公开 Agent Session active `threadId`、pending continuation 或 Agent
+execution metadata。dispatch 真正获得执行权时，由 `ResidentPetHost` 内部从共享 Agent
+Session service 读取 active thread。
+
 - 每次已接收 dispatch 的 receipt 提供 invocation-scoped observer，并回放已知最新状态。
 - transport 先发 `studio.accepted`，再订阅该 receipt；producer-owned `metadata` 不携带
   route id 或其他 transport 私有状态。
@@ -113,39 +160,70 @@ reviewCapabilities = {
 }
 ```
 
-需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；Pet runtime 将它投射为
-通用 `waiting` continuation，使当前 invocation 结束并释放 active queue slot，但不会结束或
-删除 Pet thread。没有交互 Plugin 时 checkpoint 可以一直等待，这比在核心层改变 review policy
-更符合持久化执行语义。
+需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；dispatch 只把本次
+invocation 收口为 `waiting`，不投射 interrupt identity/payload，也不会删除 checkpoint
+state。Dispatch 是发后不管的单向入口，不提供 resume。
 
-Studio transport 不复用 Chat 的 session 或 run-control 协议，因为它不拥有 Chat session
-state。它接受 Studio 自己的 typed `resume` dispatch。交互能力由独立 Studio Plugin/Host
-adapter 提供：它观察公开 continuation，把事件送给用户交互层，再把 Pet-defined回答作为一次
-新的 dispatch 送回同一 Pet。Pet runtime 对 checkpoint 校验 continuation identity、解析回答并
-构造 LangGraph resume；Studio core 只搬运 typed input/result，不解释选项。
+pending interrupt 由同一 resident Pet 的 Agent Session conversation 投射与恢复；review、
+interrupt 与 session/thread 切换直接复用 `@pinpawo/agent-session` contract。Studio core、
+Studio HTTP transport 与 Plugin 都不解释 continuation，不构造 LangGraph resume，也不持有
+checkpoint。checkpoint 持久化保证等待状态不依赖 Host 内存；重连后的用户投射由 Agent
+Session snapshot 恢复。
 
-checkpoint 已兜底保存中断状态，稳定 Pet thread 在进程重启后仍能恢复；一次性的 transport
-route 不做重建。用户侧 pending-action 索引、授权与断线重放属于交互 Plugin 的持久化边界，
-不应以关闭 runtime HITL 的方式代替。
+多 Pet 路由由 local-agent Agent Session listener 在 connection 建立阶段完成。listener 从
+Pet-scoped URL/endpoint 选择对应的 `ResidentPetInteraction`，之后继续使用原样的
+`AgentClientMessage` / `AgentServerMessage`，不向 message schema 增加 `petId`。在该 route
+及多 Pet waiting/resume E2E 落地前，现有 dispatch continuation/resume 仍是 transitional
+adapter；迁移不能先关闭唯一已经实现的恢复路径。具体顺序见
+[Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md#8-迁移顺序与验收)。
 
-## 3. 验收测试
+## 3. 进程入口与 Plugin 装配
 
-- shutdown 后 active dispatch 收到取消、queued dispatch 不 invoke；pending interrupt 不阻塞 shutdown。
+独立入口仍为 `pinpawo-studio`，直接位于 `@pinpawo/studio` package；不存在第二个
+`studio-app` 或 Chat mode。进程入口负责组合边界，不扩大 Studio core：
+
+1. 从 workdir 解析 Studio/Pet 配置，并通过注入的 `StudioPluginResolver` 把配置中的
+   Plugin id 解析成 application 已安装的 module instance；Studio 不扫描、枚举或静态
+   import concrete Plugin；
+2. 在监听前完成 Toolkit inventory、全部 resident Pet 与配套 Agent Session interaction
+   的 all-or-nothing 初始化；
+3. 启动 local-agent Agent Session WebSocket，供 TUI 与指定 Pet conversation 交互；
+4. 通过 HTTP Plugin 暴露 Studio dispatch、event 与 Plugin-contributed route/static UI；
+5. SIGINT/SIGTERM 只关闭本 Host，并等待全部 lifecycle resource settle。
+
+HTTP Plugin 是唯一 Studio control-plane listener。Console/UI Plugin 只能向它贡献打包后的
+静态资源或 route，不能启动 Vite、Express、Hono 或第二个产品 server。Agent Session
+WebSocket 是同进程 local-agent interaction transport，不是 Studio protocol。目标会移除
+当前内建的 Studio WebSocket/stdio invocation transport。
+
+具体 HTTP route、security 与 static mount 约束见 [HTTP Plugin](http-plugin.md)。
+standalone CLI 如何把已安装 module 转成 resolver、校验 factory 并装配 packaged UI，见
+[CLI Plugin Web Composition](cli-plugin-web-composition.md)。在默认 resolver 落地之前，
+CLI 对包含 Plugin 的配置仍不具备自启动能力。
+
+## 4. 验收测试
+
+- shutdown 后 queued dispatch 不 invoke；active operation 按 resident lifecycle contract 收口；
+  pending interrupt 不阻塞 shutdown。
 - plugin partial-start failure 逆序 rollback。
 - 同一 checkpoint root 的第二个 Host writer lease 被拒绝；owner 释放或 dead-owner 安全恢复后
   才能启动。两个 `FileSaver` 实例并发 `putWrites` 不丢 sibling writes。
 - Studio invocation 通过 receipt observer 精确归属；producer metadata 无 transport 私有字段。
-- Studio transport 接受 typed interrupt resume，但明确拒绝 Chat session/run control。
+- Studio dispatch contract 不包含 resume；Agent Session conversation 继续负责 typed
+  interrupt/review control。
 - Studio Pet invocation 保留 human review/session authorization capability，使 interrupt 可落入 checkpoint。
+- conversation 切换 active thread 后，尚未开始的 dispatch 在执行时沿用新 thread。
+- active operation 非抢占；空闲时 conversation queue 严格优先于 dispatch queue。
+- 任一 Pet 启动失败使整个 Host 启动失败；`listPets()` 只返回当前存活 Pet。
 - `StudioHost` success/failure init 均按所有权顺序释放资源。
 
-## 4. 尚未纳入
+## 5. 尚未纳入
 
-- 独立 Studio interaction Plugin，以及重启后的 pending-action 索引。
+- `ResidentPetHost` 双 port 的代码迁移；当前 `PetAgentRuntime.invoke()` 仍是 dispatch
+  port 的过渡实现。
+- local-agent resident interaction builder 与 Agent Session WebSocket 的代码迁移。
 - durable event log 与断线重放。
-- HTTP trigger、scheduler 与 Plugin discovery；这些仍由 #638/#645 继续设计。
-  独立进程入口见
-  [standalone process draft](standalone-process.md)。
+- scheduler 与 Plugin discovery；这些仍由 #638/#645 继续设计。
 
 Kanban 持久化和 dispatch result 投射由可选 Plugin 自己实现，见
 [Kanban Plugin durable state](kanban-plugin-durable-state.md)。它不改变上述 Studio

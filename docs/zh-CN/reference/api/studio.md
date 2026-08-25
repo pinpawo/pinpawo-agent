@@ -6,6 +6,10 @@
 > [`studioContract.ts`](../../../../packages/studio/src/studioContract.ts)、
 > [`studioInvocation.ts`](../../../../packages/studio/src/studioInvocation.ts) 和
 > [`types.ts`](../../../../packages/studio/src/types.ts)。
+>
+> **已接受目标差异：** typed dispatch resume、固定 Pet `threadId`、lazy/disabled
+> registration 与内建 Studio WebSocket/stdio 都是过渡实现。目标见
+> [Resident Pet Host Ports](../../../design/agent-runtime/resident-pet-host-ports.md)。
 
 Studio 是轻量的多 Pet dispatch 底座。它不定义任务结构、依赖、调度、重试、
 Plugin 状态持久化或 Capability；这些分别属于 Plugin 与 Agent。
@@ -100,9 +104,16 @@ Studio 不复用 Chat 的 session、route cache 或 review message。独立 inte
 
 interrupt 是否存在由 checkpoint 决定，不由 `onInvocation` 的内存订阅决定。
 
-Pet runtime 的单次 invoke 输入只携带 typed request/resume、`threadId` 和 cancellation
-signal。`invocationId` 只属于 Studio 协调/投射 envelope，不进入 Pet graph。Capability、Toolkit、workdir 与 Agent execution
+当前 `PetAgentRuntime.invoke()` 是过渡期的 dispatch adapter；它的单次输入只携带
+typed request/resume、`threadId` 和 cancellation signal。`invocationId` 只属于 Studio
+协调/投射 envelope，不进入 Pet graph。Capability、Toolkit、workdir 与 Agent execution
 context 都在 Host 构建 resident Pet 时确定，Studio 不能通过 dispatch 临时注入。
+
+已接受的目标由 local-agent 分别构造 `ResidentPet` 与 `ResidentPetInteraction`，再由
+[`ResidentPetHost`](../../../design/agent-runtime/resident-pet-host-ports.md)
+配套持有。Studio 只取得 `PetDispatchPort`；interaction 直接复用 Agent Session，并留在
+`@pinpawo/studio` 之外。目标 dispatch 只携带 request，在实际执行时从共享 session
+service 读取 active thread，也不能恢复 pending continuation。
 
 ## Plugin、Toolkit 与 Capability
 

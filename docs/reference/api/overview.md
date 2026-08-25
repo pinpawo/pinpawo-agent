@@ -15,21 +15,21 @@ cross-host ownership rules are recorded in
 
 | Surface | Primary owner | Use it when |
 |---|---|---|
-| **Pet runtime port** | `@pinpawo/studio` + local-host adapter | You need to invoke or embed a single agent runtime. |
-| **Studio runtime** | `@pinpawo/studio` | You need multi-Pet dispatch, stable Pet threads, serialized invocations, or Plugins. |
+| **Pet runtime port (transitional)** | `@pinpawo/studio` + local-host adapter | You are maintaining the current Studio-to-Pet dispatch adapter; new host assembly should follow the accepted Resident Pet ports design. |
+| **Studio runtime** | `@pinpawo/studio` | You need multi-Pet one-way dispatch, invocation events, or Plugins. |
 | **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or Toolkit runtime. |
 | **Local agent host** | `pinpawo` CLI package | You need local configuration, Capability loading, HTTP/WebSocket, or stdio transport. |
-| **Session projection** | `@pinpawo/agent-session` | You are building a client that renders sessions, runs, and review state. |
+| **Session projection** | `@pinpawo/agent-session` | You are building a client adapter that renders local-agent conversations, runs, and review state; it is not a Studio dispatch protocol. |
 
 ## Boundary rules
 
 1. **The Pet runtime owns execution.** It receives an actor, models,
    Capabilities, Toolkits, and input; it owns model calls, Capability selection,
    tool execution, and human-review continuation.
-2. **Studio owns the dispatch channel, not workflow state or worker internals.**
-   It validates Pets, resolves stable threads, serializes active invocations,
-   projects their lifecycle, and fans out Plugin events without reproducing a
-   worker's private tool or message history.
+2. **Studio owns the dispatch channel, not workflow state, Agent Session, or
+   worker internals.** It validates live Pets, serializes dispatches, projects
+   invocation lifecycle, and fans out Plugin events. Active-thread selection
+   and continuation recovery belong to the local-agent Agent Session interaction.
 3. **Capabilities own task intent; Toolkits own executable behavior.** A
    Capability declares a static Toolkit allowlist. A Toolkit provides typed
    tools, availability checks, operation metadata, and policy.

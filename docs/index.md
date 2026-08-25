@@ -65,13 +65,14 @@ There are no compatibility redirects in this directory. Current pages use their
 categorized, lowercase paths directly; obsolete implementations are retained
 only under `history/`.
 
-Active interrupt design work is split by mode. [Pending interrupt in
-Chat](design/local-agent/pending-interrupt-chat.md) defines the checkpoint,
-projection, and resume boundary for the implicit active Chat thread. [Pet thread
-and dispatch invocation](design/studio/pet-thread-dispatch-invocation.md) defines
-how Studio may later wrap that shared boundary with explicit `petId`, stable Pet
-threads, and per-dispatch invocations. Both are drafts and do not override the
-current Studio reference contract.
+Interrupt and Resident Pet design work is split by boundary. [Pending interrupt
+in Chat](design/local-agent/pending-interrupt-chat.md) defines the checkpoint,
+projection, and resume boundary for Agent Session conversation. [Resident Pet
+Host ports](design/agent-runtime/resident-pet-host-ports.md) defines the shared
+local-agent runtime boundary, while [Studio Independent Host Runtime](design/studio/independent-host-runtime.md)
+defines how Studio consumes dispatch and composes its process. Together they make
+dispatch one-way, leave active-thread/continuation ownership in Agent Session,
+and give conversation non-preemptive scheduling priority.
 
 ## Documentation maintenance and future wiki ingest
 

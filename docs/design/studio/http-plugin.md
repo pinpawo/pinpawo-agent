@@ -1,10 +1,11 @@
 # Studio HTTP Plugin
 
 > 状态：Draft implementation contract
-> 更新：2026-08-23
+> 更新：2026-08-26
 
-HTTP 是一个具体 `StudioPlugin`，不是 Studio Host transport，也不是 Studio core 的
-内置 server。它把 dispatch/event 通道投射到 HTTP，并暴露 HTTP-owned route hook：
+HTTP 是一个具体 `StudioPlugin`，不是 Studio core 的内置 server。目标 Studio Host
+composition 把它作为唯一 control-plane transport 装配；它把 dispatch/event 通道投射到
+HTTP，并暴露 HTTP-owned route hook：
 
 ```text
 POST /dispatch  ──> context.dispatch(request) ──> receipt identity
@@ -32,13 +33,13 @@ route 背后的领域。
 ```json
 {
   "petId": "planner",
-  "input": { "kind": "request", "request": "plan this work" },
+  "request": "plan this work",
   "idempotencyKey": "optional-retry-key"
 }
 ```
 
 HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202` 和
-`petId/threadId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
+`petId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
 Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段。它不等待 invocation completion，
 也不把 HTTP 连接变成 cancellation owner。调用方如需执行进度，应使用 Studio
 invocation transport，而不是把 Plugin event 当成 invocation event。
@@ -68,6 +69,14 @@ Kanban 默认向名为 `http` 的 Plugin 贡献 `GET /kanban`，返回当前 tas
 Kanban 启动失败。Plugin 启动顺序也不影响挂载；任一方停止时，Studio 托管的 hook
 lifecycle 会移除 route。
 
+### `static` hook
+
+HTTP Plugin 也可以暴露 HTTP-owned `static` hook，接收 Plugin 打包产物的 asset provider。
+UI Plugin 不启动第二个 server，不接收浏览器提供的 filesystem path，也不读取其他 Plugin
+数据库；HTTP Plugin 统一处理 mount path、SPA fallback、body/cache 上限、Origin 与认证。
+Kanban Console 因此可以和 API/SSE 共用一个 loopback origin，同时保持 HTTP 不 import
+Kanban、Console 不直接访问 Kanban SQLite。
+
 ## 2. Security boundary
 
 - server 只监听 `127.0.0.1`；当前 Plugin 不提供公网 bind 配置；
@@ -90,8 +99,9 @@ lifecycle 会移除 route。
 ## 4. 非目标
 
 - HTTP Plugin 自己内置领域页面或静态资源；页面可由具体 Plugin 经 route hook 贡献；
-- Studio Host 的 WebSocket/stdio invocation transport；
+- Agent Session conversation、pending interrupt projection 或 resume；
 - invocation progress SSE；
+- 观察其他 Plugin 派出的 invocation 或建立 Studio 全局 durable invocation history；
 - Plugin discovery/安装；
 - pending-interrupt interaction UI；
 - durable event storage/replay；

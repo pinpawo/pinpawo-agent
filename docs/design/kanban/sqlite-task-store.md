@@ -19,6 +19,10 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
   projection 和可选 HTTP read route；
 - 运行时 JSON snapshot store 已移除，SQLite 是持久化路径。
 
+当前实现仍保留 `waitTask(reason)`、public continuation 与 `continuation_json`。它们属于旧
+dispatch-resume adapter 的 transitional surface，不是本文的目标 application contract；
+后续迁移见 [Studio Kanban Plugin Adapter](../studio/kanban-plugin-durable-state.md)。
+
 仍未实现独立 Kanban CLI/Web composition，以及 Console 的真实 adapter；它们不能通过绕开
 service 或直接读写 SQLite 来临时补齐。
 
@@ -86,7 +90,9 @@ type KanbanTaskEvent = {
 
 - `todo`：尚未被 runner claim；全部 dependency 都是 `done` 后才 ready。
 - `doing`：已持久 claim，runner 准备或正在执行。
-- `waiting`：执行需要外部交互、授权或决定；它优先进入人可处理的 attention read model。
+- `waiting`：Kanban 已持久化一条由自身领域定义的 typed attention/authorization record；
+  它优先进入人可处理的 attention read model。裸 reason、Studio gate 或 dispatch result
+  不能产生这个状态。
 - `done`：执行者已经明确报告完成。
 - `blocked`：无法安全继续，需要人或上层策略决定；不会自动重试。
 
@@ -171,7 +177,6 @@ type KanbanTaskRepository = {
   createTask(input: CreateKanbanTaskInput): Promise<KanbanMutation>;
   claimNextReadyTask(): Promise<KanbanMutation | null>;
   completeTask(taskId: string, result: string): Promise<KanbanMutation>;
-  waitTask(taskId: string, reason: string): Promise<KanbanMutation>;
   blockTask(taskId: string, reason: string): Promise<KanbanMutation>;
   recoverInterruptedTasks(): Promise<KanbanMutation[]>;
   listTaskEvents(afterSequence?: number, limit?: number): Promise<KanbanTaskEvent[]>;
@@ -227,8 +232,10 @@ commit 失败时不得执行。commit 成功但进程在外部执行前或执行
 `doing`。下次 application start 在一个 transaction 中将所有 `doing` 改为 `blocked`，
 逐条写入 recovered event，避免无法证明旧动作是否发生时自动重试。
 
-`waiting` 在重启后保留；恢复它所需的授权或 continuation 由使用 Kanban 的 application
-adapter 管理，不进入 Kanban task store。
+已有 `waiting` 在重启后保留；恢复它所需的 typed attention/authorization record 由
+Kanban 自己持久化和管理，不从 Agent checkpoint、Studio event 或 application adapter 的
+任意 reason 推导。该 typed record 尚未进入当前最小 schema，因此目标 application API
+暂不提供创建 `waiting` 的通用 command。
 
 ## 7. SQLite lifecycle
 

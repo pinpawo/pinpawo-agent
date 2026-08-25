@@ -2,7 +2,7 @@
 
 > 状态：Historical / superseded。本文从“历史设计记录”起的旧 schema、迁移步骤和命名都不是当前 contract，不能用于指导新实现。
 >
-> 当前 Chat contract 见 [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)；当前 runtime projection 见 [Session Projection](../../reference/runtime/session-projection.md)；Studio 后续方案见 [Pet Thread and Dispatch Invocation](../studio/pet-thread-dispatch-invocation.md)。authorization matcher 与 session grant 生命周期见 [Authorization Matcher Lifecycle](../../reference/runtime/authorization-matcher.md)。
+> 当前 Chat contract 见 [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)；当前 runtime projection 见 [Session Projection](../../reference/runtime/session-projection.md)；resident Pet 的 Studio/conversation 边界见 [Resident Pet Host Ports](resident-pet-host-ports.md)。authorization matcher 与 session grant 生命周期见 [Authorization Matcher Lifecycle](../../reference/runtime/authorization-matcher.md)。
 
 > 日期：2026-06-09
 > 关联：issue #82，PR #76
@@ -14,9 +14,9 @@
 - `interruptId` identifies the wait, and `interactionId` identifies one item in
   the human-review payload.
 - Chat has an implicit active thread and no `petId` or dispatch semantics.
-- Studio dispatch is a separate, later integration. Each dispatch is one
-  invocation on the addressed Pet's stable thread; its typed resume input is
-  intentionally not fixed by this historical document.
+- Studio dispatch is a separate, one-way integration. It does not expose a
+  fixed Pet thread or typed resume; the resident Pet's Agent Session
+  conversation owns active-thread switching and pending-interrupt recovery.
 - Legacy `ReviewAction`, `actionId`, scalar response fields, and public
   `decisions` survive only at compatibility boundaries.
 

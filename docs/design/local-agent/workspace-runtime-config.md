@@ -3,6 +3,12 @@
 > **Status: proposal.** Workspace registry and protocol additions described
 > here are not a current contract. For shipped workdir behavior, see
 > [Workdir configuration](../../reference/runtime/workdir.md).
+>
+> **2026-08-25 boundary correction:** the `studio_request` protocol addition
+> below is withdrawn. The TUI/local-agent conversation protocol does not carry
+> Studio dispatch. Studio has its own dispatch contract, while Resident Pet
+> conversation is exposed through the local-agent conversation adapter described
+> in [Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md).
 
 ## Context
 
@@ -239,6 +245,7 @@ type ChatRequestMessage = {
 } & WorkspaceRequestScope;
 
 type StudioRequestMessage = {
+  // Withdrawn: retained only to show the original proposal.
   type: 'studio_request';
   requestId: string;
   userRequest: string;

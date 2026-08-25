@@ -1,197 +1,128 @@
 # Studio CLI Plugin Web Composition
 
 > 状态：Draft composition design
-> 更新：2026-08-23
-> 依赖：[Standalone process](standalone-process.md)、[HTTP Plugin](http-plugin.md)、
-> [Kanban Console UI](../kanban/ui-console.md)
+> 更新：2026-08-26
+> 依赖：[Independent Host Runtime](independent-host-runtime.md)、
+> [HTTP Plugin](http-plugin.md)、[Kanban Console UI](../kanban/ui-console.md)
 
-Studio 的独立 CLI 应能通过**通用 Plugin 装配**启动一个完整的本地 Web surface：一个
-HTTP Plugin 持有唯一 loopback server，业务 Plugin 贡献 API，UI Plugin 贡献静态 bundle。
-这不是让 Studio core 变成 Web application，也不是让每个 UI 启动自己的 server。
+本文只定义 standalone `pinpawo-studio` CLI 如何把已安装 Plugin 装配成可运行的本地 Web
+surface。它不把 module loading、HTTP 或 UI 提升为 Studio core 领域。
 
 ```text
 pinpawo-studio CLI
   └─ generic Plugin module loader
        ├─ HTTP Plugin             -> one loopback HTTP/SSE server
        ├─ Kanban Plugin           -> task APIs + dispatch/event integration
-       └─ Kanban Console Plugin   -> static Web bundle mount
+       └─ Kanban Console Plugin   -> packaged static Web bundle
 
 browser
-  └─ same-origin static UI -> HTTP Plugin routes/SSE -> Studio Plugin surface
+  └─ same-origin UI -> HTTP Plugin routes/SSE -> Studio Plugin surface
 ```
 
-`createStudio()`、`StudioHost` 与 `StudioPluginContext` 仍不 import、枚举或解释
-HTTP、Kanban、Console 等具体 Plugin。
+`createStudio()`、`StudioHost` 与 `StudioPluginContext` 不 import、枚举或解释 HTTP、Kanban、
+Console 等 concrete Plugin。
 
-## 1. 目标与非目标
+## 1. 当前缺口
 
-目标：
+`StudioPluginResolver` 已是 Host 的注入 port，`StudioHostProcessOptions` 也允许嵌入方提供
+resolver；但是 standalone CLI 没有默认 resolver。当前 `.pinpawo/studio.json` 一旦声明
+Plugin，CLI 无法仅凭该配置自行启动。
 
-- `pinpawo-studio` 按 workdir 的显式配置装载已安装 Plugin；
-- 一次 CLI 启动只产生一个 HTTP listener；
-- Console bundle 与 API/SSE 使用同一 loopback origin；
-- Plugin 的启动、rollback 和停止仍由 Studio lifecycle 统一管理；
-- Kanban 任务/SQLite 继续完全由 Kanban 拥有，UI 不直接碰数据库。
+HTTP Plugin 已提供 route hook，`http/static` 仍只有目标描述，尚无稳定 TypeScript contract
+与 packaged asset implementation。这个缺口在实现完成之前不能只由
+[Independent Host Runtime](independent-host-runtime.md) 的 composition prose 代替。
 
-非目标：
+## 2. CLI module loader
 
-- Studio core 内置 Plugin catalog、静态页面或 HTTP framework；
-- 自动扫描所有 npm package 或从网络下载 Plugin；
-- Vite development/preview server 成为产品运行时；
-- UI 取得 Agent checkpoint、Studio 内部 event queue 或 Plugin 私有 state；
-- 本阶段实现浏览器登录、跨机器公网访问或 interaction resume。
+安装定位属于 CLI/application composition，不属于 Studio config 领域。实现可以使用单独的
+CLI deployment config，或由 CLI 在读取 Studio config 前将安装清单解析成 resolver；无论
+选择哪种文件布局，Studio core 仍只收到 `id + options` 和注入的 resolver。
 
-## 2. CLI 的通用 Plugin module loader
-
-目前 `StudioPluginResolver` 已是正确的 Host port，但 standalone CLI 没有默认 resolver，
-因此一旦 `studio.json` 配置 Plugin 就无法自行启动。补齐的是 CLI adapter，而非 Studio
-core registry。
-
-建议配置把安装入口显式写在每一个 Plugin 项：
-
-```json
-{
-  "plugins": [
-    {
-      "id": "http",
-      "module": "@pinpawo-plugin/studio-http",
-      "options": { "port": 4310 }
-    },
-    {
-      "id": "kanban",
-      "module": "@pinpawo-plugin/kanban",
-      "options": { "database": "./.pinpawo/kanban/tasks.sqlite" }
-    },
-    {
-      "id": "kanban-console",
-      "module": "@pinpawo-plugin/kanban/console/studio-plugin",
-      "options": { "httpPlugin": "http", "mountPath": "/" }
-    }
-  ]
-}
-```
-
-这里的 `module` 只是 CLI 的通用安装定位符，不是 Studio 领域字段：
-
-- CLI 只接受 package specifier（第一阶段不支持任意相对/绝对脚本）；
-- 同一 module 可被 cache，但每一条 config 都调用自己的 factory 来支持多个实例；
-- loader 验证 module 导出的 `id` 与配置 `id` 一致，factory 返回普通 `StudioPlugin`；
-- `options` 仍由对应 factory 校验，Studio schema 不读取 HTTP token、SQLite 路径或 UI
-  mount 的含义；
-- workdir 只作为 factory 的启动环境传入；具体 Plugin 自己决定 state/secret 的位置与
-  生命周期，Studio 不分配 Plugin 数据目录。
-
-概念上的 factory contract 如下（名称可在实现时调整）：
+概念 factory contract：
 
 ```ts
+export type StudioCliPluginEnvironment = {
+  workdir: string;
+};
+
 export type StudioCliPluginModule = {
   id: string;
-  createStudioPlugin: (
+  createStudioPlugin(
     options: Record<string, unknown> | undefined,
-    environment: { workdir: string },
-  ) => StudioPlugin | Promise<StudioPlugin>;
+    environment: StudioCliPluginEnvironment,
+  ): StudioPlugin | Promise<StudioPlugin>;
 };
 ```
 
-CLI 在构造 `StudioHost` 前由这个 loader 生成 `StudioPluginResolver`。`StudioHost` 之后
-仍只接受 resolver，嵌入式调用者也仍可以传自己的 resolver；不会产生对 concrete Plugin
-的静态依赖。
+loader 必须满足：
 
-## 3. 一个 HTTP 容器，不是第二个 Web server
+- 只解析 application 明确安装/允许的 package specifier，不扫描目录或从网络下载 Plugin；
+- module 可以缓存，但每个配置实例单独调用 factory；
+- 校验 module `id`、factory 和返回的 `StudioPlugin`，错误必须阻止 Host ready；
+- `options` 由 Plugin factory 校验，CLI/Studio 不解释 HTTP token、SQLite path 或 UI mount；
+- workdir 只是 factory environment，Plugin 自己拥有 state、secret 与 lifecycle；
+- loader 输出普通 `StudioPluginResolver`，不改变嵌入式调用者注入 resolver 的能力。
 
-`@pinpawo-plugin/studio-http` 已拥有 listener、Bearer/Origin、body 限制、SSE、route
-注册和生命周期。Console 不应启动 Vite、Express、Hono 或自己的 Node server；它应作为
-零 Toolkit 的 `kanban-console` Studio Plugin，在 `start()` 里向已安装 HTTP Plugin 贡献
-静态资源 mount。
+是否把 module specifier 放入 `.pinpawo/studio.json` 尚未接受。若未来加入，该字段也只能由
+standalone CLI adapter 消费，`@pinpawo/studio` 的 runtime contract 不得依赖 npm module
+identity。
 
-HTTP Plugin 应从现有的 `routes` hook 扩展为两个 HTTP-owned hook：
+## 3. Packaged static UI hook
 
-```text
-http/routes   -> authenticated JSON/text APIs（已有）
-http/static   -> packaged static asset mounts（新增）
-```
-
-`static` 的设计应是 asset provider，而不是把任意本机目录交给 HTTP：
+HTTP Plugin 是唯一 loopback listener。Console Plugin 不启动 Vite、Express、Hono 或第二个
+Node server，而是向 HTTP Plugin 贡献受限的 packaged asset provider：
 
 ```ts
-type StudioHttpStaticAsset = {
+export type StudioHttpStaticAsset = {
   body: Uint8Array;
   contentType: string;
   cacheControl: string;
 };
 
-type StudioHttpStaticMount = {
-  mountPath: string; // e.g. "/" or "/kanban/"
-  resolve: (relativePath: string) => Promise<StudioHttpStaticAsset | undefined>;
+export type StudioHttpStaticMount = {
+  mountPath: string;
+  resolve(relativePath: string): Promise<StudioHttpStaticAsset | undefined>;
   fallback?: 'index.html';
+};
+
+export type StudioHttpStaticHook = {
+  register(mount: StudioHttpStaticMount): () => void;
 };
 ```
 
-HTTP Plugin 负责：mount path 和 request path 校验、最长前缀选择、固定 body 上限、响应和
-cache header。Provider 必须只从自己打包的 manifest/bundle 中读取；不能接受浏览器传来的
-filesystem path，也不暴露 `ServerResponse`。
+HTTP Plugin 负责 mount/path 校验、最长前缀匹配、SPA fallback、body/cache 限制、认证边界和
+lifecycle unmount。Provider 只能读取自己的 build manifest/bundle，不能接受请求提供的
+filesystem path，也不暴露 Node `ServerResponse`。
 
-Kanban Console Plugin 只把 Vite build 的 manifest 包成该 provider。它不定义 Toolkit、
-不读取 Kanban SQLite，也不执行 dispatch；浏览器使用 Kanban/HTTP 已公开的 API 和 SSE。
-这样 UI 与 Kanban data domain 仍相互独立，但它们作为同一个 `plugins/kanban/` 产品目录
-共同发布和启动。
+Kanban Console Plugin 只贡献 bundle；它不定义 Toolkit、不读取 Kanban SQLite，也不执行
+dispatch。浏览器继续使用 Kanban/HTTP 已公开的 API 与 SSE。
 
-`hooks.contribute()` 已支持 HTTP 先启动或 Console 先启动：provider 出现后即挂载，任一
-Plugin 停止时自动卸载。因此 config 顺序只决定观察性的 start 顺序，不形成 UI 对 HTTP 的
-脆弱启动竞态。
+## 4. Token bootstrap
 
-## 4. 本地 Web security
+- server 只监听 `127.0.0.1`；
+- static HTML/JS/CSS 可以公开，但不得内嵌 token、task 或 checkpoint；
+- dispatch、SSE 与 contributed API 默认仍要求 Bearer；
+- Console 首版只在内存保存用户输入的 token，不写 cookie、localStorage 或 query；
+- 若 CLI 后续支持 `--open`，token 只能短暂位于 URL fragment，页面读取后立即通过
+  `history.replaceState()` 清除；
+- same-origin 与外部 Origin 的判断仍由 HTTP Plugin 统一执行。
 
-- server 继续只 bind `127.0.0.1`；
-- 静态 HTML/JS/CSS 可以是 public，因为它们不含 task、token 或 checkpoint 数据；
-- `/dispatch`、`/events`、Kanban API 和未来 interaction command 默认仍要求 Bearer；
-- Console 首版在内存中保存用户粘贴的 access token，不写 localStorage/cookie/query；
-- CLI 可以单独显示 loopback URL 和 token 获取方式；若以后增加 `--open`，token 只能放
-  URL fragment，并在 Console 启动后立即 `history.replaceState()` 清除；
-- HTTP Plugin 应自动接受它自己已监听的 same-origin，外部 Origin 仍需要显式 allowlist。
+首版不引入新的 login/session domain，也不能为了 UI 启动便利绕开 HTTP Plugin 的认证边界。
 
-首版不实现 cookie session 或新的 authentication domain。那是 HTTP/interaction Plugin
-的后续工作，不能让 Console 为了方便绕开既有 Bearer boundary。
+## 5. 实施顺序
 
-## 5. 第三方 HTTP 容器
+1. 确定 CLI deployment config 与 Studio config 的边界；
+2. 实现 generic module loader、factory validation 和默认 `StudioPluginResolver`；
+3. 在 HTTP Plugin 中实现上述 `static` hook 与 lifecycle/security tests；
+4. 将 Console production bundle 包装成 zero-Toolkit Studio Plugin；
+5. 用一个 workdir 启动 `http + kanban + kanban-console`，验收 route/static/SSE/unmount/shutdown；
+6. 单独收敛 token bootstrap，不能把 token 变成 Studio config 字段。
 
-当前 HTTP Plugin 直接基于 `node:http` 实现了 route matching、method handling、body
-读取、CORS、Bearer middleware、SSE client 管理和错误响应。这使它已经在重复通用 Web
-framework 的职责；新增 static mount 后继续手写会放大维护与安全面。
+## 6. 验收
 
-因此建议把 **Hono + `@hono/node-server`** 作为
-`@pinpawo-plugin/studio-http` 的内部依赖。它不是新的 Studio Plugin，也不进入
-`@pinpawo/studio`：
-
-```text
-Studio core ─X─> Hono
-Studio HTTP Plugin ──> Hono / Node adapter
-other Studio Plugins ──> HTTP Plugin hook contracts only
-```
-
-HTTP Plugin 仍拥有且不能让给第三方库的部分是：Studio dispatch/event adapter、Plugin
-hook lifecycle、loopback-only bind policy、Plugin route/mount validation，以及 shutdown
-顺序。Hono 只承接通用 HTTP concerns：router、method/404、middleware composition、CORS、
-request body、response，以及静态文件传输。
-
-现有 `StudioHttpRoute`、未来 `StudioHttpStaticMount` 仍是我们的稳定 Plugin contract；它们
-由 HTTP Plugin 转成 Hono route/middleware。这样将来替换 Hono 也不会影响 Kanban 或其他
-Plugin。
-
-Vite 仍只负责 React bundle。它的官方文档明确将 build 输出视为可由静态服务托管的资产，且
-`vite preview` 仅用于本地预览、不是 production server。[Vite static deploy guide](https://vite.dev/guide/static-deploy)
-
-Hono 的 Node adapter 支持 Node server 和 `serveStatic`，可在 HTTP Plugin 内实现受限的
-Console bundle mount。[Hono Node adapter](https://hono.dev/docs/getting-started/nodejs)
-
-## 6. 实施顺序
-
-1. 以 Hono 重构 HTTP Plugin 内部实现，同时保持既有 HTTP contract 与 SSE/E2E 测试不变；
-2. 扩展 config 的通用 `plugins[].module`，实现 CLI module loader 和 factory validation；
-3. 给 HTTP Plugin 增加受限 `http/static` hook，并为静态挂载与 lifecycle 写测试；
-4. 将 Console 的 production bundle 纳入 `plugins/kanban` 发布产物，新增
-   `kanban-console` zero-Toolkit Plugin factory；
-5. 用一个 workdir config 启动 `http + kanban + kanban-console`，验收静态页面、dispatch、
-   SSE、route unmount 与 SIGINT shutdown；
-6. 独立设计 interaction Plugin、durable Kanban event read model 与 token bootstrap，
-   再把静态 prototype 换成真实 adapter。
+- standalone CLI 能从明确安装清单解析配置中的 Plugin；
+- Studio package 不 import concrete Plugin 或 npm loader；
+- 一个 Host 只有一个 HTTP listener；
+- Console 与 Kanban 数据层之间只有 HTTP/API，不直接打开 SQLite；
+- static provider 不能逃逸 bundle manifest；
+- partial-start failure 按 Studio Host lifecycle 完整 rollback。

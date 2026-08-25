@@ -3,7 +3,7 @@
 > Status: Draft
 > Date: 2026-08-22
 > Related: issues #675 and #684, PR #682
-> Studio integration: [Pet Thread and Dispatch Invocation](../studio/pet-thread-dispatch-invocation.md)
+> Resident Pet integration: [Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md)
 
 ## Decision summary
 

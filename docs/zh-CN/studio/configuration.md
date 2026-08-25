@@ -3,6 +3,11 @@
 > **状态：当前本地宿主配置。** schema 位于
 > [`configSchema.ts`](../../../packages/studio/src/configSchema.ts)，装配位于
 > [`buildStudio.ts`](../../../packages/studio/src/host/buildStudio.ts)。
+>
+> **已接受目标差异：** 本页的固定 Pet thread、typed dispatch resume、lazy/disabled
+> registration 与内建 Studio wire 都是当前过渡实现。目标 dispatch 只携带 request；
+> Agent Session conversation 负责 active thread 和 pending interrupt。见
+> [Resident Pet Host Ports](../../design/agent-runtime/resident-pet-host-ports.md)。
 
 [English](../../studio/configuration.md)
 
@@ -233,7 +238,7 @@ Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver �
 
 ---
 
-## 4. 一个完整回合
+## 4. 当前实现的一个完整回合
 
 用配置串一遍,验证契约是否自洽:
 
@@ -269,7 +274,7 @@ Plugin 的持久化状态仍由 Plugin 自己拥有。例如，应用 resolver �
 - 第 7 步 studio 只广播,不解释 `task.done` 是什么意思
 - 全程 pet 从未直接与 studio 通信
 
-### 4.1 卡住的时候
+### 4.1 当前实现卡住的时候（过渡）
 
 第 5 步若 writer 请求一个必须人工确认的操作:
 
@@ -294,6 +299,11 @@ resume Command。waiting/interrupt 由 LangGraph checkpoint 持久化,不依赖 
 > `waiting` 把 task 标为 `waiting`，`failed` / `cancelled` 标为 `blocked`，
 > 而 completed 但 Agent 未调用 Kanban 收口工具的 task 也会明确标为 `blocked`。
 > 这是 Kanban 对自己派发工作的领域投射；它不订阅或解释其他 Plugin 的 invocation。
+
+目标实现会删除第 7–9 步的 interaction Plugin/typed resume dispatch：dispatch 只返回
+`waiting` 状态，不携带 continuation；同一 resident Pet 的 local-agent Agent Session
+WebSocket 从 checkpoint snapshot 展示并恢复 pending interrupt。Studio 与 Kanban Plugin
+均不参与 resume。
 
 ---
 

@@ -4,6 +4,10 @@
 
 > **状态：当前 local-agent 行为。** 本页描述已实现的本地适配，不替代
 > `@pinpawo/studio` 的传输无关 API。
+>
+> **已接受目标：** 下文内建的 Studio WebSocket/stdio、固定 Pet thread 和 dispatch
+> resume 都是过渡实现。目标见
+> [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)。
 
 Studio core 契约不依赖文件系统或 transport；`@pinpawo/studio` package 同时拥有
 具体的本地 Host adapter 与 Studio wire protocol。local-agent 只提供不理解协议语义的
@@ -17,6 +21,11 @@ Studio + PetAgentRuntime[] + 已配置插件
 studio.dispatch → typed dispatch(petId) → studio.accepted（确认）
                                       ↘ studio.invocation
 ```
+
+`PetAgentRuntime` 是当前过渡期的 dispatch adapter。已接受的目标装配由 local-agent
+创建同时具有 `dispatch` 与 `conversation` 两个 surface 的 `ResidentPetHost`；Studio
+只取得 `dispatch`，Agent Session/TUI 路径不进入 Studio。见
+[Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)。
 
 这是与 Chat 相同的 `Host -> Agent Runtime -> Capability -> Toolkit` 领域模型。
 Studio 只改变一个 Host 如何配置、常驻并 invoke 多个 Pet runtime，不引入另一套
@@ -33,21 +42,30 @@ Plugin 不贡献 Capability。`StudioHost.init()` 在 transport 开始监听前�
 请求只 dispatch 到这个常驻实例，不触发装配。Studio 的生命周期由 Host 管理，
 不在请求时创建或缓存。
 
+上述直接构造是当前实现，不是最终所有权边界。迁移后 local-agent 分别暴露 resident
+runtime builder 与 Agent Session interaction builder；Studio Host composition 为每个 Pet
+配套使用两者，但只把 dispatch surface 交给 Studio core。interaction adapter 在同一进程
+暴露自己的 Agent Session WebSocket。Studio 不得因此增加 conversation registry 或 Agent
+Session 依赖。
+
 宿主可注入 Studio 自己的 checkpointer。Chat 与 Studio 可作为独立进程启动，因此使用
 不同 checkpoint root。每个 Host 启动时会为其 checkpoint root 取得生命周期 writer
 lease；已有 Host owner 时直接拒绝启动。`FileSaver` 仍通过 filesystem writer lock
 串行化单次 store mutation。
-Pet runtime 据此判断 typed request 或 resume 对当前 continuation 是否合法。Studio
-自身不读取、也不解释 checkpoint 内容。Pet runtime 保留 human review 能力，因此
-LangGraph 可以持久化 interrupt 并返回公开 pending 投射。这个状态不依赖 Chat Host
-内存，可以一直等待外部交互层对同一个稳定 Pet thread 提交 resume。
+Pet runtime 使用 checkpointer 在 Agent Session 当前 active thread 上执行，并保留 pending
+continuation。Studio 自身不读取、也不解释 checkpoint 内容。Pet runtime 保留 human review
+能力，因此 LangGraph 可以持久化 interrupt 并返回公开 pending 投射；这个状态不依赖 Chat
+Host 内存。
 
-内建 Studio transport 不接收 Chat 的 review/session 消息，但接收 Studio 自己的 typed
-`resume` dispatch。独立 Studio Plugin 或 Host adapter 可以消费 waiting invocation event、
-与用户交互，再提交 typed resume。Pet runtime 负责校验 checkpoint
-并构造 graph command。
+已接受目标中的 dispatch 是单向入口，不包含 resume。配套的 local-agent Agent Session
+interaction 使用现有 typed review/interrupt contract 展示和恢复 pending interrupt。Studio
+core 与 Plugin 都不构造 graph resume command。
 
-## 协议语义
+TUI conversation 不经过 Studio wire，而连接配套的 local-agent Agent Session WebSocket。
+它可以切换 resident Pet 的 active thread，并优先于尚未开始的 dispatch；active work 不被
+抢占。后续 dispatch 沿用 conversation 选择的 active thread。
+
+## 当前协议语义（过渡）
 
 Studio 自己的 `studio.dispatch` 携带 `petId`、typed request/resume input、不透明
 metadata 与可选 idempotency key。接收后立即返回带 `petId`、稳定 `threadId` 和当前
@@ -63,6 +81,10 @@ Studio 独立的进程内事件总线；request transport 不把全局 Plugin ev
 某个 delivery。未来若需对外提供 Plugin event feed，需要显式的 subscription/replay
 契约。当前 invocation 流仍是进程内 best-effort 通知，pending interrupt 仍以
 checkpoint 为权威。
+
+目标会从 Studio dispatch receipt/event 移除 typed resume 与 `threadId`，并把 Studio
+control-plane dispatch/event 收敛到 HTTP Plugin；内建 Studio WebSocket/stdio handler
+随迁移删除。本节仅用于准确描述尚未迁移的当前代码。
 
 ## 关闭
 

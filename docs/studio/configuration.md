@@ -22,7 +22,13 @@ Capability collection at
   "description": "A drafting and review workflow",
   "entryPetId": "planner",
   "pets": ["planner", "writer", "reviewer"],
-  "plugins": [{ "id": "kanban" }]
+  "plugins": [
+    {
+      "id": "kanban",
+      "module": "@pinpawo-plugin/kanban",
+      "options": { "databasePath": ".pinpawo/kanban/tasks.sqlite" }
+    }
+  ]
 }
 ```
 
@@ -34,6 +40,7 @@ Capability collection at
 | `name`, `description` | No | Display metadata. |
 | `plugins` | No | Explicit plugin list; order is plugin start order. |
 | `plugins[].id` | When a Plugin is listed | Plugin ID resolved by the injected `StudioPluginResolver`. |
+| `plugins[].module` | Standalone CLI | Installed package specifier used only by `pinpawo-studio` to create the resolver result. |
 | `plugins[].options` | No | Opaque object passed to that Plugin resolver. |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
@@ -56,7 +63,8 @@ is its lifecycle and event-source identity inside Studio.
   "name": "Writer",
   "role": "Turn outlines into complete drafts",
   "serviceSummary": "Long-form writing and structured rewriting",
-  "modelProfileId": "qwen-max"
+  "modelProfileId": "qwen-max",
+  "defaultCapabilityName": "writing"
 }
 ```
 
@@ -65,6 +73,11 @@ it also identifies the Pet's Capability directory. `general` is added by the
 local host as its required baseline Capability.
 `modelProfileId` selects a host model profile when present. The old inline
 `model` field and the old `capabilities` name list are rejected explicitly.
+`defaultCapabilityName` optionally selects the Capability document that the
+Agent's entry Planner preloads as its default candidate. It must resolve to an
+available Capability in this Pet's compiled registry; when omitted, the Agent
+uses `general`. This is a preference, not a forced route: the Planner may still
+select a more specific Capability discovered from the same registry.
 
 ## Per-Pet Capability directory
 
@@ -75,7 +88,7 @@ configuration or name allowlist is required:
 <workdir>/.pinpawo/pets/writer/capabilities/
 ├── explore/
 │   └── CAPABILITY.md
-└── studio-planning/
+└── kanban-planning/
     └── CAPABILITY.md
 ```
 
@@ -100,20 +113,33 @@ registry and imports no concrete Plugin. A Host caller maps installed IDs to
 Plugin implementations and passes `resolvePlugin` to `StudioHost`. Options pass
 through unchanged for the Plugin to validate.
 
+For the standalone `pinpawo-studio` CLI, every configured Plugin needs a
+`module` package specifier. The CLI accepts package specifiers only—not relative
+or absolute paths—and dynamically imports the package before Host startup. Each
+package exports its matching `id` and `createStudioPlugin(options, { workdir })`
+factory. The module can be cached, but the factory runs once for each config
+entry. This is a CLI composition detail: Studio preserves the locator only long
+enough to pass it to its injected resolver; it does not import packages, keep a
+Plugin catalog, or interpret Plugin options.
+
+Embedded Hosts can continue to omit `module` and supply their own resolver.
+That allows applications to use private Plugin construction or test doubles
+without adding a standalone-CLI installation boundary.
+
 `@pinpawo-plugin/kanban` provides a concrete Kanban Plugin and is not a
 Studio dependency. The Plugin defines its Kanban Toolkit but does not contribute
-the matching `studio_planning` Capability. A Pet selects that independent Agent
+the matching `kanban_planning` Capability. A Pet selects that independent Agent
 Capability by placing its `CAPABILITY.md` directory under the conventional
 per-Pet root. Installation/discovery policy for Plugins remains outside Studio;
 callers inject concrete Plugins through `StudioPluginResolver`.
 
-Durable Plugin state remains Plugin-owned. For example, an application resolver
-can construct `createKanbanPlugin({ databasePath: ... })`. The application chooses
-an absolute SQLite path such as
-`<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite`; Studio neither derives that
-path nor reads task state. Without a database path, the same Plugin remains an
-explicitly in-memory instance. A larger Kanban application can instead own a
-`KanbanTaskService` itself and inject it into the Studio adapter.
+Durable Plugin state remains Plugin-owned. The Kanban CLI factory accepts a
+`databasePath` option and resolves a relative path from the configured workdir;
+for example `".pinpawo/kanban/tasks.sqlite"` becomes
+`<workdir>/.pinpawo/kanban/tasks.sqlite`. Studio neither derives that path nor
+reads task state. An embedded application can instead construct
+`createKanbanPlugin({ databasePath: ... })` with its own absolute path or inject
+an application-owned `KanbanTaskService` into the Studio adapter.
 
 Existing file-backed `kanban.json` state is not loaded implicitly. Before changing
 an existing resolver to `databasePath`, run the explicit

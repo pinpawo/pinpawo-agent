@@ -64,8 +64,8 @@ scheduler or trigger integrations must use the same Plugin boundary rather than
 enlarge the Studio contract.
 
 The optional `studio-http` package is another concrete Plugin. It defines no
-Toolkit; it projects `context.dispatch()` and `context.subscribe()` to an
-authenticated loopback HTTP/SSE boundary.
+Toolkit; it projects `context.dispatch()` and `context.subscribe()` to a
+loopback HTTP/SSE boundary with opt-in Bearer authentication.
 
 ## Operational limits
 

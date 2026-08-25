@@ -4,13 +4,23 @@
   "private": true,
   "description": "Loopback HTTP dispatch and live SSE event Plugin for PinPawo Studio",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
+    "build": "tsup src/index.ts --format esm --platform node --target node24 --dts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
@@ -19,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "tsup": "^8.3.5",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

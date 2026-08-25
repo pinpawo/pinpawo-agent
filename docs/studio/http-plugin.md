@@ -15,21 +15,22 @@ import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 
 const plugin = createStudioHttpPlugin({
   port: 3212,
-  authToken: process.env.STUDIO_HTTP_TOKEN!,
   allowedOrigins: ['http://localhost:3000'],
 });
 ```
 
 The application resolver returns this Plugin for its configured ID. The server
 always binds `127.0.0.1`; `port: 0` selects an ephemeral port for embedding or
-tests. Both endpoints require `Authorization: Bearer <token>`. Browser requests
-must additionally use an exact origin listed under `allowedOrigins`.
+tests. Loopback calls are unauthenticated by default. An embedding that needs a
+Bearer boundary can pass `authToken`; then dispatch, SSE, and contributed routes
+require `Authorization: Bearer <token>`. Cross-origin browser requests must use
+an exact origin listed under `allowedOrigins`; the Plugin's own loopback origin
+is always accepted.
 
 ## Dispatch
 
 ```http
 POST /dispatch
-Authorization: Bearer ...
 Content-Type: application/json
 
 {
@@ -56,11 +57,17 @@ correlation field.
 Invalid JSON/dispatch shapes return `400`, unsupported media returns `415`, and
 a Studio dispatch rejection returns `422`.
 
+`GET /dispatches` returns the bounded in-memory read model for dispatches
+accepted through this HTTP Plugin. A record starts as `queued`, becomes `busy`
+when the Pet invocation begins, and ends as `completed`, `waiting`, `failed`, or
+`cancelled`. This is Console observability, not a durable Studio queue: a Plugin
+restart clears it, and dispatches produced by other Plugins remain in their own
+domain projections.
+
 ## Pet registry
 
 ```http
 GET /pets
-Authorization: Bearer ...
 ```
 
 This returns the current Studio registrations for control clients:
@@ -83,23 +90,29 @@ The registry is read-only. It deliberately excludes Agent-private actor fields,
 runtime references, checkpoint data, and execution context. `/pets` is owned by
 the HTTP Plugin and cannot be replaced through the contributed-route hook.
 
-## Plugin-contributed routes
+## Plugin-contributed routes and static UI
 
 The HTTP Plugin exposes a lifecycle-managed `routes` hook. Other installed
 Plugins can contribute HTTP handlers without the HTTP Plugin importing their
-domain. Every contributed route passes through the same Bearer authentication
-and Origin policy; `/dispatch`, `/pets`, and `/events` remain reserved.
+domain. Every contributed route passes through the same optional authentication
+and Origin policy; `/dispatch`, `/dispatches`, `/pets`, and `/events` remain reserved.
 
 When the Kanban Plugin is also installed, it contributes `GET /kanban`, which
 returns its current task snapshot and event cursor, plus `GET /kanban/events`
 for Kanban-owned durable task history. Kanban still starts normally without HTTP,
 and Plugin start order does not affect hook attachment.
 
+The separate `static` hook accepts pre-packaged asset providers rather than a
+browser-supplied filesystem path. `@pinpawo-plugin/kanban/console/studio-plugin`
+is a zero-Toolkit Plugin that contributes its Vite bundle at `/`; it starts no
+second server and the browser uses same-origin `/kanban`, `/pets`, `/events`,
+`/dispatches`, and `/dispatch`. Static mount ownership follows normal Plugin lifecycle, so the
+files disappear when the Console Plugin stops.
+
 ## Live events over SSE
 
 ```http
 GET /events
-Authorization: Bearer ...
 Accept: text/event-stream
 ```
 
@@ -110,10 +123,16 @@ event: studio.event
 data: {"type":"task.done","source":"kanban","payload":{...},"occurredAt":"..."}
 ```
 
-Because native `EventSource` cannot set a Bearer header, browser clients should
-consume this SSE stream with streaming `fetch`. This is a live-only feed: there
-are no durable IDs, `Last-Event-ID` replay, or invocation progress events.
-Disconnects can therefore lose Plugin events.
+The HTTP Plugin also projects updates to its own dispatch read model as
+`dispatch.updated` messages on the same live stream. Clients recover the current
+state from `GET /dispatches` after connecting or reconnecting.
+
+Unauthenticated loopback clients can consume this SSE endpoint with native
+`EventSource`. When an embedding enables Bearer auth, use streaming `fetch`
+instead because native `EventSource` cannot set a header. This is a live-only
+feed: there are no durable IDs or `Last-Event-ID` replay. Disconnects can lose
+messages, so the dispatch snapshot and domain-owned histories remain the recovery
+paths.
 
 See the [HTTP Plugin design](../design/studio/http-plugin.md) for lifecycle,
 limits, and security invariants.

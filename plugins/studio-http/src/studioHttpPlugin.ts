@@ -13,7 +13,9 @@ import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 
 import {
   parseStudioDispatchRequest,
+  type StudioDispatchInput,
   type StudioEvent,
+  type StudioInvocationEvent,
   type StudioPlugin,
   type StudioPluginContext,
 } from '@pinpawo/studio';
@@ -21,9 +23,12 @@ import {
 const LOOPBACK_HOST = '127.0.0.1' as const;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
+const DEFAULT_MAX_DISPATCH_RECORDS = 500;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
-const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/events', '/pets']);
+export const STUDIO_HTTP_STATIC_HOOK_NAME = 'static';
+const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/dispatches', '/events', '/pets']);
+const MAX_STATIC_ASSET_BYTES = 10 * 1024 * 1024;
 
 type StudioHttpEnvironment = { Bindings: HttpBindings };
 type StudioHttpContext = Context<StudioHttpEnvironment>;
@@ -50,21 +55,58 @@ export type StudioHttpRoutesHook = {
   register: (route: StudioHttpRoute) => () => void;
 };
 
+/** One packaged static asset. Providers never receive a filesystem path. */
+export type StudioHttpStaticAsset = {
+  body: Uint8Array;
+  contentType: string;
+  cacheControl?: string;
+};
+
+/** A Plugin-owned, pre-packaged static bundle mounted by the HTTP Plugin. */
+export type StudioHttpStaticMount = {
+  mountPath: string;
+  resolve: (relativePath: string) => StudioHttpStaticAsset | undefined | Promise<StudioHttpStaticAsset | undefined>;
+  fallback?: 'index.html';
+};
+
+export type StudioHttpStaticHook = {
+  register: (mount: StudioHttpStaticMount) => () => void;
+};
+
 export type StudioHttpPluginAddress = {
   readonly host: typeof LOOPBACK_HOST;
   readonly port: number;
 };
 
+export type StudioHttpDispatchInput =
+  | { kind: 'request'; request: string }
+  | { kind: 'resume'; continuationId: string };
+
+/** In-memory read model for dispatches accepted through this HTTP Plugin. */
+export type StudioHttpDispatchRecord = {
+  readonly petId: string;
+  readonly threadId: string;
+  readonly invocationId: string;
+  readonly input: StudioHttpDispatchInput;
+  readonly status: 'queued' | StudioInvocationEvent['status'];
+  readonly submittedAt: string;
+  readonly updatedAt: string;
+  readonly output?: string;
+  readonly pendingContinuation?: StudioInvocationEvent['pendingContinuation'];
+  readonly error?: string;
+};
+
 export type CreateStudioHttpPluginOptions = {
   /** `0` asks the OS for an ephemeral port. */
   port: number;
-  /** Bearer token used by both dispatch and SSE requests. */
-  authToken: string;
+  /** Optional Bearer token for dispatch, events, and contributed routes. */
+  authToken?: string;
   /** Exact HTTP(S) origins allowed to call the Plugin from a browser. */
   allowedOrigins?: readonly string[];
   name?: string;
   maxBodyBytes?: number;
   maxEventClients?: number;
+  maxDispatchRecords?: number;
   heartbeatIntervalMs?: number;
 };
 
@@ -93,6 +135,21 @@ function readPositiveInteger(value: number | undefined, fallback: number, name: 
     throw new Error(`${name} must be a positive integer.`);
   }
   return value;
+}
+
+function isTerminalInvocationStatus(status: StudioInvocationEvent['status']): boolean {
+  return status === 'completed'
+    || status === 'waiting'
+    || status === 'failed'
+    || status === 'cancelled';
+}
+
+function projectDispatchInput(
+  input: StudioDispatchInput,
+): StudioHttpDispatchInput {
+  return input.kind === 'request'
+    ? { kind: 'request', request: input.request }
+    : { kind: 'resume', continuationId: input.continuationId };
 }
 
 function normalizeAllowedOrigins(origins: readonly string[] | undefined): Set<string> {
@@ -177,6 +234,40 @@ function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
   return { ...route, method, path: parsed.pathname };
 }
 
+function normalizeStaticMount(input: StudioHttpStaticMount): StudioHttpStaticMount {
+  const mountPath = input.mountPath;
+  if (
+    typeof mountPath !== 'string'
+    || !mountPath.startsWith('/')
+    || (mountPath.length > 1 && mountPath.endsWith('/'))
+    || mountPath.includes('?')
+    || mountPath.includes('#')
+    || mountPath.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
+    throw new Error('Studio HTTP static mount path must be an absolute normalized path.');
+  }
+  if (RESERVED_ROUTE_PATHS.has(mountPath) || typeof input.resolve !== 'function') {
+    throw new Error('Studio HTTP static mount must use an unreserved path and define resolve().');
+  }
+  if (input.fallback !== undefined && input.fallback !== 'index.html') {
+    throw new Error('Studio HTTP static mount fallback must be "index.html" when present.');
+  }
+  return { ...input, mountPath };
+}
+
+function validateStaticAsset(asset: StudioHttpStaticAsset, mountPath: string): StudioHttpStaticAsset {
+  if (!(asset.body instanceof Uint8Array) || asset.body.byteLength > MAX_STATIC_ASSET_BYTES) {
+    throw new Error(`Studio HTTP static mount "${mountPath}" returned an invalid asset body.`);
+  }
+  if (typeof asset.contentType !== 'string' || !asset.contentType.trim()) {
+    throw new Error(`Studio HTTP static mount "${mountPath}" returned an invalid content type.`);
+  }
+  if (asset.cacheControl !== undefined && (typeof asset.cacheControl !== 'string' || !asset.cacheControl.trim())) {
+    throw new Error(`Studio HTTP static mount "${mountPath}" returned an invalid cache policy.`);
+  }
+  return asset;
+}
+
 async function readJsonBody(context: StudioHttpContext): Promise<unknown> {
   const contentType = context.req.header('content-type');
   if (contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
@@ -216,6 +307,19 @@ function textResponse(
   const headers = new Headers(context.res.headers);
   headers.set('Content-Type', contentType);
   return new Response(body, { status, headers });
+}
+
+function staticResponse(
+  context: StudioHttpContext,
+  asset: StudioHttpStaticAsset,
+): Response {
+  context.header('Cache-Control', asset.cacheControl ?? 'no-store');
+  const headers = new Headers(context.res.headers);
+  headers.set('Content-Type', asset.contentType);
+  headers.set('Cache-Control', asset.cacheControl ?? 'no-store');
+  const body = new Uint8Array(asset.body.byteLength);
+  body.set(asset.body);
+  return new Response(body.buffer, { status: 200, headers });
 }
 
 function listen(server: Server, port: number): Promise<StudioHttpPluginAddress> {
@@ -259,7 +363,8 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   if (!Number.isSafeInteger(options.port) || options.port < 0 || options.port > 65_535) {
     throw new Error('Studio HTTP Plugin port must be an integer from 0 to 65535.');
   }
-  if (!options.authToken.trim() || options.authToken.length < 16) {
+  if (options.authToken !== undefined
+    && (!options.authToken.trim() || options.authToken.length < 16)) {
     throw new Error('Studio HTTP Plugin authToken must contain at least 16 characters.');
   }
   const name = options.name?.trim() || 'http';
@@ -273,6 +378,11 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     options.maxEventClients,
     DEFAULT_MAX_EVENT_CLIENTS,
     'Studio HTTP Plugin maxEventClients',
+  );
+  const maxDispatchRecords = readPositiveInteger(
+    options.maxDispatchRecords,
+    DEFAULT_MAX_DISPATCH_RECORDS,
+    'Studio HTTP Plugin maxDispatchRecords',
   );
   const heartbeatIntervalMs = readPositiveInteger(
     options.heartbeatIntervalMs,
@@ -289,7 +399,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
   let started = false;
   let stopped = false;
   const eventClients = new Set<EventClient>();
+  const dispatchRecords = new Map<string, StudioHttpDispatchRecord>();
+  const dispatchSubscriptions = new Set<() => void>();
   const routes = new Map<string, StudioHttpRoute>();
+  const staticMounts = new Map<string, StudioHttpStaticMount>();
 
   const routesHook: StudioHttpRoutesHook = {
     register: (input) => {
@@ -302,6 +415,42 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       };
     },
   };
+
+  const staticHook: StudioHttpStaticHook = {
+    register: (input) => {
+      const mount = normalizeStaticMount(input);
+      if (staticMounts.has(mount.mountPath)) {
+        throw new Error(`Duplicate Studio HTTP static mount: ${mount.mountPath}`);
+      }
+      staticMounts.set(mount.mountPath, mount);
+      return () => {
+        if (staticMounts.get(mount.mountPath) === mount) staticMounts.delete(mount.mountPath);
+      };
+    },
+  };
+
+  async function resolveStaticAsset(pathname: string): Promise<StudioHttpStaticAsset | undefined> {
+    const mounts = [...staticMounts.values()].sort(
+      (left, right) => right.mountPath.length - left.mountPath.length,
+    );
+    for (const mount of mounts) {
+      const isRoot = mount.mountPath === '/';
+      if (!isRoot && pathname !== mount.mountPath && !pathname.startsWith(`${mount.mountPath}/`)) {
+        continue;
+      }
+      const relativePath = isRoot
+        ? pathname.slice(1)
+        : pathname.slice(mount.mountPath.length).replace(/^\//, '');
+      const requested = relativePath || 'index.html';
+      const direct = await mount.resolve(requested);
+      if (direct) return validateStaticAsset(direct, mount.mountPath);
+      if (mount.fallback === 'index.html') {
+        const fallback = await mount.resolve('index.html');
+        if (fallback) return validateStaticAsset(fallback, mount.mountPath);
+      }
+    }
+    return undefined;
+  }
 
   async function broadcastChunk(chunk: string): Promise<void> {
     await Promise.all([...eventClients].map(async (client) => {
@@ -328,8 +477,81 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     await broadcastChunk(`event: studio.event\ndata: ${data}\n\n`);
   }
 
+  function pruneDispatchRecords(): void {
+    if (dispatchRecords.size <= maxDispatchRecords) return;
+    for (const [invocationId, record] of dispatchRecords) {
+      if (record.status === 'queued' || record.status === 'busy') continue;
+      dispatchRecords.delete(invocationId);
+      if (dispatchRecords.size <= maxDispatchRecords) return;
+    }
+  }
+
+  function publishDispatchRecord(record: StudioHttpDispatchRecord): void {
+    dispatchRecords.set(record.invocationId, record);
+    pruneDispatchRecords();
+    void broadcastEvent({
+      type: 'dispatch.updated',
+      source: name,
+      payload: { dispatch: record },
+      occurredAt: record.updatedAt,
+    });
+  }
+
+  function observeDispatch(
+    receipt: Awaited<ReturnType<StudioPluginContext['dispatch']>>,
+    input: StudioDispatchInput,
+    submittedAt: string,
+  ): void {
+    // An idempotent HTTP retry may receive the same Studio receipt. Preserve
+    // the existing lifecycle instead of briefly regressing it to queued.
+    if (dispatchRecords.has(receipt.invocationId)) return;
+    publishDispatchRecord({
+      petId: receipt.petId,
+      threadId: receipt.threadId,
+      invocationId: receipt.invocationId,
+      input: projectDispatchInput(input),
+      status: 'queued',
+      submittedAt,
+      updatedAt: submittedAt,
+    });
+
+    let unsubscribe: () => void = () => undefined;
+    let terminalBeforeRegistration = false;
+    const release = () => {
+      dispatchSubscriptions.delete(unsubscribe);
+      unsubscribe();
+    };
+    unsubscribe = receipt.onInvocation((event) => {
+      const previous = dispatchRecords.get(event.invocationId);
+      const updatedAt = new Date().toISOString();
+      publishDispatchRecord({
+        petId: event.petId,
+        threadId: event.threadId,
+        invocationId: event.invocationId,
+        input: previous?.input ?? projectDispatchInput(input),
+        status: event.status,
+        submittedAt: previous?.submittedAt ?? submittedAt,
+        updatedAt,
+        ...(event.output ? { output: event.output } : {}),
+        ...(event.pendingContinuation
+          ? { pendingContinuation: event.pendingContinuation }
+          : {}),
+        ...(event.error ? { error: event.error } : {}),
+      });
+      if (isTerminalInvocationStatus(event.status)) {
+        terminalBeforeRegistration = true;
+        queueMicrotask(release);
+      }
+    });
+    if (!terminalBeforeRegistration) dispatchSubscriptions.add(unsubscribe);
+  }
+
   function createApp(): Hono<StudioHttpEnvironment> {
     const app = new Hono<StudioHttpEnvironment>();
+    const acceptsOrigin = (origin: string): boolean => (
+      allowedOrigins.has(origin)
+      || origin === `http://${LOOPBACK_HOST}:${currentAddress?.port.toString() ?? ''}`
+    );
 
     app.use('*', async (requestContext, next) => {
       noStoreHeaders(requestContext);
@@ -337,18 +559,22 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     });
     app.use('*', async (requestContext, next) => {
       const origin = readOrigin(requestContext.req.header('origin'));
-      if (origin === null || (origin !== undefined && !allowedOrigins.has(origin))) {
+      if (origin === null || (origin !== undefined && !acceptsOrigin(origin))) {
         return requestContext.json({ error: 'Origin is not allowed.' }, 403);
       }
       await next();
     });
     app.use('*', cors({
-      origin: (origin) => allowedOrigins.has(origin) ? origin : undefined,
+      origin: (origin) => acceptsOrigin(origin) ? origin : undefined,
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       allowHeaders: ['Authorization', 'Content-Type'],
       maxAge: 600,
     }));
     app.use('*', async (requestContext, next) => {
+      if (options.authToken === undefined) {
+        await next();
+        return;
+      }
       const providedToken = readBearerToken(requestContext.req.header('authorization'));
       if (!providedToken || !safeTokenEqual(providedToken, options.authToken)) {
         requestContext.header('WWW-Authenticate', 'Bearer');
@@ -369,7 +595,9 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       if (!parsed) throw new HttpRequestError(400, 'Invalid Studio dispatch request.');
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
       try {
+        const submittedAt = new Date().toISOString();
         const receipt = await context.dispatch(parsed);
+        observeDispatch(receipt, parsed.input, submittedAt);
         return requestContext.json({
           petId: receipt.petId,
           threadId: receipt.threadId,
@@ -384,6 +612,11 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       }
     });
     app.all('/dispatch', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+
+    app.get('/dispatches', (requestContext) => requestContext.json({
+      dispatches: [...dispatchRecords.values()],
+    }));
+    app.all('/dispatches', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/pets', (requestContext) => {
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');
@@ -448,6 +681,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         .filter(({ path }) => path === requestContext.req.path)
         .map(({ method }) => method);
       if (allowedMethods.length > 0) return methodNotAllowed(requestContext, [...new Set(allowedMethods)]);
+      if (requestContext.req.method === 'GET' || requestContext.req.method === 'HEAD') {
+        const asset = await resolveStaticAsset(requestContext.req.path);
+        if (asset) return staticResponse(requestContext, asset);
+      }
       return requestContext.json({ error: 'Not found.' }, 404);
     });
 
@@ -479,6 +716,15 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
           STUDIO_HTTP_ROUTES_HOOK_NAME,
           routesHook,
         );
+        const unexposeStatic = pluginContext.hooks.expose(
+          STUDIO_HTTP_STATIC_HOOK_NAME,
+          staticHook,
+        );
+        const previousUnexposeRoutes = unexposeRoutes;
+        unexposeRoutes = () => {
+          unexposeStatic();
+          previousUnexposeRoutes();
+        };
         currentAddress = await listen(nextServer, options.port);
         unsubscribeEvents = pluginContext.subscribe(broadcastEvent);
         heartbeat = setInterval(() => {
@@ -501,6 +747,10 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       unexposeRoutes?.();
       unexposeRoutes = undefined;
       routes.clear();
+      staticMounts.clear();
+      for (const unsubscribe of dispatchSubscriptions) unsubscribe();
+      dispatchSubscriptions.clear();
+      dispatchRecords.clear();
       unsubscribeEvents?.();
       unsubscribeEvents = undefined;
       if (heartbeat) clearInterval(heartbeat);

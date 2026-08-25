@@ -11,6 +11,7 @@ import { z } from 'zod';
 import type { AgentToolkit, NamedStructuredTool } from '@pinpawo/pet-agent';
 import type {
   StudioDispatchResult,
+  StudioPetRegistration,
   StudioPlugin,
   StudioPluginContext,
 } from '@pinpawo/studio';
@@ -25,7 +26,7 @@ import {
 
 export const KANBAN_TOOLKIT_NAME = 'kanban';
 
-const TOOL_TITLES = ['查看任务', '新增任务', '完成任务', '阻塞任务'] as const;
+const TOOL_TITLES = ['查看可指派 Pet', '查看任务', '新增任务', '完成任务', '阻塞任务'] as const;
 
 function describeTask(task: KanbanTask): string {
   const deps = task.deps.length > 0 ? ` deps=[${task.deps.join(', ')}]` : '';
@@ -60,7 +61,29 @@ function readNonNegativeQueryInteger(
   return parsed;
 }
 
-function buildTools(service: KanbanTaskService): NamedStructuredTool[] {
+function describePet(pet: StudioPetRegistration): string {
+  const role = pet.role ? ` role=${pet.role}` : '';
+  const service = pet.serviceSummary ? ` service=${pet.serviceSummary}` : '';
+  return `${pet.petId} name=${pet.name}${role}${service}`;
+}
+
+function buildTools(
+  service: KanbanTaskService,
+  listStudioPets?: () => readonly StudioPetRegistration[],
+): NamedStructuredTool[] {
+  const listPets = tool(
+    async () => {
+      if (!listStudioPets) return '(Studio pet registry unavailable)';
+      const pets = listStudioPets();
+      return pets.length === 0 ? '(no Studio pets registered)' : pets.map(describePet).join('\n');
+    },
+    {
+      name: 'kanban_pet_list',
+      description: '列出当前 Studio 中可作为看板任务执行者的 petId、名称与职责。添加任务前先调用。',
+      schema: z.object({}),
+    },
+  );
+
   const listTasks = tool(
     async () => {
       const tasks = (await service.readSnapshot()).tasks;
@@ -75,6 +98,16 @@ function buildTools(service: KanbanTaskService): NamedStructuredTool[] {
 
   const addTask = tool(
     async (input) => {
+      const registeredPets = listStudioPets?.() ?? [];
+      if (listStudioPets && !registeredPets.some(({ petId }) => petId === input.petId)) {
+        const available = registeredPets.length > 0
+          ? registeredPets.map(({ petId }) => petId).join(', ')
+          : '(none)';
+        throw new Error(
+          `unknown Studio petId "${input.petId}"; available petIds: ${available}. `
+          + 'Call kanban_pet_list before adding tasks.',
+        );
+      }
       // `petId` belongs to this Studio-facing Toolkit adapter. The domain only
       // receives the generic assigneeId.
       const mutation = await service.createTask({
@@ -135,7 +168,7 @@ function buildTools(service: KanbanTaskService): NamedStructuredTool[] {
     },
   );
 
-  return [listTasks, addTask, completeTask, blockTask] as NamedStructuredTool[];
+  return [listPets, listTasks, addTask, completeTask, blockTask] as NamedStructuredTool[];
 }
 
 export type CreateKanbanPluginOptions = {
@@ -152,8 +185,11 @@ export type CreateKanbanPluginOptions = {
 
 export type KanbanPlugin = StudioPlugin & { service: KanbanTaskService };
 
-export function createKanbanToolkit(service: KanbanTaskService): AgentToolkit {
-  const declaredTools = buildTools(service);
+export function createKanbanToolkit(
+  service: KanbanTaskService,
+  options: { listStudioPets?: () => readonly StudioPetRegistration[] } = {},
+): AgentToolkit {
+  const declaredTools = buildTools(service, options.listStudioPets);
   return {
     name: KANBAN_TOOLKIT_NAME,
     description: '共享任务看板：查看、拆解、完成与阻塞任务。',
@@ -169,8 +205,10 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   const service = options.service ?? (options.databasePath
     ? new KanbanTaskService(new SqliteKanbanTaskRepository(options.databasePath))
     : createInMemoryKanbanTaskService());
-  const toolkit = createKanbanToolkit(service);
   let context: StudioPluginContext | undefined;
+  const toolkit = createKanbanToolkit(service, {
+    listStudioPets: () => context?.listPets() ?? [],
+  });
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHttpRoute: (() => void) | undefined;
   let dispatchRequested = false;

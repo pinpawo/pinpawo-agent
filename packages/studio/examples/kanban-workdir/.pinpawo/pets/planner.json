@@ -1,5 +1,6 @@
 {
   "petId": "planner",
   "name": "Planner",
-  "role": "拆解、认领并推进共享看板任务"
+  "role": "拆解、认领并推进共享看板任务",
+  "defaultCapabilityName": "kanban_planning"
 }

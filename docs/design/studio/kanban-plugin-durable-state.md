@@ -38,6 +38,7 @@ Pet runtime  -X-> Kanban repository / SQLite
 当前 Studio-facing Toolkit 可以继续使用 Pet 语义：
 
 ```text
+kanban_pet_list()
 kanban_task_add({ petId, brief, dependsOn })
 kanban_task_list()
 kanban_task_complete({ taskId, result })
@@ -46,6 +47,15 @@ kanban_task_block({ taskId, reason })
 
 adapter 把 `petId` 映射成独立 Kanban model 的 `assigneeId`，然后调用
 `KanbanTaskService` command。Tool 不直接访问 repository，更不能执行 SQL。
+`kanban_pet_list` 从 Plugin 已获得的只读 Studio Pet registry 投射当前可指派目标；
+`kanban_task_add` 在写入 Kanban 前校验 `petId`，未知目标以 tool error 返回并列出可用
+petId，不得先持久化一个必然 dispatch 失败的 task。该校验属于 Studio adapter，不进入
+Kanban domain；domain 的 `assigneeId` 仍保持通用。
+
+被指派的 Pet 必须拥有一个声明 `uses: ['kanban', ...]` 的执行 Capability，才能在完成后调用
+`kanban_task_complete` 或在无法继续时调用 `kanban_task_block`。Planner 的规划 Capability 与
+Worker 的执行 Capability 是两个 Agent 角色，不由 Studio 或 Kanban Plugin 注入；示例分别使用
+`kanban_planning` 与 `kanban_task_execution`。
 
 ## 3. Dispatch adapter
 

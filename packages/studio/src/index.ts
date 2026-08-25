@@ -92,3 +92,9 @@ export type {
   StudioHostProcessDependencies,
   StudioHostProcessOptions,
 } from './studioHostProcess';
+export { createStudioCliPluginResolver } from './cliPluginLoader';
+export type {
+  CreateStudioCliPluginResolverInput,
+  StudioCliPluginEnvironment,
+  StudioCliPluginModule,
+} from './cliPluginLoader';

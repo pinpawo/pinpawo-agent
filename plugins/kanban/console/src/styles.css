@@ -52,7 +52,7 @@ button { cursor: pointer; }
 .file-path { color: #59cbd0; margin-bottom: 10px; font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .markdown-preview pre { white-space: pre-wrap; margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-.main-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.main-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(130px, 24%) minmax(0, 1fr); }
 .authorization { min-height: 98px; display: grid; grid-template-columns: 138px 1fr auto; align-items: center; gap: 18px; padding: 16px; border-bottom: 1px solid #40504c; background: #172020; }
 .authorization.empty { color: #718083; }
 .authorization-label { color: #e0ac54; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }
@@ -65,6 +65,22 @@ button { cursor: pointer; }
 .authorization-actions button, .events-heading button, .dispatch-bar button { border: 1px solid #344448; padding: 8px 10px; color: #c7d7d5; background: #162024; border-radius: 3px; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; }
 .authorization-actions button:hover, .events-heading button:hover { filter: brightness(1.15); }
 .authorization-actions .approve-button { color: #bdf1d2; border-color: #3f7960; background: #173326; }.authorization-actions .reject-button { color: #f0bbb7; border-color: #784945; background: #331e1e; }
+
+.dispatches { min-height: 0; display: grid; grid-template-rows: 42px 31px minmax(0, 1fr); border-bottom: 1px solid #263235; }
+.dispatch-columns, .dispatch-row { display: grid; grid-template-columns: 80px 95px 100px minmax(0, 1fr) 82px; gap: 12px; align-items: center; }
+.dispatch-columns { padding: 0 16px; color: #607174; border-bottom: 1px solid #243033; font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+.dispatch-list { min-height: 0; overflow: auto; }
+.dispatch-row { padding: 9px 16px; color: #c7d2d1; border-bottom: 1px solid rgba(38, 50, 53, .65); font-size: 12px; }
+.dispatch-row:hover { background: #162123; }
+.dispatch-pet, .dispatch-id { overflow: hidden; color: #8da4a6; font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.dispatch-status { display: inline-flex; align-items: center; gap: 7px; color: #91a1a2; font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dispatch-status-queued .status-dot { background: #77868a; }
+.dispatch-status-busy .status-dot { background: #5bd0d5; }
+.dispatch-status-waiting .status-dot { background: #e0ac54; }
+.dispatch-status-completed .status-dot { background: #69bd93; }
+.dispatch-status-failed .status-dot, .dispatch-status-cancelled .status-dot { background: #de766f; }
+.dispatch-goal { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-dispatches { margin: 20px 16px; color: #78888a; font-size: 12px; }
 
 .events { min-height: 0; display: grid; grid-template-rows: 42px 31px minmax(0, 1fr); }
 .events-heading > div { display: flex; align-items: center; gap: 10px; }.filter-label { color: #65cbd0; font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }.events-heading button { padding: 5px 7px; font-size: 10px; }

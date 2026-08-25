@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync as NodeSqliteDatabaseSync } from 'node:sqlite';
 
 type JsonObject = Record<string, unknown>;
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+  DatabaseSync: typeof NodeSqliteDatabaseSync;
+};
 
 function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -202,7 +207,7 @@ function normalizeDependencies(taskId: string, dependencies: readonly string[] |
  * HTTP, Toolkit, or Pet dependency.
  */
 export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
-  private readonly database: DatabaseSync;
+  private readonly database: InstanceType<typeof NodeSqliteDatabaseSync>;
   private initialized = false;
   private closed = false;
 

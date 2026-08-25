@@ -110,6 +110,25 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
   assert.ok(events.some((event) => event.type === 'task.done' && event.source === 'kanban'));
 });
 
+test('Kanban Toolkit lists registered Pets and rejects an unknown assignee before persistence', async (t) => {
+  const plugin = createKanbanPlugin();
+  const studio = await createStudio({
+    studioId: 'kanban-assignees',
+    entryPetId: 'planner',
+    pets: [pet({ petId: 'planner', tools: () => pluginTools(plugin) })],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  const tools = pluginTools(plugin);
+  assert.match(await tools.kanban_pet_list!.invoke({}) as string, /^planner name=planner/m);
+  await assert.rejects(
+    () => tools.kanban_task_add!.invoke({ petId: 'pinpit', brief: 'invalid target' }),
+    /unknown Studio petId "pinpit"; available petIds: planner/,
+  );
+  assert.deepEqual((await plugin.service.readSnapshot()).tasks, []);
+});
+
 test('a waiting Studio continuation becomes a durable Kanban waiting task', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({

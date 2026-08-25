@@ -9,6 +9,8 @@ dist/
 .pinpawo/
 !packages/studio/examples/kanban-workdir/.pinpawo/
 !packages/studio/examples/kanban-workdir/.pinpawo/**
+packages/studio/examples/kanban-workdir/.pinpawo/checkpoints-studio-capability-v2/
+packages/studio/examples/kanban-workdir/.pinpawo/kanban/
 
 # macOS/Xcode output
 tools/agent-macos/build/

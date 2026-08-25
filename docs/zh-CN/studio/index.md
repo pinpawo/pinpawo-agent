@@ -38,8 +38,8 @@ plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
 不是 Toolkit。
 
 可选 `studio-http` package 是另一个具体 Plugin。它不定义 Toolkit，只把
-`context.dispatch()` 和 `context.subscribe()` 投射成带鉴权的 loopback HTTP/SSE
-边界。
+`context.dispatch()` 和 `context.subscribe()` 投射成 loopback HTTP/SSE
+边界；Bearer 鉴权按嵌入方需要启用。
 
 ## 运行限制
 

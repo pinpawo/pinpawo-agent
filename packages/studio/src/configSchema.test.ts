@@ -43,12 +43,14 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
       role: '脚本撰写',
       serviceSummary: '短视频脚本',
       modelProfileId: 'qwen-max',
+      defaultCapabilityName: 'script_writing',
       serverBinding: { petId: 'srv-001' },
     },
     'test-source',
   );
   assert.equal(config.personality, '创意丰富');
   assert.equal(config.modelProfileId, 'qwen-max');
+  assert.equal(config.defaultCapabilityName, 'script_writing');
   assert.deepEqual(config.serverBinding, { petId: 'srv-001' });
 });
 
@@ -168,15 +170,15 @@ test('parseStudioLocalConfig requires studioId / entryPetId / pets', () => {
   );
 });
 
-test('parseStudioLocalConfig passes plugin options through without interpreting them', () => {
-  // studio 不认识任何插件的领域概念 —— options 原样透传,校验归插件自己。
+test('parseStudioLocalConfig preserves CLI module locators and plugin options without interpreting them', () => {
+  // studio 不认识任何插件的领域概念 —— module/options 都原样交给外部 resolver。
   const cfg = parseStudio(
     {
       studioId: 's1',
       entryPetId: 'p1',
       pets: ['p1'],
       plugins: [
-        { id: 'kanban' },
+        { id: 'kanban', module: '@pinpawo-plugin/kanban' },
         { id: 'scheduler', options: { timezone: 'Asia/Shanghai', nested: { any: 1 } } },
       ],
     },
@@ -184,6 +186,7 @@ test('parseStudioLocalConfig passes plugin options through without interpreting 
   );
 
   assert.deepEqual(cfg.plugins?.map((plugin) => plugin.id), ['kanban', 'scheduler']);
+  assert.equal(cfg.plugins?.[0]?.module, '@pinpawo-plugin/kanban');
   assert.equal(cfg.plugins?.[0]?.options, undefined);
   assert.deepEqual(cfg.plugins?.[1]?.options, {
     timezone: 'Asia/Shanghai',
@@ -208,6 +211,10 @@ test('parseStudioLocalConfig rejects malformed plugin entries', () => {
   assert.throws(
     () => parseStudio({ ...base, plugins: [{ id: 'kanban', options: [] }] }, 'src'),
     /"plugins\[0\]\.options" must be an object when present/,
+  );
+  assert.throws(
+    () => parseStudio({ ...base, plugins: [{ id: 'kanban', module: '' }] }, 'src'),
+    /"plugins\[0\]\.module" must be a non-empty string/,
   );
 });
 

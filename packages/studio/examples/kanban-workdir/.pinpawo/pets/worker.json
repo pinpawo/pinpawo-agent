@@ -1,0 +1,7 @@
+{
+  "petId": "worker",
+  "name": "Worker",
+  "role": "执行看板中的具体任务并报告结果",
+  "serviceSummary": "通用信息整理、文件处理与任务执行",
+  "defaultCapabilityName": "kanban_task_execution"
+}

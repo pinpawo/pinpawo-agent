@@ -37,14 +37,29 @@
   // 顺序即 start 顺序(插件之间可能有依赖);stop 时逆序。
   //
   // id 由应用 composition root 的 Plugin resolver 解析。
+  // standalone CLI 用 module 定位已安装的 package；Studio core 不 import 它。
   "plugins": [
-    { "id": "kanban" }
+    {
+      "id": "kanban",
+      "module": "@pinpawo-plugin/kanban",
+      "options": { "databasePath": ".pinpawo/kanban/tasks.sqlite" }
+    }
   ]
 }
 ```
 
 `plugins[].options` 会原样传给 Plugin resolver，再由 Plugin 自己解释与校验。
 Studio package 不含内置 Plugin registry，也不 import kanban 或 scheduler。
+
+使用独立 `pinpawo-studio` CLI 时，每个 Plugin 必须给出 `plugins[].module`：它只能是
+已安装 package 的 specifier，不能是相对或绝对文件路径。CLI 在 Host 启动前动态加载该
+package，并要求它导出匹配的 `id` 与
+`createStudioPlugin(options, { workdir })` factory。同一 package 可以被缓存，但每一条
+配置都单独调用 factory，因此可以创建多个实例。
+
+这是 CLI 的装配细节，不是 Studio 的 Plugin 领域概念：Studio 只把该 locator 原样传给
+注入的 resolver，既不 import package，也没有 Plugin catalog，更不解释 Plugin options。
+嵌入式 Host 仍可以省略 `module` 并提供自己的 resolver（例如私有 composition 或测试替身）。
 
 `plugins` 可省略 —— 那样这块 studio 没有任何驱动方,只能由宿主手动
 `dispatch`。这是合法的,但通常意味着配漏了。
@@ -87,13 +102,19 @@ Studio package 不含内置 Plugin registry，也不 import kanban 或 scheduler
   "name": "撰稿",              // 必填
   "role": "把提纲写成完整稿件",
   "serviceSummary": "长文写作、结构化改写",
-  "modelProfileId": "qwen-max"  // 省略则用宿主默认 profile
+  "modelProfileId": "qwen-max",  // 省略则用宿主默认 profile
+  "defaultCapabilityName": "writing" // 省略则由 Agent 使用 general
 }
 ```
 
 `petId` 同时用于推导 Capability 目录，所以必须是安全的单个路径段。`general`
 仍由 Agent Host 作为 baseline 自动提供。旧的 `capabilities` 名称列表和 `model`
 字段都会显式报迁移错误，不会被静默忽略。
+
+`defaultCapabilityName` 可指定 Agent entry Planner 预加载的默认 Capability。
+它必须存在于该 Pet 编译后的 registry 且可用，否则 Host 启动失败。该字段只改变默认
+候选，不会强制路由；Planner 仍可从同一 registry 中选择更具体的 Capability。省略时
+保持 Agent 的默认值 `general`。
 
 ### 2.1 `pets/<petId>/capabilities/`
 
@@ -103,7 +124,7 @@ Studio package 不含内置 Plugin registry，也不 import kanban 或 scheduler
 <workdir>/.pinpawo/pets/writer/capabilities/
 ├── explore/
 │   └── CAPABILITY.md
-└── studio-planning/
+└── kanban-planning/
     └── CAPABILITY.md
 ```
 
@@ -111,7 +132,7 @@ Studio package 不含内置 Plugin registry，也不 import kanban 或 scheduler
 Host 启动失败。目录 symlink 是允许的，因此多个 Pet 可以复用同一份 Capability，
 不必复制。Capability 名以 Pet 为作用域：不同 Pet 可以拥有同名但内容不同的定义。
 
-`studio_planning` 的 `CAPABILITY.md` 声明 `uses: ['kanban']`，但它仍完全属于
+`kanban_planning` 的 `CAPABILITY.md` 声明 `uses: ['kanban']`，但它仍完全属于
 Agent。Kanban Plugin 只定义对应 Toolkit，不注册或携带 Capability。
 
 仓库中的 `packages/studio/examples/kanban-workdir/` 提供了一份完整目录示例。
@@ -201,7 +222,7 @@ const host = new StudioHost({
 
 `options` 原样传给 resolver。未安装或不认识的 id 必须 fail fast，不能静默跳过。
 `@pinpawo-plugin/kanban` 自己拥有 Kanban Plugin 与 Toolkit 实现；依赖方向是
-Plugin package → Studio contract，不是 Studio → Kanban。`studio_planning`
+Plugin package → Studio contract，不是 Studio → Kanban。`kanban_planning`
 Capability 由对应 Pet 的约定目录独立提供。
 
 Plugin 定义的 Toolkit 与其他 Toolkit 来源一起进入 Host inventory:

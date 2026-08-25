@@ -35,6 +35,8 @@ export type PetLocalConfig = {
   serviceSummary?: string;
   /** 该 pet 使用的 model profile id;留空则继承 host default profile。 */
   modelProfileId?: string;
+  /** Planner 预加载的默认 Capability;留空则使用 Agent 默认值 `general`。 */
+  defaultCapabilityName?: string;
   /** 可选:绑定到服务端 pet,仅用于 app 同步通道,不存业务数据 */
   serverBinding?: {
     petId: string;
@@ -50,6 +52,7 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
     const role = reader.optionalString('role');
     const serviceSummary = reader.optionalString('serviceSummary');
     const modelProfileId = reader.optionalString('modelProfileId');
+    const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
 
     // `model` 曾是内联的模型名,已被稳定的 profile id 取代。显式报错,
     // 否则旧配置会被静默忽略、pet 悄悄跑在默认 profile 上。
@@ -79,6 +82,7 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
       ...(role !== undefined ? { role } : {}),
       ...(serviceSummary !== undefined ? { serviceSummary } : {}),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
+      ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
       ...(serverBinding
         ? { serverBinding: { petId: serverBinding.requiredString('petId') } }
         : {}),
@@ -94,6 +98,8 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
  */
 export type StudioPluginConfig = {
   id: string;
+  /** CLI-only package specifier; Studio passes it to the external resolver opaquely. */
+  module?: string;
   options?: Record<string, unknown>;
 };
 
@@ -150,8 +156,18 @@ function parsePluginConfigs(reader: ConfigReader): StudioPluginConfig[] | undefi
         `plugins[${index}].options`,
       );
     }
+    const module = record.module;
+    if (module !== undefined && (typeof module !== 'string' || !module.trim())) {
+      reader.fail(
+        `"plugins[${index}].module" must be a non-empty string when present`,
+        `plugins[${index}].module`,
+      );
+    }
     return {
       id,
+      // A module locator is meaningful only to the standalone CLI's resolver.
+      // Studio core preserves it but does not resolve or import it.
+      ...(module !== undefined ? { module } : {}),
       // options 原样透传:studio 不解释,校验归插件自己的 schema。
       ...(options !== undefined ? { options: options as Record<string, unknown> } : {}),
     };

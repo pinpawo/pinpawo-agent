@@ -50,13 +50,16 @@ function generalCapability(): AgentCapability {
  * 插件 options 透传。schema 与文档都承诺「studio 原样透传,由插件自己解释」,
  * 但装配时曾只解构 id 并调用无参 factory —— 用户配置解析成功却完全不生效。
  */
-async function writeStudioConfig(plugins: unknown[]): Promise<string> {
+async function writeStudioConfig(
+  plugins: unknown[],
+  petConfig: Record<string, unknown> = {},
+): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-build-studio-'));
   const stateRoot = path.join(root, '.pinpawo');
   await mkdir(path.join(stateRoot, 'pets'), { recursive: true });
   await writeFile(
     path.join(stateRoot, 'pets', 'planner.json'),
-    JSON.stringify({ petId: 'planner', name: 'Planner', role: 'planner' }),
+    JSON.stringify({ petId: 'planner', name: 'Planner', role: 'planner', ...petConfig }),
   );
   await writeFile(
     path.join(stateRoot, 'studio.json'),
@@ -65,17 +68,56 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   return root;
 }
 
+function planningCapability(): AgentCapability {
+  return {
+    name: 'kanban_planning',
+    description: 'Create a Kanban task plan.',
+    uses: [],
+    instructions: defineInstructionDocument({ content: '# Kanban planning' }),
+  };
+}
+
+test('Pet default Capability must resolve from its compiled registry', async () => {
+  const workdir = await writeStudioConfig([], {
+    defaultCapabilityName: 'kanban_planning',
+  });
+  const configuration = await resolveStudioHostConfig({ workdir });
+
+  await assert.rejects(() => buildStudio({
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    hostCapabilities: [generalCapability()],
+    petCapabilities: new Map(),
+    toolkits: [],
+    ownerUserId: null,
+  }), /default Capability "kanban_planning" is not available/);
+
+  const result = await buildStudio({
+    configuration,
+    modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
+    hostCapabilities: [generalCapability()],
+    petCapabilities: new Map([['planner', [planningCapability()]]]),
+    toolkits: [],
+    ownerUserId: null,
+  });
+  assert.equal(result.studio.listPets()[0]?.petId, 'planner');
+});
+
 test('plugin options from studio.json reach the injected resolver', async () => {
   const workdir = await writeStudioConfig([
-    { id: 'kanban', options: { timezone: 'Asia/Shanghai' } },
+    {
+      id: 'kanban',
+      module: '@pinpawo-plugin/kanban',
+      options: { timezone: 'Asia/Shanghai' },
+    },
   ]);
 
   const seen: unknown[] = [];
   const configuration = await resolveStudioHostConfig({
     workdir,
-    resolvePlugin: (id, options) => {
+    resolvePlugin: (id, options, module) => {
       assert.equal(id, 'kanban');
-      seen.push(options);
+      seen.push({ options, module });
       return fakePlugin();
     },
   });
@@ -89,7 +131,10 @@ test('plugin options from studio.json reach the injected resolver', async () => 
   });
 
   assert.equal(result.plugins.length, 1);
-  assert.deepEqual(seen, [{ timezone: 'Asia/Shanghai' }]);
+  assert.deepEqual(seen, [{
+    options: { timezone: 'Asia/Shanghai' },
+    module: '@pinpawo-plugin/kanban',
+  }]);
 });
 
 test('a plugin declared without options still builds', async () => {

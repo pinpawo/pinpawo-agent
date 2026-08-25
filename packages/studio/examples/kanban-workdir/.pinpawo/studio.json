@@ -1,6 +1,21 @@
 {
   "studioId": "kanban-example",
   "entryPetId": "planner",
-  "pets": ["planner"],
-  "plugins": [{ "id": "kanban" }]
+  "pets": ["planner", "worker"],
+  "plugins": [
+    {
+      "id": "http",
+      "module": "@pinpawo-plugin/studio-http",
+      "options": { "port": 4310 }
+    },
+    {
+      "id": "kanban",
+      "module": "@pinpawo-plugin/kanban",
+      "options": { "databasePath": ".pinpawo/kanban/tasks.sqlite" }
+    },
+    {
+      "id": "kanban-console",
+      "module": "@pinpawo-plugin/kanban/console/studio-plugin"
+    }
+  ]
 }

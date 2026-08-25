@@ -13,10 +13,9 @@ test('Studio CLI routes explicit stdio options to the Host process', async () =>
     runHost: (options) => { received = options; },
   });
 
-  assert.deepEqual(received, {
-    workdir: '/tmp/project',
-    transport: { kind: 'stdio' },
-  });
+  assert.equal(received?.workdir, '/tmp/project');
+  assert.deepEqual(received?.transport, { kind: 'stdio' });
+  assert.equal(typeof received?.resolvePlugin, 'function');
 });
 
 test('Studio CLI routes an explicit WebSocket port to the Host process', async () => {
@@ -25,9 +24,8 @@ test('Studio CLI routes an explicit WebSocket port to the Host process', async (
     runHost: (options) => { received = options; },
   });
 
-  assert.deepEqual(received, {
-    transport: { kind: 'websocket', port: 4321 },
-  });
+  assert.deepEqual(received?.transport, { kind: 'websocket', port: 4321 });
+  assert.equal(typeof received?.resolvePlugin, 'function');
 });
 
 test('Studio Host CLI requires exactly one transport', () => {

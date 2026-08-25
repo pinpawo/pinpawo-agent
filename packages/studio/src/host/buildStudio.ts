@@ -72,6 +72,8 @@ export type ResolvedStudioHostConfig = {
 export type StudioPluginResolver = (
   id: string,
   options?: Record<string, unknown>,
+  /** Opaque CLI module locator, if the config was loaded by the standalone CLI. */
+  module?: string,
 ) => Promise<StudioPlugin> | StudioPlugin;
 
 function validateResolvedPlugins(studioId: string, plugins: readonly StudioPlugin[]): void {
@@ -116,14 +118,14 @@ export async function resolveStudioHostConfig(
   const petsDir = input.petsDir ?? path.join(path.dirname(studioConfigPath), 'pets');
   const resolved = resolveStudio(studioConfig, await loadPetLocalConfigs(petsDir));
   const plugins: StudioPlugin[] = [];
-  for (const { id, options } of studioConfig.plugins ?? []) {
+  for (const { id, options, module } of studioConfig.plugins ?? []) {
     if (!input.resolvePlugin) {
       throw new Error(
         `studio "${studioConfig.studioId}": plugin "${id}" is configured `
         + 'but no plugin resolver is installed.',
       );
     }
-    plugins.push(await input.resolvePlugin(id, options));
+    plugins.push(await input.resolvePlugin(id, options, module));
   }
   validateResolvedPlugins(studioConfig.studioId, plugins);
   return { workdir, studioConfigPath, petsDir, resolved, plugins };
@@ -172,9 +174,18 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       }
       petCapabilityNames.add(capability.name);
     }
+    if (petConfig.defaultCapabilityName
+      && petConfig.defaultCapabilityName !== GENERAL_CAPABILITY_NAME
+      && !petCapabilityNames.has(petConfig.defaultCapabilityName)) {
+      throw new Error(
+        `pet "${petConfig.petId}" default Capability `
+        + `"${petConfig.defaultCapabilityName}" is not available`,
+      );
+    }
 
     return createResidentPetAgentRuntime({
       models: petModels,
+      defaultCapabilityName: petConfig.defaultCapabilityName,
       modelInputModalities: petLlmConfig.inputModalities ?? ['text'],
       actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),
       role: petConfig.role ?? null,

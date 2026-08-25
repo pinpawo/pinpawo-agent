@@ -50,6 +50,9 @@ async function writeStudioWorkdir(withPlanningCapability: boolean): Promise<stri
       petId: 'planner',
       name: 'Planner',
       role: 'planner',
+      ...(withPlanningCapability
+        ? { defaultCapabilityName: 'kanban_planning' }
+        : {}),
     }),
   );
   if (withPlanningCapability) {
@@ -58,11 +61,11 @@ async function writeStudioWorkdir(withPlanningCapability: boolean): Promise<stri
       'pets',
       'planner',
       'capabilities',
-      'studio-planning',
+      'kanban-planning',
     );
     await mkdir(capabilityDir, { recursive: true });
     await writeFile(path.join(capabilityDir, 'CAPABILITY.md'), `---
-name: studio_planning
+name: kanban_planning
 description: "Plan and advance work through the shared board."
 uses:
   - kanban
@@ -77,7 +80,7 @@ Use the kanban Toolkit to plan and advance assigned work.
   return root;
 }
 
-test('a Pet capability directory containing studio_planning reaches the kanban tools', async () => {
+test('a Pet capability directory containing kanban_planning reaches the kanban tools', async () => {
   const workdir = await writeStudioWorkdir(true);
   const configuration = await resolveStudioHostConfig({
     workdir,
@@ -106,14 +109,14 @@ test('a Pet capability directory containing studio_planning reaches the kanban t
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');
   assert.ok(planner, 'planner must be assembled');
 
-  const planning = planner.capabilities.find((item) => item.name === 'studio_planning');
-  assert.ok(planning, 'studio_planning must resolve through the studio assembly path');
+  const planning = planner.capabilities.find((item) => item.name === 'kanban_planning');
+  assert.ok(planning, 'kanban_planning must resolve through the studio assembly path');
   // 这是整条链的落点:kanban 插件已装配,所以这个能力是**可用的**,
   // 而不是 unavailable。
   assert.equal(planning.available, true, planning.reason ?? '');
 });
 
-test('studio_planning is absent when the Pet capability directory is empty', async () => {
+test('kanban_planning is absent when the Pet capability directory is empty', async () => {
   const workdir = await writeStudioWorkdir(false);
   const configuration = await resolveStudioHostConfig({
     workdir,
@@ -132,7 +135,7 @@ test('studio_planning is absent when the Pet capability directory is empty', asy
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');
   assert.ok(planner);
   assert.equal(
-    planner.capabilities.some((item) => item.name === 'studio_planning'),
+    planner.capabilities.some((item) => item.name === 'kanban_planning'),
     false,
   );
 });

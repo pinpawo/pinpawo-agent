@@ -41,9 +41,31 @@ type KanbanHistoryEvent = {
 type StudioEvent = {
   type: string;
   source: string;
-  payload?: { taskId?: unknown; note?: unknown };
+  payload?: {
+    taskId?: unknown;
+    note?: unknown;
+    dispatch?: unknown;
+  };
   occurredAt: string;
 };
+
+type DispatchStatus = 'queued' | 'busy' | 'completed' | 'waiting' | 'failed' | 'cancelled';
+
+type DispatchItem = {
+  petId: string;
+  threadId: string;
+  invocationId: string;
+  input:
+    | { kind: 'request'; request: string }
+    | { kind: 'resume'; continuationId: string };
+  status: DispatchStatus;
+  submittedAt: string;
+  updatedAt: string;
+  output?: string;
+  error?: string;
+};
+
+type DispatchesSnapshot = { dispatches: DispatchItem[] };
 
 type StudioPetRegistration = {
   petId: string;
@@ -70,7 +92,8 @@ type KnowledgeFile = {
 
 const statusOrder: TaskStatus[] = ['waiting', 'doing', 'todo', 'blocked', 'done'];
 
-const studioHttpUrl = import.meta.env.VITE_STUDIO_HTTP_URL?.replace(/\/$/, '');
+const studioHttpUrl = import.meta.env.VITE_STUDIO_HTTP_URL?.replace(/\/$/, '')
+  ?? window.location.origin;
 const studioHttpToken = import.meta.env.VITE_STUDIO_HTTP_TOKEN;
 
 const knowledgeFiles: KnowledgeFile[] = [
@@ -95,9 +118,29 @@ function statusLabel(status: TaskStatus): string {
   return status === 'todo' ? 'queued' : status;
 }
 
+function isDispatchItem(value: unknown): value is DispatchItem {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Partial<DispatchItem>;
+  return typeof record.invocationId === 'string'
+    && typeof record.petId === 'string'
+    && typeof record.threadId === 'string'
+    && typeof record.status === 'string'
+    && typeof record.submittedAt === 'string'
+    && typeof record.updatedAt === 'string'
+    && !!record.input
+    && typeof record.input === 'object';
+}
+
+function dispatchSummary(item: DispatchItem): string {
+  return item.input.kind === 'request'
+    ? item.input.request
+    : `Resume ${item.input.continuationId}`;
+}
+
 export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [pets, setPets] = useState<StudioPetRegistration[]>([]);
+  const [dispatches, setDispatches] = useState<DispatchItem[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [selectedContinuationTaskId, setSelectedContinuationTaskId] = useState<string>();
@@ -107,48 +150,54 @@ export function App() {
   const [dispatchGoal, setDispatchGoal] = useState('');
   const [resumePayload, setResumePayload] = useState('{\n  \n}');
   const [notice, setNotice] = useState(
-    studioHttpUrl && studioHttpToken ? 'Connecting to Studio HTTP…' : 'Set VITE_STUDIO_HTTP_URL and VITE_STUDIO_HTTP_TOKEN to connect.',
+    'Connecting to Studio HTTP…',
   );
   const [connected, setConnected] = useState(false);
 
   const selectedKnowledge = knowledgeFiles.find((file) => file.path === selectedKnowledgePath) ?? knowledgeFiles[0];
-  const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
   const waitingTasks = tasks.filter((task) => task.status === 'waiting' && task.continuation);
   const waitingTask = waitingTasks.find((task) => task.taskId === selectedContinuationTaskId)
     ?? waitingTasks[0];
   const visibleEvents = selectedTaskId
     ? events.filter((event) => event.taskId === selectedTaskId)
     : events;
+  const visibleDispatches = useMemo(
+    () => [...dispatches].sort((left, right) => right.submittedAt.localeCompare(left.submittedAt)),
+    [dispatches],
+  );
   const groupedTasks = useMemo(
     () => statusOrder.map((status) => ({ status, tasks: tasks.filter((task) => task.status === status) })),
     [tasks],
   );
 
   useEffect(() => {
-    if (!studioHttpUrl || !studioHttpToken) return undefined;
     const abort = new AbortController();
     let historySequence = 0;
-    const headers = { Authorization: `Bearer ${studioHttpToken}` };
+    const headers = new Headers();
+    if (studioHttpToken) headers.set('Authorization', `Bearer ${studioHttpToken}`);
 
     const refresh = async () => {
-      const [snapshotResponse, historyResponse, petsResponse] = await Promise.all([
+      const [snapshotResponse, historyResponse, petsResponse, dispatchesResponse] = await Promise.all([
         fetch(`${studioHttpUrl}/kanban`, { headers, signal: abort.signal }),
         fetch(`${studioHttpUrl}/kanban/events?after=${historySequence.toString()}`, {
           headers,
           signal: abort.signal,
         }),
         fetch(`${studioHttpUrl}/pets`, { headers, signal: abort.signal }),
+        fetch(`${studioHttpUrl}/dispatches`, { headers, signal: abort.signal }),
       ]);
-      if (!snapshotResponse.ok || !historyResponse.ok || !petsResponse.ok) {
+      if (!snapshotResponse.ok || !historyResponse.ok || !petsResponse.ok || !dispatchesResponse.ok) {
         throw new Error(
-          `Kanban HTTP request failed (${snapshotResponse.status.toString()}/${historyResponse.status.toString()}/${petsResponse.status.toString()}).`,
+          `Console HTTP request failed (${snapshotResponse.status.toString()}/${historyResponse.status.toString()}/${petsResponse.status.toString()}/${dispatchesResponse.status.toString()}).`,
         );
       }
       const snapshot = await snapshotResponse.json() as KanbanSnapshot;
       const history = await historyResponse.json() as { events: KanbanHistoryEvent[] };
       const petSnapshot = await petsResponse.json() as StudioPetsSnapshot;
+      const dispatchSnapshot = await dispatchesResponse.json() as DispatchesSnapshot;
       setTasks(snapshot.tasks);
       setPets(petSnapshot.pets);
+      setDispatches(dispatchSnapshot.dispatches);
       setDispatchTarget((current) => current || petSnapshot.pets[0]?.petId || '');
       if (history.events.length > 0) {
         historySequence = history.events.at(-1)?.sequence ?? historySequence;
@@ -190,6 +239,15 @@ export function App() {
             const data = block.split('\n').find((line) => line.startsWith('data:'))?.slice(5).trimStart();
             if (data) {
               const event = JSON.parse(data) as StudioEvent;
+              const dispatchItem = event.type === 'dispatch.updated'
+                ? event.payload?.dispatch
+                : undefined;
+              if (isDispatchItem(dispatchItem)) {
+                setDispatches((current) => {
+                  const next = current.filter(({ invocationId }) => invocationId !== dispatchItem.invocationId);
+                  return [...next, dispatchItem];
+                });
+              }
               setEvents((current) => [...current, {
                 id: `studio-${event.occurredAt}-${event.type}`,
                 time: new Date(event.occurredAt).toLocaleTimeString(),
@@ -215,22 +273,34 @@ export function App() {
   }, []);
 
   async function dispatch(input: Record<string, unknown>, petId: string): Promise<void> {
-    if (!studioHttpUrl || !studioHttpToken) {
-      setNotice('Studio HTTP connection is not configured.');
-      return;
-    }
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    if (studioHttpToken) headers.set('Authorization', `Bearer ${studioHttpToken}`);
     const response = await fetch(`${studioHttpUrl}/dispatch`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${studioHttpToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ petId, input }),
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: string } | null;
       throw new Error(body?.error ?? `Studio dispatch failed (${response.status.toString()}).`);
     }
+    const receipt = await response.json() as {
+      petId: string;
+      threadId: string;
+      invocationId: string;
+    };
+    const submittedAt = new Date().toISOString();
+    setDispatches((current) => current.some(({ invocationId }) => invocationId === receipt.invocationId)
+      ? current
+      : [...current, {
+          ...receipt,
+          input: input.kind === 'resume' && typeof input.continuationId === 'string'
+            ? { kind: 'resume' as const, continuationId: input.continuationId }
+            : { kind: 'request' as const, request: typeof input.request === 'string' ? input.request : '' },
+          status: 'queued',
+          submittedAt,
+          updatedAt: submittedAt,
+        }]);
   }
 
   async function resumeContinuation(): Promise<void> {
@@ -304,7 +374,7 @@ export function App() {
                     <span>{statusLabel(group.status)}</span>
                     <span>{group.tasks.length}</span>
                   </div>
-                  {group.tasks.length > 0 && (group.status !== 'done' || selectedTask?.status === 'done') && (
+                  {group.tasks.length > 0 && (
                     <div className="task-list">
                       {group.tasks.map((task) => (
                         <button
@@ -397,6 +467,30 @@ export function App() {
             ) : (
               <p>No Pet continuation is waiting.</p>
             )}
+          </section>
+
+          <section className="dispatches panel">
+            <div className="panel-heading">
+              <span>DISPATCH QUEUE</span>
+              <span className="count">{visibleDispatches.length}</span>
+            </div>
+            <div className="dispatch-columns" aria-hidden="true">
+              <span>TIME</span><span>PET</span><span>STATUS</span><span>GOAL</span><span>INVOCATION</span>
+            </div>
+            <div className="dispatch-list">
+              {visibleDispatches.map((item) => (
+                <div className="dispatch-row" key={item.invocationId} title={item.error ?? item.output ?? dispatchSummary(item)}>
+                  <time>{new Date(item.submittedAt).toLocaleTimeString()}</time>
+                  <span className="dispatch-pet">{item.petId}</span>
+                  <span className={`dispatch-status dispatch-status-${item.status}`}>
+                    <span className="status-dot" />{item.status}
+                  </span>
+                  <span className="dispatch-goal">{dispatchSummary(item)}</span>
+                  <span className="dispatch-id">{item.invocationId.slice(0, 8)}</span>
+                </div>
+              ))}
+              {visibleDispatches.length === 0 && <p className="empty-dispatches">No HTTP dispatches yet.</p>}
+            </div>
           </section>
 
           <section className="events panel">

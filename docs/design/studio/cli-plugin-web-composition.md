@@ -1,7 +1,7 @@
 # Studio CLI Plugin Web Composition
 
-> 状态：Draft composition design
-> 更新：2026-08-23
+> 状态：Draft composition design（CLI loader、HTTP static hook 与 Kanban Console 已落地）
+> 更新：2026-08-25
 > 依赖：[Standalone process](standalone-process.md)、[HTTP Plugin](http-plugin.md)、
 > [Kanban Console UI](../kanban/ui-console.md)
 
@@ -47,7 +47,7 @@ HTTP、Kanban、Console 等具体 Plugin。
 因此一旦 `studio.json` 配置 Plugin 就无法自行启动。补齐的是 CLI adapter，而非 Studio
 core registry。
 
-建议配置把安装入口显式写在每一个 Plugin 项：
+配置把安装入口显式写在每一个 Plugin 项：
 
 ```json
 {
@@ -60,7 +60,7 @@ core registry。
     {
       "id": "kanban",
       "module": "@pinpawo-plugin/kanban",
-      "options": { "database": "./.pinpawo/kanban/tasks.sqlite" }
+      "options": { "databasePath": ".pinpawo/kanban/tasks.sqlite" }
     },
     {
       "id": "kanban-console",
@@ -99,7 +99,7 @@ CLI 在构造 `StudioHost` 前由这个 loader 生成 `StudioPluginResolver`。`
 
 ## 3. 一个 HTTP 容器，不是第二个 Web server
 
-`@pinpawo-plugin/studio-http` 已拥有 listener、Bearer/Origin、body 限制、SSE、route
+`@pinpawo-plugin/studio-http` 已拥有 listener、可选 Bearer/Origin、body 限制、SSE、route
 注册和生命周期。Console 不应启动 Vite、Express、Hono 或自己的 Node server；它应作为
 零 Toolkit 的 `kanban-console` Studio Plugin，在 `start()` 里向已安装 HTTP Plugin 贡献
 静态资源 mount。
@@ -143,23 +143,21 @@ Plugin 停止时自动卸载。因此 config 顺序只决定观察性的 start �
 ## 4. 本地 Web security
 
 - server 继续只 bind `127.0.0.1`；
-- 静态 HTML/JS/CSS 可以是 public，因为它们不含 task、token 或 checkpoint 数据；
-- `/dispatch`、`/events`、Kanban API 和未来 interaction command 默认仍要求 Bearer；
-- Console 首版在内存中保存用户粘贴的 access token，不写 localStorage/cookie/query；
-- CLI 可以单独显示 loopback URL 和 token 获取方式；若以后增加 `--open`，token 只能放
-  URL fragment，并在 Console 启动后立即 `history.replaceState()` 清除；
+- 静态 HTML/JS/CSS 与同源 API 默认都不要求认证；当前仅支持本机单用户 loopback 场景；
+- 嵌入方可显式提供 Bearer token，为 `/dispatch`、`/events`、Kanban API 和未来 interaction
+  command 启用认证；token 不写入 `studio.json`；
 - HTTP Plugin 应自动接受它自己已监听的 same-origin，外部 Origin 仍需要显式 allowlist。
 
-首版不实现 cookie session 或新的 authentication domain。那是 HTTP/interaction Plugin
-的后续工作，不能让 Console 为了方便绕开既有 Bearer boundary。
+首版不实现 cookie session 或新的 authentication domain。跨机器或多用户访问必须先补充
+该边界，不能通过放宽 loopback bind 来实现。
 
 ## 5. 第三方 HTTP 容器
 
 当前 HTTP Plugin 直接基于 `node:http` 实现了 route matching、method handling、body
-读取、CORS、Bearer middleware、SSE client 管理和错误响应。这使它已经在重复通用 Web
+读取、CORS、可选 Bearer middleware、SSE client 管理和错误响应。这使它已经在重复通用 Web
 framework 的职责；新增 static mount 后继续手写会放大维护与安全面。
 
-因此建议把 **Hono + `@hono/node-server`** 作为
+使用 **Hono + `@hono/node-server`** 作为
 `@pinpawo-plugin/studio-http` 的内部依赖。它不是新的 Studio Plugin，也不进入
 `@pinpawo/studio`：
 
@@ -186,12 +184,12 @@ Console bundle mount。[Hono Node adapter](https://hono.dev/docs/getting-started
 
 ## 6. 实施顺序
 
-1. 以 Hono 重构 HTTP Plugin 内部实现，同时保持既有 HTTP contract 与 SSE/E2E 测试不变；
-2. 扩展 config 的通用 `plugins[].module`，实现 CLI module loader 和 factory validation；
-3. 给 HTTP Plugin 增加受限 `http/static` hook，并为静态挂载与 lifecycle 写测试；
-4. 将 Console 的 production bundle 纳入 `plugins/kanban` 发布产物，新增
-   `kanban-console` zero-Toolkit Plugin factory；
-5. 用一个 workdir config 启动 `http + kanban + kanban-console`，验收静态页面、dispatch、
-   SSE、route unmount 与 SIGINT shutdown；
+1. ~~以 Hono 重构 HTTP Plugin 内部实现，同时保持既有 HTTP contract 与 SSE/E2E 测试不变；~~（已完成）
+2. ~~扩展 config 的通用 `plugins[].module`，实现 CLI module loader 和 factory validation；~~（已完成）
+3. ~~给 HTTP Plugin 增加受限 `http/static` hook，并为静态挂载与 lifecycle 写测试；~~（已完成）
+4. ~~将 Console 的 production bundle 纳入 `plugins/kanban` 发布产物，新增
+   `kanban-console` zero-Toolkit Plugin factory；~~（已完成）
+5. ~~用一个 workdir config 启动 `http + kanban + kanban-console`，验收静态页面、dispatch、
+   SSE、route unmount 与 SIGINT shutdown；~~（静态页面、同源 API 与生命周期已验收）
 6. 独立设计 interaction Plugin、durable Kanban event read model 与 token bootstrap，
    再把静态 prototype 换成真实 adapter。

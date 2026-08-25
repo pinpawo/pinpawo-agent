@@ -6,13 +6,17 @@ import type {
   StudioDispatchRequest,
   StudioEvent,
   StudioEventHandler,
+  StudioInvocationEvent,
+  StudioInvocationEventHandler,
   StudioPetRegistration,
   StudioPluginContext,
 } from '@pinpawo/studio';
 
 import {
   createStudioHttpPlugin,
+  STUDIO_HTTP_STATIC_HOOK_NAME,
   type StudioHttpRoutesHook,
+  type StudioHttpStaticHook,
 } from './studioHttpPlugin';
 
 const AUTH_TOKEN = 'test-token-with-at-least-16-characters';
@@ -138,6 +142,94 @@ test('HTTP Plugin dispatches a validated request and returns receipt identity', 
   }]);
 });
 
+test('HTTP Plugin exposes its dispatch queue and invocation progress', async (t) => {
+  const invocationHandlers = new Set<StudioInvocationEventHandler>();
+  const harness = createContext({
+    dispatch: async (request) => ({
+      petId: request.petId,
+      threadId: `thread:${request.petId}`,
+      invocationId: 'invocation-queued',
+      onInvocation: (handler) => {
+        invocationHandlers.add(handler);
+        return () => invocationHandlers.delete(handler);
+      },
+      completion: new Promise(() => undefined),
+    }),
+  });
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+  const authorization = { Authorization: `Bearer ${AUTH_TOKEN}` };
+
+  const accepted = await fetch(pluginUrl(address.port, '/dispatch'), {
+    method: 'POST',
+    headers: { ...authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      petId: 'planner',
+      input: { kind: 'request', request: 'split this goal into Kanban tasks' },
+    }),
+  });
+  assert.equal(accepted.status, 202);
+
+  const readDispatches = async () => {
+    const response = await fetch(pluginUrl(address.port, '/dispatches'), {
+      headers: authorization,
+    });
+    assert.equal(response.status, 200);
+    return response.json() as Promise<{ dispatches: Array<{
+      status: string;
+      input: unknown;
+      pendingContinuation?: unknown;
+    }> }>;
+  };
+  assert.deepEqual((await readDispatches()).dispatches.map(({ status }) => status), ['queued']);
+
+  const emitInvocation = async (event: StudioInvocationEvent) => {
+    await Promise.all([...invocationHandlers].map((handler) => handler(event)));
+  };
+  const identity = {
+    petId: 'planner',
+    threadId: 'thread:planner',
+    invocationId: 'invocation-queued',
+  };
+  await emitInvocation({ ...identity, status: 'busy' });
+  assert.deepEqual((await readDispatches()).dispatches.map(({ status }) => status), ['busy']);
+
+  await emitInvocation({
+    ...identity,
+    status: 'waiting',
+    pendingContinuation: {
+      continuationId: 'continuation-1',
+      payload: { kind: 'human_review' },
+    },
+  });
+  const [waiting] = (await readDispatches()).dispatches;
+  assert.equal(waiting?.status, 'waiting');
+  assert.deepEqual(waiting?.input, {
+    kind: 'request',
+    request: 'split this goal into Kanban tasks',
+  });
+  assert.deepEqual(waiting?.pendingContinuation, {
+    continuationId: 'continuation-1',
+    payload: { kind: 'human_review' },
+  });
+  assert.equal(invocationHandlers.size, 0);
+
+  const retry = await fetch(pluginUrl(address.port, '/dispatch'), {
+    method: 'POST',
+    headers: { ...authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      petId: 'planner',
+      input: { kind: 'request', request: 'split this goal into Kanban tasks' },
+      idempotencyKey: 'same-dispatch',
+    }),
+  });
+  assert.equal(retry.status, 202);
+  assert.deepEqual((await readDispatches()).dispatches.map(({ status }) => status), ['waiting']);
+});
+
 test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor fields', async (t) => {
   const harness = createContext({
     pets: [{
@@ -166,6 +258,33 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
   });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { pets: harness.context.listPets() });
+});
+
+test('HTTP Plugin permits unauthenticated loopback calls while rejecting foreign origins', async (t) => {
+  const harness = createContext();
+  const plugin = createStudioHttpPlugin({ port: 0 });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+
+  const pets = await fetch(pluginUrl(address.port, '/pets'));
+  assert.equal(pets.status, 200);
+
+  const dispatch = await fetch(pluginUrl(address.port, '/dispatch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      petId: 'planner',
+      input: { kind: 'request', request: 'plan this work' },
+    }),
+  });
+  assert.equal(dispatch.status, 202);
+
+  const crossOrigin = await fetch(pluginUrl(address.port, '/pets'), {
+    headers: { Origin: 'https://evil.example' },
+  });
+  assert.equal(crossOrigin.status, 403);
 });
 
 test('HTTP Plugin requires bearer auth and an explicitly allowed browser origin', async (t) => {
@@ -263,11 +382,14 @@ test('HTTP Plugin dispatches contributed routes through its shared Hono middlewa
   let routes: StudioHttpRoutesHook | undefined;
   harness.context.hooks = {
     expose: (hookName, hook) => {
-      assert.equal(hookName, 'routes');
-      routes = hook as StudioHttpRoutesHook;
-      return () => {
-        routes = undefined;
-      };
+      if (hookName === 'routes') {
+        routes = hook as StudioHttpRoutesHook;
+        return () => {
+          routes = undefined;
+        };
+      }
+      if (hookName === STUDIO_HTTP_STATIC_HOOK_NAME) return () => undefined;
+      assert.fail(`unexpected HTTP hook ${hookName}`);
     },
     contribute: () => () => undefined,
   };
@@ -304,6 +426,52 @@ test('HTTP Plugin dispatches contributed routes through its shared Hono middlewa
     headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
   });
   assert.equal(unregistered.status, 404);
+});
+
+test('HTTP Plugin serves lifecycle-managed packaged static mounts', async (t) => {
+  const harness = createContext();
+  let staticFiles: StudioHttpStaticHook | undefined;
+  harness.context.hooks.expose = (hookName, hook) => {
+    if (hookName === STUDIO_HTTP_STATIC_HOOK_NAME) staticFiles = hook as StudioHttpStaticHook;
+    return () => { staticFiles = undefined; };
+  };
+  const plugin = createStudioHttpPlugin({ port: 0 });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  assert.ok(staticFiles);
+  const files = new Map([
+    ['index.html', {
+      body: new TextEncoder().encode('<main>console</main>'),
+      contentType: 'text/html; charset=utf-8',
+    }],
+    ['assets/app.js', {
+      body: new TextEncoder().encode('console.log("console")'),
+      contentType: 'text/javascript; charset=utf-8',
+      cacheControl: 'public, max-age=31536000, immutable',
+    }],
+  ]);
+  const unregister = staticFiles.register({
+    mountPath: '/',
+    resolve: (relativePath) => files.get(relativePath),
+    fallback: 'index.html',
+  });
+  const address = plugin.address();
+  assert.ok(address);
+
+  const root = await fetch(pluginUrl(address.port, '/'));
+  assert.equal(root.status, 200);
+  assert.equal(await root.text(), '<main>console</main>');
+
+  const asset = await fetch(pluginUrl(address.port, '/assets/app.js'));
+  assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.equal(await asset.text(), 'console.log("console")');
+
+  const clientRoute = await fetch(pluginUrl(address.port, '/tasks/next'));
+  assert.equal(clientRoute.status, 200);
+  assert.equal(await clientRoute.text(), '<main>console</main>');
+
+  unregister();
+  assert.equal((await fetch(pluginUrl(address.port, '/'))).status, 404);
 });
 
 test('HTTP Plugin projects live Studio events over SSE and releases the subscription on stop', async () => {

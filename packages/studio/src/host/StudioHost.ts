@@ -77,6 +77,9 @@ export class StudioHost {
       sourceId: 'studio-host',
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
+      // Browser is a local-agent/Chat runtime with a process-wide bridge. A
+      // Studio must not inherit it merely because Chat has it enabled.
+      includeBrowser: false,
     });
     this.buildStudioImpl = options.buildStudio ?? buildStudio;
     this.resolveStudioHostConfigImpl = options.resolveStudioHostConfig ?? resolveStudioHostConfig;

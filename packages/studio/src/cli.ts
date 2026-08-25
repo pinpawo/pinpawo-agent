@@ -2,6 +2,8 @@ import {
   runStudioHostProcess,
   type StudioHostProcessOptions,
 } from './studioHostProcess';
+import { buildLocalAgentRuntimeConfig } from 'pinpawo/host-runtime';
+import { createStudioCliPluginResolver } from './cliPluginLoader';
 
 const HELP = `Usage: pinpawo-studio [options]
 
@@ -86,5 +88,9 @@ export async function runStudioHostCli(
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(HELP);
     return;
   }
-  await (handlers.runHost ?? runStudioHostProcess)(parsed.options);
+  const runtimeConfig = buildLocalAgentRuntimeConfig(parsed.options.workdir);
+  await (handlers.runHost ?? runStudioHostProcess)({
+    ...parsed.options,
+    resolvePlugin: createStudioCliPluginResolver({ workdir: runtimeConfig.workdir }),
+  });
 }

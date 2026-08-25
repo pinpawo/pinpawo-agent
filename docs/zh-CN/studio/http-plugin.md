@@ -5,7 +5,12 @@
 `@pinpawo-plugin/studio-http` 是一个可选、零 Toolkit 的 Studio Plugin。它提供
 loopback HTTP dispatch 入口、只读 Studio Pet 注册表，并把 Studio Plugin event bus 投射成 live SSE。它不提供
 内置领域页面，但会暴露 route hook 供其他 Plugin 贡献页面或 API；它也不是 Studio
-Host 自己的 WebSocket/stdio transport。
+Host 当前内建的 WebSocket/stdio transport。
+
+> **已接受目标差异：** 本 Plugin 将成为 Studio 唯一的 control-plane transport。当前
+> typed request/resume body 与 `threadId` response 是过渡实现；目标只接收
+> `{ petId, request, metadata?, idempotencyKey? }` 并返回 `petId/invocationId`。Agent
+> Session conversation 通过同一 Host 进程内独立的 local-agent WebSocket 提供。
 
 ## 装配
 

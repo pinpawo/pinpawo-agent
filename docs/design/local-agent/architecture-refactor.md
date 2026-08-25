@@ -12,6 +12,11 @@
 > 仅保留为迁移背景。所有暴露给 Capability subagent 的业务/外部 Tool 归属
 > Toolkit；当前约束以
 > [领域关系与装配约束](../host-agent-capability-toolkit.md)为准。
+> 2026-08-25 Resident Pet 边界对齐：本文阶段记录中的
+> `LocalServerStudioHandler`、TUI Studio handler、`studio_request` 与 Chat/Studio
+> 共用 composer 路径均已撤销，不代表当前或目标实现。Studio 只消费 local-agent
+> 装配的 dispatch port；TUI 通过独立 conversation/Agent Session adapter 访问 Pet。
+> 见 [Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md)。
 
 ## 1. 文档目标
 

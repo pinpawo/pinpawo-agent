@@ -10,6 +10,11 @@
 > concrete local wire adapter is a separate `local-server-transport` surface.
 > The `pinpawo-studio` executable entry also lives in this package. Concrete
 > Plugins remain externally injected through `StudioPluginResolver`.
+>
+> **Accepted target delta:** fixed Pet threads, dispatch resume and the built-in
+> Studio WebSocket/stdio transport are transitional. Dispatch becomes one-way;
+> Agent Session conversation owns active-thread switching and continuation
+> recovery. See [Resident Pet Host ports](../design/agent-runtime/resident-pet-host-ports.md).
 
 Studio is a small coordination substrate for multiple Pet runtimes. It keeps a
 registry of dispatchable pets, serializes work per pet, and gives plugins an
@@ -25,10 +30,13 @@ may also report domain outcomes through a Toolkit owned by the relevant Plugin.
 
 ## Read in this order
 
-- [Push model and boundaries](push-model.md) — the current coordination model,
+- [Push model and boundaries](push-model.md) — the transitional current coordination model,
   thread/invocation semantics, durable resume, event rules, and Plugin lifecycle.
 - [Plugin control-plane boundary](../design/studio/plugin-control-plane-boundary.md) — the target
   separation between Studio Plugins and Pet Agent assembly.
+- [Resident Pet Host ports](../design/agent-runtime/resident-pet-host-ports.md) —
+  the accepted local-agent assembly boundary between Studio dispatch and direct
+  Pet conversation.
 - [Configuration](configuration.md) — `studio.json`, per-pet files, validation,
   and Plugin injection.
 - [Local-host integration](host-integration.md) — workdir assembly, WebSocket
@@ -37,7 +45,7 @@ may also report domain outcomes through a Toolkit owned by the relevant Plugin.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
   types and exact method semantics.
 
-## What Studio owns
+## What Studio currently owns
 
 - Validating the configured pet registry and the default `entryPetId`.
 - Accepting dispatches unless Studio is stopped, the pet is unknown, or the pet
@@ -55,6 +63,7 @@ The following are plugin or host responsibilities, not Studio concepts:
 - task shapes, dependencies, progress, retries, timeout policy, and persistence;
 - choosing which pet receives work (including planning);
 - schedules, webhooks, concrete HTTP adapters, UI state, and authentication;
+- direct Pet conversation, Agent Session projection, and TUI transport;
 - shared knowledge stores or private agent scratch state.
 
 The optional `@pinpawo-plugin/kanban` package is the first example: its Plugin defines a
@@ -66,6 +75,12 @@ enlarge the Studio contract.
 The optional `studio-http` package is another concrete Plugin. It defines no
 Toolkit; it projects `context.dispatch()` and `context.subscribe()` to an
 authenticated loopback HTTP/SSE boundary.
+
+In the accepted target, the Host registers only currently live, eagerly started
+Pets. Studio neither reports lazy/disabled Pets nor publishes active Agent
+Session thread identity. The HTTP Plugin becomes the Studio control-plane
+transport; a separate local-agent Agent Session WebSocket in the same Host
+process handles direct Pet conversation without entering Studio core.
 
 ## Operational limits
 

@@ -14,8 +14,9 @@
 |---|---|---|
 | `pinpawo init` | Create local configuration and the example Capability. | `--dir <directory>`, `--force`, `--no-example-capability` |
 | `pinpawo setup` | Diagnose local model and runtime configuration. | `--workdir <directory>` |
-| `pinpawo server` / `pinpawo run` | Start the local host. | `--mode chat|studio`, `--workdir <directory>`, `--stdio` |
+| `pinpawo server` / `pinpawo run` | Start the local Chat host. | `--workdir <directory>`, `--stdio` |
 | `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--workdir <directory>` |
+| `pinpawo-studio` | Start the independent Studio Host. | `--workdir <directory>` and exactly one of `--stdio` or `--port <port>` |
 | `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
 | `pinpawo capability validate <dir>` | Validate one Capability directory. | — |
@@ -23,11 +24,15 @@
 
 ## Mode rules
 
-- `pinpawo run` is an alias for `pinpawo server`.
+- `pinpawo run` is an alias for `pinpawo server`; both always start Chat and
+  have no Studio mode.
+- Studio is a separate package/process entry. `pinpawo-studio` requires exactly
+  one Studio transport and does not reuse the Chat server startup path.
 - `--stdio` selects one-peer JSONL stdio instead of the local HTTP/WebSocket
   server; reserve standard output for protocol messages in that mode.
-- `pinpawo tui` starts the terminal client — the only one. `--check` and
-  `--qa` cannot be used together.
+- `pinpawo tui` starts the Chat/local-agent conversation client. It does not
+  connect to Studio or send Studio dispatch messages. `--check` and `--qa`
+  cannot be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
 

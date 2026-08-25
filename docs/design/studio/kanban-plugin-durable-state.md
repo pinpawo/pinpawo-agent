@@ -60,21 +60,21 @@ service.claimNextReadyTask()
 context.notify(task.doing)
 context.dispatch({
   petId: task.assigneeId,
-  input: { kind: 'request', request: buildTaskRequest(task) }
+  request: buildTaskRequest(task)
 })
         |
         v
 receipt.completion
-  ├─ waiting           -> service.waitForContinuation(...)
+  ├─ waiting           -> service.markWaiting(...)
   ├─ failed/cancelled  -> service.blockTask(...)
   ├─ Toolkit completed -> service.completeTask(...)
   └─ completed without outcome -> service.blockTask(...)
 ```
 
-`waiting` 的公开 `continuationId` 与 opaque JSON payload 被 Kanban 持久化为 waiting task 的
-continuation item；它不是 checkpoint，也不要求 Kanban 读取或恢复 checkpoint。UI 从 Kanban
-snapshot 获得该项后，通过 HTTP 的普通 typed `resume` dispatch 提交 Pet-defined payload；Pet
-runtime 仍是唯一校验 checkpoint 与 payload 的组件。
+`waiting` 只使 Kanban 把 task 记为等待处理；Studio receipt/event 不向 Kanban 投射
+`continuationId` 或 opaque payload。pending interrupt 由同一 Pet 的 local-agent Agent
+Session conversation 展示与恢复，不通过 Kanban、HTTP Plugin 或 dispatch。conversation
+恢复后，Agent 可以继续通过 Kanban Toolkit 完成或阻塞 task；Kanban 仍不读取 checkpoint。
 
 claim transaction 失败时不得 dispatch。Plugin 只消费自己发出的 receipt，不订阅 Agent
 graph state，不读取 `threadId`，也不把 `taskId` 塞进 execution metadata。taskId 只作为
@@ -133,4 +133,4 @@ Plugin 只注册和释放 Studio adapters。两种模式必须显式区分，避
 - 把 Kanban 数据提升为 Studio state；
 - 让 Studio event 代替 Kanban task history；
 - 让 HTTP Plugin 或 Studio core 直接读写 Kanban SQLite；
-- 专门解释某种 Pet continuation payload 的 interaction Plugin、知识图谱或 UI 视觉设计。
+- Agent Session interaction、知识图谱或 UI 视觉设计。

@@ -6,6 +6,11 @@
 > [`studioContract.ts`](../../packages/studio/src/studioContract.ts),
 > [`studioInvocation.ts`](../../packages/studio/src/studioInvocation.ts), and
 > [`createStudio.ts`](../../packages/studio/src/createStudio.ts).
+>
+> **Accepted target delta:** the fixed Pet thread, typed dispatch resume,
+> lazy/disabled registration and built-in Studio wire described below are
+> transitional. The accepted replacement is
+> [Resident Pet Host Ports](../design/agent-runtime/resident-pet-host-ports.md).
 
 Studio is a plugboard between Plugins and resident Pet runtimes. It provides a
 typed dispatch channel, a separate generic event bus, and an opaque composition

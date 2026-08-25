@@ -7,6 +7,11 @@
 > [`studioContract.ts`](../../../packages/studio/src/studioContract.ts),
 > [`studioInvocation.ts`](../../../packages/studio/src/studioInvocation.ts), and
 > [`types.ts`](../../../packages/studio/src/types.ts).
+>
+> **Accepted target delta:** typed dispatch resume, fixed per-Pet `threadId`,
+> lazy/disabled registrations and the built-in Studio WebSocket/stdio transport
+> are transitional. The target is defined by
+> [Resident Pet Host Ports](../../design/agent-runtime/resident-pet-host-ports.md).
 
 Studio is a lightweight multi-pet dispatch substrate. It does not expose runs,
 task snapshots, cancellation, retries, result aggregation, a scheduler, or
@@ -195,7 +200,8 @@ than invoking a pet after plugin listeners have stopped.
 
 ## Pet runtime port
 
-A host supplies the runnable pets:
+A host currently supplies runnable pets through this transitional dispatch
+adapter:
 
 ```ts
 type PetAgentRuntime = {
@@ -209,6 +215,16 @@ type PetAgentRuntime = {
   shutdown?(): Promise<void>;
 };
 ```
+
+Despite its current name, this is not the complete external surface of a
+resident Pet. The accepted target contract is local-agent's
+[`ResidentPetHost`](../../design/agent-runtime/resident-pet-host-ports.md),
+which composes an independently built `ResidentPet` and
+`ResidentPetInteraction`. Studio receives only `PetDispatchPort`; the
+interaction adapter directly reuses Agent Session and stays outside
+`@pinpawo/studio`. In that target, dispatch contains only a request, resolves
+the active thread internally at execution time, and cannot resume a pending
+continuation.
 
 The invocation input carries only the typed request/resume, resolved stable
 `threadId`, and cancellation signal. Invocation identity remains in Studio's

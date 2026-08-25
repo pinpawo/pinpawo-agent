@@ -1,7 +1,7 @@
 # Studio Plugin Control-plane Boundary
 
 > 状态：Draft target contract
-> 更新：2026-08-24
+> 更新：2026-08-26
 
 ## 决定
 
@@ -10,7 +10,7 @@ Studio Plugin 是 Studio 的控制面扩展，不是 Pet Agent 或 Capability �
 Agent 侧。一个 Plugin 的 lifecycle 只可通过以下 Studio contract 行动：
 
 ```text
-dispatch  ──> 向已配置 Pet 提交 typed work / resume
+dispatch  ──> 向当前存活 Pet 单向提交 request
 event     ──> 发布或订阅 Plugin-owned live domain notification
 hook      ──> 与已安装的其他 Studio Plugin 装配不透明扩展点
 ```
@@ -31,15 +31,14 @@ Capability -> Toolkit -> Pet runtime      Plugin -> dispatch/event/hook -> Studi
 
 ## 适用示例
 
-- Kanban Plugin 持久化自己的 task/continuation queue；在 task ready 或 continuation
-  input 到达时 dispatch；
+- Kanban Plugin 持久化自己的 task queue；在 task ready 时 dispatch；
   将自己的 committed task mutation 发布为 event；可向 HTTP Plugin 的 `routes` hook 贡献 UI/API。
 - HTTP Plugin 只把 dispatch 与 Plugin event 投射到 HTTP/SSE，并暴露 HTTP-owned route hook。
 - 任何 UI、scheduler 或 trigger Plugin 也只能沿 dispatch/event/hook 工作。
 
-Kanban 记录 waiting receipt 中的公开 continuation projection，是 Kanban task 状态；它不是
-读取或管理 checkpoint。typed `resume` 仍经 dispatch 送给 Pet runtime，由 runtime 自行验证
-checkpoint 和其自身的 payload。
+Kanban 可以把自己发起的 dispatch 已进入 `waiting` 记为 task 状态，但 receipt/event 不携带
+continuation identity 或 payload。pending interrupt 的展示与恢复只经过 local-agent Agent
+Session conversation；Plugin 不读取、不管理 checkpoint，也不通过 dispatch 提交 resume。
 
 ## 迁移说明
 

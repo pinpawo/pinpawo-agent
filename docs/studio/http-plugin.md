@@ -8,6 +8,12 @@ and a live SSE projection of the Studio Plugin event bus. It does not bundle a
 domain page, but exposes a route hook through which another Plugin may
 contribute one. It is not the Studio Host WebSocket/stdio transport.
 
+> **Accepted target delta:** this Plugin becomes the only Studio control-plane
+> transport. Its current typed request/resume body and `threadId` response are
+> transitional; the target accepts `{ petId, request, metadata?,
+> idempotencyKey? }` and returns `petId/invocationId`. Agent Session conversation
+> uses a separate local-agent WebSocket in the same Host process.
+
 ## Assembly
 
 ```ts

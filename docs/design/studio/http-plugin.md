@@ -1,10 +1,11 @@
 # Studio HTTP Plugin
 
 > 状态：Draft implementation contract
-> 更新：2026-08-23
+> 更新：2026-08-26
 
-HTTP 是一个具体 `StudioPlugin`，不是 Studio Host transport，也不是 Studio core 的
-内置 server。它把 dispatch/event 通道投射到 HTTP，并暴露 HTTP-owned route hook：
+HTTP 是一个具体 `StudioPlugin`，不是 Studio core 的内置 server。目标 Studio Host
+composition 把它作为唯一 control-plane transport 装配；它把 dispatch/event 通道投射到
+HTTP，并暴露 HTTP-owned route hook：
 
 ```text
 POST /dispatch  ──> context.dispatch(request) ──> receipt identity
@@ -32,13 +33,13 @@ route 背后的领域。
 ```json
 {
   "petId": "planner",
-  "input": { "kind": "request", "request": "plan this work" },
+  "request": "plan this work",
   "idempotencyKey": "optional-retry-key"
 }
 ```
 
 HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202` 和
-`petId/threadId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
+`petId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
 Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段。它不等待 invocation completion，
 也不把 HTTP 连接变成 cancellation owner。调用方如需执行进度，应使用 Studio
 invocation transport，而不是把 Plugin event 当成 invocation event。
@@ -90,8 +91,9 @@ lifecycle 会移除 route。
 ## 4. 非目标
 
 - HTTP Plugin 自己内置领域页面或静态资源；页面可由具体 Plugin 经 route hook 贡献；
-- Studio Host 的 WebSocket/stdio invocation transport；
+- Agent Session conversation、pending interrupt projection 或 resume；
 - invocation progress SSE；
+- 观察其他 Plugin 派出的 invocation 或建立 Studio 全局 durable invocation history；
 - Plugin discovery/安装；
 - pending-interrupt interaction UI；
 - durable event storage/replay；

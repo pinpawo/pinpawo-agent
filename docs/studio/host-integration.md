@@ -4,6 +4,10 @@
 
 > **Status: current local-host behavior.** This page documents the shipped
 > local adapter, not a transport-independent Studio API.
+>
+> **Accepted target:** the built-in Studio WebSocket/stdio transport, fixed
+> per-Pet thread, and dispatch resume below are transitional. See
+> [Resident Pet Host ports](../design/agent-runtime/resident-pet-host-ports.md).
 
 The Studio core contract is filesystem- and transport-independent. The
 `@pinpawo/studio` package also exports the concrete local Host adapter that owns
@@ -18,6 +22,12 @@ Studio + PetAgentRuntime[] + configured plugins
 studio.dispatch → typed dispatch(petId) → studio.accepted
                                       ↘ studio.invocation
 ```
+
+`PetAgentRuntime` is the current transitional dispatch adapter. The accepted
+target assembly is a local-agent-owned `ResidentPetHost` with separate
+`dispatch` and `conversation` surfaces. Studio receives only `dispatch`; the
+Agent Session/TUI path remains outside Studio. See
+[Resident Pet Host ports](../design/agent-runtime/resident-pet-host-ports.md).
 
 This is the Studio form of the same `Host -> Agent Runtime -> Capability ->
 Toolkit` ownership model used by Chat. Studio changes how one Host configures,
@@ -39,25 +49,36 @@ begins listening; requests only dispatch to this resident instance and do not
 trigger assembly. The Studio lifecycle is owned by the Host, not created or
 cached per request.
 
+This direct construction is the current implementation, not the final ownership
+boundary. During the accepted migration, local-agent exposes resident-runtime
+and Agent Session interaction builders separately. Studio Host composition uses
+both for each configured Pet, but supplies only the dispatch surface to Studio
+core. The interaction adapter exposes its own Agent Session WebSocket inside the
+same process. Studio must not gain a conversation registry or an Agent Session
+dependency.
+
 The host supplies a Studio-owned checkpointer when available. Chat and Studio
 use separate checkpoint roots because they can run as independent processes.
 At startup, each Host claims a lifetime writer lease for its checkpoint root and
 fails fast if another Host owns it. `FileSaver` also serializes individual store
 mutations with a filesystem writer lock. The Pet runtime uses the checkpointer
-to validate whether a typed request or resume is legal for the current
-continuation. Studio itself never reads or interprets checkpoint contents. The
-Pet runtime keeps human review enabled, so LangGraph may persist an interrupt
-and return a public pending projection. This state does not depend on Chat Host
-memory and may remain pending until an external interaction adapter dispatches
-a resume to the same stable Pet thread.
+to execute against the Agent Session active thread and preserve pending
+continuation state. Studio itself never reads or interprets checkpoint contents.
+The Pet runtime keeps human review enabled, so LangGraph may persist an
+interrupt and return a public pending projection. This state does not depend on
+Chat Host memory.
 
-The built-in Studio transport does not accept Chat review/session messages. It
-does accept Studio's own typed `resume` dispatch. An independent Studio Plugin
-or Host adapter can consume waiting invocation events, interact with a user, and
-submit that typed resume. The Pet runtime remains the component that validates
-the checkpoint and constructs the graph command.
+Dispatch is one-way and has no resume input in the accepted target. The paired
+local-agent Agent Session interaction presents and resolves pending interrupts
+through its existing typed review/interrupt contract. Studio core and Plugins
+do not construct graph resume commands.
 
-## Wire behavior
+The TUI conversation does not travel over the Studio wire. It connects to the
+paired local-agent Agent Session WebSocket, may switch the resident Pet's active
+thread, and has priority over dispatches that have not started. Active work is
+non-preemptive. Later dispatches use the active thread selected by conversation.
+
+## Current wire behavior (transitional)
 
 The Studio-owned `studio.dispatch` message carries `petId` plus a typed
 request/resume input, opaque metadata, and an optional idempotency key. Once
@@ -77,6 +98,11 @@ future external Plugin-event feed must define an explicit subscription and
 replay contract. Consumers must treat the current invocation stream as
 best-effort process-local notification, not a durable audit. The checkpoint
 remains authoritative for a pending interrupt.
+
+The target removes typed resume and `threadId` from the Studio dispatch
+receipt/event. Studio control-plane dispatch and events move to the HTTP Plugin;
+the built-in Studio WebSocket/stdio handler is removed. This section remains
+only as an accurate description of code that has not yet migrated.
 
 ## Shutdown
 

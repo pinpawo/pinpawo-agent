@@ -154,8 +154,6 @@ Production client controls:
   session picker, `/transcript` (or `/history`) opens the timeline pager,
   `/edit [text]` opens `$VISUAL` or `$EDITOR`, `/export [path]` writes a
   Markdown transcript, `/review-policy` aliases `/policy`, and `/quit` exits;
-- `/studio [task]` enters Studio mode and optionally starts a task; subsequent
-  prose keeps the same Studio conversation until `/chat` returns to chat mode;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
 - Esc or the first `Ctrl+C` interrupts an active response; a second `Ctrl+C`
@@ -288,16 +286,13 @@ The transport is reachable only through the explicit `--qa` flag; normal v2
 startup and the default legacy entry remain production paths. Direct workspace
 development is still available through `npm run dev:qa -w @pinpawo/tui`.
 
-Studio mode uses `studio_request`, Studio progress, response, and error
-messages. The built-in Studio adapter does not accept Chat review, interrupt,
-or session-control messages; those require a separate Studio control adapter.
-Composer mode and conversation ID stay view-local; accepted Studio runs,
-progress, terminal replies, and errors are projected into the canonical ordered
-timeline. Run the deterministic Studio PTY smoke without a host with:
-
-```sh
-npm run smoke:studio -w @pinpawo/tui
-```
+The TUI has no Studio mode and sends no `studio_request` messages. It consumes
+the local-agent Agent Session protocol for the focused conversation. A resident
+Pet may later be exposed through that same conversation adapter, but Studio
+dispatch, invocation progress, and Studio transports remain outside the TUI.
+See the accepted
+[Resident Pet Host ports](../../docs/design/agent-runtime/resident-pet-host-ports.md)
+boundary.
 
 ## Phase 1 probes
 

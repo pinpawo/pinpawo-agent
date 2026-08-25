@@ -15,6 +15,11 @@ The canonical implementation lives in the runtime-neutral
 serves the projection; clients such as the existing TUI consume it. Neither
 transport nor UI implementation owns the domain model.
 
+For a resident Pet, this package is the client projection/wire adapter over the
+local-agent-owned conversation surface. It is not the Pet's dispatch port and
+does not connect the TUI to Studio. See
+[Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md).
+
 ## Domain model
 
 The four terms below describe different things and must not be used interchangeably:
@@ -117,11 +122,10 @@ TUI actions. Separate TUI action vocabulary remains for TUI-only state and where
 a domain intent also changes composer, review-draft, ownership, or status-copy
 state.
 
-The TUI names the destination for the next composer submission
-`ui.composerTarget`. It is a UI routing choice (`chat | studio`), not the same
-concept as `session.kind`, which classifies the focused session projection.
-Commands that switch between Chat and Studio update both facts when appropriate,
-but consumers must not derive one from the other.
+The TUI routes composer submissions to the focused local-agent conversation.
+It has no `studio` composer target and sends no Studio dispatch messages.
+Selecting or restoring a conversation is an Agent Session concern; Studio Pet
+selection and Studio dispatch remain separate control-plane operations.
 
 The TUI intentionally retains `sessions + focusedSessionId`. Switchable/resumable
 sessions are already a product capability, and session-keyed state keeps late or

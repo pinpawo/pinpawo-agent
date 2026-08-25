@@ -1,14 +1,25 @@
 # Pet Runtime API
 
-> **Status: current host-integration contract.** The public port types live in
+> **Status: current transitional host-integration contract.** The current port
+> types live in
 > [`@pinpawo/studio`](../../../packages/studio/src/types.ts); the local-host
 > adapter that executes them lives in
 > [`services/local-agent/src/residentPetAgentRuntime.ts`](../../../services/local-agent/src/residentPetAgentRuntime.ts).
+> The accepted replacement is
+> [Resident Pet Host Ports](../../design/agent-runtime/resident-pet-host-ports.md).
 
 `PetAgentRuntime` is the boundary between Studio and one agent runtime. Studio
 submits a typed dispatch and never inspects the agent's private messages,
 Toolkit calls, or checkpoint internals. `local-agent` creates the runtime and
 owns all Pet/graph/checkpoint semantics behind this port.
+
+This interface represents only the dispatch side even though its name currently
+looks like the entire Pet runtime. It must not be reused as a TUI/session API.
+The target local-agent assembly constructs `ResidentPet` and
+`ResidentPetInteraction` independently, then holds both through a
+`ResidentPetHost` composition. Studio receives only `PetDispatchPort`; the
+interaction side directly reuses `@pinpawo/agent-session` messages and snapshots.
+`invoke()` will be renamed to `dispatch()` as consumers move to that contract.
 
 ## Port
 
@@ -72,4 +83,4 @@ boundary.
 - [Capability / Toolkit contract](../extensions/capability-toolkit.md) — task
   authority and Toolkit allowlists.
 - [Session projection](../runtime/session-projection.md) — client-facing
-  checkpoint and live-run state.
+  conversation and live-run projection; it is not a Studio/Pet dispatch port.

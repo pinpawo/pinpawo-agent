@@ -6,6 +6,10 @@
 > [`studioContract.ts`](../../../packages/studio/src/studioContract.ts)、
 > [`studioInvocation.ts`](../../../packages/studio/src/studioInvocation.ts) 和
 > [`createStudio.ts`](../../../packages/studio/src/createStudio.ts) 为准。
+>
+> **已接受目标差异：** 下文固定 Pet thread、typed dispatch resume、lazy/disabled
+> registration 与内建 Studio wire 是过渡实现。目标见
+> [Resident Pet Host Ports](../../design/agent-runtime/resident-pet-host-ports.md)。
 
 Studio 是 Plugin 与常驻 Pet runtime 之间的插板。它提供 typed dispatch 通道、
 彼此独立的通用 event 总线，以及已安装 Plugin 之间的不透明装配通道：

@@ -1,7 +1,7 @@
 # Studio Independent Host Runtime
 
-> 状态：Draft implementation contract
-> 对应：#643，基于 `origin/main@80b6f2ac` 的运行时复核
+> 状态：Accepted design，implementation pending
+> 对应：#643，基于 `origin/main@6e960b82` 的运行时复核
 > 更新：2026-08-26
 
 本文补足“Studio 已提取成独立类”之后仍需成立的运行时边界。它不重新定义
@@ -170,13 +170,21 @@ Studio HTTP transport 与 Plugin 都不解释 continuation，不构造 LangGraph
 checkpoint。checkpoint 持久化保证等待状态不依赖 Host 内存；重连后的用户投射由 Agent
 Session snapshot 恢复。
 
+多 Pet 路由由 local-agent Agent Session listener 在 connection 建立阶段完成。listener 从
+Pet-scoped URL/endpoint 选择对应的 `ResidentPetInteraction`，之后继续使用原样的
+`AgentClientMessage` / `AgentServerMessage`，不向 message schema 增加 `petId`。在该 route
+及多 Pet waiting/resume E2E 落地前，现有 dispatch continuation/resume 仍是 transitional
+adapter；迁移不能先关闭唯一已经实现的恢复路径。具体顺序见
+[Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md#8-迁移顺序与验收)。
+
 ## 3. 进程入口与 Plugin 装配
 
 独立入口仍为 `pinpawo-studio`，直接位于 `@pinpawo/studio` package；不存在第二个
 `studio-app` 或 Chat mode。进程入口负责组合边界，不扩大 Studio core：
 
-1. 从 workdir 解析 Studio/Pet 配置，并通过注入的 `StudioPluginResolver` 解析配置中的
-   Plugin module；Studio 不扫描、枚举或静态 import concrete Plugin；
+1. 从 workdir 解析 Studio/Pet 配置，并通过注入的 `StudioPluginResolver` 把配置中的
+   Plugin id 解析成 application 已安装的 module instance；Studio 不扫描、枚举或静态
+   import concrete Plugin；
 2. 在监听前完成 Toolkit inventory、全部 resident Pet 与配套 Agent Session interaction
    的 all-or-nothing 初始化；
 3. 启动 local-agent Agent Session WebSocket，供 TUI 与指定 Pet conversation 交互；
@@ -189,6 +197,9 @@ WebSocket 是同进程 local-agent interaction transport，不是 Studio protoco
 当前内建的 Studio WebSocket/stdio invocation transport。
 
 具体 HTTP route、security 与 static mount 约束见 [HTTP Plugin](http-plugin.md)。
+standalone CLI 如何把已安装 module 转成 resolver、校验 factory 并装配 packaged UI，见
+[CLI Plugin Web Composition](cli-plugin-web-composition.md)。在默认 resolver 落地之前，
+CLI 对包含 Plugin 的配置仍不具备自启动能力。
 
 ## 4. 验收测试
 
@@ -212,8 +223,6 @@ WebSocket 是同进程 local-agent interaction transport，不是 Studio protoco
   port 的过渡实现。
 - local-agent resident interaction builder 与 Agent Session WebSocket 的代码迁移。
 - durable event log 与断线重放。
-- Agent Session WebSocket 在不修改 Agent Session message 的前提下选择 Pet 的 route；
-- historical fixed Studio/Pet checkpoint namespace 的迁移；
 - scheduler 与 Plugin discovery；这些仍由 #638/#645 继续设计。
 
 Kanban 持久化和 dispatch result 投射由可选 Plugin 自己实现，见

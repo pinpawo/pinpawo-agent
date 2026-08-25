@@ -124,6 +124,15 @@ conversation event 或另一套 resume payload。`AgentSessionPeer` 只保留 pe
 reply/event routing，不定义新 wire message；因此带 `requestId` 的 response 不会被错误
 广播给其他 TUI connection。
 
+多 Pet Host 在 **connection 建立阶段**选择 interaction，而不是在
+`AgentClientMessage` 中增加 `petId`。local-agent Agent Session listener 使用
+`/agent-session/pets/:petId` route 解析并校验 `petId`，从 Host-owned
+registry 取得当前存活 Pet 的 `ResidentPetInteraction`，再把该 connection 绑定给它。
+connection 建立后不能切换 Pet；未知或未存活的 Pet 在 upgrade/bind 阶段拒绝。后续所有
+message 和 server projection 继续原样复用 `@pinpawo/agent-session` contract。这个 route
+属于 local-agent transport，不属于 Studio protocol，也不进入 Studio config 或 Plugin
+hook。
+
 `ResidentPet` 与 `ResidentPetInteraction` 必须由两个独立 factory 构造，`ResidentPetHost`
 只是 Host composition 持有的配套资源句柄；不能要求构造 runtime 时必须先构造 transport。
 两个 factory 共享一个 local-agent 私有的 Coordinator/session service 引用，不把该引用
@@ -131,10 +140,12 @@ reply/event routing，不定义新 wire message；因此带 `requestId` 的 resp
 
 Thread identity、session registry 与 active thread pointer 沿用 local-agent 现有 Agent
 Session service。Host 启动 interaction 时提供中性的 Host/Pet namespace，并在进入 ready
-之前调用现有 `ensureActiveSession` 语义：恢复持久化的 active session；不存在时立即创建
-默认 session，而不是等第一个 TUI 连接。`session.new` / `session.resume` 后续更新同一个
-Pet-scoped active pointer。dispatch 不缓存 threadId，而是在真正从队列开始执行时通过
-共享 service 读取 active thread；因此排队期间的 conversation thread 切换会自然影响它。
+之前复用现有 `ensureActiveTuiSession()` 的语义：恢复持久化的 active session；不存在时
+立即创建默认 session，而不是等第一个 TUI 连接。目标 Host service 可以收敛该名称，但
+不能假装存在另一套 `ensureActiveSession()` API。`session.new` / `session.resume` 后续更新
+同一个 Pet-scoped active pointer。dispatch 不缓存 threadId，而是在真正从队列开始执行时
+通过共享 service 读取 active thread；因此排队期间的 conversation thread 切换会自然影响
+它。
 
 同样，构造输入只包含 Agent 执行真正需要的 actor、models、Capability、Toolkit、
 checkpointer、Agent Session state store、workdir 与 runtime limits。Chat Host 与 Studio
@@ -187,7 +198,9 @@ thread：
   Agent Session client 连接同一 Pet 时，共享并观察同一个 active selection；切换操作按
   conversation FIFO 串行；
 - conversation 切换 active thread 后，后续 dispatch 沿用这个结果；
-- dispatch 在排队和接收时不捕获 threadId，只在真正获得执行权时读取一次 active thread；
+- dispatch 在排队和接收时不捕获 threadId；Coordinator 选中该 dispatch、把它从 queued
+  变成 active 时，在同一临界区内读取一次 active thread，并把选择固定在该 operation
+  内部；
 - 已经开始的 graph execution 在它选定的 thread 上完成。排队中的 conversation thread
   切换随后生效，再影响之后的 dispatch；
 - Studio invocation 只表示一次单向派发，不成为 thread 或 session identity。
@@ -294,14 +307,21 @@ Studio-owned registration/config 投进了 lower surface。迁移完成的判据
    `studioConfigPath`；Studio Host 自己从 workdir 解析其配置位置。
 6. 在 `ResidentPetHost` 中收敛一个共享的非抢占 Coordinator；conversation 队列严格优先
    于 dispatch 队列，移除各入口对 graph 互斥的独立所有权。
-7. 移除 dispatch resume 与 Studio receipt/event 中的稳定 `threadId`；pending continuation
-   只通过 Agent Session conversation 恢复。
-8. local-agent 提供可独立构造的 Agent Session interaction adapter 与 WebSocket listener；
-   Studio Host composition 将它与 resident runtime 配套启动，但 Studio core 不可见。
-9. Studio control plane 收敛到 HTTP Plugin；内置 Studio WebSocket/stdio 作为过渡实现移除。
-10. 配置 schema 删除 `lazy/disabled`；所有 Pet eager start，任一失败使 Host 全部失败；
+7. local-agent 提供可独立构造的 Agent Session interaction adapter 与 Pet-scoped WebSocket
+   route；Studio Host composition 将它与 resident runtime 配套启动，但 Studio core
+   不可见。route 在 connection 建立时选择 Pet，不修改 Agent Session message schema。
+8. 把历史 `studio:<studioId>:pet:<petId>` fixed checkpoint namespace 显式迁移到 Host/Pet
+   Agent Session registry；迁移必须保留可恢复的 active session、thread 和 pending
+   interrupt，不能仅切换 thread-id builder 后留下孤儿 checkpoint。
+9. 用至少两个 Pet 验证 route 隔离、snapshot、typed review/interrupt resume 和重连恢复。
+   在这项验收通过前，当前 dispatch continuation/resume 只能作为 transitional adapter
+   保留，不能先删除唯一已实现的恢复路径。
+10. 第 9 步通过后，移除 dispatch resume 与 Studio receipt/event 中的稳定 `threadId`；
+    pending continuation 只通过 Agent Session conversation 恢复。
+11. Studio control plane 收敛到 HTTP Plugin；内置 Studio WebSocket/stdio 作为过渡实现移除。
+12. 配置 schema 删除 `lazy/disabled`；所有 Pet eager start，任一失败使 Host 全部失败；
     `listPets()` 只返回 Host runtime registry 中当前存活的 Pet。
-11. 完成消费者迁移后移除 `PetAgentRuntime.invoke()` 过渡类型。
+13. 完成消费者迁移后移除 `PetAgentRuntime.invoke()` 过渡类型。
 
 验收必须证明：
 
@@ -311,11 +331,15 @@ Studio-owned registration/config 投进了 lower surface。迁移完成的判据
   idempotency、producer metadata、`studioConfigPath`、Studio registration 或
   Capability summary 字段；
 - 一个 Resident Pet 只装配一次底层 runtime，两个 surface 共享其静态 Agent 配置；
+- 多 Pet Agent Session listener 在 connection 阶段选择唯一 Pet；wire message 不增加
+  `petId`，未知 Pet 不会连接到默认 interaction；
 - conversation 切换 Agent Session active thread 后，尚未开始的 dispatch 使用新 thread；
 - 同一个 resident runtime 不发生并发 graph operation；
 - active operation 不被抢占；空闲选项始终先取 conversation，再取 dispatch；idle
   conversation connection 不阻塞 dispatch；
 - dispatch contract 不包含 resume，Studio receipt/event 不暴露固定 Pet `threadId`；
+- 删除 dispatch resume 前，Pet-scoped Agent Session route 已通过 waiting checkpoint 的
+  snapshot、typed resume 与重连 E2E；
 - dispatch 不需要消费 conversation live stream，只观察 gate 与自己的最终结果；
 - Studio Host 任一 Pet 启动失败时整体失败；`listPets()` 只包含当前存活 Pet；
 - Studio control plane 只有 HTTP，Agent Session WebSocket 属于同进程 local-agent

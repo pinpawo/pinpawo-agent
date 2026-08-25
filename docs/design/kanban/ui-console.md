@@ -71,10 +71,13 @@ task、event、SQLite、Agent checkpoint 或 Studio runtime 状态。
 - 最多展示当前最高优先级的一个 action，并显示总数；
 - 显示 task、请求操作、简短原因与依赖信息；
 - 提供鼠标可点击的“批准”“拒绝”“详情”；
-- 没有 interaction adapter 时可以显示 waiting task，但操作按钮必须 disabled 并说明
-  当前没有授权处理器；
-- UI 不能直接恢复 checkpoint。批准/拒绝只调用独立 interaction adapter 的 command，
-  adapter 再发起 typed resume dispatch。
+- 只有 Kanban-owned typed attention/authorization record 才能进入授权区；不能把 Studio
+  gate 或 dispatch 的 `waiting` result 当成授权项；
+- 没有 interaction adapter 时可以显示该 record，但操作按钮必须 disabled 并说明当前
+  没有授权处理器；
+- UI 不能直接恢复 checkpoint。批准/拒绝只调用独立 interaction adapter；adapter 通过
+  Pet-scoped Agent Session connection 发送已有 typed control input，不发起 Studio
+  dispatch resume。
 
 `waiting` task 仍同时出现在 TASKS 的 attention group；顶部授权区只是最高优先级投射，
 不制造第二份 task 状态。

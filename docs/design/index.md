@@ -52,5 +52,7 @@ contracts in [reference/](../reference/index.md).
   dispatch/event/Toolkit/hook integration without Studio data ownership
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
   for dispatch, events, Plugin routes, and packaged UI assets
+- [Studio CLI Plugin Web composition](studio/cli-plugin-web-composition.md) — active draft for
+  the standalone CLI module resolver, packaged static hook, and token bootstrap
 
 Completed or superseded work belongs in [history/](../history/index.md).

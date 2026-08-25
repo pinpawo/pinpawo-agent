@@ -65,16 +65,27 @@ context.dispatch({
         |
         v
 receipt.completion
-  ├─ waiting           -> service.markWaiting(...)
+  ├─ waiting           -> no Kanban task mutation
   ├─ failed/cancelled  -> service.blockTask(...)
   ├─ Toolkit completed -> service.completeTask(...)
   └─ completed without outcome -> service.blockTask(...)
 ```
 
-`waiting` 只使 Kanban 把 task 记为等待处理；Studio receipt/event 不向 Kanban 投射
-`continuationId` 或 opaque payload。pending interrupt 由同一 Pet 的 local-agent Agent
-Session conversation 展示与恢复，不通过 Kanban、HTTP Plugin 或 dispatch。conversation
-恢复后，Agent 可以继续通过 Kanban Toolkit 完成或阻塞 task；Kanban 仍不读取 checkpoint。
+Studio dispatch 的 `waiting` 只说明 resident Pet 当前不能完成这次单向派发，不是 Kanban
+task transition。Kanban adapter 不得据此调用一个只接受 reason 的 `waitTask()`，也不定义
+`markWaiting()`；Studio receipt/event 也不向 Kanban 投射 `continuationId` 或 opaque
+payload。task 保持 Agent 最后一次通过 Kanban Toolkit 明确提交的领域状态。
+
+pending interrupt 由同一 Pet 的 local-agent Agent Session conversation 展示与恢复，不通过
+Kanban、HTTP Plugin 或 dispatch。conversation 恢复后，Agent 可以继续通过 Kanban Toolkit
+完成或阻塞 task；Kanban 仍不读取 checkpoint。Kanban 若保留 `waiting` 领域状态，必须在
+独立设计中由 Kanban-owned typed attention/authorization record 支撑，不能从 Studio gate、
+dispatch result 或任意 reason 推导。
+
+当前实现中的 `waitTask()`、`waitForContinuation()`、`continuation_json` 以及
+`finishUnreportedTask()` 对 public continuation 的处理都是旧 dispatch-resume 模型的
+transitional surface。Pet-scoped Agent Session route 和 waiting/resume E2E 落地后，应在
+实现 PR 中一并移除或迁移；本目标 adapter 不调用它们。
 
 claim transaction 失败时不得 dispatch。Plugin 只消费自己发出的 receipt，不订阅 Agent
 graph state，不读取 `threadId`，也不把 `taskId` 塞进 execution metadata。taskId 只作为
@@ -125,6 +136,7 @@ Plugin 只注册和释放 Studio adapters。两种模式必须显式区分，避
 - Kanban domain/service/repository 不 import Studio 类型。
 - 所有 Studio 派活只走 `context.dispatch()`，所有 live 通知只走 `context.notify()`。
 - Agent 侧只有普通 Toolkit，不新增 Kanban graph state、checkpoint 或 execution metadata。
+- Studio `waiting` result 不直接改变 Kanban task status，也不把 continuation 存入 Kanban。
 - HTTP hook handler、Toolkit 和 dispatch adapter 共用同一个 Kanban service。
 - 没有 Studio 时，同一个 Kanban service 仍可被 Kanban CLI/Web 使用。
 

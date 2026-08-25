@@ -25,6 +25,8 @@ behavior.
   [due-run scheduler](studio/due-run-scheduler.md),
   [package extraction](studio/package-extraction-plan.md), and
   [server-mode audit](studio/server-mode-phase-0-audit.md)
+- [App Studio Agents product proposal](studio/app-agents-requirements.md) — retained product goals
+  for points, service feed, discovery, and Pet interaction; not a runtime contract
 - [Workdir-scoped runtime configuration](local-agent/workdir-scoped-runtime-config.md)
 - [Textarea refactor status](tui/textarea-refactor-status.md) and
   [TUI alignment records](tui/alignment/index.md)

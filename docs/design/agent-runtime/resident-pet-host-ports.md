@@ -3,7 +3,6 @@
 > 状态：Accepted design，implementation pending
 > 更新：2026-08-26
 > 关联：[Studio 独立 Host runtime](../studio/independent-host-runtime.md)、
-> [Studio Pet dispatch](../studio/pet-thread-dispatch-invocation.md)、
 > [Agent Session projection](../../reference/runtime/session-projection.md)
 
 本文固化 resident Pet 在本地 Host 中的两个访问面，以及 Studio、TUI 与

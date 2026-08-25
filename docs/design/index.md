@@ -33,13 +33,14 @@ contracts in [reference/](../reference/index.md).
   [textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the
   [OpenTUI capability matrix](tui/v2-capability-matrix.md)
 - [Browser Toolkit package](toolkits/browser-package.md)
-- [App Studio agents requirements](studio/app-agents-requirements.md)
+- [Resident Pet Host ports](agent-runtime/resident-pet-host-ports.md) — canonical
+  local-agent boundary for resident runtime, Agent Session interaction, and
+  conversation-priority dispatch coordination
+- [Studio Independent Host runtime](studio/independent-host-runtime.md) — Studio
+  process, dispatch mapping, Plugin boundary, persistence, and lifecycle
 - [Pending interrupt in Chat](local-agent/pending-interrupt-chat.md) — draft
   checkpoint/projection/resume boundary for PR #682, explicitly excluding
   Studio dispatch identity
-- [Studio Pet thread and dispatch invocation](studio/pet-thread-dispatch-invocation.md) —
-  draft identity/lifecycle model for one durable thread per Pet, one invocation
-  per dispatch, and interrupt resumes delivered through dispatch
 
 ## Kanban
 
@@ -49,7 +50,7 @@ contracts in [reference/](../reference/index.md).
   dispatch, tasks, events, authorization, and Markdown context
 - [Studio Kanban Plugin adapter](studio/kanban-plugin-durable-state.md) — optional
   dispatch/event/Toolkit/hook integration without Studio data ownership
-- [Studio CLI Plugin Web Composition](studio/cli-plugin-web-composition.md) — generic
-  CLI loading plus one HTTP container for Plugin-contributed APIs and UI assets
+- [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
+  for dispatch, events, Plugin routes, and packaged UI assets
 
 Completed or superseded work belongs in [history/](../history/index.md).

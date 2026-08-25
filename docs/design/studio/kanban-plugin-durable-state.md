@@ -28,7 +28,7 @@ Pet runtime  -X-> Kanban repository / SQLite
 - `StudioPluginContext` 不增加 Kanban 字段，也不提供数据库。
 - Plugin 可定义 Kanban Toolkit；Host 将 definition 放入统一 inventory，Capability 决定哪个
   Pet 使用它。Plugin lifecycle 不参与 Capability 选择或 Pet runtime 装配，见
-  [Plugin control-plane boundary](plugin-control-plane-boundary.md)。
+  [Studio Independent Host Runtime](independent-host-runtime.md)。
 - Agent 只看到普通 tool input/output，不看到 SQLite、history sequence、HTTP route、
   invocation identity 或 UI 授权状态。
 - task 与 receipt 的临时关联只存在于 Plugin dispatch closure，不写入 Studio metadata。

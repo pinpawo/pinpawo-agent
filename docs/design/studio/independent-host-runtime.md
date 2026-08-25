@@ -50,8 +50,9 @@ Studio 不 import kanban 或任何具体 Plugin。配置中的 Plugin id 由外�
 `StudioPluginResolver` 解析；未安装 resolver 或找不到 Plugin 时 fail fast。Plugin 是
 Studio control-plane lifecycle 的扩展单元。Plugin 可定义 Agent Toolkit；Host 将 definitions
 与其他来源一起放入统一 inventory，再由 Agent Capability 选择。Plugin lifecycle 只通过
-dispatch/event/hook 与 Studio 交互，不参与 Capability 选择或 Pet runtime 装配。详见
-[Plugin control-plane boundary](plugin-control-plane-boundary.md)。
+dispatch/event/hook 与 Studio 交互，不参与 Capability 选择或 Pet runtime 装配。它不读取
+Pet runtime、checkpoint、thread、Agent Session 或 execution metadata，也不能通过 event 或
+hook 获得这些引用。Toolkit definition 是 Plugin 与 Agent 装配的唯一连接。
 
 Capability 属于 Agent，与 Studio Plugin 无关。Resolver 不返回 Capability，Plugin 也不
 注册 Capability；Studio Host 按 `petId` 推导
@@ -107,6 +108,38 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 - `listPets()` 只返回 Host runtime registry 中当前存活的 Pet，并把 Studio 配置中的
   registration metadata 与 runtime liveness 合并；不返回 Capability summary、lazy 或
   disabled 状态。
+
+Studio target dispatch contract 只包含单向 request，不携带 thread 或 continuation：
+
+```ts
+type StudioDispatchRequest = {
+  petId: string;
+  request: string;
+  metadata?: JsonObject;
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+};
+
+type StudioDispatchReceipt = {
+  petId: string;
+  invocationId: string;
+  onInvocation(handler: StudioInvocationEventHandler): () => void;
+  completion: Promise<StudioDispatchResult>;
+};
+
+type StudioDispatchResult = {
+  petId: string;
+  invocationId: string;
+  status: 'completed' | 'waiting' | 'failed' | 'cancelled';
+  output?: string;
+  error?: string;
+};
+```
+
+receipt/event 不公开 Agent Session active `threadId`、pending continuation 或 Agent
+execution metadata。dispatch 真正获得执行权时，由 `ResidentPetHost` 内部从共享 Agent
+Session service 读取 active thread。
+
 - 每次已接收 dispatch 的 receipt 提供 invocation-scoped observer，并回放已知最新状态。
 - transport 先发 `studio.accepted`，再订阅该 receipt；producer-owned `metadata` 不携带
   route id 或其他 transport 私有状态。
@@ -137,7 +170,27 @@ Studio HTTP transport 与 Plugin 都不解释 continuation，不构造 LangGraph
 checkpoint。checkpoint 持久化保证等待状态不依赖 Host 内存；重连后的用户投射由 Agent
 Session snapshot 恢复。
 
-## 3. 验收测试
+## 3. 进程入口与 Plugin 装配
+
+独立入口仍为 `pinpawo-studio`，直接位于 `@pinpawo/studio` package；不存在第二个
+`studio-app` 或 Chat mode。进程入口负责组合边界，不扩大 Studio core：
+
+1. 从 workdir 解析 Studio/Pet 配置，并通过注入的 `StudioPluginResolver` 解析配置中的
+   Plugin module；Studio 不扫描、枚举或静态 import concrete Plugin；
+2. 在监听前完成 Toolkit inventory、全部 resident Pet 与配套 Agent Session interaction
+   的 all-or-nothing 初始化；
+3. 启动 local-agent Agent Session WebSocket，供 TUI 与指定 Pet conversation 交互；
+4. 通过 HTTP Plugin 暴露 Studio dispatch、event 与 Plugin-contributed route/static UI；
+5. SIGINT/SIGTERM 只关闭本 Host，并等待全部 lifecycle resource settle。
+
+HTTP Plugin 是唯一 Studio control-plane listener。Console/UI Plugin 只能向它贡献打包后的
+静态资源或 route，不能启动 Vite、Express、Hono 或第二个产品 server。Agent Session
+WebSocket 是同进程 local-agent interaction transport，不是 Studio protocol。目标会移除
+当前内建的 Studio WebSocket/stdio invocation transport。
+
+具体 HTTP route、security 与 static mount 约束见 [HTTP Plugin](http-plugin.md)。
+
+## 4. 验收测试
 
 - shutdown 后 queued dispatch 不 invoke；active operation 按 resident lifecycle contract 收口；
   pending interrupt 不阻塞 shutdown。
@@ -153,15 +206,15 @@ Session snapshot 恢复。
 - 任一 Pet 启动失败使整个 Host 启动失败；`listPets()` 只返回当前存活 Pet。
 - `StudioHost` success/failure init 均按所有权顺序释放资源。
 
-## 4. 尚未纳入
+## 5. 尚未纳入
 
 - `ResidentPetHost` 双 port 的代码迁移；当前 `PetAgentRuntime.invoke()` 仍是 dispatch
   port 的过渡实现。
 - local-agent resident interaction builder 与 Agent Session WebSocket 的代码迁移。
 - durable event log 与断线重放。
+- Agent Session WebSocket 在不修改 Agent Session message 的前提下选择 Pet 的 route；
+- historical fixed Studio/Pet checkpoint namespace 的迁移；
 - scheduler 与 Plugin discovery；这些仍由 #638/#645 继续设计。
-  独立进程入口见
-  [standalone process draft](standalone-process.md)。
 
 Kanban 持久化和 dispatch result 投射由可选 Plugin 自己实现，见
 [Kanban Plugin durable state](kanban-plugin-durable-state.md)。它不改变上述 Studio

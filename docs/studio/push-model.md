@@ -132,7 +132,7 @@ them through `Capability.uses`. That definition outlet is the only Agent-side
 connection: a Plugin lifecycle only uses dispatch, events and Plugin-owned
 hooks. It does not choose Capability bindings, inject a Toolkit into a Pet,
 access checkpoints, or read execution metadata. See the
-[control-plane boundary](../design/studio/plugin-control-plane-boundary.md).
+[independent Host runtime](../design/studio/independent-host-runtime.md).
 
 Studio starts Plugins in order and stops them in reverse. A startup failure
 rolls back the started prefix. `listPets()` returns descriptors, never runtime

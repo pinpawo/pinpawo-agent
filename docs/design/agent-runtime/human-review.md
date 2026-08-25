@@ -2,7 +2,7 @@
 
 > 状态：Historical / superseded。本文从“历史设计记录”起的旧 schema、迁移步骤和命名都不是当前 contract，不能用于指导新实现。
 >
-> 当前 Chat contract 见 [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)；当前 runtime projection 见 [Session Projection](../../reference/runtime/session-projection.md)；Studio 后续方案见 [Pet Dispatch and Conversation Continuity](../studio/pet-thread-dispatch-invocation.md)。authorization matcher 与 session grant 生命周期见 [Authorization Matcher Lifecycle](../../reference/runtime/authorization-matcher.md)。
+> 当前 Chat contract 见 [Pending Interrupt in Chat](../local-agent/pending-interrupt-chat.md)；当前 runtime projection 见 [Session Projection](../../reference/runtime/session-projection.md)；resident Pet 的 Studio/conversation 边界见 [Resident Pet Host Ports](resident-pet-host-ports.md)。authorization matcher 与 session grant 生命周期见 [Authorization Matcher Lifecycle](../../reference/runtime/authorization-matcher.md)。
 
 > 日期：2026-06-09
 > 关联：issue #82，PR #76

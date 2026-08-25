@@ -69,6 +69,14 @@ Kanban 默认向名为 `http` 的 Plugin 贡献 `GET /kanban`，返回当前 tas
 Kanban 启动失败。Plugin 启动顺序也不影响挂载；任一方停止时，Studio 托管的 hook
 lifecycle 会移除 route。
 
+### `static` hook
+
+HTTP Plugin 也可以暴露 HTTP-owned `static` hook，接收 Plugin 打包产物的 asset provider。
+UI Plugin 不启动第二个 server，不接收浏览器提供的 filesystem path，也不读取其他 Plugin
+数据库；HTTP Plugin 统一处理 mount path、SPA fallback、body/cache 上限、Origin 与认证。
+Kanban Console 因此可以和 API/SSE 共用一个 loopback origin，同时保持 HTTP 不 import
+Kanban、Console 不直接访问 Kanban SQLite。
+
 ## 2. Security boundary
 
 - server 只监听 `127.0.0.1`；当前 Plugin 不提供公网 bind 配置；

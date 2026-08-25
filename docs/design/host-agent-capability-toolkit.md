@@ -108,7 +108,7 @@ Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只�
 `AgentToolkit` 的子类型。它可以通过 `toolkits` 定义出口声明零个或多个 Toolkit；Host 将
 它们纳入统一 inventory，Agent 侧再由 `Capability.uses` 选择。Plugin lifecycle 只使用
 Studio context 的 dispatch、event 与 hook，不能参与 Capability 选择或 Pet runtime 装配。详见
-[Studio Plugin control-plane boundary](studio/plugin-control-plane-boundary.md)。
+[Studio Independent Host Runtime](studio/independent-host-runtime.md)。
 
 Capability 完全属于 Agent。Plugin 和 Studio 都不得注册、贡献或隐式附带 Capability；
 即使某个 Capability 会使用 Plugin 定义的 Toolkit，也必须由 Agent Host 独立装配。

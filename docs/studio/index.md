@@ -32,8 +32,8 @@ may also report domain outcomes through a Toolkit owned by the relevant Plugin.
 
 - [Push model and boundaries](push-model.md) — the transitional current coordination model,
   thread/invocation semantics, durable resume, event rules, and Plugin lifecycle.
-- [Plugin control-plane boundary](../design/studio/plugin-control-plane-boundary.md) — the target
-  separation between Studio Plugins and Pet Agent assembly.
+- [Independent Host runtime](../design/studio/independent-host-runtime.md) — target Host,
+  process, Plugin, dispatch, and interaction ownership.
 - [Resident Pet Host ports](../design/agent-runtime/resident-pet-host-ports.md) —
   the accepted local-agent assembly boundary between Studio dispatch and direct
   Pet conversation.

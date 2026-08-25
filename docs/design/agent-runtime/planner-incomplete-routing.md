@@ -4,7 +4,8 @@ Status: draft
 
 ## Problem
 
-`general` is a default fallback candidate exposed to the Capability Planner. It is
+The Agent-configured default Capability (`general` when omitted) is a fallback
+candidate exposed to the Capability Planner. It is
 not an authorization for the runtime to invent a task or claim that the
 Planner selected it. Likewise, `unavailable` is a model commit meaning that no
 available Capability can form an executable plan; it must not stand in for a
@@ -61,23 +62,24 @@ Parallel search calls in one model response form one disclosure batch. A match
 in any call means that batch does not consume an empty-search round; repeated
 calls after closure do not change the state.
 
-General is loaded once as the verified default Capability and is excluded from
+The configured default is loaded once as a verified Capability and excluded from
 the `capability_search` index. Search therefore discloses only specific
-Capability documents and never spends the document budget redisclosing General.
+Capability documents and never spends the document budget redisclosing the
+default.
 The final tool result is assembled once inside the state-aware search tool from
 a typed registry result; middleware does not parse and rewrite a JSON tool
 message after execution.
 
 The result supplies disclosed specific candidates, explicit remaining-round
 state, and mode-specific planning guidance. An applicable disclosed specific
-Capability takes precedence over General. A literal match is not proof of
-applicability: the complete document must positively authorize the unfinished
-task, and a term appearing only in negative or limiting text does not increase
-the candidate's priority. When the first literal search misses, the result
-discloses a bounded catalog of exact specific Capability names and defers
-General while another search round remains; the next round can use one of those
-names to retrieve the complete document. Boundary mode excludes the active
-Capability from this catalog, so completed work is not reintroduced merely by
+Capability takes precedence over the configured default. A literal match is
+not proof of applicability: the complete document must positively authorize
+the unfinished task, and a term appearing only in negative or limiting text
+does not increase the candidate's priority. When the first literal search
+misses, the result discloses a bounded catalog of exact specific Capability
+names and defers the default while another search round remains; the next round
+can use one of those names to retrieve the complete document. Boundary mode
+excludes the active Capability from this catalog, so completed work is not reintroduced merely by
 name while a newly required executor remains discoverable. The Planner never
 has to consume all rounds: it should commit as soon as the candidates are
 sufficient.

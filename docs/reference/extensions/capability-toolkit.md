@@ -334,10 +334,11 @@ system prompt。subagent 只获得编译到该 Capability 的 tools。
 - 运行在 `capability:general` lane；
 - 使用统一 Capability executor。
 
-General 使用与其他 Capability 相同的文档与选择证据，但无需依赖字面搜索命中：
-只要它存在于 effective workspace，其经过校验的文档就会作为默认候选进入
-Planner 私有上下文。代码没有 general fallback executor、独立 lane 或单独的
-General terminal action。
+General 使用与其他 Capability 相同的文档与选择证据。Agent 未另行配置时，只要它存在于
+effective workspace，其经过校验的文档就会作为默认候选进入 Planner 私有上下文。Agent 也可
+通过 `defaultCapabilityName` 将另一个已注册且可用的 Capability 设为默认候选；这只改变 Planner
+预加载与候选偏好，不会强制路由或创建独立 executor。代码没有 general fallback executor、
+独立 lane 或单独的 General terminal action。
 
 local-agent 的内建 General 位于：
 

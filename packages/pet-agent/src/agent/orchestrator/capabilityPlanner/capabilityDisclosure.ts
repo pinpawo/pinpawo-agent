@@ -3,6 +3,8 @@ import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 
 export type CapabilityDisclosureState = {
   readonly registryDigest: string;
+  /** Default candidate used when this disclosure generation was initialized. */
+  readonly defaultCapabilityName?: string;
   readonly disclosedCapabilityNames: readonly string[];
   readonly emptySearchRounds: number;
   readonly maxEmptySearchRounds: number;
@@ -23,16 +25,23 @@ function disclosureStatus(emptySearchRounds: number, maxEmptySearchRounds: numbe
 export function createCapabilityDisclosureState(params: {
   workspace: CapabilityDocumentWorkspace;
   maxEmptySearchRounds: number;
+  defaultCapabilityName?: string;
 }): CapabilityDisclosureState {
   const { workspace, maxEmptySearchRounds } = params;
   if (!Number.isSafeInteger(maxEmptySearchRounds) || maxEmptySearchRounds <= 0) {
     throw new Error('Capability Planner maxEmptySearchRounds must be a positive integer');
   }
+  const defaultCapabilityName = params.defaultCapabilityName
+    ?? GENERAL_CAPABILITY_NAME;
+  if (!defaultCapabilityName.trim()) {
+    throw new Error('Capability Planner defaultCapabilityName must be non-empty');
+  }
   const disclosedCapabilityNames = workspace.capabilityNames.includes(
-    GENERAL_CAPABILITY_NAME,
-  ) ? [GENERAL_CAPABILITY_NAME] : [];
+    defaultCapabilityName,
+  ) ? [defaultCapabilityName] : [];
   return {
     registryDigest: workspace.registryDigest,
+    defaultCapabilityName,
     disclosedCapabilityNames,
     emptySearchRounds: 0,
     maxEmptySearchRounds,
@@ -48,26 +57,35 @@ export function resolveCapabilityDisclosureState(params: {
   current: CapabilityDisclosureState | null;
   workspace: CapabilityDocumentWorkspace;
   maxEmptySearchRounds: number;
+  defaultCapabilityName?: string;
 }) {
+  const defaultCapabilityName = params.defaultCapabilityName
+    ?? GENERAL_CAPABILITY_NAME;
   if (!params.current
-    || params.current.registryDigest !== params.workspace.registryDigest) {
-    return createCapabilityDisclosureState(params);
+    || params.current.registryDigest !== params.workspace.registryDigest
+    || params.current.defaultCapabilityName !== defaultCapabilityName) {
+    return createCapabilityDisclosureState({
+      ...params,
+      defaultCapabilityName,
+    });
   }
   return params.current;
 }
 
 /**
  * Drop every Capability learned through search while retaining the trace's
- * discovery-round accounting. General is the only default disclosure and is
- * therefore the only document that survives this size-limit fallback.
+ * discovery-round accounting. Only the configured default disclosure
+ * survives this size-limit fallback.
  */
 export function removeSearchedCapabilities(params: {
   current: CapabilityDisclosureState;
   workspace: CapabilityDocumentWorkspace;
 }): CapabilityDisclosureState {
+  const defaultCapabilityName = params.current.defaultCapabilityName
+    ?? GENERAL_CAPABILITY_NAME;
   const disclosedCapabilityNames = params.workspace.capabilityNames.includes(
-    GENERAL_CAPABILITY_NAME,
-  ) ? [GENERAL_CAPABILITY_NAME] : [];
+    defaultCapabilityName,
+  ) ? [defaultCapabilityName] : [];
   return {
     ...params.current,
     disclosedCapabilityNames,

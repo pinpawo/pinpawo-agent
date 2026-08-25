@@ -99,12 +99,12 @@ function formatCapabilitySearchResult(params: {
       )
     : [];
   const planningObjective = pendingParallelBatch
-    ? 'Evaluate the complete parallel search batch. If any result disclosed a Capability, this round consumes no empty-search allowance; otherwise it consumes one. Finish planning from disclosed Capabilities, including General when it can deliver the work.'
+    ? 'Evaluate the complete parallel search batch. If any result disclosed a Capability, this round consumes no empty-search allowance; otherwise it consumes one. Finish planning from disclosed Capabilities, including the configured default when it can deliver the work.'
     : reportedDisclosure.status === 'closed'
-      ? 'Discovery is finished. Submit a plan with an already disclosed Capability, including General when it can deliver the work. Report unavailable only when none of the disclosed Capabilities can deliver the remaining goal.'
+      ? 'Discovery is finished. Submit a plan with an already disclosed Capability, including the configured default when it can deliver the work. Report unavailable only when none of the disclosed Capabilities can deliver the remaining goal.'
       : newlyDisclosedCapabilityNames && newlyDisclosedCapabilityNames.length > 0
-        ? 'Evaluate the newly disclosed Capability documents and finish planning as soon as one can deliver the work. Prefer a newly disclosed specific Capability over broad General when its positive responsibility covers the task.'
-        : 'If an already disclosed Capability, including General, can deliver the work, finish planning now. Otherwise use an undisclosed Capability name from this result for one precise search of the concrete executor responsibility that is still missing.';
+        ? 'Evaluate the newly disclosed Capability documents and finish planning as soon as one can deliver the work. Prefer a newly disclosed specific Capability over the configured default when its positive responsibility covers the task.'
+        : 'If an already disclosed Capability, including the configured default, can deliver the work, finish planning now. Otherwise use an undisclosed Capability name from this result for one precise search of the concrete executor responsibility that is still missing.';
   return JSON.stringify({
     ...payload,
     capabilityDiscovery: {

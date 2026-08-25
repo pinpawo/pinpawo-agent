@@ -194,6 +194,8 @@ function buildPlannerRunnableConfig(params: {
 
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
+  /** Capability preloaded as the entry Planner's default candidate. */
+  defaultCapabilityName?: string;
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
@@ -214,6 +216,9 @@ export function createCapabilityPlannerAgent(params: {
     if (existing) return existing;
     const explorer = createCapabilityPlannerFileExplorer({
       workspace: input.workspace,
+      ...(params.defaultCapabilityName !== undefined
+        ? { defaultCapabilityName: params.defaultCapabilityName }
+        : {}),
       registryBackend: params.registryBackend ?? 'filesystem',
       ...(params.maxDocumentReadBytes
         ? { maxDocumentReadBytes: params.maxDocumentReadBytes }
@@ -278,8 +283,8 @@ export function createCapabilityPlannerAgent(params: {
             }),
           };
           // The failed explorer has already marked its budget as exhausted.
-          // Recreate it so General and any later search use a clean invocation
-          // budget after the oversized searched disclosures are discarded.
+          // Recreate it so the configured default and any later search use a
+          // clean invocation budget after oversized disclosures are discarded.
           explorers.delete(input.inputId);
           explorer = explorerForInput(effectiveInput);
           disclosedCapabilities = await explorer.readCapabilities(

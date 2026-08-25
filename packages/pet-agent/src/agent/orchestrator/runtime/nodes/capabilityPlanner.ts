@@ -228,6 +228,9 @@ function buildWaitingUpdate(
 function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlannerRunner {
   return createCapabilityPlannerAgent({
     model: config.models.act,
+    ...(config.defaultCapabilityName !== undefined
+      ? { defaultCapabilityName: config.defaultCapabilityName }
+      : {}),
     registryBackend: config.capabilityRegistryBackend ?? 'filesystem',
   });
 }
@@ -358,6 +361,9 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     const capabilityDisclosure = resolveCapabilityDisclosureState({
       current: currentDisclosure,
       workspace,
+      ...(config.defaultCapabilityName !== undefined
+        ? { defaultCapabilityName: config.defaultCapabilityName }
+        : {}),
       maxEmptySearchRounds: config.capabilityPlannerMaxSearchRounds
         ?? DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS,
     });

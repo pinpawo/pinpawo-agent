@@ -505,6 +505,10 @@ observations，并以 `Command.update` 合并并行调用；invocation 结束时
 拥有披露状态。ToolMessage 只报告本次结果、更新后的额度与稳定的 discovery 状态，不替 root
 生成 fallback commit，也不提供另一份 action 决策树。
 
+trace 初始披露项来自 Agent 配置的 `defaultCapabilityName`；未配置时为 `general`。该文档和其他
+已披露 Capability 一样通过 immutable workspace 校验并进入 Planner input，同时从
+`capability_search` 结果中排除。显式 allowlist 不包含默认项时不注入替代实现。
+
 ### 幂等输入消费
 
 Planner terminal ToolMessage 携带 `plannerInputId`，其内容就是经过校验的 commit。建议 input ID：

@@ -108,6 +108,43 @@ test('descriptor derives Capability status from registry compilation', () => {
   }]);
 });
 
+test('resident Pet rejects an unavailable configured default Capability', async () => {
+  const inspectCapability = {
+    name: 'inspect',
+    description: 'Inspect a repository.',
+    uses: ['offline'],
+    instructions: defineInstructionDocument({ content: '# Inspect' }),
+  };
+  assert.throws(() => createResidentPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    defaultCapabilityName: 'missing',
+    capabilities: [inspectCapability],
+    graph: makeStubGraph([]).graph,
+  }), /default Capability "missing" is not available/);
+
+  const { graph, calls } = makeStubGraph([{ messages: [new AIMessage('unexpected')] }]);
+  const runtime = createResidentPetAgentRuntime({
+    models: fakeModels(),
+    actor: fakeActor(),
+    defaultCapabilityName: 'inspect',
+    capabilities: [inspectCapability],
+    toolkits: [{
+      name: 'offline',
+      description: 'Runtime-dependent Toolkit.',
+      tools: [{ tool: mockTool('offline_default_tool') }],
+      availability: () => ({ available: false, reason: 'offline' }),
+    }],
+    graph,
+  });
+
+  await assert.rejects(() => runtime.invoke({
+    input: { kind: 'request', request: 'inspect' },
+    threadId: 'studio:s1:pet:p1',
+  }), /default Capability "inspect" is not available: unknown Toolkit "offline"/);
+  assert.equal(calls.length, 0);
+});
+
 test('invoke evaluates Toolkit availability before compiling its registry generation', async () => {
   let availabilityChecks = 0;
   const { graph, calls } = makeStubGraph([

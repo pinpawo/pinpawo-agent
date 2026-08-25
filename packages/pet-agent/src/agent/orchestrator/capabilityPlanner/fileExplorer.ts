@@ -113,14 +113,21 @@ function normalizeCapabilitySearchTerms(input: readonly string[]) {
 
 export function createCapabilityPlannerFileExplorer(params: {
   workspace: CapabilityDocumentWorkspace;
+  /** Defaults to the well-known `general` Capability. */
+  defaultCapabilityName?: string;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
 }): CapabilityPlannerFileExplorer {
   const { workspace } = params;
+  const defaultCapabilityName = params.defaultCapabilityName
+    ?? GENERAL_CAPABILITY_NAME;
+  if (!defaultCapabilityName.trim()) {
+    throw new Error('Capability Planner defaultCapabilityName must be non-empty');
+  }
   const registryBackend = params.registryBackend
     ?? CAPABILITY_REGISTRY_BACKEND.FILESYSTEM;
   const defaultEntry = workspace.entries.find(
-    ({ capabilityName }) => capabilityName === GENERAL_CAPABILITY_NAME,
+    ({ capabilityName }) => capabilityName === defaultCapabilityName,
   );
   const registryDocuments = createCapabilityRegistryDocuments({
     workspace,

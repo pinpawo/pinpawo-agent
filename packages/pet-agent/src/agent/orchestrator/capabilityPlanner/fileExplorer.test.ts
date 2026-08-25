@@ -168,6 +168,31 @@ test('Planner reads every disclosed Capability in stable order', async (t) => {
   assert.match(documents[1]?.content ?? '', /Open and inspect web pages/);
 });
 
+test('Planner can preload a configured default Capability instead of General', async (t) => {
+  const { workspace } = await workspaceFixture(t);
+  const explorer = createCapabilityPlannerFileExplorer({
+    workspace,
+    defaultCapabilityName: 'explore',
+  });
+
+  const [defaultCapability] = await explorer.readCapabilities(['explore']);
+  const generalSearch = await explorer.search(['ordinary local work']);
+  const exploreSearch = await explorer.search(['repository research']);
+
+  assert.equal(defaultCapability?.capabilityName, 'explore');
+  assert.equal(defaultCapability?.path, 'explore/CAPABILITY.md');
+  assert.match(defaultCapability?.content ?? '', /repository research/);
+  assert.equal(generalSearch.ok, true);
+  if (generalSearch.ok) {
+    assert.deepEqual(
+      generalSearch.data.matches.map(({ path }) => path),
+      ['general/CAPABILITY.md'],
+    );
+  }
+  assert.equal(exploreSearch.ok, true);
+  if (exploreSearch.ok) assert.deepEqual(exploreSearch.data.matches, []);
+});
+
 test('capability_search excludes the preloaded General Capability', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });

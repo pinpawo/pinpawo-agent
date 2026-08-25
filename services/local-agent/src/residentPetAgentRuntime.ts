@@ -103,6 +103,8 @@ const DEFAULT_PET_REVIEW_CAPABILITIES = {
 export type ResidentPetAgentRuntimeConfig = {
   models: AgentModels;
   actor: AgentActor;
+  /** Defaults to `general` when the runtime builds its own graph. */
+  defaultCapabilityName?: OrchestratorConfig['defaultCapabilityName'];
   role?: string | null;
   serviceSummary?: string | null;
   startupMode?: ResidentPetAgentStartupMode;
@@ -149,6 +151,28 @@ function buildCapabilitySummaries(
       reason: available ? null : unavailableByName.get(capability.name) ?? null,
     };
   });
+}
+
+function assertConfiguredDefaultCapability(
+  config: ResidentPetAgentRuntimeConfig,
+  registry: ReturnType<typeof compileAgentRegistry>,
+) {
+  const defaultCapabilityName = config.defaultCapabilityName;
+  if (defaultCapabilityName === undefined) return;
+  const available = registry.capabilities.some(
+    ({ capability }) => capability.name === defaultCapabilityName,
+  );
+  if (available) return;
+  const unavailable = registry.unavailableCapabilities.find(
+    ({ capability }) => capability.name === defaultCapabilityName,
+  );
+  const reason = unavailable
+    ? `: ${formatExecutorCompilationIssues(unavailable.issues)}`
+    : '';
+  throw new Error(
+    `Pet agent "${config.actor.petId}" default Capability `
+    + `"${defaultCapabilityName}" is not available${reason}`,
+  );
 }
 
 function initialStatus(config: ResidentPetAgentRuntimeConfig): ResidentPetAgentStatus {
@@ -272,6 +296,12 @@ function parseHumanReviewContinuationPayload(
 export function createResidentPetAgentRuntime(
   config: ResidentPetAgentRuntimeConfig,
 ): ResidentPetRuntime {
+  if (config.defaultCapabilityName !== undefined) {
+    assertConfiguredDefaultCapability(config, compileAgentRegistry({
+      toolkits: config.toolkits ?? [],
+      capabilities: config.capabilities ?? [],
+    }));
+  }
   let status = initialStatus(config);
   let gateState: ResidentPetGateState = 'open';
   const gateListeners = new Set<(state: ResidentPetGateState) => void>();
@@ -298,6 +328,7 @@ export function createResidentPetAgentRuntime(
     ?? (config.graph ? null : new ToolkitRuntimeManager());
   const graph = config.graph ?? createOrchestratorGraph({
     models: config.models,
+    defaultCapabilityName: config.defaultCapabilityName,
     modelInputModalities: config.modelInputModalities,
     actor: config.actor,
     checkpoint: config.checkpoint,
@@ -383,6 +414,7 @@ export function createResidentPetAgentRuntime(
       toolkits,
       capabilities: config.capabilities ?? [],
     });
+    assertConfiguredDefaultCapability(config, registry);
     const configurable: Record<string, unknown> = {
       actor: config.actor,
       thread_id: input.threadId,

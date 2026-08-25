@@ -77,6 +77,13 @@ export type DecisionMode = 'answer' | 'capability';
 export type OrchestratorConfig = {
   models: AgentModels;
   /**
+   * Capability document preloaded by the entry Planner as its default
+   * candidate. Defaults to the well-known `general` Capability. This changes
+   * candidate preference only; it does not bypass registry availability or an
+   * invocation-scoped Capability allowlist.
+   */
+  defaultCapabilityName?: string;
+  /**
    * Input modalities accepted by the active model profile. Tools declaring
    * `requiresInputModalities` bind only when this covers them; omitting it is
    * read as text-only.

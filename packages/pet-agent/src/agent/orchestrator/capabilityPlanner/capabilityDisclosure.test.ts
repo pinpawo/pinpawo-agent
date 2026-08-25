@@ -51,6 +51,23 @@ test('Capability disclosure starts with General and persists discoveries in orde
   assert.equal(afterBoundary.status, 'open');
 });
 
+test('Capability disclosure starts with the configured default and resets when it changes', () => {
+  const initial = createCapabilityDisclosureState({
+    workspace: workspace(),
+    maxEmptySearchRounds: 2,
+    defaultCapabilityName: 'writer',
+  });
+
+  assert.equal(initial.defaultCapabilityName, 'writer');
+  assert.deepEqual(initial.disclosedCapabilityNames, ['writer']);
+  assert.deepEqual(resolveCapabilityDisclosureState({
+    current: initial,
+    workspace: workspace(),
+    maxEmptySearchRounds: 2,
+    defaultCapabilityName: 'explore',
+  }).disclosedCapabilityNames, ['explore']);
+});
+
 test('Capability disclosure counts a wholly empty parallel batch once', () => {
   const initial = createCapabilityDisclosureState({
     workspace: workspace(),
@@ -96,6 +113,7 @@ test('Capability disclosure resets when the registry generation changes', () => 
     maxEmptySearchRounds: 3,
   }), {
     registryDigest: nextWorkspace.registryDigest,
+    defaultCapabilityName: 'general',
     disclosedCapabilityNames: ['general'],
     emptySearchRounds: 0,
     maxEmptySearchRounds: 3,

@@ -1031,6 +1031,61 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.match(readMessageText(boundaryInput), /<planning_boundary[^>]*>/);
 });
 
+test('Planner receives the configured default Capability before discovery', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({
+      name: 'general',
+      description: 'Handle ordinary work.',
+      instructions: 'Use general tools.',
+    }),
+    kanban_planning: capabilityDocument({
+      name: 'kanban_planning',
+      description: 'Plan work on the Kanban board.',
+      instructions: 'Decompose the goal and create Kanban tasks.',
+    }),
+  });
+  const model = new ScriptedPlannerModel([{
+    structuredOutput: {
+      kind: 'plan',
+      args: {
+        tasks: [{
+          capability: 'kanban_planning',
+          task: 'Create a task plan on the board.',
+        }],
+      },
+    },
+  }]);
+
+  const result = await createCapabilityPlannerAgent({
+    model,
+    defaultCapabilityName: 'kanban_planning',
+  }).invoke(plannerInput(workspace, {
+    capabilityDisclosure: createCapabilityDisclosureState({
+      workspace,
+      maxEmptySearchRounds: 2,
+      defaultCapabilityName: 'kanban_planning',
+    }),
+  }));
+
+  assert.deepEqual(commitOnly(result), {
+    action: 'execute_plan',
+    tasks: [{
+      capability: 'kanban_planning',
+      task: 'Create a task plan on the board.',
+    }],
+  });
+  const plannerInputMessage = model.invocations[0]?.find(
+    (message) => message instanceof HumanMessage,
+  );
+  assert.ok(plannerInputMessage instanceof HumanMessage);
+  assert.match(
+    readMessageText(plannerInputMessage),
+    /<capability name="kanban_planning">/,
+  );
+  assert.match(readMessageText(plannerInputMessage), /create Kanban tasks/);
+  assert.doesNotMatch(readMessageText(plannerInputMessage), /Use general tools/);
+});
+
 test('an explicit second search discloses a specific Capability after a miss', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
@@ -1167,7 +1222,7 @@ test('a term matching only preloaded General consumes one empty round', async (t
   );
   assert.equal(payload.capabilityDiscovery?.emptySearchRounds, 1);
   assert.deepEqual(payload.capabilityDiscovery?.undisclosedCapabilityNames, ['explore']);
-  assert.match(payload.planningObjective ?? '', /including General/);
+  assert.match(payload.planningObjective ?? '', /including the configured default/);
 });
 
 test('a boundary search does not redisclose its active Capability', async (t) => {

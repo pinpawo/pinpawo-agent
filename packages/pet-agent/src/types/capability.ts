@@ -71,7 +71,8 @@ export type AgentCapability = {
 /**
  * Well-known name for the host's general-purpose Capability. It uses the same
  * contract, planner selection, lane, and executor path as every Capability.
- * The planner candidate policy keeps it visible as the default executor.
+ * The planner candidate policy uses it as the default unless the Agent runtime
+ * explicitly configures another registered Capability.
  */
 export const GENERAL_CAPABILITY_NAME = 'general';
 

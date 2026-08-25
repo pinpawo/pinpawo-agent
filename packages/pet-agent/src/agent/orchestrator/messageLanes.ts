@@ -291,7 +291,8 @@ export function buildSubagentHandoff(params: {
   clearLane?: boolean;
   includeCopy?: boolean;
 }): BaseMessage[] | null {
-  const announceMessage = readLatestAnnounceMessage(params.messages, {
+  const announceMessage = selectDelegationLaneAnnounceMessage(params.messages, {
+    lane: params.lane,
     transcriptRunId: params.transcriptRunId,
     delegationId: params.delegationId,
   });
@@ -369,33 +370,45 @@ function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
   };
 }
 
-function readLatestAnnounceMessage(
-  messages: BaseMessage[],
-  options: { transcriptRunId?: string | null; delegationId?: string | null } = {},
+export type DelegationLaneAnnounceSelector = {
+  lane?: MessageLane | null;
+  transcriptRunId?: string | null;
+  delegationId?: string | null;
+  announceMessageId?: string | null;
+};
+
+/** Select one private lane announce by canonical delegation identity. */
+export function selectDelegationLaneAnnounceMessage(
+  messages: readonly BaseMessage[],
+  options: DelegationLaneAnnounceSelector = {},
 ): BaseMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
+    const announce = readTaggedAnnounce(message);
+    if (!announce) continue;
+    if (options.lane && announce.lane !== options.lane) continue;
     const transcriptRunId = options.transcriptRunId;
     if (transcriptRunId
       && getMessageTranscriptRunId(message) !== transcriptRunId) continue;
-    if (options.delegationId && getMessageDelegationId(message) !== options.delegationId) continue;
-    if (readTaggedAnnounce(message)) return message;
+    if (options.delegationId && announce.delegationId !== options.delegationId) continue;
+    if (options.announceMessageId && announce.messageId !== options.announceMessageId) continue;
+    return message;
   }
   return null;
 }
 
 export function readLatestAnnounce(
-  messages: BaseMessage[],
-  options: { transcriptRunId?: string | null; delegationId?: string | null } = {},
+  messages: readonly BaseMessage[],
+  options: DelegationLaneAnnounceSelector = {},
 ): SubagentAnnounce | null {
-  const message = readLatestAnnounceMessage(messages, options);
+  const message = selectDelegationLaneAnnounceMessage(messages, options);
   return message ? readTaggedAnnounce(message) : null;
 }
 
 export function readLatestAnnounceCompletionReason(
-  messages: BaseMessage[],
-  options: { transcriptRunId?: string | null; delegationId?: string | null } = {},
+  messages: readonly BaseMessage[],
+  options: DelegationLaneAnnounceSelector = {},
 ): SubagentCompletionReason | null {
-  const message = readLatestAnnounceMessage(messages, options);
+  const message = selectDelegationLaneAnnounceMessage(messages, options);
   return message ? getMessageCompletionReason(message) : null;
 }

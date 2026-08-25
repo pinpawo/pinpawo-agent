@@ -432,11 +432,13 @@ closed 只停止 discovery。Planner 仍须基于已披露 Capability 提交合�
 你是框架内部的 Planner。
 
 目标：验收当前 task 的结果，并让剩余计划准确表达仍需完成的工作。
-上下文：本轮消息提供用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
+上下文：本轮消息提供 main conversation、用户目标、已披露 Capability、active delegation、标准 announce 和既有计划。
 `),
 
-  // announce 之前按时间保留的当前 trace/delegation Human、AI 与 Tool messages。
-  ...selectedMessagesBeforeAnnounce,
+  // 与 Entry 相同的 canonical main conversation 基座。
+  new HumanMessage('先确认 auth 模块的当前职责。'),
+  new AIMessage('auth 模块同时承担 token 校验与 session 组装。'),
+  new HumanMessage('在当前仓库中完成 auth 模块重构并验证。'),
 
   new AIMessage(`
 <delegation_announce version="1" role="data" authority="none">
@@ -470,6 +472,12 @@ auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接
 `),
 ]
 ```
+
+Entry 与 Boundary 直接复用 `mainConversationMessages()` 作为 canonical main conversation
+selector：保留完整主对话，排除私有 Capability lane transcript 和内部 delegation briefing，
+并由既有 tool-protocol safety projection 排除不完整的内部工具调用。Boundary 在该共同基座
+之后只额外追加当前尚未验收的标准 announce，再追加包含
+`planning_boundary` 的本轮 Human input。当前 announce 不同时出现在 main conversation 中。
 
 同次调用绑定以下 tools，`tool_choice` 保持 `auto`：
 
@@ -659,8 +667,9 @@ action 选择或计划改写的条件树。Terminal tool description 只说明�
 closed 状态下，这个目标应明确：已披露的 General 能交付就结束探索，只有没有任何已披露
 Capability 能承担剩余工作时才是 unavailable。
 
-Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 使用相同
-`<capability_context>`，但没有 announce、active delegation 和 remaining-plan baseline。
+Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例”的结构。Entry 与 Boundary
+共享 Planner transcript 和 canonical main conversation 基座；Entry 使用相同
+`<capability_context>`，但没有当前 announce、active delegation 和 remaining-plan baseline。
 
 成功调用 terminal tool 后应直接形成结构化 commit；不要再要求模型用普通文本确认，也
 不要从普通 AI text 推导 fallback result。
@@ -677,8 +686,9 @@ Planner 的完整 model input 采用上文“完整 Boundary 模型输入示例�
 5. 不增加兼容读取；缺少 disclosure state 的旧 checkpoint 按既有不兼容边界处理。
 
 迁移完成后，Capability context 的唯一来源是 `CapabilityDisclosureState`，execution
-Boundary evidence 的唯一来源是 canonical delegation announce 与选中的原始 transcript；
-system prompt、Planner lane 文本和 result 字符串扫描都不能成为第二来源。
+Boundary evidence 的唯一来源是 canonical delegation announce。私有 execution lane 的
+Human、AI 与 Tool transcript 不进入 Planner model input；system prompt、Planner lane 文本和
+result 字符串扫描也不能成为第二来源。
 
 ## 迁移计划
 
@@ -723,7 +733,8 @@ system prompt、Planner lane 文本和 result 字符串扫描都不能成为第�
 
 - 删除独立 Outcome graph node、runner、schema 和 prompt；
 - 删除 `runPlannerReturn` / `PlannerAnswerDisposition`；
-- 删除 Planner direct text fallback 和普通文本确认轮；
+- 删除旧 Planner direct text 路径和普通文本确认轮；Boundary 模型违反终态协议而直接返回
+  文本时，仅保留一个经 Answer 输出的故障兜底，不从文本推导 PlannerCommit；
 - 更新 Answer context builder；
 - 更新 raw `../..` 设计文档；
 - 不修改 `../../wiki`，等待单独 ingest 请求。
@@ -850,6 +861,8 @@ Planner lane 不做独立压缩；它与 root messages 一起保留。新 trace 
 - [ ] Planner 只输出 `PlannerCommit.action + tasks`；
 - [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
 - [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或 Answer；
+- [ ] Boundary Planner 接收与 Entry 相同的 canonical main conversation，并额外接收当前标准
+      delegation announce；不接收私有 execution lane transcript；
 - [ ] 新 trace 的 disclosed Capability 以 `general`（若存在）为第一项，Entry/Boundary
       search 命中项按首次发现顺序追加；
 - [ ] `CapabilityDisclosureState` 在同一 trace 的 Entry 与所有 Boundary 之间保留，

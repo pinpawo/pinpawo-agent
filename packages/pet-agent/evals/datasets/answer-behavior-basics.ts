@@ -21,6 +21,8 @@ export type AnswerBehaviorExpectation = {
 
 export type AnswerBehaviorInput = {
   userRequest?: string;
+  /** Complete ordinary Planner output used only by the Boundary direct fallback. */
+  plannerDirectAnswer?: string;
   messages: Array<{
     role: 'user' | 'assistant';
     text: string;
@@ -73,6 +75,42 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         diagnostics: { referenceMaxCharacters: 80 },
       },
       metadata: { difficulty: 'easy', reason: 'Direct reply without internal language.', source: SOURCE_FILE },
+    },
+    {
+      id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.boundary-planner-direct-network-diagnosis`,
+      name: 'boundary-planner-direct-network-diagnosis',
+      suite: ANSWER_BEHAVIOR_BASICS_DATASET,
+      tags: ['context_synthesis', 'delegation_control'],
+      input: {
+        userRequest: '重新检查这台 Mac 的网络，并重新核对 Handoff 连不上的原因。',
+        messages: [{
+          role: 'user',
+          text: '重新检查这台 Mac 的网络，并重新核对 Handoff 连不上的原因。',
+        }],
+        plannerDirectAnswer: [
+          '检查已经完成：Mac 的 en1 已取得 IP 192.168.1.12，默认网关和外网访问均正常。',
+          'Handoff 的真正阻塞点不是网络，而是 iCloud 的 Manatee/CDP 信任圈建立失败，',
+          '日志错误为 CDPStateError -5403（circle failure）。',
+          '应重新登录 iCloud 并确认 iCloud 钥匙串开启，以重建信任圈。',
+        ].join(''),
+      },
+      expected: {
+        contract: 'answer.user-visible-close',
+        objective: '完整交付已经执行得到的网络与 Handoff 诊断，不把 Boundary 普通文本误报为未执行。',
+        acceptanceCriteria: [
+          { id: 'network_result_preserved', statement: '明确说明 Mac 已获取 IP 且外网连通正常。' },
+          { id: 'handoff_root_cause_preserved', statement: '保留 Manatee/CDP、-5403 和 circle failure 这一根因。' },
+          { id: 'repair_preserved', statement: '保留重新登录 iCloud 并确认 iCloud 钥匙串开启的修复方向。' },
+          { id: 'no_false_non_execution', statement: '没有声称本次检查未执行、规划失败、内容被截断或要求重新发起同一诊断。' },
+        ],
+        expectedBehavior: 'planner_direct_answer',
+        diagnostics: { referenceMaxCharacters: 360 },
+      },
+      metadata: {
+        difficulty: 'hard',
+        reason: 'Trace-derived Boundary fallback must preserve the complete Planner answer.',
+        source: SOURCE_FILE,
+      },
     },
     {
       id: `${ANSWER_BEHAVIOR_BASICS_DATASET}.clarification-question`,

@@ -423,6 +423,18 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
       new HumanMessage('PRIVATE_TRACE_A_GOAL'),
     ],
   });
+  const boundaryAnnounce = new AIMessage({
+    id: 'announce-a',
+    content: 'Trace A execution is complete.',
+  });
+  setPinpetMeta(boundaryAnnounce, {
+    lane: 'capability:general',
+    runId: 'transcript-a',
+    delegationId: 'delegation-a',
+    isAnnounce: true,
+    task: 'Complete trace A.',
+    completionReason: 'natural',
+  });
   const boundaryA = plannerInput(workspace, {
     mode: 'boundary',
     inputId: 'announce:delegation-a:1',
@@ -439,7 +451,7 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
       messageId: 'announce-a',
       completionReason: 'natural',
     },
-    messages: [new AIMessage('Trace A execution is complete.')],
+    messages: [boundaryAnnounce],
   });
 
   const entryState = await graph.invoke({ input: entryA }, config);
@@ -926,6 +938,28 @@ test('boundary projects the current lane announce into the standard model-visibl
     task: 'Inspect repository dependencies.',
     completionReason: 'limit_reached',
   });
+  const privateLaneTranscript = new AIMessage('PRIVATE_RAW_EXECUTOR_TRANSCRIPT');
+  setPinpetMeta(privateLaneTranscript, {
+    lane: 'capability:explore',
+    runId: 'transcript-current',
+    delegationId: 'delegation-current',
+  });
+  const priorMainRequest = new HumanMessage({
+    id: 'main-prior-request',
+    content: 'First establish the repository constraints.',
+  });
+  const priorMainReply = new AIMessage({
+    id: 'main-prior-reply',
+    content: 'The repository constraints are established.',
+  });
+  const currentMainRequest = new HumanMessage({
+    id: 'main-current-request',
+    content: 'Inspect the repository and implement the required changes.',
+  });
+  const currentMainContext = new AIMessage({
+    id: 'main-current-context',
+    content: 'The current repository constraint remains user-visible context.',
+  });
   const model = new ScriptedPlannerModel([{
     toolCalls: [{
       id: 'continue-current',
@@ -947,7 +981,14 @@ test('boundary projects the current lane announce into the standard model-visibl
         messageId: 'announce-current',
         completionReason: 'limit_reached',
       },
-      messages: [currentAnnounce],
+      messages: [
+        priorMainRequest,
+        priorMainReply,
+        currentMainRequest,
+        currentMainContext,
+        privateLaneTranscript,
+        currentAnnounce,
+      ],
       remainingPlan: [{
         capability: 'general',
         task: 'Implement the verified dependency changes.',
@@ -969,6 +1010,17 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.match(readMessageText(projectedAnnounce), /Inspect repository dependencies\./);
   assert.match(readMessageText(projectedAnnounce), /dependency evidence is missing/);
   assert.equal(currentAnnounce.content, 'The repository inspection is incomplete; dependency evidence is missing.');
+  assert.equal(model.invocations[0]?.includes(privateLaneTranscript), false);
+  assert.equal(model.invocations[0]?.some((message) =>
+    readMessageText(message).includes('PRIVATE_RAW_EXECUTOR_TRANSCRIPT')), false);
+  assert.equal(model.invocations[0]?.includes(priorMainRequest), true);
+  assert.equal(model.invocations[0]?.includes(priorMainReply), true);
+  assert.equal(model.invocations[0]?.includes(currentMainRequest), true);
+  assert.equal(model.invocations[0]?.includes(currentMainContext), true);
+  assert.ok(
+    (model.invocations[0]?.indexOf(currentMainContext) ?? -1)
+      < (model.invocations[0]?.indexOf(projectedAnnounce) ?? -1),
+  );
 
   const boundaryInput = [...(model.invocations[0] ?? [])].reverse().find(
     (message) => message instanceof HumanMessage,

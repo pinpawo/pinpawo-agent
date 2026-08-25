@@ -198,6 +198,20 @@ test('answer eval renders the current user goal for an ordinary reply', () => {
   assert.match(String(messages[1].content), /<reply_mode>direct<\/reply_mode>/);
 });
 
+test('answer eval preserves the complete Boundary Planner direct fallback', () => {
+  const scenario = getAnswerEvalScenarios().find(
+    ({ caseName }) => caseName === 'boundary-planner-direct-network-diagnosis',
+  );
+  assert.ok(scenario);
+
+  const answerInput = String(scenario.render().at(-1)?.content);
+  assert.match(answerInput, /<reply_mode>direct<\/reply_mode>/);
+  assert.match(answerInput, /<direct_answer format="markdown" role="data">/);
+  assert.match(answerInput, /Manatee\/CDP/);
+  assert.match(answerInput, /-5403/);
+  assert.doesNotMatch(answerInput, /<blocked_reason/);
+});
+
 test('answer eval derives goal result from evaluator criteria', async () => {
   const completion = getAnswerEvalScenarios().find(
     ({ caseName }) => caseName === 'task-completion-summary',

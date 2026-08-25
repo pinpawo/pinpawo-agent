@@ -296,6 +296,7 @@ export function createCapabilityPlannerAgent(params: {
               lane: `capability:${input.activeDelegation.capability}`,
               transcriptRunId: input.activeDelegation.transcriptRunId,
               delegationId: input.activeDelegation.delegationId,
+              announceMessageId: input.latestAnnounce?.messageId ?? null,
             })
           : selectCapabilityPlannerMessages({
               mode: 'entry',

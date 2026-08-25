@@ -2,8 +2,8 @@ import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/mess
 import {
   getMessageLane,
   getPinpetMeta,
-  laneMessages,
   mainConversationMessages,
+  selectDelegationLaneAnnounceMessage,
   toolProtocolSafeMessages,
 } from '../messageLanes';
 import type { MessageLane } from '../types';
@@ -53,36 +53,28 @@ export function selectCapabilityPlannerMessages(params: {
   lane: MessageLane;
   transcriptRunId: string;
   delegationId: string;
+  announceMessageId: string | null;
 }): BaseMessage[] {
   const plannerMessages = params.messages.filter((message) =>
     isCapabilityPlannerMessage(message, params.traceId, params.registryDigest),
   );
+  const currentMainMessages = mainConversationMessages([...params.messages]);
   if (params.mode === 'entry') {
-    const mainMessages = mainConversationMessages([...params.messages]);
-    let currentRequestIndex = -1;
-    for (let index = mainMessages.length - 1; index >= 0; index -= 1) {
-      if (mainMessages[index]?._getType() === 'human') {
-        currentRequestIndex = index;
-        break;
-      }
-    }
-    const currentMainMessages = currentRequestIndex >= 0
-      ? mainMessages.slice(0, currentRequestIndex + 1)
-      : mainMessages;
     return toolProtocolSafeMessages([
       ...plannerMessages,
       ...currentMainMessages,
     ]);
   }
-  const currentContext = laneMessages(
-    [...params.messages],
-    params.lane,
-    params.transcriptRunId,
-    params.delegationId,
-  );
+  const currentAnnounce = selectDelegationLaneAnnounceMessage(params.messages, {
+    lane: params.lane,
+    transcriptRunId: params.transcriptRunId,
+    delegationId: params.delegationId,
+    announceMessageId: params.announceMessageId,
+  });
   return toolProtocolSafeMessages([
     ...plannerMessages,
-    ...currentContext,
+    ...currentMainMessages,
+    ...(currentAnnounce ? [currentAnnounce] : []),
   ]);
 }
 

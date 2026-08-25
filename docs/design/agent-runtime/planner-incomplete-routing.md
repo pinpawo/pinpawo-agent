@@ -35,9 +35,12 @@ type CapabilityPlannerResult =
 
 `PlannerCommit` remains the sole model-to-graph control protocol. If a provider
 returns ordinary text instead of any tool call, the runner keeps that authentic
-Planner output, returns `plannerStatus: 'incomplete'`, and routes to Answer.
-The text is presented to Answer as low-authority blocked-context evidence; it
-does not synthesize a terminal tool message or choose a Capability.
+Planner output and returns `plannerStatus: 'incomplete'`. Entry still routes the
+text to Answer as blocked-context evidence because no execution plan was created.
+Boundary instead routes the complete text to Answer as a direct-answer fallback:
+execution has already produced an announce, so describing the run as "not started"
+would be false. This fallback does not synthesize a terminal tool message, infer a
+PlannerCommit, or mark the active delegation accepted.
 
 Capability disclosure is a bounded phase policy rather than a retry middleware
 or dynamic tool-binding policy. Search observations are written by the tool
@@ -85,19 +88,23 @@ sufficient.
 The root Capability Planner node owns the recovery route:
 
 ```text
-Planner incomplete
+Entry Planner incomplete
   -> preserve authentic Planner transcript
   -> do not materialize a delegation
-  -> Entry clears the empty plan; Boundary preserves the committed remaining plan
   -> set planner_incomplete route outcome
   -> Answer
+
+Boundary Planner ordinary text
+  -> preserve the complete authentic Planner output
+  -> preserve the active delegation and committed remaining plan
+  -> set planner_direct_answer route outcome
+  -> Answer direct mode
 ```
 
-Answer renders this as a distinct blocked reason. It can truthfully explain
-that the requested execution did not start because planning did not complete,
-without asserting that no Capability exists or that work was done. Its cleanup
-preserves the remaining plan only when `planner_incomplete` still has an active
-delegation; all other Answer routes continue to clear transient plan state.
+Entry Answer renders `planner_incomplete` as a distinct blocked reason. Boundary
+Answer renders `planner_direct_answer` from the complete Planner output without
+the blocked-detail character limit. Its cleanup preserves the active delegation
+and remaining plan because no structured acceptance commit occurred.
 
 ## Invariants
 
@@ -107,7 +114,8 @@ delegation; all other Answer routes continue to clear transient plan state.
   appeared in the Planner lane.
 - `unavailable` remains a real Planner action, not generic error handling.
 - A non-commit never accepts an active delegation or marks it complete.
-- A Boundary non-commit never discards the committed remaining plan.
+- A Boundary non-commit never discards the active delegation or committed remaining plan.
+- A Boundary ordinary-text fallback never claims that execution did not start.
 - Planner limits and timeouts remain operational errors until they receive
   their own typed recovery contract; this change narrows only the successful
   model completion-without-commit path.
@@ -116,7 +124,8 @@ delegation; all other Answer routes continue to clear transient plan state.
 
 - Entry: two successful search rounds, ordinary text -> typed incomplete -> Answer;
   no Capability execution and no repair model call.
-- Boundary: ordinary text after a delegation -> typed incomplete -> Answer;
-  active delegation is not accepted as completed and its remaining plan survives.
+- Boundary: ordinary text after a delegation -> typed incomplete -> direct Answer;
+  complete text is available, active delegation is not accepted as completed,
+  and its remaining plan survives.
 - Genuine `submit_plan`, `advance_plan`, and `report_unavailable` retain their
   existing graph behavior and transcript replay semantics.

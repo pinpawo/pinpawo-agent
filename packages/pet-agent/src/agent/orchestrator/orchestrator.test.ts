@@ -52,6 +52,7 @@ import {
   mainConversationMessages,
   readLatestAnnounce,
   readMessageCreatedAtUtc,
+  selectDelegationLaneAnnounceMessage,
   setPinpetMeta,
   tagNewLaneMessages,
 } from './messageLanes';
@@ -5459,6 +5460,18 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
     task: '读取文件并运行 lint',
     text: '文件读取完成，lint 还没跑。',
   });
+  assert.equal(selectDelegationLaneAnnounceMessage(messages, {
+    lane: 'capability:general',
+    transcriptRunId: 'turn-1',
+    delegationId: 'task-2',
+    announceMessageId: 'task-2-progress',
+  }), messages[1]);
+  assert.equal(selectDelegationLaneAnnounceMessage(messages, {
+    lane: 'capability:general',
+    transcriptRunId: 'turn-1',
+    delegationId: 'task-2',
+    announceMessageId: 'another-message',
+  }), null);
 });
 
 test('limit-reached subagent announce reaches the Planner boundary input', async () => {

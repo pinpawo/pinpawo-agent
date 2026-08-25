@@ -1,10 +1,9 @@
 import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import {
-  getMessageIsAnnounce,
   getMessageLane,
   getPinpetMeta,
-  laneMessages,
   mainConversationMessages,
+  selectDelegationLaneAnnounceMessage,
   toolProtocolSafeMessages,
 } from '../messageLanes';
 import type { MessageLane } from '../types';
@@ -66,15 +65,12 @@ export function selectCapabilityPlannerMessages(params: {
       ...currentMainMessages,
     ]);
   }
-  const currentContext = laneMessages(
-    [...params.messages],
-    params.lane,
-    params.transcriptRunId,
-    params.delegationId,
-  );
-  const currentAnnounce = params.announceMessageId
-    ? currentContext.find((message) => message.id === params.announceMessageId)
-    : [...currentContext].reverse().find(getMessageIsAnnounce);
+  const currentAnnounce = selectDelegationLaneAnnounceMessage(params.messages, {
+    lane: params.lane,
+    transcriptRunId: params.transcriptRunId,
+    delegationId: params.delegationId,
+    announceMessageId: params.announceMessageId,
+  });
   return toolProtocolSafeMessages([
     ...plannerMessages,
     ...currentMainMessages,

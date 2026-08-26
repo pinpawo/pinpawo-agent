@@ -164,8 +164,10 @@ npm test
 npm run build
 npm run test:distribution -w @pinpawo/tui
 npm run test:tui-install -w pinpawo
+npm run pack:dry -w @pinpawo/agent-session
 npm pack --dry-run -w @pinpawo/pet-agent
 npm run pack:dry -w pinpawo
+npm publish -w @pinpawo/agent-session --access public
 npm publish -w @pinpawo/pet-agent --access public
 npm publish -w pinpawo --access public
 ```

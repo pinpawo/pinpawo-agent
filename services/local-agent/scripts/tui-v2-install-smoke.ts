@@ -19,6 +19,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const localAgentRoot = resolve(scriptDir, '..');
 const workspaceRoot = resolve(localAgentRoot, '..', '..');
 const agentContractsRoot = resolve(workspaceRoot, 'packages', 'agent-contracts');
+const agentSessionRoot = resolve(workspaceRoot, 'packages', 'agent-session');
 const petAgentRoot = resolve(workspaceRoot, 'packages', 'pet-agent');
 const tuiRoot = resolve(workspaceRoot, 'services', 'tui');
 const npmCli = process.env.npm_execpath;
@@ -63,8 +64,9 @@ try {
     version: '0.0.0',
   }, null, 2)}\n`);
 
-  const [agentContractsTarball, petAgentTarball, localAgentTarball] = await Promise.all([
+  const [agentContractsTarball, agentSessionTarball, petAgentTarball, localAgentTarball] = await Promise.all([
     packWorkspacePackage(agentContractsRoot, artifactDir),
+    packWorkspacePackage(agentSessionRoot, artifactDir),
     packWorkspacePackage(petAgentRoot, artifactDir),
     packWorkspacePackage(localAgentRoot, artifactDir),
   ]);
@@ -76,6 +78,7 @@ try {
     '--prefer-offline',
     '--save=false',
     agentContractsTarball,
+    agentSessionTarball,
     petAgentTarball,
     localAgentTarball,
   ], consumerDir, 'install tarballs in an empty project', 600_000);

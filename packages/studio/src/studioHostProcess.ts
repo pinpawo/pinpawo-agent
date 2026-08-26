@@ -2,10 +2,11 @@ import {
   buildLocalAgentRuntimeConfig,
   type LocalAgentRuntimeConfig,
 } from 'pinpawo/host-runtime';
+import { ensureLocalServerAuthToken } from 'pinpawo/local-server-transport';
 import type { StudioPluginResolver } from './host/buildStudio';
+import { createInstalledStudioPluginResolver } from './installedPluginResolver';
 import {
-  startStudioHostStdio,
-  startStudioHostWebSocket,
+  startStudioHost,
   type RunningStudioHost,
   type StartStudioHostOptions,
 } from './startStudioHost';
@@ -13,9 +14,7 @@ import {
 export type StudioHostProcessOptions = {
   workdir?: string;
   resolvePlugin?: StudioPluginResolver;
-  transport:
-    | { kind: 'stdio' }
-    | { kind: 'websocket'; port: number };
+  agentSessionPort?: number;
 };
 
 type SignalTarget = {
@@ -25,11 +24,9 @@ type SignalTarget = {
 
 export type StudioHostProcessDependencies = {
   buildRuntimeConfig?: (workdir?: string) => LocalAgentRuntimeConfig;
-  startStdio?: (
-    options: StartStudioHostOptions,
-  ) => Promise<RunningStudioHost>;
-  startWebSocket?: (
-    port: number,
+  ensureAuthToken?: () => string;
+  createPluginResolver?: typeof createInstalledStudioPluginResolver;
+  startHost?: (
     options: StartStudioHostOptions,
   ) => Promise<RunningStudioHost>;
   signals?: SignalTarget;
@@ -43,9 +40,18 @@ export async function runStudioHostProcess(
   const runtimeConfig = (dependencies.buildRuntimeConfig ?? buildLocalAgentRuntimeConfig)(
     options.workdir,
   );
+  const authToken = (dependencies.ensureAuthToken ?? ensureLocalServerAuthToken)();
+  const resolvePlugin = options.resolvePlugin
+    ?? (dependencies.createPluginResolver ?? createInstalledStudioPluginResolver)({
+      workdir: runtimeConfig.workdir,
+    });
   const hostOptions: StartStudioHostOptions = {
     runtimeConfig,
-    ...(options.resolvePlugin ? { resolvePlugin: options.resolvePlugin } : {}),
+    resolvePlugin,
+    agentSessionTransport: { authToken },
+    ...(options.agentSessionPort !== undefined
+      ? { agentSessionPort: options.agentSessionPort }
+      : {}),
   };
   const signals = dependencies.signals ?? process;
   let closeRequested = false;
@@ -58,12 +64,7 @@ export async function runStudioHostProcess(
   signals.once('SIGINT', requestClose);
   signals.once('SIGTERM', requestClose);
   try {
-    running = options.transport.kind === 'stdio'
-      ? await (dependencies.startStdio ?? startStudioHostStdio)(hostOptions)
-      : await (dependencies.startWebSocket ?? startStudioHostWebSocket)(
-        options.transport.port,
-        hostOptions,
-      );
+    running = await (dependencies.startHost ?? startStudioHost)(hostOptions);
     if (closeRequested) running.close();
     await running.closed;
   } finally {

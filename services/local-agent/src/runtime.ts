@@ -17,8 +17,8 @@ import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
  * now come from local config, and a future Studio plugin owns any remote
  * surface (#638).
  *
- * Studio is started from its own package and depends only on the exported
- * shared capability-supply surface; this Chat Host never imports it.
+ * Studio is started from its own package and composes the exported resident
+ * runtime/interaction surfaces; this Chat Host never imports it.
  */
 export class LocalAgentHost {
   private readonly caps: HostCapabilityAssembly;
@@ -56,7 +56,7 @@ export class LocalAgentHost {
     return this.caps.getRuntimeConfig();
   }
 
-  /** Host 持有的 chat checkpointer;Studio 的 pet 复用同一实例(#613)。 */
+  /** This Chat Host's conversation checkpointer. */
   getChatCheckpointer(): FileSaver {
     return this.caps.getChatCheckpointer();
   }

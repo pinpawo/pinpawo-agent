@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
   buildLocalAgentRuntimeConfig,
@@ -7,7 +6,7 @@ import {
 } from 'pinpawo/host-runtime';
 import type { Studio } from './studioContract';
 import type { BuildStudioResult, ResolvedStudioHostConfig } from './host/buildStudio';
-import { startStudioHostStdio } from './startStudioHost';
+import { startStudioHost } from './startStudioHost';
 
 function fakeAssembly(events: string[]): HostCapabilityAssembly {
   const runtimeConfig = buildLocalAgentRuntimeConfig('/tmp/pinpawo-start-studio-host-test');
@@ -26,27 +25,26 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
     }) as never,
     getToolkitRuntimeManager: () => ({}) as never,
     getCheckpointer: () => ({}) as never,
+    getCapabilityArtifactStore: () => ({}) as never,
   } as unknown as HostCapabilityAssembly;
 }
 
 function fakeStudio(events: string[]): Studio {
   return {
-    entryPetId: 'pet-a',
+    entryPetId: 'planner',
     dispatch: async () => ({
-      petId: 'pet-1',
-      threadId: 'thread-1',
+      petId: 'planner',
       invocationId: 'invocation-1',
       onInvocation: () => () => undefined,
       completion: Promise.resolve({
-        petId: 'pet-1',
-        threadId: 'thread-1',
+        petId: 'planner',
         invocationId: 'invocation-1',
         status: 'completed',
       }),
     }),
-    onInvocation: () => () => {},
-    notify: () => {},
-    subscribe: () => () => {},
+    onInvocation: () => () => undefined,
+    notify: () => undefined,
+    subscribe: () => () => undefined,
     listPets: () => [],
     shutdown: async () => { events.push('studio:shutdown'); },
   };
@@ -64,75 +62,62 @@ function configuration(): ResolvedStudioHostConfig {
   };
 }
 
-test('top-level stdio entry owns transport, diagnostics, and Host shutdown', async () => {
+test('top-level entry starts only the Pet Agent Session transport and owns shutdown', async () => {
   const events: string[] = [];
-  const input = new PassThrough();
-  const output = new PassThrough();
-  const diagnostics = new PassThrough();
-  let protocolText = '';
-  let diagnosticText = '';
-  output.on('data', (chunk) => { protocolText += chunk.toString(); });
-  diagnostics.on('data', (chunk) => { diagnosticText += chunk.toString(); });
-  const previousConsole = globalThis.console;
-  const assembly = fakeAssembly(events);
-  assembly.init = async () => {
-    events.push('caps:init');
-    console.log('studio startup diagnostic');
-  };
-  const running = await startStudioHostStdio({
-    capabilityAssembly: assembly,
+  let closeTransport!: () => void;
+  const transportClosed = new Promise<void>((resolve) => { closeTransport = resolve; });
+  const running = await startStudioHost({
+    capabilityAssembly: fakeAssembly(events),
     resolveStudioHostConfig: async () => configuration(),
-    buildStudio: async (): Promise<BuildStudioResult> => {
-      events.push('studio:build');
+    buildStudio: async (): Promise<BuildStudioResult> => ({
+      studio: fakeStudio(events),
+      resolved: {} as BuildStudioResult['resolved'],
+      plugins: [],
+      residentPets: new Map(),
+    }),
+    agentSessionPort: 0,
+    startAgentSessionTransport: async (port, interactions) => {
+      events.push('agent-session:start');
+      assert.equal(port, 0);
+      assert.equal(interactions.size, 0);
       return {
-        studio: fakeStudio(events),
-        resolved: {} as BuildStudioResult['resolved'],
-        plugins: [],
+        port: 43123,
+        close: closeTransport,
+        closed: transportClosed,
       };
     },
-  }, {
-    input,
-    output,
-    diagnostics,
   });
 
-  assert.notEqual(globalThis.console, previousConsole);
-  input.end();
+  assert.equal(running.agentSessionPort, 43123);
+  running.close();
   await running.closed;
-
-  assert.equal(globalThis.console, previousConsole);
-  assert.equal(protocolText, '');
-  assert.match(diagnosticText, /studio startup diagnostic/);
   assert.deepEqual(events, [
     'caps:init',
-    'studio:build',
+    'agent-session:start',
     'studio:shutdown',
     'caps:shutdown',
   ]);
 });
 
-test('top-level stdio entry restores console when Host initialization fails', async () => {
+test('Agent Session startup failure rolls the initialized Host back', async () => {
   const events: string[] = [];
-  const previousConsole = globalThis.console;
-  const assembly = fakeAssembly(events);
-  assembly.init = async () => {
-    console.log('failed studio startup diagnostic');
-    throw new Error('init failed');
-  };
-  const diagnostics = new PassThrough();
-  let diagnosticText = '';
-  diagnostics.on('data', (chunk) => { diagnosticText += chunk.toString(); });
-
-  await assert.rejects(() => startStudioHostStdio({
-    capabilityAssembly: assembly,
+  await assert.rejects(() => startStudioHost({
+    capabilityAssembly: fakeAssembly(events),
     resolveStudioHostConfig: async () => configuration(),
-    buildStudio: async () => assert.fail('Studio must not build'),
-  }, {
-    input: new PassThrough(),
-    output: new PassThrough(),
-    diagnostics,
-  }), /init failed/);
+    buildStudio: async (): Promise<BuildStudioResult> => ({
+      studio: fakeStudio(events),
+      resolved: {} as BuildStudioResult['resolved'],
+      plugins: [],
+      residentPets: new Map(),
+    }),
+    startAgentSessionTransport: async () => {
+      throw new Error('listener failed');
+    },
+  }), /listener failed/);
 
-  assert.equal(globalThis.console, previousConsole);
-  assert.match(diagnosticText, /failed studio startup diagnostic/);
+  assert.deepEqual(events, [
+    'caps:init',
+    'studio:shutdown',
+    'caps:shutdown',
+  ]);
 });

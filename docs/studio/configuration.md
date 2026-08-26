@@ -22,7 +22,10 @@ Capability collection at
   "description": "A drafting and review workflow",
   "entryPetId": "planner",
   "pets": ["planner", "writer", "reviewer"],
-  "plugins": [{ "id": "kanban" }]
+  "plugins": [
+    { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
+    { "id": "@pinpawo-plugin/kanban" }
+  ]
 }
 ```
 
@@ -33,7 +36,7 @@ Capability collection at
 | `pets` | Yes | Non-empty ordered list of referenced pet IDs. |
 | `name`, `description` | No | Display metadata. |
 | `plugins` | No | Explicit plugin list; order is plugin start order. |
-| `plugins[].id` | When a Plugin is listed | Plugin ID resolved by the injected `StudioPluginResolver`. |
+| `plugins[].id` | When a Plugin is listed | Installed Plugin package name resolved by `StudioPluginResolver`. |
 | `plugins[].options` | No | Opaque object passed to that Plugin resolver. |
 
 The configuration rejects an empty or duplicate `pets` list, an entry pet that
@@ -95,24 +98,27 @@ The repository includes a complete layout example under
 
 ## Plugin assembly
 
-`@pinpawo/studio` declares a `StudioPluginResolver` port but contains no Plugin
-registry and imports no concrete Plugin. A Host caller maps installed IDs to
-Plugin implementations and passes `resolvePlugin` to `StudioHost`. Options pass
-through unchanged for the Plugin to validate.
+`@pinpawo/studio` declares a `StudioPluginResolver` port but contains no concrete
+Plugin registry and imports no concrete Plugin. The standalone CLI resolves an
+explicit package name from `plugins[].id` and requires that installed package to
+export `createStudioPlugin(options, environment)`. Embedded callers can replace
+that resolver entirely. Options pass through unchanged for the Plugin to validate.
+Install each configured package beside `@pinpawo/studio`; configuration does not
+download missing packages at startup.
 
 `@pinpawo-plugin/kanban` provides a concrete Kanban Plugin and is not a
 Studio dependency. The Plugin defines its Kanban Toolkit but does not contribute
 the matching `studio_planning` Capability. A Pet selects that independent Agent
 Capability by placing its `CAPABILITY.md` directory under the conventional
-per-Pet root. Installation/discovery policy for Plugins remains outside Studio;
-callers inject concrete Plugins through `StudioPluginResolver`.
+per-Pet root. The resolver loads only packages named explicitly by configuration;
+it does not scan directories or discover Plugins implicitly.
 
-Durable Plugin state remains Plugin-owned. For example, an application resolver
-can construct `createKanbanPlugin({ databasePath: ... })`. The application chooses
-an absolute SQLite path such as
-`<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite`; Studio neither derives that
-path nor reads task state. Without a database path, the same Plugin remains an
-explicitly in-memory instance. A larger Kanban application can instead own a
+Durable Plugin state remains Plugin-owned. The installed Kanban package defaults
+to `<workdir>/.pinpawo/kanban/tasks.sqlite`; an embedded application can instead
+construct `createKanbanPlugin({ databasePath: ... })` with an absolute path such as
+`<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite`; Studio core neither derives
+that path nor reads task state. Direct `createKanbanPlugin()` remains explicitly
+in-memory. A larger Kanban application can instead own a
 `KanbanTaskService` itself and inject it into the Studio adapter.
 
 Existing file-backed `kanban.json` state is not loaded implicitly. Before changing
@@ -132,4 +138,4 @@ to build pet runtime adapters and the filesystem-independent `createStudio()` co
 After a Studio Host has built a Studio for a workdir, it keeps that resident instance;
 restart the host to pick up configuration changes.
 
-For dispatch, gate, and event behavior, read the [push model](push-model.md).
+For dispatch, gate, and event behavior, read the [Studio API](../reference/api/studio.md).

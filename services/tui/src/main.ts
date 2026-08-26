@@ -179,11 +179,14 @@ if (launchOptions.showVersion) {
   process.exit(0);
 }
 
-const port = readLocalServerPort();
+const agentSession = launchOptions.agentSession;
+const port = agentSession?.port ?? readLocalServerPort();
 const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
   ? {
       localAgentVersion: 'demo',
     }
+  : agentSession
+    ? { localAgentVersion: null }
   : await loadLocalHostMetadata({ port });
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -234,7 +237,9 @@ const composerFrame = new BoxRenderable(renderer, {
 });
 const status = new TextRenderable(renderer, {
   id: 'status',
-  content: `local-agent :${port}`,
+  content: agentSession
+    ? `agent-session ${agentSession.petId} :${port}`
+    : `local-agent :${port}`,
   fg: '#8a8a8a',
   bg: RGBA.defaultBackground(),
   height: 2,
@@ -276,7 +281,12 @@ const controller = new TuiSessionController({
         review: smoke.review || demo.review,
         qa: demo.qa,
       })
-    : createLocalHostConnectionFactory({ port }),
+    : createLocalHostConnectionFactory({
+        port,
+        ...(agentSession
+          ? { path: `/agent-session/pets/${encodeURIComponent(agentSession.petId)}` }
+          : {}),
+      }),
   onManualSnapshotApplied: () => {
     timelineReplayPending = true;
   },

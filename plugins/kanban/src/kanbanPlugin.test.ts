@@ -7,12 +7,11 @@ import path from 'node:path';
 import type { NamedStructuredTool } from '@pinpawo/pet-agent';
 import {
   createStudio,
-  type PetAgentRuntime,
-  type PetAgentRuntimeInvokeInput,
-  type PetAgentRuntimeInvokeResult,
   type StudioEvent,
+  type StudioPetBinding,
   type StudioPluginContext,
 } from '@pinpawo/studio';
+import type { PetDispatchResult } from 'pinpawo/host-runtime';
 
 import { createKanbanPlugin } from './kanbanPlugin';
 import { KanbanTaskService, SqliteKanbanTaskRepository } from './kanbanTaskService';
@@ -28,27 +27,22 @@ function pluginTools(plugin: ReturnType<typeof createKanbanPlugin>): KanbanTools
 function pet(options: {
   petId: string;
   tools: () => KanbanTools;
-  onInvoke?: (input: PetAgentRuntimeInvokeInput) => Promise<PetAgentRuntimeInvokeResult | void> | PetAgentRuntimeInvokeResult | void;
-}): PetAgentRuntime {
+  onInvoke?: (request: string) => Promise<PetDispatchResult | void> | PetDispatchResult | void;
+}): StudioPetBinding {
   return {
-    gate: () => 'open',
-    onGateChange: () => () => undefined,
-    descriptor: () => ({
+    registration: {
       petId: options.petId,
-      userId: null,
       name: options.petId,
-      personality: null,
-      stage: null,
-      species: null,
       role: null,
       serviceSummary: null,
-      startupMode: 'standby',
-      status: 'standby',
-      capabilities: [],
-    }),
-    invoke: async (input) => {
-      const result = await options.onInvoke?.(input);
-      return result ?? { status: 'completed', reply: 'ok' };
+    },
+    dispatch: {
+      getState: () => 'open',
+      onStateChange: () => () => undefined,
+      dispatch: async ({ request }) => {
+        const result = await options.onInvoke?.(request);
+        return result ?? { status: 'completed', output: 'ok' };
+      },
     },
   };
 }
@@ -77,8 +71,8 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
       pet({
         petId: 'writer',
         tools: () => pluginTools(plugin),
-        onInvoke: async (input) => {
-          workerRequest = input.input.kind === 'request' ? input.input.request : '';
+        onInvoke: async (request) => {
+          workerRequest = request;
           const taskId = /Kanban taskId: ([^\s]+)/.exec(workerRequest)?.[1];
           assert.ok(taskId);
           await pluginTools(plugin).kanban_task_complete!.invoke({ taskId, result: 'draft ready' });
@@ -92,7 +86,7 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
 
   await studio.dispatch({
     petId: 'planner',
-    input: { kind: 'request', request: 'prepare a draft' },
+    request: 'prepare a draft',
   });
   await flush();
 
@@ -110,7 +104,7 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
   assert.ok(events.some((event) => event.type === 'task.done' && event.source === 'kanban'));
 });
 
-test('a waiting Studio continuation becomes a durable Kanban waiting task', async (t) => {
+test('a waiting resident Pet stays owned by Agent Session and leaves the Kanban task active', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({
     studioId: 'kanban-waiting',
@@ -118,21 +112,7 @@ test('a waiting Studio continuation becomes a durable Kanban waiting task', asyn
     pets: [pet({
       petId: 'worker',
       tools: () => pluginTools(plugin),
-      onInvoke: () => ({
-        status: 'waiting',
-        pendingContinuation: {
-          continuationId: 'continuation-1',
-          payload: {
-            kind: 'human_review',
-            interactions: [{
-              interactionId: 'review-1',
-              schemaVersion: 2,
-              view: { kind: 'plain', body: 'Approve?' },
-              options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
-            }],
-          },
-        },
-      }),
+      onInvoke: () => ({ status: 'waiting' }),
     })],
     plugins: [plugin],
   });
@@ -141,23 +121,11 @@ test('a waiting Studio continuation becomes a durable Kanban waiting task', asyn
   await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'worker', brief: 'needs approval' });
   await flush();
   const [task] = (await plugin.service.readSnapshot()).tasks;
-  assert.equal(task?.status, 'waiting');
-  assert.equal(task?.note, 'Waiting for continuation input.');
-  assert.deepEqual(task?.continuation, {
-    continuationId: 'continuation-1',
-    payload: {
-      kind: 'human_review',
-      interactions: [{
-        interactionId: 'review-1',
-        schemaVersion: 2,
-        view: { kind: 'plain', body: 'Approve?' },
-        options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
-      }],
-    },
-  });
+  assert.equal(task?.status, 'doing');
+  assert.equal('continuation' in (task ?? {}), false);
 });
 
-test('a completed Studio invocation without a Kanban outcome becomes blocked', async (t) => {
+test('a completed Studio invocation without an outcome blocks until an explicit late report', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({
     studioId: 'kanban-unreported',
@@ -172,6 +140,14 @@ test('a completed Studio invocation without a Kanban outcome becomes blocked', a
   const [task] = (await plugin.service.readSnapshot()).tasks;
   assert.equal(task?.status, 'blocked');
   assert.match(task?.note ?? '', /without reporting/);
+  assert.match(
+    await pluginTools(plugin).kanban_task_complete!.invoke({
+      taskId: task!.taskId,
+      result: 'reported after recovery',
+    }) as string,
+    /completed/,
+  );
+  assert.equal((await plugin.service.getTask(task!.taskId))?.status, 'done');
 });
 
 test('adapter startup recovers SQLite doing work as blocked before it can redispatch', async (t) => {

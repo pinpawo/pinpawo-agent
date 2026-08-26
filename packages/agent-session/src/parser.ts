@@ -155,7 +155,6 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     'workspaceName',
     'workspaceRoot',
     'stateRoot',
-    'petsDir',
   ] as const;
   if (stringFields.some((field) =>
     value[field] !== undefined && typeof value[field] !== 'string')) {
@@ -263,7 +262,6 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     ...(typeof value.workspaceName === 'string' ? { workspaceName: value.workspaceName } : {}),
     ...(typeof value.workspaceRoot === 'string' ? { workspaceRoot: value.workspaceRoot } : {}),
     ...(typeof value.stateRoot === 'string' ? { stateRoot: value.stateRoot } : {}),
-    ...(typeof value.petsDir === 'string' ? { petsDir: value.petsDir } : {}),
     ...(typeof value.contextWindow === 'number' ? { contextWindow: value.contextWindow } : {}),
   };
 }

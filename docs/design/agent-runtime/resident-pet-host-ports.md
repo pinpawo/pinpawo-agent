@@ -1,6 +1,6 @@
 # Resident Pet Host Ports
 
-> 状态：Accepted design，implementation pending
+> 状态：Accepted，implemented
 > 更新：2026-08-26
 > 关联：[Studio 独立 Host runtime](../studio/independent-host-runtime.md)、
 > [Agent Session projection](../../reference/runtime/session-projection.md)
@@ -183,9 +183,8 @@ type StudioPetBinding = {
 Pet port。Studio receipt/event 也不把当前 Agent Session thread 复制成 Studio identity；
 dispatch 真正开始时选择哪条 thread 是 resident runtime 内部行为。
 
-当前 `PetAgentRuntime.invoke()` 是上述 dispatch port 的过渡实现，不是长期命名契约。
-迁移完成前，文档引用它时必须明确标注 current/legacy adapter，不能据此为 TUI 或
-Plugin 增加另一种 Studio message。
+旧 `PetAgentRuntime.invoke()` adapter 已移除；所有调用方统一使用上述 dispatch port，
+不能据此为 TUI 或 Plugin 增加另一种 Studio message。
 
 ## 5. Thread、continuation 与 Coordinator
 
@@ -280,19 +279,9 @@ target 返回。Capability inventory 不进入该列表。
 | TUI | Agent Session wire/projection | Studio protocol、Pet graph/checkpoint |
 | Studio Plugin | Studio dispatch/event/hook、可定义 Toolkit | Pet construction、conversation、Agent Session |
 
-## 8. 迁移顺序与验收
+## 8. 已完成迁移与验收
 
-当前代码仍有两组早于本设计的反向渗透，不能被当作目标接口继续复制：
-
-- `services/local-agent/src/residentPetAgentRuntime.ts` 与 Studio 的 runtime descriptor
-  仍把 Agent Capability summary、Studio registration 和 runtime dispatchability 合成
-  一个 `descriptor()`；
-- 通用 `LocalAgentRuntimeConfig`、diagnostics 与 HTTP projection 仍携带
-  `studioConfigPath`。
-
-它们没有形成 `local-agent -> @pinpawo/studio` 的 package import，但在概念上仍把
-Studio-owned registration/config 投进了 lower surface。迁移完成的判据包括移除这些
-字段或把它们收回 Studio-owned composition；不能只改类型名称。
+以下顺序已经落地；它同时保留为后续变更不得回退的验收清单：
 
 1. 在 `pinpawo/host-runtime` 定义上述共享类型，消除 Studio 与 local-agent 的重复类型。
 2. 把 resident runtime/Coordinator 构造与 Agent Session interaction 构造收进公共
@@ -314,8 +303,7 @@ Studio-owned registration/config 投进了 lower surface。迁移完成的判据
    Agent Session registry；迁移必须保留可恢复的 active session、thread 和 pending
    interrupt，不能仅切换 thread-id builder 后留下孤儿 checkpoint。
 9. 用至少两个 Pet 验证 route 隔离、snapshot、typed review/interrupt resume 和重连恢复。
-   在这项验收通过前，当前 dispatch continuation/resume 只能作为 transitional adapter
-   保留，不能先删除唯一已实现的恢复路径。
+   该验收通过后才删除了旧 dispatch continuation/resume adapter。
 10. 第 9 步通过后，移除 dispatch resume 与 Studio receipt/event 中的稳定 `threadId`；
     pending continuation 只通过 Agent Session conversation 恢复。
 11. Studio control plane 收敛到 HTTP Plugin；内置 Studio WebSocket/stdio 作为过渡实现移除。
@@ -323,7 +311,7 @@ Studio-owned registration/config 投进了 lower surface。迁移完成的判据
     `listPets()` 只返回 Host runtime registry 中当前存活的 Pet。
 13. 完成消费者迁移后移除 `PetAgentRuntime.invoke()` 过渡类型。
 
-验收必须证明：
+现有测试与 package 边界必须持续证明：
 
 - Studio package 无 Agent Session、TUI 或 conversation import；
 - TUI 无 Studio message、Studio WebSocket 或 `composerTarget = studio`；

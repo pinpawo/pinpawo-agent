@@ -1,20 +1,21 @@
 import path from 'node:path';
-import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
-  type AgentToolkit,
+  type CapabilityArtifactStore,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { createStudio } from '../createStudio';
 import type { Studio, StudioPlugin } from '../studioContract';
-import type { PetAgentRuntime } from '../types';
+import type { StudioPetBinding } from '../types';
 import {
-  buildLocalAgentModels,
   buildLocalAgentRuntimeConfig,
-  createResidentPetAgentRuntime,
-  resolveLlmGenerationReserveTokens,
+  createResidentPetHost,
+  type FileSaver,
+  type HostToolkitInventoryStore,
+  type LocalAgentRuntimeConfig,
   type LocalModelProfileRegistry,
+  type ResidentPetHost,
 } from 'pinpawo/host-runtime';
 import { loadPetLocalConfigs } from './petConfig';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
@@ -37,12 +38,11 @@ export type BuildStudioInput = {
   hostCapabilities: readonly AgentCapability[];
   /** 每个 Pet 从约定目录严格加载的 Agent Capability 定义。 */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
-  /** Host 已统一校验 availability/provenance/runtime 的 Toolkit inventory。 */
-  toolkits: readonly AgentToolkit[];
-  toolkitRuntimeManager?: ToolkitRuntimeManager;
-  /** Host 持有的 checkpointer,由所有 pet 共用(#613)。 */
-  checkpoint?: BaseCheckpointSaver;
-  ownerUserId: string | null;
+  toolkitInventory: HostToolkitInventoryStore;
+  toolkitRuntimeManager: ToolkitRuntimeManager;
+  capabilityArtifactStore: CapabilityArtifactStore;
+  checkpoint: FileSaver;
+  runtimeConfig: LocalAgentRuntimeConfig;
 };
 
 export type ResolveStudioHostConfigInput = {
@@ -58,6 +58,8 @@ export type BuildStudioResult = {
   resolved: ResolvedStudio;
   /** 已装配的插件,按配置顺序。 */
   plugins: StudioPlugin[];
+  /** Host lifecycle resources; Studio core receives only their dispatch ports. */
+  residentPets: ReadonlyMap<string, ResidentPetHost>;
 };
 
 /** One Studio configuration snapshot resolved once by its Host. */
@@ -131,11 +133,9 @@ export async function resolveStudioHostConfig(
 
 /** Build one resident Studio from an already-resolved Host snapshot. */
 export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioResult> {
-  const { workdir: effectiveWorkdir, resolved, plugins } = input.configuration;
+  const { resolved, plugins } = input.configuration;
   const { studio: studioConfig } = resolved;
 
-  const globalLlmConfig = input.modelProfiles.resolve();
-  const globalModels = buildLocalAgentModels(globalLlmConfig);
   const hostCapabilitiesByName = new Map<string, AgentCapability>();
   for (const capability of input.hostCapabilities) {
     if (hostCapabilitiesByName.has(capability.name)) {
@@ -150,57 +150,69 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
     throw new Error(`Studio requires the host baseline Capability "${GENERAL_CAPABILITY_NAME}".`);
   }
 
-  const pets: PetAgentRuntime[] = resolved.pets.map((petConfig) => {
-    const petLlmConfig = petConfig.modelProfileId
-      ? input.modelProfiles.resolve(petConfig.modelProfileId)
-      : globalLlmConfig;
-    const petModels = petConfig.modelProfileId
-      ? buildLocalAgentModels(petLlmConfig)
-      : globalModels;
-    const generationReserveTokens = resolveLlmGenerationReserveTokens(petLlmConfig);
+  const residentPets = new Map<string, ResidentPetHost>();
+  const pets: StudioPetBinding[] = [];
+  try {
+    for (const petConfig of resolved.pets) {
+      const petCapabilities = [...(input.petCapabilities.get(petConfig.petId) ?? [])];
+      const petCapabilityNames = new Set<string>();
+      for (const capability of petCapabilities) {
+        if (capability.name === GENERAL_CAPABILITY_NAME) {
+          throw new Error(
+            `pet "${petConfig.petId}" cannot replace the Host baseline Capability "${GENERAL_CAPABILITY_NAME}"`,
+          );
+        }
+        if (petCapabilityNames.has(capability.name)) {
+          throw new Error(`pet "${petConfig.petId}" has duplicate Capability "${capability.name}"`);
+        }
+        petCapabilityNames.add(capability.name);
+      }
 
-    const petCapabilities = [...(input.petCapabilities.get(petConfig.petId) ?? [])];
-    const petCapabilityNames = new Set<string>();
-    for (const capability of petCapabilities) {
-      if (capability.name === GENERAL_CAPABILITY_NAME) {
-        throw new Error(
-          `pet "${petConfig.petId}" cannot replace the Host baseline Capability "${GENERAL_CAPABILITY_NAME}"`,
-        );
-      }
-      if (petCapabilityNames.has(capability.name)) {
-        throw new Error(`pet "${petConfig.petId}" has duplicate Capability "${capability.name}"`);
-      }
-      petCapabilityNames.add(capability.name);
+      const resident = await createResidentPetHost({
+        actor: buildPetActorFromLocalConfig(petConfig, null),
+        modelProfiles: input.modelProfiles,
+        ...(petConfig.modelProfileId ? { modelProfileId: petConfig.modelProfileId } : {}),
+        capabilities: [generalCapability, ...petCapabilities],
+        toolkitInventory: input.toolkitInventory,
+        toolkitRuntimeManager: input.toolkitRuntimeManager,
+        capabilityArtifactStore: input.capabilityArtifactStore,
+        checkpointer: input.checkpoint,
+        runtimeConfig: input.runtimeConfig,
+        sessionStatePath: path.join(
+          input.runtimeConfig.stateRoot,
+          'resident-sessions',
+          `${encodeURIComponent(petConfig.petId)}.json`,
+        ),
+        adoptThreadId: `studio:${encodeURIComponent(studioConfig.studioId)}:pet:${encodeURIComponent(petConfig.petId)}`,
+      });
+      residentPets.set(petConfig.petId, resident);
+      pets.push({
+        registration: {
+          petId: petConfig.petId,
+          name: petConfig.name,
+          role: petConfig.role ?? null,
+          serviceSummary: petConfig.serviceSummary ?? null,
+        },
+        dispatch: resident.resident.dispatch,
+      });
     }
+  } catch (error) {
+    await Promise.allSettled([...residentPets.values()].map((resident) => resident.close()));
+    throw error;
+  }
 
-    return createResidentPetAgentRuntime({
-      models: petModels,
-      modelInputModalities: petLlmConfig.inputModalities ?? ['text'],
-      actor: buildPetActorFromLocalConfig(petConfig, input.ownerUserId),
-      role: petConfig.role ?? null,
-      serviceSummary: petConfig.serviceSummary ?? null,
-      capabilities: [
-        generalCapability,
-        ...petCapabilities,
-      ],
-      toolkits: [...input.toolkits],
-      toolkitRuntimeManager: input.toolkitRuntimeManager,
-      checkpoint: input.checkpoint,
-      contextWindowTokens: petLlmConfig.contextWindowTokens,
-      subagentContextWindowTokens: petLlmConfig.subagentContextWindowTokens
-        ?? petLlmConfig.contextWindowTokens,
-      generationReserveTokens,
-      subagentGenerationReserveTokens: generationReserveTokens,
-      workdir: effectiveWorkdir,
+  let studio: Studio;
+  try {
+    studio = await createStudio({
+      studioId: studioConfig.studioId,
+      entryPetId: studioConfig.entryPetId,
+      pets,
+      plugins,
     });
-  });
+  } catch (error) {
+    await Promise.allSettled([...residentPets.values()].map((resident) => resident.close()));
+    throw error;
+  }
 
-  const studio = await createStudio({
-    studioId: studioConfig.studioId,
-    entryPetId: studioConfig.entryPetId,
-    pets,
-    plugins,
-  });
-
-  return { studio, resolved, plugins };
+  return { studio, resolved, plugins, residentPets };
 }

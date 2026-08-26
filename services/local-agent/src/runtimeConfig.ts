@@ -14,10 +14,6 @@ export type LocalAgentRuntimeConfig = Readonly<{
   workdir: string;
   workspace?: LocalAgentWorkspaceConfig;
   stateRoot: string;
-  studioConfigPath: string;
-  studioDueRunsPath: string;
-  petsDir: string;
-  studioWikiBaseDir: string;
   checkpointPath: string;
   tuiCheckpointPath: string;
   tuiSessionPath: string;
@@ -84,10 +80,6 @@ export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()):
   return freezeRuntimeConfig({
     workdir: resolvedWorkdir,
     stateRoot,
-    studioConfigPath: resolve(stateRoot, 'studio.json'),
-    studioDueRunsPath: resolve(stateRoot, 'studio-due-runs.json'),
-    petsDir: resolve(stateRoot, 'pets'),
-    studioWikiBaseDir: resolve(stateRoot, 'studio-wiki'),
     checkpointPath: resolve(
       stateRoot,
       `checkpoints-${LOCAL_AGENT_CHECKPOINT_CONTRACT}.json`,

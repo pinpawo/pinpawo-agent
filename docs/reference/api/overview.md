@@ -15,7 +15,7 @@ cross-host ownership rules are recorded in
 
 | Surface | Primary owner | Use it when |
 |---|---|---|
-| **Pet runtime port (transitional)** | `@pinpawo/studio` + local-host adapter | You are maintaining the current Studio-to-Pet dispatch adapter; new host assembly should follow the accepted Resident Pet ports design. |
+| **Resident Pet Host ports** | `pinpawo/host-runtime` | You need a shared resident runtime with one-way dispatch and Agent Session interaction surfaces. |
 | **Studio runtime** | `@pinpawo/studio` | You need multi-Pet one-way dispatch, invocation events, or Plugins. |
 | **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or Toolkit runtime. |
 | **Local agent host** | `pinpawo` CLI package | You need local configuration, Capability loading, HTTP/WebSocket, or stdio transport. |
@@ -43,7 +43,7 @@ cross-host ownership rules are recorded in
 
 ## Start from your goal
 
-- Embed a single agent: [Pet Runtime API](pet-runtime.md)
+- Compose a resident Pet Host: [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)
 - Run multi-agent coordination: [Studio API](studio.md)
 - Build an extension: [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md)
 - Add a local Capability: [Capability directory protocol](../extensions/capability-directory.md)

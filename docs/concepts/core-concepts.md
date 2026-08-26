@@ -57,7 +57,7 @@ following pages when you need a contract or implementation boundary:
 | Checkpoint, session, snapshot, and timeline | [Session projection](../reference/runtime/session-projection.md) |
 | Durable cross-lane results | [Capability Artifact Pipeline](../reference/artifacts/index.md) |
 | Workdir and runtime configuration | [Workdir configuration](../reference/runtime/workdir.md) |
-| Multi-agent coordination | [Studio push model](../studio/push-model.md) |
+| Multi-agent coordination | [Studio](../studio/index.md) |
 
 ## The three extension boundaries
 
@@ -126,8 +126,7 @@ scheduler is a plugin or Pet concern; Studio does not store task state, infer
 completion, or own shared knowledge.
 
 Studio does not become a second tool executor or a shared private scratchpad.
-Read the [Studio push model](../studio/push-model.md) for the current runtime
-boundary.
+Read the [Studio overview](../studio/index.md) for the current runtime boundary.
 
 ## Where to go next
 

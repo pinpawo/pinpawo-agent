@@ -270,12 +270,10 @@ test('Capability HTTP routes are not part of the local server contract', () => {
   ), false);
 });
 
-test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime endpoint', async () => {
+test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint', async () => {
   const workdir = await fs.mkdtemp(join(tmpdir(), 'pinpawo-runtime-'));
   const stateRoot = join(workdir, '.pinpawo');
-  const studioConfigPath = join(stateRoot, 'studio.json');
   await fs.mkdir(stateRoot, { recursive: true });
-  await fs.writeFile(studioConfigPath, '{}', 'utf8');
 
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer secret'), res, {
@@ -291,10 +289,6 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
         rootPath: workdir,
       },
       stateRoot,
-      studioConfigPath,
-      studioDueRunsPath: join(stateRoot, 'studio-due-runs.json'),
-      petsDir: join(stateRoot, 'pets'),
-      studioWikiBaseDir: join(stateRoot, 'studio-wiki'),
       checkpointPath: join(stateRoot, 'checkpoints.json'),
       tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
       tuiSessionPath: join(stateRoot, 'tui-sessions.json'),
@@ -323,9 +317,5 @@ test('handleLocalHttpRequest exposes canonical workdir Studio paths on runtime e
     workspace_name: 'Runtime Test',
     workspace_root: workdir,
     state_root: stateRoot,
-    studio_config_path: studioConfigPath,
-    studio_due_runs_path: join(stateRoot, 'studio-due-runs.json'),
-    pets_dir: join(stateRoot, 'pets'),
-    studio_wiki_base_dir: join(stateRoot, 'studio-wiki'),
   });
 });

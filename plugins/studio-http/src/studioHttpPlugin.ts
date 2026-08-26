@@ -17,6 +17,7 @@ import {
   type StudioPlugin,
   type StudioPluginContext,
 } from '@pinpawo/studio';
+import { readLocalServerAuthToken } from 'pinpawo/local-server-transport';
 
 const LOOPBACK_HOST = '127.0.0.1' as const;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
@@ -71,6 +72,10 @@ export type CreateStudioHttpPluginOptions = {
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
   stop: () => Promise<void>;
+};
+
+export type InstalledStudioHttpPluginEnvironment = {
+  workdir: string;
 };
 
 type EventClient = {
@@ -372,7 +377,6 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
         const receipt = await context.dispatch(parsed);
         return requestContext.json({
           petId: receipt.petId,
-          threadId: receipt.threadId,
           invocationId: receipt.invocationId,
           ...(receipt.metadata ? { metadata: receipt.metadata } : {}),
         }, 202);
@@ -514,4 +518,65 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       if (activeServer) await closeServer(activeServer);
     },
   };
+}
+
+function readInstalledHttpOptions(
+  value: Record<string, unknown> | undefined,
+): Omit<CreateStudioHttpPluginOptions, 'authToken'> {
+  const options = value ?? {};
+  const allowed = new Set([
+    'port',
+    'allowedOrigins',
+    'name',
+    'maxBodyBytes',
+    'maxEventClients',
+    'heartbeatIntervalMs',
+  ]);
+  const unknown = Object.keys(options).find((key) => !allowed.has(key));
+  if (unknown) throw new Error(`Studio HTTP Plugin option "${unknown}" is not supported.`);
+  const numbers = ['port', 'maxBodyBytes', 'maxEventClients', 'heartbeatIntervalMs'] as const;
+  for (const field of numbers) {
+    if (options[field] !== undefined && typeof options[field] !== 'number') {
+      throw new Error(`Studio HTTP Plugin option "${field}" must be a number.`);
+    }
+  }
+  if (options.name !== undefined && typeof options.name !== 'string') {
+    throw new Error('Studio HTTP Plugin option "name" must be a string.');
+  }
+  if (
+    options.allowedOrigins !== undefined
+    && (!Array.isArray(options.allowedOrigins)
+      || options.allowedOrigins.some((origin) => typeof origin !== 'string'))
+  ) {
+    throw new Error('Studio HTTP Plugin option "allowedOrigins" must be a string array.');
+  }
+  return {
+    port: (options.port as number | undefined) ?? 3211,
+    ...(options.allowedOrigins
+      ? { allowedOrigins: options.allowedOrigins as string[] }
+      : {}),
+    ...(typeof options.name === 'string' ? { name: options.name } : {}),
+    ...(typeof options.maxBodyBytes === 'number' ? { maxBodyBytes: options.maxBodyBytes } : {}),
+    ...(typeof options.maxEventClients === 'number'
+      ? { maxEventClients: options.maxEventClients }
+      : {}),
+    ...(typeof options.heartbeatIntervalMs === 'number'
+      ? { heartbeatIntervalMs: options.heartbeatIntervalMs }
+      : {}),
+  };
+}
+
+/** Installed-package entry used by the standalone Studio Plugin resolver. */
+export function createStudioPlugin(
+  options: Record<string, unknown> | undefined,
+  _environment: InstalledStudioHttpPluginEnvironment,
+): StudioHttpPlugin {
+  const authToken = readLocalServerAuthToken();
+  if (!authToken) {
+    throw new Error('Studio HTTP Plugin requires the Host local auth token.');
+  }
+  return createStudioHttpPlugin({
+    ...readInstalledHttpOptions(options),
+    authToken,
+  });
 }

@@ -49,6 +49,8 @@ type WebSocketFactory = (
 
 export type LocalHostConnectionOptions = {
   port?: number;
+  /** Optional Host-owned Agent Session route, including its leading slash. */
+  path?: string;
   tokenProvider?: () => string | null;
   webSocketFactory?: WebSocketFactory;
 };
@@ -100,7 +102,7 @@ export class LocalHostConnection implements AgentHostConnection {
     let socket: WebSocketLike;
     try {
       socket = this.webSocketFactory(
-        `ws://127.0.0.1:${this.options.port ?? DEFAULT_LOCAL_SERVER_PORT}`,
+        `ws://127.0.0.1:${this.options.port ?? DEFAULT_LOCAL_SERVER_PORT}${this.options.path ?? ''}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
     } catch (error) {

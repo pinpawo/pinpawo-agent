@@ -5,6 +5,7 @@ import { parseTuiLaunchOptions } from './launchOptions';
 test('launch options keep production mode free of demo transports', () => {
   assert.deepEqual(parseTuiLaunchOptions([]), {
     showVersion: false,
+    agentSession: null,
     demo: {
       command: false,
       qa: false,
@@ -24,6 +25,19 @@ test('launch options keep production mode free of demo transports', () => {
     hostSmoke: false,
     useDemoConnection: false,
   });
+});
+
+test('launch options select one Pet-scoped Agent Session endpoint', () => {
+  assert.deepEqual(parseTuiLaunchOptions([
+    '--agent-session-port',
+    '4322',
+    '--agent-session-pet',
+    'planner',
+  ]).agentSession, { port: 4322, petId: 'planner' });
+  assert.throws(
+    () => parseTuiLaunchOptions(['--agent-session-pet', 'planner']),
+    /provided together/,
+  );
 });
 
 test('launch options distinguish deterministic and real-host smokes', () => {

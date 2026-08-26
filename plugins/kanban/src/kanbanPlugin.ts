@@ -6,6 +6,7 @@
  * Toolkit, and projects committed mutations into Studio dispatch/events/HTTP hooks.
  */
 
+import path from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit, NamedStructuredTool } from '@pinpawo/pet-agent';
@@ -45,6 +46,10 @@ function buildTaskRequest(task: KanbanTask): string {
 
 function isActive(task: KanbanTask): boolean {
   return task.status === 'doing' || task.status === 'waiting';
+}
+
+function canReportCompletion(task: KanbanTask): boolean {
+  return isActive(task) || task.status === 'blocked';
 }
 
 function readNonNegativeQueryInteger(
@@ -101,7 +106,9 @@ function buildTools(service: KanbanTaskService): NamedStructuredTool[] {
     async (input) => {
       const task = await service.getTask(input.taskId);
       if (!task) return `unknown Kanban taskId "${input.taskId}"`;
-      if (!isActive(task)) return `Kanban task "${input.taskId}" is ${task.status}, not active`;
+      if (!canReportCompletion(task)) {
+        return `Kanban task "${input.taskId}" is ${task.status}, not completable`;
+      }
       await service.completeTask(task.taskId, input.result);
       return `completed ${task.taskId}`;
     },
@@ -152,6 +159,10 @@ export type CreateKanbanPluginOptions = {
 
 export type KanbanPlugin = StudioPlugin & { service: KanbanTaskService };
 
+export type InstalledKanbanPluginEnvironment = {
+  workdir: string;
+};
+
 export function createKanbanToolkit(service: KanbanTaskService): AgentToolkit {
   const declaredTools = buildTools(service);
   return {
@@ -186,17 +197,9 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     const task = await service.getTask(taskId);
     if (!task || !isActive(task)) return;
     if (result.status === 'waiting') {
-      if (task.status === 'doing') {
-        const continuation = result.pendingContinuation;
-        if (!continuation) {
-          await service.blockTask(
-            taskId,
-            'Pet reported waiting without a public continuation projection.',
-          );
-          return;
-        }
-        await service.waitForContinuation(taskId, continuation);
-      }
+      // Waiting belongs to the resident Pet's Agent Session. Kanban neither
+      // stores nor resumes Agent checkpoint state; the claimed task remains doing
+      // until the Agent reports its domain outcome through the Toolkit.
       return;
     }
     if (result.status === 'failed') {
@@ -232,7 +235,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
         try {
           const receipt = await context.dispatch({
             petId: task.assigneeId,
-            input: { kind: 'request', request: buildTaskRequest(task) },
+            request: buildTaskRequest(task),
           });
           trackDispatch(task.taskId, receipt.completion);
         } catch (error) {
@@ -355,4 +358,47 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
       if (ownsService) await service.close();
     },
   };
+}
+
+/** Installed-package entry used by the standalone Studio Plugin resolver. */
+export function createStudioPlugin(
+  value: Record<string, unknown> | undefined,
+  environment: InstalledKanbanPluginEnvironment,
+): KanbanPlugin {
+  const options = value ?? {};
+  const allowed = new Set(['databasePath', 'httpRoute']);
+  const unknown = Object.keys(options).find((key) => !allowed.has(key));
+  if (unknown) throw new Error(`Kanban Plugin option "${unknown}" is not supported.`);
+  if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
+    throw new Error('Kanban Plugin option "databasePath" must be a string.');
+  }
+  const httpRoute = options.httpRoute;
+  if (
+    httpRoute !== undefined
+    && httpRoute !== false
+    && (
+      !httpRoute
+      || typeof httpRoute !== 'object'
+      || Array.isArray(httpRoute)
+      || Object.keys(httpRoute).some((key) => key !== 'pluginName' && key !== 'path')
+      || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string')
+      || ('path' in httpRoute && typeof httpRoute.path !== 'string')
+    )
+  ) {
+    throw new Error('Kanban Plugin option "httpRoute" must be false or a route object.');
+  }
+  const configuredPath = typeof options.databasePath === 'string'
+    ? options.databasePath.trim()
+    : '';
+  const databasePath = configuredPath
+    ? (path.isAbsolute(configuredPath)
+      ? configuredPath
+      : path.resolve(environment.workdir, configuredPath))
+    : path.join(environment.workdir, '.pinpawo', 'kanban', 'tasks.sqlite');
+  return createKanbanPlugin({
+    databasePath,
+    ...(httpRoute !== undefined
+      ? { httpRoute: httpRoute as CreateKanbanPluginOptions['httpRoute'] }
+      : {}),
+  });
 }

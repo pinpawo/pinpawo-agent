@@ -20,7 +20,7 @@ import { isSafePetPathSegment } from './petId';
  * - 本地配置是 source of truth(pet 行为完全由此决定)。
  * - `serverBinding` 仅作为绑定到服务端的 channel key,不放业务字段。
  * - 同一台主机可以有多个 pet 配置共存(Studio 拼装多 pet 时用)。
- * - capability 可用性检查由 PetAgentRuntime 在 invoke 时自行处理,
+ * - Capability 可用性检查由 local-agent resident runtime 在 dispatch 时处理,
  *   schema 不负责。
  */
 export type PetLocalConfig = {

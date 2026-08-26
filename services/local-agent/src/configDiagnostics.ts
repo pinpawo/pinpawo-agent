@@ -88,7 +88,6 @@ export function buildSetupGuide(options: {
           detail: `No runnable default model profile. ${modelConfigError}`,
           nextStep: 'Define a versioned model profile under "models" in ~/.pinpawo/config.json and set models.defaultProfileId.',
         },
-    buildStudioConfigCheck(runtimeConfig),
   ];
 
   return {
@@ -123,25 +122,6 @@ export function formatSetupGuide(guide: SetupGuide): string {
   }
 
   return `${lines.join('\n')}\n`;
-}
-
-function buildStudioConfigCheck(runtimeConfig: LocalAgentRuntimeConfig): SetupCheck {
-  if (existsSync(runtimeConfig.studioConfigPath)) {
-    return {
-      id: 'studio-config',
-      label: 'Studio config',
-      status: 'ok',
-      detail: `Found ${runtimeConfig.studioConfigPath}.`,
-    };
-  }
-
-  return {
-    id: 'studio-config',
-    label: 'Studio config',
-    status: 'warning',
-    detail: `No Studio config at ${runtimeConfig.studioConfigPath}. An independent Studio Host cannot initialize this workdir until the file exists.`,
-    nextStep: `Create ${runtimeConfig.studioConfigPath}.`,
-  };
 }
 
 function buildNextSteps(checks: SetupCheck[]) {

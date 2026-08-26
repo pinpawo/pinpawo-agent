@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -41,8 +41,6 @@ test('legacy workdir reads remain unchanged until the server boundary normalizes
 test('HTTP and TUI projections expose the same normalized runtime values', () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-runtime-projection-'));
   const runtimeConfig = buildWorkspaceRuntimeConfig({ workdir });
-  mkdirSync(runtimeConfig.stateRoot, { recursive: true });
-  writeFileSync(runtimeConfig.studioConfigPath, '{}');
   const deps = { ...createDeps('/tmp/stale-workdir'), runtimeConfig };
 
   const runtime = buildLocalRuntimeProjection(deps);
@@ -53,16 +51,15 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
   assert.equal(http.workdir, runtime.workdir);
   assert.equal(http.workspace_id, runtime.workspaceId);
   assert.equal(http.state_root, runtime.stateRoot);
-  assert.equal(http.studio_config_path, runtime.studioConfigPath);
-  assert.equal(http.studio_due_runs_path, runtime.studioDueRunsPath);
+  assert.equal('studio_config_path' in http, false);
+  assert.equal('pets_dir' in http, false);
 });
 
-test('projection without runtime config does not synthesize Studio paths', () => {
+test('projection without runtime config keeps workspace state optional', () => {
   const runtime = buildLocalRuntimeProjection(createDeps('/tmp/runtime-without-config'));
 
   assert.equal(runtime.workdir, '/tmp/runtime-without-config');
   assert.equal(runtime.stateRoot, undefined);
-  assert.equal(runtime.studioConfigPath, undefined);
 });
 
 test('session projection surfaces an unavailable selected profile without fallback', () => {

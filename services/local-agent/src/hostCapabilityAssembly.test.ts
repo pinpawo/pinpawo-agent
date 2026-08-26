@@ -13,10 +13,6 @@ function buildTestConfig(root: string): LocalAgentRuntimeConfig {
   return {
     workdir: root,
     stateRoot: join(root, 'state'),
-    studioConfigPath: join(root, 'studio.json'),
-    studioDueRunsPath: join(root, 'studio-due.json'),
-    petsDir: join(root, 'pets'),
-    studioWikiBaseDir: join(root, 'wiki'),
     checkpointPath: join(root, 'checkpoints.json'),
     tuiCheckpointPath: join(root, 'tui-checkpoints.json'),
     tuiSessionPath: join(root, 'tui-sessions.json'),

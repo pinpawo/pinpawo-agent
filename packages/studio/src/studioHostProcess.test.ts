@@ -13,12 +13,13 @@ function runtimeConfig(workdir: string): LocalAgentRuntimeConfig {
 function completedHost(): RunningStudioHost {
   return {
     host: {} as RunningStudioHost['host'],
+    agentSessionPort: 0,
     close: () => undefined,
     closed: Promise.resolve(),
   };
 }
 
-test('Studio Host process composes resolver before starting stdio', async () => {
+test('Studio Host process composes resolver and Agent Session port before starting', async () => {
   const config = runtimeConfig('/resolved/project');
   const resolver: StudioPluginResolver = async () => ({
     name: 'test',
@@ -30,10 +31,11 @@ test('Studio Host process composes resolver before starting stdio', async () => 
   await runStudioHostProcess({
     workdir: './project',
     resolvePlugin: resolver,
-    transport: { kind: 'stdio' },
+    agentSessionPort: 4321,
   }, {
     buildRuntimeConfig: () => config,
-    startStdio: async (options) => {
+    ensureAuthToken: () => 'test-auth-token',
+    startHost: async (options) => {
       started = options;
       return completedHost();
     },
@@ -42,22 +44,50 @@ test('Studio Host process composes resolver before starting stdio', async () => 
 
   assert.equal(started?.runtimeConfig, config);
   assert.equal(started?.resolvePlugin, resolver);
+  assert.equal(started?.agentSessionPort, 4321);
+  assert.equal(started?.agentSessionTransport?.authToken, 'test-auth-token');
 });
 
-test('Studio Host process closes the WebSocket Host on SIGTERM', async () => {
+test('Studio Host process installs the package resolver for the standalone CLI', async () => {
+  const config = runtimeConfig('/resolved/project');
+  const resolver: StudioPluginResolver = async () => ({
+    name: 'installed',
+    toolkits: [],
+    start: () => undefined,
+  });
+  let resolverWorkdir = '';
+  let started: StartStudioHostOptions | undefined;
+
+  await runStudioHostProcess({}, {
+    buildRuntimeConfig: () => config,
+    ensureAuthToken: () => 'test-auth-token',
+    createPluginResolver: (options) => {
+      resolverWorkdir = options.workdir;
+      return resolver;
+    },
+    startHost: async (options) => {
+      started = options;
+      return completedHost();
+    },
+    signals: new EventEmitter(),
+  });
+
+  assert.equal(resolverWorkdir, '/resolved/project');
+  assert.equal(started?.resolvePlugin, resolver);
+});
+
+test('Studio Host process closes the Host on SIGTERM', async () => {
   const signals = new EventEmitter();
   let closeCount = 0;
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
-  let startedPort = 0;
-  const running = runStudioHostProcess({
-    transport: { kind: 'websocket', port: 4321 },
-  }, {
+  const running = runStudioHostProcess({}, {
     buildRuntimeConfig: () => runtimeConfig('/resolved/project'),
-    startWebSocket: async (port) => {
-      startedPort = port;
+    ensureAuthToken: () => 'test-auth-token',
+    startHost: async () => {
       return {
         host: {} as RunningStudioHost['host'],
+        agentSessionPort: 4321,
         close: () => {
           closeCount += 1;
           resolveClosed();
@@ -73,7 +103,6 @@ test('Studio Host process closes the WebSocket Host on SIGTERM', async () => {
   signals.emit('SIGTERM');
   await running;
 
-  assert.equal(startedPort, 4321);
   assert.equal(closeCount, 1);
   assert.equal(signals.listenerCount('SIGINT'), 0);
   assert.equal(signals.listenerCount('SIGTERM'), 0);
@@ -87,11 +116,10 @@ test('Studio Host process remembers a close signal received during startup', asy
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
 
-  const processRun = runStudioHostProcess({
-    transport: { kind: 'stdio' },
-  }, {
+  const processRun = runStudioHostProcess({}, {
     buildRuntimeConfig: () => runtimeConfig('/resolved/project'),
-    startStdio: async () => starting,
+    ensureAuthToken: () => 'test-auth-token',
+    startHost: async () => starting,
     signals,
   });
 
@@ -101,6 +129,7 @@ test('Studio Host process remembers a close signal received during startup', asy
 
   releaseStart({
     host: {} as RunningStudioHost['host'],
+    agentSessionPort: 43123,
     close: () => {
       closeCount += 1;
       resolveClosed();

@@ -3,23 +3,24 @@ import {
   type LocalAgentRuntimeConfig,
 } from 'pinpawo/host-runtime';
 import {
-  redirectConsoleToStdioDiagnostics,
-  type LocalServerStdioTransportOptions,
-  type LocalServerTransportOptions,
+  startResidentPetAgentSessionTransport,
+  type ResidentPetAgentSessionTransportOptions,
 } from 'pinpawo/local-server-transport';
 import { StudioHost, type StudioHostOptions } from './host/StudioHost';
-import {
-  startStudioStdioTransport,
-  startStudioWebSocketTransport,
-} from './transport/startStudioTransport';
 
 export type StartStudioHostOptions = Omit<StudioHostOptions, 'runtimeConfig'> & {
   workdir?: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
+  /** Local-agent Agent Session listener; 0 selects an available loopback port. */
+  agentSessionPort?: number;
+  agentSessionTransport?: ResidentPetAgentSessionTransportOptions;
+  /** Composition hook for deterministic lifecycle tests and embedded Hosts. */
+  startAgentSessionTransport?: typeof startResidentPetAgentSessionTransport;
 };
 
 export type RunningStudioHost = {
   host: StudioHost;
+  agentSessionPort: number;
   closed: Promise<void>;
   close: () => void;
 };
@@ -46,63 +47,28 @@ async function initializeHost(options: StartStudioHostOptions) {
   return host;
 }
 
-function ownHostLifecycle(
-  host: StudioHost,
-  transport: { close: () => void; closed: Promise<void> },
-  afterShutdown?: () => void,
-): RunningStudioHost {
-  let shutdown: Promise<void> | undefined;
-  const shutdownHost = () => {
-    shutdown ??= host.shutdown();
-    return shutdown;
-  };
-  return {
-    host,
-    close: transport.close,
-    closed: transport.closed.finally(async () => {
-      try {
-        await shutdownHost();
-      } finally {
-        afterShutdown?.();
-      }
-    }),
-  };
-}
-
-/** Start an independent resident Studio Host over newline-delimited stdio. */
-export async function startStudioHostStdio(
+/**
+ * Start the resident Host and its local-agent conversation listener.
+ * Studio dispatch/event HTTP is started only by configured Studio Plugins.
+ */
+export async function startStudioHost(
   options: StartStudioHostOptions = {},
-  transportOptions: LocalServerStdioTransportOptions = {},
-): Promise<RunningStudioHost> {
-  const restoreConsole = redirectConsoleToStdioDiagnostics(transportOptions.diagnostics);
-  let host: StudioHost | undefined;
-  try {
-    // Redirect before Host initialization: plugin/capability startup logs are
-    // diagnostics too and must never corrupt JSONL protocol stdout.
-    host = await initializeHost(options);
-    const transport = startStudioStdioTransport({
-      studio: host.getStudio(),
-    }, transportOptions);
-    return ownHostLifecycle(host, transport, restoreConsole);
-  } catch (error) {
-    await host?.shutdown().catch(() => undefined);
-    restoreConsole();
-    throw error;
-  }
-}
-
-/** Start an independent resident Studio Host over loopback HTTP/WebSocket. */
-export async function startStudioHostWebSocket(
-  port: number,
-  options: StartStudioHostOptions = {},
-  transportOptions: Omit<LocalServerTransportOptions, 'closeHandlers'> = {},
 ): Promise<RunningStudioHost> {
   const host = await initializeHost(options);
   try {
-    const transport = await startStudioWebSocketTransport(port, {
-      studio: host.getStudio(),
-    }, transportOptions);
-    return ownHostLifecycle(host, transport);
+    const transport = await (options.startAgentSessionTransport
+      ?? startResidentPetAgentSessionTransport)(
+      options.agentSessionPort ?? 0,
+      host.getResidentPetInteractions(),
+      options.agentSessionTransport,
+    );
+    const closed = transport.closed.finally(() => host.shutdown());
+    return {
+      host,
+      agentSessionPort: transport.port,
+      close: transport.close,
+      closed,
+    };
   } catch (error) {
     await host.shutdown().catch(() => undefined);
     throw error;

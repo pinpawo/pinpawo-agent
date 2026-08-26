@@ -9,10 +9,6 @@ type Task = {
   status: TaskStatus;
   deps: string[];
   note?: string;
-  continuation?: {
-    continuationId: string;
-    payload: Record<string, unknown>;
-  };
 };
 
 type EventItem = {
@@ -50,14 +46,6 @@ type StudioPetRegistration = {
   name: string;
   role?: string | null;
   serviceSummary?: string | null;
-  startupMode: 'standby' | 'lazy' | 'disabled';
-  status: 'disabled' | 'loading' | 'standby' | 'active' | 'degraded' | 'unavailable';
-  capabilities: Array<{
-    name: string;
-    description: string;
-    available: boolean;
-    reason?: string | null;
-  }>;
 };
 
 type StudioPetsSnapshot = { pets: StudioPetRegistration[] };
@@ -100,12 +88,10 @@ export function App() {
   const [pets, setPets] = useState<StudioPetRegistration[]>([]);
   const [events, setEvents] = useState<EventItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
-  const [selectedContinuationTaskId, setSelectedContinuationTaskId] = useState<string>();
   const [selectedEventId, setSelectedEventId] = useState<string>();
   const [selectedKnowledgePath, setSelectedKnowledgePath] = useState(knowledgeFiles[0].path);
   const [dispatchTarget, setDispatchTarget] = useState('');
   const [dispatchGoal, setDispatchGoal] = useState('');
-  const [resumePayload, setResumePayload] = useState('{\n  \n}');
   const [notice, setNotice] = useState(
     studioHttpUrl && studioHttpToken ? 'Connecting to Studio HTTP…' : 'Set VITE_STUDIO_HTTP_URL and VITE_STUDIO_HTTP_TOKEN to connect.',
   );
@@ -113,9 +99,6 @@ export function App() {
 
   const selectedKnowledge = knowledgeFiles.find((file) => file.path === selectedKnowledgePath) ?? knowledgeFiles[0];
   const selectedTask = tasks.find((task) => task.taskId === selectedTaskId);
-  const waitingTasks = tasks.filter((task) => task.status === 'waiting' && task.continuation);
-  const waitingTask = waitingTasks.find((task) => task.taskId === selectedContinuationTaskId)
-    ?? waitingTasks[0];
   const visibleEvents = selectedTaskId
     ? events.filter((event) => event.taskId === selectedTaskId)
     : events;
@@ -214,7 +197,7 @@ export function App() {
     return () => abort.abort();
   }, []);
 
-  async function dispatch(input: Record<string, unknown>, petId: string): Promise<void> {
+  async function dispatch(request: string, petId: string): Promise<void> {
     if (!studioHttpUrl || !studioHttpToken) {
       setNotice('Studio HTTP connection is not configured.');
       return;
@@ -225,36 +208,11 @@ export function App() {
         Authorization: `Bearer ${studioHttpToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ petId, input }),
+      body: JSON.stringify({ petId, request }),
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: string } | null;
       throw new Error(body?.error ?? `Studio dispatch failed (${response.status.toString()}).`);
-    }
-  }
-
-  async function resumeContinuation(): Promise<void> {
-    if (!waitingTask?.continuation) return;
-    let payload: unknown;
-    try {
-      payload = JSON.parse(resumePayload) as unknown;
-    } catch {
-      setNotice('Resume payload must be valid JSON.');
-      return;
-    }
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      setNotice('Resume payload must be a JSON object.');
-      return;
-    }
-    try {
-      await dispatch({
-        kind: 'resume',
-        continuationId: waitingTask.continuation.continuationId,
-        payload,
-      }, waitingTask.assigneeId);
-      setNotice(`Resume accepted for ${waitingTask.taskId}.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -267,7 +225,7 @@ export function App() {
       return;
     }
     try {
-      await dispatch({ kind: 'request', request: goal }, target);
+      await dispatch(goal, target);
       setDispatchGoal('');
       setNotice(`Dispatch accepted by ${target}.`);
     } catch (error) {
@@ -312,9 +270,6 @@ export function App() {
                           key={task.taskId}
                           onClick={() => {
                             setSelectedTaskId((current) => current === task.taskId ? undefined : task.taskId);
-                            if (task.status === 'waiting' && task.continuation) {
-                              setSelectedContinuationTaskId(task.taskId);
-                            }
                           }}
                           title={task.note ?? task.brief}
                           type="button"
@@ -361,42 +316,9 @@ export function App() {
         </aside>
 
         <section className="main-panel">
-          <section className={`authorization panel ${waitingTask ? '' : 'empty'}`}>
-            <div className="authorization-label">CONTINUATION</div>
-            {waitingTask ? (
-              <>
-                <div className="authorization-copy">
-                  <span className="status-dot status-waiting" />
-                  <div>
-                    <strong>{waitingTask.taskId} · {waitingTask.brief}</strong>
-                    <p>{waitingTask.note ?? 'Pet is waiting for a continuation input.'}</p>
-                  </div>
-                </div>
-                <div className="authorization-actions">
-                  {waitingTasks.length > 1 && (
-                    <select
-                      aria-label="Waiting continuation"
-                      onChange={(event) => setSelectedContinuationTaskId(event.target.value)}
-                      value={waitingTask.taskId}
-                    >
-                      {waitingTasks.map((task) => (
-                        <option key={task.taskId} value={task.taskId}>
-                          {task.taskId} · {task.assigneeId}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <textarea
-                    aria-label="Opaque continuation payload"
-                    onChange={(event) => setResumePayload(event.target.value)}
-                    value={resumePayload}
-                  />
-                  <button className="approve-button" onClick={() => void resumeContinuation()} type="button">RESUME</button>
-                </div>
-              </>
-            ) : (
-              <p>No Pet continuation is waiting.</p>
-            )}
+          <section className="authorization panel empty">
+            <div className="authorization-label">AGENT SESSION</div>
+            <p>Reviews and interrupted conversations are handled by the Pet-scoped Agent Session client.</p>
           </section>
 
           <section className="events panel">
@@ -434,8 +356,8 @@ export function App() {
         <select id="dispatch-target" onChange={(event) => setDispatchTarget(event.target.value)} value={dispatchTarget}>
           <option value="">Select Pet</option>
           {pets.map((pet) => (
-            <option disabled={pet.startupMode === 'disabled'} key={pet.petId} value={pet.petId}>
-              {pet.name} · {pet.petId} · {pet.status}
+            <option key={pet.petId} value={pet.petId}>
+              {pet.name} · {pet.petId}
             </option>
           ))}
         </select>

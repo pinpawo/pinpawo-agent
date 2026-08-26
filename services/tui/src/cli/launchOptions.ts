@@ -1,5 +1,6 @@
 export type TuiLaunchOptions = {
   showVersion: boolean;
+  agentSession: { port: number; petId: string } | null;
   demo: {
     command: boolean;
     qa: boolean;
@@ -24,6 +25,21 @@ export function parseTuiLaunchOptions(
   argv: readonly string[],
 ): TuiLaunchOptions {
   const flags = new Set(argv);
+  const agentSessionPort = readOption(argv, '--agent-session-port');
+  const agentSessionPetId = readOption(argv, '--agent-session-pet');
+  if ((agentSessionPort === undefined) !== (agentSessionPetId === undefined)) {
+    throw new Error('--agent-session-port and --agent-session-pet must be provided together.');
+  }
+  let agentSession: TuiLaunchOptions['agentSession'] = null;
+  if (agentSessionPort !== undefined && agentSessionPetId !== undefined) {
+    const port = Number(agentSessionPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error('--agent-session-port must be an integer from 1 to 65535.');
+    }
+    const petId = agentSessionPetId.trim();
+    if (!petId) throw new Error('--agent-session-pet must not be empty.');
+    agentSession = { port, petId };
+  }
   const demo = {
     command: flags.has('--demo-command'),
     qa: flags.has('--demo-qa'),
@@ -50,6 +66,7 @@ export function parseTuiLaunchOptions(
 
   return {
     showVersion: flags.has('--version'),
+    agentSession,
     demo,
     smoke,
     smokeEnabled,
@@ -59,4 +76,12 @@ export function parseTuiLaunchOptions(
       || demo.qa
       || demo.review,
   };
+}
+
+function readOption(argv: readonly string[], option: string): string | undefined {
+  const index = argv.indexOf(option);
+  if (index < 0) return undefined;
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${option} requires a value.`);
+  return value;
 }

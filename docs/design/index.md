@@ -29,8 +29,7 @@ contracts in [reference/](../reference/index.md).
   [process runtime](local-agent/process-runtime.md),
   [workspace runtime configuration](local-agent/workspace-runtime-config.md), and
   [app chat UI](local-agent/app-chat-runtime-ui.md)
-- [TUI architecture](tui/local-agent-tui.md), [overhaul](tui/overhaul.md),
-  [textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the
+- [TUI textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the
   [OpenTUI capability matrix](tui/v2-capability-matrix.md)
 - [Browser Toolkit package](toolkits/browser-package.md)
 - [Resident Pet Host ports](agent-runtime/resident-pet-host-ports.md) — canonical
@@ -48,11 +47,7 @@ contracts in [reference/](../reference/index.md).
   task, dependency, history, transaction, and recovery design
 - [Kanban Console UI](kanban/ui-console.md) — mouse-first desktop console for
   dispatch, tasks, events, authorization, and Markdown context
-- [Studio Kanban Plugin adapter](studio/kanban-plugin-durable-state.md) — optional
-  dispatch/event/Toolkit/hook integration without Studio data ownership
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
-  for dispatch, events, Plugin routes, and packaged UI assets
-- [Studio CLI Plugin Web composition](studio/cli-plugin-web-composition.md) — active draft for
-  the standalone CLI module resolver, packaged static hook, and token bootstrap
+  for dispatch, events, and Plugin routes
 
 Completed or superseded work belongs in [history/](../history/index.md).

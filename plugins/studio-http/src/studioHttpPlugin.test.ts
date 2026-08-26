@@ -20,14 +20,12 @@ const AUTH_TOKEN = 'test-token-with-at-least-16-characters';
 function receipt(request: StudioDispatchRequest): StudioDispatchReceipt {
   const result = {
     petId: request.petId,
-    threadId: `thread:${request.petId}`,
     invocationId: 'invocation-1',
     status: 'completed' as const,
     ...(request.metadata ? { metadata: request.metadata } : {}),
   };
   return {
     petId: result.petId,
-    threadId: result.threadId,
     invocationId: result.invocationId,
     ...(request.metadata ? { metadata: request.metadata } : {}),
     onInvocation: (handler) => {
@@ -120,7 +118,7 @@ test('HTTP Plugin dispatches a validated request and returns receipt identity', 
     },
     body: JSON.stringify({
       petId: 'planner',
-      input: { kind: 'request', request: 'plan this work' },
+      request: 'plan this work',
       idempotencyKey: 'retry-1',
     }),
   });
@@ -128,12 +126,11 @@ test('HTTP Plugin dispatches a validated request and returns receipt identity', 
   assert.equal(response.status, 202);
   assert.deepEqual(await response.json(), {
     petId: 'planner',
-    threadId: 'thread:planner',
     invocationId: 'invocation-1',
   });
   assert.deepEqual(harness.requests, [{
     petId: 'planner',
-    input: { kind: 'request', request: 'plan this work' },
+    request: 'plan this work',
     idempotencyKey: 'retry-1',
   }]);
 });
@@ -145,14 +142,6 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
       name: 'Planner',
       role: 'plans work',
       serviceSummary: null,
-      startupMode: 'standby',
-      status: 'standby',
-      capabilities: [{
-        name: 'plan',
-        description: 'Plans work.',
-        available: true,
-        reason: null,
-      }],
     }],
   });
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
@@ -184,7 +173,7 @@ test('HTTP Plugin requires bearer auth and an explicitly allowed browser origin'
   const unauthorized = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ petId: 'planner', input: { kind: 'request', request: 'x' } }),
+    body: JSON.stringify({ petId: 'planner', request: 'x' }),
   });
   assert.equal(unauthorized.status, 401);
 
@@ -195,7 +184,7 @@ test('HTTP Plugin requires bearer auth and an explicitly allowed browser origin'
       'Content-Type': 'application/json',
       Origin: 'https://evil.example',
     },
-    body: JSON.stringify({ petId: 'planner', input: { kind: 'request', request: 'x' } }),
+    body: JSON.stringify({ petId: 'planner', request: 'x' }),
   });
   assert.equal(forbidden.status, 403);
 
@@ -252,7 +241,7 @@ test('HTTP Plugin validates media type, body size, dispatch shape, and domain re
   const rejected = await fetch(url, {
     method: 'POST',
     headers: { ...authorization, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ petId: 'missing', input: { kind: 'request', request: 'x' } }),
+    body: JSON.stringify({ petId: 'missing', request: 'x' }),
   });
   assert.equal(rejected.status, 422);
   assert.deepEqual(await rejected.json(), { error: 'unknown pet' });

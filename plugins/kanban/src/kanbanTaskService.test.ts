@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import {
   KanbanTaskService,
@@ -76,50 +77,6 @@ test('SQLite task service commits one claim when callers race for ready work', a
   assert.equal(claims.filter(Boolean).length, 1);
   assert.equal(claims.find(Boolean)?.task.taskId, task.task.taskId);
   assert.equal((await service.getTask(task.task.taskId))?.status, 'doing');
-});
-
-test('SQLite task service persists waiting and blocked state transitions in history', async (t) => {
-  const service = await createService(':memory:');
-  t.after(() => service.close());
-  const task = await service.createTask({ assigneeId: 'worker', brief: 'needs a decision' });
-  await service.claimNextReadyTask();
-  await service.waitTask(task.task.taskId, 'awaiting approval');
-  await service.blockTask(task.task.taskId, 'approval rejected');
-
-  assert.deepEqual(
-    (await service.listTaskEvents()).map((event) => ({
-      eventType: event.eventType,
-      toStatus: event.toStatus,
-    })),
-    [
-      { eventType: 'created', toStatus: 'todo' },
-      { eventType: 'claimed', toStatus: 'doing' },
-      { eventType: 'waiting', toStatus: 'waiting' },
-      { eventType: 'blocked', toStatus: 'blocked' },
-    ],
-  );
-});
-
-test('SQLite task service persists an opaque continuation and clears it after completion', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-sqlite-'));
-  const databasePath = path.join(root, 'kanban.sqlite');
-  const firstProcess = await createService(databasePath);
-  const task = await firstProcess.createTask({ assigneeId: 'worker', brief: 'needs continuation' });
-  await firstProcess.claimNextReadyTask();
-  await firstProcess.waitForContinuation(task.task.taskId, {
-    continuationId: 'continuation-1',
-    payload: { kind: 'example_interaction', prompt: 'Continue?' },
-  });
-  await firstProcess.close();
-
-  const secondProcess = await createService(databasePath);
-  t.after(() => secondProcess.close());
-  assert.deepEqual((await secondProcess.getTask(task.task.taskId))?.continuation, {
-    continuationId: 'continuation-1',
-    payload: { kind: 'example_interaction', prompt: 'Continue?' },
-  });
-  await secondProcess.completeTask(task.task.taskId, 'continued');
-  assert.equal((await secondProcess.getTask(task.task.taskId))?.continuation, undefined);
 });
 
 test('SQLite task service records interrupted work as a recovered block on restart', async (t) => {
@@ -208,4 +165,39 @@ test('a failing committed-event listener does not fail the persisted command', a
   const mutation = await service.createTask({ assigneeId: 'worker', brief: 'still committed' });
   assert.equal(mutation.task.status, 'todo');
   assert.equal((await service.getTask(mutation.task.taskId))?.brief, 'still committed');
+});
+
+test('schema v2 migration removes the obsolete continuation column', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v2-'));
+  const databasePath = path.join(root, 'kanban.sqlite');
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec(`
+    CREATE TABLE kanban_tasks (
+      task_id TEXT PRIMARY KEY,
+      assignee_id TEXT NOT NULL,
+      brief TEXT NOT NULL,
+      status TEXT NOT NULL,
+      note TEXT,
+      continuation_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    PRAGMA user_version = 2;
+  `);
+  legacy.close();
+
+  const service = await createService(databasePath);
+  await service.close();
+
+  const migrated = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const columns = migrated.prepare('PRAGMA table_info(kanban_tasks)').all() as Array<{
+      name: string;
+    }>;
+    const version = migrated.prepare('PRAGMA user_version').get() as { user_version: number };
+    assert.equal(version.user_version, 3);
+    assert.equal(columns.some(({ name }) => name === 'continuation_json'), false);
+  } finally {
+    migrated.close();
+  }
 });

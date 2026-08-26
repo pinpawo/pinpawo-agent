@@ -221,7 +221,7 @@ Tool input 中的相对
 authorization 判断，而不是由 execution binding 改写参数。
 
 `ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
-它；独立 `createResidentPetAgentRuntime()` 创建的私有 manager 可通过其 `shutdown()`
+它；独立 `createResidentPetRuntime()` 使用的 manager 由 Host lifecycle 统一 `shutdown()`
 释放。若由 host 注入共享 manager，则由该 host 统一 stop，不能由单个 pet
 runtime 终止。
 

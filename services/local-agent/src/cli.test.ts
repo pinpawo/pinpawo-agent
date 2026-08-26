@@ -31,7 +31,38 @@ test('the removed legacy flags are no longer declared', () => {
   assert.ok(tui, 'the tui command must exist');
 
   const flags = tui.options.map((option) => option.long);
-  assert.deepEqual(flags.sort(), ['--check', '--qa', '--workdir']);
+  assert.deepEqual(flags.sort(), [
+    '--agent-session-pet',
+    '--agent-session-port',
+    '--check',
+    '--qa',
+    '--workdir',
+  ]);
+});
+
+test('tui forwards one complete Pet-scoped Agent Session target', async () => {
+  let received: unknown;
+  const program = createLocalAgentCli({
+    runTuiV2: (options) => { received = options; },
+  });
+
+  await program.parseAsync([
+    'node',
+    'pinpawo',
+    'tui',
+    '--agent-session-port',
+    '4322',
+    '--agent-session-pet',
+    'planner',
+  ]);
+
+  assert.deepEqual(received, {
+    workdir: undefined,
+    check: false,
+    qa: false,
+    agentSessionPort: 4322,
+    agentSessionPetId: 'planner',
+  });
 });
 
 test('the deferred Browser detect command is not part of this CLI contract', () => {

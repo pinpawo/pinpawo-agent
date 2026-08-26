@@ -20,7 +20,7 @@ export type CapabilityCatalogReader = Pick<
 >;
 
 export type LocalServerDeps = {
-  /** Local-agent transport is owned by the Chat Host. */
+  /** Local-agent interaction mode; resident Pet adapters reuse the Chat semantics. */
   serverMode: ServerMode;
   actorId: string;
   actorName?: string;
@@ -30,8 +30,8 @@ export type LocalServerDeps = {
   workdir: string;
   runtimeConfig?: LocalAgentRuntimeConfig;
   /**
-   * Chat Host 持有的 checkpointer。Studio Host 使用独立的 checkpoint root，
-   * 不通过 transport deps 暴露给 Chat/TUI session 栈。FileSaver 仍提供
+   * Composition Host 持有的 conversation checkpointer。Chat Host 与 Studio Host
+   * 使用独立 root，但都通过同一 local-agent session stack 注入。FileSaver 仍提供
    * store-wide filesystem writer lock，保护同一 root 被意外多进程打开时的
    * read-modify-write 与 GC。
    *

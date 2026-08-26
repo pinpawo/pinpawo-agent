@@ -28,8 +28,6 @@ import type {
   StudioInvocationEventHandler,
 } from './studioInvocation';
 export type {
-  PendingContinuationProjection,
-  StudioDispatchInput,
   StudioDispatchReceipt,
   StudioDispatchRequest,
   StudioDispatchResult,
@@ -137,8 +135,8 @@ export type StudioPlugin = {
 export type Studio = {
   /**
    * 外部输入默认派给谁。曾经有个 `submitRequest(goal)` 包着它 —— 那是多余的:
-   * 它完全等价于 `dispatch({ petId: entryPetId, input: { kind: 'request',
-   * request: goal } })`,却让 entry pet 在 API 上有了专属地位。按插板的逻辑,
+   * 它完全等价于 `dispatch({ petId: entryPetId, request: goal })`,却让 entry pet
+   * 在 API 上有了专属地位。按插板的逻辑,
    * entry pet 只是配置里的一个 pet。
    */
   entryPetId: string;

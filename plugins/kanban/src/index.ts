@@ -5,9 +5,14 @@
 export {
   createKanbanPlugin,
   createKanbanToolkit,
+  createStudioPlugin,
   KANBAN_TOOLKIT_NAME,
 } from './kanbanPlugin';
-export type { CreateKanbanPluginOptions, KanbanPlugin } from './kanbanPlugin';
+export type {
+  CreateKanbanPluginOptions,
+  InstalledKanbanPluginEnvironment,
+  KanbanPlugin,
+} from './kanbanPlugin';
 export {
   createInMemoryKanbanTaskService,
   KanbanTaskService,

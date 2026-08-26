@@ -1,490 +1,239 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import test from 'node:test';
+import type { PetDispatchPort, PetDispatchResult } from 'pinpawo/host-runtime';
 
 import { createStudio } from './createStudio';
-import type { StudioPlugin, StudioPluginContext } from './studioContract';
-import type {
-  PetAgentRuntime,
-  PetAgentRuntimeInvokeInput,
-  PetAgentRuntimeInvokeResult,
-} from './types';
+import type { StudioPlugin } from './studioContract';
+import type { StudioPetBinding } from './types';
 
-const pendingContinuation = {
-  continuationId: 'continuation-1',
-  payload: {
-    kind: 'human_review' as const,
-    interactions: [{
-      interactionId: 'review-1',
-      schemaVersion: 2 as const,
-      view: { kind: 'plain' as const, body: 'Approve?' },
-      options: [{
-        id: 'approve',
-        label: 'Approve',
-        batchSubmission: 'defer' as const,
-      }],
-    }],
-  },
-};
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
 
-function pet(options: {
-  petId: string;
-  disabled?: boolean;
-  invoke?: (
-    input: PetAgentRuntimeInvokeInput,
-  ) => PetAgentRuntimeInvokeResult | Promise<PetAgentRuntimeInvokeResult>;
-}): PetAgentRuntime {
+function binding(
+  petId: string,
+  run: (request: string, signal?: AbortSignal) => Promise<PetDispatchResult>
+    = async (request) => ({ status: 'completed', output: request }),
+): StudioPetBinding {
+  const port: PetDispatchPort = {
+    getState: () => 'open',
+    onStateChange: () => () => undefined,
+    dispatch: ({ request, signal }) => run(request, signal),
+  };
   return {
-    descriptor: () => ({
-      petId: options.petId,
-      userId: null,
-      name: options.petId,
-      personality: null,
-      stage: null,
-      species: null,
-      role: null,
-      serviceSummary: null,
-      startupMode: options.disabled ? 'disabled' : 'standby',
-      status: options.disabled ? 'disabled' : 'standby',
-      capabilities: [],
-    }),
-    invoke: async (input) => options.invoke
-      ? options.invoke(input)
-      : { status: 'completed', reply: 'done' },
-    gate: () => 'open',
-    onGateChange: () => () => undefined,
+    registration: {
+      petId,
+      name: petId.toUpperCase(),
+      role: `${petId} role`,
+      serviceSummary: `${petId} service`,
+    },
+    dispatch: port,
   };
 }
 
-const request = (petId: string, text: string) => ({
-  petId,
-  input: { kind: 'request' as const, request: text },
-});
-
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-test('dispatch acknowledges immediately and exposes terminal completion separately', async () => {
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => { release = resolve; });
+test('Studio dispatches request-only input and returns no thread or continuation data', async () => {
+  const seen: unknown[] = [];
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
-    pets: [pet({
-      petId: 'worker',
-      invoke: async () => {
-        await held;
-        return { status: 'completed', reply: 'eventually' };
-      },
+    pets: [binding('worker', async (request) => {
+      seen.push(request);
+      return { status: 'waiting' };
     })],
   });
 
-  const receipt = await studio.dispatch(request('worker', 'do it'));
-  const race = await Promise.race([
-    receipt.completion.then(() => 'completed'),
-    flush().then(() => 'still-running'),
-  ]);
-  assert.equal(race, 'still-running');
-  release();
+  const receipt = await studio.dispatch({ petId: 'worker', request: 'draft' });
   const result = await receipt.completion;
-  assert.equal(result.status, 'completed');
-  assert.equal(result.output, 'eventually');
+  assert.deepEqual(seen, ['draft']);
+  assert.deepEqual(Object.keys(receipt).sort(), ['completion', 'invocationId', 'onInvocation', 'petId']);
+  assert.equal(result.status, 'waiting');
+  assert.equal('threadId' in result, false);
+  assert.equal('pendingContinuation' in result, false);
+  await studio.shutdown();
 });
 
-test('a receipt replays current progress and observes only its invocation', async () => {
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({
-      petId: 'worker',
-      invoke: async () => {
-        await held;
-        return { status: 'completed', reply: 'done' };
-      },
-    })],
-  });
-
-  const receipt = await studio.dispatch(request('worker', 'observe me'));
-  const statuses: string[] = [];
-  const unsubscribe = receipt.onInvocation((event) => {
-    assert.equal(event.invocationId, receipt.invocationId);
-    statuses.push(event.status);
-  });
-  await flush();
-  assert.deepEqual(statuses, ['busy']);
-
-  release();
-  await receipt.completion;
-  await flush();
-  assert.deepEqual(statuses, ['busy', 'completed']);
-  unsubscribe();
-});
-
-test('repeated dispatches reuse one Pet thread and receive distinct invocation ids', async () => {
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({ petId: 'worker' })],
-  });
-
-  const first = await studio.dispatch(request('worker', 'first'));
-  const second = await studio.dispatch(request('worker', 'second'));
-  assert.equal(first.threadId, 'studio:s1:pet:worker');
-  assert.equal(second.threadId, first.threadId);
-  assert.notEqual(second.invocationId, first.invocationId);
-  await Promise.all([first.completion, second.completion]);
-});
-
-test('different Pets own different stable threads', async () => {
+test('Studio serializes dispatches per Pet while allowing different Pets independently', async () => {
+  const firstStarted = deferred();
+  const releaseFirst = deferred();
+  const events: string[] = [];
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'a',
-    pets: [pet({ petId: 'a' }), pet({ petId: 'b' })],
+    pets: [
+      binding('a', async (request) => {
+        events.push(`${request}:start`);
+        if (request === 'a1') {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+        }
+        events.push(`${request}:end`);
+        return { status: 'completed', output: request };
+      }),
+      binding('b', async (request) => {
+        events.push(`${request}:run`);
+        return { status: 'completed', output: request };
+      }),
+    ],
   });
-  const a = await studio.dispatch(request('a', 'a'));
-  const b = await studio.dispatch(request('b', 'b'));
-  assert.notEqual(a.threadId, b.threadId);
-  await Promise.all([a.completion, b.completion]);
+
+  const a1 = await studio.dispatch({ petId: 'a', request: 'a1' });
+  await firstStarted.promise;
+  const a2 = await studio.dispatch({ petId: 'a', request: 'a2' });
+  const b1 = await studio.dispatch({ petId: 'b', request: 'b1' });
+  await b1.completion;
+  assert.deepEqual(events, ['a1:start', 'b1:run']);
+  releaseFirst.resolve();
+  await Promise.all([a1.completion, a2.completion]);
+  assert.deepEqual(events, ['a1:start', 'b1:run', 'a1:end', 'a2:start', 'a2:end']);
+  await studio.shutdown();
 });
 
-test('the Studio registry exposes a read-only Pet registration rather than actor internals', async () => {
+test('receipt observer replays latest invocation state and metadata stays above the port', async () => {
+  const release = deferred();
+  let portRequest: string | undefined;
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
-    pets: [pet({ petId: 'worker' })],
-  });
-
-  assert.deepEqual(studio.listPets(), [{
-    petId: 'worker',
-    name: 'worker',
-    role: null,
-    serviceSummary: null,
-    startupMode: 'standby',
-    status: 'standby',
-    capabilities: [],
-  }]);
-});
-
-test('concurrent dispatches never invoke one Pet concurrently', async () => {
-  const started: string[] = [];
-  let releaseFirst!: () => void;
-  const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({
-      petId: 'worker',
-      invoke: async (input) => {
-        const text = input.input.kind === 'request' ? input.input.request : 'resume';
-        started.push(text);
-        if (text === 'first') await firstHeld;
-        return { status: 'completed', reply: text };
-      },
+    pets: [binding('worker', async (request) => {
+      portRequest = request;
+      await release.promise;
+      return { status: 'completed', output: 'done' };
     })],
   });
-
-  const first = await studio.dispatch(request('worker', 'first'));
-  const second = await studio.dispatch(request('worker', 'second'));
-  await flush();
-  assert.deepEqual(started, ['first']);
-  releaseFirst();
-  await Promise.all([first.completion, second.completion]);
-  assert.deepEqual(started, ['first', 'second']);
-});
-
-test('a dispatch cancelled while queued never invokes its Pet', async () => {
-  const started: string[] = [];
-  let releaseFirst!: () => void;
-  const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({
-      petId: 'worker',
-      invoke: async (input) => {
-        const text = input.input.kind === 'request' ? input.input.request : 'resume';
-        started.push(text);
-        if (text === 'first') await firstHeld;
-        return { status: 'completed', reply: text };
-      },
-    })],
-  });
-  const cancellation = new AbortController();
-
-  const first = await studio.dispatch(request('worker', 'first'));
-  const second = await studio.dispatch({
-    ...request('worker', 'second'),
-    signal: cancellation.signal,
-  });
-  cancellation.abort();
-  releaseFirst();
-
-  assert.equal((await first.completion).status, 'completed');
-  assert.equal((await second.completion).status, 'cancelled');
-  assert.deepEqual(started, ['first']);
-});
-
-test('a durable continuation settles its invocation and admits a later resume', async () => {
-  const inputs: PetAgentRuntimeInvokeInput[] = [];
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({
-      petId: 'worker',
-      invoke: async (input) => {
-        inputs.push(input);
-        return input.input.kind === 'request'
-          ? { status: 'waiting', pendingContinuation }
-          : { status: 'completed', reply: 'resumed' };
-      },
-    })],
-  });
-
-  const initial = await studio.dispatch(request('worker', 'needs review'));
-  const waiting = await initial.completion;
-  assert.equal(waiting.status, 'waiting');
-  const resumed = await studio.dispatch({
+  const receipt = await studio.dispatch({
     petId: 'worker',
-    input: {
-      kind: 'resume',
-      continuationId: 'continuation-1',
-      payload: {
-        kind: 'human_review_response',
-        responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
-      },
-    },
+    request: 'work',
+    metadata: { taskId: 'task-1' },
   });
-  const completed = await resumed.completion;
-  assert.equal(completed.status, 'completed');
-  assert.equal(resumed.threadId, initial.threadId);
-  assert.notEqual(resumed.invocationId, initial.invocationId);
-  assert.deepEqual(inputs.map((item) => item.input.kind), ['request', 'resume']);
+  await Promise.resolve();
+  const statuses: string[] = [];
+  receipt.onInvocation((event) => {
+    statuses.push(event.status);
+  });
+  assert.deepEqual(statuses, ['busy']);
+  assert.equal(portRequest, 'work');
+  release.resolve();
+  assert.equal((await receipt.completion).output, 'done');
+  assert.deepEqual(statuses, ['busy', 'completed']);
+  await studio.shutdown();
 });
 
-test('a restarted Studio resolves the same Pet thread and can resume its pending work', async () => {
-  let waiting = false;
-  const invokedThreads: string[] = [];
-  const createResidentPet = () => pet({
-    petId: 'worker',
-    invoke: async (input) => {
-      invokedThreads.push(input.threadId);
-      if (input.input.kind === 'request') {
-        waiting = true;
-        return { status: 'waiting', pendingContinuation };
-      }
-      assert.equal(waiting, true);
-      assert.equal(input.input.continuationId, 'continuation-1');
-      waiting = false;
-      return { status: 'completed', reply: 'resumed after restart' };
-    },
-  });
-  const firstStudio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [createResidentPet()],
-  });
-  const first = await firstStudio.dispatch(request('worker', 'start'));
-  assert.equal((await first.completion).status, 'waiting');
-  await firstStudio.shutdown();
-
-  const restartedStudio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [createResidentPet()],
-  });
-  const resumed = await restartedStudio.dispatch({
-    petId: 'worker',
-    input: {
-      kind: 'resume',
-      continuationId: 'continuation-1',
-      payload: {
-        kind: 'human_review_response',
-        responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
-      },
-    },
-  });
-  assert.equal((await resumed.completion).status, 'completed');
-  assert.equal(resumed.threadId, first.threadId);
-  assert.deepEqual(invokedThreads, ['studio:s1:pet:worker', 'studio:s1:pet:worker']);
-});
-
-test('idempotency returns the existing invocation receipt', async () => {
+test('idempotency returns the same receipt and invokes the port once', async () => {
   let calls = 0;
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
-    pets: [pet({ petId: 'worker', invoke: async () => {
+    pets: [binding('worker', async () => {
       calls += 1;
-      return { status: 'completed', reply: 'done' };
-    } })],
-  });
-  const first = await studio.dispatch({ ...request('worker', 'go'), idempotencyKey: 'job-1' });
-  const retry = await studio.dispatch({ ...request('worker', 'go'), idempotencyKey: 'job-1' });
-  assert.equal(retry, first);
-  await retry.completion;
-  assert.equal(calls, 1);
-});
-
-test('failed Pet work settles as failed without rejecting acceptance', async () => {
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({ petId: 'worker', invoke: async () => { throw new Error('pet exploded'); } })],
-  });
-  const receipt = await studio.dispatch(request('worker', 'go'));
-  assert.deepEqual(
-    { status: (await receipt.completion).status, error: (await receipt.completion).error },
-    { status: 'failed', error: 'pet exploded' },
-  );
-});
-
-test('a Plugin observes only invocations it dispatched', async () => {
-  const seen: string[] = [];
-  let mine!: StudioPluginContext;
-  let theirs!: StudioPluginContext;
-  const plugin = (name: string, capture?: (context: StudioPluginContext) => void): StudioPlugin => ({
-    name,
-    toolkits: [],
-    start: (context) => capture?.(context),
-  });
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({ petId: 'worker' })],
-    plugins: [
-      plugin('mine', (context) => {
-        mine = context;
-        context.onInvocation((event) => { seen.push(event.invocationId); });
-      }),
-      plugin('theirs', (context) => { theirs = context; }),
-    ],
-  });
-  const own = await mine.dispatch(request('worker', 'mine'));
-  const other = await theirs.dispatch(request('worker', 'theirs'));
-  await Promise.all([own.completion, other.completion]);
-  assert.ok(seen.length >= 2);
-  assert.ok(seen.every((id) => id === own.invocationId));
-});
-
-test('Host invocation events carry identity, metadata, and pending projection', async () => {
-  const events: Array<{ status: string; invocationId: string; taskId?: unknown }> = [];
-  const studio = await createStudio({
-    studioId: 's1',
-    entryPetId: 'worker',
-    pets: [pet({
-      petId: 'worker',
-      invoke: async () => ({ status: 'waiting', pendingContinuation }),
+      return { status: 'completed', output: 'done' };
     })],
   });
-  studio.onInvocation((event) => {
-    events.push({
-      status: event.status,
-      invocationId: event.invocationId,
-      taskId: event.metadata?.taskId,
-    });
-  });
-  const receipt = await studio.dispatch({
-    ...request('worker', 'go'),
-    metadata: { taskId: 'task-1' },
-  });
-  await receipt.completion;
-  await flush();
-  assert.deepEqual(events.map(({ status }) => status), ['busy', 'waiting']);
-  assert.ok(events.every(({ invocationId }) => invocationId === receipt.invocationId));
-  assert.ok(events.every(({ taskId }) => taskId === 'task-1'));
+  const request = { petId: 'worker', request: 'work', idempotencyKey: 'task-1' };
+  const first = await studio.dispatch(request);
+  const second = await studio.dispatch(request);
+  assert.equal(first, second);
+  await first.completion;
+  assert.equal(calls, 1);
+  await studio.shutdown();
 });
 
-test('Plugin events remain an opaque broadcast channel', async () => {
-  const received: unknown[] = [];
-  let publish!: StudioPluginContext['notify'];
+test('listPets exposes only Studio registration metadata', async () => {
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
-    pets: [pet({ petId: 'worker' })],
-    plugins: [{
-      name: 'source',
-      toolkits: [],
-      start: (context) => { publish = context.notify; },
-    }],
+    pets: [binding('worker')],
   });
-  studio.subscribe((event) => { received.push(event); });
-  publish({ type: 'task.done', metadata: { taskId: 'task-1' }, payload: { ok: true } });
-  await flush();
-  assert.equal(received.length, 1);
-  assert.deepEqual((received[0] as { metadata: unknown }).metadata, { taskId: 'task-1' });
+  assert.deepEqual(studio.listPets(), [{
+    petId: 'worker',
+    name: 'WORKER',
+    role: 'worker role',
+    serviceSummary: 'worker service',
+  }]);
+  await studio.shutdown();
 });
 
-test('Plugin hooks attach in either start order and detach with contributor lifecycle', async () => {
-  for (const consumerFirst of [true, false]) {
-    const installed: string[] = [];
-    const removed: string[] = [];
-    const provider: StudioPlugin = {
-      name: 'provider',
-      toolkits: [],
-      start: (context) => {
-        context.hooks.expose('routes', {
-          register: (path: string) => {
-            installed.push(path);
-            return () => { removed.push(path); };
-          },
-        });
-      },
-    };
-    const consumer: StudioPlugin = {
-      name: 'consumer',
-      toolkits: [],
-      start: (context) => {
-        context.hooks.contribute<{ register: (path: string) => () => void }>(
-          'provider',
-          'routes',
-          (routes) => routes.register('/consumer'),
-        );
-      },
-    };
-    const studio = await createStudio({
-      studioId: `hooks-${consumerFirst ? 'consumer-first' : 'provider-first'}`,
-      entryPetId: 'worker',
-      pets: [pet({ petId: 'worker' })],
-      plugins: consumerFirst ? [consumer, provider] : [provider, consumer],
-    });
-
-    assert.deepEqual(installed, ['/consumer']);
-    await studio.shutdown();
-    assert.deepEqual(removed, ['/consumer']);
-  }
+test('Plugin receives dispatch/event/hook context without a Pet runtime reference', async () => {
+  let pluginContextKeys: string[] = [];
+  let eventSource = '';
+  const plugin: StudioPlugin = {
+    name: 'scheduler',
+    toolkits: [],
+    start: async (context) => {
+      pluginContextKeys = Object.keys(context).sort();
+      context.subscribe((event) => {
+        eventSource = event.source;
+      });
+      context.notify({ type: 'schedule.ready' });
+      await (await context.dispatch({ petId: 'worker', request: 'run' })).completion;
+    },
+  };
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [binding('worker')],
+    plugins: [plugin],
+  });
+  assert.deepEqual(pluginContextKeys, [
+    'dispatch',
+    'hooks',
+    'listPets',
+    'notify',
+    'onInvocation',
+    'subscribe',
+  ]);
+  assert.equal(eventSource, 'scheduler');
+  await studio.shutdown();
 });
 
-test('plugins start in order, stop in reverse, and startup failure rolls back', async () => {
-  const order: string[] = [];
-  const plugin = (name: string, fail = false): StudioPlugin => ({
-    name,
+test('Plugin startup failure rolls back already-started Plugins', async () => {
+  const events: string[] = [];
+  const first: StudioPlugin = {
+    name: 'first',
     toolkits: [],
     start: () => {
-      order.push(`start:${name}`);
-      if (fail) throw new Error('cannot start');
+      events.push('first:start');
     },
-    stop: () => { order.push(`stop:${name}`); },
-  });
-  await assert.rejects(
-    () => createStudio({
-      studioId: 's1',
-      entryPetId: 'worker',
-      pets: [pet({ petId: 'worker' })],
-      plugins: [plugin('a'), plugin('b', true)],
-    }),
-    /cannot start/,
-  );
-  assert.deepEqual(order, ['start:a', 'start:b', 'stop:b', 'stop:a']);
+    stop: () => {
+      events.push('first:stop');
+    },
+  };
+  const second: StudioPlugin = {
+    name: 'second',
+    toolkits: [],
+    start: () => {
+      events.push('second:start');
+      throw new Error('boom');
+    },
+    stop: () => {
+      events.push('second:stop');
+    },
+  };
+  await assert.rejects(() => createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [binding('worker')],
+    plugins: [first, second],
+  }), /boom/);
+  assert.deepEqual(events, ['first:start', 'second:start', 'second:stop', 'first:stop']);
 });
 
-test('dispatch rejects unknown, disabled, and stopped targets', async () => {
+test('shutdown cancels the signal of an active dispatch', async () => {
+  const started = deferred();
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
-    pets: [pet({ petId: 'worker' }), pet({ petId: 'off', disabled: true })],
+    pets: [binding('worker', async (_request, signal) => {
+      started.resolve();
+      await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+      return { status: 'cancelled' };
+    })],
   });
-  await assert.rejects(() => studio.dispatch(request('ghost', 'go')), /unknown petId/);
-  await assert.rejects(() => studio.dispatch(request('off', 'go')), /is disabled/);
+  const receipt = await studio.dispatch({ petId: 'worker', request: 'long' });
+  await started.promise;
   await studio.shutdown();
-  await assert.rejects(() => studio.dispatch(request('worker', 'go')), /already shut down/);
+  assert.equal((await receipt.completion).status, 'cancelled');
 });

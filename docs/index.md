@@ -40,7 +40,7 @@ record of an earlier implementation.
 | [concepts/](concepts/index.md) | Stable vocabulary and system map | Learning the mental model first |
 | [guides/](guides/index.md) | Installation, configuration, and integrations | Operating or trying the project |
 | [reference/](reference/index.md) | Current APIs, extension, runtime, artifact, and local-tool contracts | Building against a stable boundary |
-| [studio/](studio/index.md) | Current multi-agent push model, configuration, host integration, and API links | Running or extending Studio |
+| [studio/](studio/index.md) | Current Studio overview and configuration | Running or extending Studio |
 | [design/](design/index.md) | Proposals and implementation rationale | Changing a subsystem |
 | [history/](history/index.md) | Superseded designs, audits, and completed migration records | Understanding why a boundary changed |
 | [references/](references/openclaw-agent-loop-reference.md) | External comparison material | Research only; not repository authority |

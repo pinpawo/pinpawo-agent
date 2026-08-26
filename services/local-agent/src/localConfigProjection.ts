@@ -28,10 +28,6 @@ export type LocalRuntimeProjection = {
   workspaceName?: string;
   workspaceRoot?: string;
   stateRoot?: string;
-  studioConfigPath?: string;
-  studioDueRunsPath?: string;
-  petsDir?: string;
-  studioWikiBaseDir?: string;
 };
 
 export function buildLocalRuntimeProjection(
@@ -62,10 +58,6 @@ export function buildLocalRuntimeProjection(
       } : {}),
       ...(runtimeConfig ? {
         stateRoot: runtimeConfig.stateRoot,
-        studioConfigPath: runtimeConfig.studioConfigPath,
-        studioDueRunsPath: runtimeConfig.studioDueRunsPath,
-        petsDir: runtimeConfig.petsDir,
-        studioWikiBaseDir: runtimeConfig.studioWikiBaseDir,
       } : {}),
     };
   }
@@ -94,10 +86,6 @@ export function buildLocalRuntimeProjection(
     } : {}),
     ...(runtimeConfig ? {
       stateRoot: runtimeConfig.stateRoot,
-      studioConfigPath: runtimeConfig.studioConfigPath,
-      studioDueRunsPath: runtimeConfig.studioDueRunsPath,
-      petsDir: runtimeConfig.petsDir,
-      studioWikiBaseDir: runtimeConfig.studioWikiBaseDir,
     } : {}),
   };
 }
@@ -119,9 +107,5 @@ export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
     ...(runtime.workspaceName ? { workspace_name: runtime.workspaceName } : {}),
     ...(runtime.workspaceRoot ? { workspace_root: runtime.workspaceRoot } : {}),
     ...(runtime.stateRoot ? { state_root: runtime.stateRoot } : {}),
-    ...(runtime.studioConfigPath ? { studio_config_path: runtime.studioConfigPath } : {}),
-    ...(runtime.studioDueRunsPath ? { studio_due_runs_path: runtime.studioDueRunsPath } : {}),
-    ...(runtime.petsDir ? { pets_dir: runtime.petsDir } : {}),
-    ...(runtime.studioWikiBaseDir ? { studio_wiki_base_dir: runtime.studioWikiBaseDir } : {}),
   };
 }

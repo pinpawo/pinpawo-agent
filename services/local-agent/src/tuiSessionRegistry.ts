@@ -99,6 +99,44 @@ export function createTuiSession(
   return record;
 }
 
+/**
+ * Adopt an existing durable thread into the Agent Session registry.
+ *
+ * This is intentionally thread-format agnostic: a checkpoint identity is an
+ * opaque Host/runtime concern. New sessions still use buildTuiChatThreadId(),
+ * while a Host migration can preserve an older thread without copying or
+ * reinterpreting its checkpoint.
+ */
+export function createTuiSessionForThread(
+  state: TuiSessionState,
+  petId: string,
+  defaultModelProfileId: string,
+  threadId: string,
+  now = new Date(),
+) {
+  if (!threadId.trim()) {
+    throw new Error('Cannot adopt an empty Agent Session thread id.');
+  }
+  const suffix = randomUUID().slice(0, 8);
+  const id = `${petId}:${suffix}`;
+  const timestamp = now.toISOString();
+  const record: TuiSessionRecord = {
+    id,
+    petId,
+    suffix,
+    threadId,
+    modelProfileId: defaultModelProfileId,
+    requiredInputModalities: ['text'],
+    title: '已恢复会话',
+    messageCount: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  state.sessions[id] = record;
+  state.activeSessionIds[petId] = id;
+  return record;
+}
+
 export function resumeTuiSession(
   state: TuiSessionState,
   petId: string,
@@ -232,7 +270,6 @@ function parseSessionRecord(
     || !threadId
     || !modelProfileId
     || !requiredInputModalities
-    || threadId !== buildTuiChatThreadId({ petId, sessionSuffix: suffix })
     || !title
     || messageCount === null
     || !createdAt

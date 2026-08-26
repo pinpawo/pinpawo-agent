@@ -74,7 +74,7 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 - 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在
-graph state 之外维护第二份 Toolkit 业务状态。独立 `createResidentPetAgentRuntime()`
+graph state 之外维护第二份 Toolkit 业务状态。独立 `createResidentPetRuntime()`
 在没有外部 Host 时可以创建私有 manager；这只是工厂代行最小 Host 所有权，
 不把 Toolkit Runtime 变成 Agent 领域概念。
 

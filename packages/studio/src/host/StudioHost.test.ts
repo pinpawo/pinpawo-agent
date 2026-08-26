@@ -23,12 +23,10 @@ function fakeStudio(onShutdown: () => void): Studio {
     entryPetId: 'pet-a',
     dispatch: async () => ({
       petId: 'pet-1',
-      threadId: 'thread-1',
       invocationId: 'invocation-1',
       onInvocation: () => () => undefined,
       completion: Promise.resolve({
         petId: 'pet-1',
-        threadId: 'thread-1',
         invocationId: 'invocation-1',
         status: 'completed',
       }),
@@ -83,6 +81,7 @@ function fakeCapabilityAssembly(
     }) as never,
     getToolkitRuntimeManager: () => ({}) as never,
     getCheckpointer: () => ({}) as never,
+    getCapabilityArtifactStore: () => ({}) as never,
   } as unknown as HostCapabilityAssembly;
 }
 
@@ -106,6 +105,7 @@ function result(studio: Studio): BuildStudioResult {
     studio,
     resolved: {} as BuildStudioResult['resolved'],
     plugins: [],
+    residentPets: new Map(),
   };
 }
 
@@ -251,7 +251,7 @@ test('StudioHost supplies Plugin Toolkits to the Host inventory before building 
     }]),
     buildStudio: async (input) => {
       events.push('studio:build');
-      assert.deepEqual(input.toolkits, [toolkit]);
+      assert.deepEqual(input.toolkitInventory.getSnapshot().effectiveToolkits, [toolkit]);
       return result(fakeStudio(() => undefined));
     },
   });

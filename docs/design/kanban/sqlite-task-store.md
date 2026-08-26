@@ -1,7 +1,7 @@
 # Kanban SQLite Task Store
 
 > 状态：Draft implementation contract
-> 更新：2026-08-23
+> 更新：2026-08-26
 
 本文定义独立 Kanban 领域的 task、dependency、history 与 SQLite persistence。
 Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition 使用；它的数据
@@ -19,9 +19,9 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
   projection 和可选 HTTP read route；
 - 运行时 JSON snapshot store 已移除，SQLite 是持久化路径。
 
-当前实现仍保留 `waitTask(reason)`、public continuation 与 `continuation_json`。它们属于旧
-dispatch-resume adapter 的 transitional surface，不是本文的目标 application contract；
-后续迁移见 [Studio Kanban Plugin Adapter](../studio/kanban-plugin-durable-state.md)。
+旧 dispatch-resume adapter 的 `waitTask(reason)`、public continuation 与
+`continuation_json` 已移除；schema v3 会显式删除 v2 的 continuation column。Studio 的
+`waiting` dispatch result 不改变 Kanban task 状态。
 
 仍未实现独立 Kanban CLI/Web composition，以及 Console 的真实 adapter；它们不能通过绕开
 service 或直接读写 SQLite 来临时补齐。
@@ -94,7 +94,8 @@ type KanbanTaskEvent = {
   它优先进入人可处理的 attention read model。裸 reason、Studio gate 或 dispatch result
   不能产生这个状态。
 - `done`：执行者已经明确报告完成。
-- `blocked`：无法安全继续，需要人或上层策略决定；不会自动重试。
+- `blocked`：无法安全自动继续，需要人或上层策略决定；不会自动重试。执行者后续通过
+  Toolkit 明确报告有效完成结果时，可以转为 `done`，这不要求 Kanban 理解执行 checkpoint。
 
 第一阶段不加入泳道、卡片坐标、颜色、UI 排序或任意 `metadata_json`。这些不是 task
 执行事实。Web 可把 `waiting` 投射到最高优先级授权区，把其他 task 投射成依赖流。
@@ -287,6 +288,13 @@ storage 或 domain event 的所有权。
 
 第一阶段不提供绕过领域 command 的 task CRUD。人或 agent 如需直接管理 task，也必须
 调用 `createTask` / `completeTask` / `blockTask` 等明确 command。
+
+Studio Kanban Plugin 只是一个可选 adapter：claim 必须先由 service commit，再调用
+`context.dispatch()`；`waiting` 不产生 task transition，failed/cancelled 或 completed
+但 Agent 未通过 Toolkit 报告结果时才 block。Agent 后续用 `kanban_task_complete` 或
+`kanban_task_block` 提交明确领域结果。Plugin 只通过 dispatch、event、hook 和自己定义的
+Toolkit 连接 Studio，不读取 checkpoint、thread、Agent Session 或 execution metadata。
+HTTP route 与 Toolkit 也必须复用同一个 `KanbanTaskService`。
 
 ## 9. JSON snapshot 迁移
 

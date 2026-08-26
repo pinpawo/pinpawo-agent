@@ -8,38 +8,28 @@ import type {
   StudioPlugin,
   StudioPluginContext,
 } from './studioContract';
-import {
-  buildStudioPetThreadId,
-  type StudioDispatchReceipt,
-  type StudioDispatchRequest,
-  type StudioDispatchResult,
-  type StudioInvocationEvent,
-  type StudioInvocationEventHandler,
-} from './studioInvocation';
 import type {
-  PetAgentRuntime,
-  StudioPetRegistration,
-} from './types';
+  StudioDispatchReceipt,
+  StudioDispatchRequest,
+  StudioDispatchResult,
+  StudioInvocationEvent,
+  StudioInvocationEventHandler,
+} from './studioInvocation';
+import type { StudioPetBinding, StudioPetRegistration } from './types';
 import { StudioPluginHookRegistry } from './studioPluginHooks';
 
 export type CreateStudioInput = {
   studioId: string;
-  pets: PetAgentRuntime[];
+  pets: StudioPetBinding[];
   entryPetId: string;
   plugins?: StudioPlugin[];
 };
 
-/**
- * Create one resident Studio registry and invocation coordinator.
- *
- * Every Pet owns one deterministic graph thread. Dispatches are serialized by
- * Pet, but a durable continuation settles its invocation and releases the
- * queue; a later typed dispatch resumes the same checkpoint.
- */
+/** Create the Studio registry over already-live, Host-owned dispatch ports. */
 export async function createStudio(input: CreateStudioInput): Promise<Studio> {
-  const petsById = new Map<string, PetAgentRuntime>();
+  const petsById = new Map<string, StudioPetBinding>();
   for (const pet of input.pets) {
-    const { petId } = pet.descriptor();
+    const { petId } = pet.registration;
     if (petsById.has(petId)) {
       throw new Error(`studio "${input.studioId}": duplicate petId "${petId}"`);
     }
@@ -54,9 +44,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const plugins = input.plugins ?? [];
   const pluginNames = new Set<string>();
   for (const plugin of plugins) {
-    if (!plugin.name.trim()) {
-      throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
-    }
+    if (!plugin.name.trim()) throw new Error(`studio "${input.studioId}": plugin name must not be empty`);
     if (pluginNames.has(plugin.name)) {
       throw new Error(`studio "${input.studioId}": duplicate plugin "${plugin.name}"`);
     }
@@ -73,18 +61,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   let stopped = false;
 
   function listPets(): StudioPetRegistration[] {
-    return [...petsById.values()].map((pet) => {
-      const descriptor = pet.descriptor();
-      return {
-        petId: descriptor.petId,
-        name: descriptor.name,
-        role: descriptor.role,
-        serviceSummary: descriptor.serviceSummary,
-        startupMode: descriptor.startupMode,
-        status: descriptor.status,
-        capabilities: descriptor.capabilities.map((capability) => ({ ...capability })),
-      };
-    });
+    return [...petsById.values()].map(({ registration }) => ({ ...registration }));
   }
 
   function subscribe(handler: StudioEventHandler): () => void {
@@ -114,16 +91,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
   }
 
-  function enqueue(
-    petId: string,
-    run: () => Promise<StudioDispatchResult>,
-  ): Promise<StudioDispatchResult> {
+  function enqueue(petId: string, run: () => Promise<StudioDispatchResult>) {
     const tail = queues.get(petId) ?? Promise.resolve();
     const completion = tail.then(run, run);
-    const settled = completion.then(
-      () => undefined,
-      () => undefined,
-    );
+    const settled = completion.then(() => undefined, () => undefined);
     queues.set(petId, settled);
     void settled.finally(() => {
       if (queues.get(petId) === settled) queues.delete(petId);
@@ -135,18 +106,9 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     request: StudioDispatchRequest,
     source?: string,
   ): Promise<StudioDispatchReceipt> {
-    if (stopped) {
-      throw new Error(`studio "${input.studioId}": already shut down`);
-    }
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
     const pet = petsById.get(request.petId);
-    if (!pet) {
-      throw new Error(`studio "${input.studioId}": unknown petId "${request.petId}"`);
-    }
-    if (pet.descriptor().startupMode === 'disabled') {
-      throw new Error(
-        `studio "${input.studioId}": pet "${request.petId}" is disabled`,
-      );
-    }
+    if (!pet) throw new Error(`studio "${input.studioId}": unknown petId "${request.petId}"`);
 
     const idempotencyKey = request.idempotencyKey?.trim();
     if (request.idempotencyKey !== undefined && !idempotencyKey) {
@@ -160,11 +122,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       : undefined;
     if (existing) return existing;
 
-    const threadId = buildStudioPetThreadId(input.studioId, request.petId);
     const invocationId = randomUUID();
-    const metadata = request.metadata
-      ? Object.freeze({ ...request.metadata })
-      : undefined;
+    const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
     const receiptInvocationHandlers = new Set<StudioInvocationEventHandler>();
     let latestInvocationEvent: StudioInvocationEvent | undefined;
 
@@ -180,23 +139,16 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
 
     console.log(
-      `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} `
-      + `thread=${threadId} invocation=${invocationId}`,
+      `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
     );
 
     const completion = enqueue(request.petId, async () => {
       const base = {
         petId: request.petId,
-        threadId,
         invocationId,
         ...(metadata ? { metadata } : {}),
       };
-      if (stopped) {
-        const result: StudioDispatchResult = { ...base, status: 'cancelled' };
-        emitReceiptInvocation(result);
-        return result;
-      }
-      if (request.signal?.aborted) {
+      if (stopped || request.signal?.aborted) {
         const result: StudioDispatchResult = { ...base, status: 'cancelled' };
         emitReceiptInvocation(result);
         return result;
@@ -210,22 +162,14 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       emitReceiptInvocation({ ...base, status: 'busy' });
 
       try {
-        const result = await pet.invoke({
-          input: request.input,
-          threadId,
-          signal,
-        });
-        const completed: StudioDispatchResult = result.status === 'waiting'
+        const result = await pet.dispatch.dispatch({ request: request.request, signal });
+        const completed: StudioDispatchResult = result.status === 'completed'
           ? {
               ...base,
-              status: 'waiting',
-              pendingContinuation: result.pendingContinuation,
-            }
-          : {
-              ...base,
               status: 'completed',
-              ...(result.reply ? { output: result.reply } : {}),
-            };
+              ...(result.output ? { output: result.output } : {}),
+            }
+          : { ...base, status: result.status };
         emitReceiptInvocation(completed);
         return completed;
       } catch (error) {
@@ -251,7 +195,6 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
 
     const receipt: StudioDispatchReceipt = Object.freeze({
       petId: request.petId,
-      threadId,
       invocationId,
       ...(metadata ? { metadata } : {}),
       onInvocation: (handler) => {
@@ -267,9 +210,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       },
       completion,
     });
-    if (idempotencyRecordKey) {
-      idempotencyRecords.set(idempotencyRecordKey, receipt);
-    }
+    if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, receipt);
     return receipt;
   }
 

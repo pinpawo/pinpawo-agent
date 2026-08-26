@@ -38,3 +38,15 @@ export type {
 export type { LocalServerPeer } from './localServerPeer';
 export { sendLocalServerPeerEvent } from './localServerPeer';
 export type { LocalAgentServerMessage } from './localAgentProtocol';
+export {
+  ensureLocalServerAuthToken,
+  readLocalServerAuthToken,
+} from './localServerAuth';
+export {
+  readResidentPetIdFromAgentSessionPath,
+  RESIDENT_PET_AGENT_SESSION_ROUTE_PREFIX,
+  startResidentPetAgentSessionTransport,
+} from './residentPetAgentSessionTransport';
+export type {
+  ResidentPetAgentSessionTransportOptions,
+} from './residentPetAgentSessionTransport';

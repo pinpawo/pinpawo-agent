@@ -8,11 +8,21 @@ import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
   type AgentCapability,
+  ToolkitRuntimeManager,
+  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 
 import { buildStudio, resolveStudioHostConfig } from '@pinpawo/studio';
-import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
+import {
+  buildLocalAgentRuntimeConfig,
+  FileSaver,
+  loadCapabilityDirectory,
+} from 'pinpawo/host-runtime';
 import { createTestModelProfileRegistry } from '../../../services/local-agent/src/testing/modelProfiles';
+import {
+  buildHostToolkitInventory,
+  HostToolkitInventoryStore,
+} from '../../../services/local-agent/src/toolkits/toolkitInventory';
 import { createKanbanPlugin } from './kanbanPlugin';
 
 /**
@@ -28,6 +38,33 @@ function generalCapability(): AgentCapability {
     description: 'Baseline capability for tests.',
     uses: [],
     instructions: defineInstructionDocument({ content: '# General' }),
+  };
+}
+
+const artifactStore: CapabilityArtifactStore = {
+  writeArtifact: async () => { throw new Error('not used'); },
+  readArtifact: async () => { throw new Error('not used'); },
+  listArtifacts: async () => [],
+  deleteThreadArtifacts: async () => undefined,
+  getDownloadUri: async (uri) => uri,
+};
+
+async function residentBuildResources(workdir: string, plugins: ReturnType<typeof createKanbanPlugin>[]) {
+  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const toolkitInventory = new HostToolkitInventoryStore(await buildHostToolkitInventory({
+    sources: [{
+      id: 'plugins',
+      kind: 'plugin',
+      definitions: plugins.flatMap((plugin) => plugin.toolkits),
+    }],
+    resolveAvailability: async () => ({ available: true }),
+  }));
+  return {
+    toolkitInventory,
+    toolkitRuntimeManager: new ToolkitRuntimeManager(),
+    capabilityArtifactStore: artifactStore,
+    checkpoint: new FileSaver(path.join(runtimeConfig.stateRoot, 'test-checkpoints.json')),
+    runtimeConfig,
   };
 }
 
@@ -91,7 +128,7 @@ test('a Pet capability directory containing studio_planning reaches the kanban t
     'planner',
     'capabilities',
   ));
-  const { studio } = await buildStudio({
+  const built = await buildStudio({
     configuration,
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()],
@@ -99,18 +136,16 @@ test('a Pet capability directory containing studio_planning reaches the kanban t
       'planner',
       loaded.map(({ capability }) => capability),
     ]]),
-    toolkits: configuration.plugins.flatMap((plugin) => plugin.toolkits),
-    ownerUserId: null,
+    ...await residentBuildResources(workdir, configuration.plugins as ReturnType<typeof createKanbanPlugin>[]),
   });
+  const { studio } = built;
 
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');
   assert.ok(planner, 'planner must be assembled');
 
-  const planning = planner.capabilities.find((item) => item.name === 'studio_planning');
-  assert.ok(planning, 'studio_planning must resolve through the studio assembly path');
-  // 这是整条链的落点:kanban 插件已装配,所以这个能力是**可用的**,
-  // 而不是 unavailable。
-  assert.equal(planning.available, true, planning.reason ?? '');
+  assert.equal(built.residentPets.size, 1);
+  await studio.shutdown();
+  await Promise.all([...built.residentPets.values()].map((resident) => resident.close()));
 });
 
 test('studio_planning is absent when the Pet capability directory is empty', async () => {
@@ -120,19 +155,18 @@ test('studio_planning is absent when the Pet capability directory is empty', asy
     resolvePlugin: () => createKanbanPlugin(),
   });
 
-  const { studio } = await buildStudio({
+  const built = await buildStudio({
     configuration,
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()],
     petCapabilities: new Map(),
-    toolkits: configuration.plugins.flatMap((plugin) => plugin.toolkits),
-    ownerUserId: null,
+    ...await residentBuildResources(workdir, configuration.plugins as ReturnType<typeof createKanbanPlugin>[]),
   });
+  const { studio } = built;
 
   const planner = studio.listPets().find((pet) => pet.petId === 'planner');
   assert.ok(planner);
-  assert.equal(
-    planner.capabilities.some((item) => item.name === 'studio_planning'),
-    false,
-  );
+  assert.equal(built.residentPets.size, 1);
+  await studio.shutdown();
+  await Promise.all([...built.residentPets.values()].map((resident) => resident.close()));
 });

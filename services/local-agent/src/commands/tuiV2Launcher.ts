@@ -39,6 +39,8 @@ export type RunTuiV2Options = {
   workdir?: string;
   check?: boolean;
   qa?: boolean;
+  agentSessionPort?: number;
+  agentSessionPetId?: string;
 };
 
 export type TuiV2DistributionManifest = {
@@ -372,7 +374,10 @@ async function spawnTuiV2(
 
 export function buildTuiV2LaunchArgs(
   plan: TuiV2LaunchPlan,
-  options: Pick<RunTuiV2Options, 'check' | 'qa'> = {},
+  options: Pick<
+    RunTuiV2Options,
+    'check' | 'qa' | 'agentSessionPort' | 'agentSessionPetId'
+  > = {},
 ) {
   if (options.check && options.qa) {
     throw new Error('OpenTUI v2 check and QA modes are mutually exclusive.');
@@ -381,6 +386,12 @@ export function buildTuiV2LaunchArgs(
     ...plan.args,
     ...(options.check ? ['--version'] : []),
     ...(options.qa ? ['--demo-qa'] : []),
+    ...(options.agentSessionPort !== undefined
+      ? ['--agent-session-port', options.agentSessionPort.toString()]
+      : []),
+    ...(options.agentSessionPetId
+      ? ['--agent-session-pet', options.agentSessionPetId]
+      : []),
   ];
 }
 

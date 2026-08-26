@@ -129,7 +129,6 @@ export type AgentRuntimeView = {
   workspaceName?: string;
   workspaceRoot?: string;
   stateRoot?: string;
-  petsDir?: string;
   contextWindow?: number;
 };
 

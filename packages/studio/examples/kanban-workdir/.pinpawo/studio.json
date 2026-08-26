@@ -2,5 +2,8 @@
   "studioId": "kanban-example",
   "entryPetId": "planner",
   "pets": ["planner"],
-  "plugins": [{ "id": "kanban" }]
+  "plugins": [
+    { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
+    { "id": "@pinpawo-plugin/kanban" }
+  ]
 }

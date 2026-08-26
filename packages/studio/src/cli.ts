@@ -9,8 +9,8 @@ Start an independent resident PinPawo Studio Host.
 
 Options:
   --workdir <directory>  workspace containing .pinpawo/studio.json
-  --stdio                use newline-delimited JSON over stdio
-  --port <port>          serve the loopback HTTP/WebSocket transport
+  --agent-session-port <port>
+                         local-agent conversation listener (default: available port)
   -h, --help             display help
 `;
 
@@ -30,7 +30,7 @@ function readOptionValue(args: readonly string[], index: number, option: string)
 function parsePort(value: string): number {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error('--port must be an integer from 1 to 65535.');
+    throw new Error('--agent-session-port must be an integer from 1 to 65535.');
   }
   return port;
 }
@@ -41,37 +41,27 @@ export type ParsedStudioHostCli =
 
 export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHostCli {
   let workdir: string | undefined;
-  let stdio = false;
-  let port: number | undefined;
+  let agentSessionPort: number | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '-h' || argument === '--help') return { help: true };
-    if (argument === '--stdio') {
-      stdio = true;
-      continue;
-    }
     if (argument === '--workdir') {
       workdir = readOptionValue(args, index, argument);
       index += 1;
       continue;
     }
-    if (argument === '--port') {
-      port = parsePort(readOptionValue(args, index, argument));
+    if (argument === '--agent-session-port') {
+      agentSessionPort = parsePort(readOptionValue(args, index, argument));
       index += 1;
       continue;
     }
     throw new Error(`Unknown option: ${argument}`);
   }
-  if (stdio === (port !== undefined)) {
-    throw new Error('Choose exactly one Studio transport: --stdio or --port <port>.');
-  }
   return {
     help: false,
     options: {
       ...(workdir ? { workdir } : {}),
-      transport: stdio
-        ? { kind: 'stdio' }
-        : { kind: 'websocket', port: port! },
+      ...(agentSessionPort !== undefined ? { agentSessionPort } : {}),
     },
   };
 }

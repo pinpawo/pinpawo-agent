@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   createTuiSession,
+  createTuiSessionForThread,
   ensureActiveTuiSession,
   listTuiSessions,
   loadTuiSessionState,
@@ -65,7 +66,7 @@ test('tui session registry rejects unversioned and unsupported persisted state',
   }
 });
 
-test('tui session registry drops non-canonical current records', async () => {
+test('tui session registry drops malformed current records', async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
   const filePath = path.join(tmp, 'tui-sessions.json');
   const sessionId = 'pet-a:abc12345';
@@ -85,7 +86,6 @@ test('tui session registry drops non-canonical current records', async () => {
     { ...currentRecord, id: undefined },
     { ...currentRecord, id: 'pet-a:different' },
     { ...currentRecord, threadId: undefined },
-    { ...currentRecord, threadId: 'wrong-thread' },
     { ...currentRecord, modelProfileId: undefined },
     { ...currentRecord, requiredInputModalities: undefined },
     { ...currentRecord, requiredInputModalities: ['image'] },
@@ -107,6 +107,25 @@ test('tui session registry drops non-canonical current records', async () => {
       sessions: {},
     });
   }
+});
+
+test('tui session registry persists an adopted opaque checkpoint thread', async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), 'pinpawo-tui-sessions-'));
+  const filePath = path.join(tmp, 'tui-sessions.json');
+  const state = loadTuiSessionState('test-profile', '/missing.json');
+  const adopted = createTuiSessionForThread(
+    state,
+    'planner',
+    'test-profile',
+    'studio:legacy:pet:planner',
+    new Date('2026-06-01T01:00:00.000Z'),
+  );
+
+  saveTuiSessionState(state, filePath);
+  const restored = loadTuiSessionState('test-profile', filePath);
+
+  assert.equal(restored.activeSessionIds.planner, adopted.id);
+  assert.equal(restored.sessions[adopted.id]?.threadId, 'studio:legacy:pet:planner');
 });
 
 test('tui session registry persists versioned state', async () => {

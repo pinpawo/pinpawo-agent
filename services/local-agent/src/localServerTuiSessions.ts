@@ -34,6 +34,7 @@ import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTuiSession,
+  createTuiSessionForThread,
   ensureActiveTuiSession,
   listTuiSessions,
   loadTuiSessionState,
@@ -211,6 +212,25 @@ export class LocalServerTuiSessionService {
       this.state,
       petId,
       this.defaultModelProfileId,
+    );
+    this.save();
+    return session;
+  }
+
+  hasActiveSession(petId: string): boolean {
+    const activeId = this.state.activeSessionIds[petId];
+    return Boolean(activeId && this.state.sessions[activeId]?.petId === petId);
+  }
+
+  adoptInitialThread(petId: string, threadId: string) {
+    if (this.hasActiveSession(petId)) {
+      return this.getActiveSession(petId);
+    }
+    const session = createTuiSessionForThread(
+      this.state,
+      petId,
+      this.defaultModelProfileId,
+      threadId,
     );
     this.save();
     return session;

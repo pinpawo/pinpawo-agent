@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -10,7 +9,7 @@ import {
 } from './configDiagnostics';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 
-test('buildSetupGuide reports missing required and recommended config', () => {
+test('buildSetupGuide reports only Chat Host setup requirements', () => {
   const runtimeConfig = runtimeConfigForMissingStudio();
   const guide = buildSetupGuide({
     stored: {},
@@ -22,17 +21,11 @@ test('buildSetupGuide reports missing required and recommended config', () => {
   assert.equal(guide.readyForLocalRun, false);
   assert.deepEqual(
     guide.checks.map((check) => [check.id, check.status]),
-    [
-      ['llm', 'missing'],
-      ['studio-config', 'warning'],
-    ],
+    [['llm', 'missing']],
   );
   assert.match(formatSetupGuide(guide), /models.defaultProfileId/);
   assert.match(formatSetupGuide(guide), new RegExp(escapeRegExp(runtimeConfig.workdir)));
-  const studioCheck = guide.checks.find((check) => check.id === 'studio-config');
-  assert.equal(studioCheck?.nextStep, `Create ${runtimeConfig.studioConfigPath}.`);
-  assert.match(studioCheck?.detail ?? '', /independent Studio Host/);
-  assert.doesNotMatch(studioCheck?.detail ?? '', /Studio mode/);
+  assert.equal(guide.checks.some((check) => check.id === 'studio-config'), false);
   assert.doesNotMatch(formatSetupGuide(guide), /studio migrate/);
 });
 
@@ -51,11 +44,9 @@ test('a runnable model profile is all local startup needs', () => {
   assert.equal(guide.checks.some((check) => check.id === 'actor'), false);
 });
 
-test('buildSetupGuide reports workdir-scoped Studio config when present', async () => {
-  const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-setup-'));
+test('buildSetupGuide reports the selected local-agent workdir', () => {
+  const root = join(tmpdir(), `pinpawo-setup-${randomUUID()}`);
   const runtimeConfig = runtimeConfigFor(root);
-  await fs.mkdir(runtimeConfig.stateRoot, { recursive: true });
-  await fs.writeFile(runtimeConfig.studioConfigPath, '{}', 'utf8');
 
   const guide = buildSetupGuide({
     stored: { llm_api_key: 'llm-key' },
@@ -65,7 +56,7 @@ test('buildSetupGuide reports workdir-scoped Studio config when present', async 
 
   assert.equal(guide.workdir, root);
   assert.equal(guide.stateRoot, runtimeConfig.stateRoot);
-  assert.equal(guide.checks.find((check) => check.id === 'studio-config')?.status, 'ok');
+  assert.equal(guide.checks.some((check) => check.id === 'studio-config'), false);
 });
 
 
@@ -78,10 +69,6 @@ function runtimeConfigFor(workdir: string): LocalAgentRuntimeConfig {
   return {
     workdir,
     stateRoot,
-    studioConfigPath: join(stateRoot, 'studio.json'),
-    studioDueRunsPath: join(stateRoot, 'studio-due-runs.json'),
-    petsDir: join(stateRoot, 'pets'),
-    studioWikiBaseDir: join(stateRoot, 'studio-wiki'),
     checkpointPath: join(stateRoot, 'checkpoints.json'),
     tuiCheckpointPath: join(stateRoot, 'checkpoints-tui.json'),
     tuiSessionPath: join(stateRoot, 'tui-sessions.json'),

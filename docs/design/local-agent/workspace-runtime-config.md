@@ -128,16 +128,16 @@ type LocalAgentRuntimeConfig = {
   workdir: string;
   workspace?: LocalAgentWorkspaceConfig;
   stateRoot: string;
-  studioConfigPath: string;
-  studioDueRunsPath: string;
-  petsDir: string;
-  studioWikiBaseDir: string;
   checkpointPath: string;
   tuiCheckpointPath: string;
   tuiSessionPath: string;
   capabilityArtifactRoot: string;
 };
 ```
+
+Studio config, Pet directories, Plugin state, and wiki paths may still live
+under the same workspace root, but they are resolved by Studio/Plugin
+composition and are not fields of the generic local-agent runtime config.
 
 Resolution order for a runtime:
 

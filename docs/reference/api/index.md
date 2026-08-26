@@ -13,7 +13,7 @@ surfaces. It is reference material: for the system model and architecture, read
 
 | You need to… | Reference |
 |---|---|
-| Embed or invoke one agent runtime | [Pet Runtime API](pet-runtime.md) |
+| Compose a resident Pet Host | [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) |
 | Coordinate multiple pet runtimes | [Studio API](studio.md) |
 | Author a task-specific extension | [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md) |
 | Load a local `CAPABILITY.md` extension | [Capability directory protocol](../extensions/capability-directory.md) |
@@ -25,8 +25,8 @@ surfaces. It is reference material: for the system model and architecture, read
 
 - [API overview](overview.md) — ownership boundaries across the
   runtime, local host, extensions, and Studio.
-- [Pet Runtime API](pet-runtime.md) — single-agent runtime input,
-  configuration, output, and examples.
+- [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) —
+  resident runtime, dispatch, Agent Session interaction, and lifecycle ownership.
 - [Studio API](studio.md) — multi-pet dispatch, runtime-gate, event, and plugin
   interfaces.
 - [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md) —
@@ -55,6 +55,6 @@ Some API behavior is motivated by detailed design records. They explain why a
 boundary exists but do not override a current contract:
 
 - [Toolkit composition design](../../design/agent-runtime/toolkit-composition.md)
-- [Studio push model](../../studio/push-model.md)
+- [Studio independent Host runtime](../../design/studio/independent-host-runtime.md)
 - [Capability Artifact Store design](../artifacts/store.md)
 - [Documentation index](../../index.md) for the full design-record catalog

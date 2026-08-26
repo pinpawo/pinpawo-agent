@@ -8,8 +8,8 @@
 
 | Boundary | What to handle | Recommended response |
 |---|---|---|
-| Pet runtime | `invoke()` rejects, often because the pet is not dispatchable, execution is cancelled, or a review bridge is unavailable. | Show the user a bounded error, retain the session/run context, and offer a retry only when the caller can safely repeat the task. |
-| Studio | `dispatch()` rejects only for a stopped Studio, unknown pet, or disabled pet. A runtime failure closes that pet's gate but is not a terminal dispatch result. | Show configuration / dispatch errors directly; let the owning plugin retain task state and decide human recovery or retry. |
+| Pet dispatch port | `dispatch()` may reject on execution failure, or return `waiting` / `cancelled`. | Keep checkpoint recovery in Agent Session; retry only when the caller can safely repeat the request. |
+| Studio | `dispatch()` rejects for a stopped Studio or unknown Pet; runtime failure becomes a failed invocation result. | Show configuration/dispatch errors directly; let the owning Plugin retain task state and decide recovery or retry. |
 | Capability loading | Validation or installation can reject an invalid `CAPABILITY.md`. | Run `pinpawo capability validate <dir>` and surface the structured validation errors. |
 | Toolkit operation | Tool policy can require review, block an action, or let execution fail. | Render review separately from an operation failure; consume root events for diagnostics. |
 

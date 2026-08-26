@@ -48,6 +48,8 @@ export type LocalServerHandlerOptions = {
   persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
   /** Composition hook for embedded hosts and deterministic integration tests. */
   chatGraphService?: LocalAgentGraphService;
+  /** Host-owned session service shared with another surface of the same resident Pet. */
+  tuiSessions?: LocalServerTuiSessionService;
   /** Must be shared by chat execution and checkpoint-backed session reads. */
   loadContext?: typeof loadAgentContext;
   /** Deterministic run-boundary hook for embedded hosts and tests. */
@@ -91,7 +93,7 @@ export function createLocalServerHandlers(
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
   const chatGraphService = options.chatGraphService ?? new LocalAgentGraphService();
-  const tuiSessions = new LocalServerTuiSessionService({
+  const tuiSessions = options.tuiSessions ?? new LocalServerTuiSessionService({
     graphService: chatGraphService,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,

@@ -95,7 +95,7 @@ state from a transient tool-event stream.
 | Capability scratch work | Subagent lane | Private to the selected unit of work. |
 | Cross-lane output | Artifact store | Passed as references, not copied through every message. |
 | Local configuration | Local host and workdir | Resolved before a runtime is created. |
-| Studio dispatch delivery | Stable Pet thread plus per-Pet active-invocation queue | Queue is process-local; checkpoint continuity is durable; workflow state belongs to a Plugin or Host. |
+| Studio dispatch delivery | Per-Pet invocation queue | Queue is process-local; active thread and checkpoint continuity belong to the resident Pet's Agent Session. |
 
 ## Deployment modes
 
@@ -104,7 +104,7 @@ state from a transient tool-event stream.
 | Interactive local agent | A person works directly in the terminal. | `pinpawo tui` |
 | Local server | Another local UI or app needs an HTTP/WebSocket host. | `pinpawo server` |
 | JSONL stdio | A process integration needs one transport-safe peer. | `pinpawo server --stdio` |
-| Studio | A request needs planner-led work across multiple pets. | `pinpawo-studio --stdio` or `pinpawo-studio --port <port>` |
+| Studio | A Plugin-driven control plane dispatches work across resident Pets. | `pinpawo-studio [--agent-session-port <port>]` |
 
 ## Extension model
 

@@ -3,26 +3,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-type JsonObject = Record<string, unknown>;
-
-function isJsonObject(value: unknown): value is JsonObject {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isJsonValue(value: unknown): boolean {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return isJsonObject(value) && Object.values(value).every(isJsonValue);
-}
-
 export type KanbanTaskStatus = 'todo' | 'doing' | 'waiting' | 'done' | 'blocked';
-
-/** A public Pet continuation held by a Kanban waiting task, never a checkpoint record. */
-export type KanbanTaskContinuation = {
-  continuationId: string;
-  payload: JsonObject;
-};
 
 export type KanbanTask = {
   taskId: string;
@@ -32,7 +13,6 @@ export type KanbanTask = {
   status: KanbanTaskStatus;
   deps: string[];
   note?: string;
-  continuation?: KanbanTaskContinuation;
   createdAt: string;
   updatedAt: string;
 };
@@ -83,8 +63,6 @@ export type KanbanTaskRepository = {
   createTask: (input: CreateKanbanTaskInput) => Promise<KanbanTaskMutation>;
   claimNextReadyTask: () => Promise<KanbanTaskMutation | null>;
   completeTask: (taskId: string, result: string) => Promise<KanbanTaskMutation>;
-  waitTask: (taskId: string, reason: string) => Promise<KanbanTaskMutation>;
-  waitForContinuation: (taskId: string, continuation: KanbanTaskContinuation) => Promise<KanbanTaskMutation>;
   blockTask: (taskId: string, reason: string) => Promise<KanbanTaskMutation>;
   recoverInterruptedTasks: () => Promise<KanbanTaskMutation[]>;
   listTaskEvents: (afterSequence?: number, limit?: number) => Promise<KanbanTaskEvent[]>;
@@ -93,7 +71,7 @@ export type KanbanTaskRepository = {
 const TASK_STATUSES = new Set<KanbanTaskStatus>([
   'todo', 'doing', 'waiting', 'done', 'blocked',
 ]);
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const DEFAULT_EVENT_LIMIT = 200;
 const MAX_EVENT_LIMIT = 1_000;
 
@@ -103,7 +81,6 @@ type TaskRow = {
   brief: string;
   status: string;
   note: string | null;
-  continuation_json: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -139,31 +116,9 @@ function taskFromRow(row: TaskRow, deps: string[]): KanbanTask {
     status: requireStatus(row.status),
     deps,
     ...(row.note === null ? {} : { note: row.note }),
-    ...(row.continuation_json === null ? {} : { continuation: parseContinuation(row.continuation_json) }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-function parseContinuation(value: string): KanbanTaskContinuation {
-  let raw: unknown;
-  try { raw = JSON.parse(value) as unknown; } catch { throw new Error('Kanban database contains invalid continuation JSON.'); }
-  if (!isJsonObject(raw)) throw new Error('Kanban database contains invalid continuation.');
-  const continuationId = raw.continuationId;
-  if (typeof continuationId !== 'string' || !continuationId.trim() || !isJsonObject(raw.payload) || !isJsonValue(raw.payload)) {
-    throw new Error('Kanban database contains invalid continuation.');
-  }
-  return { continuationId, payload: raw.payload };
-}
-
-function serializeContinuation(continuation: KanbanTaskContinuation): string {
-  if (!isJsonObject(continuation.payload) || !isJsonValue(continuation.payload)) {
-    throw new Error('Kanban continuation payload must be a JSON object.');
-  }
-  return JSON.stringify({
-    continuationId: requireNonEmpty(continuation.continuationId, 'continuation id'),
-    payload: continuation.payload,
-  });
 }
 
 function eventFromRow(row: EventRow): KanbanTaskEvent {
@@ -242,7 +197,6 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           brief TEXT NOT NULL,
           status TEXT NOT NULL CHECK (status IN ('todo', 'doing', 'waiting', 'done', 'blocked')),
           note TEXT,
-          continuation_json TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -269,12 +223,15 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           ON kanban_task_dependencies(depends_on_task_id, task_id);
         CREATE INDEX kanban_task_events_task_sequence
           ON kanban_task_events(task_id, sequence);
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
         COMMIT;
       `);
     }
     if (version.user_version === 1) {
       this.database.exec(`BEGIN IMMEDIATE; ALTER TABLE kanban_tasks ADD COLUMN continuation_json TEXT; PRAGMA user_version = 2; COMMIT;`);
+    }
+    if (version.user_version === 1 || version.user_version === 2) {
+      this.database.exec('BEGIN IMMEDIATE; ALTER TABLE kanban_tasks DROP COLUMN continuation_json; PRAGMA user_version = 3; COMMIT;');
     }
     this.initialized = true;
   }
@@ -288,7 +245,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
   async readSnapshot(): Promise<KanbanTaskSnapshot> {
     this.assertReady();
     const tasks = (this.database.prepare(
-      'SELECT task_id, assignee_id, brief, status, note, continuation_json, created_at, updated_at FROM kanban_tasks ORDER BY created_at, task_id',
+      'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks ORDER BY created_at, task_id',
     ).all() as TaskRow[]).map((row) => this.readTask(row));
     const sequence = this.database.prepare(
       'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM kanban_task_events',
@@ -299,7 +256,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
   async getTask(taskId: string): Promise<KanbanTask | null> {
     this.assertReady();
     const row = this.database.prepare(
-      'SELECT task_id, assignee_id, brief, status, note, continuation_json, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+      'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
     ).get(taskId) as TaskRow | undefined;
     return row ? this.readTask(row) : null;
   }
@@ -332,7 +289,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     this.assertReady();
     return this.transaction(() => {
       const row = this.database.prepare(`
-        SELECT task_id, assignee_id, brief, status, note, continuation_json, created_at, updated_at
+        SELECT task_id, assignee_id, brief, status, note, created_at, updated_at
         FROM kanban_tasks AS task
         WHERE task.status = 'todo'
           AND NOT EXISTS (
@@ -347,7 +304,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       if (!row) return null;
       const now = new Date().toISOString();
       const result = this.database.prepare(
-        "UPDATE kanban_tasks SET status = 'doing', continuation_json = NULL, updated_at = ? WHERE task_id = ? AND status = 'todo'",
+        "UPDATE kanban_tasks SET status = 'doing', updated_at = ? WHERE task_id = ? AND status = 'todo'",
       ).run(now, row.task_id);
       if (result.changes !== 1) throw new Error(`Kanban task "${row.task_id}" could not be claimed.`);
       return this.mutationFor(row.task_id, 'claimed', 'todo', 'doing', undefined, now);
@@ -355,33 +312,10 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
   }
 
   async completeTask(taskId: string, result: string): Promise<KanbanTaskMutation> {
-    return this.transition(taskId, ['doing', 'waiting'], 'done', 'completed', result);
-  }
-
-  async waitTask(taskId: string, reason: string): Promise<KanbanTaskMutation> {
-    return this.transition(taskId, ['doing'], 'waiting', 'waiting', reason);
-  }
-
-  async waitForContinuation(
-    taskId: string,
-    continuation: KanbanTaskContinuation,
-  ): Promise<KanbanTaskMutation> {
-    this.assertReady();
-    const normalizedTaskId = requireNonEmpty(taskId, 'taskId');
-    const continuationJson = serializeContinuation(continuation);
-    return this.transaction(() => {
-      const row = this.database.prepare('SELECT status FROM kanban_tasks WHERE task_id = ?')
-        .get(normalizedTaskId) as { status: string } | undefined;
-      if (!row) throw new Error(`Kanban task "${normalizedTaskId}" does not exist.`);
-      const current = requireStatus(row.status);
-      if (current !== 'doing') throw new Error(`Kanban task "${normalizedTaskId}" is ${current}, not active.`);
-      const note = 'Waiting for continuation input.';
-      const now = new Date().toISOString();
-      this.database.prepare(
-        'UPDATE kanban_tasks SET status = ?, note = ?, continuation_json = ?, updated_at = ? WHERE task_id = ?',
-      ).run('waiting', note, continuationJson, now, normalizedTaskId);
-      return this.mutationFor(normalizedTaskId, 'waiting', current, 'waiting', note, now);
-    });
+    // A recovered execution is conservatively marked blocked because Kanban
+    // cannot inspect Agent checkpoint state. A later explicit Agent report is
+    // still authoritative and may close that task without any checkpoint coupling.
+    return this.transition(taskId, ['doing', 'waiting', 'blocked'], 'done', 'completed', result);
   }
 
   async blockTask(taskId: string, reason: string): Promise<KanbanTaskMutation> {
@@ -500,7 +434,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       }
       const now = new Date().toISOString();
       this.database.prepare(
-        'UPDATE kanban_tasks SET status = ?, note = ?, continuation_json = NULL, updated_at = ? WHERE task_id = ?',
+        'UPDATE kanban_tasks SET status = ?, note = ?, updated_at = ? WHERE task_id = ?',
       ).run(target, normalizedNote, now, normalizedTaskId);
       return this.mutationFor(normalizedTaskId, eventType, current, target, normalizedNote, now);
     });
@@ -526,7 +460,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(taskId, eventType, fromStatus ?? null, toStatus, note ?? null, occurredAt);
     const task = this.database.prepare(
-      'SELECT task_id, assignee_id, brief, status, note, continuation_json, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+      'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
     ).get(taskId) as TaskRow | undefined;
     if (!task) throw new Error(`Kanban task "${taskId}" disappeared during mutation.`);
     return {
@@ -609,17 +543,6 @@ export class KanbanTaskService {
 
   async completeTask(taskId: string, result: string): Promise<KanbanTaskMutation> {
     return this.publish(await this.repository.completeTask(taskId, result));
-  }
-
-  async waitTask(taskId: string, reason: string): Promise<KanbanTaskMutation> {
-    return this.publish(await this.repository.waitTask(taskId, reason));
-  }
-
-  async waitForContinuation(
-    taskId: string,
-    continuation: KanbanTaskContinuation,
-  ): Promise<KanbanTaskMutation> {
-    return this.publish(await this.repository.waitForContinuation(taskId, continuation));
   }
 
   async blockTask(taskId: string, reason: string): Promise<KanbanTaskMutation> {

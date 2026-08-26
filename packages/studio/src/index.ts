@@ -7,9 +7,7 @@
 export { createStudio } from './createStudio';
 export type { CreateStudioInput } from './createStudio';
 export type {
-  PendingContinuationProjection,
   Studio,
-  StudioDispatchInput,
   StudioDispatchReceipt,
   StudioDispatchRequest,
   StudioDispatchResult,
@@ -24,10 +22,7 @@ export type {
   StudioInvocationEventHandler,
   StudioInvocationTerminalStatus,
 } from './studioContract';
-export {
-  buildStudioPetThreadId,
-  parseStudioDispatchRequest,
-} from './studioInvocation';
+export { parseStudioDispatchRequest } from './studioInvocation';
 
 export {
   petLocalConfigSchema,
@@ -42,7 +37,6 @@ export type {
 } from './configSchema';
 
 export * from './types';
-export * from './petAgentTypes';
 
 /* ─────────────── Host/runtime layer ─────────────── */
 
@@ -60,29 +54,12 @@ export type {
   ResolveStudioHostConfigInput,
   StudioPluginResolver,
 } from './host/buildStudio';
-export {
-  StudioRequestHandler,
-  createStudioWireHandlers,
-} from './transport/StudioRequestHandler';
-export {
-  parseStudioClientMessage,
-  readStudioClientMessageEnvelope,
-} from './transport/studioProtocol';
+export { createInstalledStudioPluginResolver } from './installedPluginResolver';
 export type {
-  StudioClientMessage,
-  StudioClientMessageEnvelope,
-  StudioDispatchMessage,
-  StudioServerMessage,
-} from './transport/studioProtocol';
-export {
-  startStudioStdioTransport,
-  startStudioWebSocketTransport,
-} from './transport/startStudioTransport';
-export type { StudioTransportInput } from './transport/startStudioTransport';
-export {
-  startStudioHostStdio,
-  startStudioHostWebSocket,
-} from './startStudioHost';
+  CreateInstalledStudioPluginResolverOptions,
+  InstalledStudioPluginEnvironment,
+} from './installedPluginResolver';
+export { startStudioHost } from './startStudioHost';
 export type {
   RunningStudioHost,
   StartStudioHostOptions,

@@ -89,7 +89,7 @@ manager 和 Agent 不接触这些概念。
   stop 共享 manager。
 - Plugin/本地 Toolkit 先以定义形式加载，root 启动后再做 availability 解析，避免
   runtime-dependent availability 读取到未启动状态。
-- 独立 `createResidentPetAgentRuntime()` 持有自己的 manager，调用方结束时调用
+- 独立 `createResidentPetRuntime()` 使用 Host 注入的 manager，调用方结束时调用
   `shutdown()`；host 注入 shared manager 后，只有 host 可以关闭它。
 - 若 host 直接传入预构建 orchestrator graph，则该 graph 创建时必须获得同一个
   manager；pet factory 不会在 graph 外额外启动 root。

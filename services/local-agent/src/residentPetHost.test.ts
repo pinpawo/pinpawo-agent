@@ -1,0 +1,322 @@
+import assert from 'node:assert/strict';
+import { AIMessage } from '@langchain/core/messages';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import {
+  buildReviewSpec,
+  type CapabilityArtifactStore,
+} from '@pinpawo/pet-agent';
+
+import {
+  createResidentPetHost,
+  ResidentPetCoordinator,
+  type AgentSessionPeer,
+  type PetDispatchState,
+} from './residentPetHost';
+import { FileSaver } from './fileSaver';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { createTestModelProfiles } from './testing/modelProfiles';
+import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+test('Coordinator keeps the active operation non-preemptive then drains conversation first', async () => {
+  let settledState: PetDispatchState = 'open';
+  const coordinator = new ResidentPetCoordinator({
+    readSettledState: () => settledState,
+  });
+  const firstStarted = deferred();
+  const releaseFirst = deferred();
+  const events: string[] = [];
+
+  const firstDispatch = coordinator.enqueueDispatch(async () => {
+    events.push('dispatch-1:start');
+    firstStarted.resolve();
+    await releaseFirst.promise;
+    events.push('dispatch-1:end');
+  });
+  await firstStarted.promise;
+
+  const secondDispatch = coordinator.enqueueDispatch(async () => {
+    events.push('dispatch-2');
+  });
+  const firstConversation = coordinator.enqueueConversation(async () => {
+    events.push('conversation-1');
+  });
+  const secondConversation = coordinator.enqueueConversation(async () => {
+    events.push('conversation-2');
+  });
+
+  assert.deepEqual(events, ['dispatch-1:start']);
+  releaseFirst.resolve();
+  await Promise.all([
+    firstDispatch,
+    secondDispatch,
+    firstConversation,
+    secondConversation,
+  ]);
+  assert.deepEqual(events, [
+    'dispatch-1:start',
+    'dispatch-1:end',
+    'conversation-1',
+    'conversation-2',
+    'dispatch-2',
+  ]);
+});
+
+test('state listeners cannot reenter admission while an operation is becoming active', async () => {
+  let settledState: PetDispatchState = 'open';
+  const coordinator = new ResidentPetCoordinator({
+    readSettledState: () => settledState,
+  });
+  const dispatchStarted = deferred();
+  const releaseDispatch = deferred();
+  const events: string[] = [];
+  let queuedFromListener: Promise<void> | undefined;
+  coordinator.onStateChange((state) => {
+    if (state !== 'busy' || queuedFromListener) return;
+    queuedFromListener = coordinator.enqueueConversation(async () => {
+      events.push('conversation');
+    });
+  });
+
+  const dispatch = coordinator.enqueueDispatch(async () => {
+    events.push('dispatch:start');
+    dispatchStarted.resolve();
+    await releaseDispatch.promise;
+    events.push('dispatch:end');
+  });
+  await dispatchStarted.promise;
+  assert.deepEqual(events, ['dispatch:start']);
+
+  releaseDispatch.resolve();
+  await Promise.all([dispatch, queuedFromListener]);
+  assert.deepEqual(events, ['dispatch:start', 'dispatch:end', 'conversation']);
+});
+
+test('waiting state holds dispatch while conversation can reopen the gate', async () => {
+  let settledState: PetDispatchState = 'waiting';
+  const states: PetDispatchState[] = [];
+  const events: string[] = [];
+  const coordinator = new ResidentPetCoordinator({
+    initialState: 'waiting',
+    readSettledState: () => settledState,
+  });
+  coordinator.onStateChange((state) => states.push(state));
+
+  const dispatch = coordinator.enqueueDispatch(async () => {
+    events.push('dispatch');
+  });
+  await Promise.resolve();
+  assert.equal(events.length, 0);
+
+  await coordinator.enqueueConversation(async () => {
+    events.push('conversation');
+    settledState = 'open';
+  });
+  await dispatch;
+
+  assert.deepEqual(events, ['conversation', 'dispatch']);
+  assert.deepEqual(states, ['busy', 'open', 'busy', 'open']);
+});
+
+test('a queued dispatch reads the active conversation thread only when it starts', async () => {
+  let activeThread = 'thread-old';
+  const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+  const firstStarted = deferred();
+  const releaseFirst = deferred();
+  const observedThreads: string[] = [];
+  const first = coordinator.enqueueDispatch(async () => {
+    observedThreads.push(activeThread);
+    firstStarted.resolve();
+    await releaseFirst.promise;
+  });
+  await firstStarted.promise;
+  const second = coordinator.enqueueDispatch(async () => {
+    observedThreads.push(activeThread);
+  });
+  const switchConversation = coordinator.enqueueConversation(async () => {
+    activeThread = 'thread-new';
+  });
+
+  releaseFirst.resolve();
+  await Promise.all([first, switchConversation, second]);
+
+  assert.deepEqual(observedThreads, ['thread-old', 'thread-new']);
+});
+
+test('Coordinator close cancels queued work and waits for the active operation', async () => {
+  let settledState: PetDispatchState = 'open';
+  const coordinator = new ResidentPetCoordinator({
+    readSettledState: () => settledState,
+  });
+  const activeStarted = deferred();
+  const releaseActive = deferred();
+  const active = coordinator.enqueueDispatch(async () => {
+    activeStarted.resolve();
+    await releaseActive.promise;
+  });
+  await activeStarted.promise;
+  const queued = coordinator.enqueueDispatch(async () => undefined);
+  const closed = coordinator.close();
+
+  await assert.rejects(queued, /closing/i);
+  let closeSettled = false;
+  void closed.then(() => {
+    closeSettled = true;
+  });
+  await Promise.resolve();
+  assert.equal(closeSettled, false);
+
+  releaseActive.resolve();
+  await Promise.all([active, closed]);
+  assert.equal(closeSettled, true);
+  await assert.rejects(
+    coordinator.enqueueConversation(async () => undefined),
+    /cancelled/i,
+  );
+});
+
+const testArtifactStore: CapabilityArtifactStore = {
+  writeArtifact: async () => { throw new Error('not used'); },
+  readArtifact: async () => { throw new Error('not used'); },
+  listArtifacts: async () => [],
+  deleteThreadArtifacts: async () => undefined,
+  getDownloadUri: async (uri) => uri,
+};
+
+function peer(messages: unknown[]): AgentSessionPeer {
+  return {
+    isConnected: () => true,
+    send: (message) => {
+      messages.push(message);
+      return true;
+    },
+  };
+}
+
+test('two resident Pets isolate waiting checkpoints and resume through Agent Session after reconnect', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pets-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  const states = new Map<string, {
+    messages: AIMessage[];
+    pendingInterrupt: ReturnType<typeof buildReviewSpec> | null;
+  }>();
+  const graphService = {
+    readThreadState: async (setup: { input: { threadId?: string } }) => {
+      const state = states.get(setup.input.threadId ?? '') ?? {
+        messages: [],
+        pendingInterrupt: null,
+      };
+      return {
+        messages: state.messages,
+        pendingInterrupt: state.pendingInterrupt
+          ? { interruptId: 'interrupt-1', reviews: [state.pendingInterrupt] }
+          : null,
+        hasPendingContinuation: state.pendingInterrupt !== null,
+        currentPlan: null,
+      };
+    },
+    invokeState: async (setup: { input: { threadId?: string } }) => {
+      const threadId = setup.input.threadId ?? '';
+      const review = buildReviewSpec({
+        id: 'review-1',
+        view: { kind: 'plain', body: 'Approve this dispatch?' },
+        options: [{
+          id: 'approve',
+          label: 'Approve',
+          decision: { type: 'approve' },
+        }],
+      });
+      const messages = [new AIMessage('waiting for approval')];
+      states.set(threadId, { messages, pendingInterrupt: review });
+      return { messages };
+    },
+  };
+  const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
+  const createPet = async (petId: string) => createResidentPetHost({
+    actor: {
+      petId,
+      name: petId,
+      userId: null,
+      personality: null,
+      stage: null,
+      species: null,
+    },
+    modelProfiles: createTestModelProfiles(),
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer,
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
+    graphService: graphService as never,
+    runChat: async ({ setup }) => {
+      const threadId = setup.input.threadId ?? '';
+      const state = states.get(threadId) ?? { messages: [], pendingInterrupt: null };
+      states.set(threadId, { ...state, pendingInterrupt: null });
+      return { status: 'completed', reply: 'approved' };
+    },
+  });
+  const petA = await createPet('pet-a');
+  const petB = await createPet('pet-b');
+
+  try {
+    assert.deepEqual(await petA.resident.dispatch.dispatch({ request: 'needs review' }), {
+      status: 'waiting',
+    });
+    assert.equal(petA.resident.dispatch.getState(), 'waiting');
+    assert.equal(petB.resident.dispatch.getState(), 'open');
+
+    const firstConnectionMessages: unknown[] = [];
+    const firstConnection = peer(firstConnectionMessages);
+    await petA.interaction.connect(firstConnection);
+    await petA.interaction.disconnect(firstConnection);
+
+    const resumedConnectionMessages: unknown[] = [];
+    const resumedConnection = peer(resumedConnectionMessages);
+    await petA.interaction.connect(resumedConnection);
+    await petA.interaction.handle(resumedConnection, {
+      type: 'session.snapshot.get',
+      requestId: 'snapshot-waiting',
+    });
+    const waitingSnapshot = resumedConnectionMessages.find((message) => (
+      (message as { type?: string }).type === 'session.snapshot.result'
+    )) as { snapshot?: { session?: { pendingInterrupt?: unknown } } } | undefined;
+    assert.ok(waitingSnapshot?.snapshot?.session?.pendingInterrupt);
+
+    await petA.interaction.handle(resumedConnection, {
+      type: 'human_review_response',
+      requestId: 'resume-1',
+      interruptId: 'interrupt-1',
+      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+    });
+    assert.equal(petA.resident.dispatch.getState(), 'open');
+    await petA.interaction.disconnect(resumedConnection);
+
+    const finalConnectionMessages: unknown[] = [];
+    const finalConnection = peer(finalConnectionMessages);
+    await petA.interaction.connect(finalConnection);
+    await petA.interaction.handle(finalConnection, {
+      type: 'session.snapshot.get',
+      requestId: 'snapshot-resumed',
+    });
+    const resumedSnapshot = finalConnectionMessages.find((message) => (
+      (message as { type?: string }).type === 'session.snapshot.result'
+    )) as { snapshot?: { session?: { pendingInterrupt?: unknown } } } | undefined;
+    assert.equal(resumedSnapshot?.snapshot?.session?.pendingInterrupt, null);
+    await petA.interaction.disconnect(finalConnection);
+  } finally {
+    await Promise.all([petA.close(), petB.close()]);
+  }
+});

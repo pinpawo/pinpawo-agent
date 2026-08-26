@@ -82,6 +82,28 @@ test('LocalHostConnection authenticates, parses shared messages, and sends share
   assert.equal(connection.isConnected(), false);
 });
 
+test('LocalHostConnection connects to a Pet-scoped Agent Session route', () => {
+  const socket = new FakeSocket();
+  let url = '';
+  const connection = new LocalHostConnection({
+    onOpen: () => undefined,
+    onMessage: () => undefined,
+    onClose: () => undefined,
+    onError: (error) => assert.fail(error.message),
+  }, {
+    port: 4322,
+    path: '/agent-session/pets/planner%20one',
+    tokenProvider: () => 'secret',
+    webSocketFactory: (nextUrl) => {
+      url = nextUrl;
+      return socket;
+    },
+  });
+
+  connection.connect();
+  assert.equal(url, 'ws://127.0.0.1:4322/agent-session/pets/planner%20one');
+});
+
 test('LocalHostConnection reports a missing auth token without opening a socket', () => {
   const events: string[] = [];
   let factoryCalled = false;

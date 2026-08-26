@@ -1,13 +1,10 @@
 /**
  * #643: Studio Host — independent Studio package entry point.
  *
- * Studio is no longer a branch of the Chat Host. It has its own entry,
- * its own transport, and its own lifecycle. It shares capability supply
- * (toolkit / capability / model / checkpointer construction) with Chat Host via
- * {@link HostCapabilityAssembly}, but does NOT carry chat-only concerns
- * (ws relay, TUI session, chat handler).
- *
- * Chat session/review transport state is intentionally absent.
+ * Studio is no longer a branch of the Chat Host. It has its own entry and
+ * lifecycle. The package composition root uses local-agent to build both
+ * resident dispatch and Agent Session interaction surfaces, while Studio core
+ * receives only dispatch ports.
  */
 import {
   GENERAL_CAPABILITY_NAME,
@@ -33,6 +30,7 @@ import {
   type StudioPluginResolver,
 } from './buildStudio';
 import type { Studio } from '../studioContract';
+import type { ResidentPetInteraction } from 'pinpawo/host-runtime';
 import { resolvePetCapabilityDirectory } from './petConfig';
 
 export type StudioHostOptions = {
@@ -49,9 +47,9 @@ export type StudioHostOptions = {
 /**
  * Studio Host.
  *
- * It delegates all capability supply to {@link HostCapabilityAssembly} and
- * only adds Studio-specific concerns: a resident Studio built at init time
- * and its lifecycle (without a Chat ws relay loop).
+ * It delegates capability and resident Pet construction to local-agent. This
+ * outer composition owner retains the local Agent Session adapters; the
+ * resident Studio built at init time never sees them.
  *
  * The Studio is built once during {@link StudioHost.init} — before any
  * transport begins listening. Requests only invoke the resident Studio;
@@ -108,10 +106,6 @@ export class StudioHost {
       const runtimeConfig = this.caps.getRuntimeConfig();
       const configuration = await this.resolveStudioHostConfigImpl({
         workdir: runtimeConfig.workdir,
-        ...(runtimeConfig.studioConfigPath
-          ? { studioConfigPath: runtimeConfig.studioConfigPath }
-          : {}),
-        ...(runtimeConfig.petsDir ? { petsDir: runtimeConfig.petsDir } : {}),
         ...(this.resolvePlugin ? { resolvePlugin: this.resolvePlugin } : {}),
       });
       const pluginToolkitSources: ToolkitDefinitionSource[] = configuration.plugins.map(
@@ -147,10 +141,11 @@ export class StudioHost {
           ({ name }) => name === GENERAL_CAPABILITY_NAME,
         ),
         petCapabilities,
-        toolkits: [...this.caps.getToolkitInventoryStore().getSnapshot().effectiveToolkits],
+        toolkitInventory: this.caps.getToolkitInventoryStore(),
         toolkitRuntimeManager: this.caps.getToolkitRuntimeManager(),
+        capabilityArtifactStore: this.caps.getCapabilityArtifactStore(),
         checkpoint: this.getCheckpointer(),
-        ownerUserId: null,
+        runtimeConfig,
       });
     } catch (error) {
       if (this.capsInitialized) {
@@ -186,6 +181,19 @@ export class StudioHost {
         error instanceof Error ? error.message : error,
       );
     });
+    if (resident) {
+      const results = await Promise.allSettled(
+        [...resident.residentPets.values()].map((pet) => pet.close()),
+      );
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          console.error(
+            '[studio-host] resident Pet shutdown failed:',
+            result.reason instanceof Error ? result.reason.message : result.reason,
+          );
+        }
+      }
+    }
     if (this.capsInitialized) {
       this.capsInitialized = false;
       await this.caps.shutdown();
@@ -201,6 +209,16 @@ export class StudioHost {
       throw new Error('StudioHost.getStudio() called before init()');
     }
     return this.studio.studio;
+  }
+
+  /** Pet-scoped Agent Session adapters owned by local-agent, not Studio core. */
+  getResidentPetInteractions(): ReadonlyMap<string, ResidentPetInteraction> {
+    if (!this.studio) {
+      throw new Error('StudioHost.getResidentPetInteractions() called before init()');
+    }
+    return new Map(
+      [...this.studio.residentPets].map(([petId, pet]) => [petId, pet.interaction]),
+    );
   }
 
   // ---- Capability supply delegation ----

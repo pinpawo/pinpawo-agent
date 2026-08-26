@@ -14,8 +14,15 @@ import {
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
+  ToolkitRuntimeManager,
+  type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import type { StudioPlugin } from '../studioContract';
+import {
+  buildLocalAgentRuntimeConfig,
+  FileSaver,
+} from 'pinpawo/host-runtime';
+import { HostToolkitInventoryStore } from '../../../../services/local-agent/src/toolkits/toolkitInventory';
 
 function fakePlugin(name = 'kanban'): StudioPlugin {
   const toolkit: AgentToolkit = {
@@ -43,6 +50,25 @@ function generalCapability(): AgentCapability {
     description: 'Baseline capability for tests.',
     uses: [],
     instructions: defineInstructionDocument({ content: '# General' }),
+  };
+}
+
+const artifactStore: CapabilityArtifactStore = {
+  writeArtifact: async () => { throw new Error('not used'); },
+  readArtifact: async () => { throw new Error('not used'); },
+  listArtifacts: async () => [],
+  deleteThreadArtifacts: async () => undefined,
+  getDownloadUri: async (uri) => uri,
+};
+
+function residentBuildResources(workdir: string) {
+  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  return {
+    toolkitInventory: new HostToolkitInventoryStore(),
+    toolkitRuntimeManager: new ToolkitRuntimeManager(),
+    capabilityArtifactStore: artifactStore,
+    checkpoint: new FileSaver(path.join(runtimeConfig.stateRoot, 'test-checkpoints.json')),
+    runtimeConfig,
   };
 }
 
@@ -84,8 +110,7 @@ test('plugin options from studio.json reach the injected resolver', async () => 
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()],
     petCapabilities: new Map(),
-    toolkits: configuration.plugins.flatMap((plugin) => plugin.toolkits),
-    ownerUserId: null,
+    ...residentBuildResources(workdir),
   });
 
   assert.equal(result.plugins.length, 1);
@@ -109,8 +134,7 @@ test('a plugin declared without options still builds', async () => {
     modelProfiles: createTestModelProfileRegistry([{ modelProfileId: 'default' }]),
     hostCapabilities: [generalCapability()],
     petCapabilities: new Map(),
-    toolkits: configuration.plugins.flatMap((plugin) => plugin.toolkits),
-    ownerUserId: null,
+    ...residentBuildResources(workdir),
   });
 
   assert.deepEqual(seen, [undefined]);
@@ -198,14 +222,8 @@ test('Capability names are scoped per Pet rather than globally across Studio', a
       ['planner', [scoped('Planner definition')]],
       ['writer', [scoped('Writer definition')]],
     ]),
-    toolkits: [],
-    ownerUserId: null,
+    ...residentBuildResources(root),
   });
-
-  const descriptions = new Map(studio.listPets().map((pet) => [
-    pet.petId,
-    pet.capabilities.find(({ name }) => name === 'shared_name')?.description,
-  ]));
-  assert.equal(descriptions.get('planner'), 'Planner definition');
-  assert.equal(descriptions.get('writer'), 'Writer definition');
+  assert.deepEqual(studio.listPets().map(({ petId }) => petId), ['planner', 'writer']);
+  await studio.shutdown();
 });

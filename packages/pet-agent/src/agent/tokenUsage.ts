@@ -117,6 +117,31 @@ export type ProviderInputWatermark = {
 };
 
 /**
+ * Returns the maximum observed provider input size before context compaction
+ * should run. Generation and reasoning reserves are excluded before the shared
+ * watermark ratio is applied.
+ */
+export function resolveProviderInputWatermarkTokens(
+  contextWindowTokens: number | undefined,
+  generationReserveTokens = 0,
+): number | null {
+  if (
+    !contextWindowTokens
+    || !Number.isFinite(contextWindowTokens)
+    || contextWindowTokens <= 0
+  ) {
+    return null;
+  }
+  const normalizedReserve = Number.isFinite(generationReserveTokens)
+    ? Math.max(0, Math.floor(generationReserveTokens))
+    : 0;
+  const usableInputTokens = Math.max(1, contextWindowTokens - normalizedReserve);
+  return Math.max(1, Math.floor(
+    usableInputTokens * PROVIDER_INPUT_WATERMARK_RATIO,
+  ));
+}
+
+/**
  * Shared decision helper for token-triggered maintenance guards (orchestrator
  * context compaction, subagent context rewrite). Returns the crossed watermark
  * evidence, or null when the watermark is not reached or not decidable (no
@@ -130,19 +155,16 @@ export function checkProviderInputWatermark(
   if (
     latestInputTokens === null
     || !Number.isFinite(latestInputTokens)
-    || !contextWindowTokens
-    || !Number.isFinite(contextWindowTokens)
-    || contextWindowTokens <= 0
   ) {
     return null;
   }
-  const normalizedReserve = Number.isFinite(generationReserveTokens)
-    ? Math.max(0, Math.floor(generationReserveTokens))
-    : 0;
-  const usableInputTokens = Math.max(1, contextWindowTokens - normalizedReserve);
-  const watermarkTokens = Math.max(1, Math.floor(
-    usableInputTokens * PROVIDER_INPUT_WATERMARK_RATIO,
-  ));
+  const watermarkTokens = resolveProviderInputWatermarkTokens(
+    contextWindowTokens,
+    generationReserveTokens,
+  );
+  if (watermarkTokens === null) {
+    return null;
+  }
   return latestInputTokens >= watermarkTokens
     ? { latestInputTokens, watermarkTokens }
     : null;

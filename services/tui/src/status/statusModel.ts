@@ -135,18 +135,24 @@ export function formatComposerPlaceholder(
 export function formatUsage(session: AgentSession) {
   const usage = session.sessionTokenUsage ?? session.tokenUsage;
   const contextWindow = usage?.contextWindow ?? session.runtime?.contextWindow;
+  const contextCompactionWatermarkTokens = session.runtime?.contextCompactionWatermarkTokens;
   if (!usage) {
     return contextWindow
       ? `in/out: –/– · context: ${formatCount(contextWindow)}`
       : 'in/out: –/–';
   }
   const latestInput = usage.latestInputTokens;
-  const remaining = latestInput !== undefined && contextWindow
+  const compactionRemaining = latestInput !== undefined && contextCompactionWatermarkTokens
+    ? Math.max(0, contextCompactionWatermarkTokens - latestInput)
+    : null;
+  const contextRemaining = latestInput !== undefined && contextWindow
     ? Math.max(0, contextWindow - latestInput)
     : null;
   return [
     `in/out: ${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
-    ...(remaining !== null ? [`context: ${formatCount(remaining)} left`] : []),
+    ...(compactionRemaining !== null
+      ? [`compact in: ${formatCount(compactionRemaining)}`]
+      : contextRemaining !== null ? [`context: ${formatCount(contextRemaining)} left`] : []),
   ].join(' · ');
 }
 
@@ -163,14 +169,20 @@ function formatCount(value: number) {
 function formatCompactUsage(session: AgentSession) {
   const usage = session.sessionTokenUsage ?? session.tokenUsage;
   const contextWindow = usage?.contextWindow ?? session.runtime?.contextWindow;
+  const contextCompactionWatermarkTokens = session.runtime?.contextCompactionWatermarkTokens;
   if (!usage) return 'in/out: –/–';
   const latestInput = usage.latestInputTokens;
-  const remainingPercent = latestInput !== undefined && contextWindow
+  const compactRemainingPercent = latestInput !== undefined && contextCompactionWatermarkTokens
+    ? Math.max(0, Math.round((1 - latestInput / contextCompactionWatermarkTokens) * 100))
+    : null;
+  const contextRemainingPercent = latestInput !== undefined && contextWindow
     ? Math.max(0, Math.round((1 - latestInput / contextWindow) * 100))
     : null;
   return [
     `in/out: ${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
-    ...(remainingPercent !== null ? [`ctx: ${remainingPercent}% left`] : []),
+    ...(compactRemainingPercent !== null
+      ? [`compact: ${compactRemainingPercent}% left`]
+      : contextRemainingPercent !== null ? [`ctx: ${contextRemainingPercent}% left`] : []),
   ].join(' · ');
 }
 

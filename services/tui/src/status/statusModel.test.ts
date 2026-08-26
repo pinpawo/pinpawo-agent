@@ -22,6 +22,7 @@ test('status model renders connection, model, token usage, context, and compact 
         globalReviewPolicyMode: 'require_authorization',
         cwd: '/Users/me/project',
         contextWindow: 128_000,
+        contextCompactionWatermarkTokens: 72_000,
       },
       sessionTokenUsage: {
         inputTokens: 20_000,
@@ -36,11 +37,11 @@ test('status model renders connection, model, token usage, context, and compact 
 
   assert.equal(
     formatStatusLine(state),
-    'in/out: 20,000/3,000 · context: 98,000 left · …/me/project',
+    'in/out: 20,000/3,000 · compact in: 42,000 · …/me/project',
   );
   assert.equal(
     formatStatusLine(state, 40),
-    'in/out: 20,000/3,000 · ctx: 77% left',
+    'in/out: 20,000/3,000 · compact: 58% left',
   );
   assert.equal(
     formatStatusLine(state, 24),
@@ -48,7 +49,7 @@ test('status model renders connection, model, token usage, context, and compact 
   );
   assert.deepEqual(formatStatusLines(state, 80), [
     'connected · policy: ask · Primary coding (gpt-test)',
-    'in/out: 20,000/3,000 · context: 98,000 left · …/me/project',
+    'in/out: 20,000/3,000 · compact in: 42,000 · …/me/project',
   ]);
   assert.deepEqual(formatStatusLines(state, 32, 'interrupt requested'), [
     'interrupt requested',

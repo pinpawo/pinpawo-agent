@@ -10,6 +10,7 @@ import {
   readMessageCreatedAtUtc,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
+  mainConversationMessages,
   type ReviewSpec,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
@@ -116,7 +117,7 @@ export function readTuiCheckpointTokenUsage(
   messages: BaseMessage[],
 ): TuiCheckpointPoint['sessionTokenUsage'] {
   const usage = readMessagesTokenUsage(messages);
-  const latestInputTokens = readLatestProviderInputTokens(messages);
+  const latestInputTokens = readLatestProviderInputTokens(mainConversationMessages(messages));
   return usage
     ? {
         ...usage,

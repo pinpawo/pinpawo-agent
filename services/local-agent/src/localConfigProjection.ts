@@ -1,5 +1,6 @@
 import {
   GLOBAL_REVIEW_POLICY_MODE,
+  resolveProviderInputWatermarkTokens,
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import {
@@ -10,6 +11,7 @@ import { readLocalAgentPackageVersion } from './packageVersion';
 import type { LocalServerDeps } from './localServerTypes';
 import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
+import { resolveLlmGenerationReserveTokens } from './llmModelPresets';
 
 export type LocalRuntimeProjection = {
   /** Local-agent projection is always the Chat Host. */
@@ -23,6 +25,7 @@ export type LocalRuntimeProjection = {
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   contextWindow?: number;
+  contextCompactionWatermarkTokens?: number;
   workdir: string;
   workspaceId?: string;
   workspaceName?: string;
@@ -62,6 +65,10 @@ export function buildLocalRuntimeProjection(
     };
   }
   const llmConfig = deps.modelProfiles.resolve(modelProfileId);
+  const contextCompactionWatermarkTokens = resolveProviderInputWatermarkTokens(
+    llmConfig.contextWindowTokens,
+    resolveLlmGenerationReserveTokens(llmConfig),
+  );
 
   return {
     serverMode: deps.serverMode,
@@ -77,6 +84,9 @@ export function buildLocalRuntimeProjection(
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
     ...(llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: llmConfig.contextWindowTokens }
+      : {}),
+    ...(contextCompactionWatermarkTokens !== null
+      ? { contextCompactionWatermarkTokens }
       : {}),
     workdir: runtimeConfig?.workdir ?? deps.workdir,
     ...(runtimeConfig?.workspace ? {
@@ -101,6 +111,9 @@ export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
     ...(runtime.model ? { llm_model: runtime.model } : {}),
     ...(runtime.contextWindow !== undefined
       ? { llm_context_window_tokens: runtime.contextWindow }
+      : {}),
+    ...(runtime.contextCompactionWatermarkTokens !== undefined
+      ? { context_compaction_watermark_tokens: runtime.contextCompactionWatermarkTokens }
       : {}),
     workdir: runtime.workdir,
     ...(runtime.workspaceId ? { workspace_id: runtime.workspaceId } : {}),

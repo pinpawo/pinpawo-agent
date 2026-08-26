@@ -108,6 +108,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   );
   assert.equal(snapshot.session.runtime?.modelProfileCompatible, false);
   assert.equal(snapshot.session.runtime?.contextWindow, 32000);
+  assert.equal(snapshot.session.runtime?.contextCompactionWatermarkTokens, 24000);
   assert.equal(snapshot.session.runtime?.cwd, '/tmp/work');
   assert.equal(snapshot.session.runtime?.workspaceId, 'workspace-test');
   assert.equal(snapshot.session.runtime?.workspaceName, 'Workspace Test');

@@ -100,6 +100,9 @@ export function buildLocalAgentRuntimeView(
     globalReviewPolicyMode: runtime.globalReviewPolicyMode,
     autoAuthorizationSafetyLevel: runtime.autoAuthorizationSafetyLevel,
     ...(runtime.contextWindow !== undefined ? { contextWindow: runtime.contextWindow } : {}),
+    ...(runtime.contextCompactionWatermarkTokens !== undefined
+      ? { contextCompactionWatermarkTokens: runtime.contextCompactionWatermarkTokens }
+      : {}),
     cwd: runtime.workdir,
     ...(runtime.workspaceId ? { workspaceId: runtime.workspaceId } : {}),
     ...(runtime.workspaceName ? { workspaceName: runtime.workspaceName } : {}),

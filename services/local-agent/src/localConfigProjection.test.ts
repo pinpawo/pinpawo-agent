@@ -51,8 +51,28 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
   assert.equal(http.workdir, runtime.workdir);
   assert.equal(http.workspace_id, runtime.workspaceId);
   assert.equal(http.state_root, runtime.stateRoot);
+  assert.equal(runtime.contextCompactionWatermarkTokens, 24_000);
+  assert.equal(http.context_compaction_watermark_tokens, 24_000);
   assert.equal('studio_config_path' in http, false);
   assert.equal('pets_dir' in http, false);
+});
+
+test('runtime projection excludes output and thinking reserves before context compaction', () => {
+  const deps: LocalServerDeps = {
+    serverMode: 'chat',
+    actorId: 'pet-test',
+    ...createTestModelServerDeps({
+      model: 'qwen3.8-max',
+      contextWindowTokens: 983_616,
+      maxOutputTokens: 131_072,
+    }),
+    workdir: '/tmp/pinpawo-qwen-runtime',
+  };
+
+  assert.equal(
+    buildLocalRuntimeProjection(deps).contextCompactionWatermarkTokens,
+    627_120,
+  );
 });
 
 test('projection without runtime config keeps workspace state optional', () => {

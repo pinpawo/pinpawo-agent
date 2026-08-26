@@ -12,7 +12,7 @@ The runtime must let a model and the UI distinguish all of the following:
 
 - a result produced by a delegated Capability;
 - the orchestration action that transfers that result to the main lane;
-- a later assistant answer that synthesizes one or more results.
+- a later user-visible reply that renders or synthesizes one or more results.
 
 The Capability Planner must consume the same announce at an execution Boundary
 without flattening it into Planner-generated context or reclassifying it from
@@ -29,8 +29,8 @@ was held only in incidental `additional_kwargs` metadata.
 
 That metadata is useful to runtime code but is not reliably visible to a model.
 After the copy reaches the main conversation, the model can therefore see the
-Capability result as ordinary assistant prose. A later Answer is also ordinary
-assistant prose. The two messages have different meanings but an equivalent
+Capability result as ordinary assistant prose. A later main-agent reply has the
+same provider role. The two messages have different meanings but an equivalent
 model-visible shape.
 
 This ambiguity can cause Entry Answer or another orchestration model to deny
@@ -49,8 +49,9 @@ The protocol uses four separate concepts:
   role and does not rewrite the result.
 - **Projection** converts an announce for a particular consumer. Model and UI
   projections have different output types.
-- **Answer** is user-facing synthesis. It may use accepted announces, but it is
-  not itself execution evidence and does not replace them.
+- **Terminal response** is the user-facing reply emitted when a root run stops.
+  It may use accepted announces, but it is not execution evidence and does not
+  replace them.
 
 ## Decision
 
@@ -95,11 +96,12 @@ Capability lane
   -> handoff accepts the same announce identity into the main lane
      -> model projection -> provider-compatible standard message
      -> UI projection    -> servant result event/card
-     -> Answer input     -> accepted-result synthesis
+     -> finalization     -> user-visible rendering or optional synthesis
 ```
 
 The Capability lane owns producing the announce. The root graph owns accepting
-it through handoff. Consumer boundaries own projection. Answer owns synthesis.
+it through handoff. Consumer boundaries own projection. Terminal finalization
+owns selecting accepted results; a response model, when used, owns wording only.
 
 Handoff removes the delegation transcript according to existing lane cleanup
 semantics, but it must not flatten the announce into an ordinary `AIMessage`.
@@ -194,21 +196,21 @@ Internal identifiers may remain available in diagnostics but do not need to be
 shown in the normal UI. The UI projection must not append another assistant
 message to canonical conversation state.
 
-An Answer generated after the announce remains a normal user-facing assistant
+The reply generated after the announce remains a normal user-facing assistant
 message. The UI may therefore show one servant result followed by one main-agent
-Answer without presenting two indistinguishable assistant replies.
+reply without presenting two indistinguishable assistant messages.
 
-## Answer and Entry Answer behavior
+## Terminal response and Entry Answer behavior
 
-Result Answer continues to select accepted delegation results from orchestrator
-state and project them through its accepted-results context. It should read the
-canonical announce fields rather than reverse-engineering provenance from an
-ordinary `AIMessage`.
+Terminal finalization selects accepted delegation results from orchestrator
+state. It reads canonical Announce fields rather than reverse-engineering
+provenance from an ordinary `AIMessage`. Deterministic renderers and an optional
+result synthesizer consume the same typed selection.
 
 Entry Answer and any other model that receives main-conversation history use the
 shared model projection. They can then distinguish a real delegated execution
-result from a previous user-facing Answer. Presence of an accepted announce is
-execution evidence; an Answer summary alone is not.
+result from a previous main-agent reply. Presence of an accepted Announce is
+execution evidence; a terminal summary alone is not.
 
 The design does not require Entry Answer to reproduce the announce verbatim. It
 requires only that the model-visible input preserve the fact, source, and result
@@ -225,8 +227,8 @@ of the execution so the model can answer or route accurately.
   provenance in model-visible content.
 - Delegated result content always has data authority, never system or developer
   authority.
-- Answer may summarize, combine, or qualify announces, but cannot become their
-  canonical source of truth.
+- A terminal response may summarize, combine, or qualify announces, but cannot
+  become their canonical source of truth.
 - Lane isolation and existing resume/supersede ownership remain unchanged.
 
 ## Version boundary
@@ -234,7 +236,8 @@ of the execution so the model can answer or route accurately.
 This is an intentional checkpoint contract boundary. Only a version 1
 `pinpawo.delegationAnnounce` payload is execution evidence. Old unlaned
 `AIMessage` handoff copies are ordinary conversation history: they are not
-normalized, projected as servant results, or selected by Answer.
+normalized, projected as servant results, or selected as accepted terminal
+results.
 
 No checkpoint migration is provided. Sessions with an old handoff should start
 a fresh task if they need the execution result to participate in later routing.
@@ -253,7 +256,8 @@ The implementation should keep responsibilities separated:
 - handoff code owns acceptance and lane cleanup, not presentation formatting;
 - model nodes call one shared conversation projector before model invocation;
 - stream adapters own UI projection;
-- Answer resolves accepted announces and owns final synthesis.
+- terminal finalization resolves accepted announces; optional synthesis owns
+  wording only.
 
 Artifacts remain independent capability state. They are not part of the
 announce contract or its model/UI projection.
@@ -279,7 +283,8 @@ Implementation is complete only when tests demonstrate:
 - the model input contains explicit announce provenance and a safely escaped
   result envelope;
 - handoff leaves one canonical announce and no duplicate ordinary result copy;
-- a servant result and its later Answer are distinct in stream/UI output;
+- a servant result and its later main-agent reply are distinct in stream/UI
+  output;
 - tool-call message ordering remains provider-valid;
 - context compaction retains announce provenance when it retains or summarizes
   the result;

@@ -59,8 +59,8 @@ import {
 import { RemoveMessage } from '@langchain/core/messages';
 import {
   isDelegationBriefingMessage,
+  materializeDelegation,
 } from './delegationBriefing';
-import { RUN_USER_REQUEST_CONTEXT_SOURCE } from './capabilityContext';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -5320,6 +5320,46 @@ test('lane tagging hides subagent messages from route and records completed anno
   });
 });
 
+test('lane tagging never emits root removals for invocation-only briefing messages', () => {
+  const human = new HumanMessage({ id: 'main-human', content: '继续处理任务' });
+  const persistedProgress = new AIMessage({ id: 'old-progress', content: '旧进度' });
+  setPinpetMeta(persistedProgress, {
+    lane: 'capability:general',
+    runId: 'turn-1',
+    delegationId: 'task-1',
+  });
+  const [briefing] = materializeDelegation({
+    mode: 'continue',
+    lane: 'capability:general',
+    transcriptRunId: 'turn-1',
+    delegationId: 'task-1',
+    userRequest: '完成任务',
+    task: '继续处理任务',
+    guidance: null,
+  }).laneMessages;
+  const finalAnswer = new AIMessage({ id: 'final-answer', content: '任务完成' });
+
+  const update = tagNewLaneMessages(
+    [human, finalAnswer],
+    [human, persistedProgress, briefing],
+    'capability:general',
+    'turn-1',
+    'natural',
+    {
+      delegationId: 'task-1',
+      task: '继续处理任务',
+      announceMessageId: 'final-answer',
+    },
+    [human, persistedProgress],
+  );
+  const removedIds = update
+    .filter((message) => message instanceof RemoveMessage)
+    .map((message) => message.id);
+
+  assert.deepEqual(removedIds, ['old-progress']);
+  assert.equal(removedIds.includes(briefing.id ?? ''), false);
+});
+
 test('lane tagging treats briefing-like subagent output as a deliverable, not internal state', () => {
   const human = new HumanMessage('检查委派简报格式');
   const outputText = '<delegation_briefing mode="initial">\n  <task>这是 subagent 实际返回的低质量结果</task>\n</delegation_briefing>';
@@ -6014,6 +6054,7 @@ test('delegation helpers keep new same-lane tasks separate and resume by explici
   const appended = appendRunDelegationSummary(delegations, {
     id: 'task-2',
     lane: 'capability:general',
+    mode: 'initial',
     task: '运行 lint',
     contextSummary: '这是同一 lane 的新任务。',
   });
@@ -6027,6 +6068,7 @@ test('delegation helpers keep new same-lane tasks separate and resume by explici
   const resumed = resumeRunDelegationSummary(appended, {
     id: 'task-1',
     lane: 'capability:general',
+    mode: 'continue',
     task: '读取文件',
     contextSummary: '继续原任务。',
   });
@@ -6176,18 +6218,13 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
     );
     if (status === 'pending') {
       assert.equal(resumedState.runNextDelegation?.id, activeDelegation.id);
-      assert.equal(afterContextPrep(resumedState), 'capability');
-      const continuationBriefing = resumedState.messages
-        .filter(isDelegationBriefingMessage)
-        .at(-1);
-      assert.match(String(continuationBriefing?.content ?? ''), /mode="continue"/);
-      assert.match(String(continuationBriefing?.content ?? ''), /按我刚补充的方向继续/);
+      assert.equal(resumedState.runNextDelegation?.mode, 'continue');
       assert.equal(
-        continuationBriefing
-          ? getMessageTranscriptRunId(continuationBriefing)
-          : null,
-        activeDelegation.transcriptRunId,
+        resumedState.runNextDelegation?.contextSummary,
+        '按我刚补充的方向继续',
       );
+      assert.equal(afterContextPrep(resumedState), 'capability');
+      assert.equal(resumedState.messages.some(isDelegationBriefingMessage), false);
     } else {
       assert.equal(resumedState.runNextDelegation, null);
       assert.equal(afterContextPrep(resumedState), 'plannerBoundaryIterationGuard');
@@ -6440,13 +6477,6 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     `announce:${activeDelegation.id}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
   );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
-  const resumedGoalContexts = resumedInput.filter((message) =>
-    getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE);
-  assert.equal(resumedGoalContexts.length, 1);
-  assert.match(
-    String(resumedGoalContexts[0]?.content ?? ''),
-    /完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。/,
-  );
   assert.equal(
     resumedInput.some((message) =>
       message instanceof ToolMessage
@@ -6455,6 +6485,10 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   );
   const resumedBriefing = resumedInput.filter(isDelegationBriefingMessage).at(-1);
   assert.ok(resumedBriefing);
+  assert.match(
+    String(resumedBriefing.content),
+    /<run_user_request role="goal_context"[\s\S]*完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。[\s\S]*<\/run_user_request>/,
+  );
   assert.equal(
     getMessageTranscriptRunId(resumedBriefing),
     activeDelegation.transcriptRunId,
@@ -6557,7 +6591,7 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
   assert.equal(modelInvocations, 0);
 });
 
-test('delegation briefing stays lane-scoped across sequential tasks', async () => {
+test('delegation briefing stays invocation-scoped across sequential tasks', async () => {
   let structuredCallCount = 0;
   const actModel = {
     invoke: async () => new AIMessage('两项任务都已完成。'),
@@ -6620,20 +6654,20 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
   assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 2);
 
-  // Each selected subagent still receives its complete lane-scoped briefing.
+  // Each selected subagent receives one complete invocation-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
   const [firstInput, secondInput] = recorder.subagentInputs;
   for (const input of recorder.subagentInputs) {
-    const goalContexts = input.filter((message) =>
-      getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE);
-    assert.equal(goalContexts.length, 1);
+    const briefings = input.filter(isDelegationBriefingMessage);
+    assert.equal(briefings.length, 1);
+    const latestBriefing = briefings[0];
+    assert.ok(latestBriefing);
+    assert.equal(input.at(-1), latestBriefing);
+    assert.match(String(latestBriefing.content), /<run_user_request role="goal_context"/);
     assert.equal(
-      String(goalContexts[0]?.content ?? '').includes(String(state.runUserRequest)),
+      String(latestBriefing.content).includes(String(state.runUserRequest)),
       true,
     );
-    const latestBriefing = input.filter(isDelegationBriefingMessage).at(-1);
-    assert.ok(latestBriefing);
-    assert.ok(input.indexOf(goalContexts[0]) < input.indexOf(latestBriefing));
   }
   const briefingA = String(firstInput.find(isDelegationBriefingMessage)?.content ?? '');
   const briefingB = String(secondInput.filter(isDelegationBriefingMessage).at(-1)?.content ?? '');
@@ -6655,11 +6689,6 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
   assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
-  assert.equal(
-    state.messages.some((message) =>
-      getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE),
-    false,
-  );
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
     /artifact_discovery_context/,
@@ -6680,7 +6709,7 @@ test('delegation briefing stays lane-scoped across sequential tasks', async () =
   }
 });
 
-test('continue_current appends a continuation briefing without rewriting the task', async () => {
+test('continue_current projects a continuation briefing without rewriting the task', async () => {
   let structuredCallCount = 0;
   const actModel = {
     invoke: async () => new AIMessage('issue 已确认关闭。'),
@@ -6722,11 +6751,9 @@ test('continue_current appends a continuation briefing without rewriting the tas
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
   assert.equal(recorder.subagentInputs.length, 2);
   for (const input of recorder.subagentInputs) {
-    assert.equal(
-      input.filter((message) =>
-        getPinpetMeta(message).source === RUN_USER_REQUEST_CONTEXT_SOURCE).length,
-      1,
-    );
+    const briefings = input.filter(isDelegationBriefingMessage);
+    assert.equal(briefings.length, 1);
+    assert.match(String(briefings[0]?.content), /<run_user_request role="goal_context"/);
   }
   const continuation = String(
     recorder.subagentInputs[1].filter(isDelegationBriefingMessage).at(-1)?.content ?? '',

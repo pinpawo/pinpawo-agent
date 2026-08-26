@@ -98,14 +98,14 @@ node's context changes, every case that depended on the removed context becomes
 unrunnable and must move or be deleted — a permanently failing case teaches
 nothing and hides real regressions.
 
-`handoff-synthesis` and `historical-replay` required Answer to reproduce facts
-that existed only in a prior assistant turn. After Answer stopped receiving
-conversation history they failed 3/3 for structural reasons, independent of any
-prompt. They were removed rather than kept as noise; the behavior they described
-still exists, but now belongs to `entryAnswer`.
+`handoff-synthesis` and `historical-replay` once required the terminal response
+model to reproduce facts that existed only in a prior assistant turn. After the
+current finalizer stopped receiving conversation history they failed 3/3 for
+structural reasons, independent of any prompt. They were removed rather than
+kept as noise; historical replay still exists, but belongs to `entryAnswer`.
 
 Before adding a case, check the node's row in
-[Context injection map](../../wiki/concepts/context-injection-map.md): if the
+[Context injection map](context-injection-map.md): if the
 fact the case needs is not in that node's context, the case belongs elsewhere.
 
 ## 7. Known divergence

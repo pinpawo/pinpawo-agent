@@ -94,8 +94,8 @@ capability.uses
   -> createSubagent(...)
 ```
 
-当前任务通过 delegation briefing message 进入私有 lane，不重复进入稳定 system
-prompt。Toolkit instructions 按 `uses` 的解析顺序装配。
+当前任务通过调用前临时生成的 delegation briefing 进入模型上下文，不进入稳定
+system prompt 或 checkpoint lane。Toolkit instructions 按 `uses` 的解析顺序装配。
 
 General 不使用独立 lane 或隐式工具面。它是一个名为 `general` 的普通
 Capability，显式声明自己的 Toolkit 依赖：

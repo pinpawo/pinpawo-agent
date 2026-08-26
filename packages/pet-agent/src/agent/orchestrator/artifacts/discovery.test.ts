@@ -29,6 +29,7 @@ test('artifact discovery context stays before the latest briefing without displa
     lane: 'capability:general',
     transcriptRunId: 'run-1',
     delegationId: 'delegation-1',
+    userRequest: '检查当前任务。',
     task: '检查当前任务',
     essentialContext: null,
   }).laneMessages;

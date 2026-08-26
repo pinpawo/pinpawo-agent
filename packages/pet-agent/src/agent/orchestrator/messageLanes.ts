@@ -43,7 +43,7 @@ export function readMessageCreatedAtUtc(message: BaseMessage): string | null {
  * Neutral marker for "this lane message carries the subagent's deliverable text".
  * Replaces the completed/progress announce tag: it says WHICH message is the
  * announce, without judging whether the task is complete (that judgment now lives
- * with the orchestrator / handoff). See docs/reference/runtime/subagent-handoffs.md.
+ * with the orchestrator / handoff). See docs/reference/runtime/delegation-announces.md.
  */
 export function setMessageIsAnnounce(message: BaseMessage) {
   setPinpetMeta(message, { isAnnounce: true });
@@ -194,6 +194,7 @@ export function tagNewLaneMessages(
     task?: string | null;
     announceMessageId?: string | null;
   },
+  persistedInputMessages: BaseMessage[] = existingMessages,
 ) {
   const existingRefs = new Set(existingMessages);
   const existingIds = new Set(
@@ -206,7 +207,10 @@ export function tagNewLaneMessages(
       .map((message) => message.id)
       .filter((id): id is string => typeof id === 'string' && id.length > 0),
   );
-  const removedLaneMessages = existingMessages.flatMap((message) => {
+  // Invocation-only projections (for example delegation briefing and artifact
+  // discovery context) participate in input identity reconciliation above, but
+  // can never produce root-state removals because they were never checkpointed.
+  const removedLaneMessages = persistedInputMessages.flatMap((message) => {
     if (!message.id || resultIds.has(message.id)) return [];
     if (getMessageLane(message) !== lane) return [];
     if (getMessageTranscriptRunId(message) !== transcriptRunId) return [];

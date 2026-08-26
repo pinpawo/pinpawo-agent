@@ -4,9 +4,9 @@
 > trace-scoped persistent private Planner 取代；以下正文保留迁移前背景，不再代表当前生产契约。
 > 当前契约见 [`PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md`](../../design/agent-runtime/persistent-planner.md)。
 > Entry 的后续收缩提案见
-> [`ENTRY_GOAL_CREATION_REFACTOR_DESIGN.md`](../../design/agent-runtime/entry-goal-creation.md)。
+> [`Entry Answer routing draft`](../../design/agent-runtime/entry-answer-routing.md)。
 > 范围：`entryDecision`、`capabilityPlanner`、`outcomeDecision` 与 `answer` 的职责和提示词边界。
-> 共享前缀：[`PET_AGENT_ORCHESTRATOR_DECISION_PROMPT_PREFIX.md`](../../design/agent-runtime/decision-prompt-prefix.md)。
+> 当时计划使用共享 decision prompt prefix；该未接入的设计已删除。
 
 ## 1. 核心原则
 

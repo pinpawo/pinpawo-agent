@@ -61,10 +61,10 @@ ledger。provider adapter 负责在模型边界转换成对应的原生图片格
 | 模型调用 | 输入来源 | 当前是否包含主消息图片 |
 |---|---|---|
 | Entry Answer | system message + 完整 main human/AI messages | 是 |
-| Capability Planner entry | `runUserRequest` + main conversation 的文本投影 | 否 |
-| Capability subagent | 未分 lane 的主消息 + 当前 delegation lane + User Request context | 是 |
-| Boundary Planner | active delegation、announce、remaining plan 等结构化 input | 否 |
-| Answer | 完整 main conversation + Answer input | 是 |
+| Capability Planner entry | Planner lane + 完整 main conversation + structured input | 是 |
+| Capability subagent | 未分 lane 的主消息 + 当前 delegation 的实际执行记录 + 临时增强的 delegation briefing | 是 |
+| Boundary Planner | Entry 相同的 main conversation + 当前 announce + structured boundary input | 是 |
+| Current terminal finalizer | `<answer_input>` structured text only | 否 |
 | Root compaction summarizer | 较旧 main messages 的文本投影 | 不读取图片内容 |
 | Subagent summarizer | child messages，经 LangChain `getBufferString` 形成文本 | 图片表示为 `[image]`，不包含 data URL |
 
@@ -73,12 +73,12 @@ ledger。provider adapter 负责在模型边界转换成对应的原生图片格
 - Entry Answer：[`entryAnswer.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts)
 - Planner input：[`capabilityPlanner.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capabilityPlanner.ts)
 - Capability input：[`capability.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts)
-- Answer input：[`answer.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts)
+- 当前终态收口：[`answer.ts`](../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts)
 - Message lane：[`messageLanes.ts`](../packages/pet-agent/src/agent/orchestrator/messageLanes.ts)
 
-Planner 使用原始 User Request 和 main conversation 的文本投影做任务规划，
-不直接分析图片。图片理解发生在 Entry Answer、Capability 或 Result Answer
-的模型上下文中。
+Planner 现在复用与 Entry 相同的 canonical main conversation，因此其中的标准图片 block
+会到达 Planner 模型边界。Entry Answer、Planner 和 Capability 都可能理解图片；当前终态
+收口只接收结构化文本投影。
 
 ### 2.3 Subagent 工具循环
 
@@ -95,8 +95,8 @@ child summarization 改写其内部消息列表或本次 subagent 结束。
 run 上安装 [`CallbackHandler`](../services/local-agent/src/langfuseTracing.ts)。当前 callback 没有
 PinPawo 侧的 message/media 投影，模型输入中的完整图片 payload 会进入 SDK 的媒体处理路径。
 
-Tracing 与模型调用共享相同的 runnable callback tree，因此 Entry Answer、Capability 和 Answer 等实际
-包含图片的模型输入都可能触发 SDK 媒体处理。
+Tracing 与模型调用共享相同的 runnable callback tree，因此 Entry Answer、Planner 和 Capability
+等实际包含图片的模型输入都可能触发 SDK 媒体处理。
 
 ## 3. 已确认的现状与问题
 
@@ -156,7 +156,8 @@ Langfuse callback 直接把真实模型输入写入 span，因此完整图片 pa
 
 - 图片继续作为标准 `image` content block 进入 `HumanMessage`；
 - 主消息继续由 `OrchestratorState.messages` 和 FileSaver checkpoint 保存；
-- Entry Answer、Capability 和 Answer 继续获得各自现有的 main message 上下文；
+- Entry Answer、Planner 和 Capability 继续获得各自现有的 main message 上下文；终态收口
+  继续只接收结构化文本投影；
 - Planner 继续消费 User Request 和 delegation state；
 - `laneMessages` 继续把未分 lane 的主消息提供给 Capability subagent；
 - root 与 subagent summarization 继续以摘要替代被折叠的旧消息；

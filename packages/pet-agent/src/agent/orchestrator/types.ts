@@ -33,6 +33,7 @@ export type RunDelegationSummary = {
 export type RunNextDelegation = {
   id: string;
   lane: MessageLane;
+  mode: 'initial' | 'continue';
   task: string;
   contextSummary: string | null;
 };

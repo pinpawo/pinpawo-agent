@@ -23,7 +23,7 @@ function formatDelegationBriefing(text: string): string | null {
   const task = readCdataElement(text, 'task');
   if (!task) return null;
   const context = mode === 'continue'
-    ? readCdataElement(text, 'gap_note')
+    ? readCdataElement(text, 'guidance')
     : readCdataElement(text, 'essential_context');
 
   return [
@@ -60,14 +60,34 @@ function readAttribute(header: string, name: string): string | null {
 
 function readCdataElement(text: string, tag: string): string | null {
   const opening = `<${tag}>`;
-  const start = text.indexOf(opening);
+  const start = findMarkupOutsideCdata(text, opening);
   if (start < 0) return null;
   const cdataStart = text.indexOf('<![CDATA[', start + opening.length);
-  const end = text.lastIndexOf(`</${tag}>`);
+  const end = findMarkupOutsideCdata(text, `</${tag}>`, start + opening.length);
   if (cdataStart < 0 || end < cdataStart) return null;
   const body = text.slice(cdataStart + '<![CDATA['.length, end).trim();
   if (!body.endsWith(']]>')) return null;
   return body.slice(0, -3).replaceAll(']]]]><![CDATA[>', ']]>').trim() || null;
+}
+
+function findMarkupOutsideCdata(
+  text: string,
+  markup: string,
+  fromIndex = 0,
+): number {
+  let cursor = fromIndex;
+  while (cursor < text.length) {
+    const markupIndex = text.indexOf(markup, cursor);
+    if (markupIndex < 0) return -1;
+
+    const cdataStart = text.indexOf('<![CDATA[', cursor);
+    if (cdataStart < 0 || markupIndex < cdataStart) return markupIndex;
+
+    const cdataEnd = text.indexOf(']]>', cdataStart + '<![CDATA['.length);
+    if (cdataEnd < 0) return -1;
+    cursor = cdataEnd + ']]>'.length;
+  }
+  return -1;
 }
 
 function readTextElement(text: string, tag: string): string | null {

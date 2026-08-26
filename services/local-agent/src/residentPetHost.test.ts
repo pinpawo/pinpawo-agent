@@ -227,21 +227,6 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
         currentPlan: null,
       };
     },
-    invokeState: async (setup: { input: { threadId?: string } }) => {
-      const threadId = setup.input.threadId ?? '';
-      const review = buildReviewSpec({
-        id: 'review-1',
-        view: { kind: 'plain', body: 'Approve this dispatch?' },
-        options: [{
-          id: 'approve',
-          label: 'Approve',
-          decision: { type: 'approve' },
-        }],
-      });
-      const messages = [new AIMessage('waiting for approval')];
-      states.set(threadId, { messages, pendingInterrupt: review });
-      return { messages };
-    },
   };
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
   const createPet = async (petId: string) => createResidentPetHost({
@@ -261,9 +246,25 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     runtimeConfig,
     sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
     graphService: graphService as never,
-    runChat: async ({ setup }) => {
+    runAgentTurn: async ({ request, setup }) => {
       const threadId = setup.input.threadId ?? '';
       const state = states.get(threadId) ?? { messages: [], pendingInterrupt: null };
+      if (request.kind === 'user_message') {
+        const review = buildReviewSpec({
+          id: 'review-1',
+          view: { kind: 'plain', body: 'Approve this dispatch?' },
+          options: [{
+            id: 'approve',
+            label: 'Approve',
+            decision: { type: 'approve' },
+          }],
+        });
+        states.set(threadId, {
+          messages: [new AIMessage('waiting for approval')],
+          pendingInterrupt: review,
+        });
+        return { status: 'waiting_human' };
+      }
       states.set(threadId, { ...state, pendingInterrupt: null });
       return { status: 'completed', reply: 'approved' };
     },
@@ -318,5 +319,132 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     await petA.interaction.disconnect(finalConnection);
   } finally {
     await Promise.all([petA.close(), petB.close()]);
+  }
+});
+
+test('dispatch and conversation publish the same Agent Session event stream to observers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-events-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  const blockingTurnStarted = deferred();
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingInterrupt: null,
+      hasPendingContinuation: false,
+      currentPlan: null,
+    }),
+  };
+  const host = await createResidentPetHost({
+    actor: {
+      petId: 'pet-events',
+      name: 'pet-events',
+      userId: null,
+      personality: null,
+      stage: null,
+      species: null,
+    },
+    modelProfiles: createTestModelProfiles(),
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-events-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async ({ request, setup, emitEvent }) => {
+      const text = request.kind === 'user_message' ? request.message : 'resumed';
+      if (text === 'blocking host turn') {
+        blockingTurnStarted.resolve();
+        await new Promise<void>((resolve) => {
+          const signal = setup.input.signal;
+          if (!signal || signal.aborted) return resolve();
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+        return { status: 'interrupted' };
+      }
+      emitEvent({
+        type: 'message.delta',
+        requestId: request.requestId,
+        messageId: `${request.requestId}-assistant`,
+        role: 'assistant',
+        text: `handling ${text}`,
+      });
+      emitEvent({
+        type: 'message.completed',
+        requestId: request.requestId,
+        messageId: `${request.requestId}-assistant`,
+        role: 'assistant',
+        text: `handled ${text}`,
+      });
+      return { status: 'completed', reply: `handled ${text}` };
+    },
+  });
+  const sourceMessages: unknown[] = [];
+  const observerMessages: unknown[] = [];
+  const source = peer(sourceMessages);
+  const observer = peer(observerMessages);
+  await host.interaction.connect(source);
+  await host.interaction.connect(observer);
+
+  try {
+    assert.deepEqual(await host.resident.dispatch.dispatch({ request: 'from host' }), {
+      status: 'completed',
+      output: 'handled from host',
+    });
+    for (const messages of [sourceMessages, observerMessages]) {
+      const events = messages.flatMap((message) => (
+        (message as { type?: string }).type === 'event'
+          ? [(message as { event: { type: string; initiator?: string } }).event]
+          : []
+      ));
+      assert.deepEqual(events.map((event) => event.type), [
+        'run.started',
+        'message.delta',
+        'message.completed',
+      ]);
+      assert.equal(events[0]?.initiator, 'host');
+    }
+
+    sourceMessages.length = 0;
+    observerMessages.length = 0;
+    await host.interaction.handle(source, {
+      type: 'chat_request',
+      requestId: 'client-run-1',
+      message: 'from client',
+    });
+    for (const messages of [sourceMessages, observerMessages]) {
+      const events = messages.flatMap((message) => (
+        (message as { type?: string }).type === 'event'
+          ? [(message as { event: { type: string; initiator?: string } }).event]
+          : []
+      ));
+      assert.deepEqual(events.map((event) => event.type), [
+        'run.started',
+        'message.delta',
+        'message.completed',
+      ]);
+      assert.equal(events[0]?.initiator, 'client');
+    }
+
+    sourceMessages.length = 0;
+    observerMessages.length = 0;
+    const blockingDispatch = host.resident.dispatch.dispatch({
+      request: 'blocking host turn',
+    });
+    await blockingTurnStarted.promise;
+    const startedEnvelope = observerMessages.find((message) => (
+      (message as { type?: string; event?: { type?: string } }).event?.type === 'run.started'
+    )) as { requestId?: string } | undefined;
+    assert.ok(startedEnvelope?.requestId);
+    await host.interaction.handle(observer, {
+      type: 'run.interrupt',
+      requestId: startedEnvelope.requestId,
+    });
+    assert.deepEqual(await blockingDispatch, { status: 'cancelled' });
+    assert.ok(observerMessages.some((message) => (
+      (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
+    )));
+  } finally {
+    await host.close();
   }
 });

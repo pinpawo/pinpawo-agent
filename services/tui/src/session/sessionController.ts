@@ -539,6 +539,7 @@ export class TuiSessionController {
       }, { observedAt: this.now() }));
       if (
         message.event.type === 'message.completed'
+        || message.event.type === 'run.interrupted'
         || message.event.type === 'error'
       ) {
         this.transport.requestCompletionSnapshot();

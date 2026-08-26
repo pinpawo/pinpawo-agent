@@ -162,6 +162,73 @@ test('reduceSession deterministically replays canonical run inputs', () => {
   });
 });
 
+test('an observer can project a run it did not initiate', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'runtime.event',
+    event: {
+      type: 'run.started',
+      requestId: 'host-run-1',
+      initiator: 'host',
+      input: { role: 'user', text: 'inspect the queue' },
+    },
+  }, { observedAt: 1_000 });
+
+  assert.equal(session.activeRun?.requestId, 'host-run-1');
+  assert.equal(session.timeline[0]?.type, 'message');
+  assert.equal(
+    session.timeline[0]?.type === 'message' ? session.timeline[0].text : null,
+    'inspect the queue',
+  );
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'message.delta',
+      requestId: 'host-run-1',
+      messageId: 'assistant-1',
+      role: 'assistant',
+      text: 'working',
+    },
+  }, { observedAt: 1_100 });
+  assert.equal(session.activeRun?.state, 'running');
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'message.completed',
+      requestId: 'host-run-1',
+      messageId: 'assistant-1',
+      role: 'assistant',
+      text: 'done',
+    },
+  }, { observedAt: 1_200 });
+  assert.equal(session.activeRun, null);
+});
+
+test('run.started is idempotent for the client that already accepted the input', () => {
+  let session = reduceSession(createDomainSession(), {
+    type: 'user.accepted',
+    requestId: 'client-run-1',
+    kind: 'chat',
+    text: 'hello',
+  }, { observedAt: 1_000 });
+
+  session = reduceSession(session, {
+    type: 'runtime.event',
+    event: {
+      type: 'run.started',
+      requestId: 'client-run-1',
+      initiator: 'client',
+      input: { role: 'user', text: 'hello' },
+    },
+  }, { observedAt: 1_100 });
+
+  assert.equal(
+    session.timeline.filter((entry) => entry.type === 'message' && entry.role === 'user').length,
+    1,
+  );
+});
+
 test('a completed final operation returns a running session to thinking', () => {
   let session = reduceSession(createDomainSession(), {
     type: 'user.accepted',

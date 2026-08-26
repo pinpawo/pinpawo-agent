@@ -45,12 +45,15 @@ const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当
 const PENDING_REVIEW_TEXT_NOTICE = '当前有待确认的 review，请先通过确认面板应答；这条文本没有作为新消息发送。';
 const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮内完成。已保留当前进度，可继续提交下一步让我接着推进。';
 
-export type ChatSessionResult =
+export type AgentSessionTurnResult =
   | { status: 'completed'; reply: string }
   | { status: 'waiting_human' }
   | { status: 'interrupted' };
 
-export type ChatSessionRequest =
+/** @deprecated Use AgentSessionTurnResult. */
+export type ChatSessionResult = AgentSessionTurnResult;
+
+export type AgentSessionTurnRequest =
   | {
       kind: 'user_message';
       requestId: string;
@@ -60,8 +63,11 @@ export type ChatSessionRequest =
     }
   | { kind: 'resume'; requestId: string; resume: unknown };
 
-export type ChatSessionAdapterOptions = {
-  request: ChatSessionRequest;
+/** @deprecated Use AgentSessionTurnRequest. */
+export type ChatSessionRequest = AgentSessionTurnRequest;
+
+export type AgentSessionTurnOptions = {
+  request: AgentSessionTurnRequest;
   setup: AgentChannelSetup;
   graphService: LocalAgentGraphService;
   isCurrent: () => boolean;
@@ -88,6 +94,9 @@ export type ChatSessionAdapterOptions = {
    */
   prepareUserMessage?: () => Promise<BaseMessage>;
 };
+
+/** @deprecated Use AgentSessionTurnOptions. */
+export type ChatSessionAdapterOptions = AgentSessionTurnOptions;
 
 function throwUnexpectedInterruptPayload(): never {
   throw new Error('Received an interrupt without canonical human review payload.');
@@ -311,7 +320,9 @@ function readRunTokenUsage(params: {
   );
 }
 
-export async function runChatSession(options: ChatSessionAdapterOptions): Promise<ChatSessionResult> {
+export async function runAgentSessionTurn(
+  options: AgentSessionTurnOptions,
+): Promise<AgentSessionTurnResult> {
   const {
     request,
     setup,
@@ -602,6 +613,9 @@ export async function runChatSession(options: ChatSessionAdapterOptions): Promis
 
   return { status: 'completed', reply: finalReply };
 }
+
+/** @deprecated Use runAgentSessionTurn. */
+export const runChatSession = runAgentSessionTurn;
 
 function readFirstHumanReviewInterrupt(
   interrupts: unknown[],

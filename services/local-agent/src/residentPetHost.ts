@@ -1,8 +1,12 @@
-import { HumanMessage } from '@langchain/core/messages';
-import type { AgentClientMessage, AgentServerMessage } from '@pinpawo/agent-session';
+import { randomUUID } from 'node:crypto';
+import {
+  buildAgentEventEnvelope,
+  type AgentClientMessage,
+  type AgentRuntimeEvent,
+  type AgentServerMessage,
+} from '@pinpawo/agent-session';
 import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import {
-  buildOrchestratorTurnInput,
   GLOBAL_REVIEW_POLICY_MODE,
   type AgentActor,
   type AgentCapability,
@@ -11,8 +15,11 @@ import {
 } from '@pinpawo/pet-agent';
 
 import { LocalAgentGraphService } from './agentGraphService';
-import { readFinalMessageText } from './agentStreamEvents';
-import type { ChatSessionAdapterOptions, ChatSessionResult } from './chatSessionAdapter';
+import {
+  runAgentSessionTurn,
+  type AgentSessionTurnOptions,
+  type AgentSessionTurnResult,
+} from './chatSessionAdapter';
 import { loadAgentContext } from './contextLoader';
 import { createLocalServerHandlers } from './localServerHandlers';
 import {
@@ -24,6 +31,14 @@ import type { LocalServerDeps } from './localServerTypes';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from './llmConfig';
+import {
+  configureInflightOperationRegistry,
+  createInflightOperationRun,
+  finishInflightOperations,
+  overlayInflightDelegationOperations,
+} from './inflightOperationRun';
+import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
+import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
 export type PetDispatchSettledState = Exclude<PetDispatchState, 'busy'>;
@@ -283,7 +298,10 @@ export type CreateResidentPetRuntimeOptions = {
   sessionStatePath: string;
   loadContext?: typeof loadAgentContext;
   graphService?: LocalAgentGraphService;
-  runChat?: (options: ChatSessionAdapterOptions) => Promise<ChatSessionResult>;
+  /** Shared Agent Session turn runner used by conversation and headless input. */
+  runAgentTurn?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
+  /** @deprecated Use runAgentTurn. */
+  runChat?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   /** Existing opaque checkpoint thread, adopted only when no Agent Session exists. */
   adoptThreadId?: string;
 };
@@ -302,12 +320,15 @@ type ResidentPetRuntimeContext = {
   runtime: ResidentPetRuntime;
   deps: LocalServerDeps;
   graphService: LocalAgentGraphService;
+  runAgentTurn: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   loadContext: typeof loadAgentContext;
   sessions: LocalServerTuiSessionService;
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;
   peers: Set<AgentSessionPeer>;
+  publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
+  activeHostRuns: Map<string, AbortController>;
   close: () => Promise<void>;
   isClosing: () => boolean;
 };
@@ -443,14 +464,34 @@ export async function createResidentPetRuntime(
     return 'open';
   };
   const coordinator = new ResidentPetCoordinator({ readSettledState });
+  const peers = new Set<AgentSessionPeer>();
+  const activeHostRuns = new Map<string, AbortController>();
+  const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
+    const message = buildAgentEventEnvelope(event);
+    for (const peer of peers) {
+      if (!peer.isConnected()) continue;
+      try {
+        peer.send(message);
+      } catch (error) {
+        defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
+      }
+    }
+  };
+  const runAgentTurn = options.runAgentTurn ?? options.runChat ?? runAgentSessionTurn;
   const localHandlers = createLocalServerHandlers(deps, {
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    ...(options.runChat ? { runChat: options.runChat } : {}),
+    runAgentTurn,
+    publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
+    interruptHostRun: (requestId) => {
+      const controller = activeHostRuns.get(requestId);
+      if (!controller) return false;
+      controller.abort();
+      return true;
+    },
   });
   const peerHandlers = admitConversationHandlers(localHandlers.peerHandlers, coordinator);
-  const peers = new Set<AgentSessionPeer>();
   let closing: Promise<void> | null = null;
 
   const runtime = Object.freeze({
@@ -459,6 +500,7 @@ export async function createResidentPetRuntime(
 
   const close = () => {
     closing ??= (async () => {
+      for (const controller of activeHostRuns.values()) controller.abort();
       await Promise.allSettled([...peers].map((peer) => peerHandlers.onClose(peer)));
       peers.clear();
       await coordinator.close();
@@ -471,12 +513,15 @@ export async function createResidentPetRuntime(
     runtime,
     deps,
     graphService,
+    runAgentTurn,
     loadContext,
     sessions,
     coordinator,
     localHandlers,
     peerHandlers,
     peers,
+    publishRuntimeEvent,
+    activeHostRuns,
     close,
     isClosing: () => closing !== null,
   };
@@ -492,8 +537,11 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     coordinator,
     deps,
     graphService,
+    runAgentTurn,
     loadContext,
     sessions,
+    publishRuntimeEvent,
+    activeHostRuns,
   } = context;
 
   const dispatch: PetDispatchPort = {
@@ -511,22 +559,78 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           if (before.pendingInterrupt || before.hasPendingContinuation) {
             return { status: 'waiting' };
           }
+          const requestId = `host-${randomUUID()}`;
+          const run = createInflightOperationRun(requestId);
+          configureInflightOperationRegistry(
+            run,
+            createOperationRegistryForAgentSetup(setup),
+          );
+          const abortFromCaller = () => run.controller.abort(signal?.reason);
+          signal?.addEventListener('abort', abortFromCaller, { once: true });
+          setup.input.signal = run.controller.signal;
+          activeHostRuns.set(requestId, run.controller);
+          publishRuntimeEvent({
+            type: 'run.started',
+            requestId,
+            initiator: 'host',
+            input: { role: 'user', text: request },
+          });
           try {
-            const state = await graphService.invokeState(
+            const result = await runAgentTurn({
+              request: { kind: 'user_message', requestId, message: request },
               setup,
-              buildOrchestratorTurnInput([new HumanMessage(request)]),
-            );
-            const after = await graphService.readThreadState(setup);
-            if (after.pendingInterrupt || after.hasPendingContinuation) {
+              graphService,
+              isCurrent: () => !run.controller.signal.aborted,
+              finishInterrupted: () => undefined,
+              emitEvent: publishRuntimeEvent,
+              emitToolEvent: (payload) => {
+                emitLocalServerToolOperationEvent({
+                  run,
+                  payload,
+                  emit: publishRuntimeEvent,
+                });
+              },
+              acceptDelegationOperations: (operations) => {
+                overlayInflightDelegationOperations(run, operations);
+              },
+            });
+            if (result.status === 'waiting_human') {
+              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
               return { status: 'waiting' };
             }
-            return {
-              status: 'completed',
-              output: readFinalMessageText(state.messages.at(-1) ?? {}),
-            };
+            if (result.status === 'interrupted') {
+              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+              publishRuntimeEvent({
+                type: 'run.interrupted',
+                requestId,
+                message: 'Run interrupted.',
+              });
+              return { status: 'cancelled' };
+            }
+            finishInflightOperations(run, 'completed', publishRuntimeEvent);
+            return { status: 'completed', output: result.reply };
           } catch (error) {
-            if (signal?.aborted || isAbortError(error)) return { status: 'cancelled' };
+            if (run.controller.signal.aborted || isAbortError(error)) {
+              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+              publishRuntimeEvent({
+                type: 'run.interrupted',
+                requestId,
+                message: 'Run interrupted.',
+              });
+              return { status: 'cancelled' };
+            }
+            finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
+            publishRuntimeEvent({
+              type: 'error',
+              requestId,
+              message: error instanceof Error ? error.message : 'internal error',
+            });
             throw error;
+          } finally {
+            signal?.removeEventListener('abort', abortFromCaller);
+            if (activeHostRuns.get(requestId) === run.controller) {
+              activeHostRuns.delete(requestId);
+            }
           }
         }, signal);
       } catch (error) {

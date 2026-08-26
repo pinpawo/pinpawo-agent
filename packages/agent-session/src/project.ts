@@ -191,6 +191,14 @@ function reduceRuntimeEvent(
   context: AgentSessionReductionContext,
 ): AgentSession {
   switch (event.type) {
+    case 'run.started':
+      return startObservedRun(session, event, context);
+    case 'run.interrupted':
+      return finishOwnedRun(session, event.requestId, [{
+        role: 'system',
+        requestId: event.requestId,
+        text: event.message?.trim() || 'Run interrupted.',
+      }], undefined, context);
     case 'message.delta':
       return appendAssistantDelta(session, event.requestId, event.messageId, event.text, message, context);
     case 'message.completed':
@@ -221,6 +229,33 @@ function reduceRuntimeEvent(
         text: message?.text ?? event.message ?? 'internal error',
       }], undefined, context, { preservePendingInterrupt: true });
   }
+}
+
+function startObservedRun(
+  session: AgentSession,
+  event: Extract<AgentRuntimeEvent, { type: 'run.started' }>,
+  context: AgentSessionReductionContext,
+): AgentSession {
+  if (ownsRun(session, event.requestId)) return session;
+  const withoutUsage = omitRunTokenUsage(session);
+  const running: AgentSession = {
+    ...withoutUsage,
+    currentPlan: null,
+    pendingInterrupt: null,
+    activeRun: {
+      requestId: event.requestId,
+      state: 'running',
+      activity: 'thinking',
+      startedAt: context.observedAt,
+      updatedAt: context.observedAt,
+    },
+  };
+  if (!event.input?.text.trim()) return running;
+  return appendMessage(running, {
+    role: event.input.role,
+    requestId: event.requestId,
+    text: event.input.text,
+  }, context);
 }
 
 function applyPlanUpdate(

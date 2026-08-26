@@ -548,6 +548,34 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
   const requestId = readString(record, 'requestId');
   if (!type || !requestId) return null;
 
+  if (type === 'run.started') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'initiator', 'input'])) return null;
+    const initiator = readString(record, 'initiator');
+    const input = readRecord(record, 'input');
+    if (initiator !== 'client' && initiator !== 'host') return null;
+    if (input && (
+      !hasOnlyKeys(input, ['role', 'text'])
+      || input.role !== 'user'
+      || typeof input.text !== 'string'
+    )) return null;
+    if (record.input !== undefined && !input) return null;
+    return {
+      type,
+      requestId,
+      initiator,
+      ...(input ? { input: { role: 'user', text: input.text as string } } : {}),
+    };
+  }
+  if (type === 'run.interrupted') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'message'])) return null;
+    const message = readOptionalString(record, 'message');
+    return {
+      type,
+      requestId,
+      ...(message !== undefined ? { message } : {}),
+    };
+  }
+
   if (type === 'message.delta') {
     const role = readString(record, 'role');
     const text = readString(record, 'text');

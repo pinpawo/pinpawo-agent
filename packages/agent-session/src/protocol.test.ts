@@ -127,6 +127,31 @@ test('runtime config protocol supports legacy updates and correlated acknowledge
   });
 });
 
+test('runtime run boundaries round-trip for observing clients', () => {
+  const started = {
+    type: 'event' as const,
+    requestId: 'host-run-1',
+    event: {
+      type: 'run.started' as const,
+      requestId: 'host-run-1',
+      initiator: 'host' as const,
+      input: { role: 'user' as const, text: 'inspect the queue' },
+    },
+  };
+  assert.deepEqual(parseAgentServerMessage(started), started);
+
+  const interrupted = {
+    type: 'event' as const,
+    requestId: 'host-run-1',
+    event: {
+      type: 'run.interrupted' as const,
+      requestId: 'host-run-1',
+      message: 'Run interrupted.',
+    },
+  };
+  assert.deepEqual(parseAgentServerMessage(interrupted), interrupted);
+});
+
 test('session compaction protocol is correlated and snapshot-backed', () => {
   assert.deepEqual(parseAgentClientMessage({
     type: 'session.compact',

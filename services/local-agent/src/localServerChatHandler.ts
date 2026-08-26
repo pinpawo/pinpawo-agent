@@ -13,7 +13,10 @@ import { recordAgentRunActivity } from './operationActivityState';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
-import { runChatSession, type ChatSessionRequest } from './chatSessionAdapter';
+import {
+  runAgentSessionTurn,
+  type AgentSessionTurnRequest,
+} from './chatSessionAdapter';
 import {
   configureInflightOperationRegistry,
   overlayInflightDelegationOperations,
@@ -34,7 +37,7 @@ import {
   type PendingHumanReviewInterruptRoute,
   type HumanReviewResolutionSource,
 } from './pendingHumanReviewInterrupt';
-import type { PendingInterruptProjection } from '@pinpawo/agent-session';
+import type { AgentRuntimeEvent, PendingInterruptProjection } from '@pinpawo/agent-session';
 import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
@@ -44,8 +47,8 @@ import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
 
-type LocalServerRunRequest = ChatSessionRequest;
-type RunChatSession = typeof runChatSession;
+type LocalServerRunRequest = AgentSessionTurnRequest;
+type RunAgentSessionTurn = typeof runAgentSessionTurn;
 type ChatRunOutcome =
   | 'completed'
   | 'waiting_human'
@@ -81,7 +84,12 @@ export class LocalServerChatHandler {
   private readonly tuiSessions: LocalServerTuiSessionService;
   private readonly inflightRequests: InflightRequestController<LocalServerPeer>;
   private readonly loadContext: typeof loadAgentContext;
-  private readonly runChat: RunChatSession;
+  private readonly runAgentTurn: RunAgentSessionTurn;
+  private readonly publishRuntimeEvent: (
+    origin: LocalServerPeer,
+    event: AgentRuntimeEvent,
+  ) => void;
+  private readonly interruptHostRun?: (requestId: string) => boolean;
   private readonly threadInvocations = new ThreadInvocationCoordinator();
 
   constructor(options: {
@@ -89,13 +97,25 @@ export class LocalServerChatHandler {
     tuiSessions: LocalServerTuiSessionService;
     inflightRequests: InflightRequestController<LocalServerPeer>;
     loadContext?: typeof loadAgentContext;
-    runChat?: RunChatSession;
+    runAgentTurn?: RunAgentSessionTurn;
+    /** @deprecated Use runAgentTurn. */
+    runChat?: RunAgentSessionTurn;
+    publishRuntimeEvent?: (
+      origin: LocalServerPeer,
+      event: AgentRuntimeEvent,
+    ) => void;
+    interruptHostRun?: (requestId: string) => boolean;
   }) {
     this.graphService = options.graphService;
     this.tuiSessions = options.tuiSessions;
     this.inflightRequests = options.inflightRequests;
     this.loadContext = options.loadContext ?? loadAgentContext;
-    this.runChat = options.runChat ?? runChatSession;
+    this.runAgentTurn = options.runAgentTurn ?? options.runChat ?? runAgentSessionTurn;
+    this.publishRuntimeEvent = options.publishRuntimeEvent
+      ?? ((peer, event) => {
+        sendLocalServerPeerEvent(peer, event);
+      });
+    this.interruptHostRun = options.interruptHostRun;
   }
 
   private buildPendingInterruptRoute(params: {
@@ -190,6 +210,14 @@ export class LocalServerChatHandler {
     if (inflight) {
       return inflight;
     }
+    if (this.interruptHostRun?.(msg.requestId)) {
+      peer.send({
+        type: 'interrupting',
+        requestId: msg.requestId,
+        message: 'interrupting',
+      });
+      return { requestId: msg.requestId };
+    }
     await routeRunInterruptThroughHumanReview({
       recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps),
       cancelPending: (route) => this.handleReviewCancel(peer, {
@@ -241,12 +269,37 @@ export class LocalServerChatHandler {
       this.inflightRequests.sendInterrupted(peer, inflight);
       this.inflightRequests.clear(peer, inflight);
     };
+    let runStarted = false;
+    let interruptedPublished = false;
+    const publishInterrupted = () => {
+      if (!runStarted || interruptedPublished) return;
+      interruptedPublished = true;
+      this.publishRuntimeEvent(peer, {
+        type: 'run.interrupted',
+        requestId,
+        message: 'Run interrupted.',
+      });
+    };
 
     try {
       await invocation.waitForTurn();
+      if (!isCurrent()) {
+        finishInterrupted();
+        return 'interrupted';
+      }
+      this.publishRuntimeEvent(peer, {
+        type: 'run.started',
+        requestId,
+        initiator: 'client',
+        ...(request.kind === 'user_message'
+          ? { input: { role: 'user', text: request.message } as const }
+          : {}),
+      });
+      runStarted = true;
       recordAgentRunActivity('thinking', requestId);
       const ctx = await this.loadContext(deps.actorId);
       if (!isCurrent()) {
+        publishInterrupted();
         finishInterrupted();
         return 'interrupted';
       }
@@ -257,7 +310,7 @@ export class LocalServerChatHandler {
         createOperationRegistryForAgentSetup(setup),
       );
       setup.input.signal = controller.signal;
-      const result = await this.runChat({
+      const result = await this.runAgentTurn({
         request,
         setup,
         graphService: this.graphService,
@@ -265,7 +318,7 @@ export class LocalServerChatHandler {
         finishInterrupted,
         emitEvent: (event) => {
           if (!isCurrent()) return;
-          sendLocalServerPeerEvent(peer, event);
+          this.publishRuntimeEvent(peer, event);
         },
         emitToolEvent: (event) => {
           if (!isCurrent()) return;
@@ -306,6 +359,7 @@ export class LocalServerChatHandler {
         return 'waiting_human';
       }
       if (result.status === 'interrupted') {
+        publishInterrupted();
         finishInterrupted();
         return 'interrupted';
       }
@@ -322,6 +376,7 @@ export class LocalServerChatHandler {
       if (aborted) {
         console.warn(`[local-server] chat interrupted requestId=${requestId}`);
         this.inflightRequests.sendInterrupted(peer, inflight);
+        publishInterrupted();
         recordAgentRunActivity('interrupted', requestId, 2_500);
         this.inflightRequests.clear(peer, inflight);
         return 'interrupted';
@@ -345,9 +400,9 @@ export class LocalServerChatHandler {
         }
       }
       const failure = classifyAgentRunFailure(err);
-      if (isStillCurrent && peer.isConnected()) {
+      if (isStillCurrent) {
         const message = err instanceof Error ? err.message : 'internal error';
-        sendLocalServerPeerEvent(peer, {
+        this.publishRuntimeEvent(peer, {
           type: 'error',
           requestId,
           message: recoveredFromToolProtocolError
@@ -397,7 +452,7 @@ export class LocalServerChatHandler {
         this.sendClosedReviewError(peer, msg.requestId);
       },
       emitEvent: (event) => {
-        sendLocalServerPeerEvent(peer, event);
+        this.publishRuntimeEvent(peer, event);
       },
       acceptRoute: (route) => this.acceptReviewRoute(peer, route, msg, deps),
       isConnected: peer.isConnected,
@@ -443,7 +498,7 @@ export class LocalServerChatHandler {
       run: inflight,
       payload,
       // Trusted local peer: include raw input/output so the UI can render diffs etc.
-      emit: (event) => sendLocalServerPeerEvent(peer, event),
+      emit: (event) => this.publishRuntimeEvent(peer, event),
     });
   }
 }

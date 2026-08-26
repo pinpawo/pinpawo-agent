@@ -37,6 +37,7 @@ The current local-agent snapshot endpoint selects a session/thread and materiali
 checkpoint Cn
     -> snapshot(Cn)
     -> timeline state
+    -> run.started opens the run for every connected observer
     -> live runtime/control events mutate timeline state
     -> message.completed commits checkpoint Cn+1
     -> snapshot(Cn+1) replaces timeline state
@@ -57,14 +58,25 @@ active invocation as exactly one of two projection facts:
 
 `pendingInterrupt` is a separate nullable field because a checkpoint wait is
 not itself a running invocation. It may coexist with a new `activeRun` after a
-response or cancel resumes the checkpoint. The initial `running` / `thinking` view
-is created only after the outbound run command is accepted by the transport.
+response or cancel resumes the checkpoint. The initiating client may
+optimistically create the initial `running` / `thinking` view after its outbound
+run command is accepted by the transport. The server also emits `run.started`;
+this is idempotent for the initiator and opens the same run for other clients
+observing the session. A Host-initiated turn uses the same event, so an already
+connected TUI can observe activity that it did not originate without knowing
+which Host composed the resident runtime.
 Later activity changes come from server runtime events; elapsed-time presentation
 such as busy-copy escalation remains in the render layer. The initiating client
 may project `interrupting` only after its transport accepts `run.interrupt`;
 this acknowledges the command locally, not that the agent has stopped. A server
 event or snapshot remains authoritative for the next review, completion,
 interruption, or error state.
+
+`run.started.initiator` is transport-generic (`client` or `host`). It must not
+carry Studio invocation identity, Plugin metadata, checkpoint coordinates, or a
+thread selector. `run.interrupted` closes a run that has no message, review, or
+error terminal boundary. Both are transient projection events; checkpoint state
+remains the durable authority.
 
 Local snapshot readers emit only the current versioned `AgentSessionSnapshot`.
 The parser accepts the former V3 `waiting_review/reviewAction` and V4

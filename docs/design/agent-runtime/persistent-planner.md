@@ -354,19 +354,20 @@ type CapabilityDisclosureState = {
 - 初次规划：没有 active delegation 和 announce；
 - 初次规划从完整 root messages 中选择截止当前请求的 main conversation 和当前 trace 的
   Planner lane；
-- delegation 返回或 fresh-turn continuation 时选择 main conversation、当前 delegation 的
-  完整 tool-protocol-safe lane transcript，以及当前 trace 的 Planner lane；
-- announce 字段只保留 boundary identity 与 stop reason；announce 内容、用户追问和执行
-  进展直接从原始消息读取，不再重复投影为字符串字段；
+- delegation 返回或 fresh-turn continuation 时复用同一 main conversation 与 Planner lane，
+  并只追加当前 delegation 的标准 Announce 投影；
+- announce 字段只保留 boundary identity 与 stop reason，用于选择准确的 typed Announce；
+  私有 Capability Human/AI/Tool transcript 不进入 Planner；
 - `capabilityDisclosure` 是当前 trace 已经披露给 Planner 的有序 Capability 集合和空搜索
   额度；Entry 与 Boundary 使用同一个状态，而不是每次 invocation 重新创建默认候选；
 - registry 变化：在下一次正常 Planner input 中提供新的 digest。
 
-`messages` 是 root checkpoint 已经持久化的 canonical 输入。Planner 领域根据 mode 选择
-main conversation、当前 delegation lane 与 Planner lane，保留原始 message objects、媒体
-content blocks 和 tool call/result 配对。Planner 本轮产生的新输入、搜索观察和 terminal
-tool 配对会标记为 `lane: orchestrator`、`source: capability_planner` 并通过 root message
-reducer 回写；它们不会进入 main conversation 或 Capability transcript。
+`messages` 是 root checkpoint 已经持久化的 canonical 输入。Planner 领域选择 main
+conversation 与当前 trace 的 Planner lane，保留原始 message objects、媒体 content blocks
+和 Planner 自身的 tool call/result 配对；Boundary 再临时追加当前 Announce。Planner 本轮
+产生的新输入、搜索观察和 terminal tool 配对会标记为 `lane: orchestrator`、
+`source: capability_planner` 并通过 root message reducer 回写；它们不会进入 main
+conversation 或 Capability transcript。
 
 这里的“用户继续”只是 Planner 已完成上一轮 commit 后收到的一个新输入 turn，不是
 checkpoint resume，也不需要 `user_resumed` 事件。Capability announce 本来属于 execution
@@ -493,9 +494,9 @@ auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接
 ```
 
 Entry 与 Boundary 直接复用 `mainConversationMessages()` 作为 canonical main conversation
-selector：保留完整主对话，排除私有 Capability lane transcript 和内部 delegation briefing，
-并由既有 tool-protocol safety projection 排除不完整的内部工具调用。Boundary 在该共同基座
-之后只额外追加当前尚未验收的标准 announce，再追加包含
+selector：保留完整主对话，排除私有 Capability lane transcript 和 Planner lane，并由既有
+tool-protocol safety projection 排除不完整的内部工具调用。Boundary 在该共同基座之后只额外
+追加当前尚未验收的标准 announce，再追加包含
 `planning_boundary` 的本轮 Human input。当前 announce 不同时出现在 main conversation 中。
 
 同次调用绑定以下 tools，`tool_choice` 保持 `auto`：

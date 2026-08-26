@@ -15,6 +15,7 @@ export type ComposerIntent =
   | { type: 'open-transcript' }
   | { type: 'export-transcript'; path?: string }
   | { type: 'open-editor'; text: string }
+  | { type: 'copy-latest-reply' }
   | { type: 'enter-chat' }
   | { type: 'start-new-session' }
   | { type: 'submit-chat'; text: string };
@@ -63,6 +64,10 @@ export function resolveComposerIntent(input: {
       };
     case 'edit':
       return { type: 'open-editor', text: parsed.args };
+    case 'copy':
+      return parsed.args
+        ? { type: 'notice', message: 'usage: /copy' }
+        : { type: 'copy-latest-reply' };
     case 'chat':
       return { type: 'enter-chat' };
     case 'new':

@@ -17,6 +17,7 @@ test('command registry exposes only implemented OpenTUI commands', () => {
       'transcript',
       'export',
       'edit',
+      'copy',
       'refresh',
       'compact',
       'resume',
@@ -51,6 +52,13 @@ test('command parser resolves commands and aliases', () => {
     name: 'edit',
     raw: '/edit   draft text',
     args: 'draft text',
+  });
+  assert.deepEqual(parseTuiCommand('/copy'), {
+    type: 'command',
+    command: command('copy'),
+    name: 'copy',
+    raw: '/copy',
+    args: '',
   });
   assert.deepEqual(parseTuiCommand('/history'), {
     type: 'command',

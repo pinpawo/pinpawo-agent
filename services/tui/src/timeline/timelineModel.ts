@@ -44,6 +44,22 @@ export function countSettledTimelinePrefix(
   return index;
 }
 
+/** Return the newest complete user-facing assistant reply, excluding live tails. */
+export function latestCompletedAssistantReply(session: AgentSession) {
+  for (let index = session.timeline.length - 1; index >= 0; index -= 1) {
+    const entry = session.timeline[index];
+    if (
+      entry?.type === 'message'
+      && entry.role === 'assistant'
+      && entry.status === 'completed'
+      && entry.text.trim()
+    ) {
+      return entry.text;
+    }
+  }
+  return null;
+}
+
 export function formatTimelineEntry(
   entry: AgentTimelineEntry,
   options: {

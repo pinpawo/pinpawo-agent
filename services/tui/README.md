@@ -156,6 +156,8 @@ Production client controls:
   Markdown transcript, `/review-policy` aliases `/policy`, and `/quit` exits;
 - ordinary prose containing a path remains text, and unavailable path-only
   pastes are inserted as text with a notice;
+- `/copy` copies the latest completed assistant reply through the terminal
+  clipboard channel;
 - Esc or the first `Ctrl+C` interrupts an active response; a second `Ctrl+C`
   while interruption is settling exits immediately;
 - Enter or Esc dismisses an error notice; `Ctrl+C` exits while idle.

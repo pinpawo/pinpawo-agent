@@ -64,6 +64,7 @@ import {
   type InteractionOwner,
 } from './input/inputRouter';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
+import { latestCompletedAssistantReply } from './timeline/timelineModel';
 import {
   isDelegationPaused,
   leaveDelegationPauseMode,
@@ -1673,6 +1674,10 @@ function submitComposerInput(input = composer.plainText) {
     case 'open-editor':
       openExternalEditor(intent.text);
       return;
+    case 'copy-latest-reply':
+      clearComposerPreservingNotice();
+      copyLatestAssistantReply();
+      return;
     case 'enter-chat':
       enterChatMode();
       return;
@@ -1694,6 +1699,16 @@ function submitComposerInput(input = composer.plainText) {
     case 'submit-chat':
       submitChatInput(intent.text);
   }
+}
+
+function copyLatestAssistantReply() {
+  const reply = latestCompletedAssistantReply(controller.getState().session);
+  localNotice = !reply
+    ? 'no completed reply to copy'
+    : renderer.copyToClipboardOSC52(reply)
+      ? 'copied latest reply to clipboard'
+      : 'terminal clipboard is unavailable';
+  refreshStatus();
 }
 
 function submitChatInput(text: string) {

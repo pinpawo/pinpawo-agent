@@ -47,6 +47,19 @@ test('composer intent routes a session snapshot refresh', () => {
   }), { type: 'refresh-session' });
 });
 
+test('composer intent copies the latest completed assistant reply', () => {
+  assert.deepEqual(resolveComposerIntent({
+    text: '/copy',
+    attachmentCount: 0,
+    mode: 'chat',
+  }), { type: 'copy-latest-reply' });
+  assert.deepEqual(resolveComposerIntent({
+    text: '/copy extra',
+    attachmentCount: 0,
+    mode: 'chat',
+  }), { type: 'notice', message: 'usage: /copy' });
+});
+
 test('composer intent treats the removed continuation command as unknown', () => {
   assert.deepEqual(resolveComposerIntent({
     text: '/continue',

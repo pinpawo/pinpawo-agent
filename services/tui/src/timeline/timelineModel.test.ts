@@ -12,6 +12,7 @@ import {
   formatTimelineEntry,
   isSettledTimelineEntry,
   isLiveActivityPulseActive,
+  latestCompletedAssistantReply,
 } from './timelineModel';
 import {
   findFirstUncommittedEntry,
@@ -53,6 +54,40 @@ test('timeline model commits only the settled ordered prefix', () => {
     { ...operation, phase: 'completed' },
     assistant,
   ]), 3);
+});
+
+test('timeline model selects the latest completed assistant reply', () => {
+  const session: AgentSession = {
+    sessionId: 'chat:one',
+    kind: 'chat',
+    timeline: [
+      { id: 'user', type: 'message', role: 'user', text: 'first', status: 'completed' },
+      { id: 'reply-one', type: 'message', role: 'assistant', text: 'first reply', status: 'completed' },
+      { id: 'tool', type: 'operation', requestId: 'run', operationKey: 'tool', kind: 'tool', title: 'tool', phase: 'completed' },
+      { id: 'reply-two', type: 'message', role: 'assistant', text: 'second reply', status: 'completed' },
+    ],
+    activeRun: null,
+    pendingInterrupt: null,
+  };
+  assert.equal(latestCompletedAssistantReply(session), 'second reply');
+});
+
+test('timeline model ignores incomplete and non-user-facing replies', () => {
+  const session: AgentSession = {
+    sessionId: 'chat:one',
+    kind: 'chat',
+    timeline: [
+      { id: 'reply', type: 'message', role: 'assistant', text: 'stable reply', status: 'completed' },
+      { id: 'subagent', type: 'message', role: 'subagent', requestId: 'run', text: 'private detail', status: 'completed' },
+      { id: 'system', type: 'message', role: 'system', text: 'notice', status: 'completed' },
+      { id: 'streaming', type: 'message', role: 'assistant', text: 'partial', status: 'streaming' },
+      { id: 'blank', type: 'message', role: 'assistant', text: '  ', status: 'completed' },
+    ],
+    activeRun: null,
+    pendingInterrupt: null,
+  };
+  assert.equal(latestCompletedAssistantReply(session), 'stable reply');
+  assert.equal(latestCompletedAssistantReply({ ...session, timeline: [] }), null);
 });
 
 test('timeline formatting keeps multiline messages and operation state readable', () => {

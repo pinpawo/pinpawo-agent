@@ -3,12 +3,13 @@
  *
  * Studio 是一块**插板**:它提供两个方向的通道,不提供任何管理策略。
  *
- *     plugin ──event────> studio ──dispatch──> pet
+ *     Plugin A ──notify(event)──> Studio event bus ──subscribe──> Plugin B
+ *     Plugin   ──dispatch───────> Studio ──PetDispatchPort──────> Pet
  *
  * - `dispatch` 是 studio 对外的**动作**。所有派活必经它 —— 插件不能绕过
  *   studio 直接碰 pet,否则 pet registry、身份与可派发性判断会在每个插件
  *   里重复一遍,而且多个插件同时派活时没有地方能协调。
- * - `event` 是 studio **接收**的通知,并广播给其他插件。它是**插件之间的
+ * - `event` 是 studio **接收**的通知,并通过统一 pub/sub 总线广播给其他插件。它是**插件之间的
  *   共享总线** —— 让互不认识的插件能交换信息。
  *
  * Studio 不解释 event 的内容,也不持有由 event 推导出的状态。事件是
@@ -96,6 +97,7 @@ export type StudioPluginContext = {
    */
   onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEventInput) => void;
+  /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];
   hooks: StudioPluginHooks;

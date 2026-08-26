@@ -13,7 +13,8 @@ Studio 维护可派发 Pet 的注册表、每个 Pet 的 invocation 串行通道
 随后收口本次调用。任务结构、依赖、重试和 Plugin 持久化仍由 Plugin 或 Host 负责。
 
 ```text
-plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
+Plugin A ── notify(event) ──> Studio event bus ── subscribe ──> Plugin B
+Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> Pet
 ```
 
 ## 建议阅读顺序
@@ -40,9 +41,10 @@ local-agent 负责。可选 `@pinpawo-plugin/kanban` package 提供一个 Plugin
 使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
 不是 Toolkit。
 
-可选 `studio-http` package 是另一个具体 Plugin。它不定义 Toolkit，只把
+可选 `@pinpawo-plugin/studio-http` package 是另一个具体 Plugin。它不定义 Toolkit，只把
 `context.dispatch()` 和 `context.subscribe()` 投射成带鉴权的 loopback HTTP/SSE
-边界。
+边界。轻量的进程内 Plugin event bus 由 Studio core 统一持有；HTTP 只是普通 subscriber，
+不拥有数据库、event queue 或领域 history。
 
 Host 只注册当前存活且 eager-start 的 Pet；Studio 不报告
 lazy/disabled Pet，也不公开 Agent Session active thread identity。HTTP Plugin 成为 Studio
@@ -53,7 +55,7 @@ control-plane transport；同一 Host 进程内另行运行 local-agent Agent Se
 
 队列、幂等记录与事件订阅都只存在于当前进程内。Studio 不提供背压、自动重试、
 超时或 durable event replay。Pet checkpoint 与 Agent Session active thread 不依赖这些
-内存投射，可以跨 Host 重启恢复。
+进程内投射，可以跨 Host 重启恢复。
 
 旧的 run controller、due-run scheduler 和 shared wiki 方案已经移到
 [Studio 历史记录](../../history/studio/)，不再代表当前行为。

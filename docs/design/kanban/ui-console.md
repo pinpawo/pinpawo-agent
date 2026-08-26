@@ -14,10 +14,10 @@ Kanban Console 是独立 Kanban application 的桌面 Web 操作台。它不是�
 Console 可以嵌入 Studio composition，也可以由独立 Kanban application 提供。UI 不拥有
 task、event、SQLite、Agent checkpoint 或 Studio runtime 状态。
 
-当前已有一个不连接 adapter 的 React 静态原型，位于
-[`plugins/kanban/console/`](../../../plugins/kanban/console/)。它仅用内存示例数据验证本
-文的信息结构和鼠标交互；接入 task、event、dispatch 或授权前，必须保持第 3 节的 adapter
-边界。
+当前 React Console 位于
+[`plugins/kanban/console/`](../../../plugins/kanban/console/)，已经通过 HTTP Plugin route
+接入 Pet registry、dispatch、Kanban snapshot/history 和 Studio SSE event。授权与 Markdown
+仍是未接入的独立 adapter；后续接入必须保持第 3 节边界。
 
 ## 1. MVP 边界
 
@@ -153,11 +153,12 @@ Kanban read model：
 
 - current snapshot：`tasks` 与 `lastEventSequence`；
 - task history：`after=<sequence>` 的 committed Kanban task event；
-- live event：携带同一 `sequence`，用于与 history 去重。
+- Studio live event：由 Studio core event bus 广播，再由 HTTP Plugin 投射为 SSE；不提供
+  durable cursor。
 
-重连顺序为：读 snapshot/cursor `S`，建立 live connection，读取 `after=S` history，按
-sequence 合并。UI 永远以 Kanban snapshot/history 为 task 事实源，不以 SSE 内存流重建
-任务状态。
+首次连接和每次重连都先读取 Kanban snapshot/history，再建立 Studio live event 连接。
+断线期间缺失的 Studio event 不重放；UI 依赖 Kanban 自己的 committed history 补齐 task
+变化。UI 永远以 Kanban snapshot/history 为 task 事实源，不用 Studio SSE 重建任务状态。
 
 Markdown 和 interaction 都是独立 adapter；缺少其中任一 adapter 时，对应区域显示
 unavailable 状态，但不影响 dispatch、task 或 event 主循环。

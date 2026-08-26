@@ -16,7 +16,8 @@ registry of dispatchable pets, serializes work per pet, and gives plugins an
 in-process event bus. It is deliberately not a workflow engine.
 
 ```text
-plugin ── notify(event) ──> Studio ── dispatch(request) ──> pet
+Plugin A ── notify(event) ──> Studio event bus ── subscribe ──> Plugin B
+Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> Pet
 ```
 
 `dispatch()` immediately acknowledges acceptance with a new invocation identity.
@@ -61,9 +62,11 @@ tasks whose dependencies are ready. The Plugin is not itself a Toolkit. Future
 scheduler or trigger integrations must use the same Plugin boundary rather than
 enlarge the Studio contract.
 
-The optional `studio-http` package is another concrete Plugin. It defines no
+The optional `@pinpawo-plugin/studio-http` package is another concrete Plugin. It defines no
 Toolkit; it projects `context.dispatch()` and `context.subscribe()` to an
-authenticated loopback HTTP/SSE boundary.
+authenticated loopback HTTP/SSE boundary. Studio core owns the lightweight
+in-process Plugin event bus; HTTP is an ordinary subscriber and owns no database,
+event queue, or domain history.
 
 The Host registers only currently live, eagerly started
 Pets. Studio neither reports lazy/disabled Pets nor publishes active Agent

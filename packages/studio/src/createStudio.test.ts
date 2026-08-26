@@ -189,7 +189,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
   await studio.shutdown();
 });
 
-test('Studio core event bus broadcasts Plugin events to every subscriber in order', async () => {
+test('Studio core event bus preserves per-subscriber order without cross-subscriber blocking', async () => {
   const firstStarted = deferred();
   const releaseFirst = deferred();
   const slowDeliveryComplete = deferred();
@@ -236,13 +236,82 @@ test('Studio core event bus broadcasts Plugin events to every subscriber in orde
   });
 
   await firstStarted.promise;
-  await Promise.resolve();
+  await fastDeliveryComplete.promise;
   assert.deepEqual(slowEvents, ['publisher:event.first']);
-  assert.deepEqual(fastEvents, ['publisher:event.first']);
+  assert.deepEqual(fastEvents, ['publisher:event.first', 'publisher:event.second']);
   releaseFirst.resolve();
-  await Promise.all([slowDeliveryComplete.promise, fastDeliveryComplete.promise]);
+  await slowDeliveryComplete.promise;
   assert.deepEqual(slowEvents, ['publisher:event.first', 'publisher:event.second']);
   assert.deepEqual(fastEvents, ['publisher:event.first', 'publisher:event.second']);
+  await studio.shutdown();
+});
+
+test('Studio releases event subscriptions with their Plugin lifecycle owner', async () => {
+  let subscriberStopped = false;
+  let deliveryAfterStop = false;
+  let publisherContext: Parameters<StudioPlugin['start']>[0] | undefined;
+  const publisher: StudioPlugin = {
+    name: 'publisher',
+    toolkits: [],
+    start: (context) => {
+      publisherContext = context;
+    },
+    stop: () => {
+      publisherContext?.notify({ type: 'publisher.stopping' });
+    },
+  };
+  const subscriber: StudioPlugin = {
+    name: 'subscriber',
+    toolkits: [],
+    start: (context) => {
+      // Intentionally do not keep or invoke the returned unsubscribe function.
+      context.subscribe(() => {
+        if (subscriberStopped) deliveryAfterStop = true;
+      });
+    },
+    stop: () => {
+      subscriberStopped = true;
+    },
+  };
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [binding('worker')],
+    plugins: [publisher, subscriber],
+  });
+
+  await studio.shutdown();
+  assert.equal(deliveryAfterStop, false);
+});
+
+test('Studio shutdown does not wait for a stalled event subscriber', async () => {
+  const handlerStarted = deferred();
+  const neverSettles = new Promise<void>(() => undefined);
+  const subscriber: StudioPlugin = {
+    name: 'subscriber',
+    toolkits: [],
+    start: (context) => {
+      context.subscribe(async () => {
+        handlerStarted.resolve();
+        await neverSettles;
+      });
+    },
+  };
+  const publisher: StudioPlugin = {
+    name: 'publisher',
+    toolkits: [],
+    start: (context) => {
+      context.notify({ type: 'event.stalled' });
+    },
+  };
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [binding('worker')],
+    plugins: [subscriber, publisher],
+  });
+
+  await handlerStarted.promise;
   await studio.shutdown();
 });
 

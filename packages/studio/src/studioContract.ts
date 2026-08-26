@@ -97,6 +97,7 @@ export type StudioPluginContext = {
    */
   onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEventInput) => void;
+  /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];
   hooks: StudioPluginHooks;

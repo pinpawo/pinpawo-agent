@@ -218,7 +218,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         source: plugin.name,
         occurredAt: new Date().toISOString(),
       }),
-      subscribe: (handler) => eventBus.subscribe(handler),
+      subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
       listPets,
       hooks: pluginHooks.contextFor(plugin.name),
     };
@@ -231,6 +231,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     }
     await Promise.allSettled([...queues.values()]);
     for (const plugin of [...plugins].reverse()) {
+      eventBus.releaseOwner(plugin.name);
       try {
         await plugin.stop?.();
       } catch (error) {
@@ -239,6 +240,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
           error instanceof Error ? error.message : error,
         );
       } finally {
+        eventBus.releaseOwner(plugin.name);
         invocationHandlers.delete(plugin.name);
         pluginHooks.releasePlugin(plugin.name);
       }
@@ -258,6 +260,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   } catch (error) {
     stopped = true;
     for (const plugin of [...startedPlugins].reverse()) {
+      eventBus.releaseOwner(plugin.name);
       try {
         await plugin.stop?.();
       } catch (rollbackError) {
@@ -266,6 +269,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
           rollbackError instanceof Error ? rollbackError.message : rollbackError,
         );
       } finally {
+        eventBus.releaseOwner(plugin.name);
+        invocationHandlers.delete(plugin.name);
         pluginHooks.releasePlugin(plugin.name);
       }
     }

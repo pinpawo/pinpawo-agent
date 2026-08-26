@@ -56,6 +56,10 @@ invocation transport，而不是把 Plugin event 当成 invocation event。
 Kanban Console 每次重连都重新读取 Kanban 自己的 snapshot/history；Kanban 的 SQLite
 仍是 task 事实源，HTTP Plugin 不拥有数据库或领域 history。
 
+Studio core 为每个 subscriber 隔离 FIFO delivery；HTTP 的异步 SSE 写入只阻塞 HTTP
+subscriber 自己，不阻塞其他 Plugin。Studio 还会按 Plugin lifecycle owner 自动释放该
+subscription，HTTP Plugin 保留显式退订仅用于及时清理自己的 transport 资源。
+
 ### `routes` hook
 
 HTTP Plugin 在自己的 `StudioPluginContext.hooks` 上暴露 `routes`。贡献方注册

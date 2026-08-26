@@ -217,7 +217,8 @@ resolver 只加载配置明确命名且已经安装的 package，并要求 packa
 - 任一 Pet 启动失败使整个 Host 启动失败；`listPets()` 只返回当前存活 Pet。
 - `StudioHost` success/failure init 均按所有权顺序释放资源。
 - Studio core 使用进程内 message queue 实现统一 Plugin event pub/sub；具体 transport
-  Plugin 只是 subscriber，event bus 仍不持久化。
+  Plugin 只是 subscriber，event bus 仍不持久化。每个 subscriber 使用独立 FIFO，异步
+  handler 不阻塞其他 subscriber；Studio 按 Plugin owner 自动释放 subscription。
 
 ## 5. 后续范围
 

@@ -345,6 +345,14 @@ export function inferLlmAdditionalThinkingReserveTokens(model: string): number {
   return inferLlmModelPreset(model)?.key === 'qwen-token-plan' ? 16_384 : 0;
 }
 
+export function resolveLlmGenerationReserveTokens(
+  llmConfig: Pick<LlmModelPreset, 'model' | 'maxOutputTokens'>,
+): number | undefined {
+  const reserve = (llmConfig.maxOutputTokens ?? 0)
+    + inferLlmAdditionalThinkingReserveTokens(llmConfig.model);
+  return reserve > 0 ? reserve : undefined;
+}
+
 export function buildLlmModelKwargs(
   model: string,
   thinking: boolean,

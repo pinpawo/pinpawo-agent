@@ -3,10 +3,12 @@ import type { AgentLlmConfig } from './agentConfig';
 import { ChatOpenAI } from '@langchain/openai';
 import {
   buildLlmModelKwargs,
-  inferLlmAdditionalThinkingReserveTokens,
   inferLlmRoleReasoningEffort,
   requiresLlmStreaming,
+  resolveLlmGenerationReserveTokens,
 } from './llmModelPresets';
+
+export { resolveLlmGenerationReserveTokens } from './llmModelPresets';
 
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
@@ -56,12 +58,4 @@ export function buildLocalAgentModels(
     observe: buildModel('observe'),
     subagent: buildModel('subagent'),
   };
-}
-
-export function resolveLlmGenerationReserveTokens(
-  llmConfig: Pick<AgentLlmConfig, 'model' | 'maxOutputTokens'>,
-): number | undefined {
-  const reserve = (llmConfig.maxOutputTokens ?? 0)
-    + inferLlmAdditionalThinkingReserveTokens(llmConfig.model);
-  return reserve > 0 ? reserve : undefined;
 }

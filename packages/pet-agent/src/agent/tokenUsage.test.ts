@@ -13,6 +13,7 @@ import {
   readLatestProviderInputTokens,
   readMessageTokenUsage,
   readMessagesTokenUsage,
+  resolveProviderInputWatermarkTokens,
 } from './tokenUsage';
 
 test('parseTokenUsageSnapshot validates canonical token usage snapshots', () => {
@@ -209,6 +210,7 @@ test('checkProviderInputWatermark reports the crossed watermark with its evidenc
 });
 
 test('checkProviderInputWatermark reserves generation capacity before applying the ratio', () => {
+  assert.equal(resolveProviderInputWatermarkTokens(1000, 200), 600);
   assert.deepEqual(checkProviderInputWatermark(600, 1000, 200), {
     latestInputTokens: 600,
     watermarkTokens: 600,

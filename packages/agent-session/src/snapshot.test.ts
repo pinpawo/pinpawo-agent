@@ -22,6 +22,7 @@ function createSession(): AgentSession {
       model: 'gpt-test',
       cwd: '/Users/example/project',
       contextWindow: 128_000,
+      contextCompactionWatermarkTokens: 96_000,
     },
   };
 }
@@ -56,6 +57,16 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   assert.equal(parseAgentSessionSnapshot({
     ...snapshot,
     version: AGENT_SESSION_SNAPSHOT_VERSION + 1,
+  }), null);
+  assert.equal(parseAgentSessionSnapshot({
+    ...snapshot,
+    session: {
+      ...snapshot.session,
+      runtime: {
+        ...snapshot.session.runtime,
+        contextCompactionWatermarkTokens: 128_001,
+      },
+    },
   }), null);
   assert.equal(parseAgentSessionSnapshot({
     ...snapshot,

@@ -186,8 +186,12 @@ stored on the session's checkpoint messages, so reconnect and resume can restore
 the cumulative value. When a provider or historical checkpoint has no usage
 metadata, the field remains absent until a completed run reports usage.
 `sessionTokenUsage.latestInputTokens` retains the latest provider prompt
-footprint separately from cumulative input/output totals; the TUI uses it to
-show remaining tokens before the shared 75% context-compaction watermark.
+footprint for the main conversation separately from cumulative input/output
+totals, which still include every provider call in the session. Runtime
+projection supplies `contextCompactionWatermarkTokens`, after generation and
+reasoning reserves have been excluded. The TUI uses those two values to show
+the observed room before automatic context compaction rather than overstating
+the full provider context window.
 
 The TUI reducer adapts TUI actions and presentation text into these inputs.
 Composer history, focus, connection copy, partial review drafts, the one-shot

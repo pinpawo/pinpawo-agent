@@ -130,6 +130,7 @@ export type AgentRuntimeView = {
   workspaceRoot?: string;
   stateRoot?: string;
   contextWindow?: number;
+  contextCompactionWatermarkTokens?: number;
 };
 
 export type AgentSession = {

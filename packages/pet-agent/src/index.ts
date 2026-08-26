@@ -171,6 +171,7 @@ export {
   readLatestProviderInputTokens,
   readMessageTokenUsage,
   readMessagesTokenUsage,
+  resolveProviderInputWatermarkTokens,
 } from './agent/tokenUsage';
 export {
   compactOrchestratorMessages,
@@ -213,6 +214,7 @@ export {
   selectLatestCapabilityArtifact,
 } from './agent/orchestrator/capabilityArtifacts';
 export {
+  mainConversationMessages,
   readMessageCreatedAtUtc,
   stampMessageCreatedAtUtc,
 } from './agent/orchestrator/messageLanes';

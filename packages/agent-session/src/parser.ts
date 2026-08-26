@@ -214,6 +214,18 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     return null;
   }
   if (
+    value.contextCompactionWatermarkTokens !== undefined
+    && (
+      typeof value.contextCompactionWatermarkTokens !== 'number'
+      || !Number.isSafeInteger(value.contextCompactionWatermarkTokens)
+      || value.contextCompactionWatermarkTokens <= 0
+      || typeof value.contextWindow !== 'number'
+      || value.contextCompactionWatermarkTokens > value.contextWindow
+    )
+  ) {
+    return null;
+  }
+  if (
     value.globalReviewPolicyMode !== undefined
     && !isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
   ) {
@@ -263,6 +275,9 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
     ...(typeof value.workspaceRoot === 'string' ? { workspaceRoot: value.workspaceRoot } : {}),
     ...(typeof value.stateRoot === 'string' ? { stateRoot: value.stateRoot } : {}),
     ...(typeof value.contextWindow === 'number' ? { contextWindow: value.contextWindow } : {}),
+    ...(typeof value.contextCompactionWatermarkTokens === 'number'
+      ? { contextCompactionWatermarkTokens: value.contextCompactionWatermarkTokens }
+      : {}),
   };
 }
 

@@ -146,7 +146,7 @@ test('checkpoint modalities normalize standard and legacy image blocks', () => {
   );
 });
 
-test('readTuiCheckpointTokenUsage aggregates every provider call in the session', () => {
+test('readTuiCheckpointTokenUsage aggregates every provider call but tracks main context', () => {
   const usage = readTuiCheckpointTokenUsage([
     new HumanMessage('hello'),
     new AIMessage({
@@ -168,7 +168,7 @@ test('readTuiCheckpointTokenUsage aggregates every provider call in the session'
     inputTokens: 125,
     outputTokens: 55,
     totalTokens: 180,
-    latestInputTokens: 100,
+    latestInputTokens: 15,
     source: 'provider',
     scope: 'session',
   });

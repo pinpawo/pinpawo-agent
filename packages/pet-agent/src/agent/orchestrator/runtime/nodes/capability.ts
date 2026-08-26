@@ -38,7 +38,7 @@ import {
   withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
-import { withRunUserRequestContext } from '../../capabilityContext';
+import { materializeDelegation } from '../../delegationBriefing';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -88,10 +88,33 @@ export function createCapabilityNode(params: {
     const toolkitList = [...compiledCapability.toolkits];
     const lane: MessageLane = runNextDelegation.lane;
     const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
-    const scopedMessages = withRunUserRequestContext(
-      laneMessages(state.messages, lane, transcriptRunId, runNextDelegation.id),
-      state.runUserRequest,
+    const canonicalMessages = laneMessages(
+      state.messages,
+      lane,
+      transcriptRunId,
+      runNextDelegation.id,
     );
+    const briefingBase = {
+      lane,
+      transcriptRunId,
+      delegationId: runNextDelegation.id,
+      userRequest: state.runUserRequest,
+      task: runNextDelegation.task,
+    };
+    const [delegationBriefing] = materializeDelegation(
+      runNextDelegation.mode === 'initial'
+        ? {
+            ...briefingBase,
+            mode: 'initial',
+            essentialContext: runNextDelegation.contextSummary,
+          }
+        : {
+            ...briefingBase,
+            mode: 'continue',
+            guidance: runNextDelegation.contextSummary,
+          },
+    ).laneMessages;
+    const scopedMessages = [...canonicalMessages, delegationBriefing];
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -254,6 +277,7 @@ export function createCapabilityNode(params: {
         task: runNextDelegation.task,
         announceMessageId: result.announceMessageId,
       },
+      canonicalMessages,
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });
     const interrupted = result.completionReason === 'interrupted';

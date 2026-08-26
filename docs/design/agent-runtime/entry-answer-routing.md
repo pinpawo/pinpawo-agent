@@ -8,10 +8,11 @@ The root orchestrator should decide whether a fresh user request can be answered
 from the existing conversation before starting planning. It must not ask a model
 to rewrite the request into a second, potentially divergent goal.
 
-The exact latest textual `HumanMessage` is the run boundary stored as
-`runUserRequest`. This value remains available to Planner, Capability execution,
-Answer, interruption, resume, and boundary decisions for the lifetime of the
-run.
+The exact latest textual `HumanMessage` seeds the run boundary stored as
+`runUserRequest`. Entry Answer may resolve a continuation utterance against the
+conversation when it calls `plan_request`. The resulting value remains available
+to Planner, Capability execution, terminal finalization, interruption, resume,
+and boundary decisions for the lifetime of the run.
 
 ## Flow
 
@@ -19,7 +20,7 @@ run.
 prepare -> compactContext -> captureUserRequest -> Entry Answer
                                                   | normal AI text -> END
                                                   ` plan_request -> Planner
-Planner -> Capability / Result Answer
+Planner -> Capability / terminal finalization
 ```
 
 `captureUserRequest` is deterministic. It reads the latest main-conversation
@@ -28,16 +29,16 @@ state.
 
 Entry Answer is a small `StateGraph` built from a model node and LangGraph's
 standard `ToolNode`. The model receives the normal main conversation with one
-empty control tool bound:
+control tool bound:
 
 ```ts
-plan_request({})
+plan_request({ goal })
 ```
 
 A normal model response is the user-visible reply and ends the run. Calling
 `plan_request` returns `Command.PARENT` with a `Send` to the root
-`capabilityPlanner` node. The tool does not contain business parameters and does
-not form a plan.
+`capabilityPlanner` node. `goal` resolves references such as “继续” against the
+conversation; it does not contain a plan, execution steps, or framework policy.
 
 ## Ownership boundaries
 
@@ -48,8 +49,8 @@ Entry Answer owns only:
 - deciding that execution requires Planner.
 
 Planner owns Capability discovery, task formation, execution ordering, and
-terminal planning outcomes. Result Answer owns synthesis after Planner or
-Capability execution. It does not bind `plan_request`.
+terminal planning outcomes. Terminal finalization turns those outcomes into a
+user-visible reply and clears run-scoped state. It does not bind `plan_request`.
 
 The routing transition lives in the tool's returned `Command`, not in
 `wrapToolCall`, response-text parsing, or a separate `isPlanRequest` predicate.

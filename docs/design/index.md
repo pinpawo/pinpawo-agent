@@ -11,17 +11,12 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Agent requirements](agent-runtime/agent-requirements.md)
-- [Persistent Planner](agent-runtime/persistent-planner.md),
-  [orchestrator routing](agent-runtime/orchestrator-routing.md), and
-  [terminal semantics](agent-runtime/terminal-semantics.md)
-- [Planner non-commit routing](agent-runtime/planner-incomplete-routing.md)
-- [Dynamic context governance](agent-runtime/dynamic-context-governance.md),
-  [human review](agent-runtime/human-review.md), and
-  [subagent limits](agent-runtime/subagent-limits.md)
-- [Capability / Toolkit composition](agent-runtime/toolkit-composition.md),
-  [Toolkit HITL policy](agent-runtime/toolkit-hitl-policy.md), and
-  [decision-prompt prefix](agent-runtime/decision-prompt-prefix.md)
+- [Persistent Planner](agent-runtime/persistent-planner.md) and
+  [terminal response finalization](agent-runtime/terminal-response.md)
+- [Entry Answer routing](agent-runtime/entry-answer-routing.md) and
+  [Delegation Announce messages](agent-runtime/delegation-announce-message.md)
+- [Capability / Toolkit composition](agent-runtime/toolkit-composition.md) and
+  [Toolkit HITL policy](agent-runtime/toolkit-hitl-policy.md)
 
 ## Local host and interfaces
 

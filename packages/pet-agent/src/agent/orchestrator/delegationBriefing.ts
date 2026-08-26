@@ -2,15 +2,14 @@ import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import { getPinpetMeta, setPinpetMeta, stampMessageCreatedAtUtc } from './messageLanes';
 import { indentXmlBlock, xmlTextBlock } from './prompts/shared';
-import type { MessageLane } from './types';
+import type { MessageLane, UserRequest } from './types';
 
 /**
  * Delegation briefing — the downward counterpart of the (upward) subagent
- * handoff. When a delegation materializes, the Capability Planner node renders the
- * structured current task into a compact delegation-lane AIMessage, so the
- * executing subagent reads its task boundary from message history instead of a
- * dynamic system prompt. The briefing remains private to the Capability lane;
- * the canonical main conversation receives only an accepted completion announce.
+ * handoff. Immediately before a Capability model call, the runtime projects the
+ * stable user request and the current task into one compact AIMessage. The
+ * projection is invocation-only: neither it nor a separate user-request context
+ * message is persisted in canonical main or private-lane history.
  *
  * Naming contract: "briefing" is orchestrator → subagent (task dispatch);
  * "handoff" is subagent → main (deliverable return). See issue #362.
@@ -26,6 +25,7 @@ type DelegationSpecBase = {
   lane: MessageLane;
   transcriptRunId: string;
   delegationId: string;
+  userRequest: UserRequest;
   task: string;
 };
 
@@ -84,6 +84,11 @@ export function insertBeforeLatestDelegationBriefing(
 
 function renderDelegationBriefingXml(spec: DelegationSpec): string {
   const blocks = [
+    [
+      '<run_user_request role="goal_context" source="orchestrator_state" trust="read_only">',
+      indentXmlBlock(xmlTextBlock('request', spec.userRequest), 2),
+      '</run_user_request>',
+    ].join('\n'),
     xmlTextBlock('task', spec.task),
     spec.mode === 'initial' && spec.essentialContext
       ? xmlTextBlock('essential_context', spec.essentialContext)
@@ -101,9 +106,9 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
 }
 
 /**
- * Materialize a typed delegation into its private lane briefing. Stable
- * execution rules stay in the governing prompt; XML contains only
- * per-delegation data and is never parsed back into runtime state.
+ * Materialize a typed delegation into its model-visible briefing. Stable
+ * execution rules stay in the governing prompt; XML contains only invocation
+ * data and is never parsed back into runtime state.
  */
 export function materializeDelegation(spec: DelegationSpec): MaterializedDelegation {
   const briefingMessage = stampBriefingMeta(

@@ -29,6 +29,7 @@ function isRunDelegationSummary(value: unknown): value is RunDelegationSummary {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
     && isMessageLane(value.lane)
+    && (value.mode === 'initial' || value.mode === 'continue')
     && typeof value.task === 'string'
     && isDelegationStatus(value.status)
     && (value.resultPreview === null || typeof value.resultPreview === 'string');

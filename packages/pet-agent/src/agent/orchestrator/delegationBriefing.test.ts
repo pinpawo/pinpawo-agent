@@ -13,12 +13,13 @@ import {
   getPinpetMeta,
 } from './messageLanes';
 
-test('initial delegation materializes one scoped private briefing', () => {
+test('initial delegation materializes one model-only briefing with the stable goal', () => {
   const materialized = materializeDelegation({
     mode: 'initial',
     lane: 'capability:github',
     transcriptRunId: 'run-1',
     delegationId: 'task-b',
+    userRequest: '处理 GitHub issue，并保留已有工作。',
     task: '关闭 GitHub Issue #272。',
     essentialContext: 'Capability intent: GitHub issue 操作',
   });
@@ -26,6 +27,8 @@ test('initial delegation materializes one scoped private briefing', () => {
   const text = String(briefing.content);
 
   assert.match(text, /^<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">/);
+  assert.match(text, /<run_user_request role="goal_context" source="orchestrator_state" trust="read_only">/);
+  assert.match(text, /<request>[\s\S]*处理 GitHub issue，并保留已有工作。[\s\S]*<\/request>/);
   assert.match(text, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
   assert.match(text, /<essential_context>[\s\S]*Capability intent: GitHub issue 操作[\s\S]*<\/essential_context>/);
   assert.doesNotMatch(text, /run-1|task-b|capability:github/);
@@ -39,6 +42,7 @@ test('initial delegation omits empty essential context', () => {
     lane: 'capability:general',
     transcriptRunId: 'run-1',
     delegationId: 'task-a',
+    userRequest: '检查仓库。',
     task: '检查仓库状态。',
     essentialContext: null,
   }).laneMessages;
@@ -52,6 +56,7 @@ test('continuation delegation carries task and explicit user guidance', () => {
     lane: 'capability:github',
     transcriptRunId: 'run-1',
     delegationId: 'task-a',
+    userRequest: '完成 GitHub issue 操作。',
     task: '关闭 GitHub Issue #272。',
     guidance: '未验证 issue 状态，请确认已关闭。',
   });
@@ -68,6 +73,7 @@ test('continuation delegation carries task and explicit user guidance', () => {
     lane: 'capability:github',
     transcriptRunId: 'run-1',
     delegationId: 'task-a',
+    userRequest: '完成 GitHub issue 操作。',
     task: '关闭 GitHub Issue #272。',
     guidance: null,
   }).laneMessages;
@@ -80,6 +86,7 @@ test('delegation XML safely preserves a CDATA terminator in task text', () => {
     lane: 'capability:general',
     transcriptRunId: 'run-1',
     delegationId: 'task-a',
+    userRequest: '检查边界。',
     task: '检查 ]]> 边界。',
     essentialContext: null,
   }).laneMessages;
@@ -93,6 +100,7 @@ test('briefing metadata is routing truth and never reads as announce or handoff'
     lane: 'capability:general',
     transcriptRunId: 'run-9',
     delegationId: 'task-9',
+    userRequest: '完成任务。',
     task: '任务。',
     essentialContext: null,
   }).laneMessages;

@@ -22,7 +22,7 @@ Capability Planner 更新剩余计划。这样在一个执行边界上存在两�
 capability
   -> outcomeDecision
   -> boundary Planner
-  -> capability / answer
+  -> capability / terminal finalization
 ```
 
 两者都需要理解用户目标、当前 task、最新结果和剩余计划，并都会判断最新结果如何
@@ -52,7 +52,7 @@ capability
 - Planner 对 root 只提交结构化 control action、plan tasks，以及
   `user_input_required` 专用的单个结构化问题；
 - Planner transcript、工具消息、Capability 文档观察和内部摘要进入 root checkpoint
-  的 Planner lane，但不进入 main conversation、Answer input 或 handoff。
+  的 Planner lane，但不进入 main conversation、终态综合输入或 handoff。
 - Capability 渐进披露是 trace-scoped 状态：`general`（若存在）作为第一项，Entry
   搜索命中的 Capability 追加后在后续 Boundary 中继续可见，Boundary 新命中的项也继续追加；
 - Planner system prompt 只描述稳定目标与上下文语义；Capability 文档和搜索状态不再拼入
@@ -64,15 +64,15 @@ capability
 entryDecision
   -> Planner
        |-- execute_plan        -> capability
-       |-- user_input_required -> answer
-       `-- unavailable         -> answer
+       |-- user_input_required -> finalization
+       `-- unavailable         -> finalization
 capability
   -> Planner
        |-- continue_current  -> same capability delegation
        |-- advance_plan      -> accept handoff -> next delegation
-       |-- goal_done         -> accept handoff -> answer
-       |-- user_input_required -> preserve active delegation -> answer
-       `-- unavailable       -> preserve truthful blocked state -> answer
+       |-- goal_done         -> accept handoff -> finalization
+       |-- user_input_required -> preserve active delegation -> finalization
+       `-- unavailable       -> preserve truthful blocked state -> finalization
 ```
 
 ## 术语与身份边界
@@ -119,7 +119,7 @@ threadId
 ## 非目标
 
 - 不把 Planner transcript 合并进 `OrchestratorState.messages`；
-- 不让 Planner 直接生成用户可见回复；
+- 不把 Planner 作为常规用户回复生成器；ordinary-text non-commit 只作为显式故障兜底；
 - 不让 Planner 直接修改 root state 或执行 handoff；
 - 不让 capability agent 自行决定 task 或用户目标是否完成；
 - 不依赖 `completionReason` 推导 task 成败；
@@ -154,14 +154,15 @@ threadId
 
 - main message lane；
 - Capability delegation announce；
-- Answer prompt；
+- 终态综合输入；
 - main-conversation compaction input；
 - 面向调用方的投影或 API response；
 - `runDelegationSummaries.resultPreview`。
 
-### 3. Planner 只有一个受控输出出口
+### 3. Planner 只有一个受控 control 出口
 
-Planner 只提交 `PlannerCommit`。除 plan task 外，不允许输出任意语义文本。
+合法的 Planner control output 只通过 `PlannerCommit` 提交。普通 assistant text 不具有
+control 语义，只能进入下文定义的 non-commit 恢复。
 
 ```ts
 type PlannerAction =
@@ -184,7 +185,7 @@ type PlannerCommit = {
 `action` 是 graph control protocol，不是用户内容。可执行语义只通过 `tasks`
 投影；`continue_current` 不携带新语义，也不能替换当前 task 或后续计划。
 `userInputRequest` 是唯一例外：它只允许在 `user_input_required` 中出现，
-且只携带 Answer 必须询问的一个具体问题，不携带推理或上下文。
+且只携带终态回复必须询问的一个具体问题，不携带推理或上下文。
 
 移除以下 Planner 输出形式：
 
@@ -192,8 +193,11 @@ type PlannerCommit = {
 - `context`；
 - 顶层或自由形式的 `question`；
 - `gap_note`；
-- direct text fallback；
-- Planner 生成的 Answer briefing。
+- 从普通文本推导的 Planner commit；
+- Planner 生成的终态回复 briefing。
+
+模型返回普通文本且没有 terminal tool call 时，runner 将其标记为 non-commit；该恢复边界
+不扩展 `PlannerCommit`，详见“Planner non-commit”。
 
 ### 4. Root graph 独占状态转移
 
@@ -204,7 +208,7 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 - delegation status 如何更新；
 - 是否复用当前 delegation；
 - 如何 materialize 下一项 task；
-- terminal reply mode；
+- terminal outcome 与 finalization route；
 - iteration、handoff availability 和 execution limits；
 - invariant violation、checkpoint 缺失与恢复失败。
 
@@ -258,9 +262,9 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 
 - post-execution 阶段必须存在可接受的 announce；
 - `tasks` 必须为空；
-- graph 接受 handoff、完成 delegation，并以 `goal_done` 进入 Answer；
-- Planner lane 文本不能用于完成总结；Answer 只能基于公开请求、accepted handoff
-  和 artifact 生成回复。
+- graph 接受 handoff、完成 delegation，并以 `goal_done` 进入终态收口；
+- Planner lane 文本不能用于完成总结；终态回复只能基于公开请求、accepted handoff
+  和 artifact 生成。
 
 ### `user_input_required`
 
@@ -281,8 +285,8 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 - `userInputRequest.question` 必须是非空、有长度上限的单一具体问题；
 - post-execution 阶段保留 active delegation 与 transcript；
 - 不把未完成 announce 标记为 completed handoff；
-- Answer 原样使用结构化问题，并可根据公开用户请求、当前 announce
-  和 artifact 简要说明进展；
+- 终态收口原样使用结构化问题，并可根据公开用户请求、当前 announce
+  和 artifact 确定性地说明必要进展；
 - Planner 不输出自由文本 question 或 context；
 - 用户回复后，以相同 `traceId`、新 `runId` 恢复 Planner 和 active delegation。
 
@@ -294,7 +298,7 @@ Planner 只做语义判断并提交 commit。graph 必须确定性地负责：
 
 - `tasks` 必须为空；
 - root 保存 typed blocked state，不接收 Planner 自由文本解释；
-- Answer 只根据 registry/runtime 的公开确定性事实说明限制；
+- 终态回复只根据 registry/runtime 的公开确定性事实说明限制；
 - 不能把“没有 Capability”表述为用户目标已经完成。
 
 ### 结构校验
@@ -350,19 +354,20 @@ type CapabilityDisclosureState = {
 - 初次规划：没有 active delegation 和 announce；
 - 初次规划从完整 root messages 中选择截止当前请求的 main conversation 和当前 trace 的
   Planner lane；
-- delegation 返回或 fresh-turn continuation 时选择 main conversation、当前 delegation 的
-  完整 tool-protocol-safe lane transcript，以及当前 trace 的 Planner lane；
-- announce 字段只保留 boundary identity 与 stop reason；announce 内容、用户追问和执行
-  进展直接从原始消息读取，不再重复投影为字符串字段；
+- delegation 返回或 fresh-turn continuation 时复用同一 main conversation 与 Planner lane，
+  并只追加当前 delegation 的标准 Announce 投影；
+- announce 字段只保留 boundary identity 与 stop reason，用于选择准确的 typed Announce；
+  私有 Capability Human/AI/Tool transcript 不进入 Planner；
 - `capabilityDisclosure` 是当前 trace 已经披露给 Planner 的有序 Capability 集合和空搜索
   额度；Entry 与 Boundary 使用同一个状态，而不是每次 invocation 重新创建默认候选；
 - registry 变化：在下一次正常 Planner input 中提供新的 digest。
 
-`messages` 是 root checkpoint 已经持久化的 canonical 输入。Planner 领域根据 mode 选择
-main conversation、当前 delegation lane 与 Planner lane，保留原始 message objects、媒体
-content blocks 和 tool call/result 配对。Planner 本轮产生的新输入、搜索观察和 terminal
-tool 配对会标记为 `lane: orchestrator`、`source: capability_planner` 并通过 root message
-reducer 回写；它们不会进入 main conversation 或 Capability transcript。
+`messages` 是 root checkpoint 已经持久化的 canonical 输入。Planner 领域选择 main
+conversation 与当前 trace 的 Planner lane，保留原始 message objects、媒体 content blocks
+和 Planner 自身的 tool call/result 配对；Boundary 再临时追加当前 Announce。Planner 本轮
+产生的新输入、搜索观察和 terminal tool 配对会标记为 `lane: orchestrator`、
+`source: capability_planner` 并通过 root message reducer 回写；它们不会进入 main
+conversation 或 Capability transcript。
 
 这里的“用户继续”只是 Planner 已完成上一轮 commit 后收到的一个新输入 turn，不是
 checkpoint resume，也不需要 `user_resumed` 事件。Capability announce 本来属于 execution
@@ -373,7 +378,7 @@ evidence；Planner 只消费它，不拥有它。
 Planner 不维护独立 checkpoint namespace。成功调用产生的 lane updates 与 root transition
 在同一个 graph step 中提交，因此进程重启后从 root checkpoint 恢复。相同 `inputId` 的
 terminal ToolMessage 保存在 Planner lane 中，可直接 replay commit 而不重复调用模型。
-fresh trace 在 Entry capture 阶段删除旧 trace 的 Planner lane，即使本轮随后直接 Answer、
+fresh trace 在 Entry capture 阶段删除旧 trace 的 Planner lane，即使本轮随后直接回复、
 不进入 Planner，也不会让隐藏 transcript 无限累积。
 
 Planner 当前只使用无需人机中断的 registry search 和 terminal tools。若未来需要在 Planner
@@ -382,7 +387,7 @@ checkpoint lineage；不得为此恢复第二套私有 message checkpoint。
 
 #### Fresh-turn task continuation
 
-当 Planner 已经提交 `user_input_required`，Answer 已回复用户，前一个 root run 已正常
+当 Planner 已经提交 `user_input_required`，终态收口已回复用户，前一个 root run 已正常
 结束，之后用户通过新请求继续同一任务时：
 
 - 这是一个新的 root run，因此创建新 `runId`；
@@ -420,6 +425,21 @@ registry digest；完整文档在每次调用时从 workspace 重新解析。顺
 
 closed 只停止 discovery。Planner 仍须基于已披露 Capability 提交合法终态，不得因此返回
 `planner_incomplete`。
+
+### Planner non-commit
+
+普通 assistant text 不是 Planner commit。Runner 保留本次真实输出并返回 typed
+`terminal_commit_missing`，但不得合成 ToolMessage、猜测 action，或把失败伪装成
+`unavailable`。
+
+- Entry non-commit 不 materialize delegation，并以 `planner_incomplete` 进入终态收口；
+- Boundary non-commit 保留 active delegation 与 committed tail，并以
+  `planner_direct_answer` 携带完整文本进入终态收口；
+- 这两个名称是当前 root transition 的状态值，不是综合模型的 reply mode；
+- 后续终态收口重构应让 Boundary 文本直接交付，避免第二个模型改写。
+
+该恢复只覆盖一次成功模型调用没有 terminal commit 的情况。Planner timeout、document
+limit 和 provider error 仍是 operational failure，不得复用 non-commit 语义。
 
 ### 完整 Boundary 模型输入示例
 
@@ -474,9 +494,9 @@ auth/index.ts 存在循环依赖；应提取 token validation 并保持公开接
 ```
 
 Entry 与 Boundary 直接复用 `mainConversationMessages()` 作为 canonical main conversation
-selector：保留完整主对话，排除私有 Capability lane transcript 和内部 delegation briefing，
-并由既有 tool-protocol safety projection 排除不完整的内部工具调用。Boundary 在该共同基座
-之后只额外追加当前尚未验收的标准 announce，再追加包含
+selector：保留完整主对话，排除私有 Capability lane transcript 和 Planner lane，并由既有
+tool-protocol safety projection 排除不完整的内部工具调用。Boundary 在该共同基座之后只额外
+追加当前尚未验收的标准 announce，再追加包含
 `planning_boundary` 的本轮 Human input。当前 announce 不同时出现在 main conversation 中。
 
 同次调用绑定以下 tools，`tool_choice` 保持 `auto`：
@@ -587,10 +607,10 @@ checkpoint API 能直接可靠判断初始化状态，可以不增加此字段�
 prepare
   -> compactContext
   -> entryDecision
-       |-- answer -> answer
+       |-- reply -> END
        `-- needs_plan -> Planner(initial boundary input)
                             |-- execute_plan -> capability
-                            `-- unavailable -> answer
+                            `-- terminal outcome -> finalization
 ```
 
 ### Post execution
@@ -604,19 +624,19 @@ capability
        |-- advance_plan
        |     `-- accept handoff -> complete delegation -> next capability
        |-- goal_done
-       |     `-- accept handoff -> answer
+       |     `-- accept handoff -> finalization
        |-- user_input_required
-       |     `-- preserve active delegation -> answer
+       |     `-- preserve active delegation -> finalization
        `-- unavailable
-             `-- typed blocked state -> answer
+             `-- typed blocked state -> finalization
 ```
 
 Iteration limit 必须在调用 Planner 前由 code guard 检查。handoff availability 可以在
 Planner commit 后由 graph 验证，但不能作为 Planner prompt 才知道的隐式规则。
 
-## Answer 边界
+## 终态收口边界
 
-Answer 不得读取 Planner lane。
+终态收口不得读取 Planner lane。
 
 Reply mode 的公开依据：
 
@@ -626,8 +646,9 @@ Reply mode 的公开依据：
 - `unavailable`：user request + registry/runtime 的确定性公开 facts；
 - iteration/execution limit：guard state + active delegation evidence。
 
-Planner action 可以决定 reply mode，但 Planner 的自由文本、tool observations 和内部
-summary 不能成为 Answer context。
+Planner action 决定 terminal outcome，但 Planner 的自由文本、tool observations 和内部
+summary 不能成为结果综合上下文。显式 ordinary-text non-commit payload 是直接交付数据，
+不是 Planner 推理摘要。
 
 ## 建议实现结构
 
@@ -738,8 +759,8 @@ result 字符串扫描也不能成为第二来源。
 - 删除独立 Outcome graph node、runner、schema 和 prompt；
 - 删除 `runPlannerReturn` / `PlannerAnswerDisposition`；
 - 删除旧 Planner direct text 路径和普通文本确认轮；Boundary 模型违反终态协议而直接返回
-  文本时，仅保留一个经 Answer 输出的故障兜底，不从文本推导 PlannerCommit；
-- 更新 Answer context builder；
+  文本时，仅保留一个由终态收口交付的 non-commit 兜底，不从文本推导 PlannerCommit；
+- 更新终态 context projector；
 - 更新 raw `../..` 设计文档；
 - 不修改 `../../wiki`，等待单独 ingest 请求。
 
@@ -767,8 +788,8 @@ result 字符串扫描也不能成为第二来源。
 ### Planner lane 隔离测试
 
 - Planner AI/tool messages 进入 `OrchestratorState.messages` 的 `orchestrator` lane；
-- main conversation、Answer 和 Capability selector 不读取 Planner lane；
-- `capability_search` 文本不进入 handoff、Answer input 或 delegation summary；
+- main conversation、终态收口和 Capability selector 不读取 Planner lane；
+- `capability_search` 文本不进入 handoff、终态综合输入或 delegation summary；
 - 新 trace 无法读取旧 trace Planner lane；
 - 相同 `traceId` 在不同 conversation thread 之间仍然隔离。
 
@@ -845,11 +866,12 @@ result 字符串扫描也不能成为第二来源。
 
 缓解：registry digest invalidation、每个 execution result 作为新事实覆盖旧计划假设。
 
-### Answer 缺少 Planner 的自由文本问题描述
+### 终态综合不读取 Planner 私有推理
 
-这是有意设计。Answer 必须从公开用户请求、Capability announce、artifact 和 typed state
-生成回复。若无法做到，说明缺少应由 executor 公开产出的 evidence，而不是 Planner 应该
-泄漏私有推理。增加自由文本 Planner return 不作为修复方案。
+这是有意设计。`goal_done` 综合必须从公开用户请求、Capability announce、artifact 和 typed
+state 生成回复。若无法做到，说明缺少应由 executor 公开产出的 evidence，而不是 Planner
+应该泄漏私有推理。唯一例外是上文明确建模的 ordinary-text non-commit：它作为完整的直接回复
+payload 交付，而不是作为综合模型的隐藏上下文。
 
 ### Checkpoint 体积持续增长
 
@@ -863,8 +885,8 @@ Planner lane 不做独立压缩；它与 root messages 一起保留。新 trace 
 - [ ] 新 trace 与旧 trace、不同 thread 之间严格隔离；
 - [ ] Planner agent 只构建一次，持久消息由 root Planner lane 拥有；
 - [ ] Planner 只输出 `PlannerCommit.action + tasks`；
-- [ ] Planner 不再输出 `reason/context/question/gap_note` 或 direct text；
-- [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或 Answer；
+- [ ] 合法 Planner commit 不输出 `reason/context/question/gap_note` 或 direct text；普通文本只作为 typed non-commit；
+- [ ] Planner transcript/tool observations/summary 进入 root Planner lane，但不进入 main conversation 或终态综合；
 - [ ] Boundary Planner 接收与 Entry 相同的 canonical main conversation，并额外接收当前标准
       delegation announce；不接收私有 execution lane transcript；
 - [ ] 新 trace 的 disclosed Capability 以 `general`（若存在）为第一项，Entry/Boundary

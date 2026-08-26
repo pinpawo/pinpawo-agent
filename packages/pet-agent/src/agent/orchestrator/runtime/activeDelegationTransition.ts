@@ -1,4 +1,3 @@
-import { materializeDelegation } from '../delegationBriefing';
 import {
   resumeRunDelegationSummary,
   updateRunDelegationSummaryResult,
@@ -17,6 +16,7 @@ function buildRunNextDelegation(
   return {
     id: activeDelegation.id,
     lane: activeDelegation.lane,
+    mode: 'continue',
     task: activeDelegation.task,
     contextSummary: guidance
       ?? activeDelegation.contextSummary
@@ -85,17 +85,7 @@ export function applyActiveDelegationTransition(
     };
   }
 
-  const materializedDelegation = materializeDelegation({
-    mode: 'continue',
-    lane: activeDelegation.lane,
-    transcriptRunId: activeDelegation.transcriptRunId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    guidance,
-  });
-
   return {
-    messages: materializedDelegation.laneMessages,
     traceId: activeDelegation.traceId,
     runUserRequest: resumedUserRequest,
     runNextDelegation,

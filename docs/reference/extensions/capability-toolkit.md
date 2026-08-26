@@ -320,8 +320,8 @@ subagent system prompt section 的稳定顺序是：
 4. Capability Markdown instructions；
 5. host runtime environment（存在时）。
 
-当前任务本身通过 lane 中的 delegation briefing message 传入，不重复写进稳定
-system prompt。subagent 只获得编译到该 Capability 的 tools。
+当前任务本身通过调用前临时生成的 delegation briefing 传入，不写进稳定
+system prompt 或 checkpoint lane。subagent 只获得编译到该 Capability 的 tools。
 
 ## 6. General 是普通 Capability
 

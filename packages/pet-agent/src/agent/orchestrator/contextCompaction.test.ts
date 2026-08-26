@@ -80,6 +80,7 @@ test('orchestrator context compaction excludes delegation briefings from summary
     lane: 'capability:general',
     transcriptRunId: 'run-1',
     delegationId: 'delegation-1',
+    userRequest: '完成任务',
     task: '不要把这段调度文本写入摘要',
     essentialContext: null,
   }).laneMessages;

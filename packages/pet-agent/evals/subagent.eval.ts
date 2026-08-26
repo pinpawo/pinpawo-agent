@@ -328,14 +328,16 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
         lane: 'capability:eval',
         transcriptRunId: 'eval-run',
         delegationId: 'eval-delegation',
+        userRequest: String(inputs.user_request ?? task),
         task,
-        gapNote: typeof inputs.gap_note === 'string' ? inputs.gap_note : null,
+        guidance: typeof inputs.gap_note === 'string' ? inputs.gap_note : null,
       }
     : {
         mode,
         lane: 'capability:eval',
         transcriptRunId: 'eval-run',
         delegationId: 'eval-delegation',
+        userRequest: String(inputs.user_request ?? task),
         task,
         essentialContext: typeof inputs.essential_context === 'string'
           ? inputs.essential_context
@@ -352,6 +354,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
       lane: 'capability:eval',
       transcriptRunId: 'eval-run',
       delegationId: 'eval-delegation',
+      userRequest: String(inputs.user_request ?? task),
       task: priorTask,
       essentialContext: null,
     }).laneMessages[0]);

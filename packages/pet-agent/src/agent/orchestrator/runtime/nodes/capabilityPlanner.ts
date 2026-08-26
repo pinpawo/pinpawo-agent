@@ -22,7 +22,6 @@ import {
   type PlannerCommit,
   type PlannerReplyOutcome,
 } from '../../capabilityPlanner/protocol';
-import { materializeDelegation } from '../../delegationBriefing';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -92,6 +91,7 @@ function materializeNextDelegation(params: {
   const runNextDelegation: RunNextDelegation = {
     id: randomUUID().slice(0, 8),
     lane,
+    mode: 'initial',
     task: nextTask.task,
     contextSummary: null,
   };
@@ -101,17 +101,7 @@ function materializeNextDelegation(params: {
     state.runUserRequest,
     state.traceId,
   );
-  const materializedDelegation = materializeDelegation({
-    mode: 'initial',
-    lane,
-    transcriptRunId: taskActiveDelegation.transcriptRunId,
-    delegationId: runNextDelegation.id,
-    task: runNextDelegation.task,
-    essentialContext: null,
-  });
-
   return {
-    messages: materializedDelegation.laneMessages as BaseMessage[],
     runNextDelegation,
     runCapabilityPlan: remainingPlan,
     taskActiveDelegation,
@@ -184,19 +174,11 @@ function buildContinueCurrentUpdate(params: {
   const runNextDelegation: RunNextDelegation = {
     id: activeDelegation.id,
     lane: activeDelegation.lane,
+    mode: 'continue',
     task: activeDelegation.task,
     contextSummary: null,
   };
-  const materialized = materializeDelegation({
-    mode: 'continue',
-    lane: activeDelegation.lane,
-    transcriptRunId: activeDelegation.transcriptRunId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    guidance: null,
-  });
   return {
-    messages: materialized.laneMessages,
     runNextDelegation,
     runCapabilityPlan: state.runCapabilityPlan,
     taskActiveDelegation: {
@@ -534,7 +516,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       update: includePlannerMessages({
         ...accepted,
         ...next,
-        messages: [...accepted.messages, ...next.messages],
+        messages: accepted.messages,
       }),
       goto: 'capability',
     });

@@ -10,8 +10,8 @@ HTTP，并暴露 HTTP-owned route hook：
 ```text
 POST /dispatch  ──> context.dispatch(request) ──> receipt identity
 
-context.subscribe(event)
-        └─────────> GET /events (SSE) ──────────> HTTP client
+Studio core event bus ──> context.subscribe(event)
+                                └─> GET /events (live SSE) ──> HTTP client
 
 Kanban Plugin ──contribute──> http/routes hook ──> GET /kanban
 ```
@@ -46,16 +46,15 @@ invocation transport，而不是把 Plugin event 当成 invocation event。
 
 ### `GET /events`
 
-该入口把 `context.subscribe()` 收到的 `StudioEvent` 作为 `studio.event` SSE 推送。
-这是 live-only feed：
+该入口是 Studio core event bus 的普通 subscriber。HTTP Plugin 不拥有 event queue，也不
+建立 Plugin 间的第二条总线；它只把 `context.subscribe()` 收到的 `StudioEvent` 编码为
+`studio.event`，广播给当前 SSE client。Plugin 间的发布与订阅统一通过
+`StudioPluginContext.notify/subscribe`。
 
-- 不生成 durable event id；
-- 不实现 `Last-Event-ID` replay；
-- 断线期间的事件会丢失；
-- heartbeat 只是连接保活，不改变 event 语义。
-
-durable event log、断线重放和按用户建立 event cursor 需要独立设计，不能由内存 SSE
-连接假装提供。
+这是 live-only projection：不生成 durable event id，不实现 `Last-Event-ID` replay，断线
+期间的 event 会丢失。heartbeat 只是 HTTP transport 保活，不进入 Studio event bus。
+Kanban Console 每次重连都重新读取 Kanban 自己的 snapshot/history；Kanban 的 SQLite
+仍是 task 事实源，HTTP Plugin 不拥有数据库或领域 history。
 
 ### `routes` hook
 
@@ -84,7 +83,7 @@ lifecycle 会移除 route。
 ## 3. Lifecycle
 
 - `start(context)` 完成监听和 event subscription 后才成功；监听失败必须完整 rollback；
-- `stop()` 先停止接收 event，结束 SSE client，再关闭 HTTP server；可重复调用；
+- `stop()` 先退订 Studio event，结束 SSE client，再关闭 HTTP server；可重复调用；
 - Plugin instance 不能被并发或重复启动；实际分配端口通过只读 `address()` 暴露给
   application/tests，不进入 Studio contract。
 

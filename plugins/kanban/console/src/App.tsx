@@ -152,44 +152,49 @@ export function App() {
     };
 
     const run = async () => {
-      try {
-        await refresh();
-        const response = await fetch(`${studioHttpUrl}/events`, {
-          headers,
-          signal: abort.signal,
-        });
-        if (!response.ok || !response.body) throw new Error(`Studio SSE request failed (${response.status.toString()}).`);
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let pending = '';
-        while (!abort.signal.aborted) {
-          const next = await reader.read();
-          if (next.done) break;
-          pending += decoder.decode(next.value, { stream: true });
-          let boundary = pending.indexOf('\n\n');
-          while (boundary >= 0) {
-            const block = pending.slice(0, boundary);
-            pending = pending.slice(boundary + 2);
-            const data = block.split('\n').find((line) => line.startsWith('data:'))?.slice(5).trimStart();
-            if (data) {
-              const event = JSON.parse(data) as StudioEvent;
-              setEvents((current) => [...current, {
-                id: `studio-${event.occurredAt}-${event.type}`,
-                time: new Date(event.occurredAt).toLocaleTimeString(),
-                source: event.source,
-                type: event.type,
-                taskId: typeof event.payload?.taskId === 'string' ? event.payload.taskId : undefined,
-                message: typeof event.payload?.note === 'string' ? event.payload.note : event.type,
-              }]);
-              if (event.source === 'kanban') await refresh();
-            }
-            boundary = pending.indexOf('\n\n');
+      while (!abort.signal.aborted) {
+        try {
+          await refresh();
+          const response = await fetch(`${studioHttpUrl}/events`, {
+            headers,
+            signal: abort.signal,
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Studio SSE request failed (${response.status.toString()}).`);
           }
-        }
-      } catch (error) {
-        if (!abort.signal.aborted) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let pending = '';
+          while (!abort.signal.aborted) {
+            const next = await reader.read();
+            if (next.done) throw new Error('Studio SSE connection closed.');
+            pending += decoder.decode(next.value, { stream: true });
+            let boundary = pending.indexOf('\n\n');
+            while (boundary >= 0) {
+              const block = pending.slice(0, boundary);
+              pending = pending.slice(boundary + 2);
+              const lines = block.split('\n');
+              const data = lines.find((line) => line.startsWith('data:'))?.slice(5).trimStart();
+              if (data) {
+                const event = JSON.parse(data) as StudioEvent;
+                setEvents((current) => [...current, {
+                  id: `studio-${event.occurredAt}-${event.source}-${event.type}`,
+                  time: new Date(event.occurredAt).toLocaleTimeString(),
+                  source: event.source,
+                  type: event.type,
+                  taskId: typeof event.payload?.taskId === 'string' ? event.payload.taskId : undefined,
+                  message: typeof event.payload?.note === 'string' ? event.payload.note : event.type,
+                }]);
+                if (event.source === 'kanban') await refresh();
+              }
+              boundary = pending.indexOf('\n\n');
+            }
+          }
+        } catch (error) {
+          if (abort.signal.aborted) break;
           setConnected(false);
           setNotice(error instanceof Error ? error.message : String(error));
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
         }
       }
     };

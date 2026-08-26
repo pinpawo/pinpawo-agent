@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import type {
   Studio,
   StudioEvent,
-  StudioEventHandler,
   StudioEventInput,
   StudioPlugin,
   StudioPluginContext,
@@ -16,6 +15,7 @@ import type {
   StudioInvocationEventHandler,
 } from './studioInvocation';
 import type { StudioPetBinding, StudioPetRegistration } from './types';
+import { StudioEventBus } from './studioEventBus';
 import { StudioPluginHookRegistry } from './studioPluginHooks';
 
 export type CreateStudioInput = {
@@ -51,7 +51,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     pluginNames.add(plugin.name);
   }
 
-  const eventHandlers = new Set<StudioEventHandler>();
+  const eventBus = new StudioEventBus();
   const invocationHandlers = new Map<string, Set<StudioInvocationEventHandler>>();
   const hostInvocationHandlers = new Set<StudioInvocationEventHandler>();
   const queues = new Map<string, Promise<void>>();
@@ -64,18 +64,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     return [...petsById.values()].map(({ registration }) => ({ ...registration }));
   }
 
-  function subscribe(handler: StudioEventHandler): () => void {
-    eventHandlers.add(handler);
-    return () => eventHandlers.delete(handler);
-  }
-
   function notify(event: StudioEvent): void {
-    for (const handler of eventHandlers) {
-      void invokeObserver(
-        () => handler(event),
-        `[studio] event handler failed (type=${event.type}, source=${event.source})`,
-      );
-    }
+    eventBus.publish(event);
   }
 
   function emitInvocation(event: StudioInvocationEvent, source?: string): void {
@@ -228,7 +218,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         source: plugin.name,
         occurredAt: new Date().toISOString(),
       }),
-      subscribe,
+      subscribe: (handler) => eventBus.subscribe(handler),
       listPets,
       hooks: pluginHooks.contextFor(plugin.name),
     };
@@ -253,7 +243,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         pluginHooks.releasePlugin(plugin.name);
       }
     }
-    eventHandlers.clear();
+    await eventBus.close();
     hostInvocationHandlers.clear();
     invocationHandlers.clear();
     idempotencyRecords.clear();
@@ -279,7 +269,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         pluginHooks.releasePlugin(plugin.name);
       }
     }
-    eventHandlers.clear();
+    await eventBus.close();
     hostInvocationHandlers.clear();
     invocationHandlers.clear();
     idempotencyRecords.clear();
@@ -294,7 +284,7 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
       return () => hostInvocationHandlers.delete(handler);
     },
     notify,
-    subscribe,
+    subscribe: (handler) => eventBus.subscribe(handler),
     listPets,
     shutdown,
   };

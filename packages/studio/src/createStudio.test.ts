@@ -189,6 +189,63 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
   await studio.shutdown();
 });
 
+test('Studio core event bus broadcasts Plugin events to every subscriber in order', async () => {
+  const firstStarted = deferred();
+  const releaseFirst = deferred();
+  const slowDeliveryComplete = deferred();
+  const fastDeliveryComplete = deferred();
+  const slowEvents: string[] = [];
+  const fastEvents: string[] = [];
+  const slowSubscriber: StudioPlugin = {
+    name: 'slow-subscriber',
+    toolkits: [],
+    start: (context) => {
+      context.subscribe(async (event) => {
+        slowEvents.push(`${event.source}:${event.type}`);
+        if (event.type === 'event.first') {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+        }
+        if (event.type === 'event.second') slowDeliveryComplete.resolve();
+      });
+    },
+  };
+  const fastSubscriber: StudioPlugin = {
+    name: 'fast-subscriber',
+    toolkits: [],
+    start: (context) => {
+      context.subscribe((event) => {
+        fastEvents.push(`${event.source}:${event.type}`);
+        if (event.type === 'event.second') fastDeliveryComplete.resolve();
+      });
+    },
+  };
+  const publisher: StudioPlugin = {
+    name: 'publisher',
+    toolkits: [],
+    start: (context) => {
+      context.notify({ type: 'event.first' });
+      context.notify({ type: 'event.second' });
+    },
+  };
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [binding('worker')],
+    plugins: [slowSubscriber, fastSubscriber, publisher],
+  });
+
+  await firstStarted.promise;
+  await Promise.resolve();
+  assert.deepEqual(slowEvents, ['publisher:event.first']);
+  assert.deepEqual(fastEvents, ['publisher:event.first']);
+  releaseFirst.resolve();
+  await Promise.all([slowDeliveryComplete.promise, fastDeliveryComplete.promise]);
+  assert.deepEqual(slowEvents, ['publisher:event.first', 'publisher:event.second']);
+  assert.deepEqual(fastEvents, ['publisher:event.first', 'publisher:event.second']);
+  await studio.shutdown();
+});
+
 test('Plugin startup failure rolls back already-started Plugins', async () => {
   const events: string[] = [];
   const first: StudioPlugin = {

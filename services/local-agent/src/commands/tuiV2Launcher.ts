@@ -387,10 +387,10 @@ export function buildTuiV2LaunchArgs(
     ...(options.check ? ['--version'] : []),
     ...(options.qa ? ['--demo-qa'] : []),
     ...(options.agentSessionPort !== undefined
-      ? ['--agent-session-port', options.agentSessionPort.toString()]
+      ? ['--pet-port', options.agentSessionPort.toString()]
       : []),
     ...(options.agentSessionPetId
-      ? ['--agent-session-pet', options.agentSessionPetId]
+      ? ['--pet-id', options.agentSessionPetId]
       : []),
   ];
 }

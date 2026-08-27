@@ -219,9 +219,9 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
     agentSessionPetId: 'planner',
   }), [
     ...plan.args,
-    '--agent-session-port',
+    '--pet-port',
     '4322',
-    '--agent-session-pet',
+    '--pet-id',
     'planner',
   ]);
   assert.throws(

@@ -15,8 +15,8 @@
 | `pinpawo init` | Create local configuration and the example Capability. | `--dir <directory>`, `--force`, `--no-example-capability` |
 | `pinpawo setup` | Diagnose local model and runtime configuration. | `--workdir <directory>` |
 | `pinpawo server` / `pinpawo run` | Start the local Chat host. | `--workdir <directory>`, `--stdio` |
-| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--workdir <directory>`, paired `--agent-session-port <port>` and `--agent-session-pet <petId>` |
-| `pinpawo-studio` | Start the independent Studio Host. | `--workdir <directory>`, `--agent-session-port <port>` |
+| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, Chat-only `--workdir <directory>`, or paired `--pet-port <port>` and `--pet-id <petId>` |
+| `pinpawo-studio` | Start the independent Studio Host. | `--workdir <directory>`, `--pet-port <port>` |
 | `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
 | `pinpawo capability validate <dir>` | Validate one Capability directory. | — |
@@ -30,12 +30,14 @@
   startup path. Configured Plugins provide its HTTP control plane.
 - `--stdio` selects one-peer JSONL stdio instead of the local HTTP/WebSocket
   server for the Chat Host; reserve standard output for protocol messages in that mode.
-- `pinpawo-studio --agent-session-port` optionally fixes the local-agent conversation listener;
+- `pinpawo-studio --pet-port` optionally fixes the resident Pet conversation listener;
   if omitted, Studio selects an available loopback port.
 - `pinpawo tui` starts the Chat/local-agent conversation client. It does not
   connect to the Studio control plane or send Studio dispatch messages. The paired
-  `--agent-session-port` and `--agent-session-pet` options instead select one resident
-  Pet's local-agent Agent Session endpoint. `--check` and `--qa` cannot be used together.
+  `--pet-port` and `--pet-id` options instead select one resident Pet's local-agent
+  Agent Session endpoint. Pet connection mode does not accept `--workdir`: the Studio
+  Host already resolved and owns the resident Pet workdir. `--check` and `--qa` cannot
+  be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
 

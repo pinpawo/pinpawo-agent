@@ -104,7 +104,7 @@ state from a transient tool-event stream.
 | Interactive local agent | A person works directly in the terminal. | `pinpawo tui` |
 | Local server | Another local UI or app needs an HTTP/WebSocket host. | `pinpawo server` |
 | JSONL stdio | A process integration needs one transport-safe peer. | `pinpawo server --stdio` |
-| Studio | A Plugin-driven control plane dispatches work across resident Pets. | `pinpawo-studio [--agent-session-port <port>]` |
+| Studio | A Plugin-driven control plane dispatches work across resident Pets. | `pinpawo-studio [--pet-port <port>]` |
 
 ## Extension model
 

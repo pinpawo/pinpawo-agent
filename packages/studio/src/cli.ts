@@ -9,8 +9,7 @@ Start an independent resident PinPawo Studio Host.
 
 Options:
   --workdir <directory>  workspace containing .pinpawo/studio.json
-  --agent-session-port <port>
-                         local-agent conversation listener (default: available port)
+  --pet-port <port>      resident Pet conversation listener (default: available port)
   -h, --help             display help
 `;
 
@@ -30,7 +29,7 @@ function readOptionValue(args: readonly string[], index: number, option: string)
 function parsePort(value: string): number {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error('--agent-session-port must be an integer from 1 to 65535.');
+    throw new Error('--pet-port must be an integer from 1 to 65535.');
   }
   return port;
 }
@@ -50,7 +49,7 @@ export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHos
       index += 1;
       continue;
     }
-    if (argument === '--agent-session-port') {
+    if (argument === '--pet-port') {
       agentSessionPort = parsePort(readOptionValue(args, index, argument));
       index += 1;
       continue;

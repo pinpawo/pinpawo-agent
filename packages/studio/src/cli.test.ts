@@ -17,9 +17,9 @@ test('Studio CLI starts without a Studio-owned control-plane transport', async (
   });
 });
 
-test('Studio CLI forwards an optional local-agent Agent Session port', async () => {
+test('Studio CLI forwards an optional resident Pet listener port', async () => {
   let received: StudioHostProcessOptions | undefined;
-  await runStudioHostCli(['--agent-session-port', '4321'], {
+  await runStudioHostCli(['--pet-port', '4321'], {
     runHost: (options) => { received = options; },
   });
 
@@ -37,7 +37,7 @@ test('Studio Host CLI defaults to an available Agent Session port', () => {
 
 test('Studio Host CLI validates ports and exposes help without starting a Host', async () => {
   assert.throws(
-    () => parseStudioHostCliArgs(['--agent-session-port', '70000']),
+    () => parseStudioHostCliArgs(['--pet-port', '70000']),
     /integer from 1 to 65535/,
   );
   let output = '';
@@ -46,6 +46,6 @@ test('Studio Host CLI validates ports and exposes help without starting a Host',
     writeOutput: (text) => { output += text; },
   });
   assert.match(output, /pinpawo-studio/);
-  assert.match(output, /--agent-session-port/);
+  assert.match(output, /--pet-port/);
   assert.doesNotMatch(output, /--stdio/);
 });

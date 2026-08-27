@@ -22,8 +22,14 @@ export type CreateStudioInput = {
   plugins?: StudioPlugin[];
 };
 
-/** Create the Studio registry over already-live, Host-owned dispatch ports. */
-export async function createStudio(input: CreateStudioInput): Promise<Studio> {
+export type PreparedStudio = {
+  studio: Studio;
+  /** Start Plugin lifecycles after the composing Host has opened interaction transports. */
+  activatePlugins: () => Promise<void>;
+};
+
+/** Prepare the Studio registry without running executable Plugin lifecycles. */
+export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   const petsById = new Map<string, StudioPetBinding>();
   for (const pet of input.pets) {
     const { petId } = pet.registration;
@@ -51,6 +57,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   const eventBus = new StudioEventBus();
   const idempotencyRecords = new Map<string, StudioDispatchReceipt>();
   const pluginHooks = new StudioPluginHookRegistry();
+  const startedPlugins: StudioPlugin[] = [];
+  let activationPromise: Promise<void> | null = null;
+  let shutdownPromise: Promise<void> | null = null;
+  let eventBusClosed = false;
   let stopped = false;
 
   function listPets(): StudioPetRegistration[] {
@@ -112,9 +122,8 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     };
   }
 
-  async function shutdown(): Promise<void> {
-    stopped = true;
-    for (const plugin of [...plugins].reverse()) {
+  async function stopStartedPlugins(): Promise<void> {
+    for (const plugin of startedPlugins.splice(0).reverse()) {
       eventBus.releaseOwner(plugin.name);
       try {
         await plugin.stop?.();
@@ -128,38 +137,51 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         pluginHooks.releasePlugin(plugin.name);
       }
     }
+  }
+
+  async function closeCore(): Promise<void> {
+    if (eventBusClosed) return;
+    eventBusClosed = true;
     await eventBus.close();
     idempotencyRecords.clear();
   }
 
-  const startedPlugins: StudioPlugin[] = [];
-  try {
-    for (const plugin of plugins) {
-      startedPlugins.push(plugin);
-      await plugin.start(buildPluginContext(plugin));
-    }
-  } catch (error) {
-    stopped = true;
-    for (const plugin of [...startedPlugins].reverse()) {
-      eventBus.releaseOwner(plugin.name);
+  async function activatePlugins(): Promise<void> {
+    if (activationPromise) return activationPromise;
+    if (stopped) throw new Error(`studio "${input.studioId}": already shut down`);
+    const pending = (async () => {
       try {
-        await plugin.stop?.();
-      } catch (rollbackError) {
-        console.error(
-          `[studio] plugin "${plugin.name}" failed to roll back after startup failure:`,
-          rollbackError instanceof Error ? rollbackError.message : rollbackError,
-        );
-      } finally {
-        eventBus.releaseOwner(plugin.name);
-        pluginHooks.releasePlugin(plugin.name);
+        for (const plugin of plugins) {
+          if (stopped) throw new Error(`studio "${input.studioId}": shutdown during Plugin startup`);
+          // Include the currently starting Plugin in rollback: start() may have
+          // acquired resources before rejecting.
+          startedPlugins.push(plugin);
+          await plugin.start(buildPluginContext(plugin));
+        }
+      } catch (error) {
+        stopped = true;
+        await stopStartedPlugins();
+        await closeCore();
+        throw error;
       }
-    }
-    await eventBus.close();
-    idempotencyRecords.clear();
-    throw error;
+    })();
+    activationPromise = pending;
+    return pending;
   }
 
-  return {
+  async function shutdown(): Promise<void> {
+    if (shutdownPromise) return shutdownPromise;
+    stopped = true;
+    const pending = (async () => {
+      await activationPromise?.catch(() => undefined);
+      await stopStartedPlugins();
+      await closeCore();
+    })();
+    shutdownPromise = pending;
+    return pending;
+  }
+
+  const studio: Studio = {
     entryPetId: input.entryPetId,
     dispatch,
     notify,
@@ -167,4 +189,12 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
     listPets,
     shutdown,
   };
+  return { studio, activatePlugins };
+}
+
+/** Create and activate a standalone Studio over already-live dispatch ports. */
+export async function createStudio(input: CreateStudioInput): Promise<Studio> {
+  const prepared = prepareStudio(input);
+  await prepared.activatePlugins();
+  return prepared.studio;
 }

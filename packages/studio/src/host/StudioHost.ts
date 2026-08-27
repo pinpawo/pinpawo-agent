@@ -65,6 +65,7 @@ export class StudioHost {
   private studio: BuildStudioResult | null = null;
   private capsInitialized = false;
   private initPromise: Promise<void> | null = null;
+  private activationPromise: Promise<void> | null = null;
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
@@ -146,6 +147,7 @@ export class StudioHost {
         capabilityArtifactStore: this.caps.getCapabilityArtifactStore(),
         checkpoint: this.getCheckpointer(),
         runtimeConfig,
+        deferPluginActivation: true,
       });
     } catch (error) {
       if (this.capsInitialized) {
@@ -169,10 +171,25 @@ export class StudioHost {
     return pending;
   }
 
+  /** Activate Plugin listeners after the outer local-agent interaction transport is ready. */
+  async activatePlugins(): Promise<void> {
+    if (this.shutdownRequested) {
+      throw new Error('StudioHost.activatePlugins() called after shutdown started');
+    }
+    if (!this.studio) {
+      throw new Error('StudioHost.activatePlugins() called before init()');
+    }
+    if (this.activationPromise) return this.activationPromise;
+    const pending = this.studio.activatePlugins();
+    this.activationPromise = pending;
+    return pending;
+  }
+
   private async performShutdown() {
     // If shutdown races init, let init either publish the resident Studio or
     // roll its partial capability assembly back before teardown continues.
     await this.initPromise?.catch(() => undefined);
+    await this.activationPromise?.catch(() => undefined);
     const resident = this.studio;
     this.studio = null;
     await resident?.studio.shutdown().catch((error) => {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { PetDispatchPort } from 'pinpawo/host-runtime';
 
-import { createStudio } from './createStudio';
+import { createStudio, prepareStudio } from './createStudio';
 import type { StudioPlugin } from './studioContract';
 import type { StudioPetBinding } from './types';
 
@@ -170,6 +170,28 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
   ]);
   assert.equal(eventSource, 'scheduler');
   await studio.shutdown();
+});
+
+test('prepared Studio does not start Plugins until the Host activates them', async () => {
+  const events: string[] = [];
+  const prepared = prepareStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [binding('worker')],
+    plugins: [{
+      name: 'http',
+      toolkits: [],
+      start: () => { events.push('http:start'); },
+      stop: () => { events.push('http:stop'); },
+    }],
+  });
+
+  assert.deepEqual(events, []);
+  await prepared.activatePlugins();
+  await prepared.activatePlugins();
+  assert.deepEqual(events, ['http:start']);
+  await prepared.studio.shutdown();
+  assert.deepEqual(events, ['http:start', 'http:stop']);
 });
 
 test('Studio core event bus preserves per-subscriber order without cross-subscriber blocking', async () => {

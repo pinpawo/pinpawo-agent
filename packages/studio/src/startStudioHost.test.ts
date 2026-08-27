@@ -62,12 +62,16 @@ test('top-level entry starts only the Pet Agent Session transport and owns shutd
   const running = await startStudioHost({
     capabilityAssembly: fakeAssembly(events),
     resolveStudioHostConfig: async () => configuration(),
-    buildStudio: async (): Promise<BuildStudioResult> => ({
-      studio: fakeStudio(events),
-      resolved: {} as BuildStudioResult['resolved'],
-      plugins: [],
-      residentPets: new Map(),
-    }),
+    buildStudio: async (input): Promise<BuildStudioResult> => {
+      assert.equal(input.deferPluginActivation, true);
+      return {
+        studio: fakeStudio(events),
+        resolved: {} as BuildStudioResult['resolved'],
+        plugins: [],
+        residentPets: new Map(),
+        activatePlugins: async () => { events.push('plugins:start'); },
+      };
+    },
     agentSessionPort: 0,
     startAgentSessionTransport: async (port, interactions) => {
       events.push('agent-session:start');
@@ -87,6 +91,7 @@ test('top-level entry starts only the Pet Agent Session transport and owns shutd
   assert.deepEqual(events, [
     'caps:init',
     'agent-session:start',
+    'plugins:start',
     'studio:shutdown',
     'caps:shutdown',
   ]);
@@ -102,6 +107,7 @@ test('Agent Session startup failure rolls the initialized Host back', async () =
       resolved: {} as BuildStudioResult['resolved'],
       plugins: [],
       residentPets: new Map(),
+      activatePlugins: async () => { events.push('plugins:start'); },
     }),
     startAgentSessionTransport: async () => {
       throw new Error('listener failed');
@@ -110,6 +116,47 @@ test('Agent Session startup failure rolls the initialized Host back', async () =
 
   assert.deepEqual(events, [
     'caps:init',
+    'studio:shutdown',
+    'caps:shutdown',
+  ]);
+});
+
+test('Plugin activation failure closes the ready Agent Session transport and Host', async () => {
+  const events: string[] = [];
+  let closeTransport!: () => void;
+  const transportClosed = new Promise<void>((resolve) => { closeTransport = resolve; });
+
+  await assert.rejects(() => startStudioHost({
+    capabilityAssembly: fakeAssembly(events),
+    resolveStudioHostConfig: async () => configuration(),
+    buildStudio: async (): Promise<BuildStudioResult> => ({
+      studio: fakeStudio(events),
+      resolved: {} as BuildStudioResult['resolved'],
+      plugins: [],
+      residentPets: new Map(),
+      activatePlugins: async () => {
+        events.push('plugins:start');
+        throw new Error('plugin failed');
+      },
+    }),
+    startAgentSessionTransport: async () => {
+      events.push('agent-session:start');
+      return {
+        port: 43123,
+        close: () => {
+          events.push('agent-session:close');
+          closeTransport();
+        },
+        closed: transportClosed,
+      };
+    },
+  }), /plugin failed/);
+
+  assert.deepEqual(events, [
+    'caps:init',
+    'agent-session:start',
+    'plugins:start',
+    'agent-session:close',
     'studio:shutdown',
     'caps:shutdown',
   ]);

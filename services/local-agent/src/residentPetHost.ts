@@ -263,6 +263,7 @@ export type CreateResidentPetRuntimeOptions = {
   actor: AgentActor;
   modelProfiles: LocalModelProfileRegistry;
   modelProfileId?: string;
+  defaultCapabilityName?: string;
   capabilities: readonly AgentCapability[];
   toolkitInventory: HostToolkitInventoryStore;
   toolkitRuntimeManager?: ToolkitRuntimeManager;
@@ -430,6 +431,9 @@ export async function createResidentPetRuntime(
     capabilityCatalog: {
       getSnapshot: () => ({ capabilities: options.capabilities }),
     },
+    ...(options.defaultCapabilityName
+      ? { defaultCapabilityName: options.defaultCapabilityName }
+      : {}),
     capabilityArtifactStore: options.capabilityArtifactStore,
   };
   const graphService = options.graphService ?? new LocalAgentGraphService();

@@ -131,6 +131,8 @@ export function buildLocalChatAgentInput(params: {
   timezone?: string;
   /** Explicit Capability registry backend. Defaults to local-agent configuration. */
   capabilityRegistryBackend?: CapabilityRegistryBackend;
+  /** Capability preloaded by the entry Planner. */
+  defaultCapabilityName?: string;
 }): AgentChannelSetup {
   if (!params.threadId.trim()) {
     throw new Error('Local chat requires a non-empty threadId');
@@ -186,6 +188,7 @@ export function buildLocalChatAgentInput(params: {
       String(generationReserveTokens ?? 0),
       params.checkpoint ? 'checkpoint' : 'memory',
       capabilityRegistryBackend,
+      params.defaultCapabilityName ?? 'general',
     ]),
     graphConfig: {
       models,
@@ -199,6 +202,9 @@ export function buildLocalChatAgentInput(params: {
       capabilityArtifactStore: params.capabilityArtifactStore,
       toolkitRuntimeManager: params.toolkitRuntimeManager,
       capabilityRegistryBackend,
+      ...(params.defaultCapabilityName !== undefined
+        ? { defaultCapabilityName: params.defaultCapabilityName }
+        : {}),
     },
     registry: preparedRegistry.registry,
     input: {

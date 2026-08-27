@@ -18,8 +18,10 @@
 }
 ```
 
-Pet 配置至少包含 `petId` 和 `name`，可选 `role`、`serviceSummary` 与
-`modelProfileId`。配置不包含 `lazy`、`disabled`、Capability 名单、thread 或
+Pet 配置至少包含 `petId` 和 `name`，可选 `role`、`serviceSummary`、
+`modelProfileId` 与 `defaultCapabilityName`。后者只让 Agent entry Planner 优先加载
+该 Pet 目录中已存在的一项 Capability，不绕过可用性与 Toolkit 绑定。配置不包含
+`lazy`、`disabled`、Capability 名单、thread 或
 continuation。所有配置 Pet 都在 Host ready 前 eager 构造；任意一个失败都会整体回滚。
 
 standalone CLI 把 Plugin id 作为已安装 package 名交给 `StudioPluginResolver`，package

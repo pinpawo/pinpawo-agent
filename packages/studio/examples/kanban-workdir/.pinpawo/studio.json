@@ -3,7 +3,27 @@
   "entryPetId": "planner",
   "pets": ["planner"],
   "plugins": [
-    { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
-    { "id": "@pinpawo-plugin/kanban" }
+    {
+      "id": "@pinpawo-plugin/studio-http",
+      "options": {
+        "port": 3211,
+        "allowedOrigins": ["http://127.0.0.1:5173", "http://localhost:5173"]
+      }
+    },
+    { "id": "@pinpawo-plugin/kanban" },
+    { "id": "@pinpawo-plugin/scheduler" },
+    {
+      "id": "@pinpawo-plugin/trigger",
+      "options": {
+        "triggers": [
+          {
+            "triggerId": "hello",
+            "petId": "planner",
+            "requestPrefix": "Plan the following external request with Kanban",
+            "secretEnv": "PINPAWO_HELLO_TRIGGER_SECRET"
+          }
+        ]
+      }
+    }
   ]
 }

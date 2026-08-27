@@ -171,11 +171,21 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         }
         petCapabilityNames.add(capability.name);
       }
+      if (petConfig.defaultCapabilityName
+        && petConfig.defaultCapabilityName !== GENERAL_CAPABILITY_NAME
+        && !petCapabilityNames.has(petConfig.defaultCapabilityName)) {
+        throw new Error(
+          `pet "${petConfig.petId}" default Capability "${petConfig.defaultCapabilityName}" is not available`,
+        );
+      }
 
       const resident = await createResidentPetHost({
         actor: buildPetActorFromLocalConfig(petConfig, null),
         modelProfiles: input.modelProfiles,
         ...(petConfig.modelProfileId ? { modelProfileId: petConfig.modelProfileId } : {}),
+        ...(petConfig.defaultCapabilityName
+          ? { defaultCapabilityName: petConfig.defaultCapabilityName }
+          : {}),
         capabilities: [generalCapability, ...petCapabilities],
         toolkitInventory: input.toolkitInventory,
         toolkitRuntimeManager: input.toolkitRuntimeManager,

@@ -59,7 +59,8 @@ is its lifecycle and event-source identity inside Studio.
   "name": "Writer",
   "role": "Turn outlines into complete drafts",
   "serviceSummary": "Long-form writing and structured rewriting",
-  "modelProfileId": "qwen-max"
+  "modelProfileId": "qwen-max",
+  "defaultCapabilityName": "studio-planning"
 }
 ```
 
@@ -68,6 +69,8 @@ it also identifies the Pet's Capability directory. `general` is added by the
 local host as its required baseline Capability.
 `modelProfileId` selects a host model profile when present. The old inline
 `model` field and the old `capabilities` name list are rejected explicitly.
+`defaultCapabilityName` asks the Agent entry Planner to preload one Capability
+from this Pet's collection; it does not bypass availability or Toolkit binding.
 
 ## Per-Pet Capability directory
 

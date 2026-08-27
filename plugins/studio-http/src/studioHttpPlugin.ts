@@ -42,6 +42,8 @@ export type StudioHttpRouteResult =
 export type StudioHttpRoute = {
   method: string;
   path: string;
+  /** Defaults to Studio Bearer auth. Route-owned auth is validated by handle(). */
+  authorization?: 'studio' | 'route';
   handle: (
     request: StudioHttpRouteRequest,
   ) => StudioHttpRouteResult | Promise<StudioHttpRouteResult>;
@@ -179,7 +181,17 @@ function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
   if (typeof route.handle !== 'function') {
     throw new Error('Studio HTTP route must define handle().');
   }
-  return { ...route, method, path: parsed.pathname };
+  if (route.authorization !== undefined
+    && route.authorization !== 'studio'
+    && route.authorization !== 'route') {
+    throw new Error('Studio HTTP route authorization must be studio or route.');
+  }
+  return {
+    ...route,
+    method,
+    path: parsed.pathname,
+    authorization: route.authorization ?? 'studio',
+  };
 }
 
 async function readJsonBody(context: StudioHttpContext): Promise<unknown> {
@@ -354,6 +366,11 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       maxAge: 600,
     }));
     app.use('*', async (requestContext, next) => {
+      const route = routes.get(`${requestContext.req.method} ${requestContext.req.path}`);
+      if (route?.authorization === 'route') {
+        await next();
+        return;
+      }
       const providedToken = readBearerToken(requestContext.req.header('authorization'));
       if (!providedToken || !safeTokenEqual(providedToken, options.authToken)) {
         requestContext.header('WWW-Authenticate', 'Bearer');

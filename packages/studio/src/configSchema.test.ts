@@ -43,12 +43,14 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
       role: '脚本撰写',
       serviceSummary: '短视频脚本',
       modelProfileId: 'qwen-max',
+      defaultCapabilityName: 'studio_planning',
       serverBinding: { petId: 'srv-001' },
     },
     'test-source',
   );
   assert.equal(config.personality, '创意丰富');
   assert.equal(config.modelProfileId, 'qwen-max');
+  assert.equal(config.defaultCapabilityName, 'studio_planning');
   assert.deepEqual(config.serverBinding, { petId: 'srv-001' });
 });
 

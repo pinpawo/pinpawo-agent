@@ -1,7 +1,7 @@
 # Studio HTTP Plugin
 
 > 状态：Draft implementation contract
-> 更新：2026-08-26
+> 更新：2026-08-27
 
 HTTP 是一个具体 `StudioPlugin`，不是 Studio core 的内置 server。目标 Studio Host
 composition 把它作为唯一 control-plane transport 装配；它把 dispatch/event 通道投射到
@@ -40,9 +40,10 @@ route 背后的领域。
 
 HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202` 和
 `petId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
-Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段。它不等待 invocation completion，
-也不把 HTTP 连接变成 cancellation owner。调用方如需执行进度，应使用 Studio
-invocation transport，而不是把 Plugin event 当成 invocation event。
+Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段，也不等待 Agent execution；Studio
+receipt 本身就没有 completion，HTTP 连接也不是 cancellation owner。
+调用方如需观察 Agent 执行，应连接目标 Pet 的 Agent Session event stream。Plugin 领域状态
+仍通过各自的 snapshot/history/event 暴露，不能从 dispatch receipt 推导。
 
 ### `GET /events`
 

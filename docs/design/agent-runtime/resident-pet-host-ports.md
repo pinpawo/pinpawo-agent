@@ -1,7 +1,7 @@
 # Resident Pet Host Ports
 
 > 状态：Accepted，implemented
-> 更新：2026-08-26
+> 更新：2026-08-27
 > 关联：[Studio 独立 Host runtime](../studio/independent-host-runtime.md)、
 > [Agent Session projection](../../reference/runtime/session-projection.md)
 
@@ -96,18 +96,12 @@ export interface ResidentPetHost {
 export interface PetDispatchPort {
   getState(): PetDispatchState;
   onStateChange(listener: (state: PetDispatchState) => void): () => void;
-  dispatch(request: PetDispatchRequest): Promise<PetDispatchResult>;
+  dispatch(request: PetDispatchRequest): Promise<void>;
 }
 
 export type PetDispatchRequest = {
   request: string;
-  signal?: AbortSignal;
 };
-
-export type PetDispatchResult =
-  | { status: 'completed'; output: string }
-  | { status: 'waiting' }
-  | { status: 'cancelled' };
 
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
 ```
@@ -175,12 +169,13 @@ type StudioPetBinding = {
 不再用 `lazy/disabled` port 表达“尚未启动”。Studio 自己负责：
 
 1. 由 `petId` 选中当前存活的 target；
-2. 创建 `invocationId`、排队、receipt 与 invocation event；
-3. 把 `{ request, signal }` 传给 `PetDispatchPort.dispatch()`；
-4. 把 port result 投射成 Studio result/event。
+2. 创建 `invocationId` 与 admission receipt；
+3. 把 `{ request }` 交给 `PetDispatchPort.dispatch()`。
 
 `invocationId`、producer `metadata`、idempotency 与 transport delivery identity 不进入
-Pet port。Studio receipt/event 也不把当前 Agent Session thread 复制成 Studio identity；
+Pet port。receipt 只证明 resident queue 已接纳本次 dispatch，不是 Agent execution
+handle，也没有 completion、output、waiting 或 cancellation 状态。Studio 也不把当前
+Agent Session thread 复制成 Studio identity；
 dispatch 真正开始时选择哪条 thread 是 resident runtime 内部行为。
 
 旧 `PetAgentRuntime.invoke()` adapter 已移除；所有调用方统一使用上述 dispatch port，
@@ -232,9 +227,10 @@ Dispatch gate 是这个协调过程的原子状态，不是供上层“先读后
 - `getState()` 与 `onStateChange()` 只用于观察。是否开始下一项由 Coordinator 在同一个
   临界区内决定。
 
-dispatch 调用方不订阅 Agent 的 live execution stream。它只得到 gate 与最终
-`completed` / `waiting` / cancellation 结果；Studio 的 accepted/invocation event 是
-Studio 对这次 dispatch promise 的上层投射。
+dispatch 调用方不持有 Agent execution。Promise resolve 只表示 request 已进入 resident queue；
+调用方可以观察 gate，但不会得到 `completed`、`waiting`、output 或 cancellation result。
+执行期错误由 resident runtime 投射成 Agent Session runtime event；waiting/blocked 由
+checkpoint 与 gate 表达。Studio 不把这些信号重新包装成 invocation result。
 
 resident runtime 内部的所有 Agent turn 统一经过 local-agent Agent Session turn runner。
 无论输入来自 conversation peer 还是 Host 持有的单向 dispatch，runner 都产生相同的
@@ -279,7 +275,7 @@ target 返回。Capability inventory 不进入该列表。
 | Package/surface | 可以知道 | 不可以知道 |
 | --- | --- | --- |
 | `pinpawo/host-runtime` | resident Pet、两个访问面、Coordinator、graph/checkpoint/toolkit 装配 | Studio registration metadata、Studio Plugin、TUI view、具体 wire route |
-| `@pinpawo/studio` | `PetDispatchPort`、Pet registry、dispatch/invocation/event | conversation、Agent Session、Chat/TUI message |
+| `@pinpawo/studio` | `PetDispatchPort`、Pet registry、dispatch admission、Plugin event | conversation、Agent Session、Chat/TUI message |
 | `services/local-agent` Agent Session adapter | resident interaction 构造、`@pinpawo/agent-session` contract 与 WebSocket listener | Studio dispatch/invocation、Plugin hook |
 | TUI | Agent Session wire/projection | Studio protocol、Pet graph/checkpoint |
 | Studio Plugin | Studio dispatch/event/hook、可定义 Toolkit | Pet construction、conversation、Agent Session |
@@ -315,6 +311,9 @@ target 返回。Capability inventory 不进入该列表。
 12. 配置 schema 删除 `lazy/disabled`；所有 Pet eager start，任一失败使 Host 全部失败；
     `listPets()` 只返回 Host runtime registry 中当前存活的 Pet。
 13. 完成消费者迁移后移除 `PetAgentRuntime.invoke()` 过渡类型。
+14. 从 `PetDispatchPort` 与 Studio receipt 移除 execution result、completion observer 与
+    caller cancellation；Studio 只负责接纳，resident Coordinator 持有队列和 gate，执行
+    观察统一走 Agent Session event。
 
 现有测试与 package 边界必须持续证明：
 
@@ -333,7 +332,7 @@ target 返回。Capability inventory 不进入该列表。
 - dispatch contract 不包含 resume，Studio receipt/event 不暴露固定 Pet `threadId`；
 - 删除 dispatch resume 前，Pet-scoped Agent Session route 已通过 waiting checkpoint 的
   snapshot、typed resume 与重连 E2E；
-- dispatch 调用方不消费 Agent Session live stream，只观察 gate 与自己的最终结果；
+- dispatch 调用方不拥有执行 handle 或最终结果；它只获得接纳确认并可观察 gate；
 - conversation 与 Host 单向输入共用 Agent Session turn runner；已连接同一 Pet 的 peer
   能观察任一来源后续产生的 run/message/tool/plan/review event；
 - Studio Host 任一 Pet 启动失败时整体失败；`listPets()` 只包含当前存活 Pet；

@@ -18,21 +18,10 @@ import {
 const AUTH_TOKEN = 'test-token-with-at-least-16-characters';
 
 function receipt(request: StudioDispatchRequest): StudioDispatchReceipt {
-  const result = {
+  return {
     petId: request.petId,
     invocationId: 'invocation-1',
-    status: 'completed' as const,
     ...(request.metadata ? { metadata: request.metadata } : {}),
-  };
-  return {
-    petId: result.petId,
-    invocationId: result.invocationId,
-    ...(request.metadata ? { metadata: request.metadata } : {}),
-    onInvocation: (handler) => {
-      void handler(result);
-      return () => undefined;
-    },
-    completion: Promise.resolve(result),
   };
 }
 
@@ -47,7 +36,6 @@ function createContext(options: {
       requests.push(request);
       return options.dispatch ? options.dispatch(request) : receipt(request);
     },
-    onInvocation: () => () => undefined,
     notify: () => undefined,
     subscribe: (handler) => {
       eventHandlers.add(handler);

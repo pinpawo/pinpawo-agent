@@ -43,16 +43,13 @@ import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
 export type PetDispatchSettledState = Exclude<PetDispatchState, 'busy'>;
 
-export type PetDispatchRequest = { request: string; signal?: AbortSignal };
-export type PetDispatchResult =
-  | { status: 'completed'; output: string }
-  | { status: 'waiting' }
-  | { status: 'cancelled' };
+export type PetDispatchRequest = { request: string };
 
 export interface PetDispatchPort {
   getState(): PetDispatchState;
   onStateChange(listener: (state: PetDispatchState) => void): () => void;
-  dispatch(request: PetDispatchRequest): Promise<PetDispatchResult>;
+  /** Accept one-way input into the resident queue. Execution is observed through Agent Session. */
+  dispatch(request: PetDispatchRequest): Promise<void>;
 }
 
 export interface ResidentPet {
@@ -92,8 +89,6 @@ type QueuedOperation = {
   run: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
-  signal?: AbortSignal;
-  onAbort?: () => void;
 };
 
 export class ResidentPetOperationCancelledError extends Error {
@@ -138,8 +133,19 @@ export class ResidentPetCoordinator {
     return this.enqueue('conversation', operation);
   }
 
-  enqueueDispatch<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    return this.enqueue('dispatch', operation, signal);
+  enqueueDispatch<T>(operation: () => Promise<T>): Promise<T> {
+    return this.enqueue('dispatch', operation);
+  }
+
+  /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
+  submitDispatch(operation: () => Promise<void>): void {
+    if (this.closing) {
+      throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    }
+    void this.enqueue('dispatch', operation).catch((error) => {
+      if (error instanceof ResidentPetOperationCancelledError) return;
+      this.logError('[resident-pet] dispatch execution failed:', error);
+    });
   }
 
   async refreshState(): Promise<PetDispatchState> {
@@ -176,9 +182,8 @@ export class ResidentPetCoordinator {
   private enqueue<T>(
     kind: QueuedOperation['kind'],
     operation: () => Promise<T>,
-    signal?: AbortSignal,
   ): Promise<T> {
-    if (this.closing || signal?.aborted) {
+    if (this.closing) {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
     return new Promise<T>((resolve, reject) => {
@@ -187,15 +192,7 @@ export class ResidentPetCoordinator {
         run: operation,
         resolve: (value) => resolve(value as T),
         reject,
-        ...(signal ? { signal } : {}),
       };
-      if (signal) {
-        entry.onAbort = () => {
-          if (!this.removeQueued(entry)) return;
-          entry.reject(new ResidentPetOperationCancelledError());
-        };
-        signal.addEventListener('abort', entry.onAbort, { once: true });
-      }
       (kind === 'conversation' ? this.conversationQueue : this.dispatchQueue).push(entry);
       this.drain();
     });
@@ -206,12 +203,6 @@ export class ResidentPetCoordinator {
     const entry = this.conversationQueue.shift()
       ?? (this.state === 'open' ? this.dispatchQueue.shift() : undefined);
     if (!entry) return;
-    this.detachAbort(entry);
-    if (entry.signal?.aborted) {
-      entry.reject(new ResidentPetOperationCancelledError());
-      this.drain();
-      return;
-    }
     const active = Promise.resolve().then(() => this.run(entry));
     this.active = active;
     this.setState('busy');
@@ -260,25 +251,8 @@ export class ResidentPetCoordinator {
     }
   }
 
-  private detachAbort(entry: QueuedOperation): void {
-    if (entry.signal && entry.onAbort) {
-      entry.signal.removeEventListener('abort', entry.onAbort);
-      entry.onAbort = undefined;
-    }
-  }
-
-  private removeQueued(entry: QueuedOperation): boolean {
-    const queue = entry.kind === 'conversation' ? this.conversationQueue : this.dispatchQueue;
-    const index = queue.indexOf(entry);
-    if (index < 0) return false;
-    queue.splice(index, 1);
-    this.detachAbort(entry);
-    return true;
-  }
-
   private cancelQueue(queue: QueuedOperation[]): void {
     for (const entry of queue.splice(0)) {
-      this.detachAbort(entry);
       entry.reject(new ResidentPetOperationCancelledError('Resident Pet Host is closing.'));
     }
   }
@@ -547,98 +521,80 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
   const dispatch: PetDispatchPort = {
     getState: () => coordinator.getState(),
     onStateChange: (listener) => coordinator.onStateChange(listener),
-    dispatch: async ({ request, signal }) => {
-      if (signal?.aborted) return { status: 'cancelled' };
-      try {
-        return await coordinator.enqueueDispatch(async (): Promise<PetDispatchResult> => {
-          if (signal?.aborted) return { status: 'cancelled' };
-          const context = await loadContext(deps.actorId);
-          const setup = sessions.buildChatSetup(deps, context);
-          setup.input.signal = signal;
-          const before = await graphService.readThreadState(setup);
-          if (before.pendingInterrupt || before.hasPendingContinuation) {
-            return { status: 'waiting' };
-          }
-          const requestId = `host-${randomUUID()}`;
-          const run = createInflightOperationRun(requestId);
-          configureInflightOperationRegistry(
-            run,
-            createOperationRegistryForAgentSetup(setup),
-          );
-          const abortFromCaller = () => run.controller.abort(signal?.reason);
-          signal?.addEventListener('abort', abortFromCaller, { once: true });
-          setup.input.signal = run.controller.signal;
-          activeHostRuns.set(requestId, run.controller);
-          publishRuntimeEvent({
-            type: 'run.started',
-            requestId,
-            initiator: 'host',
-            input: { role: 'user', text: request },
+    dispatch: async ({ request }) => {
+      coordinator.submitDispatch(async () => {
+        const context = await loadContext(deps.actorId);
+        const setup = sessions.buildChatSetup(deps, context);
+        const requestId = `host-${randomUUID()}`;
+        const run = createInflightOperationRun(requestId);
+        configureInflightOperationRegistry(
+          run,
+          createOperationRegistryForAgentSetup(setup),
+        );
+        setup.input.signal = run.controller.signal;
+        activeHostRuns.set(requestId, run.controller);
+        publishRuntimeEvent({
+          type: 'run.started',
+          requestId,
+          initiator: 'host',
+          input: { role: 'user', text: request },
+        });
+        try {
+          const result = await runAgentTurn({
+            request: { kind: 'user_message', requestId, message: request },
+            setup,
+            graphService,
+            isCurrent: () => !run.controller.signal.aborted,
+            finishInterrupted: () => undefined,
+            emitEvent: publishRuntimeEvent,
+            emitToolEvent: (payload) => {
+              emitLocalServerToolOperationEvent({
+                run,
+                payload,
+                emit: publishRuntimeEvent,
+              });
+            },
+            acceptDelegationOperations: (operations) => {
+              overlayInflightDelegationOperations(run, operations);
+            },
           });
-          try {
-            const result = await runAgentTurn({
-              request: { kind: 'user_message', requestId, message: request },
-              setup,
-              graphService,
-              isCurrent: () => !run.controller.signal.aborted,
-              finishInterrupted: () => undefined,
-              emitEvent: publishRuntimeEvent,
-              emitToolEvent: (payload) => {
-                emitLocalServerToolOperationEvent({
-                  run,
-                  payload,
-                  emit: publishRuntimeEvent,
-                });
-              },
-              acceptDelegationOperations: (operations) => {
-                overlayInflightDelegationOperations(run, operations);
-              },
-            });
-            if (result.status === 'waiting_human') {
-              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              return { status: 'waiting' };
-            }
-            if (result.status === 'interrupted') {
-              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              publishRuntimeEvent({
-                type: 'run.interrupted',
-                requestId,
-                message: 'Run interrupted.',
-              });
-              return { status: 'cancelled' };
-            }
-            finishInflightOperations(run, 'completed', publishRuntimeEvent);
-            return { status: 'completed', output: result.reply };
-          } catch (error) {
-            if (run.controller.signal.aborted || isAbortError(error)) {
-              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              publishRuntimeEvent({
-                type: 'run.interrupted',
-                requestId,
-                message: 'Run interrupted.',
-              });
-              return { status: 'cancelled' };
-            }
-            finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
-            publishRuntimeEvent({
-              type: 'error',
-              requestId,
-              message: error instanceof Error ? error.message : 'internal error',
-            });
-            throw error;
-          } finally {
-            signal?.removeEventListener('abort', abortFromCaller);
-            if (activeHostRuns.get(requestId) === run.controller) {
-              activeHostRuns.delete(requestId);
-            }
+          if (result.status === 'waiting_human') {
+            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+            return;
           }
-        }, signal);
-      } catch (error) {
-        if (error instanceof ResidentPetOperationCancelledError || signal?.aborted) {
-          return { status: 'cancelled' };
+          if (result.status === 'interrupted') {
+            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+            publishRuntimeEvent({
+              type: 'run.interrupted',
+              requestId,
+              message: 'Run interrupted.',
+            });
+            return;
+          }
+          finishInflightOperations(run, 'completed', publishRuntimeEvent);
+        } catch (error) {
+          if (run.controller.signal.aborted || isAbortError(error)) {
+            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+            publishRuntimeEvent({
+              type: 'run.interrupted',
+              requestId,
+              message: 'Run interrupted.',
+            });
+            return;
+          }
+          finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
+          publishRuntimeEvent({
+            type: 'error',
+            requestId,
+            message: error instanceof Error ? error.message : 'internal error',
+          });
+          throw error;
+        } finally {
+          if (activeHostRuns.get(requestId) === run.controller) {
+            activeHostRuns.delete(requestId);
+          }
         }
-        throw error;
-      }
+      });
     },
   };
 

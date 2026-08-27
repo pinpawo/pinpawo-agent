@@ -1,7 +1,7 @@
 # Kanban Console UI
 
 > 状态：Draft product and adapter contract
-> 更新：2026-08-23
+> 更新：2026-08-27
 > 依赖：[Kanban SQLite Task Store](sqlite-task-store.md)
 
 Kanban Console 是独立 Kanban application 的桌面 Web 操作台。它不是传统人类项目管理
@@ -72,7 +72,7 @@ task、event、SQLite、Agent checkpoint 或 Studio runtime 状态。
 - 显示 task、请求操作、简短原因与依赖信息；
 - 提供鼠标可点击的“批准”“拒绝”“详情”；
 - 只有 Kanban-owned typed attention/authorization record 才能进入授权区；不能把 Studio
-  gate 或 dispatch 的 `waiting` result 当成授权项；
+  gate 或 Agent Session waiting event 当成授权项；
 - 没有 interaction adapter 时可以显示该 record，但操作按钮必须 disabled 并说明当前
   没有授权处理器；
 - UI 不能直接恢复 checkpoint。批准/拒绝只调用独立 interaction adapter；adapter 通过

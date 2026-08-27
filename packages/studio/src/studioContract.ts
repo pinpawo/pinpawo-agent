@@ -8,7 +8,8 @@
  *
  * - `dispatch` 是 studio 对外的**动作**。所有派活必经它 —— 插件不能绕过
  *   studio 直接碰 pet,否则 pet registry、身份与可派发性判断会在每个插件
- *   里重复一遍,而且多个插件同时派活时没有地方能协调。
+ *   里重复一遍。Studio 只完成 target 选择与 admission identity；多个输入的
+ *   queue/gate 协调由 `PetDispatchPort` 后面的 resident runtime 负责。
  * - `event` 是 studio **接收**的通知,并通过统一 pub/sub 总线广播给其他插件。它是**插件之间的
  *   共享总线** —— 让互不认识的插件能交换信息。
  *
@@ -26,15 +27,10 @@ import type { StudioPetRegistration } from './types';
 import type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
-  StudioInvocationEventHandler,
 } from './studioInvocation';
 export type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
-  StudioDispatchResult,
-  StudioInvocationEvent,
-  StudioInvocationEventHandler,
-  StudioInvocationTerminalStatus,
 } from './studioInvocation';
 
 /* ─────────────── 入:event ─────────────── */
@@ -87,15 +83,8 @@ export type StudioPluginHooks = {
  * Plugin 之间装配不透明扩展点，不承载领域事件或执行状态。
  */
 export type StudioPluginContext = {
-  /** 派活。来源由 studio 补成本插件名,插件不需要(也无法)自报。 */
+  /** 单向派活。Promise 只覆盖 Studio/Pet 的接纳，不代表 Agent 执行完成。 */
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
-  /**
-   * 订阅**本插件派出去的** invocation 状态。别的插件派的活不会送到这里
-   * —— 这是 dispatch 那条点对点的线,不是共享总线。
-   *
-   * 想听就订,不想听就不订。返回退订函数。
-   */
-  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEventInput) => void;
   /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;
@@ -143,8 +132,6 @@ export type Studio = {
    */
   entryPetId: string;
   dispatch: (input: StudioDispatchRequest) => Promise<StudioDispatchReceipt>;
-  /** Host control-plane observation for every Studio invocation. */
-  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
   notify: (event: StudioEvent) => void;
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];

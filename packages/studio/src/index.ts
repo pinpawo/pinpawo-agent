@@ -10,7 +10,6 @@ export type {
   Studio,
   StudioDispatchReceipt,
   StudioDispatchRequest,
-  StudioDispatchResult,
   StudioEvent,
   StudioEventHandler,
   StudioEventInput,
@@ -18,9 +17,6 @@ export type {
   StudioPluginContext,
   StudioPluginHookInstaller,
   StudioPluginHooks,
-  StudioInvocationEvent,
-  StudioInvocationEventHandler,
-  StudioInvocationTerminalStatus,
 } from './studioContract';
 export { parseStudioDispatchRequest } from './studioInvocation';
 

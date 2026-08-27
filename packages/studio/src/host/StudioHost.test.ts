@@ -99,6 +99,7 @@ function result(studio: Studio): BuildStudioResult {
     resolved: {} as BuildStudioResult['resolved'],
     plugins: [],
     residentPets: new Map(),
+    activatePlugins: async () => undefined,
   };
 }
 

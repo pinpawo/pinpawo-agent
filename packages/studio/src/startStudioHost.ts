@@ -63,6 +63,13 @@ export async function startStudioHost(
       options.agentSessionTransport,
     );
     const closed = transport.closed.finally(() => host.shutdown());
+    try {
+      await host.activatePlugins();
+    } catch (error) {
+      transport.close();
+      await closed.catch(() => undefined);
+      throw error;
+    }
     return {
       host,
       agentSessionPort: transport.port,

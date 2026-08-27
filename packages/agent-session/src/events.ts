@@ -5,6 +5,8 @@ import type { AgentPlan } from './domain';
 import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
+  | AgentRunStartedEvent
+  | AgentRunInterruptedEvent
   | AgentAssistantMessageEvent
   | AgentSubagentMessageCompletedEvent
   | AgentOperationEvent
@@ -12,6 +14,28 @@ export type AgentRuntimeEvent =
   | AgentHumanReviewRequestedEvent
   | AgentSystemNoticeEvent
   | AgentErrorEvent;
+
+/**
+ * Opens a run for every observer of the session, including observers that did
+ * not originate the input. `initiator` describes the transport-side source;
+ * it deliberately does not name any composing Host such as Studio.
+ */
+export type AgentRunStartedEvent = {
+  type: 'run.started';
+  requestId: string;
+  initiator: 'client' | 'host';
+  input?: {
+    role: 'user';
+    text: string;
+  };
+};
+
+/** Terminates a run that did not reach a message/review/error boundary. */
+export type AgentRunInterruptedEvent = {
+  type: 'run.interrupted';
+  requestId: string;
+  message?: string;
+};
 
 export type AgentAssistantMessageEvent =
   | AgentMessageDeltaEvent

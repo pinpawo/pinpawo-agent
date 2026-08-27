@@ -7,6 +7,7 @@ import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
 import type {
   AgentModelProfileSummary,
+  AgentRuntimeEvent,
   AgentRunView,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
@@ -19,8 +20,8 @@ import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
 import { LocalServerSessionCommandQueue } from './localServerSessionCommandQueue';
 import { LocalServerChatHandler } from './localServerChatHandler';
 import type {
-  ChatSessionAdapterOptions,
-  ChatSessionResult,
+  AgentSessionTurnOptions,
+  AgentSessionTurnResult,
 } from './chatSessionAdapter';
 import { LocalServerTuiSessionService } from './localServerTuiSessions';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
@@ -53,9 +54,17 @@ export type LocalServerHandlerOptions = {
   /** Must be shared by chat execution and checkpoint-backed session reads. */
   loadContext?: typeof loadAgentContext;
   /** Deterministic run-boundary hook for embedded hosts and tests. */
+  runAgentTurn?: (
+    options: AgentSessionTurnOptions,
+  ) => Promise<AgentSessionTurnResult>;
+  /** @deprecated Use runAgentTurn. */
   runChat?: (
-    options: ChatSessionAdapterOptions,
-  ) => Promise<ChatSessionResult>;
+    options: AgentSessionTurnOptions,
+  ) => Promise<AgentSessionTurnResult>;
+  /** Publish one run event to every observer of the resident Agent Session. */
+  publishRuntimeEvent?: (origin: LocalServerPeer, event: AgentRuntimeEvent) => void;
+  /** Optional Host-owned run control used by resident headless inputs. */
+  interruptHostRun?: (requestId: string) => boolean;
 };
 
 type SessionSummarySource = Pick<
@@ -99,17 +108,27 @@ export function createLocalServerHandlers(
     runtimeConfig: effectiveRuntimeConfig,
     defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
+  const publishRuntimeEvent = options.publishRuntimeEvent
+    ?? ((peer: LocalServerPeer, event: AgentRuntimeEvent) => {
+      sendLocalServerPeerEvent(peer, event);
+    });
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
     // Local TUI / companion / spawned stdio peer: trusted local transports.
-    emitOperation: (peer, event) => sendLocalServerPeerEvent(peer, event),
+    emitOperation: publishRuntimeEvent,
     sendControl: (peer, message) => peer.send(message),
   });
   const chatHandler = new LocalServerChatHandler({
     graphService: chatGraphService,
     tuiSessions,
     inflightRequests,
+    publishRuntimeEvent,
+    ...(options.interruptHostRun ? { interruptHostRun: options.interruptHostRun } : {}),
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
-    ...(options.runChat ? { runChat: options.runChat } : {}),
+    ...(options.runAgentTurn
+      ? { runAgentTurn: options.runAgentTurn }
+      : options.runChat
+        ? { runChat: options.runChat }
+        : {}),
   });
   const sessionCommands = new LocalServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.

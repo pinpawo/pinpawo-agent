@@ -232,11 +232,16 @@ Dispatch gate 是这个协调过程的原子状态，不是供上层“先读后
 - `getState()` 与 `onStateChange()` 只用于观察。是否开始下一项由 Coordinator 在同一个
   临界区内决定。
 
-dispatch 不订阅 conversation 的 live execution stream。它只得到 gate 与最终
+dispatch 调用方不订阅 Agent 的 live execution stream。它只得到 gate 与最终
 `completed` / `waiting` / cancellation 结果；Studio 的 accepted/invocation event 是
-Studio 对这次 dispatch promise 的上层投射。conversation 保留完整的 snapshot/event/
-interrupt 能力，并在下次 snapshot 中看到 dispatch 已持久化的结果，但不要求实时镜像
-dispatch 的 token/tool activity。
+Studio 对这次 dispatch promise 的上层投射。
+
+resident runtime 内部的所有 Agent turn 统一经过 local-agent Agent Session turn runner。
+无论输入来自 conversation peer 还是 Host 持有的单向 dispatch，runner 都产生相同的
+message/tool/plan/review runtime event。已连接同一 Pet interaction 的 Agent Session peer
+是当前 session 的观察者：idle 连接不阻塞 dispatch，但会从 `run.started` 开始实时投射
+之后发生的 turn。没有 peer 时事件可以丢弃；checkpoint 仍是持久权威。这个广播属于
+local-agent interaction，不进入 `PetDispatchPort`、Studio core 或 Studio Plugin event bus。
 
 ## 6. 生命周期与所有权
 
@@ -328,7 +333,9 @@ target 返回。Capability inventory 不进入该列表。
 - dispatch contract 不包含 resume，Studio receipt/event 不暴露固定 Pet `threadId`；
 - 删除 dispatch resume 前，Pet-scoped Agent Session route 已通过 waiting checkpoint 的
   snapshot、typed resume 与重连 E2E；
-- dispatch 不需要消费 conversation live stream，只观察 gate 与自己的最终结果；
+- dispatch 调用方不消费 Agent Session live stream，只观察 gate 与自己的最终结果；
+- conversation 与 Host 单向输入共用 Agent Session turn runner；已连接同一 Pet 的 peer
+  能观察任一来源后续产生的 run/message/tool/plan/review event；
 - Studio Host 任一 Pet 启动失败时整体失败；`listPets()` 只包含当前存活 Pet；
 - Studio control plane 只有 HTTP，Agent Session WebSocket 属于同进程 local-agent
   interaction adapter 而非 Studio protocol；
@@ -340,6 +347,6 @@ target 返回。Capability inventory 不进入该列表。
 - 不把 TUI 变成 Studio client；
 - 不为 Studio core 增加 WebSocket 或 Agent Session 协议；HTTP 由 Studio HTTP Plugin 提供；
 - 不把普通 conversation message 自动解释为 waiting continuation 的回答；
-- 不在本阶段重命名或重写 `@pinpawo/agent-session` wire contract；
+- 不为 `@pinpawo/agent-session` wire contract 增加 Studio、invocation 或 Plugin 概念；
 - 不把 `ResidentPetHost` 放进 `packages/pet-agent`：它是本地 Host 装配，而不是
   runtime-independent Agent 领域能力。

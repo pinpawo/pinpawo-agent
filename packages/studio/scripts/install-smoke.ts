@@ -18,6 +18,7 @@ const studioRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspaceRoot = resolve(studioRoot, '..', '..');
 const packageRoots = [
   resolve(workspaceRoot, 'packages', 'agent-contracts'),
+  resolve(workspaceRoot, 'packages', 'agent-session'),
   resolve(workspaceRoot, 'packages', 'pet-agent'),
   resolve(workspaceRoot, 'services', 'local-agent'),
   studioRoot,

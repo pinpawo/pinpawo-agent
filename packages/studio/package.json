@@ -34,7 +34,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test",
     "start": "node dist/cli.js",
-    "test:install": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/pet-agent && npm run build -w pinpawo && npm run build && node --import tsx/esm scripts/install-smoke.ts",
+    "test:install": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/agent-session && npm run build -w @pinpawo/pet-agent && npm run build -w pinpawo && npm run build && node --import tsx/esm scripts/install-smoke.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },

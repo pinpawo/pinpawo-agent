@@ -1,21 +1,42 @@
 {
   "name": "@pinpawo/agent-session",
-  "version": "0.2.0",
-  "private": true,
-  "type": "module",
-  "main": "./src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
+  "version": "0.2.1",
+  "description": "Runtime-neutral Agent Session projection and transport contracts",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
   },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist --platform neutral --target es2022",
+    "pack:dry": "npm run build && npm pack --dry-run",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "dependencies": {
-    "@pinpawo/agent-contracts": "*"
+    "@pinpawo/agent-contracts": "^0.2.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

@@ -75,6 +75,7 @@ export class StudioHost {
       sourceId: 'studio-host',
       checkpointPath: resolveHostCheckpointPath(runtimeConfig, 'studio'),
       loadUserCapabilities: false,
+      includeBrowser: false,
     });
     this.buildStudioImpl = options.buildStudio ?? buildStudio;
     this.resolveStudioHostConfigImpl = options.resolveStudioHostConfig ?? resolveStudioHostConfig;

@@ -7,6 +7,9 @@ Scheduler 与 Trigger 是两个可选 Studio Plugin。它们把“何时产生�
 进入”建模为独立领域，然后只通过 `StudioPluginContext.dispatch()` 向 Pet 提交单向输入，
 通过 `notify()` 发布领域事件。
 
+领域 Service 是 committed-mutation 的唯一出口。Plugin 订阅这个出口并统一投射 Studio
+event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自补发事件。
+
 ```text
 Scheduler SQLite -> due claim -> context.dispatch()
 Trigger HTTP input -> delivery claim -> context.dispatch()
@@ -25,7 +28,8 @@ HTTP 只承载 request/response；领域校验、幂等、持久化和 recovery 
 第一版支持 durable one-shot schedule：`scheduleId/petId/request/runAt/status`。启动时把所有
 已到期且仍为 `scheduled` 的记录视为 missed fire，并按原计划只 claim/dispatch 一次。
 SQLite transaction 先把记录原子地转成 `dispatching`，再调用 `context.dispatch()`；接受后
-标记 `completed`，admission 失败标记 `failed`。崩溃遗留的 `dispatching` 标记为
+标记 `dispatched`，表示 resident queue 已接纳而不是 Agent 执行完成；admission 失败标记
+`failed`。崩溃遗留的 `dispatching` 标记为
 `failed`，避免无法证明安全时重复派发。
 
 管理 API：

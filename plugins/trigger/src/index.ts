@@ -5,4 +5,9 @@ export type {
   TriggerPlugin,
 } from './triggerPlugin';
 export { TriggerService } from './triggerService';
-export type { TriggerDelivery, TriggerDeliveryEvent, TriggerDeliveryStatus } from './triggerService';
+export type {
+  TriggerDelivery,
+  TriggerDeliveryEvent,
+  TriggerDeliveryMutation,
+  TriggerDeliveryStatus,
+} from './triggerService';

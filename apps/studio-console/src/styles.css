@@ -29,7 +29,7 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .inline-action { height: 24px; margin-left: 10px; padding: 0 7px; color: #d8b46c; background: transparent; }
 .row em.waiting, .row em.scheduled, .row em.dispatching { color: #e0b15d; }
 .row em.blocked, .row em.failed { color: #df7a73; }
-.row em.done, .row em.completed, .row em.accepted { color: #72c69c; }
+.row em.done, .row em.dispatched, .row em.accepted { color: #72c69c; }
 .composer { display: grid; grid-template-columns: 180px minmax(0, 1fr) 110px; gap: 8px; padding: 16px 0 24px; }
 .composer.scheduler { grid-template-columns: 150px minmax(0, 1fr) 220px 110px; }
 .empty-state { min-height: 260px; display: grid; place-content: center; gap: 9px; color: #758588; text-align: center; }

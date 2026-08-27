@@ -15,7 +15,7 @@ export type CreateTriggerPluginOptions = {
   triggers: readonly TriggerDefinition[];
   service?: TriggerService;
   databasePath?: string;
-  httpRoute?: false | { pluginName?: string; path?: string };
+  httpRoute?: false | { pluginName?: string };
 };
 
 export type TriggerPlugin = StudioPlugin & { service: TriggerService };
@@ -62,6 +62,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
   const ownsService = !options.service;
   const service = options.service ?? new TriggerService(options.databasePath);
   let context: StudioPluginContext | undefined;
+  let unsubscribeMutations: (() => void) | undefined;
   let unregisterRoutes: (() => void) | undefined;
 
   return {
@@ -78,6 +79,18 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       }
       context = pluginContext;
       try {
+        unsubscribeMutations = service.subscribe(({ delivery, event }) => {
+          pluginContext.notify({
+            type: `trigger.${event.eventType}`,
+            payload: {
+              deliveryId: delivery.deliveryId,
+              triggerId: delivery.triggerId,
+              status: delivery.status,
+              sequence: event.sequence,
+              ...(event.note === undefined ? {} : { note: event.note }),
+            },
+          });
+        });
         await service.init();
         const route = options.httpRoute;
         if (route !== false) {
@@ -85,7 +98,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
             route?.pluginName ?? 'http',
             'routes',
             (routes) => {
-              const base = route?.path ?? '/triggers';
+              const base = '/triggers';
               const unregister: Array<() => void> = [];
               try {
                 unregister.push(routes.register({
@@ -134,13 +147,6 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       if (claimed.duplicate) {
                         return { kind: 'json', body: { duplicate: true, delivery: claimed.delivery } };
                       }
-                      pluginContext.notify({
-                        type: 'trigger.received',
-                        payload: {
-                          deliveryId: claimed.delivery.deliveryId,
-                          triggerId: definition.triggerId,
-                        },
-                      });
                       try {
                         const payload = JSON.stringify(value.payload);
                         if (payload === undefined) throw new Error('Trigger payload must be JSON serializable.');
@@ -150,20 +156,12 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                           idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
                         });
                         const delivery = await service.accept(claimed.delivery.deliveryId);
-                        pluginContext.notify({
-                          type: 'trigger.accepted',
-                          payload: { deliveryId: delivery.deliveryId, triggerId: definition.triggerId },
-                        });
                         return { kind: 'json', status: 202, body: { duplicate: false, delivery } };
                       } catch (error) {
                         const delivery = await service.fail(
                           claimed.delivery.deliveryId,
                           asError(error).message,
                         );
-                        pluginContext.notify({
-                          type: 'trigger.failed',
-                          payload: { deliveryId: delivery.deliveryId, triggerId: definition.triggerId },
-                        });
                         return { kind: 'json', status: 422, body: { error: asError(error).message, delivery } };
                       }
                     } catch (error) {
@@ -181,6 +179,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
         }
       } catch (error) {
         context = undefined;
+        unsubscribeMutations?.();
+        unsubscribeMutations = undefined;
         unregisterRoutes?.();
         unregisterRoutes = undefined;
         if (ownsService) await service.close().catch(() => undefined);
@@ -189,6 +189,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
     },
     stop: async () => {
       context = undefined;
+      unsubscribeMutations?.();
+      unsubscribeMutations = undefined;
       unregisterRoutes?.();
       unregisterRoutes = undefined;
       if (ownsService) await service.close();
@@ -247,16 +249,15 @@ export function createStudioPlugin(
   const httpRoute = options.httpRoute;
   if (httpRoute !== undefined && httpRoute !== false
     && (!httpRoute || typeof httpRoute !== 'object' || Array.isArray(httpRoute)
-      || Object.keys(httpRoute).some((key) => key !== 'pluginName' && key !== 'path')
-      || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string')
-      || ('path' in httpRoute && typeof httpRoute.path !== 'string'))) {
+      || Object.keys(httpRoute).some((key) => key !== 'pluginName')
+      || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string'))) {
     throw new Error('Trigger Plugin option "httpRoute" must be false or a route object.');
   }
   return createTriggerPlugin({
     databasePath,
     triggers,
     ...(httpRoute !== undefined
-      ? { httpRoute: httpRoute as false | { pluginName?: string; path?: string } }
+      ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),
   });
 }

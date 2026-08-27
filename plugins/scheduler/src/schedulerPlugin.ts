@@ -7,7 +7,7 @@ export type CreateSchedulerPluginOptions = {
   service?: SchedulerService;
   databasePath?: string;
   pollIntervalMs?: number;
-  httpRoute?: false | { pluginName?: string; path?: string };
+  httpRoute?: false | { pluginName?: string };
 };
 
 export type SchedulerPlugin = StudioPlugin & { service: SchedulerService };
@@ -32,6 +32,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   }
   let context: StudioPluginContext | undefined;
   let timer: NodeJS.Timeout | undefined;
+  let unsubscribeMutations: (() => void) | undefined;
   let unregisterRoutes: (() => void) | undefined;
   let polling: Promise<void> | undefined;
 
@@ -47,17 +48,9 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
             request: schedule.request,
             idempotencyKey: `schedule:${schedule.scheduleId}`,
           });
-          await service.complete(schedule.scheduleId);
-          context.notify({
-            type: 'schedule.fired',
-            payload: { scheduleId: schedule.scheduleId, petId: schedule.petId },
-          });
+          await service.markDispatched(schedule.scheduleId);
         } catch (error) {
           await service.fail(schedule.scheduleId, asError(error).message);
-          context.notify({
-            type: 'schedule.failed',
-            payload: { scheduleId: schedule.scheduleId, message: asError(error).message },
-          });
         }
       }
     })();
@@ -68,6 +61,15 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
     }
   };
 
+  const requestPoll = () => {
+    void poll().catch((error) => {
+      context?.notify({
+        type: 'schedule.poll_failed',
+        payload: { message: asError(error).message },
+      });
+    });
+  };
+
   return {
     name: 'scheduler',
     toolkits: [],
@@ -76,6 +78,22 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
       if (context) throw new Error('Scheduler Plugin is already started.');
       context = pluginContext;
       try {
+        unsubscribeMutations = service.subscribe(({ schedule, event }) => {
+          const type = event.eventType === 'dispatched'
+            ? 'schedule.fired'
+            : `schedule.${event.eventType}`;
+          pluginContext.notify({
+            type,
+            payload: {
+              scheduleId: schedule.scheduleId,
+              petId: schedule.petId,
+              status: schedule.status,
+              sequence: event.sequence,
+              ...(event.note === undefined ? {} : { note: event.note }),
+            },
+          });
+          if (event.eventType === 'created') requestPoll();
+        });
         await service.init();
         const route = options.httpRoute;
         if (route !== false) {
@@ -83,7 +101,7 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
             route?.pluginName ?? 'http',
             'routes',
             (routes) => {
-              const base = route?.path ?? '/scheduler';
+              const base = '/scheduler';
               const unregister: Array<() => void> = [];
               try {
                 unregister.push(routes.register({
@@ -109,11 +127,6 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
                         request: value.request,
                         runAt: value.runAt,
                       });
-                      pluginContext.notify({
-                        type: 'schedule.created',
-                        payload: { scheduleId: schedule.scheduleId, petId: schedule.petId },
-                      });
-                      void poll();
                       return { kind: 'json', status: 201, body: { schedule } };
                     } catch (error) {
                       return { kind: 'json', status: 400, body: { error: asError(error).message } };
@@ -129,10 +142,6 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
                         throw new Error('Scheduler control requires action=cancel and scheduleId.');
                       }
                       const schedule = await service.cancel(value.scheduleId);
-                      pluginContext.notify({
-                        type: 'schedule.cancelled',
-                        payload: { scheduleId: schedule.scheduleId, petId: schedule.petId },
-                      });
                       return {
                         kind: 'json',
                         body: { schedule },
@@ -166,11 +175,13 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
             },
           );
         }
-        timer = setInterval(() => { void poll(); }, pollIntervalMs);
+        timer = setInterval(requestPoll, pollIntervalMs);
         timer.unref();
         await poll();
       } catch (error) {
         context = undefined;
+        unsubscribeMutations?.();
+        unsubscribeMutations = undefined;
         unregisterRoutes?.();
         unregisterRoutes = undefined;
         if (ownsService) await service.close().catch(() => undefined);
@@ -182,6 +193,8 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
       timer = undefined;
       await polling;
       context = undefined;
+      unsubscribeMutations?.();
+      unsubscribeMutations = undefined;
       unregisterRoutes?.();
       unregisterRoutes = undefined;
       if (ownsService) await service.close();
@@ -206,9 +219,8 @@ export function createStudioPlugin(
   const httpRoute = options.httpRoute;
   if (httpRoute !== undefined && httpRoute !== false
     && (!httpRoute || typeof httpRoute !== 'object' || Array.isArray(httpRoute)
-      || Object.keys(httpRoute).some((key) => key !== 'pluginName' && key !== 'path')
-      || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string')
-      || ('path' in httpRoute && typeof httpRoute.path !== 'string'))) {
+      || Object.keys(httpRoute).some((key) => key !== 'pluginName')
+      || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string'))) {
     throw new Error('Scheduler Plugin option "httpRoute" must be false or a route object.');
   }
   const databasePath = typeof options.databasePath === 'string'
@@ -220,7 +232,7 @@ export function createStudioPlugin(
     databasePath,
     ...(typeof options.pollIntervalMs === 'number' ? { pollIntervalMs: options.pollIntervalMs } : {}),
     ...(httpRoute !== undefined
-      ? { httpRoute: httpRoute as false | { pluginName?: string; path?: string } }
+      ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),
   });
 }

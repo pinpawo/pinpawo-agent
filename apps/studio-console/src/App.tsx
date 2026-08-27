@@ -9,7 +9,7 @@ type Task = {
 };
 type Schedule = {
   scheduleId: string; petId: string; request: string; runAt: string;
-  status: 'scheduled' | 'dispatching' | 'completed' | 'failed' | 'cancelled'; note?: string;
+  status: 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled'; note?: string;
 };
 type TriggerDefinition = { triggerId: string; petId: string; requestPrefix: string };
 type Delivery = {

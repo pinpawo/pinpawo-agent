@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-export type ScheduleStatus = 'scheduled' | 'dispatching' | 'completed' | 'failed' | 'cancelled';
+export type ScheduleStatus = 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled';
 
 export type Schedule = {
   scheduleId: string;
@@ -19,10 +19,15 @@ export type Schedule = {
 export type ScheduleEvent = {
   sequence: number;
   scheduleId: string;
-  eventType: 'created' | 'claimed' | 'completed' | 'failed' | 'cancelled' | 'recovered';
+  eventType: 'created' | 'claimed' | 'dispatched' | 'failed' | 'cancelled' | 'recovered';
   status: ScheduleStatus;
   note?: string;
   occurredAt: string;
+};
+
+export type ScheduleMutation = {
+  schedule: Schedule;
+  event: ScheduleEvent;
 };
 
 type ScheduleRow = {
@@ -46,7 +51,7 @@ type EventRow = {
 };
 
 const STATUSES = new Set<ScheduleStatus>([
-  'scheduled', 'dispatching', 'completed', 'failed', 'cancelled',
+  'scheduled', 'dispatching', 'dispatched', 'failed', 'cancelled',
 ]);
 
 function nonEmpty(value: string, label: string): string {
@@ -79,6 +84,7 @@ function scheduleFromRow(row: ScheduleRow): Schedule {
 
 export class SchedulerService {
   private readonly database: DatabaseSync;
+  private readonly listeners = new Set<(mutation: ScheduleMutation) => void>();
   private initialized = false;
   private closed = false;
 
@@ -100,6 +106,10 @@ export class SchedulerService {
   async init(): Promise<void> {
     if (this.closed) throw new Error('Scheduler service is closed.');
     if (this.initialized) return;
+    const existingSchema = this.database.prepare(
+      "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'schedules'",
+    ).get() as { sql: string | null } | undefined;
+    if (existingSchema?.sql?.includes("'completed'")) this.migrateCompletedStatus();
     this.database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
@@ -111,7 +121,7 @@ export class SchedulerService {
         pet_id TEXT NOT NULL,
         request TEXT NOT NULL,
         run_at TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','completed','failed','cancelled')),
+        status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','dispatched','failed','cancelled')),
         note TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -129,13 +139,19 @@ export class SchedulerService {
       COMMIT;
     `);
     this.initialized = true;
-    this.recoverInterrupted();
+    for (const mutation of this.recoverInterrupted()) this.publish(mutation);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
+    this.listeners.clear();
     this.closed = true;
     this.database.close();
+  }
+
+  subscribe(listener: (mutation: ScheduleMutation) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async create(input: { petId: string; request: string; runAt: string }): Promise<Schedule> {
@@ -145,19 +161,22 @@ export class SchedulerService {
     const petId = nonEmpty(input.petId, 'petId');
     const request = nonEmpty(input.request, 'request');
     const runAt = parseDate(input.runAt, 'runAt');
+    let event: ScheduleEvent;
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       this.database.prepare(`
         INSERT INTO schedules(schedule_id, pet_id, request, run_at, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'scheduled', ?, ?)
       `).run(scheduleId, petId, request, runAt, now, now);
-      this.insertEvent(scheduleId, 'created', 'scheduled', undefined, now);
+      event = this.insertEvent(scheduleId, 'created', 'scheduled', undefined, now);
       this.database.exec('COMMIT;');
     } catch (error) {
       this.database.exec('ROLLBACK;');
       throw error;
     }
-    return this.get(scheduleId) as Promise<Schedule>;
+    const schedule = await this.get(scheduleId) as Schedule;
+    this.publish({ schedule, event: event! });
+    return schedule;
   }
 
   async cancel(scheduleId: string): Promise<Schedule> {
@@ -166,6 +185,8 @@ export class SchedulerService {
 
   async claimDue(now = new Date()): Promise<Schedule | null> {
     this.assertReady();
+    let event: ScheduleEvent;
+    let scheduleId: string | undefined;
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       const row = this.database.prepare(`
@@ -178,20 +199,23 @@ export class SchedulerService {
         return null;
       }
       const occurredAt = new Date().toISOString();
+      scheduleId = row.schedule_id;
       this.database.prepare(
         "UPDATE schedules SET status = 'dispatching', updated_at = ? WHERE schedule_id = ?",
-      ).run(occurredAt, row.schedule_id);
-      this.insertEvent(row.schedule_id, 'claimed', 'dispatching', undefined, occurredAt);
+      ).run(occurredAt, scheduleId);
+      event = this.insertEvent(scheduleId, 'claimed', 'dispatching', undefined, occurredAt);
       this.database.exec('COMMIT;');
-      return this.get(row.schedule_id);
     } catch (error) {
       this.database.exec('ROLLBACK;');
       throw error;
     }
+    const schedule = await this.get(scheduleId) as Schedule;
+    this.publish({ schedule, event: event! });
+    return schedule;
   }
 
-  async complete(scheduleId: string): Promise<Schedule> {
-    return this.transition(scheduleId, ['dispatching'], 'completed', 'completed');
+  async markDispatched(scheduleId: string): Promise<Schedule> {
+    return this.transition(scheduleId, ['dispatching'], 'dispatched', 'dispatched');
   }
 
   async fail(scheduleId: string, note: string): Promise<Schedule> {
@@ -235,10 +259,11 @@ export class SchedulerService {
     }));
   }
 
-  private recoverInterrupted(): void {
+  private recoverInterrupted(): ScheduleMutation[] {
     const rows = this.database.prepare("SELECT schedule_id FROM schedules WHERE status = 'dispatching'")
       .all() as Array<{ schedule_id: string }>;
-    if (rows.length === 0) return;
+    if (rows.length === 0) return [];
+    const events: ScheduleEvent[] = [];
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       for (const row of rows) {
@@ -247,13 +272,17 @@ export class SchedulerService {
         this.database.prepare(
           "UPDATE schedules SET status = 'failed', note = ?, updated_at = ? WHERE schedule_id = ?",
         ).run(note, now, row.schedule_id);
-        this.insertEvent(row.schedule_id, 'recovered', 'failed', note, now);
+        events.push(this.insertEvent(row.schedule_id, 'recovered', 'failed', note, now));
       }
       this.database.exec('COMMIT;');
     } catch (error) {
       this.database.exec('ROLLBACK;');
       throw error;
     }
+    return events.map((event) => ({
+      schedule: this.readSchedule(event.scheduleId)!,
+      event,
+    }));
   }
 
   private async transition(
@@ -271,6 +300,7 @@ export class SchedulerService {
       throw new Error(`Scheduler schedule "${id}" is ${current.status}.`);
     }
     const now = new Date().toISOString();
+    let event: ScheduleEvent;
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       const result = this.database.prepare(`
@@ -278,13 +308,15 @@ export class SchedulerService {
         WHERE schedule_id = ? AND status = ?
       `).run(status, note ?? null, now, id, current.status);
       if (result.changes !== 1) throw new Error(`Scheduler schedule "${id}" changed concurrently.`);
-      this.insertEvent(id, eventType, status, note, now);
+      event = this.insertEvent(id, eventType, status, note, now);
       this.database.exec('COMMIT;');
     } catch (error) {
       this.database.exec('ROLLBACK;');
       throw error;
     }
-    return this.get(id) as Promise<Schedule>;
+    const schedule = await this.get(id) as Schedule;
+    this.publish({ schedule, event: event! });
+    return schedule;
   }
 
   private insertEvent(
@@ -293,11 +325,89 @@ export class SchedulerService {
     status: ScheduleStatus,
     note: string | undefined,
     occurredAt: string,
-  ): void {
-    this.database.prepare(`
+  ): ScheduleEvent {
+    const result = this.database.prepare(`
       INSERT INTO schedule_events(schedule_id, event_type, status, note, occurred_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(scheduleId, eventType, status, note ?? null, occurredAt);
+    return {
+      sequence: Number(result.lastInsertRowid),
+      scheduleId,
+      eventType,
+      status,
+      ...(note === undefined ? {} : { note }),
+      occurredAt,
+    };
+  }
+
+  private readSchedule(scheduleId: string): Schedule | null {
+    const row = this.database.prepare('SELECT * FROM schedules WHERE schedule_id = ?')
+      .get(scheduleId) as ScheduleRow | undefined;
+    return row ? scheduleFromRow(row) : null;
+  }
+
+  private publish(mutation: ScheduleMutation): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(mutation);
+      } catch (error) {
+        console.error(
+          '[scheduler] committed domain-event listener failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+  }
+
+  /** Rename the unreleased v0 admission status without discarding local schedules. */
+  private migrateCompletedStatus(): void {
+    this.database.exec('PRAGMA foreign_keys = OFF;');
+    try {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE schedule_events RENAME TO schedule_events_v0;
+        ALTER TABLE schedules RENAME TO schedules_v0;
+        CREATE TABLE schedules (
+          schedule_id TEXT PRIMARY KEY,
+          pet_id TEXT NOT NULL,
+          request TEXT NOT NULL,
+          run_at TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('scheduled','dispatching','dispatched','failed','cancelled')),
+          note TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE schedule_events (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          schedule_id TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          status TEXT NOT NULL,
+          note TEXT,
+          occurred_at TEXT NOT NULL,
+          FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id) ON DELETE RESTRICT
+        );
+        INSERT INTO schedules
+        SELECT schedule_id, pet_id, request, run_at,
+          CASE status WHEN 'completed' THEN 'dispatched' ELSE status END,
+          note, created_at, updated_at
+        FROM schedules_v0;
+        INSERT INTO schedule_events
+        SELECT sequence, schedule_id,
+          CASE event_type WHEN 'completed' THEN 'dispatched' ELSE event_type END,
+          CASE status WHEN 'completed' THEN 'dispatched' ELSE status END,
+          note, occurred_at
+        FROM schedule_events_v0;
+        DROP TABLE schedule_events_v0;
+        DROP TABLE schedules_v0;
+        CREATE INDEX schedules_due ON schedules(status, run_at);
+        COMMIT;
+      `);
+    } catch (error) {
+      if (this.database.isTransaction) this.database.exec('ROLLBACK;');
+      throw error;
+    } finally {
+      this.database.exec('PRAGMA foreign_keys = ON;');
+    }
   }
 
   private assertReady(): void {

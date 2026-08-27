@@ -25,6 +25,11 @@ export type TriggerDeliveryEvent = {
   occurredAt: string;
 };
 
+export type TriggerDeliveryMutation = {
+  delivery: TriggerDelivery;
+  event: TriggerDeliveryEvent;
+};
+
 type DeliveryRow = {
   delivery_id: string;
   trigger_id: string;
@@ -65,6 +70,7 @@ function fromRow(row: DeliveryRow): TriggerDelivery {
 
 export class TriggerService {
   private readonly database: DatabaseSync;
+  private readonly listeners = new Set<(mutation: TriggerDeliveryMutation) => void>();
   private initialized = false;
   private closed = false;
 
@@ -112,13 +118,19 @@ export class TriggerService {
       COMMIT;
     `);
     this.initialized = true;
-    this.recoverInterrupted();
+    for (const mutation of this.recoverInterrupted()) this.publish(mutation);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
+    this.listeners.clear();
     this.closed = true;
     this.database.close();
+  }
+
+  subscribe(listener: (mutation: TriggerDeliveryMutation) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async claim(triggerId: string, idempotencyKey: string): Promise<{
@@ -132,6 +144,7 @@ export class TriggerService {
     if (existing) return { delivery: existing, duplicate: true };
     const deliveryId = randomUUID();
     const now = new Date().toISOString();
+    let event: TriggerDeliveryEvent;
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       this.database.prepare(`
@@ -139,7 +152,14 @@ export class TriggerService {
           delivery_id, trigger_id, idempotency_key, status, occurred_at, updated_at
         ) VALUES (?, ?, ?, 'dispatching', ?, ?)
       `).run(deliveryId, normalizedTriggerId, normalizedKey, now, now);
-      this.insertEvent(deliveryId, normalizedTriggerId, 'received', 'dispatching', undefined, now);
+      event = this.insertEvent(
+        deliveryId,
+        normalizedTriggerId,
+        'received',
+        'dispatching',
+        undefined,
+        now,
+      );
       this.database.exec('COMMIT;');
     } catch (error) {
       this.database.exec('ROLLBACK;');
@@ -147,7 +167,9 @@ export class TriggerService {
       if (raced) return { delivery: raced, duplicate: true };
       throw error;
     }
-    return { delivery: this.get(deliveryId)!, duplicate: false };
+    const delivery = this.get(deliveryId)!;
+    this.publish({ delivery, event: event! });
+    return { delivery, duplicate: false };
   }
 
   async accept(deliveryId: string): Promise<TriggerDelivery> {
@@ -212,6 +234,7 @@ export class TriggerService {
     this.assertReady();
     const now = new Date().toISOString();
     const normalizedId = nonEmpty(deliveryId, 'deliveryId');
+    let event: TriggerDeliveryEvent;
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       const current = this.get(normalizedId);
@@ -222,20 +245,23 @@ export class TriggerService {
         UPDATE trigger_deliveries SET status = ?, note = ?, updated_at = ?
         WHERE delivery_id = ?
       `).run(status, note ?? null, now, normalizedId);
-      this.insertEvent(normalizedId, current.triggerId, eventType, status, note, now);
+      event = this.insertEvent(normalizedId, current.triggerId, eventType, status, note, now);
       this.database.exec('COMMIT;');
     } catch (error) {
       this.database.exec('ROLLBACK;');
       throw error;
     }
-    return this.get(normalizedId)!;
+    const delivery = this.get(normalizedId)!;
+    this.publish({ delivery, event: event! });
+    return delivery;
   }
 
-  private recoverInterrupted(): void {
+  private recoverInterrupted(): TriggerDeliveryMutation[] {
     const rows = this.database.prepare(`
       SELECT delivery_id, trigger_id FROM trigger_deliveries WHERE status = 'dispatching'
     `).all() as Array<{ delivery_id: string; trigger_id: string }>;
-    if (rows.length === 0) return;
+    if (rows.length === 0) return [];
+    const events: TriggerDeliveryEvent[] = [];
     this.database.exec('BEGIN IMMEDIATE;');
     try {
       for (const row of rows) {
@@ -245,13 +271,21 @@ export class TriggerService {
           UPDATE trigger_deliveries SET status = 'failed', note = ?, updated_at = ?
           WHERE delivery_id = ?
         `).run(note, now, row.delivery_id);
-        this.insertEvent(row.delivery_id, row.trigger_id, 'recovered', 'failed', note, now);
+        events.push(this.insertEvent(
+          row.delivery_id,
+          row.trigger_id,
+          'recovered',
+          'failed',
+          note,
+          now,
+        ));
       }
       this.database.exec('COMMIT;');
     } catch (error) {
       this.database.exec('ROLLBACK;');
       throw error;
     }
+    return events.map((event) => ({ delivery: this.get(event.deliveryId)!, event }));
   }
 
   private insertEvent(
@@ -261,12 +295,34 @@ export class TriggerService {
     status: TriggerDeliveryStatus,
     note: string | undefined,
     occurredAt: string,
-  ): void {
-    this.database.prepare(`
+  ): TriggerDeliveryEvent {
+    const result = this.database.prepare(`
       INSERT INTO trigger_delivery_events(
         delivery_id, trigger_id, event_type, status, note, occurred_at
       ) VALUES (?, ?, ?, ?, ?, ?)
     `).run(deliveryId, triggerId, eventType, status, note ?? null, occurredAt);
+    return {
+      sequence: Number(result.lastInsertRowid),
+      deliveryId,
+      triggerId,
+      eventType,
+      status,
+      ...(note === undefined ? {} : { note }),
+      occurredAt,
+    };
+  }
+
+  private publish(mutation: TriggerDeliveryMutation): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(mutation);
+      } catch (error) {
+        console.error(
+          '[trigger] committed domain-event listener failed:',
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
   }
 
   private assertReady(): void {

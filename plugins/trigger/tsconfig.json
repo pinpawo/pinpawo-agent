@@ -6,8 +6,7 @@
     "baseUrl": ".",
     "paths": {
       "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
-      "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
-      "pinpawo/host-runtime": ["../../services/local-agent/src/hostRuntime.ts"]
+      "@pinpawo/studio": ["../../packages/studio/src/index.ts"]
     },
     "strict": true,
     "esModuleInterop": true,

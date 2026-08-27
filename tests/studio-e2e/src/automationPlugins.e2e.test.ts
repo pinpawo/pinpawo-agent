@@ -62,7 +62,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
     }),
   });
   assert.equal(scheduleResponse.status, 201);
-  await waitFor(async () => (await scheduler.service.snapshot()).schedules[0]?.status === 'completed');
+  await waitFor(async () => (await scheduler.service.snapshot()).schedules[0]?.status === 'dispatched');
   assert.ok(received.includes('scheduled request'));
 
   const unauthorizedTrigger = await fetch(`${base}/triggers/invoke`, {

@@ -180,7 +180,6 @@ export type CreateKanbanPluginOptions = {
   /** Optional reverse contribution into an installed Studio HTTP Plugin. */
   httpRoute?: false | {
     pluginName?: string;
-    path?: string;
   };
 };
 
@@ -299,7 +298,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
             httpRoute?.pluginName ?? 'http',
             'routes',
             (routes) => {
-              const snapshotPath = httpRoute?.path ?? '/kanban';
+              const snapshotPath = '/kanban';
               const unregisterSnapshot = routes.register({
                 method: 'GET',
                 path: snapshotPath,
@@ -385,9 +384,8 @@ export function createStudioPlugin(
       !httpRoute
       || typeof httpRoute !== 'object'
       || Array.isArray(httpRoute)
-      || Object.keys(httpRoute).some((key) => key !== 'pluginName' && key !== 'path')
+      || Object.keys(httpRoute).some((key) => key !== 'pluginName')
       || ('pluginName' in httpRoute && typeof httpRoute.pluginName !== 'string')
-      || ('path' in httpRoute && typeof httpRoute.path !== 'string')
     )
   ) {
     throw new Error('Kanban Plugin option "httpRoute" must be false or a route object.');

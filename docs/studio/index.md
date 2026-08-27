@@ -11,9 +11,10 @@
 > The `pinpawo-studio` executable entry also lives in this package. Concrete
 > Plugins remain externally injected through `StudioPluginResolver`.
 
-Studio is a small coordination substrate for multiple Pet runtimes. It keeps a
-registry of dispatchable pets, serializes work per pet, and gives plugins an
-in-process event bus. It is deliberately not a workflow engine.
+Studio is a small dispatch-admission substrate for multiple Pet runtimes. It
+keeps a registry of dispatchable pets and gives plugins an in-process event bus.
+The resident runtime owns queueing and the gate. Studio is deliberately not a
+workflow engine.
 
 ```text
 Plugin A ── notify(event) ──> Studio event bus ── subscribe ──> Plugin B
@@ -21,8 +22,9 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
 ```
 
 `dispatch()` immediately acknowledges acceptance with a new invocation identity.
-Its completion promise later settles the invocation; a Pet
-may also report domain outcomes through a Toolkit owned by the relevant Plugin.
+The receipt does not track execution. Agent activity is projected by Agent
+Session events, while Plugin domain outcomes are reported through Plugin-owned
+Toolkits and state.
 
 ## Read in this order
 
@@ -41,8 +43,7 @@ may also report domain outcomes through a Toolkit owned by the relevant Plugin.
 
 - Validating the configured pet registry and the default `entryPetId`.
 - Accepting dispatches unless Studio is stopped or the Pet is unknown.
-- One active invocation per Pet, while allowing different Pets to run in parallel.
-- One identity and live invocation observation per accepted dispatch.
+- One admission identity per accepted dispatch.
 - Starting configured plugins in order, stopping them in reverse order, and
   broadcasting plugin notifications without interpreting their payloads.
 
@@ -76,10 +77,10 @@ process handles direct Pet conversation without entering Studio core.
 
 ## Operational limits
 
-Queues, idempotency records, and event subscriptions are process-local and in
-memory. Dispatch has no backpressure, automatic retry, timeout, or durable event
-replay. Pet checkpoints and active Agent Session threads survive Host restart
-independently of those process-local projections.
+Idempotency records and event subscriptions are process-local and in memory.
+Studio dispatch has no execution result, automatic retry, timeout, or durable
+event replay. Resident queue/gate state, Pet checkpoints, and active Agent
+Session threads belong to local-agent rather than those Studio projections.
 
 The former run-controller, due-run scheduler, and shared-wiki designs are kept
 only in [Studio history](../history/studio/) and do not define present behavior.

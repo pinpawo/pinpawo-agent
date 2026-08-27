@@ -5,7 +5,7 @@ import {
   type CapabilityArtifactStore,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import { createStudio } from '../createStudio';
+import { prepareStudio } from '../createStudio';
 import type { Studio, StudioPlugin } from '../studioContract';
 import type { StudioPetBinding } from '../types';
 import {
@@ -43,6 +43,8 @@ export type BuildStudioInput = {
   capabilityArtifactStore: CapabilityArtifactStore;
   checkpoint: FileSaver;
   runtimeConfig: LocalAgentRuntimeConfig;
+  /** Host composition defers Plugin listeners until Agent Session transport is ready. */
+  deferPluginActivation?: boolean;
 };
 
 export type ResolveStudioHostConfigInput = {
@@ -60,6 +62,8 @@ export type BuildStudioResult = {
   plugins: StudioPlugin[];
   /** Host lifecycle resources; Studio core receives only their dispatch ports. */
   residentPets: ReadonlyMap<string, ResidentPetHost>;
+  /** Idempotently activate configured Plugin lifecycles. */
+  activatePlugins: () => Promise<void>;
 };
 
 /** One Studio configuration snapshot resolved once by its Host. */
@@ -202,17 +206,22 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
   }
 
   let studio: Studio;
+  let activatePlugins: () => Promise<void>;
   try {
-    studio = await createStudio({
+    const studioInput = {
       studioId: studioConfig.studioId,
       entryPetId: studioConfig.entryPetId,
       pets,
       plugins,
-    });
+    };
+    const prepared = prepareStudio(studioInput);
+    studio = prepared.studio;
+    activatePlugins = prepared.activatePlugins;
+    if (!input.deferPluginActivation) await activatePlugins();
   } catch (error) {
     await Promise.allSettled([...residentPets.values()].map((resident) => resident.close()));
     throw error;
   }
 
-  return { studio, resolved, plugins, residentPets };
+  return { studio, resolved, plugins, residentPets, activatePlugins };
 }

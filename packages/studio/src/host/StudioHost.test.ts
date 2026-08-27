@@ -24,14 +24,7 @@ function fakeStudio(onShutdown: () => void): Studio {
     dispatch: async () => ({
       petId: 'pet-1',
       invocationId: 'invocation-1',
-      onInvocation: () => () => undefined,
-      completion: Promise.resolve({
-        petId: 'pet-1',
-        invocationId: 'invocation-1',
-        status: 'completed',
-      }),
     }),
-    onInvocation: () => () => {},
     notify: () => {},
     subscribe: () => () => {},
     listPets: () => [],
@@ -106,6 +99,7 @@ function result(studio: Studio): BuildStudioResult {
     resolved: {} as BuildStudioResult['resolved'],
     plugins: [],
     residentPets: new Map(),
+    activatePlugins: async () => undefined,
   };
 }
 

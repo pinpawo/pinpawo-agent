@@ -14,7 +14,7 @@
 在当前代码中：
 
 - `CapabilityArtifactRef` 字段名是 `id`，不是 `artifactId`。
-- `PetDispatchPort.dispatch()` 只返回完成、等待或取消结果；Artifact 仍通过 store 引用传递。
+- `PetDispatchPort.dispatch()` 只接纳单向输入，不返回 Agent 执行结果；Artifact 仍通过 store 引用传递。
 - `capability artifact refs` 目前主要以内存状态（`state.sessionCapabilityArtifacts`）+ store ref 的方式在同/跨调用中使用；`ToolMessage.artifact` 仅作临时结构字段，非持久契约。
 - Artifact 引用与 Studio dispatch 是不同边界。Studio receipt 只返回 Pet 与
   invocation identity，不公开 Agent Session thread。

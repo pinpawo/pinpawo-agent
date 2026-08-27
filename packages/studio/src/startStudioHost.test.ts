@@ -35,14 +35,7 @@ function fakeStudio(events: string[]): Studio {
     dispatch: async () => ({
       petId: 'planner',
       invocationId: 'invocation-1',
-      onInvocation: () => () => undefined,
-      completion: Promise.resolve({
-        petId: 'planner',
-        invocationId: 'invocation-1',
-        status: 'completed',
-      }),
     }),
-    onInvocation: () => () => undefined,
     notify: () => undefined,
     subscribe: () => () => undefined,
     listPets: () => [],

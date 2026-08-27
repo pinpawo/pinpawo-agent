@@ -5,7 +5,6 @@ import {
   createStudio,
   type StudioPetBinding,
 } from '@pinpawo/studio';
-import type { PetDispatchResult } from 'pinpawo/host-runtime';
 import {
   createKanbanPlugin,
   type KanbanPlugin,
@@ -17,7 +16,7 @@ const AUTH_TOKEN = 'e2e-token-with-at-least-16-characters';
 
 function pet(
   petId: string,
-  invoke: (request: string) => Promise<PetDispatchResult | void> | PetDispatchResult | void,
+  invoke: (request: string) => Promise<void> | void,
 ): StudioPetBinding {
   return {
     registration: {
@@ -29,8 +28,7 @@ function pet(
     dispatch: {
       getState: () => 'open',
       onStateChange: () => () => undefined,
-      dispatch: async ({ request }) => await invoke(request)
-        ?? { status: 'completed', output: 'ok' },
+      dispatch: async ({ request }) => { void invoke(request); },
     },
   };
 }

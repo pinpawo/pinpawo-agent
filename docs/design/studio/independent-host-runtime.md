@@ -2,7 +2,7 @@
 
 > 状态：Accepted，implemented
 > 对应：#643，基于 `origin/main@6e960b82` 的运行时复核
-> 更新：2026-08-26
+> 更新：2026-08-27
 
 本文补足“Studio 已提取成独立类”之后仍需成立的运行时边界。它不重新定义
 Host / Agent / Capability / Toolkit 领域关系；该关系以
@@ -118,36 +118,25 @@ type StudioDispatchRequest = {
   request: string;
   metadata?: JsonObject;
   idempotencyKey?: string;
-  signal?: AbortSignal;
 };
 
 type StudioDispatchReceipt = {
   petId: string;
   invocationId: string;
-  onInvocation(handler: StudioInvocationEventHandler): () => void;
-  completion: Promise<StudioDispatchResult>;
-};
-
-type StudioDispatchResult = {
-  petId: string;
-  invocationId: string;
-  status: 'completed' | 'waiting' | 'failed' | 'cancelled';
-  output?: string;
-  error?: string;
+  metadata?: JsonObject;
 };
 ```
 
-receipt/event 不公开 Agent Session active `threadId`、pending continuation 或 Agent
-execution metadata。dispatch 真正获得执行权时，由 `ResidentPetHost` 内部从共享 Agent
-Session service 读取 active thread。
+receipt 只确认 resident queue 已接纳 request；它不是 Agent execution handle，不包含
+completion、status、output、error 或 caller cancellation。dispatch 真正获得执行权时，
+由 `ResidentPetHost` 内部从共享 Agent Session service 读取 active thread。
 
-- 每次已接收 dispatch 的 receipt 提供 invocation-scoped observer，并回放已知最新状态。
-- transport 先发 `studio.accepted`，再订阅该 receipt；producer-owned `metadata` 不携带
-  route id 或其他 transport 私有状态。
+- transport 只返回 admission receipt；producer-owned `metadata` 不携带 route id 或其他
+  transport 私有状态。
 - Plugin event 保持进程内全局总线语义，request transport 不隐式把它归到某个
   peer/delivery。未来的外部 event feed 需要显式 subscription/replay 契约。
-- invocation 通过 receipt observer 投射为 `studio.invocation` progress；
-  到达 completed/waiting/failed/cancelled 后释放本次 transport route。
+- Agent 执行进度与异常走 local-agent Agent Session event；Studio core 不复制或桥接这条
+  stream。Plugin 的领域结果继续由 Plugin 自己的 Toolkit、持久化状态和 event 表达。
 
 ### 2.4 HITL
 
@@ -161,9 +150,9 @@ reviewCapabilities = {
 }
 ```
 
-需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；dispatch 只把本次
-invocation 收口为 `waiting`，不投射 interrupt identity/payload，也不会删除 checkpoint
-state。Dispatch 是发后不管的单向入口，不提供 resume。
+需要人工确认的 Toolkit operation 可以产生 checkpointed interrupt；resident gate 进入
+`waiting`，Studio receipt 不发生变化，也不投射 interrupt identity/payload。Dispatch 是
+发后不管的单向入口，不提供 resume 或 execution result。
 
 pending interrupt 由同一 resident Pet 的 Agent Session conversation 投射与恢复；review、
 interrupt 与 session/thread 切换直接复用 `@pinpawo/agent-session` contract。Studio core、
@@ -203,12 +192,12 @@ resolver 只加载配置明确命名且已经安装的 package，并要求 packa
 
 ## 4. 验收测试
 
-- shutdown 后 queued dispatch 不 invoke；active operation 按 resident lifecycle contract 收口；
-  pending interrupt 不阻塞 shutdown。
+- Studio shutdown 停止接受新 dispatch，但不取消已经接纳的 Pet execution；resident Host
+  lifecycle 负责关闭 active/queued work，pending interrupt 不阻塞 shutdown。
 - plugin partial-start failure 逆序 rollback。
 - 同一 checkpoint root 的第二个 Host writer lease 被拒绝；owner 释放或 dead-owner 安全恢复后
   才能启动。两个 `FileSaver` 实例并发 `putWrites` 不丢 sibling writes。
-- Studio invocation 通过 receipt observer 精确归属；producer metadata 无 transport 私有字段。
+- Studio receipt 只包含 admission identity；producer metadata 无 transport 私有字段。
 - Studio dispatch contract 不包含 resume；Agent Session conversation 继续负责 typed
   interrupt/review control。
 - Studio Pet invocation 保留 human review/session authorization capability，使 interrupt 可落入 checkpoint。
@@ -226,5 +215,6 @@ resolver 只加载配置明确命名且已经安装的 package，并要求 packa
 - scheduler；它仍由 #638/#645 继续设计。
 - Plugin 的安装、版本管理与分发；显式 package resolver 只负责装配已安装 Plugin。
 
-Kanban 持久化和 dispatch result 投射由可选 Plugin 自己实现，见
-[Kanban SQLite task store](../kanban/sqlite-task-store.md)。它不改变上述 Studio Host 边界。
+Kanban 持久化与 task 结果由可选 Plugin 自己实现，见
+[Kanban SQLite task store](../kanban/sqlite-task-store.md)。Kanban 只在 dispatch admission
+失败时处理投递错误；接纳之后只能由 Kanban Toolkit/domain mutation 完成或阻塞 task。

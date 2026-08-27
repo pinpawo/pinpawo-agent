@@ -30,6 +30,14 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
+async function waitFor(predicate: () => boolean, message: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(message);
+}
+
 test('Coordinator keeps the active operation non-preemptive then drains conversation first', async () => {
   let settledState: PetDispatchState = 'open';
   const coordinator = new ResidentPetCoordinator({
@@ -273,9 +281,11 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
   const petB = await createPet('pet-b');
 
   try {
-    assert.deepEqual(await petA.resident.dispatch.dispatch({ request: 'needs review' }), {
-      status: 'waiting',
-    });
+    petA.resident.dispatch.dispatch({ request: 'needs review' });
+    await waitFor(
+      () => petA.resident.dispatch.getState() === 'waiting',
+      'resident dispatch did not close the gate for human review',
+    );
     assert.equal(petA.resident.dispatch.getState(), 'waiting');
     assert.equal(petB.resident.dispatch.getState(), 'open');
 
@@ -387,10 +397,13 @@ test('dispatch and conversation publish the same Agent Session event stream to o
   await host.interaction.connect(observer);
 
   try {
-    assert.deepEqual(await host.resident.dispatch.dispatch({ request: 'from host' }), {
-      status: 'completed',
-      output: 'handled from host',
-    });
+    host.resident.dispatch.dispatch({ request: 'from host' });
+    await waitFor(
+      () => observerMessages.some((message) => (
+        (message as { event?: { type?: string } }).event?.type === 'message.completed'
+      )),
+      'resident dispatch did not publish its completed message event',
+    );
     for (const messages of [sourceMessages, observerMessages]) {
       const events = messages.flatMap((message) => (
         (message as { type?: string }).type === 'event'
@@ -428,7 +441,7 @@ test('dispatch and conversation publish the same Agent Session event stream to o
 
     sourceMessages.length = 0;
     observerMessages.length = 0;
-    const blockingDispatch = host.resident.dispatch.dispatch({
+    host.resident.dispatch.dispatch({
       request: 'blocking host turn',
     });
     await blockingTurnStarted.promise;
@@ -440,7 +453,12 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       type: 'run.interrupt',
       requestId: startedEnvelope.requestId,
     });
-    assert.deepEqual(await blockingDispatch, { status: 'cancelled' });
+    await waitFor(
+      () => observerMessages.some((message) => (
+        (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
+      )),
+      'interrupted resident dispatch did not publish its runtime event',
+    );
     assert.ok(observerMessages.some((message) => (
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
     )));

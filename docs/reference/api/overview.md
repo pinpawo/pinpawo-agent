@@ -16,7 +16,7 @@ cross-host ownership rules are recorded in
 | Surface | Primary owner | Use it when |
 |---|---|---|
 | **Resident Pet Host ports** | `pinpawo/host-runtime` | You need a shared resident runtime with one-way dispatch and Agent Session interaction surfaces. |
-| **Studio runtime** | `@pinpawo/studio` | You need multi-Pet one-way dispatch, invocation events, or Plugins. |
+| **Studio runtime** | `@pinpawo/studio` | You need multi-Pet one-way dispatch admission or Plugins. |
 | **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or Toolkit runtime. |
 | **Local agent host** | `pinpawo` CLI package | You need local configuration, Capability loading, HTTP/WebSocket, or stdio transport. |
 | **Session projection** | `@pinpawo/agent-session` | You are building a client adapter that renders local-agent conversations, runs, and review state; it is not a Studio dispatch protocol. |
@@ -27,9 +27,10 @@ cross-host ownership rules are recorded in
    Capabilities, Toolkits, and input; it owns model calls, Capability selection,
    tool execution, and human-review continuation.
 2. **Studio owns the dispatch channel, not workflow state, Agent Session, or
-   worker internals.** It validates live Pets, serializes dispatches, projects
-   invocation lifecycle, and fans out Plugin events. Active-thread selection
-   and continuation recovery belong to the local-agent Agent Session interaction.
+   worker internals.** It validates live Pets, forwards accepted dispatches,
+   allocates receipt identities, and fans out Plugin events. Queue/gate ownership,
+   active-thread selection, execution events, and continuation recovery belong
+   to the local-agent resident runtime and Agent Session interaction.
 3. **Capabilities own task intent; Toolkits own executable behavior.** A
    Capability declares a static Toolkit allowlist. A Toolkit provides typed
    tools, availability checks, operation metadata, and policy.

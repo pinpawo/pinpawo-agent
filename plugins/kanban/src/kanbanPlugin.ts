@@ -10,11 +10,7 @@ import path from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit, NamedStructuredTool } from '@pinpawo/pet-agent';
-import type {
-  StudioDispatchResult,
-  StudioPlugin,
-  StudioPluginContext,
-} from '@pinpawo/studio';
+import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 
 import {
@@ -187,41 +183,9 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   let dispatchRequested = false;
   let dispatchLoop: Promise<void> | undefined;
   let dispatchEnabled = false;
-  const activeDispatches = new Set<Promise<void>>();
 
   function asError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
-  }
-
-  async function finishUnreportedTask(taskId: string, result: StudioDispatchResult): Promise<void> {
-    const task = await service.getTask(taskId);
-    if (!task || !isActive(task)) return;
-    if (result.status === 'waiting') {
-      // Waiting belongs to the resident Pet's Agent Session. Kanban neither
-      // stores nor resumes Agent checkpoint state; the claimed task remains doing
-      // until the Agent reports its domain outcome through the Toolkit.
-      return;
-    }
-    if (result.status === 'failed') {
-      await service.blockTask(taskId, result.error ?? 'Pet invocation failed.');
-      return;
-    }
-    if (result.status === 'cancelled') {
-      await service.blockTask(taskId, 'Pet invocation was cancelled.');
-      return;
-    }
-    await service.blockTask(taskId, 'Pet invocation completed without reporting a Kanban task outcome.');
-  }
-
-  function trackDispatch(taskId: string, completion: Promise<StudioDispatchResult>): void {
-    const tracked = completion
-      .then((result) => finishUnreportedTask(taskId, result))
-      .catch(async (error) => {
-        const task = await service.getTask(taskId);
-        if (task && isActive(task)) await service.blockTask(taskId, asError(error).message);
-      });
-    activeDispatches.add(tracked);
-    void tracked.finally(() => activeDispatches.delete(tracked));
   }
 
   /** Claim is already a committed Kanban operation before Studio dispatch begins. */
@@ -233,12 +197,13 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
         if (!mutation) break;
         const task = mutation.task;
         try {
-          const receipt = await context.dispatch({
+          await context.dispatch({
             petId: task.assigneeId,
             request: buildTaskRequest(task),
           });
-          trackDispatch(task.taskId, receipt.completion);
         } catch (error) {
+          // Admission failed before the Pet accepted the dispatch. Once accepted,
+          // only Kanban Toolkit/domain mutations may complete or block this task.
           await service.blockTask(task.taskId, asError(error).message);
         }
       }
@@ -349,7 +314,6 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
       dispatchEnabled = false;
       dispatchRequested = false;
       await dispatchLoop;
-      await Promise.allSettled([...activeDispatches]);
       unsubscribeHttpRoute?.();
       unsubscribeHttpRoute = undefined;
       unsubscribe?.();

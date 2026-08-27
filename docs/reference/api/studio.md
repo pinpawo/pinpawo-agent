@@ -23,15 +23,15 @@ type StudioDispatchRequest = {
   request: string;
   metadata?: JsonObject;
   idempotencyKey?: string;
-  signal?: AbortSignal;
 };
 ```
 
 `Studio.dispatch()` validates the live Pet, allocates an `invocationId`, and
-returns a receipt immediately. Each Pet has one FIFO invocation queue; different
-Pets may run concurrently. The receipt exposes invocation events and a
-completion promise. Results are `completed`, `waiting`, `cancelled`, or `failed`.
-Neither receipt nor event exposes an Agent Session thread or continuation.
+returns an admission receipt after the resident dispatch port accepts the input.
+The receipt has no completion, execution status, output, error, or cancellation
+handle. Queueing and the dispatch gate belong to the resident runtime; execution
+is observed through Agent Session events, checkpoints, or Plugin-owned domain
+state rather than a Studio result.
 
 Plugins receive only `dispatch`, `notify`, `subscribe`, `listPets`, and Plugin
 hook installation. A Plugin may define Toolkits, but it cannot construct a Pet,

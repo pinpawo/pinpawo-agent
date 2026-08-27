@@ -10,9 +10,6 @@ import type {
 import type {
   StudioDispatchReceipt,
   StudioDispatchRequest,
-  StudioDispatchResult,
-  StudioInvocationEvent,
-  StudioInvocationEventHandler,
 } from './studioInvocation';
 import type { StudioPetBinding, StudioPetRegistration } from './types';
 import { StudioEventBus } from './studioEventBus';
@@ -52,10 +49,6 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   }
 
   const eventBus = new StudioEventBus();
-  const invocationHandlers = new Map<string, Set<StudioInvocationEventHandler>>();
-  const hostInvocationHandlers = new Set<StudioInvocationEventHandler>();
-  const queues = new Map<string, Promise<void>>();
-  const activeInvocations = new Map<string, AbortController>();
   const idempotencyRecords = new Map<string, StudioDispatchReceipt>();
   const pluginHooks = new StudioPluginHookRegistry();
   let stopped = false;
@@ -66,30 +59,6 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
 
   function notify(event: StudioEvent): void {
     eventBus.publish(event);
-  }
-
-  function emitInvocation(event: StudioInvocationEvent, source?: string): void {
-    const listeners = [
-      ...hostInvocationHandlers,
-      ...(source ? invocationHandlers.get(source) ?? [] : []),
-    ];
-    for (const handler of listeners) {
-      void invokeObserver(
-        () => handler(event),
-        `[studio] invocation handler failed (invocation=${event.invocationId})`,
-      );
-    }
-  }
-
-  function enqueue(petId: string, run: () => Promise<StudioDispatchResult>) {
-    const tail = queues.get(petId) ?? Promise.resolve();
-    const completion = tail.then(run, run);
-    const settled = completion.then(() => undefined, () => undefined);
-    queues.set(petId, settled);
-    void settled.finally(() => {
-      if (queues.get(petId) === settled) queues.delete(petId);
-    });
-    return completion;
   }
 
   async function dispatch(
@@ -114,91 +83,16 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
 
     const invocationId = randomUUID();
     const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
-    const receiptInvocationHandlers = new Set<StudioInvocationEventHandler>();
-    let latestInvocationEvent: StudioInvocationEvent | undefined;
-
-    function emitReceiptInvocation(event: StudioInvocationEvent): void {
-      latestInvocationEvent = event;
-      emitInvocation(event, source);
-      for (const handler of receiptInvocationHandlers) {
-        void invokeObserver(
-          () => handler(event),
-          `[studio] receipt invocation handler failed (invocation=${event.invocationId})`,
-        );
-      }
-    }
 
     console.log(
       `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
     );
-
-    const completion = enqueue(request.petId, async () => {
-      const base = {
-        petId: request.petId,
-        invocationId,
-        ...(metadata ? { metadata } : {}),
-      };
-      if (stopped || request.signal?.aborted) {
-        const result: StudioDispatchResult = { ...base, status: 'cancelled' };
-        emitReceiptInvocation(result);
-        return result;
-      }
-
-      const controller = new AbortController();
-      activeInvocations.set(invocationId, controller);
-      const signal = request.signal
-        ? AbortSignal.any([request.signal, controller.signal])
-        : controller.signal;
-      emitReceiptInvocation({ ...base, status: 'busy' });
-
-      try {
-        const result = await pet.dispatch.dispatch({ request: request.request, signal });
-        const completed: StudioDispatchResult = result.status === 'completed'
-          ? {
-              ...base,
-              status: 'completed',
-              ...(result.output ? { output: result.output } : {}),
-            }
-          : { ...base, status: result.status };
-        emitReceiptInvocation(completed);
-        return completed;
-      } catch (error) {
-        const aborted = signal.aborted;
-        const message = error instanceof Error ? error.message : String(error);
-        const failed: StudioDispatchResult = {
-          ...base,
-          status: aborted ? 'cancelled' : 'failed',
-          ...(!aborted ? { error: message } : {}),
-        };
-        if (!aborted) {
-          console.error(
-            `[studio] invocation failed (petId=${request.petId}, invocation=${invocationId}):`,
-            message,
-          );
-        }
-        emitReceiptInvocation(failed);
-        return failed;
-      } finally {
-        activeInvocations.delete(invocationId);
-      }
-    });
+    await pet.dispatch.dispatch({ request: request.request });
 
     const receipt: StudioDispatchReceipt = Object.freeze({
       petId: request.petId,
       invocationId,
       ...(metadata ? { metadata } : {}),
-      onInvocation: (handler) => {
-        receiptInvocationHandlers.add(handler);
-        const current = latestInvocationEvent;
-        if (current) {
-          void invokeObserver(
-            () => handler(current),
-            `[studio] receipt invocation handler failed (invocation=${invocationId})`,
-          );
-        }
-        return () => receiptInvocationHandlers.delete(handler);
-      },
-      completion,
     });
     if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, receipt);
     return receipt;
@@ -207,12 +101,6 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {
     return {
       dispatch: (request) => dispatch(request, plugin.name),
-      onInvocation: (handler) => {
-        const listeners = invocationHandlers.get(plugin.name) ?? new Set();
-        listeners.add(handler);
-        invocationHandlers.set(plugin.name, listeners);
-        return () => listeners.delete(handler);
-      },
       notify: (event: StudioEventInput) => notify({
         ...event,
         source: plugin.name,
@@ -226,10 +114,6 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
 
   async function shutdown(): Promise<void> {
     stopped = true;
-    for (const controller of activeInvocations.values()) {
-      controller.abort(new Error(`studio "${input.studioId}" is shutting down`));
-    }
-    await Promise.allSettled([...queues.values()]);
     for (const plugin of [...plugins].reverse()) {
       eventBus.releaseOwner(plugin.name);
       try {
@@ -241,13 +125,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         );
       } finally {
         eventBus.releaseOwner(plugin.name);
-        invocationHandlers.delete(plugin.name);
         pluginHooks.releasePlugin(plugin.name);
       }
     }
     await eventBus.close();
-    hostInvocationHandlers.clear();
-    invocationHandlers.clear();
     idempotencyRecords.clear();
   }
 
@@ -270,13 +151,10 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
         );
       } finally {
         eventBus.releaseOwner(plugin.name);
-        invocationHandlers.delete(plugin.name);
         pluginHooks.releasePlugin(plugin.name);
       }
     }
     await eventBus.close();
-    hostInvocationHandlers.clear();
-    invocationHandlers.clear();
     idempotencyRecords.clear();
     throw error;
   }
@@ -284,21 +162,9 @@ export async function createStudio(input: CreateStudioInput): Promise<Studio> {
   return {
     entryPetId: input.entryPetId,
     dispatch,
-    onInvocation: (handler) => {
-      hostInvocationHandlers.add(handler);
-      return () => hostInvocationHandlers.delete(handler);
-    },
     notify,
     subscribe: (handler) => eventBus.subscribe(handler),
     listPets,
     shutdown,
   };
-}
-
-async function invokeObserver(run: () => void | Promise<void>, context: string) {
-  try {
-    await run();
-  } catch (error) {
-    console.error(`${context}:`, error instanceof Error ? error.message : error);
-  }
 }

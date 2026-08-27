@@ -20,7 +20,6 @@ export type {
   CreateResidentPetRuntimeOptions,
   PetDispatchPort,
   PetDispatchRequest,
-  PetDispatchResult,
   PetDispatchSettledState,
   PetDispatchState,
   ResidentPet,

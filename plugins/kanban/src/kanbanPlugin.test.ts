@@ -11,7 +11,6 @@ import {
   type StudioPetBinding,
   type StudioPluginContext,
 } from '@pinpawo/studio';
-import type { PetDispatchResult } from 'pinpawo/host-runtime';
 
 import { createKanbanPlugin } from './kanbanPlugin';
 import { KanbanTaskService, SqliteKanbanTaskRepository } from './kanbanTaskService';
@@ -27,7 +26,7 @@ function pluginTools(plugin: ReturnType<typeof createKanbanPlugin>): KanbanTools
 function pet(options: {
   petId: string;
   tools: () => KanbanTools;
-  onInvoke?: (request: string) => Promise<PetDispatchResult | void> | PetDispatchResult | void;
+  onInvoke?: (request: string) => Promise<void> | void;
 }): StudioPetBinding {
   return {
     registration: {
@@ -40,8 +39,7 @@ function pet(options: {
       getState: () => 'open',
       onStateChange: () => () => undefined,
       dispatch: async ({ request }) => {
-        const result = await options.onInvoke?.(request);
-        return result ?? { status: 'completed', output: 'ok' };
+        void options.onInvoke?.(request);
       },
     },
   };
@@ -104,7 +102,7 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
   assert.ok(events.some((event) => event.type === 'task.done' && event.source === 'kanban'));
 });
 
-test('a waiting resident Pet stays owned by Agent Session and leaves the Kanban task active', async (t) => {
+test('an accepted dispatch leaves the Kanban task active until its Toolkit reports an outcome', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({
     studioId: 'kanban-waiting',
@@ -112,7 +110,6 @@ test('a waiting resident Pet stays owned by Agent Session and leaves the Kanban 
     pets: [pet({
       petId: 'worker',
       tools: () => pluginTools(plugin),
-      onInvoke: () => ({ status: 'waiting' }),
     })],
     plugins: [plugin],
   });
@@ -125,7 +122,7 @@ test('a waiting resident Pet stays owned by Agent Session and leaves the Kanban 
   assert.equal('continuation' in (task ?? {}), false);
 });
 
-test('a completed Studio invocation without an outcome blocks until an explicit late report', async (t) => {
+test('a late Toolkit report completes an active task independently of dispatch lifetime', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({
     studioId: 'kanban-unreported',
@@ -138,8 +135,7 @@ test('a completed Studio invocation without an outcome blocks until an explicit 
   await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'worker', brief: 'must report' });
   await flush();
   const [task] = (await plugin.service.readSnapshot()).tasks;
-  assert.equal(task?.status, 'blocked');
-  assert.match(task?.note ?? '', /without reporting/);
+  assert.equal(task?.status, 'doing');
   assert.match(
     await pluginTools(plugin).kanban_task_complete!.invoke({
       taskId: task!.taskId,
@@ -148,6 +144,27 @@ test('a completed Studio invocation without an outcome blocks until an explicit 
     /completed/,
   );
   assert.equal((await plugin.service.getTask(task!.taskId))?.status, 'done');
+});
+
+test('a dispatch admission failure blocks the already-claimed task', async (t) => {
+  const plugin = createKanbanPlugin();
+  const studio = await createStudio({
+    studioId: 'kanban-admission-failure',
+    entryPetId: 'worker',
+    pets: [pet({
+      petId: 'worker',
+      tools: () => pluginTools(plugin),
+      onInvoke: () => { throw new Error('resident unavailable'); },
+    })],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'worker', brief: 'cannot deliver' });
+  await flush();
+  const [task] = (await plugin.service.readSnapshot()).tasks;
+  assert.equal(task?.status, 'blocked');
+  assert.match(task?.note ?? '', /resident unavailable/);
 });
 
 test('adapter startup recovers SQLite doing work as blocked before it can redispatch', async (t) => {
@@ -205,7 +222,6 @@ test('failed secondary HTTP route registration removes the first route', async (
   const registeredPaths = new Set<string>();
   const context = {
     dispatch: async () => { throw new Error('not used'); },
-    onInvocation: () => () => undefined,
     notify: () => undefined,
     subscribe: () => () => undefined,
     listPets: () => [],

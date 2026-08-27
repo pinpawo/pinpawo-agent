@@ -6,38 +6,14 @@ export type StudioDispatchRequest = {
   /** Producer-owned correlation data echoed by Studio; never passed to the Pet. */
   metadata?: JsonObject;
   idempotencyKey?: string;
-  signal?: AbortSignal;
 };
 
-export type StudioInvocationTerminalStatus = 'completed' | 'waiting' | 'failed' | 'cancelled';
-
-export type StudioDispatchResult = {
-  petId: string;
-  invocationId: string;
-  status: StudioInvocationTerminalStatus;
-  metadata?: JsonObject;
-  output?: string;
-  error?: string;
-};
-
+/** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {
   petId: string;
   invocationId: string;
   metadata?: JsonObject;
-  onInvocation: (handler: StudioInvocationEventHandler) => () => void;
-  completion: Promise<StudioDispatchResult>;
 };
-
-export type StudioInvocationEvent = {
-  petId: string;
-  invocationId: string;
-  status: 'busy' | StudioInvocationTerminalStatus;
-  metadata?: JsonObject;
-  output?: string;
-  error?: string;
-};
-
-export type StudioInvocationEventHandler = (event: StudioInvocationEvent) => void | Promise<void>;
 
 function hasOnlyKeys(record: Record<string, unknown>, keys: readonly string[]): boolean {
   const allowed = new Set(keys);

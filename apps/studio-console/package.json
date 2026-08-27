@@ -1,8 +1,8 @@
 {
-  "name": "@pinpawo/kanban-console",
+  "name": "@pinpawo/studio-console",
   "version": "0.1.0",
   "private": true,
-  "description": "React control-plane client for the PinPawo Kanban HTTP Plugin",
+  "description": "Independent browser console for PinPawo Studio APIs",
   "type": "module",
   "scripts": {
     "dev": "vite",

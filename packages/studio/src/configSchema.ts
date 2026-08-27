@@ -35,6 +35,8 @@ export type PetLocalConfig = {
   serviceSummary?: string;
   /** 该 pet 使用的 model profile id;留空则继承 host default profile。 */
   modelProfileId?: string;
+  /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
+  defaultCapabilityName?: string;
   /** 可选:绑定到服务端 pet,仅用于 app 同步通道,不存业务数据 */
   serverBinding?: {
     petId: string;
@@ -50,6 +52,7 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
     const role = reader.optionalString('role');
     const serviceSummary = reader.optionalString('serviceSummary');
     const modelProfileId = reader.optionalString('modelProfileId');
+    const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
 
     // `model` 曾是内联的模型名,已被稳定的 profile id 取代。显式报错,
     // 否则旧配置会被静默忽略、pet 悄悄跑在默认 profile 上。
@@ -79,6 +82,7 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
       ...(role !== undefined ? { role } : {}),
       ...(serviceSummary !== undefined ? { serviceSummary } : {}),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
+      ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
       ...(serverBinding
         ? { serverBinding: { petId: serverBinding.requiredString('petId') } }
         : {}),

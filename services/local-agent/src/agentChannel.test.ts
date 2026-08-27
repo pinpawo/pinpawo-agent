@@ -133,6 +133,21 @@ test('buildLocalChatAgentInput keeps the Capability registry backend explicit', 
   assert.notEqual(filesystem.graphKey, memory.graphKey);
 });
 
+test('buildLocalChatAgentInput passes the Pet default Capability into the graph identity', () => {
+  const general = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+  });
+  const planning = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    defaultCapabilityName: 'studio_planning',
+  });
+
+  assert.equal(planning.graphConfig.defaultCapabilityName, 'studio_planning');
+  assert.notEqual(planning.graphKey, general.graphKey);
+});
+
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
   assert.throws(
     () => buildTestLocalChatAgentInput({

@@ -43,6 +43,8 @@ export type LocalServerDeps = {
   toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host-owned Capability catalog; Chat consumes its configured snapshot. */
   capabilityCatalog: CapabilityCatalogReader;
+  /** Capability preloaded by this resident Pet's entry Planner. */
+  defaultCapabilityName?: string;
   capabilityArtifactStore?: CapabilityArtifactStore;
 };
 

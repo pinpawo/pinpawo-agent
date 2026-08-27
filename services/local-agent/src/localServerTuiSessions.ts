@@ -311,6 +311,9 @@ export class LocalServerTuiSessionService {
       toolkitRuntimeManager: deps.toolkitRuntimeManager,
       reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
       capabilities: deps.capabilityCatalog.getSnapshot().capabilities,
+      ...(deps.defaultCapabilityName !== undefined
+        ? { defaultCapabilityName: deps.defaultCapabilityName }
+        : {}),
       threadId,
       interfaceKind: 'tui',
       checkpoint: this.checkpointer,

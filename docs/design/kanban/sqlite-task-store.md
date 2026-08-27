@@ -272,8 +272,8 @@ Kanban CLI/Web 属于 Kanban application，可以：
 - 或通过 Kanban-owned HTTP adapter 调用远端 service；
 - 订阅 committed domain event 更新 UI。
 
-桌面 Web 的最小信息结构、read recovery 和 MVP 交互见
-[Kanban Console UI](ui-console.md)。它只消费 service/adapter，不改变 Kanban task
+独立前端的最小信息结构、read recovery 和 MVP 交互见
+[Studio Console](../studio/console.md)。它只消费 service/adapter，不改变 Kanban task
 storage 或 domain event 的所有权。
 
 它们不能直接执行 SQL，是为了保持 Kanban 自己的 transaction 和状态机，不是因为必须

@@ -14,6 +14,7 @@ Studio core event bus ──> context.subscribe(event)
                                 └─> GET /events (live SSE) ──> HTTP client
 
 Kanban Plugin ──contribute──> http/routes hook ──> GET /kanban
+Scheduler/Trigger ──contribute──> http/routes hook ──> domain APIs
 ```
 
 实现使用 Hono 与 `@hono/node-server` 处理 router、middleware、body limit、CORS 和
@@ -64,8 +65,10 @@ subscription，HTTP Plugin 保留显式退订仅用于及时清理自己的 tran
 ### `routes` hook
 
 HTTP Plugin 在自己的 `StudioPluginContext.hooks` 上暴露 `routes`。贡献方注册
-`method + absolute path + handler`，HTTP 统一负责监听、Bearer 鉴权、Origin/CORS、
-body 上限和响应发送。内置 `/dispatch` 与 `/events` 是保留路径，贡献方不能覆盖。
+`method + absolute path + handler`，HTTP 统一负责监听、Origin/CORS、body 上限和响应发送。
+route 默认使用 Studio Bearer；外部 webhook 一类入口可以显式选择 route-owned auth，由
+贡献方在 handler 中完成领域凭证验证。内置 `/dispatch`、`/events` 与 `/pets` 是保留路径，
+贡献方不能覆盖。
 
 Kanban 默认向名为 `http` 的 Plugin 贡献 `GET /kanban`，返回当前 task snapshot（含
 `lastEventSequence`），并贡献 `GET /kanban/events` 读取 Kanban 自己的 durable history。
@@ -81,7 +84,8 @@ lifecycle 会移除 route。
 - client 携带 `Origin` 时必须命中显式 `allowedOrigins`；Plugin 处理受限 CORS preflight；
 - POST body 有明确字节上限；SSE client 数量有上限；慢客户端背压治理仍须在 HTTP Plugin
   内收紧，不能由 Kanban 或 Studio core 处理；
-- Plugin 贡献的 route 进入同一 Bearer 与 Origin 边界，不能绕过 HTTP Plugin 鉴权；
+- Plugin 贡献的管理 route 默认进入同一 Bearer 与 Origin 边界；route-owned auth 必须显式
+  声明，且贡献方必须在 handler 中拒绝无效凭证；
 - Plugin options 与 token 由外部 resolver/application composition root 提供，Studio
   config schema 不解释这些字段，也不读取 token。
 

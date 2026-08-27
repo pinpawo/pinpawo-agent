@@ -36,13 +36,18 @@ contracts in [reference/](../reference/index.md).
   checkpoint/projection/resume boundary for PR #682, explicitly excluding
   Studio dispatch identity
 
+## Studio applications and Plugins
+
+- [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
+  Kanban, Scheduler, and Trigger APIs
+- [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
+  for dispatch, events, and Plugin routes
+- [Studio automation Plugins](studio/automation-plugins.md) — durable Scheduler and
+  Trigger domain/API boundaries
+
 ## Kanban
 
 - [Kanban SQLite task store](kanban/sqlite-task-store.md) — independent Kanban
   task, dependency, history, transaction, and recovery design
-- [Kanban Console UI](kanban/ui-console.md) — mouse-first desktop console for
-  dispatch, tasks, events, authorization, and Markdown context
-- [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
-  for dispatch, events, and Plugin routes
 
 Completed or superseded work belongs in [history/](../history/index.md).

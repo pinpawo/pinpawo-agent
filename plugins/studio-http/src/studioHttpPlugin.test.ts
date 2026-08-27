@@ -283,6 +283,43 @@ test('HTTP Plugin dispatches contributed routes through its shared Hono middlewa
   assert.equal(unregistered.status, 404);
 });
 
+test('HTTP Plugin allows an explicitly route-authenticated external endpoint', async (t) => {
+  const harness = createContext();
+  let routes: StudioHttpRoutesHook | undefined;
+  harness.context.hooks = {
+    expose: (_hookName, hook) => {
+      routes = hook as StudioHttpRoutesHook;
+      return () => { routes = undefined; };
+    },
+    contribute: () => () => undefined,
+  };
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  assert.ok(routes);
+  routes.register({
+    method: 'POST',
+    path: '/external-hook',
+    authorization: 'route',
+    handle: ({ headers }) => headers.authorization === 'Trigger external-secret'
+      ? { kind: 'json', status: 202, body: { accepted: true } }
+      : { kind: 'json', status: 401, body: { error: 'Unauthorized.' } },
+  });
+  const address = plugin.address();
+  assert.ok(address);
+
+  const accepted = await fetch(pluginUrl(address.port, '/external-hook'), {
+    method: 'POST',
+    headers: { Authorization: 'Trigger external-secret' },
+  });
+  assert.equal(accepted.status, 202);
+  const rejected = await fetch(pluginUrl(address.port, '/external-hook'), { method: 'POST' });
+  assert.equal(rejected.status, 401);
+
+  const management = await fetch(pluginUrl(address.port, '/pets'));
+  assert.equal(management.status, 401);
+});
+
 test('HTTP Plugin projects live Studio events over SSE and releases the subscription on stop', async () => {
   const harness = createContext();
   const plugin = createStudioHttpPlugin({

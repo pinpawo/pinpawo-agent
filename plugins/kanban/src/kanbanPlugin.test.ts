@@ -122,6 +122,65 @@ test('an accepted dispatch leaves the Kanban task active until its Toolkit repor
   assert.equal('continuation' in (task ?? {}), false);
 });
 
+test('Kanban Toolkit lists and validates Studio Pet assignees', async (t) => {
+  const plugin = createKanbanPlugin();
+  const studio = await createStudio({
+    studioId: 'kanban-assignees',
+    entryPetId: 'planner',
+    pets: [
+      pet({ petId: 'planner', tools: () => pluginTools(plugin) }),
+      pet({ petId: 'writer', tools: () => pluginTools(plugin) }),
+    ],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  assert.equal(
+    await pluginTools(plugin).kanban_assignee_list!.invoke({}),
+    'planner\nwriter',
+  );
+  assert.match(
+    await pluginTools(plugin).kanban_task_add!.invoke({
+      petId: 'missing',
+      brief: 'must not be persisted',
+    }) as string,
+    /unknown Studio petId/,
+  );
+  assert.equal((await plugin.service.readSnapshot()).tasks.length, 0);
+});
+
+test('downstream dispatch includes completed dependency results', async (t) => {
+  const plugin = createKanbanPlugin();
+  const requests: string[] = [];
+  const studio = await createStudio({
+    studioId: 'kanban-dependency-results',
+    entryPetId: 'writer',
+    pets: [pet({
+      petId: 'writer',
+      tools: () => pluginTools(plugin),
+      onInvoke: (request) => { requests.push(request); },
+    })],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  const first = await plugin.service.createTask({
+    assigneeId: 'writer',
+    brief: 'produce the outline',
+  });
+  await flush();
+  await plugin.service.completeTask(first.task.taskId, 'outline is ready');
+  await plugin.service.createTask({
+    assigneeId: 'writer',
+    brief: 'write the article',
+    dependsOn: [first.task.taskId],
+  });
+  await flush();
+
+  assert.match(requests.at(-1) ?? '', /Completed dependency results:/);
+  assert.match(requests.at(-1) ?? '', /outline is ready/);
+});
+
 test('a late Toolkit report completes an active task independently of dispatch lifetime', async (t) => {
   const plugin = createKanbanPlugin();
   const studio = await createStudio({

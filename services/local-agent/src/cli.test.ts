@@ -32,9 +32,9 @@ test('the removed legacy flags are no longer declared', () => {
 
   const flags = tui.options.map((option) => option.long);
   assert.deepEqual(flags.sort(), [
-    '--agent-session-pet',
-    '--agent-session-port',
     '--check',
+    '--pet-id',
+    '--pet-port',
     '--qa',
     '--workdir',
   ]);
@@ -50,9 +50,9 @@ test('tui forwards one complete Pet-scoped Agent Session target', async () => {
     'node',
     'pinpawo',
     'tui',
-    '--agent-session-port',
+    '--pet-port',
     '4322',
-    '--agent-session-pet',
+    '--pet-id',
     'planner',
   ]);
 
@@ -63,6 +63,23 @@ test('tui forwards one complete Pet-scoped Agent Session target', async () => {
     agentSessionPort: 4322,
     agentSessionPetId: 'planner',
   });
+});
+
+test('Pet connection mode does not accept a second workdir', async () => {
+  await assert.rejects(
+    createLocalAgentCli({ runTuiV2: () => undefined }).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--workdir',
+      '/tmp/other-project',
+      '--pet-port',
+      '4322',
+      '--pet-id',
+      'planner',
+    ]),
+    /Studio Host owns the resident Pet workdir/,
+  );
 });
 
 test('the deferred Browser detect command is not part of this CLI contract', () => {

@@ -65,6 +65,8 @@ export type LocalServerHandlerOptions = {
   publishRuntimeEvent?: (origin: LocalServerPeer, event: AgentRuntimeEvent) => void;
   /** Optional Host-owned run control used by resident headless inputs. */
   interruptHostRun?: (requestId: string) => boolean;
+  /** Resident-wide live run projection used by observing peers and startup snapshots. */
+  readActiveRun?: () => Extract<AgentRunView, { state: 'running' }> | null;
 };
 
 type SessionSummarySource = Pick<
@@ -143,17 +145,18 @@ export function createLocalServerHandlers(
       requestDeps,
       checkpoint.pendingInterrupt,
     );
+    const residentActiveRun = options.readActiveRun?.() ?? null;
     const active = peer ? activeChatRuns.get(peer) : null;
     const inflight = peer ? inflightRequests.get(peer) : null;
-    const activeRun: Extract<AgentRunView, { state: 'running' }> | null = active
-      && inflight?.requestId === active.requestId
-      ? {
-        requestId: active.requestId,
-        state: 'running',
-        activity: 'thinking',
-        startedAt: active.startedAt,
-      }
-      : null;
+    const activeRun: Extract<AgentRunView, { state: 'running' }> | null = residentActiveRun
+      ?? (active && inflight?.requestId === active.requestId
+        ? {
+            requestId: active.requestId,
+            state: 'running',
+            activity: 'thinking',
+            startedAt: active.startedAt,
+          }
+        : null);
     return buildLocalAgentSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',

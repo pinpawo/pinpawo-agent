@@ -29,13 +29,13 @@ test('launch options keep production mode free of demo transports', () => {
 
 test('launch options select one Pet-scoped Agent Session endpoint', () => {
   assert.deepEqual(parseTuiLaunchOptions([
-    '--agent-session-port',
+    '--pet-port',
     '4322',
-    '--agent-session-pet',
+    '--pet-id',
     'planner',
   ]).agentSession, { port: 4322, petId: 'planner' });
   assert.throws(
-    () => parseTuiLaunchOptions(['--agent-session-pet', 'planner']),
+    () => parseTuiLaunchOptions(['--pet-id', 'planner']),
     /provided together/,
   );
 });

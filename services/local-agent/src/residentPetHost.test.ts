@@ -5,6 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import {
+  reduceSession,
+  type AgentServerMessage,
+} from '@pinpawo/agent-session';
+import {
   buildReviewSpec,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
@@ -463,6 +467,107 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
     )));
   } finally {
+    await host.close();
+  }
+});
+
+test('a TUI attaching mid-dispatch snapshots the resident run and projects later events', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-late-observer-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  const turnStarted = deferred();
+  const releaseTurn = deferred();
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingInterrupt: null,
+      hasPendingContinuation: false,
+      currentPlan: null,
+    }),
+  };
+  const host = await createResidentPetHost({
+    actor: {
+      petId: 'pet-late-observer',
+      name: 'pet-late-observer',
+      userId: null,
+      personality: null,
+      stage: null,
+      species: null,
+    },
+    modelProfiles: createTestModelProfiles(),
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'late-observer-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async ({ request, emitEvent }) => {
+      turnStarted.resolve();
+      await releaseTurn.promise;
+      emitEvent({
+        type: 'message.delta',
+        requestId: request.requestId,
+        messageId: 'late-assistant',
+        role: 'assistant',
+        text: 'finishing ',
+      });
+      emitEvent({
+        type: 'message.completed',
+        requestId: request.requestId,
+        messageId: 'late-assistant',
+        role: 'assistant',
+        text: 'finishing work',
+      });
+      return { status: 'completed', reply: 'finishing work' };
+    },
+  });
+  const messages: AgentServerMessage[] = [];
+  const observer = peer(messages);
+
+  try {
+    await host.resident.dispatch.dispatch({ request: 'already running' });
+    await turnStarted.promise;
+    await host.interaction.connect(observer);
+    await host.interaction.handle(observer, {
+      type: 'session.snapshot.get',
+      requestId: 'late-snapshot',
+    });
+
+    const snapshot = messages.find((message) => (
+      message.type === 'session.snapshot.result'
+      && message.requestId === 'late-snapshot'
+    ));
+    assert.equal(snapshot?.type, 'session.snapshot.result');
+    if (snapshot?.type !== 'session.snapshot.result') return;
+    const requestId = snapshot.snapshot.session.activeRun?.requestId;
+    assert.match(requestId ?? '', /^host-/);
+
+    releaseTurn.resolve();
+    await waitFor(
+      () => messages.some((message) => (
+        message.type === 'event'
+        && message.event.type === 'message.completed'
+      )),
+      'late observer did not receive the remaining dispatch events',
+    );
+
+    let projected = snapshot.snapshot.session;
+    for (const message of messages) {
+      if (message.type !== 'event' || message.event.requestId !== requestId) continue;
+      projected = reduceSession(projected, {
+        type: 'runtime.event',
+        event: message.event,
+      }, { observedAt: Date.now() });
+    }
+    assert.equal(projected.activeRun, null);
+    assert.ok(projected.timeline.some((entry) => (
+      entry.type === 'message'
+      && entry.role === 'assistant'
+      && entry.status === 'completed'
+      && entry.text === 'finishing work'
+    )));
+  } finally {
+    releaseTurn.resolve();
     await host.close();
   }
 });

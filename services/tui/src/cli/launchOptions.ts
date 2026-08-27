@@ -25,19 +25,19 @@ export function parseTuiLaunchOptions(
   argv: readonly string[],
 ): TuiLaunchOptions {
   const flags = new Set(argv);
-  const agentSessionPort = readOption(argv, '--agent-session-port');
-  const agentSessionPetId = readOption(argv, '--agent-session-pet');
+  const agentSessionPort = readOption(argv, '--pet-port');
+  const agentSessionPetId = readOption(argv, '--pet-id');
   if ((agentSessionPort === undefined) !== (agentSessionPetId === undefined)) {
-    throw new Error('--agent-session-port and --agent-session-pet must be provided together.');
+    throw new Error('--pet-port and --pet-id must be provided together.');
   }
   let agentSession: TuiLaunchOptions['agentSession'] = null;
   if (agentSessionPort !== undefined && agentSessionPetId !== undefined) {
     const port = Number(agentSessionPort);
     if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-      throw new Error('--agent-session-port must be an integer from 1 to 65535.');
+      throw new Error('--pet-port must be an integer from 1 to 65535.');
     }
     const petId = agentSessionPetId.trim();
-    if (!petId) throw new Error('--agent-session-pet must not be empty.');
+    if (!petId) throw new Error('--pet-id must not be empty.');
     agentSession = { port, petId };
   }
   const demo = {

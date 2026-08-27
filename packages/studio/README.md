@@ -19,7 +19,7 @@ npm install --global \
   @pinpawo-plugin/kanban
 
 pinpawo-studio --workdir /path/to/project
-pinpawo-studio --workdir /path/to/project --agent-session-port 3212
+pinpawo-studio --workdir /path/to/project --pet-port 3212
 ```
 
 Configured Plugin IDs are installed package names. Each package exposes its
@@ -28,7 +28,7 @@ Plugins. To connect the terminal client to a resident Pet, use the listener port
 and Pet ID:
 
 ```bash
-pinpawo tui --agent-session-port 3212 --agent-session-pet planner
+pinpawo tui --pet-port 3212 --pet-id planner
 ```
 
 The package also exposes the programmatic Host/runtime API:

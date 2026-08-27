@@ -101,14 +101,14 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .option('--check', 'verify the terminal runtime without entering terminal mode')
     .option('--qa', 'run the deterministic terminal QA scenario')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
-    .option('--agent-session-port <port>', 'connect to a Studio Host Agent Session listener')
-    .option('--agent-session-pet <petId>', 'resident Pet selected for the Agent Session connection')
+    .option('--pet-port <port>', 'connect to a resident Pet listener')
+    .option('--pet-id <petId>', 'resident Pet selected for the connection')
     .action(async (options: {
       check?: boolean;
       qa?: boolean;
       workdir?: string;
-      agentSessionPort?: string;
-      agentSessionPet?: string;
+      petPort?: string;
+      petId?: string;
     }) => {
       if (options.check && options.qa) {
         throw new Error('Choose either --check or --qa, not both.');
@@ -116,21 +116,26 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       const workdir = options.workdir?.trim()
         ? resolveWorkdirOption(options.workdir)
         : undefined;
-      if ((options.agentSessionPort === undefined) !== (options.agentSessionPet === undefined)) {
-        throw new Error('Provide --agent-session-port and --agent-session-pet together.');
+      if ((options.petPort === undefined) !== (options.petId === undefined)) {
+        throw new Error('Provide --pet-port and --pet-id together.');
       }
-      const agentSessionPort = options.agentSessionPort === undefined
+      if (workdir && options.petPort !== undefined) {
+        throw new Error(
+          'Do not provide --workdir with --pet-port/--pet-id; the Studio Host owns the resident Pet workdir.',
+        );
+      }
+      const agentSessionPort = options.petPort === undefined
         ? undefined
-        : Number(options.agentSessionPort);
+        : Number(options.petPort);
       if (
         agentSessionPort !== undefined
         && (!Number.isInteger(agentSessionPort) || agentSessionPort < 1 || agentSessionPort > 65_535)
       ) {
-        throw new Error('--agent-session-port must be an integer from 1 to 65535.');
+        throw new Error('--pet-port must be an integer from 1 to 65535.');
       }
-      const agentSessionPetId = options.agentSessionPet?.trim();
-      if (options.agentSessionPet !== undefined && !agentSessionPetId) {
-        throw new Error('--agent-session-pet must not be empty.');
+      const agentSessionPetId = options.petId?.trim();
+      if (options.petId !== undefined && !agentSessionPetId) {
+        throw new Error('--pet-id must not be empty.');
       }
       const runTuiV2 = handlers.runTuiV2
         ?? (await import('./commands/tuiV2Launcher')).runTuiV2;

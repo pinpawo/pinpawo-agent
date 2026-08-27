@@ -236,8 +236,10 @@ resident runtime 内部的所有 Agent turn 统一经过 local-agent Agent Sessi
 无论输入来自 conversation peer 还是 Host 持有的单向 dispatch，runner 都产生相同的
 message/tool/plan/review runtime event。已连接同一 Pet interaction 的 Agent Session peer
 是当前 session 的观察者：idle 连接不阻塞 dispatch，但会从 `run.started` 开始实时投射
-之后发生的 turn。没有 peer 时事件可以丢弃；checkpoint 仍是持久权威。这个广播属于
-local-agent interaction，不进入 `PetDispatchPort`、Studio core 或 Studio Plugin event bus。
+之后发生的 turn。运行中才接入的 peer 不要求事件重放，但 startup snapshot 必须包含 resident
+当前 `activeRun`，使后续实时事件仍能投射到同一个 run；snapshot 读取不排在 active dispatch
+后面。没有 peer 时事件可以丢弃；checkpoint 仍是持久权威。这个广播属于 local-agent
+interaction，不进入 `PetDispatchPort`、Studio core 或 Studio Plugin event bus。
 
 ## 6. 生命周期与所有权
 
@@ -335,6 +337,8 @@ target 返回。Capability inventory 不进入该列表。
 - dispatch 调用方不拥有执行 handle 或最终结果；它只获得接纳确认并可观察 gate；
 - conversation 与 Host 单向输入共用 Agent Session turn runner；已连接同一 Pet 的 peer
   能观察任一来源后续产生的 run/message/tool/plan/review event；
+- 运行中接入的 peer 从 startup snapshot 取得当前 `activeRun` 并继续投射后续 event；不要求
+  Studio 保存或重放 Agent event；
 - Studio Host 任一 Pet 启动失败时整体失败；`listPets()` 只包含当前存活 Pet；
 - Studio control plane 只有 HTTP，Agent Session WebSocket 属于同进程 local-agent
   interaction adapter 而非 Studio protocol；

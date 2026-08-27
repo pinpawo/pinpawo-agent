@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   buildAgentEventEnvelope,
   type AgentClientMessage,
+  type AgentRunView,
   type AgentRuntimeEvent,
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
@@ -303,9 +304,13 @@ type ResidentPetRuntimeContext = {
   peers: Set<AgentSessionPeer>;
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
   activeHostRuns: Map<string, AbortController>;
+  beginActiveRun: (requestId: string) => ResidentActiveRun;
+  finishActiveRun: (run: ResidentActiveRun) => void;
   close: () => Promise<void>;
   isClosing: () => boolean;
 };
+
+type ResidentActiveRun = Extract<AgentRunView, { state: 'running' }>;
 
 const residentPetRuntimeContexts = new WeakMap<object, ResidentPetRuntimeContext>();
 
@@ -352,22 +357,40 @@ function isAbortError(error: unknown): boolean {
 function admitConversationHandlers(
   handlers: LocalServerPeerHandlers,
   coordinator: ResidentPetCoordinator,
+  activeRuns: {
+    begin: (requestId: string) => ResidentActiveRun;
+    finish: (run: ResidentActiveRun) => void;
+  },
 ): LocalServerPeerHandlers {
   const admit = <TMessage>(
     handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
   ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.enqueueConversation(
     () => Promise.resolve(handler(peer, message)),
   );
+  const admitRun = <TMessage extends { requestId: string }>(
+    handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
+  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.enqueueConversation(
+    async () => {
+      const activeRun = activeRuns.begin(message.requestId);
+      try {
+        await handler(peer, message);
+      } finally {
+        activeRuns.finish(activeRun);
+      }
+    },
+  );
   return {
-    onChatRequest: admit(handlers.onChatRequest),
-    onHumanReviewResponse: admit(handlers.onHumanReviewResponse),
-    onReviewCancel: admit(handlers.onReviewCancel),
+    onChatRequest: admitRun(handlers.onChatRequest),
+    onHumanReviewResponse: admitRun(handlers.onHumanReviewResponse),
+    onReviewCancel: admitRun(handlers.onReviewCancel),
     // These controls must reach the active conversation instead of waiting
     // behind it in the same queue.
     onRunInterrupt: handlers.onRunInterrupt,
     onNewSession: admit(handlers.onNewSession),
     onRuntimeConfigUpdate: admit(handlers.onRuntimeConfigUpdate),
-    onSessionSnapshotGet: admit(handlers.onSessionSnapshotGet),
+    // Snapshot is observational and already serialized per peer by the local
+    // handler. It must remain reachable while a resident operation is active.
+    onSessionSnapshotGet: handlers.onSessionSnapshotGet,
     onSessionList: admit(handlers.onSessionList),
     ...(handlers.onSessionCompact ? { onSessionCompact: admit(handlers.onSessionCompact) } : {}),
     onSessionNew: admit(handlers.onSessionNew),
@@ -440,6 +463,23 @@ export async function createResidentPetRuntime(
   const coordinator = new ResidentPetCoordinator({ readSettledState });
   const peers = new Set<AgentSessionPeer>();
   const activeHostRuns = new Map<string, AbortController>();
+  let activeRun: ResidentActiveRun | null = null;
+  const beginActiveRun = (requestId: string): ResidentActiveRun => {
+    if (activeRun) {
+      throw new Error(`Resident Pet already has active run "${activeRun.requestId}".`);
+    }
+    const next: ResidentActiveRun = {
+      requestId,
+      state: 'running',
+      activity: 'thinking',
+      startedAt: Date.now(),
+    };
+    activeRun = next;
+    return next;
+  };
+  const finishActiveRun = (run: ResidentActiveRun) => {
+    if (activeRun === run) activeRun = null;
+  };
   const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
     const message = buildAgentEventEnvelope(event);
     for (const peer of peers) {
@@ -458,6 +498,7 @@ export async function createResidentPetRuntime(
     loadContext,
     runAgentTurn,
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
+    readActiveRun: () => activeRun,
     interruptHostRun: (requestId) => {
       const controller = activeHostRuns.get(requestId);
       if (!controller) return false;
@@ -465,7 +506,10 @@ export async function createResidentPetRuntime(
       return true;
     },
   });
-  const peerHandlers = admitConversationHandlers(localHandlers.peerHandlers, coordinator);
+  const peerHandlers = admitConversationHandlers(localHandlers.peerHandlers, coordinator, {
+    begin: beginActiveRun,
+    finish: finishActiveRun,
+  });
   let closing: Promise<void> | null = null;
 
   const runtime = Object.freeze({
@@ -496,6 +540,8 @@ export async function createResidentPetRuntime(
     peers,
     publishRuntimeEvent,
     activeHostRuns,
+    beginActiveRun,
+    finishActiveRun,
     close,
     isClosing: () => closing !== null,
   };
@@ -516,6 +562,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     sessions,
     publishRuntimeEvent,
     activeHostRuns,
+    beginActiveRun,
+    finishActiveRun,
   } = context;
 
   const dispatch: PetDispatchPort = {
@@ -533,6 +581,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         );
         setup.input.signal = run.controller.signal;
         activeHostRuns.set(requestId, run.controller);
+        const activeRun = beginActiveRun(requestId);
         publishRuntimeEvent({
           type: 'run.started',
           requestId,
@@ -593,6 +642,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           if (activeHostRuns.get(requestId) === run.controller) {
             activeHostRuns.delete(requestId);
           }
+          finishActiveRun(activeRun);
         }
       });
     },

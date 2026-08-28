@@ -320,6 +320,39 @@ test('HTTP Plugin allows an explicitly route-authenticated external endpoint', a
   assert.equal(management.status, 401);
 });
 
+test('HTTP Plugin gives a route the exact request text for signature verification', async (t) => {
+  const harness = createContext();
+  let routes: StudioHttpRoutesHook | undefined;
+  harness.context.hooks = {
+    expose: (_hookName, hook) => {
+      routes = hook as StudioHttpRoutesHook;
+      return () => { routes = undefined; };
+    },
+    contribute: () => () => undefined,
+  };
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  assert.ok(routes);
+  routes.register({
+    method: 'POST',
+    path: '/signed-hook',
+    authorization: 'route',
+    handle: async ({ readText }) => ({ kind: 'text', body: await readText() }),
+  });
+  const address = plugin.address();
+  assert.ok(address);
+
+  const payload = '{"z":1, "a":[true,false]}';
+  const response = await fetch(pluginUrl(address.port, '/signed-hook'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), payload);
+});
+
 test('HTTP Plugin projects live Studio events over SSE and releases the subscription on stop', async () => {
   const harness = createContext();
   const plugin = createStudioHttpPlugin({

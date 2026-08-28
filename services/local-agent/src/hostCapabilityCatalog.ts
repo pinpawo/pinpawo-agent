@@ -161,8 +161,8 @@ export class HostCapabilityCatalog {
 
   /**
    * Resolve one explicit directory through the same catalog contract.
-   * Studio uses this for each Pet: required Host baselines plus that Pet's
-   * CAPABILITY.md collection, with every directory member selected.
+   * Studio uses this to load each Pet's CAPABILITY.md collection; its assembly
+   * decides whether that Pet uses the general fallback or an explicit default.
    */
   async createDirectorySnapshot(options: {
     rootDir: string;

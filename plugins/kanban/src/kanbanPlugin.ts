@@ -10,7 +10,11 @@ import path from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit, NamedStructuredTool } from '@pinpawo/pet-agent';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type {
+  StudioPetRegistration,
+  StudioPlugin,
+  StudioPluginContext,
+} from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 
 import {
@@ -28,6 +32,16 @@ function describeTask(task: KanbanTask): string {
   const deps = task.deps.length > 0 ? ` deps=[${task.deps.join(', ')}]` : '';
   const note = task.note ? ` note=${task.note}` : '';
   return `${task.taskId} [${task.status}] assignee=${task.assigneeId}${deps} ${task.brief}${note}`;
+}
+
+function describeAssignee(assignee: StudioPetRegistration): string {
+  const details = [
+    `petId=${assignee.petId}`,
+    `name=${assignee.name}`,
+    ...(assignee.role ? [`role=${assignee.role}`] : []),
+    ...(assignee.serviceSummary ? [`service=${assignee.serviceSummary}`] : []),
+  ];
+  return details.join(' ');
 }
 
 function buildTaskRequest(task: KanbanTask, dependencies: readonly KanbanTask[]): string {
@@ -73,18 +87,18 @@ function readNonNegativeQueryInteger(
 
 function buildTools(
   service: KanbanTaskService,
-  readAssigneeIds: () => readonly string[] | null,
+  readAssignees: () => readonly StudioPetRegistration[] | null,
 ): NamedStructuredTool[] {
   const listAssignees = tool(
     async () => {
-      const assigneeIds = readAssigneeIds();
-      return !assigneeIds || assigneeIds.length === 0
+      const assignees = readAssignees();
+      return !assignees || assignees.length === 0
         ? '(Kanban Plugin is not attached to a Studio Pet registry)'
-        : assigneeIds.join('\n');
+        : assignees.map(describeAssignee).join('\n');
     },
     {
       name: 'kanban_assignee_list',
-      description: '列出当前 Studio 中可以接收 Kanban 任务的 petId。新增任务前先从这里选择。',
+      description: '列出当前 Studio 中可接收 Kanban 任务的 petId、角色与服务摘要。新增任务前先从这里选择。',
       schema: z.object({}),
     },
   );
@@ -103,9 +117,9 @@ function buildTools(
 
   const addTask = tool(
     async (input) => {
-      const assigneeIds = readAssigneeIds();
-      if (assigneeIds && !assigneeIds.includes(input.petId)) {
-        return `unknown Studio petId "${input.petId}"; available: ${assigneeIds.join(', ') || '(none)'}`;
+      const assignees = readAssignees();
+      if (assignees && !assignees.some(({ petId }) => petId === input.petId)) {
+        return `unknown Studio petId "${input.petId}"; available: ${assignees.map(({ petId }) => petId).join(', ') || '(none)'}`;
       }
       // `petId` belongs to this Studio-facing Toolkit adapter. The domain only
       // receives the generic assigneeId.
@@ -191,9 +205,9 @@ export type InstalledKanbanPluginEnvironment = {
 
 export function createKanbanToolkit(
   service: KanbanTaskService,
-  readAssigneeIds: () => readonly string[] | null = () => null,
+  readAssignees: () => readonly StudioPetRegistration[] | null = () => null,
 ): AgentToolkit {
-  const declaredTools = buildTools(service, readAssigneeIds);
+  const declaredTools = buildTools(service, readAssignees);
   return {
     name: KANBAN_TOOLKIT_NAME,
     description: '共享任务看板：查看、拆解、完成与阻塞任务。',
@@ -209,8 +223,8 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   const service = options.service ?? (options.databasePath
     ? new KanbanTaskService(new SqliteKanbanTaskRepository(options.databasePath))
     : createInMemoryKanbanTaskService());
-  let assigneeIds: readonly string[] | null = null;
-  const toolkit = createKanbanToolkit(service, () => assigneeIds);
+  let assignees: readonly StudioPetRegistration[] | null = null;
+  const toolkit = createKanbanToolkit(service, () => assignees);
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHttpRoute: (() => void) | undefined;
@@ -275,7 +289,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     start: async (pluginContext) => {
       if (context) throw new Error('Kanban Plugin is already started.');
       context = pluginContext;
-      assigneeIds = pluginContext.listPets().map(({ petId }) => petId);
+      assignees = pluginContext.listPets();
       unsubscribe = service.subscribe((mutation) => {
         pluginContext.notify({
           type: `task.${mutation.task.status}`,
@@ -344,7 +358,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
         unsubscribe?.();
         unsubscribe = undefined;
         context = undefined;
-        assigneeIds = null;
+        assignees = null;
         if (ownsService) await service.close().catch(() => undefined);
         throw error;
       }
@@ -358,7 +372,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
       unsubscribe?.();
       unsubscribe = undefined;
       context = undefined;
-      assigneeIds = null;
+      assignees = null;
       if (ownsService) await service.close();
     },
   };

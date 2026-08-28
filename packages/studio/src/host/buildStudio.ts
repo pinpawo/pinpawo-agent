@@ -34,7 +34,7 @@ export class StudioNotConfiguredError extends Error {
 export type BuildStudioInput = {
   configuration: ResolvedStudioHostConfig;
   modelProfiles: LocalModelProfileRegistry;
-  /** Host baseline Capability 池；Studio 只自动提供 general。 */
+  /** Host fallback Capability 池；Studio uses general only without an explicit default. */
   hostCapabilities: readonly AgentCapability[];
   /** 每个 Pet 从约定目录严格加载的 Agent Capability 定义。 */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
@@ -46,6 +46,17 @@ export type BuildStudioInput = {
   /** Host composition defers Plugin listeners until Agent Session transport is ready. */
   deferPluginActivation?: boolean;
 };
+
+export function selectStudioPetCapabilities(input: {
+  defaultCapabilityName?: string;
+  generalCapability: AgentCapability;
+  petCapabilities: readonly AgentCapability[];
+}): AgentCapability[] {
+  const defaultCapabilityName = input.defaultCapabilityName ?? GENERAL_CAPABILITY_NAME;
+  return defaultCapabilityName === GENERAL_CAPABILITY_NAME
+    ? [input.generalCapability, ...input.petCapabilities]
+    : [...input.petCapabilities];
+}
 
 export type ResolveStudioHostConfigInput = {
   studioConfigPath?: string;
@@ -186,7 +197,13 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         ...(petConfig.defaultCapabilityName
           ? { defaultCapabilityName: petConfig.defaultCapabilityName }
           : {}),
-        capabilities: [generalCapability, ...petCapabilities],
+        capabilities: selectStudioPetCapabilities({
+          ...(petConfig.defaultCapabilityName
+            ? { defaultCapabilityName: petConfig.defaultCapabilityName }
+            : {}),
+          generalCapability,
+          petCapabilities,
+        }),
         toolkitInventory: input.toolkitInventory,
         toolkitRuntimeManager: input.toolkitRuntimeManager,
         capabilityArtifactStore: input.capabilityArtifactStore,

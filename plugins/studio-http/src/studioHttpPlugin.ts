@@ -32,6 +32,8 @@ type StudioHttpContext = Context<StudioHttpEnvironment>;
 export type StudioHttpRouteRequest = {
   readonly url: URL;
   readonly headers: Readonly<IncomingHttpHeaders>;
+  /** Exact request text for route-owned signature verification. */
+  readText: () => Promise<string>;
   readJson: () => Promise<unknown>;
 };
 
@@ -194,16 +196,24 @@ function normalizeRoute(route: StudioHttpRoute): StudioHttpRoute {
   };
 }
 
-async function readJsonBody(context: StudioHttpContext): Promise<unknown> {
+function validateJsonContentType(context: StudioHttpContext): void {
   const contentType = context.req.header('content-type');
   if (contentType?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') {
     throw new HttpRequestError(415, 'Content-Type must be application/json.');
   }
+}
+
+function parseJsonText(text: string): unknown {
   try {
-    return await context.req.json();
+    return JSON.parse(text) as unknown;
   } catch {
     throw new HttpRequestError(400, 'Request body must contain valid JSON.');
   }
+}
+
+async function readJsonBody(context: StudioHttpContext): Promise<unknown> {
+  validateJsonContentType(context);
+  return parseJsonText(await context.req.text());
 }
 
 function noStoreHeaders(context: StudioHttpContext): void {
@@ -443,12 +453,18 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     app.all('*', async (requestContext) => {
       const route = routes.get(`${requestContext.req.method} ${requestContext.req.path}`);
       if (route) {
+        let text: Promise<string> | undefined;
         let body: Promise<unknown> | undefined;
         const result = await route.handle({
           url: new URL(requestContext.req.url),
           headers: requestContext.env.incoming.headers,
+          readText: () => {
+            text ??= requestContext.req.text();
+            return text;
+          },
           readJson: () => {
-            body ??= readJsonBody(requestContext);
+            validateJsonContentType(requestContext);
+            body ??= (text ??= requestContext.req.text()).then(parseJsonText);
             return body;
           },
         });

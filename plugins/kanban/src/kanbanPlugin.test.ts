@@ -26,14 +26,16 @@ function pluginTools(plugin: ReturnType<typeof createKanbanPlugin>): KanbanTools
 function pet(options: {
   petId: string;
   tools: () => KanbanTools;
+  role?: string;
+  serviceSummary?: string;
   onInvoke?: (request: string) => Promise<void> | void;
 }): StudioPetBinding {
   return {
     registration: {
       petId: options.petId,
       name: options.petId,
-      role: null,
-      serviceSummary: null,
+      role: options.role ?? null,
+      serviceSummary: options.serviceSummary ?? null,
     },
     dispatch: {
       getState: () => 'open',
@@ -128,17 +130,26 @@ test('Kanban Toolkit lists and validates Studio Pet assignees', async (t) => {
     studioId: 'kanban-assignees',
     entryPetId: 'planner',
     pets: [
-      pet({ petId: 'planner', tools: () => pluginTools(plugin) }),
-      pet({ petId: 'writer', tools: () => pluginTools(plugin) }),
+      pet({
+        petId: 'planner',
+        role: 'plan work',
+        serviceSummary: 'task planning',
+        tools: () => pluginTools(plugin),
+      }),
+      pet({
+        petId: 'writer',
+        role: 'write output',
+        serviceSummary: 'draft delivery',
+        tools: () => pluginTools(plugin),
+      }),
     ],
     plugins: [plugin],
   });
   t.after(() => studio.shutdown());
 
-  assert.equal(
-    await pluginTools(plugin).kanban_assignee_list!.invoke({}),
-    'planner\nwriter',
-  );
+  const assignees = await pluginTools(plugin).kanban_assignee_list!.invoke({}) as string;
+  assert.match(assignees, /petId=planner name=planner role=plan work service=task planning/);
+  assert.match(assignees, /petId=writer name=writer role=write output service=draft delivery/);
   assert.match(
     await pluginTools(plugin).kanban_task_add!.invoke({
       petId: 'missing',

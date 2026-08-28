@@ -117,6 +117,7 @@ The main boundaries are:
 | `plugins/studio-http/` | Optional Studio HTTP dispatch and SSE event Plugin. |
 | `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
 | `plugins/kanban/` | Optional Kanban Plugin, its Agent Toolkit, and Console UI. |
+| `plugins/trigger/` | Optional event-condition Trigger Plugin for Pet dispatch. |
 | `tools/agent-macos/` | macOS desktop companion. |
 | `docs/concepts/` | Project vocabulary and architecture for new contributors. |
 | `docs/guides/` | Installation, configuration, and browser-operation guides. |

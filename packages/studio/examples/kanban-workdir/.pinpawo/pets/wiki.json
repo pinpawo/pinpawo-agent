@@ -1,0 +1,7 @@
+{
+  "petId": "wiki",
+  "name": "Wiki",
+  "role": "根据代码、review 与 task 进度维护项目整体知识",
+  "serviceSummary": "项目概览、决策、风险和未决问题的 Markdown 对齐",
+  "defaultCapabilityName": "wiki_maintenance"
+}

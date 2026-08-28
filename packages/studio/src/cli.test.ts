@@ -31,8 +31,29 @@ test('Studio CLI forwards an optional resident Pet listener port', async () => {
 test('Studio Host CLI defaults to an available Agent Session port', () => {
   assert.deepEqual(parseStudioHostCliArgs([]), {
     help: false,
+    command: 'start',
     options: {},
   });
+});
+
+test('Studio CLI initializes the kickstart template without starting a Host', async () => {
+  let received: string | undefined;
+  let output = '';
+  await runStudioHostCli(['init', '--workdir', '/tmp/new-studio'], {
+    runHost: () => assert.fail('init must not start a Host'),
+    initKickstart: async ({ workdir }) => {
+      received = workdir;
+      return { workdir, files: ['.pinpawo/studio.json'] };
+    },
+    writeOutput: (text) => { output += text; },
+  });
+
+  assert.equal(received, '/tmp/new-studio');
+  assert.match(output, /Initialized Studio kickstart/);
+  assert.throws(
+    () => parseStudioHostCliArgs(['init', '--pet-port', '3210']),
+    /not valid for Studio init/,
+  );
 });
 
 test('Studio Host CLI validates ports and exposes help without starting a Host', async () => {

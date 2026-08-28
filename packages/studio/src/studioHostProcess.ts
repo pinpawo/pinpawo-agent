@@ -30,6 +30,8 @@ export type StudioHostProcessDependencies = {
     options: StartStudioHostOptions,
   ) => Promise<RunningStudioHost>;
   signals?: SignalTarget;
+  writeOutput?: (text: string) => void;
+  authTokenPath?: () => string;
 };
 
 /** Start one standalone Studio Host and own its process signal boundary. */
@@ -65,6 +67,16 @@ export async function runStudioHostProcess(
   signals.once('SIGTERM', requestClose);
   try {
     running = await (dependencies.startHost ?? startStudioHost)(hostOptions);
+    const writeOutput = dependencies.writeOutput ?? process.stdout.write.bind(process.stdout);
+    const authTokenPath = dependencies.authTokenPath?.() ?? '~/.pinpawo/local-server-token';
+    writeOutput([
+      'Studio Host ready.',
+      `Workdir: ${runtimeConfig.workdir}`,
+      `Resident Pet Agent Session port: ${running.agentSessionPort.toString()}`,
+      `Studio bearer token file: ${authTokenPath}`,
+      `Connect a Pet TUI: pinpawo tui --pet-port ${running.agentSessionPort.toString()} --pet-id <petId>`,
+      '',
+    ].join('\n'));
     if (closeRequested) running.close();
     await running.closed;
   } finally {

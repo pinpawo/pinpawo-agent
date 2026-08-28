@@ -24,6 +24,9 @@
   },
   "files": [
     "dist/",
+    "examples/kanban-workdir/.pinpawo/studio.json",
+    "examples/kanban-workdir/.pinpawo/pets/",
+    "examples/kanban-workdir/wiki/",
     "README.md",
     "LICENSE"
   ],

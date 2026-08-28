@@ -11,7 +11,8 @@ apps/studio-console
   ├─ Studio     -> /pets /dispatch /events
   ├─ Kanban     -> /kanban /kanban/events
   ├─ Scheduler  -> /scheduler /scheduler/events
-  └─ Trigger    -> /triggers /triggers/events
+  ├─ Trigger    -> /triggers /triggers/events
+  └─ Knowledge  -> /knowledge /knowledge/document (Project Files Plugin)
 
 Console -X-> Studio core / Agent / checkpoint / Plugin hook / SQLite
 Plugin  -X-> Console assets or frontend module
@@ -27,7 +28,9 @@ Console 使用固定页面，不实现前端 Plugin 系统。后端没有装配�
 - Kanban：读取 task snapshot/history，以连续状态流展示 waiting/doing/todo/blocked/done；
 - Scheduler：查看 schedule、创建一次性 schedule、取消尚未触发的 schedule；
 - Trigger：查看 trigger 定义和 delivery history、复制外部接收说明；
-- Knowledge：暂不实现 graph；以后只通过独立只读 API 列出和读取受限 Markdown。
+- Knowledge：通过 Project Files Plugin 的独立只读 API 列出和读取受限 Markdown；不实现
+  graph、索引或文件写入。该 Plugin 只向 HTTP `routes` hook 贡献 API，不依赖 Console，
+  不接触 Agent、dispatch、checkpoint 或其他领域数据库。
 
 第一版不实现动态 UI module、Plugin 静态资源 hook、传统泳道/拖拽看板、Agent Session、
 HITL resume 或 checkpoint 操作。Console 的 dispatch 成功只表示 Studio 已接受输入，页面

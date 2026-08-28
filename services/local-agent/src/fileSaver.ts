@@ -55,6 +55,12 @@ type ChannelValueRef =
   | { kind: 'array'; itemHashes: string[] };
 
 const ROOT_NAMESPACE_SEGMENT = '__root__';
+const HASHED_PATH_SEGMENT_PREFIX = '__sha256__';
+// Refs are written through an atomic temporary sibling whose pid/UUID suffix
+// also counts against the filesystem's per-component limit (255 on macOS).
+// Keep logical identifiers comfortably below that limit without changing the
+// existing layout for ordinary thread/checkpoint identifiers.
+const MAX_ENCODED_PATH_SEGMENT_LENGTH = 190;
 const STORE_LOCK_WAIT_MS = 10;
 const STORE_LOCK_TIMEOUT_MS = 30_000;
 const STORE_LOCK_ORPHAN_GRACE_MS = 1_000;
@@ -80,7 +86,14 @@ function generateWriteKey(threadId: string, checkpointNamespace: string | undefi
 }
 
 function encodePathSegment(value: string) {
-  return encodeURIComponent(value || ROOT_NAMESPACE_SEGMENT);
+  const encoded = encodeURIComponent(value || ROOT_NAMESPACE_SEGMENT);
+  if (
+    encoded.length <= MAX_ENCODED_PATH_SEGMENT_LENGTH
+    && !encoded.startsWith(HASHED_PATH_SEGMENT_PREFIX)
+  ) {
+    return encoded;
+  }
+  return `${HASHED_PATH_SEGMENT_PREFIX}${createHash('sha256').update(value).digest('hex')}`;
 }
 
 function objectHash(bytes: Uint8Array) {
@@ -166,6 +179,10 @@ function isProcessAlive(pid: number): boolean {
  *   <base>/threads/<threadId>/refs/<namespace>
  *   <base>/threads/<threadId>/manifests/<namespace>/<checkpointId>.json
  *   <base>/threads/<threadId>/writes/<namespace>/<checkpointId>.json
+ *
+ * Each logical path segment is URI-encoded while it is short and replaced by
+ * a deterministic SHA-256 segment when it is long. The manifests retain the
+ * original identifiers, so the bounded disk representation is opaque.
  *
  * Checkpoint channel values and pending writes are immutable blobs addressed by
  * content hash. Refs are updated only after the referenced manifest and objects

@@ -170,7 +170,11 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
     { headers: authorization },
   );
   assert.equal(emptyBoardResponse.status, 200);
-  assert.deepEqual(await emptyBoardResponse.json(), { tasks: [], lastEventSequence: 0 });
+  assert.deepEqual(await emptyBoardResponse.json(), {
+    tasks: [],
+    lastEventSequence: 0,
+    dispatchMode: 'automatic',
+  });
 
   const eventResponse = await fetch(
     `http://${address.host}:${address.port.toString()}/events`,
@@ -181,12 +185,13 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
   const eventReader = eventResponse.body.getReader();
   const receivedEvents = readSseEventsUntil(
     eventReader,
-    (events) => events.some((event) => (
-      typeof event === 'object'
-      && event !== null
-      && 'type' in event
-      && event.type === 'task.done'
-    )),
+    (events) => {
+      const records = events.filter((event): event is Record<string, unknown> => (
+        typeof event === 'object' && event !== null
+      ));
+      return records.some(({ type }) => type === 'task.done')
+        && records.filter(({ type }) => type === 'dispatch.accepted').length >= 2;
+    },
   );
 
   const dispatchResponse = await fetch(
@@ -207,7 +212,20 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
     ['invocationId', 'petId'],
   );
 
-  const events = await receivedEvents as Array<{ type?: string; source?: string }>;
+  const events = await receivedEvents as Array<{
+    type?: string;
+    source?: string;
+    payload?: { producer?: string; petId?: string };
+  }>;
+  assert.deepEqual(
+    events
+      .filter(({ source, type }) => source === 'studio' && type === 'dispatch.accepted')
+      .map(({ payload }) => ({ producer: payload?.producer, petId: payload?.petId })),
+    [
+      { producer: 'http', petId: 'planner' },
+      { producer: 'kanban', petId: 'writer' },
+    ],
+  );
   assert.deepEqual(
     events.filter(({ source }) => source === 'kanban').map(({ type }) => type),
     ['task.todo', 'task.doing', 'task.done'],
@@ -246,4 +264,41 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
     history.events.map(({ sequence }) => sequence),
     [1, 2, 3],
   );
+});
+
+test('Kanban manual mode exposes an explicit task start control over HTTP', async (t) => {
+  const kanban = createKanbanPlugin({ dispatchMode: 'manual' });
+  const http = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  let workerRequest = '';
+  const studio = await createStudio({
+    studioId: 'manual-kanban-e2e',
+    entryPetId: 'worker',
+    pets: [pet('worker', (request) => { workerRequest = request; })],
+    plugins: [kanban, http],
+  });
+  t.after(() => studio.shutdown());
+  const address = http.address();
+  assert.ok(address);
+  const authorization = { Authorization: `Bearer ${AUTH_TOKEN}` };
+  const task = await kanban.service.createTask({ assigneeId: 'worker', brief: 'run manually' });
+
+  const snapshotResponse = await fetch(
+    `http://${address.host}:${address.port.toString()}/kanban`,
+    { headers: authorization },
+  );
+  assert.equal(snapshotResponse.status, 200);
+  assert.equal((await snapshotResponse.json() as { dispatchMode: string }).dispatchMode, 'manual');
+  assert.equal((await kanban.service.getTask(task.task.taskId))?.status, 'todo');
+
+  const startResponse = await fetch(
+    `http://${address.host}:${address.port.toString()}/kanban/control`,
+    {
+      method: 'POST',
+      headers: { ...authorization, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', taskId: task.task.taskId }),
+    },
+  );
+  assert.equal(startResponse.status, 202);
+  assert.match(workerRequest, /run manually/);
+  assert.equal((await kanban.service.getTask(task.task.taskId))?.status, 'doing');
 });

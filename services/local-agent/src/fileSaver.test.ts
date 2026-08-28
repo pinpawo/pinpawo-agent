@@ -521,3 +521,55 @@ test('FileSaver isolates checkpoint namespaces and encodes path segments', async
     ['child namespace'],
   );
 });
+
+test('FileSaver bounds long checkpoint path segments without losing logical identifiers', async (t) => {
+  const root = createTempDir(t);
+  const filePath = join(root, 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const threadId = `petbot:tui:pet:wiki:${'thread-segment:'.repeat(16)}`;
+  const namespace = [
+    'capability:00000000-0000-0000-0000-000000000001',
+    'tools:00000000-0000-0000-0000-000000000002',
+    'capability:00000000-0000-0000-0000-000000000003',
+    'tools:00000000-0000-0000-0000-000000000004',
+    'entryAnswer:00000000-0000-0000-0000-000000000005',
+  ].join('|');
+
+  await saver.put({
+    configurable: { thread_id: threadId, checkpoint_ns: namespace },
+  }, checkpoint('cp-long', {
+    messages: ['long logical identifiers'],
+  }), { source: 'loop', step: 1, parents: {} });
+
+  const threadSegments = readdirSync(join(root, 'checkpoints', 'threads'));
+  assert.equal(threadSegments.length, 1);
+  assert.ok(threadSegments[0]!.length <= 190);
+  const refSegments = readdirSync(join(
+    root,
+    'checkpoints',
+    'threads',
+    threadSegments[0]!,
+    'refs',
+  ));
+  assert.equal(refSegments.length, 1);
+  assert.ok(refSegments[0]!.length <= 190);
+
+  const restored = new FileSaver(filePath);
+  assert.deepEqual(
+    (await restored.getTuple({
+      configurable: { thread_id: threadId, checkpoint_ns: namespace },
+    }))?.checkpoint.channel_values.messages,
+    ['long logical identifiers'],
+  );
+  const listed = [];
+  for await (const tuple of restored.list({
+    configurable: { thread_id: threadId, checkpoint_ns: namespace },
+  })) {
+    listed.push(tuple.config.configurable);
+  }
+  assert.deepEqual(listed, [{
+    thread_id: threadId,
+    checkpoint_ns: namespace,
+    checkpoint_id: 'cp-long',
+  }]);
+});

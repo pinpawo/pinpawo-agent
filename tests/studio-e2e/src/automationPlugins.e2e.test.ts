@@ -111,7 +111,10 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
     triggers: [{
       triggerId: 'github-pr-opened',
       petId: 'reviewer',
-      request: 'Review the opened pull request.',
+      request: {
+        template: 'Review PR #{{payload.pull_request.number}} after {{source.action}}.',
+        context: ['source.deliveryId', 'payload.pull_request.number'],
+      },
       source: { kind: 'github', secret: githubSecret, event: 'pull_request', action: 'opened' },
     }],
   });
@@ -142,7 +145,8 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
   assert.equal((await request()).status, 202);
   assert.equal((await request()).status, 202);
   assert.equal(received.length, 1);
-  assert.match(received[0]!, /"number":42/);
+  assert.match(received[0]!, /Review PR #42 after opened/);
+  assert.match(received[0]!, /"source.deliveryId":"delivery-42"/);
 
   const rejected = await fetch(`${base}/triggers/github`, {
     method: 'POST',

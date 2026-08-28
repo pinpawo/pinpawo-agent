@@ -126,12 +126,35 @@ that path nor reads task state. Direct `createKanbanPlugin()` remains explicitly
 in-memory. A larger Kanban application can instead own a
 `KanbanTaskService` itself and inject it into the Studio adapter.
 
+Kanban dispatch defaults to `"automatic"`: each dependency-ready task is claimed
+and sent through Studio dispatch. Set Plugin option `"dispatchMode": "manual"`
+to keep ready tasks queued until an operator calls `POST /kanban/control` with
+`{"action":"start","taskId":"..."}`. The same explicit start can retry a
+blocked task after its dependencies are complete. This control remains Kanban
+domain/API behavior; Studio core does not interpret task state.
+
 `@pinpawo-plugin/trigger` binds either an HTTP source or a Studio event
 condition to one Pet dispatch. For example, a `studio_event` trigger matching
 Kanban `task.*` can dispatch a Wiki Pet; the Pet maintains ordinary workdir
 Markdown through its own Capability rather than through a Wiki-specific
 Toolkit or Plugin. Its current contract is documented in the
 [Studio automation Plugins draft](../design/studio/automation-plugins.md).
+
+A Trigger `request` may remain a string, or use a logic-free template with an
+explicit context projection:
+
+```json
+{
+  "request": {
+    "template": "Reconcile task {{payload.taskId}} after {{event.type}}.",
+    "context": ["payload.taskId", "payload.note", "event.occurredAt"]
+  }
+}
+```
+
+The normalized template envelope contains `triggerId`, `source`, optional
+`event`, and `payload`. Templates only render the outgoing dispatch request;
+they do not select Agent Capabilities, Toolkits, models, or threads.
 
 A GitHub webhook binding uses `source.kind: "github"`, a `secretEnv`, and the
 GitHub webhook `event` (plus optional payload `action`). GitHub sends it to
@@ -152,7 +175,8 @@ keeps the JSON source and refuses to write into a non-empty destination.
 Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
 broker. Studio only matches Plugin and hook names and owns lifecycle cleanup; it
 does not import or interpret extension contracts. The HTTP Plugin exposes a
-`routes` hook, while Kanban optionally contributes its `/kanban` snapshot route.
+`routes` hook, while Kanban optionally contributes its `/kanban` snapshot,
+history, and control routes.
 Kanban remains valid when HTTP is absent, and HTTP never depends on Kanban.
 
 The Host first calls `resolveStudioHostConfig()` to read files and resolve Plugins,

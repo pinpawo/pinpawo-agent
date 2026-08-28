@@ -195,7 +195,11 @@ export type CreateKanbanPluginOptions = {
   httpRoute?: false | {
     pluginName?: string;
   };
+  /** Automatic by default; manual keeps ready tasks queued until explicitly started. */
+  dispatchMode?: KanbanDispatchMode;
 };
+
+export type KanbanDispatchMode = 'automatic' | 'manual';
 
 export type KanbanPlugin = StudioPlugin & { service: KanbanTaskService };
 
@@ -231,9 +235,33 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   let dispatchRequested = false;
   let dispatchLoop: Promise<void> | undefined;
   let dispatchEnabled = false;
+  const dispatchMode = options.dispatchMode ?? 'automatic';
+
+  if (dispatchMode !== 'automatic' && dispatchMode !== 'manual') {
+    throw new Error('Kanban dispatchMode must be "automatic" or "manual".');
+  }
 
   function asError(error: unknown): Error {
     return error instanceof Error ? error : new Error(String(error));
+  }
+
+  async function dispatchClaimedTask(task: KanbanTask): Promise<void> {
+    const activeContext = context;
+    if (!dispatchEnabled || !activeContext) throw new Error('Kanban Plugin is not running.');
+    try {
+      const dependencies = (await Promise.all(
+        task.deps.map((taskId) => service.getTask(taskId)),
+      )).filter((dependency): dependency is KanbanTask => dependency !== null);
+      await activeContext.dispatch({
+        petId: task.assigneeId,
+        request: buildTaskRequest(task, dependencies),
+      });
+    } catch (error) {
+      // Admission failed before the Pet accepted the dispatch. Once accepted,
+      // only Kanban Toolkit/domain mutations may complete or block this task.
+      await service.blockTask(task.taskId, asError(error).message);
+      throw error;
+    }
   }
 
   /** Claim is already a committed Kanban operation before Studio dispatch begins. */
@@ -243,26 +271,19 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
       while (dispatchEnabled && context) {
         const mutation = await service.claimNextReadyTask();
         if (!mutation) break;
-        const task = mutation.task;
-        try {
-          const dependencies = (await Promise.all(
-            task.deps.map((taskId) => service.getTask(taskId)),
-          )).filter((dependency): dependency is KanbanTask => dependency !== null);
-          await context.dispatch({
-            petId: task.assigneeId,
-            request: buildTaskRequest(task, dependencies),
-          });
-        } catch (error) {
-          // Admission failed before the Pet accepted the dispatch. Once accepted,
-          // only Kanban Toolkit/domain mutations may complete or block this task.
-          await service.blockTask(task.taskId, asError(error).message);
-        }
+        await dispatchClaimedTask(mutation.task).catch(() => undefined);
       }
     }
   }
 
+  async function startTask(taskId: string): Promise<KanbanTask> {
+    const mutation = await service.claimReadyTask(taskId);
+    await dispatchClaimedTask(mutation.task);
+    return mutation.task;
+  }
+
   function dispatchReady(): void {
-    if (!dispatchEnabled || !context) return;
+    if (dispatchMode !== 'automatic' || !dispatchEnabled || !context) return;
     dispatchRequested = true;
     if (dispatchLoop) return;
     const running = runDispatchLoop();
@@ -316,9 +337,13 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
               const unregisterSnapshot = routes.register({
                 method: 'GET',
                 path: snapshotPath,
-                handle: async () => ({ kind: 'json', body: await service.readSnapshot() }),
+                handle: async () => ({
+                  kind: 'json',
+                  body: { ...await service.readSnapshot(), dispatchMode },
+                }),
               });
               let unregisterEvents: (() => void) | undefined;
+              let unregisterControl: (() => void) | undefined;
               try {
                 unregisterEvents = routes.register({
                   method: 'GET',
@@ -339,11 +364,42 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
                     }
                   },
                 });
+                unregisterControl = routes.register({
+                  method: 'POST',
+                  path: `${snapshotPath}/control`,
+                  handle: async ({ readJson }) => {
+                    try {
+                      const value = await readJson();
+                      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                        throw new Error('Kanban control request must be an object.');
+                      }
+                      const input = value as Record<string, unknown>;
+                      if (input.action !== 'start' || typeof input.taskId !== 'string'
+                        || Object.keys(input).some((key) => key !== 'action' && key !== 'taskId')) {
+                        throw new Error('Kanban control requires action "start" and taskId.');
+                      }
+                      return {
+                        kind: 'json',
+                        status: 202,
+                        body: { task: await startTask(input.taskId) },
+                      };
+                    } catch (error) {
+                      return {
+                        kind: 'json',
+                        status: 409,
+                        body: { error: asError(error).message },
+                      };
+                    }
+                  },
+                });
               } catch (error) {
+                unregisterControl?.();
+                unregisterEvents?.();
                 unregisterSnapshot();
                 throw error;
               }
               return () => {
+                unregisterControl?.();
                 unregisterEvents?.();
                 unregisterSnapshot();
               };
@@ -384,11 +440,16 @@ export function createStudioPlugin(
   environment: InstalledKanbanPluginEnvironment,
 ): KanbanPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'httpRoute']);
+  const allowed = new Set(['databasePath', 'httpRoute', 'dispatchMode']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Kanban Plugin option "${unknown}" is not supported.`);
   if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
     throw new Error('Kanban Plugin option "databasePath" must be a string.');
+  }
+  if (options.dispatchMode !== undefined
+    && options.dispatchMode !== 'automatic'
+    && options.dispatchMode !== 'manual') {
+    throw new Error('Kanban Plugin option "dispatchMode" must be automatic or manual.');
   }
   const httpRoute = options.httpRoute;
   if (
@@ -414,6 +475,9 @@ export function createStudioPlugin(
     : path.join(environment.workdir, '.pinpawo', 'kanban', 'tasks.sqlite');
   return createKanbanPlugin({
     databasePath,
+    ...(options.dispatchMode === undefined
+      ? {}
+      : { dispatchMode: options.dispatchMode as KanbanDispatchMode }),
     ...(httpRoute !== undefined
       ? { httpRoute: httpRoute as CreateKanbanPluginOptions['httpRoute'] }
       : {}),

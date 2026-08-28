@@ -62,6 +62,7 @@ export type KanbanTaskRepository = {
   getTask: (taskId: string) => Promise<KanbanTask | null>;
   createTask: (input: CreateKanbanTaskInput) => Promise<KanbanTaskMutation>;
   claimNextReadyTask: () => Promise<KanbanTaskMutation | null>;
+  claimReadyTask: (taskId: string) => Promise<KanbanTaskMutation>;
   completeTask: (taskId: string, result: string) => Promise<KanbanTaskMutation>;
   blockTask: (taskId: string, reason: string) => Promise<KanbanTaskMutation>;
   recoverInterruptedTasks: () => Promise<KanbanTaskMutation[]>;
@@ -311,6 +312,42 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     });
   }
 
+  async claimReadyTask(taskId: string): Promise<KanbanTaskMutation> {
+    this.assertReady();
+    const normalizedTaskId = requireNonEmpty(taskId, 'taskId');
+    return this.transaction(() => {
+      const row = this.database.prepare(
+        'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+      ).get(normalizedTaskId) as TaskRow | undefined;
+      if (!row) throw new Error(`Kanban task "${normalizedTaskId}" does not exist.`);
+      const current = requireStatus(row.status);
+      if (current !== 'todo' && current !== 'blocked') {
+        throw new Error(`Kanban task "${normalizedTaskId}" is ${current}, not startable.`);
+      }
+      const incomplete = this.database.prepare(`
+        SELECT dependency.depends_on_task_id AS task_id
+        FROM kanban_task_dependencies AS dependency
+        JOIN kanban_tasks AS prerequisite ON prerequisite.task_id = dependency.depends_on_task_id
+        WHERE dependency.task_id = ? AND prerequisite.status <> 'done'
+        ORDER BY dependency.depends_on_task_id
+        LIMIT 1
+      `).get(normalizedTaskId) as { task_id: string } | undefined;
+      if (incomplete) {
+        throw new Error(
+          `Kanban task "${normalizedTaskId}" is waiting for dependency "${incomplete.task_id}".`,
+        );
+      }
+      const now = new Date().toISOString();
+      const result = this.database.prepare(
+        "UPDATE kanban_tasks SET status = 'doing', note = NULL, updated_at = ? WHERE task_id = ? AND status = ?",
+      ).run(now, normalizedTaskId, current);
+      if (result.changes !== 1) {
+        throw new Error(`Kanban task "${normalizedTaskId}" could not be started.`);
+      }
+      return this.mutationFor(normalizedTaskId, 'claimed', current, 'doing', undefined, now);
+    });
+  }
+
   async completeTask(taskId: string, result: string): Promise<KanbanTaskMutation> {
     // A recovered execution is conservatively marked blocked because Kanban
     // cannot inspect Agent checkpoint state. A later explicit Agent report is
@@ -539,6 +576,10 @@ export class KanbanTaskService {
     this.assertReady();
     const mutation = await this.repository.claimNextReadyTask();
     return mutation ? this.publish(mutation) : null;
+  }
+
+  async claimReadyTask(taskId: string): Promise<KanbanTaskMutation> {
+    return this.publish(await this.repository.claimReadyTask(taskId));
   }
 
   async completeTask(taskId: string, result: string): Promise<KanbanTaskMutation> {

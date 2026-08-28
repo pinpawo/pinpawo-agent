@@ -8,7 +8,7 @@ packages; the standalone resolver loads only the packages listed in
 
 ```text
 external request -> planner -> executor -> reviewer
-Kanban task.* event -----------------> Trigger binding -> wiki Pet -> wiki/PROJECT.md
+Kanban task.done event --------------> Trigger binding -> wiki Pet -> wiki/PROJECT.md
 ```
 
 Kanban owns task, dependency, status, and history. The Wiki Pet owns Markdown
@@ -23,13 +23,19 @@ not already provide one:
 npm run studio:hello
 ```
 
-The command prints the Console URL, Studio HTTP URL, Pet TUI command, current
-Bearer token, and Trigger secret. To start the two processes separately instead:
+The command initializes an isolated temporary workdir, waits for both HTTP and
+Console readiness, and prints the runtime workdir, Console URL, Studio HTTP URL,
+Pet TUI command, current Bearer token, and Trigger secret. The temporary workdir
+is removed after shutdown, so running the demo never mutates this published
+template or inherits a previous run's task/checkpoint state. To start the two
+processes separately against a persistent initialized workdir instead:
 
 ```bash
 export PINPAWO_HELLO_TRIGGER_SECRET='replace-with-a-local-secret-at-least-16-chars'
 npm run build
-npm run start -w @pinpawo/studio -- --workdir "$PWD/packages/studio/examples/kanban-workdir" --pet-port 3210
+HELLO_WORKDIR="$(mktemp -d)"
+node packages/studio/dist/cli.js init --workdir "$HELLO_WORKDIR"
+npm run start -w @pinpawo/studio -- --workdir "$HELLO_WORKDIR" --pet-port 3210
 ```
 
 In another terminal, start the independent pure frontend:
@@ -41,6 +47,28 @@ npm run dev -w @pinpawo/studio-console
 Open `http://127.0.0.1:5173`, then enter the local-agent bearer token. The
 Console is not served by a Plugin and does not directly access Studio core or a
 Plugin database.
+
+To run the real project-delivery loop from the Console, open **studio**, keep
+`planner` selected, and dispatch a concrete goal such as:
+
+```text
+Create a concise HELLO.md in the project root, then have an independent reviewer verify it.
+```
+
+Watch **kanban** for the Planner-created dependency flow and **knowledge** for
+the Wiki Pet's `PROJECT.md` reconciliation. Knowledge is an ordinary project
+file rather than a Studio event projection, so use its explicit **REFRESH**
+action after the final `task.done` event.
+
+The same entry can be exercised as an external HTTP Trigger using the secret
+printed by `npm run studio:hello`:
+
+```bash
+curl -X POST http://127.0.0.1:3211/triggers/invoke \
+  -H 'Authorization: Trigger <printed-trigger-secret>' \
+  -H 'Content-Type: application/json' \
+  --data '{"triggerId":"hello","idempotencyKey":"hello-1","payload":{"goal":"Create a concise HELLO.md, then review it."}}'
+```
 
 The optional Project Files Plugin only lists and reads Markdown under `wiki/`
 for the Console Knowledge page. The Wiki Pet still owns file updates; the Plugin

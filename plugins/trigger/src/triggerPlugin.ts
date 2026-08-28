@@ -23,11 +23,20 @@ export type GitHubTriggerSource = {
   action?: string;
 };
 
+export type TriggerRequestTemplate = {
+  /** Logic-free interpolation over the normalized Trigger request envelope. */
+  template: string;
+  /** Optional envelope paths appended as a bounded, explicit JSON context. */
+  context?: readonly string[];
+};
+
+export type TriggerRequest = string | TriggerRequestTemplate;
+
 export type TriggerDefinition = {
   triggerId: string;
   source: HttpTriggerSource | StudioEventTriggerSource | GitHubTriggerSource;
   petId: string;
-  request: string;
+  request: TriggerRequest;
 };
 
 export type CreateTriggerPluginOptions = {
@@ -79,6 +88,109 @@ function stringifyTriggerContext(value: unknown): string {
   }
 }
 
+type TriggerRequestEnvelope = {
+  triggerId: string;
+  source: {
+    kind: 'http' | 'github' | 'studio_event';
+    event?: string;
+    action?: string;
+    deliveryId?: string;
+  };
+  event?: {
+    source: string;
+    type: string;
+    metadata?: StudioEvent['metadata'];
+    occurredAt: string;
+  };
+  payload: unknown;
+};
+
+const TEMPLATE_EXPRESSION = /{{\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*)\s*}}/g;
+const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function validateTemplatePath(value: string, label: string): string {
+  const candidate = value.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)*$/.test(candidate)
+    || candidate.split('.').some((segment) => BLOCKED_PATH_SEGMENTS.has(segment))) {
+    throw new Error(`${label} must be a safe dot-separated Trigger context path.`);
+  }
+  return candidate;
+}
+
+function readEnvelopePath(envelope: TriggerRequestEnvelope, pathValue: string): unknown {
+  let current: unknown = envelope;
+  for (const segment of pathValue.split('.')) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)
+      || !Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function renderTemplateValue(value: unknown): string {
+  return typeof value === 'string' ? value : stringifyTriggerContext(value);
+}
+
+function renderTriggerRequest(
+  request: TriggerRequestTemplate,
+  envelope: TriggerRequestEnvelope,
+): string {
+  const rendered = request.template.replace(TEMPLATE_EXPRESSION, (_expression, rawPath: string) => {
+    const pathValue = validateTemplatePath(rawPath, 'Trigger request template expression');
+    const value = readEnvelopePath(envelope, pathValue);
+    if (value === undefined) {
+      throw new Error(`Trigger request template path "${pathValue}" is unavailable.`);
+    }
+    return renderTemplateValue(value);
+  });
+  const selected = Object.fromEntries((request.context ?? []).flatMap((pathValue) => {
+    const value = readEnvelopePath(envelope, pathValue);
+    return value === undefined ? [] : [[pathValue, value]];
+  }));
+  return Object.keys(selected).length > 0
+    ? `${rendered}\n\nTrigger context:\n${stringifyTriggerContext(selected)}`
+    : rendered;
+}
+
+function buildTriggerRequestEnvelope(
+  definition: TriggerDefinition,
+  context:
+    | { kind: 'http'; payload: unknown }
+    | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
+    | { kind: 'studio_event'; event: StudioEvent },
+): TriggerRequestEnvelope {
+  if (context.kind === 'http') {
+    return {
+      triggerId: definition.triggerId,
+      source: { kind: 'http' },
+      payload: context.payload,
+    };
+  }
+  if (context.kind === 'github') {
+    return {
+      triggerId: definition.triggerId,
+      source: {
+        kind: 'github',
+        event: context.event,
+        ...(context.action === undefined ? {} : { action: context.action }),
+        deliveryId: context.deliveryId,
+      },
+      payload: context.payload,
+    };
+  }
+  return {
+    triggerId: definition.triggerId,
+    source: { kind: 'studio_event' },
+    event: {
+      source: context.event.source,
+      type: context.event.type,
+      ...(context.event.metadata === undefined ? {} : { metadata: context.event.metadata }),
+      occurredAt: context.event.occurredAt,
+    },
+    payload: context.event.payload,
+  };
+}
+
 function buildTriggerRequest(
   definition: TriggerDefinition,
   context:
@@ -86,6 +198,12 @@ function buildTriggerRequest(
     | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
     | { kind: 'studio_event'; event: StudioEvent },
 ): string {
+  if (typeof definition.request !== 'string') {
+    return renderTriggerRequest(
+      definition.request,
+      buildTriggerRequestEnvelope(definition, context),
+    );
+  }
   const detail = context.kind === 'http'
     ? { source: 'http', payload: context.payload }
     : context.kind === 'github'
@@ -134,9 +252,28 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
   for (const definition of input) {
     const triggerId = definition.triggerId.trim();
     const petId = definition.petId.trim();
-    const request = definition.request.trim();
-    if (!triggerId || !petId || !request) {
+    const request = typeof definition.request === 'string'
+      ? definition.request.trim()
+      : {
+        template: definition.request.template.trim(),
+        ...(definition.request.context === undefined
+          ? {}
+          : { context: definition.request.context.map((pathValue) => (
+            validateTemplatePath(pathValue, `Trigger "${triggerId}" request context path`)
+          )) }),
+      };
+    if (!triggerId || !petId || (typeof request === 'string' ? !request : !request.template)) {
       throw new Error('Trigger definitions require triggerId, petId, and request.');
+    }
+    if (typeof request !== 'string') {
+      const unmatched = request.template.replace(TEMPLATE_EXPRESSION, '');
+      if (unmatched.includes('{{') || unmatched.includes('}}')) {
+        throw new Error(`Trigger "${triggerId}" request template contains an invalid expression.`);
+      }
+      if (request.context
+        && new Set(request.context).size !== request.context.length) {
+        throw new Error(`Trigger "${triggerId}" request context paths must be unique.`);
+      }
     }
     if (definitions.has(triggerId)) throw new Error(`Duplicate Trigger triggerId "${triggerId}".`);
     if (definition.source.kind === 'http') {
@@ -508,7 +645,7 @@ export function createStudioPlugin(
     }
     if (typeof definition.triggerId !== 'string'
       || typeof definition.petId !== 'string'
-      || typeof definition.request !== 'string') {
+      || !isInstalledTriggerRequest(definition.request, index)) {
       throw new Error(
         `Trigger Plugin triggers[${index.toString()}] requires triggerId, petId, request, and source.`,
       );
@@ -539,4 +676,20 @@ export function createStudioPlugin(
       ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),
   });
+}
+
+function isInstalledTriggerRequest(value: unknown, index: number): value is TriggerRequest {
+  if (typeof value === 'string') return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const request = value as Record<string, unknown>;
+  const unknown = Object.keys(request).find((key) => !new Set(['template', 'context']).has(key));
+  if (unknown || typeof request.template !== 'string'
+    || (request.context !== undefined
+      && (!Array.isArray(request.context)
+        || request.context.some((pathValue) => typeof pathValue !== 'string')))) {
+    throw new Error(
+      `Trigger Plugin triggers[${index.toString()}].request must be a string or contain only template and string context paths.`,
+    );
+  }
+  return true;
 }

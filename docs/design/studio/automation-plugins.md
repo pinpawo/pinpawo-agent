@@ -7,6 +7,12 @@ Scheduler 与 Trigger 是两个可选 Studio Plugin。Scheduler 表达时间条�
 表达“满足某个事件源条件时，向哪个 Pet 派发什么请求”。二者只通过
 `StudioPluginContext.dispatch()` 向 Pet 提交单向输入，通过 `notify()` 发布领域事件。
 
+Trigger 的 `request` 可以是静态字符串，也可以是有限的 request template。模板只把规范化
+Trigger envelope 投射成一条 dispatch request；它不选择 Capability、Toolkit、模型、thread
+或 Agent prompt。结构化形式支持 `{{payload.taskId}}` 这类无逻辑点路径替换，并通过
+`context` 显式选择附加字段。它不提供条件、循环或任意表达式，也不会默认把完整 GitHub
+payload 塞给 Agent。静态字符串继续保留原有的“固定 request + 完整 Trigger context”兼容语义。
+
 领域 Service 是 committed-mutation 的唯一出口。Plugin 订阅这个出口并统一投射 Studio
 event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自补发事件。
 
@@ -44,7 +50,7 @@ parser。
 
 ## Trigger 第一版
 
-一个 Trigger 是一条独立绑定：`source condition -> petId + request`。第一版有两种 source：
+一个 Trigger 是一条独立绑定：`source condition -> petId + request`。第一版有三种 source：
 
 - `http`：一个具名外部 HTTP source；
 - `github`：经 GitHub `X-Hub-Signature-256` 签名验证的 webhook，并可按 GitHub
@@ -71,6 +77,10 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 `studio_event` binding 没有独立 durable queue：它响应一次已经发生的 Studio event。事件源
 自身需要 durability/replay 时，应由其 owning Plugin 提供；Trigger 不复制 Kanban、GitHub
 或其他领域的事实源。
+
+Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”。
+宽泛的 `typePrefix` 会为每个匹配 mutation 产生一次独立 dispatch；需要昂贵 Agent 工作时，
+配置应优先选择明确的领域终态事件，而不是依赖 Trigger 隐式 debounce 或合并队列。
 
 管理 API `GET /triggers` 与 `GET /triggers/events` 使用 Studio Bearer；外部 invoke route
 声明 route-owned authentication，由 Trigger 自己验证 secret。HTTP Plugin 只提供这一

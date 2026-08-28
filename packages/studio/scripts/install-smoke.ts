@@ -22,6 +22,11 @@ const packageRoots = [
   resolve(workspaceRoot, 'packages', 'pet-agent'),
   resolve(workspaceRoot, 'services', 'local-agent'),
   studioRoot,
+  resolve(workspaceRoot, 'plugins', 'studio-http'),
+  resolve(workspaceRoot, 'plugins', 'kanban'),
+  resolve(workspaceRoot, 'plugins', 'scheduler'),
+  resolve(workspaceRoot, 'plugins', 'project-files'),
+  resolve(workspaceRoot, 'plugins', 'trigger'),
 ];
 const npmCli = process.env.npm_execpath;
 
@@ -138,6 +143,29 @@ try {
     access(join(initializedWorkdir, '.pinpawo', 'pets', 'planner.json')),
     access(join(initializedWorkdir, 'wiki', 'PROJECT.md')),
   ]);
+
+  const resolvedKickstart = await runProcess(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    [
+      "const studio = await import('@pinpawo/studio');",
+      'const workdir = process.env.PINPAWO_SMOKE_WORKDIR;',
+      "if (!workdir) throw new Error('missing smoke workdir');",
+      'const configuration = await studio.resolveStudioHostConfig({',
+      '  workdir,',
+      '  resolvePlugin: studio.createInstalledStudioPluginResolver({ workdir }),',
+      '});',
+      'const names = configuration.plugins.map(({ name }) => name);',
+      "const expected = ['http', 'kanban', 'scheduler', 'project-files', 'trigger'];",
+      "if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`unexpected Plugins: ${JSON.stringify(names)}`);",
+      "process.stdout.write(`${names.join(',')}\\n`);",
+    ].join('\n'),
+  ], consumerDir, 'resolve installed Studio kickstart Plugins', 30_000, {
+    PINPAWO_SMOKE_WORKDIR: initializedWorkdir,
+    PINPAWO_HELLO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
+  });
+  assert.equal(resolvedKickstart.stdout.trim(), 'http,kanban,scheduler,project-files,trigger');
+  assert.equal(resolvedKickstart.stderr, '');
   process.stdout.write('[studio:install-smoke] installed library and CLI passed\n');
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

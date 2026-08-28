@@ -44,7 +44,10 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
     triggers: [{
       triggerId: 'wiki-on-task-change',
       petId: 'wiki',
-      request: 'Update the project Wiki Markdown in the current workdir.',
+      request: {
+        template: 'Update the project Wiki after {{event.type}} for {{payload.taskId}}.',
+        context: ['payload.taskId', 'event.occurredAt'],
+      },
       source: { kind: 'studio_event', eventSource: 'kanban', typePrefix: 'task.' },
     }],
   });
@@ -66,7 +69,7 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
   studio.notify({
     source: 'kanban',
     type: 'task.completed',
-    payload: { taskId: 'task-1' },
+    payload: { taskId: 'task-1', ignored: 'must not be appended' },
     occurredAt: '2026-08-28T00:00:00.000Z',
   });
   studio.notify({
@@ -77,6 +80,32 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(requests.length, 1);
-  assert.match(requests[0]!, /Update the project Wiki Markdown/);
-  assert.match(requests[0]!, /"taskId":"task-1"/);
+  assert.match(requests[0]!, /Update the project Wiki after task\.completed for task-1/);
+  assert.match(requests[0]!, /"payload\.taskId":"task-1"/);
+  assert.doesNotMatch(requests[0]!, /must not be appended/);
+});
+
+test('Trigger request templates reject invalid expressions and duplicate context paths', () => {
+  assert.throws(() => createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'invalid-template',
+      petId: 'worker',
+      request: { template: 'Handle {{payload[taskId]}}' },
+      source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.done' },
+    }],
+  }), /invalid expression/);
+
+  assert.throws(() => createTriggerPlugin({
+    httpRoute: false,
+    triggers: [{
+      triggerId: 'duplicate-context',
+      petId: 'worker',
+      request: {
+        template: 'Handle task',
+        context: ['payload.taskId', 'payload.taskId'],
+      },
+      source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.done' },
+    }],
+  }), /must be unique/);
 });

@@ -53,10 +53,13 @@ test('kickstart composes HTTP, Kanban, automation, Wiki dispatch, and Markdown p
   const scheduler = createSchedulerPlugin({ pollIntervalMs: 10 });
   const trigger = createTriggerPlugin({
     triggers: [{
-      triggerId: 'wiki-on-task-change',
+      triggerId: 'wiki-on-task-done',
       petId: 'wiki',
-      request: 'Update project Markdown.',
-      source: { kind: 'studio_event', eventSource: 'kanban', typePrefix: 'task.' },
+      request: {
+        template: 'Update project Markdown for {{payload.taskId}} after {{event.type}}.',
+        context: ['payload.taskId', 'payload.sequence'],
+      },
+      source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.done' },
     }],
   });
   const projectFiles = createProjectFilesPlugin({ rootDir: wikiRoot });
@@ -144,6 +147,7 @@ test('kickstart composes HTTP, Kanban, automation, Wiki dispatch, and Markdown p
   assert.equal(observed.get('planner')?.length, 1);
   assert.equal(observed.get('executor')?.length, 1);
   assert.equal(observed.get('reviewer')?.length, 1);
+  assert.equal(observed.get('wiki')?.length, 2);
   assert.match(observed.get('reviewer')?.[0] ?? '', /implementation complete/);
   assert.match(await readFile(path.join(wikiRoot, 'PROJECT.md'), 'utf8'), /reviewer: done/);
 

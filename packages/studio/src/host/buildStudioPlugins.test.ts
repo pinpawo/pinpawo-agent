@@ -7,7 +7,11 @@ import path from 'node:path';
 import { z } from 'zod';
 import { tool } from '@langchain/core/tools';
 
-import { buildStudio, resolveStudioHostConfig } from './buildStudio';
+import {
+  buildStudio,
+  resolveStudioHostConfig,
+  selectStudioPetCapabilities,
+} from './buildStudio';
 import { createTestModelProfileRegistry } from '../../../../services/local-agent/src/testing/modelProfiles';
 import {
   GENERAL_CAPABILITY_NAME,
@@ -52,6 +56,31 @@ function generalCapability(): AgentCapability {
     instructions: defineInstructionDocument({ content: '# General' }),
   };
 }
+
+test('an explicit Pet default excludes the general fallback Capability', () => {
+  const specialist: AgentCapability = {
+    name: 'studio_planning',
+    description: 'Plan Studio work.',
+    uses: [],
+    instructions: defineInstructionDocument({ content: '# Studio planning' }),
+  };
+
+  assert.deepEqual(
+    selectStudioPetCapabilities({
+      defaultCapabilityName: 'studio_planning',
+      generalCapability: generalCapability(),
+      petCapabilities: [specialist],
+    }).map(({ name }) => name),
+    ['studio_planning'],
+  );
+  assert.deepEqual(
+    selectStudioPetCapabilities({
+      generalCapability: generalCapability(),
+      petCapabilities: [specialist],
+    }).map(({ name }) => name),
+    ['general', 'studio_planning'],
+  );
+});
 
 const artifactStore: CapabilityArtifactStore = {
   writeArtifact: async () => { throw new Error('not used'); },

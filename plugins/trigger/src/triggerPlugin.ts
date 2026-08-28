@@ -1,14 +1,33 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioEvent, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { TriggerService } from './triggerService';
 
+export type HttpTriggerSource = {
+  kind: 'http';
+  secret: string;
+};
+
+export type StudioEventTriggerSource = {
+  kind: 'studio_event';
+  eventSource: string;
+  type?: string;
+  typePrefix?: string;
+};
+
+export type GitHubTriggerSource = {
+  kind: 'github';
+  secret: string;
+  event: string;
+  action?: string;
+};
+
 export type TriggerDefinition = {
   triggerId: string;
+  source: HttpTriggerSource | StudioEventTriggerSource | GitHubTriggerSource;
   petId: string;
-  requestPrefix: string;
-  secret: string;
+  request: string;
 };
 
 export type CreateTriggerPluginOptions = {
@@ -30,9 +49,19 @@ function secureEqual(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function verifyGitHubSignature(body: string, signature: string | string[] | undefined, secret: string): boolean {
+  if (typeof signature !== 'string' || !signature.startsWith('sha256=')) return false;
+  const expected = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+  return secureEqual(signature, expected);
+}
+
 function readTriggerSecret(header: string | string[] | undefined): string | null {
   if (typeof header !== 'string') return null;
   return /^Trigger\s+(.+)$/i.exec(header)?.[1]?.trim() || null;
+}
+
+function readHeaderValue(header: string | string[] | undefined): string | null {
+  return typeof header === 'string' && header.trim() ? header.trim() : null;
 }
 
 function readCursor(url: URL, name: string, fallback: number): number {
@@ -42,17 +71,128 @@ function readCursor(url: URL, name: string, fallback: number): number {
   return Number(raw);
 }
 
+function stringifyTriggerContext(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? 'null';
+  } catch {
+    return '{"unserializable":true}';
+  }
+}
+
+function buildTriggerRequest(
+  definition: TriggerDefinition,
+  context:
+    | { kind: 'http'; payload: unknown }
+    | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
+    | { kind: 'studio_event'; event: StudioEvent },
+): string {
+  const detail = context.kind === 'http'
+    ? { source: 'http', payload: context.payload }
+    : context.kind === 'github'
+      ? {
+        source: 'github',
+        event: context.event,
+        ...(context.action === undefined ? {} : { action: context.action }),
+        deliveryId: context.deliveryId,
+        payload: context.payload,
+      }
+    : {
+      source: context.event.source,
+      type: context.event.type,
+      metadata: context.event.metadata,
+      payload: context.event.payload,
+      occurredAt: context.event.occurredAt,
+    };
+  return `${definition.request}\n\nTrigger context:\n${stringifyTriggerContext(detail)}`;
+}
+
+function matchesStudioEvent(source: StudioEventTriggerSource, event: StudioEvent): boolean {
+  if (source.eventSource !== event.source) return false;
+  if (source.type !== undefined && source.type !== event.type) return false;
+  return source.typePrefix === undefined || event.type.startsWith(source.typePrefix);
+}
+
+function publicDefinition(definition: TriggerDefinition): Record<string, unknown> {
+  return {
+    triggerId: definition.triggerId,
+    source: definition.source.kind === 'studio_event'
+      ? definition.source
+      : definition.source.kind === 'github'
+        ? {
+          kind: 'github',
+          event: definition.source.event,
+          ...(definition.source.action === undefined ? {} : { action: definition.source.action }),
+        }
+        : { kind: 'http' },
+    petId: definition.petId,
+    request: definition.request,
+  };
+}
+
 function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, TriggerDefinition> {
   const definitions = new Map<string, TriggerDefinition>();
   for (const definition of input) {
     const triggerId = definition.triggerId.trim();
     const petId = definition.petId.trim();
-    const requestPrefix = definition.requestPrefix.trim();
-    if (!triggerId || !petId || !requestPrefix || definition.secret.length < 16) {
-      throw new Error('Trigger definitions require triggerId, petId, requestPrefix, and a 16+ character secret.');
+    const request = definition.request.trim();
+    if (!triggerId || !petId || !request) {
+      throw new Error('Trigger definitions require triggerId, petId, and request.');
     }
     if (definitions.has(triggerId)) throw new Error(`Duplicate Trigger triggerId "${triggerId}".`);
-    definitions.set(triggerId, { ...definition, triggerId, petId, requestPrefix });
+    if (definition.source.kind === 'http') {
+      if (definition.source.secret.length < 16) {
+        throw new Error(`HTTP Trigger "${triggerId}" requires a 16+ character secret.`);
+      }
+      definitions.set(triggerId, { ...definition, triggerId, petId, request });
+      continue;
+    }
+    if (definition.source.kind === 'github') {
+      const event = definition.source.event.trim();
+      if (!event || definition.source.secret.length < 16) {
+        throw new Error(`GitHub Trigger "${triggerId}" requires an event and a 16+ character secret.`);
+      }
+      if (definition.source.action !== undefined && !definition.source.action.trim()) {
+        throw new Error(`GitHub Trigger "${triggerId}" action must not be empty.`);
+      }
+      definitions.set(triggerId, {
+        ...definition,
+        triggerId,
+        petId,
+        request,
+        source: {
+          ...definition.source,
+          event,
+          ...(definition.source.action === undefined ? {} : { action: definition.source.action.trim() }),
+        },
+      });
+      continue;
+    }
+    const eventSource = definition.source.eventSource.trim();
+    if (!eventSource || (definition.source.type !== undefined && definition.source.typePrefix !== undefined)) {
+      throw new Error(
+        `Studio event Trigger "${triggerId}" requires eventSource and at most one of type or typePrefix.`,
+      );
+    }
+    if (definition.source.type !== undefined && !definition.source.type.trim()) {
+      throw new Error(`Studio event Trigger "${triggerId}" type must not be empty.`);
+    }
+    if (definition.source.typePrefix !== undefined && !definition.source.typePrefix.trim()) {
+      throw new Error(`Studio event Trigger "${triggerId}" typePrefix must not be empty.`);
+    }
+    definitions.set(triggerId, {
+      ...definition,
+      triggerId,
+      petId,
+      request,
+      source: {
+        ...definition.source,
+        eventSource,
+        ...(definition.source.type === undefined ? {} : { type: definition.source.type.trim() }),
+        ...(definition.source.typePrefix === undefined
+          ? {}
+          : { typePrefix: definition.source.typePrefix.trim() }),
+      },
+    });
   }
   return definitions;
 }
@@ -62,6 +202,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
   const ownsService = !options.service;
   const service = options.service ?? new TriggerService(options.databasePath);
   let context: StudioPluginContext | undefined;
+  let unsubscribeEvents: (() => void) | undefined;
   let unsubscribeMutations: (() => void) | undefined;
   let unregisterRoutes: (() => void) | undefined;
 
@@ -79,6 +220,17 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       }
       context = pluginContext;
       try {
+        unsubscribeEvents = pluginContext.subscribe(async (event) => {
+          if (!context) return;
+          for (const definition of definitions.values()) {
+            if (definition.source.kind !== 'studio_event'
+              || !matchesStudioEvent(definition.source, event)) continue;
+            await pluginContext.dispatch({
+              petId: definition.petId,
+              request: buildTriggerRequest(definition, { kind: 'studio_event', event }),
+            });
+          }
+        });
         unsubscribeMutations = service.subscribe(({ delivery, event }) => {
           pluginContext.notify({
             type: `trigger.${event.eventType}`,
@@ -106,7 +258,7 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                   handle: async () => ({
                     kind: 'json',
                     body: {
-                      triggers: [...definitions.values()].map(({ secret: _secret, ...definition }) => definition),
+                      triggers: [...definitions.values()].map(publicDefinition),
                       ...(await service.snapshot()),
                     },
                   }),
@@ -140,7 +292,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       }
                       const definition = definitions.get(value.triggerId);
                       const secret = readTriggerSecret(headers.authorization);
-                      if (!definition || !secret || !secureEqual(secret, definition.secret)) {
+                      if (!definition || definition.source.kind !== 'http'
+                        || !secret || !secureEqual(secret, definition.source.secret)) {
                         return { kind: 'json', status: 401, body: { error: 'Unauthorized.' } };
                       }
                       const claimed = await service.claim(value.triggerId, value.idempotencyKey);
@@ -148,11 +301,10 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                         return { kind: 'json', body: { duplicate: true, delivery: claimed.delivery } };
                       }
                       try {
-                        const payload = JSON.stringify(value.payload);
-                        if (payload === undefined) throw new Error('Trigger payload must be JSON serializable.');
+                        JSON.stringify(value.payload);
                         await pluginContext.dispatch({
                           petId: definition.petId,
-                          request: `${definition.requestPrefix}\n\nTrigger payload:\n${payload}`,
+                          request: buildTriggerRequest(definition, { kind: 'http', payload: value.payload }),
                           idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
                         });
                         const delivery = await service.accept(claimed.delivery.deliveryId);
@@ -169,6 +321,75 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                     }
                   },
                 }));
+                unregister.push(routes.register({
+                  method: 'POST', path: `${base}/github`, authorization: 'route',
+                  handle: async ({ headers, readText }) => {
+                    const body = await readText();
+                    const event = readHeaderValue(headers['x-github-event']);
+                    const deliveryId = readHeaderValue(headers['x-github-delivery']);
+                    if (!event || !deliveryId) {
+                      return { kind: 'json', status: 400, body: { error: 'GitHub webhook requires X-GitHub-Event and X-GitHub-Delivery.' } };
+                    }
+                    const githubDefinitions = [...definitions.values()].filter((definition): definition is (
+                      TriggerDefinition & { source: GitHubTriggerSource }
+                    ) => definition.source.kind === 'github');
+                    const signedDefinitions = githubDefinitions.filter((definition) => (
+                      verifyGitHubSignature(body, headers['x-hub-signature-256'], definition.source.secret)
+                    ));
+                    if (!signedDefinitions.length) {
+                      return { kind: 'json', status: 401, body: { error: 'Invalid GitHub webhook signature.' } };
+                    }
+                    let payload: unknown;
+                    try {
+                      payload = JSON.parse(body) as unknown;
+                    } catch {
+                      return { kind: 'json', status: 400, body: { error: 'GitHub webhook payload must be valid JSON.' } };
+                    }
+                    const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+                      ? payload as Record<string, unknown>
+                      : undefined;
+                    const action = typeof payloadRecord?.action === 'string'
+                      ? payloadRecord.action
+                      : undefined;
+                    const matching = signedDefinitions.filter((definition) => (
+                      definition.source.event === event
+                      && (definition.source.action === undefined || definition.source.action === action)
+                    ));
+                    if (!matching.length) {
+                      return { kind: 'json', status: 202, body: { ignored: true } };
+                    }
+                    const deliveries = [];
+                    let failed = false;
+                    for (const definition of matching) {
+                      const claimed = await service.claim(definition.triggerId, deliveryId);
+                      if (claimed.duplicate) {
+                        deliveries.push(claimed.delivery);
+                        continue;
+                      }
+                      try {
+                        await pluginContext.dispatch({
+                          petId: definition.petId,
+                          request: buildTriggerRequest(definition, {
+                            kind: 'github', event, action, deliveryId, payload,
+                          }),
+                          idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
+                        });
+                        deliveries.push(await service.accept(claimed.delivery.deliveryId));
+                      } catch (error) {
+                        failed = true;
+                        deliveries.push(await service.fail(
+                          claimed.delivery.deliveryId,
+                          asError(error).message,
+                        ));
+                      }
+                    }
+                    return {
+                      kind: 'json',
+                      status: failed ? 422 : 202,
+                      body: { ignored: false, deliveries },
+                    };
+                  },
+                }));
               } catch (error) {
                 for (const remove of unregister.reverse()) remove();
                 throw error;
@@ -179,6 +400,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
         }
       } catch (error) {
         context = undefined;
+        unsubscribeEvents?.();
+        unsubscribeEvents = undefined;
         unsubscribeMutations?.();
         unsubscribeMutations = undefined;
         unregisterRoutes?.();
@@ -189,6 +412,8 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
     },
     stop: async () => {
       context = undefined;
+      unsubscribeEvents?.();
+      unsubscribeEvents = undefined;
       unsubscribeMutations?.();
       unsubscribeMutations = undefined;
       unregisterRoutes?.();
@@ -196,6 +421,65 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       if (ownsService) await service.close();
     },
   };
+}
+
+function parseSource(
+  input: unknown,
+  index: number,
+): HttpTriggerSource | StudioEventTriggerSource | GitHubTriggerSource {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error(`Trigger Plugin triggers[${index.toString()}].source must be an object.`);
+  }
+  const source = input as Record<string, unknown>;
+  if (source.kind === 'http') {
+    const unknown = Object.keys(source).find((key) => !new Set(['kind', 'secretEnv']).has(key));
+    if (unknown || typeof source.secretEnv !== 'string') {
+      throw new Error(`HTTP Trigger source at triggers[${index.toString()}] requires only kind and secretEnv.`);
+    }
+    const secret = process.env[source.secretEnv];
+    if (!secret) throw new Error(`Trigger Plugin environment variable "${source.secretEnv}" is not set.`);
+    return { kind: 'http', secret };
+  }
+  if (source.kind === 'studio_event') {
+    const unknown = Object.keys(source).find((key) => (
+      !new Set(['kind', 'eventSource', 'type', 'typePrefix']).has(key)
+    ));
+    if (unknown || typeof source.eventSource !== 'string'
+      || (source.type !== undefined && typeof source.type !== 'string')
+      || (source.typePrefix !== undefined && typeof source.typePrefix !== 'string')) {
+      throw new Error(
+        `Studio event Trigger source at triggers[${index.toString()}] requires kind, eventSource, and optional type or typePrefix.`,
+      );
+    }
+    return {
+      kind: 'studio_event',
+      eventSource: source.eventSource,
+      ...(typeof source.type === 'string' ? { type: source.type } : {}),
+      ...(typeof source.typePrefix === 'string' ? { typePrefix: source.typePrefix } : {}),
+    };
+  }
+  if (source.kind === 'github') {
+    const unknown = Object.keys(source).find((key) => (
+      !new Set(['kind', 'secretEnv', 'event', 'action']).has(key)
+    ));
+    if (unknown || typeof source.secretEnv !== 'string' || typeof source.event !== 'string'
+      || (source.action !== undefined && typeof source.action !== 'string')) {
+      throw new Error(
+        `GitHub Trigger source at triggers[${index.toString()}] requires kind, secretEnv, event, and optional action.`,
+      );
+    }
+    const secret = process.env[source.secretEnv];
+    if (!secret) throw new Error(`Trigger Plugin environment variable "${source.secretEnv}" is not set.`);
+    return {
+      kind: 'github',
+      secret,
+      event: source.event,
+      ...(typeof source.action === 'string' ? { action: source.action } : {}),
+    };
+  }
+  throw new Error(
+    `Trigger Plugin triggers[${index.toString()}].source kind must be "http", "github", or "studio_event".`,
+  );
 }
 
 export function createStudioPlugin(
@@ -215,7 +499,7 @@ export function createStudioPlugin(
       throw new Error(`Trigger Plugin triggers[${index.toString()}] must be an object.`);
     }
     const definition = input as Record<string, unknown>;
-    const definitionAllowed = new Set(['triggerId', 'petId', 'requestPrefix', 'secretEnv']);
+    const definitionAllowed = new Set(['triggerId', 'petId', 'request', 'source']);
     const definitionUnknown = Object.keys(definition).find((key) => !definitionAllowed.has(key));
     if (definitionUnknown) {
       throw new Error(
@@ -224,21 +508,16 @@ export function createStudioPlugin(
     }
     if (typeof definition.triggerId !== 'string'
       || typeof definition.petId !== 'string'
-      || typeof definition.requestPrefix !== 'string'
-      || typeof definition.secretEnv !== 'string') {
+      || typeof definition.request !== 'string') {
       throw new Error(
-        `Trigger Plugin triggers[${index.toString()}] requires triggerId, petId, requestPrefix, and secretEnv.`,
+        `Trigger Plugin triggers[${index.toString()}] requires triggerId, petId, request, and source.`,
       );
-    }
-    const secret = process.env[definition.secretEnv];
-    if (!secret) {
-      throw new Error(`Trigger Plugin environment variable "${definition.secretEnv}" is not set.`);
     }
     return {
       triggerId: definition.triggerId,
       petId: definition.petId,
-      requestPrefix: definition.requestPrefix,
-      secret,
+      request: definition.request,
+      source: parseSource(definition.source, index),
     };
   });
   const databasePath = typeof options.databasePath === 'string'

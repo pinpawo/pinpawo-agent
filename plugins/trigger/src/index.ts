@@ -1,6 +1,9 @@
 export { createStudioPlugin, createTriggerPlugin } from './triggerPlugin';
 export type {
   CreateTriggerPluginOptions,
+  GitHubTriggerSource,
+  HttpTriggerSource,
+  StudioEventTriggerSource,
   TriggerDefinition,
   TriggerPlugin,
 } from './triggerPlugin';

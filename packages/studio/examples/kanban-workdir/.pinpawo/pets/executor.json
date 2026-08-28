@@ -1,0 +1,7 @@
+{
+  "petId": "executor",
+  "name": "Executor",
+  "role": "完成明确的工作区任务并提供验证证据",
+  "serviceSummary": "实现、调查、文件修改与受控验证",
+  "defaultCapabilityName": "studio_execution"
+}

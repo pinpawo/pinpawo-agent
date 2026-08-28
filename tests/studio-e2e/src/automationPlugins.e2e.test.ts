@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
 
 import { createSchedulerPlugin } from '@pinpawo-plugin/scheduler';
@@ -32,8 +33,8 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
     triggers: [{
       triggerId: 'build',
       petId: 'worker',
-      requestPrefix: 'Handle build notification',
-      secret: TRIGGER_SECRET,
+      request: 'Handle build notification',
+      source: { kind: 'http', secret: TRIGGER_SECRET },
     }],
   });
   const http = createStudioHttpPlugin({ port: 0, authToken: STUDIO_TOKEN });
@@ -93,4 +94,65 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
   };
   assert.equal('secret' in (value.triggers[0] ?? {}), false);
   assert.deepEqual(value.deliveries.map(({ status }) => status), ['accepted']);
+});
+
+test('GitHub webhook Trigger verifies signatures, filters event action, and deduplicates delivery', async (t) => {
+  const received: string[] = [];
+  const worker: StudioPetBinding = {
+    registration: { petId: 'reviewer', name: 'Reviewer', role: null, serviceSummary: null },
+    dispatch: {
+      getState: () => 'open',
+      onStateChange: () => () => undefined,
+      dispatch: async ({ request }) => { received.push(request); },
+    },
+  };
+  const githubSecret = 'github-webhook-secret-at-least-16-characters';
+  const trigger = createTriggerPlugin({
+    triggers: [{
+      triggerId: 'github-pr-opened',
+      petId: 'reviewer',
+      request: 'Review the opened pull request.',
+      source: { kind: 'github', secret: githubSecret, event: 'pull_request', action: 'opened' },
+    }],
+  });
+  const http = createStudioHttpPlugin({ port: 0, authToken: STUDIO_TOKEN });
+  const studio = await createStudio({
+    studioId: 'github-trigger-e2e',
+    entryPetId: 'reviewer',
+    pets: [worker],
+    plugins: [trigger, http],
+  });
+  t.after(() => studio.shutdown());
+  const address = http.address();
+  assert.ok(address);
+  const base = `http://${address.host}:${address.port.toString()}`;
+  const body = JSON.stringify({ action: 'opened', pull_request: { number: 42 } });
+  const signature = `sha256=${createHmac('sha256', githubSecret).update(body).digest('hex')}`;
+  const request = () => fetch(`${base}/triggers/github`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-GitHub-Event': 'pull_request',
+      'X-GitHub-Delivery': 'delivery-42',
+      'X-Hub-Signature-256': signature,
+    },
+    body,
+  });
+
+  assert.equal((await request()).status, 202);
+  assert.equal((await request()).status, 202);
+  assert.equal(received.length, 1);
+  assert.match(received[0]!, /"number":42/);
+
+  const rejected = await fetch(`${base}/triggers/github`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-GitHub-Event': 'pull_request',
+      'X-GitHub-Delivery': 'delivery-invalid',
+      'X-Hub-Signature-256': 'sha256=invalid',
+    },
+    body,
+  });
+  assert.equal(rejected.status, 401);
 });

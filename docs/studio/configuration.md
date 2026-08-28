@@ -65,8 +65,9 @@ is its lifecycle and event-source identity inside Studio.
 ```
 
 `petId` and `name` are required. `petId` must be one safe path segment because
-it also identifies the Pet's Capability directory. `general` is added by the
-local host as its required baseline Capability.
+it also identifies the Pet's Capability directory. `general` is the default
+Capability only when `defaultCapabilityName` is omitted; an explicit default
+selects from that Pet's Capability directory instead.
 `modelProfileId` selects a host model profile when present. The old inline
 `model` field and the old `capabilities` name list are rejected explicitly.
 `defaultCapabilityName` asks the Agent entry Planner to preload one Capability
@@ -123,6 +124,18 @@ construct `createKanbanPlugin({ databasePath: ... })` with an absolute path such
 that path nor reads task state. Direct `createKanbanPlugin()` remains explicitly
 in-memory. A larger Kanban application can instead own a
 `KanbanTaskService` itself and inject it into the Studio adapter.
+
+`@pinpawo-plugin/trigger` binds either an HTTP source or a Studio event
+condition to one Pet dispatch. For example, a `studio_event` trigger matching
+Kanban `task.*` can dispatch a Wiki Pet; the Pet maintains ordinary workdir
+Markdown through its own Capability rather than through a Wiki-specific
+Toolkit or Plugin. Its current contract is documented in the
+[Studio automation Plugins draft](../design/studio/automation-plugins.md).
+
+A GitHub webhook binding uses `source.kind: "github"`, a `secretEnv`, and the
+GitHub webhook `event` (plus optional payload `action`). GitHub sends it to
+`POST /triggers/github`; the Trigger Plugin verifies `X-Hub-Signature-256` and
+deduplicates `X-GitHub-Delivery` before dispatching the configured Pet.
 
 Existing file-backed `kanban.json` state is not loaded implicitly. Before changing
 an existing resolver to `databasePath`, run the explicit

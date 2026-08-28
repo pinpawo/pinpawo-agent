@@ -1,6 +1,7 @@
 {
   "petId": "planner",
   "name": "Planner",
-  "role": "拆解、认领并推进共享看板任务",
+  "role": "将外部目标拆解为可交付的 task 与依赖",
+  "serviceSummary": "任务拆解、依赖关系与执行者分派",
   "defaultCapabilityName": "studio_planning"
 }

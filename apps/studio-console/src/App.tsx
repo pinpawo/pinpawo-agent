@@ -11,7 +11,19 @@ type Schedule = {
   scheduleId: string; petId: string; request: string; runAt: string;
   status: 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled'; note?: string;
 };
-type TriggerDefinition = { triggerId: string; petId: string; requestPrefix: string };
+type TriggerDefinition = {
+  triggerId: string;
+  petId: string;
+  request: string;
+  source: {
+    kind: string;
+    eventSource?: string;
+    type?: string;
+    typePrefix?: string;
+    event?: string;
+    action?: string;
+  };
+};
 type Delivery = {
   deliveryId: string; triggerId: string; idempotencyKey: string;
   status: 'dispatching' | 'accepted' | 'failed'; note?: string; occurredAt: string;
@@ -31,6 +43,16 @@ function eventMessage(event: LiveEvent): string {
   return typeof payload.message === 'string'
     ? payload.message
     : typeof payload.note === 'string' ? payload.note : event.type;
+}
+
+function triggerSourceLabel(source: TriggerDefinition['source']): string {
+  if (source.kind === 'studio_event') {
+    return `${source.eventSource}:${source.type ?? source.typePrefix ?? '*'}`;
+  }
+  if (source.kind === 'github') {
+    return `github:${source.event ?? '*'}${source.action ? `/${source.action}` : ''}`;
+  }
+  return source.kind;
 }
 
 export function App() {
@@ -222,7 +244,7 @@ export function App() {
         </> : unavailable(schedules, 'Scheduler'))}
         {page === 'trigger' && (triggers.value ? <>
           <div className="section-title"><span>TRIGGERS</span><b>{triggers.value.triggers.length}</b></div>
-          <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{trigger.requestPrefix}</strong><span>→ {trigger.petId}</span></div>)}</div>
+          <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{trigger.request}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.petId}</span></div>)}</div>
           <div className="hint">POST /triggers/invoke · Authorization: Trigger &lt;secret&gt; · body: triggerId, idempotencyKey, payload</div>
           <div className="section-title"><span>DELIVERIES</span><b>{triggers.value.deliveries.length}</b></div>
           <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}</span></div>)}</div>

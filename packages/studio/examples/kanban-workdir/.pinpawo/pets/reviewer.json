@@ -1,0 +1,7 @@
+{
+  "petId": "reviewer",
+  "name": "Reviewer",
+  "role": "独立审查 task 产出并记录可追溯结论",
+  "serviceSummary": "代码与结果审查、风险识别、验证证据检查",
+  "defaultCapabilityName": "studio_review"
+}

@@ -16,7 +16,8 @@ Each Pet selects its Agent Capabilities through its conventional directory:
 npm install --global \
   @pinpawo/studio \
   @pinpawo-plugin/studio-http \
-  @pinpawo-plugin/kanban
+  @pinpawo-plugin/kanban \
+  @pinpawo-plugin/trigger
 
 pinpawo-studio --workdir /path/to/project
 pinpawo-studio --workdir /path/to/project --pet-port 3212
@@ -41,5 +42,5 @@ Studio dispatch/event HTTP is provided by the configured HTTP Plugin. The
 local-agent Agent Session listener is only for direct conversation with a
 resident Pet. The workdir must contain
 `.pinpawo/studio.json` and the referenced `.pinpawo/pets/*.json` files.
-Per-Pet Capability directories are optional; the Host always supplies the
-`general` baseline Capability.
+Per-Pet Capability directories are optional. The Host supplies the `general`
+fallback only when a Pet does not configure `defaultCapabilityName`.

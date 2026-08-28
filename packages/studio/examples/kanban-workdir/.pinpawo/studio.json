@@ -1,13 +1,17 @@
 {
   "studioId": "kanban-example",
   "entryPetId": "planner",
-  "pets": ["planner"],
+  "pets": ["planner", "executor", "reviewer", "wiki"],
   "plugins": [
     {
       "id": "@pinpawo-plugin/studio-http",
       "options": {
         "port": 3211,
-        "allowedOrigins": ["http://127.0.0.1:5173", "http://localhost:5173"]
+        "allowedOrigins": [
+          "http://127.0.0.1:5173",
+          "http://localhost:5173",
+          "http://127.0.0.1:5176"
+        ]
       }
     },
     { "id": "@pinpawo-plugin/kanban" },
@@ -19,8 +23,21 @@
           {
             "triggerId": "hello",
             "petId": "planner",
-            "requestPrefix": "Plan the following external request with Kanban",
-            "secretEnv": "PINPAWO_HELLO_TRIGGER_SECRET"
+            "request": "Plan the following external request with Kanban.",
+            "source": {
+              "kind": "http",
+              "secretEnv": "PINPAWO_HELLO_TRIGGER_SECRET"
+            }
+          },
+          {
+            "triggerId": "wiki-on-task-change",
+            "petId": "wiki",
+            "request": "Update the project Wiki Markdown in the current workdir. Inspect the current code, review evidence, and Kanban task state before writing. Do not create, complete, or block Kanban tasks.",
+            "source": {
+              "kind": "studio_event",
+              "eventSource": "kanban",
+              "typePrefix": "task."
+            }
           }
         ]
       }

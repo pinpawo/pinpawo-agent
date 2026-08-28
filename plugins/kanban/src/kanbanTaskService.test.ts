@@ -65,6 +65,29 @@ test('SQLite task service rejects missing dependencies before creating a task', 
   assert.deepEqual((await service.readSnapshot()).tasks, []);
 });
 
+test('SQLite task service starts one selected ready or blocked task explicitly', async (t) => {
+  const service = await createService(':memory:');
+  t.after(() => service.close());
+
+  const prerequisite = await service.createTask({ assigneeId: 'writer', brief: 'draft' });
+  const dependent = await service.createTask({
+    assigneeId: 'reviewer',
+    brief: 'review',
+    dependsOn: [prerequisite.task.taskId],
+  });
+  await assert.rejects(
+    () => service.claimReadyTask(dependent.task.taskId),
+    /waiting for dependency/,
+  );
+  await service.claimReadyTask(prerequisite.task.taskId);
+  await service.completeTask(prerequisite.task.taskId, 'draft ready');
+  assert.equal((await service.claimReadyTask(dependent.task.taskId)).task.status, 'doing');
+  await service.blockTask(dependent.task.taskId, 'review service unavailable');
+  const restarted = await service.claimReadyTask(dependent.task.taskId);
+  assert.equal(restarted.task.status, 'doing');
+  assert.equal(restarted.task.note, undefined);
+});
+
 test('SQLite task service commits one claim when callers race for ready work', async (t) => {
   const service = await createService(':memory:');
   t.after(() => service.close());

@@ -11,6 +11,7 @@ export {
 export type {
   CreateKanbanPluginOptions,
   InstalledKanbanPluginEnvironment,
+  KanbanDispatchMode,
   KanbanPlugin,
 } from './kanbanPlugin';
 export {

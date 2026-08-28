@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import {
   buildAgentEventEnvelope,
   type AgentClientMessage,
@@ -574,81 +575,89 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     getState: () => coordinator.getState(),
     onStateChange: (listener) => coordinator.onStateChange(listener),
     dispatch: async ({ request }) => {
-      coordinator.submitDispatch(async () => {
-        const context = await loadContext(deps.actorId);
-        const setup = sessions.buildChatSetup(deps, context);
-        const requestId = `host-${randomUUID()}`;
-        const run = createInflightOperationRun(requestId);
-        configureInflightOperationRegistry(
-          run,
-          createOperationRegistryForAgentSetup(setup),
-        );
-        setup.input.signal = run.controller.signal;
-        activeHostRuns.set(requestId, run.controller);
-        const activeRun = beginActiveRun(requestId);
-        publishRuntimeEvent({
-          type: 'run.started',
-          requestId,
-          initiator: 'host',
-          input: { role: 'user', text: request },
-        });
-        try {
-          const result = await runAgentTurn({
-            request: { kind: 'user_message', requestId, message: request },
-            setup,
-            graphService,
-            isCurrent: () => !run.controller.signal.aborted,
-            finishInterrupted: () => undefined,
-            emitEvent: publishRuntimeEvent,
-            emitToolEvent: (payload) => {
-              emitLocalServerToolOperationEvent({
-                run,
-                payload,
-                emit: publishRuntimeEvent,
-              });
-            },
-            acceptDelegationOperations: (operations) => {
-              overlayInflightDelegationOperations(run, operations);
-            },
-          });
-          if (result.status === 'waiting_human') {
-            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-            return;
-          }
-          if (result.status === 'interrupted') {
-            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-            publishRuntimeEvent({
-              type: 'run.interrupted',
-              requestId,
-              message: 'Run interrupted.',
-            });
-            return;
-          }
-          finishInflightOperations(run, 'completed', publishRuntimeEvent);
-        } catch (error) {
-          if (run.controller.signal.aborted || isAbortError(error)) {
-            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-            publishRuntimeEvent({
-              type: 'run.interrupted',
-              requestId,
-              message: 'Run interrupted.',
-            });
-            return;
-          }
-          finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
+      coordinator.submitDispatch(() => AsyncLocalStorageProviderSingleton.runWithConfig(
+        { callbacks: [] },
+        async () => {
+          // A Plugin can submit the next Pet while still inside the current Pet's
+          // LangChain tool/event callback. This admitted dispatch is a new
+          // one-way Agent root, not a child model run, so it must not inherit the
+          // caller's callbacks/run id.
+          const context = await loadContext(deps.actorId);
+          const setup = sessions.buildChatSetup(deps, context);
+          const requestId = `host-${randomUUID()}`;
+          const run = createInflightOperationRun(requestId);
+          configureInflightOperationRegistry(
+            run,
+            createOperationRegistryForAgentSetup(setup),
+          );
+          setup.input.signal = run.controller.signal;
+          activeHostRuns.set(requestId, run.controller);
+          const activeRun = beginActiveRun(requestId);
           publishRuntimeEvent({
-            type: 'error',
+            type: 'run.started',
             requestId,
-            message: error instanceof Error ? error.message : 'internal error',
+            initiator: 'host',
+            input: { role: 'user', text: request },
           });
-          throw error;
-        } finally {
-          if (activeHostRuns.get(requestId) === run.controller) {
-            activeHostRuns.delete(requestId);
+          try {
+            const result = await runAgentTurn({
+              request: { kind: 'user_message', requestId, message: request },
+              setup,
+              graphService,
+              isCurrent: () => !run.controller.signal.aborted,
+              finishInterrupted: () => undefined,
+              emitEvent: publishRuntimeEvent,
+              emitToolEvent: (payload) => {
+                emitLocalServerToolOperationEvent({
+                  run,
+                  payload,
+                  emit: publishRuntimeEvent,
+                });
+              },
+              acceptDelegationOperations: (operations) => {
+                overlayInflightDelegationOperations(run, operations);
+              },
+            });
+            if (result.status === 'waiting_human') {
+              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+              return;
+            }
+            if (result.status === 'interrupted') {
+              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+              publishRuntimeEvent({
+                type: 'run.interrupted',
+                requestId,
+                message: 'Run interrupted.',
+              });
+              return;
+            }
+            finishInflightOperations(run, 'completed', publishRuntimeEvent);
+          } catch (error) {
+            if (run.controller.signal.aborted || isAbortError(error)) {
+              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+              publishRuntimeEvent({
+                type: 'run.interrupted',
+                requestId,
+                message: 'Run interrupted.',
+              });
+              return;
+            }
+            finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
+            publishRuntimeEvent({
+              type: 'error',
+              requestId,
+              message: error instanceof Error ? error.message : 'internal error',
+            });
+            throw error;
+          } finally {
+            if (activeHostRuns.get(requestId) === run.controller) {
+              activeHostRuns.delete(requestId);
+            }
+            finishActiveRun(activeRun);
           }
-          finishActiveRun(activeRun);
-        }
-      });
+        },
+        true,
+      ));
     },
   };
 

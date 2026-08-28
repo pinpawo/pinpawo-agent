@@ -31,13 +31,22 @@
             }
           },
           {
-            "triggerId": "wiki-on-task-change",
+            "triggerId": "wiki-on-task-done",
             "petId": "wiki",
-            "request": "Update the project Wiki Markdown in the current workdir. Inspect the current code, review evidence, and Kanban task state before writing. Do not create, complete, or block Kanban tasks.",
+            "request": {
+              "template": "Reconcile the project Wiki after {{event.type}} for task {{payload.taskId}}. Inspect the current code, review evidence, and Kanban task state before writing. Do not create, complete, or block Kanban tasks.",
+              "context": [
+                "payload.taskId",
+                "payload.petId",
+                "payload.note",
+                "payload.sequence",
+                "event.occurredAt"
+              ]
+            },
             "source": {
               "kind": "studio_event",
               "eventSource": "kanban",
-              "typePrefix": "task."
+              "type": "task.done"
             }
           }
         ]

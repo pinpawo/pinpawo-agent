@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -21,11 +21,7 @@ function toolFrom(toolkit: AgentToolkit, name: string) {
   return definition.tool;
 }
 
-test('git toolkit does not declare a Runtime solely to bind workdir', () => {
-  assert.equal(createGitToolkit().runtime, undefined);
-});
-
-test('separate Host managers own independent shell Runtime roots', async (t) => {
+test('separate Host managers bind local tools to independent execution workdirs', async (t) => {
   const workdirA = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-a-'));
   const workdirB = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-b-'));
   t.after(() => {
@@ -55,17 +51,21 @@ test('separate Host managers own independent shell Runtime roots', async (t) => 
     assert.equal(
       String(await toolFrom(firstA.toolkits[0]!, 'run_shell').invoke({
         command,
-        cwd: workdirA,
       })),
       realpathSync(workdirA),
     );
     assert.equal(
       String(await toolFrom(firstB.toolkits[0]!, 'run_shell').invoke({
         command,
-        cwd: workdirB,
       })),
       realpathSync(workdirB),
     );
+    await toolFrom(firstA.toolkits[0]!, 'write_file').invoke({
+      path: 'host-a.txt',
+      content: 'host A',
+    });
+    assert.equal(readFileSync(resolve(workdirA, 'host-a.txt'), 'utf-8'), 'host A');
+    assert.equal(existsSync(resolve(workdirB, 'host-a.txt')), false);
 
     await Promise.all([firstA.release(), firstB.release()]);
     await managerA.stop();
@@ -77,12 +77,32 @@ test('separate Host managers own independent shell Runtime roots', async (t) => 
     assert.equal(
       String(await toolFrom(laterB.toolkits[0]!, 'run_shell').invoke({
         command,
-        cwd: workdirB,
       })),
       realpathSync(workdirB),
     );
   } finally {
     await Promise.all([firstA?.release(), firstB?.release(), laterB?.release()]);
     await Promise.all([managerA.stop(), managerB.stop()]);
+  }
+});
+
+test('git toolkit defaults repository operations to the execution workdir', async (t) => {
+  const workdir = mkdtempSync(resolve(tmpdir(), 'pinpawo-git-workdir-'));
+  t.after(() => rmSync(workdir, { recursive: true, force: true }));
+  const manager = new ToolkitRuntimeManager();
+  const toolkit = createGitToolkit();
+  let execution: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
+
+  try {
+    execution = await manager.resolve({
+      toolkits: [toolkit],
+      execution: executionScope(workdir, 'git'),
+    });
+    const result = String(await toolFrom(execution.toolkits[0]!, 'git_status').invoke({}));
+    assert.match(result, /not a git repository/i);
+    assert.doesNotMatch(result, /pinpawo-agent/);
+  } finally {
+    await execution?.release();
+    await manager.stop();
   }
 });

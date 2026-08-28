@@ -105,6 +105,17 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       ...(metadata ? { metadata } : {}),
     });
     if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, receipt);
+    notify({
+      type: 'dispatch.accepted',
+      source: 'studio',
+      occurredAt: new Date().toISOString(),
+      payload: {
+        invocationId,
+        petId: request.petId,
+        request: request.request,
+        producer: source ?? 'studio',
+      },
+    });
     return receipt;
   }
 

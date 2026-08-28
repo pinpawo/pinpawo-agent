@@ -75,7 +75,7 @@ export async function initStudioKickstart(
   for (const relative of files) {
     const destination = path.join(workdir, relative);
     await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(path.join(templateRoot, relative), destination);
+    await copyFile(path.join(templateRoot, relative), destination, constants.COPYFILE_EXCL);
   }
   return { workdir, files };
 }

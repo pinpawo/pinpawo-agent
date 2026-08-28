@@ -38,15 +38,16 @@ export type {
 /**
  * 插件发给 studio 的通知。
  *
- * `type` 由插件自行命名(如 `task.done` / `schedule.fired`),studio
- * **不认识**任何具体类型,只负责广播。`payload` 同理 —— 不解释、不校验。
+ * `type` 通常由插件命名(如 `task.done` / `schedule.fired`),studio
+ * **不认识**插件类型,只负责广播。Studio core 仅发布自己的边界事实，例如
+ * `dispatch.accepted`；它同样不表示 Agent 执行完成。`payload` 不被总线解释或校验。
  *
  * 这样互不认识的插件之间才能交换信息:发布方不需要知道谁在听,订阅方
  * 按自己认识的 type 过滤即可。
  */
 export type StudioEvent = {
   type: string;
-  /** 发布该 event 的插件名,便于订阅方判断来源。 */
+  /** 发布该 event 的插件名，或 `studio` 这一 core producer。 */
   source: string;
   /** Producer-owned context; Studio does not assign meaning to its fields. */
   metadata?: JsonObject;

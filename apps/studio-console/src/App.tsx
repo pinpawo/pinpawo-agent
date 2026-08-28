@@ -1,11 +1,16 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 type Page = 'studio' | 'kanban' | 'scheduler' | 'trigger' | 'knowledge';
+type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
   taskId: string; assigneeId: string; brief: string;
   status: 'waiting' | 'doing' | 'todo' | 'blocked' | 'done';
-  deps: string[]; note?: string;
+  deps: string[]; note?: string; createdAt: string; updatedAt: string;
+};
+type KanbanSnapshot = {
+  tasks: Task[];
+  dispatchMode: 'automatic' | 'manual';
 };
 type Schedule = {
   scheduleId: string; petId: string; request: string; runAt: string;
@@ -14,7 +19,7 @@ type Schedule = {
 type TriggerDefinition = {
   triggerId: string;
   petId: string;
-  request: string;
+  request: string | { template: string; context?: string[] };
   source: {
     kind: string;
     eventSource?: string;
@@ -33,6 +38,13 @@ type HistoryEvent = {
   taskId?: string; scheduleId?: string; deliveryId?: string; triggerId?: string; status?: string;
 };
 type LiveEvent = { type: string; source: string; occurredAt: string; payload?: unknown };
+type DispatchRecord = {
+  invocationId: string;
+  petId: string;
+  request: string;
+  producer: string;
+  acceptedAt: string;
+};
 type ProjectDocumentSummary = {
   path: string; title: string; size: number; modifiedAt: string;
 };
@@ -59,12 +71,52 @@ function triggerSourceLabel(source: TriggerDefinition['source']): string {
   return source.kind;
 }
 
+function triggerRequestLabel(request: TriggerDefinition['request']): string {
+  return typeof request === 'string' ? request : request.template;
+}
+
+function connectionErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/\/pets failed \(401\)/.test(message)) {
+    return 'Authentication failed. Check the Studio bearer token.';
+  }
+  if (/Failed to fetch|NetworkError|fetch failed|Load failed/i.test(message)) {
+    return 'Studio Host is unreachable. Check the URL and confirm the Host is running.';
+  }
+  return message;
+}
+
+function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null {
+  if (event.source !== 'studio' || event.type !== 'dispatch.accepted'
+    || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
+    return null;
+  }
+  const payload = event.payload as Record<string, unknown>;
+  if (typeof payload.invocationId !== 'string' || typeof payload.petId !== 'string'
+    || typeof payload.request !== 'string' || typeof payload.producer !== 'string') {
+    return null;
+  }
+  return {
+    invocationId: payload.invocationId,
+    petId: payload.petId,
+    request: payload.request,
+    producer: payload.producer,
+    acceptedAt: event.occurredAt,
+  };
+}
+
+function appendDispatchRecord(records: DispatchRecord[], record: DispatchRecord): DispatchRecord[] {
+  if (records.some(({ invocationId }) => invocationId === record.invocationId)) return records;
+  return [...records.slice(-199), record];
+}
+
 export function App() {
   const [page, setPage] = useState<Page>('studio');
   const [baseUrl, setBaseUrl] = useState(() => sessionStorage.getItem('studio.url') ?? 'http://127.0.0.1:3211');
   const [token, setToken] = useState(() => sessionStorage.getItem('studio.token') ?? '');
   const [connectionKey, setConnectionKey] = useState(0);
-  const [connected, setConnected] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
+  const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState('Enter the Studio HTTP token, then connect.');
   const [pets, setPets] = useState<Pet[]>([]);
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
@@ -73,6 +125,9 @@ export function App() {
   const [knowledge, setKnowledge] = useState<Resource<ProjectDocumentSummary[]>>(empty);
   const [selectedDocument, setSelectedDocument] = useState<ProjectDocument | null>(null);
   const [events, setEvents] = useState<LiveEvent[]>([]);
+  const [dispatches, setDispatches] = useState<DispatchRecord[]>([]);
+  const [kanbanDispatchMode, setKanbanDispatchMode] = useState<'automatic' | 'manual'>('automatic');
+  const [startingTaskId, setStartingTaskId] = useState('');
   const [kanbanHistory, setKanbanHistory] = useState<HistoryEvent[]>([]);
   const [schedulerHistory, setSchedulerHistory] = useState<HistoryEvent[]>([]);
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
@@ -97,7 +152,7 @@ export function App() {
     const refresh = async () => {
       const petResponse = await read<{ pets: Pet[] }>('/pets');
       const [kanban, scheduler, trigger, projectFiles, kanbanEvents, schedulerEvents, triggerEvents] = await Promise.all([
-        read<{ tasks: Task[] }>('/kanban').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
+        read<KanbanSnapshot>('/kanban').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ schedules: Schedule[] }>('/scheduler').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>('/triggers').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ documents: ProjectDocumentSummary[] }>('/knowledge').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
@@ -110,6 +165,7 @@ export function App() {
       setDispatchPet((current) => current || nextPets[0]?.petId || '');
       setSchedulePet((current) => current || nextPets[0]?.petId || '');
       setTasks({ ...kanban, value: kanban.value?.tasks ?? null });
+      setKanbanDispatchMode(kanban.value?.dispatchMode ?? 'automatic');
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
       setTriggers(trigger);
       setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
@@ -121,7 +177,8 @@ export function App() {
       setKanbanHistory(kanbanEvents.value?.events ?? []);
       setSchedulerHistory(schedulerEvents.value?.events ?? []);
       setTriggerHistory(triggerEvents.value?.events ?? []);
-      setConnected(true);
+      setConnectionState('connected');
+      setConnectionError('');
       setNotice('Connected.');
     };
     const run = async () => {
@@ -145,6 +202,10 @@ export function App() {
               if (data) {
                 const event = JSON.parse(data) as LiveEvent;
                 setEvents((current) => [...current.slice(-499), event]);
+                const dispatchRecord = dispatchRecordFromEvent(event);
+                if (dispatchRecord) {
+                  setDispatches((current) => appendDispatchRecord(current, dispatchRecord));
+                }
                 if (event.source === 'kanban' || event.source === 'scheduler' || event.source === 'trigger') {
                   await refresh();
                 }
@@ -155,8 +216,10 @@ export function App() {
         }
       } catch (error) {
         if (!abort.signal.aborted) {
-          setConnected(false);
-          setNotice(error instanceof Error ? error.message : String(error));
+          const message = connectionErrorMessage(error);
+          setConnectionState('error');
+          setConnectionError(message);
+          setNotice(message);
         }
       }
     };
@@ -166,22 +229,41 @@ export function App() {
 
   const connect = (event: FormEvent) => {
     event.preventDefault();
+    if (!token.trim()) {
+      setConnectionState('error');
+      setConnectionError('Enter the Studio bearer token before connecting.');
+      setNotice('Enter the Studio bearer token before connecting.');
+      return;
+    }
+    try {
+      const parsed = new URL(normalizedUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error();
+    } catch {
+      setConnectionState('error');
+      setConnectionError('Enter a valid HTTP(S) Studio URL.');
+      setNotice('Enter a valid HTTP(S) Studio URL.');
+      return;
+    }
     sessionStorage.setItem('studio.url', normalizedUrl);
     sessionStorage.setItem('studio.token', token);
     setEvents([]);
+    setDispatches([]);
+    setConnectionState('connecting');
+    setConnectionError('');
     setConnectionKey((current) => current + 1);
     setNotice('Connecting…');
   };
 
-  const post = async (path: string, body: unknown) => {
+  const post = async <T = unknown,>(path: string, body: unknown): Promise<T> => {
     const response = await fetch(`${normalizedUrl}${path}`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const value = await response.json().catch(() => null) as { error?: string } | null;
+    const value = await response.json().catch(() => null) as ({ error?: string } & T) | null;
     if (!response.ok) throw new Error(value?.error ?? `${path} failed (${response.status.toString()}).`);
     setConnectionKey((current) => current + 1);
+    return value as T;
   };
 
   const openDocument = async (documentPath: string) => {
@@ -198,6 +280,34 @@ export function App() {
         throw new Error(value?.error ?? `Knowledge document failed (${response.status.toString()}).`);
       }
       setSelectedDocument(value.document);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const reloadKnowledge = async () => {
+    try {
+      const response = await fetch(`${normalizedUrl}/knowledge`, { headers });
+      if (response.status === 404) {
+        setKnowledge({ value: null, unavailable: true });
+        setSelectedDocument(null);
+        return;
+      }
+      const value = await response.json().catch(() => null) as {
+        documents?: ProjectDocumentSummary[];
+        error?: string;
+      } | null;
+      if (!response.ok || !value?.documents) {
+        throw new Error(value?.error ?? `Knowledge refresh failed (${response.status.toString()}).`);
+      }
+      setKnowledge({ value: value.documents, unavailable: false });
+      if (selectedDocument?.path
+        && value.documents.some(({ path }) => path === selectedDocument.path)) {
+        await openDocument(selectedDocument.path);
+      } else {
+        setSelectedDocument(null);
+      }
+      setNotice('Knowledge refreshed.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
@@ -223,6 +333,38 @@ export function App() {
     }
   };
 
+  const submitDispatch = (event: FormEvent) => {
+    event.preventDefault();
+    const request = dispatchGoal.trim();
+    if (!dispatchPet || !request) {
+      setNotice('Dispatch requires a Pet and a goal.');
+      return;
+    }
+    void post<{ petId: string; invocationId: string }>('/dispatch', {
+      petId: dispatchPet,
+      request,
+    }).then((receipt) => {
+      setDispatchGoal('');
+      setDispatches((current) => appendDispatchRecord(current, {
+        invocationId: receipt.invocationId,
+        petId: receipt.petId,
+        request,
+        producer: 'http',
+        acceptedAt: new Date().toISOString(),
+      }));
+      setNotice(`Dispatch accepted for ${receipt.petId}.`);
+    }).catch((error) => setNotice(connectionErrorMessage(error)));
+  };
+
+  const startTask = (taskId: string) => {
+    setStartingTaskId(taskId);
+    void post('/kanban/control', { action: 'start', taskId }).then(() => {
+      setNotice(`Kanban task ${taskId} was accepted for dispatch.`);
+    }).catch((error) => {
+      setNotice(connectionErrorMessage(error));
+    }).finally(() => setStartingTaskId(''));
+  };
+
   const unavailable = (resource: Resource<unknown>, name: string) => (
     <div className="empty-state">
       <strong>{name} Plugin unavailable</strong>
@@ -237,8 +379,12 @@ export function App() {
         <form className="connection" onSubmit={connect}>
           <input aria-label="Studio HTTP URL" onChange={(event) => setBaseUrl(event.target.value)} value={baseUrl} />
           <input aria-label="Studio bearer token" onChange={(event) => setToken(event.target.value)} placeholder="Bearer token" type="password" value={token} />
-          <button>CONNECT</button>
-          <i className={connected ? 'online' : ''} />
+          <button disabled={connectionState === 'connecting'}>
+            {connectionState === 'connecting' ? 'CONNECTING…' : 'CONNECT'}
+          </button>
+          <span className={`connection-state ${connectionState}`} role="status">
+            <i />{connectionState}
+          </span>
         </form>
       </header>
       <nav>
@@ -247,20 +393,33 @@ export function App() {
         ))}
       </nav>
       <section className="content">
+        {connectionError && <div className="connection-alert" role="alert">
+          <strong>CONNECTION FAILED</strong>
+          <span>{connectionError}</span>
+        </div>}
         {page === 'studio' && <>
           <div className="section-title"><span>RESIDENT PETS</span><b>{pets.length}</b></div>
           <div className="rows">{pets.map((pet) => <div className="row" key={pet.petId}><code>{pet.petId}</code><strong>{pet.name}</strong><span>{pet.role ?? pet.serviceSummary ?? 'resident'}</span></div>)}</div>
-          <form className="composer" onSubmit={(event) => { event.preventDefault(); void post('/dispatch', { petId: dispatchPet, request: dispatchGoal }).then(() => setDispatchGoal('')).catch((error) => setNotice(String(error))); }}>
+          <form className="composer" onSubmit={submitDispatch}>
             <select onChange={(event) => setDispatchPet(event.target.value)} value={dispatchPet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
             <input onChange={(event) => setDispatchGoal(event.target.value)} placeholder="Dispatch a goal…" value={dispatchGoal} />
-            <button>DISPATCH</button>
+            <button disabled={connectionState !== 'connected' || !dispatchPet || !dispatchGoal.trim()}>DISPATCH</button>
           </form>
+          <div className="section-title"><span>DISPATCH ACTIVITY</span><b>{dispatches.length}</b></div>
+          {dispatches.length > 0
+            ? <div className="rows dispatch-rows">{dispatches.slice().reverse().map((dispatch) => <div className="row" key={dispatch.invocationId}><time>{new Date(dispatch.acceptedAt).toLocaleTimeString()}</time><code>{dispatch.petId}</code><strong>{dispatch.request}</strong><span>{dispatch.producer} · {dispatch.invocationId.slice(0, 8)}</span></div>)}</div>
+            : <div className="compact-empty">No dispatch has been accepted in this Console session.</div>}
           <div className="section-title"><span>LIVE EVENTS</span><b>{events.length}</b></div>
           <div className="rows event-rows">{events.slice().reverse().map((event, index) => <div className="row" key={`${event.occurredAt}-${index.toString()}`}><time>{new Date(event.occurredAt).toLocaleTimeString()}</time><code>{event.source}</code><strong>{event.type}</strong><span>{eventMessage(event)}</span></div>)}</div>
         </>}
         {page === 'kanban' && (tasks.value ? <>
-          <div className="section-title"><span>TASK FLOW</span><b>{tasks.value.length}</b></div>
-          <div className="rows">{tasks.value.map((task) => <div className="row" key={task.taskId}><em className={task.status}>{task.status}</em><code>{task.taskId}</code><strong>{task.brief}</strong><span>{task.assigneeId}{task.note ? ` · ${task.note}` : ''}</span></div>)}</div>
+          <div className="section-title"><span>TASK FLOW</span><span><em className="mode-label">{kanbanDispatchMode} dispatch</em><b>{tasks.value.length}</b></span></div>
+          <KanbanFlow
+            dispatchMode={kanbanDispatchMode}
+            onStart={startTask}
+            startingTaskId={startingTaskId}
+            tasks={tasks.value}
+          />
           <History title="KANBAN HISTORY" events={kanbanHistory} />
         </> : unavailable(tasks, 'Kanban'))}
         {page === 'scheduler' && (schedules.value ? <>
@@ -276,14 +435,14 @@ export function App() {
         </> : unavailable(schedules, 'Scheduler'))}
         {page === 'trigger' && (triggers.value ? <>
           <div className="section-title"><span>TRIGGERS</span><b>{triggers.value.triggers.length}</b></div>
-          <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{trigger.request}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.petId}</span></div>)}</div>
+          <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{triggerRequestLabel(trigger.request)}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.petId}</span></div>)}</div>
           <div className="hint">POST /triggers/invoke · Authorization: Trigger &lt;secret&gt; · body: triggerId, idempotencyKey, payload</div>
           <div className="section-title"><span>DELIVERIES</span><b>{triggers.value.deliveries.length}</b></div>
           <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}</span></div>)}</div>
           <History title="TRIGGER HISTORY" events={triggerHistory} />
         </> : unavailable(triggers, 'Trigger'))}
         {page === 'knowledge' && (knowledge.value ? <>
-          <div className="section-title"><span>PROJECT MARKDOWN</span><b>{knowledge.value.length}</b></div>
+          <div className="section-title"><span>PROJECT MARKDOWN</span><span><button className="title-action" onClick={() => { void reloadKnowledge(); }} type="button">REFRESH</button><b>{knowledge.value.length}</b></span></div>
           <div className="knowledge-layout">
             <div className="rows knowledge-files">{knowledge.value.map((document) => (
               <button
@@ -307,6 +466,82 @@ export function App() {
       <footer>{notice}</footer>
     </main>
   );
+}
+
+function KanbanFlow({
+  dispatchMode,
+  onStart,
+  startingTaskId,
+  tasks,
+}: {
+  dispatchMode: 'automatic' | 'manual';
+  onStart: (taskId: string) => void;
+  startingTaskId: string;
+  tasks: Task[];
+}) {
+  const tasksById = new Map(tasks.map((task) => [task.taskId, task]));
+  const groups = [
+    { id: 'active', label: 'ACTIVE', tasks: tasks.filter(({ status }) => status === 'doing' || status === 'waiting') },
+    { id: 'queue', label: 'QUEUE', tasks: tasks.filter(({ status }) => status === 'todo') },
+    { id: 'blocked', label: 'BLOCKED', tasks: tasks.filter(({ status }) => status === 'blocked') },
+    { id: 'done', label: 'COMPLETED', tasks: tasks.filter(({ status }) => status === 'done') },
+  ];
+
+  if (tasks.length === 0) {
+    return <div className="empty-state compact">
+      <strong>No Kanban tasks yet</strong>
+      <span>The Planner creates tasks through the Kanban Toolkit.</span>
+    </div>;
+  }
+
+  return <div className="task-flow">
+    <div className="flow-summary">
+      <span>{dispatchMode === 'automatic'
+        ? 'Ready tasks are dispatched automatically. Manual start remains available for queued or blocked work.'
+        : 'Tasks remain queued until START is selected.'}</span>
+    </div>
+    {groups.map((group) => group.tasks.length > 0 && <section className="task-group" key={group.id}>
+      <div className="task-group-title"><span>{group.label}</span><b>{group.tasks.length}</b></div>
+      <div className="task-list">{group.tasks.map((task) => {
+        const incompleteDependencies = task.deps.filter((dependencyId) => (
+          tasksById.get(dependencyId)?.status !== 'done'
+        ));
+        const startable = incompleteDependencies.length === 0
+          && (task.status === 'todo' || task.status === 'blocked');
+        const showStart = task.status === 'todo' || task.status === 'blocked';
+        const starting = startingTaskId === task.taskId;
+        const visibleStatus = task.status === 'todo' && incompleteDependencies.length > 0
+          ? 'waiting deps'
+          : task.status;
+        return <article className="task-card" key={task.taskId}>
+          <div className="task-card-head">
+            <em className={task.status}>{visibleStatus}</em>
+            <code title={task.taskId}>{task.taskId.slice(0, 8)}</code>
+            <span className="task-assignee">→ {task.assigneeId}</span>
+            {showStart && <button
+              aria-label={`${task.status === 'blocked' ? 'Retry' : 'Start'} task ${task.brief}`}
+              className="task-action"
+              disabled={!startable || Boolean(startingTaskId)}
+              onClick={() => onStart(task.taskId)}
+              title={startable ? undefined : `Waiting for: ${incompleteDependencies.join(', ')}`}
+              type="button"
+            >{starting ? 'STARTING…' : task.status === 'blocked' ? 'RETRY' : 'START'}</button>}
+          </div>
+          <strong className="task-brief">{task.brief}</strong>
+          {task.deps.length > 0 && <div className="task-dependencies">
+            <span>DEPENDS ON</span>
+            {task.deps.map((dependencyId) => <code
+              className={tasksById.get(dependencyId)?.status === 'done' ? 'complete' : ''}
+              key={dependencyId}
+              title={dependencyId}
+            >{dependencyId.slice(0, 8)}</code>)}
+          </div>}
+          {task.note && <p className="task-note">{task.note}</p>}
+          <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
+        </article>;
+      })}</div>
+    </section>)}
+  </div>;
 }
 
 function History({ title, events }: { title: string; events: HistoryEvent[] }) {

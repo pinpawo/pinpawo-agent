@@ -33,6 +33,12 @@ handle. Queueing and the dispatch gate belong to the resident runtime; execution
 is observed through Agent Session events, checkpoints, or Plugin-owned domain
 state rather than a Studio result.
 
+After admission, Studio publishes a live `dispatch.accepted` event with the
+`invocationId`, target `petId`, request text, and producer name. This is an
+observability fact on the same non-durable event bus, not a completion signal or
+a dispatch result store. Idempotent replay returns the original receipt without
+publishing another accepted event.
+
 Plugins receive only `dispatch`, `notify`, `subscribe`, `listPets`, and Plugin
 hook installation. A Plugin may define Toolkits, but it cannot construct a Pet,
 inspect a runtime, or participate in Agent Session conversation.

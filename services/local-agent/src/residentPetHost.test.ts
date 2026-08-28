@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { AIMessage } from '@langchain/core/messages';
+import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -340,6 +341,7 @@ test('dispatch and conversation publish the same Agent Session event stream to o
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-events-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(root);
   const blockingTurnStarted = deferred();
+  let dispatchCallerMetadata: unknown;
   const graphService = {
     readThreadState: async () => ({
       messages: [],
@@ -367,6 +369,10 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup, emitEvent }) => {
       const text = request.kind === 'user_message' ? request.message : 'resumed';
+      if (text === 'from host') {
+        dispatchCallerMetadata = AsyncLocalStorageProviderSingleton
+          .getRunnableConfig()?.metadata;
+      }
       if (text === 'blocking host turn') {
         blockingTurnStarted.resolve();
         await new Promise<void>((resolve) => {
@@ -401,7 +407,12 @@ test('dispatch and conversation publish the same Agent Session event stream to o
   await host.interaction.connect(observer);
 
   try {
-    host.resident.dispatch.dispatch({ request: 'from host' });
+    AsyncLocalStorageProviderSingleton.runWithConfig({
+      callbacks: [],
+      metadata: { caller: 'studio-plugin-run' },
+    }, () => {
+      host.resident.dispatch.dispatch({ request: 'from host' });
+    });
     await waitFor(
       () => observerMessages.some((message) => (
         (message as { event?: { type?: string } }).event?.type === 'message.completed'
@@ -421,6 +432,10 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       ]);
       assert.equal(events[0]?.initiator, 'host');
     }
+    assert.equal(
+      (dispatchCallerMetadata as { caller?: string } | undefined)?.caller,
+      undefined,
+    );
 
     sourceMessages.length = 0;
     observerMessages.length = 0;

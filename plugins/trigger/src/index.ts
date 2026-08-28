@@ -6,6 +6,8 @@ export type {
   StudioEventTriggerSource,
   TriggerDefinition,
   TriggerPlugin,
+  TriggerRequest,
+  TriggerRequestTemplate,
 } from './triggerPlugin';
 export { TriggerService } from './triggerService';
 export type {

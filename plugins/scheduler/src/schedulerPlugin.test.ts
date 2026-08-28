@@ -32,5 +32,10 @@ test('Scheduler dispatches one due schedule exactly once', async (t) => {
 
   assert.equal(requests, 1);
   assert.equal((await plugin.service.get(schedule.scheduleId))?.status, 'dispatched');
-  assert.deepEqual(events, ['schedule.created', 'schedule.claimed', 'schedule.fired']);
+  assert.deepEqual(events, [
+    'schedule.created',
+    'schedule.claimed',
+    'dispatch.accepted',
+    'schedule.fired',
+  ]);
 });

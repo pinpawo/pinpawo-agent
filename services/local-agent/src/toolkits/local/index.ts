@@ -10,6 +10,7 @@ import {
   ReviewPolicies,
   type AgentToolkit,
   type CapabilityArtifactStore,
+  type NamedStructuredTool,
   type ToolOperationMetadata,
   type ToolAutoAuthorizationContext,
   type ToolReviewPolicy,
@@ -46,6 +47,7 @@ import {
   runShellTool,
   shellOperationMetadata,
 } from './shellTools';
+import { bindToolToExecutionWorkdir } from './workdirBinding';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -213,7 +215,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         return root;
       },
       resolve: (root, context) => (root as ShellRuntime).resolve(context.execution),
-      bindTools: (binding) => {
+      bindTools: (binding, context) => {
         const shell = binding as ShellRuntimeBinding;
         // The framework matches bound tools to the static inventory by
         // position, so this must return the whole list in order. Only the
@@ -223,7 +225,10 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
           [createRunShellTool(shell), ...createProcessTools(shell)]
             .map((item) => [item.name, item]),
         );
-        return tools.map((staticTool) => bound.get(staticTool.name) ?? staticTool);
+        return tools.map((staticTool) => bindToolToExecutionWorkdir(
+          (bound.get(staticTool.name) ?? staticTool) as NamedStructuredTool,
+          context.execution.workdir,
+        ));
       },
       stop: async (root) => { await (root as ShellRuntime).stop(); },
     },
@@ -246,6 +251,12 @@ export function createGitToolkit(): AgentToolkit {
     reviewGuidance: {
       allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization, including staging files, creating a local commit, a normal non-force push, and creating a pull request or issue.',
       ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting or closing remote resources, and publishing packages or releases.',
+    },
+    runtime: {
+      start: () => undefined,
+      bindTools: (_binding, context) => gitTools.map((toolItem) => (
+        bindToolToExecutionWorkdir(toolItem, context.execution.workdir)
+      )),
     },
   });
 }

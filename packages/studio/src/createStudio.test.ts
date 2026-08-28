@@ -36,6 +36,7 @@ function binding(
 
 test('Studio dispatches request-only input and returns no thread or continuation data', async () => {
   const seen: unknown[] = [];
+  const events: unknown[] = [];
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
@@ -43,12 +44,25 @@ test('Studio dispatches request-only input and returns no thread or continuation
       seen.push(request);
     })],
   });
+  studio.subscribe((event) => { events.push(event); });
 
   const receipt = await studio.dispatch({ petId: 'worker', request: 'draft' });
   assert.deepEqual(seen, ['draft']);
   assert.deepEqual(Object.keys(receipt).sort(), ['invocationId', 'petId']);
   assert.equal('completion' in receipt, false);
   assert.equal('status' in receipt, false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(events, [{
+    type: 'dispatch.accepted',
+    source: 'studio',
+    occurredAt: (events[0] as { occurredAt: string }).occurredAt,
+    payload: {
+      invocationId: receipt.invocationId,
+      petId: 'worker',
+      request: 'draft',
+      producer: 'studio',
+    },
+  }]);
   await studio.shutdown();
 });
 
@@ -95,6 +109,7 @@ test('receipt echoes producer metadata while the Pet sees request text only', as
 
 test('idempotency returns the same receipt and invokes the port once', async () => {
   let calls = 0;
+  let acceptedEvents = 0;
   const studio = await createStudio({
     studioId: 's1',
     entryPetId: 'worker',
@@ -102,11 +117,16 @@ test('idempotency returns the same receipt and invokes the port once', async () 
       calls += 1;
     })],
   });
+  studio.subscribe((event) => {
+    if (event.type === 'dispatch.accepted') acceptedEvents += 1;
+  });
   const request = { petId: 'worker', request: 'work', idempotencyKey: 'task-1' };
   const first = await studio.dispatch(request);
   const second = await studio.dispatch(request);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(first, second);
   assert.equal(calls, 1);
+  assert.equal(acceptedEvents, 1);
   await studio.shutdown();
 });
 
@@ -142,14 +162,14 @@ test('listPets exposes only Studio registration metadata', async () => {
 
 test('Plugin receives dispatch/event/hook context without a Pet runtime reference', async () => {
   let pluginContextKeys: string[] = [];
-  let eventSource = '';
+  const receivedEvents: Array<[string, string]> = [];
   const plugin: StudioPlugin = {
     name: 'scheduler',
     toolkits: [],
     start: async (context) => {
       pluginContextKeys = Object.keys(context).sort();
       context.subscribe((event) => {
-        eventSource = event.source;
+        receivedEvents.push([event.type, event.source]);
       });
       context.notify({ type: 'schedule.ready' });
       await context.dispatch({ petId: 'worker', request: 'run' });
@@ -168,7 +188,11 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
     'notify',
     'subscribe',
   ]);
-  assert.equal(eventSource, 'scheduler');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(receivedEvents, [
+    ['schedule.ready', 'scheduler'],
+    ['dispatch.accepted', 'studio'],
+  ]);
   await studio.shutdown();
 });
 

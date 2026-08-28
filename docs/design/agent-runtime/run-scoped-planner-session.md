@@ -229,6 +229,7 @@ Conceptual provider-visible form:
 
   <delegation_announces
     delegation_id="delegation-1"
+    evidence_state="available"
     evaluation_target="announce-2"
   >
     <delegation_announce
@@ -261,13 +262,16 @@ Conceptual provider-visible form:
 
 The XML-like form is a provider projection, not the canonical schema. The
 wrapper may change without changing the ownership and lifetime contract above.
-`delegation_announces` is always present, even at the first Boundary when it has
-only one child. It contains the ordered announce attempts for the active
-delegation, while `evaluation_target` identifies the latest attempt that this
-invocation must judge. Accepted Announces from earlier delegations remain in the
-clean main conversation and are not duplicated in this collection. The prior
-remaining plan is a run-scoped proposal, not an accepted fact: every Boundary
-revalidates it against the goal, accepted history, and current announce evidence.
+`delegation_announces` is always present. A normal first Boundary has one child
+and `evidence_state="available"`; an explicit resume with no canonical execution
+evidence uses a self-closing element with `evidence_state="absent"` and no
+`evaluation_target`. When evidence is available, the element contains the
+ordered announce attempts for the active delegation and `evaluation_target`
+identifies the latest attempt that this invocation must judge. Accepted
+Announces from earlier delegations remain in the clean main conversation and are
+not duplicated in this collection. The prior remaining plan is a run-scoped
+proposal, not an accepted fact: every Boundary revalidates it against the goal,
+accepted history, and current announce evidence.
 
 ## Provider contract audit
 

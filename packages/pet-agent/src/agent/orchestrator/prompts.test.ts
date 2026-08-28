@@ -150,7 +150,7 @@ test('Capability Planner boundary input carries the run user request and boundar
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<planning_boundary_event role="task_boundary" source="orchestrator_state">/);
   assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
-  assert.match(input, /<delegation_announces delegation_id="delegation-1" evaluation_target="announce-1">/);
+  assert.match(input, /<delegation_announces delegation_id="delegation-1" evidence_state="available" evaluation_target="announce-1">/);
   assert.match(input, /浏览器已连接。/);
   assert.match(input, /确认浏览器可用/);
   assert.match(input, /<prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation">/);
@@ -158,6 +158,36 @@ test('Capability Planner boundary input carries the run user request and boundar
   assert.match(input, /浏览相关内容/);
   assert.doesNotMatch(input, /执行停止原因/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+});
+
+test('Capability Planner boundary input marks absent execution evidence explicitly', () => {
+  const input = buildCapabilityPlannerAgentInput({
+    mode: 'boundary',
+    inputId: 'human:run-1',
+    traceId: 'trace-1',
+    runId: 'run-1',
+    workspace: plannerPromptWorkspace,
+    userRequest: '继续检查仓库并完成测试验证。',
+    messages: [],
+    activeDelegation: {
+      delegationId: 'delegation-1',
+      transcriptRunId: 'transcript-1',
+      capability: 'general',
+      task: '检查仓库并完成测试验证',
+    },
+    latestAnnounce: null,
+    announceAttempts: [],
+    remainingPlan: [],
+    capabilityDisclosure: plannerDisclosure,
+    plannerSession: plannerSession(),
+  } satisfies CapabilityPlannerInput, disclosedDocuments);
+
+  assert.match(
+    input,
+    /<delegation_announces delegation_id="delegation-1" evidence_state="absent" \/>/,
+  );
+  assert.doesNotMatch(input, /evaluation_target=/);
+  assert.doesNotMatch(input, /<delegation_announce /);
 });
 
 test('Capability Planner boundary input omits the follow-up section once the plan is exhausted', () => {

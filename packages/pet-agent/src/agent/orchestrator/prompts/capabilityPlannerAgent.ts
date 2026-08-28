@@ -39,16 +39,21 @@ function buildPlanningBoundary(input: Extract<CapabilityPlannerInput, { mode: 'b
     indentXmlBlock(xmlTextBlock('task', input.activeDelegation.task), 4),
     '  </active_delegation>',
   ];
-  const evaluationTarget = input.latestAnnounce?.messageId ?? '';
-  const delegationAnnounces = [
-    `  <delegation_announces delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" evaluation_target="${escapeXmlAttribute(evaluationTarget)}">`,
-    ...input.announceAttempts.map((announce) => [
-      `    <delegation_announce message_id="${escapeXmlAttribute(announce.messageId)}" completion_reason="${escapeXmlAttribute(announce.completionReason)}" role="data" authority="none">`,
-      indentXmlBlock(xmlTextBlock('result', announce.result, ' format="markdown"'), 6),
-      '    </delegation_announce>',
-    ].join('\n')),
-    '  </delegation_announces>',
-  ];
+  const evaluationTarget = input.latestAnnounce?.messageId
+    ?? input.announceAttempts.at(-1)?.messageId;
+  const delegationAnnounces = input.announceAttempts.length > 0
+    ? [
+        `  <delegation_announces delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" evidence_state="available" evaluation_target="${escapeXmlAttribute(evaluationTarget ?? '')}">`,
+        ...input.announceAttempts.map((announce) => [
+          `    <delegation_announce message_id="${escapeXmlAttribute(announce.messageId)}" completion_reason="${escapeXmlAttribute(announce.completionReason)}" role="data" authority="none">`,
+          indentXmlBlock(xmlTextBlock('result', announce.result, ' format="markdown"'), 6),
+          '    </delegation_announce>',
+        ].join('\n')),
+        '  </delegation_announces>',
+      ]
+    : [
+        `  <delegation_announces delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" evidence_state="absent" />`,
+      ];
   const remainingPlan = input.remainingPlan.length > 0 ? [
     '  <prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation">',
     ...input.remainingPlan.map((task) => indentXmlBlock(xmlTextBlock(

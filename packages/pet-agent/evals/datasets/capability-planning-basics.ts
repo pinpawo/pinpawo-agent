@@ -788,6 +788,43 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
     metadata: { difficulty: 'medium', reason: 'Unified acceptance and continuation action.', source: SOURCE_FILE },
   },
   {
+    id: `${SUITE}.boundary-resume-without-execution-evidence-continues-current`,
+    name: 'boundary-resume-without-execution-evidence-continues-current',
+    suite: SUITE,
+    tags: [
+      'capability_planning',
+      'delegation_control',
+      'planner_boundary',
+      'interruption_recovery',
+    ],
+    input: {
+      mode: 'boundary',
+      messages: [{
+        role: 'user',
+        content: '继续检查仓库并完成测试验证。',
+      }],
+      capabilityRegistry: [
+        'general: inspect, modify, and verify the workspace',
+      ],
+      activeCapability: 'general',
+      activeTask: '检查仓库并完成测试验证',
+      remainingPlan: [],
+    },
+    expected: {
+      result: 'continue_current',
+      remainingPlan: [],
+      exactRemainingPlanLength: 0,
+      planEffect: 'empty',
+      rubberStamp: false,
+      reason: 'An explicit resume has no canonical execution evidence to accept, while the active Capability can still execute the task. Continue the same delegation instead of assuming completion.',
+    },
+    metadata: {
+      difficulty: 'hard',
+      reason: 'Resume regression for an active delegation whose checkpoint contains no canonical announce evidence.',
+      source: SOURCE_FILE,
+    },
+  },
+  {
     id: `${SUITE}.boundary-corrects-context-summary-output`,
     name: 'boundary-corrects-context-summary-output',
     suite: SUITE,

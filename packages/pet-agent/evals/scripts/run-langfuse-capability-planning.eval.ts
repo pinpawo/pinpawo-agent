@@ -213,6 +213,14 @@ async function main() {
             capabilityDisclosure,
           }),
         };
+        const latestAnnounce = testCase.input.latestAnnounce;
+        const announceData = latestAnnounce === undefined
+          ? null
+          : {
+              messageId: 'eval-announce',
+              completionReason: 'natural' as const,
+              result: latestAnnounce,
+            };
         const plannerInput: CapabilityPlannerInput = testCase.input.mode === 'boundary'
           ? {
               ...plannerInputBase,
@@ -223,16 +231,8 @@ async function main() {
                 capability: activeCapability,
                 task: activeTask,
               },
-              latestAnnounce: {
-                messageId: 'eval-announce',
-                completionReason: 'natural',
-                result: testCase.input.latestAnnounce ?? '',
-              },
-              announceAttempts: [{
-                messageId: 'eval-announce',
-                completionReason: 'natural',
-                result: testCase.input.latestAnnounce ?? '',
-              }],
+              latestAnnounce: announceData,
+              announceAttempts: announceData ? [announceData] : [],
             }
           : {
               ...plannerInputBase,

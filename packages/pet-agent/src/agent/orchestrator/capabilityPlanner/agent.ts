@@ -153,7 +153,6 @@ export function createCapabilityPlannerAgent(params: {
     name: 'capabilityPlanner',
     model: params.model,
     tools: [capabilitySearchTool, ...terminalTools, ...additionalTools],
-    systemPrompt: '',
     middleware: [middleware, createPlannerSearchStateMiddleware()],
     checkpointer: false,
   });

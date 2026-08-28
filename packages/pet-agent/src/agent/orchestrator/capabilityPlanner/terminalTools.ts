@@ -58,7 +58,10 @@ function plannerTasksSchema(description: string) {
     .describe(description);
 }
 
-/** Terminal tools serialize an already-made Planner decision. */
+/**
+ * Terminal tools serialize an already-made Planner decision. Runtime registers
+ * the full superset; mode projects the provider-visible subset for static audits.
+ */
 export function createPlannerTerminalTools(
   mode?: PlannerTerminalToolMode,
 ): StructuredTool[] {

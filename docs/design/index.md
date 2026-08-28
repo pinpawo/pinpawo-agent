@@ -11,7 +11,7 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Persistent Planner](agent-runtime/persistent-planner.md) and
+- [Run-scoped Planner session](agent-runtime/run-scoped-planner-session.md) and
   [terminal response finalization](agent-runtime/terminal-response.md)
 - [Entry Answer routing](agent-runtime/entry-answer-routing.md) and
   [Delegation Announce messages](agent-runtime/delegation-announce-message.md)

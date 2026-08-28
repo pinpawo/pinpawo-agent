@@ -18,7 +18,7 @@ Everything below is classified on two independent axes. Do not conflate them.
 | Class | Meaning | Rebuilt when |
 |---|---|---|
 | `STATIC` | Same string for every invocation of this node, for the whole process | Never (module constant) |
-| `RUN-STABLE` | Fixed once per run/trace, then replayed identically | New run, or a superseding request |
+| `RUN-STABLE` | Fixed once per run, then replayed identically | New run |
 | `DYNAMIC` | Recomputed from state on every single invocation | Every invocation |
 
 **Axis 2 — Authority** (may the model treat it as an instruction?)
@@ -87,8 +87,8 @@ Routes the request: reply directly, ask a question, or hand off via
 the main conversation and nothing else — deliberately, because it is the node
 that decides what the goal *is*.
 
-`mainConversationMessages()` excludes every laned message (delegation lanes and
-the `orchestrator` planner lane) and pre-lane delegation briefings. An accepted
+`mainConversationMessages()` excludes every lane-tagged message and pre-lane
+delegation briefings. An accepted
 typed Announce reaches this view after handoff moves its semantic identity into
 the main queue. `projectDelegationAnnouncesForModel()` then creates the
 provider-compatible model view.
@@ -98,27 +98,33 @@ conversation. This is the only place a goal is authored. See §8.
 
 ## 5. Node: capabilityPlanner
 
-Two modes use the same node and Planner lane. Sources:
+Two modes use the same steering domain. The target lifetime and ownership
+contract is defined by
+[`run-scoped-planner-session.md`](../../design/agent-runtime/run-scoped-planner-session.md).
+Sources:
 `runtime/nodes/capabilityPlanner.ts` (dispatch),
 `capabilityPlanner/agent.ts` (assembly),
 `capabilityPlanner/messageContext.ts` (projection).
 
-| Slot | Class | Entry mode | Boundary mode |
+| Slot | Lifetime | Entry mode | Boundary mode |
 |---|---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | entry objective and context meaning | boundary objective and context meaning |
-| history | `DYNAMIC` / `HISTORY` | trace/digest Planner lane + canonical main conversation | same base + only the current delegation Announce |
-| input | `DYNAMIC` / `FACT` | `<run_user_request>` + `<capability_context>` | same + `<planning_boundary>` |
+| system | invocation projection / `INSTRUCTION` | entry objective and context meaning | boundary objective and context meaning |
+| clean conversation | projected per invocation / `HISTORY` | canonical main conversation | current canonical main conversation |
+| session state | `RUN-STABLE` / `FACT` | goal, plan and Capability disclosure | updated plan and disclosure from this run |
+| overlay | `DYNAMIC` / `BOUNDARY` | none | one current announce, active delegation and remaining plan |
 
-Both modes use `selectCapabilityPlannerMessages()`, filtered by `traceId` and
-`registryDigest`; a registry change invalidates stale Planner observations.
-Accepted typed Announces in main conversation and the current private Announce
-are projected through the same provider-visible `<delegation_announce>` shape.
-The private Capability Human/AI/Tool transcript is not included.
+Entry initializes a clean run-scoped Planner session. Boundary adds one
+invocation-only overlay that selects the current private Announce by canonical
+delegation and message identity. The overlay marks it as the evaluation target
+without changing the announce or root messages. Private Capability Human/AI/Tool
+transcript is never included.
 
-`<capability_context>` is a per-invocation projection of trace-scoped disclosure
-state. It contains the configured default Capability when available and every
-successfully disclosed Capability in stable order. Neither Capability documents
-nor search-round state enter the system prompt.
+Capability disclosure is run-scoped semantic state. It contains the configured
+default Capability when available and every Capability disclosed during this
+run in stable order. Neither Capability documents nor search-round state enter
+the system prompt. A new run resets search attempts and revalidates disclosure;
+resumed root tasks may seed the capabilities named by their active and remaining
+plan.
 
 `capability_search` remains callable with `tool_choice=auto`. Each ToolMessage
 reports the post-call disclosure state, remaining empty rounds, and a planning
@@ -126,9 +132,11 @@ objective. After discovery closes, later calls return the stable
 `capability_search_round_limit_exceeded` result instead of changing tool
 availability.
 
-The Planner transcript, search observations, and terminal commits are persisted
-under the private `orchestrator` lane. They are invisible to other nodes and are
-bounded by the global compaction mechanism rather than a separate lane budget.
+Planner provider messages, search ToolMessages, and terminal ToolMessages do not
+belong in root `messages`. Same-input recovery uses a typed run-scoped commit;
+raw invocation detail belongs to tracing. The current implementation still has
+a transitional `orchestrator` Planner lane while this migration is incomplete;
+do not extend that lane or treat it as the target context contract.
 
 ## 6. Node: capability (subagent execution)
 
@@ -239,10 +247,11 @@ One mechanism bounds all context. Source: `contextCompaction.ts`,
   the **full** message array and re-runs `toolProtocolSafeMessages()` so no
   orphaned tool call survives.
 
-The trigger is measured on main messages; the sweep covers **every lane**,
-including the planner lane. No lane carries its own budget. A per-lane
-compaction was removed deliberately — nested self-summarizing summaries made the
-lane grow faster than they shrank it.
+The trigger is measured on main messages; the sweep currently covers every root
+message lane. The target run-scoped Planner session is not a root message lane
+and therefore does not participate in root conversation compaction. If Planner
+session history later requires compaction, it must compact the whole run-private
+history rather than clip individual Delegation Announces.
 
 ## 10. Checklist for adding context
 

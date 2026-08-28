@@ -162,17 +162,19 @@ complete `result` evidence.
 
 ### Capability Planner Boundary projection
 
-At a post-execution Boundary, the Planner receives the standard announce in its
-chronological position. Capability context, active-delegation state and remaining
-plan stay outside the announce. The complete provider-visible example is fixed in
-[`persistent-planner.md`](persistent-planner.md#完整-boundary-模型输入示例).
+At a post-execution Boundary, the Planner adapter selects the standard announce
+by its root-owned identity and places it inside one invocation-only Boundary
+overlay. Capability context, active-delegation state and remaining plan stay
+outside the canonical announce. The overlay marks which announce is current
+without mutating or checkpointing that mark. See
+[`run-scoped-planner-session.md`](run-scoped-planner-session.md#boundary-overlay-temporary-paint).
 
 The announce is the complete execution evidence at this boundary. The private
 Capability-lane Human, AI, and Tool transcript is not projected alongside it;
 doing so would duplicate evidence, expose executor implementation detail, and let
 large tool results displace the Planner's control context.
-The canonical main conversation remains model-visible through the same selector
-used by Entry; it is conversation context, not a substitute execution transcript.
+The clean canonical main conversation initializes the run-scoped Planner
+session. It is conversation context, not a substitute execution transcript.
 
 Version 1 intentionally has no `content_kind`, `progress`, `accepted`, or
 `task_completed` field. Add a field only when a producer or framework boundary can

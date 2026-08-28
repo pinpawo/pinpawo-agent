@@ -1,8 +1,8 @@
 # pet-agent decision prompt 设计
 
-> 状态：历史设计。Outcome 与旧 Planner return contract 已由 #619 的
-> trace-scoped persistent private Planner 取代；以下正文保留迁移前背景，不再代表当前生产契约。
-> 当前契约见 [`PERSISTENT_PRIVATE_PLANNER_REFACTOR_ISSUE.md`](../../design/agent-runtime/persistent-planner.md)。
+> 状态：历史设计。以下正文保留迁移前背景，不再代表当前方向。
+> Planner 生命周期目标见
+> [run-scoped Planner session](../../design/agent-runtime/run-scoped-planner-session.md)。
 > Entry 的后续收缩提案见
 > [`Entry Answer routing draft`](../../design/agent-runtime/entry-answer-routing.md)。
 > 范围：`entryDecision`、`capabilityPlanner`、`outcomeDecision` 与 `answer` 的职责和提示词边界。

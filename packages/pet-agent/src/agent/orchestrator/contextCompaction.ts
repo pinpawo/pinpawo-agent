@@ -3,6 +3,7 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
+  getMessageIsAnnounce,
   getMessageLane,
   getPinpetMeta,
   mainConversationMessages,
@@ -20,6 +21,11 @@ export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
   keepMessages?: number;
+  preserveAnnouncesFor?: {
+    lane: string;
+    transcriptRunId: string;
+    delegationId: string;
+  };
 };
 
 export type ContextCompactionResult = {
@@ -53,9 +59,25 @@ export function createContextCompactionMessage(
   return message;
 }
 
-function selectMessagesToKeep(messages: BaseMessage[], keepMessages: number): BaseMessage[] {
+function selectMessagesToKeep(
+  messages: BaseMessage[],
+  keepMessages: number,
+  preserveAnnouncesFor: ContextCompactionOptions['preserveAnnouncesFor'],
+): BaseMessage[] {
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
-  return toolProtocolSafeMessages(candidates.slice(-Math.max(1, keepMessages)));
+  const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
+  // An active delegation's lane Announces are canonical Boundary evidence
+  // until Planner accepts them. They are excluded from summaries, so pin every
+  // still-lane-tagged Announce even when it falls outside the recent suffix.
+  const selected = candidates.filter((message) => {
+    if (recentMessages.has(message)) return true;
+    if (!preserveAnnouncesFor || !getMessageIsAnnounce(message)) return false;
+    const meta = getPinpetMeta(message);
+    return getMessageLane(message) === preserveAnnouncesFor.lane
+      && meta.runId === preserveAnnouncesFor.transcriptRunId
+      && meta.delegationId === preserveAnnouncesFor.delegationId;
+  });
+  return toolProtocolSafeMessages(selected);
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
@@ -177,7 +199,11 @@ export async function compactOrchestratorMessages(params: {
   const mainMessageCount = triggerMessages.length;
   const keepMessages = params.options?.keepMessages ?? DEFAULT_KEEP_MESSAGES;
 
-  const keptMessages = selectMessagesToKeep(messages, keepMessages);
+  const keptMessages = selectMessagesToKeep(
+    messages,
+    keepMessages,
+    params.options?.preserveAnnouncesFor,
+  );
   const keptMessageRefs = new Set(keptMessages);
   const keptIds = new Set(keptMessages.map((message) => message.id).filter((id): id is string => Boolean(id)));
   const messagesToSummarize = messages.filter((message) => {

@@ -11,6 +11,8 @@ export const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 export const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 export const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
+export type PlannerTerminalToolMode = 'entry' | 'boundary';
+
 export const PLANNER_TERMINAL_TOOL_NAMES = new Set([
   CONTINUE_CURRENT_TOOL_NAME,
   SUBMIT_PLAN_TOOL_NAME,
@@ -20,31 +22,50 @@ export const PLANNER_TERMINAL_TOOL_NAMES = new Set([
   REPORT_UNAVAILABLE_TOOL_NAME,
 ]);
 
+const ENTRY_TERMINAL_TOOL_NAMES = new Set([
+  SUBMIT_PLAN_TOOL_NAME,
+  REQUEST_USER_INPUT_TOOL_NAME,
+  REPORT_UNAVAILABLE_TOOL_NAME,
+]);
+
+const BOUNDARY_TERMINAL_TOOL_NAMES = new Set([
+  CONTINUE_CURRENT_TOOL_NAME,
+  ADVANCE_PLAN_TOOL_NAME,
+  COMPLETE_GOAL_TOOL_NAME,
+  REQUEST_USER_INPUT_TOOL_NAME,
+  REPORT_UNAVAILABLE_TOOL_NAME,
+]);
+
+export function plannerTerminalToolNamesForMode(
+  mode: PlannerTerminalToolMode,
+): ReadonlySet<string> {
+  return mode === 'entry'
+    ? ENTRY_TERMINAL_TOOL_NAMES
+    : BOUNDARY_TERMINAL_TOOL_NAMES;
+}
+
 function plannerTaskSchema() {
   return z.object({
     capability: z.string().trim().min(1).max(200)
-      .describe('Registered Capability name for this task.'),
+      .describe('Name of a disclosed Capability whose responsibility matches this task.'),
     task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('The task goal to deliver.'),
+      .describe('One independently deliverable result for that Capability, not an internal phase.'),
   });
 }
 
-function plannerTasksSchema() {
+function plannerTasksSchema(description: string) {
   return z.array(plannerTaskSchema()).min(1).max(MAX_PLAN_TASKS)
-    .describe('The non-empty ordered task sequence committed by this action.');
+    .describe(description);
 }
 
 /** Terminal tools serialize an already-made Planner decision. */
-export function createPlannerTerminalTools(): StructuredTool[] {
-  return [
+export function createPlannerTerminalTools(
+  mode?: PlannerTerminalToolMode,
+): StructuredTool[] {
+  const tools = [
     tool(async () => JSON.stringify({ action: 'continue_current', tasks: [] }), {
       name: CONTINUE_CURRENT_TOOL_NAME,
-      description: [
-        'Keep the active delegation and its existing remaining plan unchanged.',
-        'Use when the latest announce does not establish that the current task is accepted,',
-        'including an intended-work plan, an unexecuted attempt, incomplete evidence,',
-        'or a delivered result that contradicts an explicit user acceptance criterion.',
-      ].join(' '),
+      description: 'Boundary only: keep the active delegation and prior plan unchanged for another autonomous attempt.',
       schema: z.object({}).strict(),
     }),
     tool(
@@ -52,8 +73,12 @@ export function createPlannerTerminalTools(): StructuredTool[] {
         JSON.stringify({ action: 'execute_plan', tasks }),
       {
         name: SUBMIT_PLAN_TOOL_NAME,
-        description: 'Submit execute_plan with the initial ordered tasks.',
-        schema: z.object({ tasks: plannerTasksSchema() }),
+        description: 'Entry only: commit the initial executable plan for the user goal.',
+        schema: z.object({
+          tasks: plannerTasksSchema(
+            'Non-empty ordered tasks required to deliver the user goal.',
+          ),
+        }),
       },
     ),
     tool(
@@ -61,18 +86,17 @@ export function createPlannerTerminalTools(): StructuredTool[] {
         JSON.stringify({ action: 'advance_plan', tasks }),
       {
         name: ADVANCE_PLAN_TOOL_NAME,
-        description: [
-          'After the active task is accepted, submit the ordered remaining tasks.',
-          'Start from the existing remaining-plan tasks exactly as written.',
-          'Change, remove, or add a task only when the latest announce provides concrete',
-          'evidence that requires that specific change; do not rewrite a task merely to add detail.',
-        ].join(' '),
-        schema: z.object({ tasks: plannerTasksSchema() }),
+        description: 'Boundary only: accept the active result and replace the prior proposal with the tasks still required for the user goal.',
+        schema: z.object({
+          tasks: plannerTasksSchema(
+            'Non-empty ordered tasks for results not yet satisfied by accepted history and the active result.',
+          ),
+        }),
       },
     ),
     tool(async () => JSON.stringify({ action: 'goal_done', tasks: [] }), {
       name: COMPLETE_GOAL_TOOL_NAME,
-      description: 'Submit goal_done with no tasks.',
+      description: 'Boundary only: accept the active result and close the user goal when no requested result or user-owned input remains outstanding.',
       schema: z.object({}).strict(),
     }),
     tool(
@@ -83,17 +107,20 @@ export function createPlannerTerminalTools(): StructuredTool[] {
       }),
       {
         name: REQUEST_USER_INPUT_TOOL_NAME,
-        description: 'Submit user_input_required with the question Answer should ask.',
+        description: 'Pause the unfinished goal in a resumable state and ask for concrete information, a choice, or authorization only the user can provide.',
         schema: z.object({
           question: z.string().trim().min(1).max(1_000)
-            .describe('The concrete question to present to the user.'),
+            .describe('The single concrete question that unblocks planning.'),
         }).strict(),
       },
     ),
     tool(async () => JSON.stringify({ action: 'unavailable', tasks: [] }), {
       name: REPORT_UNAVAILABLE_TOOL_NAME,
-      description: 'Submit unavailable with no tasks.',
+      description: 'Return control because no disclosed or discoverable Capability can execute the remaining goal.',
       schema: z.object({}).strict(),
     }),
   ];
+  if (!mode) return tools;
+  const allowedNames = plannerTerminalToolNamesForMode(mode);
+  return tools.filter(({ name }) => allowedNames.has(name));
 }

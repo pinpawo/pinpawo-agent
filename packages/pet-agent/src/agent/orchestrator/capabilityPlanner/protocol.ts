@@ -17,10 +17,8 @@ export type PlannerReplyOutcome = Extract<
   'goal_done' | 'user_input_required' | 'unavailable'
 >;
 
-/** Root-owned terminal route outcomes, including Planner protocol fallbacks. */
-export type PlannerRouteOutcome = PlannerReplyOutcome
-  | 'planner_direct_answer'
-  | 'planner_incomplete';
+/** Root-owned terminal route outcomes, including the explicit protocol failure. */
+export type PlannerRouteOutcome = PlannerReplyOutcome | 'planner_incomplete';
 
 /** Deterministic root-visible failure metadata; never produced by a model. */
 export type OrchestratorRuntimeFailure =
@@ -54,8 +52,15 @@ export type PlannerDelegationInput = {
 };
 
 export type PlannerAnnounceInput = {
-  readonly messageId: string | null;
-  readonly completionReason: SubagentCompletionReason | null;
+  readonly messageId: string;
+  readonly completionReason: SubagentCompletionReason;
+  readonly result: string;
+};
+
+/** Identity of the newest announce currently being evaluated. */
+export type PlannerAnnounceTarget = Omit<PlannerAnnounceInput, 'result'> & {
+  /** Optional compatibility echo; ordered announceAttempts owns the evidence. */
+  readonly result?: string;
 };
 
 const plannerTaskSchema = z.object({

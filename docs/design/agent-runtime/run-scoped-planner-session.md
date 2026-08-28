@@ -150,6 +150,11 @@ from canonical facts such as the active delegation, remaining plan, accepted
 Announces, and normalized goal. It does not resume the previous Planner working
 history, search attempts, or commit cache.
 
+Terminal Planner, Capability, and Answer exceptions follow the same lifetime
+rule. Root first checkpoints a continuation snapshot for resumable work and
+clears the run-scoped Planner session, then rethrows the failure. An exception
+must not leave a previous run's session available to a later invocation.
+
 Capabilities referenced by a resumed active task or remaining plan may be
 materialized into the new run's initial disclosure. Previous search attempts and
 empty-search counters are not inherited merely because the trace is unchanged.
@@ -172,7 +177,7 @@ PlannerEntryFrame(
 )
 ```
 
-Entry has no active delegation, current announce, or Boundary overlay.
+Entry has no active delegation, announce attempts, or Boundary overlay.
 
 The resulting `submit_plan` decision initializes the run plan. Provider-facing
 Human/AI/Tool messages produced while making that decision remain inside the
@@ -180,9 +185,10 @@ invocation or run-private observability stream; they do not become root history.
 
 ## Boundary overlay: temporary paint
 
-A Boundary does not rewrite the canonical announce or main conversation. The
-Planner adapter selects the current announce by root-owned identity and creates
-one ephemeral overlay:
+A Boundary does not rewrite the canonical announces or main conversation. The
+Planner adapter selects every still-unaccepted announce for the active
+delegation by root-owned identity, marks the latest attempt as the evaluation
+target, and creates one ephemeral overlay:
 
 ```ts
 type PlannerBoundaryOverlay = {
@@ -193,7 +199,7 @@ type PlannerBoundaryOverlay = {
     announceMessageId: string | null;
   };
   activeDelegation: PlannerDelegationInput;
-  currentAnnounce: DelegationAnnounceData | null;
+  announceAttempts: DelegationAnnounceData[];
   remainingPlan: CapabilityPlanTask[];
 };
 ```
@@ -244,7 +250,12 @@ Conceptual provider-visible form:
     </delegation_announce>
   </delegation_announces>
 
-  <remaining_plan />
+  <prior_remaining_plan
+    role="proposal"
+    source="planner_session"
+    authority="none"
+    status="requires_revalidation"
+  />
 </planning_boundary_event>
 ```
 
@@ -254,7 +265,40 @@ wrapper may change without changing the ownership and lifetime contract above.
 only one child. It contains the ordered announce attempts for the active
 delegation, while `evaluation_target` identifies the latest attempt that this
 invocation must judge. Accepted Announces from earlier delegations remain in the
-clean main conversation and are not duplicated in this collection.
+clean main conversation and are not duplicated in this collection. The prior
+remaining plan is a run-scoped proposal, not an accepted fact: every Boundary
+revalidates it against the goal, accepted history, and current announce evidence.
+
+## Provider contract audit
+
+Planner behavior depends on the complete provider-visible contract, not prompt
+text alone. Before changing Planner policy or investigating a model regression,
+render the production contract without calling a model:
+
+```sh
+npm run planner:context-audit
+```
+
+The command uses the production system/input builders, main-message projection,
+tool descriptions, and argument schemas for both modes. Review the output in one
+fixed order:
+
+1. **Goal:** each mode has one clear decision objective.
+2. **Evidence:** accepted history, current announce evidence, and prior proposals
+   have distinct authority.
+3. **Actions:** the provider sees only terminal actions valid for that mode, with
+   mutually exclusive effects.
+4. **Arguments:** schemas describe the data being committed rather than adding a
+   second decision policy.
+5. **Scope:** private executor-lane messages are absent, while accepted main
+   conclusions remain visible.
+6. **Runtime:** code validates typed identity and shape; it does not infer semantic
+   completion from announce prose.
+
+The system message owns decision policy. Tool descriptions state tool effect and
+eligibility concisely; argument descriptions state serialized data semantics.
+Static audit is a reasoning aid, not a prose snapshot test. Validate changes with
+behavior tests and targeted model evals.
 
 ## Successive Boundaries
 
@@ -286,8 +330,10 @@ announce attempt for the active delegation and marks only the latest as the
 evaluation target. Prior attempts remain delegation-owned evidence until
 acceptance; they are not silently promoted into main conversation, and the
 design does not assume that the latest announce is cumulative. Whole-session
-context compaction may summarize old history when the model context limit
-requires it; individual announce results must not be clipped independently.
+context compaction may summarize old main history when the model context limit
+requires it. Still-unaccepted lane Announces are excluded from that summary and
+pinned intact until Planner accepts them; individual announce results must not
+be clipped independently.
 
 ## Commit and idempotency
 

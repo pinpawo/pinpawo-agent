@@ -79,27 +79,22 @@ const actor = {
   species: null,
 };
 
-test('a fresh trace clears disclosure when resume_active has no delegation to resume', () => {
+test('entry capture clears any stale Planner session', () => {
   const input = {
     ...buildOrchestratorRunInput(
       [new HumanMessage('开始一个新的任务。')],
       { activeDelegationTransition: 'resume_active', traceId: 'new-trace' },
     ),
     taskActiveDelegation: null,
-    runCapabilityDisclosure: {
-      registryDigest: 'old-registry',
-      disclosedCapabilityNames: ['general', 'old-specialist'],
-      emptySearchRounds: 2,
-      maxEmptySearchRounds: 2,
-      status: 'closed',
-    },
+    runPlannerSession: {} as never,
   } as unknown as OrchestratorStateType;
   const update = captureRunUserRequest(input);
 
-  assert.equal(update.runCapabilityDisclosure, null);
+  assert.equal(update.runPlannerSession, null);
+  assert.equal(update.taskPlannerContinuation, null);
 });
 
-test('resuming an active delegation preserves its capability disclosure', () => {
+test('entry capture does not retain a prior active delegation Planner session', () => {
   const input = {
     ...buildOrchestratorRunInput(
       [new HumanMessage('继续。')],
@@ -116,20 +111,11 @@ test('resuming an active delegation preserves its capability disclosure', () => 
       resultPreview: null,
       userRequest: '完成当前任务。',
     },
-    runCapabilityDisclosure: {
-      registryDigest: 'current-registry',
-      disclosedCapabilityNames: ['general'],
-      emptySearchRounds: 0,
-      maxEmptySearchRounds: 2,
-      status: 'open',
-    },
+    runPlannerSession: {} as never,
   } as unknown as OrchestratorStateType;
   const update = captureRunUserRequest(input);
 
-  assert.equal(
-    Object.prototype.hasOwnProperty.call(update, 'runCapabilityDisclosure'),
-    false,
-  );
+  assert.equal(update.runPlannerSession, null);
 });
 
 test('Entry Answer returns an ordinary reply without invoking Planner', async () => {
@@ -163,12 +149,6 @@ test('Entry Answer returns an ordinary reply without invoking Planner', async ()
 test('plan_request routes to Planner without persisting control messages', async () => {
   const scripted = entryAnswerModel('plan');
   const plannerInputs: CapabilityPlannerInput[] = [];
-  const plannerObservation = new AIMessage('INTERNAL_PLANNER_OBSERVATION');
-  setPinpetMeta(plannerObservation, {
-    lane: 'orchestrator',
-    source: 'capability_planner',
-    traceId: 'test-trace',
-  });
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
@@ -178,7 +158,6 @@ test('plan_request routes to Planner without persisting control messages', async
         return {
           action: 'unavailable',
           tasks: [],
-          messageUpdates: [plannerObservation],
         };
       },
     },
@@ -199,8 +178,7 @@ test('plan_request routes to Planner without persisting control messages', async
     AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), false);
-  assert.equal(result.messages.some((message) => getMessageLane(message) === 'orchestrator'), true);
-  assert.equal(mainConversationMessages(result.messages).includes(plannerObservation), false);
+  assert.equal(result.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
   assert.equal(result.messages.at(-1)?.content, '当前没有可执行该任务的 Capability。');
 });
 

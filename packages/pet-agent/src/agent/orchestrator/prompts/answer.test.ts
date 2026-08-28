@@ -96,7 +96,7 @@ test('Answer input append helper does not mutate canonical history', () => {
 
 test('Answer input uses a closed reply mode without an instruction field', () => {
   const variants: ModelAnswerContextFacts[] = [
-    { mode: 'direct', hasUserRequest: true, acceptedResults: [], answer: null },
+    { mode: 'direct', hasUserRequest: true, acceptedResults: [] },
     { mode: 'goal_done', hasUserRequest: true, acceptedResults: [] },
     {
       mode: 'user_input_required',
@@ -189,21 +189,4 @@ test('blocked Answer facts are escaped and bounded as data', () => {
     + ANSWER_CONTEXT_LIMITS.detailChars
     + 560
   ));
-});
-
-test('Boundary Planner direct answer remains complete model-visible data', () => {
-  const directAnswer = `网络正常。${'完整诊断证据。'.repeat(100)}Manatee/CDP -5403。`;
-  const message = appendAnswerInputMessage([], '重新检查网络。', {
-    mode: 'direct',
-    hasUserRequest: true,
-    acceptedResults: [],
-    answer: directAnswer,
-  }).at(-1);
-
-  assert.ok(message);
-  const context = String(message.content);
-  assert.match(context, /<reply_mode>direct<\/reply_mode>/);
-  assert.match(context, /<direct_answer format="markdown" role="data">/);
-  assert.match(context, /Manatee\/CDP -5403/);
-  assert.equal(context.includes(directAnswer), true);
 });

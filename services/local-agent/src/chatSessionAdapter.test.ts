@@ -316,7 +316,9 @@ test('runChatSession replaces the current plan from root values and clears it at
             task: 'Inspect code',
             status: 'progress',
           }],
-          runCapabilityPlan: [{ capability: 'browser', task: 'Verify result' }],
+          runPlannerSession: {
+            plan: [{ capability: 'browser', task: 'Verify result' }],
+          },
         });
       })();
     },

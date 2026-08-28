@@ -1,134 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { DelegationAnnounceMessage } from '../delegationAnnounce';
 import { setPinpetMeta } from '../messageLanes';
-import {
-  CAPABILITY_PLANNER_MESSAGE_SOURCE,
-  removeStaleCapabilityPlannerMessages,
-  selectCapabilityPlannerMessages,
-} from './messageContext';
+import { projectCapabilityPlannerMessagesForModel } from './messageContext';
 
-function stampLane(
-  message: AIMessage | ToolMessage,
-  delegationId: string,
-  runId = 'transcript-1',
-) {
-  setPinpetMeta(message, {
+test('Planner context contains only clean canonical conversation with ephemeral announce projection', () => {
+  const request = new HumanMessage('检查代码并继续。');
+  const privateLane = new AIMessage('PRIVATE_EXECUTOR_TRANSCRIPT');
+  setPinpetMeta(privateLane, {
     lane: 'capability:general',
-    runId,
-    delegationId,
-  });
-  return message;
-}
-
-test('Planner message context selects canonical messages for each planning mode', () => {
-  const priorMainRequest = new HumanMessage('先确认一下任务背景。');
-  const priorMainReply = new AIMessage('任务背景已经确认。');
-  const mainRequest = new HumanMessage({
-    content: [{ type: 'text', text: '检查这张图片并继续任务。' }, {
-      type: 'image_url',
-      image_url: { url: 'data:image/png;base64,planner-media' },
-    }],
-  });
-  const currentMainReply = new AIMessage('CURRENT_MAIN_CONTEXT');
-  const toolCall = stampLane(new AIMessage({
-    content: '',
-    tool_calls: [{ id: 'call-1', name: 'read_file', args: { path: 'a.ts' } }],
-  }), 'delegation-1');
-  const toolResult = stampLane(new ToolMessage({
-    content: 'FILE_CONTENT',
-    tool_call_id: 'call-1',
-  }), 'delegation-1');
-  const announce = stampLane(new AIMessage({
-    id: 'announce-current',
-    content: 'CURRENT_DELEGATION_ANNOUNCE',
-  }), 'delegation-1');
-  setPinpetMeta(announce, { isAnnounce: true });
-  const otherLane = stampLane(new AIMessage('OTHER_DELEGATION_CONTENT'), 'delegation-2');
-  const staleTranscript = stampLane(
-    new AIMessage('STALE_TRANSCRIPT_CONTENT'),
-    'delegation-1',
-    'transcript-old',
-  );
-  const entryControlCall = new AIMessage({
-    content: '',
-    tool_calls: [{ id: 'plan-call', name: 'plan_request', args: {} }],
-  });
-  const priorPlannerMessage = new AIMessage('PRIOR_PLANNER_OBSERVATION');
-  setPinpetMeta(priorPlannerMessage, {
-    lane: 'orchestrator',
-    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
-    traceId: 'trace-1',
-    registryDigest: 'digest-1',
-  });
-  const messages = [
-    priorMainRequest,
-    priorMainReply,
-    mainRequest,
-    currentMainReply,
-    priorPlannerMessage,
-    toolCall,
-    toolResult,
-    announce,
-    otherLane,
-    staleTranscript,
-    entryControlCall,
-  ];
-
-  const entry = selectCapabilityPlannerMessages({
-    mode: 'entry',
-    messages,
-    traceId: 'trace-1',
-    registryDigest: 'digest-1',
-  });
-  assert.deepEqual(entry, [
-    priorPlannerMessage,
-    priorMainRequest,
-    priorMainReply,
-    mainRequest,
-    currentMainReply,
-  ]);
-
-  const boundary = selectCapabilityPlannerMessages({
-    mode: 'boundary',
-    messages,
-    traceId: 'trace-1',
-    registryDigest: 'digest-1',
-    lane: 'capability:general',
-    transcriptRunId: 'transcript-1',
+    runId: 'transcript-1',
     delegationId: 'delegation-1',
-    announceMessageId: 'announce-current',
   });
-  assert.deepEqual(boundary, [
-    priorPlannerMessage,
-    priorMainRequest,
-    priorMainReply,
-    mainRequest,
-    currentMainReply,
-    announce,
+  const legacyPlannerLane = new AIMessage('LEGACY_PLANNER_TRANSCRIPT');
+  setPinpetMeta(legacyPlannerLane, {
+    lane: 'orchestrator',
+    source: 'capability_planner',
+  });
+  const accepted = new DelegationAnnounceMessage({
+    id: 'accepted-1',
+    sourceLane: 'capability:explore',
+    delegationId: 'delegation-accepted',
+    transcriptRunId: 'run-old',
+    announceMessageId: 'announce-old',
+    task: '检查历史实现',
+    completionReason: 'natural',
+    result: '历史实现已检查。',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  const projected = projectCapabilityPlannerMessagesForModel([
+    request,
+    privateLane,
+    legacyPlannerLane,
+    accepted,
   ]);
-  assert.equal(boundary.includes(toolCall), false);
-  assert.equal(boundary.includes(toolResult), false);
-});
 
-test('a fresh trace removes Planner messages owned by older traces', () => {
-  const stale = new AIMessage({ id: 'planner-old', content: 'OLD_PLANNER_STATE' });
-  setPinpetMeta(stale, {
-    lane: 'orchestrator',
-    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
-    traceId: 'trace-old',
-  });
-  const current = new AIMessage({ id: 'planner-current', content: 'CURRENT_PLANNER_STATE' });
-  setPinpetMeta(current, {
-    lane: 'orchestrator',
-    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
-    traceId: 'trace-current',
-  });
-
-  const removals = removeStaleCapabilityPlannerMessages(
-    [stale, current],
-    'trace-current',
-  );
-
-  assert.deepEqual(removals.map((message) => message.id), ['planner-old']);
+  assert.equal(projected.length, 2);
+  assert.equal(projected[0], request);
+  assert.notEqual(projected[1], accepted);
+  assert.match(projected[1]?.text ?? '', /<delegation_announce/);
+  assert.match(projected[1]?.text ?? '', /历史实现已检查/);
+  assert.equal(projected.some((message) => message.text.includes('PRIVATE_EXECUTOR_TRANSCRIPT')), false);
+  assert.equal(projected.some((message) => message.text.includes('LEGACY_PLANNER_TRANSCRIPT')), false);
 });

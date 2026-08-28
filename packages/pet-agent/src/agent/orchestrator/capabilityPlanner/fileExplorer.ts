@@ -16,7 +16,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Disclose a more specific Capability document. When the request centers on a distinct domain or specialist responsibility, make one focused search before assigning the configured default, even if the configured default could attempt ordinary work. Skip discovery when the work is genuinely general or an already disclosed specific Capability clearly matches. Search with literal terms from the desired responsibility. Each new match returns the complete CAPABILITY.md and remains disclosed for later planning boundaries. Empty-search allowance is shared across the whole task; once search is closed, finish planning from already disclosed Capabilities.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search undisclosed Capability documents for one responsibility and disclose each matching complete document for this run. Use concise literal terms from the desired responsibility. This tool discovers execution capabilities; it does not execute the user task.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;

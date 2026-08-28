@@ -47,13 +47,15 @@ export function applyActiveDelegationTransition(
   if (state.runActiveDelegationTransition === 'supersede_active') {
     return {
       taskActiveDelegation: null,
+      taskPlannerContinuation: null,
     };
   }
 
   if (!isResumableDelegation(activeDelegation)) {
     return {
       runNextDelegation: null,
-      runCapabilityPlan: [],
+      runPlannerSession: null,
+      taskPlannerContinuation: null,
       runLatestDelegationOutcome: null,
       runRuntimeFailure: 'checkpoint_incompatible',
     };
@@ -64,6 +66,15 @@ export function applyActiveDelegationTransition(
     ? clipForPrompt(latestHumanRequest, RESUME_GUIDANCE_MAX_CHARS)
     : null;
   const resumedUserRequest = activeDelegation.userRequest;
+  const continuation = state.taskPlannerContinuation
+    ?? (state.runPlannerSession && state.runPlannerSession.runId !== state.runId
+      ? {
+          traceId: activeDelegation.traceId,
+          userRequest: activeDelegation.userRequest,
+          activeDelegationId: activeDelegation.id,
+          remainingPlan: [...state.runPlannerSession.plan],
+        }
+      : null);
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
   const resumedSummaries = resumeRunDelegationSummary(
     state.runDelegationSummaries,
@@ -73,6 +84,8 @@ export function applyActiveDelegationTransition(
   if (activeDelegation.status === 'awaiting_decision') {
     return {
       traceId: activeDelegation.traceId,
+      runPlannerSession: null,
+      taskPlannerContinuation: continuation,
       runUserRequest: resumedUserRequest,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
@@ -87,6 +100,8 @@ export function applyActiveDelegationTransition(
 
   return {
     traceId: activeDelegation.traceId,
+    runPlannerSession: null,
+    taskPlannerContinuation: continuation,
     runUserRequest: resumedUserRequest,
     runNextDelegation,
     taskActiveDelegation: {

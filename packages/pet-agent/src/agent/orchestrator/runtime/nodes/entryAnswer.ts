@@ -11,7 +11,6 @@ import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { resolveActor } from '../config';
 import type { CapabilityPlannerDispatch } from '../../capabilityPlanner/runner';
-import { removeStaleCapabilityPlannerMessages } from '../../capabilityPlanner/messageContext';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -46,14 +45,10 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
     throw new Error('Entry Answer requires a current HumanMessage.');
   }
   return {
-    messages: removeStaleCapabilityPlannerMessages(state.messages, state.traceId),
     runUserRequest,
     runNextDelegation: null,
-    runCapabilityPlan: [],
-    ...((state.runActiveDelegationTransition === 'supersede_active'
-      || !state.taskActiveDelegation)
-      ? { runCapabilityDisclosure: null }
-      : {}),
+    runPlannerSession: null,
+    taskPlannerContinuation: null,
   };
 }
 
@@ -124,8 +119,7 @@ function plannerDispatch(
       traceId: state.traceId,
       runUserRequest,
       runDelegationSummaries: state.runDelegationSummaries,
-      runCapabilityPlan: [],
-      runCapabilityDisclosure: state.runCapabilityDisclosure,
+      runPlannerSession: null,
     },
     messages: state.messages,
   };
@@ -144,7 +138,7 @@ export function createPlanRequestTool() {
         update: {
           runUserRequest,
           runNextDelegation: null,
-          runCapabilityPlan: [],
+          runPlannerSession: null,
         },
         goto: new Send('capabilityPlanner', plannerDispatch(runtime.state, runUserRequest)),
       });

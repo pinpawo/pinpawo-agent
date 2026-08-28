@@ -1,9 +1,8 @@
 import type { AgentPlan, AgentPlanItem } from '@pinpawo/agent-session';
-import { truncateTerminalLine } from '../text/terminalText';
+import stringWidth from 'string-width';
+import { truncateTerminalLine, wrapTerminalText } from '../text/terminalText';
 
-const EXPANDED_MIN_TERMINAL_ROWS = 24;
-const EXPANDED_MIN_WIDTH = 56;
-const MAX_VISIBLE_ITEMS = 4;
+const MIN_VISIBLE_ITEMS = 4;
 
 export type CurrentPlanPanel = {
   content: string;
@@ -21,9 +20,6 @@ export function buildCurrentPlanPanel(
 ): CurrentPlanPanel {
   if (!plan?.items.length) return { content: '', height: 0, mode: 'hidden' };
 
-  const compact = options.overlayOpen
-    || options.terminalHeight < EXPANDED_MIN_TERMINAL_ROWS
-    || options.width < EXPANDED_MIN_WIDTH;
   // Between delegations no item is active; the next pending step still tells
   // the operator where the plan stands.
   const active = plan.items.find((item) => item.status === 'active')
@@ -32,7 +28,7 @@ export function buildCurrentPlanPanel(
   if (!active) return { content: '', height: 0, mode: 'hidden' };
   const currentStep = plan.items.indexOf(active) + 1;
 
-  if (compact) {
+  if (options.overlayOpen) {
     return {
       content: truncateTerminalLine(
         `计划 ${currentStep}/${plan.items.length} · ${formatItem(active)}`,
@@ -46,16 +42,18 @@ export function buildCurrentPlanPanel(
   // A taller terminal can show more of the plan; the cap only exists to keep
   // the panel from crowding out the transcript.
   const maxVisible = Math.max(
-    MAX_VISIBLE_ITEMS,
+    MIN_VISIBLE_ITEMS,
     Math.min(plan.items.length, Math.floor(options.terminalHeight / 4)),
   );
-  const visibleItems = selectVisibleItems(plan.items, maxVisible);
+  const visibleItems = selectVisibleItems(plan.items, maxVisible, currentStep - 1);
   const omitted = plan.items.length - visibleItems.length;
   const lines = [
-    `当前计划 · ${currentStep}/${plan.items.length}`,
-    ...visibleItems.map((item) => `  ${formatItem(item)}`),
-    ...(omitted > 0 ? [`  … 还有 ${omitted} 项`] : []),
-  ].map((line) => truncateTerminalLine(line, options.width));
+    ...wrapTerminalText(`当前计划 · ${currentStep}/${plan.items.length}`, options.width),
+    ...visibleItems.flatMap((item) => formatItemLines(item, options.width)),
+    ...(omitted > 0
+      ? wrapTerminalText(`  … 还有 ${omitted} 项`, options.width)
+      : []),
+  ];
   return {
     content: lines.join('\n'),
     height: lines.length,
@@ -63,18 +61,46 @@ export function buildCurrentPlanPanel(
   };
 }
 
-function selectVisibleItems(items: AgentPlanItem[], maxVisible: number) {
+function selectVisibleItems(
+  items: AgentPlanItem[],
+  maxVisible: number,
+  focusIndex: number,
+) {
   if (items.length <= maxVisible) return items;
-  const activeIndex = Math.max(0, items.findIndex((item) => item.status === 'active'));
-  const start = Math.max(0, Math.min(activeIndex - 1, items.length - maxVisible));
+  const start = Math.max(0, Math.min(focusIndex - 1, items.length - maxVisible));
   return items.slice(start, start + maxVisible);
 }
 
+function formatItemLines(item: AgentPlanItem, width: number) {
+  const contentWidth = Math.max(1, width);
+  const prefix = `  ${formatItemPrefix(item)}`;
+  const prefixWidth = stringWidth(prefix);
+  if (prefixWidth < contentWidth) {
+    const taskLines = wrapTerminalText(item.task, contentWidth - prefixWidth);
+    const continuationPrefix = ' '.repeat(prefixWidth);
+    return taskLines.map((line, index) => (
+      `${index === 0 ? prefix : continuationPrefix}${line}`
+    ));
+  }
+
+  const continuationWidth = Math.min(4, Math.max(0, contentWidth - 1));
+  const continuationPrefix = ' '.repeat(continuationWidth);
+  return [
+    ...wrapTerminalText(prefix.trimEnd(), contentWidth),
+    ...wrapTerminalText(item.task, contentWidth - continuationWidth)
+      .map((line) => `${continuationPrefix}${line}`),
+  ];
+}
+
 function formatItem(item: AgentPlanItem) {
+  return `${formatItemPrefix(item)}${item.task}`;
+}
+
+function formatItemPrefix(item: AgentPlanItem) {
   const marker = item.status === 'completed'
     ? '✓'
     : item.status === 'active'
       ? '→'
       : '·';
-  return `${marker} ${item.capability} · ${item.task}`;
+  return `${marker} ${item.capability} · `;
 }

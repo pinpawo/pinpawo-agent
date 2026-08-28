@@ -78,7 +78,6 @@ async function evaluateGoal(
       runtimeContext: {
         userRequest: testCase.input.userRequest ?? null,
         delegationOutcome: testCase.input.delegationOutcome ?? null,
-        plannerDirectAnswer: testCase.input.plannerDirectAnswer ?? null,
       },
     },
     candidateOutput: { text: candidateAnswer },
@@ -160,7 +159,6 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
             mode: 'direct',
             hasUserRequest,
             acceptedResults: [],
-            answer: testCase.input.plannerDirectAnswer ?? null,
           },
   });
 }

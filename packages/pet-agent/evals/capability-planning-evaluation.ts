@@ -94,9 +94,9 @@ export function buildCapabilityPlanningGoalContract(
           }, ...(expected.result === 'advance_plan' ? [{
             id: 'remaining_plan_change_is_minimal',
             statement: [
-              'Preserve the prior remaining plan unchanged unless the accepted result proves a change is necessary.',
-              'Do not rewrite tasks for style or to copy handoff details that the next executor already receives as context.',
-              'When a change is necessary, revise only the affected task or shortest affected segment and preserve the unaffected tail.',
+              'Revalidate the prior remaining-plan proposal against the user goal, accepted history, and current result.',
+              'Keep only independently required work that is not already satisfied; preserve an unaffected task when its responsibility and wording remain accurate.',
+              'Do not rewrite tasks merely for style or copy details that the next executor already receives as context.',
             ].join(' '),
           }] : []), {
             id: expected.remainingPlanPolicy === 'optional'

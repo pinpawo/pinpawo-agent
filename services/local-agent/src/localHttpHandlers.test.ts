@@ -312,6 +312,7 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
     model_profile_available: true,
     llm_model: 'test-model',
     llm_context_window_tokens: 32000,
+    context_compaction_watermark_tokens: 24000,
     workdir,
     workspace_id: 'workspace-test',
     workspace_name: 'Runtime Test',

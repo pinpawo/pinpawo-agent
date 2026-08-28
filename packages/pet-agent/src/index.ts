@@ -125,6 +125,8 @@ export type {
   CapabilityPlannerMode,
   CapabilityPlannerResult,
   CapabilityPlannerRunner,
+  PlannerSessionState,
+  PlannerTaskContinuation,
   CapabilityRegistryBackend,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,

@@ -579,6 +579,9 @@ async function runCase(params: {
     const invariants = evaluateLifecycleCompositionInvariants({
       finalState,
       assistantMessageCount,
+      executorCallCount: executor.calls.length,
+      expectedExecutorCallRange: testCase.expected.executorCallRange,
+      expectedCheckpointState: testCase.expected.checkpointState,
     });
     const evaluation = await evaluatePromptGoal({
       judge: {

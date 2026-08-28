@@ -5,7 +5,6 @@ import {
   formatHandoffArtifactRefsForMessage,
 } from '../../artifacts/handoff';
 import {
-  getPinpetMeta,
   getMessageHandoffSource,
   mainConversationMessages,
   readLatestAnnounce,
@@ -13,7 +12,6 @@ import {
   readLatestHumanRequest,
   stampMessageCreatedAtUtc,
 } from '../../messageLanes';
-import { isCapabilityPlannerMessage } from '../../capabilityPlanner/messageContext';
 import { getDelegationAnnounce } from '../../delegationAnnounce';
 import {
   buildAnswerInvocationMessages,
@@ -30,6 +28,7 @@ import {
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
+import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
 
 type AcceptedRunResultsProjection = {
   history: BaseMessage[];
@@ -83,23 +82,6 @@ export function projectAcceptedRunResults(params: {
 
 export const CHECKPOINT_INCOMPATIBLE_MESSAGE =
   '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。';
-
-function readLatestPlannerOrdinaryOutput(state: OrchestratorStateType) {
-  let latestPlannerInputId: string | null = null;
-  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
-    const message = state.messages[index];
-    if (!isCapabilityPlannerMessage(message, state.traceId)) continue;
-    const plannerInputId = getPinpetMeta(message).plannerInputId;
-    if (typeof plannerInputId !== 'string' || !plannerInputId) continue;
-    latestPlannerInputId ??= plannerInputId;
-    if (plannerInputId !== latestPlannerInputId
-      || !AIMessage.isInstance(message)
-      || message.tool_calls?.length) continue;
-    const content = readMessageText(message).trim();
-    if (content) return content;
-  }
-  return null;
-}
 
 export function createAnswerNode(config: OrchestratorConfig) {
   // Node: answer — the dedicated final-reply node. The decision nodes only route
@@ -233,14 +215,6 @@ export function selectAnswerContextFacts(params: {
       detail: null,
     };
   }
-  if (params.state.runLatestDelegationOutcome === 'planner_direct_answer') {
-    return {
-      mode: 'direct',
-      hasUserRequest,
-      acceptedResults: params.acceptedResults,
-      answer: readLatestPlannerOrdinaryOutput(params.state),
-    };
-  }
   if (params.state.runLatestDelegationOutcome === 'planner_incomplete') {
     return {
       mode: 'blocked',
@@ -250,9 +224,7 @@ export function selectAnswerContextFacts(params: {
       unfinishedTask: params.state.taskActiveDelegation?.task
         ?? params.state.runUserRequest
         ?? null,
-      // Ordinary Planner text is not a control action, but it is still useful
-      // evidence for Answer to explain why planning stopped.
-      detail: readLatestPlannerOrdinaryOutput(params.state),
+      detail: null,
     };
   }
 
@@ -287,23 +259,24 @@ export function selectAnswerContextFacts(params: {
     mode: 'direct',
     hasUserRequest,
     acceptedResults: params.acceptedResults,
-    answer: null,
   };
 }
 
 function buildAnswerCleanup(state: OrchestratorStateType) {
-  const preserveBoundaryPlan = (
-    state.runLatestDelegationOutcome === 'planner_incomplete'
-    || state.runLatestDelegationOutcome === 'planner_direct_answer'
-  )
-    && state.runRuntimeFailure === null
-    && state.taskActiveDelegation !== null;
+  const continuation = state.runRuntimeFailure === null
+    ? snapshotPlannerTaskContinuation({
+        activeDelegation: state.taskActiveDelegation,
+        plannerSession: state.runPlannerSession,
+      })
+    : null;
   return {
     runNextDelegation: null,
-    runCapabilityPlan: preserveBoundaryPlan ? [...state.runCapabilityPlan] : [],
+    runPlannerSession: null,
+    taskPlannerContinuation: continuation,
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
     runUserInputRequest: null,
     runRuntimeFailure: null,
+    runTerminalError: null,
   };
 }

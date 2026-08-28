@@ -147,9 +147,9 @@ because preparation, execution, and reporting belong to one workspace boundary.
    npm run eval:lifecycle-composition
    ```
 
-   The fixed V1 profile contains seven cases and defaults to three repeats. It
+   The fixed V1 profile contains nine cases and defaults to three repeats. It
    evaluates the complete user-visible lifecycle with
-   `prompt-goal-v1`; terminal-state cleanup, lane isolation, assistant output,
+   `prompt-goal-v1`; checkpoint-state correctness, lane isolation, assistant output,
    and controlled-evidence availability are separate mechanical invariants.
    Executor-call counts, decision paths, and delegation summaries remain
    diagnostics.
@@ -185,9 +185,7 @@ Render the exact production system and human input messages for canonical
 decision cases without calling a model:
 
 ```sh
-npm run prompt:preview -- entry
-npm run prompt:preview -- planner --case boundary-materializes-from-explore-handoff
-npm run prompt:preview -- outcome --case partial-result-continues-current-task
+npm run prompt:preview -- entry_answer
 npm run prompt:preview -- all --method jsonMode
 ```
 
@@ -198,7 +196,24 @@ characters individually and groups other characters four-to-one; it is useful
 for relative prompt comparisons, not provider billing.
 
 Both preview and stability evaluation use `decision-eval-scenarios.ts`, so the
-displayed messages cannot drift from the messages sent by the runner.
+displayed entry-routing messages cannot drift from the messages sent by the
+runner.
+
+## Capability Planner Context Audit
+
+Render the complete static Entry and Boundary provider contracts without calling
+a model:
+
+```sh
+npm run planner:context-audit
+```
+
+The audit includes production system and input messages, clean projected main
+history, mode-specific tool descriptions, and complete argument JSON schemas.
+Use the checklist printed at the top to inspect goal clarity, evidence authority,
+action exclusivity, argument semantics, and run/message scope. Follow static
+review with behavior tests and targeted lifecycle evals; do not turn prompt prose
+into a literal snapshot contract.
 
 ## Cross-Decision Stability Runner
 

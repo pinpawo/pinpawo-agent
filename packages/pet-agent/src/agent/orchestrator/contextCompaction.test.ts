@@ -172,26 +172,27 @@ test('orchestrator context compaction passes the complete old history to the sum
   assert.match(summaryInput, /new-context-marker/);
 });
 
-test('orchestrator context compaction retains a complete large delegation result', async () => {
+test('orchestrator context compaction summarizes a complete accepted main announce', async () => {
   let summaryInput = '';
   const resultTail = 'DELEGATION_RESULT_TAIL_MARKER';
+  const acceptedAnnounce = new DelegationAnnounceMessage({
+    id: 'delegation-announce:run-1:delegation-1:announce-1',
+    sourceLane: 'capability:general',
+    delegationId: 'delegation-1',
+    transcriptRunId: 'run-1',
+    announceMessageId: 'announce-1',
+    task: '生成完整报告',
+    completionReason: 'natural',
+    result: `${'大结果内容 '.repeat(6000)}${resultTail}`,
+    createdAt: '2026-08-24T00:00:00.000Z',
+  });
   const messages: BaseMessage[] = [
     new HumanMessage('用户目标：保留完整的委派结果并总结。'),
-    new DelegationAnnounceMessage({
-      id: 'delegation-announce:run-1:delegation-1:announce-1',
-      sourceLane: 'capability:general',
-      delegationId: 'delegation-1',
-      transcriptRunId: 'run-1',
-      announceMessageId: 'announce-1',
-      task: '生成完整报告',
-      completionReason: 'natural',
-      result: `${'大结果内容 '.repeat(6000)}${resultTail}`,
-      createdAt: '2026-08-24T00:00:00.000Z',
-    }),
+    acceptedAnnounce,
     usageMessage('保留在当前上下文的最新消息。', 900),
   ];
 
-  await compactOrchestratorMessages({
+  const result = await compactOrchestratorMessages({
     messages,
     model: fakeSummaryModel('summary', (input) => {
       summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
@@ -202,6 +203,59 @@ test('orchestrator context compaction retains a complete large delegation result
   assert.match(summaryInput, /用户目标：保留完整的委派结果并总结。/);
   assert.match(summaryInput, /<delegation_announce/);
   assert.match(summaryInput, new RegExp(resultTail));
+  assert.equal(
+    result.messages.some((message) => message.id === acceptedAnnounce.id),
+    false,
+  );
+});
+
+test('orchestrator context compaction pins every unaccepted lane announce outside the suffix', async () => {
+  const firstAnnounce = new AIMessage('FIRST_ATTEMPT');
+  firstAnnounce.id = 'announce-1';
+  setPinpetMeta(firstAnnounce, {
+    lane: 'capability:general',
+    runId: 'run-1',
+    delegationId: 'delegation-1',
+    isAnnounce: true,
+    completionReason: 'limit_reached',
+  });
+  const secondAnnounce = new AIMessage('SECOND_ATTEMPT');
+  secondAnnounce.id = 'announce-2';
+  setPinpetMeta(secondAnnounce, {
+    lane: 'capability:general',
+    runId: 'run-1',
+    delegationId: 'delegation-1',
+    isAnnounce: true,
+    completionReason: 'natural',
+  });
+  const messages: BaseMessage[] = [
+    new HumanMessage('完成任务'),
+    firstAnnounce,
+    ...Array.from({ length: 12 }, (_, index) => longMessage(index)),
+    secondAnnounce,
+    usageMessage('模型已经看到了较长主线。', 900),
+  ];
+
+  const result = await compactOrchestratorMessages({
+    messages,
+    model: fakeSummaryModel('summary'),
+    options: {
+      keepMessages: 1,
+      preserveAnnouncesFor: {
+        lane: 'capability:general',
+        transcriptRunId: 'run-1',
+        delegationId: 'delegation-1',
+      },
+    },
+  });
+
+  assert.equal(result.compacted, true);
+  assert.deepEqual(
+    result.messages
+      .filter((message) => getPinpetMeta(message).isAnnounce)
+      .map((message) => message.id),
+    ['announce-1', 'announce-2'],
+  );
 });
 
 test('orchestrator context compaction falls back when summary model fails', async () => {

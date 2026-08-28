@@ -76,6 +76,16 @@ test('boundary planning cases identify the active Capability explicitly', () => 
   }
 });
 
+test('resume planning represents absent execution evidence without a synthetic announce', () => {
+  const testCase = capabilityPlanningBasicsDataset.cases.find(
+    ({ name }) => name === 'boundary-resume-without-execution-evidence-continues-current',
+  );
+  assert.ok(testCase);
+  assert.equal(testCase.input.mode, 'boundary');
+  assert.equal(testCase.input.latestAnnounce, undefined);
+  assert.equal(testCase.expected.result, 'continue_current');
+});
+
 test('entry planning distinguishes verifiable facts from user-owned choices', () => {
   const verifiableFact = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-verifies-latest-main-instead-of-requesting-user-input',

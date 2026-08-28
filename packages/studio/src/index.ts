@@ -65,3 +65,8 @@ export type {
   StudioHostProcessDependencies,
   StudioHostProcessOptions,
 } from './studioHostProcess';
+export { initStudioKickstart } from './studioTemplate';
+export type {
+  InitStudioKickstartOptions,
+  InitStudioKickstartResult,
+} from './studioTemplate';

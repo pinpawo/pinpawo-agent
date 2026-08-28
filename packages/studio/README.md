@@ -17,8 +17,11 @@ npm install --global \
   @pinpawo/studio \
   @pinpawo-plugin/studio-http \
   @pinpawo-plugin/kanban \
+  @pinpawo-plugin/scheduler \
+  @pinpawo-plugin/project-files \
   @pinpawo-plugin/trigger
 
+pinpawo-studio init --workdir /path/to/project
 pinpawo-studio --workdir /path/to/project
 pinpawo-studio --workdir /path/to/project --pet-port 3212
 ```
@@ -44,3 +47,7 @@ resident Pet. The workdir must contain
 `.pinpawo/studio.json` and the referenced `.pinpawo/pets/*.json` files.
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.
+
+`pinpawo-studio init` copies the shipped four-Pet kickstart configuration,
+Capabilities, and initial `wiki/PROJECT.md` without overwriting existing files.
+The independent Studio Console remains a separate frontend application.

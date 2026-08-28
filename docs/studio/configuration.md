@@ -24,7 +24,8 @@ Capability collection at
   "pets": ["planner", "writer", "reviewer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
-    { "id": "@pinpawo-plugin/kanban" }
+    { "id": "@pinpawo-plugin/kanban" },
+    { "id": "@pinpawo-plugin/project-files", "options": { "directory": "wiki" } }
   ]
 }
 ```
@@ -136,6 +137,12 @@ A GitHub webhook binding uses `source.kind: "github"`, a `secretEnv`, and the
 GitHub webhook `event` (plus optional payload `action`). GitHub sends it to
 `POST /triggers/github`; the Trigger Plugin verifies `X-Hub-Signature-256` and
 deduplicates `X-GitHub-Delivery` before dispatching the configured Pet.
+
+`@pinpawo-plugin/project-files` is an optional, read-only projection of Markdown
+under a workdir-relative directory (default `wiki`). It contributes
+`GET /knowledge` and `GET /knowledge/document?path=...` through the HTTP route
+hook. It defines no Toolkit, does not write files, and does not make Studio or
+the HTTP Plugin own project knowledge.
 
 Existing file-backed `kanban.json` state is not loaded implicitly. Before changing
 an existing resolver to `databasePath`, run the explicit

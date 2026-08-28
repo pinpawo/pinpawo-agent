@@ -10,6 +10,7 @@
   "devDependencies": {
     "@pinpawo-plugin/studio-http": "*",
     "@pinpawo-plugin/kanban": "*",
+    "@pinpawo-plugin/project-files": "*",
     "@pinpawo-plugin/scheduler": "*",
     "@pinpawo-plugin/trigger": "*",
     "@pinpawo/studio": "*",

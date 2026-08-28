@@ -40,6 +40,7 @@ test('Studio Host process composes resolver and Agent Session port before starti
       return completedHost();
     },
     signals: new EventEmitter(),
+    writeOutput: () => undefined,
   });
 
   assert.equal(started?.runtimeConfig, config);
@@ -70,6 +71,7 @@ test('Studio Host process installs the package resolver for the standalone CLI',
       return completedHost();
     },
     signals: new EventEmitter(),
+    writeOutput: () => undefined,
   });
 
   assert.equal(resolverWorkdir, '/resolved/project');
@@ -96,6 +98,7 @@ test('Studio Host process closes the Host on SIGTERM', async () => {
       };
     },
     signals,
+    writeOutput: () => undefined,
   });
 
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -121,6 +124,7 @@ test('Studio Host process remembers a close signal received during startup', asy
     ensureAuthToken: () => 'test-auth-token',
     startHost: async () => starting,
     signals,
+    writeOutput: () => undefined,
   });
 
   await new Promise<void>((resolve) => setImmediate(resolve));
@@ -141,4 +145,21 @@ test('Studio Host process remembers a close signal received during startup', asy
   assert.equal(closeCount, 1);
   assert.equal(signals.listenerCount('SIGINT'), 0);
   assert.equal(signals.listenerCount('SIGTERM'), 0);
+});
+
+test('Studio Host process reports the resolved interaction endpoint and token path', async () => {
+  let output = '';
+  await runStudioHostProcess({}, {
+    buildRuntimeConfig: () => runtimeConfig('/resolved/project'),
+    ensureAuthToken: () => 'test-auth-token',
+    authTokenPath: () => '/resolved/token',
+    startHost: async () => ({ ...completedHost(), agentSessionPort: 43123 }),
+    signals: new EventEmitter(),
+    writeOutput: (text) => { output += text; },
+  });
+
+  assert.match(output, /Workdir: \/resolved\/project/);
+  assert.match(output, /Agent Session port: 43123/);
+  assert.match(output, /Studio bearer token file: \/resolved\/token/);
+  assert.match(output, /--pet-port 43123 --pet-id <petId>/);
 });

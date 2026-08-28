@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
-type Page = 'studio' | 'kanban' | 'scheduler' | 'trigger';
+type Page = 'studio' | 'kanban' | 'scheduler' | 'trigger' | 'knowledge';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
   taskId: string; assigneeId: string; brief: string;
@@ -33,6 +33,10 @@ type HistoryEvent = {
   taskId?: string; scheduleId?: string; deliveryId?: string; triggerId?: string; status?: string;
 };
 type LiveEvent = { type: string; source: string; occurredAt: string; payload?: unknown };
+type ProjectDocumentSummary = {
+  path: string; title: string; size: number; modifiedAt: string;
+};
+type ProjectDocument = ProjectDocumentSummary & { content: string };
 
 type Resource<T> = { value: T | null; unavailable: boolean; error?: string };
 const empty = <T,>(): Resource<T> => ({ value: null, unavailable: false });
@@ -66,6 +70,8 @@ export function App() {
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
+  const [knowledge, setKnowledge] = useState<Resource<ProjectDocumentSummary[]>>(empty);
+  const [selectedDocument, setSelectedDocument] = useState<ProjectDocument | null>(null);
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [kanbanHistory, setKanbanHistory] = useState<HistoryEvent[]>([]);
   const [schedulerHistory, setSchedulerHistory] = useState<HistoryEvent[]>([]);
@@ -90,10 +96,11 @@ export function App() {
     };
     const refresh = async () => {
       const petResponse = await read<{ pets: Pet[] }>('/pets');
-      const [kanban, scheduler, trigger, kanbanEvents, schedulerEvents, triggerEvents] = await Promise.all([
+      const [kanban, scheduler, trigger, projectFiles, kanbanEvents, schedulerEvents, triggerEvents] = await Promise.all([
         read<{ tasks: Task[] }>('/kanban').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ schedules: Schedule[] }>('/scheduler').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>('/triggers').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
+        read<{ documents: ProjectDocumentSummary[] }>('/knowledge').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ events: HistoryEvent[] }>('/kanban/events').catch(() => ({ value: null, unavailable: true })),
         read<{ events: HistoryEvent[] }>('/scheduler/events').catch(() => ({ value: null, unavailable: true })),
         read<{ events: HistoryEvent[] }>('/triggers/events').catch(() => ({ value: null, unavailable: true })),
@@ -105,6 +112,12 @@ export function App() {
       setTasks({ ...kanban, value: kanban.value?.tasks ?? null });
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
       setTriggers(trigger);
+      setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
+      setSelectedDocument((current) => (
+        current && projectFiles.value?.documents.some(({ path }) => path === current.path)
+          ? current
+          : null
+      ));
       setKanbanHistory(kanbanEvents.value?.events ?? []);
       setSchedulerHistory(schedulerEvents.value?.events ?? []);
       setTriggerHistory(triggerEvents.value?.events ?? []);
@@ -171,6 +184,25 @@ export function App() {
     setConnectionKey((current) => current + 1);
   };
 
+  const openDocument = async (documentPath: string) => {
+    try {
+      const response = await fetch(
+        `${normalizedUrl}/knowledge/document?path=${encodeURIComponent(documentPath)}`,
+        { headers },
+      );
+      const value = await response.json().catch(() => null) as {
+        document?: ProjectDocument;
+        error?: string;
+      } | null;
+      if (!response.ok || !value?.document) {
+        throw new Error(value?.error ?? `Knowledge document failed (${response.status.toString()}).`);
+      }
+      setSelectedDocument(value.document);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const submitSchedule = (event: FormEvent) => {
     event.preventDefault();
     try {
@@ -210,7 +242,7 @@ export function App() {
         </form>
       </header>
       <nav>
-        {(['studio', 'kanban', 'scheduler', 'trigger'] as const).map((item) => (
+        {(['studio', 'kanban', 'scheduler', 'trigger', 'knowledge'] as const).map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
@@ -250,6 +282,27 @@ export function App() {
           <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}</span></div>)}</div>
           <History title="TRIGGER HISTORY" events={triggerHistory} />
         </> : unavailable(triggers, 'Trigger'))}
+        {page === 'knowledge' && (knowledge.value ? <>
+          <div className="section-title"><span>PROJECT MARKDOWN</span><b>{knowledge.value.length}</b></div>
+          <div className="knowledge-layout">
+            <div className="rows knowledge-files">{knowledge.value.map((document) => (
+              <button
+                className={selectedDocument?.path === document.path ? 'knowledge-file active' : 'knowledge-file'}
+                key={document.path}
+                onClick={() => { void openDocument(document.path); }}
+                type="button"
+              >
+                <code>{document.path}</code>
+                <span>{new Date(document.modifiedAt).toLocaleString()} · {document.size.toString()} B</span>
+              </button>
+            ))}</div>
+            <article className="knowledge-document">
+              {selectedDocument
+                ? <><h2>{selectedDocument.path}</h2><pre>{selectedDocument.content}</pre></>
+                : <div className="empty-state"><strong>Select a Markdown document</strong><span>Knowledge remains ordinary project files; this view is read-only.</span></div>}
+            </article>
+          </div>
+        </> : unavailable(knowledge, 'Project Files'))}
       </section>
       <footer>{notice}</footer>
     </main>

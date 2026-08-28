@@ -86,6 +86,8 @@ try {
     access(join(installedStudio, 'dist', 'index.d.ts')),
     access(join(installedStudio, 'dist', 'cli.js')),
     access(installedBin),
+    access(join(installedStudio, 'examples', 'kanban-workdir', '.pinpawo', 'studio.json')),
+    access(join(installedStudio, 'examples', 'kanban-workdir', 'wiki', 'PROJECT.md')),
   ]);
 
   const imported = await runProcess(process.execPath, [
@@ -112,6 +114,30 @@ try {
     );
   assert.match(cli.stdout, /Usage: pinpawo-studio/);
   assert.equal(cli.stderr, '');
+
+  const initializedWorkdir = join(tempRoot, 'initialized-workdir');
+  const initialized = process.platform === 'win32'
+    ? await runProcess(
+      process.execPath,
+      [join(installedStudio, 'dist', 'cli.js'), 'init', '--workdir', initializedWorkdir],
+      consumerDir,
+      'initialize installed Studio kickstart',
+      30_000,
+    )
+    : await runProcess(
+      installedBin,
+      ['init', '--workdir', initializedWorkdir],
+      consumerDir,
+      'initialize installed Studio kickstart',
+      30_000,
+    );
+  assert.match(initialized.stdout, /Initialized Studio kickstart/);
+  assert.equal(initialized.stderr, '');
+  await Promise.all([
+    access(join(initializedWorkdir, '.pinpawo', 'studio.json')),
+    access(join(initializedWorkdir, '.pinpawo', 'pets', 'planner.json')),
+    access(join(initializedWorkdir, 'wiki', 'PROJECT.md')),
+  ]);
   process.stdout.write('[studio:install-smoke] installed library and CLI passed\n');
 } finally {
   await rm(tempRoot, { recursive: true, force: true });

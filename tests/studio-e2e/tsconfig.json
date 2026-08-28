@@ -8,6 +8,7 @@
       "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
       "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
       "@pinpawo-plugin/kanban": ["../../plugins/kanban/src/index.ts"],
+      "@pinpawo-plugin/project-files": ["../../plugins/project-files/src/index.ts"],
       "@pinpawo-plugin/scheduler": ["../../plugins/scheduler/src/index.ts"],
       "@pinpawo-plugin/trigger": ["../../plugins/trigger/src/index.ts"],
       "pinpawo/host-runtime": ["../../services/local-agent/src/hostRuntime.ts"],

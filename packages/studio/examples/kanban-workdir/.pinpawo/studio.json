@@ -16,6 +16,7 @@
     },
     { "id": "@pinpawo-plugin/kanban" },
     { "id": "@pinpawo-plugin/scheduler" },
+    { "id": "@pinpawo-plugin/project-files" },
     {
       "id": "@pinpawo-plugin/trigger",
       "options": {

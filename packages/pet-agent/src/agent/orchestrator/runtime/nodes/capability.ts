@@ -39,6 +39,7 @@ import {
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegationBriefing';
+import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -297,6 +298,13 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
     );
+    const interruptedContinuation = interrupted
+      ? state.taskPlannerContinuation
+        ?? snapshotPlannerTaskContinuation({
+          activeDelegation,
+          plannerSession: state.runPlannerSession,
+        })
+      : null;
     return {
       messages: laneOutputMessages,
       sessionCapabilityArtifacts: result.artifacts,
@@ -308,6 +316,10 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
+      ...(interrupted ? {
+        runPlannerSession: null,
+        taskPlannerContinuation: interruptedContinuation,
+      } : {}),
       sessionToolAuthorizations: {
         generation: registry.authorizationGeneration,
         records: authorizationRecorder.active,

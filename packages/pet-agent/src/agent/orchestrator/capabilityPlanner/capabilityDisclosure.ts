@@ -26,6 +26,7 @@ export function createCapabilityDisclosureState(params: {
   workspace: CapabilityDocumentWorkspace;
   maxEmptySearchRounds: number;
   defaultCapabilityName?: string;
+  seedCapabilityNames?: readonly string[];
 }): CapabilityDisclosureState {
   const { workspace, maxEmptySearchRounds } = params;
   if (!Number.isSafeInteger(maxEmptySearchRounds) || maxEmptySearchRounds <= 0) {
@@ -36,9 +37,14 @@ export function createCapabilityDisclosureState(params: {
   if (!defaultCapabilityName.trim()) {
     throw new Error('Capability Planner defaultCapabilityName must be non-empty');
   }
-  const disclosedCapabilityNames = workspace.capabilityNames.includes(
-    defaultCapabilityName,
-  ) ? [defaultCapabilityName] : [];
+  const disclosedCapabilityNames = [...new Set([
+    ...(workspace.capabilityNames.includes(defaultCapabilityName)
+      ? [defaultCapabilityName]
+      : []),
+    ...(params.seedCapabilityNames ?? []).filter((name) =>
+      workspace.capabilityNames.includes(name),
+    ),
+  ])];
   return {
     registryDigest: workspace.registryDigest,
     defaultCapabilityName,
@@ -50,7 +56,7 @@ export function createCapabilityDisclosureState(params: {
 }
 
 /**
- * Keep discovery trace-scoped while making a registry generation change an
+ * Keep discovery run-scoped while making a registry generation change an
  * explicit new disclosure boundary.
  */
 export function resolveCapabilityDisclosureState(params: {
@@ -58,6 +64,7 @@ export function resolveCapabilityDisclosureState(params: {
   workspace: CapabilityDocumentWorkspace;
   maxEmptySearchRounds: number;
   defaultCapabilityName?: string;
+  seedCapabilityNames?: readonly string[];
 }) {
   const defaultCapabilityName = params.defaultCapabilityName
     ?? GENERAL_CAPABILITY_NAME;
@@ -73,7 +80,7 @@ export function resolveCapabilityDisclosureState(params: {
 }
 
 /**
- * Drop every Capability learned through search while retaining the trace's
+ * Drop every Capability learned through search while retaining the run's
  * discovery-round accounting. Only the configured default disclosure
  * survives this size-limit fallback.
  */
@@ -93,7 +100,7 @@ export function removeSearchedCapabilities(params: {
 }
 
 /**
- * Project invocation-local search observations back into persistent trace
+ * Project invocation-local search observations back into the run session
  * state. Parallel calls owned by one AI message form one search round.
  */
 export function applyCapabilitySearchObservations(

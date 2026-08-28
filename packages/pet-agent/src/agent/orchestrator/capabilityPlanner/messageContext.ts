@@ -1,130 +1,16 @@
-import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
-import {
-  getMessageLane,
-  getPinpetMeta,
-  mainConversationMessages,
-  selectDelegationLaneAnnounceMessage,
-  toolProtocolSafeMessages,
-} from '../messageLanes';
-import type { MessageLane } from '../types';
-import {
-  formatDelegationAnnounceForModel,
-  isDelegationAnnounceMessage,
-  projectDelegationAnnouncesForModel,
-} from '../delegationAnnounce';
-import { readMessageText } from '../utils';
-import type { CapabilityPlannerInput } from './runner';
-
-export const CAPABILITY_PLANNER_MESSAGE_SOURCE = 'capability_planner';
-
-export function isCapabilityPlannerMessage(
-  message: BaseMessage,
-  traceId?: string,
-  registryDigest?: string,
-) {
-  const meta = getPinpetMeta(message);
-  return getMessageLane(message) === 'orchestrator'
-    && meta.source === CAPABILITY_PLANNER_MESSAGE_SOURCE
-    && (!traceId || meta.traceId === traceId)
-    && (!registryDigest || meta.registryDigest === registryDigest);
-}
-
-export function removeStaleCapabilityPlannerMessages(
-  messages: readonly BaseMessage[],
-  traceId: string,
-) {
-  return messages.flatMap((message) => {
-    if (!isCapabilityPlannerMessage(message)) return [];
-    if (getPinpetMeta(message).traceId === traceId) return [];
-    return message.id ? [new RemoveMessage({ id: message.id }) as BaseMessage] : [];
-  });
-}
-
-export function selectCapabilityPlannerMessages(params: {
-  mode: 'entry';
-  messages: readonly BaseMessage[];
-  traceId: string;
-  registryDigest: string;
-} | {
-  mode: 'boundary';
-  messages: readonly BaseMessage[];
-  traceId: string;
-  registryDigest: string;
-  lane: MessageLane;
-  transcriptRunId: string;
-  delegationId: string;
-  announceMessageId: string | null;
-}): BaseMessage[] {
-  const plannerMessages = params.messages.filter((message) =>
-    isCapabilityPlannerMessage(message, params.traceId, params.registryDigest),
-  );
-  const currentMainMessages = mainConversationMessages([...params.messages]);
-  if (params.mode === 'entry') {
-    return toolProtocolSafeMessages([
-      ...plannerMessages,
-      ...currentMainMessages,
-    ]);
-  }
-  const currentAnnounce = selectDelegationLaneAnnounceMessage(params.messages, {
-    lane: params.lane,
-    transcriptRunId: params.transcriptRunId,
-    delegationId: params.delegationId,
-    announceMessageId: params.announceMessageId,
-  });
-  return toolProtocolSafeMessages([
-    ...plannerMessages,
-    ...currentMainMessages,
-    ...(currentAnnounce ? [currentAnnounce] : []),
-  ]);
-}
+import type { BaseMessage } from '@langchain/core/messages';
+import { projectDelegationAnnouncesForModel } from '../delegationAnnounce';
+import { mainConversationMessages, toolProtocolSafeMessages } from '../messageLanes';
 
 /**
- * Project canonical messages only at the Planner model boundary.
- *
- * Accepted handoffs are already typed DelegationAnnounceMessages. The current
- * delegation's announce is still a private lane message because accepting it is
- * precisely the decision this Boundary invocation must make. Project that one
- * message from the root-owned Boundary identity without persisting a premature
- * handoff copy.
+ * Build the canonical Planner conversation view. Every lane-tagged message and
+ * invocation-only delegation briefing is excluded by mainConversationMessages.
+ * Accepted typed Announces are projected only in the returned provider input.
  */
 export function projectCapabilityPlannerMessagesForModel(
   messages: readonly BaseMessage[],
-  input: CapabilityPlannerInput,
 ): BaseMessage[] {
-  const projectedMessages = projectDelegationAnnouncesForModel(messages);
-  if (input.mode !== 'boundary') {
-    return projectedMessages;
-  }
-  const currentAnnounce = input.latestAnnounce;
-  if (!currentAnnounce?.messageId) {
-    return projectedMessages;
-  }
-  const { messageId, completionReason } = currentAnnounce;
-
-  return projectedMessages.map((projectedMessage, index) => {
-    const canonicalMessage = messages[index];
-    if (!canonicalMessage
-      || canonicalMessage.id !== messageId
-      || isDelegationAnnounceMessage(canonicalMessage)) {
-      return projectedMessage;
-    }
-    return new AIMessage({
-      id: canonicalMessage.id,
-      content: formatDelegationAnnounceForModel({
-        sourceLane: `capability:${input.activeDelegation.capability}`,
-        task: input.activeDelegation.task,
-        completionReason,
-        result: readMessageText(canonicalMessage),
-      }),
-      additional_kwargs: {
-        ...canonicalMessage.additional_kwargs,
-        pinpawo: {
-          ...getPinpetMeta(canonicalMessage),
-          source: 'delegation_announce_projection',
-          synthetic: true,
-          authority: 'none',
-        },
-      },
-    });
-  });
+  return projectDelegationAnnouncesForModel(toolProtocolSafeMessages(
+    mainConversationMessages([...messages]),
+  ));
 }

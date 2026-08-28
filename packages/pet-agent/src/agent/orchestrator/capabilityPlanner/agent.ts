@@ -1,13 +1,7 @@
-import {
-  HumanMessage,
-  RemoveMessage,
-  ToolMessage,
-  type BaseMessage,
-} from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
-import { randomUUID } from 'node:crypto';
 import { createAgent } from 'langchain';
 import {
   createCapabilityPlannerFileExplorer,
@@ -23,16 +17,8 @@ import type {
 } from './runner';
 import { parsePlannerCommit } from './protocol';
 import {
-  CAPABILITY_PLANNER_MESSAGE_SOURCE,
-  isCapabilityPlannerMessage,
   projectCapabilityPlannerMessagesForModel,
-  selectCapabilityPlannerMessages,
 } from './messageContext';
-import {
-  getPinpetMeta,
-  setPinpetMeta,
-  stampMessageCreatedAtUtc,
-} from '../messageLanes';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import {
@@ -63,17 +49,6 @@ export class CapabilityPlannerAgentError extends Error {
   }
 }
 
-function readTerminalCommit(message: ToolMessage): unknown {
-  if (message.status === 'error' || typeof message.content !== 'string') {
-    return null;
-  }
-  try {
-    return JSON.parse(message.content);
-  } catch {
-    return null;
-  }
-}
-
 function mergePlannerSignal(
   parentSignal: AbortSignal | undefined,
   timeoutMs: number,
@@ -99,72 +74,13 @@ function assertPositiveInteger(value: number, label: string) {
   }
 }
 
-/**
- * Stamp Planner-lane provenance onto a message, in place.
- *
- * Callers must only pass messages this invocation produced. The `produced`
- * filter in buildPlannerMessageUpdates() is what guarantees that: it drops any
- * message still referenced by, or sharing an id with, `input.messages`, so a
- * message already committed to root state is never mutated here.
- */
-function stampPlannerMessage(params: {
-  message: BaseMessage;
-  input: CapabilityPlannerInput;
-}) {
-  const { message, input } = params;
-  if (!message.id) message.id = randomUUID();
-  stampMessageCreatedAtUtc(message);
-  setPinpetMeta(message, {
-    lane: 'orchestrator',
-    source: CAPABILITY_PLANNER_MESSAGE_SOURCE,
-    traceId: input.traceId,
-    runId: input.runId,
-    plannerInputId: input.inputId,
-    registryDigest: input.workspace.registryDigest,
-  });
-  return message;
-}
-
 function readCachedPlannerCommit(input: CapabilityPlannerInput) {
-  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
-    const message = input.messages[index];
-    const meta = getPinpetMeta(message);
-    if (!ToolMessage.isInstance(message)
-      || !isCapabilityPlannerMessage(message, input.traceId)
-      || meta.registryDigest !== input.workspace.registryDigest
-      || meta.plannerInputId !== input.inputId) {
-      continue;
-    }
-    const rawCommit = readTerminalCommit(message);
-    if (rawCommit) return rawCommit;
-  }
-  return null;
-}
-
-function buildPlannerMessageUpdates(params: {
-  input: CapabilityPlannerInput;
-  resultMessages: readonly BaseMessage[];
-}) {
-  const rootRefs = new Set(params.input.messages);
-  const rootIds = new Set(params.input.messages.flatMap((message) =>
-    message.id ? [message.id] : [],
-  ));
-  const produced = params.resultMessages.filter((message) =>
-    !rootRefs.has(message) && (!message.id || !rootIds.has(message.id)),
-  );
-  const stalePlannerRemovals = params.input.messages.flatMap((message) => {
-    if (!isCapabilityPlannerMessage(message)) return [];
-    const meta = getPinpetMeta(message);
-    if (meta.traceId === params.input.traceId
-      && meta.registryDigest === params.input.workspace.registryDigest) {
-      return [];
-    }
-    return message.id ? [new RemoveMessage({ id: message.id }) as BaseMessage] : [];
-  });
-  return [
-    ...stalePlannerRemovals,
-    ...produced.map((message) => stampPlannerMessage({ message, input: params.input })),
-  ];
+  const cached = input.plannerSession.lastCommit;
+  return cached
+    && cached.inputId === input.inputId
+    && cached.registryDigest === input.workspace.registryDigest
+    ? cached.decision
+    : null;
 }
 
 function buildPlannerRunnableConfig(params: {
@@ -292,26 +208,9 @@ export function createCapabilityPlannerAgent(params: {
             timeout.signal,
           );
         }
-        const selectedMessages = input.mode === 'boundary'
-          ? selectCapabilityPlannerMessages({
-              mode: 'boundary',
-              messages: input.messages,
-              traceId: input.traceId,
-              registryDigest: input.workspace.registryDigest,
-              lane: `capability:${input.activeDelegation.capability}`,
-              transcriptRunId: input.activeDelegation.transcriptRunId,
-              delegationId: input.activeDelegation.delegationId,
-              announceMessageId: input.latestAnnounce?.messageId ?? null,
-            })
-          : selectCapabilityPlannerMessages({
-              mode: 'entry',
-              messages: input.messages,
-              traceId: input.traceId,
-              registryDigest: input.workspace.registryDigest,
-            });
         const result = await agent.invoke({
           messages: [
-            ...projectCapabilityPlannerMessagesForModel(selectedMessages, input),
+            ...projectCapabilityPlannerMessagesForModel(input.messages),
             new HumanMessage({
               id: `planner:${input.inputId}`,
               content: buildCapabilityPlannerAgentInput(
@@ -335,10 +234,6 @@ export function createCapabilityPlannerAgent(params: {
           return {
             ...commit,
             capabilityDisclosure,
-            messageUpdates: buildPlannerMessageUpdates({
-              input,
-              resultMessages: result.messages,
-            }),
           };
         }
         if (explorer.didReachDocumentReadLimit()) {
@@ -351,10 +246,6 @@ export function createCapabilityPlannerAgent(params: {
           plannerStatus: 'incomplete',
           reason: 'terminal_commit_missing',
           capabilityDisclosure,
-          messageUpdates: buildPlannerMessageUpdates({
-            input,
-            resultMessages: result.messages,
-          }),
         };
       } catch (error) {
         if (timeout.didTimeOut()) {

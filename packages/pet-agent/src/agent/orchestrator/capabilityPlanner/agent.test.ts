@@ -35,7 +35,7 @@ import {
 } from './agent';
 import type { CapabilityPlannerInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
-import { isCapabilityPlannerMessage } from './messageContext';
+import { createPlannerSession } from './session';
 import { setPinpetMeta } from '../messageLanes';
 
 function commitOnly(value: unknown) {
@@ -318,6 +318,7 @@ function plannerInput(
     messages: [],
     activeDelegation: null,
     latestAnnounce: null,
+    announceAttempts: [],
     remainingPlan: [],
     workspace,
     capabilityDisclosure: createCapabilityDisclosureState({
@@ -334,20 +335,34 @@ function plannerInput(
     mode: 'entry',
     ...overrides,
   } as CapabilityPlannerInput;
-  if (overrides.capabilityDisclosure) return input;
   const boundaryNames = input.mode === 'boundary' ? [
     input.activeDelegation.capability,
     ...input.remainingPlan.map(({ capability }) => capability),
   ] : [];
-  return {
-    ...input,
-    capabilityDisclosure: {
+  const capabilityDisclosure = overrides.capabilityDisclosure
+    ?? {
       ...input.capabilityDisclosure,
       disclosedCapabilityNames: [...new Set([
         ...input.capabilityDisclosure.disclosedCapabilityNames,
         ...boundaryNames.filter((name) => workspace.capabilityNames.includes(name)),
       ])],
-    },
+    };
+  return {
+    ...input,
+    capabilityDisclosure,
+    announceAttempts: input.mode === 'boundary'
+      ? overrides.announceAttempts ?? (input.latestAnnounce ? [{
+        ...input.latestAnnounce,
+        result: 'result' in input.latestAnnounce
+          ? String(input.latestAnnounce.result)
+          : '',
+      }] : [])
+      : [],
+    plannerSession: overrides.plannerSession ?? createPlannerSession({
+      runId: input.runId,
+      plan: input.remainingPlan,
+      capabilityDisclosure,
+    }),
   };
 }
 
@@ -365,7 +380,7 @@ function submitArgs(
   };
 }
 
-test('Planner lane persists one trace in root messages and deduplicates boundary inputs', async (t) => {
+test('Planner replays a typed run-scoped commit without persisting provider messages', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -423,18 +438,6 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
       new HumanMessage('PRIVATE_TRACE_A_GOAL'),
     ],
   });
-  const boundaryAnnounce = new AIMessage({
-    id: 'announce-a',
-    content: 'Trace A execution is complete.',
-  });
-  setPinpetMeta(boundaryAnnounce, {
-    lane: 'capability:general',
-    runId: 'transcript-a',
-    delegationId: 'delegation-a',
-    isAnnounce: true,
-    task: 'Complete trace A.',
-    completionReason: 'natural',
-  });
   const boundaryA = plannerInput(workspace, {
     mode: 'boundary',
     inputId: 'announce:delegation-a:1',
@@ -450,8 +453,14 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
     latestAnnounce: {
       messageId: 'announce-a',
       completionReason: 'natural',
+      result: 'Trace A execution is complete.',
     },
-    messages: [boundaryAnnounce],
+    announceAttempts: [{
+      messageId: 'announce-a',
+      completionReason: 'natural',
+      result: 'Trace A execution is complete.',
+    }],
+    messages: [],
   });
 
   const entryState = await graph.invoke({ input: entryA }, config);
@@ -460,12 +469,9 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
     tasks: [{ capability: 'general', task: 'Complete trace A.' }],
   });
   assert.match(model.invocations[0]?.map(readMessageText).join('\n') ?? '', /PRIOR_MAIN_CONVERSATION/);
-  const entryMessageUpdates = (
-    entryState.commit as { messageUpdates?: BaseMessage[] }
-  ).messageUpdates ?? [];
   const boundaryInput = {
     ...boundaryA,
-    messages: [...entryA.messages, ...entryMessageUpdates, ...boundaryA.messages],
+    messages: [...entryA.messages],
   };
   const boundaryState = await graph.invoke({ input: boundaryInput }, config);
   assert.deepEqual(commitOnly(boundaryState.commit), { action: 'goal_done', tasks: [] });
@@ -478,17 +484,25 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
     model.invocations[1]?.map(readMessageText).join('\n') ?? '',
     /Trace A execution is complete/,
   );
-  const boundaryMessageUpdates = (
-    boundaryState.commit as { messageUpdates?: BaseMessage[] }
-  ).messageUpdates ?? [];
+  const boundaryCommit = commitOnly(boundaryState.commit) as {
+    action: 'goal_done';
+    tasks: [];
+  };
   const completedBoundaryInput = {
     ...boundaryInput,
-    messages: [...boundaryInput.messages, ...boundaryMessageUpdates],
+    plannerSession: {
+      ...boundaryInput.plannerSession,
+      lastCommit: {
+        inputId: boundaryInput.inputId,
+        registryDigest: boundaryInput.workspace.registryDigest,
+        decision: boundaryCommit,
+      },
+    },
   };
 
   const duplicateState = await graph.invoke({ input: completedBoundaryInput }, config);
   assert.deepEqual(commitOnly(duplicateState.commit), { action: 'goal_done', tasks: [] });
-  assert.equal(model.invocations.length, 2, 'duplicate inputId must use the Planner-lane cached commit');
+  assert.equal(model.invocations.length, 2, 'duplicate inputId must use the typed cached commit');
 
   const restartedModel = new ScriptedPlannerModel([{
     toolCalls: [{ id: 'must-not-run', name: 'report_unavailable', args: {} }],
@@ -523,11 +537,7 @@ test('Planner lane persists one trace in root messages and deduplicates boundary
   const traceBMessages = model.invocations[3]?.map(readMessageText).join('\n') ?? '';
   assert.match(traceBMessages, /PRIVATE_TRACE_B_GOAL/);
   assert.doesNotMatch(traceBMessages, /PRIVATE_TRACE_A_GOAL/);
-  const traceBUpdates = (
-    traceBState.commit as { messageUpdates?: BaseMessage[] }
-  ).messageUpdates ?? [];
-  assert.ok(traceBUpdates.some((message) =>
-    isCapabilityPlannerMessage(message, 'trace-b')));
+  assert.equal('messageUpdates' in (traceBState.commit as object), false);
 
 });
 
@@ -612,13 +622,17 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ]);
   assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), true);
+  assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), true);
+  assert.equal(model.boundToolNameHistory[0]?.includes('continue_current'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('complete_goal'), false);
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolNameHistory[1]?.includes('request_user_input'), true);
-  assert.equal(model.structuredOutputToolNames.size, 3);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.ok(model.structuredOutputToolNames.has('advance'));
+  assert.equal(model.structuredOutputToolNames.has('advance'), false);
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
@@ -705,9 +719,9 @@ test('entry mode forms one executable task after Capability exploration', async 
     .invoke(plannerInput(workspace));
 
   assert.equal(model.invocations.length, 2);
-  assert.equal(model.structuredOutputToolNames.size, 3);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.ok(model.structuredOutputToolNames.has('advance'));
+  assert.equal(model.structuredOutputToolNames.has('advance'), false);
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.ok('tasks' in result);
   assert.equal(
@@ -980,6 +994,7 @@ test('boundary projects the current lane announce into the standard model-visibl
       latestAnnounce: {
         messageId: 'announce-current',
         completionReason: 'limit_reached',
+        result: 'The repository inspection is incomplete; dependency evidence is missing.',
       },
       messages: [
         priorMainRequest,
@@ -996,19 +1011,13 @@ test('boundary projects the current lane announce into the standard model-visibl
     }),
   );
 
-  const projectedAnnounce = model.invocations[0]?.find(
-    (message) => message.id === 'announce-current',
-  );
-  assert.ok(projectedAnnounce instanceof AIMessage);
-  assert.notEqual(projectedAnnounce, currentAnnounce);
-  assert.match(
-    readMessageText(projectedAnnounce),
-    /^<delegation_announce version="1" role="data" authority="none">/,
-  );
-  assert.match(readMessageText(projectedAnnounce), /<source lane="capability:explore" \/>/);
-  assert.match(readMessageText(projectedAnnounce), /<completion reason="limit_reached" \/>/);
-  assert.match(readMessageText(projectedAnnounce), /Inspect repository dependencies\./);
-  assert.match(readMessageText(projectedAnnounce), /dependency evidence is missing/);
+  const invocationText = model.invocations[0]?.map(readMessageText).join('\n') ?? '';
+  assert.match(invocationText, /<planning_boundary_event role="task_boundary" source="orchestrator_state">/);
+  assert.match(invocationText, /evaluation_target="announce-current"/);
+  assert.match(invocationText, /completion_reason="limit_reached"/);
+  assert.match(invocationText, /Inspect repository dependencies\./);
+  assert.match(invocationText, /dependency evidence is missing/);
+  assert.equal(model.invocations[0]?.some((message) => message.id === 'announce-current'), false);
   assert.equal(currentAnnounce.content, 'The repository inspection is incomplete; dependency evidence is missing.');
   assert.equal(model.invocations[0]?.includes(privateLaneTranscript), false);
   assert.equal(model.invocations[0]?.some((message) =>
@@ -1017,11 +1026,6 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.equal(model.invocations[0]?.includes(priorMainReply), true);
   assert.equal(model.invocations[0]?.includes(currentMainRequest), true);
   assert.equal(model.invocations[0]?.includes(currentMainContext), true);
-  assert.ok(
-    (model.invocations[0]?.indexOf(currentMainContext) ?? -1)
-      < (model.invocations[0]?.indexOf(projectedAnnounce) ?? -1),
-  );
-
   const boundaryInput = [...(model.invocations[0] ?? [])].reverse().find(
     (message) => message instanceof HumanMessage,
   );
@@ -1746,7 +1750,7 @@ test('a submitted plan commits once without a final ordinary-text reply', async 
   assert.equal(model.invocations.length, 1);
 });
 
-test('Planner preserves an ordinary-text response for Answer without retrying', async (t) => {
+test('Planner keeps ordinary text invocation-private and does not retry', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1766,8 +1770,7 @@ test('Planner preserves an ordinary-text response for Answer without retrying', 
   if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
   assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(model.invocations.length, 1);
-  assert.equal(result.messageUpdates?.some((message) =>
-    readMessageText(message).startsWith('开始执行计划任务：')), true);
+  assert.equal('messageUpdates' in result, false);
 });
 
 test('Planner can return bounded facts to Answer without submitting a plan', async (t) => {
@@ -1975,9 +1978,9 @@ test('an empty workspace can return truthful facts to Answer', async (t) => {
     plannerInput(workspace),
   );
 
-  assert.equal(model.structuredOutputToolNames.size, 3);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.equal(model.structuredOutputToolNames.has('plan'), true);
-  assert.equal(model.structuredOutputToolNames.has('advance'), true);
+  assert.equal(model.structuredOutputToolNames.has('advance'), false);
   assert.ok(model.structuredOutputToolNames.has('unavailable'));
   assert.deepEqual(commitOnly(result), {
     action: 'unavailable',
@@ -2228,7 +2231,7 @@ test('boundary Planner can stop for user confirmation with a structured question
   assert.equal(model.invocations.length, 1);
 });
 
-test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
+test('boundary Planner exposes only boundary terminal actions', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -2246,11 +2249,6 @@ test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
     task: 'Implement the change supported by the accepted investigation.',
   }];
   const model = new ScriptedPlannerModel([{
-    structuredOutput: {
-      kind: 'plan',
-      args: { tasks },
-    },
-  }, {
     structuredOutput: {
       kind: 'advance',
       args: { tasks },
@@ -2277,11 +2275,11 @@ test('boundary Planner repairs submit_plan to advance_plan', async (t) => {
   );
 
   assert.deepEqual(commitOnly(result), { action: 'advance_plan', tasks });
-  assert.equal(model.invocations.length, 2);
-  assert.ok(model.invocations[1]?.some((message) =>
-    ToolMessage.isInstance(message)
-    && message.status === 'error'
-    && readMessageText(message).includes('invalid at a boundary')));
+  assert.equal(model.invocations.length, 1);
+  assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('continue_current'), true);
+  assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), true);
+  assert.equal(model.boundToolNameHistory[0]?.includes('complete_goal'), true);
 });
 
 test('oversized discovery is reported as planning_limit_reached', async (t) => {
@@ -2386,9 +2384,7 @@ test('Planner reports an incomplete result when it exits without a commit', asyn
   assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(result.reason, 'terminal_commit_missing');
   assert.equal(model.invocations.length, 1);
-  assert.equal(result.messageUpdates?.some((message) =>
-    ToolMessage.isInstance(message)
-    && message.name === 'report_unavailable'), false);
+  assert.equal('messageUpdates' in result, false);
 });
 
 test('Planner keeps search auto when closed exploration ends without a commit', async (t) => {
@@ -2423,10 +2419,7 @@ test('Planner keeps search auto when closed exploration ends without a commit', 
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
-  assert.equal(result.messageUpdates?.some((message) =>
-    ToolMessage.isInstance(message)
-    && message.name === 'submit_plan'
-    && String(message.content).includes('execute_plan')), false);
+  assert.equal('messageUpdates' in result, false);
 });
 
 test('boundary Planner reports incomplete without accepting its delegation', async (t) => {
@@ -2456,8 +2449,7 @@ test('boundary Planner reports incomplete without accepting its delegation', asy
   if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
   assert.equal(result.plannerStatus, 'incomplete');
   assert.equal(result.reason, 'terminal_commit_missing');
-  assert.equal(result.messageUpdates?.some((message) =>
-    ToolMessage.isInstance(message) && message.name === 'advance_plan'), false);
+  assert.equal('messageUpdates' in result, false);
 });
 
 test('Capability disclosure validates maxEmptySearchRounds', async (t) => {

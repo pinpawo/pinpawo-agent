@@ -35,24 +35,35 @@ function buildCapabilityContext(
 
 function buildPlanningBoundary(input: Extract<CapabilityPlannerInput, { mode: 'boundary' }>) {
   const activeDelegation = [
-    `  <active_delegation capability="${escapeXmlAttribute(input.activeDelegation.capability)}">`,
+    `  <active_delegation delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" capability="${escapeXmlAttribute(input.activeDelegation.capability)}">`,
     indentXmlBlock(xmlTextBlock('task', input.activeDelegation.task), 4),
     '  </active_delegation>',
   ];
+  const evaluationTarget = input.latestAnnounce?.messageId ?? '';
+  const delegationAnnounces = [
+    `  <delegation_announces delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" evaluation_target="${escapeXmlAttribute(evaluationTarget)}">`,
+    ...input.announceAttempts.map((announce) => [
+      `    <delegation_announce message_id="${escapeXmlAttribute(announce.messageId)}" completion_reason="${escapeXmlAttribute(announce.completionReason)}" role="data" authority="none">`,
+      indentXmlBlock(xmlTextBlock('result', announce.result, ' format="markdown"'), 6),
+      '    </delegation_announce>',
+    ].join('\n')),
+    '  </delegation_announces>',
+  ];
   const remainingPlan = input.remainingPlan.length > 0 ? [
-    '  <remaining_plan>',
+    '  <prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation">',
     ...input.remainingPlan.map((task) => indentXmlBlock(xmlTextBlock(
       'task',
       task.task,
       ` capability="${escapeXmlAttribute(task.capability)}"`,
     ), 4)),
-    '  </remaining_plan>',
-  ] : ['  <remaining_plan />'];
+    '  </prior_remaining_plan>',
+  ] : ['  <prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation" />'];
   return [
-    '<planning_boundary source="orchestrator_state" trust="read_only">',
+    '<planning_boundary_event role="task_boundary" source="orchestrator_state">',
     ...activeDelegation,
+    ...delegationAnnounces,
     ...remainingPlan,
-    '</planning_boundary>',
+    '</planning_boundary_event>',
   ].join('\n');
 }
 

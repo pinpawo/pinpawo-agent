@@ -1,12 +1,10 @@
 import { tool } from '@langchain/core/tools';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlanner/agent.ts';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/capabilityPlanner/capabilityDisclosure.ts';
-import { CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
 import {
   isCapabilityPlannerIncompleteResult,
   type CapabilityPlannerInput,
@@ -14,7 +12,7 @@ import {
 } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
-import { setPinpetMeta } from '../../src/agent/orchestrator/messageLanes.ts';
+import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -34,6 +32,10 @@ import { createDecisionEvalModel } from './decision-eval-model.ts';
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
 import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
+import {
+  createCapabilitySearchDiagnosticsCollector,
+  type CapabilitySearchDiagnostics,
+} from '../capability-planning-diagnostics.ts';
 
 const evalExecutionToolkit = defineToolkit({
   name: 'eval_execution',
@@ -67,27 +69,6 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
   });
 }
 
-function currentBoundaryAnnounce(params: {
-  content: string;
-  capability: string;
-  activeTask: string;
-  transcriptRunId: string;
-}) {
-  const message = new AIMessage({
-    id: 'eval-announce',
-    content: params.content,
-  });
-  setPinpetMeta(message, {
-    lane: `capability:${params.capability}`,
-    runId: params.transcriptRunId,
-    delegationId: 'eval-delegation',
-    isAnnounce: true,
-    task: params.activeTask,
-    completionReason: 'natural',
-  });
-  return message;
-}
-
 function plannerOutput(
   result: CapabilityPlannerResult,
 ): CapabilityPlanningEvalOutput {
@@ -118,90 +99,12 @@ function plannerOutput(
   };
 }
 
-function plannerDiagnostics(result: CapabilityPlannerResult) {
-  const searchCallIds = new Set(
-    result.messageUpdates?.flatMap((message) =>
-      ToolMessage.isInstance(message)
-      && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
-      ? [message.tool_call_id]
-      : []) ?? [],
-  );
-  const searchRounds = result.messageUpdates?.filter((message) =>
-    AIMessage.isInstance(message)
-    && message.tool_calls?.some((toolCall) =>
-      toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME))
-    .length ?? 0;
-  const searchQueries = result.messageUpdates?.flatMap((message) =>
-    AIMessage.isInstance(message)
-      ? message.tool_calls?.flatMap((toolCall) =>
-          toolCall.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
-            ? [{
-                toolCallId: toolCall.id ?? null,
-                terms: toolCall.args && typeof toolCall.args === 'object'
-                  && 'terms' in toolCall.args && Array.isArray(toolCall.args.terms)
-                  ? toolCall.args.terms.filter((term): term is string => typeof term === 'string')
-                  : [],
-              }]
-            : []) ?? []
-      : []) ?? [];
-  const searchResults = result.messageUpdates?.flatMap((message) => {
-    if (!ToolMessage.isInstance(message)
-      || message.name !== CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
-      || typeof message.content !== 'string') {
-      return [];
-    }
-    try {
-      const payload = JSON.parse(message.content) as {
-        data?: { matches?: Array<{ path?: unknown }> };
-        capabilityDiscovery?: {
-          newlyDisclosedCapabilityNames?: unknown;
-          disclosedCapabilityNames?: unknown;
-          status?: unknown;
-          remainingEmptyRounds?: unknown;
-        };
-      };
-      return [{
-        toolCallId: message.tool_call_id,
-        matchedPaths: Array.isArray(payload.data?.matches)
-          ? payload.data.matches.flatMap(({ path }) => typeof path === 'string' ? [path] : [])
-          : [],
-        specificCandidates: Array.isArray(
-          payload.capabilityDiscovery?.newlyDisclosedCapabilityNames,
-        )
-          ? payload.capabilityDiscovery.newlyDisclosedCapabilityNames.filter(
-              (candidate): candidate is string => typeof candidate === 'string',
-            )
-          : [],
-        disclosedCapabilityNames: Array.isArray(
-          payload.capabilityDiscovery?.disclosedCapabilityNames,
-        )
-          ? payload.capabilityDiscovery.disclosedCapabilityNames.filter(
-              (candidate): candidate is string => typeof candidate === 'string',
-            )
-          : [],
-        status: typeof payload.capabilityDiscovery?.status === 'string'
-          ? payload.capabilityDiscovery.status
-          : null,
-        remainingRounds: typeof payload.capabilityDiscovery?.remainingEmptyRounds === 'number'
-          ? payload.capabilityDiscovery.remainingEmptyRounds
-          : null,
-      }];
-    } catch {
-      return [{
-        toolCallId: message.tool_call_id,
-        matchedPaths: [],
-        specificCandidates: [],
-        disclosedCapabilityNames: [],
-        status: null,
-        remainingRounds: null,
-      }];
-    }
-  }) ?? [];
+function plannerDiagnostics(
+  result: CapabilityPlannerResult,
+  searchDiagnostics: CapabilitySearchDiagnostics,
+) {
   return {
-    searchCalls: searchCallIds.size,
-    searchRounds,
-    searchQueries,
-    searchResults,
+    ...searchDiagnostics,
     plannerStatus: isCapabilityPlannerIncompleteResult(result)
       ? result.plannerStatus
       : 'committed',
@@ -300,20 +203,15 @@ async function main() {
           traceId: `eval:${testCase.id}`,
           runId: `eval:${testCase.id}`,
           userRequest: testCase.input.userRequest,
-          messages: [
-            ...buildCapabilityPlanningHistoryMessages(testCase.input),
-            ...(testCase.input.mode === 'boundary' && testCase.input.latestAnnounce
-              ? [currentBoundaryAnnounce({
-                  content: testCase.input.latestAnnounce,
-                  capability: activeCapability,
-                  activeTask,
-                  transcriptRunId: `eval:${testCase.id}`,
-                })]
-              : []),
-          ],
+          messages: buildCapabilityPlanningHistoryMessages(testCase.input),
           remainingPlan: testCase.input.remainingPlan ?? [],
           workspace,
           capabilityDisclosure,
+          plannerSession: createPlannerSession({
+            runId: `eval:${testCase.id}`,
+            plan: testCase.input.remainingPlan ?? [],
+            capabilityDisclosure,
+          }),
         };
         const plannerInput: CapabilityPlannerInput = testCase.input.mode === 'boundary'
           ? {
@@ -328,14 +226,22 @@ async function main() {
               latestAnnounce: {
                 messageId: 'eval-announce',
                 completionReason: 'natural',
+                result: testCase.input.latestAnnounce ?? '',
               },
+              announceAttempts: [{
+                messageId: 'eval-announce',
+                completionReason: 'natural',
+                result: testCase.input.latestAnnounce ?? '',
+              }],
             }
           : {
               ...plannerInputBase,
               mode: 'entry',
               activeDelegation: null,
               latestAnnounce: null,
+              announceAttempts: [],
             };
+        const searchDiagnostics = createCapabilitySearchDiagnosticsCollector();
         const result = await createCapabilityPlannerAgent({
           model: modelConfig.model,
         }).invoke(
@@ -349,10 +255,11 @@ async function main() {
               modelProfileId: modelConfig.metadata.profileId,
               modelProfileFingerprint: modelConfig.metadata.fingerprint,
             },
+            callbacks: [searchDiagnostics.callback],
           },
         );
         const output = plannerOutput(result);
-        const diagnostics = plannerDiagnostics(result);
+        const diagnostics = plannerDiagnostics(result, searchDiagnostics.read());
         const evaluation = await evaluateCapabilityPlanningOutput({
           input: testCase.input,
           expected: testCase.expected,

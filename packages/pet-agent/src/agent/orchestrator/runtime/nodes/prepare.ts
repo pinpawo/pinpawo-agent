@@ -44,6 +44,15 @@ export function createCompactContextNode(params: {
     const compacted = await compactOrchestratorMessages({
       messages: state.messages,
       model: params.config.models.observe ?? params.config.models.act,
+      ...(state.taskActiveDelegation ? {
+        options: {
+          preserveAnnouncesFor: {
+            lane: state.taskActiveDelegation.lane,
+            transcriptRunId: state.taskActiveDelegation.transcriptRunId,
+            delegationId: state.taskActiveDelegation.id,
+          },
+        },
+      } : {}),
       runnableConfig,
     });
     if (!compacted.compacted) {

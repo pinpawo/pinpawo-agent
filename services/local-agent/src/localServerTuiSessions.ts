@@ -136,9 +136,8 @@ function readTuiCheckpointMessageSource(
   const type = message._getType();
   if (type !== 'human' && type !== 'ai') return null;
   const pinpawo = message.additional_kwargs?.pinpawo;
-  // Lane-tagged messages are internal transcripts, never conversation. The
-  // Planner writes its own input as a laned HumanMessage, so this check must
-  // precede the human/ai split or that input renders as a user turn.
+  // Lane-tagged messages are internal Capability transcripts, never root
+  // conversation. Filter them before the human/ai split.
   if (pinpawo && typeof pinpawo === 'object') {
     if ('lane' in pinpawo || (pinpawo as Record<string, unknown>).synthetic === true) {
       return null;

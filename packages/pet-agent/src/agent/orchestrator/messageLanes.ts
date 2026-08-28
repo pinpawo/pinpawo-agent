@@ -295,19 +295,12 @@ export function buildSubagentHandoff(params: {
   clearLane?: boolean;
   includeCopy?: boolean;
 }): BaseMessage[] | null {
-  const announceMessage = selectDelegationLaneAnnounceMessage(params.messages, {
+  const announceMessages = selectDelegationLaneAnnounceMessages(params.messages, {
     lane: params.lane,
     transcriptRunId: params.transcriptRunId,
     delegationId: params.delegationId,
   });
-  const announceText = announceMessage ? readMessageText(announceMessage) : '';
-  if (!announceText.trim()) return null;
-  const announceMessageId = announceMessage?.id;
-  if (!announceMessageId) {
-    throw new Error('Delegation announce is missing the required message id.');
-  }
-
-  const task = announceMessage ? getMessageDelegatedTask(announceMessage) : null;
+  if (announceMessages.length === 0) return null;
 
   const clearLane = params.clearLane ?? true;
   const includeCopy = params.includeCopy ?? true;
@@ -327,23 +320,28 @@ export function buildSubagentHandoff(params: {
     return removeMessages;
   }
 
-  const handoffAnnounce = new DelegationAnnounceMessage({
-    id: `delegation-announce:${params.transcriptRunId}:${params.delegationId}:${announceMessageId}`,
-    sourceLane: params.lane,
-    delegationId: params.delegationId,
-    transcriptRunId: params.transcriptRunId,
-    announceMessageId,
-    task,
-    completionReason: announceMessage
-      ? getMessageCompletionReason(announceMessage) ?? 'natural'
-      : 'natural',
-    result: announceText,
-    createdAt: new Date().toISOString(),
+  const handoffAnnounces = announceMessages.map((announceMessage) => {
+    const announceText = readMessageText(announceMessage);
+    const announceMessageId = announceMessage.id;
+    if (!announceMessageId) {
+      throw new Error('Delegation announce is missing the required message id.');
+    }
+    return new DelegationAnnounceMessage({
+      id: `delegation-announce:${params.transcriptRunId}:${params.delegationId}:${announceMessageId}`,
+      sourceLane: params.lane,
+      delegationId: params.delegationId,
+      transcriptRunId: params.transcriptRunId,
+      announceMessageId,
+      task: getMessageDelegatedTask(announceMessage),
+      completionReason: getMessageCompletionReason(announceMessage) ?? 'natural',
+      result: announceText,
+      createdAt: readMessageCreatedAtUtc(announceMessage) ?? new Date().toISOString(),
+    });
   });
 
   return [
     ...removeMessages,
-    handoffAnnounce,
+    ...handoffAnnounces,
   ];
 }
 
@@ -386,19 +384,25 @@ export function selectDelegationLaneAnnounceMessage(
   messages: readonly BaseMessage[],
   options: DelegationLaneAnnounceSelector = {},
 ): BaseMessage | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
+  return selectDelegationLaneAnnounceMessages(messages, options).at(-1) ?? null;
+}
+
+/** Select every private announce for one delegation in canonical chronology. */
+export function selectDelegationLaneAnnounceMessages(
+  messages: readonly BaseMessage[],
+  options: DelegationLaneAnnounceSelector = {},
+): BaseMessage[] {
+  return messages.filter((message) => {
     const announce = readTaggedAnnounce(message);
-    if (!announce) continue;
-    if (options.lane && announce.lane !== options.lane) continue;
+    if (!announce) return false;
+    if (options.lane && announce.lane !== options.lane) return false;
     const transcriptRunId = options.transcriptRunId;
     if (transcriptRunId
-      && getMessageTranscriptRunId(message) !== transcriptRunId) continue;
-    if (options.delegationId && announce.delegationId !== options.delegationId) continue;
-    if (options.announceMessageId && announce.messageId !== options.announceMessageId) continue;
-    return message;
-  }
-  return null;
+      && getMessageTranscriptRunId(message) !== transcriptRunId) return false;
+    if (options.delegationId && announce.delegationId !== options.delegationId) return false;
+    if (options.announceMessageId && announce.messageId !== options.announceMessageId) return false;
+    return true;
+  });
 }
 
 export function readLatestAnnounce(

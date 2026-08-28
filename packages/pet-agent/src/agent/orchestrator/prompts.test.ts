@@ -38,6 +38,19 @@ const disclosedDocuments = [{
   content: '# Browser\n\n浏览网页。',
 }];
 
+function plannerSession(
+  capabilityDisclosure = plannerDisclosure,
+  plan: CapabilityPlannerInput['remainingPlan'] = [],
+) {
+  return {
+    runId: 'run-1',
+    revision: 0,
+    plan,
+    capabilityDisclosure,
+    lastCommit: null,
+  };
+}
+
 test('Capability Planner entry input leads with the run user request', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
@@ -49,8 +62,10 @@ test('Capability Planner entry input leads with the run user request', () => {
     messages: [],
     activeDelegation: null,
     latestAnnounce: null,
+    announceAttempts: [],
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
+    plannerSession: plannerSession(),
   } satisfies CapabilityPlannerInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
@@ -80,11 +95,16 @@ test('Capability Planner entry input represents an empty disclosure explicitly',
     messages: [],
     activeDelegation: null,
     latestAnnounce: null,
+    announceAttempts: [],
     remainingPlan: [],
     capabilityDisclosure: {
       ...plannerDisclosure,
       disclosedCapabilityNames: [],
     },
+    plannerSession: plannerSession({
+      ...plannerDisclosure,
+      disclosedCapabilityNames: [],
+    }),
   } satisfies CapabilityPlannerInput, []);
 
   assert.match(input, /^<run_user_request[^>]*>/);
@@ -109,19 +129,31 @@ test('Capability Planner boundary input carries the run user request and boundar
     latestAnnounce: {
       messageId: 'announce-1',
       completionReason: 'natural',
+      result: '浏览器已连接。',
     },
+    announceAttempts: [{
+      messageId: 'announce-1',
+      completionReason: 'natural',
+      result: '浏览器已连接。',
+    }],
     remainingPlan: [{
       capability: 'browser',
       task: '浏览相关内容',
     }],
     capabilityDisclosure: plannerDisclosure,
+    plannerSession: plannerSession(plannerDisclosure, [{
+      capability: 'browser',
+      task: '浏览相关内容',
+    }]),
   } satisfies CapabilityPlannerInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /<planning_boundary source="orchestrator_state" trust="read_only">/);
-  assert.match(input, /<active_delegation capability="browser">/);
+  assert.match(input, /<planning_boundary_event role="task_boundary" source="orchestrator_state">/);
+  assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
+  assert.match(input, /<delegation_announces delegation_id="delegation-1" evaluation_target="announce-1">/);
+  assert.match(input, /浏览器已连接。/);
   assert.match(input, /确认浏览器可用/);
-  assert.match(input, /<remaining_plan>/);
+  assert.match(input, /<prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation">/);
   assert.match(input, /<task capability="browser">/);
   assert.match(input, /浏览相关内容/);
   assert.doesNotMatch(input, /执行停止原因/);
@@ -146,14 +178,21 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     latestAnnounce: {
       messageId: 'announce-1',
       completionReason: 'natural',
+      result: '浏览器已连接。',
     },
+    announceAttempts: [{
+      messageId: 'announce-1',
+      completionReason: 'natural',
+      result: '浏览器已连接。',
+    }],
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
+    plannerSession: plannerSession(),
   } satisfies CapabilityPlannerInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /<active_delegation capability="browser">/);
-  assert.match(input, /<remaining_plan \/>/);
+  assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
+  assert.match(input, /<prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation" \/>/);
   assert.doesNotMatch(input, /此前保留的后续任务|planner_request_briefing/);
 });
 

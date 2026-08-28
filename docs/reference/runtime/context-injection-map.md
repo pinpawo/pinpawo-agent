@@ -111,13 +111,16 @@ Sources:
 | system | invocation projection / `INSTRUCTION` | entry objective and context meaning | boundary objective and context meaning |
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation | current canonical main conversation |
 | session state | `RUN-STABLE` / `FACT` | goal, plan and Capability disclosure | updated plan and disclosure from this run |
-| overlay | `DYNAMIC` / `BOUNDARY` | none | one current announce, active delegation and remaining plan |
+| overlay | `DYNAMIC` / `BOUNDARY` | none | ordered active-delegation announces with one latest target, active delegation and prior remaining-plan proposal |
+| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan`, `request_user_input`, `report_unavailable` | `capability_search`, `continue_current`, `advance_plan`, `complete_goal`, `request_user_input`, `report_unavailable` |
 
 Entry initializes a clean run-scoped Planner session. Boundary adds one
-invocation-only overlay that selects the current private Announce by canonical
-delegation and message identity. The overlay marks it as the evaluation target
-without changing the announce or root messages. Private Capability Human/AI/Tool
-transcript is never included.
+invocation-only overlay that selects every current-delegation Announce in
+chronological order by canonical delegation identity and marks exactly the
+latest message id as the evaluation target. The overlay never changes the
+announces or root messages. Private Capability Human/AI/Tool transcript is never
+included. The prior remaining plan is marked as a non-authoritative proposal that
+the Boundary must revalidate against current evidence.
 
 Capability disclosure is run-scoped semantic state. It contains the configured
 default Capability when available and every Capability disclosed during this
@@ -134,9 +137,12 @@ availability.
 
 Planner provider messages, search ToolMessages, and terminal ToolMessages do not
 belong in root `messages`. Same-input recovery uses a typed run-scoped commit;
-raw invocation detail belongs to tracing. The current implementation still has
-a transitional `orchestrator` Planner lane while this migration is incomplete;
-do not extend that lane or treat it as the target context contract.
+raw invocation detail belongs to tracing. No Planner provider lane is persisted
+in the root conversation checkpoint.
+
+Run `npm run planner:context-audit` to inspect the complete static provider
+contract for both modes. It renders the production system/input builders,
+projected history, tool descriptions, and argument schemas together.
 
 ## 6. Node: capability (subagent execution)
 
@@ -195,9 +201,9 @@ awaiting-input context. `projectAcceptedRunResults()` selects typed Announces by
 completed delegation identity; it does not make canonical history model-visible.
 
 Current routes include `goal_done`, `user_input_required`, blocked states, and
-`planner_direct_answer`. Checkpoint incompatibility already uses a deterministic
-message. All other routes currently invoke the response model, including direct
-Planner text; the terminal-response design removes that unnecessary rewriting.
+the explicit `planner_incomplete` protocol failure. Checkpoint incompatibility
+also uses a deterministic message. Planner ordinary text is invocation-private
+and cannot become a terminal root reply.
 
 Historical replay is not a terminal-finalization responsibility. A later request
 to re-show a result is an ordinary conversational request handled by Entry
@@ -247,11 +253,13 @@ One mechanism bounds all context. Source: `contextCompaction.ts`,
   the **full** message array and re-runs `toolProtocolSafeMessages()` so no
   orphaned tool call survives.
 
-The trigger is measured on main messages; the sweep currently covers every root
-message lane. The target run-scoped Planner session is not a root message lane
-and therefore does not participate in root conversation compaction. If Planner
-session history later requires compaction, it must compact the whole run-private
-history rather than clip individual Delegation Announces.
+The trigger is measured on main messages. The sweep covers root message lanes,
+but pins every still-unaccepted lane Announce intact because lane content is
+excluded from the generated summary and Boundary must retain all attempts.
+The run-scoped Planner session is not a root message lane and therefore does not
+participate in root conversation compaction. If Planner session history later
+requires compaction, it must compact the whole run-private history rather than
+clip individual Delegation Announces.
 
 ## 10. Checklist for adding context
 

@@ -5,7 +5,6 @@ import type {
   MessageLane,
   RunNextDelegation,
   RunDelegationSummary,
-  CapabilityPlanTask,
   TaskActiveDelegation,
   ActiveDelegationTransition,
   UserRequest,
@@ -21,11 +20,23 @@ import type {
   PlannerRouteOutcome,
   PlannerUserInputRequest,
 } from './capabilityPlanner/protocol';
-import type { CapabilityDisclosureState } from './capabilityPlanner/capabilityDisclosure';
+import type {
+  PlannerSessionState,
+  PlannerTaskContinuation,
+} from './capabilityPlanner/session';
 
 export type SessionToolAuthorizationState = {
   generation: string;
   records: ToolAuthorizationRecord[];
+};
+
+export type OrchestratorTerminalErrorState = {
+  readonly id: string;
+  readonly node: string;
+  readonly name: string;
+  readonly message: string;
+  readonly code: string | null;
+  readonly langChainErrorCode: string | null;
 };
 
 const orchestratorStateChannels = {
@@ -37,11 +48,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runCapabilityPlan: Annotation<CapabilityPlanTask[]>({
-    reducer: (_prev, next) => next,
-    default: () => [],
-  }),
-  runCapabilityDisclosure: Annotation<CapabilityDisclosureState | null>({
+  runPlannerSession: Annotation<PlannerSessionState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -54,6 +61,10 @@ const orchestratorStateChannels = {
     default: () => [],
   }),
   taskActiveDelegation: Annotation<TaskActiveDelegation | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  taskPlannerContinuation: Annotation<PlannerTaskContinuation | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -74,6 +85,10 @@ const orchestratorStateChannels = {
     default: () => null,
   }),
   runRuntimeFailure: Annotation<OrchestratorRuntimeFailure | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
+  runTerminalError: Annotation<OrchestratorTerminalErrorState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -109,13 +124,14 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
-  | 'runCapabilityPlan'
+  | 'runPlannerSession'
   | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runLatestDelegationOutcome'
   | 'runUserInputRequest'
   | 'runRuntimeFailure'
+  | 'runTerminalError'
   | 'runActiveDelegationTransition'
   | 'runId'
   | 'traceId'
@@ -132,13 +148,14 @@ export function buildRunStateReset(
 ): OrchestratorRunState {
   return {
     runNextDelegation: null,
-    runCapabilityPlan: [],
+    runPlannerSession: null,
     runUserRequest: null,
     runDelegationSummaries: [],
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
     runUserInputRequest: null,
     runRuntimeFailure: null,
+    runTerminalError: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',
     runId: randomUUID().slice(0, 8),
@@ -150,9 +167,19 @@ export function buildOrchestratorRunInput(
   messages: BaseMessage[],
   options: BuildOrchestratorRunOptions = {},
 ) {
+  const reset = buildRunStateReset(options);
+  if (options.activeDelegationTransition === 'resume_active') {
+    // Preserve an interrupted prior run's session until prepare can extract
+    // only its canonical plan into a fresh-run continuation seed.
+    const { runPlannerSession: _priorRunPlannerSession, ...resumeReset } = reset;
+    return {
+      messages,
+      ...resumeReset,
+    };
+  }
   return {
     messages,
-    ...buildRunStateReset(options),
+    ...reset,
   };
 }
 

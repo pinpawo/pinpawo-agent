@@ -173,7 +173,7 @@ function createOrchestratorGraph(
     if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
     const state = input as Record<string, unknown>;
     if (!state.taskActiveDelegation
-      || Object.prototype.hasOwnProperty.call(state, 'runCapabilityDisclosure')) {
+      || state.runPlannerSession) {
       return input;
     }
     // Direct boundary fixtures represent checkpoints created by the current
@@ -181,12 +181,29 @@ function createOrchestratorGraph(
     // old-checkpoint boundary.
     return {
       ...state,
-      runCapabilityDisclosure: {
-        registryDigest: 'test-fixture-registry-generation',
-        disclosedCapabilityNames: [],
-        emptySearchRounds: 0,
-        maxEmptySearchRounds: 2,
-        status: 'open',
+      taskPlannerContinuation: state.taskPlannerContinuation ?? {
+        traceId: (state.taskActiveDelegation as TaskActiveDelegation).traceId,
+        userRequest: (state.taskActiveDelegation as TaskActiveDelegation).userRequest,
+        activeDelegationId: (state.taskActiveDelegation as TaskActiveDelegation).id,
+        remainingPlan: [],
+      },
+      runPlannerSession: {
+        runId: state.runId,
+        revision: 0,
+        plan: state.taskPlannerContinuation
+          && typeof state.taskPlannerContinuation === 'object'
+          && !Array.isArray(state.taskPlannerContinuation)
+          && Array.isArray((state.taskPlannerContinuation as Record<string, unknown>).remainingPlan)
+          ? (state.taskPlannerContinuation as Record<string, unknown>).remainingPlan
+          : [],
+        capabilityDisclosure: {
+          registryDigest: 'test-fixture-registry-generation',
+          disclosedCapabilityNames: [],
+          emptySearchRounds: 0,
+          maxEmptySearchRounds: 2,
+          status: 'open',
+        },
+        lastCommit: null,
       },
     };
   };
@@ -256,7 +273,7 @@ function createQueuedPlannerRunner(
         if (planning.outcome !== 'task_done') {
           throw new Error(`unsupported scripted planner outcome ${planning.outcome}`);
         }
-        if (!input.messages.some(getMessageIsAnnounce)) {
+        if (input.announceAttempts.length === 0) {
           return { action: 'unavailable', tasks: [] };
         }
         return this.invoke(input);
@@ -352,6 +369,9 @@ test('orchestrator state channels encode lifecycle prefixes in their names', () 
 
   assert.deepEqual(invalidChannels, []);
   assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runPendingFinalReply'), false);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runPlannerSession'), true);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityPlan'), false);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityDisclosure'), false);
 });
 
 test('run identity is fresh while task trace identity can be supplied by the caller', () => {
@@ -366,6 +386,8 @@ test('run identity is fresh while task trace identity can be supplied by the cal
   assert.equal(first.traceId, 'task-trace-1');
   assert.equal(resumed.traceId, first.traceId);
   assert.notEqual(resumed.runId, first.runId);
+  assert.equal('runPlannerSession' in first ? first.runPlannerSession : undefined, null);
+  assert.equal('runPlannerSession' in resumed, false);
 });
 
 function readToolMessages(messages: unknown[]) {
@@ -500,17 +522,31 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
   assert.deepEqual(boundaryPlannerInput?.userRequest, entryPlannerInput?.userRequest);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
-  assert.match(plannerMessageContextText(plannerInputs[1]), /issue #269 需求点/);
+  assert.match(plannerInputs[1]?.announceAttempts[0]?.result ?? '', /issue #269 需求点/);
+  assert.equal(plannerInputs[1]?.announceAttempts.length, 1);
+  const secondBoundaryInput = plannerInputs[2];
+  const acceptedFirstTaskAnnounce = secondBoundaryInput?.messages.find((message) =>
+    getMessageHandoffSource(message)?.delegationId
+      === plannerInputs[1]?.activeDelegation?.delegationId);
+  assert.ok(acceptedFirstTaskAnnounce);
+  assert.equal(secondBoundaryInput?.announceAttempts.length, 1);
+  assert.notEqual(
+    secondBoundaryInput?.announceAttempts[0]?.messageId,
+    getMessageHandoffSource(acceptedFirstTaskAnnounce)?.announceMessageId,
+  );
   assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
   assert.equal(
     plannerInputs[1]?.inputId,
     `announce:${plannerInputs[1]?.activeDelegation?.delegationId}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.deepEqual(state.runCapabilityPlan, []);
+  assert.equal(state.runPlannerSession, null);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
-  assert.deepEqual(state.runCapabilityDisclosure, boundaryPlannerInput?.capabilityDisclosure);
+  assert.equal(state.taskPlannerContinuation, null);
+  assert.equal(state.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
+  assert.equal(state.messages.some((message) =>
+    readMessageText(message).includes('<planning_boundary_event')), false);
   const answerInput = readMessageText(answerMessages.at(-1) ?? new HumanMessage(''));
   assert.match(answerInput, /<accepted_results>/);
   assert.equal(answerInput.match(/<accepted_result order=/g)?.length, 2);
@@ -566,7 +602,7 @@ test('a completed single-task goal is accepted by the boundary Planner', async (
   assert.equal(plannerInputs[0]?.mode, 'entry');
   assert.equal(plannerInputs[1]?.mode, 'boundary');
   assert.equal(state.runNextDelegation, null);
-  assert.deepEqual(state.runCapabilityPlan, []);
+  assert.equal(state.runPlannerSession, null);
 });
 
 test('Planner boundary returns to capabilityPlanner until the remaining goal is complete', async () => {
@@ -639,16 +675,16 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
     task: '检索本地实现与 git log。',
   }]);
   assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
-  assert.match(plannerMessageContextText(plannerInputs[1]), /issue #269 需求点：需要检查本地实现/);
+  assert.match(plannerInputs[1]?.announceAttempts[0]?.result ?? '', /issue #269 需求点：需要检查本地实现/);
   assert.doesNotMatch(plannerMessageContextText(plannerInputs[1]), /announce truncated for Planner context/);
-  assert.match(plannerMessageContextText(plannerInputs[1]), /完整 handoff 末尾约束：必须检查兼容性/);
+  assert.match(plannerInputs[1]?.announceAttempts[0]?.result ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
     'issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。',
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.deepEqual(state.runCapabilityPlan, []);
+  assert.equal(state.runPlannerSession, null);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
 });
@@ -843,9 +879,8 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
     ...buildOrchestratorRunInput([
       new HumanMessage('继续当前任务'),
     ], { activeDelegationTransition: 'resume_active' }),
-    runCapabilityPlan: remainingPlan,
     taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
+  } as OrchestratorStateType;
   input.runDelegationSummaries = [{
     id: 'active-1',
     lane: 'capability:general',
@@ -863,6 +898,12 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
     status: 'awaiting_decision',
     resultPreview: '验证尚未形成可接受的边界决定。',
     userRequest: '验证当前改动，然后发布。',
+  };
+  input.taskPlannerContinuation = {
+    traceId: input.taskActiveDelegation.traceId,
+    userRequest: input.taskActiveDelegation.userRequest,
+    activeDelegationId: input.taskActiveDelegation.id,
+    remainingPlan,
   };
 
   const state = await graph.invoke(input, {
@@ -882,11 +923,11 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
   assert.deepEqual(observedPlannerInput?.remainingPlan, remainingPlan);
   assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">planner_incomplete<\/blocked_reason>/);
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
-  assert.deepEqual(state.runCapabilityPlan, remainingPlan);
+  assert.deepEqual(state.taskPlannerContinuation?.remainingPlan, remainingPlan);
   assert.equal(state.runNextDelegation, null);
 });
 
-test('Planner boundary ordinary text becomes a complete direct Answer fallback', async () => {
+test('Planner boundary ordinary text cannot enter root messages through the runner seam', async () => {
   let answerInvocationText = '';
   const plannerAnswer = [
     '网络检查已经完成：en1 已获取 IP，外网连通正常。',
@@ -908,20 +949,10 @@ test('Planner boundary ordinary text becomes a complete direct Answer fallback',
     },
     actor: testActor,
     capabilityPlannerRunner: {
-      async invoke(plannerInput) {
-        const output = new AIMessage(plannerAnswer);
-        setPinpetMeta(output, {
-          lane: 'orchestrator',
-          source: 'capability_planner',
-          traceId: plannerInput.traceId,
-          runId: plannerInput.runId,
-          plannerInputId: plannerInput.inputId,
-          registryDigest: plannerInput.workspace.registryDigest,
-        });
+      async invoke() {
         return {
           plannerStatus: 'incomplete',
           reason: 'terminal_commit_missing',
-          messageUpdates: [output],
         };
       },
     },
@@ -934,9 +965,8 @@ test('Planner boundary ordinary text becomes a complete direct Answer fallback',
     ...buildOrchestratorRunInput([
       new HumanMessage('重新检查网络并核对 Handoff。'),
     ], { activeDelegationTransition: 'resume_active' }),
-    runCapabilityPlan: remainingPlan,
     taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
+  } as OrchestratorStateType;
   input.runDelegationSummaries = [{
     id: 'active-network-check',
     lane: 'capability:general',
@@ -955,6 +985,12 @@ test('Planner boundary ordinary text becomes a complete direct Answer fallback',
     resultPreview: '网络检查已完成。',
     userRequest: '重新检查网络并核对 Handoff。',
   };
+  input.taskPlannerContinuation = {
+    traceId: input.taskActiveDelegation.traceId,
+    userRequest: input.taskActiveDelegation.userRequest,
+    activeDelegationId: input.taskActiveDelegation.id,
+    remainingPlan,
+  };
 
   const state = await graph.invoke(input, {
     configurable: {
@@ -968,17 +1004,16 @@ test('Planner boundary ordinary text becomes a complete direct Answer fallback',
     },
   }) as OrchestratorStateType;
 
-  assert.match(answerInvocationText, /<reply_mode>direct<\/reply_mode>/);
-  assert.match(answerInvocationText, /<direct_answer format="markdown" role="data">/);
-  assert.match(answerInvocationText, /Manatee\/CDP circle failure -5403/);
-  assert.doesNotMatch(answerInvocationText, /<blocked_reason/);
-  assert.equal(answerInvocationText.includes(plannerAnswer), true);
+  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">planner_incomplete<\/blocked_reason>/);
+  assert.equal(answerInvocationText.includes(plannerAnswer), false);
+  assert.equal(state.messages.some((message) => readMessageText(message).includes(plannerAnswer)), false);
   assert.equal(state.taskActiveDelegation?.id, 'active-network-check');
-  assert.deepEqual(state.runCapabilityPlan, remainingPlan);
+  assert.deepEqual(state.taskPlannerContinuation?.remainingPlan, remainingPlan);
 });
 
-test('a boundary checkpoint without disclosure state is rejected before Planner invocation', async () => {
+test('an explicit resume without Planner state initializes a fresh session', async () => {
   let plannerCalls = 0;
+  let observedSessionRunId: string | null = null;
   const model = {
     invoke: async () => new AIMessage('must not run'),
     bindTools: () => ({ invoke: async () => new AIMessage('') }),
@@ -987,8 +1022,9 @@ test('a boundary checkpoint without disclosure state is rejected before Planner 
     models: { act: model },
     actor: testActor,
     capabilityPlannerRunner: {
-      async invoke() {
+      async invoke(plannerInput) {
         plannerCalls += 1;
+        observedSessionRunId = plannerInput.plannerSession.runId;
         return { action: 'goal_done', tasks: [] };
       },
     },
@@ -997,7 +1033,6 @@ test('a boundary checkpoint without disclosure state is rejected before Planner 
     ...buildOrchestratorRunInput([
       new HumanMessage('继续旧任务'),
     ], { activeDelegationTransition: 'resume_active' }),
-    runCapabilityDisclosure: null,
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   input.taskActiveDelegation = {
@@ -1021,13 +1056,11 @@ test('a boundary checkpoint without disclosure state is rejected before Planner 
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerCalls, 0);
+  assert.equal(plannerCalls, 1);
+  assert.equal(observedSessionRunId, input.runId);
   assert.equal(state.runRuntimeFailure, null);
-  assert.equal(state.taskActiveDelegation, null);
-  assert.match(
-    String(mainConversationMessages(state.messages).at(-1)?.content ?? ''),
-    /旧版本创建，当前版本无法继续/,
-  );
+  assert.equal(state.taskActiveDelegation?.id, 'legacy-active');
+  assert.equal(state.runPlannerSession, null);
 });
 
 test('capability planner reports an empty compiled registry without inventing General', async () => {
@@ -1316,8 +1349,8 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
 
   const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
   assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.match(plannerMessageContextText(observedPlannerInput), /文件读取完成，lint 已通过/);
-  assert.match(plannerMessageContextText(observedPlannerInput), /END_OF_FULL_SUBAGENT_RESULT/);
+  assert.match(observedPlannerInput?.announceAttempts[0]?.result ?? '', /文件读取完成，lint 已通过/);
+  assert.match(observedPlannerInput?.announceAttempts[0]?.result ?? '', /END_OF_FULL_SUBAGENT_RESULT/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(result.messages.at(-1)?.content, '文件读取和 lint 检查已完成，lint 已通过。');
   assert.match(answerInput.map(readMessageText).join('\n'), /END_OF_FULL_SUBAGENT_RESULT/);
@@ -1669,6 +1702,97 @@ test('capability errors retain the active delegation and lane without a handoff'
     checkpointState.messages.some((message) => getMessageHandoffSource(message)),
     false,
   );
+  assert.equal(checkpointState.runPlannerSession, null);
+  assert.equal(
+    checkpointState.taskPlannerContinuation?.activeDelegationId,
+    activeDelegation.id,
+  );
+  assert.equal(checkpointState.runIterationCount, 0);
+  assert.equal(checkpointState.runTerminalError?.node, 'capability');
+  assert.equal(checkpointState.runTerminalError?.message, 'capability finalize failed');
+});
+
+test('planner errors checkpoint run-scoped cleanup before they are rethrown', async () => {
+  const graph = createOrchestratorGraph({
+    models: {
+      act: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
+    },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+    capabilityPlannerRunner: {
+      invoke: async () => {
+        throw new Error('planner failed');
+      },
+    },
+  });
+  const config = {
+    configurable: {
+      thread_id: 'planner-error-cleanup',
+      actor: testActor,
+      capabilities: [capability('general', 'General-purpose capability.')],
+      toolkits: [],
+    },
+  };
+
+  await assert.rejects(
+    graph.invoke(buildOrchestratorRunInput([
+      new HumanMessage('执行会触发 Planner 失败的任务'),
+    ]), config),
+    /planner failed/,
+  );
+
+  const checkpoint = await graph.getState(config);
+  const state = checkpoint.values as OrchestratorStateType;
+  assert.equal(state.runPlannerSession, null);
+  assert.equal(state.taskPlannerContinuation, null);
+  assert.equal(state.runTerminalError?.node, 'capabilityPlanner');
+});
+
+test('answer errors checkpoint run-scoped cleanup before they are rethrown', async () => {
+  const answerError = Object.assign(new Error('answer failed'), {
+    lc_error_code: 'MODEL_RATE_LIMIT',
+  });
+  const answerModel = {
+    invoke: async () => {
+      throw answerError;
+    },
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => ({ action: 'unavailable', tasks: [] }),
+    }),
+  } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: answerModel },
+    actor: testActor,
+    checkpoint: new MemorySaver(),
+    capabilityPlannerRunner: {
+      invoke: async () => ({ action: 'unavailable', tasks: [] }),
+    },
+  });
+  const config = {
+    configurable: {
+      thread_id: 'answer-error-cleanup',
+      actor: testActor,
+      capabilities: [],
+      toolkits: [],
+    },
+  };
+
+  await assert.rejects(
+    graph.invoke(buildOrchestratorRunInput([
+      new HumanMessage('回答会失败的任务'),
+    ]), config),
+    (error) => error instanceof Error
+      && error.message === 'answer failed'
+      && (error as Error & { lc_error_code?: string }).lc_error_code === 'MODEL_RATE_LIMIT',
+  );
+
+  const checkpoint = await graph.getState(config);
+  const state = checkpoint.values as OrchestratorStateType;
+  assert.equal(state.runPlannerSession, null);
+  assert.equal(state.taskPlannerContinuation, null);
+  assert.equal(state.runTerminalError?.node, 'answer');
+  assert.equal(state.runTerminalError?.langChainErrorCode, 'MODEL_RATE_LIMIT');
 });
 
 test('answer filters internal briefings by lane without parsing message text', async () => {
@@ -4539,7 +4663,9 @@ test('toolkit review run interruption retains the delegation without another mod
     __interrupt__?: unknown;
     messages: BaseMessage[];
     runNextDelegation: unknown;
+    runPlannerSession: OrchestratorStateType['runPlannerSession'];
     taskActiveDelegation: TaskActiveDelegation | null;
+    taskPlannerContinuation: OrchestratorStateType['taskPlannerContinuation'];
   };
 
   assert.equal(finalState.__interrupt__, undefined);
@@ -4550,6 +4676,12 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 0);
   assert.equal(finalState.runNextDelegation, null);
   assert.equal(finalState.taskActiveDelegation?.status, 'pending');
+  assert.equal(finalState.runPlannerSession, null);
+  assert.equal(
+    finalState.taskPlannerContinuation?.activeDelegationId,
+    finalState.taskActiveDelegation?.id,
+  );
+  assert.deepEqual(finalState.taskPlannerContinuation?.remainingPlan, []);
   assert.equal(
     mainConversationMessages(finalState.messages)
       .some((message) => Boolean(getMessageHandoffSource(message))),
@@ -5199,21 +5331,13 @@ test('Planner continuation path rechecks run iteration guard before next decisio
   assert.match(finalText, /主流程循环已达到上限/);
 });
 
-test('Planner boundary does not append duplicate handoff copies for unchanged announce', async () => {
+test('Planner boundary accepts each announce attempt once', async () => {
   let routeCallCount = 0;
+  const plannerInputs: CapabilityPlannerInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage(''),
     bindTools: () => ({
       invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        if (routeCallCount === 1 || routeCallCount === 2) {
-          return continueDecision('任务仍未完成，继续执行后续步骤。');
-        }
-        return goalDoneDecision();
-      },
     }),
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -5226,6 +5350,15 @@ test('Planner boundary does not append duplicate handoff copies for unchanged an
       }),
     },
     actor: testActor,
+    capabilityPlannerRunner: {
+      async invoke(plannerInput) {
+        routeCallCount += 1;
+        plannerInputs.push(plannerInput);
+        return routeCallCount <= 2
+          ? { action: 'continue_current', tasks: [] }
+          : { action: 'goal_done', tasks: [] };
+      },
+    },
   });
 
   const activeDelegation: TaskActiveDelegation = {
@@ -5282,12 +5415,39 @@ test('Planner boundary does not append duplicate handoff copies for unchanged an
   }) as OrchestratorStateType;
 
   assert.equal(routeCallCount, 3);
+  assert.deepEqual(
+    plannerInputs.map((plannerInput) =>
+      plannerInput.announceAttempts.map((announce) => announce.messageId)),
+    [
+      ['m-dup-copy'],
+      ['m-dup-copy', plannerInputs[1]?.latestAnnounce?.messageId],
+      [
+        'm-dup-copy',
+        plannerInputs[1]?.latestAnnounce?.messageId,
+        plannerInputs[2]?.latestAnnounce?.messageId,
+      ],
+    ],
+  );
+  assert.deepEqual(
+    plannerInputs.map((plannerInput) => plannerInput.plannerSession.revision),
+    [0, 1, 2],
+  );
+  assert.equal(new Set(plannerInputs.map((plannerInput) =>
+    plannerInput.plannerSession.runId)).size, 1);
+  for (const plannerInput of plannerInputs) {
+    assert.equal(plannerInput.messages.some(getMessageIsAnnounce), false);
+    assert.equal(
+      plannerInput.latestAnnounce?.messageId,
+      plannerInput.announceAttempts.at(-1)?.messageId,
+    );
+  }
   const handoffCopies = mainConversationMessages(state.messages)
     .filter((message) => {
       const source = getMessageHandoffSource(message);
       return source?.delegationId === activeDelegation.id;
     });
-  assert.equal(handoffCopies.length, 1);
+  assert.equal(handoffCopies.length, 3);
+  assert.equal(new Set(handoffCopies.map((message) => message.id)).size, 3);
 });
 
 test('lane tagging hides subagent messages from route and records completed announce', () => {
@@ -5628,7 +5788,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
   assert.equal(observedPlannerInput?.mode, 'boundary');
   assert.equal(observedPlannerInput?.latestAnnounce?.completionReason, 'limit_reached');
   assert.match(
-    plannerMessageContextText(observedPlannerInput),
+    observedPlannerInput?.announceAttempts[0]?.result ?? '',
     /已完成依赖检查，剩余源码还需要继续探查。/,
   );
 });
@@ -5937,6 +6097,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   ).length, 0);
   assert.deepEqual(mainConversationMessages(finalState).map((m) => m.content), [
     '处理所有分片',
+    '已处理第一个分片，尚未完成。',
     '全部分片已处理完成，共 120 条。',
   ]);
 });
@@ -6254,7 +6415,8 @@ test('resume rejects a delegation without the current trace identity', () => {
 
   assert.deepEqual(applyActiveDelegationTransition(state), {
     runNextDelegation: null,
-    runCapabilityPlan: [],
+    runPlannerSession: null,
+    taskPlannerContinuation: null,
     runLatestDelegationOutcome: null,
     runRuntimeFailure: 'checkpoint_incompatible',
   });
@@ -6468,7 +6630,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
   assert.match(plannerMessageContextText(plannerInputs[0]), /优先检查最新修改/);
-  assert.match(plannerMessageContextText(plannerInputs[0]), /需要用户确认检查方向/);
+  assert.match(plannerInputs[0]?.announceAttempts[0]?.result ?? '', /需要用户确认检查方向/);
   assert.equal(plannerInputs[0]?.latestAnnounce?.messageId, 'prior-resume-announce');
   assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
   assert.notEqual(plannerInputs[1]?.latestAnnounce?.messageId, 'prior-resume-announce');

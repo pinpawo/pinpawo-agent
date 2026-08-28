@@ -12,7 +12,10 @@ import {
   plannerCommitContext,
   plannerInvocationStateSchema,
 } from './plannerState';
-import { PLANNER_TERMINAL_TOOL_NAMES } from './terminalTools';
+import {
+  PLANNER_TERMINAL_TOOL_NAMES,
+  plannerTerminalToolNamesForMode,
+} from './terminalTools';
 
 function readTerminalCommit(message: ToolMessage): unknown {
   if (message.status === 'error' || typeof message.content !== 'string') {
@@ -43,7 +46,15 @@ export function createPlannerMiddleware() {
         });
       }
       const systemMessage = plannerSystemMessage(input);
-      return handler({ ...request, systemMessage });
+      const allowedTerminalToolNames = plannerTerminalToolNamesForMode(input.mode);
+      return handler({
+        ...request,
+        systemMessage,
+        tools: request.tools.filter(({ name }) =>
+          typeof name !== 'string'
+          || !PLANNER_TERMINAL_TOOL_NAMES.has(name)
+          || allowedTerminalToolNames.has(name)),
+      });
     },
     wrapToolCall: async (request, handler) => {
       let result: Awaited<ReturnType<typeof handler>>;

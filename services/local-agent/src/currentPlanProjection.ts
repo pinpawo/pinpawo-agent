@@ -27,7 +27,11 @@ export function projectCurrentPlan(state: unknown): AgentPlan | null {
   const record = asRecord(state);
   const active = readActiveDelegation(record?.taskActiveDelegation);
   const summaries = readDelegationSummaries(record?.runDelegationSummaries);
-  const remaining = readRemainingPlan(record?.runCapabilityPlan);
+  const plannerSession = asRecord(record?.runPlannerSession);
+  const continuation = asRecord(record?.taskPlannerContinuation);
+  const remaining = readRemainingPlan(
+    plannerSession?.plan ?? continuation?.remainingPlan,
+  );
 
   // A missing active delegation only means no step is running right now — the
   // plan itself survives between delegations, so it must not be cleared.

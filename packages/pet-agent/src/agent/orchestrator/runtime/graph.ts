@@ -30,6 +30,7 @@ import { afterContextPrep } from './routes/afterContextPrep';
 import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
 import { createAfterPlannerBoundaryIterationGuard } from './routes/afterPlannerBoundaryIterationGuard';
+import { createRunTerminationHandlers } from './runTermination';
 
 // --- Graph builder ---
 
@@ -43,6 +44,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const afterPlannerBoundaryIterationGuard =
     createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations });
   const runCapabilityPlanner = createCapabilityPlannerNode(config);
+  const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
   const resultAnswer = createAnswerNode(config);
@@ -64,11 +66,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       ends: ['capabilityPlanner'],
     })
     .addNode('capabilityPlanner', runCapabilityPlanner, {
-      ends: ['answer', 'capability'],
+      ends: ['answer', 'capability', 'throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
     })
     .addNode('plannerBoundaryIterationGuard', plannerBoundaryIterationGuard)
-    .addNode('answer', resultAnswer)
-    .addNode('capability', capabilityNode)
+    .addNode('answer', resultAnswer, {
+      ends: ['throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
+    })
+    .addNode('capability', capabilityNode, {
+      ends: ['throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
+    })
+    .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addEdge(START, 'prepare')
     .addConditionalEdges('prepare', afterPrepare, {
       answer: 'answer',

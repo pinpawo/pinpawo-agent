@@ -2,7 +2,7 @@ import type { ProviderTokenUsage } from '../src/agent/tokenUsage.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import type { DecisionEvalTarget } from './decision-eval-scenarios.ts';
 
-export type PromptEvalTarget = DecisionEvalTarget | 'answer';
+export type PromptEvalTarget = DecisionEvalTarget | 'result_synthesis';
 
 export type DecisionStabilityResult = {
   target: PromptEvalTarget;

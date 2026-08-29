@@ -123,7 +123,7 @@ Root continues to own execution lifecycle facts:
 runUserRequest
 taskActiveDelegation
 runDelegationSummaries
-runLatestDelegationOutcome
+runTerminalOutcome
 ```
 
 Planner session state cannot directly create a delegation, accept an announce,
@@ -150,7 +150,7 @@ from canonical facts such as the active delegation, remaining plan, accepted
 Announces, and normalized goal. It does not resume the previous Planner working
 history, search attempts, or commit cache.
 
-Terminal Planner, Capability, and Answer exceptions follow the same lifetime
+Terminal Planner, Capability, and finalization exceptions follow the same lifetime
 rule. Root first checkpoints a continuation snapshot for resumable work and
 clears the run-scoped Planner session, then rethrows the failure. An exception
 must not leave a previous run's session available to a later invocation.
@@ -348,17 +348,18 @@ Repeated invocation with the same `inputId` and `registryDigest` reads the typed
 `lastCommit`; it does not scan historical `ToolMessage` JSON. A new input
 replaces the replay slot. A new run starts with no replay slot.
 
-Ordinary Planner text is not persisted as an AI message. If the runtime keeps a
-Boundary direct-answer fallback, it is returned explicitly as invocation data:
+Ordinary Planner text is not persisted as Planner history. It is returned as a
+typed direct-response result:
 
 ```ts
-type PlannerIncomplete = {
-  plannerStatus: 'incomplete';
-  fallbackText: string | null;
+type CapabilityPlannerDirectResponseResult = {
+  plannerStatus: 'direct_response';
+  response: string;
 };
 ```
 
-Answer consumes that value in the current transition only.
+Root materialization writes it into `runTerminalOutcome`; `finalizeRun` emits the
+complete payload without another model call or a fabricated Planner commit.
 
 ## Capability disclosure
 

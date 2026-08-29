@@ -168,16 +168,25 @@ again rather than persisting a Planner-owned copy.
 
 Conceptual model input:
 
-```text
-SystemMessage(Planner entry objective and context semantics)
-MainConversationMessages(clean canonical projection)
-PlannerEntryFrame(
-  goal,
-  disclosedCapabilities
-)
+```xml
+<planner_invocation
+  mode="entry"
+  source="orchestrator_state"
+  trust="read_only"
+>
+  <run_user_request role="task_boundary" source="orchestrator_state" trust="read_only">
+    <request><![CDATA[User goal and constraints.]]></request>
+  </run_user_request>
+
+  <capability_context source="planner_state" trust="read_only">
+    <capability name="general"><![CDATA[Disclosed Capability document.]]></capability>
+  </capability_context>
+</planner_invocation>
 ```
 
 Entry has no active delegation, announce attempts, or Boundary overlay.
+The envelope is one invocation-only HumanMessage appended after the clean main
+conversation. It is a provider projection, not canonical Planner state.
 
 The resulting `submit_plan` decision initializes the run plan. Provider-facing
 Human/AI/Tool messages produced while making that decision remain inside the
@@ -216,7 +225,21 @@ The overlay must never be checkpointed as a root conversation message. It must
 also never rely on chronological adjacency alone to identify the current
 announce.
 
-Conceptual provider-visible form:
+Conceptual provider-visible invocation:
+
+```xml
+<planner_invocation
+  mode="boundary"
+  source="orchestrator_state"
+  trust="read_only"
+>
+  <run_user_request>...</run_user_request>
+  <capability_context>...</capability_context>
+  <planning_boundary_event>...</planning_boundary_event>
+</planner_invocation>
+```
+
+The `planning_boundary_event` child has this complete shape:
 
 ```xml
 <planning_boundary_event role="task_boundary" source="orchestrator_state">
@@ -260,8 +283,10 @@ Conceptual provider-visible form:
 </planning_boundary_event>
 ```
 
-The XML-like form is a provider projection, not the canonical schema. The
-wrapper may change without changing the ownership and lifetime contract above.
+The XML-like form is a provider projection, not the canonical schema. The outer
+envelope makes Entry and Boundary one rooted invocation document; it does not
+absorb later `capability_search` ToolMessages. The wrapper may change without
+changing the ownership and lifetime contract above.
 `delegation_announces` is always present. A normal first Boundary has one child
 and `evidence_state="available"`; an explicit resume with no canonical execution
 evidence uses a self-closing element with `evidence_state="absent"` and no

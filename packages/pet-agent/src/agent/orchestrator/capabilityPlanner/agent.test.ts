@@ -1030,6 +1030,10 @@ test('boundary projects the current lane announce into the standard model-visibl
     (message) => message instanceof HumanMessage,
   );
   assert.ok(boundaryInput instanceof HumanMessage);
+  assert.match(
+    readMessageText(boundaryInput),
+    /^<planner_invocation mode="boundary" source="orchestrator_state" trust="read_only">/,
+  );
   assert.match(readMessageText(boundaryInput), /<run_user_request[^>]*>/);
   assert.match(readMessageText(boundaryInput), /<capability_context[^>]*>/);
   assert.match(readMessageText(boundaryInput), /<planning_boundary[^>]*>/);

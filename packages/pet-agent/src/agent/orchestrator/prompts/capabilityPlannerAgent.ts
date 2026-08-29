@@ -84,8 +84,8 @@ export function buildCapabilityPlannerAgentInput(
   input: CapabilityPlannerInput,
   disclosedCapabilities: readonly CapabilityPlannerCapabilityDocument[],
 ) {
-  const userRequest = buildRunUserRequestContext(input.userRequest);
-  const capabilityContext = buildCapabilityContext(disclosedCapabilities);
+  const userRequest = indentXmlBlock(buildRunUserRequestContext(input.userRequest), 2);
+  const capabilityContext = indentXmlBlock(buildCapabilityContext(disclosedCapabilities), 2);
   return input.mode === 'entry'
     ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({
         userRequest,
@@ -94,6 +94,6 @@ export function buildCapabilityPlannerAgentInput(
     : CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT.render({
         userRequest,
         capabilityContext,
-        planningBoundary: buildPlanningBoundary(input),
+        planningBoundary: indentXmlBlock(buildPlanningBoundary(input), 2),
       });
 }

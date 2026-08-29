@@ -62,6 +62,7 @@ These are assembled by several nodes. Defined in
 | Block | Class | Built by | Notes |
 |---|---|---|---|
 | `[配置]` | `RUN-STABLE` / `INSTRUCTION` | `buildDecisionConfig(actor)` | Only `entryAnswer` and `answer` use it. It accepts `workdir`/`runtimeEnvironment`, but **no call site passes them** — both are currently dead parameters. |
+| `<planner_invocation>` | `DYNAMIC` / `BOUNDARY` | `buildCapabilityPlannerAgentInput()` | Invocation-only Planner envelope. `mode="entry"` contains goal + disclosure; `mode="boundary"` adds the current Boundary event. Search results remain separate ToolMessages. |
 | `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Planner and finalizer use the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
 | `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + optional `<essential_context>` (initial) or `<guidance>` (continue). |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
@@ -121,6 +122,12 @@ latest message id as the evaluation target. The overlay never changes the
 announces or root messages. Private Capability Human/AI/Tool transcript is never
 included. The prior remaining plan is marked as a non-authoritative proposal that
 the Boundary must revalidate against current evidence.
+
+Both modes receive one rooted `<planner_invocation>` HumanMessage after the
+clean conversation. Its `mode` attribute makes the invocation kind explicit.
+The Entry envelope contains `<run_user_request>` and `<capability_context>`;
+Boundary adds `<planning_boundary_event>` as a third child. The envelope and
+Boundary event are discarded after the call and never enter root history.
 
 Capability disclosure is run-scoped semantic state. It contains the configured
 default Capability when available and every Capability disclosed during this

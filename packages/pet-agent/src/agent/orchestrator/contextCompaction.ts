@@ -4,12 +4,14 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageIsAnnounce,
+} from './delegationMessages';
+import {
   getMessageLane,
-  getPinpetMeta,
+  getAgentMessageMetadata,
   mainConversationMessages,
   setPinpetMeta,
   toolProtocolSafeMessages,
-} from './messageLanes';
+} from '../messages';
 import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegationAnnounce';
 import { clipForPrompt, readMessageText } from './utils';
 import { isDelegationBriefingMessage } from './delegationBriefing';
@@ -36,7 +38,7 @@ export type ContextCompactionResult = {
 
 export function isContextCompactionMessage(message: BaseMessage): boolean {
   return message.name === CONTEXT_COMPACTION_MESSAGE_NAME
-    || getPinpetMeta(message).source === CONTEXT_COMPACTION_MESSAGE_NAME;
+    || getAgentMessageMetadata(message).source === CONTEXT_COMPACTION_MESSAGE_NAME;
 }
 
 export function createContextCompactionMessage(
@@ -72,7 +74,7 @@ function selectMessagesToKeep(
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;
     if (!preserveAnnouncesFor || !getMessageIsAnnounce(message)) return false;
-    const meta = getPinpetMeta(message);
+    const meta = getAgentMessageMetadata(message);
     return getMessageLane(message) === preserveAnnouncesFor.lane
       && meta.runId === preserveAnnouncesFor.transcriptRunId
       && meta.delegationId === preserveAnnouncesFor.delegationId;

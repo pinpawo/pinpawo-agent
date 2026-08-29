@@ -251,11 +251,12 @@ loses or corrupts the payload is incompatible with the new writer.
 
 ## Implementation boundaries
 
-The implementation should keep responsibilities separated:
+The implementation keeps responsibilities separated:
 
-- `messageLanes.ts` recognizes lane ownership and announce identity;
-- a dedicated announce module owns the class, validation, and model projection;
-- handoff code owns acceptance and lane cleanup, not presentation formatting;
+- `agent/messages` owns lane metadata, scoped selection, and invocation views;
+- the dedicated announce module owns the class, validation, and model projection;
+- `delegationMessages.ts` owns announce selection, acceptance, and lane cleanup,
+  not presentation formatting;
 - model nodes call one shared conversation projector before model invocation;
 - stream adapters own UI projection;
 - terminal finalization resolves accepted announces; optional synthesis owns

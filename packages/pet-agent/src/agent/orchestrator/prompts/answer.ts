@@ -10,7 +10,7 @@ import {
   MAX_HANDOFF_ARTIFACT_URI_LENGTH,
   type HandOffArtifactRef,
 } from '../artifacts/handoff';
-import { getPinpetMeta, setPinpetMeta } from '../messageLanes';
+import { getAgentMessageMetadata, setPinpetMeta } from '../../messages';
 import type { UserRequest } from '../types';
 import { clipForPrompt } from '../utils';
 import { buildRunUserRequestContext } from './context';
@@ -214,7 +214,7 @@ export function appendAnswerInputMessage(
   const inputMessage = createAnswerInputMessage(userRequest, facts);
   const canonicalHistory = history.filter((message) => !(
     message.name === ANSWER_INPUT_MESSAGE_NAME
-    || getPinpetMeta(message).source === ANSWER_INPUT_MESSAGE_NAME
+    || getAgentMessageMetadata(message).source === ANSWER_INPUT_MESSAGE_NAME
   ));
   return [...canonicalHistory, inputMessage];
 }

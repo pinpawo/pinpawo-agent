@@ -36,7 +36,7 @@ import {
 import type { CapabilityPlannerInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { createPlannerSession } from './session';
-import { setPinpetMeta } from '../messageLanes';
+import { setPinpetMeta } from '../../messages';
 
 function commitOnly(value: unknown) {
   const result = value as {

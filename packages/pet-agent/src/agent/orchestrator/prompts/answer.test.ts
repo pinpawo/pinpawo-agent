@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { getPinpetMeta } from '../messageLanes';
+import { getAgentMessageMetadata } from '../../messages';
 import {
   ANSWER_CONTEXT_LIMITS,
   ANSWER_INPUT_MESSAGE_NAME,
@@ -47,7 +47,7 @@ test('Answer invocation is exactly the system prompt plus one answer_input messa
   assert.ok(message);
   assert.equal(message._getType(), 'human');
   assert.equal(message.name, ANSWER_INPUT_MESSAGE_NAME);
-  assert.deepEqual(getPinpetMeta(message), {
+  assert.deepEqual(getAgentMessageMetadata(message), {
     source: ANSWER_INPUT_MESSAGE_NAME,
     synthetic: true,
     authority: 'none',

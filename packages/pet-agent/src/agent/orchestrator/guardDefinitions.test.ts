@@ -18,7 +18,7 @@ import {
   guardDecisionEmitter,
   isGuardDecisionStreamChunk,
 } from './runtime/guards/decisionEvents';
-import { setPinpetMeta } from './messageLanes';
+import { setPinpetMeta } from '../messages';
 import type { OrchestratorStateType } from './state';
 import type { TaskActiveDelegation } from './types';
 

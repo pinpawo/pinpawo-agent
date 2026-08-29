@@ -27,8 +27,10 @@ import {
 import {
   getMessageLane,
   mainConversationMessages,
+} from '../../src/agent/messages/index.ts';
+import {
   readLatestHumanRequest,
-} from '../../src/agent/orchestrator/messageLanes.ts';
+} from '../../src/agent/orchestrator/delegationMessages.ts';
 import type { OrchestratorStateType } from '../../src/agent/orchestrator/state.ts';
 import { readMessageText } from '../../src/agent/orchestrator/utils.ts';
 import { readMessageToolCalls } from '../../src/utils/messages.ts';

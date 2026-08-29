@@ -8,9 +8,11 @@ import { createOrchestratorGraph, buildOrchestratorRunInput } from '../../src/ag
 import { buildReviewSpec } from '../../src/agent/orchestrator/review/reviewSpec';
 import { randomUUID } from 'node:crypto';
 import {
-  getMessageHandoffSource,
   mainConversationMessages,
-} from '../../src/agent/orchestrator/messageLanes';
+} from '../../src/agent/messages/index';
+import {
+  getMessageHandoffSource,
+} from '../../src/agent/orchestrator/delegationMessages';
 import {
   defineCapability,
   defineInstructionDocument,

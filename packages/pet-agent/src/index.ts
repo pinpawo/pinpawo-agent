@@ -219,7 +219,7 @@ export {
   mainConversationMessages,
   readMessageCreatedAtUtc,
   stampMessageCreatedAtUtc,
-} from './agent/orchestrator/messageLanes';
+} from './agent/messages';
 export type {
   CapabilityArtifactSelector,
 } from './agent/orchestrator/capabilityArtifacts';

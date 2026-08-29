@@ -14,9 +14,13 @@ import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocu
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
+import type {
+  AgentMessageLane,
+  CapabilityMessageLane,
+} from '../messages';
 
-export type MessageLane = `capability:${string}`;
-export type PinpetMessageLane = MessageLane | 'orchestrator';
+export type MessageLane = CapabilityMessageLane;
+export type PinpetMessageLane = AgentMessageLane;
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
 

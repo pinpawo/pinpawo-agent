@@ -1,6 +1,7 @@
 import { AIMessage, BaseMessage } from '@langchain/core/messages';
 import { indentXmlBlock, xmlTextBlock } from './prompts/shared';
-import type { SubagentCompletionReason, MessageLane } from './types';
+import type { SubagentCompletionReason } from './types';
+import type { CapabilityMessageLane as MessageLane } from '../messages';
 
 export const DELEGATION_ANNOUNCE_META_KEY = 'delegationAnnounce';
 export const DELEGATION_ANNOUNCE_VERSION = 1;

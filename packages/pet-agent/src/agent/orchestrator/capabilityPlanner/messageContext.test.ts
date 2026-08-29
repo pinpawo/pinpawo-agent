@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { DelegationAnnounceMessage } from '../delegationAnnounce';
-import { setPinpetMeta } from '../messageLanes';
+import { setPinpetMeta } from '../../messages';
 import { projectCapabilityPlannerMessagesForModel } from './messageContext';
 
 test('Planner context contains only clean canonical conversation with ephemeral announce projection', () => {

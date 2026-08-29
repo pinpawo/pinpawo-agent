@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage } from '@langchain/core/messages';
-import { setPinpetMeta } from '../src/agent/orchestrator/messageLanes.ts';
+import { setPinpetMeta } from '../src/agent/messages/index.ts';
 import {
   evaluateLifecycleCompositionInvariants,
   lifecycleCompositionGoalAchieved,

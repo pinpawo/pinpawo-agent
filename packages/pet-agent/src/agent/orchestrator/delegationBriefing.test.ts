@@ -6,12 +6,14 @@ import {
 } from './delegationBriefing';
 import {
   getMessageDelegationId,
-  getMessageIsAnnounce,
-  getMessageHandoffSource,
   getMessageLane,
   getMessageTranscriptRunId,
-  getPinpetMeta,
-} from './messageLanes';
+  getAgentMessageMetadata,
+} from '../messages';
+import {
+  getMessageHandoffSource,
+  getMessageIsAnnounce,
+} from './delegationMessages';
 
 test('initial delegation materializes one model-only briefing with the stable goal', () => {
   const materialized = materializeDelegation({
@@ -106,7 +108,7 @@ test('briefing metadata is routing truth and never reads as announce or handoff'
   }).laneMessages;
 
   assert.equal(isDelegationBriefingMessage(briefing), true);
-  assert.equal(getPinpetMeta(briefing).synthetic, true);
+  assert.equal(getAgentMessageMetadata(briefing).synthetic, true);
   assert.equal(getMessageTranscriptRunId(briefing), 'run-9');
   assert.equal(getMessageDelegationId(briefing), 'task-9');
   assert.equal(getMessageLane(briefing), 'capability:general');

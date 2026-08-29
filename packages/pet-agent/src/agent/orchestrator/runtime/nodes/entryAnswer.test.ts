@@ -10,7 +10,11 @@ import type { OrchestratorConfig } from '../../types';
 import { createOrchestratorGraph } from '../graph';
 import { captureRunUserRequest, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
-import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
+import {
+  getMessageLane,
+  mainConversationMessages,
+  setPinpetMeta,
+} from '../../../messages';
 import { DelegationAnnounceMessage } from '../../delegationAnnounce';
 
 function readLatestHumanText(messages: BaseMessage[]): string {

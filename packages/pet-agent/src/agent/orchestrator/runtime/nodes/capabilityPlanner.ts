@@ -40,13 +40,16 @@ import type {
 } from '../../types';
 import { findLatestHandoffCopyForDelegation } from '../../artifacts/handoff';
 import {
+  observeAgentMessageView,
+  type AgentMessageViewManifest,
+} from '../../../messages';
+import { createOrchestratorMessageViews } from '../../messageViews';
+import {
   buildSubagentHandoff,
   getMessageHandoffSource,
   getMessageCompletionReason,
-  mainConversationMessages,
   readLatestAnnounceCompletionReason,
-  selectDelegationLaneAnnounceMessages,
-} from '../../messageLanes';
+} from '../../delegationMessages';
 import {
   getInvokeOptions,
   getInvokeRegistry,
@@ -237,19 +240,26 @@ function buildPlannerInput(params: {
   nodeInput: OrchestratorStateType | CapabilityPlannerDispatch;
   workspace: CapabilityPlannerInput['workspace'];
   plannerSession: PlannerSessionState;
-}): { input: CapabilityPlannerInput; state: CapabilityPlannerRuntimeState } {
+}): {
+  input: CapabilityPlannerInput;
+  state: CapabilityPlannerRuntimeState;
+  messageViewManifest: AgentMessageViewManifest;
+} {
   const { nodeInput, workspace, plannerSession } = params;
   if (isPlannerDispatch(nodeInput)) {
     const state = nodeInput.plannerState;
+    const messageView = createOrchestratorMessageViews(nodeInput.messages)
+      .capabilityPlannerEntry();
     return {
       state,
+      messageViewManifest: messageView.manifest,
       input: {
         mode: 'entry',
         inputId: `run_started:${state.runId}`,
         traceId: state.traceId,
         runId: state.runId,
         userRequest: state.runUserRequest,
-        messages: mainConversationMessages([...nodeInput.messages]),
+        messages: messageView.messages,
         activeDelegation: null,
         latestAnnounce: null,
         announceAttempts: [],
@@ -270,11 +280,14 @@ function buildPlannerInput(params: {
   if (!capability) {
     throw new Error('Boundary Planner active delegation has an invalid lane.');
   }
-  const announceAttempts = selectDelegationLaneAnnounceMessages(state.messages, {
+  const activeScope = {
     lane: activeDelegation.lane,
     transcriptRunId: activeDelegation.transcriptRunId,
     delegationId: activeDelegation.id,
-  }).flatMap((message) => {
+  };
+  const messageView = createOrchestratorMessageViews(state.messages)
+    .capabilityPlannerBoundary(activeScope);
+  const announceAttempts = (messageView.messagesBySource.delegation ?? []).flatMap((message) => {
     if (!message.id) return [];
     const reason = getMessageCompletionReason(message);
     if (!reason) return [];
@@ -293,6 +306,7 @@ function buildPlannerInput(params: {
   const plannerState = runtimeStateFromRoot(state);
   return {
     state: plannerState,
+    messageViewManifest: messageView.manifest,
     input: {
       mode: 'boundary',
       inputId: freshTurn
@@ -302,7 +316,7 @@ function buildPlannerInput(params: {
       traceId: state.traceId,
       runId: state.runId,
       userRequest: plannerState.runUserRequest,
-      messages: mainConversationMessages([...state.messages]),
+      messages: messageView.messagesBySource.main ?? [],
       activeDelegation: {
         delegationId: activeDelegation.id,
         transcriptRunId: activeDelegation.transcriptRunId,
@@ -396,11 +410,12 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
           plan: continuation?.remainingPlan ?? [],
           capabilityDisclosure,
         });
-    const { input } = buildPlannerInput({
+    const { input, messageViewManifest } = buildPlannerInput({
       nodeInput,
       workspace,
       plannerSession,
     });
+    observeAgentMessageView(messageViewManifest, runnableConfig);
     const result = await runner.invoke(input, runnableConfig);
     const updatedCapabilityDisclosure = result.capabilityDisclosure
       ?? input.capabilityDisclosure;

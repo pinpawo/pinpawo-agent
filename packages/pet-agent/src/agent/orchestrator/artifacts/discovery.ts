@@ -1,5 +1,5 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
-import { setPinpetMeta } from '../messageLanes';
+import { setPinpetMeta } from '../../messages';
 import { insertBeforeLatestDelegationBriefing } from '../delegationBriefing';
 
 export const ARTIFACT_DISCOVERY_CONTEXT_SOURCE = 'artifact_discovery_context';
@@ -26,6 +26,7 @@ export function buildArtifactDiscoveryContextMessage(): AIMessage {
   setPinpetMeta(message, {
     source: ARTIFACT_DISCOVERY_CONTEXT_SOURCE,
     synthetic: true,
+    persistence: 'invocation',
   });
   return message;
 }

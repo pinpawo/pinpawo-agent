@@ -3,7 +3,7 @@ import {
   getMessageDelegationId,
   getMessageLane,
   getMessageTranscriptRunId,
-} from '../src/agent/orchestrator/messageLanes.ts';
+} from '../src/agent/messages/index.ts';
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import type {

@@ -8,15 +8,15 @@ import {
   hasArtifactDiscoveryToolkit,
   withArtifactDiscoveryContext,
 } from './discovery';
-import { getPinpetMeta } from '../messageLanes';
+import { getAgentMessageMetadata } from '../../messages';
 import { materializeDelegation } from '../delegationBriefing';
 
 test('artifact discovery context exposes only a non-authoritative thread scope', () => {
   const context = buildArtifactDiscoveryContextMessage();
 
   assert.equal(context._getType(), 'ai');
-  assert.equal(getPinpetMeta(context).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
-  assert.equal(getPinpetMeta(context).synthetic, true);
+  assert.equal(getAgentMessageMetadata(context).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
+  assert.equal(getAgentMessageMetadata(context).synthetic, true);
   assert.match(String(context.content), /trust="non_authoritative"/);
   assert.match(String(context.content), /<scope>current_thread<\/scope>/);
   assert.doesNotMatch(String(context.content), /capability-artifacts|current_thread_root/);
@@ -41,7 +41,7 @@ test('artifact discovery context stays before the latest briefing without displa
   assert.equal(withContext.length, 4);
   assert.equal(withContext[0], system);
   assert.equal(withContext[1], human);
-  assert.equal(getPinpetMeta(withContext[2]).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
+  assert.equal(getAgentMessageMetadata(withContext[2]).source, ARTIFACT_DISCOVERY_CONTEXT_SOURCE);
   assert.equal(withContext[3], briefing);
   assert.equal(withArtifactDiscoveryContext(messages, false), messages);
 });

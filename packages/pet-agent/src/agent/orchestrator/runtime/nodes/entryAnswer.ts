@@ -4,8 +4,12 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
-import { mainConversationMessages, stampMessageCreatedAtUtc } from '../../messageLanes';
-import { projectDelegationAnnouncesForModel } from '../../delegationAnnounce';
+import {
+  mainConversationMessages,
+  observeAgentMessageView,
+  stampMessageCreatedAtUtc,
+} from '../../../messages';
+import { createOrchestratorMessageViews } from '../../messageViews';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -166,11 +170,13 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) => {
+    const messageView = createOrchestratorMessageViews(state.messages).entryAnswer();
+    observeAgentMessageView(messageView.manifest, runnableConfig);
     const history = [
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
-      ...projectDelegationAnnouncesForModel(mainConversationMessages(state.messages)),
+      ...messageView.messages,
     ];
     let response = await model.invoke(history, runnableConfig);
     if (!AIMessage.isInstance(response)) {

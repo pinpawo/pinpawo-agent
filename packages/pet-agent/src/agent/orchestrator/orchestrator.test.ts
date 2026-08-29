@@ -41,21 +41,23 @@ import {
   ReviewPolicies,
 } from './review/reviewPolicies';
 import {
-  buildSubagentHandoff,
   getMessageDelegationId,
-  getMessageHandoffSource,
-  getMessageIsAnnounce,
   getMessageLane,
   getMessageTranscriptRunId,
-  getPinpetMeta,
+  getAgentMessageMetadata,
   laneMessages,
   mainConversationMessages,
-  readLatestAnnounce,
   readMessageCreatedAtUtc,
-  selectDelegationLaneAnnounceMessage,
   setPinpetMeta,
+} from '../messages';
+import {
+  buildSubagentHandoff,
+  getMessageHandoffSource,
+  getMessageIsAnnounce,
+  readLatestAnnounce,
+  selectDelegationLaneAnnounceMessage,
   tagNewLaneMessages,
-} from './messageLanes';
+} from './delegationMessages';
 import { RemoveMessage } from '@langchain/core/messages';
 import {
   isDelegationBriefingMessage,
@@ -4335,7 +4337,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.ok(handoffCopy, JSON.stringify(finalState.messages.map((message) => ({
     type: message._getType(),
     content: message.content,
-    meta: getPinpetMeta(message),
+    meta: getAgentMessageMetadata(message),
   }))));
   const handoffSource = getMessageHandoffSource(handoffCopy);
   assert.equal(handoffSource?.handoffFrom, 'capability:general');
@@ -5728,7 +5730,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
   const taggedProgress = messages.find((message) => message.id === progress.id);
   assert.ok(taggedProgress);
   assert.equal(getMessageIsAnnounce(taggedProgress), true);
-  assert.equal(getPinpetMeta(taggedProgress).completionReason, 'limit_reached');
+  assert.equal(getAgentMessageMetadata(taggedProgress).completionReason, 'limit_reached');
 
   let plannerInput: CapabilityPlannerInput | null = null;
   const routeModel = {

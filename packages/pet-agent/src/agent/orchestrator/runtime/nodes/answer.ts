@@ -5,13 +5,16 @@ import {
   formatHandoffArtifactRefsForMessage,
 } from '../../artifacts/handoff';
 import {
+  observeAgentMessageView,
+  stampMessageCreatedAtUtc,
+} from '../../../messages';
+import { createOrchestratorMessageViews } from '../../messageViews';
+import {
   getMessageHandoffSource,
-  mainConversationMessages,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
   readLatestHumanRequest,
-  stampMessageCreatedAtUtc,
-} from '../../messageLanes';
+} from '../../delegationMessages';
 import { getDelegationAnnounce } from '../../delegationAnnounce';
 import {
   buildAnswerInvocationMessages,
@@ -104,7 +107,9 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // handoff copies (first-class, lane-free). A user-input-required result is
     // different: its lane remains resumable, so its announce and artifact refs
     // are appended only to this model invocation and never copied into main state.
-    const canonicalHistory = mainConversationMessages(state.messages);
+    const mainMessageView = createOrchestratorMessageViews(state.messages).answerFacts();
+    observeAgentMessageView(mainMessageView.manifest, runnableConfig);
+    const canonicalHistory = mainMessageView.messages;
     const acceptedResultsProjection = projectAcceptedRunResults({
       state,
       history: canonicalHistory,

@@ -1,6 +1,10 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
-import { getPinpetMeta, setPinpetMeta, stampMessageCreatedAtUtc } from './messageLanes';
+import {
+  getAgentMessageMetadata,
+  setPinpetMeta,
+  stampMessageCreatedAtUtc,
+} from '../messages';
 import { indentXmlBlock, xmlTextBlock } from './prompts/shared';
 import type { MessageLane, UserRequest } from './types';
 
@@ -50,6 +54,7 @@ function stampBriefingMeta(message: AIMessage, spec: DelegationSpec) {
   setPinpetMeta(message, {
     source: DELEGATION_BRIEFING_SOURCE,
     synthetic: true,
+    persistence: 'invocation',
     lane: spec.lane,
     // Message metadata keeps the existing storage key, but its value scopes
     // the stable delegation transcript and must not follow a resumed root run.
@@ -60,7 +65,7 @@ function stampBriefingMeta(message: AIMessage, spec: DelegationSpec) {
 }
 
 export function isDelegationBriefingMessage(message: BaseMessage): boolean {
-  return getPinpetMeta(message).source === DELEGATION_BRIEFING_SOURCE;
+  return getAgentMessageMetadata(message).source === DELEGATION_BRIEFING_SOURCE;
 }
 
 export function insertBeforeLatestDelegationBriefing(

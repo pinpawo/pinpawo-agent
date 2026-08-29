@@ -15,7 +15,7 @@ import type {
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
 import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegationAnnounce.ts';
-import { setPinpetMeta } from '../../src/agent/orchestrator/messageLanes.ts';
+import { setPinpetMeta } from '../../src/agent/messages/index.ts';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,

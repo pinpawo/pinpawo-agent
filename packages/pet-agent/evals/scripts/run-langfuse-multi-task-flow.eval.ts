@@ -6,7 +6,7 @@ import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
-import { getMessageLane } from '../../src/agent/orchestrator/messageLanes.ts';
+import { getMessageLane } from '../../src/agent/messages/index.ts';
 import {
   defineInstructionDocument,
   type AgentCapability,

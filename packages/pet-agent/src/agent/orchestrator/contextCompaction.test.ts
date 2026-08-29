@@ -9,7 +9,7 @@ import {
   createContextCompactionMessage,
   isContextCompactionMessage,
 } from './contextCompaction';
-import { getPinpetMeta, setPinpetMeta } from './messageLanes';
+import { getAgentMessageMetadata, setPinpetMeta } from '../messages';
 import { materializeDelegation } from './delegationBriefing';
 import { DelegationAnnounceMessage } from './delegationAnnounce';
 
@@ -66,7 +66,7 @@ test('orchestrator context compaction summarizes old messages and keeps recent s
   assert.equal(isContextCompactionMessage(result.messages[1]), true);
   assert.match(String(result.messages[1].content), /^<context_summary role="context" source="compaction">/);
   assert.match(String(result.messages[1].content), /保留用户目标、已完成修改、未完成测试。/);
-  assert.equal(getPinpetMeta(result.messages[1]).authority, 'none');
+  assert.equal(getAgentMessageMetadata(result.messages[1]).authority, 'none');
   assert.deepEqual(
     result.messages.slice(2).map((message) => message.content),
     messages.slice(-4).map((message) => message.content),
@@ -252,7 +252,7 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
   assert.equal(result.compacted, true);
   assert.deepEqual(
     result.messages
-      .filter((message) => getPinpetMeta(message).isAnnounce)
+      .filter((message) => getAgentMessageMetadata(message).isAnnounce)
       .map((message) => message.id),
     ['announce-1', 'announce-2'],
   );

@@ -48,7 +48,7 @@ type CapabilityPlannerInputBase = {
   readonly traceId: string;
   readonly runId: string;
   readonly userRequest: UserRequest;
-  /** Canonical root messages. The Planner domain owns invocation projection. */
+  /** Canonical main-view messages. The Planner domain owns provider projection. */
   readonly messages: readonly BaseMessage[];
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;

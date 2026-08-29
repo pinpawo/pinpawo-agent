@@ -67,7 +67,7 @@ The routing transition lives in the tool's returned `Command`, not in
 - Entry Answer control-tool lifecycle events are not projected as user-visible
   Toolkit operations.
 - Existing active-delegation resume and supersede paths bypass fresh Entry
-  Answer routing and retain their established lifecycle semantics.
+  Answer routing and terminate through the shared `finalizeRun` boundary.
 
 ## Checkpoint compatibility
 

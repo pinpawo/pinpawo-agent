@@ -39,7 +39,7 @@ const cases: AgentEvalCase<ContextSynthesisInput, ContextSynthesisExpected>[] = 
     },
     metadata: {
       difficulty: 'easy',
-      reason: 'The answer node should use completed subagent context directly.',
+      reason: 'Terminal result synthesis should use completed subagent context directly.',
       source: SOURCE_FILE,
     },
   },

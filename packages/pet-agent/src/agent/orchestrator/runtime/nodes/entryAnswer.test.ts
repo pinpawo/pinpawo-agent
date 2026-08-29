@@ -169,7 +169,7 @@ test('plan_request routes to Planner without persisting control messages', async
     invokeConfig(),
   );
 
-  assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 1 });
+  assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
   assert.equal(plannerInputs[0]?.userRequest, request);
   assert.equal(plannerInputs[0]?.messages.some((message) => message.content === request), true);
   assert.equal(result.runUserRequest, request);
@@ -179,7 +179,7 @@ test('plan_request routes to Planner without persisting control messages', async
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), false);
   assert.equal(result.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
-  assert.equal(result.messages.at(-1)?.content, '当前没有可执行该任务的 Capability。');
+  assert.match(String(result.messages.at(-1)?.content ?? ''), /当前没有可用于继续执行/);
 });
 
 test('Entry Answer preserves the current textual HumanMessage exactly', async () => {

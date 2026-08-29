@@ -55,7 +55,7 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
 /**
  * Resolve the authoritative run goal from the plan_request argument, falling
  * back to the provisional capture when the model supplies nothing usable.
- * Everything downstream — Planner input, Capability run context, Answer, and the
+ * Everything downstream — Planner input, Capability run context, finalization, and the
  * TaskActiveDelegation snapshot replayed on every resume — reads this one value.
  *
  * When the resolved goal is just the current message again, the original is kept

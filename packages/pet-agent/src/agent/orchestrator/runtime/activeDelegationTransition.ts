@@ -56,8 +56,7 @@ export function applyActiveDelegationTransition(
       runNextDelegation: null,
       runPlannerSession: null,
       taskPlannerContinuation: null,
-      runLatestDelegationOutcome: null,
-      runRuntimeFailure: 'checkpoint_incompatible',
+      runTerminalOutcome: { kind: 'checkpoint_incompatible' },
     };
   }
 
@@ -111,7 +110,7 @@ export function applyActiveDelegationTransition(
       resultPreview: null,
     },
     runDelegationSummaries: resumedSummaries,
-    runLatestDelegationOutcome: null,
+    runTerminalOutcome: null,
   };
 }
 

@@ -711,7 +711,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'Outcome established that follow-up work remains, but the Planner finds no executable Capability for that work and returns the blocking facts to Answer.',
+      reason: 'Follow-up work remains, but the Planner finds no executable Capability and returns a typed unavailable outcome for finalization.',
     },
     metadata: {
       difficulty: 'hard',

@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { getAnswerEvalScenarios } from '../answer-eval-scenarios.ts';
+import { getResultSynthesisEvalScenarios } from '../result-synthesis-eval-scenarios.ts';
 import {
   getDecisionEvalScenarios,
   type DecisionEvalRunResult,
@@ -29,7 +29,7 @@ import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
-const TARGETS: PromptEvalTarget[] = ['entry_answer', 'answer'];
+const TARGETS: PromptEvalTarget[] = ['entry_answer', 'result_synthesis'];
 const DEFAULT_REPEATS = 5;
 
 type PromptEvalScenario = {
@@ -158,7 +158,7 @@ export function getPromptEvalScenarios(): PromptEvalScenario[] {
         judge: PromptEvalJudge,
       ) => scenario.run(model, method, config, judge),
     })),
-    ...getAnswerEvalScenarios().map((scenario) => ({
+    ...getResultSynthesisEvalScenarios().map((scenario) => ({
       ...scenario,
       run: (
         model: AgentModels['act'],
@@ -229,7 +229,7 @@ async function main() {
       + 'from the subject model.',
     );
   }
-  const structuredOutputMethod = targets.some((target) => target !== 'answer')
+  const structuredOutputMethod = targets.some((target) => target !== 'result_synthesis')
     ? modelConfig.method ?? 'provider-default'
     : 'not-applicable';
   const evaluator = {

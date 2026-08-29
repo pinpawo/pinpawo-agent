@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlanner/agent.ts';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/capabilityPlanner/capabilityDisclosure.ts';
 import {
+  isCapabilityPlannerDirectResponseResult,
   isCapabilityPlannerIncompleteResult,
   type CapabilityPlannerInput,
   type CapabilityPlannerResult,
@@ -80,6 +81,14 @@ function plannerOutput(
       remainingPlan: [],
     };
   }
+  if (isCapabilityPlannerDirectResponseResult(result)) {
+    return {
+      result: 'direct_response',
+      nextTask: null,
+      capabilityName: null,
+      remainingPlan: [],
+    };
+  }
   if (result.action !== 'execute_plan'
     && result.action !== 'advance_plan'
     && result.action !== 'continue_current') {
@@ -105,9 +114,7 @@ function plannerDiagnostics(
 ) {
   return {
     ...searchDiagnostics,
-    plannerStatus: isCapabilityPlannerIncompleteResult(result)
-      ? result.plannerStatus
-      : 'committed',
+    plannerStatus: 'plannerStatus' in result ? result.plannerStatus : 'committed',
   } as const;
 }
 

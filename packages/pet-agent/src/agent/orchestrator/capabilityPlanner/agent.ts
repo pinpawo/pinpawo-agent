@@ -1,4 +1,4 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
@@ -31,6 +31,7 @@ import {
 } from './searchTool';
 import { createPlannerTerminalTools } from './terminalTools';
 import { PlannerFileToolError } from './workspaceReader';
+import { readMessageText } from '../utils';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS = 2;
@@ -81,6 +82,18 @@ function readCachedPlannerCommit(input: CapabilityPlannerInput) {
     && cached.registryDigest === input.workspace.registryDigest
     ? cached.decision
     : null;
+}
+
+function readDirectResponse(messages: readonly BaseMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || message._getType() !== 'ai') continue;
+    const candidate = message as BaseMessage & { tool_calls?: readonly unknown[] };
+    if (candidate.tool_calls?.length) return null;
+    const content = readMessageText(message);
+    return content.trim() ? content : null;
+  }
+  return null;
 }
 
 function buildPlannerRunnableConfig(params: {
@@ -240,6 +253,14 @@ export function createCapabilityPlannerAgent(params: {
             'planning_limit_reached',
             'Capability Planner document read limit was reached before a valid commit.',
           );
+        }
+        const directResponse = readDirectResponse(result.messages ?? []);
+        if (directResponse) {
+          return {
+            plannerStatus: 'direct_response',
+            response: directResponse,
+            capabilityDisclosure,
+          };
         }
         return {
           plannerStatus: 'incomplete',

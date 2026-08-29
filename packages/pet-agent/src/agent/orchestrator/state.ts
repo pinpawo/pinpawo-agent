@@ -15,11 +15,7 @@ import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from './review/reviewAuthorizations';
-import type {
-  OrchestratorRuntimeFailure,
-  PlannerRouteOutcome,
-  PlannerUserInputRequest,
-} from './capabilityPlanner/protocol';
+import type { RunTerminalOutcome } from './terminalOutcome';
 import type {
   PlannerSessionState,
   PlannerTaskContinuation,
@@ -76,15 +72,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runLatestDelegationOutcome: Annotation<PlannerRouteOutcome | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runUserInputRequest: Annotation<PlannerUserInputRequest | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runRuntimeFailure: Annotation<OrchestratorRuntimeFailure | null>({
+  runTerminalOutcome: Annotation<RunTerminalOutcome | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -128,9 +116,7 @@ export type OrchestratorRunState = Pick<
   | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runIterationCount'
-  | 'runLatestDelegationOutcome'
-  | 'runUserInputRequest'
-  | 'runRuntimeFailure'
+  | 'runTerminalOutcome'
   | 'runTerminalError'
   | 'runActiveDelegationTransition'
   | 'runId'
@@ -152,9 +138,7 @@ export function buildRunStateReset(
     runUserRequest: null,
     runDelegationSummaries: [],
     runIterationCount: 0,
-    runLatestDelegationOutcome: null,
-    runUserInputRequest: null,
-    runRuntimeFailure: null,
+    runTerminalOutcome: null,
     runTerminalError: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',

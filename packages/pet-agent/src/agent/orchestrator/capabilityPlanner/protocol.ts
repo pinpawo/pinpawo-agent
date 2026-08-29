@@ -12,18 +12,6 @@ export const PLANNER_ACTIONS = [
 ] as const;
 
 export type PlannerAction = typeof PLANNER_ACTIONS[number];
-export type PlannerReplyOutcome = Extract<
-  PlannerAction,
-  'goal_done' | 'user_input_required' | 'unavailable'
->;
-
-/** Root-owned terminal route outcomes, including the explicit protocol failure. */
-export type PlannerRouteOutcome = PlannerReplyOutcome | 'planner_incomplete';
-
-/** Deterministic root-visible failure metadata; never produced by a model. */
-export type OrchestratorRuntimeFailure =
-  | 'checkpoint_incompatible';
-
 export type PlannerUserInputRequest = {
   readonly question: string;
 };

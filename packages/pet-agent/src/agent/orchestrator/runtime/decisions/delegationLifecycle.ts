@@ -1,15 +1,10 @@
 import type { OrchestratorStateType } from '../../state';
 import type {
-  DecisionMode,
   MessageLane,
   RunNextDelegation,
   TaskActiveDelegation,
   UserRequest,
 } from '../../types';
-
-export function decisionModeFromRunNextDelegation(pending: RunNextDelegation | null): DecisionMode {
-  return pending ? 'capability' : 'answer';
-}
 
 export function createTaskActiveDelegation(
   delegation: RunNextDelegation,

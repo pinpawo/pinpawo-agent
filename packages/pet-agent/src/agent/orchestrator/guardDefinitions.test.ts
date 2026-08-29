@@ -11,8 +11,8 @@ import {
   runStateResetGuard,
 } from './guardDefinitions';
 import {
-  createAfterPlannerBoundaryIterationGuard,
-} from './runtime/routes/afterPlannerBoundaryIterationGuard';
+  createPlannerBoundaryIterationGuardNode,
+} from './runtime/nodes/plannerBoundaryIterationGuard';
 import {
   GUARD_DECISION_EVENT,
   guardDecisionEmitter,
@@ -182,12 +182,12 @@ test('guard routes push decision records onto the LangGraph custom stream writer
   const chunks: unknown[] = [];
   const runnableConfig = {
     writer: (chunk: unknown) => chunks.push(chunk),
-  } as Parameters<ReturnType<typeof createAfterPlannerBoundaryIterationGuard>>[1] & {
+  } as Parameters<ReturnType<typeof createPlannerBoundaryIterationGuardNode>>[1] & {
     writer: (chunk: unknown) => void;
   };
 
-  const route = createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations: 5 });
-  route(baseState({
+  const guardNode = createPlannerBoundaryIterationGuardNode({ orchestratorMaxIterations: 5 });
+  guardNode(baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
   }), runnableConfig);
@@ -218,7 +218,7 @@ test('guard decision emitter is a no-op without a runnable config', () => {
   });
 });
 
-test('run iteration limit guard routes through answer at the resolved limit', () => {
+test('run iteration limit guard records a terminal outcome at the resolved limit', () => {
   const state = baseState({
     taskActiveDelegation: activeDelegation,
     runIterationCount: 5,
@@ -235,9 +235,12 @@ test('run iteration limit guard routes through answer at the resolved limit', ()
     runIterationLimit: 5,
   });
 
-  const atLimitRoute = createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations: 5 });
-  assert.equal(atLimitRoute(state), 'answer');
+  const atLimit = createPlannerBoundaryIterationGuardNode({ orchestratorMaxIterations: 5 })(state);
+  assert.deepEqual(atLimit.goto, ['finalizeRun']);
+  assert.deepEqual(atLimit.update, {
+    runTerminalOutcome: { kind: 'iteration_limit' },
+  });
 
-  const belowLimitRoute = createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations: 25 });
-  assert.equal(belowLimitRoute(state), 'capabilityPlanner');
+  const belowLimit = createPlannerBoundaryIterationGuardNode({ orchestratorMaxIterations: 25 })(state);
+  assert.deepEqual(belowLimit.goto, ['capabilityPlanner']);
 });

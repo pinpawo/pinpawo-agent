@@ -19,12 +19,12 @@ import {
   type CapabilityPlannerInput,
   type CapabilityPlannerRuntimeState,
   type CapabilityPlannerRunner,
+  isCapabilityPlannerDirectResponseResult,
   isCapabilityPlannerIncompleteResult,
 } from '../../capabilityPlanner/runner';
 import {
   parsePlannerCommit,
   type PlannerCommit,
-  type PlannerReplyOutcome,
 } from '../../capabilityPlanner/protocol';
 import {
   appendRunDelegationSummary,
@@ -103,16 +103,14 @@ function materializeNextDelegation(params: {
       state.runDelegationSummaries,
       runNextDelegation,
     ),
-    runLatestDelegationOutcome: null,
-    runUserInputRequest: null,
-    runRuntimeFailure: null,
+    runTerminalOutcome: null,
   };
 }
 
 function buildAcceptedDelegationUpdate(
   state: OrchestratorStateType,
   activeDelegation: TaskActiveDelegation,
-  outcome: PlannerReplyOutcome | null,
+  outcome: 'goal_done' | null,
 ) {
   const completionReason = readLatestAnnounceCompletionReason(state.messages, {
     transcriptRunId: activeDelegation.transcriptRunId,
@@ -147,9 +145,7 @@ function buildAcceptedDelegationUpdate(
       delegation.id === activeDelegation.id
         ? { ...delegation, status: 'completed' as const }
         : delegation),
-    runLatestDelegationOutcome: outcome,
-    runUserInputRequest: null,
-    runRuntimeFailure: null,
+    runTerminalOutcome: outcome ? { kind: outcome } : null,
   };
 }
 
@@ -184,9 +180,7 @@ function buildContinueCurrentUpdate(params: {
       state.runDelegationSummaries,
       runNextDelegation,
     ),
-    runLatestDelegationOutcome: null,
-    runUserInputRequest: null,
-    runRuntimeFailure: null,
+    runTerminalOutcome: null,
   };
 }
 
@@ -204,9 +198,13 @@ function buildWaitingUpdate(
             ? { ...delegation, status: 'progress' as const }
             : delegation)
       : state.runDelegationSummaries,
-    runLatestDelegationOutcome: commit.action,
-    runUserInputRequest: commit.userInputRequest ?? null,
-    runRuntimeFailure: null,
+    runTerminalOutcome: commit.action === 'user_input_required'
+      ? {
+          kind: 'user_input_required' as const,
+          question: commit.userInputRequest?.question
+            ?? '请补充继续完成当前任务所需的信息。',
+        }
+      : { kind: 'unavailable' as const },
   };
 }
 
@@ -355,11 +353,9 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         update: {
           runNextDelegation: null,
           runPlannerSession: null,
-          runLatestDelegationOutcome: null,
-          runUserInputRequest: null,
-          runRuntimeFailure: 'checkpoint_incompatible' as const,
+          runTerminalOutcome: { kind: 'checkpoint_incompatible' as const },
         },
-        goto: 'answer',
+        goto: 'finalizeRun',
       });
     }
     const resumedCapabilityNames = !existingSession && !isPlannerDispatch(nodeInput)
@@ -404,10 +400,33 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     const result = await runner.invoke(input, runnableConfig);
     const updatedCapabilityDisclosure = result.capabilityDisclosure
       ?? input.capabilityDisclosure;
-    // A non-commit is not a model terminal action: do not invent General, do
-    // not fabricate a ToolMessage, and do not accept an active delegation.
-    // Both modes report an explicit typed failure to Answer. Ordinary Planner
-    // text remains private to invocation tracing and never becomes a root reply.
+    // A non-commit never becomes a fabricated Planner decision. A complete
+    // ordinary-text response is nevertheless a valid terminal response payload:
+    // finalization may deliver it without accepting the active delegation.
+    if (isCapabilityPlannerDirectResponseResult(result)) {
+      const directPlan = input.mode === 'boundary' ? plannerSession.plan : [];
+      return new Command({
+        update: {
+          runNextDelegation: null,
+          ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
+          taskPlannerContinuation: null,
+          runPlannerSession: updatePlannerSession({
+            current: plannerSession,
+            plan: directPlan,
+            capabilityDisclosure: updatedCapabilityDisclosure,
+            inputId: input.inputId,
+            registryDigest: workspace.registryDigest,
+            decision: null,
+          }),
+          runTerminalOutcome: {
+            kind: 'direct_response' as const,
+            source: 'capability_planner' as const,
+            content: result.response,
+          },
+        },
+        goto: 'finalizeRun',
+      });
+    }
     if (isCapabilityPlannerIncompleteResult(result)) {
       const incompletePlan = input.mode === 'boundary' ? plannerSession.plan : [];
       return new Command({
@@ -423,11 +442,9 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
             registryDigest: workspace.registryDigest,
             decision: null,
           }),
-          runLatestDelegationOutcome: 'planner_incomplete' as const,
-          runUserInputRequest: null,
-          runRuntimeFailure: null,
+          runTerminalOutcome: { kind: 'planner_incomplete' as const },
         },
-        goto: 'answer',
+        goto: 'finalizeRun',
       });
     }
     // CapabilityPlannerRunner is an injectable seam: config.capabilityPlannerRunner
@@ -452,7 +469,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     // Entry Answer against the whole conversation. Its Command.PARENT update is
     // overwritten when the entryAnswer subgraph writes its own channels back, so
     // this node — the first to run outside that subgraph — is what commits the
-    // resolved goal to root state for Capability, Answer and the delegation
+    // resolved goal to root state for Capability, finalization and the delegation
     // snapshot to read.
     const includePlannerSession = <T extends object>(
       update: T,
@@ -487,11 +504,15 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       return new Command({
         update: includePlannerSession({
           runNextDelegation: null,
-          runLatestDelegationOutcome: commit.action,
-          runUserInputRequest: commit.userInputRequest ?? null,
-          runRuntimeFailure: null,
+          runTerminalOutcome: commit.action === 'user_input_required'
+            ? {
+                kind: 'user_input_required' as const,
+                question: commit.userInputRequest?.question
+                  ?? '请补充继续完成当前任务所需的信息。',
+              }
+            : { kind: 'unavailable' as const },
         }, []),
-        goto: 'answer',
+        goto: 'finalizeRun',
       });
     }
 
@@ -514,7 +535,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
           buildWaitingUpdate(rootState, commit),
           plannerSession.plan,
         ),
-        goto: 'answer',
+        goto: 'finalizeRun',
       });
     }
 
@@ -524,18 +545,26 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       commit.action === 'goal_done' ? 'goal_done' : null,
     );
     if (!accepted) {
+      const completionReason = readLatestAnnounceCompletionReason(rootState.messages, {
+        transcriptRunId: activeDelegation.transcriptRunId,
+        delegationId: activeDelegation.id,
+      });
       return new Command({
         update: includePlannerSession({
           runNextDelegation: null,
-          runUserInputRequest: null,
+          runTerminalOutcome: {
+            kind: completionReason === 'limit_reached'
+              ? 'execution_limit' as const
+              : 'incomplete' as const,
+          },
         }, plannerSession.plan),
-        goto: 'answer',
+        goto: 'finalizeRun',
       });
     }
     if (commit.action === 'goal_done') {
       return new Command({
         update: includePlannerSession(accepted, []),
-        goto: 'answer',
+        goto: 'finalizeRun',
       });
     }
 

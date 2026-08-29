@@ -45,11 +45,39 @@ import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
 export type PetDispatchSettledState = Exclude<PetDispatchState, 'busy'>;
 
-export type PetDispatchRequest = { request: string };
+/**
+ * An opaque caller correlation key. The resident runtime does not interpret it;
+ * it only returns the same key in lifecycle observations.
+ */
+export type PetDispatchRequest = {
+  request: string;
+  dispatchId?: string;
+};
+
+export type PetDispatchLifecycleState =
+  | 'queued'
+  | 'running'
+  | 'waiting'
+  | 'completed'
+  | 'interrupted'
+  | 'failed';
+
+/**
+ * Observation-only lifecycle for one admitted dispatch. This is not an Agent
+ * execution handle: callers cannot cancel, resume, or read model output here.
+ */
+export type PetDispatchLifecycleEvent = {
+  dispatchId: string;
+  request: string;
+  state: PetDispatchLifecycleState;
+  requestId?: string;
+  error?: string;
+};
 
 export interface PetDispatchPort {
   getState(): PetDispatchState;
   onStateChange(listener: (state: PetDispatchState) => void): () => void;
+  onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input into the resident queue. Execution is observed through Agent Session. */
   dispatch(request: PetDispatchRequest): Promise<void>;
 }
@@ -305,6 +333,8 @@ type ResidentPetRuntimeContext = {
   peerHandlers: LocalServerPeerHandlers;
   peers: Set<AgentSessionPeer>;
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
+  dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
+  publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
   activeHostRuns: Map<string, AbortController>;
   beginActiveRun: (requestId: string) => ResidentActiveRun;
   finishActiveRun: (run: ResidentActiveRun) => void;
@@ -467,6 +497,7 @@ export async function createResidentPetRuntime(
   };
   const coordinator = new ResidentPetCoordinator({ readSettledState });
   const peers = new Set<AgentSessionPeer>();
+  const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
   const activeHostRuns = new Map<string, AbortController>();
   let activeRun: ResidentActiveRun | null = null;
   const beginActiveRun = (requestId: string): ResidentActiveRun => {
@@ -493,6 +524,15 @@ export async function createResidentPetRuntime(
         peer.send(message);
       } catch (error) {
         defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
+      }
+    }
+  };
+  const publishDispatchLifecycle = (event: PetDispatchLifecycleEvent) => {
+    for (const listener of dispatchLifecycleListeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        defaultLogError('[resident-pet] dispatch lifecycle listener failed:', error);
       }
     }
   };
@@ -544,6 +584,8 @@ export async function createResidentPetRuntime(
     peerHandlers,
     peers,
     publishRuntimeEvent,
+    dispatchLifecycleListeners,
+    publishDispatchLifecycle,
     activeHostRuns,
     beginActiveRun,
     finishActiveRun,
@@ -566,6 +608,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     loadContext,
     sessions,
     publishRuntimeEvent,
+    dispatchLifecycleListeners,
+    publishDispatchLifecycle,
     activeHostRuns,
     beginActiveRun,
     finishActiveRun,
@@ -574,7 +618,12 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
   const dispatch: PetDispatchPort = {
     getState: () => coordinator.getState(),
     onStateChange: (listener) => coordinator.onStateChange(listener),
-    dispatch: async ({ request }) => {
+    onDispatchLifecycle: (listener) => {
+      dispatchLifecycleListeners.add(listener);
+      return () => dispatchLifecycleListeners.delete(listener);
+    },
+    dispatch: async ({ request, dispatchId: suppliedDispatchId }) => {
+      const dispatchId = suppliedDispatchId?.trim() || randomUUID();
       coordinator.submitDispatch(() => AsyncLocalStorageProviderSingleton.runWithConfig(
         { callbacks: [] },
         async () => {
@@ -582,24 +631,26 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           // LangChain tool/event callback. This admitted dispatch is a new
           // one-way Agent root, not a child model run, so it must not inherit the
           // caller's callbacks/run id.
-          const context = await loadContext(deps.actorId);
-          const setup = sessions.buildChatSetup(deps, context);
           const requestId = `host-${randomUUID()}`;
           const run = createInflightOperationRun(requestId);
-          configureInflightOperationRegistry(
-            run,
-            createOperationRegistryForAgentSetup(setup),
-          );
-          setup.input.signal = run.controller.signal;
-          activeHostRuns.set(requestId, run.controller);
-          const activeRun = beginActiveRun(requestId);
-          publishRuntimeEvent({
-            type: 'run.started',
-            requestId,
-            initiator: 'host',
-            input: { role: 'user', text: request },
-          });
+          let activeRun: ResidentActiveRun | null = null;
           try {
+            const context = await loadContext(deps.actorId);
+            const setup = sessions.buildChatSetup(deps, context);
+            configureInflightOperationRegistry(
+              run,
+              createOperationRegistryForAgentSetup(setup),
+            );
+            setup.input.signal = run.controller.signal;
+            activeHostRuns.set(requestId, run.controller);
+            activeRun = beginActiveRun(requestId);
+            publishDispatchLifecycle({ dispatchId, request, requestId, state: 'running' });
+            publishRuntimeEvent({
+              type: 'run.started',
+              requestId,
+              initiator: 'host',
+              input: { role: 'user', text: request },
+            });
             const result = await runAgentTurn({
               request: { kind: 'user_message', requestId, message: request },
               setup,
@@ -620,6 +671,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             });
             if (result.status === 'waiting_human') {
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
             }
             if (result.status === 'interrupted') {
@@ -629,35 +681,51 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                 requestId,
                 message: 'Run interrupted.',
               });
+              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
               return;
             }
             finishInflightOperations(run, 'completed', publishRuntimeEvent);
+            publishDispatchLifecycle({ dispatchId, request, requestId, state: 'completed' });
           } catch (error) {
             if (run.controller.signal.aborted || isAbortError(error)) {
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              publishRuntimeEvent({
-                type: 'run.interrupted',
-                requestId,
-                message: 'Run interrupted.',
-              });
+              if (activeRun) {
+                publishRuntimeEvent({
+                  type: 'run.interrupted',
+                  requestId,
+                  message: 'Run interrupted.',
+                });
+              }
+              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
               return;
             }
             finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
-            publishRuntimeEvent({
-              type: 'error',
+            const message = error instanceof Error ? error.message : 'internal error';
+            if (activeRun) {
+              publishRuntimeEvent({
+                type: 'error',
+                requestId,
+                message,
+              });
+            }
+            publishDispatchLifecycle({
+              dispatchId,
+              request,
               requestId,
-              message: error instanceof Error ? error.message : 'internal error',
+              state: 'failed',
+              error: message,
             });
             throw error;
           } finally {
             if (activeHostRuns.get(requestId) === run.controller) {
               activeHostRuns.delete(requestId);
             }
-            finishActiveRun(activeRun);
+            if (activeRun) finishActiveRun(activeRun);
           }
         },
         true,
       ));
+      publishDispatchLifecycle({ dispatchId, request, state: 'queued' });
     },
   };
 

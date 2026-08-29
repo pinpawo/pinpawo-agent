@@ -382,6 +382,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
         });
         return { status: 'interrupted' };
       }
+      if (text === 'failing host turn') {
+        throw new Error('Connection error');
+      }
       emitEvent({
         type: 'message.delta',
         requestId: request.requestId,
@@ -401,17 +404,25 @@ test('dispatch and conversation publish the same Agent Session event stream to o
   });
   const sourceMessages: unknown[] = [];
   const observerMessages: unknown[] = [];
+  const lifecycleEvents: Array<{ state: string; dispatchId: string; error?: string }> = [];
   const source = peer(sourceMessages);
   const observer = peer(observerMessages);
   await host.interaction.connect(source);
   await host.interaction.connect(observer);
+  const stopLifecycleObservation = host.resident.dispatch.onDispatchLifecycle((event) => {
+    lifecycleEvents.push({
+      state: event.state,
+      dispatchId: event.dispatchId,
+      ...(event.error ? { error: event.error } : {}),
+    });
+  });
 
   try {
     AsyncLocalStorageProviderSingleton.runWithConfig({
       callbacks: [],
       metadata: { caller: 'studio-plugin-run' },
     }, () => {
-      host.resident.dispatch.dispatch({ request: 'from host' });
+      host.resident.dispatch.dispatch({ request: 'from host', dispatchId: 'studio-dispatch-1' });
     });
     await waitFor(
       () => observerMessages.some((message) => (
@@ -436,6 +447,27 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       (dispatchCallerMetadata as { caller?: string } | undefined)?.caller,
       undefined,
     );
+    assert.deepEqual(lifecycleEvents.slice(0, 3), [
+      { state: 'queued', dispatchId: 'studio-dispatch-1' },
+      { state: 'running', dispatchId: 'studio-dispatch-1' },
+      { state: 'completed', dispatchId: 'studio-dispatch-1' },
+    ]);
+
+    host.resident.dispatch.dispatch({
+      request: 'failing host turn',
+      dispatchId: 'studio-dispatch-failed',
+    });
+    await waitFor(
+      () => lifecycleEvents.some((event) => (
+        event.state === 'failed' && event.dispatchId === 'studio-dispatch-failed'
+      )),
+      'failed resident dispatch did not publish its lifecycle observation',
+    );
+    assert.deepEqual(lifecycleEvents.at(-1), {
+      state: 'failed',
+      dispatchId: 'studio-dispatch-failed',
+      error: 'Connection error',
+    });
 
     sourceMessages.length = 0;
     observerMessages.length = 0;
@@ -482,6 +514,7 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
     )));
   } finally {
+    stopLifecycleObservation();
     await host.close();
   }
 });

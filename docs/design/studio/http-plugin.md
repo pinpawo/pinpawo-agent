@@ -43,8 +43,10 @@ HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202
 `petId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
 Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段，也不等待 Agent execution；Studio
 receipt 本身就没有 completion，HTTP 连接也不是 cancellation owner。
-调用方如需观察 Agent 执行，应连接目标 Pet 的 Agent Session event stream。Plugin 领域状态
-仍通过各自的 snapshot/history/event 暴露，不能从 dispatch receipt 推导。
+调用方如需观察完整 Agent execution（消息、工具、review 或结果），应连接目标 Pet 的
+Agent Session event stream。Studio event bus 还会转发与 receipt 关联、无模型内容的
+dispatch lifecycle observation，供 Console 显示 queued/running/failed 并发起新的 retry
+dispatch；它不能替代 Agent Session，也不能从 receipt 推导 Plugin 领域状态。
 
 ### `GET /events`
 

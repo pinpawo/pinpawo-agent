@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import test from 'node:test';
 import { initStudioKickstart } from './studioTemplate';
 
@@ -54,4 +55,20 @@ test('kickstart init preflights conflicts before copying any file', async () => 
     /ENOENT/,
   );
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
+});
+
+test('shipped Planner Capability combines project exploration with Kanban planning', async () => {
+  const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
+  await initStudioKickstart({ workdir });
+
+  const capabilities = await loadCapabilityDirectory(path.join(
+    workdir,
+    '.pinpawo',
+    'pets',
+    'planner',
+    'capabilities',
+  ));
+  assert.equal(capabilities.length, 1);
+  assert.equal(capabilities[0]?.capability.name, 'studio_planning');
+  assert.deepEqual(capabilities[0]?.capability.uses, ['bash', 'git', 'kanban']);
 });

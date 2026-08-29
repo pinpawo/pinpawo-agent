@@ -138,9 +138,10 @@ completion、status、output、error 或 caller cancellation。dispatch 真正�
 - Agent 的消息、工具进度、review 与执行结果仍走 local-agent Agent Session event；Studio core
   不复制这条 conversation stream。resident runtime 可以额外发布与 dispatch receipt 关联的
   无内容 lifecycle observation（queued/running/waiting/completed/interrupted/failed），供
-  Console 呈现状态和创建一次新的 retry dispatch；它不包含执行结果，也不提供 resume、cancel
-  或其他 execution control。Plugin 的领域结果继续由 Plugin 自己的 Toolkit、持久化状态和 event
-  表达。
+  Console 呈现状态；Console 仅能为其直接通过 HTTP 发起的失败输入创建新的 retry dispatch。
+  其他 Plugin 发起的失败仍由其领域 control/history 处理。该 observation 不包含执行结果，也不
+  提供 resume、cancel 或其他 execution control。Plugin 的领域结果继续由 Plugin 自己的 Toolkit、
+  持久化状态和 event 表达。
 
 ### 2.4 HITL
 

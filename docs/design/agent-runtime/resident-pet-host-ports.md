@@ -256,8 +256,9 @@ message/tool/plan/review runtime event。已连接同一 Pet interaction 的 Age
 当前 `activeRun`，使后续实时事件仍能投射到同一个 run；snapshot 读取不排在 active dispatch
 后面。没有 peer 时 Agent Session event 可以丢弃；checkpoint 仍是持久权威。与之分离的
 `PetDispatchPort.onDispatchLifecycle()` 是没有模型内容的 invocation observation，可由
-Studio 转发到 Plugin event bus，供 Console 显示 queued/running/failed 和重试入口；它不
-替代 Agent Session stream，也不提供执行控制。
+Studio 转发到 Plugin event bus，供 Console 显示 queued/running/failed。Console 只能为自己
+直接经 HTTP 发起的失败输入提供重试入口；Plugin-owned dispatch 必须由来源 Plugin 的领域
+control/history 处理。它不替代 Agent Session stream，也不提供执行控制。
 
 ## 6. 生命周期与所有权
 
@@ -334,7 +335,7 @@ target 返回。Capability inventory 不进入该列表。
 14. 从 `PetDispatchPort` 与 Studio receipt 移除 execution result、completion observer 与
     caller cancellation；Studio 只负责接纳，resident Coordinator 持有队列和 gate。Port 仅
     允许暴露不含模型内容的 dispatch lifecycle observation，Studio 可转发它供 Console 显示
-    状态和创建新的 retry dispatch；完整执行观察仍走 Agent Session event。
+    状态；Console 只可重试自己直接经 HTTP 发起的输入，完整执行观察仍走 Agent Session event。
 
 现有测试与 package 边界必须持续证明：
 

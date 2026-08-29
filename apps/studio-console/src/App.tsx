@@ -46,6 +46,7 @@ type DispatchRecord = {
   producer: string;
   state: DispatchState;
   updatedAt: string;
+  source: 'admission_receipt' | 'lifecycle';
   error?: string;
 };
 type ProjectDocumentSummary = {
@@ -90,12 +91,17 @@ function connectionErrorMessage(error: unknown): string {
 }
 
 function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null {
-  const state = event.source === 'studio' && event.type === 'dispatch.accepted'
-    ? 'queued'
+  const source = event.source === 'studio' && event.type === 'dispatch.accepted'
+    ? 'admission_receipt'
     : event.source === 'resident-pet' && /^dispatch\.(queued|running|waiting|completed|interrupted|failed)$/.test(event.type)
+      ? 'lifecycle'
+      : null;
+  const state = source === 'admission_receipt'
+    ? 'queued'
+    : source === 'lifecycle'
       ? event.type.slice('dispatch.'.length) as DispatchState
       : null;
-  if (!state
+  if (!source || !state
     || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
     return null;
   }
@@ -111,6 +117,7 @@ function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null {
     producer: typeof payload.producer === 'string' ? payload.producer : 'resident-pet',
     state,
     updatedAt: event.occurredAt,
+    source,
     ...(typeof payload.error === 'string' && payload.error.trim()
       ? { error: payload.error }
       : {}),
@@ -124,17 +131,26 @@ function appendDispatchRecord(records: DispatchRecord[], record: DispatchRecord)
   if (!existing) return records;
   // Studio's receipt can arrive after the resident runtime has already emitted
   // running or terminal lifecycle. It only establishes the initial queued row;
-  // never let it regress a more specific observation.
-  if (record.producer === 'studio' && record.state === 'queued' && existing.state !== 'queued') {
-    return records;
+  // merge its source attribution without regressing the execution observation.
+  if (record.source === 'admission_receipt' && existing.state !== 'queued') {
+    const next = [...records];
+    next[existingIndex] = {
+      ...existing,
+      producer: record.producer,
+    };
+    return next;
   }
   const next = [...records];
   next[existingIndex] = {
     ...existing,
     ...record,
-    producer: record.producer === 'resident-pet' ? existing.producer : record.producer,
+    producer: record.source === 'lifecycle' ? existing.producer : record.producer,
   };
   return next;
+}
+
+function canRetryDispatch(dispatch: DispatchRecord): boolean {
+  return dispatch.producer === 'http' || dispatch.producer === 'studio';
 }
 
 export function App() {
@@ -380,12 +396,14 @@ export function App() {
         producer: 'http',
         state: 'queued',
         updatedAt: new Date().toISOString(),
+        source: 'admission_receipt',
       }));
       setNotice(`Dispatch accepted for ${receipt.petId}.`);
     }).catch((error) => setNotice(connectionErrorMessage(error)));
   };
 
   const retryDispatch = (dispatch: DispatchRecord) => {
+    if (!canRetryDispatch(dispatch)) return;
     setRetryingInvocationId(dispatch.invocationId);
     void post<{ petId: string; invocationId: string }>('/dispatch', {
       petId: dispatch.petId,
@@ -395,9 +413,10 @@ export function App() {
         invocationId: receipt.invocationId,
         petId: receipt.petId,
         request: dispatch.request,
-        producer: 'console-retry',
+        producer: 'http',
         state: 'queued',
         updatedAt: new Date().toISOString(),
+        source: 'admission_receipt',
       }));
       setNotice(`Retry accepted for ${receipt.petId}.`);
     }).catch((error) => setNotice(connectionErrorMessage(error))).finally(() => {
@@ -464,7 +483,7 @@ export function App() {
                   <strong>{dispatch.request}</strong>
                   <span>
                     {dispatch.petId} · {dispatch.error ?? `${dispatch.producer} · ${dispatch.invocationId.slice(0, 8)}`}
-                    {dispatch.state === 'failed' && <button
+                    {dispatch.state === 'failed' && canRetryDispatch(dispatch) && <button
                       className="inline-action"
                       disabled={retryingInvocationId === dispatch.invocationId}
                       onClick={() => retryDispatch(dispatch)}

@@ -46,7 +46,8 @@ receipt 本身就没有 completion，HTTP 连接也不是 cancellation owner。
 调用方如需观察完整 Agent execution（消息、工具、review 或结果），应连接目标 Pet 的
 Agent Session event stream。Studio event bus 还会转发与 receipt 关联、无模型内容的
 dispatch lifecycle observation，供 Console 显示 queued/running/failed 并发起新的 retry
-dispatch；它不能替代 Agent Session，也不能从 receipt 推导 Plugin 领域状态。
+dispatch；Console 只重试自己经 HTTP 直接发起的请求，Plugin-owned dispatch 由来源 Plugin
+处理。它不能替代 Agent Session，也不能从 receipt 推导 Plugin 领域状态。
 
 ### `GET /events`
 

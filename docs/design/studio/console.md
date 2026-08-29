@@ -26,8 +26,9 @@ Console 使用固定页面，不实现前端 Plugin 系统。后端没有装配�
 
 - Studio：列出存活 Pet、提交单向 dispatch，并以 live `dispatch.queued`、`running`、
   `waiting`、`completed`、`interrupted`、`failed` 显示该次 dispatch 的生命周期。`accepted`
-  仍只说明 admission；Console 以失败条目保存的原 Pet/request 创建一次全新的 retry
-  dispatch，不恢复、取消或控制原运行；
+  仍只说明 admission；Console 只对自己通过 HTTP 直接发起的失败 dispatch，以保存的
+  Pet/request 创建一次全新的 retry dispatch，不恢复、取消或控制原运行。Kanban、Scheduler
+  与 Trigger 的失败由各自的领域 control/history 处理；
 - Kanban：读取 task snapshot/history，以 active/queue/needs-attention/completed 连续状态流展示
   任务、依赖和结果；ready/blocked task 可通过 Kanban 自己的 control route 手工启动或重试；
 - Scheduler：查看 schedule、创建一次性 schedule、取消尚未触发的 schedule；

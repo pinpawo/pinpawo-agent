@@ -40,6 +40,7 @@ function pet(options: {
     dispatch: {
       getState: () => 'open',
       onStateChange: () => () => undefined,
+      onDispatchLifecycle: () => () => undefined,
       dispatch: async ({ request }) => {
         void options.onInvoke?.(request);
       },

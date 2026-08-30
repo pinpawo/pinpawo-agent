@@ -21,6 +21,7 @@ test('Trigger projects direct service mutations through Studio events', async (t
       dispatch: {
         getState: () => 'open',
         onStateChange: () => () => undefined,
+        onDispatchLifecycle: () => () => undefined,
         dispatch: async () => undefined,
       },
     }],
@@ -59,6 +60,7 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
       dispatch: {
         getState: () => 'open',
         onStateChange: () => () => undefined,
+        onDispatchLifecycle: () => () => undefined,
         dispatch: async (input) => { requests.push(input.request); },
       },
     }],

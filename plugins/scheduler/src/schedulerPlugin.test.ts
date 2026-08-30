@@ -15,6 +15,7 @@ test('Scheduler dispatches one due schedule exactly once', async (t) => {
       dispatch: {
         getState: () => 'open',
         onStateChange: () => () => undefined,
+        onDispatchLifecycle: () => () => undefined,
         dispatch: async () => { requests += 1; },
       },
     }],

@@ -32,6 +32,7 @@ function pet(
     dispatch: {
       getState: () => 'open',
       onStateChange: () => () => undefined,
+      onDispatchLifecycle: () => () => undefined,
       dispatch: async ({ request }) => { await invoke(request); },
     },
   };

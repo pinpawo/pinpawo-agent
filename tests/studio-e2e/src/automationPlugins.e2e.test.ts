@@ -25,6 +25,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
     dispatch: {
       getState: () => 'open',
       onStateChange: () => () => undefined,
+      onDispatchLifecycle: () => () => undefined,
       dispatch: async ({ request }) => { received.push(request); },
     },
   };
@@ -103,6 +104,7 @@ test('GitHub webhook Trigger verifies signatures, filters event action, and dedu
     dispatch: {
       getState: () => 'open',
       onStateChange: () => () => undefined,
+      onDispatchLifecycle: () => () => undefined,
       dispatch: async ({ request }) => { received.push(request); },
     },
   };

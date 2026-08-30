@@ -96,14 +96,25 @@ export interface ResidentPetHost {
 export interface PetDispatchPort {
   getState(): PetDispatchState;
   onStateChange(listener: (state: PetDispatchState) => void): () => void;
+  onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   dispatch(request: PetDispatchRequest): Promise<void>;
 }
 
 export type PetDispatchRequest = {
   request: string;
+  /** Caller-owned opaque correlation only; the runtime does not interpret it. */
+  dispatchId?: string;
 };
 
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
+
+export type PetDispatchLifecycleEvent = {
+  dispatchId: string;
+  request: string;
+  state: 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
+  requestId?: string;
+  error?: string;
+};
 ```
 
 两个访问面都不提供 `describe()`。Pet identity、Studio registration 和 Agent
@@ -145,7 +156,9 @@ Session service。Host 启动 interaction 时提供中性的 Host/Pet namespace�
 checkpointer、Agent Session state store、workdir 与 runtime limits。Chat Host 与 Studio
 Host 都从 composition root 注入自己的 store/root；公共 builder 不推导 Studio identity
 或路径。它不接收 `StudioHostConfig`、`studioConfigPath`、Plugin、Studio registration 或
-invocation/receipt 配置。`dispatch` 在这里是中性的工作交付动作，不表示 Studio protocol。
+invocation/receipt 配置。`dispatchId` 只是调用方提供的 opaque correlation，runtime
+不把它解释为 Studio identity，也不将它写入 Agent/checkpoint。`dispatch` 在这里是中性的
+工作交付动作，不表示 Studio protocol。
 
 ## 4. Studio 映射
 
@@ -170,12 +183,14 @@ type StudioPetBinding = {
 
 1. 由 `petId` 选中当前存活的 target；
 2. 创建 `invocationId` 与 admission receipt；
-3. 把 `{ request }` 交给 `PetDispatchPort.dispatch()`。
+3. 把 `{ request, dispatchId: invocationId }` 交给 `PetDispatchPort.dispatch()`；
+4. 将 port 的只读 lifecycle observation 投影为 live Studio event。
 
-`invocationId`、producer `metadata`、idempotency 与 transport delivery identity 不进入
-Pet port。receipt 只证明 resident queue 已接纳本次 dispatch，不是 Agent execution
-handle，也没有 completion、output、waiting 或 cancellation 状态。Studio 也不把当前
-Agent Session thread 复制成 Studio identity；
+`invocationId`、producer `metadata`、idempotency 与 transport delivery identity 不成为
+Pet port 的领域语义。Studio 可把自己的 `invocationId` 原样作为 opaque `dispatchId` 传入，
+以关联只读 lifecycle event；receipt 仍只证明 resident queue 已接纳本次 dispatch，不是
+Agent execution handle，也没有 completion、output、waiting 或 cancellation API。Studio
+也不把当前 Agent Session thread 复制成 Studio identity；
 dispatch 真正开始时选择哪条 thread 是 resident runtime 内部行为。
 
 旧 `PetAgentRuntime.invoke()` adapter 已移除；所有调用方统一使用上述 dispatch port，
@@ -228,9 +243,10 @@ Dispatch gate 是这个协调过程的原子状态，不是供上层“先读后
   临界区内决定。
 
 dispatch 调用方不持有 Agent execution。Promise resolve 只表示 request 已进入 resident queue；
-调用方可以观察 gate，但不会得到 `completed`、`waiting`、output 或 cancellation result。
-执行期错误由 resident runtime 投射成 Agent Session runtime event；waiting/blocked 由
-checkpoint 与 gate 表达。Studio 不把这些信号重新包装成 invocation result。
+调用方可以观察 gate，以及同一 dispatch 的只读 `queued`/`running`/terminal lifecycle，
+但不会得到 output、continuation payload 或 cancellation API。执行期错误仍由 resident
+runtime 投射成 Agent Session runtime event；Studio 仅将相同 dispatch 的失败事实作为
+live observation 转发，不把它重新包装成 invocation result。
 
 resident runtime 内部的所有 Agent turn 统一经过 local-agent Agent Session turn runner。
 无论输入来自 conversation peer 还是 Host 持有的单向 dispatch，runner 都产生相同的
@@ -238,8 +254,11 @@ message/tool/plan/review runtime event。已连接同一 Pet interaction 的 Age
 是当前 session 的观察者：idle 连接不阻塞 dispatch，但会从 `run.started` 开始实时投射
 之后发生的 turn。运行中才接入的 peer 不要求事件重放，但 startup snapshot 必须包含 resident
 当前 `activeRun`，使后续实时事件仍能投射到同一个 run；snapshot 读取不排在 active dispatch
-后面。没有 peer 时事件可以丢弃；checkpoint 仍是持久权威。这个广播属于 local-agent
-interaction，不进入 `PetDispatchPort`、Studio core 或 Studio Plugin event bus。
+后面。没有 peer 时 Agent Session event 可以丢弃；checkpoint 仍是持久权威。与之分离的
+`PetDispatchPort.onDispatchLifecycle()` 是没有模型内容的 invocation observation，可由
+Studio 转发到 Plugin event bus，供 Console 显示 queued/running/failed。Console 只能为自己
+直接经 HTTP 发起的失败输入提供重试入口；Plugin-owned dispatch 必须由来源 Plugin 的领域
+control/history 处理。它不替代 Agent Session stream，也不提供执行控制。
 
 ## 6. 生命周期与所有权
 
@@ -314,8 +333,9 @@ target 返回。Capability inventory 不进入该列表。
     `listPets()` 只返回 Host runtime registry 中当前存活的 Pet。
 13. 完成消费者迁移后移除 `PetAgentRuntime.invoke()` 过渡类型。
 14. 从 `PetDispatchPort` 与 Studio receipt 移除 execution result、completion observer 与
-    caller cancellation；Studio 只负责接纳，resident Coordinator 持有队列和 gate，执行
-    观察统一走 Agent Session event。
+    caller cancellation；Studio 只负责接纳，resident Coordinator 持有队列和 gate。Port 仅
+    允许暴露不含模型内容的 dispatch lifecycle observation，Studio 可转发它供 Console 显示
+    状态；Console 只可重试自己直接经 HTTP 发起的输入，完整执行观察仍走 Agent Session event。
 
 现有测试与 package 边界必须持续证明：
 

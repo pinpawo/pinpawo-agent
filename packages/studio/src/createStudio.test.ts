@@ -21,6 +21,7 @@ function binding(
   const port: PetDispatchPort = {
     getState: () => 'open',
     onStateChange: () => () => undefined,
+    onDispatchLifecycle: () => () => undefined,
     dispatch: async ({ request }) => { await run(request); },
   };
   return {
@@ -64,6 +65,64 @@ test('Studio dispatches request-only input and returns no thread or continuation
     },
   }]);
   await studio.shutdown();
+});
+
+test('Studio relays resident dispatch lifecycle observations without owning execution', async () => {
+  const events: unknown[] = [];
+  let lifecycleListener: Parameters<PetDispatchPort['onDispatchLifecycle']>[0] | undefined;
+  const port: PetDispatchPort = {
+    getState: () => 'open',
+    onStateChange: () => () => undefined,
+    onDispatchLifecycle: (listener) => {
+      lifecycleListener = listener;
+      return () => {
+        if (lifecycleListener === listener) lifecycleListener = undefined;
+      };
+    },
+    dispatch: async ({ request, dispatchId }) => {
+      assert.ok(dispatchId);
+      lifecycleListener?.({ dispatchId, request, state: 'queued' });
+      lifecycleListener?.({ dispatchId, request, requestId: 'host-1', state: 'running' });
+      lifecycleListener?.({
+        dispatchId,
+        request,
+        requestId: 'host-1',
+        state: 'failed',
+        error: 'Connection error',
+      });
+    },
+  };
+  const studio = await createStudio({
+    studioId: 's1',
+    entryPetId: 'worker',
+    pets: [{
+      registration: { petId: 'worker', name: 'WORKER' },
+      dispatch: port,
+    }],
+  });
+  studio.subscribe((event) => { events.push(event); });
+
+  const receipt = await studio.dispatch({ petId: 'worker', request: 'draft' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(events.map((event) => ({
+    type: (event as { type: string }).type,
+    source: (event as { source: string }).source,
+  })), [
+    { type: 'dispatch.queued', source: 'resident-pet' },
+    { type: 'dispatch.running', source: 'resident-pet' },
+    { type: 'dispatch.failed', source: 'resident-pet' },
+    { type: 'dispatch.accepted', source: 'studio' },
+  ]);
+  assert.deepEqual((events[2] as { payload: unknown }).payload, {
+    invocationId: receipt.invocationId,
+    petId: 'worker',
+    request: 'draft',
+    requestId: 'host-1',
+    error: 'Connection error',
+  });
+  await studio.shutdown();
+  assert.equal(lifecycleListener, undefined);
 });
 
 test('Studio delegates queue ownership to each live Pet dispatch port', async () => {

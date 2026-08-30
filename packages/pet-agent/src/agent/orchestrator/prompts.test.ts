@@ -51,7 +51,7 @@ function plannerSession(
   };
 }
 
-test('Capability Planner entry input leads with the run user request', () => {
+test('Capability Planner entry input wraps invocation facts in one entry envelope', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
@@ -68,7 +68,11 @@ test('Capability Planner entry input leads with the run user request', () => {
     plannerSession: plannerSession(),
   } satisfies CapabilityPlannerInput, disclosedDocuments);
 
-  assert.match(input, /^<run_user_request[^>]*>/);
+  assert.match(
+    input,
+    /^<planner_invocation mode="entry" source="orchestrator_state" trust="read_only">\n  <run_user_request[^>]*>/,
+  );
+  assert.match(input, /<\/capability_context>\n<\/planner_invocation>$/);
   assert.match(input, /打开示例站点并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
   assert.match(input, /<capability_context source="planner_state" trust="read_only">/);
@@ -107,11 +111,14 @@ test('Capability Planner entry input represents an empty disclosure explicitly',
     }),
   } satisfies CapabilityPlannerInput, []);
 
-  assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /<capability_context[^>]*>\n  <none \/>\n<\/capability_context>/);
+  assert.match(
+    input,
+    /^<planner_invocation mode="entry" source="orchestrator_state" trust="read_only">\n  <run_user_request[^>]*>/,
+  );
+  assert.match(input, /<capability_context[^>]*>\n    <none \/>\n  <\/capability_context>/);
 });
 
-test('Capability Planner boundary input carries the run user request and boundary facts', () => {
+test('Capability Planner boundary input wraps goal, disclosure, and boundary facts together', () => {
   const input = buildCapabilityPlannerAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
@@ -147,7 +154,11 @@ test('Capability Planner boundary input carries the run user request and boundar
     }]),
   } satisfies CapabilityPlannerInput, disclosedDocuments);
 
-  assert.match(input, /^<run_user_request[^>]*>/);
+  assert.match(
+    input,
+    /^<planner_invocation mode="boundary" source="orchestrator_state" trust="read_only">\n  <run_user_request[^>]*>/,
+  );
+  assert.match(input, /<\/planning_boundary_event>\n<\/planner_invocation>$/);
   assert.match(input, /<planning_boundary_event role="task_boundary" source="orchestrator_state">/);
   assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
   assert.match(input, /<delegation_announces delegation_id="delegation-1" evidence_state="available" evaluation_target="announce-1">/);
@@ -220,7 +231,10 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     plannerSession: plannerSession(),
   } satisfies CapabilityPlannerInput, disclosedDocuments);
 
-  assert.match(input, /^<run_user_request[^>]*>/);
+  assert.match(
+    input,
+    /^<planner_invocation mode="boundary" source="orchestrator_state" trust="read_only">\n  <run_user_request[^>]*>/,
+  );
   assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
   assert.match(input, /<prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation" \/>/);
   assert.doesNotMatch(input, /此前保留的后续任务|planner_request_briefing/);

@@ -19,9 +19,11 @@ export const CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<{}
 export const CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT = definePromptTemplate<{
   userRequest: string;
   capabilityContext: string;
-}>(`{userRequest}
+}>(`<planner_invocation mode="entry" source="orchestrator_state" trust="read_only">
+{userRequest}
 
-{capabilityContext}`, [
+{capabilityContext}
+</planner_invocation>`, [
   'userRequest',
   'capabilityContext',
 ]);
@@ -30,11 +32,13 @@ export const CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT = definePromptTemplate<{
   userRequest: string;
   capabilityContext: string;
   planningBoundary: string;
-}>(`{userRequest}
+}>(`<planner_invocation mode="boundary" source="orchestrator_state" trust="read_only">
+{userRequest}
 
 {capabilityContext}
 
-{planningBoundary}`, [
+{planningBoundary}
+</planner_invocation>`, [
   'userRequest',
   'capabilityContext',
   'planningBoundary',

@@ -24,6 +24,7 @@ import type {
   PlannerSessionState,
   PlannerTaskContinuation,
 } from './capabilityPlanner/session';
+import type { RunTerminalOutcome } from './terminalOutcome';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -88,6 +89,10 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
+  runTerminalOutcome: Annotation<RunTerminalOutcome | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   runTerminalError: Annotation<OrchestratorTerminalErrorState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
@@ -131,6 +136,7 @@ export type OrchestratorRunState = Pick<
   | 'runLatestDelegationOutcome'
   | 'runUserInputRequest'
   | 'runRuntimeFailure'
+  | 'runTerminalOutcome'
   | 'runTerminalError'
   | 'runActiveDelegationTransition'
   | 'runId'
@@ -155,6 +161,7 @@ export function buildRunStateReset(
     runLatestDelegationOutcome: null,
     runUserInputRequest: null,
     runRuntimeFailure: null,
+    runTerminalOutcome: null,
     runTerminalError: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',

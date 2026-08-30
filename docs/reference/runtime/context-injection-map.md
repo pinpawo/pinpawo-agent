@@ -122,12 +122,15 @@ or root messages. Private Capability Human/AI/Tool messages are never included.
 The prior remaining plan is marked as a non-authoritative proposal that the
 Boundary must revalidate against current evidence.
 
-Capability disclosure is run-scoped semantic state. It contains the configured
-default Capability when available and every Capability disclosed during this
-run in stable order. Neither Capability documents nor search-round state enter
-the system prompt. A new run resets search attempts and revalidates disclosure;
-resumed root tasks may seed the capabilities named by their active and remaining
-plan.
+Capability disclosure is run-scoped semantic state. It contains every
+Capability whose complete document was disclosed during this run in stable
+order; the configured default is candidate policy rather than an initial
+disclosure. A compact routing manifest initialized from the effective registry
+is projected into each Planner invocation, while complete Capability documents
+remain progressively disclosed. Neither dynamic registry facts nor search-round
+state enter the stable system prompt. A new run resets search attempts and
+revalidates disclosure; resumed root tasks may seed the capabilities named by
+their active and remaining plan.
 
 `capability_search` remains callable with `tool_choice=auto`. Each ToolMessage
 reports the post-call disclosure state, remaining empty rounds, and a planning

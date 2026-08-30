@@ -114,6 +114,7 @@ test('workspace renders inline Capabilities as discoverable CAPABILITY.md files'
   });
 
   assert.deepEqual(workspace.capabilityNames, ['general']);
+  assert.equal(workspace.entries[0]?.description, 'General workspace execution.');
   assert.equal(workspace.entries[0]?.provenance, 'generated');
   assert.equal(workspace.entries[0]?.relativePath, 'general/CAPABILITY.md');
   const source = await readFile(

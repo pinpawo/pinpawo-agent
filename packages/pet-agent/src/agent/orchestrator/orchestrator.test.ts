@@ -557,7 +557,6 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.equal(boundaryPlannerInput?.mode, 'boundary');
   assert.deepEqual(boundaryPlannerInput?.capabilityDisclosure, {
     registryDigest: entryPlannerInput?.workspace.registryDigest,
-    defaultCapabilityName: 'general',
     disclosedCapabilityNames: ['explore'],
     emptySearchRounds: 1,
     maxEmptySearchRounds: 2,

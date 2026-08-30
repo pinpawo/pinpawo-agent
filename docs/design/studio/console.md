@@ -24,8 +24,11 @@ Console 使用固定页面，不实现前端 Plugin 系统。后端没有装配�
 
 ## 第一版
 
-- Studio：列出存活 Pet、提交单向 dispatch、观察 `dispatch.accepted` activity 与其他 live
-  Studio event；dispatch activity 只说明 admission，不推导执行结果；
+- Studio：列出存活 Pet、提交单向 dispatch，并以 live `dispatch.queued`、`running`、
+  `waiting`、`completed`、`interrupted`、`failed` 显示该次 dispatch 的生命周期。`accepted`
+  仍只说明 admission；Console 只对自己通过 HTTP 直接发起的失败 dispatch，以保存的
+  Pet/request 创建一次全新的 retry dispatch，不恢复、取消或控制原运行。Kanban、Scheduler
+  与 Trigger 的失败由各自的领域 control/history 处理；
 - Kanban：读取 task snapshot/history，以 active/queue/needs-attention/completed 连续状态流展示
   任务、依赖和结果；ready/blocked task 可通过 Kanban 自己的 control route 手工启动或重试；
 - Scheduler：查看 schedule、创建一次性 schedule、取消尚未触发的 schedule；
@@ -36,12 +39,13 @@ Console 使用固定页面，不实现前端 Plugin 系统。后端没有装配�
   bus；页面提供显式 refresh，并在刷新时重新读取当前文档。
 
 第一版不实现动态 UI module、Plugin 静态资源 hook、传统泳道/拖拽看板、Agent Session、
-HITL resume 或 checkpoint 操作。Console 的 dispatch 成功只表示 Studio 已接受输入，页面
-不得等待 Agent completion。
+HITL resume 或 checkpoint 操作。Console 的 dispatch 成功只表示 Studio 已接受输入；
+后续 lifecycle 是 live observation，不是可恢复的 execution handle，页面不得等待或控制
+Agent completion。
 
 ## 数据恢复
 
-领域页面先读取 snapshot/history，再订阅 live `/events`。Studio event（包括
+领域页面先读取 snapshot/history，再订阅 live `/events`。Studio dispatch lifecycle（包括
 `dispatch.accepted`）是 live-only；
 Kanban、Scheduler 和 Trigger 各自的 SQLite history 才是断线恢复事实源。Console 不用
 Studio SSE 重建领域状态。

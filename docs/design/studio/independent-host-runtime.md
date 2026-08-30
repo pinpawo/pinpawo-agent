@@ -135,8 +135,13 @@ completion、status、output、error 或 caller cancellation。dispatch 真正�
   transport 私有状态。
 - Plugin event 保持进程内全局总线语义，request transport 不隐式把它归到某个
   peer/delivery。未来的外部 event feed 需要显式 subscription/replay 契约。
-- Agent 执行进度与异常走 local-agent Agent Session event；Studio core 不复制或桥接这条
-  stream。Plugin 的领域结果继续由 Plugin 自己的 Toolkit、持久化状态和 event 表达。
+- Agent 的消息、工具进度、review 与执行结果仍走 local-agent Agent Session event；Studio core
+  不复制这条 conversation stream。resident runtime 可以额外发布与 dispatch receipt 关联的
+  无内容 lifecycle observation（queued/running/waiting/completed/interrupted/failed），供
+  Console 呈现状态；Console 仅能为其直接通过 HTTP 发起的失败输入创建新的 retry dispatch。
+  其他 Plugin 发起的失败仍由其领域 control/history 处理。该 observation 不包含执行结果，也不
+  提供 resume、cancel 或其他 execution control。Plugin 的领域结果继续由 Plugin 自己的 Toolkit、
+  持久化状态和 event 表达。
 
 ### 2.4 HITL
 

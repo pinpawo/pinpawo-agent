@@ -18,6 +18,8 @@ export type {
   AgentSessionPeer,
   CreateResidentPetHostOptions,
   CreateResidentPetRuntimeOptions,
+  PetDispatchLifecycleEvent,
+  PetDispatchLifecycleState,
   PetDispatchPort,
   PetDispatchRequest,
   PetDispatchSettledState,

@@ -12,6 +12,7 @@ const plannerPromptWorkspace = {
   capabilityNames: ['general', 'browser'],
   entries: ['general', 'browser'].map((capabilityName) => ({
     capabilityName,
+    description: `${capabilityName} capability`,
     relativePath: `${capabilityName}/CAPABILITY.md`,
     documentDigest: 'b'.repeat(64),
     provenance: 'authored' as const,
@@ -36,6 +37,19 @@ const disclosedDocuments = [{
   path: 'browser/CAPABILITY.md',
   content: '# Browser\n\n浏览网页。',
 }];
+
+const routingManifest = {
+  defaultCapabilityName: 'general',
+  capabilities: [{
+    name: 'general',
+    purpose: '处理通用工作区任务',
+    cues: ['general', 'workspace', 'task'],
+  }, {
+    name: 'browser',
+    purpose: '打开并检查网页',
+    cues: ['browser', 'web page', 'navigate'],
+  }],
+};
 
 function plannerSession(
   capabilityDisclosure = plannerDisclosure,
@@ -65,16 +79,19 @@ test('Capability Planner entry input leads with the run user request', () => {
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
     plannerSession: plannerSession(),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+  } satisfies CapabilityPlannerInput, disclosedDocuments, routingManifest);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /打开示例站点并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
   assert.match(input, /<capability_context source="planner_state" trust="read_only">/);
+  assert.match(input, /<capability_routing_manifest[^>]* default="general">/);
+  assert.match(input, /<purpose>\s*<!\[CDATA\[\s*打开并检查网页/);
+  assert.match(input, /<cue>\s*<!\[CDATA\[\s*browser/);
   assert.match(input, /<capability name="general">/);
   assert.match(input, /<capability name="browser">/);
   assert.match(input, /保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
-  assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+  assert.doesNotMatch(input, /registry_digest|document_count|<planning_state>/);
 });
 
 test('Capability Planner system prompt contains no dynamic Capability state', () => {
@@ -104,7 +121,7 @@ test('Capability Planner entry input represents an empty disclosure explicitly',
       ...plannerDisclosure,
       disclosedCapabilityNames: [],
     }),
-  } satisfies CapabilityPlannerInput, []);
+  } satisfies CapabilityPlannerInput, [], routingManifest);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<capability_context[^>]*>\n  <none \/>\n<\/capability_context>/);
@@ -144,7 +161,7 @@ test('Capability Planner boundary input carries the run user request and boundar
       capability: 'browser',
       task: '浏览相关内容',
     }]),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+  } satisfies CapabilityPlannerInput, disclosedDocuments, routingManifest);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<planning_boundary_event role="task_boundary" source="orchestrator_state">/);
@@ -156,7 +173,7 @@ test('Capability Planner boundary input carries the run user request and boundar
   assert.match(input, /<task capability="browser">/);
   assert.match(input, /浏览相关内容/);
   assert.doesNotMatch(input, /执行停止原因/);
-  assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
+  assert.doesNotMatch(input, /registry_digest|document_count|<planning_state>/);
 });
 
 test('Capability Planner boundary input marks absent execution evidence explicitly', () => {
@@ -179,7 +196,7 @@ test('Capability Planner boundary input marks absent execution evidence explicit
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
     plannerSession: plannerSession(),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+  } satisfies CapabilityPlannerInput, disclosedDocuments, routingManifest);
 
   assert.match(
     input,
@@ -217,7 +234,7 @@ test('Capability Planner boundary input omits the follow-up section once the pla
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
     plannerSession: plannerSession(),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+  } satisfies CapabilityPlannerInput, disclosedDocuments, routingManifest);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);

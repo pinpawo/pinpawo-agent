@@ -1,6 +1,5 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import { GENERAL_CAPABILITY_NAME } from '../../../types/capability';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
   CAPABILITY_REGISTRY_BACKEND,
@@ -113,26 +112,15 @@ function normalizeCapabilitySearchTerms(input: readonly string[]) {
 
 export function createCapabilityPlannerFileExplorer(params: {
   workspace: CapabilityDocumentWorkspace;
-  /** Defaults to the well-known `general` Capability. */
-  defaultCapabilityName?: string;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
 }): CapabilityPlannerFileExplorer {
   const { workspace } = params;
-  const defaultCapabilityName = params.defaultCapabilityName
-    ?? GENERAL_CAPABILITY_NAME;
-  if (!defaultCapabilityName.trim()) {
-    throw new Error('Capability Planner defaultCapabilityName must be non-empty');
-  }
   const registryBackend = params.registryBackend
     ?? CAPABILITY_REGISTRY_BACKEND.FILESYSTEM;
-  const defaultEntry = workspace.entries.find(
-    ({ capabilityName }) => capabilityName === defaultCapabilityName,
-  );
   const registryDocuments = createCapabilityRegistryDocuments({
     workspace,
     backend: registryBackend,
-    ...(defaultEntry ? { excludedPaths: [defaultEntry.relativePath] } : {}),
   });
   const workspaceReader = new CapabilityPlannerWorkspaceReader(workspace);
   const maxDocumentReadBytes = params.maxDocumentReadBytes

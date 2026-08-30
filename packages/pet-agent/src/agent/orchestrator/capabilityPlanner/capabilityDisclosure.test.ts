@@ -18,6 +18,7 @@ function workspace(
     capabilityNames,
     entries: capabilityNames.map((capabilityName) => ({
       capabilityName,
+      description: `${capabilityName} capability`,
       relativePath: `${capabilityName}/CAPABILITY.md`,
       documentDigest: capabilityName.repeat(8),
       provenance: 'authored',
@@ -26,7 +27,7 @@ function workspace(
   };
 }
 
-test('Capability disclosure starts with General and persists discoveries in order', () => {
+test('Capability disclosure starts empty and persists discoveries in order', () => {
   const initial = createCapabilityDisclosureState({
     workspace: workspace(),
     maxEmptySearchRounds: 2,
@@ -43,29 +44,11 @@ test('Capability disclosure starts with General and persists discoveries in orde
   }]);
 
   assert.deepEqual(afterBoundary.disclosedCapabilityNames, [
-    'general',
     'explore',
     'writer',
   ]);
   assert.equal(afterBoundary.emptySearchRounds, 0);
   assert.equal(afterBoundary.status, 'open');
-});
-
-test('Capability disclosure starts with the configured default and resets when it changes', () => {
-  const initial = createCapabilityDisclosureState({
-    workspace: workspace(),
-    maxEmptySearchRounds: 2,
-    defaultCapabilityName: 'writer',
-  });
-
-  assert.equal(initial.defaultCapabilityName, 'writer');
-  assert.deepEqual(initial.disclosedCapabilityNames, ['writer']);
-  assert.deepEqual(resolveCapabilityDisclosureState({
-    current: initial,
-    workspace: workspace(),
-    maxEmptySearchRounds: 2,
-    defaultCapabilityName: 'explore',
-  }).disclosedCapabilityNames, ['explore']);
 });
 
 test('Capability disclosure counts a wholly empty parallel batch once', () => {
@@ -113,8 +96,7 @@ test('Capability disclosure resets when the registry generation changes', () => 
     maxEmptySearchRounds: 3,
   }), {
     registryDigest: nextWorkspace.registryDigest,
-    defaultCapabilityName: 'general',
-    disclosedCapabilityNames: ['general'],
+    disclosedCapabilityNames: [],
     emptySearchRounds: 0,
     maxEmptySearchRounds: 3,
     status: 'open',
@@ -134,9 +116,8 @@ test('Capability disclosure can discard searched Capabilities without reopening 
 
   assert.deepEqual(removeSearchedCapabilities({
     current,
-    workspace: workspace(),
   }), {
     ...current,
-    disclosedCapabilityNames: ['general'],
+    disclosedCapabilityNames: [],
   });
 });

@@ -12,6 +12,10 @@ import type {
   CapabilityPlannerInput,
   CapabilityPlannerMode,
 } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+import {
+  createCapabilityRegistryManifest,
+  createDeterministicCapabilityRoutingManifest,
+} from '../../src/agent/orchestrator/capabilityPlanner/routingManifest.ts';
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
 import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation/index.ts';
@@ -29,17 +33,23 @@ const workspace: CapabilityDocumentWorkspace = {
   capabilityNames: ['general', 'repository'],
   entries: [{
     capabilityName: 'general',
+    description: 'Handle ordinary tasks.',
     relativePath: 'general/CAPABILITY.md',
     documentDigest: 'general-document-digest',
     provenance: 'authored',
   }, {
     capabilityName: 'repository',
+    description: 'Inspect, edit, and verify repository changes.',
     relativePath: 'repository/CAPABILITY.md',
     documentDigest: 'repository-document-digest',
     provenance: 'authored',
   }],
   reused: true,
 };
+
+const routingManifest = createDeterministicCapabilityRoutingManifest(
+  createCapabilityRegistryManifest({ workspace }),
+);
 
 const documents: CapabilityPlannerCapabilityDocument[] = [{
   capabilityName: 'general',
@@ -175,7 +185,7 @@ function renderMode(mode: CapabilityPlannerMode) {
     console.log(messageText(message));
   });
   console.log('\n### INVOCATION INPUT');
-  console.log(buildCapabilityPlannerAgentInput(input, documents));
+  console.log(buildCapabilityPlannerAgentInput(input, documents, routingManifest));
   console.log('\n### PROVIDER TOOLS');
   tools.forEach((tool) => {
     console.log(`\n${renderTool(tool)}`);

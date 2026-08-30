@@ -38,12 +38,16 @@ type HistoryEvent = {
   taskId?: string; scheduleId?: string; deliveryId?: string; triggerId?: string; status?: string;
 };
 type LiveEvent = { type: string; source: string; occurredAt: string; payload?: unknown };
+type DispatchState = 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
 type DispatchRecord = {
   invocationId: string;
   petId: string;
   request: string;
   producer: string;
-  acceptedAt: string;
+  state: DispatchState;
+  updatedAt: string;
+  source: 'admission_receipt' | 'lifecycle';
+  error?: string;
 };
 type ProjectDocumentSummary = {
   path: string; title: string; size: number; modifiedAt: string;
@@ -87,27 +91,66 @@ function connectionErrorMessage(error: unknown): string {
 }
 
 function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null {
-  if (event.source !== 'studio' || event.type !== 'dispatch.accepted'
+  const source = event.source === 'studio' && event.type === 'dispatch.accepted'
+    ? 'admission_receipt'
+    : event.source === 'resident-pet' && /^dispatch\.(queued|running|waiting|completed|interrupted|failed)$/.test(event.type)
+      ? 'lifecycle'
+      : null;
+  const state = source === 'admission_receipt'
+    ? 'queued'
+    : source === 'lifecycle'
+      ? event.type.slice('dispatch.'.length) as DispatchState
+      : null;
+  if (!source || !state
     || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
     return null;
   }
   const payload = event.payload as Record<string, unknown>;
   if (typeof payload.invocationId !== 'string' || typeof payload.petId !== 'string'
-    || typeof payload.request !== 'string' || typeof payload.producer !== 'string') {
+    || typeof payload.request !== 'string') {
     return null;
   }
   return {
     invocationId: payload.invocationId,
     petId: payload.petId,
     request: payload.request,
-    producer: payload.producer,
-    acceptedAt: event.occurredAt,
+    producer: typeof payload.producer === 'string' ? payload.producer : 'resident-pet',
+    state,
+    updatedAt: event.occurredAt,
+    source,
+    ...(typeof payload.error === 'string' && payload.error.trim()
+      ? { error: payload.error }
+      : {}),
   };
 }
 
 function appendDispatchRecord(records: DispatchRecord[], record: DispatchRecord): DispatchRecord[] {
-  if (records.some(({ invocationId }) => invocationId === record.invocationId)) return records;
-  return [...records.slice(-199), record];
+  const existingIndex = records.findIndex(({ invocationId }) => invocationId === record.invocationId);
+  if (existingIndex < 0) return [...records.slice(-199), record];
+  const existing = records[existingIndex];
+  if (!existing) return records;
+  // Studio's receipt can arrive after the resident runtime has already emitted
+  // running or terminal lifecycle. It only establishes the initial queued row;
+  // merge its source attribution without regressing the execution observation.
+  if (record.source === 'admission_receipt' && existing.state !== 'queued') {
+    const next = [...records];
+    next[existingIndex] = {
+      ...existing,
+      producer: record.producer,
+    };
+    return next;
+  }
+  const next = [...records];
+  next[existingIndex] = {
+    ...existing,
+    ...record,
+    producer: record.source === 'lifecycle' ? existing.producer : record.producer,
+  };
+  return next;
+}
+
+function canRetryDispatch(dispatch: DispatchRecord): boolean {
+  return dispatch.producer === 'http' || dispatch.producer === 'studio';
 }
 
 export function App() {
@@ -133,6 +176,7 @@ export function App() {
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
   const [dispatchPet, setDispatchPet] = useState('');
   const [dispatchGoal, setDispatchGoal] = useState('');
+  const [retryingInvocationId, setRetryingInvocationId] = useState('');
   const [schedulePet, setSchedulePet] = useState('');
   const [scheduleRequest, setScheduleRequest] = useState('');
   const [scheduleRunAt, setScheduleRunAt] = useState('');
@@ -350,10 +394,34 @@ export function App() {
         petId: receipt.petId,
         request,
         producer: 'http',
-        acceptedAt: new Date().toISOString(),
+        state: 'queued',
+        updatedAt: new Date().toISOString(),
+        source: 'admission_receipt',
       }));
       setNotice(`Dispatch accepted for ${receipt.petId}.`);
     }).catch((error) => setNotice(connectionErrorMessage(error)));
+  };
+
+  const retryDispatch = (dispatch: DispatchRecord) => {
+    if (!canRetryDispatch(dispatch)) return;
+    setRetryingInvocationId(dispatch.invocationId);
+    void post<{ petId: string; invocationId: string }>('/dispatch', {
+      petId: dispatch.petId,
+      request: dispatch.request,
+    }).then((receipt) => {
+      setDispatches((current) => appendDispatchRecord(current, {
+        invocationId: receipt.invocationId,
+        petId: receipt.petId,
+        request: dispatch.request,
+        producer: 'http',
+        state: 'queued',
+        updatedAt: new Date().toISOString(),
+        source: 'admission_receipt',
+      }));
+      setNotice(`Retry accepted for ${receipt.petId}.`);
+    }).catch((error) => setNotice(connectionErrorMessage(error))).finally(() => {
+      setRetryingInvocationId('');
+    });
   };
 
   const startTask = (taskId: string) => {
@@ -407,7 +475,26 @@ export function App() {
           </form>
           <div className="section-title"><span>DISPATCH ACTIVITY</span><b>{dispatches.length}</b></div>
           {dispatches.length > 0
-            ? <div className="rows dispatch-rows">{dispatches.slice().reverse().map((dispatch) => <div className="row" key={dispatch.invocationId}><time>{new Date(dispatch.acceptedAt).toLocaleTimeString()}</time><code>{dispatch.petId}</code><strong>{dispatch.request}</strong><span>{dispatch.producer} · {dispatch.invocationId.slice(0, 8)}</span></div>)}</div>
+            ? <div className="rows dispatch-rows">
+              {dispatches.slice().reverse().map((dispatch) => (
+                <div className="row dispatch-row" key={dispatch.invocationId}>
+                  <time>{new Date(dispatch.updatedAt).toLocaleTimeString()}</time>
+                  <em className={dispatch.state}>{dispatch.state}</em>
+                  <strong>{dispatch.request}</strong>
+                  <span>
+                    {dispatch.petId} · {dispatch.error ?? `${dispatch.producer} · ${dispatch.invocationId.slice(0, 8)}`}
+                    {dispatch.state === 'failed' && canRetryDispatch(dispatch) && <button
+                      className="inline-action"
+                      disabled={retryingInvocationId === dispatch.invocationId}
+                      onClick={() => retryDispatch(dispatch)}
+                      type="button"
+                    >
+                      {retryingInvocationId === dispatch.invocationId ? 'retrying…' : 'retry'}
+                    </button>}
+                  </span>
+                </div>
+              ))}
+            </div>
             : <div className="compact-empty">No dispatch has been accepted in this Console session.</div>}
           <div className="section-title"><span>LIVE EVENTS</span><b>{events.length}</b></div>
           <div className="rows event-rows">{events.slice().reverse().map((event, index) => <div className="row" key={`${event.occurredAt}-${index.toString()}`}><time>{new Date(event.occurredAt).toLocaleTimeString()}</time><code>{event.source}</code><strong>{event.type}</strong><span>{eventMessage(event)}</span></div>)}</div>

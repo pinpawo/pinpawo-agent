@@ -276,9 +276,6 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       ...(resumedCapabilityNames.length > 0
         ? { seedCapabilityNames: resumedCapabilityNames }
         : {}),
-      ...(config.defaultCapabilityName !== undefined
-        ? { defaultCapabilityName: config.defaultCapabilityName }
-        : {}),
       maxEmptySearchRounds: config.capabilityPlannerMaxSearchRounds
         ?? DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS,
     });

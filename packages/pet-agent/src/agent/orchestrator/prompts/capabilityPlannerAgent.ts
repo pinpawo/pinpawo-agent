@@ -1,5 +1,6 @@
 import type { CapabilityPlannerCapabilityDocument } from '../capabilityPlanner/fileExplorer';
 import type { CapabilityPlannerInput } from '../capabilityPlanner/runner';
+import type { CapabilityRoutingManifest } from '../capabilityPlanner/routingManifest';
 import {
   CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT,
   CAPABILITY_PLANNER_BOUNDARY_SYSTEM_PROMPT,
@@ -30,6 +31,29 @@ function buildCapabilityContext(
         ), 2))
       : ['  <none />']),
     '</capability_context>',
+  ].join('\n');
+}
+
+function buildCapabilityRoutingManifest(
+  manifest: CapabilityRoutingManifest,
+) {
+  return [
+    `<capability_routing_manifest role="fact" source="compiled_registry" trust="read_only"${manifest.defaultCapabilityName
+      ? ` default="${escapeXmlAttribute(manifest.defaultCapabilityName)}"`
+      : ''}>`,
+    ...(manifest.capabilities.length > 0
+      ? manifest.capabilities.map((capability) => [
+          `  <capability name="${escapeXmlAttribute(capability.name)}">`,
+          indentXmlBlock(xmlTextBlock('purpose', capability.purpose), 4),
+          '    <cues>',
+          ...capability.cues.map((cue) =>
+            indentXmlBlock(xmlTextBlock('cue', cue), 6),
+          ),
+          '    </cues>',
+          '  </capability>',
+        ].join('\n'))
+      : ['  <none />']),
+    '</capability_routing_manifest>',
   ].join('\n');
 }
 
@@ -83,16 +107,20 @@ export function buildCapabilityPlannerAgentSystemPrompt(
 export function buildCapabilityPlannerAgentInput(
   input: CapabilityPlannerInput,
   disclosedCapabilities: readonly CapabilityPlannerCapabilityDocument[],
+  routingManifest: CapabilityRoutingManifest,
 ) {
   const userRequest = buildRunUserRequestContext(input.userRequest);
+  const routingContext = buildCapabilityRoutingManifest(routingManifest);
   const capabilityContext = buildCapabilityContext(disclosedCapabilities);
   return input.mode === 'entry'
     ? CAPABILITY_PLANNER_ENTRY_INPUT_PROMPT.render({
         userRequest,
+        routingContext,
         capabilityContext,
       })
     : CAPABILITY_PLANNER_BOUNDARY_INPUT_PROMPT.render({
         userRequest,
+        routingContext,
         capabilityContext,
         planningBoundary: buildPlanningBoundary(input),
       });

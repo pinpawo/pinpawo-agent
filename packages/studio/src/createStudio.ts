@@ -56,6 +56,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
 
   const eventBus = new StudioEventBus();
   const idempotencyRecords = new Map<string, StudioDispatchReceipt>();
+  const stopDispatchLifecycleObservers: Array<() => void> = [];
   const pluginHooks = new StudioPluginHookRegistry();
   const startedPlugins: StudioPlugin[] = [];
   let activationPromise: Promise<void> | null = null;
@@ -69,6 +70,23 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
 
   function notify(event: StudioEvent): void {
     eventBus.publish(event);
+  }
+
+  for (const pet of petsById.values()) {
+    stopDispatchLifecycleObservers.push(pet.dispatch.onDispatchLifecycle((event) => {
+      notify({
+        type: `dispatch.${event.state}`,
+        source: 'resident-pet',
+        occurredAt: new Date().toISOString(),
+        payload: {
+          invocationId: event.dispatchId,
+          petId: pet.registration.petId,
+          request: event.request,
+          ...(event.requestId ? { requestId: event.requestId } : {}),
+          ...(event.error ? { error: event.error } : {}),
+        },
+      });
+    }));
   }
 
   async function dispatch(
@@ -97,7 +115,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     console.log(
       `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
     );
-    await pet.dispatch.dispatch({ request: request.request });
+    await pet.dispatch.dispatch({
+      request: request.request,
+      dispatchId: invocationId,
+    });
 
     const receipt: StudioDispatchReceipt = Object.freeze({
       petId: request.petId,
@@ -153,6 +174,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   async function closeCore(): Promise<void> {
     if (eventBusClosed) return;
     eventBusClosed = true;
+    for (const stop of stopDispatchLifecycleObservers.splice(0)) stop();
     await eventBus.close();
     idempotencyRecords.clear();
   }

@@ -1579,7 +1579,7 @@ test('a matching search keeps a parallel batch from consuming empty-search budge
   assert.equal(payload.capabilityDiscovery?.remainingEmptyRounds, 0);
 });
 
-test('Planner returns to Answer after one capability_search without general', async (t) => {
+test('Planner can finalize after one capability_search without general', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -1754,7 +1754,7 @@ test('a submitted plan commits once without a final ordinary-text reply', async 
   assert.equal(model.invocations.length, 1);
 });
 
-test('Planner keeps ordinary text invocation-private and does not retry', async (t) => {
+test('Planner returns ordinary text once without retrying', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1771,13 +1771,14 @@ test('Planner keeps ordinary text invocation-private and does not retry', async 
   );
 
   assert.ok('plannerStatus' in result);
-  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
-  assert.equal(result.plannerStatus, 'incomplete');
+  if (!('plannerStatus' in result)) assert.fail('expected a direct Planner response');
+  assert.equal(result.plannerStatus, 'direct_response');
+  assert.match('response' in result ? result.response : '', /开始执行计划任务/);
   assert.equal(model.invocations.length, 1);
   assert.equal('messageUpdates' in result, false);
 });
 
-test('Planner can return bounded facts to Answer without submitting a plan', async (t) => {
+test('Planner can return bounded facts directly without submitting a plan', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -1966,7 +1967,7 @@ test('Planner allows every search in one parallel disclosure round', async (t) =
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
 });
 
-test('an empty workspace can return truthful facts to Answer', async (t) => {
+test('an empty workspace can return truthful facts directly', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
     structuredOutput: {
@@ -2376,7 +2377,7 @@ test('oversized persisted disclosure drops searched Capabilities and continues w
   assert.doesNotMatch(invocationText, /EXPLORE_ONLY|WRITER_ONLY/);
 });
 
-test('Planner reports an incomplete result when it exits without a commit', async (t) => {
+test('Planner returns ordinary text as a direct response without inventing a commit', async (t) => {
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedPlannerModel([{
     content: 'The user needs to choose a target first.',
@@ -2384,14 +2385,14 @@ test('Planner reports an incomplete result when it exits without a commit', asyn
 
   const result = await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace));
   assert.ok('plannerStatus' in result);
-  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
-  assert.equal(result.plannerStatus, 'incomplete');
-  assert.equal(result.reason, 'terminal_commit_missing');
+  if (!('plannerStatus' in result)) assert.fail('expected a direct Planner response');
+  assert.equal(result.plannerStatus, 'direct_response');
+  assert.equal('response' in result ? result.response : null, 'The user needs to choose a target first.');
   assert.equal(model.invocations.length, 1);
   assert.equal('messageUpdates' in result, false);
 });
 
-test('Planner keeps search auto when closed exploration ends without a commit', async (t) => {
+test('Planner keeps search auto when closed exploration ends with a direct response', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -2415,9 +2416,9 @@ test('Planner keeps search auto when closed exploration ends without a commit', 
   }));
 
   assert.ok('plannerStatus' in result);
-  if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
-  assert.equal(result.plannerStatus, 'incomplete');
-  assert.equal(result.reason, 'terminal_commit_missing');
+  if (!('plannerStatus' in result)) assert.fail('expected a direct Planner response');
+  assert.equal(result.plannerStatus, 'direct_response');
+  assert.equal('response' in result ? result.response : null, 'I have finished looking for capabilities.');
   assert.equal(model.invocations.length, 3);
   assert.equal(model.boundToolNameHistory[2]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
@@ -2426,7 +2427,7 @@ test('Planner keeps search auto when closed exploration ends without a commit', 
   assert.equal('messageUpdates' in result, false);
 });
 
-test('boundary Planner reports incomplete without accepting its delegation', async (t) => {
+test('boundary Planner returns direct text without accepting its delegation', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -2450,10 +2451,21 @@ test('boundary Planner reports incomplete without accepting its delegation', asy
   }));
 
   assert.ok('plannerStatus' in result);
+  if (!('plannerStatus' in result)) assert.fail('expected a direct Planner response');
+  assert.equal(result.plannerStatus, 'direct_response');
+  assert.equal('response' in result ? result.response : null, 'The current task should be handed over.');
+  assert.equal('messageUpdates' in result, false);
+});
+
+test('Planner reports incomplete only when it exits without a commit or text', async (t) => {
+  const workspace = await createWorkspace(t, {});
+  const model = new ScriptedPlannerModel([{ content: '' }]);
+
+  const result = await createCapabilityPlannerAgent({ model }).invoke(plannerInput(workspace));
+  assert.ok('plannerStatus' in result);
   if (!('plannerStatus' in result)) assert.fail('expected an incomplete Planner result');
   assert.equal(result.plannerStatus, 'incomplete');
-  assert.equal(result.reason, 'terminal_commit_missing');
-  assert.equal('messageUpdates' in result, false);
+  assert.equal('reason' in result ? result.reason : null, 'terminal_commit_missing');
 });
 
 test('Capability disclosure validates maxEmptySearchRounds', async (t) => {

@@ -78,10 +78,10 @@ export type DecisionMode = 'answer' | 'capability';
 export type OrchestratorConfig = {
   models: AgentModels;
   /**
-   * Capability document preloaded by the entry Planner as its default
+   * Capability identified in the Planner routing manifest as its default
    * candidate. Defaults to the well-known `general` Capability. This changes
-   * candidate preference only; it does not bypass registry availability or an
-   * invocation-scoped Capability allowlist.
+   * candidate preference only; it does not disclose the Capability document,
+   * bypass registry availability, or bypass an invocation-scoped allowlist.
    */
   defaultCapabilityName?: string;
   /**

@@ -19,8 +19,9 @@
 ```
 
 Pet 配置至少包含 `petId` 和 `name`，可选 `role`、`serviceSummary`、
-`modelProfileId` 与 `defaultCapabilityName`。后者只让 Agent entry Planner 优先加载
-该 Pet 目录中已存在的一项 Capability，不绕过可用性与 Toolkit 绑定。配置不包含
+`modelProfileId` 与 `defaultCapabilityName`。后者只在 Planner 的紧凑路由清单中标记
+该 Pet 目录中已存在的一项默认候选；完整文档仍与其他 Capability 一样通过搜索披露，
+且不绕过可用性与 Toolkit 绑定。配置不包含
 `lazy`、`disabled`、Capability 名单、thread 或
 continuation。所有配置 Pet 都在 Host ready 前 eager 构造；任意一个失败都会整体回滚。
 

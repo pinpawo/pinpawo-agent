@@ -31,6 +31,7 @@ import {
 } from './searchTool';
 import { createPlannerTerminalTools } from './terminalTools';
 import { PlannerFileToolError } from './workspaceReader';
+import { createCapabilityRoutingManifestResolver } from './routingManifest';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS = 2;
@@ -110,7 +111,7 @@ function buildPlannerRunnableConfig(params: {
 
 export function createCapabilityPlannerAgent(params: {
   model: BaseChatModel;
-  /** Capability preloaded as the entry Planner's default candidate. */
+  /** Capability identified as the Planner's default candidate. */
   defaultCapabilityName?: string;
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
@@ -127,14 +128,14 @@ export function createCapabilityPlannerAgent(params: {
     );
   }
   const explorers = new Map<string, CapabilityPlannerFileExplorer>();
+  const resolveRoutingManifest = createCapabilityRoutingManifestResolver({
+    model: params.model,
+  });
   const explorerForInput = (input: CapabilityPlannerInput) => {
     const existing = explorers.get(input.inputId);
     if (existing) return existing;
     const explorer = createCapabilityPlannerFileExplorer({
       workspace: input.workspace,
-      ...(params.defaultCapabilityName !== undefined
-        ? { defaultCapabilityName: params.defaultCapabilityName }
-        : {}),
       registryBackend: params.registryBackend ?? 'filesystem',
       ...(params.maxDocumentReadBytes
         ? { maxDocumentReadBytes: params.maxDocumentReadBytes }
@@ -178,6 +179,14 @@ export function createCapabilityPlannerAgent(params: {
           };
         }
         let effectiveInput = input;
+        const routingManifest = await resolveRoutingManifest({
+          workspace: input.workspace,
+          ...(params.defaultCapabilityName !== undefined
+            ? { defaultCapabilityName: params.defaultCapabilityName }
+            : {}),
+          runnableConfig: config,
+        });
+        timeout.signal.throwIfAborted();
         let explorer = explorerForInput(effectiveInput);
         let disclosedCapabilities: CapabilityPlannerCapabilityDocument[];
         try {
@@ -194,12 +203,11 @@ export function createCapabilityPlannerAgent(params: {
             ...input,
             capabilityDisclosure: removeSearchedCapabilities({
               current: input.capabilityDisclosure,
-              workspace: input.workspace,
             }),
           };
           // The failed explorer has already marked its budget as exhausted.
-          // Recreate it so the configured default and any later search use a
-          // clean invocation budget after oversized disclosures are discarded.
+          // Recreate it so later searches use a clean invocation budget after
+          // oversized disclosures are discarded.
           explorers.delete(input.inputId);
           explorer = explorerForInput(effectiveInput);
           disclosedCapabilities = await explorer.readCapabilities(
@@ -215,6 +223,7 @@ export function createCapabilityPlannerAgent(params: {
               content: buildCapabilityPlannerAgentInput(
                 effectiveInput,
                 disclosedCapabilities,
+                routingManifest,
               ),
             }),
           ],

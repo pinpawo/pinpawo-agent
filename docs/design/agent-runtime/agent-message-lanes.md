@@ -29,7 +29,10 @@ run. It is ordinary scope identity, not the identity of another message model.
 ```text
 canonical messages
   -> select main + active delegation private messages
-  -> append one current briefing
+  -> shared model-message materialization
+     -> project typed domain messages
+     -> append one current briefing
+     -> repair provider tool-call ordering
   -> invoke the Capability model
   -> reconcile returned messages
   -> tag new private messages with the same delegation scope
@@ -71,6 +74,34 @@ The query knows only message ownership:
 
 It does not know about Planner inputs, Announce, prompts, artifacts, provider
 roles, task completion, or visibility modes.
+
+## Model-message materialization
+
+Selection and provider preparation are separate, but provider preparation has
+one shared exit. A node selects canonical history, constructs its one current
+invocation message, and passes both to `buildAgentModelMessages`:
+
+```ts
+const selection = queryAgentMessages(messages)
+  .main()
+  .delegation(scope)
+  .select();
+
+const modelMessages = buildAgentModelMessages({
+  history: selection.messages,
+  current: [delegationBriefing],
+});
+```
+
+The shared materializer preserves history order, projects known typed domain
+messages into provider-safe standard messages, appends current invocation
+messages, and finally repairs tool-call protocol ordering. Callers do not invoke
+those steps separately or choose their order.
+
+The node still owns the semantic choice of history and the construction of its
+current typed input. This is not a generic prompt builder: it knows no Planner
+mode, task state, artifact policy, or system-prompt parameters. Current messages
+remain invocation-only and are never written to canonical state.
 
 ## Capability delegation protocol
 
@@ -171,11 +202,16 @@ that projection never mutates canonical state.
 
 ## Other model nodes
 
-Entry Answer and Answer select clean main messages. They do not inspect private
-Capability messages or Planner provider messages.
+Entry Answer selects clean main messages and uses the shared materializer.
+Answer receives a closed fact-only input and intentionally receives no canonical
+conversation history. Neither inspects private Capability messages or Planner
+provider messages.
 
-Every model node owns its own typed-state-to-provider projection. The lane query
-does not construct model calls.
+The lane query does not construct model calls. Nodes that consume canonical
+history use the shared materializer rather than owning projection and provider
+protocol sanitation themselves. Isolated model calls that do not consume
+canonical history, such as routing-manifest initialization and context
+compaction, remain self-contained.
 
 ## Package boundaries
 
@@ -193,9 +229,11 @@ agent/orchestrator/delegation/
   announce.ts        exact-scope Announce selection
   handoff.ts         acceptance into main and private-message cleanup
 
+agent/orchestrator/modelMessages.ts
+  ordered canonical-history + current-input materialization for model calls
+
 agent/orchestrator/capabilityPlanner/
   input.ts           OrchestratorState -> CapabilityPlannerInput
-  providerMessages.ts typed Planner input -> provider messages
   protocol.ts        terminal commit contract
   session.ts         run-scoped Planner state
   runner.ts          Planner execution boundary
@@ -227,13 +265,16 @@ observability data, not another message model.
    `messages`.
 6. Planner Boundary receives typed Announce evidence, not raw private messages.
 7. Handoff accepts typed Announces and clears the matching private messages.
-8. Each model node owns its provider-input construction.
+8. Nodes own history selection and current typed input; the shared materializer
+   owns projection, append order, and provider protocol sanitation.
 
 ## Validation
 
 - query tests cover chronology, immutability, exact scope, and diagnostics;
 - Capability tests cover fresh-task isolation and same-delegation continuation;
 - Planner tests cover Entry and Boundary input shapes;
+- materializer tests cover projection, append order, immutability, and tool-call
+  protocol sanitation;
 - Boundary tests prove ordered Announce evidence without raw private messages;
 - full typecheck, unit tests, context audit, and targeted real-model evals pass.
 

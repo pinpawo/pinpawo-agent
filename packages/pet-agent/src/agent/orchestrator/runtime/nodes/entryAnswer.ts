@@ -8,10 +8,9 @@ import {
   mainConversationMessages,
   observeAgentMessageSelection,
   queryAgentMessages,
-  toolProtocolSafeMessages,
   stampAgentMessageCreatedAt,
 } from '../../../messages';
-import { projectDelegationAnnouncesForModel } from '../../delegation';
+import { buildAgentModelMessages } from '../../modelMessages';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -178,9 +177,9 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const modelMessages = toolProtocolSafeMessages(
-      projectDelegationAnnouncesForModel(mainSelection.messages),
-    );
+    const modelMessages = buildAgentModelMessages({
+      history: mainSelection.messages,
+    });
     const history = [
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),

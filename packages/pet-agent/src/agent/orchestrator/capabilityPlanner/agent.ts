@@ -16,9 +16,8 @@ import type {
   CapabilityPlannerRunner,
 } from './runner';
 import { parsePlannerCommit } from './protocol';
-import {
-  buildCapabilityPlannerProviderMessages,
-} from './providerMessages';
+import { queryAgentMessages } from '../../messages';
+import { buildAgentModelMessages } from '../modelMessages';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import {
@@ -223,10 +222,10 @@ export function createCapabilityPlannerAgent(params: {
             routingManifest,
           ),
         });
-        const providerMessages = buildCapabilityPlannerProviderMessages(
-          input.messages,
-          plannerInputMessage,
-        );
+        const providerMessages = buildAgentModelMessages({
+          history: queryAgentMessages(input.messages).main().select().messages,
+          current: [plannerInputMessage],
+        });
         const result = await agent.invoke({
           messages: providerMessages,
           currentInput: effectiveInput,

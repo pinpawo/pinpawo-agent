@@ -260,7 +260,8 @@ The implementation keeps responsibilities separated:
 - `delegation/privateMessages.ts` owns result reconciliation and materializes
   the selected executor output as a lane-scoped `DelegationAnnounceMessage`;
 - `delegation/handoff.ts` owns acceptance into main and lane cleanup;
-- each model node owns its provider-input construction;
+- the shared model-message materializer owns provider projection and protocol
+  sanitation for nodes that consume canonical history;
 - stream adapters own UI projection;
 - terminal finalization resolves accepted announces; optional synthesis owns
   wording only.

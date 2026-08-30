@@ -7,13 +7,12 @@ import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
   observeAgentMessageSelection,
   queryAgentMessages,
-  toolProtocolSafeMessages,
 } from '../../../messages';
 import {
-  projectDelegationAnnouncesForModel,
   readLatestAnnounce,
   reconcileDelegationPrivateMessages,
 } from '../../delegation';
+import { buildAgentModelMessages } from '../../modelMessages';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
@@ -125,12 +124,10 @@ export function createCapabilityNode(params: {
             guidance: runNextDelegation.contextSummary,
           },
     );
-    // Typed Announce messages stay canonical in state and are projected only at
-    // this provider boundary, just like accepted announces in the main lane.
-    const scopedMessages = toolProtocolSafeMessages([
-      ...projectDelegationAnnouncesForModel(canonicalMessages),
-      delegationBriefing,
-    ]);
+    const scopedMessages = buildAgentModelMessages({
+      history: canonicalMessages,
+      current: [delegationBriefing],
+    });
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(

@@ -7,7 +7,6 @@ import {
   createCapabilityPlannerSearchTool,
   type CapabilityPlannerCapabilityDocument,
 } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
-import { projectCapabilityPlannerMessagesForModel } from '../../src/agent/orchestrator/capabilityPlanner/providerMessages.ts';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerMode,
@@ -19,7 +18,11 @@ import {
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
 import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation/index.ts';
-import { setAgentMessageMetadata } from '../../src/agent/messages/index.ts';
+import { buildAgentModelMessages } from '../../src/agent/orchestrator/modelMessages.ts';
+import {
+  queryAgentMessages,
+  setAgentMessageMetadata,
+} from '../../src/agent/messages/index.ts';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
@@ -169,7 +172,10 @@ function renderTool(tool: StructuredTool) {
 
 function renderMode(mode: CapabilityPlannerMode) {
   const input = buildInput(mode);
-  const projectedMessages = projectCapabilityPlannerMessagesForModel(input.messages);
+  const mainSelection = queryAgentMessages(input.messages).main().select();
+  const projectedMessages = buildAgentModelMessages({
+    history: mainSelection.messages,
+  });
   const searchTool = createCapabilityPlannerSearchTool(async () => ({
     ok: true,
     data: { entries: [] },

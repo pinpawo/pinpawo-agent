@@ -1,19 +1,15 @@
 import { RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import {
+  getAgentMessageLane,
   isMessageInDelegationScope,
-  queryAgentMessages,
-  readAgentMessageCreatedAt,
   type CapabilityMessageLane,
   type DelegationMessageScope,
 } from '../../messages';
 import {
   DelegationAnnounceMessage,
   getDelegationAnnounce,
-  getMessageCompletionReason,
-  getMessageDelegatedTask,
-  getMessageIsAnnounce,
+  selectDelegationAnnounceMessages,
 } from './announce';
-import { readMessageText } from '../utils';
 
 export type HandoffSource = {
   handoffFrom: CapabilityMessageLane;
@@ -24,6 +20,7 @@ export type HandoffSource = {
 };
 
 export function getMessageHandoffSource(message: BaseMessage): HandoffSource | null {
+  if (getAgentMessageLane(message)) return null;
   const announce = getDelegationAnnounce(message);
   if (!announce) return null;
   return {
@@ -48,11 +45,11 @@ export function buildSubagentHandoff(params: {
     runId: params.runId,
     delegationId: params.delegationId,
   };
-  const announceMessages = queryAgentMessages(params.messages)
-    .delegation(scope)
-    .select()
-    .messages
-    .filter(getMessageIsAnnounce);
+  const announceMessages = selectDelegationAnnounceMessages(params.messages, scope)
+    .flatMap((message) => {
+      const announce = getDelegationAnnounce(message);
+      return announce ? [announce] : [];
+    });
   if (announceMessages.length === 0) return null;
 
   const removeMessages = params.clearLane === false
@@ -67,21 +64,17 @@ export function buildSubagentHandoff(params: {
       });
   if (params.includeCopy === false) return removeMessages;
 
-  const handoffAnnounces = announceMessages.map((announceMessage) => {
-    const announceMessageId = announceMessage.id;
-    if (!announceMessageId) {
-      throw new Error('Delegation announce is missing the required message id.');
-    }
+  const handoffAnnounces = announceMessages.map((announce) => {
     return new DelegationAnnounceMessage({
-      id: `delegation-announce:${params.runId}:${params.delegationId}:${announceMessageId}`,
-      sourceLane: params.lane,
-      delegationId: params.delegationId,
-      runId: params.runId,
-      announceMessageId,
-      task: getMessageDelegatedTask(announceMessage),
-      completionReason: getMessageCompletionReason(announceMessage) ?? 'natural',
-      result: readMessageText(announceMessage),
-      createdAt: readAgentMessageCreatedAt(announceMessage) ?? new Date().toISOString(),
+      id: `delegation-announce:${announce.runId}:${announce.delegationId}:${announce.announceMessageId}`,
+      sourceLane: announce.sourceLane,
+      delegationId: announce.delegationId,
+      runId: announce.runId,
+      announceMessageId: announce.announceMessageId,
+      task: announce.task,
+      completionReason: announce.completionReason,
+      result: announce.result,
+      createdAt: announce.createdAt,
     });
   });
   return [...removeMessages, ...handoffAnnounces];

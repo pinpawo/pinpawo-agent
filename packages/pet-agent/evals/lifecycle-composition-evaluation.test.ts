@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage } from '@langchain/core/messages';
-import { setAgentMessageMetadata } from '../src/agent/messages/index.ts';
+import { setAgentMessageDelegationScope } from '../src/agent/messages/index.ts';
+import { DelegationAnnounceMessage } from '../src/agent/orchestrator/delegation/index.ts';
 import {
   evaluateLifecycleCompositionInvariants,
   lifecycleCompositionGoalAchieved,
@@ -94,13 +95,20 @@ test('lifecycle composition cannot pass an exactly-once case without an executor
 });
 
 test('lifecycle composition accepts an isolated resumable checkpoint for required user input', () => {
-  const retainedAnnounce = new AIMessage('need staging address and credentials');
-  retainedAnnounce.id = 'announce-awaiting-input';
-  setAgentMessageMetadata(retainedAnnounce, {
+  const retainedAnnounce = setAgentMessageDelegationScope(new DelegationAnnounceMessage({
+    id: 'announce-awaiting-input',
+    sourceLane: 'capability:workspace_analysis',
+    runId: 'delegation-run-1',
+    delegationId: 'delegation-1',
+    announceMessageId: 'announce-awaiting-input',
+    task: 'check staging deployment',
+    completionReason: 'natural',
+    result: 'need staging address and credentials',
+    createdAt: '2026-08-31T00:00:00.000Z',
+  }), {
     lane: 'capability:workspace_analysis',
     runId: 'delegation-run-1',
     delegationId: 'delegation-1',
-    isAnnounce: true,
   });
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {

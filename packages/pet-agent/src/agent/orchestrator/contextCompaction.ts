@@ -3,9 +3,6 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  getMessageIsAnnounce,
-} from './delegation';
-import {
   getAgentMessageLane,
   getAgentMessageMetadata,
   mainConversationMessages,
@@ -72,7 +69,7 @@ function selectMessagesToKeep(
   // still-lane-tagged Announce even when it falls outside the recent suffix.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;
-    if (!preserveAnnouncesFor || !getMessageIsAnnounce(message)) return false;
+    if (!preserveAnnouncesFor || !getDelegationAnnounce(message)) return false;
     const meta = getAgentMessageMetadata(message);
     return getAgentMessageLane(message) === preserveAnnouncesFor.lane
       && meta.runId === preserveAnnouncesFor.runId

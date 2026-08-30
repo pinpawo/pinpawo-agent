@@ -3,8 +3,7 @@ import {
   type AgentMessageSelectionDiagnostics,
 } from '../../messages';
 import {
-  getMessageCompletionReason,
-  getMessageIsAnnounce,
+  getDelegationAnnounce,
 } from '../delegation';
 import type { OrchestratorStateType } from '../state';
 import { readCapabilityNameFromLane } from '../runtime/decisions/delegationLifecycle';
@@ -95,15 +94,13 @@ export function buildCapabilityPlannerInput(params: {
     .delegation(activeScope)
     .select();
   const announceAttempts = delegationSelection.messages
-    .filter(getMessageIsAnnounce)
     .flatMap((message) => {
-      if (!message.id) return [];
-      const reason = getMessageCompletionReason(message);
-      if (!reason) return [];
+      const announce = getDelegationAnnounce(message);
+      if (!announce) return [];
       return [{
-        messageId: message.id,
-        completionReason: reason,
-        result: message.text,
+        messageId: announce.announceMessageId,
+        completionReason: announce.completionReason,
+        result: announce.result,
       }];
     });
   const latestAnnounce = announceAttempts.at(-1) ?? null;

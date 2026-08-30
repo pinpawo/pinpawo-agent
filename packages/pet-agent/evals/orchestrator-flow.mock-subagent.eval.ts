@@ -31,7 +31,7 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { readLatestAnnounce } from '../src/agent/orchestrator/delegation';
+import { getDelegationAnnounce } from '../src/agent/orchestrator/delegation';
 import {
   readRunDelegationSummaries,
   readTaskActiveDelegation,
@@ -531,10 +531,12 @@ function extractResult(
     return !pinpawo || typeof pinpawo !== 'object' || !('lane' in pinpawo);
   });
   const lastMsg = visibleMessages.at(-1);
-  const latestAnnounce = readLatestAnnounce(
-    messages,
-    { runId: typeof result.runId === 'string' ? result.runId : null },
-  );
+  const latestAnnounce = messages
+    .flatMap((message) => {
+      const announce = getDelegationAnnounce(message);
+      return announce ? [announce] : [];
+    })
+    .at(-1);
   const runDelegationSummaries = readRunDelegationSummaries(result);
   const activeDelegation = readTaskActiveDelegation(result);
   const observedRunDelegations = runDelegationSummaries.filter((delegation) =>
@@ -567,7 +569,7 @@ function extractResult(
     delegation_statuses: runDelegationSummaries.map((item) => item.status),
     latest_announce_kind: latestObservedDelegation?.status
       ?? (activeDelegation?.status === 'awaiting_decision' ? 'progress' : null),
-    latest_announce_lane: latestAnnounce?.lane ?? latestObservedDelegation?.lane ?? activeDelegation?.lane ?? null,
+    latest_announce_lane: latestAnnounce?.sourceLane ?? latestObservedDelegation?.lane ?? activeDelegation?.lane ?? null,
     subagent_invocation_count: invocationStats.length,
     private_message_leak: privateMessageLeak,
     carryover_seen: carryoverSeen,

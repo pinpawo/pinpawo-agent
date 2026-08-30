@@ -257,7 +257,8 @@ The implementation keeps responsibilities separated:
 - `agent/messages` owns lane metadata, scoped selection, and reconciliation;
 - `agent/orchestrator/delegation/announce.ts` owns Announce selection while
   `announceMessage.ts` owns the class, validation, and model projection;
-- `delegation/privateMessages.ts` owns result tagging and reconciliation;
+- `delegation/privateMessages.ts` owns result reconciliation and materializes
+  the selected executor output as a lane-scoped `DelegationAnnounceMessage`;
 - `delegation/handoff.ts` owns acceptance into main and lane cleanup;
 - each model node owns its provider-input construction;
 - stream adapters own UI projection;

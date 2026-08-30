@@ -129,6 +129,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : null;
     const userInputRequiredAnnounce = userInputRequiredDelegation
       ? readLatestAnnounce(state.messages, {
+          lane: userInputRequiredDelegation.lane,
           runId: userInputRequiredDelegation.runId,
           delegationId: userInputRequiredDelegation.id,
         })
@@ -144,7 +145,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : '';
     const awaitingUserInput = acceptedOutcome === 'user_input_required';
     const userInputRequiredContext = [
-      userInputRequiredAnnounce?.text ?? '',
+      userInputRequiredAnnounce?.result ?? '',
       userInputRequiredArtifactContext,
     ].join('').trim();
     const answerContextFacts = selectAnswerContextFacts({
@@ -251,6 +252,7 @@ export function selectAnswerContextFacts(params: {
 
   if (activeDelegation) {
     const completionReason = readLatestAnnounceCompletionReason(params.state.messages, {
+      lane: activeDelegation.lane,
       runId: activeDelegation.runId,
       delegationId: activeDelegation.id,
     });

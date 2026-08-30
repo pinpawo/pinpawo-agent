@@ -1,4 +1,4 @@
-import { AIMessage, BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
 import type { SubagentCompletionReason } from '../types';
 import type { CapabilityMessageLane } from '../../messages';
@@ -119,17 +119,10 @@ export class DelegationAnnounceMessage extends AIMessage {
     });
   }
 
-  static isInstance(message: unknown): message is AIMessage {
-    return BaseMessage.isInstance(message) && getDelegationAnnounce(message) !== null;
-  }
 }
 
 export function getDelegationAnnounce(message: BaseMessage): DelegationAnnounceData | null {
   return readTypedDelegationAnnounce(message);
-}
-
-export function isDelegationAnnounceMessage(message: BaseMessage): boolean {
-  return getDelegationAnnounce(message) !== null;
 }
 
 function escapeXmlAttribute(value: string): string {

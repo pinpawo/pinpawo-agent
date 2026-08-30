@@ -10,6 +10,7 @@ import {
   toolProtocolSafeMessages,
 } from '../../../messages';
 import {
+  projectDelegationAnnouncesForModel,
   readLatestAnnounce,
   reconcileDelegationPrivateMessages,
 } from '../../delegation';
@@ -124,8 +125,10 @@ export function createCapabilityNode(params: {
             guidance: runNextDelegation.contextSummary,
           },
     );
+    // Typed Announce messages stay canonical in state and are projected only at
+    // this provider boundary, just like accepted announces in the main lane.
     const scopedMessages = toolProtocolSafeMessages([
-      ...canonicalMessages,
+      ...projectDelegationAnnouncesForModel(canonicalMessages),
       delegationBriefing,
     ]);
     const threadId = readThreadId(runnableConfig);
@@ -288,12 +291,12 @@ export function createCapabilityNode(params: {
       },
       canonicalMessages,
     );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });
+    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
     const interrupted = result.completionReason === 'interrupted';
     const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
     const resultPreview = interrupted
       ? currentResultPreview
-      : delegationAnnounce?.text ?? null;
+      : delegationAnnounce?.result ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
     // whether it is complete is the Planner's call at the execution boundary,
     // which upgrades the status to 'completed' when it hands off. The raw lane

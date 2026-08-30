@@ -113,6 +113,7 @@ function buildAcceptedDelegationUpdate(
   outcome: PlannerReplyOutcome | null,
 ) {
   const completionReason = readLatestAnnounceCompletionReason(state.messages, {
+    lane: activeDelegation.lane,
     runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
   });

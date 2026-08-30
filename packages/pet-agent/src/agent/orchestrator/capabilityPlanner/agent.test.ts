@@ -36,7 +36,10 @@ import {
 import type { CapabilityPlannerInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { createPlannerSession } from './session';
-import { setAgentMessageMetadata } from '../../messages';
+import {
+  setAgentMessageDelegationScope,
+  setAgentMessageMetadata,
+} from '../../messages';
 
 function commitOnly(value: unknown) {
   const result = value as {
@@ -944,13 +947,10 @@ test('boundary projects the current lane announce into the standard model-visibl
     id: 'announce-current',
     content: 'The repository inspection is incomplete; dependency evidence is missing.',
   });
-  setAgentMessageMetadata(currentAnnounce, {
+  setAgentMessageDelegationScope(currentAnnounce, {
     lane: 'capability:explore',
     runId: 'run-current',
     delegationId: 'delegation-current',
-    isAnnounce: true,
-    task: 'Inspect repository dependencies.',
-    completionReason: 'limit_reached',
   });
   const privateLaneMessage = new AIMessage('PRIVATE_RAW_EXECUTOR_TRANSCRIPT');
   setAgentMessageMetadata(privateLaneMessage, {

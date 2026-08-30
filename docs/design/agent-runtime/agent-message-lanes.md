@@ -108,8 +108,10 @@ HumanMessage(current Delegation Briefing)
 ### Capability result
 
 The runtime reconciles returned messages against the selected canonical input.
-Only new executor output is tagged and written back. The runtime-supplied result
-message identity determines Announce; text is never parsed to infer it.
+Only new executor output is written back. The runtime-supplied result message
+identity determines which output is materialized as a lane-scoped
+`DelegationAnnounceMessage`; text is never parsed to infer it. Ordinary private
+messages and the typed Announce use the same complete delegation scope.
 
 ## Planner protocol
 
@@ -186,9 +188,9 @@ agent/messages/
 
 agent/orchestrator/delegation/
   briefing.ts        Orchestrator -> Capability current request
-  privateMessages.ts returned-message tagging and reconciliation
+  privateMessages.ts returned-message reconciliation and typed Announce materialization
   announceMessage.ts typed Capability -> Orchestrator result
-  announce.ts        Announce selection and metadata
+  announce.ts        exact-scope Announce selection
   handoff.ts         acceptance into main and private-message cleanup
 
 agent/orchestrator/capabilityPlanner/

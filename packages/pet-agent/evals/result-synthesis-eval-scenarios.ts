@@ -1,20 +1,20 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { buildAnswerInvocationMessages } from '../src/agent/orchestrator/prompts/answer.ts';
+import { buildResultSynthesisInvocationMessages } from '../src/agent/orchestrator/prompts/resultSynthesis.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import {
-  answerBehaviorBasicsDataset,
-  type AnswerBehaviorCase,
-  type AnswerBehaviorExpectation,
-} from './datasets/answer-behavior-basics.ts';
+  resultSynthesisBasicsDataset,
+  type ResultSynthesisCase,
+  type ResultSynthesisExpectation,
+} from './datasets/result-synthesis-basics.ts';
 import {
   evaluatePromptGoal,
   type PromptEvalJudge,
 } from './prompt-goal-evaluator.ts';
 
-export type AnswerEvalRunResult = {
+export type ResultSynthesisEvalRunResult = {
   output: Record<string, unknown>;
   scores: DecisionContractScore[];
   verdict: string;
@@ -22,10 +22,10 @@ export type AnswerEvalRunResult = {
   diagnostics: Record<string, unknown>;
 };
 
-export type AnswerEvalScenario = {
-  target: 'answer';
+export type ResultSynthesisEvalScenario = {
+  target: 'result_synthesis';
   execution: 'model';
-  contract: AnswerBehaviorExpectation['contract'];
+  contract: ResultSynthesisExpectation['contract'];
   objective: string;
   datasetName: string;
   caseId: string;
@@ -36,13 +36,13 @@ export type AnswerEvalScenario = {
     model: AgentModels['act'],
     config?: RunnableConfig,
     judge?: PromptEvalJudge,
-  ): Promise<AnswerEvalRunResult>;
+  ): Promise<ResultSynthesisEvalRunResult>;
 };
 
 const actor = {
   petId: 'eval-pet',
   userId: 'eval-user',
-  name: 'answer-eval',
+  name: 'result-synthesis-eval',
   personality: null,
   stage: null,
   species: null,
@@ -65,7 +65,7 @@ function longestSharedSpan(left: string, right: string): number {
 
 async function evaluateGoal(
   judge: PromptEvalJudge,
-  testCase: AnswerBehaviorCase,
+  testCase: ResultSynthesisCase,
   candidateAnswer: string,
 ): Promise<{ scores: DecisionContractScore[]; summary: string }> {
   return evaluatePromptGoal({
@@ -77,7 +77,7 @@ async function evaluateGoal(
       conversation: testCase.input.messages,
       runtimeContext: {
         userRequest: testCase.input.userRequest ?? null,
-        delegationOutcome: testCase.input.delegationOutcome ?? null,
+        acceptedResultCount: testCase.input.acceptedResults.length,
       },
     },
     candidateOutput: { text: candidateAnswer },
@@ -86,7 +86,7 @@ async function evaluateGoal(
 
 function collectDiagnostics(
   text: string,
-  expected: AnswerBehaviorExpectation,
+  expected: ResultSynthesisExpectation,
   priorAssistantText: string,
 ): Record<string, unknown> {
   const diagnostics: Record<string, unknown> = { characters: text.length };
@@ -111,65 +111,29 @@ function collectDiagnostics(
   return diagnostics;
 }
 
-function render(testCase: AnswerBehaviorCase): BaseMessage[] {
-  const delegationOutcome = testCase.input.delegationOutcome;
-  const fallbackAcceptedResult = delegationOutcome?.outcome === 'goal_done'
-    ? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')
-    : undefined;
-  const acceptedResults = delegationOutcome?.acceptedResults
-    ?? (fallbackAcceptedResult
-        ? [{ task: delegationOutcome?.task ?? '完成当前任务', result: fallbackAcceptedResult.text }]
-        : []);
-  // Answer receives no history, so a case that states its request only as a user
-  // turn must still reach the model through <run_user_request>. In production
-  // that value is runUserRequest, resolved by Entry Answer.
+function render(testCase: ResultSynthesisCase): BaseMessage[] {
   const userTurns = testCase.input.messages.filter(({ role }) => role === 'user');
   const userRequest = testCase.input.userRequest
     ?? userTurns[userTurns.length - 1]?.text
     ?? null;
-  const hasUserRequest = Boolean(userRequest);
-  return buildAnswerInvocationMessages({
+  return buildResultSynthesisInvocationMessages({
     actor,
     userRequest,
-    contextFacts: delegationOutcome?.outcome === 'goal_done'
-      ? {
-          mode: 'goal_done',
-          hasUserRequest,
-          acceptedResults: acceptedResults.map(({ task, result }) => ({
-            task,
-            result,
-            artifactRefs: [],
-          })),
-        }
-      : delegationOutcome?.outcome === 'user_input_required'
-        ? {
-            mode: 'user_input_required',
-            hasUserRequest,
-            acceptedResults: acceptedResults.map(({ task, result }) => ({
-              task,
-              result,
-              artifactRefs: [],
-            })),
-            question: delegationOutcome.question ?? null,
-            context: delegationOutcome.context
-              ?? [...testCase.input.messages].reverse().find(({ role }) => role === 'assistant')?.text
-              ?? null,
-          }
-        : {
-            mode: 'direct',
-            hasUserRequest,
-            acceptedResults: [],
-          },
+    acceptedResults: testCase.input.acceptedResults.map(({ task, result }) => ({
+      task,
+      result,
+      artifactRefs: [],
+    })),
   });
 }
 
-export function getAnswerEvalScenarios(): AnswerEvalScenario[] {
-  return answerBehaviorBasicsDataset.cases.map((testCase) => ({
-    target: 'answer',
+export function getResultSynthesisEvalScenarios(): ResultSynthesisEvalScenario[] {
+  return resultSynthesisBasicsDataset.cases.map((testCase) => ({
+    target: 'result_synthesis',
     execution: 'model',
     contract: testCase.expected.contract,
     objective: testCase.expected.objective,
-    datasetName: answerBehaviorBasicsDataset.name,
+    datasetName: resultSynthesisBasicsDataset.name,
     caseId: testCase.id,
     caseName: testCase.name,
     expectedSummary: testCase.expected.expectedBehavior,

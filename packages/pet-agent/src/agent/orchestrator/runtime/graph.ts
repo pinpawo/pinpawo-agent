@@ -15,7 +15,7 @@ import {
   readSubagentContextWindowTokens,
   readSubagentGenerationReserveTokens,
 } from './config';
-import { createAnswerNode } from './nodes/answer';
+import { createFinalizeRunNode } from './nodes/finalizeRun';
 import { createCapabilityNode } from './nodes/capability';
 import { createCapabilityPlannerNode } from './nodes/capabilityPlanner';
 import {
@@ -29,7 +29,7 @@ import {
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
-import { createAfterPlannerBoundaryIterationGuard } from './routes/afterPlannerBoundaryIterationGuard';
+import { createPlannerBoundaryIterationGuardNode } from './nodes/plannerBoundaryIterationGuard';
 import { createRunTerminationHandlers } from './runTermination';
 
 // --- Graph builder ---
@@ -41,23 +41,19 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const afterPlannerBoundaryIterationGuard =
-    createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations });
+  const plannerBoundaryIterationGuard = createPlannerBoundaryIterationGuardNode({
+    orchestratorMaxIterations,
+  });
   const runCapabilityPlanner = createCapabilityPlannerNode(config);
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
-  const resultAnswer = createAnswerNode(config);
+  const finalizeRun = createFinalizeRunNode(config);
   const capabilityNode = createCapabilityNode({
     config,
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   });
-  // Graph-visible anchor shared by resume and post-execution paths. Its
-  // conditional edge owns deterministic guard evaluation and telemetry only;
-  // it must not grow state updates or user-facing output.
-  const plannerBoundaryIterationGuard = () => ({});
-
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
@@ -66,11 +62,13 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       ends: ['capabilityPlanner'],
     })
     .addNode('capabilityPlanner', runCapabilityPlanner, {
-      ends: ['answer', 'capability', 'throwRunFailure'],
+      ends: ['finalizeRun', 'capability', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
-    .addNode('plannerBoundaryIterationGuard', plannerBoundaryIterationGuard)
-    .addNode('answer', resultAnswer, {
+    .addNode('plannerBoundaryIterationGuard', plannerBoundaryIterationGuard, {
+      ends: ['finalizeRun', 'capabilityPlanner'],
+    })
+    .addNode('finalizeRun', finalizeRun, {
       ends: ['throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
@@ -81,7 +79,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addEdge(START, 'prepare')
     .addConditionalEdges('prepare', afterPrepare, {
-      answer: 'answer',
+      finalizeRun: 'finalizeRun',
       compactContext: 'compactContext',
     })
     // Run entry uses explicit task lifecycle state. Lane announces remain
@@ -92,12 +90,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       capability: 'capability',
     })
     .addEdge('captureUserRequest', 'entryAnswer')
-    .addConditionalEdges('plannerBoundaryIterationGuard', afterPlannerBoundaryIterationGuard, {
-      answer: 'answer',
-      capabilityPlanner: 'capabilityPlanner',
-    })
     .addEdge('entryAnswer', END)
-    .addEdge('answer', END)
+    .addEdge('finalizeRun', END)
     .addConditionalEdges('capability', afterCapability, {
       end: END,
       plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',

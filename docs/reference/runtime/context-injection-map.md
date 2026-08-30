@@ -180,30 +180,27 @@ Initial projection:
 Continuation uses the same shape with `mode="continue"` and optional
 `<guidance>` in place of `<essential_context>`.
 
-## 7. Current node: answer
+## 7. Terminal finalization and result synthesis
 
-The current terminal finalizer is implemented by `runtime/nodes/answer.ts` and
-`prompts/answer.ts`. It performs three jobs: terminal fact projection, reply
-generation, and run cleanup. The target design separates those jobs but keeps
-one finalization boundary.
+`runtime/nodes/finalizeRun.ts` owns terminal projection, response selection,
+and run cleanup. It reads typed root state and selects canonical Announces by
+their metadata; it never passes ordinary conversation history to the synthesis
+model.
 
-For its model-backed paths, the current node receives no conversation history.
-Its invocation contains exactly:
+Direct responses, user-input requests, blocked states, limits, checkpoint
+incompatibility, and one accepted result are rendered deterministically. Only a
+`goal_done` outcome with multiple accepted results invokes result synthesis.
+That invocation contains exactly:
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `buildAnswerSystemPrompt({ actor })` |
-| input | `DYNAMIC` / `FACT` | `<answer_input>` — the complete projected facts |
+| system | `RUN-STABLE` / `INSTRUCTION` | result-synthesis policy and actor configuration |
+| input | `DYNAMIC` / `FACT` | `<result_synthesis_input>` with the run request and ordered accepted results |
 
-`<answer_input>` contains `<run_user_request>` and `<answer_context>`, including
-the current reply mode, ordered accepted results, blocked reason, or
-awaiting-input context. `projectAcceptedRunResults()` selects typed Announces by
-completed delegation identity; it does not make canonical history model-visible.
-
-Current routes include `goal_done`, `user_input_required`, blocked states, and
-the explicit `planner_incomplete` protocol failure. Checkpoint incompatibility
-also uses a deterministic message. Planner ordinary text is invocation-private
-and cannot become a terminal root reply.
+`collectAcceptedRunResults()` selects typed Announces by completed delegation
+identity. No conversation history, reply mode, blocked reason, or waiting state
+enters the synthesis model. Planner ordinary text crosses the runner seam only
+as a typed `direct_response` terminal payload and is emitted unchanged.
 
 Historical replay is not a terminal-finalization responsibility. A later request
 to re-show a result is an ordinary conversational request handled by Entry

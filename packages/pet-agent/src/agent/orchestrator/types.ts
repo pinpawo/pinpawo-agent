@@ -73,8 +73,6 @@ export type SubagentAnnounce = {
   >[];
 };
 
-export type DecisionMode = 'answer' | 'capability';
-
 export type OrchestratorConfig = {
   models: AgentModels;
   /**

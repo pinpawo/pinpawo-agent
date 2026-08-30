@@ -2,7 +2,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { buildEntryAnswerSystemPrompt } from '../src/agent/orchestrator/prompts/answer.ts';
+import { buildEntryAnswerSystemPrompt } from '../src/agent/orchestrator/prompts/entryAnswer.ts';
 import { PLAN_REQUEST_TOOL_NAME } from '../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';

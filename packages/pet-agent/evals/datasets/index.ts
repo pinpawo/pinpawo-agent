@@ -8,9 +8,10 @@ import { orchestratorFlowMockSubagentDataset } from './orchestrator-flow-mock-su
 import { orchestratorRouteDataset } from './orchestrator-route.ts';
 import { permissionControlBasicsDataset } from './permission-control-basics.ts';
 import { toolReviewRejectRuntimeDataset } from './tool-review-reject-runtime.ts';
+import { resultSynthesisBasicsDataset } from './result-synthesis-basics.ts';
 
 export const agentEvalDatasets = [
-  answerBehaviorBasicsDataset,
+  resultSynthesisBasicsDataset,
   orchestratorRouteDataset,
   orchestratorFlowMockSubagentDataset,
   capabilityPlanningBasicsDataset,
@@ -24,7 +25,7 @@ export const agentEvalDatasets = [
 ] as const;
 
 export {
-  answerBehaviorBasicsDataset,
+  resultSynthesisBasicsDataset,
   capabilityPlanningBasicsDataset,
   contextSynthesisBasicsDataset,
   delegationControlBasicsDataset,
@@ -36,4 +37,3 @@ export {
   permissionControlBasicsDataset,
   toolReviewRejectRuntimeDataset,
 };
-import { answerBehaviorBasicsDataset } from './answer-behavior-basics.ts';

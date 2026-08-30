@@ -87,14 +87,29 @@ export type CapabilityPlannerIncompleteResult = {
   readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
+/** A Planner protocol miss that still contains a complete user-facing reply. */
+export type CapabilityPlannerDirectResponseResult = {
+  readonly plannerStatus: 'direct_response';
+  readonly response: string;
+  /** Production runners always return the updated run-scoped disclosure. */
+  readonly capabilityDisclosure?: CapabilityDisclosureState;
+};
+
 export type CapabilityPlannerResult =
   | CapabilityPlannerCommitResult
+  | CapabilityPlannerDirectResponseResult
   | CapabilityPlannerIncompleteResult;
 
 export function isCapabilityPlannerIncompleteResult(
   result: CapabilityPlannerResult,
 ): result is CapabilityPlannerIncompleteResult {
   return 'plannerStatus' in result && result.plannerStatus === 'incomplete';
+}
+
+export function isCapabilityPlannerDirectResponseResult(
+  result: CapabilityPlannerResult,
+): result is CapabilityPlannerDirectResponseResult {
+  return 'plannerStatus' in result && result.plannerStatus === 'direct_response';
 }
 
 /**

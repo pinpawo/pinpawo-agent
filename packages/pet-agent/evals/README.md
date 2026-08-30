@@ -54,8 +54,8 @@ recreate datasets.
 - `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
-- `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
-  clarification, task completion summary, and required-user-input return control.
+- `agent-result-synthesis-basics`: goal-level composition of multiple accepted
+  execution results. Deterministic finalization cases are covered by runtime tests.
 - `agent-entry-answer-routing`: direct-answer, clarification, and Planner handoff
   cases for Entry Answer.
 - `agent-capability-planning-basics`: production Planner entry and
@@ -304,12 +304,6 @@ Candidate recall, planner rubber-stamp status, gap-note presence, output shape,
 and similar measurements remain diagnostics. Schema-owned field and enum
 constraints remain schema failures rather than duplicated prompt-goal criteria.
 
-The answer cases keep two different contracts separate:
-
-- explicit requests to replay prior content must preserve the requested facts;
-- the fixed post-delegation acknowledgement must close the lifecycle without
-  copying the already-delivered result body.
-
 Use explicit metadata when endpoint or model names do not identify the provider
 and family unambiguously:
 
@@ -317,7 +311,7 @@ and family unambiguously:
 PROMPT_EVAL_PROVIDER=openai \
 PROMPT_EVAL_MODEL_FAMILY=gpt-5 \
 PROMPT_EVAL_REASONING_EFFORT=low \
-PROMPT_EVAL_TARGETS=entry,answer \
+PROMPT_EVAL_TARGETS=entry_answer,result_synthesis \
 PROMPT_EVAL_REPEATS=5 \
 PROMPT_EVAL_REPORT_PATH=.eval-results/gpt-candidate.json \
   npm run eval:prompt-stability

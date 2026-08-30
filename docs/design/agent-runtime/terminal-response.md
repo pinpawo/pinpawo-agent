@@ -1,6 +1,6 @@
 # Terminal Response Finalization Draft
 
-Status: working design for the Answer simplification.
+Status: implemented.
 
 ## Goal
 
@@ -22,11 +22,13 @@ state, a graph ownership boundary, or the source of execution evidence.
 ```text
 Entry Answer ordinary reply ----------------------------------------> END
 
-Prepare failure ───────────┐
+Checkpoint incompatibility ──┐
 Planner terminal outcome ──┼─> finalizeRun ─> user-visible reply ──> END
 Iteration guard stop ──────┘          |
                                      ├─ deterministic rendering
                                      `─ optional result synthesis
+
+Unhandled node or model failure ──> checkpointed cleanup ──> rethrow
 ```
 
 `Entry Answer` remains the fresh-request router. It is not reused for terminal
@@ -42,7 +44,7 @@ Finalization reads typed root state rather than conversation prose:
 - accepted `runDelegationSummaries`;
 - canonical `DelegationAnnounceMessage` values selected by delegation identity;
 - separately stored artifact references when they are relevant;
-- runtime failure and iteration-limit facts.
+- iteration- and execution-limit facts.
 
 Planner-lane reasoning, private Capability transcripts, and prior user-facing
 answers are not result evidence. A Planner ordinary-text non-commit may be
@@ -96,22 +98,18 @@ Moving this cleanup into every Planner, guard, and prepare route would duplicate
 terminal semantics. The finalization boundary therefore remains even when no
 model call is needed.
 
-## Current implementation boundary
+## Implementation boundary
 
-The current graph still names this boundary `answer` and invokes the Answer
-model for most terminal modes. The code migration should:
+The graph terminates through `finalizeRun`. Root state carries one discriminated
+`runTerminalOutcome`; the former parallel outcome, user-input, and runtime-failure
+fields no longer exist. Direct responses, waiting, blocked, limit, and fixed
+responses are deterministic. A single accepted result is preserved directly;
+only multiple accepted results invoke the closed result-synthesis model input.
 
-1. rename the graph responsibility to `finalizeRun` or an equivalent neutral
-   name;
-2. separate terminal projection and cleanup from response rendering;
-3. make direct, waiting, blocked, and fixed responses deterministic;
-4. retain model synthesis only for result sets that need goal-level composition;
-5. remove Answer-specific reply modes once their data is represented as terminal
-   outcomes or response payloads.
-
-Do not preserve aliases, duplicate nodes, or compatibility parsing for the old
-Answer concept. Checkpoint incompatibility continues to fail closed through the
-existing version boundary.
+There is no compatibility alias or parsing path for the former Answer node.
+Checkpoint incompatibility continues to fail closed through the version boundary.
+Unexpected runtime failures remain failures: they use checkpointed cleanup and
+are rethrown rather than being converted into a plausible user-facing reply.
 
 ## Validation
 

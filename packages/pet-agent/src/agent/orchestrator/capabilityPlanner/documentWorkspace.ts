@@ -27,6 +27,7 @@ const REPAIR_LOCK_WAIT_TIMEOUT_MS = 5_000;
 
 export type CapabilityDocumentWorkspaceEntry = {
   readonly capabilityName: string;
+  readonly description: string;
   readonly relativePath: string;
   readonly documentDigest: string;
   readonly provenance: 'authored' | 'generated';
@@ -42,6 +43,7 @@ export type CapabilityDocumentWorkspace = {
 
 type ResolvedCapabilityDocument = {
   capabilityName: string;
+  description: string;
   relativePath: string;
   content: string;
   documentDigest: string;
@@ -103,6 +105,7 @@ function resolveCapabilityDocument(
 
   return {
     capabilityName: capability.name,
+    description: capability.description,
     relativePath,
     content,
     documentDigest: sha256(content),
@@ -345,6 +348,7 @@ function freezeWorkspace(params: {
 }): CapabilityDocumentWorkspace {
   const entries = params.documents.map((document) => Object.freeze({
     capabilityName: document.capabilityName,
+    description: document.description,
     relativePath: document.relativePath,
     documentDigest: document.documentDigest,
     provenance: document.provenance,

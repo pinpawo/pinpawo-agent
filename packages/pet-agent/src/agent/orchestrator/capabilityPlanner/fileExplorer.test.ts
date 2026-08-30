@@ -168,12 +168,9 @@ test('Planner reads every disclosed Capability in stable order', async (t) => {
   assert.match(documents[1]?.content ?? '', /Open and inspect web pages/);
 });
 
-test('Planner can preload a configured default Capability instead of General', async (t) => {
+test('Planner can read any disclosed Capability and search every other document', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({
-    workspace,
-    defaultCapabilityName: 'explore',
-  });
+  const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
   const [defaultCapability] = await explorer.readCapabilities(['explore']);
   const generalSearch = await explorer.search(['ordinary local work']);
@@ -190,10 +187,15 @@ test('Planner can preload a configured default Capability instead of General', a
     );
   }
   assert.equal(exploreSearch.ok, true);
-  if (exploreSearch.ok) assert.deepEqual(exploreSearch.data.matches, []);
+  if (exploreSearch.ok) {
+    assert.deepEqual(
+      exploreSearch.data.matches.map(({ path }) => path),
+      ['explore/CAPABILITY.md'],
+    );
+  }
 });
 
-test('capability_search excludes the preloaded General Capability', async (t) => {
+test('capability_search discovers General through the same path as other Capabilities', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createCapabilityPlannerFileExplorer({ workspace });
 
@@ -201,7 +203,10 @@ test('capability_search excludes the preloaded General Capability', async (t) =>
 
   assert.equal(result.ok, true);
   if (!result.ok) return;
-  assert.deepEqual(result.data.matches, []);
+  assert.deepEqual(
+    result.data.matches.map(({ path }) => path),
+    ['general/CAPABILITY.md'],
+  );
 });
 
 test('capability_search remains pure discovery after a literal miss', async (t) => {
@@ -273,9 +278,9 @@ test('Planner document reads reject tampered workspace content', async (t) => {
   );
 
   const searchResult = await search(explorer, ['tampered']);
-  assert.equal(searchResult.ok, true);
-  if (!searchResult.ok) return;
-  assert.deepEqual(searchResult.data.matches, []);
+  assert.equal(searchResult.ok, false);
+  if (searchResult.ok) return;
+  assert.equal(searchResult.error.code, 'document_tampered');
 });
 
 test('capability_search rejects a symlink introduced after workspace publication', async (t) => {

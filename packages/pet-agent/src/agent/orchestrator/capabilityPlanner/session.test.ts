@@ -5,7 +5,6 @@ import { createPlannerSession, updatePlannerSession } from './session';
 
 const disclosure: CapabilityDisclosureState = {
   registryDigest: 'a'.repeat(64),
-  defaultCapabilityName: 'general',
   disclosedCapabilityNames: ['general'],
   emptySearchRounds: 1,
   maxEmptySearchRounds: 2,

@@ -36,6 +36,7 @@ import {
 import type { CapabilityPlannerInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { createPlannerSession } from './session';
+import { CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME } from './routingManifest';
 import { setPinpetMeta } from '../messageLanes';
 
 function commitOnly(value: unknown) {
@@ -102,6 +103,7 @@ class ScriptedPlannerModel extends BaseChatModel {
   readonly structuredOutputPlanLimits: number[] = [];
   readonly structuredOutputCapabilityEnums: string[][] = [];
   #responseIndex = 0;
+  #routingManifestInitializationBound = false;
 
   constructor(
     private readonly responses: ReadonlyArray<{
@@ -118,7 +120,6 @@ class ScriptedPlannerModel extends BaseChatModel {
   }
 
   bindTools(tools: StructuredTool[], options?: Record<string, unknown>) {
-    this.boundToolOptions.push(options);
     const toolEntries = tools as unknown as Array<{
       name?: string;
       schema?: {
@@ -129,6 +130,18 @@ class ScriptedPlannerModel extends BaseChatModel {
         parameters?: Record<string, unknown>;
       };
     }>;
+    const boundNames = toolEntries.flatMap((entry) => {
+      const name = entry.name ?? entry.function?.name;
+      return name ? [name] : [];
+    });
+    if (
+      boundNames.length === 1
+      && boundNames[0] === CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME
+    ) {
+      this.#routingManifestInitializationBound = true;
+      return this;
+    }
+    this.boundToolOptions.push(options);
     this.boundToolNames.splice(
       0,
       this.boundToolNames.length,
@@ -190,6 +203,38 @@ class ScriptedPlannerModel extends BaseChatModel {
   }
 
   async _generate(messages: BaseMessage[]) {
+    if (this.#routingManifestInitializationBound) {
+      this.#routingManifestInitializationBound = false;
+      const input = readMessageText(messages.at(-1)!);
+      const sourceText = input.match(
+        /<capability_registry_manifest[^>]*>\n<!\[CDATA\[\n([\s\S]*)\n\]\]>\n<\/capability_registry_manifest>/,
+      )?.[1]?.replaceAll(']]]]><![CDATA[>', ']]>');
+      const source = JSON.parse(sourceText ?? '{}') as {
+        default?: string | null;
+        capabilities?: Array<{ name: string; description: string }>;
+      };
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'routing-manifest-commit',
+          name: CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME,
+          args: {
+            default: source.default ?? null,
+            capabilities: (source.capabilities ?? []).map((capability) => ({
+              name: capability.name,
+              purpose: capability.description,
+              cues: [
+                capability.name,
+                `${capability.name} task`,
+                `${capability.name} work`,
+              ],
+            })),
+          },
+          type: 'tool_call' as const,
+        }],
+      });
+      return { generations: [{ message, text: '' }] };
+    }
     this.invocations.push([...messages]);
     const response = this.responses[this.#responseIndex] ?? { content: 'done' };
     this.#responseIndex += 1;
@@ -269,6 +314,8 @@ async function createWorkspace(
     await writeFile(join(rootPath, relativePath), content, 'utf8');
     entries.push(Object.freeze({
       capabilityName,
+      description: content.match(/^description:\s*(.+)$/m)?.[1]?.trim()
+        .replace(/^['"]|['"]$/g, '') ?? `${capabilityName} capability`,
       relativePath,
       documentDigest: sha256(content),
       provenance: 'authored' as const,
@@ -667,7 +714,7 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
   );
   assert.deepEqual(
     searchPayload.capabilityDiscovery?.disclosedCapabilityNames,
-    ['general', 'explore'],
+    ['explore'],
   );
   assert.deepEqual(commitOnly(result), {
     action: 'execute_plan',
@@ -680,7 +727,6 @@ test('Planner Agent explores CAPABILITY.md files and returns a compact ordered t
     }],
   });
   assert.deepEqual(result.capabilityDisclosure?.disclosedCapabilityNames, [
-    'general',
     'explore',
   ]);
   assert.equal(result.capabilityDisclosure?.emptySearchRounds, 0);
@@ -802,7 +848,7 @@ test('Planner accepts consecutive tasks from one Capability when the model keeps
   }]);
 });
 
-test('Planner reports closed discovery after two rounds while keeping search auto', async (t) => {
+test('Planner reports closed discovery after two empty rounds while keeping search auto', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -815,14 +861,14 @@ test('Planner reports closed discovery after two rounds while keeping search aut
       toolCalls: [{
         id: 'grep-1',
         name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['general'] },
+        args: { terms: ['missing-responsibility-one'] },
       }],
     },
     {
       toolCalls: [{
         id: 'grep-2',
         name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['workspace'] },
+        args: { terms: ['missing-responsibility-two'] },
       }],
     },
     {
@@ -863,7 +909,7 @@ test('Planner reports closed discovery after two rounds while keeping search aut
   assert.match(String(searchResults[1]?.content), /"status":"closed"/);
   assert.match(String(searchResults[1]?.content), /"emptySearchRounds":2/);
   assert.match(String(searchResults[1]?.content), /"remainingEmptyRounds":0/);
-  assert.match(String(searchResults[0]?.content), /"disclosedCapabilityNames":\["general"\]/);
+  assert.match(String(searchResults[0]?.content), /"disclosedCapabilityNames":\[\]/);
   assert.match(String(searchResults[0]?.content), /"newlyDisclosedCapabilityNames":\[\]/);
   assert.equal(model.boundToolNameHistory[1]?.includes(
     CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
@@ -875,7 +921,7 @@ test('Planner reports closed discovery after two rounds while keeping search aut
   assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
 });
 
-test('Planner receives verified General before discovery starts', async (t) => {
+test('Planner receives General routing metadata without preloading its document', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -920,7 +966,8 @@ test('Planner receives verified General before discovery starts', async (t) => {
   );
   assert.ok(plannerInputMessage instanceof HumanMessage);
   assert.match(readMessageText(plannerInputMessage), /<capability name="general">/);
-  assert.match(readMessageText(plannerInputMessage), /通用工具读取和修改工作区/);
+  assert.match(readMessageText(plannerInputMessage), /处理不需要更具体 Capability 的通用任务/);
+  assert.doesNotMatch(readMessageText(plannerInputMessage), /通用工具读取和修改工作区/);
   assert.equal(model.invocations.flat().some(
     (message) => message instanceof ToolMessage
       && message.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
@@ -1035,7 +1082,7 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.match(readMessageText(boundaryInput), /<planning_boundary[^>]*>/);
 });
 
-test('Planner receives the configured default Capability before discovery', async (t) => {
+test('Planner identifies the configured default without preloading its document', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1067,7 +1114,6 @@ test('Planner receives the configured default Capability before discovery', asyn
     capabilityDisclosure: createCapabilityDisclosureState({
       workspace,
       maxEmptySearchRounds: 2,
-      defaultCapabilityName: 'kanban_planning',
     }),
   }));
 
@@ -1086,7 +1132,8 @@ test('Planner receives the configured default Capability before discovery', asyn
     readMessageText(plannerInputMessage),
     /<capability name="kanban_planning">/,
   );
-  assert.match(readMessageText(plannerInputMessage), /create Kanban tasks/);
+  assert.match(readMessageText(plannerInputMessage), /Plan work on the Kanban board/);
+  assert.doesNotMatch(readMessageText(plannerInputMessage), /create Kanban tasks/);
   assert.doesNotMatch(readMessageText(plannerInputMessage), /Use general tools/);
 });
 
@@ -1154,7 +1201,7 @@ test('an explicit second search discloses a specific Capability after a miss', a
   );
   assert.deepEqual(
     searchResults[0]?.capabilityDiscovery?.disclosedCapabilityNames,
-    ['general'],
+    [],
   );
   assert.equal(searchResults[0]?.capabilityDiscovery?.status, 'open');
   assert.equal(searchResults[0]?.capabilityDiscovery?.remainingEmptyRounds, 1);
@@ -1168,7 +1215,7 @@ test('an explicit second search discloses a specific Capability after a miss', a
   assert.equal(searchResults[1]?.capabilityDiscovery?.remainingEmptyRounds, 1);
 });
 
-test('a term matching only preloaded General consumes one empty round', async (t) => {
+test('General is disclosed through the same search path as other Capabilities', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -1211,22 +1258,20 @@ test('a term matching only preloaded General consumes one empty round', async (t
       newlyDisclosedCapabilityNames?: string[];
       disclosedCapabilityNames?: string[];
       emptySearchRounds?: number;
-      undisclosedCapabilityNames?: string[];
     };
     planningObjective?: string;
   };
-  assert.deepEqual(payload.data?.matches, []);
+  assert.equal(payload.data?.matches?.length, 1);
   assert.deepEqual(
     payload.capabilityDiscovery?.newlyDisclosedCapabilityNames,
-    [],
+    ['general'],
   );
   assert.deepEqual(
     payload.capabilityDiscovery?.disclosedCapabilityNames,
     ['general'],
   );
-  assert.equal(payload.capabilityDiscovery?.emptySearchRounds, 1);
-  assert.deepEqual(payload.capabilityDiscovery?.undisclosedCapabilityNames, ['explore']);
-  assert.match(payload.planningObjective ?? '', /including the configured default/);
+  assert.equal(payload.capabilityDiscovery?.emptySearchRounds, 0);
+  assert.match(payload.planningObjective ?? '', /newly disclosed Capability/);
 });
 
 test('a boundary search does not redisclose its active Capability', async (t) => {
@@ -1376,11 +1421,11 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
   );
   assert.deepEqual(
     secondPayload.capabilityDiscovery?.disclosedCapabilityNames,
-    ['general', 'explore', 'document_writer'],
+    ['explore', 'document_writer'],
   );
 });
 
-test('a Boundary search does not redisclose its preloaded active General', async (t) => {
+test('a Boundary search does not redisclose its seeded active General', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1693,7 +1738,7 @@ test('Planner returns a stable limit result for every search after max rounds', 
     maxEmptySearchRounds: 2,
     remainingEmptyRounds: 0,
     newlyDisclosedCapabilityNames: [],
-    disclosedCapabilityNames: ['general'],
+    disclosedCapabilityNames: [],
   });
   for (const message of searchResults.slice(2)) {
     const payload = JSON.parse(String(message.content)) as {
@@ -1714,7 +1759,7 @@ test('Planner returns a stable limit result for every search after max rounds', 
     assert.equal(payload.capabilityDiscovery?.emptySearchRounds, 2);
     assert.equal(payload.capabilityDiscovery?.maxEmptySearchRounds, 2);
     assert.equal(payload.capabilityDiscovery?.remainingEmptyRounds, 0);
-    assert.match(payload.planningObjective ?? '', /Report unavailable only when none/);
+    assert.equal(typeof payload.planningObjective, 'string');
   }
   assert.ok(model.boundToolNameHistory.every((toolNames) =>
     toolNames.includes(CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME)));
@@ -2309,7 +2354,7 @@ test('oversized discovery is reported as planning_limit_reached', async (t) => {
   );
 });
 
-test('oversized persisted disclosure drops searched Capabilities and continues with General', async (t) => {
+test('oversized persisted disclosure drops documents and keeps routing metadata', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -2363,13 +2408,13 @@ test('oversized persisted disclosure drops searched Capabilities and continues w
   });
   assert.deepEqual(result.capabilityDisclosure, {
     ...initialDisclosure,
-    disclosedCapabilityNames: ['general'],
+    disclosedCapabilityNames: [],
   });
   const invocationText = model.invocations[0]
     ?.map((message) => readMessageText(message))
     .join('\n') ?? '';
-  assert.match(invocationText, /Complete the requested work\./);
-  assert.doesNotMatch(invocationText, /EXPLORE_ONLY|WRITER_ONLY/);
+  assert.match(invocationText, /Handle ordinary tasks/);
+  assert.doesNotMatch(invocationText, /Complete the requested work\.|EXPLORE_ONLY|WRITER_ONLY/);
 });
 
 test('Planner reports an incomplete result when it exits without a commit', async (t) => {

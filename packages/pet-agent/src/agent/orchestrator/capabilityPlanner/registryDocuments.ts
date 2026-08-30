@@ -195,18 +195,14 @@ async function runFilesystemGrep(params: {
 class FileSystemCapabilityRegistryDocuments implements CapabilityRegistryDocuments {
   readonly #workspace: CapabilityDocumentWorkspace;
   readonly #reader: CapabilityPlannerWorkspaceReader;
-  readonly #excludedPaths: ReadonlySet<string>;
 
-  constructor(workspace: CapabilityDocumentWorkspace, excludedPaths: readonly string[]) {
+  constructor(workspace: CapabilityDocumentWorkspace) {
     this.#workspace = workspace;
     this.#reader = new CapabilityPlannerWorkspaceReader(workspace);
-    this.#excludedPaths = new Set(excludedPaths);
   }
 
   async search(params: Parameters<CapabilityRegistryDocuments['search']>[0]) {
-    const documentPaths = (await this.#reader.listDocumentPaths(params.signal)).filter(
-      (path) => !this.#excludedPaths.has(path),
-    );
+    const documentPaths = await this.#reader.listDocumentPaths(params.signal);
     const candidates = await runFilesystemGrep({
       rootPath: this.#workspace.rootPath,
       documentPaths,
@@ -242,19 +238,15 @@ class FileSystemCapabilityRegistryDocuments implements CapabilityRegistryDocumen
 
 class InMemoryCapabilityRegistryDocuments implements CapabilityRegistryDocuments {
   readonly #reader: CapabilityPlannerWorkspaceReader;
-  readonly #excludedPaths: ReadonlySet<string>;
   #documents: Promise<ReadonlyMap<string, string>> | null = null;
 
-  constructor(workspace: CapabilityDocumentWorkspace, excludedPaths: readonly string[]) {
+  constructor(workspace: CapabilityDocumentWorkspace) {
     this.#reader = new CapabilityPlannerWorkspaceReader(workspace);
-    this.#excludedPaths = new Set(excludedPaths);
   }
 
   #load(signal?: AbortSignal) {
     this.#documents ??= (async () => {
-      const paths = (await this.#reader.listDocumentPaths(signal)).filter(
-        (path) => !this.#excludedPaths.has(path),
-      );
+      const paths = await this.#reader.listDocumentPaths(signal);
       const entries: Array<readonly [string, string]> = [];
       for (const path of paths) {
         entries.push([path, await this.#reader.readDocument(path, signal)]);
@@ -293,14 +285,12 @@ class InMemoryCapabilityRegistryDocuments implements CapabilityRegistryDocuments
 export function createCapabilityRegistryDocuments(params: {
   workspace: CapabilityDocumentWorkspace;
   backend: CapabilityRegistryBackend;
-  excludedPaths?: readonly string[];
 }): CapabilityRegistryDocuments {
-  const excludedPaths = params.excludedPaths ?? [];
   if (params.backend === CAPABILITY_REGISTRY_BACKEND.FILESYSTEM) {
-    return new FileSystemCapabilityRegistryDocuments(params.workspace, excludedPaths);
+    return new FileSystemCapabilityRegistryDocuments(params.workspace);
   }
   if (params.backend === CAPABILITY_REGISTRY_BACKEND.MEMORY) {
-    return new InMemoryCapabilityRegistryDocuments(params.workspace, excludedPaths);
+    return new InMemoryCapabilityRegistryDocuments(params.workspace);
   }
   throw new Error(`Unsupported Capability registry backend: ${String(params.backend)}`);
 }

@@ -162,7 +162,8 @@ empty-search counters are not inherited merely because the trace is unchanged.
 ## Entry invocation
 
 Entry reads the clean main conversation and adds an Entry frame containing the
-normalized goal and initially disclosed Capability documents. The conversation
+normalized goal, the compact Capability routing manifest, and any Capability
+documents already disclosed by continuation state. The conversation
 remains root-owned; later Planner invocations project the current clean view
 again rather than persisting a Planner-owned copy.
 
@@ -173,6 +174,7 @@ SystemMessage(Planner entry objective and context semantics)
 MainConversationMessages(clean canonical projection)
 PlannerEntryFrame(
   goal,
+  routingManifest,
   disclosedCapabilities
 )
 ```

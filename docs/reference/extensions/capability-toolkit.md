@@ -291,10 +291,10 @@ Capability Document Workspace。文件定义的 Capability 保留原始
 `CAPABILITY.md`；inline Capability 会生成等价文档，因此 registry 中不存在
 Planner 看不见的隐形 Capability。
 
-Planner 是一个框架内部的 tool-loop agent。若 effective workspace 包含
-`general`，runtime 会先读取经过 workspace digest 校验的完整文档，并只在
-Planner 私有输入中将它作为默认 Capability 提供。Planner 随后使用
-`capability_search` 按需发现更具体的 `CAPABILITY.md`，再统一完成：
+Planner 是一个框架内部的 tool-loop agent。runtime 从 effective workspace
+初始化一个包含 Capability 名称、职责摘要与搜索 cues 的紧凑路由清单；该清单帮助
+Planner 形成准确的 `capability_search` literal terms，但不替代完整文档。
+Planner 使用 `capability_search` 按需披露匹配的完整 `CAPABILITY.md`，再统一完成：
 
 1. 划分当前与后续执行任务；
 2. 为当前任务选择一个 workspace 内的 Capability；
@@ -335,9 +335,9 @@ system prompt 或 checkpoint lane。subagent 只获得编译到该 Capability �
 - 使用统一 Capability executor。
 
 General 使用与其他 Capability 相同的文档与选择证据。Agent 未另行配置时，只要它存在于
-effective workspace，其经过校验的文档就会作为默认候选进入 Planner 私有上下文。Agent 也可
-通过 `defaultCapabilityName` 将另一个已注册且可用的 Capability 设为默认候选；这只改变 Planner
-预加载与候选偏好，不会强制路由或创建独立 executor。代码没有 general fallback executor、
+effective workspace，路由清单会将它标为默认候选；其完整文档仍通过与其他 Capability
+相同的 `capability_search` 路径披露。Agent 也可通过 `defaultCapabilityName` 将另一个已注册且
+可用的 Capability 设为默认候选；这只改变路由清单中的候选偏好，不会强制路由或创建独立 executor。代码没有 general fallback executor、
 独立 lane 或单独的 General terminal action。
 
 local-agent 的内建 General 位于：

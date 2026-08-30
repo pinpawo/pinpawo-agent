@@ -200,7 +200,7 @@ const cases: AgentEvalCase<
       ],
       checkpointState: 'clean',
       executorCallRange: { min: 1, max: 1 },
-      reason: 'Regression for a trace where a successful registration announce was hidden by Planner transcript state and caused repeated continue_current plus duplicate creation.',
+      reason: 'Regression for a trace where a successful registration announce was hidden by Planner provider state and caused repeated continue_current plus duplicate creation.',
     },
     metadata: {
       difficulty: 'hard',

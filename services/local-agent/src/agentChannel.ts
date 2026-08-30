@@ -2,7 +2,7 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  stampMessageCreatedAtUtc,
+  stampAgentMessageCreatedAt,
   type AgentCapability,
   type AgentInvokeInput,
   type AgentToolkit,
@@ -210,7 +210,7 @@ export function buildLocalChatAgentInput(params: {
     input: {
       messages: [
         ...buildHistoryMessages(params.context.context.recentChatTurns),
-        stampMessageCreatedAtUtc(new HumanMessage(params.userMessage)),
+        stampAgentMessageCreatedAt(new HumanMessage(params.userMessage)),
       ],
       threadId: params.threadId,
       capabilities,

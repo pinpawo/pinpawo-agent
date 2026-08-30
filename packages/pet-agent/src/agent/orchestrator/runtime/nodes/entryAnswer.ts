@@ -4,8 +4,14 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
-import { mainConversationMessages, stampMessageCreatedAtUtc } from '../../messageLanes';
-import { projectDelegationAnnouncesForModel } from '../../delegationAnnounce';
+import {
+  mainConversationMessages,
+  observeAgentMessageSelection,
+  queryAgentMessages,
+  toolProtocolSafeMessages,
+  stampAgentMessageCreatedAt,
+} from '../../../messages';
+import { projectDelegationAnnouncesForModel } from '../../delegation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -166,11 +172,20 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) => {
+    const mainSelection = queryAgentMessages(state.messages).main().select();
+    observeAgentMessageSelection(
+      'entry_answer.main',
+      mainSelection.diagnostics,
+      runnableConfig,
+    );
+    const modelMessages = toolProtocolSafeMessages(
+      projectDelegationAnnouncesForModel(mainSelection.messages),
+    );
     const history = [
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
-      ...projectDelegationAnnouncesForModel(mainConversationMessages(state.messages)),
+      ...modelMessages,
     ];
     let response = await model.invoke(history, runnableConfig);
     if (!AIMessage.isInstance(response)) {
@@ -191,7 +206,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
     }
     return {
-      messages: [stampMessageCreatedAtUtc(response)],
+      messages: [stampAgentMessageCreatedAt(response)],
     };
   };
 

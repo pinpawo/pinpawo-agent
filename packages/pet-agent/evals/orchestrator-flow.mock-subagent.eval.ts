@@ -31,7 +31,7 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
+import { getDelegationAnnounce } from '../src/agent/orchestrator/delegation';
 import {
   readRunDelegationSummaries,
   readTaskActiveDelegation,
@@ -119,14 +119,14 @@ const examples = [
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 2,
-      expected_transcript_leak: false,
+      expected_private_message_leak: false,
       expected_carryover_seen: false,
       known_issue: 'multi_task_delegation_boundary_reuses_same_lane_delegation',
-      reason: 'Known issue for the next multi-task redesign: the second task should start clean, but same-lane delegation reuse currently carries the first task transcript.',
+      reason: 'Known issue for the next multi-task redesign: the second task should start clean, but same-lane delegation reuse currently carries the first task private messages.',
     },
   },
   {
-    name: 'limit-reached-continuation-carries-transcript',
+    name: 'limit-reached-continuation-carries-private-messages',
     inputs: {
       user_message: '帮我把 data/items.csv 里的所有分片都处理完，全部处理完成后告诉我结果',
       subagent_script: 'tool_calls_until_carryover',
@@ -139,7 +139,7 @@ const examples = [
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 1,
       expected_carryover_seen: true,
-      reason: 'limit_reached continuation must reuse the delegation id and carry the prior transcript back into the subagent input.',
+      reason: 'limit_reached continuation must reuse the delegation id and carry the prior private messages back into the subagent input.',
     },
   },
   {
@@ -228,11 +228,11 @@ function messageHasLaneMeta(message: unknown): boolean {
 
 /**
  * Deterministic subagent model that snapshots every input it receives, so the
- * eval can assert what laneMessages actually fed into each delegation.
+ * eval can assert which canonical messages the query fed into each delegation.
  * Subclasses BaseChatModel directly (not FakeListChatModel) because the fake's
  * _streamResponseChunks would bypass _generate on streamed runs.
  *
- * Lane meta MUST be snapshotted at invocation time: tagNewLaneMessages mutates
+ * Lane meta MUST be snapshotted at invocation time: reconcileDelegationPrivateMessages mutates
  * the same message objects after the run, so inspecting stored references
  * later would see post-hoc tags and report false carryover.
  */
@@ -276,7 +276,7 @@ function buildTextScriptSubagent(responses: string[]) {
 
 /**
  * Emits tool calls forever until its input contains lane-tagged messages —
- * i.e. until the orchestrator re-delegated with the prior transcript carried
+ * i.e. until the orchestrator re-delegated with the prior private messages carried
  * over. First run exhausts the subagent recursion limit (limit_reached);
  * the continuation run finishes naturally only if carryover happened.
  * Calls process_next_chunk so the progress preview clearly says "unfinished",
@@ -531,10 +531,12 @@ function extractResult(
     return !pinpawo || typeof pinpawo !== 'object' || !('lane' in pinpawo);
   });
   const lastMsg = visibleMessages.at(-1);
-  const latestAnnounce = readLatestAnnounce(
-    messages,
-    { runId: typeof result.runId === 'string' ? result.runId : null },
-  );
+  const latestAnnounce = messages
+    .flatMap((message) => {
+      const announce = getDelegationAnnounce(message);
+      return announce ? [announce] : [];
+    })
+    .at(-1);
   const runDelegationSummaries = readRunDelegationSummaries(result);
   const activeDelegation = readTaskActiveDelegation(result);
   const observedRunDelegations = runDelegationSummaries.filter((delegation) =>
@@ -543,15 +545,15 @@ function extractResult(
   const latestObservedDelegation = observedRunDelegations.at(-1);
 
   // Lane-scoping probes over invocation-time snapshots (see ProbeSubagentModel):
-  // - transcript_leak: a previous task's reply text showed up in a later
+  // - private_message_leak: a previous task's reply text showed up in a later
   //   delegation's input (delegationId scoping broken).
   // - carryover_seen: some invocation received lane-tagged messages, i.e. a
-  //   continuation of the same delegation carried its transcript back.
+  //   continuation of the same delegation carried its private messages back.
   const invocationStats = subagentModel.invocationStats;
   const firstTaskMarker = Array.isArray(inputs.subagent_responses) && typeof inputs.subagent_responses[0] === 'string'
     ? inputs.subagent_responses[0]
     : null;
-  const transcriptLeak = firstTaskMarker
+  const privateMessageLeak = firstTaskMarker
     ? invocationStats.some((stat) => stat.nonSystemTexts.some((text) => text.includes(firstTaskMarker)))
     : null;
   const carryoverSeen = invocationStats.some((stat) => stat.sawLaneMeta);
@@ -567,9 +569,9 @@ function extractResult(
     delegation_statuses: runDelegationSummaries.map((item) => item.status),
     latest_announce_kind: latestObservedDelegation?.status
       ?? (activeDelegation?.status === 'awaiting_decision' ? 'progress' : null),
-    latest_announce_lane: latestAnnounce?.lane ?? latestObservedDelegation?.lane ?? activeDelegation?.lane ?? null,
+    latest_announce_lane: latestAnnounce?.sourceLane ?? latestObservedDelegation?.lane ?? activeDelegation?.lane ?? null,
     subagent_invocation_count: invocationStats.length,
-    transcript_leak: transcriptLeak,
+    private_message_leak: privateMessageLeak,
     carryover_seen: carryoverSeen,
     iteration_limit_interrupt_count: iterationLimitInterruptCount,
   };
@@ -647,7 +649,7 @@ async function main() {
       exactFieldEvaluator('phase', 'expected_phase'),
       exactFieldEvaluator('latest_announce_kind', 'expected_latest_announce_kind'),
       exactFieldEvaluator('latest_announce_lane', 'expected_latest_announce_lane'),
-      exactFieldEvaluator('transcript_leak', 'expected_transcript_leak'),
+      exactFieldEvaluator('private_message_leak', 'expected_private_message_leak'),
       exactFieldEvaluator('carryover_seen', 'expected_carryover_seen'),
       exactFieldEvaluator('iteration_limit_interrupt_count', 'expected_iteration_limit_interrupt_count'),
       delegationCountEvaluator,
@@ -663,7 +665,7 @@ async function main() {
     'phase_correct',
     'latest_announce_kind_correct',
     'latest_announce_lane_correct',
-    'transcript_leak_correct',
+    'private_message_leak_correct',
     'carryover_seen_correct',
     'iteration_limit_interrupt_count_correct',
     'delegation_count_correct',

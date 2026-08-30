@@ -5,14 +5,17 @@ import {
   formatHandoffArtifactRefsForMessage,
 } from '../../artifacts/handoff';
 import {
+  observeAgentMessageSelection,
+  queryAgentMessages,
+  stampAgentMessageCreatedAt,
+} from '../../../messages';
+import {
   getMessageHandoffSource,
-  mainConversationMessages,
   readLatestAnnounce,
   readLatestAnnounceCompletionReason,
-  readLatestHumanRequest,
-  stampMessageCreatedAtUtc,
-} from '../../messageLanes';
-import { getDelegationAnnounce } from '../../delegationAnnounce';
+} from '../../delegation';
+import { readLatestHumanRequest } from '../../conversationMessages';
+import { getDelegationAnnounce } from '../../delegation';
 import {
   buildAnswerInvocationMessages,
   type AnswerAcceptedResult,
@@ -91,7 +94,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
   return async function answerNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     if (state.runRuntimeFailure === 'checkpoint_incompatible') {
       return {
-        messages: [stampMessageCreatedAtUtc(
+        messages: [stampAgentMessageCreatedAt(
           new AIMessage(CHECKPOINT_INCOMPATIBLE_MESSAGE),
         )],
         taskActiveDelegation: null,
@@ -104,7 +107,13 @@ export function createAnswerNode(config: OrchestratorConfig) {
     // handoff copies (first-class, lane-free). A user-input-required result is
     // different: its lane remains resumable, so its announce and artifact refs
     // are appended only to this model invocation and never copied into main state.
-    const canonicalHistory = mainConversationMessages(state.messages);
+    const mainSelection = queryAgentMessages(state.messages).main().select();
+    observeAgentMessageSelection(
+      'answer.main',
+      mainSelection.diagnostics,
+      runnableConfig,
+    );
+    const canonicalHistory = mainSelection.messages;
     const acceptedResultsProjection = projectAcceptedRunResults({
       state,
       history: canonicalHistory,
@@ -120,7 +129,8 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : null;
     const userInputRequiredAnnounce = userInputRequiredDelegation
       ? readLatestAnnounce(state.messages, {
-          transcriptRunId: userInputRequiredDelegation.transcriptRunId,
+          lane: userInputRequiredDelegation.lane,
+          runId: userInputRequiredDelegation.runId,
           delegationId: userInputRequiredDelegation.id,
         })
       : null;
@@ -128,14 +138,14 @@ export function createAnswerNode(config: OrchestratorConfig) {
       ? formatHandoffArtifactRefsForMessage(buildHandoffArtifactRefs(
           state.sessionCapabilityArtifacts,
           {
-            runId: userInputRequiredDelegation.transcriptRunId,
+            runId: userInputRequiredDelegation.runId,
             delegationId: userInputRequiredDelegation.id,
           },
         ))
       : '';
     const awaitingUserInput = acceptedOutcome === 'user_input_required';
     const userInputRequiredContext = [
-      userInputRequiredAnnounce?.text ?? '',
+      userInputRequiredAnnounce?.result ?? '',
       userInputRequiredArtifactContext,
     ].join('').trim();
     const answerContextFacts = selectAnswerContextFacts({
@@ -162,12 +172,12 @@ export function createAnswerNode(config: OrchestratorConfig) {
     if (!readMessageText(response).trim()) {
       const fallback = new AIMessage('我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。');
       return {
-        messages: [stampMessageCreatedAtUtc(fallback)],
+        messages: [stampAgentMessageCreatedAt(fallback)],
         ...buildAnswerCleanup(state),
       };
     }
     return {
-      messages: [stampMessageCreatedAtUtc(response)],
+      messages: [stampAgentMessageCreatedAt(response)],
       ...buildAnswerCleanup(state),
     };
   };
@@ -242,7 +252,8 @@ export function selectAnswerContextFacts(params: {
 
   if (activeDelegation) {
     const completionReason = readLatestAnnounceCompletionReason(params.state.messages, {
-      transcriptRunId: activeDelegation.transcriptRunId,
+      lane: activeDelegation.lane,
+      runId: activeDelegation.runId,
       delegationId: activeDelegation.id,
     });
     return {

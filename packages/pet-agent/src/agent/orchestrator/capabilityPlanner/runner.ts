@@ -48,7 +48,7 @@ type CapabilityPlannerInputBase = {
   readonly traceId: string;
   readonly runId: string;
   readonly userRequest: UserRequest;
-  /** Canonical root messages. The Planner domain owns invocation projection. */
+  /** Canonical main-view messages. The Planner domain owns provider projection. */
   readonly messages: readonly BaseMessage[];
   readonly remainingPlan: readonly CapabilityPlanTask[];
   readonly workspace: CapabilityDocumentWorkspace;
@@ -67,7 +67,7 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & (
   | {
       readonly mode: 'boundary';
       readonly activeDelegation: PlannerDelegationInput;
-      /** Boundary identity and stop reason. Evidence remains in canonical messages. */
+      /** Boundary identity and stop reason for the latest typed attempt. */
       readonly latestAnnounce: PlannerAnnounceTarget | null;
       /** Ordered unaccepted announces owned by the active delegation. */
       readonly announceAttempts: readonly PlannerAnnounceInput[];
@@ -101,7 +101,7 @@ export function isCapabilityPlannerIncompleteResult(
  * Typed graph seam for the framework-internal Capability Planner.
  *
  * Graph tests inject a scripted implementation of this interface. Production
- * uses createCapabilityPlannerAgent(), whose raw transcript remains private to
+ * uses createCapabilityPlannerAgent(), whose raw model/tool messages remain private to
  * invocation tracing and never crosses this seam into root messages.
  */
 export interface CapabilityPlannerRunner {

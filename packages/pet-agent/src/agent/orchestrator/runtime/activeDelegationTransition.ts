@@ -2,7 +2,7 @@ import {
   resumeRunDelegationSummary,
   updateRunDelegationSummaryResult,
 } from '../delegations';
-import { readLatestHumanRequest } from '../messageLanes';
+import { readLatestHumanRequest } from '../conversationMessages';
 import type { OrchestratorStateType } from '../state';
 import type { RunNextDelegation, TaskActiveDelegation } from '../types';
 import { clipForPrompt } from '../utils';
@@ -31,7 +31,7 @@ function buildRunNextDelegation(
  * lane message in checkpoint storage so interruption never fabricates a
  * completed handoff or destroys resumable evidence.
  *
- * Resuming reuses the exact delegation and transcript identities. A pending
+ * Resuming reuses the exact delegation and private-message scope. A pending
  * delegation can return directly to its capability; an awaiting delegation
  * returns to the Planner boundary with the new human message available
  * as guidance.

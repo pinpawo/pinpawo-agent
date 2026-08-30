@@ -28,7 +28,7 @@ Everything below is classified on two independent axes. Do not conflate them.
 | `INSTRUCTION` | The model must obey it. System prompts only. |
 | `BOUNDARY` | Defines what "done" means for this step. |
 | `FACT` | Read-only data. Explicitly *not* an instruction. Carries `authority="none"`. |
-| `HISTORY` | Canonical conversation/transcript messages. |
+| `HISTORY` | Canonical conversation or private delegation messages. |
 
 The repo encodes Axis 2 in the XML itself — blocks carry `role=`, `source=` and
 `trust=`/`authority=` attributes. When adding a block, set these; they are the
@@ -87,8 +87,8 @@ Routes the request: reply directly, ask a question, or hand off via
 the main conversation and nothing else — deliberately, because it is the node
 that decides what the goal *is*.
 
-`mainConversationMessages()` excludes every lane-tagged message and pre-lane
-delegation briefings. An accepted
+`mainConversationMessages()` excludes every lane-tagged message. Briefings are
+current Capability inputs and never enter canonical state. An accepted
 typed Announce reaches this view after handoff moves its semantic identity into
 the main queue. `projectDelegationAnnouncesForModel()` then creates the
 provider-compatible model view.
@@ -104,23 +104,23 @@ contract is defined by
 Sources:
 `runtime/nodes/capabilityPlanner.ts` (dispatch),
 `capabilityPlanner/agent.ts` (assembly),
-`capabilityPlanner/messageContext.ts` (projection).
+`capabilityPlanner/providerMessages.ts` (provider projection).
 
 | Slot | Lifetime | Entry mode | Boundary mode |
 |---|---|---|---|
 | system | invocation projection / `INSTRUCTION` | entry objective and context meaning | boundary objective and context meaning |
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation | current canonical main conversation |
 | session state | `RUN-STABLE` / `FACT` | goal, plan and Capability disclosure | updated plan and disclosure from this run |
-| overlay | `DYNAMIC` / `BOUNDARY` | none | ordered active-delegation announces with one latest target, active delegation and prior remaining-plan proposal |
+| current input | `DYNAMIC` / `BOUNDARY` | entry data | ordered active-delegation announces with one latest target, active delegation and prior remaining-plan proposal |
 | tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan`, `request_user_input`, `report_unavailable` | `capability_search`, `continue_current`, `advance_plan`, `complete_goal`, `request_user_input`, `report_unavailable` |
 
-Entry initializes a clean run-scoped Planner session. Boundary adds one
-invocation-only overlay that selects every current-delegation Announce in
-chronological order by canonical delegation identity and marks exactly the
-latest message id as the evaluation target. The overlay never changes the
-announces or root messages. Private Capability Human/AI/Tool transcript is never
-included. The prior remaining plan is marked as a non-authoritative proposal that
-the Boundary must revalidate against current evidence.
+Entry initializes a clean run-scoped Planner session. Boundary queries the exact
+active delegation, extracts every typed Announce in chronological order, and
+places that evidence in the current `CapabilityPlannerInput`; exactly the latest
+message id is the evaluation target. This projection never changes the Announces
+or root messages. Private Capability Human/AI/Tool messages are never included.
+The prior remaining plan is marked as a non-authoritative proposal that the
+Boundary must revalidate against current evidence.
 
 Capability disclosure is run-scoped semantic state. It contains every
 Capability whose complete document was disclosed during this run in stable
@@ -154,19 +154,20 @@ Executes one delegated task. Source: `runtime/nodes/capability.ts`.
 | Slot | Class | Content |
 |---|---|---|
 | system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static) + `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ workdir, artifactDiscovery })` |
-| history | `DYNAMIC` / `HISTORY` | `laneMessages(messages, lane, transcriptRunId, delegationId)` — canonical main conversation plus this delegation's actual executor transcript |
+| history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().delegation(scope).select()` — canonical main conversation plus this delegation's private messages |
 | boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context and current task; always last |
 
-`laneMessages()` returns unlaned main-conversation messages **plus** only this
-delegation's own lane messages. A different delegation in the same lane gets a
-fresh `delegationId` and starts clean: conclusions cross task boundaries through
-handoffs and summaries, transcripts do not.
+The query returns unlaned main-conversation messages **plus** only this
+delegation's own private messages. A different delegation in the same lane gets
+a fresh `delegationId` and starts clean: conclusions cross task boundaries
+through handoffs and summaries; private messages do not.
 
-The briefing is assembled immediately before the Capability call and is not
+The Human-role briefing is assembled immediately before the Capability call and is not
 written to checkpoint history. `runUserRequest` and delegation lifecycle state
 remain separate canonical fields; model projection merges them without creating
-a second protocol message. Artifact-discovery context, when enabled, is inserted
-immediately before the briefing.
+a second protocol message. Artifact-discovery availability, when enabled, is
+described by Capability prompt sections and bound tools rather than a synthetic
+history message.
 
 Initial projection:
 

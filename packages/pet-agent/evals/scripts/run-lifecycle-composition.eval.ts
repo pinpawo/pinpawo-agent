@@ -25,10 +25,11 @@ import {
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
 import {
-  getMessageLane,
+  getAgentMessageLane,
   mainConversationMessages,
-  readLatestHumanRequest,
-} from '../../src/agent/orchestrator/messageLanes.ts';
+} from '../../src/agent/messages/index.ts';
+import { readLatestHumanRequest } from '../../src/agent/orchestrator/conversationMessages.ts';
+import { isDelegationBriefingMessage } from '../../src/agent/orchestrator/delegation/index.ts';
 import type { OrchestratorStateType } from '../../src/agent/orchestrator/state.ts';
 import { readMessageText } from '../../src/agent/orchestrator/utils.ts';
 import { readMessageToolCalls } from '../../src/utils/messages.ts';
@@ -386,7 +387,9 @@ function createControlledExecutor(turns: LifecycleCompositionTurn[]) {
     const runnable = bindTools(tools);
     runnable.invoke = async (input) => {
       const messages = Array.isArray(input) ? input as BaseMessage[] : [];
-      const latestUserMessage = readLatestHumanRequest(messages);
+      const latestUserMessage = readLatestHumanRequest(
+        messages.filter((message) => !isDelegationBriefingMessage(message)),
+      );
       const matchedTurnIndex = [...turns].reverse().findIndex(
         ({ userMessage }) => userMessage === latestUserMessage,
       );
@@ -410,7 +413,7 @@ function createControlledExecutor(turns: LifecycleCompositionTurn[]) {
         inputMessages: messages.map((message) => readMessageText(message)),
         controlledResult,
         unexpected: controlledResult === null,
-        laneMessageCount: messages.filter((message) => getMessageLane(message) !== null).length,
+        laneMessageCount: messages.filter((message) => getAgentMessageLane(message) !== null).length,
       });
       if (controlledResult === null) {
         throw new ControlledExecutorExhaustedError(

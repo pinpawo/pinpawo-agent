@@ -10,8 +10,11 @@ import type { OrchestratorConfig } from '../../types';
 import { createOrchestratorGraph } from '../graph';
 import { captureRunUserRequest, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
-import { getMessageLane, mainConversationMessages, setPinpetMeta } from '../../messageLanes';
-import { DelegationAnnounceMessage } from '../../delegationAnnounce';
+import {
+  mainConversationMessages,
+  setAgentMessageMetadata,
+} from '../../../messages';
+import { DelegationAnnounceMessage } from '../../delegation';
 
 function readLatestHumanText(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -105,7 +108,7 @@ test('entry capture does not retain a prior active delegation Planner session', 
       lane: 'capability:general',
       task: '继续当前任务。',
       contextSummary: null,
-      transcriptRunId: 'previous-run',
+      runId: 'previous-run',
       traceId: 'active-trace',
       status: 'awaiting_decision',
       resultPreview: null,
@@ -178,7 +181,6 @@ test('plan_request routes to Planner without persisting control messages', async
     AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), false);
-  assert.equal(result.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
   assert.equal(result.messages.at(-1)?.content, '当前没有可执行该任务的 Capability。');
 });
 
@@ -252,7 +254,7 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   });
   const compaction = createContextCompactionMessage('更早的主对话摘要。', 4);
   const laneMessage = new AIMessage('不应进入 Entry Answer 的 delegation lane。');
-  setPinpetMeta(laneMessage, {
+  setAgentMessageMetadata(laneMessage, {
     lane: 'capability:general',
     runId: 'older-run',
     delegationId: 'older-delegation',
@@ -294,7 +296,7 @@ test('Entry Answer receives an accepted delegation result as execution data, not
     id: 'delegation-announce:run-1:delegation-1:announce-1',
     sourceLane: 'capability:general',
     delegationId: 'delegation-1',
-    transcriptRunId: 'run-1',
+    runId: 'run-1',
     announceMessageId: 'announce-1',
     task: '检查仓库状态',
     completionReason: 'natural',

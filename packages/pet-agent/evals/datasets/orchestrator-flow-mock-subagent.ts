@@ -103,8 +103,8 @@ const cases: AgentEvalCase<
     },
   },
   {
-    id: `${SUITE}.limit-reached-continuation-carries-transcript`,
-    name: 'limit-reached-continuation-carries-transcript',
+    id: `${SUITE}.limit-reached-continuation-carries-private-messages`,
+    name: 'limit-reached-continuation-carries-private-messages',
     suite: SUITE,
     tags: ['interruption_recovery', 'delegation_control', 'context_synthesis'],
     input: {
@@ -119,11 +119,11 @@ const cases: AgentEvalCase<
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 1,
       expected_carryover_seen: true,
-      reason: 'A limit-reached continuation must reuse the delegation id, carry the prior transcript, then answer after natural completion.',
+      reason: 'A limit-reached continuation must reuse the delegation id, carry the prior private messages, then answer after natural completion.',
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Covers the interrupted subagent transcript carryover path.',
+      reason: 'Covers the interrupted subagent private messages carryover path.',
       source: SOURCE_FILE,
     },
   },

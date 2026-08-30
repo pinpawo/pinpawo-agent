@@ -1,5 +1,5 @@
 import type {
-  MessageLane,
+  CapabilityMessageLane,
   RunNextDelegation,
   RunDelegationSummary,
 } from './types';

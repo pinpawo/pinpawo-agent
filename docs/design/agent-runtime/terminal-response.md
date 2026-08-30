@@ -44,7 +44,7 @@ Finalization reads typed root state rather than conversation prose:
 - separately stored artifact references when they are relevant;
 - runtime failure and iteration-limit facts.
 
-Planner-lane reasoning, private Capability transcripts, and prior user-facing
+Planner-internal reasoning, private Capability messages, and prior user-facing
 answers are not result evidence. A Planner ordinary-text non-commit may be
 carried as an explicit direct-response payload; it is not silently discovered
 from arbitrary history.

@@ -27,7 +27,11 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { readLatestAnnounce } from '../src/agent/orchestrator/messageLanes';
+import {
+  DelegationAnnounceMessage,
+  getDelegationAnnounce,
+} from '../src/agent/orchestrator/delegation';
+import { setAgentMessageDelegationScope } from '../src/agent/messages';
 import {
   activeCapabilityFromResult,
   hasObservedDelegation,
@@ -42,6 +46,36 @@ import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 export const DATASET_NAME = 'orchestrator-route-decision';
+
+function evalAnnounce(params: {
+  lane: `capability:${string}`;
+  runId: string;
+  delegationId: string;
+  task: string;
+  result: string;
+  completionReason: 'natural' | 'limit_reached';
+  accepted?: boolean;
+}) {
+  const announceMessageId = `announce:${params.runId}:${params.delegationId}`;
+  const message = new DelegationAnnounceMessage({
+    id: `${params.accepted ? 'accepted' : 'private'}:${announceMessageId}`,
+    sourceLane: params.lane,
+    runId: params.runId,
+    delegationId: params.delegationId,
+    announceMessageId,
+    task: params.task,
+    completionReason: params.completionReason,
+    result: params.result,
+    createdAt: '2026-08-31T00:00:00.000Z',
+  });
+  return params.accepted
+    ? message
+    : setAgentMessageDelegationScope(message, {
+        lane: params.lane,
+        runId: params.runId,
+        delegationId: params.delegationId,
+      });
+}
 
 // ── Model setup (env vars → ~/.pinpawo/config.json fallback) ──
 
@@ -253,20 +287,15 @@ export async function target(
   const turnInput = buildOrchestratorTurnInput(resumeProgressLane
     ? [
         new HumanMessage(String(inputs.resume_original_user_message ?? userMessage)),
-        new AIMessage({
-          content: String(inputs.resume_progress_result ?? ''),
-          additional_kwargs: {
-            pinpawo: {
-              lane: resumeProgressLane,
-              runId: 'previous-turn',
-              isAnnounce: true,
-              delegationId: 'resume-progress-1',
-              task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
-              ...(typeof inputs.resume_progress_completion_reason === 'string'
-                ? { completionReason: inputs.resume_progress_completion_reason }
-                : {}),
-            },
-          },
+        evalAnnounce({
+          lane: resumeProgressLane,
+          runId: 'previous-turn',
+          delegationId: 'resume-progress-1',
+          task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
+          result: String(inputs.resume_progress_result ?? ''),
+          completionReason: inputs.resume_progress_completion_reason === 'limit_reached'
+            ? 'limit_reached'
+            : 'natural',
         }),
         new HumanMessage(userMessage),
       ]
@@ -277,7 +306,7 @@ export async function target(
       lane: resumeProgressLane,
       task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
       contextSummary: null,
-      transcriptRunId: 'previous-turn',
+      runId: 'previous-turn',
       status: 'awaiting_decision',
       resultPreview: String(inputs.resume_progress_result ?? ''),
     };
@@ -300,18 +329,14 @@ export async function target(
       resultPreview: text,
     }));
     turnInput.messages.push(
-      ...completedResults.map((text, index) => new AIMessage({
-        content: text,
-        additional_kwargs: {
-          pinpawo: {
-            lane: 'capability:general',
-            runId: turnInput.runId,
-            isAnnounce: true,
-            delegationId: `eval-${index + 1}`,
-            task: completedTasks[index] ?? userMessage,
-            completionReason: 'natural',
-          },
-        },
+      ...completedResults.map((text, index) => evalAnnounce({
+        lane: 'capability:general',
+        runId: turnInput.runId,
+        delegationId: `eval-${index + 1}`,
+        task: completedTasks[index] ?? userMessage,
+        result: text,
+        completionReason: 'natural',
+        accepted: true,
       })),
     );
   }
@@ -332,24 +357,19 @@ export async function target(
         lane: latestProgress.lane,
         task: latestProgress.task,
         contextSummary: null,
-        transcriptRunId: turnInput.runId,
+        runId: turnInput.runId,
         status: 'awaiting_decision',
         resultPreview: latestProgress.resultPreview,
       };
     }
     turnInput.messages.push(
-      ...progressResults.map((text, index) => new AIMessage({
-        content: text,
-        additional_kwargs: {
-          pinpawo: {
-            lane: 'capability:general',
-            runId: turnInput.runId,
-            isAnnounce: true,
-            delegationId: `eval-${offset + index + 1}`,
-            task: userMessage,
-            completionReason: 'limit_reached',
-          },
-        },
+      ...progressResults.map((text, index) => evalAnnounce({
+        lane: 'capability:general',
+        runId: turnInput.runId,
+        delegationId: `eval-${offset + index + 1}`,
+        task: userMessage,
+        result: text,
+        completionReason: 'limit_reached',
       })),
     );
   }
@@ -381,8 +401,10 @@ function hasCurrentSubagentObservation(result: Record<string, unknown>): boolean
 
 function latestAnnounceFromResult(result: Record<string, unknown>) {
   const messages = Array.isArray(result.messages) ? result.messages : [];
-  const runId = typeof result.runId === 'string' ? result.runId : null;
-  return readLatestAnnounce(messages, { runId });
+  return messages.flatMap((message) => {
+    const announce = getDelegationAnnounce(message);
+    return announce ? [announce] : [];
+  }).at(-1) ?? null;
 }
 
 function extractResult(result: Record<string, unknown>): Record<string, unknown> {

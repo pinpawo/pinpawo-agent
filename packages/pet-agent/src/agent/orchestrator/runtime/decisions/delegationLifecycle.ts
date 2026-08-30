@@ -1,7 +1,7 @@
 import type { OrchestratorStateType } from '../../state';
 import type {
   DecisionMode,
-  MessageLane,
+  CapabilityMessageLane,
   RunNextDelegation,
   TaskActiveDelegation,
   UserRequest,
@@ -22,7 +22,7 @@ export function createTaskActiveDelegation(
     lane: delegation.lane,
     task: delegation.task,
     contextSummary: delegation.contextSummary,
-    transcriptRunId: runId,
+    runId,
     traceId,
     status: 'pending',
     resultPreview: null,
@@ -30,15 +30,15 @@ export function createTaskActiveDelegation(
   };
 }
 
-export function resolveDelegationTranscriptRunId(
+export function resolveDelegationRunId(
   state: OrchestratorStateType,
   delegation: RunNextDelegation,
 ) {
   return state.taskActiveDelegation?.id === delegation.id
-    ? state.taskActiveDelegation.transcriptRunId
+    ? state.taskActiveDelegation.runId
     : state.runId;
 }
 
-export function readCapabilityNameFromLane(lane: MessageLane): string | null {
+export function readCapabilityNameFromLane(lane: CapabilityMessageLane): string | null {
   return lane.startsWith('capability:') ? lane.slice('capability:'.length) : null;
 }

@@ -1,7 +1,7 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactKind, CapabilityArtifactRef } from '../../../types/artifact';
 import { filterCapabilityArtifacts } from '../capabilityArtifacts';
-import type { MessageLane } from '../types';
+import type { CapabilityMessageLane } from '../types';
 import { clipForPrompt } from '../utils';
 
 export const MAX_HANDED_OFF_ANNOUNCE_ARTIFACT_REFS = 5;
@@ -48,7 +48,7 @@ type HandOffFooterArtifactRef = Omit<
   kind?: CapabilityArtifactKind;
 };
 export type HandoffMessageSource = {
-  handoffFrom: MessageLane;
+  handoffFrom: CapabilityMessageLane;
   delegationId: string;
   runId: string;
 };
@@ -142,7 +142,7 @@ export function buildHandoffArtifactRefs(
 export function findLatestHandoffCopyForDelegation(
   messages: BaseMessage[],
   delegationId: string,
-  handoffFrom: MessageLane,
+  handoffFrom: CapabilityMessageLane,
   runId: string,
   readHandoffSource: HandoffSourceResolver,
 ): AIMessage | null {

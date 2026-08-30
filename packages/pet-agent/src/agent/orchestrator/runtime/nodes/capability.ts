@@ -5,17 +5,22 @@ import type { SubagentRunInput } from '../../../../types/subagent';
 import type { OrchestratorStateType } from '../../state';
 import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
-  laneMessages,
+  observeAgentMessageSelection,
+  queryAgentMessages,
+  toolProtocolSafeMessages,
+} from '../../../messages';
+import {
+  projectDelegationAnnouncesForModel,
   readLatestAnnounce,
-  tagNewLaneMessages,
-} from '../../messageLanes';
+  reconcileDelegationPrivateMessages,
+} from '../../delegation';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
   resolveToolkitExecution,
 } from '../../subagentDispatch';
 import type {
-  MessageLane,
+  CapabilityMessageLane,
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
@@ -31,14 +36,13 @@ import {
 } from '../config';
 import {
   readCapabilityNameFromLane,
-  resolveDelegationTranscriptRunId,
+  resolveDelegationRunId,
 } from '../decisions/delegationLifecycle';
 import {
   hasArtifactDiscoveryToolkit,
-  withArtifactDiscoveryContext,
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
-import { materializeDelegation } from '../../delegationBriefing';
+import { materializeDelegation } from '../../delegation';
 import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
 
 export function createCapabilityNode(params: {
@@ -87,22 +91,28 @@ export function createCapabilityNode(params: {
     }
     const { capability } = compiledCapability;
     const toolkitList = [...compiledCapability.toolkits];
-    const lane: MessageLane = runNextDelegation.lane;
-    const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
-    const canonicalMessages = laneMessages(
-      state.messages,
+    const lane: CapabilityMessageLane = runNextDelegation.lane;
+    const runId = resolveDelegationRunId(state, runNextDelegation);
+    const delegationScope = {
       lane,
-      transcriptRunId,
-      runNextDelegation.id,
-    );
-    const briefingBase = {
-      lane,
-      transcriptRunId,
+      runId,
       delegationId: runNextDelegation.id,
+    };
+    const canonicalSelection = queryAgentMessages(state.messages)
+      .main()
+      .delegation(delegationScope)
+      .select();
+    observeAgentMessageSelection(
+      'capability.private_messages',
+      canonicalSelection.diagnostics,
+      runnableConfig,
+    );
+    const canonicalMessages = canonicalSelection.messages;
+    const briefingBase = {
       userRequest: state.runUserRequest,
       task: runNextDelegation.task,
     };
-    const [delegationBriefing] = materializeDelegation(
+    const delegationBriefing = materializeDelegation(
       runNextDelegation.mode === 'initial'
         ? {
             ...briefingBase,
@@ -114,8 +124,13 @@ export function createCapabilityNode(params: {
             mode: 'continue',
             guidance: runNextDelegation.contextSummary,
           },
-    ).laneMessages;
-    const scopedMessages = [...canonicalMessages, delegationBriefing];
+    );
+    // Typed Announce messages stay canonical in state and are projected only at
+    // this provider boundary, just like accepted announces in the main lane.
+    const scopedMessages = toolProtocolSafeMessages([
+      ...projectDelegationAnnouncesForModel(canonicalMessages),
+      delegationBriefing,
+    ]);
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -152,7 +167,7 @@ export function createCapabilityNode(params: {
             toolkits: toolkitList,
             execution: {
               threadId,
-              runId: transcriptRunId,
+              runId,
               delegationId: runNextDelegation.id,
               workdir: workdir ?? null,
               signal: runnableConfig?.signal,
@@ -169,10 +184,6 @@ export function createCapabilityNode(params: {
       );
       const canExploreArtifacts = hasArtifactDiscoveryToolkit(
         usedResolvedToolkitExecution.toolkits,
-      );
-      const subagentMessages = withArtifactDiscoveryContext(
-        scopedMessages,
-        canExploreArtifacts,
       );
       const executionContext = buildSubagentExecutionContext({
         workdir: workdir ?? null,
@@ -210,7 +221,7 @@ export function createCapabilityNode(params: {
             : []),
         ],
         operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
-        messages: subagentMessages,
+        messages: scopedMessages,
         maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
         contextWindowTokens: subagentContextWindowTokens,
         generationReserveTokens: subagentGenerationReserveTokens,
@@ -218,7 +229,7 @@ export function createCapabilityNode(params: {
         runtimeContext: {
           executionScope: {
             threadId,
-            runId: transcriptRunId,
+            runId,
             delegationId: runNextDelegation.id,
             workdir: workdir ?? null,
           },
@@ -251,7 +262,7 @@ export function createCapabilityNode(params: {
         threadId,
         capabilityId: capability.name,
         delegationId: runNextDelegation.id,
-        runId: transcriptRunId,
+        runId,
       });
       const artifactsById = new Map(
         [...result.artifacts, ...artifactRefs, ...(finalized?.artifactRefs ?? [])]
@@ -267,11 +278,11 @@ export function createCapabilityNode(params: {
       };
     }
 
-    const laneOutputMessages = tagNewLaneMessages(
+    const laneOutputMessages = reconcileDelegationPrivateMessages(
       result.messages,
       subagentInput.messages,
       lane,
-      transcriptRunId,
+      runId,
       result.completionReason,
       {
         delegationId: runNextDelegation.id,
@@ -280,12 +291,12 @@ export function createCapabilityNode(params: {
       },
       canonicalMessages,
     );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, { delegationId: runNextDelegation.id });
+    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
     const interrupted = result.completionReason === 'interrupted';
     const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
     const resultPreview = interrupted
       ? currentResultPreview
-      : delegationAnnounce?.text ?? null;
+      : delegationAnnounce?.result ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
     // whether it is complete is the Planner's call at the execution boundary,
     // which upgrades the status to 'completed' when it hands off. The raw lane

@@ -7,7 +7,7 @@ import {
   createCapabilityPlannerSearchTool,
   type CapabilityPlannerCapabilityDocument,
 } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
-import { projectCapabilityPlannerMessagesForModel } from '../../src/agent/orchestrator/capabilityPlanner/messageContext.ts';
+import { projectCapabilityPlannerMessagesForModel } from '../../src/agent/orchestrator/capabilityPlanner/providerMessages.ts';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerMode,
@@ -18,8 +18,8 @@ import {
 } from '../../src/agent/orchestrator/capabilityPlanner/routingManifest.ts';
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
-import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegationAnnounce.ts';
-import { setPinpetMeta } from '../../src/agent/orchestrator/messageLanes.ts';
+import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation/index.ts';
+import { setAgentMessageMetadata } from '../../src/agent/messages/index.ts';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
@@ -72,7 +72,7 @@ const acceptedAnnounce = new DelegationAnnounceMessage({
   id: 'audit-accepted-announce',
   sourceLane: 'capability:repository',
   delegationId: 'audit-prior-delegation',
-  transcriptRunId: 'audit-prior-transcript',
+  runId: 'audit-prior-run',
   announceMessageId: 'audit-prior-result',
   task: 'Inspect the issue and identify the required change.',
   completionReason: 'natural',
@@ -83,9 +83,9 @@ const privateLaneMessage = new AIMessage({
   id: 'audit-private-lane-message',
   content: 'Private executor reasoning that must not enter Planner context.',
 });
-setPinpetMeta(privateLaneMessage, {
+setAgentMessageMetadata(privateLaneMessage, {
   lane: 'capability:repository',
-  runId: 'audit-active-transcript',
+  runId: 'audit-active-run',
   delegationId: 'audit-active-delegation',
 });
 
@@ -128,7 +128,7 @@ function buildInput(mode: CapabilityPlannerMode): CapabilityPlannerInput {
     messages,
     activeDelegation: {
       delegationId: 'audit-active-delegation',
-      transcriptRunId: 'audit-active-transcript',
+      runId: 'audit-active-run',
       capability: 'repository',
       task: 'Implement and verify the identified change.',
     },

@@ -5,7 +5,7 @@ import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   projectHumanReviewRequest,
-  readMessageCreatedAtUtc,
+  readAgentMessageCreatedAt,
   SUBAGENT_OPERATIONS_EVENT,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
@@ -203,7 +203,7 @@ test('runChatSession sources tool operations from the root protocol stream, not 
   assert.equal(setup.input.messages.length, 1);
   assert.equal(setup.input.messages[0]?._getType(), 'human');
   assert.equal(readFinalMessageText(setup.input.messages[0] ?? {}), 'hello');
-  assert.match(readMessageCreatedAtUtc(setup.input.messages[0]!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
+  assert.match(readAgentMessageCreatedAt(setup.input.messages[0]!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
   assert.deepEqual(emittedTools, [
     {
       event: 'on_tool_start',

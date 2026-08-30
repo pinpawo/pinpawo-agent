@@ -24,7 +24,7 @@ Planner execution history survive multiple runs and forced every consumer to
 decide which Planner messages to select, replay, compact, invalidate, or remove.
 
 Excluding those messages from later model calls avoids self-reinforcement, but
-leaves an incoherent intermediate shape: Planner transcript is persisted even
+leaves an incoherent intermediate shape: Planner provider messages are persisted even
 though it is not Planner working memory.
 
 The domain needs state. It does not need to turn root conversation messages into
@@ -36,11 +36,11 @@ The Capability Planner is a stateful domain component scoped to one `runId`.
 
 - A new run creates a clean Planner session.
 - Entry initializes the session while reading a clean main-conversation projection.
-- Boundary reuses the session and adds one invocation-only Boundary overlay.
+- Boundary reuses the session and builds one typed current Boundary input.
 - Planner output updates typed session state and returns one structured root
   transition.
 - Planner prompt messages never enter canonical root `messages`.
-- The next run does not inherit the previous run's Planner transcript, search
+- The next run does not inherit the previous run's Planner provider messages, search
   attempts, terminal calls, or commit cache.
 
 Planner statefulness is semantic. Raw provider messages are not the source of
@@ -63,8 +63,8 @@ Decision mode and data lifetime are independent.
 |---|---|---|
 | conversation/goal | root | clean main conversation, accepted Delegation Announces |
 | run | Planner session and root typed state | goal, plan, Capability disclosure, last committed input |
-| invocation | Planner adapter | current Boundary overlay, system projection, bound tools |
-| delegation | Capability subagent | private execution transcript and current unaccepted announce |
+| invocation | Planner adapter | current typed Boundary input, system projection, bound tools |
+| delegation | Capability subagent | private execution messages and current unaccepted announce |
 
 No message tag or lane changes one scope into another. Projection may expose
 data across a boundary, but it does not transfer ownership or mutate the source.
@@ -74,7 +74,7 @@ data across a boundary, but it does not transfer ownership or mutate the source.
 The Planner starts from `mainConversationMessages()`:
 
 - every lane-tagged message is excluded;
-- invocation-only delegation briefings are excluded;
+- delegation briefings never enter canonical messages;
 - accepted `DelegationAnnounceMessage` values remain canonical main facts;
 - provider projection happens after selection and never writes back to state.
 
@@ -137,7 +137,7 @@ new root run
   -> initialize clean Planner session
   -> Entry decision
   -> Capability execution
-  -> Boundary overlay + Boundary decision
+  -> typed Boundary input + Boundary decision
   -> Capability execution / terminal route
   -> root run ends
   -> discard Planner session
@@ -179,21 +179,21 @@ PlannerEntryFrame(
 )
 ```
 
-Entry has no active delegation, announce attempts, or Boundary overlay.
+Entry has no active delegation or announce attempts.
 
 The resulting `submit_plan` decision initializes the run plan. Provider-facing
 Human/AI/Tool messages produced while making that decision remain inside the
 invocation or run-private observability stream; they do not become root history.
 
-## Boundary overlay: temporary paint
+## Boundary current input: temporary paint
 
 A Boundary does not rewrite the canonical announces or main conversation. The
 Planner adapter selects every still-unaccepted announce for the active
 delegation by root-owned identity, marks the latest attempt as the evaluation
-target, and creates one ephemeral overlay:
+target, and creates one typed invocation input:
 
 ```ts
-type PlannerBoundaryOverlay = {
+type PlannerBoundaryInput = {
   mode: 'boundary';
   inputId: string;
   evaluationTarget: {
@@ -214,7 +214,7 @@ This is the “temporary paint” rule:
 4. the view is discarded after the invocation;
 5. only the structured decision and typed state update leave Planner.
 
-The overlay must never be checkpointed as a root conversation message. It must
+The current input must never be checkpointed as a root conversation message. It must
 also never rely on chronological adjacency alone to identify the current
 announce.
 
@@ -330,8 +330,8 @@ remaining = [T3]
 ```
 
 If Planner chooses `continue_current`, root preserves the exact delegation id,
-task, and remaining plan. The next invocation receives a new overlay targeting
-the latest announce for that same delegation. The overlay projects every ordered
+task, and remaining plan. The next invocation receives a new current input targeting
+the latest announce for that same delegation. The input projects every ordered
 announce attempt for the active delegation and marks only the latest as the
 evaluation target. Prior attempts remain delegation-owned evidence until
 acceptance; they are not silently promoted into main conversation, and the
@@ -392,9 +392,9 @@ user goal retains the same `traceId`.
 - Moving plan ownership back to Answer or Capability subagents.
 - Removing `entry | boundary` modes.
 - Letting code infer task completion from announce prose.
-- Exposing private Capability Human/AI/Tool transcripts to Planner.
+- Exposing private Capability Human/AI/Tool messages to Planner.
 - Giving Planner direct authority to mutate root messages or delegation state.
-- Persisting Planner raw provider transcript across runs.
+- Persisting Planner raw provider messages across runs.
 
 ## Migration
 
@@ -402,7 +402,7 @@ user goal retains the same `traceId`.
 2. Make its plan the single authoritative replacement for `runCapabilityPlan`;
    use a separate continuation snapshot only when a later run may resume work.
 3. Move disclosure and commit replay behind the session contract.
-4. Introduce one Boundary overlay builder and provider projection.
+4. Introduce one typed Boundary input builder and provider projection.
 5. Stop returning Planner message updates to root `messages`.
 6. Remove Planner-lane selection, stale-lane cleanup, and ToolMessage commit
    parsing from the agent boundary.
@@ -425,5 +425,5 @@ user goal retains the same `traceId`.
 - Same-input recovery replays a typed commit without a model call.
 - `continue_current` projects all ordered announce attempts for the active
   delegation and marks only the latest as the evaluation target.
-- Planner tracing remains complete after raw transcript is removed from root
+- Planner tracing remains complete after raw provider messages are removed from root
   checkpoint messages.

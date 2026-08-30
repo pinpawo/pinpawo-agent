@@ -1,9 +1,9 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import {
-  getMessageDelegationId,
-  getMessageLane,
-  getMessageTranscriptRunId,
-} from '../src/agent/orchestrator/messageLanes.ts';
+  getAgentMessageDelegationId,
+  getAgentMessageLane,
+  getAgentMessageRunId,
+} from '../src/agent/messages/index.ts';
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import type {
@@ -62,7 +62,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
 }): LifecycleCompositionInvariant[] {
   const state = params.finalState;
   const retainedLaneMessages = state.messages.filter(
-    (message: BaseMessage) => getMessageLane(message) !== null,
+    (message: BaseMessage) => getAgentMessageLane(message) !== null,
   );
   const activeDelegation = state.taskActiveDelegation;
   const cleanCheckpoint = state.runNextDelegation === null
@@ -87,9 +87,9 @@ export function evaluateLifecycleCompositionInvariants(params: {
     : activeDelegation !== null
       && retainedLaneMessages.length > 0
       && retainedLaneMessages.every((message) =>
-        getMessageLane(message) === activeDelegation.lane
-        && getMessageTranscriptRunId(message) === activeDelegation.transcriptRunId
-        && getMessageDelegationId(message) === activeDelegation.id);
+        getAgentMessageLane(message) === activeDelegation.lane
+        && getAgentMessageRunId(message) === activeDelegation.runId
+        && getAgentMessageDelegationId(message) === activeDelegation.id);
   const executorCallCountWithinExpectedRange = params.executorCallCount
     >= params.expectedExecutorCallRange.min
     && params.executorCallCount <= params.expectedExecutorCallRange.max;

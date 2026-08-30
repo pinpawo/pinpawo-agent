@@ -14,9 +14,9 @@ import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocu
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
+import type { CapabilityMessageLane } from '../messages';
 
-export type MessageLane = `capability:${string}`;
-export type PinpetMessageLane = MessageLane | 'orchestrator';
+export type { CapabilityMessageLane };
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
 export type { SubagentCompletionReason };
 
@@ -24,7 +24,7 @@ export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
 
 export type RunDelegationSummary = {
   id: string;
-  lane: MessageLane;
+  lane: CapabilityMessageLane;
   task: string;
   status: DelegationStatus;
   resultPreview: string | null;
@@ -32,7 +32,7 @@ export type RunDelegationSummary = {
 
 export type RunNextDelegation = {
   id: string;
-  lane: MessageLane;
+  lane: CapabilityMessageLane;
   mode: 'initial' | 'continue';
   task: string;
   contextSummary: string | null;
@@ -49,28 +49,17 @@ export type UserRequest = string;
 
 export type TaskActiveDelegation = {
   id: string;
-  lane: MessageLane;
+  lane: CapabilityMessageLane;
   task: string;
   contextSummary: string | null;
-  transcriptRunId: string;
+  /** Scope shared by this delegation's private messages across resume runs. */
+  runId: string;
   /** Stable user-task identity across fresh runs that resume this delegation. */
   traceId: string;
   status: 'pending' | 'awaiting_decision';
   resultPreview: string | null;
   /** Snapshot used to restore runUserRequest when this delegation is resumed. */
   userRequest: UserRequest;
-};
-
-export type SubagentAnnounce = {
-  messageId: string | null;
-  lane: MessageLane;
-  delegationId: string | null;
-  task: string | null;
-  text: string | null;
-  artifactRefs?: Pick<
-    CapabilityArtifactRef,
-    'id' | 'kind' | 'mimeType' | 'uri' | 'title' | 'preview' | 'capabilityId' | 'delegationId' | 'runId'
-  >[];
 };
 
 export type DecisionMode = 'answer' | 'capability';
@@ -116,7 +105,7 @@ export type OrchestratorConfig = {
   /**
    * Typed seam for the framework-internal Capability Planner. Production
    * defaults to createCapabilityPlannerAgent(); graph tests may inject a
-   * scripted runner without simulating its private file-tool transcript.
+   * scripted runner without simulating its private file-tool messages.
    */
   capabilityPlannerRunner?: CapabilityPlannerRunner;
   /**

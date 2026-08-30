@@ -17,8 +17,8 @@ import type {
 } from './runner';
 import { parsePlannerCommit } from './protocol';
 import {
-  projectCapabilityPlannerMessagesForModel,
-} from './messageContext';
+  buildCapabilityPlannerProviderMessages,
+} from './providerMessages';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import {
@@ -215,18 +215,20 @@ export function createCapabilityPlannerAgent(params: {
             timeout.signal,
           );
         }
+        const plannerInputMessage = new HumanMessage({
+          id: `planner:${input.inputId}`,
+          content: buildCapabilityPlannerAgentInput(
+            effectiveInput,
+            disclosedCapabilities,
+            routingManifest,
+          ),
+        });
+        const providerMessages = buildCapabilityPlannerProviderMessages(
+          input.messages,
+          plannerInputMessage,
+        );
         const result = await agent.invoke({
-          messages: [
-            ...projectCapabilityPlannerMessagesForModel(input.messages),
-            new HumanMessage({
-              id: `planner:${input.inputId}`,
-              content: buildCapabilityPlannerAgentInput(
-                effectiveInput,
-                disclosedCapabilities,
-                routingManifest,
-              ),
-            }),
-          ],
+          messages: providerMessages,
           currentInput: effectiveInput,
         }, config);
         timeout.signal.throwIfAborted();

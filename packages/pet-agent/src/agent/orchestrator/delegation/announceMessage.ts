@@ -1,15 +1,16 @@
-import { AIMessage, BaseMessage } from '@langchain/core/messages';
-import { indentXmlBlock, xmlTextBlock } from './prompts/shared';
-import type { SubagentCompletionReason, MessageLane } from './types';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
+import type { SubagentCompletionReason } from '../types';
+import type { CapabilityMessageLane } from '../../messages';
 
 export const DELEGATION_ANNOUNCE_META_KEY = 'delegationAnnounce';
-export const DELEGATION_ANNOUNCE_VERSION = 1;
+export const DELEGATION_ANNOUNCE_VERSION = 2;
 
 export type DelegationAnnounceData = {
   version: typeof DELEGATION_ANNOUNCE_VERSION;
-  sourceLane: MessageLane;
+  sourceLane: CapabilityMessageLane;
   delegationId: string;
-  transcriptRunId: string;
+  runId: string;
   announceMessageId: string;
   task: string | null;
   completionReason: SubagentCompletionReason;
@@ -28,7 +29,7 @@ function readPinpetMeta(message: BaseMessage): Record<string, unknown> {
     : {};
 }
 
-function isMessageLane(value: unknown): value is MessageLane {
+function isCapabilityLane(value: unknown): value is CapabilityMessageLane {
   return typeof value === 'string' && value.startsWith('capability:');
 }
 
@@ -46,9 +47,9 @@ function readTypedDelegationAnnounce(message: BaseMessage): DelegationAnnounceDa
   const data = raw as Record<string, unknown>;
   if (
     data.version !== DELEGATION_ANNOUNCE_VERSION
-    || !isMessageLane(data.sourceLane)
+    || !isCapabilityLane(data.sourceLane)
     || typeof data.delegationId !== 'string' || !data.delegationId
-    || typeof data.transcriptRunId !== 'string' || !data.transcriptRunId
+    || typeof data.runId !== 'string' || !data.runId
     || typeof data.announceMessageId !== 'string' || !data.announceMessageId
     || (data.task !== null && typeof data.task !== 'string')
     || !isCompletionReason(data.completionReason)
@@ -61,7 +62,7 @@ function readTypedDelegationAnnounce(message: BaseMessage): DelegationAnnounceDa
     version: DELEGATION_ANNOUNCE_VERSION,
     sourceLane: data.sourceLane,
     delegationId: data.delegationId,
-    transcriptRunId: data.transcriptRunId,
+    runId: data.runId,
     announceMessageId: data.announceMessageId,
     task: data.task,
     completionReason: data.completionReason,
@@ -89,7 +90,7 @@ export class DelegationAnnounceMessage extends AIMessage {
       id,
       sourceLane,
       delegationId,
-      transcriptRunId,
+      runId,
       announceMessageId,
       task,
       completionReason,
@@ -106,7 +107,7 @@ export class DelegationAnnounceMessage extends AIMessage {
             version: DELEGATION_ANNOUNCE_VERSION,
             sourceLane,
             delegationId,
-            transcriptRunId,
+            runId,
             announceMessageId,
             task,
             completionReason,
@@ -118,17 +119,10 @@ export class DelegationAnnounceMessage extends AIMessage {
     });
   }
 
-  static isInstance(message: unknown): message is AIMessage {
-    return BaseMessage.isInstance(message) && getDelegationAnnounce(message) !== null;
-  }
 }
 
 export function getDelegationAnnounce(message: BaseMessage): DelegationAnnounceData | null {
   return readTypedDelegationAnnounce(message);
-}
-
-export function isDelegationAnnounceMessage(message: BaseMessage): boolean {
-  return getDelegationAnnounce(message) !== null;
 }
 
 function escapeXmlAttribute(value: string): string {

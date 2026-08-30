@@ -3,16 +3,14 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  getMessageIsAnnounce,
-  getMessageLane,
-  getPinpetMeta,
+  getAgentMessageLane,
+  getAgentMessageMetadata,
   mainConversationMessages,
-  setPinpetMeta,
+  setAgentMessageMetadata,
   toolProtocolSafeMessages,
-} from './messageLanes';
-import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegationAnnounce';
+} from '../messages';
+import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
 import { clipForPrompt, readMessageText } from './utils';
-import { isDelegationBriefingMessage } from './delegationBriefing';
 import { xmlTextBlock } from './prompts/shared';
 
 const DEFAULT_KEEP_MESSAGES = 10;
@@ -23,7 +21,7 @@ export type ContextCompactionOptions = {
   keepMessages?: number;
   preserveAnnouncesFor?: {
     lane: string;
-    transcriptRunId: string;
+    runId: string;
     delegationId: string;
   };
 };
@@ -36,7 +34,7 @@ export type ContextCompactionResult = {
 
 export function isContextCompactionMessage(message: BaseMessage): boolean {
   return message.name === CONTEXT_COMPACTION_MESSAGE_NAME
-    || getPinpetMeta(message).source === CONTEXT_COMPACTION_MESSAGE_NAME;
+    || getAgentMessageMetadata(message).source === CONTEXT_COMPACTION_MESSAGE_NAME;
 }
 
 export function createContextCompactionMessage(
@@ -49,7 +47,7 @@ export function createContextCompactionMessage(
     ' role="context" source="compaction"',
   ));
   message.name = CONTEXT_COMPACTION_MESSAGE_NAME;
-  setPinpetMeta(message, {
+  setAgentMessageMetadata(message, {
     source: CONTEXT_COMPACTION_MESSAGE_NAME,
     synthetic: true,
     authority: 'none',
@@ -71,17 +69,16 @@ function selectMessagesToKeep(
   // still-lane-tagged Announce even when it falls outside the recent suffix.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;
-    if (!preserveAnnouncesFor || !getMessageIsAnnounce(message)) return false;
-    const meta = getPinpetMeta(message);
-    return getMessageLane(message) === preserveAnnouncesFor.lane
-      && meta.runId === preserveAnnouncesFor.transcriptRunId
+    if (!preserveAnnouncesFor || !getDelegationAnnounce(message)) return false;
+    const meta = getAgentMessageMetadata(message);
+    return getAgentMessageLane(message) === preserveAnnouncesFor.lane
+      && meta.runId === preserveAnnouncesFor.runId
       && meta.delegationId === preserveAnnouncesFor.delegationId;
   });
   return toolProtocolSafeMessages(selected);
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
-  if (isDelegationBriefingMessage(message)) return null;
   const announce = getDelegationAnnounce(message);
   if (announce) return formatDelegationAnnounceForModel(announce);
   const text = readMessageText(message);
@@ -100,7 +97,7 @@ function formatMainMessageForSummary(message: BaseMessage): string | null {
 }
 
 function formatMessageForSummary(message: BaseMessage): string | null {
-  if (getMessageLane(message)) return null;
+  if (getAgentMessageLane(message)) return null;
   return formatMainMessageForSummary(message);
 }
 
@@ -112,7 +109,7 @@ function buildSummaryItems(messages: BaseMessage[]): string[] {
 }
 
 function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
-  const mainMessageCount = messages.filter((message) => !getMessageLane(message)).length;
+  const mainMessageCount = messages.filter((message) => !getAgentMessageLane(message)).length;
 
   return [
     '[以下是更早上下文的自动压缩摘要]',
@@ -122,7 +119,7 @@ function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
   ].join('\n');
 }
 
-function buildSummaryTranscript(messages: BaseMessage[]): string {
+function renderMessagesForSummary(messages: BaseMessage[]): string {
   // The compaction watermark is derived from the provider's measured input
   // usage, and the retained suffix is excluded before this point. Pass every
   // remaining main message to the summarizer: per-message sampling loses facts
@@ -165,8 +162,8 @@ async function summarizeMessages(params: {
   messages: BaseMessage[];
   runnableConfig?: RunnableConfig;
 }): Promise<string> {
-  const transcript = buildSummaryTranscript(params.messages);
-  if (!transcript.trim()) {
+  const renderedMessages = renderMessagesForSummary(params.messages);
+  if (!renderedMessages.trim()) {
     return buildFallbackSummary(params.messages);
   }
 
@@ -180,7 +177,7 @@ async function summarizeMessages(params: {
         '丢弃：寒暄、重复内容、无关日志、已被后续结果覆盖的中间过程。',
         '用中文，结构化要点，尽量简洁；优先写清任务状态和结果。',
       ].join('\n')),
-      new HumanMessage(`请压缩以下旧上下文：\n\n${transcript}`),
+      new HumanMessage(`请压缩以下旧上下文：\n\n${renderedMessages}`),
     ],
     params.runnableConfig,
   );

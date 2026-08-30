@@ -7,7 +7,7 @@ import type {
   AgentPlan,
 } from '@pinpawo/agent-session';
 import {
-  readMessageCreatedAtUtc,
+  readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   mainConversationMessages,
@@ -89,7 +89,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
     if (!text) {
       return [];
     }
-    const createdAt = readMessageCreatedAtUtc(message);
+    const createdAt = readAgentMessageCreatedAt(message);
     return [{
       ...source,
       text,
@@ -149,7 +149,7 @@ function readTuiCheckpointMessageSource(
   if (!announce || typeof announce !== 'object' || Array.isArray(announce)) {
     return { role: 'assistant' };
   }
-  const runId = (announce as Record<string, unknown>).transcriptRunId;
+  const runId = (announce as Record<string, unknown>).runId;
   return typeof runId === 'string' && runId.trim()
     ? { role: 'subagent', requestId: runId }
     : null;

@@ -6,7 +6,7 @@ import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
-import { getMessageLane } from '../../src/agent/orchestrator/messageLanes.ts';
+import { getAgentMessageLane } from '../../src/agent/messages/index.ts';
 import {
   defineInstructionDocument,
   type AgentCapability,
@@ -76,7 +76,7 @@ function buildRecordingSubagent(responses: string[]) {
     const runnable = bindTools(tools);
     runnable.invoke = async (input) => {
       const messages = Array.isArray(input) ? input : [];
-      laneMessageCounts.push(messages.filter((message) => getMessageLane(message as never) !== null).length);
+      laneMessageCounts.push(messages.filter((message) => getAgentMessageLane(message as never) !== null).length);
       const response = responses[responseIndex] ?? responses.at(-1) ?? '';
       responseIndex += 1;
       return new AIMessageChunk(response);
@@ -198,7 +198,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
   };
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
-  const remainingLaneMessageCount = messages.filter((message) => getMessageLane(message as never) !== null).length;
+  const remainingLaneMessageCount = messages.filter((message) => getAgentMessageLane(message as never) !== null).length;
   const expected = testCase.expected;
   const scores: LangfuseEvalScore[] = [
     {

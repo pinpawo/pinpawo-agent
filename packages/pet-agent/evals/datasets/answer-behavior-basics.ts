@@ -195,11 +195,11 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           { role: 'user', text: '完成发布准备：审查风险、修复阻塞问题并提交 PR。' },
           {
             role: 'assistant',
-            text: '风险审查已完成：发现阻塞项 cache-key-17；建议统一 transcriptRunId 的使用。风险审查阶段已完成。',
+            text: '风险审查已完成：发现阻塞项 cache-key-17；建议统一 runId 的使用。风险审查阶段已完成。',
           },
           {
             role: 'assistant',
-            text: '阻塞问题修复已完成：已统一 transcriptRunId，并为 resume 场景补充测试。修复阶段已完成，测试通过。',
+            text: '阻塞问题修复已完成：已统一 runId，并为 resume 场景补充测试。修复阶段已完成，测试通过。',
           },
           {
             role: 'assistant',
@@ -214,11 +214,11 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
           acceptedResults: [
             {
               task: '审查风险',
-              result: '风险审查已完成：发现阻塞项 cache-key-17；建议统一 transcriptRunId 的使用。风险审查阶段已完成。',
+              result: '风险审查已完成：发现阻塞项 cache-key-17；建议统一 runId 的使用。风险审查阶段已完成。',
             },
             {
               task: '修复阻塞问题',
-              result: '阻塞问题修复已完成：已统一 transcriptRunId，并为 resume 场景补充测试。修复阶段已完成，测试通过。',
+              result: '阻塞问题修复已完成：已统一 runId，并为 resume 场景补充测试。修复阶段已完成，测试通过。',
             },
             {
               task: '提交 PR',
@@ -232,7 +232,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         objective: '把多个阶段性 handoff 合并成一份围绕用户目标的闭合摘要，而不是逐条重播每个阶段。',
         acceptanceCriteria: [
           { id: 'task_level_completion', statement: '从整个发布准备目标说明任务已经完成，而不是只报告其中一个阶段。' },
-          { id: 'key_cross_handoff_facts_preserved', statement: '保留 cache-key-17 已通过统一 transcriptRunId 修复、resume 测试通过、PR #643 已创建且没有剩余阻塞项。' },
+          { id: 'key_cross_handoff_facts_preserved', statement: '保留 cache-key-17 已通过统一 runId 修复、resume 测试通过、PR #643 已创建且没有剩余阻塞项。' },
           { id: 'handoffs_synthesized_once', statement: '围绕最终目标合并多个阶段结果，没有按风险审查、阻塞修复和 PR 提交三个执行阶段逐项重述，也没有重复每个阶段的完成状态。' },
           { id: 'self_contained_summary', statement: '回复自身包含用户理解最终交付所需的关键信息，没有仅引用上文。' },
         ],

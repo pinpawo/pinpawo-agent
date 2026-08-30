@@ -114,7 +114,7 @@ through complete graph runs:
    planning remains owned by the Capability Planner.
 
 2. The Capability Planner is a private, trace-scoped tool-loop agent. It owns
-   current-result acceptance and next-step planning together. Its transcript and
+   current-result acceptance and next-step planning together. Its provider messages and
    document observations are not a public graph decision contract, so its eval
    invokes the complete production Planner loop against a materialized
    Capability Document Workspace rather than simulating a single Decision call:

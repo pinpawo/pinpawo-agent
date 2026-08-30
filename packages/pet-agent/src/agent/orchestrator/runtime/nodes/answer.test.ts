@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentModels } from '../../../../types/agent';
-import { DelegationAnnounceMessage } from '../../delegationAnnounce';
+import { DelegationAnnounceMessage } from '../../delegation';
 import type { OrchestratorStateType } from '../../state';
 import {
   createAnswerNode,
@@ -26,7 +26,7 @@ function delegationAnnounce(params: {
   id: string;
   sourceLane: `capability:${string}`;
   delegationId: string;
-  transcriptRunId: string;
+  runId: string;
   task: string;
   result: string;
 }) {
@@ -119,7 +119,7 @@ test('Answer projects only current-run completed handoffs in delegation order', 
     id: 'announce-2',
     sourceLane: 'capability:general',
     delegationId: 'delegation-2',
-    transcriptRunId: 'run-2',
+    runId: 'run-2',
     task: '提交 PR',
     result: '第二项结果。',
   });
@@ -127,7 +127,7 @@ test('Answer projects only current-run completed handoffs in delegation order', 
     id: 'announce-1',
     sourceLane: 'capability:explore',
     delegationId: 'delegation-1',
-    transcriptRunId: 'run-1',
+    runId: 'run-1',
     task: '审查风险',
     result: '第一项结果。',
   });
@@ -135,7 +135,7 @@ test('Answer projects only current-run completed handoffs in delegation order', 
     id: 'announce-1-old',
     sourceLane: 'capability:explore',
     delegationId: 'delegation-1',
-    transcriptRunId: 'run-1',
+    runId: 'run-1',
     task: '审查风险',
     result: '第一项旧副本。',
   });
@@ -210,7 +210,7 @@ test('goal_done asks Answer to summarize the completed task from canonical histo
     id: 'announce-browser',
     sourceLane: 'capability:explore',
     delegationId: 'delegation-browser',
-    transcriptRunId: 'run-browser',
+    runId: 'run-browser',
     task: completedTask,
     result: '公开信息已经提取并结构化返回。',
   });
@@ -259,7 +259,7 @@ test('Answer runtime projects unfinished work as facts rather than prose', () =>
         lane: 'capability:general',
         task: '检查剩余文件',
         contextSummary: null,
-        transcriptRunId: 'run-1',
+        runId: 'run-1',
         traceId: 'trace-1',
         status: 'awaiting_decision',
         resultPreview: null,

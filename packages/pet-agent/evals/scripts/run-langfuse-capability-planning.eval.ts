@@ -227,7 +227,7 @@ async function main() {
               mode: 'boundary',
               activeDelegation: {
                 delegationId: 'eval-delegation',
-                transcriptRunId: `eval:${testCase.id}`,
+                runId: `eval:${testCase.id}`,
                 capability: activeCapability,
                 task: activeTask,
               },

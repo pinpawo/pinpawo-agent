@@ -85,7 +85,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       compactContext: 'compactContext',
     })
     // Run entry uses explicit task lifecycle state. Lane announces remain
-    // transcript/context storage and are not the normal control-flow signal.
+    // message/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
       plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',
       captureUserRequest: 'captureUserRequest',

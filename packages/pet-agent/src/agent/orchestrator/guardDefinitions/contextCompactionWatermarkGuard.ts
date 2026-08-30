@@ -7,7 +7,7 @@ import {
   checkProviderInputWatermark,
   readLatestProviderInputTokens,
 } from '../../tokenUsage';
-import { mainConversationMessages } from '../messageLanes';
+import { mainConversationMessages } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import {
   ORCHESTRATOR_GUARD_NAME,

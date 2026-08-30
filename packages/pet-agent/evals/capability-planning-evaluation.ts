@@ -37,7 +37,7 @@ export function buildCapabilityPlanningMessages(
 /**
  * Build canonical history for one Planner eval invocation. A Boundary's
  * current result belongs to the private delegation lane and is appended by the
- * runner with announce metadata, so remove one legacy transcript copy of that
+ * runner with announce metadata, so remove one legacy message copy of that
  * same result from ordinary main history when present.
  */
 export function buildCapabilityPlanningHistoryMessages(

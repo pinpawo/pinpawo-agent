@@ -18,7 +18,7 @@ import {
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
 import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation/index.ts';
-import { buildAgentModelMessages } from '../../src/agent/orchestrator/modelMessages.ts';
+import { prepareModelRequestMessages } from '../../src/agent/orchestrator/modelRequestMessages.ts';
 import {
   queryAgentMessages,
   setAgentMessageMetadata,
@@ -173,9 +173,7 @@ function renderTool(tool: StructuredTool) {
 function renderMode(mode: CapabilityPlannerMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
-  const projectedMessages = buildAgentModelMessages({
-    history: mainSelection.messages,
-  });
+  const projectedMessages = prepareModelRequestMessages(mainSelection.messages);
   const searchTool = createCapabilityPlannerSearchTool(async () => ({
     ok: true,
     data: { entries: [] },

@@ -12,7 +12,7 @@ import {
   readLatestAnnounce,
   reconcileDelegationPrivateMessages,
 } from '../../delegation';
-import { buildAgentModelMessages } from '../../modelMessages';
+import { createModelRequestMessagesMiddleware } from '../../modelRequestMessages';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
@@ -54,6 +54,7 @@ export function createCapabilityNode(params: {
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   } = params;
+  const modelRequestMessagesMiddleware = createModelRequestMessagesMiddleware();
 
   // Node: capability — reads capabilities, tools, execution from configurable
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -124,10 +125,7 @@ export function createCapabilityNode(params: {
             guidance: runNextDelegation.contextSummary,
           },
     );
-    const scopedMessages = buildAgentModelMessages({
-      history: canonicalMessages,
-      current: [delegationBriefing],
-    });
+    const scopedMessages = [...canonicalMessages, delegationBriefing];
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -222,7 +220,10 @@ export function createCapabilityNode(params: {
         maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
         contextWindowTokens: subagentContextWindowTokens,
         generationReserveTokens: subagentGenerationReserveTokens,
-        middleware: usedResolvedToolkitExecution.middleware,
+        middleware: [
+          ...usedResolvedToolkitExecution.middleware,
+          modelRequestMessagesMiddleware,
+        ],
         runtimeContext: {
           executionScope: {
             threadId,

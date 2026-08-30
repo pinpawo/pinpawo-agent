@@ -1,6 +1,6 @@
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state';
 import type {
-  MessageLane,
+  CapabilityMessageLane,
   RunDelegationSummary,
   RunNextDelegation,
   TaskActiveDelegation,
@@ -17,7 +17,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
 }
 
-function isMessageLane(value: unknown): value is MessageLane {
+function isCapabilityLane(value: unknown): value is CapabilityMessageLane {
   return typeof value === 'string' && value.startsWith('capability:');
 }
 
@@ -28,7 +28,7 @@ function isDelegationStatus(value: unknown): value is RunDelegationSummary['stat
 function isRunDelegationSummary(value: unknown): value is RunDelegationSummary {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
-    && isMessageLane(value.lane)
+    && isCapabilityLane(value.lane)
     && (value.mode === 'initial' || value.mode === 'continue')
     && typeof value.task === 'string'
     && isDelegationStatus(value.status)
@@ -38,7 +38,7 @@ function isRunDelegationSummary(value: unknown): value is RunDelegationSummary {
 function isRunNextDelegation(value: unknown): value is RunNextDelegation {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
-    && isMessageLane(value.lane)
+    && isCapabilityLane(value.lane)
     && typeof value.task === 'string'
     && (value.contextSummary === null || typeof value.contextSummary === 'string');
 }
@@ -46,10 +46,10 @@ function isRunNextDelegation(value: unknown): value is RunNextDelegation {
 function isTaskActiveDelegation(value: unknown): value is TaskActiveDelegation {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
-    && isMessageLane(value.lane)
+    && isCapabilityLane(value.lane)
     && typeof value.task === 'string'
     && (value.contextSummary === null || typeof value.contextSummary === 'string')
-    && typeof value.transcriptRunId === 'string'
+    && typeof value.runId === 'string'
     && (value.status === 'pending' || value.status === 'awaiting_decision')
     && (value.resultPreview === null || typeof value.resultPreview === 'string');
 }

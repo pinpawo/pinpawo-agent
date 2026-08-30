@@ -28,7 +28,7 @@ Everything below is classified on two independent axes. Do not conflate them.
 | `INSTRUCTION` | The model must obey it. System prompts only. |
 | `BOUNDARY` | Defines what "done" means for this step. |
 | `FACT` | Read-only data. Explicitly *not* an instruction. Carries `authority="none"`. |
-| `HISTORY` | Canonical conversation/transcript messages. |
+| `HISTORY` | Canonical conversation or private delegation messages. |
 
 The repo encodes Axis 2 in the XML itself — blocks carry `role=`, `source=` and
 `trust=`/`authority=` attributes. When adding a block, set these; they are the
@@ -118,7 +118,7 @@ Entry initializes a clean run-scoped Planner session. Boundary queries the exact
 active delegation, extracts every typed Announce in chronological order, and
 places that evidence in the current `CapabilityPlannerInput`; exactly the latest
 message id is the evaluation target. This projection never changes the Announces
-or root messages. Private Capability Human/AI/Tool transcript is never included.
+or root messages. Private Capability Human/AI/Tool messages are never included.
 The prior remaining plan is marked as a non-authoritative proposal that the
 Boundary must revalidate against current evidence.
 
@@ -151,13 +151,13 @@ Executes one delegated task. Source: `runtime/nodes/capability.ts`.
 | Slot | Class | Content |
 |---|---|---|
 | system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static) + `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ workdir, artifactDiscovery })` |
-| history | `DYNAMIC` / `HISTORY` | `laneMessages(messages, lane, transcriptRunId, delegationId)` — canonical main conversation plus this delegation's actual executor transcript |
+| history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().delegation(scope).select()` — canonical main conversation plus this delegation's private messages |
 | boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context and current task; always last |
 
-`laneMessages()` returns unlaned main-conversation messages **plus** only this
-delegation's own lane messages. A different delegation in the same lane gets a
-fresh `delegationId` and starts clean: conclusions cross task boundaries through
-handoffs and summaries, transcripts do not.
+The query returns unlaned main-conversation messages **plus** only this
+delegation's own private messages. A different delegation in the same lane gets
+a fresh `delegationId` and starts clean: conclusions cross task boundaries
+through handoffs and summaries; private messages do not.
 
 The Human-role briefing is assembled immediately before the Capability call and is not
 written to checkpoint history. `runUserRequest` and delegation lifecycle state

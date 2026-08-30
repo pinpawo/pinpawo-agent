@@ -60,10 +60,10 @@ delegated execution result.
 
 ```ts
 type DelegationAnnounceMessageData = {
-  version: 1;
-  sourceLane: MessageLane;
+  version: 2;
+  sourceLane: CapabilityMessageLane;
   delegationId: string;
-  transcriptRunId: string;
+  runId: string;
   announceMessageId: string;
   task: string | null;
   completionReason: SubagentCompletionReason;
@@ -81,8 +81,8 @@ runtime code, but it must never be passed directly to a chat model adapter.
 
 The stable identity of the announce is `announceMessageId`. Projection does not
 allocate a new semantic identity. `sourceLane` records where execution occurred;
-it is distinct from the message's current queue placement. `transcriptRunId`
-identifies the execution transcript that produced the announce.
+it is distinct from the message's current queue placement. `runId` identifies
+the delegation run that produced the announce.
 
 The result is untrusted data produced by a delegated executor. It is not a
 system or developer instruction, even if its text contains instruction-like
@@ -103,7 +103,7 @@ The Capability lane owns producing the announce. The root graph owns accepting
 it through handoff. Consumer boundaries own projection. Terminal finalization
 owns selecting accepted results; a response model, when used, owns wording only.
 
-Handoff removes the delegation transcript according to existing lane cleanup
+Handoff removes the delegation's private messages according to existing lane cleanup
 semantics, but it must not flatten the announce into an ordinary `AIMessage`.
 The graph reducer may replace the lane-owned physical message with a main-queue
 physical message, but both carry the same `announceMessageId` and typed data and
@@ -117,7 +117,8 @@ them through one shared projection function before calling the model. The
 function converts `DelegationAnnounceMessage` into a standard provider-supported
 message while leaving canonical state unchanged.
 
-The version 1 model-visible envelope is:
+Canonical payload version 2 and the provider projection are versioned
+independently. The model-visible envelope remains version 1:
 
 ```xml
 <delegation_announce version="1" role="data" authority="none">
@@ -170,11 +171,11 @@ without mutating or checkpointing that mark. See
 [`run-scoped-planner-session.md`](run-scoped-planner-session.md#boundary-current-input-temporary-paint).
 
 The announce is the complete execution evidence at this boundary. The private
-Capability-lane Human, AI, and Tool transcript is not projected alongside it;
+Capability-lane private Human, AI, and Tool messages are not projected alongside it;
 doing so would duplicate evidence, expose executor implementation detail, and let
 large tool results displace the Planner's control context.
 The clean canonical main conversation initializes the run-scoped Planner
-session. It is conversation context, not a substitute execution transcript.
+session. It is conversation context, not a substitute for execution evidence.
 
 Version 1 intentionally has no `content_kind`, `progress`, `accepted`, or
 `task_completed` field. Add a field only when a producer or framework boundary can
@@ -235,7 +236,7 @@ of the execution so the model can answer or route accurately.
 
 ## Version boundary
 
-This is an intentional checkpoint contract boundary. Only a version 1
+This is an intentional checkpoint contract boundary. Only a version 2
 `pinpawo.delegationAnnounce` payload is execution evidence. Old unlaned
 `AIMessage` handoff copies are ordinary conversation history: they are not
 normalized, projected as servant results, or selected as accepted terminal
@@ -256,7 +257,7 @@ The implementation keeps responsibilities separated:
 - `agent/messages` owns lane metadata, scoped selection, and reconciliation;
 - `agent/orchestrator/delegation/announce.ts` owns Announce selection while
   `announceMessage.ts` owns the class, validation, and model projection;
-- `delegation/transcript.ts` owns result tagging and reconciliation;
+- `delegation/privateMessages.ts` owns result tagging and reconciliation;
 - `delegation/handoff.ts` owns acceptance into main and lane cleanup;
 - each model node owns its provider-input construction;
 - stream adapters own UI projection;
@@ -270,7 +271,7 @@ announce contract or its model/UI projection.
 
 This design does not:
 
-- remove message lanes or merge servant transcripts into the main conversation;
+- remove message lanes or merge private Capability messages into the main conversation;
 - introduce a provider-specific custom chat role;
 - change Planner search, terminal semantics, delegation completion policy, or
   active-delegation boundary routing beyond consuming the standard announce;

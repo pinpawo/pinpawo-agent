@@ -148,7 +148,7 @@ test('orchestrator context compaction summarizes a complete accepted main announ
     id: 'delegation-announce:run-1:delegation-1:announce-1',
     sourceLane: 'capability:general',
     delegationId: 'delegation-1',
-    transcriptRunId: 'run-1',
+    runId: 'run-1',
     announceMessageId: 'announce-1',
     task: '生成完整报告',
     completionReason: 'natural',
@@ -212,7 +212,7 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
       keepMessages: 1,
       preserveAnnouncesFor: {
         lane: 'capability:general',
-        transcriptRunId: 'run-1',
+        runId: 'run-1',
         delegationId: 'delegation-1',
       },
     },

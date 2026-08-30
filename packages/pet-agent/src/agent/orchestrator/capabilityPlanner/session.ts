@@ -20,7 +20,7 @@ export type PlannerSessionState = {
 
 /**
  * Canonical resume seed written only when a root run ends with unfinished work.
- * It deliberately excludes Planner transcript, disclosure/search accounting,
+ * It deliberately excludes Planner provider messages, disclosure/search accounting,
  * revision, and commit replay state.
  */
 export type PlannerTaskContinuation = {

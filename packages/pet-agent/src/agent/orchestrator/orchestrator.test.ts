@@ -43,12 +43,13 @@ import {
 import {
   getAgentMessageDelegationId,
   getAgentMessageLane,
-  getAgentMessageTranscriptRunId,
+  getAgentMessageRunId,
   getAgentMessageMetadata,
-  laneMessages,
   mainConversationMessages,
+  queryAgentMessages,
   readAgentMessageCreatedAt,
   setAgentMessageMetadata,
+  toolProtocolSafeMessages,
 } from '../messages';
 import {
   DelegationAnnounceMessage,
@@ -57,8 +58,8 @@ import {
   getMessageHandoffSource,
   getMessageIsAnnounce,
   readLatestAnnounce,
-  selectDelegationLaneAnnounceMessage,
-  tagNewLaneMessages,
+  selectDelegationAnnounceMessage,
+  reconcileDelegationPrivateMessages,
   isDelegationBriefingMessage,
   materializeDelegation,
 } from './delegation';
@@ -73,6 +74,21 @@ import {
   isContextCompactionMessage,
 } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
+
+function selectCapabilityHistory(
+  messages: readonly BaseMessage[],
+  lane: `capability:${string}`,
+  runId: string,
+  delegationId: string,
+) {
+  return toolProtocolSafeMessages(
+    queryAgentMessages(messages)
+      .main()
+      .delegation({ lane, runId, delegationId })
+      .select()
+      .messages,
+  );
+}
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
 import type { SubagentRuntimeContext } from '../../types/subagent';
 import {
@@ -890,7 +906,7 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
     lane: 'capability:general',
     task: '验证当前改动。',
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '验证尚未形成可接受的边界决定。',
@@ -976,7 +992,7 @@ test('Planner boundary ordinary text cannot enter root messages through the runn
     lane: 'capability:general',
     task: '重新检查网络并核对 Handoff。',
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '网络检查已完成。',
@@ -1037,7 +1053,7 @@ test('an explicit resume without Planner state initializes a fresh session', asy
     lane: 'capability:general',
     task: '继续旧任务',
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '旧版本结果',
@@ -1328,7 +1344,7 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     lane: 'capability:general',
     task: '读取文件并运行 lint',
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: currentAnnounceText,
@@ -1456,7 +1472,7 @@ test('delegation goal_done summarizes and preserves the handed-off result', asyn
     lane: 'capability:general',
     task: '搜索并整理 vibecoding 模型排行榜。',
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
@@ -1540,7 +1556,7 @@ test('user_input_required returns control without claiming delegation completion
     lane: 'capability:general',
     task,
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: announceText,
@@ -1592,7 +1608,7 @@ test('user_input_required returns control without claiming delegation completion
   assert.equal(result.taskActiveDelegation?.id, 'task-user-choice');
   assert.equal(result.taskActiveDelegation?.status, 'awaiting_decision');
   assert.equal(
-    laneMessages(
+    selectCapabilityHistory(
       result.messages,
       'capability:general',
       input.runId,
@@ -1618,7 +1634,7 @@ test('capability errors retain the active delegation and lane without a handoff'
     lane: 'capability:general',
     task: '继续处理会失败的 delegated task',
     contextSummary: null,
-    transcriptRunId: 'run-capability-error',
+    runId: 'run-capability-error',
     traceId: 'trace-capability-error',
     status: 'pending',
     resultPreview: null,
@@ -1626,7 +1642,7 @@ test('capability errors retain the active delegation and lane without a handoff'
   };
   const messages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
   });
   const failingCapability: AgentCapability = {
     ...capability('general', 'General-purpose capability.'),
@@ -1657,7 +1673,7 @@ test('capability errors retain the active delegation and lane without a handoff'
   };
   await graph.updateState(config, {
     messages,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
     taskActiveDelegation: activeDelegation,
     runDelegationSummaries: [{
       id: activeDelegation.id,
@@ -1683,14 +1699,14 @@ test('capability errors retain the active delegation and lane without a handoff'
   const checkpointState = checkpoint.values as OrchestratorStateType;
   assert.equal(checkpointState.taskActiveDelegation?.id, activeDelegation.id);
   assert.equal(
-    checkpointState.taskActiveDelegation?.transcriptRunId,
-    activeDelegation.transcriptRunId,
+    checkpointState.taskActiveDelegation?.runId,
+    activeDelegation.runId,
   );
   assert.equal(
-    laneMessages(
+    selectCapabilityHistory(
       checkpointState.messages,
       activeDelegation.lane,
-      activeDelegation.transcriptRunId,
+      activeDelegation.runId,
       activeDelegation.id,
     ).some((message) => message instanceof ToolMessage),
     true,
@@ -1792,7 +1808,7 @@ test('answer errors checkpoint run-scoped cleanup before they are rethrown', asy
   assert.equal(state.runTerminalError?.langChainErrorCode, 'MODEL_RATE_LIMIT');
 });
 
-test('answer filters private delegation transcripts by lane without parsing message text', async () => {
+test('answer filters private delegation messages by lane without parsing message text', async () => {
   let answerInput = '';
   const model = {
     invoke: async (messages: unknown[]) => {
@@ -1811,8 +1827,8 @@ test('answer filters private delegation transcripts by lane without parsing mess
     actor: testActor,
   });
 
-  const privateTranscript = new AIMessage('正文完全普通，但 metadata 表明它属于 delegation lane。');
-  setAgentMessageMetadata(privateTranscript, {
+  const privateMessage = new AIMessage('正文完全普通，但 metadata 表明它属于 delegation lane。');
+  setAgentMessageMetadata(privateMessage, {
     lane: 'capability:general',
     runId: 'answer-run',
     delegationId: 'answer-task',
@@ -1820,7 +1836,7 @@ test('answer filters private delegation transcripts by lane without parsing mess
   const briefingShapedConversation = new AIMessage('【委派简报】\n- 这是用户可见的普通历史内容');
   const state = await graph.invoke(buildOrchestratorRunInput([
     new HumanMessage('之前做了什么？'),
-    privateTranscript,
+    privateMessage,
     briefingShapedConversation,
     new HumanMessage('直接回答我。'),
   ]), {
@@ -1836,7 +1852,7 @@ test('answer filters private delegation transcripts by lane without parsing mess
   // lane-tagged one does not.
   const canonical = mainConversationMessages(state.messages);
   assert.equal(canonical.includes(briefingShapedConversation), true);
-  assert.equal(canonical.includes(privateTranscript), false);
+  assert.equal(canonical.includes(privateMessage), false);
 });
 
 test('answer returns model output unchanged without classifying its text shape', async () => {
@@ -1978,7 +1994,7 @@ test('limit-reached progress announce lets model choose the same capability dele
     lane: 'capability:inspect_repo',
     task: '调查仓库 capability 注册链路。',
     contextSummary: null,
-    transcriptRunId: input.runId,
+    runId: input.runId,
     traceId: input.traceId,
     status: 'awaiting_decision',
     resultPreview: '(no matches)',
@@ -4320,7 +4336,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
   // After the resumed tool approval, the Planner boundary finishes the task.
-  // The result is handed off into the main queue and the lane transcript is
+  // The result is handed off into the main queue and the private messages is
   // cleared, so continuation state is no longer inferred from a stale announce.
   const handoffCopy = mainConversationMessages(finalState.messages)
     .find((message) => getMessageHandoffSource(message)?.task === 'run shell');
@@ -4336,7 +4352,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.ok(handoffSource?.announceMessageId);
   assert.match(String(handoffCopy.content), /ran git status/);
   assert.equal(readLatestAnnounce(finalState.messages, {
-    transcriptRunId: finalState.runId,
+    runId: finalState.runId,
   }), null);
 });
 
@@ -4500,10 +4516,10 @@ test('toolkit review rejection rolls back the full action and retains the delega
 
   const activeDelegation = finalState.taskActiveDelegation;
   assert.ok(activeDelegation);
-  const retainedLane = laneMessages(
+  const retainedLane = selectCapabilityHistory(
     finalState.messages,
     activeDelegation.lane,
-    activeDelegation.transcriptRunId,
+    activeDelegation.runId,
     activeDelegation.id,
   );
   assert.equal(
@@ -4682,10 +4698,10 @@ test('toolkit review run interruption retains the delegation without another mod
 
   const activeDelegation = finalState.taskActiveDelegation;
   assert.ok(activeDelegation);
-  const retainedLane = laneMessages(
+  const retainedLane = selectCapabilityHistory(
     finalState.messages,
     activeDelegation.lane,
-    activeDelegation.transcriptRunId,
+    activeDelegation.runId,
     activeDelegation.id,
   );
   const cancelledToolResult = retainedLane.find((message) =>
@@ -4872,7 +4888,7 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   const update = buildSubagentHandoff({
     messages,
     lane: 'capability:explore',
-    transcriptRunId: 't1',
+    runId: 't1',
     delegationId: 'd1',
   });
   assert.ok(update, 'handoff update should be produced for a completed delegation');
@@ -4898,12 +4914,12 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   });
 });
 
-test('handoff idempotency is scoped by delegation lane and transcript run id', () => {
+test('handoff idempotency is scoped by delegation lane and run id', () => {
   const oldCopy = new DelegationAnnounceMessage({
     id: 'stored-old-announce',
     sourceLane: 'capability:general',
     delegationId: 'same-delegation',
-    transcriptRunId: 'run-old',
+    runId: 'run-old',
     task: 'same task',
     announceMessageId: 'announce-old',
     completionReason: 'natural',
@@ -4914,7 +4930,7 @@ test('handoff idempotency is scoped by delegation lane and transcript run id', (
     id: 'stored-current-announce',
     sourceLane: 'capability:general',
     delegationId: 'same-delegation',
-    transcriptRunId: 'run-current',
+    runId: 'run-current',
     task: 'same task',
     announceMessageId: 'announce-current',
     completionReason: 'natural',
@@ -4972,7 +4988,7 @@ test('buildSubagentHandoff retains only announce identity and result', () => {
   const update = buildSubagentHandoff({
     messages: [userAsk, announce],
     lane: 'capability:explore',
-    transcriptRunId: 'run-1',
+    runId: 'run-1',
     delegationId: 'd-announce',
   });
   assert.ok(update);
@@ -5009,7 +5025,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   const update = buildSubagentHandoff({
     messages: [humanAsk, intermediate, announce],
     lane: 'capability:general',
-    transcriptRunId: 'run-5',
+    runId: 'run-5',
     delegationId: 'd-keep',
     clearLane: false,
   });
@@ -5036,7 +5052,7 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
   const update = buildSubagentHandoff({
     messages: [new HumanMessage('做点事'), intermediate],
     lane: 'capability:general',
-    transcriptRunId: 't1',
+    runId: 't1',
     delegationId: 'd1',
   });
   assert.equal(update, null);
@@ -5054,7 +5070,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
   assert.throws(() => buildSubagentHandoff({
     messages: [announce],
     lane: 'capability:general',
-    transcriptRunId: 't1',
+    runId: 't1',
     delegationId: 'd1',
   }), /missing the required message id/);
 });
@@ -5095,7 +5111,7 @@ test('terminal Planner action keeps active delegation when handoff cannot be bui
     lane: 'capability:explore',
     task: '当前 explore 任务',
     contextSummary: '已有任务仍待判断。',
-    transcriptRunId: 'run-active',
+    runId: 'run-active',
     traceId: 'trace-active',
     status: 'awaiting_decision',
     resultPreview: null,
@@ -5177,7 +5193,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
     lane: 'capability:general',
     task: '批量梳理仓库问题',
     contextSummary: '已完成部分。',
-    transcriptRunId: 'run-continue',
+    runId: 'run-continue',
     traceId: 'trace-continue',
     status: 'awaiting_decision',
     resultPreview: '已完成第一批抓取，剩余待查。',
@@ -5187,7 +5203,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
     [new HumanMessage('继续处理仓库')],
     { activeDelegationTransition: 'resume_active' },
   );
-  activeDelegation.transcriptRunId = inputBase.runId;
+  activeDelegation.runId = inputBase.runId;
   const input = {
     ...inputBase,
     taskActiveDelegation: activeDelegation,
@@ -5232,8 +5248,8 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
   assert.equal(handoffSource.handoffFrom, 'capability:general');
   assert.equal(handoffSource.runId, input.runId);
   assert.equal(handoffSource.task, '批量梳理仓库问题');
-  // Final handoff on answer should clear lane transcript for finished continuation.
-  assert.equal(laneMessages(state.messages, 'capability:general', input.runId, activeDelegation.id)
+  // Final handoff on answer should clear private messages for finished continuation.
+  assert.equal(selectCapabilityHistory(state.messages, 'capability:general', input.runId, activeDelegation.id)
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
 });
 
@@ -5267,7 +5283,7 @@ test('Planner continuation path rechecks run iteration guard before next decisio
     lane: 'capability:general',
     task: '执行长流程任务',
     contextSummary: '持续进行。',
-    transcriptRunId: 'run-continue-limit',
+    runId: 'run-continue-limit',
     traceId: 'trace-continue-limit',
     status: 'awaiting_decision',
     resultPreview: '进度已完成前段。',
@@ -5277,7 +5293,7 @@ test('Planner continuation path rechecks run iteration guard before next decisio
     [new HumanMessage('继续执行任务')],
     { activeDelegationTransition: 'resume_active' },
   );
-  activeDelegation.transcriptRunId = inputBase.runId;
+  activeDelegation.runId = inputBase.runId;
   const input = {
     ...inputBase,
     taskActiveDelegation: activeDelegation,
@@ -5358,7 +5374,7 @@ test('Planner boundary accepts each announce attempt once', async () => {
     lane: 'capability:general',
     task: '处理大型清单',
     contextSummary: '尚未完成。',
-    transcriptRunId: 'run-dup-copy',
+    runId: 'run-dup-copy',
     traceId: 'trace-dup-copy',
     status: 'awaiting_decision',
     resultPreview: '进度更新：已完成一部分，继续保留。',
@@ -5368,7 +5384,7 @@ test('Planner boundary accepts each announce attempt once', async () => {
     [new HumanMessage('继续清单处理')],
     { activeDelegationTransition: 'resume_active' },
   );
-  activeDelegation.transcriptRunId = inputBase.runId;
+  activeDelegation.runId = inputBase.runId;
   const input = {
     ...inputBase,
     taskActiveDelegation: activeDelegation,
@@ -5448,7 +5464,7 @@ test('lane tagging hides subagent messages from route and records completed anno
     new AIMessage({ id: 'task-1-announce', content: '已查到热门动态。' }),
   ];
 
-  const tagged = tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'natural', {
+  const tagged = reconcileDelegationPrivateMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '查公开资料',
     announceMessageId: 'task-1-announce',
@@ -5459,7 +5475,7 @@ test('lane tagging hides subagent messages from route and records completed anno
   assert.equal(getMessageIsAnnounce(messages[1]), true);
   assert.equal(getAgentMessageDelegationId(messages[1]), 'task-1');
   assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下公开资料']);
-  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
+  assert.deepEqual(selectCapabilityHistory(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我查一下公开资料',
     '已查到热门动态。',
   ]);
@@ -5488,7 +5504,7 @@ test('lane reconciliation never emits root removals for the current briefing', (
   });
   const finalAnswer = new AIMessage({ id: 'final-answer', content: '任务完成' });
 
-  const update = tagNewLaneMessages(
+  const update = reconcileDelegationPrivateMessages(
     [human, finalAnswer],
     [human, persistedProgress, briefing],
     'capability:general',
@@ -5514,7 +5530,7 @@ test('lane tagging treats briefing-like subagent output as a deliverable, not in
   const outputText = '<delegation_briefing mode="initial">\n  <task>这是 subagent 实际返回的低质量结果</task>\n</delegation_briefing>';
   const output = new AIMessage({ id: 'briefing-shaped-announce', content: outputText });
 
-  const tagged = tagNewLaneMessages(
+  const tagged = reconcileDelegationPrivateMessages(
     [human, output],
     [human],
     'capability:general',
@@ -5541,7 +5557,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
       id: 'stored-accepted-briefing-0',
       sourceLane: 'capability:general',
       delegationId: 'task-accepted-briefing',
-      transcriptRunId: 'turn-accepted-briefing',
+      runId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
       announceMessageId: 'accepted-briefing-0',
       completionReason: 'natural',
@@ -5552,7 +5568,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
       id: 'stored-accepted-briefing-1',
       sourceLane: 'capability:general',
       delegationId: 'task-accepted-briefing',
-      transcriptRunId: 'turn-accepted-briefing',
+      runId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
       announceMessageId: 'accepted-briefing-1',
       completionReason: 'natural',
@@ -5564,7 +5580,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
   assert.deepEqual(mainConversationMessages(handoffs), handoffs);
 });
 
-test('lane tagging reconciles a summarized subagent transcript by message identity', () => {
+test('lane tagging reconciles a summarized subagent messages by message identity', () => {
   const human = new HumanMessage({ id: 'main-human', content: '继续检查项目' });
   const oldToolCall = new AIMessage({
     id: 'old-call',
@@ -5577,7 +5593,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
     content: 'old evidence',
   });
   const initialOutput = [human, oldToolCall, oldToolResult];
-  const initialUpdate = tagNewLaneMessages(
+  const initialUpdate = reconcileDelegationPrivateMessages(
     initialOutput,
     [human],
     'capability:general',
@@ -5586,7 +5602,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
     { delegationId: 'task-summary', task: '检查项目' },
   );
   const stateBeforeSummary = messagesStateReducer([human], initialUpdate);
-  const continuationInput = laneMessages(
+  const continuationInput = selectCapabilityHistory(
     stateBeforeSummary,
     'capability:general',
     'turn-1',
@@ -5599,7 +5615,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   });
   const finalAnswer = new AIMessage({ id: 'final-answer', content: '检查完成。' });
 
-  const summarizedUpdate = tagNewLaneMessages(
+  const summarizedUpdate = reconcileDelegationPrivateMessages(
     [contextSummary, finalAnswer],
     continuationInput,
     'capability:general',
@@ -5620,7 +5636,7 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   assert.equal(getAgentMessageDelegationId(contextSummary), 'task-summary');
   assert.equal(getMessageIsAnnounce(finalAnswer), true);
   assert.deepEqual(
-    laneMessages(stateAfterSummary, 'capability:general', 'turn-1', 'task-summary').map((message) => message.id),
+    selectCapabilityHistory(stateAfterSummary, 'capability:general', 'turn-1', 'task-summary').map((message) => message.id),
     ['main-human', 'context-summary', 'final-answer'],
   );
 });
@@ -5633,7 +5649,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
 
   // limit_reached is just a stop reason now; the deliverable is still marked as
   // the announce (no completed/progress verdict at tag time).
-  tagNewLaneMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'limit_reached', {
+  reconcileDelegationPrivateMessages(messages, [messages[0]], 'capability:general', 'turn-1', 'limit_reached', {
     delegationId: 'task-2',
     task: '读取文件并运行 lint',
     announceMessageId: 'task-2-progress',
@@ -5647,15 +5663,15 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
     task: '读取文件并运行 lint',
     text: '文件读取完成，lint 还没跑。',
   });
-  assert.equal(selectDelegationLaneAnnounceMessage(messages, {
+  assert.equal(selectDelegationAnnounceMessage(messages, {
     lane: 'capability:general',
-    transcriptRunId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-2',
     announceMessageId: 'task-2-progress',
   }), messages[1]);
-  assert.equal(selectDelegationLaneAnnounceMessage(messages, {
+  assert.equal(selectDelegationAnnounceMessage(messages, {
     lane: 'capability:general',
-    transcriptRunId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-2',
     announceMessageId: 'another-message',
   }), null);
@@ -5698,7 +5714,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
   assert.equal(result.completionReason, 'limit_reached');
   assert.equal(result.announceMessageId, progress.id);
   const delegationId = 'limit-chain-delegation';
-  const tagged = tagNewLaneMessages(
+  const tagged = reconcileDelegationPrivateMessages(
     result.messages,
     baseInput.messages,
     'capability:general',
@@ -5743,7 +5759,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     lane: 'capability:general',
     task: '继续探查 repo',
     contextSummary: null,
-    transcriptRunId: baseInput.runId,
+    runId: baseInput.runId,
     traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: String(progress.content),
@@ -5806,7 +5822,7 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
     lane: 'capability:general',
     task: '继续探查 repo',
     contextSummary: null,
-    transcriptRunId: baseInput.runId,
+    runId: baseInput.runId,
     traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '上一轮还没结束。',
@@ -5898,7 +5914,7 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
     lane: 'capability:general',
     task: '持续执行大规模迁移',
     contextSummary: '最近卡住',
-    transcriptRunId: baseInput.runId,
+    runId: baseInput.runId,
     traceId: baseInput.traceId,
     status: 'awaiting_decision',
     resultPreview: '处理到一半。',
@@ -5946,7 +5962,7 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
   assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
 });
 
-test('handoff copies the announce into main and wipes the lane transcript', () => {
+test('handoff copies the announce into main and wipes the private messages', () => {
   const human = new HumanMessage('检查项目并汇报');
   const toolCall = new AIMessage({
     content: '先读取 package.json。',
@@ -5963,7 +5979,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   });
   const outputMessages = [human, toolCall, toolResult, note, announce];
 
-  const tagged = tagNewLaneMessages(
+  const tagged = reconcileDelegationPrivateMessages(
     outputMessages,
     [human],
     'capability:general',
@@ -5979,13 +5995,13 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   const handoff = buildSubagentHandoff({
     messages: stateWithLane,
     lane: 'capability:general',
-    transcriptRunId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-complete',
   });
   assert.ok(handoff);
   const stateMessages = messagesStateReducer(stateWithLane, handoff);
 
-  // The lane transcript is gone; only the user message and a main-queue copy of
+  // The private messages is gone; only the user message and a main-queue copy of
   // the announce remain.
   assert.deepEqual(stateMessages.map((message) => message.content), [
     '检查项目并汇报',
@@ -6019,7 +6035,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const oldProgress = new AIMessage({ id: 'task-resume-progress', content: '已处理第一个分片，尚未完成。' });
   const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
   // First (interrupted) run keeps its whole lane in place — no handoff yet.
-  const previousUpdate = tagNewLaneMessages(
+  const previousUpdate = reconcileDelegationPrivateMessages(
     previousRun,
     [human],
     'capability:general',
@@ -6032,7 +6048,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   });
   const stateWithProgress = messagesStateReducer([human], previousUpdate);
   assert.equal(
-    laneMessages(stateWithProgress, 'capability:general', 'turn-1', 'task-resume').length,
+    selectCapabilityHistory(stateWithProgress, 'capability:general', 'turn-1', 'task-resume').length,
     4,
   );
 
@@ -6042,7 +6058,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
     id: 'task-resume-complete',
     content: '全部分片已处理完成，共 120 条。',
   });
-  const continuationInput = laneMessages(
+  const continuationInput = selectCapabilityHistory(
     stateWithProgress,
     'capability:general',
     'turn-1',
@@ -6053,7 +6069,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
     finalNote,
     completedAnnounce,
   ];
-  const taggedContinuation = tagNewLaneMessages(
+  const taggedContinuation = reconcileDelegationPrivateMessages(
     continuationOutput,
     continuationInput,
     'capability:general',
@@ -6070,13 +6086,13 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   const handoff = buildSubagentHandoff({
     messages: stateBeforeHandoff,
     lane: 'capability:general',
-    transcriptRunId: 'turn-1',
+    runId: 'turn-1',
     delegationId: 'task-resume',
   });
   assert.ok(handoff);
   const finalState = messagesStateReducer(stateBeforeHandoff, handoff);
 
-  // The entire delegation lane (old progress + continuation transcript) is gone;
+  // The entire delegation lane (old progress + continuation messages) is gone;
   // only the user message and the main-queue copy of the final announce remain.
   assert.equal(finalState.filter(
     (message) => getAgentMessageLane(message) === 'capability:general',
@@ -6104,7 +6120,7 @@ test('lane messages drop unanswered tool calls from interrupted subagent history
   });
   const messages = [human, completeToolCall, toolResult, unansweredToolCall];
 
-  const tagged = tagNewLaneMessages(
+  const tagged = reconcileDelegationPrivateMessages(
     messages,
     [human],
     'capability:general',
@@ -6133,7 +6149,7 @@ test('lane messages sanitize checkpoint history with dangling tool calls', () =>
   });
   setAgentMessageMetadata(danglingToolCall, { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-legacy' });
 
-  assert.deepEqual(laneMessages(
+  assert.deepEqual(selectCapabilityHistory(
     [human, danglingToolCall],
     'capability:general',
     'turn-1',
@@ -6156,19 +6172,19 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
   const task1Answer = new AIMessage({ id: 'task-1-answer', content: '目录已整理完成。' });
   const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
 
-  tagNewLaneMessages(messages, [human], 'capability:general', 'turn-1', 'natural', {
+  reconcileDelegationPrivateMessages(messages, [human], 'capability:general', 'turn-1', 'natural', {
     delegationId: 'task-1',
     task: '整理仓库',
     announceMessageId: 'task-1-answer',
   });
 
-  // 同 turn 同 lane 的新 task：看不到上一个 task 的 transcript，只剩主对话。
-  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-2').map((message) => message.content), [
+  // 同 turn 同 lane 的新 task：看不到上一个 task 的 private messages，只剩主对话。
+  assert.deepEqual(selectCapabilityHistory(messages, 'capability:general', 'turn-1', 'task-2').map((message) => message.content), [
     '帮我整理仓库',
   ]);
 
-  // 同一 delegation 续跑（复用 delegationId）：全量带回自己的 transcript。
-  assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
+  // 同一 delegation 续跑（复用 delegationId）：全量带回自己的 private messages。
+  assert.deepEqual(selectCapabilityHistory(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我整理仓库',
     '先看一下目录。',
     '{"entries":["a.ts"]}',
@@ -6182,7 +6198,7 @@ test('lane messages reject lane history without a delegationId', () => {
   setAgentMessageMetadata(invalidLaneMessage, { lane: 'capability:general', runId: 'turn-1' });
 
   assert.throws(
-    () => laneMessages([human, invalidLaneMessage], 'capability:general', 'turn-1', 'task-1'),
+    () => selectCapabilityHistory([human, invalidLaneMessage], 'capability:general', 'turn-1', 'task-1'),
     /missing delegationId/,
   );
 });
@@ -6298,7 +6314,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       lane: 'capability:general',
       task: `旧的 ${status} 任务`,
       contextSummary: '旧任务上下文。',
-      transcriptRunId: `old-run-${status}`,
+      runId: `old-run-${status}`,
       traceId: `old-trace-${status}`,
       status,
       resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
@@ -6306,7 +6322,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
     };
     const oldLaneMessages = interruptedLaneMessages({
       delegationId: activeDelegation.id,
-      runId: activeDelegation.transcriptRunId,
+      runId: activeDelegation.runId,
     });
     const supersedeState = {
       ...buildOrchestratorRunInput([new HumanMessage('开始全新的请求')]),
@@ -6330,7 +6346,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
     } as OrchestratorStateType;
     const resumeUpdate = applyActiveDelegationTransition(resumeState);
     assert.deepEqual(resumeUpdate.runUserRequest, activeDelegation.userRequest);
-    assert.notEqual(resumeState.runId, activeDelegation.transcriptRunId);
+    assert.notEqual(resumeState.runId, activeDelegation.runId);
     const resumedState = {
       ...resumeState,
       ...resumeUpdate,
@@ -6342,20 +6358,20 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
 
     assert.equal(resumedState.taskActiveDelegation?.id, activeDelegation.id);
     assert.equal(
-      resumedState.taskActiveDelegation?.transcriptRunId,
-      activeDelegation.transcriptRunId,
+      resumedState.taskActiveDelegation?.runId,
+      activeDelegation.runId,
     );
     assert.equal(
-      laneMessages(
+      selectCapabilityHistory(
         resumedState.messages,
         activeDelegation.lane,
-        activeDelegation.transcriptRunId,
+        activeDelegation.runId,
         activeDelegation.id,
       ).some((message) => message instanceof ToolMessage),
       true,
     );
     assert.equal(
-      laneMessages(
+      selectCapabilityHistory(
         resumedState.messages,
         activeDelegation.lane,
         resumeState.runId,
@@ -6386,7 +6402,7 @@ test('resume rejects a delegation without the current trace identity', () => {
     lane: 'capability:general',
     task: '继续旧任务',
     contextSummary: null,
-    transcriptRunId: 'legacy-transcript-run',
+    runId: 'legacy-delegation-run',
     status: 'pending',
     resultPreview: null,
     userRequest: '继续旧任务。',
@@ -6414,7 +6430,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     lane: 'capability:general',
     task: '旧任务：检查历史 review 状态',
     contextSummary: '这段上下文不得进入新任务。',
-    transcriptRunId: 'old-awaiting-run',
+    runId: 'old-awaiting-run',
     traceId: 'old-awaiting-trace',
     status: 'awaiting_decision',
     resultPreview: '旧任务执行了一部分。',
@@ -6422,7 +6438,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: oldDelegation.id,
-    runId: oldDelegation.transcriptRunId,
+    runId: oldDelegation.runId,
   });
   let structuredCallCount = 0;
   let executedDelegation: { delegationId: string; runId: string } | null = null;
@@ -6478,7 +6494,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   await graph.updateState(config, {
     messages: oldMessages,
     taskActiveDelegation: oldDelegation,
-    runId: oldDelegation.transcriptRunId,
+    runId: oldDelegation.runId,
   });
 
   const state = await graph.invoke(
@@ -6493,7 +6509,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   } | null;
   assert.ok(observedFreshDelegation);
   assert.notEqual(observedFreshDelegation.delegationId, oldDelegation.id);
-  assert.notEqual(observedFreshDelegation.runId, oldDelegation.transcriptRunId);
+  assert.notEqual(observedFreshDelegation.runId, oldDelegation.runId);
   assert.equal(
     recorder.subagentInputs.flat().some((message) =>
       message instanceof ToolMessage
@@ -6501,10 +6517,10 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     false,
   );
   assert.equal(
-    laneMessages(
+    selectCapabilityHistory(
       state.messages,
       oldDelegation.lane,
-      oldDelegation.transcriptRunId,
+      oldDelegation.runId,
       oldDelegation.id,
     ).some((message) => message instanceof ToolMessage),
     true,
@@ -6517,7 +6533,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     lane: 'capability:general',
     task: '继续原来的仓库检查',
     contextSummary: '已经完成第一步。',
-    transcriptRunId: 'resume-pending-run',
+    runId: 'resume-pending-run',
     traceId: 'resume-pending-trace',
     status: 'awaiting_decision',
     resultPreview: '第一步完成后，需要用户确认检查方向。',
@@ -6525,7 +6541,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   };
   const oldMessages = interruptedLaneMessages({
     delegationId: activeDelegation.id,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
   });
   const priorAnnounce = new AIMessage({
     id: 'prior-resume-announce',
@@ -6533,7 +6549,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   });
   setAgentMessageMetadata(priorAnnounce, {
     lane: activeDelegation.lane,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
     isAnnounce: true,
     completionReason: 'natural',
     delegationId: activeDelegation.id,
@@ -6594,7 +6610,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   await graph.updateState(config, {
     messages: oldMessages,
     taskActiveDelegation: activeDelegation,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
   });
 
   const state = await graph.invoke(
@@ -6608,10 +6624,10 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.equal(plannerInputs.length, 2);
   assert.deepEqual(executedDelegation, {
     delegationId: activeDelegation.id,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
   });
   assert.deepEqual(state.runUserRequest, activeDelegation.userRequest);
-  assert.notEqual(state.runId, activeDelegation.transcriptRunId);
+  assert.notEqual(state.runId, activeDelegation.runId);
   assert.equal(state.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
   assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
@@ -6638,14 +6654,14 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     /<run_user_request role="goal_context"[\s\S]*完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。[\s\S]*<\/run_user_request>/,
   );
   assert.equal(
-    getAgentMessageTranscriptRunId(resumedBriefing),
+    getAgentMessageRunId(resumedBriefing),
     null,
   );
   assert.equal(
     resumedInput
       .filter((message) => getAgentMessageLane(message) === activeDelegation.lane)
       .every((message) =>
-        getAgentMessageTranscriptRunId(message) === activeDelegation.transcriptRunId),
+        getAgentMessageRunId(message) === activeDelegation.runId),
     true,
   );
   assert.match(
@@ -6660,7 +6676,7 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
     lane: 'capability:general',
     task: '完成旧 checkpoint 中的仓库检查',
     contextSummary: '旧 checkpoint 没有 runUserRequest。',
-    transcriptRunId: 'legacy-resume-run',
+    runId: 'legacy-resume-run',
     traceId: 'legacy-resume-trace',
     status: 'awaiting_decision',
     resultPreview: '仓库检查已经完成。',
@@ -6672,7 +6688,7 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
   const priorAnnounce = new AIMessage(activeDelegation.resultPreview ?? '');
   setAgentMessageMetadata(priorAnnounce, {
     lane: activeDelegation.lane,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
     isAnnounce: true,
     completionReason: 'natural',
     delegationId: activeDelegation.id,
@@ -6717,7 +6733,7 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
   await graph.updateState(config, {
     messages: [priorAnnounce],
     taskActiveDelegation: activeDelegation,
-    runId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
   });
 
   const state = await graph.invoke(
@@ -6831,7 +6847,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   assert.equal(String(humanMessages[0].content), '关闭 issue #272，然后删除 packages/goat 目录。');
 
   // Subagent model input: the current Human briefing is appended after the
-  // selected canonical main and delegation transcript.
+  // selected canonical main and delegation private messages.
   assert.match(String(firstInput.at(-1)?.content), /<delegation_briefing[\s\S]*关闭 GitHub Issue #272/);
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
@@ -6912,7 +6928,7 @@ test('continue_current projects a continuation briefing without rewriting the ta
   );
   assert.doesNotMatch(continuation, /<guidance>/);
 
-  // The continuation run keeps the same delegation transcript and reads the
+  // The continuation run keeps the same delegation private messages and reads the
   // continuation briefing as the latest message.
   const secondInput = recorder.subagentInputs[1];
   assert.match(String(secondInput.at(-1)?.content), /^<delegation_briefing[^>]*mode="continue">/);

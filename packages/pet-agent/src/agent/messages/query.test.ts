@@ -6,7 +6,7 @@ import { queryAgentMessages } from './query';
 
 const scope = {
   lane: 'capability:general' as const,
-  transcriptRunId: 'run-1',
+  runId: 'run-1',
   delegationId: 'delegation-1',
 };
 
@@ -61,11 +61,11 @@ test('query is bound to the canonical snapshot captured at creation', () => {
 
 test('query explains exclusions without copying message content', () => {
   const current = setAgentMessageDelegationScope(
-    new AIMessage({ id: 'current', content: 'private transcript' }),
+    new AIMessage({ id: 'current', content: 'current private message' }),
     scope,
   );
   const other = setAgentMessageDelegationScope(
-    new AIMessage({ id: 'other', content: 'other transcript' }),
+    new AIMessage({ id: 'other', content: 'other private message' }),
     { ...scope, delegationId: 'delegation-2' },
   );
   const unsupported = setAgentMessageMetadata(

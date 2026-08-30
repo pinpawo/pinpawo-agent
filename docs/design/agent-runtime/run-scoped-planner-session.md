@@ -24,7 +24,7 @@ Planner execution history survive multiple runs and forced every consumer to
 decide which Planner messages to select, replay, compact, invalidate, or remove.
 
 Excluding those messages from later model calls avoids self-reinforcement, but
-leaves an incoherent intermediate shape: Planner transcript is persisted even
+leaves an incoherent intermediate shape: Planner provider messages are persisted even
 though it is not Planner working memory.
 
 The domain needs state. It does not need to turn root conversation messages into
@@ -40,7 +40,7 @@ The Capability Planner is a stateful domain component scoped to one `runId`.
 - Planner output updates typed session state and returns one structured root
   transition.
 - Planner prompt messages never enter canonical root `messages`.
-- The next run does not inherit the previous run's Planner transcript, search
+- The next run does not inherit the previous run's Planner provider messages, search
   attempts, terminal calls, or commit cache.
 
 Planner statefulness is semantic. Raw provider messages are not the source of
@@ -64,7 +64,7 @@ Decision mode and data lifetime are independent.
 | conversation/goal | root | clean main conversation, accepted Delegation Announces |
 | run | Planner session and root typed state | goal, plan, Capability disclosure, last committed input |
 | invocation | Planner adapter | current typed Boundary input, system projection, bound tools |
-| delegation | Capability subagent | private execution transcript and current unaccepted announce |
+| delegation | Capability subagent | private execution messages and current unaccepted announce |
 
 No message tag or lane changes one scope into another. Projection may expose
 data across a boundary, but it does not transfer ownership or mutate the source.
@@ -390,9 +390,9 @@ user goal retains the same `traceId`.
 - Moving plan ownership back to Answer or Capability subagents.
 - Removing `entry | boundary` modes.
 - Letting code infer task completion from announce prose.
-- Exposing private Capability Human/AI/Tool transcripts to Planner.
+- Exposing private Capability Human/AI/Tool messages to Planner.
 - Giving Planner direct authority to mutate root messages or delegation state.
-- Persisting Planner raw provider transcript across runs.
+- Persisting Planner raw provider messages across runs.
 
 ## Migration
 
@@ -423,5 +423,5 @@ user goal retains the same `traceId`.
 - Same-input recovery replays a typed commit without a model call.
 - `continue_current` projects all ordered announce attempts for the active
   delegation and marks only the latest as the evaluation target.
-- Planner tracing remains complete after raw transcript is removed from root
+- Planner tracing remains complete after raw provider messages are removed from root
   checkpoint messages.

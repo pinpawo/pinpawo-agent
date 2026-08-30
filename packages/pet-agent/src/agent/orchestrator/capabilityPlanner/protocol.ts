@@ -46,7 +46,7 @@ export type PlannerCommit = {
 
 export type PlannerDelegationInput = {
   readonly delegationId: string;
-  readonly transcriptRunId: string;
+  readonly runId: string;
   readonly capability: string;
   readonly task: string;
 };

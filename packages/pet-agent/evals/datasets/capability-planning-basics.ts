@@ -40,17 +40,17 @@ export type CapabilityPlanningExpected = {
 const SUITE = 'agent-capability-planning-basics';
 const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basics.ts';
 
-type CapabilityPlanningTranscriptInput = Omit<CapabilityPlanningInput, 'userRequest'> & {
+type CapabilityPlanningMessageInput = Omit<CapabilityPlanningInput, 'userRequest'> & {
   /**
    * Current user request that production stores for every Planner invocation.
-   * The transcript messages are projected into Planner as complete canonical
+   * The input messages are projected into Planner as complete canonical
    * conversation context; contextual cases may provide a more precise
    * normalized request explicitly.
    */
   userRequest?: CapabilityPlanningInput['userRequest'];
 };
 
-function buildEvalUserRequest(messages: CapabilityPlanningTranscriptInput['messages']) {
+function buildEvalUserRequest(messages: CapabilityPlanningMessageInput['messages']) {
   const latestUserRequest = [...messages]
     .reverse()
     .find((message) => message.role === 'user');
@@ -65,7 +65,7 @@ function buildEvalUserRequest(messages: CapabilityPlanningTranscriptInput['messa
  * boundary cases receive the same request representation.
  */
 function withUserRequest(
-  testCase: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>,
+  testCase: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlanningExpected>,
 ): AgentEvalCase<CapabilityPlanningInput, CapabilityPlanningExpected> {
   return {
     ...testCase,
@@ -76,7 +76,7 @@ function withUserRequest(
   };
 }
 
-const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, CapabilityPlanningExpected>[] = [
+const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlanningExpected>[] = [
   {
     id: `${SUITE}.entry-explore-then-implementation`,
     name: 'entry-explore-then-implementation',
@@ -858,7 +858,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Continue the same delegation because its full transcript already preserves the task and evidence.',
+      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Continue the same delegation because its full private message history already preserves the task and evidence.',
     },
     metadata: {
       difficulty: 'hard',
@@ -892,7 +892,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The latest announce only restates a future plan and contains no completed work. Continue the same delegation using its existing task and transcript.',
+      reason: 'The latest announce only restates a future plan and contains no completed work. Continue the same delegation using its existing task and private messages.',
     },
     metadata: {
       difficulty: 'medium',
@@ -926,7 +926,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The subagent produced the explicitly rejected placeholder design. Continue the same delegation because the original task and full transcript preserve the unmet acceptance criteria.',
+      reason: 'The subagent produced the explicitly rejected placeholder design. Continue the same delegation because the original task and full private message history preserve the unmet acceptance criteria.',
     },
     metadata: {
       difficulty: 'hard',
@@ -994,7 +994,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Continue the same delegation with the full execution transcript intact.',
+      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Continue the same delegation with the full execution history intact.',
     },
     metadata: {
       difficulty: 'medium',
@@ -1081,7 +1081,7 @@ const transcriptCases: AgentEvalCase<CapabilityPlanningTranscriptInput, Capabili
   },
 ];
 
-const cases = transcriptCases.map(withUserRequest);
+const cases = messageCases.map(withUserRequest);
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,

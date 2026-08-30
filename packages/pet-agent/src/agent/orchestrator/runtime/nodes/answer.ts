@@ -129,7 +129,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       : null;
     const userInputRequiredAnnounce = userInputRequiredDelegation
       ? readLatestAnnounce(state.messages, {
-          transcriptRunId: userInputRequiredDelegation.transcriptRunId,
+          runId: userInputRequiredDelegation.runId,
           delegationId: userInputRequiredDelegation.id,
         })
       : null;
@@ -137,7 +137,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       ? formatHandoffArtifactRefsForMessage(buildHandoffArtifactRefs(
           state.sessionCapabilityArtifacts,
           {
-            runId: userInputRequiredDelegation.transcriptRunId,
+            runId: userInputRequiredDelegation.runId,
             delegationId: userInputRequiredDelegation.id,
           },
         ))
@@ -251,7 +251,7 @@ export function selectAnswerContextFacts(params: {
 
   if (activeDelegation) {
     const completionReason = readLatestAnnounceCompletionReason(params.state.messages, {
-      transcriptRunId: activeDelegation.transcriptRunId,
+      runId: activeDelegation.runId,
       delegationId: activeDelegation.id,
     });
     return {

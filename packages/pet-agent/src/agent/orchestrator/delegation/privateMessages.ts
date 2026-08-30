@@ -8,28 +8,28 @@ import {
 } from '../../messages';
 import { setMessageIsAnnounce } from './announce';
 
-export function tagNewLaneMessages(
-  messages: BaseMessage[],
-  existingMessages: BaseMessage[],
+export function reconcileDelegationPrivateMessages(
+  resultMessages: BaseMessage[],
+  modelInputMessages: BaseMessage[],
   lane: CapabilityMessageLane,
-  transcriptRunId: string,
+  runId: string,
   completionReason: SubagentCompletionReason,
   reportMeta: {
     delegationId?: string | null;
     task?: string | null;
     announceMessageId?: string | null;
   } = {},
-  canonicalInputMessages: BaseMessage[] = existingMessages,
+  canonicalMessages: BaseMessage[] = modelInputMessages,
 ) {
   const delegationId = reportMeta.delegationId?.trim();
   if (!delegationId) {
-    throw new Error('Delegation transcript reconciliation requires delegationId.');
+    throw new Error('Delegation private-message reconciliation requires delegationId.');
   }
-  const scope: DelegationMessageScope = { lane, transcriptRunId, delegationId };
+  const scope: DelegationMessageScope = { lane, runId, delegationId };
   const reconciled = reconcileDelegationMessages({
-    resultMessages: messages,
-    inputMessages: existingMessages,
-    canonicalInputMessages,
+    resultMessages,
+    inputMessages: modelInputMessages,
+    canonicalInputMessages: canonicalMessages,
     scope,
   });
   const announceMessage = reportMeta.announceMessageId

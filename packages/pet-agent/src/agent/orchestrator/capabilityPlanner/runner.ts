@@ -101,7 +101,7 @@ export function isCapabilityPlannerIncompleteResult(
  * Typed graph seam for the framework-internal Capability Planner.
  *
  * Graph tests inject a scripted implementation of this interface. Production
- * uses createCapabilityPlannerAgent(), whose raw transcript remains private to
+ * uses createCapabilityPlannerAgent(), whose raw model/tool messages remain private to
  * invocation tracing and never crosses this seam into root messages.
  */
 export interface CapabilityPlannerRunner {

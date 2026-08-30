@@ -48,7 +48,7 @@ export function createCompactContextNode(params: {
         options: {
           preserveAnnouncesFor: {
             lane: state.taskActiveDelegation.lane,
-            transcriptRunId: state.taskActiveDelegation.transcriptRunId,
+            runId: state.taskActiveDelegation.runId,
             delegationId: state.taskActiveDelegation.id,
           },
         },

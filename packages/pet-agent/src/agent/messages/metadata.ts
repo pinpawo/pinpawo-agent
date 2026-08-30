@@ -5,7 +5,7 @@ export type CapabilityMessageLane = `capability:${string}`;
 
 export type DelegationMessageScope = {
   lane: CapabilityMessageLane;
-  transcriptRunId: string;
+  runId: string;
   delegationId: string;
 };
 
@@ -52,7 +52,7 @@ export function getAgentMessageDelegationId(message: BaseMessage): string | null
     : null;
 }
 
-export function getAgentMessageTranscriptRunId(message: BaseMessage): string | null {
+export function getAgentMessageRunId(message: BaseMessage): string | null {
   const runId = getAgentMessageMetadata(message).runId;
   return typeof runId === 'string' && runId.trim() ? runId : null;
 }
@@ -62,10 +62,10 @@ export function getAgentMessageDelegationScope(
 ): DelegationMessageScope | null {
   const lane = getAgentMessageLane(message);
   if (!isCapabilityMessageLane(lane)) return null;
-  const transcriptRunId = getAgentMessageTranscriptRunId(message);
+  const runId = getAgentMessageRunId(message);
   const delegationId = getAgentMessageDelegationId(message);
-  return transcriptRunId && delegationId
-    ? { lane, transcriptRunId, delegationId }
+  return runId && delegationId
+    ? { lane, runId, delegationId }
     : null;
 }
 
@@ -75,7 +75,7 @@ export function setAgentMessageDelegationScope(
 ) {
   return setAgentMessageMetadata(message, {
     lane: scope.lane,
-    runId: scope.transcriptRunId,
+    runId: scope.runId,
     delegationId: scope.delegationId,
   });
 }
@@ -85,7 +85,7 @@ export function delegationMessageScopesEqual(
   right: DelegationMessageScope,
 ) {
   return left.lane === right.lane
-    && left.transcriptRunId === right.transcriptRunId
+    && left.runId === right.runId
     && left.delegationId === right.delegationId;
 }
 

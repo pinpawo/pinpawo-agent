@@ -11,7 +11,7 @@ import {
 } from '../../../messages';
 import {
   readLatestAnnounce,
-  tagNewLaneMessages,
+  reconcileDelegationPrivateMessages,
 } from '../../delegation';
 import {
   buildSubagentExecutionContext,
@@ -19,7 +19,7 @@ import {
   resolveToolkitExecution,
 } from '../../subagentDispatch';
 import type {
-  MessageLane,
+  CapabilityMessageLane,
   OrchestratorConfig,
 } from '../../types';
 import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
@@ -35,7 +35,7 @@ import {
 } from '../config';
 import {
   readCapabilityNameFromLane,
-  resolveDelegationTranscriptRunId,
+  resolveDelegationRunId,
 } from '../decisions/delegationLifecycle';
 import {
   hasArtifactDiscoveryToolkit,
@@ -90,11 +90,11 @@ export function createCapabilityNode(params: {
     }
     const { capability } = compiledCapability;
     const toolkitList = [...compiledCapability.toolkits];
-    const lane: MessageLane = runNextDelegation.lane;
-    const transcriptRunId = resolveDelegationTranscriptRunId(state, runNextDelegation);
+    const lane: CapabilityMessageLane = runNextDelegation.lane;
+    const runId = resolveDelegationRunId(state, runNextDelegation);
     const delegationScope = {
       lane,
-      transcriptRunId,
+      runId,
       delegationId: runNextDelegation.id,
     };
     const canonicalSelection = queryAgentMessages(state.messages)
@@ -102,7 +102,7 @@ export function createCapabilityNode(params: {
       .delegation(delegationScope)
       .select();
     observeAgentMessageSelection(
-      'capability.canonical_transcript',
+      'capability.private_messages',
       canonicalSelection.diagnostics,
       runnableConfig,
     );
@@ -164,7 +164,7 @@ export function createCapabilityNode(params: {
             toolkits: toolkitList,
             execution: {
               threadId,
-              runId: transcriptRunId,
+              runId,
               delegationId: runNextDelegation.id,
               workdir: workdir ?? null,
               signal: runnableConfig?.signal,
@@ -226,7 +226,7 @@ export function createCapabilityNode(params: {
         runtimeContext: {
           executionScope: {
             threadId,
-            runId: transcriptRunId,
+            runId,
             delegationId: runNextDelegation.id,
             workdir: workdir ?? null,
           },
@@ -259,7 +259,7 @@ export function createCapabilityNode(params: {
         threadId,
         capabilityId: capability.name,
         delegationId: runNextDelegation.id,
-        runId: transcriptRunId,
+        runId,
       });
       const artifactsById = new Map(
         [...result.artifacts, ...artifactRefs, ...(finalized?.artifactRefs ?? [])]
@@ -275,11 +275,11 @@ export function createCapabilityNode(params: {
       };
     }
 
-    const laneOutputMessages = tagNewLaneMessages(
+    const laneOutputMessages = reconcileDelegationPrivateMessages(
       result.messages,
       subagentInput.messages,
       lane,
-      transcriptRunId,
+      runId,
       result.completionReason,
       {
         delegationId: runNextDelegation.id,

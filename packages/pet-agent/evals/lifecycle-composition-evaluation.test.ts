@@ -118,7 +118,7 @@ test('lifecycle composition accepts an isolated resumable checkpoint for require
         lane: 'capability:workspace_analysis',
         task: 'check staging deployment',
         contextSummary: null,
-        transcriptRunId: 'delegation-run-1',
+        runId: 'delegation-run-1',
         traceId: 'trace-1',
         status: 'awaiting_decision',
         resultPreview: 'need staging address and credentials',

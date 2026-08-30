@@ -32,7 +32,7 @@ import {
 import type { OrchestratorStateType } from '../../state';
 import type {
   CapabilityPlanTask,
-  MessageLane,
+  CapabilityMessageLane,
   OrchestratorConfig,
   RunNextDelegation,
   TaskActiveDelegation,
@@ -79,7 +79,7 @@ function materializeNextDelegation(params: {
       `Capability Planner selected "${nextTask.capability}" outside the immutable workspace.`,
     );
   }
-  const lane: MessageLane = `capability:${nextTask.capability}`;
+  const lane: CapabilityMessageLane = `capability:${nextTask.capability}`;
   const runNextDelegation: RunNextDelegation = {
     id: randomUUID().slice(0, 8),
     lane,
@@ -113,7 +113,7 @@ function buildAcceptedDelegationUpdate(
   outcome: PlannerReplyOutcome | null,
 ) {
   const completionReason = readLatestAnnounceCompletionReason(state.messages, {
-    transcriptRunId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
   });
   if (completionReason === 'limit_reached') {
@@ -123,13 +123,13 @@ function buildAcceptedDelegationUpdate(
     state.messages,
     activeDelegation.id,
     activeDelegation.lane,
-    activeDelegation.transcriptRunId,
+    activeDelegation.runId,
     getMessageHandoffSource,
   );
   const messages = buildSubagentHandoff({
     messages: state.messages,
     lane: activeDelegation.lane,
-    transcriptRunId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
     clearLane: true,
     includeCopy: !existingCopy,

@@ -446,7 +446,7 @@ test('Planner replays a typed run-scoped commit without persisting provider mess
     userRequest: entryA.userRequest,
     activeDelegation: {
       delegationId: 'delegation-a',
-      transcriptRunId: 'transcript-a',
+      runId: 'run-a',
       capability: 'general',
       task: 'Complete trace A.',
     },
@@ -946,16 +946,16 @@ test('boundary projects the current lane announce into the standard model-visibl
   });
   setAgentMessageMetadata(currentAnnounce, {
     lane: 'capability:explore',
-    runId: 'transcript-current',
+    runId: 'run-current',
     delegationId: 'delegation-current',
     isAnnounce: true,
     task: 'Inspect repository dependencies.',
     completionReason: 'limit_reached',
   });
-  const privateLaneTranscript = new AIMessage('PRIVATE_RAW_EXECUTOR_TRANSCRIPT');
-  setAgentMessageMetadata(privateLaneTranscript, {
+  const privateLaneMessage = new AIMessage('PRIVATE_RAW_EXECUTOR_TRANSCRIPT');
+  setAgentMessageMetadata(privateLaneMessage, {
     lane: 'capability:explore',
-    runId: 'transcript-current',
+    runId: 'run-current',
     delegationId: 'delegation-current',
   });
   const priorMainRequest = new HumanMessage({
@@ -987,7 +987,7 @@ test('boundary projects the current lane announce into the standard model-visibl
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-current',
-        transcriptRunId: 'transcript-current',
+        runId: 'run-current',
         capability: 'explore',
         task: 'Inspect repository dependencies.',
       },
@@ -1001,7 +1001,7 @@ test('boundary projects the current lane announce into the standard model-visibl
         priorMainReply,
         currentMainRequest,
         currentMainContext,
-        privateLaneTranscript,
+        privateLaneMessage,
         currentAnnounce,
       ],
       remainingPlan: [{
@@ -1019,7 +1019,7 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.match(invocationText, /dependency evidence is missing/);
   assert.equal(model.invocations[0]?.some((message) => message.id === 'announce-current'), false);
   assert.equal(currentAnnounce.content, 'The repository inspection is incomplete; dependency evidence is missing.');
-  assert.equal(model.invocations[0]?.includes(privateLaneTranscript), false);
+  assert.equal(model.invocations[0]?.includes(privateLaneMessage), false);
   assert.equal(model.invocations[0]?.some((message) =>
     readMessageText(message).includes('PRIVATE_RAW_EXECUTOR_TRANSCRIPT')), false);
   assert.equal(model.invocations[0]?.includes(priorMainRequest), true);
@@ -1255,7 +1255,7 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
-        transcriptRunId: 'transcript-1',
+        runId: 'run-1',
         capability: 'explore',
         task: 'Inspect package release readiness.',
       },
@@ -1333,7 +1333,7 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
-        transcriptRunId: 'transcript-1',
+        runId: 'run-1',
         capability: 'explore',
         task: 'Read the current issue status.',
       },
@@ -1407,7 +1407,7 @@ test('a Boundary search does not redisclose its preloaded active General', async
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-general',
-        transcriptRunId: 'transcript-general',
+        runId: 'run-general',
         capability: 'general',
         task: 'Complete the ordinary workspace task.',
       },
@@ -2036,7 +2036,7 @@ test('boundary mode returns tool feedback for an empty executable plan', async (
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
-        transcriptRunId: 'transcript-1',
+        runId: 'run-1',
         capability: 'explore',
         task: 'Research the repository.',
       },
@@ -2089,7 +2089,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
-        transcriptRunId: 'transcript-1',
+        runId: 'run-1',
         capability: 'explore',
         task: 'Read the issue #587 status.',
       },
@@ -2139,7 +2139,7 @@ test('boundary Planner continues without replacing the active task', async (t) =
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
-        transcriptRunId: 'transcript-1',
+        runId: 'run-1',
         capability: 'explore',
         task: 'Inspect the repository.',
       },
@@ -2209,7 +2209,7 @@ test('boundary Planner can stop for user confirmation with a structured question
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-review-662',
-        transcriptRunId: 'transcript-review-662',
+        runId: 'run-review-662',
         capability: 'general',
         task: 'Review PR #662.',
       },
@@ -2260,7 +2260,7 @@ test('boundary Planner exposes only boundary terminal actions', async (t) => {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
-        transcriptRunId: 'transcript-1',
+        runId: 'run-1',
         capability: 'explore',
         task: 'Inspect the repository.',
       },
@@ -2439,7 +2439,7 @@ test('boundary Planner reports incomplete without accepting its delegation', asy
     userRequest: 'Finish the remaining request.',
     activeDelegation: {
       delegationId: 'delegation-1',
-      transcriptRunId: 'transcript-1',
+      runId: 'run-1',
       capability: 'explore',
       task: 'Inspect the repository.',
     },

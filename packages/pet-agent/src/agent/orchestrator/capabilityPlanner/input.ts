@@ -87,7 +87,7 @@ export function buildCapabilityPlannerInput(params: {
   }
   const activeScope = {
     lane: activeDelegation.lane,
-    transcriptRunId: activeDelegation.transcriptRunId,
+    runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
   };
   const mainSelection = queryAgentMessages(state.messages).main().select();
@@ -129,14 +129,14 @@ export function buildCapabilityPlannerInput(params: {
       inputId: freshTurn
         ? `human:${state.runId}`
         : `announce:${activeDelegation.id}:${latestAnnounce?.messageId
-          ?? `${activeDelegation.transcriptRunId}:${String(state.runIterationCount)}`}`,
+          ?? `${activeDelegation.runId}:${String(state.runIterationCount)}`}`,
       traceId: state.traceId,
       runId: state.runId,
       userRequest: plannerState.runUserRequest,
       messages: mainSelection.messages,
       activeDelegation: {
         delegationId: activeDelegation.id,
-        transcriptRunId: activeDelegation.transcriptRunId,
+        runId: activeDelegation.runId,
         capability,
         task: activeDelegation.task,
       },

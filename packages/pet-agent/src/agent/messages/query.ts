@@ -6,7 +6,6 @@ import {
   isCapabilityMessageLane,
   type DelegationMessageScope,
 } from './metadata';
-import { toolProtocolSafeMessages } from './protocol';
 
 export type AgentMessageSelectionExclusionReason =
   | 'main_not_selected'
@@ -31,7 +30,7 @@ export type AgentMessageSelection = {
 export type AgentMessageQuery = {
   /** Include the untagged main conversation. */
   main(): AgentMessageQuery;
-  /** Include one exact capability-delegation transcript. */
+  /** Include the private messages for one exact delegation scope. */
   delegation(scope: DelegationMessageScope): AgentMessageQuery;
   /** Materialize selected canonical messages in their original chronology. */
   select(): AgentMessageSelection;
@@ -122,7 +121,7 @@ function createQuery(
 
 /**
  * Start an immutable query over canonical Agent messages. This layer only
- * chooses main/delegation transcripts; model-input construction belongs to the
+ * chooses main or delegation-private messages; model-input construction belongs to the
  * node or subagent protocol that owns the invocation.
  */
 export function queryAgentMessages(
@@ -137,24 +136,4 @@ export function queryAgentMessages(
 
 export function mainConversationMessages(messages: readonly BaseMessage[]) {
   return queryAgentMessages(messages).main().select().messages;
-}
-
-export function delegationTranscriptMessages(
-  messages: readonly BaseMessage[],
-  scope: DelegationMessageScope,
-) {
-  return queryAgentMessages(messages).main().delegation(scope).select().messages;
-}
-
-export function laneMessages(
-  messages: readonly BaseMessage[],
-  lane: DelegationMessageScope['lane'],
-  transcriptRunId: string,
-  delegationId: string,
-) {
-  return toolProtocolSafeMessages(delegationTranscriptMessages(messages, {
-    lane,
-    transcriptRunId,
-    delegationId,
-  }));
 }

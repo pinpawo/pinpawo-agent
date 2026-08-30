@@ -17,9 +17,10 @@ export type ReconcileDelegationMessagesParams = {
 };
 
 /**
- * Reconcile one child transcript without assigning orchestrator-domain meaning
- * such as Announce or completion. The current briefing may be present in the
- * child input but is intentionally absent from canonicalInputMessages.
+ * Reconcile one delegation's private messages without assigning
+ * orchestrator-domain meaning such as Announce or completion. The current
+ * briefing may be present in the child input but is intentionally absent from
+ * canonicalInputMessages.
  */
 export function reconcileDelegationMessages(
   params: ReconcileDelegationMessagesParams,

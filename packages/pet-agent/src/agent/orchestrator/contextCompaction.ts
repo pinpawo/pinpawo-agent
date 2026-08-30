@@ -24,7 +24,7 @@ export type ContextCompactionOptions = {
   keepMessages?: number;
   preserveAnnouncesFor?: {
     lane: string;
-    transcriptRunId: string;
+    runId: string;
     delegationId: string;
   };
 };
@@ -75,7 +75,7 @@ function selectMessagesToKeep(
     if (!preserveAnnouncesFor || !getMessageIsAnnounce(message)) return false;
     const meta = getAgentMessageMetadata(message);
     return getAgentMessageLane(message) === preserveAnnouncesFor.lane
-      && meta.runId === preserveAnnouncesFor.transcriptRunId
+      && meta.runId === preserveAnnouncesFor.runId
       && meta.delegationId === preserveAnnouncesFor.delegationId;
   });
   return toolProtocolSafeMessages(selected);
@@ -122,7 +122,7 @@ function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
   ].join('\n');
 }
 
-function buildSummaryTranscript(messages: BaseMessage[]): string {
+function renderMessagesForSummary(messages: BaseMessage[]): string {
   // The compaction watermark is derived from the provider's measured input
   // usage, and the retained suffix is excluded before this point. Pass every
   // remaining main message to the summarizer: per-message sampling loses facts
@@ -165,8 +165,8 @@ async function summarizeMessages(params: {
   messages: BaseMessage[];
   runnableConfig?: RunnableConfig;
 }): Promise<string> {
-  const transcript = buildSummaryTranscript(params.messages);
-  if (!transcript.trim()) {
+  const renderedMessages = renderMessagesForSummary(params.messages);
+  if (!renderedMessages.trim()) {
     return buildFallbackSummary(params.messages);
   }
 
@@ -180,7 +180,7 @@ async function summarizeMessages(params: {
         '丢弃：寒暄、重复内容、无关日志、已被后续结果覆盖的中间过程。',
         '用中文，结构化要点，尽量简洁；优先写清任务状态和结果。',
       ].join('\n')),
-      new HumanMessage(`请压缩以下旧上下文：\n\n${transcript}`),
+      new HumanMessage(`请压缩以下旧上下文：\n\n${renderedMessages}`),
     ],
     params.runnableConfig,
   );

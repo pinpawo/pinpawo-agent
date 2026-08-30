@@ -143,7 +143,7 @@ function evaluateGuard(guard, input, emit): GuardOutcome {
 execution.
 
 Records have two lifetimes, following the context-governance principle that
-conclusions cross boundaries and transcripts do not:
+conclusions cross boundaries and private messages do not:
 
 - **Ephemeral channel**: orchestrator positions emit each record twice — onto
   the LangGraph custom stream (`streamMode: 'custom'`, via the node config's

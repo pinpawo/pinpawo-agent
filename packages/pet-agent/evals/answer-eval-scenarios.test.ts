@@ -74,7 +74,7 @@ test('answer eval projects full accepted-result evidence while measuring compres
 
   const summaries = [
     'Answer 优化已完成，主消息与 handoff 流转保持不变；PR #642 已创建，测试和 typecheck 均通过。',
-    '发布准备已完成：cache-key-17 已通过统一 transcriptRunId 修复，resume 测试通过；PR #643 已创建，当前没有剩余阻塞项。',
+    '发布准备已完成：cache-key-17 已通过统一 runId 修复，resume 测试通过；PR #643 已创建，当前没有剩余阻塞项。',
   ];
   let invocation = 0;
   const subject = {

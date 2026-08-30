@@ -149,7 +149,7 @@ function readTuiCheckpointMessageSource(
   if (!announce || typeof announce !== 'object' || Array.isArray(announce)) {
     return { role: 'assistant' };
   }
-  const runId = (announce as Record<string, unknown>).transcriptRunId;
+  const runId = (announce as Record<string, unknown>).runId;
   return typeof runId === 'string' && runId.trim()
     ? { role: 'subagent', requestId: runId }
     : null;

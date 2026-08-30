@@ -10,7 +10,7 @@ One delegation stop produces at most one Announce identity. The versioned
 payload records:
 
 - source lane;
-- delegation and transcript-run identities;
+- delegation scope identities;
 - announce message identity;
 - delegated task;
 - completion reason;
@@ -19,7 +19,7 @@ payload records:
 
 The Announce initially belongs to the private delegation lane. A structured
 Planner decision may accept it through handoff. Handoff moves the same semantic
-identity into the main queue and removes the corresponding private transcript;
+identity into the main queue and removes the corresponding private messages;
 it does not create an ordinary `AIMessage` copy or infer completion from result
 prose.
 
@@ -47,7 +47,7 @@ than per-Announce clipping, owns context-window pressure.
 
 The Boundary Planner receives the current unaccepted Announce as the execution
 evidence for its active delegation. It does not receive the private delegation
-transcript. Entry Answer and other consumers of main conversation see accepted
+private messages. Entry Answer and other consumers of main conversation see accepted
 Announces through the same projection.
 
 Terminal finalization selects accepted results by typed identity. It may render

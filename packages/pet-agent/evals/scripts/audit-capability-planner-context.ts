@@ -62,7 +62,7 @@ const acceptedAnnounce = new DelegationAnnounceMessage({
   id: 'audit-accepted-announce',
   sourceLane: 'capability:repository',
   delegationId: 'audit-prior-delegation',
-  transcriptRunId: 'audit-prior-transcript',
+  runId: 'audit-prior-run',
   announceMessageId: 'audit-prior-result',
   task: 'Inspect the issue and identify the required change.',
   completionReason: 'natural',
@@ -75,7 +75,7 @@ const privateLaneMessage = new AIMessage({
 });
 setAgentMessageMetadata(privateLaneMessage, {
   lane: 'capability:repository',
-  runId: 'audit-active-transcript',
+  runId: 'audit-active-run',
   delegationId: 'audit-active-delegation',
 });
 
@@ -118,7 +118,7 @@ function buildInput(mode: CapabilityPlannerMode): CapabilityPlannerInput {
     messages,
     activeDelegation: {
       delegationId: 'audit-active-delegation',
-      transcriptRunId: 'audit-active-transcript',
+      runId: 'audit-active-run',
       capability: 'repository',
       task: 'Implement and verify the identified change.',
     },

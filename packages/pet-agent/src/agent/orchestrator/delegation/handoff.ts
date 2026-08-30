@@ -29,7 +29,7 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
   return {
     handoffFrom: announce.sourceLane,
     delegationId: announce.delegationId,
-    runId: announce.transcriptRunId,
+    runId: announce.runId,
     task: announce.task,
     announceMessageId: announce.announceMessageId,
   };
@@ -38,14 +38,14 @@ export function getMessageHandoffSource(message: BaseMessage): HandoffSource | n
 export function buildSubagentHandoff(params: {
   messages: BaseMessage[];
   lane: CapabilityMessageLane;
-  transcriptRunId: string;
+  runId: string;
   delegationId: string;
   clearLane?: boolean;
   includeCopy?: boolean;
 }): BaseMessage[] | null {
   const scope: DelegationMessageScope = {
     lane: params.lane,
-    transcriptRunId: params.transcriptRunId,
+    runId: params.runId,
     delegationId: params.delegationId,
   };
   const announceMessages = queryAgentMessages(params.messages)
@@ -73,10 +73,10 @@ export function buildSubagentHandoff(params: {
       throw new Error('Delegation announce is missing the required message id.');
     }
     return new DelegationAnnounceMessage({
-      id: `delegation-announce:${params.transcriptRunId}:${params.delegationId}:${announceMessageId}`,
+      id: `delegation-announce:${params.runId}:${params.delegationId}:${announceMessageId}`,
       sourceLane: params.lane,
       delegationId: params.delegationId,
-      transcriptRunId: params.transcriptRunId,
+      runId: params.runId,
       announceMessageId,
       task: getMessageDelegatedTask(announceMessage),
       completionReason: getMessageCompletionReason(announceMessage) ?? 'natural',

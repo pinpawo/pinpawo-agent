@@ -277,7 +277,7 @@ export async function target(
       lane: resumeProgressLane,
       task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
       contextSummary: null,
-      transcriptRunId: 'previous-turn',
+      runId: 'previous-turn',
       status: 'awaiting_decision',
       resultPreview: String(inputs.resume_progress_result ?? ''),
     };
@@ -332,7 +332,7 @@ export async function target(
         lane: latestProgress.lane,
         task: latestProgress.task,
         contextSummary: null,
-        transcriptRunId: turnInput.runId,
+        runId: turnInput.runId,
         status: 'awaiting_decision',
         resultPreview: latestProgress.resultPreview,
       };

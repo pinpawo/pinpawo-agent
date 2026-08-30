@@ -10,7 +10,7 @@ test('Planner provider input projects typed Announces without mutating canonical
     id: 'accepted-1',
     sourceLane: 'capability:explore',
     delegationId: 'delegation-accepted',
-    transcriptRunId: 'run-old',
+    runId: 'run-old',
     announceMessageId: 'announce-old',
     task: '检查历史实现',
     completionReason: 'natural',

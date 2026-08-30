@@ -2,7 +2,7 @@
 
 Status: superseded.
 
-The earlier design made the Capability Planner transcript a trace-scoped
+The earlier design made the Capability Planner provider history a trace-scoped
 `orchestrator` lane in root `messages`. That mixed three different concerns:
 
 - Planner working memory;

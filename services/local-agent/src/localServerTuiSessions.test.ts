@@ -64,7 +64,7 @@ test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => 
             version: 1,
             sourceLane: 'capability:general',
             delegationId: 'delegation-1',
-            transcriptRunId: 'run-1',
+            runId: 'run-1',
             announceMessageId: 'announce-1',
             task: '关闭 Issue #272',
             completionReason: 'natural',

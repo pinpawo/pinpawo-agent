@@ -2,7 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import {
   getAgentMessageDelegationId,
   getAgentMessageLane,
-  getAgentMessageTranscriptRunId,
+  getAgentMessageRunId,
 } from '../src/agent/messages/index.ts';
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
@@ -88,7 +88,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
       && retainedLaneMessages.length > 0
       && retainedLaneMessages.every((message) =>
         getAgentMessageLane(message) === activeDelegation.lane
-        && getAgentMessageTranscriptRunId(message) === activeDelegation.transcriptRunId
+        && getAgentMessageRunId(message) === activeDelegation.runId
         && getAgentMessageDelegationId(message) === activeDelegation.id);
   const executorCallCountWithinExpectedRange = params.executorCallCount
     >= params.expectedExecutorCallRange.min

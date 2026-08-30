@@ -2,7 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
 import type {
-  MessageLane,
+  CapabilityMessageLane,
   RunNextDelegation,
   RunDelegationSummary,
   TaskActiveDelegation,
@@ -188,4 +188,4 @@ export const buildTurnStateReset = buildRunStateReset;
 /** @deprecated Use buildOrchestratorRunInput. Kept temporarily for external callers. */
 export const buildOrchestratorTurnInput = buildOrchestratorRunInput;
 
-export type { MessageLane };
+export type { CapabilityMessageLane };

@@ -49,7 +49,7 @@ const activeDelegation: TaskActiveDelegation = {
   lane: 'capability:general',
   task: '做点事',
   contextSummary: null,
-  transcriptRunId: 'run-1',
+  runId: 'run-1',
   traceId: 'trace-1',
   status: 'awaiting_decision',
   resultPreview: null,

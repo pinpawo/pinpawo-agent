@@ -4,16 +4,24 @@ import {
   getAgentMessageDelegationId,
   getAgentMessageLane,
   getAgentMessageMetadata,
-  getAgentMessageTranscriptRunId,
+  getAgentMessageRunId,
   isCapabilityMessageLane,
   queryAgentMessages,
   setAgentMessageMetadata,
+  type CapabilityMessageLane,
   type DelegationMessageScope,
 } from '../../messages';
-import type { SubagentAnnounce } from '../types';
 import { readMessageText } from '../utils';
 
 export * from './announceMessage';
+
+export type DelegationAnnounce = {
+  messageId: string | null;
+  lane: CapabilityMessageLane;
+  delegationId: string | null;
+  task: string | null;
+  text: string | null;
+};
 
 export function setMessageIsAnnounce(message: BaseMessage) {
   setAgentMessageMetadata(message, { isAnnounce: true });
@@ -37,11 +45,11 @@ export function getMessageDelegatedTask(message: BaseMessage): string | null {
   return typeof task === 'string' && task.trim() ? task.trim() : null;
 }
 
-export type DelegationLaneAnnounceSelector = Partial<DelegationMessageScope> & {
+export type DelegationAnnounceSelector = Partial<DelegationMessageScope> & {
   announceMessageId?: string | null;
 };
 
-function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
+function readTaggedAnnounce(message: BaseMessage): DelegationAnnounce | null {
   if (!getMessageIsAnnounce(message)) return null;
   const lane = getAgentMessageLane(message);
   if (!isCapabilityMessageLane(lane)) return null;
@@ -55,20 +63,20 @@ function readTaggedAnnounce(message: BaseMessage): SubagentAnnounce | null {
 }
 
 function completeSelectorScope(
-  options: DelegationLaneAnnounceSelector,
+  options: DelegationAnnounceSelector,
 ): DelegationMessageScope | null {
-  return options.lane && options.transcriptRunId && options.delegationId
+  return options.lane && options.runId && options.delegationId
     ? {
         lane: options.lane,
-        transcriptRunId: options.transcriptRunId,
+        runId: options.runId,
         delegationId: options.delegationId,
       }
     : null;
 }
 
-export function selectDelegationLaneAnnounceMessages(
+export function selectDelegationAnnounceMessages(
   messages: readonly BaseMessage[],
-  options: DelegationLaneAnnounceSelector = {},
+  options: DelegationAnnounceSelector = {},
 ): BaseMessage[] {
   const scope = completeSelectorScope(options);
   const candidates = scope
@@ -79,8 +87,8 @@ export function selectDelegationLaneAnnounceMessages(
     if (!announce) return false;
     if (options.lane && announce.lane !== options.lane) return false;
     if (
-      options.transcriptRunId
-      && getAgentMessageTranscriptRunId(message) !== options.transcriptRunId
+      options.runId
+      && getAgentMessageRunId(message) !== options.runId
     ) return false;
     if (options.delegationId && announce.delegationId !== options.delegationId) return false;
     if (options.announceMessageId && announce.messageId !== options.announceMessageId) return false;
@@ -88,25 +96,25 @@ export function selectDelegationLaneAnnounceMessages(
   });
 }
 
-export function selectDelegationLaneAnnounceMessage(
+export function selectDelegationAnnounceMessage(
   messages: readonly BaseMessage[],
-  options: DelegationLaneAnnounceSelector = {},
+  options: DelegationAnnounceSelector = {},
 ): BaseMessage | null {
-  return selectDelegationLaneAnnounceMessages(messages, options).at(-1) ?? null;
+  return selectDelegationAnnounceMessages(messages, options).at(-1) ?? null;
 }
 
 export function readLatestAnnounce(
   messages: readonly BaseMessage[],
-  options: DelegationLaneAnnounceSelector = {},
-): SubagentAnnounce | null {
-  const message = selectDelegationLaneAnnounceMessage(messages, options);
+  options: DelegationAnnounceSelector = {},
+): DelegationAnnounce | null {
+  const message = selectDelegationAnnounceMessage(messages, options);
   return message ? readTaggedAnnounce(message) : null;
 }
 
 export function readLatestAnnounceCompletionReason(
   messages: readonly BaseMessage[],
-  options: DelegationLaneAnnounceSelector = {},
+  options: DelegationAnnounceSelector = {},
 ): SubagentCompletionReason | null {
-  const message = selectDelegationLaneAnnounceMessage(messages, options);
+  const message = selectDelegationAnnounceMessage(messages, options);
   return message ? getMessageCompletionReason(message) : null;
 }

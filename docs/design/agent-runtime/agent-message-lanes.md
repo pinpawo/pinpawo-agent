@@ -1,58 +1,85 @@
-# Agent Message Lanes and Views
+# Capability lane selection and model invocation boundaries
 
-Status: draft.
+Status: working design implemented by the current refactor.
 
-## Goal
+## Decision
 
-Make message lanes an operational Agent-internal context mechanism rather than
-an inert metadata field. Every model invocation that consumes conversation or
-runtime data should obtain those messages from one shared view composer that can
-answer:
+Root `OrchestratorState` is the single source of truth for conversation,
+planning, and execution lifecycle data. Message lanes do not form another state
+model and do not own model-prompt composition.
 
-- which canonical messages were selected;
-- which delegation scope they belong to;
-- which invocation-only overlays were appended;
-- which provider projections were applied;
-- which messages were removed to repair tool-call protocol;
-- why another lane was excluded.
+A Capability lane has one narrow lifecycle:
 
-This draft starts from the current `main` implementation. It does not depend on
-the terminal-finalization PR stack.
+```text
+canonical messages
+  -> reselect main + active delegation transcript
+  -> invoke the Capability model
+  -> reconcile the model result
+  -> tag new messages with the active delegation scope
+  -> canonical messages
+```
 
-## Prior problem
+Every model node separately projects typed state into the exact system, history,
+and current-input messages required by that model. That projection is owned by
+the node or subagent protocol, not by the lane package.
 
-Before this package, `orchestrator/messageLanes.ts` mixed several responsibilities:
+## Why the current abstraction is too broad
 
-- reading and writing `additional_kwargs.pinpawo` metadata;
-- selecting main conversation messages;
-- selecting a Capability transcript;
-- repairing dangling tool-call sequences;
-- reconciling child results into root state;
-- finding delegation announces;
-- accepting a delegation through handoff.
+The current draft combines two independent operations:
 
-Consumers then built their own views again:
+1. select canonical messages by lane and delegation scope;
+2. construct a provider invocation from prompts, runtime data, and temporary
+   messages.
 
-- Entry and Answer select main history and project accepted Announces;
-- Capability selects main plus one delegation transcript and appends a briefing;
-- Planner selects main history separately from current-delegation Announces;
-- context compaction independently decides which main and lane messages survive.
+This produced a generic message manager with source ids, audiences, overlays,
+projection hooks, visibility modes, provider-protocol options, named source
+partitions, and a composition manifest. Most of those concepts do not describe
+lane state. They describe one consumer's model invocation.
 
-The `lane` value therefore identified storage but did not own visibility. The
-same visibility policy is distributed across selectors, prompt builders, and
-nodes, which makes Boundary context especially easy to drift.
+The result duplicates information already present in typed state and makes a
+simple transcript boundary responsible for Planner input, delegation briefing,
+Announce rendering, and Toolkit context.
 
-## Domain model
+This design removes that generic composition layer.
 
-### Canonical message
+## Authoritative state
 
-A canonical message is stored in graph state. It is either:
+The root graph already stores typed lifecycle facts:
 
-- **main**: no lane; part of the user-facing Agent conversation;
-- **delegation-scoped**: belongs to one exact tuple of lane, transcript run, and
-  delegation id.
+```text
+OrchestratorState
+  messages
+  runUserRequest
+  taskActiveDelegation
+  runNextDelegation
+  runPlannerSession
+  runDelegationSummaries
+  runLatestDelegationOutcome
+  ...
+```
 
-The tuple is indivisible:
+No `AgentMessageManager`, `AgentMessageViewSpec`, or generic `ModelInvocation`
+value becomes a second representation of those facts.
+
+A model does not consume `OrchestratorState` directly. Its owning node performs
+one pure projection from typed state to provider messages, then applies the typed
+result back to state through a reducer or `Command`.
+
+```text
+OrchestratorState
+  -> node-owned model-message projection
+  -> model
+  -> node-owned result materialization
+  -> OrchestratorState update
+```
+
+## Canonical message ownership
+
+A canonical root message is exactly one of:
+
+- **main conversation**: no Capability lane metadata;
+- **delegation transcript**: tagged with one complete Capability delegation
+  scope.
 
 ```ts
 type DelegationMessageScope = {
@@ -62,182 +89,297 @@ type DelegationMessageScope = {
 };
 ```
 
-Selecting by lane alone is not a valid delegation transcript operation.
+The scope tuple is indivisible. Selecting by Capability name or lane alone is
+not a valid transcript operation.
 
-### Message view
+Planner history, Planner search calls, Planner terminal tools, delegation
+briefings, and Toolkit invocation context are not canonical lane state.
 
-A message view is an invocation-only projection over canonical state:
+## Lane query API
 
-```ts
-type AgentMessageViewSpec = {
-  name: string;
-  audience: string;
-  sources: MessageViewSource[];
-  overlays?: MessageViewOverlay[];
-  projector?: MessageViewProjector;
-  toolProtocol?: 'safe' | 'preserve';
-};
-```
-
-Canonical sources are evaluated against the original message sequence, so main
-messages and a selected delegation transcript retain chronological order.
-Overlays are appended after canonical selection and are never persisted merely
-because they appear in a view.
-
-The result contains both provider messages and a composition manifest:
+The shared message package exposes an immutable, snapshot-scoped query chain.
+The chain starts with no selected source and adds only canonical ownership
+clauses:
 
 ```ts
-type AgentMessageView = {
-  messages: BaseMessage[];
-  messagesBySource: Readonly<Record<string, readonly BaseMessage[]>>;
-  manifest: AgentMessageViewManifest;
-};
+const query = queryAgentMessages(messages);
+
+const main = query
+  .main()
+  .select();
+
+const delegation = query
+  .delegation(scope)
+  .select();
+
+const capabilityHistory = query
+  .main()
+  .delegation(scope)
+  .select();
 ```
 
-The manifest records source, scope, canonical id, projection status, overlay
-status, and tool-protocol removals without copying message content. Named source
-partitions let a domain consume one composition in more than one representation;
-for example, Planner Boundary passes the `main` partition as provider history
-and serializes the `delegation` partition as structured boundary evidence.
+Each chain operation returns a new query value. `select()` evaluates the query
+once against the bound canonical snapshot and preserves original message
+chronology. Reusing the base query cannot leak clauses between node
+invocations.
 
-### Query, manager, and location API
+The query vocabulary is deliberately small:
 
-Message handling has three layers:
+- `main()` includes canonical main-conversation messages;
+- `delegation(scope)` includes one explicitly named private delegation scope;
+- `select()` returns the selected messages and small identity-only diagnostics.
+
+The query has no arbitrary provider or prompt operations. Domain filtering such
+as identifying Announces happens after scoped selection inside the executor
+delegation protocol. The query knows nothing about Announce, Planner Boundary,
+prompts, provider roles, artifacts, or task completion.
+
+Provider tool-call sanitation remains a shared message utility, but it is
+applied after a node has assembled its complete provider input. It is not a
+caller-selectable lane visibility policy.
+
+## Capability executor protocol
+
+Delegation briefing, transcript reconciliation, Announce, and handoff form one
+protocol between the root Orchestrator and a Capability executor subagent.
 
 ```text
-queryAgentMessages
-  -> AgentMessageManager
-    -> createOrchestratorMessageViews
+Orchestrator
+  -> Delegation Briefing
+  -> Capability executor
+  -> lane-scoped result messages + Announce
+  -> Orchestrator Boundary
+  -> continue the same delegation or accept through handoff
 ```
 
-- `queryAgentMessages` is the single canonical selection implementation. It
-  assigns each selected message to a named source and records why every other
-  canonical message was excluded. It also validates source identity and rejects
-  ambiguous main or delegation source definitions at this boundary.
-- `AgentMessageManager` adds invocation-only overlays, provider projection,
-  tool-protocol sanitation, named partitions, and the final manifest.
-- `createOrchestratorMessageViews` exposes location-level methods such as
-  `entryAnswer`, `capabilityPlannerBoundary`, and `capabilityModel`. Nodes choose
-  their location without re-declaring lane policy.
+The protocol owns:
 
-The manifest includes excluded message identities, lanes, and reason codes such
-as `scope_mismatch`, `not_announce`, and `invocation_only`; it never includes the
-message body.
+- the typed delegation briefing request;
+- tagging and reconciling executor result messages;
+- identifying the executor's typed Announce;
+- continuing the same delegation transcript;
+- accepting Announce values into main through handoff;
+- clearing an accepted private transcript.
 
-## Standard views
+The lane package supplies only scoped selection and reconciliation primitives.
 
-### Main conversation
+### Capability model input
+
+The Capability node derives the active scope from typed state, reselects the
+canonical history, and appends one current delegation briefing:
 
 ```text
-sources = [main]
+SystemMessage(Capability, Toolkit, and runtime instructions)
+Main + active delegation history
+HumanMessage(Delegation Briefing)
 ```
 
-Used by Entry, Answer, guards, and compaction. Accepted typed Announces are main
-facts and may receive an ephemeral provider projection.
+The briefing is the Orchestrator's current request to the executor. It is a
+Human-role invocation input, not an AI response and not a checkpoint message.
 
-### Capability delegation
+Toolkit-owned instructions, including artifact-discovery availability, belong
+in the Capability system/prompt sections. They are not synthetic lane messages.
+
+### Capability result
+
+After the model returns, the Capability node reconciles the child transcript
+against the selected canonical input, tags new messages with the active scope,
+and marks the result message identified by the subagent runtime as Announce.
+
+The node does not infer Announce identity or completion from text.
+
+## Planner protocol
+
+The Capability Planner is a separate subagent protocol. It does not own a root
+message lane and does not consume a generic message view.
+
+The Orchestrator sends typed `CapabilityPlannerInput`; the Planner returns one
+typed terminal commit.
 
 ```text
-sources = [main, delegation(scope, transcript)]
-overlays = [delegation briefing, optional artifact context]
+OrchestratorState
+  -> CapabilityPlannerInput
+  -> Planner provider messages
+  -> PlannerCommit
+  -> root state transition
 ```
 
-Only the exact active delegation scope is visible. A different delegation using
-the same Capability lane does not inherit its transcript. Invocation-only
-briefings are overlays, not checkpoint messages.
+### Entry
 
-### Planner Entry
+Planner Entry receives:
 
 ```text
-sources = [main]
-overlays = [Planner entry input]
+SystemMessage(Planner Entry objective)
+Clean main conversation
+HumanMessage(Planner Entry input)
 ```
 
-### Planner Boundary
+The Entry input contains the normalized run goal and run-scoped Planner data.
+It has no active delegation or execution evidence.
+
+### Boundary
+
+The root node uses the active delegation from typed state to select its private
+transcript. The executor protocol extracts the ordered typed Announces from that
+transcript. The Planner adapter then constructs `CapabilityPlannerInput`:
 
 ```text
-sources = [main, delegation(activeScope, announces_only)]
-overlays = [Planner boundary input]
+conversation: clean main conversation
+activeDelegation: typed root state
+announceAttempts: typed executor evidence
+latestAnnounce: the latest typed attempt or null
+remainingPlan: typed Planner session state
 ```
 
-The only private execution evidence eligible for Boundary comes from the exact
-active delegation. Other Capability lanes and non-announce executor transcript
-are excluded. Selected Announces are serialized inside the Boundary input, and
-that Planner input is an invocation-only `planner_input` overlay. The model call
-uses the resulting view directly.
+The Planner provider input is:
 
-## Ownership boundaries
+```text
+SystemMessage(Planner Boundary objective)
+Clean main conversation
+HumanMessage(Planner Boundary input)
+```
 
-The Agent message package owns:
+Private raw executor Human, AI, and Tool messages are not part of Planner
+history. Ordered Announces are current Boundary input data, not a lane visibility
+mode and not a temporary mutation of canonical messages.
 
-- lane and scope metadata;
-- canonical source selection;
-- chronological composition;
-- invocation-only overlays;
-- provider projection hooks;
-- tool-protocol sanitation;
-- view manifests and observability events;
-- child transcript reconciliation.
+Planner provider messages, search calls, and terminal tool calls remain inside
+the run-scoped Planner session. They never enter root `messages`.
 
-The orchestrator still owns:
+## Other root model nodes
 
-- what counts as an Announce;
-- accepting a delegation and constructing a handoff;
-- Planner plan/session state;
-- task completion and terminal outcomes;
-- context compaction policy.
+### Entry Answer
 
-Lane state is not a replacement for typed orchestration state.
+Entry Answer receives its system objective followed by clean main conversation.
+The latest real user `HumanMessage` is already present in that conversation; the
+node does not append a synthetic user message.
 
-## Package shape
+Its ordinary AI result is appended to main. A `plan_request` control result is
+materialized as typed Planner dispatch state rather than persisted control
+messages.
 
-The implementation lives under `agent/messages/`:
+### Answer
+
+Answer receives clean main conversation plus typed terminal outcome data owned
+by the Answer node. It does not inspect private Capability transcripts or reuse
+the Planner provider transcript.
+
+Its user-facing AI result is appended to main.
+
+## Typed domain messages and provider roles
+
+`DelegationAnnounceMessage` is the typed executor-output message. Its canonical
+payload and provider representation are owned by the executor delegation
+protocol, not by lane selection.
+
+When a model consumer needs explicit Announce provenance, that consumer uses the
+Announce protocol's provider adapter. The adapter does not mutate canonical
+state and is not a generic projection hook.
+
+Provider-role discipline is:
+
+- System: stable identity, objective, Capability/Toolkit instructions, and
+  trusted runtime constraints;
+- Human: the current caller request to this model or subagent;
+- AI: prior model or executor output, including accepted typed Announces;
+- Tool: a real result paired with a preceding tool call.
+
+Run-specific tasks, active delegation data, Announce attempts, and remaining
+plan belong in typed current input, not in a dynamically expanding system
+prompt.
+
+## Rejected concepts
+
+The target design has no generic:
+
+- message manager or prompt-composition DSL;
+- source ids or named source partitions;
+- audience field;
+- overlay abstraction;
+- projector callback;
+- `visibility: 'announces_only'` mode;
+- caller-selectable tool-protocol mode;
+- invocation-only persistence metadata;
+- composition manifest that models prompt construction as lane state.
+
+If runtime observability is retained, each node emits a small diagnostic after
+selection: location, active scope when applicable, selected message identities,
+and excluded message identities. It includes no message body and does not become
+another message-domain model.
+
+## Target package boundaries
 
 ```text
 agent/messages/
-  metadata.ts       lane/scope metadata and stamps
-  query.ts          canonical selection and exclusion reasons
-  protocol.ts       tool-call-safe sequence handling
-  manager.ts        canonical selection, overlays, projection, manifest
+  metadata.ts        Capability lane and delegation scope metadata
+  query.ts           snapshot-scoped canonical query chain
+  protocol.ts        provider tool-call sequence sanitation
   reconciliation.ts child transcript reconciliation
-  observability.ts  composition event emission
-  index.ts           internal package surface
+
+agent/orchestrator/delegation/
+  briefing.ts        Orchestrator -> Capability request
+  announceMessage.ts typed Capability -> Orchestrator result
+  announce.ts        Announce selection and metadata
+  transcript.ts      result tagging and continuation
+  handoff.ts         acceptance into main and lane cleanup
+
+agent/orchestrator/capabilityPlanner/
+  input.ts           OrchestratorState -> CapabilityPlannerInput
+  providerMessages.ts typed Planner input -> provider messages
+  protocol.ts        terminal commit contract
+  session.ts         run-scoped Planner state
+  runner.ts          Planner execution boundary
 ```
 
-Orchestrator-specific Announce and handoff operations move to a focused
-delegation-message module and consume the shared package. Location-level view
-conveniences live in `orchestrator/messageViews.ts`.
+There is no generic `orchestrator/invocationMessages.ts`. Each subagent protocol
+owns its own input and output representation.
 
 ## Invariants
 
-1. Main messages never acquire a delegation scope implicitly.
-2. A delegation-scoped message must carry lane, transcript run id, and
-   delegation id together.
-3. A Capability transcript view includes main plus exactly one delegation scope.
-4. A Planner Boundary view includes private messages only from the active scope
-   and only those selected as Announces.
-5. Overlays are marked invocation-only in the manifest and are never returned as
-   canonical state updates.
-6. Provider projection never mutates the canonical message object.
-7. Tool-call sanitation runs after selection and projection and is visible in
-   the manifest.
-8. View observation contains identities and counts, not user/tool message text.
+1. `OrchestratorState` remains the only root lifecycle source of truth.
+2. A Capability transcript is selected by the complete delegation scope.
+3. A fresh delegation never inherits another delegation's private transcript,
+   even when both use the same Capability.
+4. Continuing a delegation reuses the same scope and transcript.
+5. Only Capability executor results are tagged into Capability lanes.
+6. Planner provider messages never enter root `messages`.
+7. Briefing and Toolkit invocation context never enter canonical state.
+8. Announce identity is supplied by the subagent runtime, never inferred from
+   text or chronology alone.
+9. Handoff accepts typed Announces and clears the matching private transcript.
+10. Every node owns one explicit typed-state-to-model projection and one typed
+    result materialization path.
 
-## Implementation sequence
+## Implemented migration
 
-1. Introduce `agent/messages` and direct behavior tests.
-2. Move metadata, protocol sanitation, and reconciliation into the package.
-3. Split orchestrator Announce/handoff logic from the old monolith.
-4. Migrate Capability to a delegation transcript view with briefing overlay.
-5. Migrate Planner Entry and Boundary; Boundary uses the active delegation
-   announce source.
-6. Migrate Entry, Answer, guards, and compaction to main views.
-7. Delete the old `messageLanes.ts` aggregation after all imports move.
+1. Added behavior tests for the exact model input shape of Entry Answer, Planner
+   Entry, Planner Boundary, Capability initial/continue, and Answer.
+2. Deleted `manager.ts` and reduced `query.ts` to the bounded canonical query
+   chain described above.
+3. Split `delegationMessages.ts` along briefing, Announce, transcript, and
+   handoff ownership.
+4. Moved Planner Entry/Boundary input construction into the Planner protocol.
+5. Made delegation briefing a current Human-role executor request.
+6. Moved artifact-discovery model guidance into Toolkit/system prompt sections.
+7. Deleted overlays, projection hooks, named source partitions, and the generic
+   view manifest.
+8. Updated affected raw design/reference documents; wiki ingest remains separate.
+
+## Validation
+
+The implementation is complete only when:
+
+- typecheck and the full `pet-agent` unit suite pass;
+- exact input-shape tests prove private-lane isolation and current-input roles;
+- continuation tests prove same-delegation transcript reuse;
+- sequential-task tests prove different-delegation isolation;
+- Planner Boundary tests prove ordered Announce evidence without raw transcript;
+- no invocation-only briefing or Toolkit context reaches root state;
+- targeted real-model Entry and Boundary evals show no stable regression.
 
 ## Non-goals
 
-- Persisting model-specific XML projections.
-- Exposing raw Capability tool transcripts to Planner.
-- Encoding Planner plan/search state as messages.
-- Treating the latest message by chronology as the active delegation.
-- Changing terminal-response behavior in the same refactor.
+This refactor does not change Planner decision policy, search budgets, terminal
+actions, Announce payload semantics, user-visible answer policy, or artifact
+state. It changes ownership and message placement so those behaviors no longer
+depend on a generic lane-composition framework.

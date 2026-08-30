@@ -10,7 +10,7 @@ const scope = {
   delegationId: 'delegation-1',
 };
 
-test('query assigns canonical messages to named sources in original chronology', () => {
+test('query chains main and an exact delegation while preserving chronology', () => {
   const mainBefore = new HumanMessage({ id: 'main-before', content: 'goal' });
   const delegation = setAgentMessageDelegationScope(
     new AIMessage({ id: 'delegation', content: 'result' }),
@@ -18,73 +18,80 @@ test('query assigns canonical messages to named sources in original chronology',
   );
   const mainAfter = new HumanMessage({ id: 'main-after', content: 'continue' });
 
-  const result = queryAgentMessages([mainBefore, delegation, mainAfter], [
-    { id: 'main', kind: 'main' },
-    { id: 'current', kind: 'delegation', scope, visibility: 'transcript' },
-  ]);
+  const selection = queryAgentMessages([mainBefore, delegation, mainAfter])
+    .main()
+    .delegation(scope)
+    .select();
 
-  assert.deepEqual(result.selected.map(({ message }) => message), [
-    mainBefore,
-    delegation,
-    mainAfter,
-  ]);
-  assert.deepEqual(result.selected.map(({ source }) => source.id), [
-    'main',
-    'current',
-    'main',
+  assert.deepEqual(selection.messages, [mainBefore, delegation, mainAfter]);
+  assert.deepEqual(selection.diagnostics.selectedMessageIds, [
+    'main-before',
+    'delegation',
+    'main-after',
   ]);
 });
 
-test('query explains every canonical exclusion without copying message content', () => {
-  const invocationOnly = setAgentMessageMetadata(
-    new AIMessage({ id: 'invocation', content: 'briefing' }),
-    { persistence: 'invocation' },
-  );
-  const rawCurrent = setAgentMessageDelegationScope(
-    new AIMessage({ id: 'raw-current', content: 'private transcript' }),
+test('query is immutable and only selects explicitly requested sources', () => {
+  const main = new HumanMessage({ id: 'main', content: 'goal' });
+  const delegation = setAgentMessageDelegationScope(
+    new AIMessage({ id: 'delegation', content: 'result' }),
     scope,
   );
-  const otherDelegation = setAgentMessageDelegationScope(
+  const base = queryAgentMessages([main, delegation]);
+  const mainQuery = base.main();
+
+  assert.deepEqual(base.select().messages, []);
+  assert.deepEqual(mainQuery.select().messages, [main]);
+  assert.deepEqual(
+    mainQuery.delegation(scope).select().messages,
+    [main, delegation],
+  );
+});
+
+test('query is bound to the canonical snapshot captured at creation', () => {
+  const first = new HumanMessage({ id: 'first', content: 'first' });
+  const later = new HumanMessage({ id: 'later', content: 'later' });
+  const canonical = [first];
+  const query = queryAgentMessages(canonical).main();
+
+  canonical.push(later);
+
+  assert.deepEqual(query.select().messages, [first]);
+});
+
+test('query explains exclusions without copying message content', () => {
+  const current = setAgentMessageDelegationScope(
+    new AIMessage({ id: 'current', content: 'private transcript' }),
+    scope,
+  );
+  const other = setAgentMessageDelegationScope(
     new AIMessage({ id: 'other', content: 'other transcript' }),
     { ...scope, delegationId: 'delegation-2' },
   );
-  const legacyInternal = setAgentMessageMetadata(
-    new AIMessage({ id: 'legacy', content: 'legacy internal' }),
+  const unsupported = setAgentMessageMetadata(
+    new AIMessage({ id: 'unsupported', content: 'legacy internal' }),
     { lane: 'orchestrator' },
   );
 
-  const result = queryAgentMessages(
-    [invocationOnly, rawCurrent, otherDelegation, legacyInternal],
-    [
-      { id: 'main', kind: 'main' },
-      { id: 'current', kind: 'delegation', scope, visibility: 'announces_only' },
-    ],
-  );
+  const selection = queryAgentMessages([current, other, unsupported])
+    .delegation(scope)
+    .select();
 
-  assert.deepEqual(result.excluded.map(({ message, reason }) => ({
-    messageId: message.id,
-    reason,
-  })), [
-    { messageId: 'invocation', reason: 'invocation_only' },
-    { messageId: 'raw-current', reason: 'not_announce' },
+  assert.deepEqual(selection.messages, [current]);
+  assert.deepEqual(selection.diagnostics.excluded, [
     { messageId: 'other', reason: 'scope_mismatch' },
-    { messageId: 'legacy', reason: 'unsupported_lane' },
+    { messageId: 'unsupported', reason: 'unsupported_lane' },
   ]);
 });
 
-test('query rejects ambiguous source definitions at its own boundary', () => {
-  assert.throws(
-    () => queryAgentMessages([], [
-      { id: 'main-a', kind: 'main' },
-      { id: 'main-b', kind: 'main' },
-    ]),
-    /at most one main source/,
+test('query rejects a capability lane message with an incomplete scope', () => {
+  const invalid = setAgentMessageMetadata(
+    new AIMessage({ id: 'invalid', content: 'result' }),
+    { lane: scope.lane },
   );
+
   assert.throws(
-    () => queryAgentMessages([], [
-      { id: 'duplicate', kind: 'main' },
-      { id: 'duplicate', kind: 'delegation', scope, visibility: 'transcript' },
-    ]),
-    /source ids must be unique/,
+    () => queryAgentMessages([invalid]).delegation(scope).select(),
+    /missing delegationId or another part of its complete scope/,
   );
 });

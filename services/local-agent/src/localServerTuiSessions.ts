@@ -7,7 +7,7 @@ import type {
   AgentPlan,
 } from '@pinpawo/agent-session';
 import {
-  readMessageCreatedAtUtc,
+  readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   mainConversationMessages,
@@ -89,7 +89,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
     if (!text) {
       return [];
     }
-    const createdAt = readMessageCreatedAtUtc(message);
+    const createdAt = readAgentMessageCreatedAt(message);
     return [{
       ...source,
       text,

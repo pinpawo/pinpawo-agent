@@ -36,7 +36,7 @@ import {
 import type { CapabilityPlannerInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { createPlannerSession } from './session';
-import { setPinpetMeta } from '../../messages';
+import { setAgentMessageMetadata } from '../../messages';
 
 function commitOnly(value: unknown) {
   const result = value as {
@@ -944,7 +944,7 @@ test('boundary projects the current lane announce into the standard model-visibl
     id: 'announce-current',
     content: 'The repository inspection is incomplete; dependency evidence is missing.',
   });
-  setPinpetMeta(currentAnnounce, {
+  setAgentMessageMetadata(currentAnnounce, {
     lane: 'capability:explore',
     runId: 'transcript-current',
     delegationId: 'delegation-current',
@@ -953,7 +953,7 @@ test('boundary projects the current lane announce into the standard model-visibl
     completionReason: 'limit_reached',
   });
   const privateLaneTranscript = new AIMessage('PRIVATE_RAW_EXECUTOR_TRANSCRIPT');
-  setPinpetMeta(privateLaneTranscript, {
+  setAgentMessageMetadata(privateLaneTranscript, {
     lane: 'capability:explore',
     runId: 'transcript-current',
     delegationId: 'delegation-current',

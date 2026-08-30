@@ -41,28 +41,28 @@ import {
   ReviewPolicies,
 } from './review/reviewPolicies';
 import {
-  getMessageDelegationId,
-  getMessageLane,
-  getMessageTranscriptRunId,
+  getAgentMessageDelegationId,
+  getAgentMessageLane,
+  getAgentMessageTranscriptRunId,
   getAgentMessageMetadata,
   laneMessages,
   mainConversationMessages,
-  readMessageCreatedAtUtc,
-  setPinpetMeta,
+  readAgentMessageCreatedAt,
+  setAgentMessageMetadata,
 } from '../messages';
 import {
+  DelegationAnnounceMessage,
   buildSubagentHandoff,
+  getDelegationAnnounce,
   getMessageHandoffSource,
   getMessageIsAnnounce,
   readLatestAnnounce,
   selectDelegationLaneAnnounceMessage,
   tagNewLaneMessages,
-} from './delegationMessages';
-import { RemoveMessage } from '@langchain/core/messages';
-import {
   isDelegationBriefingMessage,
   materializeDelegation,
-} from './delegationBriefing';
+} from './delegation';
+import { RemoveMessage } from '@langchain/core/messages';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -73,10 +73,6 @@ import {
   isContextCompactionMessage,
 } from './contextCompaction';
 import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
-import {
-  DelegationAnnounceMessage,
-  getDelegationAnnounce,
-} from './delegationAnnounce';
 import type { RunDelegationSummary, TaskActiveDelegation } from './types';
 import type { SubagentRuntimeContext } from '../../types/subagent';
 import {
@@ -546,7 +542,6 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
   assert.equal(state.taskPlannerContinuation, null);
-  assert.equal(state.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
   assert.equal(state.messages.some((message) =>
     readMessageText(message).includes('<planning_boundary_event')), false);
   const answerInput = readMessageText(answerMessages.at(-1) ?? new HumanMessage(''));
@@ -1313,7 +1308,7 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
-  setPinpetMeta(currentAnnounce, {
+  setAgentMessageMetadata(currentAnnounce, {
     lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
@@ -1441,7 +1436,7 @@ test('delegation goal_done summarizes and preserves the handed-off result', asyn
   };
   const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
   const announceMessage = new AIMessage(announceText);
-  setPinpetMeta(announceMessage, {
+  setAgentMessageMetadata(announceMessage, {
     lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
@@ -1518,7 +1513,7 @@ test('user_input_required returns control without claiming delegation completion
   const task = '确认发送渠道并发送已经完成的报告';
   const announceText = '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。';
   const announceMessage = new AIMessage(announceText);
-  setPinpetMeta(announceMessage, {
+  setAgentMessageMetadata(announceMessage, {
     lane: 'capability:general',
     runId: input.runId,
     isAnnounce: true,
@@ -1797,7 +1792,7 @@ test('answer errors checkpoint run-scoped cleanup before they are rethrown', asy
   assert.equal(state.runTerminalError?.langChainErrorCode, 'MODEL_RATE_LIMIT');
 });
 
-test('answer filters internal briefings by lane without parsing message text', async () => {
+test('answer filters private delegation transcripts by lane without parsing message text', async () => {
   let answerInput = '';
   const model = {
     invoke: async (messages: unknown[]) => {
@@ -1816,9 +1811,8 @@ test('answer filters internal briefings by lane without parsing message text', a
     actor: testActor,
   });
 
-  const internalBriefing = new AIMessage('正文完全普通，但 metadata 表明它属于 delegation lane。');
-  setPinpetMeta(internalBriefing, {
-    source: 'delegation_briefing',
+  const privateTranscript = new AIMessage('正文完全普通，但 metadata 表明它属于 delegation lane。');
+  setAgentMessageMetadata(privateTranscript, {
     lane: 'capability:general',
     runId: 'answer-run',
     delegationId: 'answer-task',
@@ -1826,7 +1820,7 @@ test('answer filters internal briefings by lane without parsing message text', a
   const briefingShapedConversation = new AIMessage('【委派简报】\n- 这是用户可见的普通历史内容');
   const state = await graph.invoke(buildOrchestratorRunInput([
     new HumanMessage('之前做了什么？'),
-    internalBriefing,
+    privateTranscript,
     briefingShapedConversation,
     new HumanMessage('直接回答我。'),
   ]), {
@@ -1842,7 +1836,7 @@ test('answer filters internal briefings by lane without parsing message text', a
   // lane-tagged one does not.
   const canonical = mainConversationMessages(state.messages);
   assert.equal(canonical.includes(briefingShapedConversation), true);
-  assert.equal(canonical.includes(internalBriefing), false);
+  assert.equal(canonical.includes(privateTranscript), false);
 });
 
 test('answer returns model output unchanged without classifying its text shape', async () => {
@@ -1963,7 +1957,7 @@ test('limit-reached progress announce lets model choose the same capability dele
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
   const progressAnnounce = new AIMessage('(no matches)');
-  setPinpetMeta(progressAnnounce, {
+  setAgentMessageMetadata(progressAnnounce, {
     lane: 'capability:inspect_repo',
     runId: input.runId,
     isAnnounce: true,
@@ -2391,10 +2385,6 @@ test('general Capability composes its declared Toolkits', async () => {
     'artifact_read',
   ]);
   assert.equal(recorder.subagentInputs.length, 1);
-  assert.match(
-    recorder.subagentInputs[0].map((message) => String(message.content)).join('\n'),
-    /<artifact_discovery_context[\s\S]*current_thread/,
-  );
   assert.doesNotMatch(
     JSON.stringify(recorder.subagentInputs[0].map((message) => message.content)),
     /小白|物种：cat|性格：友好/,
@@ -4869,14 +4859,14 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   const userAsk = new HumanMessage('帮我查一下公开资料');
   const intermediate = new AIMessage('正在抓取页面…');
   intermediate.id = 'm-intermediate';
-  setPinpetMeta(intermediate, { lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
+  setAgentMessageMetadata(intermediate, { lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
   const announce = new AIMessage('已查到热门动态：A、B、C。FULL_ANNOUNCE_MARKER');
   announce.id = 'm-announce';
-  setPinpetMeta(announce, { lane: 'capability:explore', runId: 't1', delegationId: 'd1', isAnnounce: true, task: '查动态' });
+  setAgentMessageMetadata(announce, { lane: 'capability:explore', runId: 't1', delegationId: 'd1', isAnnounce: true, task: '查动态' });
   // A different delegation in the same lane must be untouched.
   const otherDelegation = new AIMessage('另一个 delegation 的中间消息');
   otherDelegation.id = 'm-other';
-  setPinpetMeta(otherDelegation, { lane: 'capability:explore', runId: 't1', delegationId: 'd2' });
+  setAgentMessageMetadata(otherDelegation, { lane: 'capability:explore', runId: 't1', delegationId: 'd2' });
 
   const messages = [userAsk, intermediate, announce, otherDelegation];
   const update = buildSubagentHandoff({
@@ -4897,8 +4887,8 @@ test('buildSubagentHandoff copies the announce into main and wipes the whole del
   // The copy carries the full announce text, lives in main (no lane), and keeps
   // only minimal provenance.
   assert.match(String(copy.content), /FULL_ANNOUNCE_MARKER/);
-  assert.equal(getMessageLane(copy), null);
-  assert.match(readMessageCreatedAtUtc(copy) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
+  assert.equal(getAgentMessageLane(copy), null);
+  assert.match(readAgentMessageCreatedAt(copy) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
   assert.deepEqual(getMessageHandoffSource(copy), {
     handoffFrom: 'capability:explore',
     delegationId: 'd1',
@@ -4956,7 +4946,7 @@ test('handoff idempotency is scoped by delegation lane and transcript run id', (
 
 test('old handoff metadata is not treated as an accepted delegation result', () => {
   const oldCopy = new AIMessage('旧 handoff 文本');
-  setPinpetMeta(oldCopy, {
+  setAgentMessageMetadata(oldCopy, {
     handoffFrom: 'capability:general',
     delegationId: 'old-delegation',
     runId: 'old-run',
@@ -4972,7 +4962,7 @@ test('buildSubagentHandoff retains only announce identity and result', () => {
   const userAsk = new HumanMessage('请帮我做一次探索');
   const announce = new AIMessage('已整理好探索结果。');
   announce.id = 'm-announce-2';
-  setPinpetMeta(announce, {
+  setAgentMessageMetadata(announce, {
     lane: 'capability:explore',
     runId: 'run-1',
     delegationId: 'd-announce',
@@ -5005,10 +4995,10 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
   const humanAsk = new HumanMessage('继续处理一些文件');
   const intermediate = new AIMessage('准备处理中...');
   intermediate.id = 'm-mid';
-  setPinpetMeta(intermediate, { lane: 'capability:general', runId: 'run-5', delegationId: 'd-keep' });
+  setAgentMessageMetadata(intermediate, { lane: 'capability:general', runId: 'run-5', delegationId: 'd-keep' });
   const announce = new AIMessage('已完成部分，继续留痕。');
   announce.id = 'm-announce-keep';
-  setPinpetMeta(announce, {
+  setAgentMessageMetadata(announce, {
     lane: 'capability:general',
     runId: 'run-5',
     delegationId: 'd-keep',
@@ -5042,7 +5032,7 @@ test('buildSubagentHandoff keeps lane messages when clearLane is disabled', () =
 test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
   const intermediate = new AIMessage('只有中间步骤，没有结论');
   intermediate.id = 'm1';
-  setPinpetMeta(intermediate, { lane: 'capability:general', runId: 't1', delegationId: 'd1' });
+  setAgentMessageMetadata(intermediate, { lane: 'capability:general', runId: 't1', delegationId: 'd1' });
   const update = buildSubagentHandoff({
     messages: [new HumanMessage('做点事'), intermediate],
     lane: 'capability:general',
@@ -5054,7 +5044,7 @@ test('buildSubagentHandoff returns null when the delegation has no announce text
 
 test('buildSubagentHandoff rejects an announce without a message id', () => {
   const announce = new AIMessage('完成结果');
-  setPinpetMeta(announce, {
+  setAgentMessageMetadata(announce, {
     lane: 'capability:general',
     runId: 't1',
     delegationId: 'd1',
@@ -5212,7 +5202,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
 
   const previousAnnounce = new AIMessage(announceText);
   previousAnnounce.id = 'm-prev-announce';
-  setPinpetMeta(previousAnnounce, {
+  setAgentMessageMetadata(previousAnnounce, {
     lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
@@ -5302,7 +5292,7 @@ test('Planner continuation path rechecks run iteration guard before next decisio
 
   const announce = new AIMessage('进度已完成前段。');
   announce.id = 'm-limit-announce';
-  setPinpetMeta(announce, {
+  setAgentMessageMetadata(announce, {
     lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
@@ -5392,7 +5382,7 @@ test('Planner boundary accepts each announce attempt once', async () => {
   };
   const initialAnnounce = new AIMessage('进度更新：已完成一部分，继续保留。');
   initialAnnounce.id = 'm-dup-copy';
-  setPinpetMeta(initialAnnounce, {
+  setAgentMessageMetadata(initialAnnounce, {
     lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
@@ -5467,7 +5457,7 @@ test('lane tagging hides subagent messages from route and records completed anno
   assert.equal(tagged.length, 1);
   // The deliverable message is marked as the announce (neutral, no verdict).
   assert.equal(getMessageIsAnnounce(messages[1]), true);
-  assert.equal(getMessageDelegationId(messages[1]), 'task-1');
+  assert.equal(getAgentMessageDelegationId(messages[1]), 'task-1');
   assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下公开资料']);
   assert.deepEqual(laneMessages(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
     '帮我查一下公开资料',
@@ -5482,23 +5472,20 @@ test('lane tagging hides subagent messages from route and records completed anno
   });
 });
 
-test('lane tagging never emits root removals for invocation-only briefing messages', () => {
+test('lane reconciliation never emits root removals for the current briefing', () => {
   const human = new HumanMessage({ id: 'main-human', content: '继续处理任务' });
   const persistedProgress = new AIMessage({ id: 'old-progress', content: '旧进度' });
-  setPinpetMeta(persistedProgress, {
+  setAgentMessageMetadata(persistedProgress, {
     lane: 'capability:general',
     runId: 'turn-1',
     delegationId: 'task-1',
   });
-  const [briefing] = materializeDelegation({
+  const briefing = materializeDelegation({
     mode: 'continue',
-    lane: 'capability:general',
-    transcriptRunId: 'turn-1',
-    delegationId: 'task-1',
     userRequest: '完成任务',
     task: '继续处理任务',
     guidance: null,
-  }).laneMessages;
+  });
   const finalAnswer = new AIMessage({ id: 'final-answer', content: '任务完成' });
 
   const update = tagNewLaneMessages(
@@ -5574,10 +5561,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
     }),
   ];
 
-  const legacyBriefing = new AIMessage('旧 checkpoint 中未打 lane 标的简报。');
-  setPinpetMeta(legacyBriefing, { source: 'delegation_briefing' });
-
-  assert.deepEqual(mainConversationMessages([...handoffs, legacyBriefing]), handoffs);
+  assert.deepEqual(mainConversationMessages(handoffs), handoffs);
 });
 
 test('lane tagging reconciles a summarized subagent transcript by message identity', () => {
@@ -5632,8 +5616,8 @@ test('lane tagging reconciles a summarized subagent transcript by message identi
   assert.equal(stateAfterSummary.some((message) => message.id === 'main-human'), true);
   assert.equal(stateAfterSummary.some((message) => message.id === 'old-call'), false);
   assert.equal(stateAfterSummary.some((message) => message.id === 'old-result'), false);
-  assert.equal(getMessageLane(contextSummary), 'capability:general');
-  assert.equal(getMessageDelegationId(contextSummary), 'task-summary');
+  assert.equal(getAgentMessageLane(contextSummary), 'capability:general');
+  assert.equal(getAgentMessageDelegationId(contextSummary), 'task-summary');
   assert.equal(getMessageIsAnnounce(finalAnswer), true);
   assert.deepEqual(
     laneMessages(stateAfterSummary, 'capability:general', 'turn-1', 'task-summary').map((message) => message.id),
@@ -5840,7 +5824,7 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
     }],
   };
   const partialAnnounce = new AIMessage('已跑到一半，继续需要更多时间。');
-  setPinpetMeta(partialAnnounce, {
+  setAgentMessageMetadata(partialAnnounce, {
     lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
@@ -5870,7 +5854,7 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
   assert.equal(state.taskActiveDelegation?.status, 'awaiting_decision');
   assert.equal(state.runDelegationSummaries.find((item) => item.id === activeDelegation.id)?.status, 'progress');
   assert.equal(state.messages.filter(
-    (message) => getMessageLane(message) === 'capability:general',
+    (message) => getAgentMessageLane(message) === 'capability:general',
   ).length > 0, true);
 });
 
@@ -5921,7 +5905,7 @@ test('Planner boundary uses a unified run-iteration guard before invoking decisi
     userRequest: '完成大规模迁移。',
   };
   const partialAnnounce = new AIMessage('继续迁移，已完成 50%。');
-  setPinpetMeta(partialAnnounce, {
+  setAgentMessageMetadata(partialAnnounce, {
     lane: 'capability:general',
     runId: input.runId,
     delegationId: activeDelegation.id,
@@ -6008,7 +5992,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
     '检查完成，测试脚本是 node --test。',
   ]);
   // The copy is a first-class main message (no lane) with handoff provenance.
-  assert.equal(getMessageLane(stateMessages[1]), null);
+  assert.equal(getAgentMessageLane(stateMessages[1]), null);
   assert.deepEqual(getMessageHandoffSource(stateMessages[1]), {
     handoffFrom: 'capability:general',
     delegationId: 'task-complete',
@@ -6018,7 +6002,7 @@ test('handoff copies the announce into main and wipes the lane transcript', () =
   });
   // No lane-tagged messages for this delegation remain.
   assert.equal(stateMessages.filter(
-    (message) => getMessageLane(message) === 'capability:general',
+    (message) => getAgentMessageLane(message) === 'capability:general',
   ).length, 0);
 });
 
@@ -6095,7 +6079,7 @@ test('handoff after a resumed delegation wipes the whole delegation lane includi
   // The entire delegation lane (old progress + continuation transcript) is gone;
   // only the user message and the main-queue copy of the final announce remain.
   assert.equal(finalState.filter(
-    (message) => getMessageLane(message) === 'capability:general',
+    (message) => getAgentMessageLane(message) === 'capability:general',
   ).length, 0);
   assert.deepEqual(mainConversationMessages(finalState).map((m) => m.content), [
     '处理所有分片',
@@ -6147,7 +6131,7 @@ test('lane messages sanitize checkpoint history with dangling tool calls', () =>
     content: '准备移动。',
     tool_calls: [{ id: 'call-legacy', name: 'move_path', args: { source: 'a', destination: 'b' } }],
   });
-  setPinpetMeta(danglingToolCall, { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-legacy' });
+  setAgentMessageMetadata(danglingToolCall, { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-legacy' });
 
   assert.deepEqual(laneMessages(
     [human, danglingToolCall],
@@ -6195,7 +6179,7 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
 test('lane messages reject lane history without a delegationId', () => {
   const human = new HumanMessage('继续');
   const invalidLaneMessage = new AIMessage('缺少 delegationId 的 lane 消息。');
-  setPinpetMeta(invalidLaneMessage, { lane: 'capability:general', runId: 'turn-1' });
+  setAgentMessageMetadata(invalidLaneMessage, { lane: 'capability:general', runId: 'turn-1' });
 
   assert.throws(
     () => laneMessages([human, invalidLaneMessage], 'capability:general', 'turn-1', 'task-1'),
@@ -6286,7 +6270,7 @@ function interruptedLaneMessages(params: {
     tool_call_id: `${params.delegationId}-call`,
   });
   for (const message of [toolCall, toolResult]) {
-    setPinpetMeta(message, {
+    setAgentMessageMetadata(message, {
       lane,
       runId: params.runId,
       delegationId: params.delegationId,
@@ -6547,7 +6531,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     id: 'prior-resume-announce',
     content: activeDelegation.resultPreview ?? '',
   });
-  setPinpetMeta(priorAnnounce, {
+  setAgentMessageMetadata(priorAnnounce, {
     lane: activeDelegation.lane,
     runId: activeDelegation.transcriptRunId,
     isAnnounce: true,
@@ -6654,14 +6638,14 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     /<run_user_request role="goal_context"[\s\S]*完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。[\s\S]*<\/run_user_request>/,
   );
   assert.equal(
-    getMessageTranscriptRunId(resumedBriefing),
-    activeDelegation.transcriptRunId,
+    getAgentMessageTranscriptRunId(resumedBriefing),
+    null,
   );
   assert.equal(
     resumedInput
-      .filter((message) => getMessageLane(message) === activeDelegation.lane)
+      .filter((message) => getAgentMessageLane(message) === activeDelegation.lane)
       .every((message) =>
-        getMessageTranscriptRunId(message) === activeDelegation.transcriptRunId),
+        getAgentMessageTranscriptRunId(message) === activeDelegation.transcriptRunId),
     true,
   );
   assert.match(
@@ -6686,7 +6670,7 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
     },
   } as unknown as TaskActiveDelegation;
   const priorAnnounce = new AIMessage(activeDelegation.resultPreview ?? '');
-  setPinpetMeta(priorAnnounce, {
+  setAgentMessageMetadata(priorAnnounce, {
     lane: activeDelegation.lane,
     runId: activeDelegation.transcriptRunId,
     isAnnounce: true,
@@ -6846,16 +6830,15 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   assert.equal(humanMessages.length, 1);
   assert.equal(String(humanMessages[0].content), '关闭 issue #272，然后删除 packages/goat 目录。');
 
-  // Subagent model input: the briefing is the latest orchestrator message and
-  // no synthetic HumanMessage is appended.
+  // Subagent model input: the current Human briefing is appended after the
+  // selected canonical main and delegation transcript.
   assert.match(String(firstInput.at(-1)?.content), /<delegation_briefing[\s\S]*关闭 GitHub Issue #272/);
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
-  assert.match(secondInputText, /<artifact_discovery_context[\s\S]*current_thread/);
   assert.doesNotMatch(
     state.messages.map((message) => String(message.content)).join('\n'),
-    /artifact_discovery_context/,
+    /可选历史 artifacts/,
   );
 
   // Per-delegation task data stays in the briefing instead of being copied

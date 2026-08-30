@@ -10,7 +10,7 @@ import {
   MAX_HANDOFF_ARTIFACT_URI_LENGTH,
   type HandOffArtifactRef,
 } from '../artifacts/handoff';
-import { getAgentMessageMetadata, setPinpetMeta } from '../../messages';
+import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
 import type { UserRequest } from '../types';
 import { clipForPrompt } from '../utils';
 import { buildRunUserRequestContext } from './context';
@@ -193,7 +193,7 @@ function createAnswerInputMessage(
   const content = renderAnswerInput(userRequest, facts);
   const message = new HumanMessage(content);
   message.name = ANSWER_INPUT_MESSAGE_NAME;
-  setPinpetMeta(message, {
+  setAgentMessageMetadata(message, {
     source: ANSWER_INPUT_MESSAGE_NAME,
     synthetic: true,
     authority: 'none',

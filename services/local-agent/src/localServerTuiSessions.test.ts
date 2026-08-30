@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 import {
-  stampMessageCreatedAtUtc,
+  stampAgentMessageCreatedAt,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import test from 'node:test';
@@ -41,11 +41,11 @@ const testArtifactStore: CapabilityArtifactStore = {
 };
 
 test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => {
-  const userMessage = stampMessageCreatedAtUtc(
+  const userMessage = stampAgentMessageCreatedAt(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
   );
-  const assistantMessage = stampMessageCreatedAtUtc(
+  const assistantMessage = stampAgentMessageCreatedAt(
     new AIMessage('assistant reply'),
     '2026-06-01T01:00:01.000Z',
   );

@@ -33,7 +33,7 @@ export function buildSubagentExecutionContext(params: {
       ? [
           [
             '## 可选历史 artifacts',
-            `消息中的 <artifact_discovery_context> 表示可使用 ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} 和 ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} 查找并读取当前 thread 的历史产物。`,
+            `可使用 ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} 和 ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} 查找并读取当前 thread 的历史产物。`,
             'Artifacts 是可能过期或不完整的参考信息；按当前任务的需要选择并核验。',
           ].join('\n'),
         ]

@@ -25,12 +25,10 @@ import {
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
 import {
-  getMessageLane,
+  getAgentMessageLane,
   mainConversationMessages,
 } from '../../src/agent/messages/index.ts';
-import {
-  readLatestHumanRequest,
-} from '../../src/agent/orchestrator/delegationMessages.ts';
+import { readLatestHumanRequest } from '../../src/agent/orchestrator/conversationMessages.ts';
 import type { OrchestratorStateType } from '../../src/agent/orchestrator/state.ts';
 import { readMessageText } from '../../src/agent/orchestrator/utils.ts';
 import { readMessageToolCalls } from '../../src/utils/messages.ts';
@@ -412,7 +410,7 @@ function createControlledExecutor(turns: LifecycleCompositionTurn[]) {
         inputMessages: messages.map((message) => readMessageText(message)),
         controlledResult,
         unexpected: controlledResult === null,
-        laneMessageCount: messages.filter((message) => getMessageLane(message) !== null).length,
+        laneMessageCount: messages.filter((message) => getAgentMessageLane(message) !== null).length,
       });
       if (controlledResult === null) {
         throw new ControlledExecutorExhaustedError(

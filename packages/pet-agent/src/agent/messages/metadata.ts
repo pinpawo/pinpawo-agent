@@ -2,7 +2,6 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 
 export type CapabilityMessageLane = `capability:${string}`;
-export type AgentMessageLane = CapabilityMessageLane | 'orchestrator';
 
 export type DelegationMessageScope = {
   lane: CapabilityMessageLane;
@@ -35,13 +34,13 @@ export function ensureAgentMessageId(message: BaseMessage): string {
   return message.id;
 }
 
-export function getAgentMessageLane(message: BaseMessage): AgentMessageLane | null {
+export function getAgentMessageLane(message: BaseMessage): string | null {
   const lane = getAgentMessageMetadata(message).lane;
-  return typeof lane === 'string' ? lane as AgentMessageLane : null;
+  return typeof lane === 'string' ? lane : null;
 }
 
 export function isCapabilityMessageLane(
-  lane: AgentMessageLane | string | null,
+  lane: string | null,
 ): lane is CapabilityMessageLane {
   return Boolean(lane?.startsWith('capability:'));
 }
@@ -101,21 +100,3 @@ export function readAgentMessageCreatedAt(message: BaseMessage): string | null {
   const createdAt = getAgentMessageMetadata(message).createdAt;
   return typeof createdAt === 'string' && createdAt.trim() ? createdAt : null;
 }
-
-export function isInvocationOnlyAgentMessage(message: BaseMessage): boolean {
-  const metadata = getAgentMessageMetadata(message);
-  return metadata.persistence === 'invocation'
-    || (
-      metadata.source === 'delegation_briefing'
-      && metadata.handoffFrom === undefined
-    );
-}
-
-// Stable names retained at the public package boundary after implementation
-// ownership moved into the Agent message package.
-export const setPinpetMeta = setAgentMessageMetadata;
-export const getMessageLane = getAgentMessageLane;
-export const getMessageDelegationId = getAgentMessageDelegationId;
-export const getMessageTranscriptRunId = getAgentMessageTranscriptRunId;
-export const stampMessageCreatedAtUtc = stampAgentMessageCreatedAt;
-export const readMessageCreatedAtUtc = readAgentMessageCreatedAt;

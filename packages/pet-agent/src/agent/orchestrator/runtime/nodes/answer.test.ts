@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { AgentModels } from '../../../../types/agent';
-import { DelegationAnnounceMessage } from '../../delegationAnnounce';
+import { DelegationAnnounceMessage } from '../../delegation';
 import type { OrchestratorStateType } from '../../state';
 import {
   createAnswerNode,

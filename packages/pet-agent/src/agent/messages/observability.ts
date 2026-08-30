@@ -1,17 +1,18 @@
 import { dispatchCustomEvent } from '@langchain/core/callbacks/dispatch';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { AgentMessageViewManifest } from './manager';
+import type { AgentMessageSelectionDiagnostics } from './query';
 
-export const AGENT_MESSAGE_VIEW_EVENT = 'agent_message_view';
+export const AGENT_MESSAGE_SELECTION_EVENT = 'agent_message_selection';
 
-export function observeAgentMessageView(
-  manifest: AgentMessageViewManifest,
+export function observeAgentMessageSelection(
+  location: string,
+  diagnostics: AgentMessageSelectionDiagnostics,
   runnableConfig?: RunnableConfig,
 ) {
   if (!runnableConfig) return;
   void dispatchCustomEvent(
-    AGENT_MESSAGE_VIEW_EVENT,
-    manifest,
+    AGENT_MESSAGE_SELECTION_EVENT,
+    { location, ...diagnostics },
     runnableConfig,
   ).catch(() => {});
 }

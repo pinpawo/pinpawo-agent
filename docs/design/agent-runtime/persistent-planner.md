@@ -15,8 +15,8 @@ continually select, exclude, compact, invalidate, and clean those messages.
 
 Do not extend the trace-scoped Planner lane design. The replacement direction is
 the [Run-scoped Planner session](run-scoped-planner-session.md): Planner is a
-stateful steering domain for one root run, Boundary context is an
-invocation-only overlay, and a new run starts with a clean Planner session.
+stateful steering domain for one root run, Boundary context is a typed current
+input projection, and a new run starts with a clean Planner session.
 
 This file remains only to keep historical links resolvable. Its former detailed
 contract was intentionally removed so it cannot compete with the replacement

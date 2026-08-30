@@ -2,7 +2,7 @@ import {
   resumeRunDelegationSummary,
   updateRunDelegationSummaryResult,
 } from '../delegations';
-import { readLatestHumanRequest } from '../delegationMessages';
+import { readLatestHumanRequest } from '../conversationMessages';
 import type { OrchestratorStateType } from '../state';
 import type { RunNextDelegation, TaskActiveDelegation } from '../types';
 import { clipForPrompt } from '../utils';

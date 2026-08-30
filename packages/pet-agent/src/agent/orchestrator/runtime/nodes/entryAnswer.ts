@@ -6,10 +6,12 @@ import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
 import {
   mainConversationMessages,
-  observeAgentMessageView,
-  stampMessageCreatedAtUtc,
+  observeAgentMessageSelection,
+  queryAgentMessages,
+  toolProtocolSafeMessages,
+  stampAgentMessageCreatedAt,
 } from '../../../messages';
-import { createOrchestratorMessageViews } from '../../messageViews';
+import { projectDelegationAnnouncesForModel } from '../../delegation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -170,13 +172,20 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) => {
-    const messageView = createOrchestratorMessageViews(state.messages).entryAnswer();
-    observeAgentMessageView(messageView.manifest, runnableConfig);
+    const mainSelection = queryAgentMessages(state.messages).main().select();
+    observeAgentMessageSelection(
+      'entry_answer.main',
+      mainSelection.diagnostics,
+      runnableConfig,
+    );
+    const modelMessages = toolProtocolSafeMessages(
+      projectDelegationAnnouncesForModel(mainSelection.messages),
+    );
     const history = [
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
-      ...messageView.messages,
+      ...modelMessages,
     ];
     let response = await model.invoke(history, runnableConfig);
     if (!AIMessage.isInstance(response)) {
@@ -197,7 +206,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
     }
     return {
-      messages: [stampMessageCreatedAtUtc(response)],
+      messages: [stampAgentMessageCreatedAt(response)],
     };
   };
 

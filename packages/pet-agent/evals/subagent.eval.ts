@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createSubagent } from '../src/subagent/createSubagent';
-import { materializeDelegation } from '../src/agent/orchestrator/delegationBriefing';
+import { materializeDelegation } from '../src/agent/orchestrator/delegation';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { langfuseFetch, resolveLangfuseConfig } from './scripts/langfuse-api';
 import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
@@ -325,24 +325,18 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const briefing = materializeDelegation(mode === 'continue'
     ? {
         mode,
-        lane: 'capability:eval',
-        transcriptRunId: 'eval-run',
-        delegationId: 'eval-delegation',
         userRequest: String(inputs.user_request ?? task),
         task,
         guidance: typeof inputs.gap_note === 'string' ? inputs.gap_note : null,
       }
     : {
         mode,
-        lane: 'capability:eval',
-        transcriptRunId: 'eval-run',
-        delegationId: 'eval-delegation',
         userRequest: String(inputs.user_request ?? task),
         task,
         essentialContext: typeof inputs.essential_context === 'string'
           ? inputs.essential_context
           : null,
-      }).laneMessages[0];
+      });
   const mainContext = typeof inputs.main_context === 'string'
     ? inputs.main_context
     : `用户请求：${task}`;
@@ -351,13 +345,10 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     const priorTask = typeof inputs.prior_task === 'string' ? inputs.prior_task : task;
     messages.push(materializeDelegation({
       mode: 'initial',
-      lane: 'capability:eval',
-      transcriptRunId: 'eval-run',
-      delegationId: 'eval-delegation',
       userRequest: String(inputs.user_request ?? task),
       task: priorTask,
       essentialContext: null,
-    }).laneMessages[0]);
+    }));
     messages.push(new AIMessage(inputs.prior_progress));
   }
   messages.push(briefing);

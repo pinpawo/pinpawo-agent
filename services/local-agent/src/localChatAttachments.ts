@@ -3,7 +3,7 @@ import {
   formatChatRequestDisplayText,
   type AgentLocalAttachment,
 } from '@pinpawo/agent-session';
-import { stampMessageCreatedAtUtc } from '@pinpawo/pet-agent';
+import { stampAgentMessageCreatedAt } from '@pinpawo/pet-agent';
 import type {
   AdmittedLocalAttachment,
   AdmittedLocalImageAttachment,
@@ -28,7 +28,7 @@ export function createLocalChatHumanMessage(
         }
       : {}),
   });
-  return stampMessageCreatedAtUtc(humanMessage);
+  return stampAgentMessageCreatedAt(humanMessage);
 }
 
 export function createAdmittedLocalChatHumanMessage(
@@ -86,7 +86,7 @@ export function createAdmittedLocalChatHumanMessage(
       },
     },
   });
-  return stampMessageCreatedAtUtc(humanMessage);
+  return stampAgentMessageCreatedAt(humanMessage);
 }
 
 export function readLocalChatDisplayText(message: BaseMessage) {

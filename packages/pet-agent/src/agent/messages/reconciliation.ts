@@ -12,14 +12,14 @@ import { toolProtocolSafeMessages } from './protocol';
 export type ReconcileDelegationMessagesParams = {
   resultMessages: readonly BaseMessage[];
   inputMessages: readonly BaseMessage[];
-  persistedInputMessages?: readonly BaseMessage[];
+  canonicalInputMessages?: readonly BaseMessage[];
   scope: DelegationMessageScope;
 };
 
 /**
  * Reconcile one child transcript without assigning orchestrator-domain meaning
- * such as Announce or completion. Invocation-only overlays may be present in
- * inputMessages but must be omitted from persistedInputMessages.
+ * such as Announce or completion. The current briefing may be present in the
+ * child input but is intentionally absent from canonicalInputMessages.
  */
 export function reconcileDelegationMessages(
   params: ReconcileDelegationMessagesParams,
@@ -32,8 +32,8 @@ export function reconcileDelegationMessages(
     message.id ? [message.id] : []));
   const resultIds = new Set(params.resultMessages.flatMap((message) =>
     message.id ? [message.id] : []));
-  const persistedInputMessages = params.persistedInputMessages ?? params.inputMessages;
-  const removed = persistedInputMessages.flatMap((message) => {
+  const canonicalInputMessages = params.canonicalInputMessages ?? params.inputMessages;
+  const removed = canonicalInputMessages.flatMap((message) => {
     if (!message.id || resultIds.has(message.id)) return [];
     const scope = getAgentMessageDelegationScope(message);
     if (!scope || !delegationMessageScopesEqual(scope, params.scope)) return [];

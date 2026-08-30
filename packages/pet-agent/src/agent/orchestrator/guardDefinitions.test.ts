@@ -18,7 +18,7 @@ import {
   guardDecisionEmitter,
   isGuardDecisionStreamChunk,
 } from './runtime/guards/decisionEvents';
-import { setPinpetMeta } from '../messages';
+import { setAgentMessageMetadata } from '../messages';
 import type { OrchestratorStateType } from './state';
 import type { TaskActiveDelegation } from './types';
 
@@ -78,7 +78,7 @@ test('context compaction watermark guard uses main conversation provider usage o
     content: `lane noise ${'x'.repeat(3200)}`,
     tool_call_id: 'call-noise',
   });
-  setPinpetMeta(noisyToolResult, {
+  setAgentMessageMetadata(noisyToolResult, {
     lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-noise',

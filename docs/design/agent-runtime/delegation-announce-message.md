@@ -163,11 +163,11 @@ complete `result` evidence.
 ### Capability Planner Boundary projection
 
 At a post-execution Boundary, the Planner adapter selects the standard announce
-by its root-owned identity and places it inside one invocation-only Boundary
-overlay. Capability context, active-delegation state and remaining plan stay
-outside the canonical announce. The overlay marks which announce is current
+by its root-owned identity and places it inside one typed Boundary current
+input. Capability context, active-delegation state and remaining plan stay
+outside the canonical announce. The input marks which announce is current
 without mutating or checkpointing that mark. See
-[`run-scoped-planner-session.md`](run-scoped-planner-session.md#boundary-overlay-temporary-paint).
+[`run-scoped-planner-session.md`](run-scoped-planner-session.md#boundary-current-input-temporary-paint).
 
 The announce is the complete execution evidence at this boundary. The private
 Capability-lane Human, AI, and Tool transcript is not projected alongside it;
@@ -253,11 +253,12 @@ loses or corrupts the payload is incompatible with the new writer.
 
 The implementation keeps responsibilities separated:
 
-- `agent/messages` owns lane metadata, scoped selection, and invocation views;
-- the dedicated announce module owns the class, validation, and model projection;
-- `delegationMessages.ts` owns announce selection, acceptance, and lane cleanup,
-  not presentation formatting;
-- model nodes call one shared conversation projector before model invocation;
+- `agent/messages` owns lane metadata, scoped selection, and reconciliation;
+- `agent/orchestrator/delegation/announce.ts` owns Announce selection while
+  `announceMessage.ts` owns the class, validation, and model projection;
+- `delegation/transcript.ts` owns result tagging and reconciliation;
+- `delegation/handoff.ts` owns acceptance into main and lane cleanup;
+- each model node owns its provider-input construction;
 - stream adapters own UI projection;
 - terminal finalization resolves accepted announces; optional synthesis owns
   wording only.

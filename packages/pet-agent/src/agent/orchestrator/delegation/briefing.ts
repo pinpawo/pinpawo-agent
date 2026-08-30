@@ -1,17 +1,13 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
-import {
-  getAgentMessageMetadata,
-  setPinpetMeta,
-  stampMessageCreatedAtUtc,
-} from '../messages';
-import { indentXmlBlock, xmlTextBlock } from './prompts/shared';
-import type { MessageLane, UserRequest } from './types';
+import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
+import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
+import type { UserRequest } from '../types';
 
 /**
  * Delegation briefing — the downward counterpart of the (upward) subagent
  * handoff. Immediately before a Capability model call, the runtime projects the
- * stable user request and the current task into one compact AIMessage. The
+ * stable user request and the current task into one compact HumanMessage. The
  * projection is invocation-only: neither it nor a separate user-request context
  * message is persisted in canonical main or private-lane history.
  *
@@ -20,15 +16,13 @@ import type { MessageLane, UserRequest } from './types';
  *
  * DelegationSpec is the source of truth. Its XML briefing is a deterministic
  * projection for the selected subagent — no model call and no reverse parsing.
- * Runtime metadata, rather than XML content, drives lane routing and cleanup.
+ * The caller's typed delegation scope, rather than this message, drives lane
+ * routing and cleanup.
  */
 
 export const DELEGATION_BRIEFING_SOURCE = 'delegation_briefing';
 
 type DelegationSpecBase = {
-  lane: MessageLane;
-  transcriptRunId: string;
-  delegationId: string;
   userRequest: UserRequest;
   task: string;
 };
@@ -44,47 +38,16 @@ export type DelegationSpec = DelegationSpecBase & (
     }
 );
 
-export type MaterializedDelegation = {
-  laneMessages: [AIMessage];
-};
-
-function stampBriefingMeta(message: AIMessage, spec: DelegationSpec) {
+function stampBriefingMeta(message: HumanMessage) {
   message.id ??= randomUUID();
-  stampMessageCreatedAtUtc(message);
-  setPinpetMeta(message, {
+  setAgentMessageMetadata(message, {
     source: DELEGATION_BRIEFING_SOURCE,
-    synthetic: true,
-    persistence: 'invocation',
-    lane: spec.lane,
-    // Message metadata keeps the existing storage key, but its value scopes
-    // the stable delegation transcript and must not follow a resumed root run.
-    runId: spec.transcriptRunId,
-    delegationId: spec.delegationId,
   });
   return message;
 }
 
 export function isDelegationBriefingMessage(message: BaseMessage): boolean {
   return getAgentMessageMetadata(message).source === DELEGATION_BRIEFING_SOURCE;
-}
-
-export function insertBeforeLatestDelegationBriefing(
-  messages: BaseMessage[],
-  contextMessage: BaseMessage,
-): BaseMessage[] {
-  let briefingIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (isDelegationBriefingMessage(messages[index])) {
-      briefingIndex = index;
-      break;
-    }
-  }
-  const insertionIndex = briefingIndex >= 0 ? briefingIndex : messages.length;
-  return [
-    ...messages.slice(0, insertionIndex),
-    contextMessage,
-    ...messages.slice(insertionIndex),
-  ];
 }
 
 function renderDelegationBriefingXml(spec: DelegationSpec): string {
@@ -115,12 +78,8 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
  * execution rules stay in the governing prompt; XML contains only invocation
  * data and is never parsed back into runtime state.
  */
-export function materializeDelegation(spec: DelegationSpec): MaterializedDelegation {
-  const briefingMessage = stampBriefingMeta(
-    new AIMessage(renderDelegationBriefingXml(spec)),
-    spec,
+export function materializeDelegation(spec: DelegationSpec): HumanMessage {
+  return stampBriefingMeta(
+    new HumanMessage(renderDelegationBriefingXml(spec)),
   );
-  return {
-    laneMessages: [briefingMessage],
-  };
 }

@@ -27,7 +27,7 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { readLatestAnnounce } from '../src/agent/orchestrator/delegationMessages';
+import { readLatestAnnounce } from '../src/agent/orchestrator/delegation';
 import {
   activeCapabilityFromResult,
   hasObservedDelegation,

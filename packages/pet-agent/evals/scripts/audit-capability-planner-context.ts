@@ -7,15 +7,15 @@ import {
   createCapabilityPlannerSearchTool,
   type CapabilityPlannerCapabilityDocument,
 } from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
-import { projectCapabilityPlannerMessagesForModel } from '../../src/agent/orchestrator/capabilityPlanner/messageContext.ts';
+import { projectCapabilityPlannerMessagesForModel } from '../../src/agent/orchestrator/capabilityPlanner/providerMessages.ts';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerMode,
 } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
-import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegationAnnounce.ts';
-import { setPinpetMeta } from '../../src/agent/messages/index.ts';
+import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation/index.ts';
+import { setAgentMessageMetadata } from '../../src/agent/messages/index.ts';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
@@ -73,7 +73,7 @@ const privateLaneMessage = new AIMessage({
   id: 'audit-private-lane-message',
   content: 'Private executor reasoning that must not enter Planner context.',
 });
-setPinpetMeta(privateLaneMessage, {
+setAgentMessageMetadata(privateLaneMessage, {
   lane: 'capability:repository',
   runId: 'audit-active-transcript',
   delegationId: 'audit-active-delegation',

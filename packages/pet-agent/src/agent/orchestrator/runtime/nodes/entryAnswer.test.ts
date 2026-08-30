@@ -11,11 +11,10 @@ import { createOrchestratorGraph } from '../graph';
 import { captureRunUserRequest, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import {
-  getMessageLane,
   mainConversationMessages,
-  setPinpetMeta,
+  setAgentMessageMetadata,
 } from '../../../messages';
-import { DelegationAnnounceMessage } from '../../delegationAnnounce';
+import { DelegationAnnounceMessage } from '../../delegation';
 
 function readLatestHumanText(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -182,7 +181,6 @@ test('plan_request routes to Planner without persisting control messages', async
     AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), false);
-  assert.equal(result.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
   assert.equal(result.messages.at(-1)?.content, '当前没有可执行该任务的 Capability。');
 });
 
@@ -256,7 +254,7 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   });
   const compaction = createContextCompactionMessage('更早的主对话摘要。', 4);
   const laneMessage = new AIMessage('不应进入 Entry Answer 的 delegation lane。');
-  setPinpetMeta(laneMessage, {
+  setAgentMessageMetadata(laneMessage, {
     lane: 'capability:general',
     runId: 'older-run',
     delegationId: 'older-delegation',

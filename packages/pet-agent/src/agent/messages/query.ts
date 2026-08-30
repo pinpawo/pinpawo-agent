@@ -3,135 +3,158 @@ import {
   delegationMessageScopesEqual,
   getAgentMessageDelegationScope,
   getAgentMessageLane,
-  getAgentMessageMetadata,
   isCapabilityMessageLane,
-  isInvocationOnlyAgentMessage,
   type DelegationMessageScope,
 } from './metadata';
+import { toolProtocolSafeMessages } from './protocol';
 
-export type AgentMessageQuerySource =
-  | {
-      id: string;
-      kind: 'main';
-    }
-  | {
-      id: string;
-      kind: 'delegation';
-      scope: DelegationMessageScope;
-      visibility: 'transcript' | 'announces_only';
-    };
-
-export type AgentMessageQueryExclusionReason =
-  | 'invocation_only'
-  | 'source_not_selected'
-  | 'unsupported_lane'
+export type AgentMessageSelectionExclusionReason =
+  | 'main_not_selected'
+  | 'delegation_not_selected'
   | 'scope_mismatch'
-  | 'not_announce';
+  | 'unsupported_lane';
 
-export type AgentMessageQuerySelection = {
-  message: BaseMessage;
-  canonicalIndex: number;
-  source: AgentMessageQuerySource;
+export type AgentMessageSelectionDiagnostics = {
+  canonicalMessageCount: number;
+  selectedMessageIds: string[];
+  excluded: Array<{
+    messageId: string;
+    reason: AgentMessageSelectionExclusionReason;
+  }>;
 };
 
-export type AgentMessageQueryExclusion = {
-  message: BaseMessage;
-  canonicalIndex: number;
-  source?: AgentMessageQuerySource;
-  reason: AgentMessageQueryExclusionReason;
+export type AgentMessageSelection = {
+  messages: BaseMessage[];
+  diagnostics: AgentMessageSelectionDiagnostics;
 };
 
-export type AgentMessageQueryResult = {
-  selected: AgentMessageQuerySelection[];
-  excluded: AgentMessageQueryExclusion[];
-  selectedCounts: ReadonlyMap<string, number>;
+export type AgentMessageQuery = {
+  /** Include the untagged main conversation. */
+  main(): AgentMessageQuery;
+  /** Include one exact capability-delegation transcript. */
+  delegation(scope: DelegationMessageScope): AgentMessageQuery;
+  /** Materialize selected canonical messages in their original chronology. */
+  select(): AgentMessageSelection;
 };
 
-function assertAgentMessageQuerySources(
-  sources: readonly AgentMessageQuerySource[],
-) {
-  const ids = sources.map((source) => source.id);
-  if (ids.some((id) => !id.trim())) {
-    throw new Error('Agent message query source ids must be non-empty.');
-  }
-  if (new Set(ids).size !== ids.length) {
-    throw new Error('Agent message query source ids must be unique.');
-  }
-  if (sources.filter((source) => source.kind === 'main').length > 1) {
-    throw new Error('Agent message queries may contain at most one main source.');
-  }
-  const delegationSources = sources.filter((source) => source.kind === 'delegation');
-  if (delegationSources.some((source, index) =>
-    delegationSources.slice(index + 1).some((candidate) =>
-      delegationMessageScopesEqual(source.scope, candidate.scope)))) {
-    throw new Error('Agent message queries cannot assign one delegation scope twice.');
-  }
+type AgentMessageQueryState = {
+  includeMain: boolean;
+  delegationScopes: readonly DelegationMessageScope[];
+};
+
+function messageIdentity(message: BaseMessage, index: number) {
+  return message.id ?? `canonical:${index.toString()}`;
+}
+
+function createQuery(
+  canonicalMessages: readonly BaseMessage[],
+  state: AgentMessageQueryState,
+): AgentMessageQuery {
+  return Object.freeze({
+    main() {
+      return state.includeMain
+        ? createQuery(canonicalMessages, state)
+        : createQuery(canonicalMessages, { ...state, includeMain: true });
+    },
+    delegation(scope: DelegationMessageScope) {
+      if (state.delegationScopes.some((candidate) =>
+        delegationMessageScopesEqual(candidate, scope))) {
+        return createQuery(canonicalMessages, state);
+      }
+      return createQuery(canonicalMessages, {
+        ...state,
+        delegationScopes: [...state.delegationScopes, { ...scope }],
+      });
+    },
+    select() {
+      const messages: BaseMessage[] = [];
+      const selectedMessageIds: string[] = [];
+      const excluded: AgentMessageSelectionDiagnostics['excluded'] = [];
+
+      canonicalMessages.forEach((message, index) => {
+        const messageId = messageIdentity(message, index);
+        const lane = getAgentMessageLane(message);
+        if (!lane) {
+          if (state.includeMain) {
+            messages.push(message);
+            selectedMessageIds.push(messageId);
+          } else {
+            excluded.push({ messageId, reason: 'main_not_selected' });
+          }
+          return;
+        }
+
+        if (!isCapabilityMessageLane(lane)) {
+          excluded.push({ messageId, reason: 'unsupported_lane' });
+          return;
+        }
+        if (state.delegationScopes.length === 0) {
+          excluded.push({ messageId, reason: 'delegation_not_selected' });
+          return;
+        }
+
+        const scope = getAgentMessageDelegationScope(message);
+        if (!scope) {
+          throw new Error(
+            `Delegation lane message ${message.id ?? '(missing id)'} is missing delegationId or another part of its complete scope.`,
+          );
+        }
+        if (!state.delegationScopes.some((candidate) =>
+          delegationMessageScopesEqual(candidate, scope))) {
+          excluded.push({ messageId, reason: 'scope_mismatch' });
+          return;
+        }
+        messages.push(message);
+        selectedMessageIds.push(messageId);
+      });
+
+      return {
+        messages,
+        diagnostics: {
+          canonicalMessageCount: canonicalMessages.length,
+          selectedMessageIds,
+          excluded,
+        },
+      };
+    },
+  });
 }
 
 /**
- * The single canonical-message query used by every view. It assigns each
- * selected message to one named source and records why every other canonical
- * message was excluded. Projection, overlays, and provider protocol repair are
- * deliberately outside this layer.
+ * Start an immutable query over canonical Agent messages. This layer only
+ * chooses main/delegation transcripts; model-input construction belongs to the
+ * node or subagent protocol that owns the invocation.
  */
 export function queryAgentMessages(
   canonicalMessages: readonly BaseMessage[],
-  sources: readonly AgentMessageQuerySource[],
-): AgentMessageQueryResult {
-  assertAgentMessageQuerySources(sources);
-  const selected: AgentMessageQuerySelection[] = [];
-  const excluded: AgentMessageQueryExclusion[] = [];
-  const selectedCounts = new Map(sources.map((source) => [source.id, 0]));
-  const mainSource = sources.find((source) => source.kind === 'main');
-  const delegationSources = sources.filter((source) => source.kind === 'delegation');
-
-  canonicalMessages.forEach((message, canonicalIndex) => {
-    const lane = getAgentMessageLane(message);
-    if (!lane) {
-      if (isInvocationOnlyAgentMessage(message)) {
-        excluded.push({ message, canonicalIndex, reason: 'invocation_only' });
-        return;
-      }
-      if (!mainSource) {
-        excluded.push({ message, canonicalIndex, reason: 'source_not_selected' });
-        return;
-      }
-      selected.push({ message, canonicalIndex, source: mainSource });
-      selectedCounts.set(mainSource.id, (selectedCounts.get(mainSource.id) ?? 0) + 1);
-      return;
-    }
-
-    if (!isCapabilityMessageLane(lane)) {
-      excluded.push({ message, canonicalIndex, reason: 'unsupported_lane' });
-      return;
-    }
-    if (delegationSources.length === 0) {
-      excluded.push({ message, canonicalIndex, reason: 'source_not_selected' });
-      return;
-    }
-
-    const scope = getAgentMessageDelegationScope(message);
-    if (!scope) {
-      throw new Error(
-        `Delegation lane message ${message.id ?? '(missing id)'} is missing delegationId or another part of its complete scope.`,
-      );
-    }
-    const source = delegationSources.find((candidate) =>
-      delegationMessageScopesEqual(scope, candidate.scope));
-    if (!source) {
-      excluded.push({ message, canonicalIndex, reason: 'scope_mismatch' });
-      return;
-    }
-    if (
-      source.visibility === 'announces_only'
-      && getAgentMessageMetadata(message).isAnnounce !== true
-    ) {
-      excluded.push({ message, canonicalIndex, source, reason: 'not_announce' });
-      return;
-    }
-    selected.push({ message, canonicalIndex, source });
-    selectedCounts.set(source.id, (selectedCounts.get(source.id) ?? 0) + 1);
+): AgentMessageQuery {
+  const snapshot = [...canonicalMessages];
+  return createQuery(snapshot, {
+    includeMain: false,
+    delegationScopes: [],
   });
+}
 
-  return { selected, excluded, selectedCounts };
+export function mainConversationMessages(messages: readonly BaseMessage[]) {
+  return queryAgentMessages(messages).main().select().messages;
+}
+
+export function delegationTranscriptMessages(
+  messages: readonly BaseMessage[],
+  scope: DelegationMessageScope,
+) {
+  return queryAgentMessages(messages).main().delegation(scope).select().messages;
+}
+
+export function laneMessages(
+  messages: readonly BaseMessage[],
+  lane: DelegationMessageScope['lane'],
+  transcriptRunId: string,
+  delegationId: string,
+) {
+  return toolProtocolSafeMessages(delegationTranscriptMessages(messages, {
+    lane,
+    transcriptRunId,
+    delegationId,
+  }));
 }

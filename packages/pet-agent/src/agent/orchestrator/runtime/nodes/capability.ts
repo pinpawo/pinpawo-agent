@@ -5,12 +5,14 @@ import type { SubagentRunInput } from '../../../../types/subagent';
 import type { OrchestratorStateType } from '../../state';
 import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
-  observeAgentMessageView,
+  observeAgentMessageSelection,
+  queryAgentMessages,
+  toolProtocolSafeMessages,
 } from '../../../messages';
 import {
   readLatestAnnounce,
   tagNewLaneMessages,
-} from '../../delegationMessages';
+} from '../../delegation';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
@@ -36,12 +38,10 @@ import {
   resolveDelegationTranscriptRunId,
 } from '../decisions/delegationLifecycle';
 import {
-  buildArtifactDiscoveryContextMessage,
   hasArtifactDiscoveryToolkit,
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
-import { materializeDelegation } from '../../delegationBriefing';
-import { createOrchestratorMessageViews } from '../../messageViews';
+import { materializeDelegation } from '../../delegation';
 import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
 
 export function createCapabilityNode(params: {
@@ -97,16 +97,21 @@ export function createCapabilityNode(params: {
       transcriptRunId,
       delegationId: runNextDelegation.id,
     };
-    const messageViews = createOrchestratorMessageViews(state.messages);
-    const canonicalMessages = messageViews.capabilityCanonical(delegationScope).messages;
+    const canonicalSelection = queryAgentMessages(state.messages)
+      .main()
+      .delegation(delegationScope)
+      .select();
+    observeAgentMessageSelection(
+      'capability.canonical_transcript',
+      canonicalSelection.diagnostics,
+      runnableConfig,
+    );
+    const canonicalMessages = canonicalSelection.messages;
     const briefingBase = {
-      lane,
-      transcriptRunId,
-      delegationId: runNextDelegation.id,
       userRequest: state.runUserRequest,
       task: runNextDelegation.task,
     };
-    const [delegationBriefing] = materializeDelegation(
+    const delegationBriefing = materializeDelegation(
       runNextDelegation.mode === 'initial'
         ? {
             ...briefingBase,
@@ -118,11 +123,11 @@ export function createCapabilityNode(params: {
             mode: 'continue',
             guidance: runNextDelegation.contextSummary,
           },
-    ).laneMessages;
-    const scopedMessages = messageViews.capabilityBase(
-      delegationScope,
+    );
+    const scopedMessages = toolProtocolSafeMessages([
+      ...canonicalMessages,
       delegationBriefing,
-    ).messages;
+    ]);
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -177,16 +182,6 @@ export function createCapabilityNode(params: {
       const canExploreArtifacts = hasArtifactDiscoveryToolkit(
         usedResolvedToolkitExecution.toolkits,
       );
-      const artifactContext = canExploreArtifacts
-        ? buildArtifactDiscoveryContextMessage()
-        : null;
-      const subagentMessageView = messageViews.capabilityModel(
-        delegationScope,
-        [artifactContext, delegationBriefing]
-          .filter((message): message is NonNullable<typeof message> => message !== null),
-      );
-      observeAgentMessageView(subagentMessageView.manifest, runnableConfig);
-      const subagentMessages = subagentMessageView.messages;
       const executionContext = buildSubagentExecutionContext({
         workdir: workdir ?? null,
         artifactDiscovery: canExploreArtifacts,
@@ -223,7 +218,7 @@ export function createCapabilityNode(params: {
             : []),
         ],
         operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
-        messages: subagentMessages,
+        messages: scopedMessages,
         maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
         contextWindowTokens: subagentContextWindowTokens,
         generationReserveTokens: subagentGenerationReserveTokens,

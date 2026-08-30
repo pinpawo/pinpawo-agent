@@ -9,9 +9,8 @@ import {
   createContextCompactionMessage,
   isContextCompactionMessage,
 } from './contextCompaction';
-import { getAgentMessageMetadata, setPinpetMeta } from '../messages';
-import { materializeDelegation } from './delegationBriefing';
-import { DelegationAnnounceMessage } from './delegationAnnounce';
+import { getAgentMessageMetadata, setAgentMessageMetadata } from '../messages';
+import { DelegationAnnounceMessage } from './delegation';
 
 function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: unknown[], config?: RunnableConfig) => void) {
   return {
@@ -71,36 +70,6 @@ test('orchestrator context compaction summarizes old messages and keeps recent s
     result.messages.slice(2).map((message) => message.content),
     messages.slice(-4).map((message) => message.content),
   );
-});
-
-test('orchestrator context compaction excludes delegation briefings from summary input', async () => {
-  let summaryInput = '';
-  const [briefing] = materializeDelegation({
-    mode: 'initial',
-    lane: 'capability:general',
-    transcriptRunId: 'run-1',
-    delegationId: 'delegation-1',
-    userRequest: '完成任务',
-    task: '不要把这段调度文本写入摘要',
-    essentialContext: null,
-  }).laneMessages;
-  const messages: BaseMessage[] = [
-    new HumanMessage('完成任务'),
-    briefing,
-    ...Array.from({ length: 12 }, (_, index) => longMessage(index)),
-    usageMessage('模型已经看到了较长主线。', 900),
-  ];
-
-  await compactOrchestratorMessages({
-    messages,
-    model: fakeSummaryModel('摘要', (input) => {
-      summaryInput = input.map((message) => String((message as BaseMessage).content)).join('\n');
-    }),
-    options: { keepMessages: 4 },
-  });
-
-  assert.doesNotMatch(summaryInput, /不要把这段调度文本写入摘要/);
-  assert.doesNotMatch(summaryInput, /主线 agent 回复[\s\S]*委派简报/);
 });
 
 test('orchestrator context compaction forwards runnable config to summary model', async () => {
@@ -212,7 +181,7 @@ test('orchestrator context compaction summarizes a complete accepted main announ
 test('orchestrator context compaction pins every unaccepted lane announce outside the suffix', async () => {
   const firstAnnounce = new AIMessage('FIRST_ATTEMPT');
   firstAnnounce.id = 'announce-1';
-  setPinpetMeta(firstAnnounce, {
+  setAgentMessageMetadata(firstAnnounce, {
     lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
@@ -221,7 +190,7 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
   });
   const secondAnnounce = new AIMessage('SECOND_ATTEMPT');
   secondAnnounce.id = 'announce-2';
-  setPinpetMeta(secondAnnounce, {
+  setAgentMessageMetadata(secondAnnounce, {
     lane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
@@ -352,7 +321,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
   messages.push(new AIMessage('主线 handoff：素材已经整理完成，输出了 canonical-result.md。'));
 
   const subagentDetail = new AIMessage(`subagent verbose detail ${'z'.repeat(3200)}`);
-  setPinpetMeta(subagentDetail, {
+  setAgentMessageMetadata(subagentDetail, {
     lane: 'capability:general',
     runId: 'turn-1',
     delegationId: 'task-1',
@@ -361,7 +330,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
   messages.push(subagentDetail);
 
   const announce = new AIMessage('素材已经整理完成，输出了 result.md。');
-  setPinpetMeta(announce, {
+  setAgentMessageMetadata(announce, {
     lane: 'capability:general',
     runId: 'turn-1',
     isAnnounce: true,
@@ -371,7 +340,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
   messages.push(announce);
 
   const orchestratorMessage = new AIMessage('内部路由决策，不应进入摘要。');
-  setPinpetMeta(orchestratorMessage, { lane: 'orchestrator', runId: 'turn-1' });
+  setAgentMessageMetadata(orchestratorMessage, { lane: 'orchestrator', runId: 'turn-1' });
   messages.push(orchestratorMessage);
 
   messages.push(new HumanMessage('最后保留的用户消息'));

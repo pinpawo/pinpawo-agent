@@ -4,17 +4,16 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   getMessageIsAnnounce,
-} from './delegationMessages';
+} from './delegation';
 import {
-  getMessageLane,
+  getAgentMessageLane,
   getAgentMessageMetadata,
   mainConversationMessages,
-  setPinpetMeta,
+  setAgentMessageMetadata,
   toolProtocolSafeMessages,
 } from '../messages';
-import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegationAnnounce';
+import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
 import { clipForPrompt, readMessageText } from './utils';
-import { isDelegationBriefingMessage } from './delegationBriefing';
 import { xmlTextBlock } from './prompts/shared';
 
 const DEFAULT_KEEP_MESSAGES = 10;
@@ -51,7 +50,7 @@ export function createContextCompactionMessage(
     ' role="context" source="compaction"',
   ));
   message.name = CONTEXT_COMPACTION_MESSAGE_NAME;
-  setPinpetMeta(message, {
+  setAgentMessageMetadata(message, {
     source: CONTEXT_COMPACTION_MESSAGE_NAME,
     synthetic: true,
     authority: 'none',
@@ -75,7 +74,7 @@ function selectMessagesToKeep(
     if (recentMessages.has(message)) return true;
     if (!preserveAnnouncesFor || !getMessageIsAnnounce(message)) return false;
     const meta = getAgentMessageMetadata(message);
-    return getMessageLane(message) === preserveAnnouncesFor.lane
+    return getAgentMessageLane(message) === preserveAnnouncesFor.lane
       && meta.runId === preserveAnnouncesFor.transcriptRunId
       && meta.delegationId === preserveAnnouncesFor.delegationId;
   });
@@ -83,7 +82,6 @@ function selectMessagesToKeep(
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
-  if (isDelegationBriefingMessage(message)) return null;
   const announce = getDelegationAnnounce(message);
   if (announce) return formatDelegationAnnounceForModel(announce);
   const text = readMessageText(message);
@@ -102,7 +100,7 @@ function formatMainMessageForSummary(message: BaseMessage): string | null {
 }
 
 function formatMessageForSummary(message: BaseMessage): string | null {
-  if (getMessageLane(message)) return null;
+  if (getAgentMessageLane(message)) return null;
   return formatMainMessageForSummary(message);
 }
 
@@ -114,7 +112,7 @@ function buildSummaryItems(messages: BaseMessage[]): string[] {
 }
 
 function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
-  const mainMessageCount = messages.filter((message) => !getMessageLane(message)).length;
+  const mainMessageCount = messages.filter((message) => !getAgentMessageLane(message)).length;
 
   return [
     '[以下是更早上下文的自动压缩摘要]',

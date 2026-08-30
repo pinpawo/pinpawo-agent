@@ -67,7 +67,7 @@ export type CapabilityPlannerInput = CapabilityPlannerInputBase & (
   | {
       readonly mode: 'boundary';
       readonly activeDelegation: PlannerDelegationInput;
-      /** Boundary identity and stop reason. Evidence remains in canonical messages. */
+      /** Boundary identity and stop reason for the latest typed attempt. */
       readonly latestAnnounce: PlannerAnnounceTarget | null;
       /** Ordered unaccepted announces owned by the active delegation. */
       readonly announceAttempts: readonly PlannerAnnounceInput[];

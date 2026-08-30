@@ -12,7 +12,7 @@ import {
 } from '../../src/agent/messages/index';
 import {
   getMessageHandoffSource,
-} from '../../src/agent/orchestrator/delegationMessages';
+} from '../../src/agent/orchestrator/delegation';
 import {
   defineCapability,
   defineInstructionDocument,

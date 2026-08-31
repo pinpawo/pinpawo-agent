@@ -35,7 +35,7 @@ export function buildCapabilityPlanningMessages(
 }
 
 /**
- * Build canonical history for one Planner eval invocation. A Boundary's
+ * Build canonical history for one Supervisor eval invocation. A Boundary's
  * current result belongs to the private delegation lane and is appended by the
  * runner with announce metadata, so remove one legacy message copy of that
  * same result from ordinary main history when present.
@@ -151,7 +151,7 @@ export async function evaluateCapabilityPlanningOutput(params: {
   const semanticEvaluation = contract.acceptanceCriteria.length > 0
     ? await evaluatePromptGoal({
         judge: params.judge,
-        contract: 'planner.execution-boundary',
+        contract: 'supervisor.execution-boundary',
         objective: contract.objective,
         acceptanceCriteria: contract.acceptanceCriteria,
         evidence: params.input,

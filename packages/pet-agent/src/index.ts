@@ -121,12 +121,12 @@ export {
 } from './agent/createAgentRuntime';
 export type {
   ActiveDelegationTransition,
-  CapabilityPlannerInput,
-  CapabilityPlannerMode,
-  CapabilityPlannerResult,
-  CapabilityPlannerRunner,
-  PlannerSessionState,
-  PlannerTaskContinuation,
+  RunSupervisorInput,
+  RunSupervisorMode,
+  RunSupervisorResult,
+  RunSupervisorRunner,
+  RunSupervisorSessionState,
+  RunTaskContinuation,
   CapabilityRegistryBackend,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
@@ -135,7 +135,7 @@ export {
   CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION,
   materializeCapabilityDocumentWorkspace,
   renderCapabilityDocument,
-} from './agent/orchestrator/capabilityPlanner/documentWorkspace';
+} from './agent/orchestrator/runSupervisor/documentWorkspace';
 export {
   ToolkitRuntimeManager,
 } from './agent/orchestrator/toolkitRuntime';
@@ -148,7 +148,7 @@ export type {
 export type {
   CapabilityDocumentWorkspace,
   CapabilityDocumentWorkspaceEntry,
-} from './agent/orchestrator/capabilityPlanner/documentWorkspace';
+} from './agent/orchestrator/runSupervisor/documentWorkspace';
 export {
   assertCapabilityDocumentMatches,
   CAPABILITY_DOCUMENT_FILE_NAME,

@@ -35,7 +35,7 @@ entry: ./index.js
 ## 2. Frontmatter
 
 - `name`：必填；稳定的 Capability route id。
-- `description`：必填；planner 用于候选检索和选择。
+- `description`：必填；Supervisor 用于候选检索和选择。
 - `uses`：必填；完整 required Toolkit 列表，可以为空。
 - `version`：必填；当前只能为 `1`。
 - `icon`、`color`、`defaultEnabled`：可选展示字段。

@@ -8,53 +8,53 @@ import {
 import type { OrchestratorStateType } from '../state';
 import { readCapabilityNameFromLane } from '../runtime/decisions/delegationLifecycle';
 import type {
-  CapabilityPlannerDispatch,
-  CapabilityPlannerInput,
-  CapabilityPlannerRuntimeState,
+  RunSupervisorDispatch,
+  RunSupervisorInput,
+  RunSupervisorRuntimeState,
 } from './runner';
-import type { PlannerSessionState } from './session';
+import type { RunSupervisorSessionState } from './session';
 
-export function isPlannerDispatch(
-  input: OrchestratorStateType | CapabilityPlannerDispatch,
-): input is CapabilityPlannerDispatch {
-  return 'plannerState' in input && input.mode === 'entry';
+export function isSupervisorDispatch(
+  input: OrchestratorStateType | RunSupervisorDispatch,
+): input is RunSupervisorDispatch {
+  return 'supervisorState' in input && input.mode === 'entry';
 }
 
-export function plannerRuntimeStateFromRoot(
+export function supervisorRuntimeStateFromRoot(
   state: OrchestratorStateType,
-): CapabilityPlannerRuntimeState {
+): RunSupervisorRuntimeState {
   if (!state.runUserRequest) {
-    throw new Error('Capability Planner requires runUserRequest.');
+    throw new Error('Run Supervisor requires runUserRequest.');
   }
   return {
     runId: state.runId,
     traceId: state.traceId,
     runUserRequest: state.runUserRequest,
     runDelegationSummaries: state.runDelegationSummaries,
-    runPlannerSession: state.runPlannerSession,
+    runSupervisorSession: state.runSupervisorSession,
   };
 }
 
-export function buildCapabilityPlannerInput(params: {
-  nodeInput: OrchestratorStateType | CapabilityPlannerDispatch;
-  workspace: CapabilityPlannerInput['workspace'];
-  plannerSession: PlannerSessionState;
+export function buildRunSupervisorInput(params: {
+  nodeInput: OrchestratorStateType | RunSupervisorDispatch;
+  workspace: RunSupervisorInput['workspace'];
+  supervisorSession: RunSupervisorSessionState;
 }): {
-  input: CapabilityPlannerInput;
-  state: CapabilityPlannerRuntimeState;
+  input: RunSupervisorInput;
+  state: RunSupervisorRuntimeState;
   messageSelections: Array<{
     location: string;
     diagnostics: AgentMessageSelectionDiagnostics;
   }>;
 } {
-  const { nodeInput, workspace, plannerSession } = params;
-  if (isPlannerDispatch(nodeInput)) {
-    const state = nodeInput.plannerState;
+  const { nodeInput, workspace, supervisorSession } = params;
+  if (isSupervisorDispatch(nodeInput)) {
+    const state = nodeInput.supervisorState;
     const mainSelection = queryAgentMessages(nodeInput.messages).main().select();
     return {
       state,
       messageSelections: [{
-        location: 'capability_planner.entry',
+        location: 'run_supervisor.entry',
         diagnostics: mainSelection.diagnostics,
       }],
       input: {
@@ -67,10 +67,10 @@ export function buildCapabilityPlannerInput(params: {
         activeDelegation: null,
         latestAnnounce: null,
         announceAttempts: [],
-        remainingPlan: plannerSession.plan,
+        remainingPlan: supervisorSession.plan,
         workspace,
-        capabilityDisclosure: plannerSession.capabilityDisclosure,
-        plannerSession,
+        capabilityDisclosure: supervisorSession.capabilityDisclosure,
+        supervisorSession,
       },
     };
   }
@@ -78,11 +78,11 @@ export function buildCapabilityPlannerInput(params: {
   const state = nodeInput;
   const activeDelegation = state.taskActiveDelegation;
   if (!activeDelegation) {
-    throw new Error('Boundary Planner requires taskActiveDelegation.');
+    throw new Error('Boundary Supervisor requires taskActiveDelegation.');
   }
   const capability = readCapabilityNameFromLane(activeDelegation.lane);
   if (!capability) {
-    throw new Error('Boundary Planner active delegation has an invalid lane.');
+    throw new Error('Boundary Supervisor active delegation has an invalid lane.');
   }
   const activeScope = {
     lane: activeDelegation.lane,
@@ -104,20 +104,20 @@ export function buildCapabilityPlannerInput(params: {
       }];
     });
   const latestAnnounce = announceAttempts.at(-1) ?? null;
-  // resume_active is a fresh Planner input only before this run executes a
+  // resume_active is a fresh Supervisor input only before this run executes a
   // Capability. Later iterations use the identity of their latest Announce.
   const freshTurn = state.runActiveDelegationTransition === 'resume_active'
     && state.runIterationCount === 0;
-  const plannerState = plannerRuntimeStateFromRoot(state);
+  const supervisorState = supervisorRuntimeStateFromRoot(state);
   return {
-    state: plannerState,
+    state: supervisorState,
     messageSelections: [
       {
-        location: 'capability_planner.boundary.main',
+        location: 'run_supervisor.boundary.main',
         diagnostics: mainSelection.diagnostics,
       },
       {
-        location: 'capability_planner.boundary.delegation',
+        location: 'run_supervisor.boundary.delegation',
         diagnostics: delegationSelection.diagnostics,
       },
     ],
@@ -129,7 +129,7 @@ export function buildCapabilityPlannerInput(params: {
           ?? `${activeDelegation.runId}:${String(state.runIterationCount)}`}`,
       traceId: state.traceId,
       runId: state.runId,
-      userRequest: plannerState.runUserRequest,
+      userRequest: supervisorState.runUserRequest,
       messages: mainSelection.messages,
       activeDelegation: {
         delegationId: activeDelegation.id,
@@ -139,10 +139,10 @@ export function buildCapabilityPlannerInput(params: {
       },
       latestAnnounce,
       announceAttempts,
-      remainingPlan: plannerSession.plan,
+      remainingPlan: supervisorSession.plan,
       workspace,
-      capabilityDisclosure: plannerSession.capabilityDisclosure,
-      plannerSession,
+      capabilityDisclosure: supervisorSession.capabilityDisclosure,
+      supervisorSession,
     },
   };
 }

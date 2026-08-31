@@ -76,7 +76,7 @@ The query knows only message ownership:
 
 `append()` does not classify its input or persist it. The node constructs the
 typed current message; the query only owns its position after selected history.
-The query knows nothing about Planner meaning, Announce rendering, prompts,
+The query knows nothing about Supervisor meaning, Announce rendering, prompts,
 artifacts, provider roles, or task completion.
 
 ## Model invocation
@@ -110,7 +110,7 @@ Orchestrator
   -> HumanMessage(Delegation Briefing)
   -> Capability executor
   -> private result messages + typed Announce
-  -> Planner Boundary
+  -> Supervisor Boundary
   -> continue the delegation or accept it through Handoff
 ```
 
@@ -141,15 +141,15 @@ identity determines which output is materialized as a lane-scoped
 `DelegationAnnounceMessage`; text is never parsed to infer it. Ordinary private
 messages and the typed Announce use the same complete delegation scope.
 
-## Planner protocol
+## Supervisor protocol
 
-Planner is a separate subagent protocol. It has no root message lane.
+Supervisor is a separate subagent protocol. It has no root message lane.
 
 ```text
 OrchestratorState
-  -> CapabilityPlannerInput
-  -> Planner provider messages
-  -> PlannerCommit
+  -> RunSupervisorInput
+  -> Supervisor provider messages
+  -> SupervisorCommand
   -> OrchestratorState update
 ```
 
@@ -167,13 +167,13 @@ The Orchestrator selects the active delegation's private messages, extracts its
 ordered typed Announces, and constructs current typed input:
 
 ```text
-CapabilityPlannerInput
+RunSupervisorInput
   mode: boundary
   messages: clean main conversation
   activeDelegation: typed state
   announceAttempts: ordered executor evidence
   latestAnnounce: newest attempt or null
-  remainingPlan: Planner session state
+  remainingPlan: Supervisor session state
 ```
 
 The provider receives:
@@ -184,9 +184,9 @@ Clean main conversation
 HumanMessage(typed Boundary input)
 ```
 
-Raw private Human, AI, and Tool messages do not enter Planner provider history.
-Planner model/tool messages remain inside the run-scoped Planner session and do
-not enter root `messages`.
+Raw private Human, AI, and Tool messages do not enter Supervisor provider history.
+Supervisor model/tool messages remain invocation-private observability data and
+do not enter either the typed Supervisor session or root `messages`.
 
 ## Announce and Handoff
 
@@ -202,7 +202,7 @@ that projection never mutates canonical state.
 Entry Answer selects clean main messages through the same query and invokes its
 model through the shared runtime boundary.
 Answer receives a closed fact-only input and intentionally receives no canonical
-conversation history. Neither inspects private Capability messages or Planner
+conversation history. Neither inspects private Capability messages or Supervisor
 provider messages.
 
 The lane query constructs ordered Agent input but does not own provider details.
@@ -229,11 +229,11 @@ agent/orchestrator/delegation/
 agent/orchestrator/modelInvocation.ts
   internal model-call wiring for typed rendering and protocol sanitation
 
-agent/orchestrator/capabilityPlanner/
-  input.ts           OrchestratorState -> CapabilityPlannerInput
-  protocol.ts        terminal commit contract
-  session.ts         run-scoped Planner state
-  runner.ts          Planner execution boundary
+agent/orchestrator/runSupervisor/
+  input.ts           OrchestratorState -> RunSupervisorInput
+  protocol.ts        control-command contract
+  session.ts         run-scoped Supervisor state
+  runner.ts          Supervisor execution boundary
 ```
 
 ## Rejected concepts
@@ -258,9 +258,9 @@ observability data, not another message model.
 2. Private Capability messages always have a complete delegation scope.
 3. A fresh delegation never inherits another delegation's private messages.
 4. Continuing a delegation reuses the same scope and private messages.
-5. Briefing, Toolkit context, and Planner provider messages never enter root
+5. Briefing, Toolkit context, and Supervisor provider messages never enter root
    `messages`.
-6. Planner Boundary receives typed Announce evidence, not raw private messages.
+6. Supervisor Boundary receives typed Announce evidence, not raw private messages.
 7. Handoff accepts typed Announces and clears the matching private messages.
 8. One query owns history selection and invocation-local append order; the
    internal model runtime owns provider protocol details.
@@ -269,7 +269,7 @@ observability data, not another message model.
 
 - query tests cover chronology, immutability, exact scope, and diagnostics;
 - Capability tests cover fresh-task isolation and same-delegation continuation;
-- Planner tests cover Entry and Boundary input shapes;
+- Supervisor tests cover Entry and Boundary input shapes;
 - model-invocation tests cover typed rendering, state immutability, and the real
   Agent/direct-model boundaries;
 - Boundary tests prove ordered Announce evidence without raw private messages;
@@ -277,5 +277,5 @@ observability data, not another message model.
 
 ## Non-goals
 
-This refactor does not change Planner decision policy, search budgets, terminal
+This refactor does not change Supervisor decision policy, search budgets, command
 actions, Announce semantics, user-facing answer policy, or artifact state.

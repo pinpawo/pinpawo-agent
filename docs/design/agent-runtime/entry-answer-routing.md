@@ -11,7 +11,7 @@ to rewrite the request into a second, potentially divergent goal.
 The exact latest textual `HumanMessage` seeds the run boundary stored as
 `runUserRequest`. Entry Answer may resolve a continuation utterance against the
 conversation when it calls `plan_request`. The resulting value remains available
-to Planner, Capability execution, terminal finalization, interruption, resume,
+to Supervisor, Capability execution, terminal finalization, interruption, resume,
 and boundary decisions for the lifetime of the run.
 
 ## Flow
@@ -19,8 +19,8 @@ and boundary decisions for the lifetime of the run.
 ```text
 prepare -> compactContext -> captureUserRequest -> Entry Answer
                                                   | normal AI text -> END
-                                                  ` plan_request -> Planner
-Planner -> Capability / terminal finalization
+                                                  ` plan_request -> Supervisor
+Supervisor -> Capability / terminal finalization
 ```
 
 `captureUserRequest` is deterministic. It reads the latest main-conversation
@@ -37,7 +37,7 @@ plan_request({ goal })
 
 A normal model response is the user-visible reply and ends the run. Calling
 `plan_request` returns `Command.PARENT` with a `Send` to the root
-`capabilityPlanner` node. `goal` resolves references such as “继续” against the
+`runSupervisor` node. `goal` resolves references such as “继续” against the
 conversation; it does not contain a plan, execution steps, or framework policy.
 
 ## Ownership boundaries
@@ -46,9 +46,9 @@ Entry Answer owns only:
 
 - replying from information already present in the conversation;
 - asking the user for missing information;
-- deciding that execution requires Planner.
+- deciding that execution requires Supervisor.
 
-Planner owns Capability discovery, task formation, execution ordering, and
+Supervisor owns Capability discovery, task formation, execution ordering, and
 terminal planning outcomes. Terminal finalization turns those outcomes into a
 user-visible reply and clears run-scoped state. It does not bind `plan_request`.
 
@@ -58,7 +58,7 @@ The routing transition lives in the tool's returned `Command`, not in
 ## Message and stream invariants
 
 - `runUserRequest` is the user's request, not generated model text.
-- The Planner receives `runUserRequest` plus the canonical main conversation.
+- The Supervisor receives `runUserRequest` plus the canonical main conversation.
 - The Entry Answer model's `plan_request` AI message and matching `ToolMessage`
   remain private to the child graph and are not persisted in root messages.
 - Entry Answer text is buffered by the stream adapter and projected as the main
@@ -77,7 +77,7 @@ fails closed rather than reconstructing an approximate request.
 
 ## Validation
 
-Behavior tests cover direct reply, Planner routing, exact request preservation,
+Behavior tests cover direct reply, Supervisor routing, exact request preservation,
 and absence of control messages in canonical root state. Model evals cover a
 conversation follow-up that should be answered directly, clarification, and a
 repository task that must call `plan_request`.

@@ -11,9 +11,9 @@ export const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
 export const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
 export const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
 
-export type PlannerTerminalToolMode = 'entry' | 'boundary';
+export type SupervisorCommandToolMode = 'entry' | 'boundary';
 
-export const PLANNER_TERMINAL_TOOL_NAMES = new Set([
+export const SUPERVISOR_COMMAND_TOOL_NAMES = new Set([
   CONTINUE_CURRENT_TOOL_NAME,
   SUBMIT_PLAN_TOOL_NAME,
   ADVANCE_PLAN_TOOL_NAME,
@@ -22,13 +22,13 @@ export const PLANNER_TERMINAL_TOOL_NAMES = new Set([
   REPORT_UNAVAILABLE_TOOL_NAME,
 ]);
 
-const ENTRY_TERMINAL_TOOL_NAMES = new Set([
+const ENTRY_COMMAND_TOOL_NAMES = new Set([
   SUBMIT_PLAN_TOOL_NAME,
   REQUEST_USER_INPUT_TOOL_NAME,
   REPORT_UNAVAILABLE_TOOL_NAME,
 ]);
 
-const BOUNDARY_TERMINAL_TOOL_NAMES = new Set([
+const BOUNDARY_COMMAND_TOOL_NAMES = new Set([
   CONTINUE_CURRENT_TOOL_NAME,
   ADVANCE_PLAN_TOOL_NAME,
   COMPLETE_GOAL_TOOL_NAME,
@@ -36,15 +36,15 @@ const BOUNDARY_TERMINAL_TOOL_NAMES = new Set([
   REPORT_UNAVAILABLE_TOOL_NAME,
 ]);
 
-export function plannerTerminalToolNamesForMode(
-  mode: PlannerTerminalToolMode,
+export function supervisorCommandToolNamesForMode(
+  mode: SupervisorCommandToolMode,
 ): ReadonlySet<string> {
   return mode === 'entry'
-    ? ENTRY_TERMINAL_TOOL_NAMES
-    : BOUNDARY_TERMINAL_TOOL_NAMES;
+    ? ENTRY_COMMAND_TOOL_NAMES
+    : BOUNDARY_COMMAND_TOOL_NAMES;
 }
 
-function plannerTaskSchema() {
+function supervisorTaskSchema() {
   return z.object({
     capability: z.string().trim().min(1).max(200)
       .describe('Name of a disclosed Capability whose responsibility matches this task.'),
@@ -53,17 +53,17 @@ function plannerTaskSchema() {
   });
 }
 
-function plannerTasksSchema(description: string) {
-  return z.array(plannerTaskSchema()).min(1).max(MAX_PLAN_TASKS)
+function supervisorTasksSchema(description: string) {
+  return z.array(supervisorTaskSchema()).min(1).max(MAX_PLAN_TASKS)
     .describe(description);
 }
 
 /**
- * Terminal tools serialize an already-made Planner decision. Runtime registers
+ * Command tools serialize an already-made Supervisor decision. Runtime registers
  * the full superset; mode projects the provider-visible subset for static audits.
  */
-export function createPlannerTerminalTools(
-  mode?: PlannerTerminalToolMode,
+export function createSupervisorCommandTools(
+  mode?: SupervisorCommandToolMode,
 ): StructuredTool[] {
   const tools = [
     tool(async () => JSON.stringify({ action: 'continue_current', tasks: [] }), {
@@ -76,9 +76,9 @@ export function createPlannerTerminalTools(
         JSON.stringify({ action: 'execute_plan', tasks }),
       {
         name: SUBMIT_PLAN_TOOL_NAME,
-        description: 'Entry only: commit the initial executable plan for the user goal.',
+        description: 'Entry only: submit the initial executable plan for the user goal.',
         schema: z.object({
-          tasks: plannerTasksSchema(
+          tasks: supervisorTasksSchema(
             'Non-empty ordered tasks required to deliver the user goal.',
           ),
         }),
@@ -91,7 +91,7 @@ export function createPlannerTerminalTools(
         name: ADVANCE_PLAN_TOOL_NAME,
         description: 'Boundary only: accept the active result and replace the prior proposal with the tasks still required for the user goal.',
         schema: z.object({
-          tasks: plannerTasksSchema(
+          tasks: supervisorTasksSchema(
             'Non-empty ordered tasks for results not yet satisfied by accepted history and the active result.',
           ),
         }),
@@ -113,7 +113,7 @@ export function createPlannerTerminalTools(
         description: 'Pause the unfinished goal in a resumable state and ask for concrete information, a choice, or authorization only the user can provide.',
         schema: z.object({
           question: z.string().trim().min(1).max(1_000)
-            .describe('The single concrete question that unblocks planning.'),
+            .describe('The single concrete question that unblocks the user goal.'),
         }).strict(),
       },
     ),
@@ -124,6 +124,6 @@ export function createPlannerTerminalTools(
     }),
   ];
   if (!mode) return tools;
-  const allowedNames = plannerTerminalToolNamesForMode(mode);
+  const allowedNames = supervisorCommandToolNamesForMode(mode);
   return tools.filter(({ name }) => allowedNames.has(name));
 }

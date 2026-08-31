@@ -6,22 +6,22 @@ import {
 } from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import type { StructuredTool } from '@langchain/core/tools';
-import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/capabilityPlanner/capabilityDisclosure.ts';
-import type { CapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
+import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
+import type { CapabilityDocumentWorkspace } from '../../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
 import {
-  createCapabilityPlannerSearchTool,
-  type CapabilityPlannerCapabilityDocument,
-} from '../../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
+  createRunSupervisorSearchTool,
+  type RunSupervisorCapabilityDocument,
+} from '../../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
 import type {
-  CapabilityPlannerInput,
-  CapabilityPlannerMode,
-} from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+  RunSupervisorInput,
+  RunSupervisorMode,
+} from '../../src/agent/orchestrator/runSupervisor/runner.ts';
 import {
   createCapabilityRegistryManifest,
   createDeterministicCapabilityRoutingManifest,
-} from '../../src/agent/orchestrator/capabilityPlanner/routingManifest.ts';
-import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
-import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
+} from '../../src/agent/orchestrator/runSupervisor/routingManifest.ts';
+import { createRunSupervisorSession } from '../../src/agent/orchestrator/runSupervisor/session.ts';
+import { createSupervisorCommandTools } from '../../src/agent/orchestrator/runSupervisor/commandTools.ts';
 import {
   DelegationAnnounceMessage,
 } from '../../src/agent/orchestrator/delegation/index.ts';
@@ -31,9 +31,9 @@ import {
 } from '../../src/agent/messages/index.ts';
 import { invokeOrchestratorModel } from '../../src/agent/orchestrator/modelInvocation.ts';
 import {
-  buildCapabilityPlannerAgentInput,
-  buildCapabilityPlannerAgentSystemPrompt,
-} from '../../src/agent/orchestrator/prompts/capabilityPlannerAgent.ts';
+  buildRunSupervisorAgentInput,
+  buildRunSupervisorAgentSystemPrompt,
+} from '../../src/agent/orchestrator/prompts/runSupervisorAgent.ts';
 
 const userRequest = 'Review the repository issue, implement the required fix, and report the verified result.';
 
@@ -63,7 +63,7 @@ const routingManifest = createDeterministicCapabilityRoutingManifest(
   createCapabilityRegistryManifest({ workspace }),
 );
 
-const documents: CapabilityPlannerCapabilityDocument[] = [{
+const documents: RunSupervisorCapabilityDocument[] = [{
   capabilityName: 'general',
   path: '/audit/capabilities/general/CAPABILITY.md',
   content: '# General\n\nHandle ordinary tasks.',
@@ -93,7 +93,7 @@ const acceptedAnnounce = new DelegationAnnounceMessage({
 });
 const privateLaneMessage = new AIMessage({
   id: 'audit-private-lane-message',
-  content: 'Private executor reasoning that must not enter Planner context.',
+  content: 'Private executor reasoning that must not enter Supervisor context.',
 });
 setAgentMessageMetadata(privateLaneMessage, {
   lane: 'capability:repository',
@@ -101,7 +101,7 @@ setAgentMessageMetadata(privateLaneMessage, {
   delegationId: 'audit-active-delegation',
 });
 
-function buildInput(mode: CapabilityPlannerMode): CapabilityPlannerInput {
+function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
   const messages: BaseMessage[] = mode === 'entry'
     ? [userMessage, privateLaneMessage]
     : [userMessage, acceptedAnnounce, privateLaneMessage];
@@ -109,7 +109,7 @@ function buildInput(mode: CapabilityPlannerMode): CapabilityPlannerInput {
     capability: 'general',
     task: 'Report the verified result to the user.',
   }] : [];
-  const plannerSession = createPlannerSession({
+  const supervisorSession = createRunSupervisorSession({
     runId: 'audit-run',
     plan: remainingPlan,
     capabilityDisclosure: disclosure,
@@ -128,7 +128,7 @@ function buildInput(mode: CapabilityPlannerMode): CapabilityPlannerInput {
       remainingPlan,
       workspace,
       capabilityDisclosure: disclosure,
-      plannerSession,
+      supervisorSession,
     };
   }
   return {
@@ -161,7 +161,7 @@ function buildInput(mode: CapabilityPlannerMode): CapabilityPlannerInput {
     remainingPlan,
     workspace,
     capabilityDisclosure: disclosure,
-    plannerSession,
+    supervisorSession,
   };
 }
 
@@ -193,33 +193,33 @@ async function captureProviderHistory(messages: readonly BaseMessage[]) {
   return invocation.slice(1);
 }
 
-async function renderMode(mode: CapabilityPlannerMode) {
+async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
   const projectedMessages = await captureProviderHistory(mainSelection.messages);
-  const searchTool = createCapabilityPlannerSearchTool(async () => ({
+  const searchTool = createRunSupervisorSearchTool(async () => ({
     ok: true,
     data: { entries: [] },
   }));
-  const tools = [searchTool, ...createPlannerTerminalTools(mode)];
+  const tools = [searchTool, ...createSupervisorCommandTools(mode)];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);
   console.log('\n### SYSTEM');
-  console.log(buildCapabilityPlannerAgentSystemPrompt(mode));
+  console.log(buildRunSupervisorAgentSystemPrompt(mode));
   console.log('\n### CLEAN PROVIDER HISTORY');
   projectedMessages.forEach((message, index) => {
     console.log(`\n[${String(index + 1)}] ${message._getType()}`);
     console.log(messageText(message));
   });
   console.log('\n### INVOCATION INPUT');
-  console.log(buildCapabilityPlannerAgentInput(input, documents, routingManifest));
+  console.log(buildRunSupervisorAgentInput(input, documents, routingManifest));
   console.log('\n### PROVIDER TOOLS');
   tools.forEach((tool) => {
     console.log(`\n${renderTool(tool)}`);
   });
 }
 
-console.log(`# Capability Planner Context Audit
+console.log(`# Run Supervisor Context Audit
 
 This is a static rendering of the production prompt builders, message projection,
 tool descriptions, and argument schemas. No external model is called.
@@ -230,7 +230,7 @@ Audit in this order:
 3. Actions: only actions valid for this mode are exposed, and their effects are mutually exclusive.
 4. Arguments: schemas describe data to serialize, without adding competing decision policy.
 5. Scope: private executor-lane messages are absent; accepted main-history conclusions remain visible.
-6. Runtime: code validates identities and shapes only; semantic completion remains the Planner's decision.`);
+6. Runtime: code validates identities and shapes only; semantic completion remains the Supervisor's decision.`);
 
 await renderMode('entry');
 await renderMode('boundary');

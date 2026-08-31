@@ -17,13 +17,13 @@ import {
 } from './review/reviewAuthorizations';
 import type {
   OrchestratorRuntimeFailure,
-  PlannerRouteOutcome,
-  PlannerUserInputRequest,
-} from './capabilityPlanner/protocol';
+  SupervisorRouteOutcome,
+  SupervisorUserInputRequest,
+} from './runSupervisor/protocol';
 import type {
-  PlannerSessionState,
-  PlannerTaskContinuation,
-} from './capabilityPlanner/session';
+  RunSupervisorSessionState,
+  RunTaskContinuation,
+} from './runSupervisor/session';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -48,7 +48,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runPlannerSession: Annotation<PlannerSessionState | null>({
+  runSupervisorSession: Annotation<RunSupervisorSessionState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -64,7 +64,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  taskPlannerContinuation: Annotation<PlannerTaskContinuation | null>({
+  taskRunContinuation: Annotation<RunTaskContinuation | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -76,11 +76,11 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runLatestDelegationOutcome: Annotation<PlannerRouteOutcome | null>({
+  runLatestDelegationOutcome: Annotation<SupervisorRouteOutcome | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  runUserInputRequest: Annotation<PlannerUserInputRequest | null>({
+  runUserInputRequest: Annotation<SupervisorUserInputRequest | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -124,7 +124,7 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
-  | 'runPlannerSession'
+  | 'runSupervisorSession'
   | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runIterationCount'
@@ -148,7 +148,7 @@ export function buildRunStateReset(
 ): OrchestratorRunState {
   return {
     runNextDelegation: null,
-    runPlannerSession: null,
+    runSupervisorSession: null,
     runUserRequest: null,
     runDelegationSummaries: [],
     runIterationCount: 0,
@@ -171,7 +171,7 @@ export function buildOrchestratorRunInput(
   if (options.activeDelegationTransition === 'resume_active') {
     // Preserve an interrupted prior run's session until prepare can extract
     // only its canonical plan into a fresh-run continuation seed.
-    const { runPlannerSession: _priorRunPlannerSession, ...resumeReset } = reset;
+    const { runSupervisorSession: _priorRunSupervisorSession, ...resumeReset } = reset;
     return {
       messages,
       ...resumeReset,

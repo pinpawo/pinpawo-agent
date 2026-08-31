@@ -6,7 +6,7 @@ An unfinished delegation is durable server-side state, but the TUI previously
 returned to ordinary chat immediately after an interruption. Ordinary chat
 sends `supersede_active`, while the separate `/continue <guidance>` command
 sends `resume_active`. Users therefore had to know an invisible protocol
-distinction to answer a Planner question or resume work they had just stopped.
+distinction to answer a Supervisor question or resume work they had just stopped.
 
 ## Interaction contract
 
@@ -45,7 +45,7 @@ Starting a run, opening a review, or switching sessions clears paused mode.
 
 ## Acceptance criteria
 
-- A cancelled review or Planner user-input boundary opens paused mode after
+- A cancelled review or Supervisor user-input boundary opens paused mode after
   its authoritative interrupted event.
 - Plain text and attachments submitted in paused mode carry `resume_active`.
 - A second Esc changes the next submission to `supersede_active` without

@@ -34,7 +34,7 @@ test('an exhausted boundary plan can continue autonomous work or report a real c
   assert.ok(results.has('unavailable'));
 });
 
-test('planner scorer enforces the mandatory General default candidate', () => {
+test('supervisor scorer enforces the mandatory General default candidate', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     (item) => item.name === 'entry-uses-general-for-unmatched-work',
   );
@@ -51,7 +51,7 @@ test('planner scorer enforces the mandatory General default candidate', () => {
   );
 });
 
-test('planner scorer reconstructs an unchanged plan from next task plus future tail', () => {
+test('supervisor scorer reconstructs an unchanged plan from next task plus future tail', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find((item) => item.name === 'boundary-keeps-valid-next-task');
   assert.ok(testCase);
   const materialized = testCase.input.remainingPlan?.[0];
@@ -65,7 +65,7 @@ test('planner scorer reconstructs an unchanged plan from next task plus future t
   assert.ok(allPass(scores));
 });
 
-test('planner deterministic scorer treats Capability as executor identity', () => {
+test('supervisor deterministic scorer treats Capability as executor identity', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     (item) => item.name === 'boundary-keeps-valid-next-task',
   );
@@ -84,7 +84,7 @@ test('planner deterministic scorer treats Capability as executor identity', () =
   );
 });
 
-test('planner deterministic scorer can enforce a case-specific future task count', () => {
+test('supervisor deterministic scorer can enforce a case-specific future task count', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     (item) => item.name === 'entry-keeps-investigation-scope',
   );

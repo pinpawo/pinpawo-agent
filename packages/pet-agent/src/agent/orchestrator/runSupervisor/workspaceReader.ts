@@ -18,43 +18,43 @@ import type {
   CapabilityDocumentWorkspaceEntry,
 } from './documentWorkspace';
 
-export const CAPABILITY_PLANNER_DOCUMENT_PATH_MAX_CHARS = 512;
+export const RUN_SUPERVISOR_DOCUMENT_PATH_MAX_CHARS = 512;
 
-export type PlannerFileToolErrorCode =
+export type SupervisorFileToolErrorCode =
   | 'aborted'
   | 'document_not_found'
   | 'document_tampered'
   | 'invalid_path'
   | 'invalid_query'
   | 'invalid_range'
-  | 'planning_limit_reached'
+  | 'supervisor_discovery_limit_reached'
   | 'workspace_invalid'
   | 'workspace_unavailable';
 
-export class PlannerFileToolError extends Error {
-  readonly code: PlannerFileToolErrorCode;
+export class SupervisorFileToolError extends Error {
+  readonly code: SupervisorFileToolErrorCode;
 
-  constructor(code: PlannerFileToolErrorCode, message: string) {
+  constructor(code: SupervisorFileToolErrorCode, message: string) {
     super(message);
-    this.name = 'PlannerFileToolError';
+    this.name = 'SupervisorFileToolError';
     this.code = code;
   }
 }
 
-export function throwIfPlannerFileExplorationAborted(
+export function throwIfSupervisorFileExplorationAborted(
   signal: AbortSignal | undefined,
 ) {
   if (signal?.aborted) {
-    throw new PlannerFileToolError(
+    throw new SupervisorFileToolError(
       'aborted',
-      'Capability Planner file exploration was aborted.',
+      'Run Supervisor file exploration was aborted.',
     );
   }
 }
 
-export function stablePlannerFileToolError(error: unknown) {
-  if (error instanceof PlannerFileToolError) return error;
-  return new PlannerFileToolError(
+export function stableSupervisorFileToolError(error: unknown) {
+  if (error instanceof SupervisorFileToolError) return error;
+  return new SupervisorFileToolError(
     'workspace_unavailable',
     'Capability Document Workspace could not be read.',
   );
@@ -102,7 +102,7 @@ function buildEntryMap(workspace: CapabilityDocumentWorkspace) {
   return entries;
 }
 
-export class CapabilityPlannerWorkspaceReader {
+export class RunSupervisorWorkspaceReader {
   readonly workspace: CapabilityDocumentWorkspace;
   readonly #entries: ReadonlyMap<string, CapabilityDocumentWorkspaceEntry>;
 
@@ -114,7 +114,7 @@ export class CapabilityPlannerWorkspaceReader {
   assertDocumentPath(path: string) {
     if (
       !path
-      || path.length > CAPABILITY_PLANNER_DOCUMENT_PATH_MAX_CHARS
+      || path.length > RUN_SUPERVISOR_DOCUMENT_PATH_MAX_CHARS
       || isAbsolute(path)
       || path.includes('\\')
       || path.includes('\0')
@@ -122,14 +122,14 @@ export class CapabilityPlannerWorkspaceReader {
       || path === '..'
       || path.startsWith('../')
     ) {
-      throw new PlannerFileToolError(
+      throw new SupervisorFileToolError(
         'invalid_path',
         'path must be a normalized workspace-relative CAPABILITY.md path',
       );
     }
     const entry = this.#entries.get(path);
     if (!entry) {
-      throw new PlannerFileToolError(
+      throw new SupervisorFileToolError(
         'document_not_found',
         `Capability document "${path}" is not part of this registry generation.`,
       );
@@ -138,10 +138,10 @@ export class CapabilityPlannerWorkspaceReader {
   }
 
   async listDocumentPaths(signal?: AbortSignal) {
-    throwIfPlannerFileExplorationAborted(signal);
+    throwIfSupervisorFileExplorationAborted(signal);
     const rootStats = await lstat(this.workspace.rootPath);
     if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
-      throw new PlannerFileToolError(
+      throw new SupervisorFileToolError(
         'workspace_invalid',
         'Capability Document Workspace root is not a real directory.',
       );
@@ -150,7 +150,7 @@ export class CapabilityPlannerWorkspaceReader {
     const expectedNames = [...this.workspace.capabilityNames].sort();
     const actualNames = (await readdir(this.workspace.rootPath)).sort();
     if (!sameOrderedValues(actualNames, expectedNames)) {
-      throw new PlannerFileToolError(
+      throw new SupervisorFileToolError(
         'workspace_invalid',
         'Capability Document Workspace contains unexpected entries.',
       );
@@ -158,11 +158,11 @@ export class CapabilityPlannerWorkspaceReader {
 
     const documentPaths: string[] = [];
     for (const capabilityName of expectedNames) {
-      throwIfPlannerFileExplorationAborted(signal);
+      throwIfSupervisorFileExplorationAborted(signal);
       const capabilityDir = join(this.workspace.rootPath, capabilityName);
       const capabilityStats = await lstat(capabilityDir);
       if (!capabilityStats.isDirectory() || capabilityStats.isSymbolicLink()) {
-        throw new PlannerFileToolError(
+        throw new SupervisorFileToolError(
           'workspace_invalid',
           `Capability document directory "${capabilityName}" is invalid.`,
         );
@@ -172,7 +172,7 @@ export class CapabilityPlannerWorkspaceReader {
         childNames.length !== 1
         || childNames[0] !== CAPABILITY_DOCUMENT_FILE_NAME
       ) {
-        throw new PlannerFileToolError(
+        throw new SupervisorFileToolError(
           'workspace_invalid',
           `Capability document directory "${capabilityName}" contains unexpected entries.`,
         );
@@ -186,7 +186,7 @@ export class CapabilityPlannerWorkspaceReader {
         || documentStats.isSymbolicLink()
         || !this.#entries.has(relativePath)
       ) {
-        throw new PlannerFileToolError(
+        throw new SupervisorFileToolError(
           'workspace_invalid',
           `Capability document "${relativePath}" is invalid.`,
         );
@@ -197,7 +197,7 @@ export class CapabilityPlannerWorkspaceReader {
   }
 
   async readDocument(path: string, signal?: AbortSignal) {
-    throwIfPlannerFileExplorationAborted(signal);
+    throwIfSupervisorFileExplorationAborted(signal);
     const relativePath = this.assertDocumentPath(path);
     const entry = this.#entries.get(relativePath)!;
     const rootRealPath = await realpath(this.workspace.rootPath);
@@ -210,14 +210,14 @@ export class CapabilityPlannerWorkspaceReader {
       || relativeRealPath.startsWith(`..${sep}`)
       || isAbsolute(relativeRealPath)
     ) {
-      throw new PlannerFileToolError(
+      throw new SupervisorFileToolError(
         'invalid_path',
         `Capability document "${relativePath}" resolves outside the workspace.`,
       );
     }
     const content = await readFile(fileRealPath, 'utf8');
     if (sha256(content) !== entry.documentDigest) {
-      throw new PlannerFileToolError(
+      throw new SupervisorFileToolError(
         'document_tampered',
         `Capability document "${relativePath}" no longer matches this registry generation.`,
       );

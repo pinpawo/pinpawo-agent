@@ -38,7 +38,7 @@
     "eval:prompt-matrix": "npm -w @pinpawo/pet-agent run eval:prompt-matrix",
     "eval:prompt-compare": "npm -w @pinpawo/pet-agent run eval:prompt-compare --",
     "prompt:preview": "npm -w @pinpawo/pet-agent run prompt:preview --",
-    "planner:context-audit": "npm -w @pinpawo/pet-agent run planner:context-audit"
+    "supervisor:context-audit": "npm -w @pinpawo/pet-agent run supervisor:context-audit"
   },
   "overrides": {
     "langsmith": "^0.7.2",

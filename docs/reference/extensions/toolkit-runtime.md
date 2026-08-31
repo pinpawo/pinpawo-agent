@@ -59,14 +59,14 @@ instructions、availability 和 Capability 的 `uses` 均是静态契约。没�
 `bindTools` 的 Toolkit 保持同一批静态 Tool；它的 opaque runtime port 以 Toolkit
 name 为 key 放入 `ToolRuntime.context.toolkitRuntimes`，Tool 可以在每次调用时把
 invocation identity 传给自己的 Runtime。框架不解释 port 的接口，也不把它放进
-registry、planner workspace、prompt 或 checkpoint。
+registry、Supervisor workspace、prompt 或 checkpoint。
 
 `bindTools` 是另一种互斥的消费方式：只在某个 Toolkit 确实需要替换执行
 implementation 时，为同名、同数量的 Tool 注入 Toolkit 自己持有的动态资源或
 ownership，例如 process registry；这类 binding 不再额外暴露到 Tool runtime context。
 管理器保留原始 Tool 对象的
 schema、description、response format 等公开契约，只把底层 `_call` 分派给 bound
-implementation。管理器拒绝更名、增删或非 StructuredTool 的返回值。因此 planner、
+implementation。管理器拒绝更名、增删或非 StructuredTool 的返回值。因此 Supervisor、
 checkpoint、registry 与 review 决策永远引用静态契约，不携带 runtime binding。
 
 `threadId`、`runId`、`delegationId` 等 invocation identity 由 Agent 放入

@@ -5,7 +5,7 @@ export function afterContextPrep(state: OrchestratorStateType) {
     state.runActiveDelegationTransition === 'resume_active'
     && state.taskActiveDelegation?.status === 'awaiting_decision'
   ) {
-    return 'plannerBoundaryIterationGuard';
+    return 'supervisorBoundaryIterationGuard';
   }
   if (
     state.runActiveDelegationTransition === 'resume_active'

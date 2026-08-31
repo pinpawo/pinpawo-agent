@@ -2,8 +2,8 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { ReducedValue, StateSchema } from '@langchain/langgraph';
 import { z as z4 } from 'zod/v4';
 import type { CapabilitySearchObservation } from './capabilityDisclosure';
-import type { CapabilityPlannerInput } from './runner';
-import type { PlannerCommit } from './protocol';
+import type { RunSupervisorInput } from './runner';
+import type { SupervisorCommand } from './protocol';
 
 function mergeCapabilitySearchObservation(
   current: CapabilitySearchObservation[],
@@ -23,18 +23,18 @@ const capabilitySearchObservationSchema = z4.object({
   disclosedCapabilityNames: z4.array(z4.string()),
 });
 
-/** Private invocation state used by Planner model and terminal-tool middleware. */
-export const plannerInvocationStateSchema = z4.object({
-  currentInput: z4.custom<CapabilityPlannerInput>(),
-  plannerCommit: z4.custom<PlannerCommit>().nullable().default(null),
+/** Private invocation state used by the Supervisor model and command-tool middleware. */
+export const supervisorInvocationStateSchema = z4.object({
+  currentInput: z4.custom<RunSupervisorInput>(),
+  supervisorCommand: z4.custom<SupervisorCommand>().nullable().default(null),
 });
 
 /**
- * Search is the one Planner concern that needs a reducer: parallel tool calls
+ * Search is the one Supervisor concern that needs a reducer: parallel tool calls
  * append observations into the same model round. Keep it as a distinct graph
  * state channel so it does not change the existing middleware-private state.
  */
-export const plannerSearchStateSchema = new StateSchema({
+export const supervisorSearchStateSchema = new StateSchema({
   // Each search tool call writes one observation. The reducer preserves every
   // parallel result so empty search *rounds* can be derived by model message.
   capabilitySearchObservations: new ReducedValue(
@@ -53,25 +53,25 @@ export const plannerSearchStateSchema = new StateSchema({
   ),
 });
 
-export type PlannerInvocationState = {
-  currentInput: CapabilityPlannerInput;
-  plannerCommit: PlannerCommit | null;
+export type SupervisorInvocationState = {
+  currentInput: RunSupervisorInput;
+  supervisorCommand: SupervisorCommand | null;
   capabilitySearchObservations: CapabilitySearchObservation[];
 };
 
-export type PlannerSearchToolState = PlannerInvocationState & {
+export type SupervisorSearchToolState = SupervisorInvocationState & {
   messages?: BaseMessage[];
 };
 
-export function currentPlannerInput(state: Partial<PlannerInvocationState>) {
+export function currentSupervisorInput(state: Partial<SupervisorInvocationState>) {
   if (!state.currentInput) {
-    throw new Error('Planner invocation state has no current input.');
+    throw new Error('Supervisor invocation state has no current input.');
   }
   return state.currentInput;
 }
 
-/** Keep every terminal-tool validation path on the same immutable workspace. */
-export function plannerCommitContext(input: CapabilityPlannerInput) {
+/** Keep every command-tool validation path on the same immutable workspace. */
+export function supervisorCommandContext(input: RunSupervisorInput) {
   return {
     mode: input.mode,
     activeDelegation: input.activeDelegation,

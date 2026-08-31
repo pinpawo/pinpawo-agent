@@ -23,7 +23,7 @@ state, a graph ownership boundary, or the source of execution evidence.
 Entry Answer ordinary reply ----------------------------------------> END
 
 Prepare failure ───────────┐
-Planner terminal outcome ──┼─> finalizeRun ─> user-visible reply ──> END
+Supervisor terminal outcome ──┼─> finalizeRun ─> user-visible reply ──> END
 Iteration guard stop ──────┘          |
                                      ├─ deterministic rendering
                                      `─ optional result synthesis
@@ -44,8 +44,8 @@ Finalization reads typed root state rather than conversation prose:
 - separately stored artifact references when they are relevant;
 - runtime failure and iteration-limit facts.
 
-Planner-internal reasoning, private Capability messages, and prior user-facing
-answers are not result evidence. A Planner ordinary-text non-commit may be
+Supervisor-internal reasoning, private Capability messages, and prior user-facing
+answers are not result evidence. A Supervisor ordinary-text no-command result may be
 carried as an explicit direct-response payload; it is not silently discovered
 from arbitrary history.
 
@@ -54,7 +54,7 @@ from arbitrary history.
 | Terminal case | Default rendering |
 |---|---|
 | checkpoint incompatibility | fixed framework message |
-| Planner direct-response payload | preserve the complete payload |
+| Supervisor direct-response payload | preserve the complete payload |
 | user input required | render the structured question and bounded progress facts |
 | unavailable, incomplete, or limit reached | deterministic status message |
 | goal done with accepted results | synthesize only when a coherent goal-level summary is needed |
@@ -71,7 +71,7 @@ reply contract.
 
 ## Ownership
 
-- Planner owns the structured terminal decision.
+- Supervisor owns the structured control command.
 - Handoff owns accepting an Announce and cleaning its private lane.
 - Finalization owns terminal projection, response selection, and run cleanup.
 - An optional synthesizer owns wording only.
@@ -92,7 +92,7 @@ Finalization performs one root-state update together with the reply:
 - never marks a delegation accepted or completed as a side effect of wording;
 - emits at most one main-agent reply for the root run.
 
-Moving this cleanup into every Planner, guard, and prepare route would duplicate
+Moving this cleanup into every Supervisor, guard, and prepare route would duplicate
 terminal semantics. The finalization boundary therefore remains even when no
 model call is needed.
 
@@ -121,7 +121,7 @@ existing version boundary.
 - direct payloads are delivered without semantic rewriting;
 - `goal_done` synthesis uses only accepted typed results;
 - `user_input_required` never claims completion;
-- unavailable and limit cases never fabricate work or a Planner commit;
+- unavailable and limit cases never fabricate work or a Supervisor command;
 - resume and supersede behavior retain their existing delegation ownership.
 
 Prompt behavior is covered through model evaluations. Runtime ownership,

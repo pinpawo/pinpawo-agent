@@ -30,7 +30,7 @@ function goalJudgeWithFailure(failedCriterion: string) {
   };
 }
 
-test('planner eval preserves the complete conversation with message roles', () => {
+test('supervisor eval preserves the complete conversation with message roles', () => {
   const messages = Array.from({ length: 12 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
     content: `message-${index.toString()}`,
@@ -97,7 +97,7 @@ test('entry planning distinguishes verifiable facts from user-owned choices', ()
   assert.equal(userOwnedChoice?.expected.result, 'user_input_required');
 });
 
-test('planner goal contract keeps semantic plan checks outside the deterministic result score', () => {
+test('supervisor goal contract keeps semantic plan checks outside the deterministic result score', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-explore-then-implementation',
   );
@@ -113,7 +113,7 @@ test('planner goal contract keeps semantic plan checks outside the deterministic
   );
 });
 
-test('planner goal contract evaluates an expected empty future plan', () => {
+test('supervisor goal contract evaluates an expected empty future plan', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-keeps-investigation-scope',
   );
@@ -125,7 +125,7 @@ test('planner goal contract evaluates an expected empty future plan', () => {
   assert.match(criterion.statement, /remaining plan is empty/i);
 });
 
-test('planner materializes requested recommendation work before asking for confirmation', () => {
+test('supervisor materializes requested recommendation work before asking for confirmation', () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-recommends-before-requesting-confirmation',
   );
@@ -147,7 +147,7 @@ test('trace-derived latest-main verification requires execution rather than user
   assert.equal(testCase.expected.exactRemainingPlanLength, 0);
 });
 
-test('planner goal evaluation rejects a semantically wrong plan with the correct result', async () => {
+test('supervisor goal evaluation rejects a semantically wrong plan with the correct result', async () => {
   const testCase = capabilityPlanningBasicsDataset.cases.find(
     ({ name }) => name === 'entry-explore-then-implementation',
   );

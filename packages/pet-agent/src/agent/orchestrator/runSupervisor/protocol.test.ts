@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parsePlannerCommit } from './protocol';
+import { parseSupervisorCommand } from './protocol';
 
 const boundaryContext = {
   mode: 'boundary' as const,
@@ -13,8 +13,8 @@ const boundaryContext = {
   allowedCapabilityNames: ['general', 'explore'],
 };
 
-test('Planner commit exposes only action, plan tasks, and a bounded user-input request', () => {
-  assert.deepEqual(parsePlannerCommit({
+test('Supervisor command exposes only action, plan tasks, and a bounded user-input request', () => {
+  assert.deepEqual(parseSupervisorCommand({
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
   }, {
@@ -25,12 +25,12 @@ test('Planner commit exposes only action, plan tasks, and a bounded user-input r
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
   });
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'unavailable',
     tasks: [],
     reason: 'private reasoning must not cross the seam',
   }, boundaryContext));
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'user_input_required',
     tasks: [],
     userInputRequest: { question: 'Which target should I use?' },
@@ -38,8 +38,8 @@ test('Planner commit exposes only action, plan tasks, and a bounded user-input r
   }, boundaryContext));
 });
 
-test('Planner commit enforces entry and continuation invariants', () => {
-  assert.throws(() => parsePlannerCommit({
+test('Supervisor command enforces entry and continuation invariants', () => {
+  assert.throws(() => parseSupervisorCommand({
     action: 'goal_done',
     tasks: [],
   }, {
@@ -47,7 +47,7 @@ test('Planner commit enforces entry and continuation invariants', () => {
     mode: 'entry',
     activeDelegation: null,
   }), /invalid at entry/);
-  assert.deepEqual(parsePlannerCommit({
+  assert.deepEqual(parseSupervisorCommand({
     action: 'user_input_required',
     tasks: [],
     userInputRequest: { question: 'Which target should I use?' },
@@ -60,36 +60,36 @@ test('Planner commit enforces entry and continuation invariants', () => {
     tasks: [],
     userInputRequest: { question: 'Which target should I use?' },
   });
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'user_input_required',
     tasks: [],
   }, boundaryContext), /requires userInputRequest/);
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'unavailable',
     tasks: [],
     userInputRequest: { question: 'Unexpected question.' },
   }, boundaryContext), /forbids userInputRequest/);
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'continue_current',
     tasks: [{ capability: 'explore', task: 'Switch executor.' }],
   }, boundaryContext), /forbids tasks/);
-  assert.deepEqual(parsePlannerCommit({
+  assert.deepEqual(parseSupervisorCommand({
     action: 'continue_current',
     tasks: [],
   }, boundaryContext), {
     action: 'continue_current',
     tasks: [],
   });
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'continue_current',
     tasks: [],
     gapNote: 'The previous result omitted verification; run it and return the evidence.',
   }, boundaryContext));
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'execute_plan',
     tasks: [{ capability: 'explore', task: 'Start a replacement plan.' }],
   }, boundaryContext), /invalid at a boundary/);
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'advance_plan',
     tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
   }, {
@@ -97,18 +97,18 @@ test('Planner commit enforces entry and continuation invariants', () => {
     mode: 'entry',
     activeDelegation: null,
   }), /invalid at entry/);
-  assert.deepEqual(parsePlannerCommit({
+  assert.deepEqual(parseSupervisorCommand({
     action: 'advance_plan',
     tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
   }, boundaryContext), {
     action: 'advance_plan',
     tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
   });
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'goal_done',
     tasks: [{ capability: 'general', task: 'Unexpected work.' }],
   }, boundaryContext), /forbids tasks/);
-  assert.throws(() => parsePlannerCommit({
+  assert.throws(() => parseSupervisorCommand({
     action: 'goal_done',
     tasks: [],
     gapNote: 'Unexpected continuation guidance.',

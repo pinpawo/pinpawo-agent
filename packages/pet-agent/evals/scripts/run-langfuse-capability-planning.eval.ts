@@ -3,16 +3,16 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { createCapabilityPlannerAgent } from '../../src/agent/orchestrator/capabilityPlanner/agent.ts';
-import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/capabilityPlanner/capabilityDisclosure.ts';
+import { createRunSupervisorAgent } from '../../src/agent/orchestrator/runSupervisor/agent.ts';
+import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import {
-  isCapabilityPlannerIncompleteResult,
-  type CapabilityPlannerInput,
-  type CapabilityPlannerResult,
-} from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
-import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/capabilityPlanner/documentWorkspace.ts';
+  isRunSupervisorNoCommandResult,
+  type RunSupervisorInput,
+  type RunSupervisorResult,
+} from '../../src/agent/orchestrator/runSupervisor/runner.ts';
+import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
-import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
+import { createRunSupervisorSession } from '../../src/agent/orchestrator/runSupervisor/session.ts';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -39,7 +39,7 @@ import {
 
 const evalExecutionToolkit = defineToolkit({
   name: 'eval_execution',
-  description: 'Synthetic execution adapter for Capability Planner semantic evaluation.',
+  description: 'Synthetic execution adapter for Run Supervisor semantic evaluation.',
   tools: [{
     tool: tool(async () => 'ok', {
       name: 'eval_execute',
@@ -70,11 +70,11 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 }
 
 function plannerOutput(
-  result: CapabilityPlannerResult,
+  result: RunSupervisorResult,
 ): CapabilityPlanningEvalOutput {
-  if (isCapabilityPlannerIncompleteResult(result)) {
+  if (isRunSupervisorNoCommandResult(result)) {
     return {
-      result: 'planner_incomplete',
+      result: 'supervisor_command_missing',
       nextTask: null,
       capabilityName: null,
       remainingPlan: [],
@@ -100,13 +100,13 @@ function plannerOutput(
 }
 
 function plannerDiagnostics(
-  result: CapabilityPlannerResult,
+  result: RunSupervisorResult,
   searchDiagnostics: CapabilitySearchDiagnostics,
 ) {
   return {
     ...searchDiagnostics,
-    plannerStatus: isCapabilityPlannerIncompleteResult(result)
-      ? result.plannerStatus
+    supervisorStatus: isRunSupervisorNoCommandResult(result)
+      ? result.supervisorStatus
       : 'committed',
   } as const;
 }
@@ -198,7 +198,7 @@ async function main() {
           ])],
         };
         const activeTask = testCase.input.activeTask ?? 'Evaluate the current task.';
-        const plannerInputBase = {
+        const supervisorInputBase = {
           inputId: `${testCase.input.mode}:${testCase.id}`,
           traceId: `eval:${testCase.id}`,
           runId: `eval:${testCase.id}`,
@@ -207,7 +207,7 @@ async function main() {
           remainingPlan: testCase.input.remainingPlan ?? [],
           workspace,
           capabilityDisclosure,
-          plannerSession: createPlannerSession({
+          supervisorSession: createRunSupervisorSession({
             runId: `eval:${testCase.id}`,
             plan: testCase.input.remainingPlan ?? [],
             capabilityDisclosure,
@@ -221,9 +221,9 @@ async function main() {
               completionReason: 'natural' as const,
               result: latestAnnounce,
             };
-        const plannerInput: CapabilityPlannerInput = testCase.input.mode === 'boundary'
+        const supervisorInput: RunSupervisorInput = testCase.input.mode === 'boundary'
           ? {
-              ...plannerInputBase,
+              ...supervisorInputBase,
               mode: 'boundary',
               activeDelegation: {
                 delegationId: 'eval-delegation',
@@ -235,17 +235,17 @@ async function main() {
               announceAttempts: announceData ? [announceData] : [],
             }
           : {
-              ...plannerInputBase,
+              ...supervisorInputBase,
               mode: 'entry',
               activeDelegation: null,
               latestAnnounce: null,
               announceAttempts: [],
             };
         const searchDiagnostics = createCapabilitySearchDiagnosticsCollector();
-        const result = await createCapabilityPlannerAgent({
+        const result = await createRunSupervisorAgent({
           model: modelConfig.model,
         }).invoke(
-          plannerInput,
+          supervisorInput,
           {
             configurable: {
               thread_id: `capability-planning-eval:${testCase.id}`,
@@ -304,7 +304,7 @@ async function main() {
           `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
           + `search_calls=${diagnostics.searchCalls.toString()} `
           + `search_rounds=${diagnostics.searchRounds.toString()} `
-          + `planner_status=${diagnostics.plannerStatus} `
+          + `planner_status=${diagnostics.supervisorStatus} `
           + evaluation.scores.map(({ key, score }) => `${key}=${score}`).join(' '),
         );
         if (!ok && showFailureDetails) {

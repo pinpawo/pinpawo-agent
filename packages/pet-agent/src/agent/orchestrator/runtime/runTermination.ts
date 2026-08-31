@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { Command, type NodeError } from '@langchain/langgraph';
-import { snapshotPlannerTaskContinuation } from '../capabilityPlanner/session';
-import type { CapabilityPlannerDispatch } from '../capabilityPlanner/runner';
+import { snapshotRunTaskContinuation } from '../runSupervisor/session';
+import type { RunSupervisorDispatch } from '../runSupervisor/runner';
 import type {
   OrchestratorStateType,
   OrchestratorTerminalErrorState,
 } from '../state';
 
-type FailureNodeInput = OrchestratorStateType | CapabilityPlannerDispatch;
+type FailureNodeInput = OrchestratorStateType | RunSupervisorDispatch;
 
 function rootState(input: FailureNodeInput): OrchestratorStateType {
-  return 'plannerState' in input
-    ? input.plannerState as OrchestratorStateType
+  return 'supervisorState' in input
+    ? input.supervisorState as OrchestratorStateType
     : input;
 }
 
@@ -78,11 +78,11 @@ export function createRunTerminationHandlers() {
       return new Command({
         update: {
           runNextDelegation: null,
-          runPlannerSession: null,
-          taskPlannerContinuation: state.taskPlannerContinuation
-            ?? snapshotPlannerTaskContinuation({
+          runSupervisorSession: null,
+          taskRunContinuation: state.taskRunContinuation
+            ?? snapshotRunTaskContinuation({
               activeDelegation: state.taskActiveDelegation ?? null,
-              plannerSession: state.runPlannerSession ?? null,
+              supervisorSession: state.runSupervisorSession ?? null,
             }),
           runIterationCount: 0,
           runLatestDelegationOutcome: null,

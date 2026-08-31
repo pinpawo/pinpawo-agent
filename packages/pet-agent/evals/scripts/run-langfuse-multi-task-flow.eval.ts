@@ -13,7 +13,7 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+import type { RunSupervisorRunner } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
 import { PLAN_REQUEST_TOOL_NAME } from '../../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
@@ -110,7 +110,7 @@ function buildScriptedPlannerRunner() {
   const selectedCapabilityNames: string[] = [];
   const plannedObjectives: string[] = [];
   let secondTaskSawHandoff = false;
-  const runner: CapabilityPlannerRunner = {
+  const runner: RunSupervisorRunner = {
     async invoke(input) {
       plannerDecisionCount += 1;
       if (plannerDecisionCount === 1) {
@@ -163,7 +163,7 @@ function taskMatches(actual: string, expectedTerms: string[]) {
 
 async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
   const answers = buildScriptedAnswerModel();
-  const planner = buildScriptedPlannerRunner();
+  const supervisor = buildScriptedPlannerRunner();
   const subagent = buildRecordingSubagent(testCase.input.subagentResults);
   const graph = createOrchestratorGraph({
     models: {
@@ -173,7 +173,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       subagent: subagent.model,
     },
     actor,
-    capabilityPlannerRunner: planner.runner,
+    runSupervisorRunner: supervisor.runner,
   });
   const result = await graph.invoke(
     buildOrchestratorTurnInput([new HumanMessage(testCase.input.userMessage)]),
@@ -194,7 +194,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     .map((summary) => summary.resultPreview ?? '')
     .join('\n');
   const stats = {
-    ...planner.stats(),
+    ...supervisor.stats(),
   };
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');

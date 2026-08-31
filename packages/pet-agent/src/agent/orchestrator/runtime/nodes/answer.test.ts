@@ -92,11 +92,11 @@ test('Answer runtime recognizes the run user request when canonical history has 
   });
 });
 
-test('Answer treats an incomplete Planner result as typed blocked context', () => {
+test('Answer treats a Supervisor no-command result as typed blocked context', () => {
   assert.deepEqual(selectAnswerContextFacts({
     state: state({
-      runUserRequest: '修改当前仓库的 Planner 行为。',
-      runLatestDelegationOutcome: 'planner_incomplete',
+      runUserRequest: '修改当前仓库的 Supervisor 行为。',
+      runLatestDelegationOutcome: 'supervisor_command_missing',
     }),
     history: [],
     acceptedHandoffOutcome: null,
@@ -107,8 +107,8 @@ test('Answer treats an incomplete Planner result as typed blocked context', () =
     mode: 'blocked',
     hasUserRequest: true,
     acceptedResults: [],
-    reason: 'planner_incomplete',
-    unfinishedTask: '修改当前仓库的 Planner 行为。',
+    reason: 'supervisor_command_missing',
+    unfinishedTask: '修改当前仓库的 Supervisor 行为。',
     detail: null,
   });
 });

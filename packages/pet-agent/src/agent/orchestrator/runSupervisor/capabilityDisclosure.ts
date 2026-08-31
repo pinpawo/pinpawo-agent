@@ -26,7 +26,7 @@ export function createCapabilityDisclosureState(params: {
 }): CapabilityDisclosureState {
   const { workspace, maxEmptySearchRounds } = params;
   if (!Number.isSafeInteger(maxEmptySearchRounds) || maxEmptySearchRounds <= 0) {
-    throw new Error('Capability Planner maxEmptySearchRounds must be a positive integer');
+    throw new Error('Run Supervisor maxEmptySearchRounds must be a positive integer');
   }
   const disclosedCapabilityNames = [...new Set([
     ...(params.seedCapabilityNames ?? []).filter((name) =>

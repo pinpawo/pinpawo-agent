@@ -3,7 +3,7 @@
 > Status: historical. The `return_to_answer` / `runPlannerReturn` path was removed
 > by #619. The private Planner now exposes only `PlannerCommit.action + tasks`;
 > the replacement lifecycle direction is the
-> [run-scoped Planner session](../../design/agent-runtime/run-scoped-planner-session.md).
+> [run-scoped Supervisor session](../../design/agent-runtime/run-scoped-supervisor-session.md).
 >
 > Scope: the framework-internal Capability Planner, its graph handoff, and
 > Answer invocation context. This document supersedes the statement that the

@@ -12,7 +12,7 @@ test('capability search diagnostics report traced calls, rounds, queries, and re
     { name: 'capability_search' } as never,
     JSON.stringify({ terms: ['kanban', 'task registration'] }),
     'search-run-1',
-    'planner-run',
+    'supervisor-run',
     [],
     {},
     'capability_search',

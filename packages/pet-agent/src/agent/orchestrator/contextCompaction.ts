@@ -66,7 +66,7 @@ function selectMessagesToKeep(
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
   const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
   // An active delegation's lane Announces are canonical Boundary evidence
-  // until Planner accepts them. They are excluded from summaries, so pin every
+  // until Supervisor accepts them. They are excluded from summaries, so pin every
   // still-lane-tagged Announce even when it falls outside the recent suffix.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;

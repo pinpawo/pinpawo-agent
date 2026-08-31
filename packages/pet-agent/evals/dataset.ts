@@ -31,9 +31,9 @@ export type Example = {
     resume_progress_task?: string;
     resume_progress_completion_reason?: string;
     resume_original_user_message?: string;
-    /** Optional: enable a mock Capability registry for Planner routing tests */
+    /** Optional: enable a mock Capability registry for Supervisor routing tests */
     capability_pack?: 'pet_content' | 'browser' | 'explore';
-    /** Optional: restrict the Planner workspace to these Capability names */
+    /** Optional: restrict the Supervisor workspace to these Capability names */
     allowed_capability_names?: string[];
   };
   outputs: {
@@ -165,7 +165,7 @@ export const examples: Example[] = [
       expected_route: 'answer',
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
-      reason: 'A completed lookup should answer even when the Planner workspace is narrowly scoped to content_writer.',
+      reason: 'A completed lookup should answer even when the Supervisor workspace is narrowly scoped to content_writer.',
     },
   },
 
@@ -326,7 +326,7 @@ export const examples: Example[] = [
       expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_active_capability: 'content_writer',
-      reason: 'The Planner should explore the available Capability documents and select content_writer.',
+      reason: 'The Supervisor should explore the available Capability documents and select content_writer.',
     },
   },
   {
@@ -340,7 +340,7 @@ export const examples: Example[] = [
       expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_active_capability: 'content_writer',
-      reason: 'The full graph should let the Planner discover and delegate to content_writer.',
+      reason: 'The full graph should let the Supervisor discover and delegate to content_writer.',
     },
   },
   {
@@ -355,7 +355,7 @@ export const examples: Example[] = [
       expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_active_capability: 'content_writer',
-      reason: 'The Planner workspace is scoped to content_writer, so delegation should use it.',
+      reason: 'The Supervisor workspace is scoped to content_writer, so delegation should use it.',
     },
   },
   {
@@ -388,7 +388,7 @@ export const examples: Example[] = [
       expected_mode: 'capability',
       expected_phase: 'initial_request',
       expected_active_capability: null,
-      reason: 'The Planner should reject unrelated domain Capabilities and select general.',
+      reason: 'The Supervisor should reject unrelated domain Capabilities and select general.',
     },
   },
   {
@@ -401,7 +401,7 @@ export const examples: Example[] = [
       expected_route: 'delegate',
       expected_mode: 'capability',
       expected_phase: 'initial_request',
-      reason: 'After exploring the documents, the Planner should select general for file inspection.',
+      reason: 'After exploring the documents, the Supervisor should select general for file inspection.',
     },
   },
 ];

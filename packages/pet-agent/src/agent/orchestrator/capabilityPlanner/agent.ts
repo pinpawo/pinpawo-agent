@@ -17,7 +17,7 @@ import type {
 } from './runner';
 import { parsePlannerCommit } from './protocol';
 import { queryAgentMessages } from '../../messages';
-import { createModelRequestMessagesMiddleware } from '../modelRequestMessages';
+import { modelMessageViewMiddleware } from '../modelMessageView';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import {
@@ -156,7 +156,7 @@ export function createCapabilityPlannerAgent(params: {
     middleware: [
       middleware,
       createPlannerSearchStateMiddleware(),
-      createModelRequestMessagesMiddleware(),
+      modelMessageViewMiddleware,
     ],
     checkpointer: false,
   });

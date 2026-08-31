@@ -75,7 +75,7 @@ The query knows only message ownership:
 It does not know about Planner inputs, Announce, prompts, artifacts, provider
 roles, task completion, or visibility modes.
 
-## Model-request preparation
+## Model-visible message view
 
 Selection, invocation input, and provider preparation are distinct. A node
 selects canonical history and constructs its current invocation message as
@@ -90,22 +90,21 @@ const selection = queryAgentMessages(messages)
 const agentMessages = [...selection.messages, delegationBriefing];
 ```
 
-That array is not yet a provider request. Immediately before every actual model
-call, the final `wrapModelCall` middleware applies
-`prepareModelRequestMessages(request.messages)`. It projects known typed domain
-messages into provider-safe standard messages and then repairs tool-call
-protocol ordering. The projection is repeated after other middleware and after
-each AI/Tool turn; it never mutates the agent's canonical state.
+That array remains Agent state. Immediately before every actual model call, the
+final `wrapModelCall` adapter replaces `request.messages` with its ephemeral
+model-visible view. The view projects known typed domain messages into standard
+messages and repairs tool-call protocol ordering. This happens after other
+middleware and after each AI/Tool turn; it never mutates Agent state.
 
 The node still owns the semantic choice of history and the construction of its
 current typed input. This is not a generic prompt builder: it knows no Planner
 mode, task state, artifact policy, or system-prompt parameters. Current messages
 remain invocation-only and are never written to canonical state.
 
-Entry Answer calls a model directly instead of using `createAgent`, so it runs
-the same preparation function on the complete message array immediately at each
-`model.invoke`. System prompt construction remains owned by the caller or
-LangChain's `ModelRequest.systemMessage`; it is not a lane concern.
+Entry Answer calls a model directly instead of using `createAgent`. It converts
+only selected Agent history to the same model-visible view, then places the
+Entry system message before that view. System prompts never enter the view;
+they remain owned by the caller or LangChain's `ModelRequest.systemMessage`.
 
 ## Capability delegation protocol
 
@@ -206,8 +205,7 @@ that projection never mutates canonical state.
 
 ## Other model nodes
 
-Entry Answer selects clean main messages and uses the shared model-request
-preparation boundary.
+Entry Answer selects clean main messages and uses the shared model-visible view.
 Answer receives a closed fact-only input and intentionally receives no canonical
 conversation history. Neither inspects private Capability messages or Planner
 provider messages.
@@ -235,8 +233,8 @@ agent/orchestrator/delegation/
   announce.ts        exact-scope Announce selection
   handoff.ts         acceptance into main and private-message cleanup
 
-agent/orchestrator/modelRequestMessages.ts
-  final provider projection and protocol sanitation for model requests
+agent/orchestrator/modelMessageView.ts
+  ephemeral model-visible projection and protocol sanitation
 
 agent/orchestrator/capabilityPlanner/
   input.ts           OrchestratorState -> CapabilityPlannerInput

@@ -12,7 +12,7 @@ import {
   readLatestAnnounce,
   reconcileDelegationPrivateMessages,
 } from '../../delegation';
-import { createModelRequestMessagesMiddleware } from '../../modelRequestMessages';
+import { modelMessageViewMiddleware } from '../../modelMessageView';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
@@ -54,7 +54,6 @@ export function createCapabilityNode(params: {
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   } = params;
-  const modelRequestMessagesMiddleware = createModelRequestMessagesMiddleware();
 
   // Node: capability — reads capabilities, tools, execution from configurable
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -222,7 +221,7 @@ export function createCapabilityNode(params: {
         generationReserveTokens: subagentGenerationReserveTokens,
         middleware: [
           ...usedResolvedToolkitExecution.middleware,
-          modelRequestMessagesMiddleware,
+          modelMessageViewMiddleware,
         ],
         runtimeContext: {
           executionScope: {

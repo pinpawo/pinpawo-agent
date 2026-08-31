@@ -10,7 +10,7 @@ import {
   queryAgentMessages,
   stampAgentMessageCreatedAt,
 } from '../../../messages';
-import { prepareModelRequestMessages } from '../../modelRequestMessages';
+import { modelVisibleMessages } from '../../modelMessageView';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -181,24 +181,18 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       new SystemMessage(buildEntryAnswerSystemPrompt({
         actor: resolveActor(config, runnableConfig),
       })),
-      ...mainSelection.messages,
+      ...modelVisibleMessages(mainSelection.messages),
     ];
-    let response = await model.invoke(
-      prepareModelRequestMessages(history),
-      runnableConfig,
-    );
+    let response = await model.invoke(history, runnableConfig);
     if (!AIMessage.isInstance(response)) {
       throw new Error('Entry Answer model must return an AIMessage.');
     }
     if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
-      const retried = await model.invoke(
-        prepareModelRequestMessages([
-          ...history,
-          response,
-          new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR),
-        ]),
-        runnableConfig,
-      );
+      const retried = await model.invoke([
+        ...history,
+        response,
+        new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR),
+      ], runnableConfig);
       if (!AIMessage.isInstance(retried)) {
         throw new Error('Entry Answer model must return an AIMessage.');
       }

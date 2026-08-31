@@ -6,15 +6,15 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createAgent, createMiddleware } from 'langchain';
 import { DelegationAnnounceMessage } from './delegation';
 import {
-  createModelRequestMessagesMiddleware,
-  prepareModelRequestMessages,
-} from './modelRequestMessages';
+  modelMessageViewMiddleware,
+  modelVisibleMessages,
+} from './modelMessageView';
 
 class RecordingModel extends BaseChatModel {
   readonly invocations: BaseMessage[][] = [];
 
   _llmType() {
-    return 'model-request-recorder';
+    return 'model-message-view-recorder';
   }
 
   bindTools() {
@@ -28,7 +28,7 @@ class RecordingModel extends BaseChatModel {
   }
 }
 
-test('prepareModelRequestMessages projects typed canonical messages without mutating state', () => {
+test('modelVisibleMessages projects typed Agent messages without mutating state', () => {
   const request = new HumanMessage('检查代码并继续。');
   const accepted = new DelegationAnnounceMessage({
     id: 'accepted-1',
@@ -42,7 +42,7 @@ test('prepareModelRequestMessages projects typed canonical messages without muta
     createdAt: '2026-01-01T00:00:00.000Z',
   });
 
-  const messages = prepareModelRequestMessages([request, accepted]);
+  const messages = modelVisibleMessages([request, accepted]);
 
   assert.equal(messages.length, 2);
   assert.equal(messages[0], request);
@@ -52,7 +52,7 @@ test('prepareModelRequestMessages projects typed canonical messages without muta
   assert.equal(accepted.text, '历史实现已检查。');
 });
 
-test('prepareModelRequestMessages repairs the complete model-request tool protocol', () => {
+test('modelVisibleMessages repairs the Agent message tool protocol', () => {
   const toolCall = new AIMessage({
     content: '',
     tool_calls: [{ id: 'call-1', name: 'inspect', args: {} }],
@@ -62,12 +62,12 @@ test('prepareModelRequestMessages repairs the complete model-request tool protoc
     tool_call_id: 'call-1',
   });
 
-  const messages = prepareModelRequestMessages([toolCall, toolResult]);
+  const messages = modelVisibleMessages([toolCall, toolResult]);
 
   assert.deepEqual(messages, [toolCall, toolResult]);
 });
 
-test('final request middleware prepares messages added by an earlier middleware without mutating agent state', async () => {
+test('model view applies after earlier middleware without mutating agent state', async () => {
   const accepted = new DelegationAnnounceMessage({
     id: 'accepted-1',
     sourceLane: 'capability:explore',
@@ -94,10 +94,7 @@ test('final request middleware prepares messages added by an earlier middleware 
   const agent = createAgent({
     model,
     tools: [],
-    middleware: [
-      appendInvocationInput,
-      createModelRequestMessagesMiddleware(),
-    ],
+    middleware: [appendInvocationInput, modelMessageViewMiddleware],
   });
 
   const result = await agent.invoke({

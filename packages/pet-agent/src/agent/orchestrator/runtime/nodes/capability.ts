@@ -39,7 +39,7 @@ import {
 } from '../../artifacts/discovery';
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegationBriefing';
-import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
+import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -287,7 +287,7 @@ export function createCapabilityNode(params: {
       ? currentResultPreview
       : delegationAnnounce?.text ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
-    // whether it is complete is the Planner's call at the execution boundary,
+    // whether it is complete is the Supervisor's call at the execution boundary,
     // which upgrades the status to 'completed' when it hands off. The raw lane
     // messages are kept in place — handoff (or a later continuation) cleans them up.
     const updatedRunDelegationSummaries = updateRunDelegationSummaryResult(
@@ -299,10 +299,10 @@ export function createCapabilityNode(params: {
       },
     );
     const interruptedContinuation = interrupted
-      ? state.taskPlannerContinuation
-        ?? snapshotPlannerTaskContinuation({
+      ? state.taskRunContinuation
+        ?? snapshotRunTaskContinuation({
           activeDelegation,
-          plannerSession: state.runPlannerSession,
+          supervisorSession: state.runSupervisorSession,
         })
       : null;
     return {
@@ -317,8 +317,8 @@ export function createCapabilityNode(params: {
       },
       runIterationCount: state.runIterationCount + 1,
       ...(interrupted ? {
-        runPlannerSession: null,
-        taskPlannerContinuation: interruptedContinuation,
+        runSupervisorSession: null,
+        taskRunContinuation: interruptedContinuation,
       } : {}),
       sessionToolAuthorizations: {
         generation: registry.authorizationGeneration,

@@ -175,7 +175,7 @@ const cases: AgentEvalCase<
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_delegation_count: 1,
-      reason: 'The Planner should delegate to content_writer once, then answer from its completed announce.',
+      reason: 'The Supervisor should delegate to content_writer once, then answer from its completed announce.',
     },
     metadata: {
       difficulty: 'medium',

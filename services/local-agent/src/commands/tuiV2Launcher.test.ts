@@ -216,13 +216,13 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
   ]);
   assert.deepEqual(buildTuiV2LaunchArgs(plan, {
     agentSessionPort: 4322,
-    agentSessionPetId: 'planner',
+    agentSessionPetId: 'supervisor',
   }), [
     ...plan.args,
     '--pet-port',
     '4322',
     '--pet-id',
-    'planner',
+    'supervisor',
   ]);
   assert.throws(
     () => buildTuiV2LaunchArgs(plan, { check: true, qa: true }),

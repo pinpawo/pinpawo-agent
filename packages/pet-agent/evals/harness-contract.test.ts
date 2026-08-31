@@ -36,7 +36,7 @@ test('the eval plan_request stub mirrors the production tool contract', () => {
   // The scenario module owns the stub; reach it through a rendered scenario so
   // this test breaks if the stub is replaced rather than edited.
   const scenario = getDecisionEvalScenarios('entry_answer')
-    .find(({ caseName }) => caseName === 'repository-task-enters-planner');
+    .find(({ caseName }) => caseName === 'repository-task-enters-supervisor');
   assert.ok(scenario, 'expected a plan_request scenario to exist');
 
   let boundTools: unknown[] = [];

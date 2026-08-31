@@ -23,7 +23,7 @@ test('projects the active delegation, its history, and the remaining plan', () =
         status: 'progress',
       },
     ],
-    runPlannerSession: { plan: [
+    runSupervisorSession: { plan: [
       { capability: 'browser', task: 'Verify the result' },
     ] },
   });
@@ -50,7 +50,7 @@ test('projects the active delegation, its history, and the remaining plan', () =
       },
     ],
   });
-  assert.equal(projectCurrentPlan({ runPlannerSession: { plan: [] } }), null);
+  assert.equal(projectCurrentPlan({ runSupervisorSession: { plan: [] } }), null);
 });
 
 test('a plan survives the gap between delegations', () => {
@@ -65,7 +65,7 @@ test('a plan survives the gap between delegations', () => {
         status: 'completed',
       },
     ],
-    runPlannerSession: { plan: [{ capability: 'explore', task: 'Inspect the repository' }] },
+    runSupervisorSession: { plan: [{ capability: 'explore', task: 'Inspect the repository' }] },
   });
 
   assert.deepEqual(plan?.items.map((item) => [item.capability, item.status]), [
@@ -76,7 +76,7 @@ test('a plan survives the gap between delegations', () => {
 
 test('a remaining capability plan alone still renders', () => {
   const plan = projectCurrentPlan({
-    runPlannerSession: { plan: [{ capability: 'general', task: 'Draft the reply' }] },
+    runSupervisorSession: { plan: [{ capability: 'general', task: 'Draft the reply' }] },
   });
   assert.equal(plan?.items.length, 1);
   assert.equal(plan?.items[0]?.status, 'pending');
@@ -84,7 +84,7 @@ test('a remaining capability plan alone still renders', () => {
 
 test('a resumable task projects its continuation tail after the run session is discarded', () => {
   const plan = projectCurrentPlan({
-    taskPlannerContinuation: {
+    taskRunContinuation: {
       remainingPlan: [{ capability: 'general', task: 'Resume the remaining work' }],
     },
   });
@@ -96,7 +96,7 @@ test('an empty orchestration state clears the plan', () => {
   assert.equal(projectCurrentPlan({}), null);
   assert.equal(projectCurrentPlan(null), null);
   assert.equal(
-    projectCurrentPlan({ runDelegationSummaries: [], runPlannerSession: { plan: [] } }),
+    projectCurrentPlan({ runDelegationSummaries: [], runSupervisorSession: { plan: [] } }),
     null,
   );
 });
@@ -125,7 +125,7 @@ test('keeps delegation identifiers exact while normalizing display text', () => 
       task: ' Inspect the repository ',
       status: 'progress',
     }],
-    runPlannerSession: { plan: [] },
+    runSupervisorSession: { plan: [] },
   });
 
   assert.deepEqual(plan, {

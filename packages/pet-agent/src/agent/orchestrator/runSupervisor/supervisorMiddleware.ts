@@ -5,19 +5,19 @@ import {
 import { Command, END } from '@langchain/langgraph';
 import { createMiddleware, ToolInvocationError } from 'langchain';
 import { ToolInputParsingException } from '@langchain/core/tools';
-import { buildCapabilityPlannerAgentSystemPrompt } from '../prompts/capabilityPlannerAgent';
-import { parsePlannerCommit, type PlannerCommit } from './protocol';
+import { buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
+import { parseSupervisorCommand, type SupervisorCommand } from './protocol';
 import {
-  currentPlannerInput,
-  plannerCommitContext,
-  plannerInvocationStateSchema,
-} from './plannerState';
+  currentSupervisorInput,
+  supervisorCommandContext,
+  supervisorInvocationStateSchema,
+} from './supervisorState';
 import {
-  PLANNER_TERMINAL_TOOL_NAMES,
-  plannerTerminalToolNamesForMode,
-} from './terminalTools';
+  SUPERVISOR_COMMAND_TOOL_NAMES,
+  supervisorCommandToolNamesForMode,
+} from './commandTools';
 
-function readTerminalCommit(message: ToolMessage): unknown {
+function readCommandResult(message: ToolMessage): unknown {
   if (message.status === 'error' || typeof message.content !== 'string') {
     return null;
   }
@@ -28,32 +28,32 @@ function readTerminalCommit(message: ToolMessage): unknown {
   }
 }
 
-function plannerSystemMessage(input: ReturnType<typeof currentPlannerInput>) {
-  return new SystemMessage(buildCapabilityPlannerAgentSystemPrompt(input.mode));
+function supervisorSystemMessage(input: ReturnType<typeof currentSupervisorInput>) {
+  return new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode));
 }
 
-/** Framework lifecycle control only: model protocol and terminal commit. */
-export function createPlannerMiddleware() {
+/** Framework lifecycle control only: model protocol and control commands. */
+export function createSupervisorMiddleware() {
   return createMiddleware({
-    name: 'CapabilityPlanner',
-    stateSchema: plannerInvocationStateSchema,
+    name: 'RunSupervisor',
+    stateSchema: supervisorInvocationStateSchema,
     wrapModelCall: async (request, handler) => {
-      const input = currentPlannerInput(request.state);
-      if (request.state.plannerCommit) {
+      const input = currentSupervisorInput(request.state);
+      if (request.state.supervisorCommand) {
         return new Command({
           update: { jumpTo: 'end' },
           goto: END,
         });
       }
-      const systemMessage = plannerSystemMessage(input);
-      const allowedTerminalToolNames = plannerTerminalToolNamesForMode(input.mode);
+      const systemMessage = supervisorSystemMessage(input);
+      const allowedCommandToolNames = supervisorCommandToolNamesForMode(input.mode);
       return handler({
         ...request,
         systemMessage,
         tools: request.tools.filter(({ name }) =>
           typeof name !== 'string'
-          || !PLANNER_TERMINAL_TOOL_NAMES.has(name)
-          || allowedTerminalToolNames.has(name)),
+          || !SUPERVISOR_COMMAND_TOOL_NAMES.has(name)
+          || allowedCommandToolNames.has(name)),
       });
     },
     wrapToolCall: async (request, handler) => {
@@ -78,15 +78,15 @@ export function createPlannerMiddleware() {
         });
       }
       if (!ToolMessage.isInstance(result)
-        || !PLANNER_TERMINAL_TOOL_NAMES.has(request.toolCall.name)) {
+        || !SUPERVISOR_COMMAND_TOOL_NAMES.has(request.toolCall.name)) {
         return result;
       }
-      const rawCommit = readTerminalCommit(result);
-      if (!rawCommit) return result;
-      const input = currentPlannerInput(request.state);
-      let commit: PlannerCommit;
+      const rawCommand = readCommandResult(result);
+      if (!rawCommand) return result;
+      const input = currentSupervisorInput(request.state);
+      let command: SupervisorCommand;
       try {
-        commit = parsePlannerCommit(rawCommit, plannerCommitContext(input));
+        command = parseSupervisorCommand(rawCommand, supervisorCommandContext(input));
       } catch (error) {
         return new ToolMessage({
           content: error instanceof Error ? error.message : String(error),
@@ -98,7 +98,7 @@ export function createPlannerMiddleware() {
       return new Command({
         update: {
           messages: [result],
-          plannerCommit: commit,
+          supervisorCommand: command,
           jumpTo: 'end',
         },
         goto: END,

@@ -115,17 +115,17 @@ test('tui session registry persists an adopted opaque checkpoint thread', async 
   const state = loadTuiSessionState('test-profile', '/missing.json');
   const adopted = createTuiSessionForThread(
     state,
-    'planner',
+    'supervisor',
     'test-profile',
-    'studio:legacy:pet:planner',
+    'studio:legacy:pet:supervisor',
     new Date('2026-06-01T01:00:00.000Z'),
   );
 
   saveTuiSessionState(state, filePath);
   const restored = loadTuiSessionState('test-profile', filePath);
 
-  assert.equal(restored.activeSessionIds.planner, adopted.id);
-  assert.equal(restored.sessions[adopted.id]?.threadId, 'studio:legacy:pet:planner');
+  assert.equal(restored.activeSessionIds.supervisor, adopted.id);
+  assert.equal(restored.sessions[adopted.id]?.threadId, 'studio:legacy:pet:supervisor');
 });
 
 test('tui session registry persists versioned state', async () => {

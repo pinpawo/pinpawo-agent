@@ -92,7 +92,8 @@ The runtime follows this shape:
 
 ```text
 request
-  -> planner selects a direct answer, general task, or Capability
+  -> Entry Answer replies directly or routes an executable goal
+  -> Run Supervisor selects and steers the Capability plan
   -> selected work runs in an isolated lane
   -> Toolkit tools execute under their declared policy
   -> optional human review interrupts and resumes the run

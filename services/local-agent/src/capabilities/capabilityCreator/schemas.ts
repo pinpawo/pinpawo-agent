@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const scaffoldCapabilityPluginInputSchema = z.object({
   id: z.string().trim().min(1).describe('稳定 capability id。建议使用 snake_case，例如 capability_creator'),
   name: z.string().trim().min(1).describe('展示名称，通常是中文名'),
-  description: z.string().trim().min(1).describe('用于 planner 检索和选择的一句话职责描述，应包含用户会说的关键词'),
+  description: z.string().trim().min(1).describe('用于 supervisor 检索和选择的一句话职责描述，应包含用户会说的关键词'),
   task: z.string().trim().min(1).describe('可复用的 capability 职责和执行目标，不要写成只适用于当前请求的一次性任务'),
   uses: z.array(z.string().trim().min(1))
     .max(16)

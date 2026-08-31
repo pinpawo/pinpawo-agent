@@ -33,7 +33,7 @@ function buildRunNextDelegation(
  *
  * Resuming reuses the exact delegation and transcript identities. A pending
  * delegation can return directly to its capability; an awaiting delegation
- * returns to the Planner boundary with the new human message available
+ * returns to the Supervisor boundary with the new human message available
  * as guidance.
  */
 export function applyActiveDelegationTransition(
@@ -47,15 +47,15 @@ export function applyActiveDelegationTransition(
   if (state.runActiveDelegationTransition === 'supersede_active') {
     return {
       taskActiveDelegation: null,
-      taskPlannerContinuation: null,
+      taskRunContinuation: null,
     };
   }
 
   if (!isResumableDelegation(activeDelegation)) {
     return {
       runNextDelegation: null,
-      runPlannerSession: null,
-      taskPlannerContinuation: null,
+      runSupervisorSession: null,
+      taskRunContinuation: null,
       runLatestDelegationOutcome: null,
       runRuntimeFailure: 'checkpoint_incompatible',
     };
@@ -66,13 +66,13 @@ export function applyActiveDelegationTransition(
     ? clipForPrompt(latestHumanRequest, RESUME_GUIDANCE_MAX_CHARS)
     : null;
   const resumedUserRequest = activeDelegation.userRequest;
-  const continuation = state.taskPlannerContinuation
-    ?? (state.runPlannerSession && state.runPlannerSession.runId !== state.runId
+  const continuation = state.taskRunContinuation
+    ?? (state.runSupervisorSession && state.runSupervisorSession.runId !== state.runId
       ? {
           traceId: activeDelegation.traceId,
           userRequest: activeDelegation.userRequest,
           activeDelegationId: activeDelegation.id,
-          remainingPlan: [...state.runPlannerSession.plan],
+          remainingPlan: [...state.runSupervisorSession.plan],
         }
       : null);
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
@@ -84,8 +84,8 @@ export function applyActiveDelegationTransition(
   if (activeDelegation.status === 'awaiting_decision') {
     return {
       traceId: activeDelegation.traceId,
-      runPlannerSession: null,
-      taskPlannerContinuation: continuation,
+      runSupervisorSession: null,
+      taskRunContinuation: continuation,
       runUserRequest: resumedUserRequest,
       runDelegationSummaries: updateRunDelegationSummaryResult(
         resumedSummaries,
@@ -100,8 +100,8 @@ export function applyActiveDelegationTransition(
 
   return {
     traceId: activeDelegation.traceId,
-    runPlannerSession: null,
-    taskPlannerContinuation: continuation,
+    runSupervisorSession: null,
+    taskRunContinuation: continuation,
     runUserRequest: resumedUserRequest,
     runNextDelegation,
     taskActiveDelegation: {

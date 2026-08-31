@@ -1,7 +1,7 @@
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { AIMessage } from '@langchain/core/messages';
 import type { LLMResult } from '@langchain/core/outputs';
-import { CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME } from '../src/agent/orchestrator/capabilityPlanner/fileExplorer.ts';
+import { RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME } from '../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
 
 export type CapabilitySearchDiagnostics = {
   searchCalls: number;
@@ -43,11 +43,11 @@ function readToolOutput(value: unknown, depth = 0): unknown {
 }
 
 function isCapabilitySearchTool(tool: unknown, runName: string | undefined) {
-  if (runName === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) return true;
+  if (runName === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME) return true;
   if (!isRecord(tool)) return false;
-  if (tool.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME) return true;
+  if (tool.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME) return true;
   return Array.isArray(tool.id)
-    && tool.id.includes(CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME);
+    && tool.id.includes(RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME);
 }
 
 function countSearchRounds(output: LLMResult): number {
@@ -55,7 +55,7 @@ function countSearchRounds(output: LLMResult): number {
     'message' in generation
     && AIMessage.isInstance(generation.message)
     && generation.message.tool_calls?.some(({ name }) =>
-      name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
     ),
   )).length;
 }

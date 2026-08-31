@@ -30,12 +30,12 @@ export function createCapabilityDisclosureState(params: {
 }): CapabilityDisclosureState {
   const { workspace, maxEmptySearchRounds } = params;
   if (!Number.isSafeInteger(maxEmptySearchRounds) || maxEmptySearchRounds <= 0) {
-    throw new Error('Capability Planner maxEmptySearchRounds must be a positive integer');
+    throw new Error('Run Supervisor maxEmptySearchRounds must be a positive integer');
   }
   const defaultCapabilityName = params.defaultCapabilityName
     ?? GENERAL_CAPABILITY_NAME;
   if (!defaultCapabilityName.trim()) {
-    throw new Error('Capability Planner defaultCapabilityName must be non-empty');
+    throw new Error('Run Supervisor defaultCapabilityName must be non-empty');
   }
   const disclosedCapabilityNames = [...new Set([
     ...(workspace.capabilityNames.includes(defaultCapabilityName)

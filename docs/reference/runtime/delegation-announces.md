@@ -18,7 +18,7 @@ payload records:
 - creation time.
 
 The Announce initially belongs to the private delegation lane. A structured
-Planner decision may accept it through handoff. Handoff moves the same semantic
+Supervisor decision may accept it through handoff. Handoff moves the same semantic
 identity into the main queue and removes the corresponding private transcript;
 it does not create an ordinary `AIMessage` copy or infer completion from result
 prose.
@@ -45,7 +45,7 @@ The projection preserves the complete result and chronological position. It is
 ephemeral and never replaces canonical state. Whole-history compaction, rather
 than per-Announce clipping, owns context-window pressure.
 
-The Boundary Planner receives the current unaccepted Announce as the execution
+The Boundary Supervisor receives the current unaccepted Announce as the execution
 evidence for its active delegation. It does not receive the private delegation
 transcript. Entry Answer and other consumers of main conversation see accepted
 Announces through the same projection.

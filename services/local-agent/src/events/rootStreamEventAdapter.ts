@@ -170,9 +170,9 @@ export function readRootStreamChatEvent(
       if (!data) {
         return null;
       }
-      // Internal decision and Planner Agent model activity remains observable
+      // Internal decision and Supervisor Agent model activity remains observable
       // on the raw protocol stream, but it is not assistant output or
-      // delegated-subagent progress. This also covers the Planner's nested
+      // delegated-subagent progress. This also covers the Supervisor's nested
       // private tool loop (namespace depth >= 2).
       if (isInternalOrchestratorNamespace(namespace)) {
         return null;
@@ -261,7 +261,7 @@ export function readRootStreamChatEvent(
       if (!data) {
         return null;
       }
-      // Planner file exploration tools are framework internals, not Capability
+      // Supervisor file exploration tools are framework internals, not Capability
       // Toolkit activity exposed to the chat surface.
       if (isInternalOrchestratorNamespace(namespace)) {
         return null;

@@ -92,7 +92,7 @@ test('LocalHostConnection connects to a Pet-scoped Agent Session route', () => {
     onError: (error) => assert.fail(error.message),
   }, {
     port: 4322,
-    path: '/agent-session/pets/planner%20one',
+    path: '/agent-session/pets/supervisor%20one',
     tokenProvider: () => 'secret',
     webSocketFactory: (nextUrl) => {
       url = nextUrl;
@@ -101,7 +101,7 @@ test('LocalHostConnection connects to a Pet-scoped Agent Session route', () => {
   });
 
   connection.connect();
-  assert.equal(url, 'ws://127.0.0.1:4322/agent-session/pets/planner%20one');
+  assert.equal(url, 'ws://127.0.0.1:4322/agent-session/pets/supervisor%20one');
 });
 
 test('LocalHostConnection reports a missing auth token without opening a socket', () => {

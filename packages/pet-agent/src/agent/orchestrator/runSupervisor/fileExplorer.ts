@@ -9,50 +9,50 @@ import {
   type CapabilityRegistrySearchResult,
 } from './registryDocuments';
 import {
-  CapabilityPlannerWorkspaceReader,
-  PlannerFileToolError,
-  stablePlannerFileToolError,
-  type PlannerFileToolErrorCode,
+  RunSupervisorWorkspaceReader,
+  SupervisorFileToolError,
+  stableSupervisorFileToolError,
+  type SupervisorFileToolErrorCode,
 } from './workspaceReader';
 
-export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search undisclosed Capability documents for one responsibility and disclose each matching complete document for this run. Use concise literal terms from the desired responsibility. This tool discovers execution capabilities; it does not execute the user task.';
+export const RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
+const RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search undisclosed Capability documents for one responsibility and disclose each matching complete document for this run. Use concise literal terms from the desired responsibility. This tool discovers execution capabilities; it does not execute the user task.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
 const MAX_CAPABILITY_SEARCH_TERM_CHARS = 80;
 const MAX_CAPABILITY_SEARCH_RESULT_BYTES = 64 * 1024;
-export type CapabilityPlannerFileExplorer = {
+export type RunSupervisorFileExplorer = {
   readonly didReachDocumentReadLimit: () => boolean;
   readonly search: (
     terms: readonly string[],
     signal?: AbortSignal,
-  ) => Promise<CapabilityPlannerSearchResult>;
-  /** Read already-disclosed documents for the current Planner invocation. */
+  ) => Promise<RunSupervisorSearchResult>;
+  /** Read already-disclosed documents for the current Supervisor invocation. */
   readonly readCapabilities: (
     capabilityNames: readonly string[],
     signal?: AbortSignal,
-  ) => Promise<CapabilityPlannerCapabilityDocument[]>;
+  ) => Promise<RunSupervisorCapabilityDocument[]>;
 };
 
-export type CapabilityPlannerCapabilityDocument = {
+export type RunSupervisorCapabilityDocument = {
   readonly capabilityName: string;
   readonly path: string;
   readonly content: string;
 };
 
-export type CapabilityPlannerSearchResult = {
+export type RunSupervisorSearchResult = {
   readonly ok: true;
   readonly data: CapabilityRegistrySearchResult;
 } | {
   readonly ok: false;
   readonly error: {
-    readonly code: PlannerFileToolErrorCode;
+    readonly code: SupervisorFileToolErrorCode;
     readonly message: string;
   };
 };
 
-export function createCapabilityPlannerSearchTool<
+export function createRunSupervisorSearchTool<
   TState = Record<string, unknown>,
 >(
   search: (
@@ -64,8 +64,8 @@ export function createCapabilityPlannerSearchTool<
     async ({ terms }: { terms: string[] }, runtime: ToolRuntime<TState>) =>
       search(terms, runtime),
     {
-      name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-      description: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION,
+      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+      description: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_DESCRIPTION,
       schema: z.object({
         terms: z.array(
           z.string().trim().min(1).max(MAX_CAPABILITY_SEARCH_TERM_CHARS)
@@ -81,8 +81,8 @@ function utf8Bytes(content: string) {
   return Buffer.byteLength(content, 'utf8');
 }
 
-function searchError(error: unknown): CapabilityPlannerSearchResult {
-  const stable = stablePlannerFileToolError(error);
+function searchError(error: unknown): RunSupervisorSearchResult {
+  const stable = stableSupervisorFileToolError(error);
   return {
     ok: false,
     error: {
@@ -97,13 +97,13 @@ function normalizeCapabilitySearchTerms(input: readonly string[]) {
     .map((term) => term.trim())
     .filter(Boolean);
   if (terms.length === 0) {
-    throw new PlannerFileToolError(
+    throw new SupervisorFileToolError(
       'invalid_query',
       'Capability search must contain at least one non-empty term',
     );
   }
   if (terms.some((term) => /[\0\r\n]/.test(term))) {
-    throw new PlannerFileToolError(
+    throw new SupervisorFileToolError(
       'invalid_query',
       'Capability search terms must be single-line text',
     );
@@ -111,18 +111,18 @@ function normalizeCapabilitySearchTerms(input: readonly string[]) {
   return terms.map((term) => term.toLowerCase());
 }
 
-export function createCapabilityPlannerFileExplorer(params: {
+export function createRunSupervisorFileExplorer(params: {
   workspace: CapabilityDocumentWorkspace;
   /** Defaults to the well-known `general` Capability. */
   defaultCapabilityName?: string;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
-}): CapabilityPlannerFileExplorer {
+}): RunSupervisorFileExplorer {
   const { workspace } = params;
   const defaultCapabilityName = params.defaultCapabilityName
     ?? GENERAL_CAPABILITY_NAME;
   if (!defaultCapabilityName.trim()) {
-    throw new Error('Capability Planner defaultCapabilityName must be non-empty');
+    throw new Error('Run Supervisor defaultCapabilityName must be non-empty');
   }
   const registryBackend = params.registryBackend
     ?? CAPABILITY_REGISTRY_BACKEND.FILESYSTEM;
@@ -134,11 +134,11 @@ export function createCapabilityPlannerFileExplorer(params: {
     backend: registryBackend,
     ...(defaultEntry ? { excludedPaths: [defaultEntry.relativePath] } : {}),
   });
-  const workspaceReader = new CapabilityPlannerWorkspaceReader(workspace);
+  const workspaceReader = new RunSupervisorWorkspaceReader(workspace);
   const maxDocumentReadBytes = params.maxDocumentReadBytes
     ?? DEFAULT_MAX_DOCUMENT_READ_BYTES;
   if (!Number.isSafeInteger(maxDocumentReadBytes) || maxDocumentReadBytes <= 0) {
-    throw new Error('Capability Planner maxDocumentReadBytes must be a positive integer');
+    throw new Error('Run Supervisor maxDocumentReadBytes must be a positive integer');
   }
   let consumedDocumentReadBytes = 0;
   let documentReadLimitReached = false;
@@ -146,16 +146,16 @@ export function createCapabilityPlannerFileExplorer(params: {
   const readCapabilities = async (
     capabilityNames: readonly string[],
     signal?: AbortSignal,
-  ): Promise<CapabilityPlannerCapabilityDocument[]> => {
+  ): Promise<RunSupervisorCapabilityDocument[]> => {
     const entryByName = new Map(workspace.entries.map((entry) => [
       entry.capabilityName,
       entry,
     ]));
-    const documents: CapabilityPlannerCapabilityDocument[] = [];
+    const documents: RunSupervisorCapabilityDocument[] = [];
     for (const capabilityName of [...new Set(capabilityNames)]) {
       const entry = entryByName.get(capabilityName);
       if (!entry) {
-        throw new PlannerFileToolError(
+        throw new SupervisorFileToolError(
           'invalid_query',
           `Disclosed Capability "${capabilityName}" is not present in the workspace.`,
         );
@@ -179,9 +179,9 @@ export function createCapabilityPlannerFileExplorer(params: {
       || documentBytes > MAX_CAPABILITY_SEARCH_RESULT_BYTES
     ) {
       documentReadLimitReached = true;
-      throw new PlannerFileToolError(
-        'planning_limit_reached',
-        'Disclosed Capability documents exceed the remaining Planner read limit.',
+      throw new SupervisorFileToolError(
+        'supervisor_discovery_limit_reached',
+        'Disclosed Capability documents exceed the remaining Supervisor read limit.',
       );
     }
     consumedDocumentReadBytes += documentBytes;
@@ -194,7 +194,7 @@ export function createCapabilityPlannerFileExplorer(params: {
   const search = async (
     terms: readonly string[],
     signal: AbortSignal | undefined,
-  ): Promise<CapabilityPlannerSearchResult> => {
+  ): Promise<RunSupervisorSearchResult> => {
     try {
       const normalizedTerms = normalizeCapabilitySearchTerms(terms);
       const remainingDocumentReadBytes = Math.max(
@@ -203,9 +203,9 @@ export function createCapabilityPlannerFileExplorer(params: {
       );
       if (remainingDocumentReadBytes === 0) {
         documentReadLimitReached = true;
-        throw new PlannerFileToolError(
-          'planning_limit_reached',
-          'Capability Planner document read limit is reached.',
+        throw new SupervisorFileToolError(
+          'supervisor_discovery_limit_reached',
+          'Run Supervisor document read limit is reached.',
         );
       }
       const result = await registryDocuments.search({
@@ -219,9 +219,9 @@ export function createCapabilityPlannerFileExplorer(params: {
       });
       if (result.matches.length === 0 && result.stoppedBy === 'result_size') {
         documentReadLimitReached = true;
-        throw new PlannerFileToolError(
-          'planning_limit_reached',
-          'Capability Planner search result cannot fit the first matching document.',
+        throw new SupervisorFileToolError(
+          'supervisor_discovery_limit_reached',
+          'Run Supervisor search result cannot fit the first matching document.',
         );
       }
       consumedDocumentReadBytes += result.matches.reduce(

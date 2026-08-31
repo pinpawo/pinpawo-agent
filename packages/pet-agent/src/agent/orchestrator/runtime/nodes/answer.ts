@@ -28,7 +28,7 @@ import {
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
-import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
+import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 
 type AcceptedRunResultsProjection = {
   history: BaseMessage[];
@@ -215,12 +215,12 @@ export function selectAnswerContextFacts(params: {
       detail: null,
     };
   }
-  if (params.state.runLatestDelegationOutcome === 'planner_incomplete') {
+  if (params.state.runLatestDelegationOutcome === 'supervisor_command_missing') {
     return {
       mode: 'blocked',
       hasUserRequest,
       acceptedResults: params.acceptedResults,
-      reason: 'planner_incomplete',
+      reason: 'supervisor_command_missing',
       unfinishedTask: params.state.taskActiveDelegation?.task
         ?? params.state.runUserRequest
         ?? null,
@@ -264,15 +264,15 @@ export function selectAnswerContextFacts(params: {
 
 function buildAnswerCleanup(state: OrchestratorStateType) {
   const continuation = state.runRuntimeFailure === null
-    ? snapshotPlannerTaskContinuation({
+    ? snapshotRunTaskContinuation({
         activeDelegation: state.taskActiveDelegation,
-        plannerSession: state.runPlannerSession,
+        supervisorSession: state.runSupervisorSession,
       })
     : null;
   return {
     runNextDelegation: null,
-    runPlannerSession: null,
-    taskPlannerContinuation: continuation,
+    runSupervisorSession: null,
+    taskRunContinuation: continuation,
     runIterationCount: 0,
     runLatestDelegationOutcome: null,
     runUserInputRequest: null,

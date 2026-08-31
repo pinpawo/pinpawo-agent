@@ -53,7 +53,7 @@ test('tui forwards one complete Pet-scoped Agent Session target', async () => {
     '--pet-port',
     '4322',
     '--pet-id',
-    'planner',
+    'supervisor',
   ]);
 
   assert.deepEqual(received, {
@@ -61,7 +61,7 @@ test('tui forwards one complete Pet-scoped Agent Session target', async () => {
     check: false,
     qa: false,
     agentSessionPort: 4322,
-    agentSessionPetId: 'planner',
+    agentSessionPetId: 'supervisor',
   });
 });
 
@@ -76,7 +76,7 @@ test('Pet connection mode does not accept a second workdir', async () => {
       '--pet-port',
       '4322',
       '--pet-id',
-      'planner',
+      'supervisor',
     ]),
     /Studio Host owns the resident Pet workdir/,
   );

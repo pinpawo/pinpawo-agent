@@ -316,7 +316,7 @@ test('runChatSession replaces the current plan from root values and clears it at
             task: 'Inspect code',
             status: 'progress',
           }],
-          runPlannerSession: {
+          runSupervisorSession: {
             plan: [{ capability: 'browser', task: 'Verify result' }],
           },
         });

@@ -2,10 +2,10 @@ import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messag
 import { Command } from '@langchain/langgraph';
 import { createMiddleware } from 'langchain';
 import {
-  CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
-  createCapabilityPlannerSearchTool,
-  type CapabilityPlannerFileExplorer,
-  type CapabilityPlannerSearchResult,
+  RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+  createRunSupervisorSearchTool,
+  type RunSupervisorFileExplorer,
+  type RunSupervisorSearchResult,
 } from './fileExplorer';
 import {
   applyCapabilitySearchObservations,
@@ -13,11 +13,11 @@ import {
   type CapabilitySearchObservation,
 } from './capabilityDisclosure';
 import {
-  currentPlannerInput,
-  type PlannerSearchToolState,
-  plannerSearchStateSchema,
-} from './plannerState';
-import type { CapabilityPlannerInput } from './runner';
+  currentSupervisorInput,
+  type SupervisorSearchToolState,
+  supervisorSearchStateSchema,
+} from './supervisorState';
+import type { RunSupervisorInput } from './runner';
 
 const MAX_UNDISCLOSED_CAPABILITY_NAMES = 50;
 
@@ -30,7 +30,7 @@ type CapabilitySearchLimitResult = {
 };
 
 type CapabilitySearchExecutionResult =
-  | CapabilityPlannerSearchResult
+  | RunSupervisorSearchResult
   | CapabilitySearchLimitResult;
 
 function searchRound(messages: readonly BaseMessage[] | undefined, toolCallId: string) {
@@ -50,7 +50,7 @@ function searchRound(messages: readonly BaseMessage[] | undefined, toolCallId: s
     .sort()
     .join(':')}`,
     searchCallCount: toolCalls.filter(({ name }) =>
-      name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+      name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
     ).length,
   };
 }
@@ -165,14 +165,14 @@ function expandCapabilityNameTerms(
  * observation through Command.update; the reducer makes parallel tool calls
  * safe and later model turns derive empty rounds from their shared AI message.
  */
-export function createPlannerCapabilitySearchTool(params: {
-  explorerForInput: (input: CapabilityPlannerInput) => CapabilityPlannerFileExplorer;
+export function createSupervisorCapabilitySearchTool(params: {
+  explorerForInput: (input: RunSupervisorInput) => RunSupervisorFileExplorer;
 }) {
-  return createCapabilityPlannerSearchTool<PlannerSearchToolState>(
+  return createRunSupervisorSearchTool<SupervisorSearchToolState>(
     async (terms, runtime) => {
       const state = runtime.state;
       const observations = state.capabilitySearchObservations ?? [];
-      const input = currentPlannerInput(state);
+      const input = currentSupervisorInput(state);
       const priorDisclosure = applyCapabilitySearchObservations(
         input.capabilityDisclosure,
         observations,
@@ -221,7 +221,7 @@ export function createPlannerCapabilitySearchTool(params: {
       });
       const messages = [new ToolMessage({
         content,
-        name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
         tool_call_id: runtime.toolCallId,
       })];
       if (!payload.ok && payload.error.code === 'capability_search_round_limit_exceeded') {
@@ -240,9 +240,9 @@ export function createPlannerCapabilitySearchTool(params: {
 }
 
 /** Registers the reducer-backed state channel used by capability_search. */
-export function createPlannerSearchStateMiddleware() {
+export function createSupervisorSearchStateMiddleware() {
   return createMiddleware({
-    name: 'CapabilityPlannerSearchState',
-    stateSchema: plannerSearchStateSchema,
+    name: 'RunSupervisorSearchState',
+    stateSchema: supervisorSearchStateSchema,
   });
 }

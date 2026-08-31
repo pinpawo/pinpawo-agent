@@ -52,7 +52,7 @@ test('Agent Session route selects one resident Pet for the whole connection', as
   const handled: string[] = [];
   const transport = await startResidentPetAgentSessionTransport(0, new Map([
     ['pet-a', interaction('pet-a', handled)],
-    ['planner-2', interaction('planner-2', handled)],
+    ['supervisor-2', interaction('supervisor-2', handled)],
   ]), {
     authToken: 'test-token',
     log: () => undefined,
@@ -64,7 +64,7 @@ test('Agent Session route selects one resident Pet for the whole connection', as
       'test-token',
     );
     const petB = await connect(
-      `ws://127.0.0.1:${transport.port}/agent-session/pets/planner-2`,
+      `ws://127.0.0.1:${transport.port}/agent-session/pets/supervisor-2`,
       'test-token',
     );
     try {
@@ -74,7 +74,7 @@ test('Agent Session route selects one resident Pet for the whole connection', as
       petB.send(JSON.stringify({ type: 'ping' }));
       assert.deepEqual(await pongA, { type: 'pong' });
       assert.deepEqual(await pongB, { type: 'pong' });
-      assert.deepEqual(handled, ['pet-a:ping', 'planner-2:ping']);
+      assert.deepEqual(handled, ['pet-a:ping', 'supervisor-2:ping']);
     } finally {
       petA.close();
       petB.close();
@@ -118,7 +118,7 @@ test('Agent Session route rejects unknown Pets before WebSocket binding', async 
 
 test('Agent Session path parsing is strict and decodes the Pet identity once', () => {
   assert.equal(readResidentPetIdFromAgentSessionPath('/agent-session/pets/pet-a'), 'pet-a');
-  assert.equal(readResidentPetIdFromAgentSessionPath('/agent-session/pets/planner-2'), 'planner-2');
+  assert.equal(readResidentPetIdFromAgentSessionPath('/agent-session/pets/supervisor-2'), 'supervisor-2');
   assert.equal(readResidentPetIdFromAgentSessionPath('/agent-session/pets/pet%2Fb'), null);
   assert.equal(readResidentPetIdFromAgentSessionPath('/agent-session/pets/'), null);
   assert.equal(readResidentPetIdFromAgentSessionPath('/agent-session/pets/a/b'), null);

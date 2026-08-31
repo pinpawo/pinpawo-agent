@@ -11,7 +11,7 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Run-scoped Planner session](agent-runtime/run-scoped-planner-session.md) and
+- [Run-scoped Supervisor session](agent-runtime/run-scoped-supervisor-session.md) and
   [terminal response finalization](agent-runtime/terminal-response.md)
 - [Entry Answer routing](agent-runtime/entry-answer-routing.md) and
   [Delegation Announce messages](agent-runtime/delegation-announce-message.md)

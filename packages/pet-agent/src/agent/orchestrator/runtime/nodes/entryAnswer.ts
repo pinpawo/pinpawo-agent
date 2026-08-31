@@ -10,7 +10,7 @@ import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { resolveActor } from '../config';
-import type { CapabilityPlannerDispatch } from '../../capabilityPlanner/runner';
+import type { RunSupervisorDispatch } from '../../runSupervisor/runner';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -47,15 +47,15 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
   return {
     runUserRequest,
     runNextDelegation: null,
-    runPlannerSession: null,
-    taskPlannerContinuation: null,
+    runSupervisorSession: null,
+    taskRunContinuation: null,
   };
 }
 
 /**
  * Resolve the authoritative run goal from the plan_request argument, falling
  * back to the provisional capture when the model supplies nothing usable.
- * Everything downstream — Planner input, Capability run context, Answer, and the
+ * Everything downstream — Supervisor input, Capability run context, Answer, and the
  * TaskActiveDelegation snapshot replayed on every resume — reads this one value.
  *
  * When the resolved goal is just the current message again, the original is kept
@@ -108,18 +108,18 @@ const EXECUTION_ANNOUNCEMENT_REPAIR = [
   '现在重新处理这一轮：需要执行就发起 plan_request 工具调用；不需要执行就直接给出面向用户的最终回复。',
 ].join('\n');
 
-function plannerDispatch(
+function supervisorDispatch(
   state: OrchestratorStateType,
   runUserRequest: string,
-): CapabilityPlannerDispatch {
+): RunSupervisorDispatch {
   return {
     mode: 'entry',
-    plannerState: {
+    supervisorState: {
       runId: state.runId,
       traceId: state.traceId,
       runUserRequest,
       runDelegationSummaries: state.runDelegationSummaries,
-      runPlannerSession: null,
+      runSupervisorSession: null,
     },
     messages: state.messages,
   };
@@ -138,14 +138,14 @@ export function createPlanRequestTool() {
         update: {
           runUserRequest,
           runNextDelegation: null,
-          runPlannerSession: null,
+          runSupervisorSession: null,
         },
-        goto: new Send('capabilityPlanner', plannerDispatch(runtime.state, runUserRequest)),
+        goto: new Send('runSupervisor', supervisorDispatch(runtime.state, runUserRequest)),
       });
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
-      description: 'Hand the current user request to the Capability Planner when satisfying it requires any tool, external capability, or task execution.',
+      description: 'Hand the current user request to the Run Supervisor when satisfying it requires any tool, external capability, or task execution.',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
           .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),

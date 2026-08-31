@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { compileAgentRegistry } from '../../registry';
-import type { CapabilityPlannerInput } from '../../capabilityPlanner/runner';
+import type { RunSupervisorInput } from '../../runSupervisor/runner';
 import { buildOrchestratorRunInput } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -79,22 +79,22 @@ const actor = {
   species: null,
 };
 
-test('entry capture clears any stale Planner session', () => {
+test('entry capture clears any stale Supervisor session', () => {
   const input = {
     ...buildOrchestratorRunInput(
       [new HumanMessage('开始一个新的任务。')],
       { activeDelegationTransition: 'resume_active', traceId: 'new-trace' },
     ),
     taskActiveDelegation: null,
-    runPlannerSession: {} as never,
+    runSupervisorSession: {} as never,
   } as unknown as OrchestratorStateType;
   const update = captureRunUserRequest(input);
 
-  assert.equal(update.runPlannerSession, null);
-  assert.equal(update.taskPlannerContinuation, null);
+  assert.equal(update.runSupervisorSession, null);
+  assert.equal(update.taskRunContinuation, null);
 });
 
-test('entry capture does not retain a prior active delegation Planner session', () => {
+test('entry capture does not retain a prior active delegation Supervisor session', () => {
   const input = {
     ...buildOrchestratorRunInput(
       [new HumanMessage('继续。')],
@@ -111,22 +111,22 @@ test('entry capture does not retain a prior active delegation Planner session', 
       resultPreview: null,
       userRequest: '完成当前任务。',
     },
-    runPlannerSession: {} as never,
+    runSupervisorSession: {} as never,
   } as unknown as OrchestratorStateType;
   const update = captureRunUserRequest(input);
 
-  assert.equal(update.runPlannerSession, null);
+  assert.equal(update.runSupervisorSession, null);
 });
 
-test('Entry Answer returns an ordinary reply without invoking Planner', async () => {
+test('Entry Answer returns an ordinary reply without invoking Supervisor', async () => {
   const scripted = entryAnswerModel('direct');
-  let plannerCalls = 0;
+  let supervisorCalls = 0;
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
-        plannerCalls += 1;
+        supervisorCalls += 1;
         return { action: 'unavailable', tasks: [] };
       },
     },
@@ -138,7 +138,7 @@ test('Entry Answer returns an ordinary reply without invoking Planner', async ()
   );
 
   assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
-  assert.equal(plannerCalls, 0);
+  assert.equal(supervisorCalls, 0);
   assert.equal(result.runUserRequest, '这个方案还有更好的选择吗？');
   assert.deepEqual(
     result.messages.map((message) => message.content),
@@ -146,15 +146,15 @@ test('Entry Answer returns an ordinary reply without invoking Planner', async ()
   );
 });
 
-test('plan_request routes to Planner without persisting control messages', async () => {
+test('plan_request routes to Supervisor without persisting control messages', async () => {
   const scripted = entryAnswerModel('plan');
-  const plannerInputs: CapabilityPlannerInput[] = [];
+  const supervisorInputs: RunSupervisorInput[] = [];
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerInputs.push(input);
+        supervisorInputs.push(input);
         return {
           action: 'unavailable',
           tasks: [],
@@ -170,8 +170,8 @@ test('plan_request routes to Planner without persisting control messages', async
   );
 
   assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 1 });
-  assert.equal(plannerInputs[0]?.userRequest, request);
-  assert.equal(plannerInputs[0]?.messages.some((message) => message.content === request), true);
+  assert.equal(supervisorInputs[0]?.userRequest, request);
+  assert.equal(supervisorInputs[0]?.messages.some((message) => message.content === request), true);
   assert.equal(result.runUserRequest, request);
   assert.equal(result.messages.some((message) => ToolMessage.isInstance(message)), false);
   assert.equal(result.messages.some((message) => (
@@ -184,13 +184,13 @@ test('plan_request routes to Planner without persisting control messages', async
 
 test('Entry Answer preserves the current textual HumanMessage exactly', async () => {
   const scripted = entryAnswerModel('plan');
-  let plannerRequest = '';
+  let supervisorRequest = '';
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerRequest = input.userRequest;
+        supervisorRequest = input.userRequest;
         return { action: 'unavailable', tasks: [] };
       },
     },
@@ -203,19 +203,19 @@ test('Entry Answer preserves the current textual HumanMessage exactly', async ()
   );
 
   assert.equal(result.runUserRequest, request);
-  assert.equal(plannerRequest, request);
+  assert.equal(supervisorRequest, request);
 });
 
 test('Entry Answer resolves a continuation utterance into the goal it refers back to', async () => {
   const resolvedGoal = '把 docs/ 下的接口文档同步到最新实现。';
   const scripted = entryAnswerModel('plan', undefined, resolvedGoal);
-  let plannerRequest = '';
+  let supervisorRequest = '';
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerRequest = input.userRequest;
+        supervisorRequest = input.userRequest;
         return { action: 'unavailable', tasks: [] };
       },
     },
@@ -233,7 +233,7 @@ test('Entry Answer resolves a continuation utterance into the goal it refers bac
   // The continuation utterance never becomes the run goal: everything
   // downstream needs a request that stands on its own.
   assert.equal(result.runUserRequest, resolvedGoal);
-  assert.equal(plannerRequest, resolvedGoal);
+  assert.equal(supervisorRequest, resolvedGoal);
 });
 
 test('Entry Answer receives normalized main conversation and excludes delegation lanes', async () => {
@@ -244,9 +244,9 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
-        throw new Error('Planner must not run for a direct reply.');
+        throw new Error('Supervisor must not run for a direct reply.');
       },
     },
   });
@@ -262,7 +262,7 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   await graph.invoke(buildOrchestratorRunInput([
     compaction,
     new HumanMessage('之前我们在讨论 Entry 架构。'),
-    new AIMessage('可以将 Answer 放在 Planner 之前。'),
+    new AIMessage('可以将 Answer 放在 Supervisor 之前。'),
     laneMessage,
     new HumanMessage(currentRequest),
   ]), invokeConfig());
@@ -270,7 +270,7 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   assert.deepEqual(entryMessages.slice(1).map((message) => message.content), [
     compaction.content,
     '之前我们在讨论 Entry 架构。',
-    '可以将 Answer 放在 Planner 之前。',
+    '可以将 Answer 放在 Supervisor 之前。',
     currentRequest,
   ]);
   assert.equal(entryMessages.includes(laneMessage), false);
@@ -284,9 +284,9 @@ test('Entry Answer receives an accepted delegation result as execution data, not
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
-        throw new Error('Planner must not run for a direct reply.');
+        throw new Error('Supervisor must not run for a direct reply.');
       },
     },
   });
@@ -337,13 +337,13 @@ test('Entry Answer retries when the model announces execution instead of calling
     invoke: async () => new AIMessage('当前没有可执行该任务的 Capability。'),
   } as unknown as BaseChatModel;
 
-  let plannerRequest = '';
+  let supervisorRequest = '';
   const graph = createOrchestratorGraph({
     models: { act: model, answer: model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerRequest = input.userRequest;
+        supervisorRequest = input.userRequest;
         return { action: 'unavailable', tasks: [] };
       },
     },
@@ -356,7 +356,7 @@ test('Entry Answer retries when the model announces execution instead of calling
 
   assert.equal(invocations, 2, 'the faked announcement must trigger exactly one retry');
   assert.match(repairPrompt, /plan_request/);
-  assert.equal(plannerRequest, goal, 'the retry must reach the Planner');
+  assert.equal(supervisorRequest, goal, 'the retry must reach the Supervisor');
   assert.equal(
     result.messages.some((message) => String(message.content).startsWith('开始执行计划任务')),
     false,
@@ -369,9 +369,9 @@ test('Entry Answer leaves an ordinary reply untouched', async () => {
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
     actor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
-        throw new Error('Planner must not run for a direct reply.');
+        throw new Error('Supervisor must not run for a direct reply.');
       },
     },
   });

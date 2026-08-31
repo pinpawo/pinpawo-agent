@@ -1,7 +1,7 @@
 export const ORCHESTRATOR_GUARD_POSITION = {
   PREPARE: 'orchestrator.prepare',
   CONTEXT_COMPACTION: 'orchestrator.context_compaction',
-  PLANNER_BOUNDARY_ITERATION: 'orchestrator.planner_boundary_iteration',
+  SUPERVISOR_BOUNDARY_ITERATION: 'orchestrator.supervisor_boundary_iteration',
 } as const;
 
 export type OrchestratorGuardPosition =

@@ -46,8 +46,8 @@ export function evaluateLifecycleCompositionInvariants(params: {
     OrchestratorStateType,
     | 'messages'
     | 'runNextDelegation'
-    | 'runPlannerSession'
-    | 'taskPlannerContinuation'
+    | 'runSupervisorSession'
+    | 'taskRunContinuation'
     | 'taskActiveDelegation'
     | 'runIterationCount'
     | 'runLatestDelegationOutcome'
@@ -66,17 +66,17 @@ export function evaluateLifecycleCompositionInvariants(params: {
   );
   const activeDelegation = state.taskActiveDelegation;
   const cleanCheckpoint = state.runNextDelegation === null
-    && state.runPlannerSession === null
-    && state.taskPlannerContinuation === null
+    && state.runSupervisorSession === null
+    && state.taskRunContinuation === null
     && activeDelegation === null
     && state.runIterationCount === 0
     && state.runLatestDelegationOutcome === null;
   const resumableCheckpoint = state.runNextDelegation === null
-    && state.runPlannerSession === null
+    && state.runSupervisorSession === null
     && activeDelegation?.status === 'awaiting_decision'
-    && state.taskPlannerContinuation?.activeDelegationId === activeDelegation.id
-    && state.taskPlannerContinuation.traceId === activeDelegation.traceId
-    && state.taskPlannerContinuation.userRequest === activeDelegation.userRequest
+    && state.taskRunContinuation?.activeDelegationId === activeDelegation.id
+    && state.taskRunContinuation.traceId === activeDelegation.traceId
+    && state.taskRunContinuation.userRequest === activeDelegation.userRequest
     && state.runIterationCount === 0
     && state.runLatestDelegationOutcome === null;
   const checkpointStateMatches = params.expectedCheckpointState === 'clean'
@@ -100,8 +100,8 @@ export function evaluateLifecycleCompositionInvariants(params: {
       details: JSON.stringify({
         expected: params.expectedCheckpointState,
         runNextDelegation: state.runNextDelegation,
-        runPlannerSession: state.runPlannerSession,
-        taskPlannerContinuation: state.taskPlannerContinuation,
+        runSupervisorSession: state.runSupervisorSession,
+        taskRunContinuation: state.taskRunContinuation,
         taskActiveDelegation: state.taskActiveDelegation,
         runIterationCount: state.runIterationCount,
         runLatestDelegationOutcome: state.runLatestDelegationOutcome,

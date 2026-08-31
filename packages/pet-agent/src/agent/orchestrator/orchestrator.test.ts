@@ -84,14 +84,14 @@ import {
 import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
 import { afterContextPrep } from './runtime/routes/afterContextPrep';
 import {
-  type CapabilityPlannerInput,
-  type CapabilityPlannerResult,
-  type CapabilityPlannerRunner,
-} from './capabilityPlanner/runner';
+  type RunSupervisorInput,
+  type RunSupervisorResult,
+  type RunSupervisorRunner,
+} from './runSupervisor/runner';
 import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
 
-function plannerMessageContextText(input: CapabilityPlannerInput | null | undefined) {
+function supervisorMessageContextText(input: RunSupervisorInput | null | undefined) {
   return input?.messages.map(readMessageText).join('\n') ?? '';
 }
 
@@ -151,8 +151,8 @@ function createOrchestratorGraph(
       ...config.models,
       answer: entryPlanningAnswerModel,
     },
-    capabilityPlannerRunner:
-      config.capabilityPlannerRunner ?? createQueuedPlannerRunner(config.models.act),
+    runSupervisorRunner:
+      config.runSupervisorRunner ?? createQueuedSupervisorRunner(config.models.act),
   });
   const withRegistry = (options: {
     configurable?: Record<string, unknown>;
@@ -169,11 +169,11 @@ function createOrchestratorGraph(
       },
     };
   };
-  const withCurrentPlannerCheckpoint = (input: unknown) => {
+  const withCurrentSupervisorCheckpoint = (input: unknown) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
     const state = input as Record<string, unknown>;
     if (!state.taskActiveDelegation
-      || state.runPlannerSession) {
+      || state.runSupervisorSession) {
       return input;
     }
     // Direct boundary fixtures represent checkpoints created by the current
@@ -181,20 +181,20 @@ function createOrchestratorGraph(
     // old-checkpoint boundary.
     return {
       ...state,
-      taskPlannerContinuation: state.taskPlannerContinuation ?? {
+      taskRunContinuation: state.taskRunContinuation ?? {
         traceId: (state.taskActiveDelegation as TaskActiveDelegation).traceId,
         userRequest: (state.taskActiveDelegation as TaskActiveDelegation).userRequest,
         activeDelegationId: (state.taskActiveDelegation as TaskActiveDelegation).id,
         remainingPlan: [],
       },
-      runPlannerSession: {
+      runSupervisorSession: {
         runId: state.runId,
         revision: 0,
-        plan: state.taskPlannerContinuation
-          && typeof state.taskPlannerContinuation === 'object'
-          && !Array.isArray(state.taskPlannerContinuation)
-          && Array.isArray((state.taskPlannerContinuation as Record<string, unknown>).remainingPlan)
-          ? (state.taskPlannerContinuation as Record<string, unknown>).remainingPlan
+        plan: state.taskRunContinuation
+          && typeof state.taskRunContinuation === 'object'
+          && !Array.isArray(state.taskRunContinuation)
+          && Array.isArray((state.taskRunContinuation as Record<string, unknown>).remainingPlan)
+          ? (state.taskRunContinuation as Record<string, unknown>).remainingPlan
           : [],
         capabilityDisclosure: {
           registryDigest: 'test-fixture-registry-generation',
@@ -203,7 +203,7 @@ function createOrchestratorGraph(
           maxEmptySearchRounds: 2,
           status: 'open',
         },
-        lastCommit: null,
+        lastCommand: null,
       },
     };
   };
@@ -213,7 +213,7 @@ function createOrchestratorGraph(
         return (input: unknown, options: {
           configurable?: Record<string, unknown>;
         } = {}) => target[property](
-          withCurrentPlannerCheckpoint(input) as never,
+          withCurrentSupervisorCheckpoint(input) as never,
           withRegistry(options) as never,
         );
       }
@@ -221,7 +221,7 @@ function createOrchestratorGraph(
         return (options: { configurable?: Record<string, unknown> }, values: unknown) =>
           target.updateState(
             withRegistry(options) as never,
-            withCurrentPlannerCheckpoint(values) as never,
+            withCurrentSupervisorCheckpoint(values) as never,
           );
       }
       const value = Reflect.get(target, property, receiver);
@@ -230,19 +230,19 @@ function createOrchestratorGraph(
   });
 }
 
-function createQueuedPlannerRunner(
+function createQueuedSupervisorRunner(
   model: AgentModels['act'],
-): CapabilityPlannerRunner {
+): RunSupervisorRunner {
   const nextStructuredValue = async () => {
     const structured = model.withStructuredOutput(
       z.record(z.unknown()),
-      { name: 'scripted_capability_planner' },
+      { name: 'scripted_run_supervisor' },
     );
     return await structured.invoke([]) as Record<string, unknown>;
   };
 
   return {
-    async invoke(input: CapabilityPlannerInput): Promise<CapabilityPlannerResult> {
+    async invoke(input: RunSupervisorInput): Promise<RunSupervisorResult> {
       const planning = await nextStructuredValue();
       if (planning.action === 'unavailable') {
         return { action: 'unavailable', tasks: [] };
@@ -271,7 +271,7 @@ function createQueuedPlannerRunner(
           };
         }
         if (planning.outcome !== 'task_done') {
-          throw new Error(`unsupported scripted planner outcome ${planning.outcome}`);
+          throw new Error(`unsupported scripted supervisor outcome ${planning.outcome}`);
         }
         if (input.announceAttempts.length === 0) {
           return { action: 'unavailable', tasks: [] };
@@ -282,7 +282,7 @@ function createQueuedPlannerRunner(
         ? planning.tasks as Array<{ capability?: unknown; task?: unknown }>
         : [];
       if (!nextTask) {
-        throw new Error('scripted Capability Planner requires at least one task');
+        throw new Error('scripted Run Supervisor requires at least one task');
       }
       const capabilityName = String(
         (await nextStructuredValue()).capabilityName ?? '',
@@ -369,7 +369,7 @@ test('orchestrator state channels encode lifecycle prefixes in their names', () 
 
   assert.deepEqual(invalidChannels, []);
   assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runPendingFinalReply'), false);
-  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runPlannerSession'), true);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runSupervisorSession'), true);
   assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityPlan'), false);
   assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityDisclosure'), false);
 });
@@ -386,8 +386,8 @@ test('run identity is fresh while task trace identity can be supplied by the cal
   assert.equal(first.traceId, 'task-trace-1');
   assert.equal(resumed.traceId, first.traceId);
   assert.notEqual(resumed.runId, first.runId);
-  assert.equal('runPlannerSession' in first ? first.runPlannerSession : undefined, null);
-  assert.equal('runPlannerSession' in resumed, false);
+  assert.equal('runSupervisorSession' in first ? first.runSupervisorSession : undefined, null);
+  assert.equal('runSupervisorSession' in resumed, false);
 });
 
 function readToolMessages(messages: unknown[]) {
@@ -403,7 +403,7 @@ const testActor: AgentActor = {
   species: 'cat',
 };
 
-function scriptedPlannerTask(
+function scriptedSupervisorTask(
   task: string,
   remainingPlan: Array<{ capability: string; task: string }> = [],
 ) {
@@ -412,7 +412,7 @@ function scriptedPlannerTask(
   };
 }
 
-function scriptedPlannerCapability(capabilityName: string) {
+function scriptedSupervisorCapability(capabilityName: string) {
   return { capabilityName };
 }
 
@@ -436,8 +436,8 @@ function continueDecision(gapNote: string | null = '当前 delegated task 还未
   return { outcome: 'continue', gap_note: gapNote };
 }
 
-test('execution boundary routes through capabilityPlanner before the next task', async () => {
-  const plannerInputs: CapabilityPlannerInput[] = [];
+test('execution boundary routes through runSupervisor before the next task', async () => {
+  const supervisorInputs: RunSupervisorInput[] = [];
   let answerMessages: BaseMessage[] = [];
   const routeModel = {
     invoke: async (messages: BaseMessage[]) => {
@@ -445,10 +445,10 @@ test('execution boundary routes through capabilityPlanner before the next task',
       return new AIMessage('final summary');
     },
   } as unknown as AgentModels['act'];
-  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+  const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
-      plannerInputs.push(input);
-      if (plannerInputs.length === 1) {
+      supervisorInputs.push(input);
+      if (supervisorInputs.length === 1) {
         return {
           action: 'execute_plan',
           tasks: [{
@@ -462,7 +462,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
           },
         };
       }
-      if (plannerInputs.length === 3) {
+      if (supervisorInputs.length === 3) {
         return { action: 'goal_done', tasks: [] };
       }
       return {
@@ -487,7 +487,7 @@ test('execution boundary routes through capabilityPlanner before the next task',
       }),
     },
     actor: testActor,
-    capabilityPlannerRunner,
+    runSupervisorRunner,
   });
 
   const dynamicSystemContext = new SystemMessage('DYNAMIC_WIKI_SYSTEM_CONTEXT');
@@ -505,48 +505,48 @@ test('execution boundary routes through capabilityPlanner before the next task',
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerInputs.length, 3);
-  const entryPlannerInput = plannerInputs[0];
-  const boundaryPlannerInput = plannerInputs[1];
-  assert.equal(entryPlannerInput?.mode, 'entry');
-  assert.equal(boundaryPlannerInput?.mode, 'boundary');
-  assert.deepEqual(boundaryPlannerInput?.capabilityDisclosure, {
-    registryDigest: entryPlannerInput?.workspace.registryDigest,
+  assert.equal(supervisorInputs.length, 3);
+  const entrySupervisorInput = supervisorInputs[0];
+  const boundarySupervisorInput = supervisorInputs[1];
+  assert.equal(entrySupervisorInput?.mode, 'entry');
+  assert.equal(boundarySupervisorInput?.mode, 'boundary');
+  assert.deepEqual(boundarySupervisorInput?.capabilityDisclosure, {
+    registryDigest: entrySupervisorInput?.workspace.registryDigest,
     defaultCapabilityName: 'general',
     disclosedCapabilityNames: ['explore'],
     emptySearchRounds: 1,
     maxEmptySearchRounds: 2,
     status: 'open',
   });
-  assert.deepEqual(plannerInputs[2]?.capabilityDisclosure, boundaryPlannerInput?.capabilityDisclosure);
-  assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
-  assert.deepEqual(boundaryPlannerInput?.userRequest, entryPlannerInput?.userRequest);
-  assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
-  assert.match(plannerInputs[1]?.announceAttempts[0]?.result ?? '', /issue #269 需求点/);
-  assert.equal(plannerInputs[1]?.announceAttempts.length, 1);
-  const secondBoundaryInput = plannerInputs[2];
+  assert.deepEqual(supervisorInputs[2]?.capabilityDisclosure, boundarySupervisorInput?.capabilityDisclosure);
+  assert.equal(entrySupervisorInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
+  assert.deepEqual(boundarySupervisorInput?.userRequest, entrySupervisorInput?.userRequest);
+  assert.equal(supervisorInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
+  assert.match(supervisorInputs[1]?.announceAttempts[0]?.result ?? '', /issue #269 需求点/);
+  assert.equal(supervisorInputs[1]?.announceAttempts.length, 1);
+  const secondBoundaryInput = supervisorInputs[2];
   const acceptedFirstTaskAnnounce = secondBoundaryInput?.messages.find((message) =>
     getMessageHandoffSource(message)?.delegationId
-      === plannerInputs[1]?.activeDelegation?.delegationId);
+      === supervisorInputs[1]?.activeDelegation?.delegationId);
   assert.ok(acceptedFirstTaskAnnounce);
   assert.equal(secondBoundaryInput?.announceAttempts.length, 1);
   assert.notEqual(
     secondBoundaryInput?.announceAttempts[0]?.messageId,
     getMessageHandoffSource(acceptedFirstTaskAnnounce)?.announceMessageId,
   );
-  assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
+  assert.ok(supervisorInputs[1]?.latestAnnounce?.messageId);
   assert.equal(
-    plannerInputs[1]?.inputId,
-    `announce:${plannerInputs[1]?.activeDelegation?.delegationId}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
+    supervisorInputs[1]?.inputId,
+    `announce:${supervisorInputs[1]?.activeDelegation?.delegationId}:${supervisorInputs[1]?.latestAnnounce?.messageId}`,
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runPlannerSession, null);
+  assert.equal(state.runSupervisorSession, null);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.taskPlannerContinuation, null);
+  assert.equal(state.taskRunContinuation, null);
   assert.equal(state.messages.some((message) => getMessageLane(message) === 'orchestrator'), false);
   assert.equal(state.messages.some((message) =>
-    readMessageText(message).includes('<planning_boundary_event')), false);
+    readMessageText(message).includes('<supervision_boundary_event')), false);
   const answerInput = readMessageText(answerMessages.at(-1) ?? new HumanMessage(''));
   assert.match(answerInput, /<accepted_results>/);
   assert.equal(answerInput.match(/<accepted_result order=/g)?.length, 2);
@@ -558,14 +558,14 @@ test('execution boundary routes through capabilityPlanner before the next task',
   assert.equal(answerMessages.some((message) => Boolean(getMessageHandoffSource(message))), false);
 });
 
-test('a completed single-task goal is accepted by the boundary Planner', async () => {
-  const plannerInputs: CapabilityPlannerInput[] = [];
+test('a completed single-task goal is accepted by the boundary Supervisor', async () => {
+  const supervisorInputs: RunSupervisorInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('final summary'),
   } as unknown as AgentModels['act'];
-  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+  const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
-      plannerInputs.push(input);
+      supervisorInputs.push(input);
       return {
         action: input.mode === 'entry' ? 'execute_plan' : 'goal_done',
         tasks: input.mode === 'entry'
@@ -584,7 +584,7 @@ test('a completed single-task goal is accepted by the boundary Planner', async (
       }),
     },
     actor: testActor,
-    capabilityPlannerRunner,
+    runSupervisorRunner,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -598,25 +598,25 @@ test('a completed single-task goal is accepted by the boundary Planner', async (
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerInputs.length, 2);
-  assert.equal(plannerInputs[0]?.mode, 'entry');
-  assert.equal(plannerInputs[1]?.mode, 'boundary');
+  assert.equal(supervisorInputs.length, 2);
+  assert.equal(supervisorInputs[0]?.mode, 'entry');
+  assert.equal(supervisorInputs[1]?.mode, 'boundary');
   assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runPlannerSession, null);
+  assert.equal(state.runSupervisorSession, null);
 });
 
-test('Planner boundary returns to capabilityPlanner until the remaining goal is complete', async () => {
+test('Supervisor boundary returns to runSupervisor until the remaining goal is complete', async () => {
   let answerModelInvocations = 0;
-  const plannerInputs: CapabilityPlannerInput[] = [];
+  const supervisorInputs: RunSupervisorInput[] = [];
   const routeModel = {
     invoke: async () => {
       answerModelInvocations += 1;
       return new AIMessage('issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。');
     },
   } as unknown as AgentModels['act'];
-  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+  const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
-      plannerInputs.push(input);
+      supervisorInputs.push(input);
       if (input.mode === 'entry') {
         return {
           action: 'execute_plan',
@@ -629,7 +629,7 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
           }],
         };
       }
-      if (plannerInputs.length === 3) {
+      if (supervisorInputs.length === 3) {
         return { action: 'goal_done', tasks: [] };
       }
       return {
@@ -654,7 +654,7 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
       }),
     },
     actor: testActor,
-    capabilityPlannerRunner,
+    runSupervisorRunner,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -668,28 +668,28 @@ test('Planner boundary returns to capabilityPlanner until the remaining goal is 
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerInputs.length, 3);
-  assert.deepEqual(plannerInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
-  assert.deepEqual(plannerInputs[1]?.remainingPlan, [{
+  assert.equal(supervisorInputs.length, 3);
+  assert.deepEqual(supervisorInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
+  assert.deepEqual(supervisorInputs[1]?.remainingPlan, [{
     capability: 'explore',
     task: '检索本地实现与 git log。',
   }]);
-  assert.equal(plannerInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
-  assert.match(plannerInputs[1]?.announceAttempts[0]?.result ?? '', /issue #269 需求点：需要检查本地实现/);
-  assert.doesNotMatch(plannerMessageContextText(plannerInputs[1]), /announce truncated for Planner context/);
-  assert.match(plannerInputs[1]?.announceAttempts[0]?.result ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
+  assert.equal(supervisorInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
+  assert.match(supervisorInputs[1]?.announceAttempts[0]?.result ?? '', /issue #269 需求点：需要检查本地实现/);
+  assert.doesNotMatch(supervisorMessageContextText(supervisorInputs[1]), /announce truncated for Supervisor context/);
+  assert.match(supervisorInputs[1]?.announceAttempts[0]?.result ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(
     String(state.messages.at(-1)?.content ?? ''),
     'issue #269 的需求与本地实现检查均已完成，并确认了兼容性要求。',
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runPlannerSession, null);
+  assert.equal(state.runSupervisorSession, null);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('Planner return routes bounded facts through the answer node', async () => {
+test('Supervisor return routes bounded facts through the answer node', async () => {
   let answerInvocationText = '';
   const model = {
     invoke: async (messages: BaseMessage[]) => {
@@ -708,7 +708,7 @@ test('Planner return routes bounded facts through the answer node', async () => 
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
           return { action: 'goal_done', tasks: [] };
@@ -740,7 +740,7 @@ test('Planner return routes bounded facts through the answer node', async () => 
   assert.equal(state.taskActiveDelegation, null);
 });
 
-test('Entry Planner routes its structured user question through Answer without an active delegation', async () => {
+test('Entry Supervisor routes its structured user question through Answer without an active delegation', async () => {
   let answerInvocationText = '';
   let answerInputText = '';
   const question = '请选择部署到生产还是预发布环境？';
@@ -761,7 +761,7 @@ test('Entry Planner routes its structured user question through Answer without a
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
         return {
           action: 'user_input_required',
@@ -776,7 +776,7 @@ test('Entry Planner routes its structured user question through Answer without a
     new HumanMessage('把服务部署到生产或预发布环境，目标由我决定。'),
   ]), {
     configurable: {
-      thread_id: 'entry-planner-user-input-question',
+      thread_id: 'entry-supervisor-user-input-question',
       actor: testActor,
       capabilities: [capability('general', 'Deploy after the user selects an environment.')],
       toolkits: [],
@@ -792,9 +792,9 @@ test('Entry Planner routes its structured user question through Answer without a
   assert.equal(state.runUserInputRequest, null);
 });
 
-test('Planner non-commit routes to Answer without inventing a General delegation', async () => {
+test('Supervisor no-command routes to Answer without inventing a General delegation', async () => {
   let answerInvocationText = '';
-  let plannerCalls = 0;
+  let supervisorCalls = 0;
   const model = {
     invoke: async (messages: BaseMessage[]) => {
       answerInvocationText = messages.map(readMessageText).join('\n');
@@ -811,39 +811,39 @@ test('Planner non-commit routes to Answer without inventing a General delegation
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
-        plannerCalls += 1;
+        supervisorCalls += 1;
         return {
-          plannerStatus: 'incomplete',
-          reason: 'terminal_commit_missing',
+          supervisorStatus: 'no_command',
+          reason: 'command_missing',
         };
       },
     },
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('修改当前仓库的 Planner 行为'),
+    new HumanMessage('修改当前仓库的 Supervisor 行为'),
   ]), {
     configurable: {
-      thread_id: 'planner-non-commit-routes-answer',
+      thread_id: 'supervisor-no-command-routes-answer',
       actor: testActor,
       capabilities: [capability('general', 'General-purpose capability.')],
       toolkits: [],
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerCalls, 1);
+  assert.equal(supervisorCalls, 1);
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /规划没有形成/);
   assert.match(answerInvocationText, /<reply_mode>blocked<\/reply_mode>/);
-  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">planner_incomplete<\/blocked_reason>/);
+  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">supervisor_command_missing<\/blocked_reason>/);
   assert.equal(state.runNextDelegation, null);
   assert.equal(state.taskActiveDelegation, null);
   assert.equal(state.runDelegationSummaries.length, 0);
 });
 
-test('Planner boundary non-commit preserves the active delegation and remaining plan', async () => {
-  let plannerInput: CapabilityPlannerInput | null = null;
+test('Supervisor boundary no-command preserves the active delegation and remaining plan', async () => {
+  let supervisorInput: RunSupervisorInput | null = null;
   let answerInvocationText = '';
   const model = {
     invoke: async (messages: BaseMessage[]) => {
@@ -861,12 +861,12 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerInput = input;
+        supervisorInput = input;
         return {
-          plannerStatus: 'incomplete',
-          reason: 'terminal_commit_missing',
+          supervisorStatus: 'no_command',
+          reason: 'command_missing',
         };
       },
     },
@@ -899,7 +899,7 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
     resultPreview: '验证尚未形成可接受的边界决定。',
     userRequest: '验证当前改动，然后发布。',
   };
-  input.taskPlannerContinuation = {
+  input.taskRunContinuation = {
     traceId: input.taskActiveDelegation.traceId,
     userRequest: input.taskActiveDelegation.userRequest,
     activeDelegationId: input.taskActiveDelegation.id,
@@ -908,7 +908,7 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
 
   const state = await graph.invoke(input, {
     configurable: {
-      thread_id: 'planner-boundary-non-commit-preserves-plan',
+      thread_id: 'supervisor-boundary-no-command-preserves-plan',
       actor: testActor,
       capabilities: [
         capability('general', 'General-purpose capability.'),
@@ -918,18 +918,18 @@ test('Planner boundary non-commit preserves the active delegation and remaining 
     },
   }) as OrchestratorStateType;
 
-  const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
-  assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.deepEqual(observedPlannerInput?.remainingPlan, remainingPlan);
-  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">planner_incomplete<\/blocked_reason>/);
+  const observedSupervisorInput = supervisorInput as RunSupervisorInput | null;
+  assert.equal(observedSupervisorInput?.mode, 'boundary');
+  assert.deepEqual(observedSupervisorInput?.remainingPlan, remainingPlan);
+  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">supervisor_command_missing<\/blocked_reason>/);
   assert.equal(state.taskActiveDelegation?.id, 'active-1');
-  assert.deepEqual(state.taskPlannerContinuation?.remainingPlan, remainingPlan);
+  assert.deepEqual(state.taskRunContinuation?.remainingPlan, remainingPlan);
   assert.equal(state.runNextDelegation, null);
 });
 
-test('Planner boundary ordinary text cannot enter root messages through the runner seam', async () => {
+test('Supervisor boundary ordinary text cannot enter root messages through the runner seam', async () => {
   let answerInvocationText = '';
-  const plannerAnswer = [
+  const supervisorAnswer = [
     '网络检查已经完成：en1 已获取 IP，外网连通正常。',
     '完整诊断证据。'.repeat(100),
     'Handoff 根因是 Manatee/CDP circle failure -5403。',
@@ -948,11 +948,11 @@ test('Planner boundary ordinary text cannot enter root messages through the runn
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
         return {
-          plannerStatus: 'incomplete',
-          reason: 'terminal_commit_missing',
+          supervisorStatus: 'no_command',
+          reason: 'command_missing',
         };
       },
     },
@@ -985,7 +985,7 @@ test('Planner boundary ordinary text cannot enter root messages through the runn
     resultPreview: '网络检查已完成。',
     userRequest: '重新检查网络并核对 Handoff。',
   };
-  input.taskPlannerContinuation = {
+  input.taskRunContinuation = {
     traceId: input.taskActiveDelegation.traceId,
     userRequest: input.taskActiveDelegation.userRequest,
     activeDelegationId: input.taskActiveDelegation.id,
@@ -994,7 +994,7 @@ test('Planner boundary ordinary text cannot enter root messages through the runn
 
   const state = await graph.invoke(input, {
     configurable: {
-      thread_id: 'planner-boundary-direct-answer-fallback',
+      thread_id: 'supervisor-boundary-direct-answer-fallback',
       actor: testActor,
       capabilities: [
         capability('general', 'General-purpose capability.'),
@@ -1004,15 +1004,15 @@ test('Planner boundary ordinary text cannot enter root messages through the runn
     },
   }) as OrchestratorStateType;
 
-  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">planner_incomplete<\/blocked_reason>/);
-  assert.equal(answerInvocationText.includes(plannerAnswer), false);
-  assert.equal(state.messages.some((message) => readMessageText(message).includes(plannerAnswer)), false);
+  assert.match(answerInvocationText, /<blocked_reason meaning="[^"]+">supervisor_command_missing<\/blocked_reason>/);
+  assert.equal(answerInvocationText.includes(supervisorAnswer), false);
+  assert.equal(state.messages.some((message) => readMessageText(message).includes(supervisorAnswer)), false);
   assert.equal(state.taskActiveDelegation?.id, 'active-network-check');
-  assert.deepEqual(state.taskPlannerContinuation?.remainingPlan, remainingPlan);
+  assert.deepEqual(state.taskRunContinuation?.remainingPlan, remainingPlan);
 });
 
-test('an explicit resume without Planner state initializes a fresh session', async () => {
-  let plannerCalls = 0;
+test('an explicit resume without Supervisor state initializes a fresh session', async () => {
+  let supervisorCalls = 0;
   let observedSessionRunId: string | null = null;
   const model = {
     invoke: async () => new AIMessage('must not run'),
@@ -1021,10 +1021,10 @@ test('an explicit resume without Planner state initializes a fresh session', asy
   const graph = createOrchestratorGraph({
     models: { act: model },
     actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke(plannerInput) {
-        plannerCalls += 1;
-        observedSessionRunId = plannerInput.plannerSession.runId;
+    runSupervisorRunner: {
+      async invoke(supervisorInput) {
+        supervisorCalls += 1;
+        observedSessionRunId = supervisorInput.supervisorSession.runId;
         return { action: 'goal_done', tasks: [] };
       },
     },
@@ -1049,23 +1049,23 @@ test('an explicit resume without Planner state initializes a fresh session', asy
 
   const state = await graph.invoke(input, {
     configurable: {
-      thread_id: 'legacy-planner-disclosure-checkpoint',
+      thread_id: 'legacy-supervisor-disclosure-checkpoint',
       actor: testActor,
       capabilities: [capability('general', 'General-purpose capability.')],
       toolkits: [],
     },
   }) as OrchestratorStateType;
 
-  assert.equal(plannerCalls, 1);
+  assert.equal(supervisorCalls, 1);
   assert.equal(observedSessionRunId, input.runId);
   assert.equal(state.runRuntimeFailure, null);
   assert.equal(state.taskActiveDelegation?.id, 'legacy-active');
-  assert.equal(state.runPlannerSession, null);
+  assert.equal(state.runSupervisorSession, null);
 });
 
-test('capability planner reports an empty compiled registry without inventing General', async () => {
-  let plannerMode: CapabilityPlannerInput['mode'] | null = null;
-  let plannerCapabilityNames: readonly string[] = [];
+test('run supervisor reports an empty compiled registry without inventing General', async () => {
+  let supervisorMode: RunSupervisorInput['mode'] | null = null;
+  let supervisorCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('当前没有可用 Capability。'),
     bindTools: () => ({
@@ -1079,10 +1079,10 @@ test('capability planner reports an empty compiled registry without inventing Ge
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerMode = input.mode;
-        plannerCapabilityNames = input.workspace.capabilityNames;
+        supervisorMode = input.mode;
+        supervisorCapabilityNames = input.workspace.capabilityNames;
         return {
           action: 'unavailable',
           tasks: [],
@@ -1095,18 +1095,18 @@ test('capability planner reports an empty compiled registry without inventing Ge
     new HumanMessage('完成一个需要执行能力的任务'),
   ]), {
     configurable: {
-      thread_id: 'empty-capability-registry-planner-facts',
+      thread_id: 'empty-capability-registry-supervisor-facts',
       actor: testActor,
       capabilities: [],
       toolkits: [],
     },
   });
 
-  assert.equal(plannerMode, 'entry');
-  assert.deepEqual(plannerCapabilityNames, []);
+  assert.equal(supervisorMode, 'entry');
+  assert.deepEqual(supervisorCapabilityNames, []);
 });
 
-test('Capability Planner return is materialized without a second semantic policy check', async () => {
+test('Run Supervisor return is materialized without a second semantic policy check', async () => {
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({
@@ -1116,7 +1116,7 @@ test('Capability Planner return is materialized without a second semantic policy
   const graph = createOrchestratorGraph({
     models: { act: model },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke() {
         return {
           action: 'unavailable',
@@ -1140,14 +1140,14 @@ test('Capability Planner return is materialized without a second semantic policy
   assert.equal(result.messages.at(-1)?.content, 'done');
 });
 
-test('allowedCapabilityNames scopes the immutable Planner workspace', async () => {
-  let plannerCapabilityNames: readonly string[] = [];
+test('allowedCapabilityNames scopes the immutable Supervisor workspace', async () => {
+  let supervisorCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('answered'),
   } as unknown as AgentModels['act'];
-  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+  const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
-      plannerCapabilityNames = input.workspace.capabilityNames;
+      supervisorCapabilityNames = input.workspace.capabilityNames;
       return {
         action: 'unavailable',
         tasks: [],
@@ -1162,7 +1162,7 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner,
+    runSupervisorRunner,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
 
@@ -1171,7 +1171,7 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
       thread_id: 'forced-cap-thread',
       actor: testActor,
       capabilities: [
-        capability('studio_plan', 'Planner 唯一的目标:把用户请求拆解为一份 plan。'),
+        capability('studio_plan', 'Supervisor 唯一的目标:把用户请求拆解为一份 plan。'),
         capability('other_cap', '某个无关 capability。'),
       ],
       tools: [],
@@ -1179,10 +1179,10 @@ test('allowedCapabilityNames scopes the immutable Planner workspace', async () =
     },
   });
 
-  assert.deepEqual(plannerCapabilityNames, ['studio_plan']);
+  assert.deepEqual(supervisorCapabilityNames, ['studio_plan']);
 });
 
-test('Capability Planner materializer rejects selections outside the workspace', async () => {
+test('Run Supervisor materializer rejects selections outside the workspace', async () => {
   const model = {
     invoke: async () => new AIMessage('answered'),
   } as unknown as AgentModels['act'];
@@ -1193,7 +1193,7 @@ test('Capability Planner materializer rejects selections outside the workspace',
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
         assert.equal(input.mode, 'entry');
         return {
@@ -1212,7 +1212,7 @@ test('Capability Planner materializer rejects selections outside the workspace',
       buildOrchestratorRunInput([new HumanMessage('帮我读取 src/index.ts')]),
       {
         configurable: {
-          thread_id: 'planner-selection-outside-workspace',
+          thread_id: 'supervisor-selection-outside-workspace',
           actor: testActor,
           capabilities: [capability('general', '普通代码任务。')],
           tools: [],
@@ -1223,7 +1223,7 @@ test('Capability Planner materializer rejects selections outside the workspace',
   );
 });
 
-test('Capability Planner owns the executable task boundary at entry', async () => {
+test('Run Supervisor owns the executable task boundary at entry', async () => {
   const model = {
     invoke: async () => new AIMessage('answered'),
   } as unknown as AgentModels['act'];
@@ -1234,7 +1234,7 @@ test('Capability Planner owns the executable task boundary at entry', async () =
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
           return { action: 'goal_done', tasks: [] };
@@ -1254,7 +1254,7 @@ test('Capability Planner owns the executable task boundary at entry', async () =
     buildOrchestratorRunInput([new HumanMessage('帮我看看 src/index.ts')]),
     {
       configurable: {
-        thread_id: 'planner-owns-entry-task-boundary',
+        thread_id: 'supervisor-owns-entry-task-boundary',
         actor: testActor,
         capabilities: [capability('general', '普通代码任务。')],
         tools: [],
@@ -1269,7 +1269,7 @@ test('Capability Planner owns the executable task boundary at entry', async () =
 });
 
 test('a completed subagent announce reaches the decision, then Answer summarizes the result', async () => {
-  let plannerInput: CapabilityPlannerInput | null = null;
+  let supervisorInput: RunSupervisorInput | null = null;
   let answerModelInvocations = 0;
   let answerInput: BaseMessage[] = [];
   const model = {
@@ -1291,9 +1291,9 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
       observe: model,
     },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerInput = input;
+        supervisorInput = input;
         return { action: 'goal_done', tasks: [] };
       },
     },
@@ -1347,10 +1347,10 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     },
   });
 
-  const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
-  assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.match(observedPlannerInput?.announceAttempts[0]?.result ?? '', /文件读取完成，lint 已通过/);
-  assert.match(observedPlannerInput?.announceAttempts[0]?.result ?? '', /END_OF_FULL_SUBAGENT_RESULT/);
+  const observedSupervisorInput = supervisorInput as RunSupervisorInput | null;
+  assert.equal(observedSupervisorInput?.mode, 'boundary');
+  assert.match(observedSupervisorInput?.announceAttempts[0]?.result ?? '', /文件读取完成，lint 已通过/);
+  assert.match(observedSupervisorInput?.announceAttempts[0]?.result ?? '', /END_OF_FULL_SUBAGENT_RESULT/);
   assert.equal(answerModelInvocations, 1);
   assert.equal(result.messages.at(-1)?.content, '文件读取和 lint 检查已完成，lint 已通过。');
   assert.match(answerInput.map(readMessageText).join('\n'), /END_OF_FULL_SUBAGENT_RESULT/);
@@ -1702,9 +1702,9 @@ test('capability errors retain the active delegation and lane without a handoff'
     checkpointState.messages.some((message) => getMessageHandoffSource(message)),
     false,
   );
-  assert.equal(checkpointState.runPlannerSession, null);
+  assert.equal(checkpointState.runSupervisorSession, null);
   assert.equal(
-    checkpointState.taskPlannerContinuation?.activeDelegationId,
+    checkpointState.taskRunContinuation?.activeDelegationId,
     activeDelegation.id,
   );
   assert.equal(checkpointState.runIterationCount, 0);
@@ -1712,22 +1712,22 @@ test('capability errors retain the active delegation and lane without a handoff'
   assert.equal(checkpointState.runTerminalError?.message, 'capability finalize failed');
 });
 
-test('planner errors checkpoint run-scoped cleanup before they are rethrown', async () => {
+test('supervisor errors checkpoint run-scoped cleanup before they are rethrown', async () => {
   const graph = createOrchestratorGraph({
     models: {
       act: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
     },
     actor: testActor,
     checkpoint: new MemorySaver(),
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       invoke: async () => {
-        throw new Error('planner failed');
+        throw new Error('supervisor failed');
       },
     },
   });
   const config = {
     configurable: {
-      thread_id: 'planner-error-cleanup',
+      thread_id: 'supervisor-error-cleanup',
       actor: testActor,
       capabilities: [capability('general', 'General-purpose capability.')],
       toolkits: [],
@@ -1736,16 +1736,16 @@ test('planner errors checkpoint run-scoped cleanup before they are rethrown', as
 
   await assert.rejects(
     graph.invoke(buildOrchestratorRunInput([
-      new HumanMessage('执行会触发 Planner 失败的任务'),
+      new HumanMessage('执行会触发 Supervisor 失败的任务'),
     ]), config),
-    /planner failed/,
+    /supervisor failed/,
   );
 
   const checkpoint = await graph.getState(config);
   const state = checkpoint.values as OrchestratorStateType;
-  assert.equal(state.runPlannerSession, null);
-  assert.equal(state.taskPlannerContinuation, null);
-  assert.equal(state.runTerminalError?.node, 'capabilityPlanner');
+  assert.equal(state.runSupervisorSession, null);
+  assert.equal(state.taskRunContinuation, null);
+  assert.equal(state.runTerminalError?.node, 'runSupervisor');
 });
 
 test('answer errors checkpoint run-scoped cleanup before they are rethrown', async () => {
@@ -1765,7 +1765,7 @@ test('answer errors checkpoint run-scoped cleanup before they are rethrown', asy
     models: { act: answerModel },
     actor: testActor,
     checkpoint: new MemorySaver(),
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       invoke: async () => ({ action: 'unavailable', tasks: [] }),
     },
   });
@@ -1789,8 +1789,8 @@ test('answer errors checkpoint run-scoped cleanup before they are rethrown', asy
 
   const checkpoint = await graph.getState(config);
   const state = checkpoint.values as OrchestratorStateType;
-  assert.equal(state.runPlannerSession, null);
-  assert.equal(state.taskPlannerContinuation, null);
+  assert.equal(state.runSupervisorSession, null);
+  assert.equal(state.taskRunContinuation, null);
   assert.equal(state.runTerminalError?.node, 'answer');
   assert.equal(state.runTerminalError?.langChainErrorCode, 'MODEL_RATE_LIMIT');
 });
@@ -1909,8 +1909,8 @@ test('answer does not special-case briefing-shaped output', async () => {
 
 test('limit-reached progress announce lets model choose the same capability delegation', async () => {
   let capabilityRunCount = 0;
-  let plannerCallCount = 0;
-  let plannerInput: CapabilityPlannerInput | null = null;
+  let supervisorCallCount = 0;
+  let supervisorInput: RunSupervisorInput | null = null;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1941,10 +1941,10 @@ test('limit-reached progress announce lets model choose the same capability dele
     },
     maxRunIterations: 1,
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerCallCount += 1;
-        plannerInput = input;
+        supervisorCallCount += 1;
+        supervisorInput = input;
         return {
           action: 'continue_current',
           tasks: [],
@@ -1999,11 +1999,11 @@ test('limit-reached progress announce lets model choose the same capability dele
   });
 
   assert.equal(capabilityRunCount, 1);
-  assert.equal(plannerCallCount, 1);
-  const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
-  assert.equal(observedPlannerInput?.activeDelegation?.capability, 'inspect_repo');
-  assert.equal(observedPlannerInput?.latestAnnounce?.completionReason, 'limit_reached');
-  assert.match(plannerMessageContextText(observedPlannerInput), /继续/);
+  assert.equal(supervisorCallCount, 1);
+  const observedSupervisorInput = supervisorInput as RunSupervisorInput | null;
+  assert.equal(observedSupervisorInput?.activeDelegation?.capability, 'inspect_repo');
+  assert.equal(observedSupervisorInput?.latestAnnounce?.completionReason, 'limit_reached');
+  assert.match(supervisorMessageContextText(observedSupervisorInput), /继续/);
 });
 
 test('toolkits compose tools and instructions for capability runtimes', async () => {
@@ -2090,10 +2090,10 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('inspect repository');
+          return scriptedSupervisorTask('inspect repository');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('inspect_repo');
+          return scriptedSupervisorCapability('inspect_repo');
         }
         return goalDoneDecision();
       },
@@ -2205,8 +2205,8 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        if (routeCallCount === 1) return scriptedPlannerTask('inspect browser state');
-        if (routeCallCount === 2) return scriptedPlannerCapability('inspect_browser');
+        if (routeCallCount === 1) return scriptedSupervisorTask('inspect browser state');
+        if (routeCallCount === 2) return scriptedSupervisorCapability('inspect_browser');
         return goalDoneDecision();
       },
     }),
@@ -2266,8 +2266,8 @@ test('artifact discovery tools reach a selected capability only when declared in
     withStructuredOutput: () => ({
       invoke: async () => {
         decisionCallCount += 1;
-        if (decisionCallCount === 1) return scriptedPlannerTask('inspect browser state');
-        if (decisionCallCount === 2) return scriptedPlannerCapability('browser_like');
+        if (decisionCallCount === 1) return scriptedSupervisorTask('inspect browser state');
+        if (decisionCallCount === 2) return scriptedSupervisorCapability('browser_like');
         return goalDoneDecision();
       },
     }),
@@ -2333,10 +2333,10 @@ test('general Capability composes its declared Toolkits', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('inspect workspace and prior artifacts');
+          return scriptedSupervisorTask('inspect workspace and prior artifacts');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -2411,10 +2411,10 @@ test('toolkit registration does not rely on lane authorization flags', async () 
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('inspect with tools');
+          return scriptedSupervisorTask('inspect with tools');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -2523,10 +2523,10 @@ test('capability finalize artifact refs are merged into state', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('inspect issue context');
+          return scriptedSupervisorTask('inspect issue context');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('explore');
+          return scriptedSupervisorCapability('explore');
         }
         return goalDoneDecision();
       },
@@ -2610,10 +2610,10 @@ test('capability finalize stores only artifact refs in state', async () => {
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('create post');
+          return scriptedSupervisorTask('create post');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('content_writer');
+          return scriptedSupervisorCapability('content_writer');
         }
         return goalDoneDecision();
       },
@@ -3455,8 +3455,8 @@ test('exact auto authorization survives graph rebuild but expires on registry re
       invoke: async () => {
         routeCallCount += 1;
         const step = (routeCallCount - 1) % 3;
-        if (step === 0) return scriptedPlannerTask('inspect repository');
-        if (step === 1) return scriptedPlannerCapability('general');
+        if (step === 0) return scriptedSupervisorTask('inspect repository');
+        if (step === 1) return scriptedSupervisorCapability('general');
         return goalDoneDecision();
       },
     }),
@@ -4095,10 +4095,10 @@ test('toolkit review policy records authorization through orchestrator runtime t
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('run shell');
+          return scriptedSupervisorTask('run shell');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -4250,10 +4250,10 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('run shell');
+          return scriptedSupervisorTask('run shell');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -4327,7 +4327,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  // After the resumed tool approval, the Planner boundary finishes the task.
+  // After the resumed tool approval, the Supervisor boundary finishes the task.
   // The result is handed off into the main queue and the lane transcript is
   // cleared, so continuation state is no longer inferred from a stale announce.
   const handoffCopy = mainConversationMessages(finalState.messages)
@@ -4398,10 +4398,10 @@ test('toolkit review rejection rolls back the full action and retains the delega
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('run shell');
+          return scriptedSupervisorTask('run shell');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -4594,10 +4594,10 @@ test('toolkit review run interruption retains the delegation without another mod
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('run shell');
+          return scriptedSupervisorTask('run shell');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -4663,9 +4663,9 @@ test('toolkit review run interruption retains the delegation without another mod
     __interrupt__?: unknown;
     messages: BaseMessage[];
     runNextDelegation: unknown;
-    runPlannerSession: OrchestratorStateType['runPlannerSession'];
+    runSupervisorSession: OrchestratorStateType['runSupervisorSession'];
     taskActiveDelegation: TaskActiveDelegation | null;
-    taskPlannerContinuation: OrchestratorStateType['taskPlannerContinuation'];
+    taskRunContinuation: OrchestratorStateType['taskRunContinuation'];
   };
 
   assert.equal(finalState.__interrupt__, undefined);
@@ -4676,12 +4676,12 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 0);
   assert.equal(finalState.runNextDelegation, null);
   assert.equal(finalState.taskActiveDelegation?.status, 'pending');
-  assert.equal(finalState.runPlannerSession, null);
+  assert.equal(finalState.runSupervisorSession, null);
   assert.equal(
-    finalState.taskPlannerContinuation?.activeDelegationId,
+    finalState.taskRunContinuation?.activeDelegationId,
     finalState.taskActiveDelegation?.id,
   );
-  assert.deepEqual(finalState.taskPlannerContinuation?.remainingPlan, []);
+  assert.deepEqual(finalState.taskRunContinuation?.remainingPlan, []);
   assert.equal(
     mainConversationMessages(finalState.messages)
       .some((message) => Boolean(getMessageHandoffSource(message))),
@@ -4773,10 +4773,10 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       invoke: async () => {
         routeCallCount += 1;
         if (routeCallCount === 1) {
-          return scriptedPlannerTask('run shell twice');
+          return scriptedSupervisorTask('run shell twice');
         }
         if (routeCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -5067,7 +5067,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
   }), /missing the required message id/);
 });
 
-test('terminal Planner action keeps active delegation when handoff cannot be built', async () => {
+test('terminal Supervisor action keeps active delegation when handoff cannot be built', async () => {
   let toolRunCount = 0;
   let answerMessages: BaseMessage[] = [];
   const rawTool = tool(async () => {
@@ -5155,7 +5155,7 @@ test('terminal Planner action keeps active delegation when handoff cannot be bui
   assert.match(String(mainConversationMessages(state.messages).at(-1)?.content ?? ''), /暂不能完成任务边界切换/);
 });
 
-test('Planner continue_current action can re-enter main and finalize handoff', async () => {
+test('Supervisor continue_current action can re-enter main and finalize handoff', async () => {
   const announceText = '已完成第一批抓取，接下来继续。';
   let routeCallCount = 0;
   const routeModel = {
@@ -5245,7 +5245,7 @@ test('Planner continue_current action can re-enter main and finalize handoff', a
     .filter((message) => getMessageIsAnnounce(message)).length === 0, true);
 });
 
-test('Planner continuation path rechecks run iteration guard before next decision', async () => {
+test('Supervisor continuation path rechecks run iteration guard before next decision', async () => {
   let routeCallCount = 0;
   const routeModel = {
     invoke: async () => new AIMessage('主流程循环已达到上限。'),
@@ -5331,9 +5331,9 @@ test('Planner continuation path rechecks run iteration guard before next decisio
   assert.match(finalText, /主流程循环已达到上限/);
 });
 
-test('Planner boundary accepts each announce attempt once', async () => {
+test('Supervisor boundary accepts each announce attempt once', async () => {
   let routeCallCount = 0;
-  const plannerInputs: CapabilityPlannerInput[] = [];
+  const supervisorInputs: RunSupervisorInput[] = [];
   const routeModel = {
     invoke: async () => new AIMessage(''),
     bindTools: () => ({
@@ -5350,10 +5350,10 @@ test('Planner boundary accepts each announce attempt once', async () => {
       }),
     },
     actor: testActor,
-    capabilityPlannerRunner: {
-      async invoke(plannerInput) {
+    runSupervisorRunner: {
+      async invoke(supervisorInput) {
         routeCallCount += 1;
-        plannerInputs.push(plannerInput);
+        supervisorInputs.push(supervisorInput);
         return routeCallCount <= 2
           ? { action: 'continue_current', tasks: [] }
           : { action: 'goal_done', tasks: [] };
@@ -5416,29 +5416,29 @@ test('Planner boundary accepts each announce attempt once', async () => {
 
   assert.equal(routeCallCount, 3);
   assert.deepEqual(
-    plannerInputs.map((plannerInput) =>
-      plannerInput.announceAttempts.map((announce) => announce.messageId)),
+    supervisorInputs.map((supervisorInput) =>
+      supervisorInput.announceAttempts.map((announce) => announce.messageId)),
     [
       ['m-dup-copy'],
-      ['m-dup-copy', plannerInputs[1]?.latestAnnounce?.messageId],
+      ['m-dup-copy', supervisorInputs[1]?.latestAnnounce?.messageId],
       [
         'm-dup-copy',
-        plannerInputs[1]?.latestAnnounce?.messageId,
-        plannerInputs[2]?.latestAnnounce?.messageId,
+        supervisorInputs[1]?.latestAnnounce?.messageId,
+        supervisorInputs[2]?.latestAnnounce?.messageId,
       ],
     ],
   );
   assert.deepEqual(
-    plannerInputs.map((plannerInput) => plannerInput.plannerSession.revision),
+    supervisorInputs.map((supervisorInput) => supervisorInput.supervisorSession.revision),
     [0, 1, 2],
   );
-  assert.equal(new Set(plannerInputs.map((plannerInput) =>
-    plannerInput.plannerSession.runId)).size, 1);
-  for (const plannerInput of plannerInputs) {
-    assert.equal(plannerInput.messages.some(getMessageIsAnnounce), false);
+  assert.equal(new Set(supervisorInputs.map((supervisorInput) =>
+    supervisorInput.supervisorSession.runId)).size, 1);
+  for (const supervisorInput of supervisorInputs) {
+    assert.equal(supervisorInput.messages.some(getMessageIsAnnounce), false);
     assert.equal(
-      plannerInput.latestAnnounce?.messageId,
-      plannerInput.announceAttempts.at(-1)?.messageId,
+      supervisorInput.latestAnnounce?.messageId,
+      supervisorInput.announceAttempts.at(-1)?.messageId,
     );
   }
   const handoffCopies = mainConversationMessages(state.messages)
@@ -5675,7 +5675,7 @@ test('lane tagging marks the deliverable as the announce regardless of stop reas
   }), null);
 });
 
-test('limit-reached subagent announce reaches the Planner boundary input', async () => {
+test('limit-reached subagent announce reaches the Supervisor boundary input', async () => {
   const baseInput = buildOrchestratorRunInput(
     [new HumanMessage('继续探查 repo')],
     { activeDelegationTransition: 'resume_active' },
@@ -5730,7 +5730,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
   assert.equal(getMessageIsAnnounce(taggedProgress), true);
   assert.equal(getPinpetMeta(taggedProgress).completionReason, 'limit_reached');
 
-  let plannerInput: CapabilityPlannerInput | null = null;
+  let supervisorInput: RunSupervisorInput | null = null;
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -5741,9 +5741,9 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel },
     actor: testActor,
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerInput = input;
+        supervisorInput = input;
         return {
           action: 'user_input_required',
           tasks: [],
@@ -5784,16 +5784,16 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     },
   });
 
-  const observedPlannerInput = plannerInput as CapabilityPlannerInput | null;
-  assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.equal(observedPlannerInput?.latestAnnounce?.completionReason, 'limit_reached');
+  const observedSupervisorInput = supervisorInput as RunSupervisorInput | null;
+  assert.equal(observedSupervisorInput?.mode, 'boundary');
+  assert.equal(observedSupervisorInput?.latestAnnounce?.completionReason, 'limit_reached');
   assert.match(
-    observedPlannerInput?.announceAttempts[0]?.result ?? '',
+    observedSupervisorInput?.announceAttempts[0]?.result ?? '',
     /已完成依赖检查，剩余源码还需要继续探查。/,
   );
 });
 
-test('Planner boundary does not handoff a limit_reached announce', async () => {
+test('Supervisor boundary does not handoff a limit_reached announce', async () => {
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -5872,7 +5872,7 @@ test('Planner boundary does not handoff a limit_reached announce', async () => {
   ).length > 0, true);
 });
 
-test('Planner boundary uses a unified run-iteration guard before invoking decision', async () => {
+test('Supervisor boundary uses a unified run-iteration guard before invoking decision', async () => {
   let answerMessages: BaseMessage[] = [];
   const routeModel = {
     invoke: async (messages: unknown[]) => {
@@ -6388,7 +6388,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
       assert.equal(resumedState.messages.some(isDelegationBriefingMessage), false);
     } else {
       assert.equal(resumedState.runNextDelegation, null);
-      assert.equal(afterContextPrep(resumedState), 'plannerBoundaryIterationGuard');
+      assert.equal(afterContextPrep(resumedState), 'supervisorBoundaryIterationGuard');
       assert.equal(resumedState.runDelegationSummaries[0]?.status, 'progress');
     }
   }
@@ -6415,8 +6415,8 @@ test('resume rejects a delegation without the current trace identity', () => {
 
   assert.deepEqual(applyActiveDelegationTransition(state), {
     runNextDelegation: null,
-    runPlannerSession: null,
-    taskPlannerContinuation: null,
+    runSupervisorSession: null,
+    taskRunContinuation: null,
     runLatestDelegationOutcome: null,
     runRuntimeFailure: 'checkpoint_incompatible',
   });
@@ -6447,10 +6447,10 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return scriptedPlannerTask('执行全新的请求。');
+          return scriptedSupervisorTask('执行全新的请求。');
         }
         if (structuredCallCount === 2) {
-          return scriptedPlannerCapability('general');
+          return scriptedSupervisorCapability('general');
         }
         return goalDoneDecision();
       },
@@ -6554,7 +6554,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     task: activeDelegation.task,
   });
   oldMessages.push(priorAnnounce);
-  const plannerInputs: CapabilityPlannerInput[] = [];
+  const supervisorInputs: RunSupervisorInput[] = [];
   let executedDelegation: { delegationId: string; runId: string } | null = null;
   const actModel = {
     invoke: async () => new AIMessage('原任务继续完成。'),
@@ -6584,10 +6584,10 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     },
     actor: testActor,
     checkpoint: new MemorySaver(),
-    capabilityPlannerRunner: {
+    runSupervisorRunner: {
       async invoke(input) {
-        plannerInputs.push(input);
-        return plannerInputs.length === 1
+        supervisorInputs.push(input);
+        return supervisorInputs.length === 1
           ? {
             action: 'continue_current',
             tasks: [],
@@ -6619,7 +6619,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     config,
   ) as OrchestratorStateType;
 
-  assert.equal(plannerInputs.length, 2);
+  assert.equal(supervisorInputs.length, 2);
   assert.deepEqual(executedDelegation, {
     delegationId: activeDelegation.id,
     runId: activeDelegation.transcriptRunId,
@@ -6627,16 +6627,16 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.deepEqual(state.runUserRequest, activeDelegation.userRequest);
   assert.notEqual(state.runId, activeDelegation.transcriptRunId);
   assert.equal(state.traceId, activeDelegation.traceId);
-  assert.equal(plannerInputs[0]?.traceId, activeDelegation.traceId);
-  assert.equal(plannerInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
-  assert.match(plannerMessageContextText(plannerInputs[0]), /优先检查最新修改/);
-  assert.match(plannerInputs[0]?.announceAttempts[0]?.result ?? '', /需要用户确认检查方向/);
-  assert.equal(plannerInputs[0]?.latestAnnounce?.messageId, 'prior-resume-announce');
-  assert.ok(plannerInputs[1]?.latestAnnounce?.messageId);
-  assert.notEqual(plannerInputs[1]?.latestAnnounce?.messageId, 'prior-resume-announce');
+  assert.equal(supervisorInputs[0]?.traceId, activeDelegation.traceId);
+  assert.equal(supervisorInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
+  assert.match(supervisorMessageContextText(supervisorInputs[0]), /优先检查最新修改/);
+  assert.match(supervisorInputs[0]?.announceAttempts[0]?.result ?? '', /需要用户确认检查方向/);
+  assert.equal(supervisorInputs[0]?.latestAnnounce?.messageId, 'prior-resume-announce');
+  assert.ok(supervisorInputs[1]?.latestAnnounce?.messageId);
+  assert.notEqual(supervisorInputs[1]?.latestAnnounce?.messageId, 'prior-resume-announce');
   assert.equal(
-    plannerInputs[1]?.inputId,
-    `announce:${activeDelegation.id}:${plannerInputs[1]?.latestAnnounce?.messageId}`,
+    supervisorInputs[1]?.inputId,
+    `announce:${activeDelegation.id}:${supervisorInputs[1]?.latestAnnounce?.messageId}`,
   );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
@@ -6700,7 +6700,7 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
     },
     bindTools: () => ({
       invoke: async () => {
-        throw new Error('legacy checkpoint recovery must not invoke the Planner model');
+        throw new Error('legacy checkpoint recovery must not invoke the Supervisor model');
       },
     }),
     withStructuredOutput: () => ({
@@ -6762,17 +6762,17 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return scriptedPlannerTask(
+          return scriptedSupervisorTask(
             '关闭 GitHub Issue #272。',
             [{ capability: 'ops', task: '删除 packages/goat 目录。' }],
           );
         }
-        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 2) return scriptedSupervisorCapability('ops');
         if (structuredCallCount === 3) return taskDoneDecision('issue 已关闭，还需删除目录。');
         if (structuredCallCount === 4) {
-          return scriptedPlannerTask('删除 packages/goat 目录。');
+          return scriptedSupervisorTask('删除 packages/goat 目录。');
         }
-        if (structuredCallCount === 5) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 5) return scriptedSupervisorCapability('ops');
         return goalDoneDecision();
       },
     }),
@@ -6880,9 +6880,9 @@ test('continue_current projects a continuation briefing without rewriting the ta
       invoke: async () => {
         structuredCallCount += 1;
         if (structuredCallCount === 1) {
-          return scriptedPlannerTask('关闭 GitHub Issue #272。');
+          return scriptedSupervisorTask('关闭 GitHub Issue #272。');
         }
-        if (structuredCallCount === 2) return scriptedPlannerCapability('ops');
+        if (structuredCallCount === 2) return scriptedSupervisorCapability('ops');
         if (structuredCallCount === 3) return continueDecision('未验证 issue 状态，请确认已关闭。');
         return goalDoneDecision();
       },

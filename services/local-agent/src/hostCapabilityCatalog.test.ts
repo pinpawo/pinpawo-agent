@@ -78,7 +78,7 @@ test('HostCapabilityCatalog lets an explicit directory use the same baseline and
 
   const snapshot = await catalog.createDirectorySnapshot({
     rootDir: root,
-    sourceId: 'studio-pet:planner',
+    sourceId: 'studio-pet:supervisor',
   });
   assert.deepEqual(snapshot.capabilities.map(({ name }) => name), [
     'general',
@@ -128,7 +128,7 @@ test('HostCapabilityCatalog rejects a Pet directory that shadows its required ba
   await assert.rejects(
     () => catalog.createDirectorySnapshot({
       rootDir: root,
-      sourceId: 'studio-pet:planner',
+      sourceId: 'studio-pet:supervisor',
     }),
     /general.*conflicts with host:host/,
   );

@@ -178,7 +178,7 @@ const examples = [
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      reason: 'The Planner should delegate to content_writer once, then answer from its completed announce.',
+      reason: 'The Supervisor should delegate to content_writer once, then answer from its completed announce.',
     },
   },
 ];

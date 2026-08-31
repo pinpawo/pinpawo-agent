@@ -36,7 +36,7 @@ export function buildSubagentAnnounceContext(
   completionReason?: SubagentCompletionReason | null,
 ): string | null {
   if (!item) return null;
-  // Do not pre-classify the announce: the Planner owns completion judgment.
+  // Do not pre-classify the announce: the Supervisor owns completion judgment.
   const resultBlock = item.text
     ? xmlTextBlock('result', item.text.trim(), ' format="markdown" role="data"')
     : null;

@@ -4,77 +4,77 @@ import type {
   UserRequest,
 } from '../types';
 import type { CapabilityDisclosureState } from './capabilityDisclosure';
-import type { PlannerCommit } from './protocol';
+import type { SupervisorCommand } from './protocol';
 
-export type PlannerSessionState = {
+export type RunSupervisorSessionState = {
   readonly runId: string;
   readonly revision: number;
   readonly plan: readonly CapabilityPlanTask[];
   readonly capabilityDisclosure: CapabilityDisclosureState;
-  readonly lastCommit: {
+  readonly lastCommand: {
     readonly inputId: string;
     readonly registryDigest: string;
-    readonly decision: PlannerCommit;
+    readonly command: SupervisorCommand;
   } | null;
 };
 
 /**
  * Canonical resume seed written only when a root run ends with unfinished work.
- * It deliberately excludes Planner transcript, disclosure/search accounting,
- * revision, and commit replay state.
+ * It deliberately excludes Supervisor transcript, disclosure/search accounting,
+ * revision, and command replay state.
  */
-export type PlannerTaskContinuation = {
+export type RunTaskContinuation = {
   readonly traceId: string;
   readonly userRequest: UserRequest;
   readonly activeDelegationId: string;
   readonly remainingPlan: readonly CapabilityPlanTask[];
 };
 
-export function snapshotPlannerTaskContinuation(params: {
+export function snapshotRunTaskContinuation(params: {
   activeDelegation: TaskActiveDelegation | null;
-  plannerSession: PlannerSessionState | null;
-}): PlannerTaskContinuation | null {
-  const { activeDelegation, plannerSession } = params;
-  if (!activeDelegation || !plannerSession) return null;
+  supervisorSession: RunSupervisorSessionState | null;
+}): RunTaskContinuation | null {
+  const { activeDelegation, supervisorSession } = params;
+  if (!activeDelegation || !supervisorSession) return null;
   return {
     traceId: activeDelegation.traceId,
     userRequest: activeDelegation.userRequest,
     activeDelegationId: activeDelegation.id,
-    remainingPlan: [...plannerSession.plan],
+    remainingPlan: [...supervisorSession.plan],
   };
 }
 
-export function createPlannerSession(params: {
+export function createRunSupervisorSession(params: {
   runId: string;
   plan?: readonly CapabilityPlanTask[];
   capabilityDisclosure: CapabilityDisclosureState;
-}): PlannerSessionState {
+}): RunSupervisorSessionState {
   return {
     runId: params.runId,
     revision: 0,
     plan: [...(params.plan ?? [])],
     capabilityDisclosure: params.capabilityDisclosure,
-    lastCommit: null,
+    lastCommand: null,
   };
 }
 
-export function updatePlannerSession(params: {
-  current: PlannerSessionState;
+export function updateRunSupervisorSession(params: {
+  current: RunSupervisorSessionState;
   plan: readonly CapabilityPlanTask[];
   capabilityDisclosure: CapabilityDisclosureState;
   inputId: string;
   registryDigest: string;
-  decision: PlannerCommit | null;
-}): PlannerSessionState {
+  command: SupervisorCommand | null;
+}): RunSupervisorSessionState {
   return {
     runId: params.current.runId,
     revision: params.current.revision + 1,
     plan: [...params.plan],
     capabilityDisclosure: params.capabilityDisclosure,
-    lastCommit: params.decision ? {
+    lastCommand: params.command ? {
       inputId: params.inputId,
       registryDigest: params.registryDigest,
-      decision: params.decision,
+      command: params.command,
     } : null,
   };
 }

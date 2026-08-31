@@ -39,14 +39,14 @@ only thing preventing a data block from being read as a new user instruction.
 ```
 START
   └─> prepare ──────────────> compactContext ──┬─> captureUserRequest ─> entryAnswer
-                                               ├─> plannerBoundaryIterationGuard
+                                               ├─> supervisorBoundaryIterationGuard
                                                └─> capability
-      entryAnswer ─(plan_request)─> capabilityPlanner ─┬─> capability
+      entryAnswer ─(plan_request)─> runSupervisor ─┬─> capability
                                                        └─> answer (current finalizer)
-      capability ─────> plannerBoundaryIterationGuard ─> capabilityPlanner
+      capability ─────> supervisorBoundaryIterationGuard ─> runSupervisor
 ```
 
-Model-invoking nodes: **entryAnswer**, **capabilityPlanner**, **capability**
+Model-invoking nodes: **entryAnswer**, **runSupervisor**, **capability**
 (subagent), **answer**, plus **compactContext** (summarizer).
 `prepare`, `captureUserRequest` and the guards invoke no model.
 
@@ -62,7 +62,7 @@ These are assembled by several nodes. Defined in
 | Block | Class | Built by | Notes |
 |---|---|---|---|
 | `[配置]` | `RUN-STABLE` / `INSTRUCTION` | `buildDecisionConfig(actor)` | Only `entryAnswer` and `answer` use it. It accepts `workdir`/`runtimeEnvironment`, but **no call site passes them** — both are currently dead parameters. |
-| `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Planner and finalizer use the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
+| `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor and finalizer use the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
 | `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + optional `<essential_context>` (initial) or `<guidance>` (continue). |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
 
@@ -96,15 +96,15 @@ provider-compatible model view.
 **Output → state:** `plan_request(goal)` resolves the run goal against the whole
 conversation. This is the only place a goal is authored. See §8.
 
-## 5. Node: capabilityPlanner
+## 5. Node: runSupervisor
 
 Two modes use the same steering domain. The target lifetime and ownership
 contract is defined by
-[`run-scoped-planner-session.md`](../../design/agent-runtime/run-scoped-planner-session.md).
+[`run-scoped-supervisor-session.md`](../../design/agent-runtime/run-scoped-supervisor-session.md).
 Sources:
-`runtime/nodes/capabilityPlanner.ts` (dispatch),
-`capabilityPlanner/agent.ts` (assembly),
-`capabilityPlanner/messageContext.ts` (projection).
+`runtime/nodes/runSupervisor.ts` (dispatch),
+`runSupervisor/agent.ts` (assembly),
+`runSupervisor/messageContext.ts` (projection).
 
 | Slot | Lifetime | Entry mode | Boundary mode |
 |---|---|---|---|
@@ -114,7 +114,7 @@ Sources:
 | overlay | `DYNAMIC` / `BOUNDARY` | none | ordered active-delegation announces with one latest target, active delegation and prior remaining-plan proposal |
 | tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan`, `request_user_input`, `report_unavailable` | `capability_search`, `continue_current`, `advance_plan`, `complete_goal`, `request_user_input`, `report_unavailable` |
 
-Entry initializes a clean run-scoped Planner session. Boundary adds one
+Entry initializes a clean run-scoped Supervisor session. Boundary adds one
 invocation-only overlay that selects every current-delegation Announce in
 chronological order by canonical delegation identity and marks exactly the
 latest message id as the evaluation target. The overlay never changes the
@@ -135,12 +135,12 @@ objective. After discovery closes, later calls return the stable
 `capability_search_round_limit_exceeded` result instead of changing tool
 availability.
 
-Planner provider messages, search ToolMessages, and terminal ToolMessages do not
-belong in root `messages`. Same-input recovery uses a typed run-scoped commit;
-raw invocation detail belongs to tracing. No Planner provider lane is persisted
+Supervisor provider messages, search ToolMessages, and command ToolMessages do not
+belong in root `messages`. Same-input recovery uses a typed run-scoped command;
+raw invocation detail belongs to tracing. No Supervisor provider lane is persisted
 in the root conversation checkpoint.
 
-Run `npm run planner:context-audit` to inspect the complete static provider
+Run `npm run supervisor:context-audit` to inspect the complete static provider
 contract for both modes. It renders the production system/input builders,
 projected history, tool descriptions, and argument schemas together.
 
@@ -201,8 +201,8 @@ awaiting-input context. `projectAcceptedRunResults()` selects typed Announces by
 completed delegation identity; it does not make canonical history model-visible.
 
 Current routes include `goal_done`, `user_input_required`, blocked states, and
-the explicit `planner_incomplete` protocol failure. Checkpoint incompatibility
-also uses a deterministic message. Planner ordinary text is invocation-private
+the explicit `supervisor_command_missing` protocol failure. Checkpoint incompatibility
+also uses a deterministic message. Supervisor ordinary text is invocation-private
 and cannot become a terminal root reply.
 
 Historical replay is not a terminal-finalization responsibility. A later request
@@ -216,7 +216,7 @@ projection:
 
 | Consumer | Role in practice |
 |---|---|
-| capabilityPlanner | **Input body.** This is what the planner plans against. |
+| runSupervisor | **Input body.** This is what the supervisor plans against. |
 | capability | **Nested background.** `<run_user_request role="goal_context">` lives inside the briefing; `<task>` is the real boundary (§6). |
 | current finalizer | **Target.** What the reply must close against. |
 
@@ -224,7 +224,7 @@ projection:
 
 1. `captureRunUserRequest` — seeds a *provisional* value (last human message) so
    the state invariant holds. Not authoritative.
-2. `plan_request(goal)` → committed by `capabilityPlanner` on the entry path —
+2. `plan_request(goal)` → committed by `runSupervisor` on the entry path —
    the **only** authoritative write.
 3. `activeDelegationTransition` on resume — replays
    `activeDelegation.userRequest`, a **snapshot**, never a re-capture.
@@ -256,8 +256,8 @@ One mechanism bounds all context. Source: `contextCompaction.ts`,
 The trigger is measured on main messages. The sweep covers root message lanes,
 but pins every still-unaccepted lane Announce intact because lane content is
 excluded from the generated summary and Boundary must retain all attempts.
-The run-scoped Planner session is not a root message lane and therefore does not
-participate in root conversation compaction. If Planner session history later
+The run-scoped Supervisor session is not a root message lane and therefore does not
+participate in root conversation compaction. If Supervisor session history later
 requires compaction, it must compact the whole run-private history rather than
 clip individual Delegation Announces.
 

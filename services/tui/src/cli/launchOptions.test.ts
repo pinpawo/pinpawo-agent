@@ -32,10 +32,10 @@ test('launch options select one Pet-scoped Agent Session endpoint', () => {
     '--pet-port',
     '4322',
     '--pet-id',
-    'planner',
-  ]).agentSession, { port: 4322, petId: 'planner' });
+    'supervisor',
+  ]).agentSession, { port: 4322, petId: 'supervisor' });
   assert.throws(
-    () => parseTuiLaunchOptions(['--pet-id', 'planner']),
+    () => parseTuiLaunchOptions(['--pet-id', 'supervisor']),
     /provided together/,
   );
 });

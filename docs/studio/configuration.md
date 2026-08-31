@@ -20,8 +20,8 @@ Capability collection at
   "studioId": "content-studio",
   "name": "Content Studio",
   "description": "A drafting and review workflow",
-  "entryPetId": "planner",
-  "pets": ["planner", "writer", "reviewer"],
+  "entryPetId": "supervisor",
+  "pets": ["supervisor", "writer", "reviewer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
     { "id": "@pinpawo-plugin/kanban" }
@@ -44,7 +44,7 @@ is not listed, or a referenced pet file that is missing. A configured Plugin
 fails fast when no resolver is installed or the resolver cannot resolve it.
 `plugins` may be omitted for manual host dispatch, but no plugin will then drive
 workflow progress. Extra legacy fields are not a migration mechanism and should
-be removed; in particular, do not use `plannerPetId`, `agents`, queue, retry,
+be removed; in particular, do not use `supervisorPetId`, `agents`, queue, retry,
 or scheduler fields.
 
 The same Plugin ID may appear more than once with different options. Each
@@ -70,7 +70,7 @@ Capability only when `defaultCapabilityName` is omitted; an explicit default
 selects from that Pet's Capability directory instead.
 `modelProfileId` selects a host model profile when present. The old inline
 `model` field and the old `capabilities` name list are rejected explicitly.
-`defaultCapabilityName` asks the Agent entry Planner to preload one Capability
+`defaultCapabilityName` asks the Agent entry Supervisor to preload one Capability
 from this Pet's collection; it does not bypass availability or Toolkit binding.
 
 ## Per-Pet Capability directory

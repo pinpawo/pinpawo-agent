@@ -231,9 +231,9 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     },
     actor: testActor,
     checkpoint: new MemorySaver(),
-    capabilityPlannerRunner: {
-      async invoke(plannerInput) {
-        return plannerInput.mode === 'boundary'
+    runSupervisorRunner: {
+      async invoke(supervisorInput) {
+        return supervisorInput.mode === 'boundary'
           ? { action: 'goal_done', tasks: [] }
           : {
           action: 'execute_plan',

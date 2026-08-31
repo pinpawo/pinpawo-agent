@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSubagentAnnounceContext } from './prompts';
 import {
-  buildCapabilityPlannerAgentInput,
-  buildCapabilityPlannerAgentSystemPrompt,
-} from './prompts/capabilityPlannerAgent';
-import type { CapabilityPlannerInput } from './capabilityPlanner/runner';
+  buildRunSupervisorAgentInput,
+  buildRunSupervisorAgentSystemPrompt,
+} from './prompts/runSupervisorAgent';
+import type { RunSupervisorInput } from './runSupervisor/runner';
 
-const plannerPromptWorkspace = {
+const supervisorPromptWorkspace = {
   rootPath: '/tmp/capabilities',
   registryDigest: 'a'.repeat(64),
   capabilityNames: ['general', 'browser'],
@@ -20,8 +20,8 @@ const plannerPromptWorkspace = {
   reused: false,
 };
 
-const plannerDisclosure = {
-  registryDigest: plannerPromptWorkspace.registryDigest,
+const supervisorDisclosure = {
+  registryDigest: supervisorPromptWorkspace.registryDigest,
   disclosedCapabilityNames: ['general', 'browser'],
   emptySearchRounds: 0,
   maxEmptySearchRounds: 2,
@@ -38,59 +38,59 @@ const disclosedDocuments = [{
   content: '# Browser\n\n浏览网页。',
 }];
 
-function plannerSession(
-  capabilityDisclosure = plannerDisclosure,
-  plan: CapabilityPlannerInput['remainingPlan'] = [],
+function supervisorSession(
+  capabilityDisclosure = supervisorDisclosure,
+  plan: RunSupervisorInput['remainingPlan'] = [],
 ) {
   return {
     runId: 'run-1',
     revision: 0,
     plan,
     capabilityDisclosure,
-    lastCommit: null,
+    lastCommand: null,
   };
 }
 
-test('Capability Planner entry input leads with the run user request', () => {
-  const input = buildCapabilityPlannerAgentInput({
+test('Run Supervisor entry input leads with the run user request', () => {
+  const input = buildRunSupervisorAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    workspace: supervisorPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     messages: [],
     activeDelegation: null,
     latestAnnounce: null,
     announceAttempts: [],
     remainingPlan: [],
-    capabilityDisclosure: plannerDisclosure,
-    plannerSession: plannerSession(),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+    capabilityDisclosure: supervisorDisclosure,
+    supervisorSession: supervisorSession(),
+  } satisfies RunSupervisorInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /打开示例站点并浏览相关内容。/);
   assert.match(input, /浏览器已经连接。/);
-  assert.match(input, /<capability_context source="planner_state" trust="read_only">/);
+  assert.match(input, /<capability_context source="supervisor_state" trust="read_only">/);
   assert.match(input, /<capability name="general">/);
   assert.match(input, /<capability name="browser">/);
   assert.match(input, /保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
-test('Capability Planner system prompt contains no dynamic Capability state', () => {
-  const systemPrompt = buildCapabilityPlannerAgentSystemPrompt('entry');
+test('Run Supervisor system prompt contains no dynamic Capability state', () => {
+  const systemPrompt = buildRunSupervisorAgentSystemPrompt('entry');
   assert.doesNotMatch(systemPrompt, /<capability_context|<default_capability|registry_digest/);
   assert.doesNotMatch(systemPrompt, /# General|# Browser/);
 });
 
-test('Capability Planner entry input represents an empty disclosure explicitly', () => {
-  const input = buildCapabilityPlannerAgentInput({
+test('Run Supervisor entry input represents an empty disclosure explicitly', () => {
+  const input = buildRunSupervisorAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    workspace: supervisorPromptWorkspace,
     userRequest: '整理下载目录。',
     messages: [],
     activeDelegation: null,
@@ -98,26 +98,26 @@ test('Capability Planner entry input represents an empty disclosure explicitly',
     announceAttempts: [],
     remainingPlan: [],
     capabilityDisclosure: {
-      ...plannerDisclosure,
+      ...supervisorDisclosure,
       disclosedCapabilityNames: [],
     },
-    plannerSession: plannerSession({
-      ...plannerDisclosure,
+    supervisorSession: supervisorSession({
+      ...supervisorDisclosure,
       disclosedCapabilityNames: [],
     }),
-  } satisfies CapabilityPlannerInput, []);
+  } satisfies RunSupervisorInput, []);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<capability_context[^>]*>\n  <none \/>\n<\/capability_context>/);
 });
 
-test('Capability Planner boundary input carries the run user request and boundary facts', () => {
-  const input = buildCapabilityPlannerAgentInput({
+test('Run Supervisor boundary input carries the run user request and boundary facts', () => {
+  const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    workspace: supervisorPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     messages: [],
     activeDelegation: {
@@ -140,33 +140,33 @@ test('Capability Planner boundary input carries the run user request and boundar
       capability: 'browser',
       task: '浏览相关内容',
     }],
-    capabilityDisclosure: plannerDisclosure,
-    plannerSession: plannerSession(plannerDisclosure, [{
+    capabilityDisclosure: supervisorDisclosure,
+    supervisorSession: supervisorSession(supervisorDisclosure, [{
       capability: 'browser',
       task: '浏览相关内容',
     }]),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+  } satisfies RunSupervisorInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /<planning_boundary_event role="task_boundary" source="orchestrator_state">/);
+  assert.match(input, /<supervision_boundary_event role="task_boundary" source="orchestrator_state">/);
   assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
   assert.match(input, /<delegation_announces delegation_id="delegation-1" evidence_state="available" evaluation_target="announce-1">/);
   assert.match(input, /浏览器已连接。/);
   assert.match(input, /确认浏览器可用/);
-  assert.match(input, /<prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation">/);
+  assert.match(input, /<prior_remaining_plan role="proposal" source="supervisor_session" authority="none" status="requires_revalidation">/);
   assert.match(input, /<task capability="browser">/);
   assert.match(input, /浏览相关内容/);
   assert.doesNotMatch(input, /执行停止原因/);
   assert.doesNotMatch(input, /workspace|registry_digest|document_count|<planning_state>/);
 });
 
-test('Capability Planner boundary input marks absent execution evidence explicitly', () => {
-  const input = buildCapabilityPlannerAgentInput({
+test('Run Supervisor boundary input marks absent execution evidence explicitly', () => {
+  const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'human:run-1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    workspace: supervisorPromptWorkspace,
     userRequest: '继续检查仓库并完成测试验证。',
     messages: [],
     activeDelegation: {
@@ -178,9 +178,9 @@ test('Capability Planner boundary input marks absent execution evidence explicit
     latestAnnounce: null,
     announceAttempts: [],
     remainingPlan: [],
-    capabilityDisclosure: plannerDisclosure,
-    plannerSession: plannerSession(),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+    capabilityDisclosure: supervisorDisclosure,
+    supervisorSession: supervisorSession(),
+  } satisfies RunSupervisorInput, disclosedDocuments);
 
   assert.match(
     input,
@@ -190,13 +190,13 @@ test('Capability Planner boundary input marks absent execution evidence explicit
   assert.doesNotMatch(input, /<delegation_announce /);
 });
 
-test('Capability Planner boundary input omits the follow-up section once the plan is exhausted', () => {
-  const input = buildCapabilityPlannerAgentInput({
+test('Run Supervisor boundary input omits the follow-up section once the plan is exhausted', () => {
+  const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    workspace: supervisorPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。',
     messages: [],
     activeDelegation: {
@@ -216,14 +216,14 @@ test('Capability Planner boundary input omits the follow-up section once the pla
       result: '浏览器已连接。',
     }],
     remainingPlan: [],
-    capabilityDisclosure: plannerDisclosure,
-    plannerSession: plannerSession(),
-  } satisfies CapabilityPlannerInput, disclosedDocuments);
+    capabilityDisclosure: supervisorDisclosure,
+    supervisorSession: supervisorSession(),
+  } satisfies RunSupervisorInput, disclosedDocuments);
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
-  assert.match(input, /<prior_remaining_plan role="proposal" source="planner_session" authority="none" status="requires_revalidation" \/>/);
-  assert.doesNotMatch(input, /此前保留的后续任务|planner_request_briefing/);
+  assert.match(input, /<prior_remaining_plan role="proposal" source="supervisor_session" authority="none" status="requires_revalidation" \/>/);
+  assert.doesNotMatch(input, /此前保留的后续任务|supervisor_request_briefing/);
 });
 
 test('completed subagent announce context includes the full current result text', () => {

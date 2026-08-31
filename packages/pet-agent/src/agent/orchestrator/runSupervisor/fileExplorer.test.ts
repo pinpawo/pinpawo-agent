@@ -20,9 +20,9 @@ import {
   type CapabilityDocumentWorkspace,
 } from './documentWorkspace';
 import {
-  createCapabilityPlannerFileExplorer,
-  createCapabilityPlannerSearchTool,
-  type CapabilityPlannerFileExplorer,
+  createRunSupervisorFileExplorer,
+  createRunSupervisorSearchTool,
+  type RunSupervisorFileExplorer,
 } from './fileExplorer';
 import { compileAgentRegistry } from '../registry';
 
@@ -86,7 +86,7 @@ async function workspaceFixture(
     }),
   ],
 ) {
-  const root = await temporaryDirectory(t, 'capability-planner-files-');
+  const root = await temporaryDirectory(t, 'run-supervisor-files-');
   const workspace = await materializeCapabilityDocumentWorkspace({
     registry: compileAgentRegistry({
       toolkits: [],
@@ -98,15 +98,15 @@ async function workspaceFixture(
 }
 
 async function search(
-  explorer: CapabilityPlannerFileExplorer,
+  explorer: RunSupervisorFileExplorer,
   terms: readonly string[],
 ) {
   return explorer.search(terms);
 }
 
-test('Planner file explorer exposes a typed registry discovery service', async (t) => {
+test('Supervisor file explorer exposes a typed registry discovery service', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   assert.equal(typeof explorer.search, 'function');
   assert.equal('tools' in explorer, false);
@@ -115,7 +115,7 @@ test('Planner file explorer exposes a typed registry discovery service', async (
 
 test('capability_search finds candidates from immutable Workspace documents', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const first = await search(explorer, ['BROWSER', 'research']);
   assert.equal(first.ok, true);
@@ -143,7 +143,7 @@ test('capability_search finds candidates from immutable Workspace documents', as
 
 test('capability_search searches complete Capability documents', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const result = await search(explorer, ['browser']);
   if (!result.ok) assert.fail('expected capability search to succeed');
@@ -153,9 +153,9 @@ test('capability_search searches complete Capability documents', async (t) => {
   );
 });
 
-test('Planner reads every disclosed Capability in stable order', async (t) => {
+test('Supervisor reads every disclosed Capability in stable order', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const documents = await explorer.readCapabilities(['general', 'browser']);
 
@@ -168,9 +168,9 @@ test('Planner reads every disclosed Capability in stable order', async (t) => {
   assert.match(documents[1]?.content ?? '', /Open and inspect web pages/);
 });
 
-test('Planner can preload a configured default Capability instead of General', async (t) => {
+test('Supervisor can preload a configured default Capability instead of General', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({
+  const explorer = createRunSupervisorFileExplorer({
     workspace,
     defaultCapabilityName: 'explore',
   });
@@ -195,7 +195,7 @@ test('Planner can preload a configured default Capability instead of General', a
 
 test('capability_search excludes the preloaded General Capability', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const result = await explorer.search(['ordinary local work']);
 
@@ -206,7 +206,7 @@ test('capability_search excludes the preloaded General Capability', async (t) =>
 
 test('capability_search remains pure discovery after a literal miss', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const result = await search(explorer, ['list files directory']);
 
@@ -218,8 +218,8 @@ test('capability_search remains pure discovery after a literal miss', async (t) 
 
 test('memory backend is explicit and preserves complete registry search results', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const filesystem = createCapabilityPlannerFileExplorer({ workspace });
-  const memory = createCapabilityPlannerFileExplorer({
+  const filesystem = createRunSupervisorFileExplorer({ workspace });
+  const memory = createRunSupervisorFileExplorer({
     workspace,
     registryBackend: 'memory',
   });
@@ -231,9 +231,9 @@ test('memory backend is explicit and preserves complete registry search results'
   assert.deepEqual(memorySearch.data.matches, filesystemSearch.data.matches);
 });
 
-test('capability_search bounds literal terms without an active Planner graph', async (t) => {
+test('capability_search bounds literal terms without an active Supervisor graph', async (t) => {
   const { workspace } = await workspaceFixture(t);
-  const searchTool = createCapabilityPlannerSearchTool(
+  const searchTool = createRunSupervisorSearchTool(
     async () => JSON.stringify({ ok: true }),
   );
   // The term count is unbounded: per-term shape is what keeps a search literal.
@@ -245,19 +245,19 @@ test('capability_search bounds literal terms without an active Planner graph', a
     terms: ['x'.repeat(81)],
   }), /String must contain at most 80 character/);
 
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
   const first = await search(explorer, ['browser']);
   assert.equal(first.ok, true);
   const second = await search(explorer, ['browser']);
   assert.equal(second.ok, true);
 });
 
-test('Planner document reads reject tampered workspace content', async (t) => {
+test('Supervisor document reads reject tampered workspace content', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const documentPath = join(workspace.rootPath, 'general', 'CAPABILITY.md');
   await chmod(documentPath, 0o644);
   await writeFile(documentPath, 'tampered', 'utf8');
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   await assert.rejects(
     explorer.readCapabilities(['general']),
@@ -287,7 +287,7 @@ test('capability_search rejects a symlink introduced after workspace publication
   await chmod(capabilityDir, 0o755);
   await rm(documentPath);
   await symlink(outsidePath, documentPath);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const result = await search(explorer, ['outside secret']);
   assert.equal(result.ok, false);
@@ -302,21 +302,21 @@ test('capability_search never returns a partial Capability document', async (t) 
       instructions: `# budget\n\n${'x'.repeat(500)}`,
     }),
   ]);
-  const explorer = createCapabilityPlannerFileExplorer({
+  const explorer = createRunSupervisorFileExplorer({
     workspace,
     maxDocumentReadBytes: 80,
   });
 
   const result = await search(explorer, ['budget']);
   assert.equal(result.ok, false);
-  assert.equal(result.error?.code, 'planning_limit_reached');
+  assert.equal(result.error?.code, 'supervisor_discovery_limit_reached');
   assert.equal(explorer.didReachDocumentReadLimit(), true);
   assert.doesNotMatch(JSON.stringify(result), /x{40}/);
 });
 
 test('capability_search returns no candidates for an empty Capability workspace', async (t) => {
   const { workspace } = await workspaceFixture(t, []);
-  const explorer = createCapabilityPlannerFileExplorer({ workspace });
+  const explorer = createRunSupervisorFileExplorer({ workspace });
 
   const result = await search(explorer, ['general']);
   assert.equal(result.ok, true);

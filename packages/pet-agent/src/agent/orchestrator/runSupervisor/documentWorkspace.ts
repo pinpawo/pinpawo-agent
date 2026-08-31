@@ -65,7 +65,7 @@ function quoteYamlString(value: string) {
 }
 
 /**
- * Render an inline runtime Capability as the document the Planner can explore.
+ * Render an inline runtime Capability as the document the Supervisor can explore.
  *
  * File-authored Capabilities keep their original source instead. This renderer
  * prevents an inline Capability from becoming invisible to document discovery.
@@ -423,7 +423,7 @@ async function quarantineInvalidSnapshot(params: {
       });
       // Quarantine cleanup is deliberately outside materialization. The
       // canonical path is rebuilt first; a later GC policy may remove invalid
-      // generations without delaying the Capability Planner.
+      // generations without delaying the Run Supervisor.
       return true;
     }
   } finally {

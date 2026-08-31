@@ -35,7 +35,7 @@ export function scoreCapabilityPlanning(
 ): DecisionContractScore[] {
   return [
     exact(
-      'planner_result_correct',
+      'supervisor_result_correct',
       `Return ${expected.result} at this planning boundary.`,
       output.result,
       expected.result,
@@ -43,7 +43,7 @@ export function scoreCapabilityPlanning(
     ...(expected.capabilityName === undefined
       ? []
       : [exact(
-          'planner_capability_correct',
+          'supervisor_capability_correct',
           `Select ${expected.capabilityName} as the concrete Capability.`,
           output.capabilityName,
           expected.capabilityName,

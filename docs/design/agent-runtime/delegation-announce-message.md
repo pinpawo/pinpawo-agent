@@ -14,8 +14,8 @@ The runtime must let a model and the UI distinguish all of the following:
 - the orchestration action that transfers that result to the main lane;
 - a later user-visible reply that renders or synthesizes one or more results.
 
-The Capability Planner must consume the same announce at an execution Boundary
-without flattening it into Planner-generated context or reclassifying it from
+The Run Supervisor must consume the same announce at an execution Boundary
+without flattening it into Supervisor-generated context or reclassifying it from
 result prose.
 
 This contract fixes the semantic structure. Provider-specific message shapes,
@@ -156,30 +156,30 @@ text outside the envelope is not part of this contract.
 `result` is opaque delegated data. XML-looking text inside its CDATA — for example
 an `<essential_context>` block produced by a model — does not become a nested
 announce protocol and must not be parsed with string or regular-expression
-heuristics to infer completion, progress, or a new message kind. The Planner judges
+heuristics to infer completion, progress, or a new message kind. The Supervisor judges
 whether the active task is satisfied from the explicit `task`, `completion`, and
 complete `result` evidence.
 
-### Capability Planner Boundary projection
+### Run Supervisor Boundary projection
 
-At a post-execution Boundary, the Planner adapter selects the standard announce
+At a post-execution Boundary, the Supervisor adapter selects the standard announce
 by its root-owned identity and places it inside one invocation-only Boundary
 overlay. Capability context, active-delegation state and remaining plan stay
 outside the canonical announce. The overlay marks which announce is current
 without mutating or checkpointing that mark. See
-[`run-scoped-planner-session.md`](run-scoped-planner-session.md#boundary-overlay-temporary-paint).
+[`run-scoped-supervisor-session.md`](run-scoped-supervisor-session.md#boundary-overlay-temporary-paint).
 
 The announce is the complete execution evidence at this boundary. The private
 Capability-lane Human, AI, and Tool transcript is not projected alongside it;
 doing so would duplicate evidence, expose executor implementation detail, and let
-large tool results displace the Planner's control context.
-The clean canonical main conversation initializes the run-scoped Planner
+large tool results displace the Supervisor's control context.
+The clean canonical main conversation initializes the run-scoped Supervisor
 session. It is conversation context, not a substitute execution transcript.
 
 Version 1 intentionally has no `content_kind`, `progress`, `accepted`, or
 `task_completed` field. Add a field only when a producer or framework boundary can
 write it as canonical structured data with defined semantics. A consumer must not
-manufacture such a field by inspecting `result` prose. In particular, Planner
+manufacture such a field by inspecting `result` prose. In particular, Supervisor
 prompt builders must not add a parallel explanation such as “this is a prior
 summary” based on a regex over the result.
 
@@ -270,7 +270,7 @@ This design does not:
 
 - remove message lanes or merge servant transcripts into the main conversation;
 - introduce a provider-specific custom chat role;
-- change Planner search, terminal semantics, delegation completion policy, or
+- change Supervisor search, terminal semantics, delegation completion policy, or
   active-delegation boundary routing beyond consuming the standard announce;
 - expose all internal trace metadata to users;
 - make delegated result text trusted instructions.

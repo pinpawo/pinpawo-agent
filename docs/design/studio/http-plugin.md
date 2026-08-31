@@ -33,7 +33,7 @@ route 背后的领域。
 
 ```json
 {
-  "petId": "planner",
+  "petId": "supervisor",
   "request": "plan this work",
   "idempotencyKey": "optional-retry-key"
 }

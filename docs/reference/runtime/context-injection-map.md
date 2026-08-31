@@ -90,8 +90,8 @@ that decides what the goal *is*.
 `mainConversationMessages()` excludes every lane-tagged message. Briefings are
 current Capability inputs and never enter canonical state. An accepted
 typed Announce reaches this view after handoff moves its semantic identity into
-the main queue. `projectDelegationAnnouncesForModel()` then creates the
-provider-compatible model view.
+the main queue. Entry Answer selects this history with the shared message query;
+the model-invocation runtime renders typed messages without changing state.
 
 **Output → state:** `plan_request(goal)` resolves the run goal against the whole
 conversation. This is the only place a goal is authored. See §8.
@@ -104,7 +104,7 @@ contract is defined by
 Sources:
 `runtime/nodes/capabilityPlanner.ts` (dispatch),
 `capabilityPlanner/agent.ts` (assembly),
-`capabilityPlanner/providerMessages.ts` (provider projection).
+`orchestrator/modelInvocation.ts` (internal model-call wiring).
 
 | Slot | Lifetime | Entry mode | Boundary mode |
 |---|---|---|---|

@@ -7,13 +7,12 @@ import { updateRunDelegationSummaryResult } from '../../delegations';
 import {
   observeAgentMessageSelection,
   queryAgentMessages,
-  toolProtocolSafeMessages,
 } from '../../../messages';
 import {
-  projectDelegationAnnouncesForModel,
   readLatestAnnounce,
   reconcileDelegationPrivateMessages,
 } from '../../delegation';
+import { orchestratorModelInvocationMiddleware } from '../../modelInvocation';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
@@ -98,16 +97,6 @@ export function createCapabilityNode(params: {
       runId,
       delegationId: runNextDelegation.id,
     };
-    const canonicalSelection = queryAgentMessages(state.messages)
-      .main()
-      .delegation(delegationScope)
-      .select();
-    observeAgentMessageSelection(
-      'capability.private_messages',
-      canonicalSelection.diagnostics,
-      runnableConfig,
-    );
-    const canonicalMessages = canonicalSelection.messages;
     const briefingBase = {
       userRequest: state.runUserRequest,
       task: runNextDelegation.task,
@@ -125,12 +114,19 @@ export function createCapabilityNode(params: {
             guidance: runNextDelegation.contextSummary,
           },
     );
-    // Typed Announce messages stay canonical in state and are projected only at
-    // this provider boundary, just like accepted announces in the main lane.
-    const scopedMessages = toolProtocolSafeMessages([
-      ...projectDelegationAnnouncesForModel(canonicalMessages),
-      delegationBriefing,
-    ]);
+    const scopedQuery = queryAgentMessages(state.messages)
+      .main()
+      .delegation(delegationScope);
+    const canonicalSelection = scopedQuery.select();
+    const scopedSelection = scopedQuery
+      .append(delegationBriefing)
+      .select();
+    observeAgentMessageSelection(
+      'capability.private_messages',
+      scopedSelection.diagnostics,
+      runnableConfig,
+    );
+    const scopedMessages = scopedSelection.messages;
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -225,7 +221,10 @@ export function createCapabilityNode(params: {
         maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
         contextWindowTokens: subagentContextWindowTokens,
         generationReserveTokens: subagentGenerationReserveTokens,
-        middleware: usedResolvedToolkitExecution.middleware,
+        middleware: [
+          ...usedResolvedToolkitExecution.middleware,
+          orchestratorModelInvocationMiddleware,
+        ],
         runtimeContext: {
           executionScope: {
             threadId,
@@ -289,7 +288,7 @@ export function createCapabilityNode(params: {
         task: runNextDelegation.task,
         announceMessageId: result.announceMessageId,
       },
-      canonicalMessages,
+      canonicalSelection.messages,
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
     const interrupted = result.completionReason === 'interrupted';

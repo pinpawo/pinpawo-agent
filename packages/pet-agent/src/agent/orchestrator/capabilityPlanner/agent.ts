@@ -16,9 +16,8 @@ import type {
   CapabilityPlannerRunner,
 } from './runner';
 import { parsePlannerCommit } from './protocol';
-import {
-  buildCapabilityPlannerProviderMessages,
-} from './providerMessages';
+import { queryAgentMessages } from '../../messages';
+import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import {
@@ -154,7 +153,11 @@ export function createCapabilityPlannerAgent(params: {
     name: 'capabilityPlanner',
     model: params.model,
     tools: [capabilitySearchTool, ...terminalTools, ...additionalTools],
-    middleware: [middleware, createPlannerSearchStateMiddleware()],
+    middleware: [
+      middleware,
+      createPlannerSearchStateMiddleware(),
+      orchestratorModelInvocationMiddleware,
+    ],
     checkpointer: false,
   });
 
@@ -223,12 +226,13 @@ export function createCapabilityPlannerAgent(params: {
             routingManifest,
           ),
         });
-        const providerMessages = buildCapabilityPlannerProviderMessages(
-          input.messages,
-          plannerInputMessage,
-        );
+        const agentMessages = queryAgentMessages(input.messages)
+          .main()
+          .append(plannerInputMessage)
+          .select()
+          .messages;
         const result = await agent.invoke({
-          messages: providerMessages,
+          messages: agentMessages,
           currentInput: effectiveInput,
         }, config);
         timeout.signal.throwIfAborted();

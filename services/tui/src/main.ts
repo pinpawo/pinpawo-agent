@@ -59,6 +59,7 @@ import {
 } from './input/fileMention';
 import { resolveGlobalInterruptAction } from './input/globalInterrupt';
 import {
+  ensureInteractionInputFocus,
   interactionOwnerBlocksPaste,
   resolveInteractionOwner,
   type InteractionOwner,
@@ -275,6 +276,8 @@ let focusedSessionId = 'pending';
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
 let timelineReplayPending = false;
+let timelineResizeReplayTimer: ReturnType<typeof setTimeout> | null = null;
+let timelineWidth = renderer.width;
 let delegationPauseMode: DelegationPauseMode = 'ordinary';
 const controller = new TuiSessionController({
   connectionFactory: launchOptions.useDemoConnection
@@ -479,6 +482,9 @@ renderer.keyInput.on('keypress', (key) => {
     }
     return;
   }
+  syncComposerInputOverlays();
+  const owner = currentInteractionOwner(approval);
+  restoreInteractionInputFocus(owner);
   const clipboardAction = resolveClipboardAction(key);
   const clipboardEditor = activeClipboardEditor(approval);
   if (clipboardAction && clipboardEditor) {
@@ -501,8 +507,6 @@ renderer.keyInput.on('keypress', (key) => {
     }
   }
 
-  syncComposerInputOverlays();
-  const owner = currentInteractionOwner(approval);
   switch (owner.type) {
     case 'approval': {
       const action = resolveApprovalKey(approval, key);
@@ -662,9 +666,11 @@ renderer.keyInput.on('keypress', (key) => {
   }
 });
 renderer.keyInput.on('paste', (event) => {
+  syncComposerInputOverlays();
   const owner = currentInteractionOwner(
     approvalController.getState(),
   );
+  restoreInteractionInputFocus(owner);
   if (interactionOwnerBlocksPaste(owner)) {
     event.preventDefault();
     event.stopPropagation();
@@ -672,7 +678,7 @@ renderer.keyInput.on('paste', (event) => {
   }
   releaseStickyComposerNotice();
 });
-renderer.on('resize', () => {
+renderer.on('resize', (width) => {
   syncComposerLayout();
   refreshLive();
   refreshSessionPicker();
@@ -682,11 +688,19 @@ renderer.on('resize', () => {
   refreshCommandOverlay();
   refreshFileMention();
   refreshNoticeOverlay();
+  restoreInteractionInputFocus(currentInteractionOwner(
+    approvalController.getState(),
+  ));
+  scheduleTimelineResizeReplay(width);
 });
 renderer.on('destroy', () => {
   liveActivityController.destroy();
   overlayLoadingController.destroy();
   interruptPendingNoticeController.destroy();
+  if (timelineResizeReplayTimer !== null) {
+    clearTimeout(timelineResizeReplayTimer);
+    timelineResizeReplayTimer = null;
+  }
   sessionPickerGeneration += 1;
   policyPickerGeneration += 1;
   modelPickerGeneration += 1;
@@ -862,6 +876,52 @@ function currentInteractionOwner(
     commandPaletteOpen: commandOverlay.phase === 'palette',
     fileMentionOpen: fileMention.phase === 'open',
   });
+}
+
+function restoreInteractionInputFocus(owner: InteractionOwner) {
+  if (terminalHandoffOpen) return;
+  ensureInteractionInputFocus(owner, {
+    composer,
+    approval: approvalView.input,
+  });
+}
+
+function scheduleTimelineResizeReplay(width: number) {
+  if (width === timelineWidth) return;
+  timelineWidth = width;
+  if (timelineResizeReplayTimer !== null) {
+    clearTimeout(timelineResizeReplayTimer);
+  }
+  if (terminalHandoffOpen) {
+    timelineResizeReplayTimer = null;
+    timelineReplayPending = true;
+    return;
+  }
+  timelineResizeReplayTimer = setTimeout(() => {
+    timelineResizeReplayTimer = null;
+    if (terminalHandoffOpen) {
+      timelineReplayPending = true;
+      return;
+    }
+    replayCanonicalTimeline();
+    restoreInteractionInputFocus(currentInteractionOwner(
+      approvalController.getState(),
+    ));
+  }, 120);
+}
+
+function replayCanonicalTimeline() {
+  const state = controller.getState();
+  timeline.resetForReplay();
+  if (state.session.sessionId !== 'pending') {
+    timeline.renderWelcome(buildWelcomeLines({
+      session: state.session,
+      width: renderer.width,
+      connection: formatConnection(state.connection),
+      hostMetadata,
+    }));
+  }
+  timeline.render(state.session);
 }
 
 function refreshCommandOverlay() {

@@ -26,6 +26,11 @@ export type InteractionOwnerState = {
   fileMentionOpen: boolean;
 };
 
+export type InteractionInput = {
+  focused: boolean;
+  focus: () => void;
+};
+
 export function resolveInteractionOwner(
   state: InteractionOwnerState,
 ): InteractionOwner {
@@ -62,4 +67,23 @@ export function interactionOwnerBlocksPaste(
     case 'composer':
       return false;
   }
+}
+
+export function ensureInteractionInputFocus(
+  owner: InteractionOwner,
+  inputs: {
+    composer: InteractionInput;
+    approval: InteractionInput;
+  },
+) {
+  const input = owner.type === 'approval'
+    ? owner.acceptsTextInput
+      ? inputs.approval
+      : null
+    : owner.type === 'composer'
+        || owner.type === 'command-palette'
+        || owner.type === 'file-mention'
+      ? inputs.composer
+      : null;
+  if (input && !input.focused) input.focus();
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ensureInteractionInputFocus,
   interactionOwnerBlocksPaste,
   resolveInteractionOwner,
   type InteractionOwnerState,
@@ -66,4 +67,54 @@ test('paste reaches only composer-like or free-text owners', () => {
   assert.equal(interactionOwnerBlocksPaste({ type: 'command-palette' }), false);
   assert.equal(interactionOwnerBlocksPaste({ type: 'file-mention' }), false);
   assert.equal(interactionOwnerBlocksPaste({ type: 'composer' }), false);
+});
+
+test('the current input owner repairs a lost editor focus', () => {
+  const focused: string[] = [];
+  const inputs = {
+    composer: {
+      focused: false,
+      focus: () => focused.push('composer'),
+    },
+    approval: {
+      focused: false,
+      focus: () => focused.push('approval'),
+    },
+  };
+
+  ensureInteractionInputFocus({ type: 'composer' }, inputs);
+  ensureInteractionInputFocus({ type: 'command-palette' }, inputs);
+  ensureInteractionInputFocus({ type: 'file-mention' }, inputs);
+  ensureInteractionInputFocus({
+    type: 'approval',
+    acceptsTextInput: true,
+  }, inputs);
+  assert.deepEqual(focused, [
+    'composer',
+    'composer',
+    'composer',
+    'approval',
+  ]);
+});
+
+test('non-input owners do not steal focus', () => {
+  let focusCount = 0;
+  const inputs = {
+    composer: {
+      focused: false,
+      focus: () => focusCount += 1,
+    },
+    approval: {
+      focused: false,
+      focus: () => focusCount += 1,
+    },
+  };
+
+  ensureInteractionInputFocus({ type: 'notice' }, inputs);
+  ensureInteractionInputFocus({ type: 'session-picker' }, inputs);
+  ensureInteractionInputFocus({
+    type: 'approval',
+    acceptsTextInput: false,
+  }, inputs);
+  assert.equal(focusCount, 0);
 });

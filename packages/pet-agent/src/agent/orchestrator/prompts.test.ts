@@ -13,6 +13,7 @@ const plannerPromptWorkspace = {
   entries: ['general', 'browser'].map((capabilityName) => ({
     capabilityName,
     description: `${capabilityName} capability`,
+    toolkits: [],
     relativePath: `${capabilityName}/CAPABILITY.md`,
     documentDigest: 'b'.repeat(64),
     provenance: 'authored' as const,
@@ -44,10 +45,18 @@ const routingManifest = {
     name: 'general',
     purpose: '处理通用工作区任务',
     cues: ['general', 'workspace', 'task'],
+    toolkits: [{
+      name: 'workspace',
+      description: '读取、编辑并验证本地工作区文件。',
+    }],
   }, {
     name: 'browser',
     purpose: '打开并检查网页',
     cues: ['browser', 'web page', 'navigate'],
+    toolkits: [{
+      name: 'browser',
+      description: '打开网页并读取浏览器页面内容。',
+    }],
   }],
 };
 
@@ -88,6 +97,8 @@ test('Capability Planner entry input leads with the run user request', () => {
   assert.match(input, /<capability_routing_manifest[^>]* default="general">/);
   assert.match(input, /<purpose>\s*<!\[CDATA\[\s*打开并检查网页/);
   assert.match(input, /<cue>\s*<!\[CDATA\[\s*browser/);
+  assert.match(input, /<toolkit name="browser">/);
+  assert.match(input, /打开网页并读取浏览器页面内容。/);
   assert.match(input, /<capability name="general">/);
   assert.match(input, /<capability name="browser">/);
   assert.match(input, /保留 \]\]\]\]>\<!\[CDATA\[> 作为文档数据。/);

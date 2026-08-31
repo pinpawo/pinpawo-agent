@@ -27,7 +27,25 @@ The command initializes an isolated temporary workdir, waits for both HTTP and
 Console readiness, and prints the runtime workdir, Console URL, Studio HTTP URL,
 Pet TUI command, current Bearer token, and Trigger secret. The temporary workdir
 is removed after shutdown, so running the demo never mutates this published
-template or inherits a previous run's task/checkpoint state. To start the two
+template or inherits a previous run's task/checkpoint state.
+
+For a terminal dashboard, start or reuse the same demo through tmux:
+
+```bash
+npm run studio:hello:tmux
+```
+
+This creates a `pinpawo-studio` session. When port `3210` is not already in use,
+the `host` window starts `studio:hello`; the `pets` window contains tiled
+`planner`, `executor`, `reviewer`, and `wiki` TUIs. Mouse mode is enabled for
+pane selection and scrolling. Reattach or rebuild the dashboard with:
+
+```bash
+tmux attach-session -t pinpawo-studio
+npm run studio:hello:tmux -- --reset
+```
+
+Use `--detached` to prepare the session without attaching. To start the two
 processes separately against a persistent initialized workdir instead:
 
 ```bash

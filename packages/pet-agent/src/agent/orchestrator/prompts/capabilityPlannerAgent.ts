@@ -50,6 +50,13 @@ function buildCapabilityRoutingManifest(
             indentXmlBlock(xmlTextBlock('cue', cue), 6),
           ),
           '    </cues>',
+          '    <toolkits>',
+          ...capability.toolkits.map((toolkit) => [
+            `      <toolkit name="${escapeXmlAttribute(toolkit.name)}">`,
+            indentXmlBlock(xmlTextBlock('description', toolkit.description), 8),
+            '      </toolkit>',
+          ].join('\n')),
+          '    </toolkits>',
           '  </capability>',
         ].join('\n'))
       : ['  <none />']),

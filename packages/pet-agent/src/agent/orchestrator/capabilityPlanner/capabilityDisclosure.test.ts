@@ -19,6 +19,7 @@ function workspace(
     entries: capabilityNames.map((capabilityName) => ({
       capabilityName,
       description: `${capabilityName} capability`,
+      toolkits: [],
       relativePath: `${capabilityName}/CAPABILITY.md`,
       documentDigest: capabilityName.repeat(8),
       provenance: 'authored',

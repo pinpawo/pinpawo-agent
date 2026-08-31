@@ -48,6 +48,10 @@ type CapabilityRegistryManifest = {
   capabilities: Array<{
     name: string;
     description: string;
+    toolkits: Array<{
+      name: string;
+      description: string;
+    }>;
   }>;
 };
 ```
@@ -61,14 +65,25 @@ capabilities:
   - name: project_review
     purpose: 审查工作区改动、提交、分支和 Pull Request
     cues: [review, pull request, diff, code quality]
+    toolkits:
+      - name: git
+        description: 本地 Git 与 GitHub PR/Issue 协作
 
   - name: github_project
     purpose: 查询和维护 GitHub Issue、PR 与仓库内容
     cues: [github, issue, pull request, repository]
+    toolkits:
+      - name: git
+        description: 本地 Git 与 GitHub PR/Issue 协作
 
   - name: studio_planning
     purpose: 探索项目状态并拆分、安排和跟踪任务
     cues: [project planning, task breakdown, kanban, progress]
+    toolkits:
+      - name: workspace
+        description: 本地文件、代码搜索与受控命令执行
+      - name: kanban
+        description: 共享任务的查看、拆解、完成与阻塞
 ```
 
 Every available Capability remains present. Compression reduces the description
@@ -89,8 +104,11 @@ Each entry includes:
 
 - the canonical Capability name;
 - one concise `purpose` sentence describing the positive responsibility;
-- three to six short `cues` likely to appear literally in user requests or the
-  corresponding Capability document;
+- three to six short `cues` that help relate user intent to the registered
+  responsibility;
+- the names and registered descriptions of Toolkits resolved from the
+  Capability's compiled `uses`, retained as deterministic execution-scope
+  facts rather than model-authored summaries;
 - whether the registry designates it as the default, represented once at the
   manifest level.
 
@@ -101,7 +119,7 @@ expressed by it.
 The manifest excludes:
 
 - Capability instructions and execution workflow;
-- Toolkit names, tool schemas, and tool descriptions;
+- individual tool names and schemas, Toolkit instructions, and runtime state;
 - authorization and safety policy;
 - examples and implementation notes;
 - document paths, digests, and provenance.
@@ -117,8 +135,8 @@ compiled Capability registry
   -> deterministic source manifest
   -> initialize compact routing manifest
   -> initialize run-scoped Planner session with that routing manifest
-  -> Planner derives literal search terms from user request + manifest
-  -> capability_search discloses matching complete CAPABILITY.md documents
+  -> Planner selects a candidate from user request + manifest
+  -> capability_search uses its canonical Capability name to disclose the complete CAPABILITY.md
   -> Planner commits a plan or returns a terminal planning result
 ```
 
@@ -133,13 +151,17 @@ memory backends continue searching complete immutable Capability documents and
 return complete matching documents. The manifest does not become another search
 backend.
 
-The Planner is instructed to disclose a Capability's complete document before
-using execution details that are absent from the routing manifest. This applies
-to the configured default as well. The default document uses the same discovery
-path as every other Capability; an exact search for its manifest name is always
-available when the Planner needs the default's complete contract. This remains
-a Planner information-boundary rule rather than a new terminal protocol field;
-the terminal trust boundary continues validating canonical registry membership.
+Toolkit descriptions let the Planner select a candidate from known execution
+scope, but do not replace the Capability document. The candidate's canonical
+name is the stable literal lookup term; semantic phrases are only useful when
+they are expected verbatim in the document. The Planner is instructed to
+disclose a Capability's complete document before using workflow or contract
+details that are absent from the routing manifest. This applies to the configured
+default as well. The default document uses the same discovery path as every other
+Capability; an exact search for its manifest name is always available when the
+Planner needs the default's complete contract. This remains a Planner
+information-boundary rule rather than a new terminal protocol field; the terminal
+trust boundary continues validating canonical registry membership.
 
 Continuation seeds may disclose Capabilities already referenced by canonical
 active or remaining tasks. That is execution recovery, not initial registry
@@ -188,6 +210,12 @@ The compression result must satisfy these invariants:
   Toolkit names and implementation details;
 - generated text cannot add a responsibility absent from the source description.
 
+The model owns only `purpose` and `cues`. Toolkit names and descriptions are
+copied from the compiled source into the validated routing result after model
+initialization. A model may use those facts while compressing, but cannot omit or
+rewrite them. This prevents lossy summarization from hiding a registered ability
+such as GitHub Issue access from normal Planner routing.
+
 The initialized result is cached by the internal registry generation together
 with the configured default identity and is not regenerated for each Planner
 invocation or root run. The internal cache key does not enter model context.
@@ -197,8 +225,9 @@ canceling one caller does not cancel initialization for other callers.
 
 If initialization fails validation or the model call is unavailable, planning
 falls back to a deterministic projection: each Capability keeps its authored
-description as `purpose` and its canonical name as the minimum cue. This keeps
-Capability discovery available without treating generated routing text as
+description as `purpose`, while its canonical Capability and Toolkit names form
+the minimum cues. Registered Toolkit names and descriptions remain present. This
+keeps Capability discovery available without treating generated routing text as
 authoritative registry state.
 
 ## Migration
@@ -227,6 +256,8 @@ Behavioral coverage should demonstrate that:
 - every available Capability is represented once in the manifest;
 - unavailable or uncompiled Capabilities are absent;
 - initialized names and the default exactly match the source manifest;
+- each Capability retains the compiled Toolkit names and descriptions from its
+  `uses`, even when model compression omits that scope from `purpose` or `cues`;
 - each initialized entry satisfies the `purpose` and `cues` bounds;
 - invalid initialization output uses the deterministic fallback;
 - the configured default is identified but its complete document is not

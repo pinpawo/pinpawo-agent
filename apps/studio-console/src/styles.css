@@ -1,10 +1,10 @@
 :root { color: #d6e1df; background: #0d1214; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 760px; min-height: 100vh; background: #0d1214; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .48; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #66d3d7; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #66d3d7; outline-offset: 2px; }
 .shell { min-height: 100vh; display: grid; grid-template-rows: 54px 42px minmax(0, 1fr) 34px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 0 22px; border-bottom: 1px solid #273235; background: #11181a; }
 .brand { color: #65d5d8; font: 700 13px/1 ui-monospace, monospace; letter-spacing: .1em; }
@@ -45,6 +45,19 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .row em.interrupted { color: #aab5b4; }
 .composer { display: grid; grid-template-columns: 180px minmax(0, 1fr) 110px; gap: 8px; padding: 16px 0 24px; }
 .composer.scheduler { grid-template-columns: 150px minmax(0, 1fr) 220px 110px; }
+.chat-composer { grid-template-columns: 180px minmax(0, 1fr); align-items: stretch; gap: 12px; }
+.composer-target { display: grid; align-content: start; gap: 8px; }
+.composer-target span, .chat-input > label { color: #7f9193; font: 10px/1 ui-monospace, monospace; letter-spacing: .08em; }
+.composer-target select { width: 100%; }
+.chat-input { min-height: 146px; display: grid; grid-template-rows: auto minmax(76px, 1fr) auto; border: 1px solid #334246; border-radius: 8px; background: #0c1214; transition: border-color .15s ease, box-shadow .15s ease; }
+.chat-input:focus-within { border-color: #52999c; box-shadow: 0 0 0 3px rgba(102, 211, 215, .08); }
+.chat-input > label { padding: 12px 14px 0; }
+.chat-input textarea { width: 100%; min-height: 76px; resize: vertical; padding: 10px 14px 14px; color: #d6e1df; border: 0; outline: 0; background: transparent; font-size: 14px; line-height: 1.55; }
+.chat-input textarea::placeholder { color: #5f7073; }
+.chat-input textarea:focus-visible { outline: 0; }
+.chat-actions { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 9px 8px 14px; border-top: 1px solid #273235; }
+.chat-actions span { color: #687a7c; font: 10px/1.3 ui-monospace, monospace; }
+.chat-actions button { min-width: 104px; }
 .empty-state { min-height: 260px; display: grid; place-content: center; gap: 9px; color: #758588; text-align: center; }
 .empty-state.compact { min-height: 150px; }
 .empty-state strong { color: #b5c4c2; }

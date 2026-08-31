@@ -34,12 +34,14 @@ const workspace: CapabilityDocumentWorkspace = {
   entries: [{
     capabilityName: 'general',
     description: 'Handle ordinary tasks.',
+    toolkits: [],
     relativePath: 'general/CAPABILITY.md',
     documentDigest: 'general-document-digest',
     provenance: 'authored',
   }, {
     capabilityName: 'repository',
     description: 'Inspect, edit, and verify repository changes.',
+    toolkits: [],
     relativePath: 'repository/CAPABILITY.md',
     documentDigest: 'repository-document-digest',
     provenance: 'authored',

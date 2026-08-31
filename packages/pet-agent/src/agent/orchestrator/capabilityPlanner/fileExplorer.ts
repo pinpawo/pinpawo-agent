@@ -15,7 +15,7 @@ import {
 } from './workspaceReader';
 
 export const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Search undisclosed Capability documents for one responsibility and disclose each matching complete document for this run. Use concise literal terms from the desired responsibility. This tool discovers execution capabilities; it does not execute the user task.';
+const CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Disclose undisclosed Capability documents whose text contains any supplied fixed substring. Every terms item is matched exactly, and items use OR semantics. A canonical Capability name from the routing manifest is the stable lookup term for that candidate. This tool discovers execution capabilities; it does not execute the user task.';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
@@ -68,9 +68,9 @@ export function createCapabilityPlannerSearchTool<
       schema: z.object({
         terms: z.array(
           z.string().trim().min(1).max(MAX_CAPABILITY_SEARCH_TERM_CHARS)
-            .describe('Literal text expected in a Capability name, description, or document; concise phrases produce better matches.'),
+            .describe('One exact fixed substring expected verbatim in a Capability name, description, or document. A canonical Capability name from the routing manifest always identifies that candidate. Spaces remain part of the same substring and do not separate keywords; use a phrase only when that complete phrase is expected verbatim.'),
         ).min(1)
-          .describe('Alternative terms for one Capability. Any matching term may select a document.'),
+          .describe('OR alternatives for one Capability, supplied together in one call. Prefer the candidate\'s canonical Capability name; otherwise use separate literals such as ["github", "issue", "pull request"], not one combined keyword string such as ["analyze GitHub issue repository code"].'),
       }),
     },
   );

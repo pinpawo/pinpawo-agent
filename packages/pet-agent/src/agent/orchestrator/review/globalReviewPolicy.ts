@@ -1,4 +1,4 @@
-import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import {
   DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
@@ -10,9 +10,11 @@ import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
 import {
   buildAutoReviewPrompt,
-  buildAutoReviewSystemPrompt,
+  buildAutoReviewSystemPolicy,
+  selectAutoReviewToolkitPolicies,
 } from '../prompts/autoReview';
 import type { ReviewSpec } from './reviewSpec';
+import { createInvocationContextMessage } from '../../modelContext/invocationContext';
 
 export const GLOBAL_REVIEW_POLICY_MODE = {
   REQUIRE_AUTHORIZATION: 'require_authorization',
@@ -163,6 +165,10 @@ export async function assessAutoReviewRisk(options: {
   });
   if (!prompt.complete) return { complete: false };
 
+  const systemPolicy = buildAutoReviewSystemPolicy({
+    toolkitPolicies: selectAutoReviewToolkitPolicies(options.reviews),
+    method: options.structuredOutput?.method,
+  });
   const assessment = await invokeStructuredOutput({
     model: options.model,
     schema: AUTO_REVIEW_RESULT_SCHEMA,
@@ -172,11 +178,11 @@ export async function assessAutoReviewRisk(options: {
       ...options.structuredOutput,
     },
     messages: [
-      new SystemMessage(buildAutoReviewSystemPrompt(
-        options.reviews,
-        options.structuredOutput?.method,
-      )),
-      new HumanMessage(prompt.text),
+      systemPolicy.message,
+      createInvocationContextMessage({
+        name: 'auto_review_facts',
+        content: prompt.text,
+      }),
     ],
     // The auto-review risk assessment is private, not delegated-agent progress.
     // Do not inherit the root stream callbacks that project model messages.

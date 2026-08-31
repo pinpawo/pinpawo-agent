@@ -1,6 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
   SubagentInputState,
   SubagentResult,
@@ -39,6 +39,11 @@ import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
+import {
+  buildSystemPolicy,
+  SYSTEM_POLICY_SOURCE,
+  SYSTEM_POLICY_TARGET,
+} from '../agent/modelContext/systemPolicy';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -68,7 +73,7 @@ export const SUBAGENT_GUARD_DECISION_EVENT = 'subagent_guard_decision';
  * (which are not in any statically known toolkit) still resolve.
  */
 export const SUBAGENT_OPERATIONS_EVENT = 'subagent_operations';
-export const SUBAGENT_PROMPT_SECTIONS_EVENT = 'subagent_prompt_sections';
+export const SUBAGENT_SYSTEM_POLICY_EVENT = 'subagent_system_policy';
 
 function readResultMessages(result: unknown): BaseMessage[] | null {
   if (
@@ -246,7 +251,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   // messages from summaries and model responses returned by the child graph.
   ensureSubagentMessageIds(input.messages);
   const inputState: SubagentInputState = {
-    promptSections: input.promptSections,
+    systemInstructions: input.systemInstructions,
     operations: input.operations,
     messages: input.messages,
     maxIterations: input.maxIterations,
@@ -255,37 +260,27 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
-  const systemPromptSections = [
+  const systemInstructions = [
     {
       id: 'framework:governing',
+      source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
       owner: 'framework',
       content: SUBAGENT_GOVERNING_PROMPT,
     },
     ...(inputState.contextWindowTokens
       ? [{
           id: 'framework:context-summary',
+          source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
           owner: 'framework',
           content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
         }]
       : []),
-    ...inputState.promptSections,
+    ...inputState.systemInstructions,
   ];
-  const sectionIds = new Set<string>();
-  for (const section of systemPromptSections) {
-    if (!section.id.trim()) {
-      throw new Error('Subagent prompt section id must be non-empty');
-    }
-    if (!section.content.trim()) {
-      throw new Error(`Subagent prompt section "${section.id}" content must be non-empty`);
-    }
-    if (sectionIds.has(section.id)) {
-      throw new Error(`Duplicate subagent prompt section id: ${section.id}`);
-    }
-    sectionIds.add(section.id);
-  }
-  const systemPrompt = systemPromptSections
-    .map((section) => section.content)
-    .join('\n\n');
+  const systemPolicy = buildSystemPolicy({
+    target: SYSTEM_POLICY_TARGET.CAPABILITY,
+    instructions: systemInstructions,
+  });
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
@@ -304,17 +299,15 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   const agent = createAgent({
     model: input.model,
     tools: input.tools,
-    systemPrompt,
+    systemPrompt: systemPolicy.message,
     contextSchema: subagentRuntimeContextSchema,
     ...(middleware.length > 0 ? { middleware } : {}),
   });
 
-  writeSubagentRuntimeEvent(SUBAGENT_PROMPT_SECTIONS_EVENT, {
-    sections: systemPromptSections.map((section) => ({
-      id: section.id,
-      owner: section.owner ?? null,
-      digest: createHash('sha256').update(section.content, 'utf8').digest('hex'),
-    })),
+  writeSubagentRuntimeEvent(SUBAGENT_SYSTEM_POLICY_EVENT, {
+    target: systemPolicy.diagnostics.target,
+    variant: systemPolicy.diagnostics.variant,
+    sections: systemPolicy.diagnostics.instructions,
   });
   if (inputState.operations && Object.keys(inputState.operations).length > 0) {
     writeSubagentRuntimeEvent(SUBAGENT_OPERATIONS_EVENT, { operations: inputState.operations });

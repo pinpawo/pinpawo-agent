@@ -355,7 +355,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const result = await createSubagent({
     model: evalSubject.model,
     tools: runtime.tools,
-    promptSections: [],
+    systemInstructions: [],
     messages,
     maxIterations: 8,
   });

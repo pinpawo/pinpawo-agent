@@ -1,3 +1,4 @@
+import type { HumanMessage } from '@langchain/core/messages';
 import type { StructuredTool } from '@langchain/core/tools';
 import type {
   AgentToolkit,
@@ -16,31 +17,44 @@ import {
   ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
   ARTIFACT_DISCOVERY_READ_TOOL_NAME,
 } from './artifacts/discovery';
-/** Runtime facts and conditional interfaces available to this execution. */
-export function buildSubagentExecutionContext(params: {
+import { indentXmlBlock, xmlTextBlock } from './prompts/shared';
+import { createInvocationContextMessage } from '../modelContext/invocationContext';
+
+export const CAPABILITY_RUNTIME_CONTEXT_MESSAGE_NAME = 'capability_runtime_context';
+
+/** Invocation-only runtime facts and conditional interfaces for one delegation. */
+export function buildCapabilityRuntimeContextMessage(params: {
   workdir?: string | null;
+  runtimeEnvironment?: string | null;
   artifactDiscovery: boolean;
-}): string | null {
-  const sections = [
+}): HumanMessage | null {
+  const facts = [
     params.workdir
+      ? xmlTextBlock('workdir', params.workdir, ' relative_paths="resolve_from_here"')
+      : null,
+    params.runtimeEnvironment
+      ? xmlTextBlock('runtime_environment', params.runtimeEnvironment)
+      : null,
+    params.artifactDiscovery
       ? [
-          '## 执行上下文',
-          `- 当前工作目录：${params.workdir}`,
-          '- 相对路径默认相对于当前工作目录。',
+          '<available_interface name="artifact_discovery" evidence="possibly_stale">',
+          `  <tool>${ARTIFACT_DISCOVERY_LIST_TOOL_NAME}</tool>`,
+          `  <tool>${ARTIFACT_DISCOVERY_READ_TOOL_NAME}</tool>`,
+          '</available_interface>',
         ].join('\n')
       : null,
-    ...(params.artifactDiscovery
-      ? [
-          [
-            '## 可选历史 artifacts',
-            `可使用 ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} 和 ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} 查找并读取当前 thread 的历史产物。`,
-            'Artifacts 是可能过期或不完整的参考信息；按当前任务的需要选择并核验。',
-          ].join('\n'),
-        ]
-      : []),
-  ].filter((section): section is string => section !== null);
+  ].filter((fact): fact is string => fact !== null);
 
-  return sections.length > 0 ? sections.join('\n\n') : null;
+  if (facts.length === 0) return null;
+
+  return createInvocationContextMessage({
+    name: CAPABILITY_RUNTIME_CONTEXT_MESSAGE_NAME,
+    content: [
+      '<capability_runtime_context role="fact" source="host_runtime" authority="none">',
+      ...facts.map((fact) => indentXmlBlock(fact, 2)),
+      '</capability_runtime_context>',
+    ].join('\n'),
+  });
 }
 
 export function collectToolkitOperations(

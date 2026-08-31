@@ -33,7 +33,6 @@ export {
 export type {
   SubagentInputState,
   SubagentExecutionScope,
-  SubagentPromptSection,
   SubagentResult,
   SubagentRunInput,
   SubagentRuntimeContext,
@@ -41,6 +40,14 @@ export type {
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
+export {
+  SYSTEM_POLICY_SOURCE,
+  SYSTEM_POLICY_TARGET,
+  type SystemPolicyInstruction,
+  type SystemPolicyRequest,
+  type SystemPolicySource,
+  type SystemPolicyTarget,
+} from './types/modelContext';
 
 export type {
   Guard,
@@ -347,7 +354,7 @@ export {
   createSubagent,
   SUBAGENT_GUARD_DECISION_EVENT,
   SUBAGENT_OPERATIONS_EVENT,
-  SUBAGENT_PROMPT_SECTIONS_EVENT,
+  SUBAGENT_SYSTEM_POLICY_EVENT,
 } from './subagent/createSubagent';
 export {
   NamespacedProtocolToolEventReader,

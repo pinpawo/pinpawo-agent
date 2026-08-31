@@ -1,15 +1,24 @@
-import { HumanMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createAgent } from 'langchain';
 import {
+  buildSystemPolicy,
+  SYSTEM_POLICY_SOURCE,
+  SYSTEM_POLICY_TARGET,
+} from '../../modelContext/systemPolicy';
+import { createInvocationContextMessage } from '../../modelContext/invocationContext';
+import {
+  CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
   createCapabilityPlannerFileExplorer,
   type CapabilityPlannerCapabilityDocument,
   type CapabilityPlannerFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
-import { buildCapabilityPlannerAgentInput } from '../prompts/capabilityPlannerAgent';
+import {
+  buildCapabilityPlannerAgentInput,
+  buildCapabilityPlannerAgentSystemPrompt,
+} from '../prompts/capabilityPlannerAgent';
 import type {
   CapabilityPlannerInput,
   CapabilityPlannerResult,
@@ -28,7 +37,11 @@ import {
   createPlannerCapabilitySearchTool,
   createPlannerSearchStateMiddleware,
 } from './searchTool';
-import { createPlannerTerminalTools } from './terminalTools';
+import {
+  createPlannerTerminalTools,
+  PLANNER_TERMINAL_TOOL_NAMES,
+  type PlannerTerminalToolMode,
+} from './terminalTools';
 import { PlannerFileToolError } from './workspaceReader';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
 
@@ -143,23 +156,49 @@ export function createCapabilityPlannerAgent(params: {
     explorers.set(input.inputId, explorer);
     return explorer;
   };
-  const terminalTools = createPlannerTerminalTools();
   const additionalTools = params.additionalTools ?? [];
+  for (const additionalTool of additionalTools) {
+    if (additionalTool.name === CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME
+      || PLANNER_TERMINAL_TOOL_NAMES.has(additionalTool.name)) {
+      throw new Error(
+        `Capability Planner additionalTools cannot use reserved tool name "${additionalTool.name}".`,
+      );
+    }
+  }
   const capabilitySearchTool = createPlannerCapabilitySearchTool({
     explorerForInput,
   });
-  const middleware = createPlannerMiddleware();
-  const agent = createAgent({
-    name: 'capabilityPlanner',
-    model: params.model,
-    tools: [capabilitySearchTool, ...terminalTools, ...additionalTools],
-    middleware: [
-      middleware,
-      createPlannerSearchStateMiddleware(),
-      orchestratorModelInvocationMiddleware,
-    ],
-    checkpointer: false,
-  });
+  const createModeAgent = (mode: PlannerTerminalToolMode) => {
+    const systemPolicy = buildSystemPolicy({
+      target: SYSTEM_POLICY_TARGET.CAPABILITY_PLANNER,
+      variant: mode,
+      instructions: [{
+        id: `framework:capability-planner:${mode}`,
+        source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
+        content: buildCapabilityPlannerAgentSystemPrompt(mode),
+      }],
+    });
+    return createAgent({
+      name: `capabilityPlanner:${mode}`,
+      model: params.model,
+      systemPrompt: systemPolicy.message,
+      tools: [
+        capabilitySearchTool,
+        ...createPlannerTerminalTools(mode),
+        ...additionalTools,
+      ],
+      middleware: [
+        createPlannerMiddleware(),
+        createPlannerSearchStateMiddleware(),
+        orchestratorModelInvocationMiddleware,
+      ],
+      checkpointer: false,
+    });
+  };
+  const agents = {
+    entry: createModeAgent('entry'),
+    boundary: createModeAgent('boundary'),
+  } as const;
 
   return Object.freeze({
     async invoke(
@@ -218,8 +257,9 @@ export function createCapabilityPlannerAgent(params: {
             timeout.signal,
           );
         }
-        const plannerInputMessage = new HumanMessage({
+        const plannerInputMessage = createInvocationContextMessage({
           id: `planner:${input.inputId}`,
+          name: 'capability_planner_input',
           content: buildCapabilityPlannerAgentInput(
             effectiveInput,
             disclosedCapabilities,
@@ -231,7 +271,7 @@ export function createCapabilityPlannerAgent(params: {
           .append(plannerInputMessage)
           .select()
           .messages;
-        const result = await agent.invoke({
+        const result = await agents[effectiveInput.mode].invoke({
           messages: agentMessages,
           currentInput: effectiveInput,
         }, config);

@@ -38,6 +38,7 @@ import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { createPlannerSession } from './session';
 import { CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME } from './routingManifest';
 import {
+  getAgentMessageMetadata,
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
 } from '../../messages';
@@ -638,6 +639,35 @@ test('Planner supports additional invocation-scoped tools without child persiste
   );
 });
 
+test('Planner rejects additional tools that use framework-reserved names', () => {
+  const reservedTerminalTool = tool(async () => 'not allowed', {
+    name: 'complete_goal',
+    description: 'Attempt to shadow a Planner terminal action.',
+    schema: z.object({}).strict(),
+  });
+  const reservedSearchTool = tool(async () => 'not allowed', {
+    name: CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
+    description: 'Attempt to shadow Capability discovery.',
+    schema: z.object({}).strict(),
+  });
+  const model = new ScriptedPlannerModel([]);
+
+  assert.throws(
+    () => createCapabilityPlannerAgent({
+      model,
+      additionalTools: [reservedTerminalTool],
+    }),
+    /reserved tool name "complete_goal"/,
+  );
+  assert.throws(
+    () => createCapabilityPlannerAgent({
+      model,
+      additionalTools: [reservedSearchTool],
+    }),
+    /reserved tool name "capability_search"/,
+  );
+});
+
 test('Planner Agent explores CAPABILITY.md files and returns a compact ordered task plan', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
@@ -969,6 +999,12 @@ test('Planner receives General routing metadata without preloading its document'
     (message) => message instanceof HumanMessage,
   );
   assert.ok(plannerInputMessage instanceof HumanMessage);
+  assert.deepEqual(getAgentMessageMetadata(plannerInputMessage), {
+    source: 'capability_planner_input',
+    synthetic: true,
+    invocationOnly: true,
+    authority: 'none',
+  });
   assert.match(readMessageText(plannerInputMessage), /<capability name="general">/);
   assert.match(readMessageText(plannerInputMessage), /处理不需要更具体 Capability 的通用任务/);
   assert.doesNotMatch(readMessageText(plannerInputMessage), /通用工具读取和修改工作区/);

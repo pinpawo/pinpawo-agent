@@ -315,13 +315,16 @@ lane = capability:<name>
 executor = compiled Capability
 ```
 
-subagent system prompt section 的稳定顺序是：
+当前 subagent System Policy instruction 的装配顺序是：
 
 1. framework delegation contract；
-2. actor context；
+2. 可选的 context-summary governing instruction；
 3. `uses` 所解析 Toolkit 的 instructions；
 4. Capability Markdown instructions；
-5. host runtime environment（存在时）。
+其中 framework、Toolkit 和 Capability instructions 是 System Policy。workdir、
+runtime environment 和当前可用接口通过独立的
+`<capability_runtime_context>` Invocation Context 传入。统一的装配契约见
+[Agent model context assembly](../../design/agent-runtime/model-context-assembly.md)。
 
 当前任务本身通过调用前临时生成的 delegation briefing 传入，不写进稳定
 system prompt 或 checkpoint lane。subagent 只获得编译到该 Capability 的 tools。

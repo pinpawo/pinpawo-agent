@@ -1,3 +1,4 @@
+import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
@@ -14,7 +15,7 @@ import {
 } from '../../delegation';
 import { orchestratorModelInvocationMiddleware } from '../../modelInvocation';
 import {
-  buildSubagentExecutionContext,
+  buildCapabilityRuntimeContextMessage,
   collectToolkitOperations,
   resolveToolkitExecution,
 } from '../../subagentDispatch';
@@ -43,6 +44,7 @@ import {
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegation';
 import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
+import { SYSTEM_POLICY_SOURCE } from '../../../modelContext/systemPolicy';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -118,15 +120,7 @@ export function createCapabilityNode(params: {
       .main()
       .delegation(delegationScope);
     const canonicalSelection = scopedQuery.select();
-    const scopedSelection = scopedQuery
-      .append(delegationBriefing)
-      .select();
-    observeAgentMessageSelection(
-      'capability.private_messages',
-      scopedSelection.diagnostics,
-      runnableConfig,
-    );
-    const scopedMessages = scopedSelection.messages;
+    let scopedMessages: BaseMessage[] = canonicalSelection.messages;
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -135,24 +129,6 @@ export function createCapabilityNode(params: {
         : [],
     );
     const artifactRefs: CapabilityArtifactRef[] = [];
-    const toolkitContext = {
-      models: config.models,
-      modelInputModalities: config.modelInputModalities,
-      actor,
-      messages: scopedMessages,
-      reviewContext: {
-        task: runNextDelegation.task,
-        workdir: workdir ?? null,
-      },
-      reviewCapabilities,
-      globalReviewPolicy,
-      toolAuthorizations: authorizationRecorder.active,
-      recordToolAuthorizations: authorizationRecorder.recordToolAuthorizations,
-      // Runtime events (authorization notices) surface as `custom` protocol
-      // events on the root stream (#322); review emits from afterModel
-      // middleware, where the writer is reachable at call time.
-      emitRuntimeEvent: emitRuntimeEventToStreamWriter,
-    };
     let runtimeExecution: ToolkitRuntimeExecution | null = null;
     let usedResolvedToolkitExecution: Awaited<ReturnType<typeof resolveToolkitExecution>>;
     let subagentInput: SubagentRunInput;
@@ -173,48 +149,65 @@ export function createCapabilityNode(params: {
       const executionToolkits = runtimeExecution
         ? [...runtimeExecution.toolkits]
         : toolkitList;
+      const canExploreArtifacts = hasArtifactDiscoveryToolkit(executionToolkits);
+      const runtimeContextMessage = buildCapabilityRuntimeContextMessage({
+        workdir: workdir ?? null,
+        runtimeEnvironment: runtimeEnvironment ?? null,
+        artifactDiscovery: canExploreArtifacts,
+      });
+      const scopedSelection = scopedQuery
+        .append(
+          ...(runtimeContextMessage ? [runtimeContextMessage] : []),
+          delegationBriefing,
+        )
+        .select();
+      observeAgentMessageSelection(
+        'capability.private_messages',
+        scopedSelection.diagnostics,
+        runnableConfig,
+      );
+      scopedMessages = scopedSelection.messages;
+      const toolkitContext = {
+        models: config.models,
+        modelInputModalities: config.modelInputModalities,
+        actor,
+        messages: scopedMessages,
+        reviewContext: {
+          task: runNextDelegation.task,
+          workdir: workdir ?? null,
+        },
+        reviewCapabilities,
+        globalReviewPolicy,
+        toolAuthorizations: authorizationRecorder.active,
+        recordToolAuthorizations: authorizationRecorder.recordToolAuthorizations,
+        // Runtime events (authorization notices) surface as `custom` protocol
+        // events on the root stream (#322); review emits from afterModel
+        // middleware, where the writer is reachable at call time.
+        emitRuntimeEvent: emitRuntimeEventToStreamWriter,
+      };
       usedResolvedToolkitExecution = await resolveToolkitExecution(
         executionToolkits,
         undefined,
         toolkitContext,
       );
-      const canExploreArtifacts = hasArtifactDiscoveryToolkit(
-        usedResolvedToolkitExecution.toolkits,
-      );
-      const executionContext = buildSubagentExecutionContext({
-        workdir: workdir ?? null,
-        artifactDiscovery: canExploreArtifacts,
-      });
       subagentInput = {
         model: config.models.subagent ?? config.models.act,
         tools: usedResolvedToolkitExecution.tools,
-        promptSections: [
+        systemInstructions: [
           ...usedResolvedToolkitExecution.toolkits
             .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
             .map((toolkit) => ({
               id: `toolkit:${toolkit.name}`,
+              source: SYSTEM_POLICY_SOURCE.TOOLKIT,
               owner: toolkit.name,
               content: toolkit.instructions as string,
             })),
           {
             id: `capability:${capability.name}`,
+            source: SYSTEM_POLICY_SOURCE.CAPABILITY,
             owner: capability.name,
             content: capability.instructions.content,
           },
-          ...(executionContext
-            ? [{
-                id: 'execution-context',
-                owner: 'framework',
-                content: executionContext,
-              }]
-            : []),
-          ...(runtimeEnvironment
-            ? [{
-                id: 'runtime-environment',
-                owner: 'host',
-                content: runtimeEnvironment,
-              }]
-            : []),
         ],
         operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
         messages: scopedMessages,

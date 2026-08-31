@@ -1,11 +1,9 @@
 import {
-  SystemMessage,
   ToolMessage,
 } from '@langchain/core/messages';
 import { Command, END } from '@langchain/langgraph';
 import { createMiddleware, ToolInvocationError } from 'langchain';
 import { ToolInputParsingException } from '@langchain/core/tools';
-import { buildCapabilityPlannerAgentSystemPrompt } from '../prompts/capabilityPlannerAgent';
 import { parsePlannerCommit, type PlannerCommit } from './protocol';
 import {
   currentPlannerInput,
@@ -14,7 +12,6 @@ import {
 } from './plannerState';
 import {
   PLANNER_TERMINAL_TOOL_NAMES,
-  plannerTerminalToolNamesForMode,
 } from './terminalTools';
 
 function readTerminalCommit(message: ToolMessage): unknown {
@@ -28,33 +25,19 @@ function readTerminalCommit(message: ToolMessage): unknown {
   }
 }
 
-function plannerSystemMessage(input: ReturnType<typeof currentPlannerInput>) {
-  return new SystemMessage(buildCapabilityPlannerAgentSystemPrompt(input.mode));
-}
-
 /** Framework lifecycle control only: model protocol and terminal commit. */
 export function createPlannerMiddleware() {
   return createMiddleware({
     name: 'CapabilityPlanner',
     stateSchema: plannerInvocationStateSchema,
     wrapModelCall: async (request, handler) => {
-      const input = currentPlannerInput(request.state);
       if (request.state.plannerCommit) {
         return new Command({
           update: { jumpTo: 'end' },
           goto: END,
         });
       }
-      const systemMessage = plannerSystemMessage(input);
-      const allowedTerminalToolNames = plannerTerminalToolNamesForMode(input.mode);
-      return handler({
-        ...request,
-        systemMessage,
-        tools: request.tools.filter(({ name }) =>
-          typeof name !== 'string'
-          || !PLANNER_TERMINAL_TOOL_NAMES.has(name)
-          || allowedTerminalToolNames.has(name)),
-      });
+      return handler(request);
     },
     wrapToolCall: async (request, handler) => {
       let result: Awaited<ReturnType<typeof handler>>;

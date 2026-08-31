@@ -85,7 +85,12 @@ test('briefing is invocation input and never becomes lane routing truth', () => 
     essentialContext: null,
   });
 
-  assert.equal(getAgentMessageMetadata(briefing).source, 'delegation_briefing');
+  assert.deepEqual(getAgentMessageMetadata(briefing), {
+    source: 'delegation_briefing',
+    synthetic: true,
+    invocationOnly: true,
+    authority: 'none',
+  });
   assert.equal(getAgentMessageLane(briefing), null);
   assert.equal(getDelegationAnnounce(briefing), null);
   assert.equal(getMessageHandoffSource(briefing), null);

@@ -1,4 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { RemoveMessage } from '@langchain/core/messages';
+import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import { evaluateGuard } from '../../../../guards';
 import { compactOrchestratorMessages } from '../../contextCompaction';
 import {
@@ -11,9 +13,23 @@ import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 import { applyActiveDelegationTransition } from '../activeDelegationTransition';
+import { findCanonicalSystemMessage } from '../../../messages';
 
 export function createPrepareNode() {
   return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
+    if (findCanonicalSystemMessage(state.messages)) {
+      return {
+        // Old checkpoints used canonical SystemMessages as an instruction
+        // channel. Do not migrate or retain that authority: discard the whole
+        // legacy history before reporting the incompatibility.
+        messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES })],
+        runNextDelegation: null,
+        runPlannerSession: null,
+        taskPlannerContinuation: null,
+        runLatestDelegationOutcome: null,
+        runRuntimeFailure: 'checkpoint_incompatible' as const,
+      };
+    }
     const outcome = evaluateGuard(runStateResetGuard, {
       state,
       config: {},

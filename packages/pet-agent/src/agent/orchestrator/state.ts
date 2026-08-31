@@ -24,6 +24,7 @@ import type {
   PlannerSessionState,
   PlannerTaskContinuation,
 } from './capabilityPlanner/session';
+import { assertCanonicalAgentMessages } from '../messages';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -167,6 +168,7 @@ export function buildOrchestratorRunInput(
   messages: BaseMessage[],
   options: BuildOrchestratorRunOptions = {},
 ) {
+  assertCanonicalAgentMessages(messages);
   const reset = buildRunStateReset(options);
   if (options.activeDelegationTransition === 'resume_active') {
     // Preserve an interrupted prior run's session until prepare can extract

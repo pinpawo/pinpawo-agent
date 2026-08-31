@@ -89,13 +89,18 @@ orchestrator 创建 subagent 前，从已编译 registry 完成 toolkit 解析�
 capability.uses
   -> resolve toolkits
   -> tools = declared toolkit tools
-  -> instructions = framework + actor + toolkit.instructions
-                    + capability.instructions + host runtime environment
+  -> System Policy = framework + toolkit.instructions
+                     + capability.instructions
+  -> Invocation Context = workdir + host runtime environment
+                          + optional interface facts + delegation briefing
   -> createSubagent(...)
 ```
 
 当前任务通过调用前临时生成的 delegation briefing 进入模型上下文，不进入稳定
 system prompt 或 checkpoint lane。Toolkit instructions 按 `uses` 的解析顺序装配。
+运行环境和当前可用接口是调用事实，不获得与 Toolkit/Capability instructions
+相同的 system authority。当前实现仍在迁移这条边界；统一放置规则见
+[`model-context-assembly.md`](model-context-assembly.md)。
 
 General 不使用独立 lane 或隐式工具面。它是一个名为 `general` 的普通
 Capability，显式声明自己的 Toolkit 依赖：

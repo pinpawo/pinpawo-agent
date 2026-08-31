@@ -11,6 +11,8 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
+- [Agent model context assembly](agent-runtime/model-context-assembly.md) —
+  draft contract for System Policy, Conversation History, and Invocation Context
 - [Run-scoped Planner session](agent-runtime/run-scoped-planner-session.md) and
   [terminal response finalization](agent-runtime/terminal-response.md)
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —

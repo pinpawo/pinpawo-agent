@@ -8,6 +8,7 @@ import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
   resolveGlobalReviewBatchPolicy,
 } from './globalReviewPolicy';
+import { getAgentMessageMetadata } from '../../messages';
 const testActor = {
   petId: 'pet-1',
   userId: 'user-1',
@@ -151,7 +152,7 @@ test('auto review prompt contains bounded task context, runtime scope, and tool 
   });
 
   assert.equal(resolution.type, GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE);
-  const [systemMessage, humanMessage] = capturedMessages as Array<{ content?: unknown }>;
+  const [systemMessage, humanMessage] = capturedMessages as HumanMessage[];
   const systemPrompt = String(systemMessage?.content);
   const prompt = String(humanMessage?.content);
   assert.doesNotMatch(systemPrompt, /Write a short notes\.md file|\/repo\/notes\.md|Conversation context/);
@@ -162,6 +163,12 @@ test('auto review prompt contains bounded task context, runtime scope, and tool 
   assert.match(prompt, /Input facts:[\s\S]*"path": "notes\.md"/);
   assert.doesNotMatch(prompt, /Conversation context/);
   assert.doesNotMatch(prompt, /user_requests|derived_task|Decision policy:/);
+  assert.deepEqual(getAgentMessageMetadata(humanMessage), {
+    source: 'auto_review_facts',
+    synthetic: true,
+    invocationOnly: true,
+    authority: 'none',
+  });
 });
 
 test('auto review prompt stays compact and keeps every action identity', () => {

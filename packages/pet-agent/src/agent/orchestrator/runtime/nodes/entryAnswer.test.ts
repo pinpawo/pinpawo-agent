@@ -321,7 +321,7 @@ test('Entry Answer receives an accepted delegation result as execution data, not
 test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {
   const goal = 'review https://github.com/pinpawo/pinpawo-agent/pull/667';
   let invocations = 0;
-  let repairPrompt = '';
+  let retryMessages: BaseMessage[] = [];
   const model = {
     bindTools: () => ({
       invoke: async (messages: BaseMessage[]) => {
@@ -329,7 +329,7 @@ test('Entry Answer retries when the model announces execution instead of calling
         if (invocations === 1) {
           return new AIMessage('开始执行计划任务：对 Pull Request #667 进行代码审查。');
         }
-        repairPrompt = String(messages.at(-1)?.content ?? '');
+        retryMessages = messages;
         return new AIMessage({
           content: '',
           tool_calls: [{ id: 'call-plan', name: PLAN_REQUEST_TOOL_NAME, args: { goal } }],
@@ -357,7 +357,15 @@ test('Entry Answer retries when the model announces execution instead of calling
   );
 
   assert.equal(invocations, 2, 'the faked announcement must trigger exactly one retry');
-  assert.match(repairPrompt, /plan_request/);
+  const retrySystemPolicy = retryMessages.find((message) => message._getType() === 'system');
+  assert.ok(retrySystemPolicy);
+  assert.match(String(retrySystemPolicy.content), /plan_request/);
+  assert.equal(
+    retryMessages.filter((message) => message._getType() === 'human').length,
+    1,
+    'Framework repair policy must not masquerade as another user turn',
+  );
+  assert.match(String(retryMessages.at(-1)?.content), /^开始执行计划任务/);
   assert.equal(plannerRequest, goal, 'the retry must reach the Planner');
   assert.equal(
     result.messages.some((message) => String(message.content).startsWith('开始执行计划任务')),

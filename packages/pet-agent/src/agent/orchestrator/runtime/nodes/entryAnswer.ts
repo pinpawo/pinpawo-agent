@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
@@ -11,7 +11,7 @@ import {
   stampAgentMessageCreatedAt,
 } from '../../../messages';
 import { invokeOrchestratorModel } from '../../modelInvocation';
-import { buildEntryAnswerSystemPrompt } from '../../prompts';
+import { buildEntryAnswerSystemPolicy } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { resolveActor } from '../config';
@@ -108,11 +108,6 @@ export function isExecutionAnnouncement(text: string) {
   return EXECUTION_ANNOUNCEMENT_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-const EXECUTION_ANNOUNCEMENT_REPAIR = [
-  '你刚才只是用文字宣告要执行，但没有发起 plan_request 工具调用，因此不会有任何事情发生。',
-  '现在重新处理这一轮：需要执行就发起 plan_request 工具调用；不需要执行就直接给出面向用户的最终回复。',
-].join('\n');
-
 function plannerDispatch(
   state: OrchestratorStateType,
   runUserRequest: string,
@@ -178,9 +173,9 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt({
+    const systemMessage = buildEntryAnswerSystemPolicy({
       actor: resolveActor(config, runnableConfig),
-    }));
+    }).message;
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
       messages: mainSelection.messages,
@@ -190,10 +185,13 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }
     if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
       const retrySelection = mainQuery
-        .append(response, new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR))
+        .append(response)
         .select();
       const retried = await invokeOrchestratorModel(model, {
-        systemMessage,
+        systemMessage: buildEntryAnswerSystemPolicy({
+          actor: resolveActor(config, runnableConfig),
+          repairExecutionAnnouncement: true,
+        }).message,
         messages: retrySelection.messages,
       }, runnableConfig);
       if (!AIMessage.isInstance(retried)) {

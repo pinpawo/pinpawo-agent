@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, RemoveMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -13,6 +13,12 @@ import {
 import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
 import { clipForPrompt, readMessageText } from './utils';
 import { xmlTextBlock } from './prompts/shared';
+import {
+  buildSystemPolicy,
+  SYSTEM_POLICY_SOURCE,
+  SYSTEM_POLICY_TARGET,
+} from '../modelContext/systemPolicy';
+import { createInvocationContextMessage } from '../modelContext/invocationContext';
 
 const DEFAULT_KEEP_MESSAGES = 10;
 const DEFAULT_FALLBACK_SUMMARY_CHARS = 4000;
@@ -164,17 +170,28 @@ async function summarizeMessages(params: {
     return buildFallbackSummary(params.messages);
   }
 
-  const response = await params.model.invoke(
-    [
-      new SystemMessage([
+  const systemPolicy = buildSystemPolicy({
+    target: SYSTEM_POLICY_TARGET.CONTEXT_COMPACTION,
+    instructions: [{
+      id: 'framework:context-compaction',
+      source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
+      content: [
         '你在为一个长运行的任务执行通用 agent 压缩旧上下文。',
         '目标是让后续 agent 能延续当前任务，而不是把摘要写成新的用户指令。',
         '最重要：保留任务目标、执行计划、已执行步骤、完成结果、交付物、当前进度、阻塞点和下一步。',
         '同时保留：用户约束、关键决策、工具/能力调用结论、外部副作用、权限确认、风险或失败原因。',
         '丢弃：寒暄、重复内容、无关日志、已被后续结果覆盖的中间过程。',
         '用中文，结构化要点，尽量简洁；优先写清任务状态和结果。',
-      ].join('\n')),
-      new HumanMessage(`请压缩以下旧上下文：\n\n${renderedMessages}`),
+      ].join('\n'),
+    }],
+  });
+  const response = await params.model.invoke(
+    [
+      systemPolicy.message,
+      createInvocationContextMessage({
+        name: 'context_compaction_input',
+        content: `请压缩以下旧上下文：\n\n${renderedMessages}`,
+      }),
     ],
     params.runnableConfig,
   );

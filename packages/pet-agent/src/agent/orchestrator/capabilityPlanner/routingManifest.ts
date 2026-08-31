@@ -1,7 +1,5 @@
 import {
   AIMessage,
-  HumanMessage,
-  SystemMessage,
 } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -14,6 +12,12 @@ import {
 } from '../prompts/templates/capabilityRoutingManifest.prompt';
 import { xmlTextBlock } from '../prompts/shared';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
+import {
+  buildSystemPolicy,
+  SYSTEM_POLICY_SOURCE,
+  SYSTEM_POLICY_TARGET,
+} from '../../modelContext/systemPolicy';
+import { createInvocationContextMessage } from '../../modelContext/invocationContext';
 
 export const CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME =
   'commit_capability_routing_manifest';
@@ -169,15 +173,26 @@ export async function initializeCapabilityRoutingManifest(params: {
   }
   try {
     const boundModel = params.model.bindTools([routingManifestCommitTool]);
+    const systemPolicy = buildSystemPolicy({
+      target: SYSTEM_POLICY_TARGET.CAPABILITY_ROUTING_MANIFEST,
+      instructions: [{
+        id: 'framework:capability-routing-manifest',
+        source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
+        content: CAPABILITY_ROUTING_MANIFEST_SYSTEM_PROMPT.render({}),
+      }],
+    });
     const response = await boundModel.invoke([
-      new SystemMessage(CAPABILITY_ROUTING_MANIFEST_SYSTEM_PROMPT.render({})),
-      new HumanMessage(CAPABILITY_ROUTING_MANIFEST_INPUT_PROMPT.render({
-        sourceManifest: xmlTextBlock(
-          'capability_registry_manifest',
-          routingManifestSourceText(params.source),
-          ' role="fact" source="compiled_registry" trust="read_only"',
-        ),
-      })),
+      systemPolicy.message,
+      createInvocationContextMessage({
+        name: 'capability_routing_manifest_input',
+        content: CAPABILITY_ROUTING_MANIFEST_INPUT_PROMPT.render({
+          sourceManifest: xmlTextBlock(
+            'capability_registry_manifest',
+            routingManifestSourceText(params.source),
+            ' role="fact" source="compiled_registry" trust="read_only"',
+          ),
+        }),
+      }),
     ], {
       ...params.runnableConfig,
       runName: 'framework.capability_planner.routing_manifest',

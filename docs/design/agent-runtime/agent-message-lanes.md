@@ -2,6 +2,11 @@
 
 Status: working design implemented by the current refactor.
 
+This document owns canonical message and delegation-lane selection. It does not
+define System Policy or decide whether current facts belong in an invocation
+message; those channels are defined by
+[`model-context-assembly.md`](model-context-assembly.md).
+
 ## Decision
 
 `OrchestratorState.messages` is the only canonical message collection. A message
@@ -74,12 +79,18 @@ The query knows only message ownership:
 - `append(messages)` adds invocation-only messages after canonical history;
 - `select()` returns the ordered input and identity-only canonical diagnostics.
 
+Lane selection is deliberately role-agnostic. Root ingress rejects an untagged
+canonical `SystemMessage`, and checkpoint validation fails closed if legacy
+history contains one. That legacy history is cleared rather than migrated. The
+query therefore does not need to reinterpret roles or silently discard
+caller-owned authority.
+
 `append()` does not classify its input or persist it. The node constructs the
 typed current message; the query only owns its position after selected history.
 The query knows nothing about Planner meaning, Announce rendering, prompts,
 artifacts, provider roles, or task completion.
 
-## Model invocation
+## Invocation boundary
 
 Nodes use the same query for canonical selection and invocation-local input:
 
@@ -97,8 +108,9 @@ Provider-specific work is private runtime wiring, not another message API. The
 final Agent middleware renders typed Announces and repairs tool-call ordering on
 each real model call. Entry Answer uses the same runtime boundary for its direct
 model invocation. Nodes never call a separate prepare, project, or view helper.
-System prompts remain independently owned by the caller or LangChain's
-`ModelRequest.systemMessage` and never enter the lane query.
+Node-owned System Policy remains separate from the query and is passed by the
+caller or LangChain's `ModelRequest.systemMessage`. Canonical history must not
+be used as another System Policy channel.
 
 ## Capability delegation protocol
 
@@ -122,17 +134,6 @@ It owns:
 - accepting Announces into main through Handoff;
 - clearing accepted private messages.
 
-Toolkit instructions and artifact-discovery availability belong in Capability
-prompt sections and bound tools, not synthetic history messages.
-
-### Capability model input
-
-```text
-SystemMessage(Capability, Toolkit, runtime instructions)
-Main messages + active delegation private messages
-HumanMessage(current Delegation Briefing)
-```
-
 ### Capability result
 
 The runtime reconciles returned messages against the selected canonical input.
@@ -143,7 +144,7 @@ messages and the typed Announce use the same complete delegation scope.
 
 ## Planner protocol
 
-Planner is a separate subagent protocol. It has no root message lane.
+Planner is a separate subagent protocol and has no root message lane:
 
 ```text
 OrchestratorState
@@ -153,18 +154,10 @@ OrchestratorState
   -> OrchestratorState update
 ```
 
-### Entry input
-
-```text
-SystemMessage(Entry objective)
-Clean main conversation
-HumanMessage(typed Entry input)
-```
-
-### Boundary input
-
-The Orchestrator selects the active delegation's private messages, extracts its
-ordered typed Announces, and constructs current typed input:
+Entry and Boundary both query the clean main conversation. Boundary separately
+queries the active delegation, extracts its ordered typed Announces, and builds
+one current input with active-delegation and remaining-plan state. Raw private
+Human, AI, and Tool messages do not enter Planner provider history.
 
 ```text
 CapabilityPlannerInput
@@ -176,17 +169,11 @@ CapabilityPlannerInput
   remainingPlan: Planner session state
 ```
 
-The provider receives:
-
-```text
-SystemMessage(Boundary objective)
-Clean main conversation
-HumanMessage(typed Boundary input)
-```
-
-Raw private Human, AI, and Tool messages do not enter Planner provider history.
 Planner model/tool messages remain inside the run-scoped Planner session and do
-not enter root `messages`.
+not enter root `messages`. System variants and Invocation Context placement are
+covered by the [context injection map](../../reference/runtime/context-injection-map.md);
+Planner state ownership is covered by
+[`run-scoped-planner-session.md`](run-scoped-planner-session.md).
 
 ## Announce and Handoff
 
@@ -203,12 +190,8 @@ Entry Answer selects clean main messages through the same query and invokes its
 model through the shared runtime boundary.
 Answer receives a closed fact-only input and intentionally receives no canonical
 conversation history. Neither inspects private Capability messages or Planner
-provider messages.
-
-The lane query constructs ordered Agent input but does not own provider details.
-The model runtime internally owns typed-message rendering and protocol
-sanitation. Isolated model calls that do not consume canonical history, such as
-routing-manifest initialization and context compaction, remain self-contained.
+provider messages. Isolated calls such as routing-manifest initialization and
+context compaction do not consume lanes and remain self-contained.
 
 ## Package boundaries
 

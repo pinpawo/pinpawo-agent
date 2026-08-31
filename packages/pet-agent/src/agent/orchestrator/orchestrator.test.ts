@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
@@ -28,6 +28,7 @@ import {
 import { compileAgentRegistry } from './registry';
 import { ToolkitRuntimeManager } from './toolkitRuntime';
 import {
+  CAPABILITY_RUNTIME_CONTEXT_MESSAGE_NAME,
   collectToolkitOperations,
   resolveToolkitExecution,
 } from './subagentDispatch';
@@ -392,7 +393,7 @@ async function runToolkitToolCall(
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    promptSections: [],
+    systemInstructions: [],
     operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
   });
@@ -535,10 +536,8 @@ test('execution boundary routes through capabilityPlanner before the next task',
     capabilityPlannerRunner,
   });
 
-  const dynamicSystemContext = new SystemMessage('DYNAMIC_WIKI_SYSTEM_CONTEXT');
   const compactionContext = createContextCompactionMessage('FRAMEWORK_COMPACTION_CONTEXT', 8);
   const state = await graph.invoke(buildOrchestratorRunInput([
-    dynamicSystemContext,
     compactionContext,
     new HumanMessage('看 issue #269，再查本地实现，最后总结。'),
   ]), {
@@ -3035,7 +3034,7 @@ test('deterministic toolkit policy block terminates without another model call',
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    promptSections: [],
+    systemInstructions: [],
     operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
     runnableConfig: { callbacks: recorder.callbacks },
@@ -5759,7 +5758,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     }),
     tools: [noop],
     middleware: [progressMiddleware],
-    promptSections: [],
+    systemInstructions: [],
     messages: baseInput.messages,
     maxIterations: 1,
   });
@@ -6874,10 +6873,15 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   const [firstInput, secondInput] = recorder.subagentInputs;
   for (const input of recorder.subagentInputs) {
     const briefings = input.filter(isDelegationBriefingMessage);
+    const runtimeContexts = input.filter((message) =>
+      message.name === CAPABILITY_RUNTIME_CONTEXT_MESSAGE_NAME);
     assert.equal(briefings.length, 1);
+    assert.equal(runtimeContexts.length, 1);
     const latestBriefing = briefings[0];
     assert.ok(latestBriefing);
     assert.equal(input.at(-1), latestBriefing);
+    assert.equal(input.at(-2), runtimeContexts[0]);
+    assert.match(String(runtimeContexts[0]?.content), /<available_interface name="artifact_discovery"/);
     assert.match(String(latestBriefing.content), /<run_user_request role="goal_context"/);
     assert.equal(
       String(latestBriefing.content).includes(String(state.runUserRequest)),
@@ -6903,10 +6907,8 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /Issue #272 已关闭。/);
-  assert.doesNotMatch(
-    state.messages.map((message) => String(message.content)).join('\n'),
-    /可选历史 artifacts/,
-  );
+  assert.equal(state.messages.some((message) =>
+    message.name === CAPABILITY_RUNTIME_CONTEXT_MESSAGE_NAME), false);
 
   // Per-delegation task data stays in the briefing instead of being copied
   // into system context.
@@ -6919,6 +6921,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
         : JSON.stringify(message.content);
       assert.doesNotMatch(systemText, /关闭 GitHub Issue #272/);
       assert.doesNotMatch(systemText, /上下文摘要/);
+      assert.doesNotMatch(systemText, /capability_runtime_context|artifact_list|artifact_read/);
     }
   }
 });

@@ -59,11 +59,11 @@ function plannerTasksSchema(description: string) {
 }
 
 /**
- * Terminal tools serialize an already-made Planner decision. Runtime registers
- * the full superset; mode projects the provider-visible subset for static audits.
+ * Terminal tools serialize an already-made Planner decision. Each Planner
+ * variant registers only the actions that are valid for that mode.
  */
 export function createPlannerTerminalTools(
-  mode?: PlannerTerminalToolMode,
+  mode: PlannerTerminalToolMode,
 ): StructuredTool[] {
   const tools = [
     tool(async () => JSON.stringify({ action: 'continue_current', tasks: [] }), {
@@ -123,7 +123,6 @@ export function createPlannerTerminalTools(
       schema: z.object({}).strict(),
     }),
   ];
-  if (!mode) return tools;
   const allowedNames = plannerTerminalToolNamesForMode(mode);
   return tools.filter(({ name }) => allowedNames.has(name));
 }

@@ -1,8 +1,8 @@
-import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import { randomUUID } from 'node:crypto';
-import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
+import type { BaseMessage, HumanMessage } from '@langchain/core/messages';
+import { getAgentMessageMetadata } from '../../messages';
 import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
 import type { UserRequest } from '../types';
+import { createInvocationContextMessage } from '../../modelContext/invocationContext';
 
 /**
  * Delegation briefing — the downward counterpart of the (upward) subagent
@@ -38,14 +38,6 @@ export type DelegationSpec = DelegationSpecBase & (
     }
 );
 
-function stampBriefingMeta(message: HumanMessage) {
-  message.id ??= randomUUID();
-  setAgentMessageMetadata(message, {
-    source: DELEGATION_BRIEFING_SOURCE,
-  });
-  return message;
-}
-
 export function isDelegationBriefingMessage(message: BaseMessage): boolean {
   return getAgentMessageMetadata(message).source === DELEGATION_BRIEFING_SOURCE;
 }
@@ -79,7 +71,8 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
  * data and is never parsed back into runtime state.
  */
 export function materializeDelegation(spec: DelegationSpec): HumanMessage {
-  return stampBriefingMeta(
-    new HumanMessage(renderDelegationBriefingXml(spec)),
-  );
+  return createInvocationContextMessage({
+    name: DELEGATION_BRIEFING_SOURCE,
+    content: renderDelegationBriefingXml(spec),
+  });
 }

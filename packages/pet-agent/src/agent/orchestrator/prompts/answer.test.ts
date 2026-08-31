@@ -50,6 +50,7 @@ test('Answer invocation is exactly the system prompt plus one answer_input messa
   assert.deepEqual(getAgentMessageMetadata(message), {
     source: ANSWER_INPUT_MESSAGE_NAME,
     synthetic: true,
+    invocationOnly: true,
     authority: 'none',
   });
   assert.match(String(message.content), /^<answer_input role="fact" source="orchestrator_state" authority="none">/);

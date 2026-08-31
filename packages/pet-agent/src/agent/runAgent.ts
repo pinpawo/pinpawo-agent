@@ -24,9 +24,9 @@ export type AgentInvokeInput = {
   toolkits?: AgentToolkit[];
   execution?: AgentExecution;
   signal?: AbortSignal;
-  /** Agent working directory passed into system prompt so the agent knows its file scope. */
+  /** Agent working directory passed as invocation-only runtime context. */
   workdir?: string;
-  /** Runtime environment summary injected into system prompts. Must not contain secrets. */
+  /** Runtime environment facts passed as invocation-only context. Must not contain secrets. */
   runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
   /** Optional allowlist exposed through the Planner document workspace. */

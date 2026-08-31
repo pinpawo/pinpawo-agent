@@ -1,4 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import {
   DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
@@ -10,7 +10,7 @@ import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
 import {
   buildAutoReviewPrompt,
-  buildAutoReviewSystemPolicy,
+  buildAutoReviewSystemPrompt,
   selectAutoReviewToolkitPolicies,
 } from '../prompts/autoReview';
 import type { ReviewSpec } from './reviewSpec';
@@ -165,7 +165,7 @@ export async function assessAutoReviewRisk(options: {
   });
   if (!prompt.complete) return { complete: false };
 
-  const systemPolicy = buildAutoReviewSystemPolicy({
+  const systemPrompt = buildAutoReviewSystemPrompt({
     toolkitPolicies: selectAutoReviewToolkitPolicies(options.reviews),
     method: options.structuredOutput?.method,
   });
@@ -178,7 +178,7 @@ export async function assessAutoReviewRisk(options: {
       ...options.structuredOutput,
     },
     messages: [
-      systemPolicy.message,
+      new SystemMessage(systemPrompt),
       createInvocationContextMessage({
         name: 'auto_review_facts',
         content: prompt.text,

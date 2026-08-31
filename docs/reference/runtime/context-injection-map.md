@@ -44,11 +44,11 @@ isolated model calls.
 
 | Model call | System Policy | Conversation History | Invocation Context |
 |---|---|---|---|
-| Entry Answer | Entry policy + actor | main | none |
+| Entry Answer | rendered Entry template | main | none |
 | Capability Planner | explicit entry/boundary policy | main | Planner input |
 | Capability | governing + Toolkit + Capability instructions | main + exact delegation | runtime facts + delegation briefing |
 | Capability history summary | fixed maintenance instruction | none | selected older Capability input history |
-| Answer | answer policy + actor | none | closed answer facts |
+| Answer | rendered Answer template | none | closed answer facts |
 | Context compaction | static summary policy | none | rendered old main history |
 | Routing manifest | static manifest policy | none | compiled registry manifest |
 | Auto Review | global policy + registered Toolkit policy + provider output protocol | none | action and runtime facts |
@@ -57,7 +57,6 @@ isolated model calls.
 
 | Structure | Channel | Source |
 |---|---|---|
-| `[配置]` | System Policy | trusted actor |
 | `<run_user_request>` | Invocation Context | `runUserRequest` |
 | `<delegation_briefing>` | Invocation Context | active delegation and current run goal |
 | `<capability_runtime_context>` | Invocation Context | workdir, runtime environment, and optional interfaces |
@@ -71,16 +70,13 @@ cannot change structure. Fact and evidence envelopes carry explicit
 non-authoritative roles. Their schemas remain owned by their domains rather
 than one generic context serializer.
 
-Actor identity is a Host-owned System Policy instruction. Runtime facts do not
-share its builder or enter the actor block.
-
 ## Entry Answer
 
 Entry Answer decides whether to reply from current conversation context or call
 `plan_request`.
 
 ```text
-SystemMessage(Entry policy + actor)
+SystemMessage(ENTRY_ANSWER_SYSTEM_PROMPT.render(vars))
 queryAgentMessages(messages).main().select()
 ```
 
@@ -110,9 +106,9 @@ HumanMessage(typed Planner input)
 ```
 
 The main conversation and current input are assembled explicitly through the
-message query. The same typed mode selects an entry or boundary agent, its
-System Policy variant, and its terminal-tool set. Planner middleware only owns
-lifecycle and terminal-commit transport.
+message query. The same typed mode selects an entry or boundary template and
+its terminal-tool set. Planner middleware only owns lifecycle and
+terminal-commit transport.
 
 Private Capability Human, AI, and Tool messages never enter Planner history.
 Boundary extracts typed Announces from the exact active delegation scope and
@@ -177,7 +173,7 @@ for the channel migration.
 Answer currently receives no canonical conversation history:
 
 ```text
-SystemMessage(Answer policy + actor)
+SystemMessage(ANSWER_SYSTEM_PROMPT.render({}))
 HumanMessage(<answer_input>)
 ```
 
@@ -202,8 +198,8 @@ HumanMessage(<auto_review_facts>)
 
 Toolkit auto-review policy is trusted registered instruction. Tool input,
 review view, current task, and workdir are non-authoritative action facts. The
-call site first selects deduplicated Toolkit policies, then builds System Policy
-and action facts through separate typed inputs.
+call site first selects deduplicated Toolkit policies, then renders System
+Policy and action facts through separate typed inputs.
 
 ## Routing manifest and compaction
 
@@ -236,17 +232,19 @@ replace it.
 
 ## Assembly implementation
 
-`buildSystemPolicy()` is the shared authority boundary. It validates target,
-variant, and trusted instruction source; it does not read messages or runtime
-facts. `queryAgentMessages()` is the shared history boundary. Domain builders
-own Invocation Context messages, and query `.append()` owns their final order.
+Ordinary nodes select a domain template and render typed variables directly.
+Only Capability subagents use
+`composeCapabilitySystemPolicy(systemInstructions)` because they genuinely
+compose Framework, Toolkit, and Capability instruction owners.
+`queryAgentMessages()` is the shared history boundary. Domain builders own
+Invocation Context messages, and query `.append()` owns their final order.
 Provider projection happens after those channels meet.
 
 ## Checklist for changing model context
 
-1. Identify the model target and finite System Policy variant.
-2. Verify every System Policy instruction comes from Framework, Host,
-   Capability, Toolkit, or provider protocol authority.
+1. Select the domain System Prompt template and prepare its typed variables.
+2. For Capability composition only, verify every registered instruction comes
+   from Framework, Capability, or Toolkit authority.
 3. Put current goal, task, plan, evidence, environment, and interface facts in
    Invocation Context.
 4. Select existing history only through `queryAgentMessages()`.

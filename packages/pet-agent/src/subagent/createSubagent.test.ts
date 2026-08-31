@@ -30,7 +30,7 @@ import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
   readSubagentGuardStopReason,
 } from './guardStop';
-import { SYSTEM_POLICY_SOURCE } from '../agent/modelContext/systemPolicy';
+import { SYSTEM_POLICY_SOURCE } from '../types/modelContext';
 
 /**
  * Minimal model that never converges: it keeps emitting a fresh tool call every

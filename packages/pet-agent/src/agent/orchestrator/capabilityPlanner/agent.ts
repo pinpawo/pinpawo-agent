@@ -2,11 +2,6 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createAgent } from 'langchain';
-import {
-  buildSystemPolicy,
-  SYSTEM_POLICY_SOURCE,
-  SYSTEM_POLICY_TARGET,
-} from '../../modelContext/systemPolicy';
 import { createInvocationContextMessage } from '../../modelContext/invocationContext';
 import {
   CAPABILITY_PLANNER_CAPABILITY_SEARCH_TOOL_NAME,
@@ -169,19 +164,10 @@ export function createCapabilityPlannerAgent(params: {
     explorerForInput,
   });
   const createModeAgent = (mode: PlannerTerminalToolMode) => {
-    const systemPolicy = buildSystemPolicy({
-      target: SYSTEM_POLICY_TARGET.CAPABILITY_PLANNER,
-      variant: mode,
-      instructions: [{
-        id: `framework:capability-planner:${mode}`,
-        source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-        content: buildCapabilityPlannerAgentSystemPrompt(mode),
-      }],
-    });
     return createAgent({
       name: `capabilityPlanner:${mode}`,
       model: params.model,
-      systemPrompt: systemPolicy.message,
+      systemPrompt: buildCapabilityPlannerAgentSystemPrompt(mode),
       tools: [
         capabilitySearchTool,
         ...createPlannerTerminalTools(mode),

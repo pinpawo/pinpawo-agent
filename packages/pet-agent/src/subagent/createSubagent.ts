@@ -40,10 +40,9 @@ import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
 import {
-  buildSystemPolicy,
+  composeCapabilitySystemPolicy,
   SYSTEM_POLICY_SOURCE,
-  SYSTEM_POLICY_TARGET,
-} from '../agent/modelContext/systemPolicy';
+} from './systemPolicy';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -277,10 +276,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
       : []),
     ...inputState.systemInstructions,
   ];
-  const systemPolicy = buildSystemPolicy({
-    target: SYSTEM_POLICY_TARGET.CAPABILITY,
-    instructions: systemInstructions,
-  });
+  const systemPolicy = composeCapabilitySystemPolicy(systemInstructions);
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
@@ -305,8 +301,6 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   });
 
   writeSubagentRuntimeEvent(SUBAGENT_SYSTEM_POLICY_EVENT, {
-    target: systemPolicy.diagnostics.target,
-    variant: systemPolicy.diagnostics.variant,
     sections: systemPolicy.diagnostics.instructions,
   });
   if (inputState.operations && Object.keys(inputState.operations).length > 0) {

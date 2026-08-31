@@ -44,7 +44,7 @@ import {
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegation';
 import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
-import { SYSTEM_POLICY_SOURCE } from '../../../modelContext/systemPolicy';
+import { SYSTEM_POLICY_SOURCE } from '../../../../types/modelContext';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;

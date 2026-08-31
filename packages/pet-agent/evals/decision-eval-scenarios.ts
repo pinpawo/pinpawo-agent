@@ -112,15 +112,6 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
   },
 ];
 
-const actor = {
-  petId: 'entry-answer-eval',
-  userId: 'eval-user',
-  name: 'entry-answer-eval',
-  personality: null,
-  stage: null,
-  species: null,
-};
-
 // Mirrors createPlanRequestTool()'s contract in
 // runtime/nodes/entryAnswer.ts. The eval scores args.goal, so a stub without
 // that parameter makes every correct route look like a shape failure.
@@ -144,7 +135,7 @@ function renderMessages(prompt: RenderedDecisionPrompt) {
 function entryAnswerScenarios(): DecisionEvalScenario[] {
   return ENTRY_ANSWER_CASES.map((testCase) => {
     const render = (): RenderedDecisionPrompt => ({
-      system: buildEntryAnswerSystemPrompt({ actor }),
+      system: buildEntryAnswerSystemPrompt(),
       input: '',
       conversationMessages: testCase.messages.map((message) => message.role === 'user'
         ? new HumanMessage(message.text)

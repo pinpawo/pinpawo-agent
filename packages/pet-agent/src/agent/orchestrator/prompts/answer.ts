@@ -1,5 +1,4 @@
-import type { HumanMessage, BaseMessage } from '@langchain/core/messages';
-import type { AgentActor } from '../../../types/agent';
+import { SystemMessage, type HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH,
   MAX_HANDOFF_ARTIFACT_TITLE_LENGTH,
@@ -10,13 +9,8 @@ import { getAgentMessageMetadata } from '../../messages';
 import type { UserRequest } from '../types';
 import { clipForPrompt } from '../utils';
 import { buildRunUserRequestContext } from './context';
-import {
-  buildSystemPolicy,
-  SYSTEM_POLICY_SOURCE,
-  SYSTEM_POLICY_TARGET,
-} from '../../modelContext/systemPolicy';
 import { createInvocationContextMessage } from '../../modelContext/invocationContext';
-import { buildActorSystemInstruction, indentXmlBlock, xmlTextBlock } from './shared';
+import { indentXmlBlock, xmlTextBlock } from './shared';
 import { ANSWER_SYSTEM_PROMPT } from './templates/answer.prompt';
 import {
   ENTRY_ANSWER_EXECUTION_ANNOUNCEMENT_REPAIR,
@@ -219,63 +213,21 @@ export function appendAnswerInputMessage(
   return [...canonicalHistory, inputMessage];
 }
 
-export function buildAnswerSystemPrompt(params: {
-  actor: AgentActor;
-}): string {
-  return buildAnswerSystemPolicy(params).message.text;
+export function buildAnswerSystemPrompt(): string {
+  return ANSWER_SYSTEM_PROMPT.render({});
 }
 
 export function buildEntryAnswerSystemPrompt(params: {
-  actor: AgentActor;
-}): string {
-  return buildEntryAnswerSystemPolicy(params).message.text;
-}
-
-export function buildAnswerSystemPolicy(params: { actor: AgentActor }) {
-  return buildSystemPolicy({
-    target: SYSTEM_POLICY_TARGET.ANSWER,
-    instructions: [
-      {
-        id: 'host:actor',
-        source: SYSTEM_POLICY_SOURCE.HOST,
-        owner: params.actor.name,
-        content: buildActorSystemInstruction(params.actor),
-      },
-      {
-        id: 'framework:answer',
-        source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-        content: ANSWER_SYSTEM_PROMPT.render({}),
-      },
-    ],
-  });
-}
-
-export function buildEntryAnswerSystemPolicy(params: {
-  actor: AgentActor;
   repairExecutionAnnouncement?: boolean;
-}) {
-  return buildSystemPolicy({
-    target: SYSTEM_POLICY_TARGET.ENTRY_ANSWER,
-    instructions: [
-      {
-        id: 'host:actor',
-        source: SYSTEM_POLICY_SOURCE.HOST,
-        owner: params.actor.name,
-        content: buildActorSystemInstruction(params.actor),
-      },
-      {
-        id: 'framework:entry-answer',
-        source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-        content: ENTRY_ANSWER_SYSTEM_PROMPT.render({}),
-      },
-      ...(params.repairExecutionAnnouncement
-        ? [{
-            id: 'framework:entry-answer:execution-announcement-repair',
-            source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-            content: ENTRY_ANSWER_EXECUTION_ANNOUNCEMENT_REPAIR,
-          } as const]
-        : []),
-    ],
+} = {}): string {
+  return ENTRY_ANSWER_SYSTEM_PROMPT.render({
+    repairInstruction: params.repairExecutionAnnouncement
+      ? [
+          '',
+          '',
+          ENTRY_ANSWER_EXECUTION_ANNOUNCEMENT_REPAIR,
+        ].join('\n')
+      : '',
   });
 }
 
@@ -291,12 +243,11 @@ export function buildEntryAnswerSystemPolicy(params: {
  * similarity across one session. The facts block is the whole input.
  */
 export function buildAnswerInvocationMessages(params: {
-  actor: AgentActor;
   userRequest?: UserRequest | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
   return [
-    buildAnswerSystemPolicy({ actor: params.actor }).message,
+    new SystemMessage(buildAnswerSystemPrompt()),
     ...appendAnswerInputMessage([], params.userRequest, params.contextFacts),
   ];
 }

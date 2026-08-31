@@ -6,11 +6,6 @@ import {
   AUTO_REVIEW_INPUT_PROMPT,
   AUTO_REVIEW_SYSTEM_PROMPT,
 } from './templates/autoReview.prompt';
-import {
-  buildSystemPolicy,
-  SYSTEM_POLICY_SOURCE,
-  SYSTEM_POLICY_TARGET,
-} from '../../modelContext/systemPolicy';
 
 const MAX_PROMPT_CHARS = 8_000;
 const MAX_ACTIONS_CHARS = 3_000;
@@ -130,12 +125,18 @@ export function selectAutoReviewToolkitPolicies(
   }));
 }
 
-function formatToolkitAutoReviewPolicy(input: AutoReviewToolkitPolicy) {
+function formatToolkitAutoReviewPolicies(
+  policies: readonly AutoReviewToolkitPolicy[],
+) {
+  if (policies.length === 0) return '';
   return [
+    '',
     'Registered toolkit auto-review policies:',
-    `Toolkit ${input.toolkitName}:`,
-    `- Automatic-authorization eligibility: ${stripGuidanceDirective(input.policy.allow, 'allow')}`,
-    `- Human-authorization conditions: ${stripGuidanceDirective(input.policy.ask, 'ask')}`,
+    ...policies.flatMap(({ toolkitName, policy }) => [
+      `Toolkit ${toolkitName}:`,
+      `- Automatic-authorization eligibility: ${stripGuidanceDirective(policy.allow, 'allow')}`,
+      `- Human-authorization conditions: ${stripGuidanceDirective(policy.ask, 'ask')}`,
+    ]),
   ].join('\n');
 }
 
@@ -158,44 +159,14 @@ function buildAutoReviewOutputInstruction(method?: StructuredOutputMethod) {
   ].join('\n');
 }
 
-export function buildAutoReviewSystemPolicy(params: {
-  toolkitPolicies?: readonly AutoReviewToolkitPolicy[];
-  method?: StructuredOutputMethod;
-}) {
-  const outputInstruction = buildAutoReviewOutputInstruction(params.method).trim();
-  return buildSystemPolicy({
-    target: SYSTEM_POLICY_TARGET.AUTO_REVIEW,
-    instructions: [
-      {
-        id: 'framework:auto-review',
-        source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-        content: AUTO_REVIEW_SYSTEM_PROMPT.render({
-          toolkitPolicyBlock: '',
-          outputInstruction: '',
-        }).trimEnd(),
-      },
-      ...(params.toolkitPolicies ?? []).map(({ toolkitName, policy }) => ({
-        id: `toolkit:${toolkitName}:auto-review`,
-        source: SYSTEM_POLICY_SOURCE.TOOLKIT,
-        owner: toolkitName,
-        content: formatToolkitAutoReviewPolicy({ toolkitName, policy }),
-      })),
-      ...(outputInstruction
-        ? [{
-            id: 'provider:auto-review-output',
-            source: SYSTEM_POLICY_SOURCE.PROVIDER_PROTOCOL,
-            content: outputInstruction,
-          } as const]
-        : []),
-    ],
-  });
-}
-
 export function buildAutoReviewSystemPrompt(params: {
   toolkitPolicies?: readonly AutoReviewToolkitPolicy[];
   method?: StructuredOutputMethod;
 }) {
-  return buildAutoReviewSystemPolicy(params).message.text;
+  return AUTO_REVIEW_SYSTEM_PROMPT.render({
+    toolkitPolicyBlock: formatToolkitAutoReviewPolicies(params.toolkitPolicies ?? []),
+    outputInstruction: buildAutoReviewOutputInstruction(params.method),
+  });
 }
 
 export function buildAutoReviewPrompt(params: {

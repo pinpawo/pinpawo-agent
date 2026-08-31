@@ -44,23 +44,30 @@ rendered output and meet only at the model invocation boundary.
 
 ## System Policy
 
-System Policy contains trusted identity, objectives, decision policy, registered
-instructions, and provider output protocol. Its construction has three inputs:
-a code-owned target, an optional finite variant, and trusted instruction
-sources.
+System Policy contains code-owned objectives, decision policy, registered
+Capability instructions, and provider output protocol. Ordinary nodes build it
+the same way as any other prompt: select a domain template and render typed
+variables.
 
-The target comes from the model-calling site, such as Entry Answer, Planner,
-Capability, finalization, routing, or review. It is not runtime content.
+```ts
+const systemPrompt = ENTRY_ANSWER_SYSTEM_PROMPT.render({
+  repairInstruction,
+});
+```
+
+System Policy is a context channel, not a generic runtime request object. A
+node does not restate its target, source list, or actor identity just to render
+one template.
 
 ### Variant selection
 
-A variant selects one of a finite set of code-owned policies. Its discriminator
+A variant selects one of a finite set of code-owned templates. Its discriminator
 must be typed and must come from Framework control flow or validated runtime
 configuration.
 
 Planner `entry | boundary` mode is the current reference example. A future
-target may define another finite variant, but provider protocol and conditional
-Framework instructions are instruction sources rather than variants.
+node may define another finite variant, but the selection remains in its
+domain builder rather than a shared prompt-construction protocol.
 
 A variant must never be inferred from conversation text, an Announce result, a
 tool result, or unconstrained model prose.
@@ -77,37 +84,31 @@ CapabilityPlannerInput.mode
 These branches share one typed discriminator. None derives its value by parsing
 another branch's rendered prompt.
 
-### Trusted instruction sources
+### Registered instruction composition
 
-After selecting a base policy, a model call may compose instructions from only
-these sources:
+Most model calls render one template and need no instruction-source structure.
+Capability execution is the exception because a subagent combines instructions
+registered by multiple owners:
 
 | Source | Examples |
 |---|---|
 | `framework` | governing policy and role objective |
-| `host` | trusted actor or product identity |
 | `capability` | instructions from a validated compiled Capability |
 | `toolkit` | instructions from Toolkits in the compiled Capability `uses` set |
-| `provider_protocol` | structured-output requirements required by the selected provider path |
 
 Conditional instructions, such as informing a Capability that context
 summarization is enabled, remain Framework instruction sources. Their presence
 does not create another base variant.
 
-The common construction contract may be represented as:
+That narrow composition contract is:
 
 ```ts
-type SystemPolicyRequest = {
-  target: ModelTarget;
-  variant?: SystemPromptVariant;
-  instructions?: readonly TrustedInstructionSource[];
-};
+composeCapabilitySystemPolicy(systemInstructions);
 ```
 
-This is a common assembly protocol, not a requirement that every target accept
-the same domain parameters. Each domain resolves its typed inputs into this
-shape before rendering. Arbitrary root state and caller-supplied strings are not
-trusted instruction sources.
+It validates registered instruction ownership, joins the sections, and emits
+content-free diagnostics. It is not used by Entry, Answer, Planner, routing,
+review, or compaction prompt builders.
 
 A model-selected Capability name becomes eligible only after the terminal
 commit is validated, the active delegation is materialized, and the name is
@@ -199,7 +200,7 @@ Use this rule before choosing an API:
 | Agent identity, objective, and decision policy | System Policy |
 | Planner mode | System Policy variant selector |
 | Capability and Toolkit instructions | System Policy instruction sources |
-| Structured-output protocol | System Policy instruction source |
+| Structured-output protocol | System Policy template variable |
 | User goal, task, plan, Announce, and execution evidence | Invocation Context |
 | Workdir and runtime environment | Invocation Context |
 | Available optional interfaces | Invocation Context |
@@ -238,15 +239,17 @@ policy. Provider rendering is not a fourth context channel.
 
 ## Implementation status
 
-- `buildSystemPolicy()` validates a finite target and trusted instruction
-  sources, preserves their order, and emits content-free digests.
+- Ordinary System Prompts use their domain template plus typed render variables.
+- `composeCapabilitySystemPolicy(systemInstructions)` belongs to the Capability
+  subagent domain; it preserves registered instruction order and emits
+  content-free digests.
 - `createInvocationContextMessage()` preserves each domain-owned visible
   schema while applying the shared synthetic, invocation-only, and
   non-authoritative transport metadata.
-- Entry, Answer, Planner, Capability, routing, review, and compaction calls use
-  the shared System Policy contract.
-- Entry's execution-announcement retry adds a Framework instruction to the
-  retry System Policy; it does not inject a synthetic user instruction.
+- Entry, Answer, Planner, routing, review, and compaction select and render their
+  own templates directly.
+- Entry's execution-announcement retry supplies the template's typed repair
+  variable; it does not inject a synthetic user instruction.
 - Planner entry and boundary are explicit agents selected by the typed mode;
   middleware no longer replaces their policy or terminal-tool set.
 - Capability workdir, runtime environment, and optional-interface facts are one
@@ -256,15 +259,16 @@ policy. Provider rendering is not a fourth context channel.
 - Root ingress rejects canonical `SystemMessage` values; legacy checkpoint
   history containing one fails closed and is cleared rather than migrated.
 
-System Policy diagnostics contain target, variant, source, owner, and content
-digest only. Invocation Context identity remains observable through message
-selection diagnostics and stable synthetic-message metadata.
+Capability System Policy diagnostics contain source, owner, and content digest
+only. Invocation Context identity remains observable through message selection
+diagnostics and stable synthetic-message metadata.
 
 ## Invariants
 
 1. Every Agent decision or execution call has exactly one node-owned System
    Policy; closed maintenance calls have one fixed maintenance instruction.
-2. System Policy sources are finite, typed, and trusted.
+2. Ordinary policy variables are typed; composed Capability instruction sources
+   are finite, typed, and trusted.
 3. Root conversation cannot introduce another `SystemMessage` authority.
 4. All current facts and task boundaries use Invocation Context.
 5. Invocation Context is not persisted merely because it was appended.

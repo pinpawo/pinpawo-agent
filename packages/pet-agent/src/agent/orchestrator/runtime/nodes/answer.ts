@@ -27,7 +27,6 @@ import { readMessageText } from '../../utils';
 import {
   getInvokeOptions,
   readRunIterationLimit,
-  resolveActor,
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
@@ -102,7 +101,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
       };
     }
     const { maxRunIterations } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
     // The full main conversation queue. Completed subagent results live here as
     // handoff copies (first-class, lane-free). A user-input-required result is
     // different: its lane remains resumable, so its announce and artifact refs
@@ -161,7 +159,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
         ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     });
     const answerMessages = buildAnswerInvocationMessages({
-      actor,
       userRequest: state.runUserRequest,
       contextFacts: answerContextFacts,
     });

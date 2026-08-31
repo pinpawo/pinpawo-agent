@@ -1,5 +1,3 @@
-import type { AgentActor } from '../../../types/agent';
-
 export function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
   return [
@@ -30,11 +28,4 @@ export function indentXmlBlock(block: string, spaces: number): string {
 export function promptBlock(block: string | null | undefined, spaces: number): string {
   // A block owns its leading newline so optional template slots disappear cleanly.
   return block ? `\n${indentXmlBlock(block, spaces)}` : '';
-}
-
-export function buildActorSystemInstruction(actor: AgentActor): string {
-  return [
-    '[配置]',
-    `角色：「${actor.name}」`,
-  ].join('\n');
 }

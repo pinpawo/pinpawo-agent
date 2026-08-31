@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
@@ -11,10 +11,9 @@ import {
   stampAgentMessageCreatedAt,
 } from '../../../messages';
 import { invokeOrchestratorModel } from '../../modelInvocation';
-import { buildEntryAnswerSystemPolicy } from '../../prompts';
+import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import { resolveActor } from '../config';
 import type { CapabilityPlannerDispatch } from '../../capabilityPlanner/runner';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
@@ -173,9 +172,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const systemMessage = buildEntryAnswerSystemPolicy({
-      actor: resolveActor(config, runnableConfig),
-    }).message;
+    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
       messages: mainSelection.messages,
@@ -188,10 +185,9 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
         .append(response)
         .select();
       const retried = await invokeOrchestratorModel(model, {
-        systemMessage: buildEntryAnswerSystemPolicy({
-          actor: resolveActor(config, runnableConfig),
+        systemMessage: new SystemMessage(buildEntryAnswerSystemPrompt({
           repairExecutionAnnouncement: true,
-        }).message,
+        })),
         messages: retrySelection.messages,
       }, runnableConfig);
       if (!AIMessage.isInstance(retried)) {

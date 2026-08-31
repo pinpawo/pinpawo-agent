@@ -1,6 +1,8 @@
 import { definePromptTemplate } from '../template';
 
-export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`你负责处理主对话中最后一条用户请求，并决定这一轮如何回应。
+export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{
+  repairInstruction: string;
+}>(`你负责处理主对话中最后一条用户请求，并决定这一轮如何回应。
 
 - 已有信息足以回答时，直接回复用户。
 - 请求不清楚，或继续处理需要用户补充信息时，提出具体问题。
@@ -24,7 +26,7 @@ goal 写作「review https://example.com/pr/1」。审查维度、检查清单�
 
 你没有业务工具，本轮也无法执行、读取、查询、修改或验证任何东西；执行只能由 plan_request 工具调用发起。
 
-因此本轮只有两种输出：一次 plan_request 工具调用，或者一段面向用户的最终回复正文。`, []);
+因此本轮只有两种输出：一次 plan_request 工具调用，或者一段面向用户的最终回复正文。{repairInstruction}`, ['repairInstruction']);
 
 export const ENTRY_ANSWER_EXECUTION_ANNOUNCEMENT_REPAIR = [
   '你上一条输出只宣告要执行，却没有发起 plan_request 工具调用，因此没有启动任何执行。',

@@ -6,6 +6,7 @@ import {
   getAgentMessageLane,
   getAgentMessageMetadata,
   mainConversationMessages,
+  queryAgentMessages,
   setAgentMessageMetadata,
   toolProtocolSafeMessages,
 } from '../messages';
@@ -96,20 +97,16 @@ function formatMainMessageForSummary(message: BaseMessage): string | null {
   return null;
 }
 
-function formatMessageForSummary(message: BaseMessage): string | null {
-  if (getAgentMessageLane(message)) return null;
-  return formatMainMessageForSummary(message);
-}
-
 function buildSummaryItems(messages: BaseMessage[]): string[] {
-  return messages.flatMap((message) => {
-    const item = formatMessageForSummary(message);
+  const mainMessages = queryAgentMessages(messages).main().select().messages;
+  return mainMessages.flatMap((message) => {
+    const item = formatMainMessageForSummary(message);
     return item ? [item] : [];
   });
 }
 
 function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
-  const mainMessageCount = messages.filter((message) => !getAgentMessageLane(message)).length;
+  const mainMessageCount = queryAgentMessages(messages).main().select().messages.length;
 
   return [
     '[以下是更早上下文的自动压缩摘要]',

@@ -98,7 +98,7 @@ function buildTools(
     },
     {
       name: 'kanban_assignee_list',
-      description: '列出当前 Studio 中可接收 Kanban 任务的 petId、角色与服务摘要。新增任务前先从这里选择。',
+      description: '读取当前 Studio 可接收 task 的 Pet 快照，返回 petId、角色与服务摘要，用于选择职责匹配的执行者。',
       schema: z.object({}),
     },
   );
@@ -110,7 +110,7 @@ function buildTools(
     },
     {
       name: 'kanban_task_list',
-      description: '列出当前所有任务及其状态、依赖与结果。',
+      description: '读取调用时刻的 Kanban task 快照，返回状态、执行者、依赖与已有结果，适合作为当前决策的事实基线。持续变化通过 Studio 事件与 Trigger 流转；持久化由 Plugin 内部负责。',
       schema: z.object({}),
     },
   );
@@ -133,12 +133,12 @@ function buildTools(
     {
       name: 'kanban_task_add',
       description:
-        '新增一个任务并指派给某个 pet。用 dependsOn 声明它依赖哪些任务先完成;'
-        + '依赖全部完成后该任务才会被派发。',
+        '创建并指派一个可由单个 Pet 独立交付的完整 task。一次调用只创建一个 task；'
+        + 'dependsOn 表示真实的交付依赖，依赖完成后进入可派发状态。返回的 taskId 是持久化成功的确认。',
       schema: z.object({
-        petId: z.string().describe('由哪个 Studio pet 执行'),
-        brief: z.string().describe('任务描述，接收方将以此为唯一输入'),
-        dependsOn: z.array(z.string()).optional().describe('依赖的 taskId'),
+        petId: z.string().describe('负责完整交付的 Studio petId'),
+        brief: z.string().describe('接收方的完整任务输入，包含目标、完成标准、必要上下文与应保留的证据；同一交付的实现步骤统一写入此 brief'),
+        dependsOn: z.array(z.string()).optional().describe('本 task 开始前必须完成的真实前置交付 taskId'),
       }),
     },
   );
@@ -155,7 +155,7 @@ function buildTools(
     },
     {
       name: 'kanban_task_complete',
-      description: '按 taskId 标记任务已完成，并附上结果供后续任务参考。',
+      description: '由当前 task 的执行者按 taskId 提交完成状态和结果摘要，供依赖 task 使用并推进其可派发状态。',
       schema: z.object({
         taskId: z.string().describe('派发请求中给出的 Kanban taskId'),
         result: z.string().describe('完成结果或产出摘要'),
@@ -174,8 +174,8 @@ function buildTools(
     {
       name: 'kanban_task_block',
       description:
-        '按 taskId 标记无法完成的任务，并说明原因。它不会自动重试 —— '
-        + '任务会留在看板上等人决定。',
+        '由当前 task 的执行者按 taskId 提交阻塞状态和原因。阻塞记录保留在看板中，'
+        + '后续显式决策负责重试、调整或替代方案。',
       schema: z.object({
         taskId: z.string().describe('派发请求中给出的 Kanban taskId'),
         reason: z.string().describe('卡住的原因'),
@@ -214,7 +214,7 @@ export function createKanbanToolkit(
   const declaredTools = buildTools(service, readAssignees);
   return {
     name: KANBAN_TOOLKIT_NAME,
-    description: '共享任务看板：查看、拆解、完成与阻塞任务。',
+    description: 'Studio 的共享 task 领域接口：按 Pet 职责登记完整交付、表达依赖，并读取或提交 task 生命周期状态。',
     tools: declaredTools.map((declared, index) => ({
       tool: declared,
       operation: { title: TOOL_TITLES[index] ?? declared.name },

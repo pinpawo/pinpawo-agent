@@ -9,6 +9,8 @@
  *
  * Optional env vars:
  *   SUBAGENT_EVAL_PROFILE — model profile id; defaults to the configured profile
+ *   SUBAGENT_EVAL_CASES — comma-separated case names or ids; defaults to all
+ *   SUBAGENT_EVAL_WRITE_LANGFUSE — set to false to run without result storage
  *
  * Run:
  *   npm run eval:subagent -w @pinpawo/pet-agent
@@ -21,15 +23,26 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createSubagent } from '../src/subagent/createSubagent';
 import { materializeDelegation } from '../src/agent/orchestrator/delegation';
+import { parseCapabilityDocument } from '../src/types/capabilityDocument';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
-import { langfuseFetch, resolveLangfuseConfig } from './scripts/langfuse-api';
+import { resolveLangfuseConfig } from './scripts/langfuse-api';
 import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
+import { createLangfuseV4Runtime } from './scripts/langfuse-v4-runtime';
 
 const DATASET_NAME = 'subagent-execution';
 const DATASET_DESCRIPTION = [
   'Evaluates Capability subagent execution against delegated task boundaries,',
   'tool evidence, continuation state, and truthful incomplete results.',
 ].join(' ');
+
+const STUDIO_PLANNING_CAPABILITY_PATH = resolve(
+  import.meta.dirname,
+  '../../studio/examples/kanban-workdir/.pinpawo/pets/planner/capabilities/studio-planning/CAPABILITY.md',
+);
+const STUDIO_PLANNING_CAPABILITY_PROMPT = parseCapabilityDocument(
+  readFileSync(STUDIO_PLANNING_CAPABILITY_PATH, 'utf8'),
+  STUDIO_PLANNING_CAPABILITY_PATH,
+).body;
 
 const examples = [
   {
@@ -174,6 +187,51 @@ const examples = [
       reason: 'Subagent should report the evidence gap instead of inventing file contents.',
     },
   },
+  {
+    name: 'studio-planner-creates-minimal-kanban-graph-and-stops',
+    inputs: {
+      task: [
+        '为 issue #101 建立最小完整 task 图。',
+        '已确认的工作是：修复 auth token refresh 竞态并补齐回归测试；实现完成后由 Reviewer 独立审查。',
+        'Wiki 会由 task.done Trigger 自动对齐并沿事件流程推进。',
+      ].join('\n'),
+      essential_context: [
+        '项目事实已经充分，可直接形成 task 图。',
+        '当前 task 快照为空。可分派 Pet 为 executor、reviewer、wiki。',
+      ].join('\n'),
+      prompt_sections: [{
+        id: 'capability:studio_planning',
+        owner: 'studio_planning',
+        content: STUDIO_PLANNING_CAPABILITY_PROMPT,
+      }],
+      kanban: {
+        assignees: [
+          'petId=executor role=实现代码与验证 service=完成可运行改动和测试',
+          'petId=reviewer role=独立审查 service=审查实现与验证证据',
+          'petId=wiki role=维护项目知识 service=由 Trigger 对齐 Wiki',
+        ].join('\n'),
+        tasks: '(no tasks yet)',
+      },
+    },
+    outputs: {
+      expected_completion_reason: 'natural',
+      expected_tools: ['kanban_assignee_list', 'kanban_task_list', 'kanban_task_add'],
+      forbidden_tools: ['shell', 'kanban_task_complete', 'kanban_task_block'],
+      tool_call_ranges: {
+        kanban_assignee_list: { min: 1, max: 1 },
+        kanban_task_list: { min: 1, max: 1 },
+        kanban_task_add: { min: 2, max: 2 },
+      },
+      expected_kanban_plan: {
+        assignees: ['executor', 'reviewer'],
+        dependencies: [{ task: 'reviewer', dependsOn: 'executor' }],
+        forbiddenAssignees: ['wiki'],
+      },
+      expected_last_tool: 'kanban_task_add',
+      expected_final_any_terms: ['task', '任务', 'executor', 'reviewer'],
+      reason: 'Studio Planner should create one complete implementation delivery plus one dependent review delivery, omit Trigger-owned Wiki work, and stop without polling or reading Kanban persistence through shell.',
+    },
+  },
 ];
 
 const testCases = examples.map((example, index) => ({
@@ -189,6 +247,23 @@ const testCases = examples.map((example, index) => ({
     source: 'subagent.eval.ts',
   },
 }));
+
+function selectTestCases() {
+  const requested = process.env.SUBAGENT_EVAL_CASES
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!requested?.length) return testCases;
+  const selected = testCases.filter((testCase) => (
+    requested.includes(testCase.id) || requested.includes(testCase.name)
+  ));
+  const found = new Set(selected.flatMap((testCase) => [testCase.id, testCase.name]));
+  const missing = requested.filter((value) => !found.has(value));
+  if (missing.length > 0) {
+    throw new Error(`Unknown SUBAGENT_EVAL_CASES: ${missing.join(', ')}`);
+  }
+  return selected;
+}
 
 function readConfiguredDefaultProfileId(): string {
   try {
@@ -311,8 +386,70 @@ function buildMockTools(inputs: Record<string, unknown>) {
     schema: z.object({ query: z.string().describe('搜索 query') }),
   });
 
+  const kanbanInput = inputs.kanban && typeof inputs.kanban === 'object'
+    ? inputs.kanban as Record<string, unknown>
+    : null;
+  let kanbanTaskSequence = 0;
+  const kanbanAssigneeListTool = tool(async () => {
+    calls.push({ name: 'kanban_assignee_list', args: {} });
+    return String(kanbanInput?.assignees ?? '(no assignees)');
+  }, {
+    name: 'kanban_assignee_list',
+    description: '读取当前 Studio 可接收 task 的 Pet 快照，返回 petId、角色与服务摘要，用于选择职责匹配的执行者。',
+    schema: z.object({}),
+  });
+  const kanbanTaskListTool = tool(async () => {
+    calls.push({ name: 'kanban_task_list', args: {} });
+    return String(kanbanInput?.tasks ?? '(no tasks yet)');
+  }, {
+    name: 'kanban_task_list',
+    description: '读取调用时刻的 Kanban task 快照，适合作为当前决策的事实基线；持续变化通过 Studio 事件与 Trigger 流转。',
+    schema: z.object({}),
+  });
+  const kanbanTaskAddTool = tool(async ({ petId, brief, dependsOn }) => {
+    calls.push({ name: 'kanban_task_add', args: { petId, brief, dependsOn } });
+    kanbanTaskSequence += 1;
+    return `added KAN-${kanbanTaskSequence.toString()}`;
+  }, {
+    name: 'kanban_task_add',
+    description: '创建并指派一个可由单个 Pet 独立交付的完整 task；返回的 taskId 是持久化成功的确认。',
+    schema: z.object({
+      petId: z.string(),
+      brief: z.string(),
+      dependsOn: z.array(z.string()).optional(),
+    }),
+  });
+  const kanbanTaskCompleteTool = tool(async ({ taskId, result }) => {
+    calls.push({ name: 'kanban_task_complete', args: { taskId, result } });
+    return `completed ${taskId}`;
+  }, {
+    name: 'kanban_task_complete',
+    description: '由当前 task 的执行者提交完成状态。',
+    schema: z.object({ taskId: z.string(), result: z.string() }),
+  });
+  const kanbanTaskBlockTool = tool(async ({ taskId, reason }) => {
+    calls.push({ name: 'kanban_task_block', args: { taskId, reason } });
+    return `blocked ${taskId}`;
+  }, {
+    name: 'kanban_task_block',
+    description: '由当前 task 的执行者提交阻塞状态。',
+    schema: z.object({ taskId: z.string(), reason: z.string() }),
+  });
+
   return {
-    tools: [viewFileChunkTool, writeFileTool, shellTool, webSearchTool],
+    tools: [
+      viewFileChunkTool,
+      writeFileTool,
+      shellTool,
+      webSearchTool,
+      ...(kanbanInput ? [
+        kanbanAssigneeListTool,
+        kanbanTaskListTool,
+        kanbanTaskAddTool,
+        kanbanTaskCompleteTool,
+        kanbanTaskBlockTool,
+      ] : []),
+    ],
     calls,
     readFile: (path: string) => files.get(path) ?? null,
   };
@@ -355,7 +492,9 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const result = await createSubagent({
     model: evalSubject.model,
     tools: runtime.tools,
-    promptSections: [],
+    promptSections: Array.isArray(inputs.prompt_sections)
+      ? inputs.prompt_sections
+      : [],
     messages,
     maxIterations: 8,
   });
@@ -513,6 +652,89 @@ function fileContainsEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
+function toolCallRangesEvaluator({ outputs, referenceOutputs }) {
+  const ranges = referenceOutputs?.tool_call_ranges;
+  if (!ranges || typeof ranges !== 'object') {
+    return { key: 'tool_call_ranges_correct', score: 1, comment: 'No tool call ranges specified' };
+  }
+  const called = Array.isArray(outputs?.called_tools) ? outputs.called_tools : [];
+  const failures = [];
+  for (const [name, range] of Object.entries(ranges)) {
+    const count = called.filter((calledName) => calledName === name).length;
+    const min = typeof range?.min === 'number' ? range.min : 0;
+    const max = typeof range?.max === 'number' ? range.max : Number.POSITIVE_INFINITY;
+    if (count < min || count > max) failures.push(`${name}: ${count}, expected ${min}-${max}`);
+  }
+  return {
+    key: 'tool_call_ranges_correct',
+    score: failures.length === 0 ? 1 : 0,
+    comment: failures.length === 0
+      ? 'Tool call counts are within the expected ranges'
+      : failures.join('; '),
+  };
+}
+
+function lastToolEvaluator({ outputs, referenceOutputs }) {
+  const expected = normalizeToolName(referenceOutputs?.expected_last_tool);
+  if (!expected) {
+    return { key: 'last_tool_correct', score: 1, comment: 'No final tool specified' };
+  }
+  const called = Array.isArray(outputs?.called_tools) ? outputs.called_tools : [];
+  const actual = normalizeToolName(called.at(-1));
+  return {
+    key: 'last_tool_correct',
+    score: actual === expected ? 1 : 0,
+    comment: actual === expected
+      ? `Correct: final tool is ${expected}`
+      : `Expected final tool ${expected}, got ${actual ?? '(none)'}`,
+  };
+}
+
+function kanbanPlanEvaluator({ outputs, referenceOutputs }) {
+  const expected = referenceOutputs?.expected_kanban_plan;
+  if (!expected || typeof expected !== 'object') {
+    return { key: 'kanban_plan_correct', score: 1, comment: 'No Kanban plan specified' };
+  }
+  const calls = Array.isArray(outputs?.calls) ? outputs.calls : [];
+  const additions = calls
+    .filter((call) => call?.name === 'kanban_task_add')
+    .map((call, index) => ({
+      taskId: `KAN-${(index + 1).toString()}`,
+      petId: typeof call?.args?.petId === 'string' ? call.args.petId : '',
+      dependsOn: Array.isArray(call?.args?.dependsOn) ? call.args.dependsOn : [],
+    }));
+  const failures = [];
+  const assignees = Array.isArray(expected.assignees) ? expected.assignees : [];
+  for (const petId of assignees) {
+    if (!additions.some((addition) => addition.petId === petId)) {
+      failures.push(`missing task for ${petId}`);
+    }
+  }
+  const forbiddenAssignees = Array.isArray(expected.forbiddenAssignees)
+    ? expected.forbiddenAssignees
+    : [];
+  for (const petId of forbiddenAssignees) {
+    if (additions.some((addition) => addition.petId === petId)) {
+      failures.push(`unexpected task for ${petId}`);
+    }
+  }
+  const dependencies = Array.isArray(expected.dependencies) ? expected.dependencies : [];
+  for (const dependency of dependencies) {
+    const task = additions.find((addition) => addition.petId === dependency.task);
+    const prerequisite = additions.find((addition) => addition.petId === dependency.dependsOn);
+    if (!task || !prerequisite || !task.dependsOn.includes(prerequisite.taskId)) {
+      failures.push(`${dependency.task} does not depend on ${dependency.dependsOn}`);
+    }
+  }
+  return {
+    key: 'kanban_plan_correct',
+    score: failures.length === 0 ? 1 : 0,
+    comment: failures.length === 0
+      ? 'Kanban task ownership and dependencies match the minimal graph'
+      : failures.join('; '),
+  };
+}
+
 const evaluators = [
   exactFieldEvaluator('completion_reason', 'expected_completion_reason'),
   requiredToolsEvaluator,
@@ -522,6 +744,9 @@ const evaluators = [
   finalTermsEvaluator,
   finalAnyTermsEvaluator,
   fileContainsEvaluator,
+  toolCallRangesEvaluator,
+  lastToolEvaluator,
+  kanbanPlanEvaluator,
 ];
 
 const scoreKeys = [
@@ -533,53 +758,53 @@ const scoreKeys = [
   'final_terms_present',
   'final_any_terms_present',
   'file_contains_correct',
+  'tool_call_ranges_correct',
+  'last_tool_correct',
+  'kanban_plan_correct',
 ];
 
-async function syncDataset(config: ReturnType<typeof resolveLangfuseConfig>) {
-  const list = await langfuseFetch<{ data?: Array<{ name: string }> }>(config, '/datasets');
-  if (!(list.data?.some((dataset) => dataset.name === DATASET_NAME) ?? false)) {
-    await langfuseFetch(config, '/datasets', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: DATASET_NAME,
-        description: DATASET_DESCRIPTION,
-        metadata: { owner: 'pet-agent', areas: ['delegation_control'] },
-      }),
+async function syncDataset(runtime: ReturnType<typeof createLangfuseV4Runtime>) {
+  const list = await runtime.client.api.datasets.list();
+  if (!list.data.some((dataset) => dataset.name === DATASET_NAME)) {
+    await runtime.client.api.datasets.create({
+      name: DATASET_NAME,
+      description: DATASET_DESCRIPTION,
+      metadata: { owner: 'pet-agent', areas: ['delegation_control'] },
     });
   }
 
   for (const testCase of testCases) {
-    await langfuseFetch(config, '/dataset-items', {
-      method: 'POST',
-      body: JSON.stringify({
-        id: testCase.id,
-        datasetName: DATASET_NAME,
-        input: testCase.input,
-        expectedOutput: testCase.expected,
-        metadata: {
-          name: testCase.name,
-          suite: testCase.suite,
-          tags: testCase.tags,
-          ...testCase.metadata,
-        },
-      }),
+    await runtime.client.dataset.createItem({
+      id: testCase.id,
+      datasetName: DATASET_NAME,
+      input: testCase.input,
+      expectedOutput: testCase.expected,
+      metadata: {
+        name: testCase.name,
+        suite: testCase.suite,
+        tags: testCase.tags,
+        ...testCase.metadata,
+      },
     });
   }
 }
 
 async function main() {
-  const config = resolveLangfuseConfig();
-  await syncDataset(config);
+  const writeLangfuseResults = process.env.SUBAGENT_EVAL_WRITE_LANGFUSE !== 'false';
+  const config = writeLangfuseResults ? resolveLangfuseConfig() : null;
+  const runtime = config ? createLangfuseV4Runtime(config) : null;
+  if (runtime) await syncDataset(runtime);
+  const selectedTestCases = selectTestCases();
   const runName = process.env.LANGFUSE_RUN_NAME
     ?? `subagent-execution-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running Langfuse subagent eval: ${runName}`);
   console.log(`Dataset: ${DATASET_NAME}`);
   console.log(`Subagent model: ${evalSubject.label}`);
-  console.log(`Langfuse: ${config.baseUrl}`);
-  console.log(`Cases: ${testCases.length}\n`);
+  console.log(`Langfuse: ${config?.baseUrl ?? 'disabled'}`);
+  console.log(`Cases: ${selectedTestCases.length}\n`);
 
   const rows = [];
-  for (const testCase of testCases) {
+  for (const testCase of selectedTestCases) {
     const started = performance.now();
     try {
       const output = await target(testCase.input);
@@ -589,41 +814,45 @@ async function main() {
       }));
       const ok = scores.every(({ score }) => score === 1);
       const durationMs = Math.round(performance.now() - started);
-      await writeLangfuseEvalResult({
-        config,
-        datasetName: DATASET_NAME,
-        runName,
-        traceName: 'subagent-execution-eval',
-        testCase,
-        output,
-        scores,
-        durationMs,
-        metadata: {
-          subjectModelProfileId: evalSubject.metadata.profileId,
-          subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
-        },
-      });
+      if (runtime) {
+        await writeLangfuseEvalResult({
+          runtime,
+          datasetName: DATASET_NAME,
+          runName,
+          traceName: 'subagent-execution-eval',
+          testCase,
+          output,
+          scores,
+          durationMs,
+          metadata: {
+            subjectModelProfileId: evalSubject.metadata.profileId,
+            subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+          },
+        });
+      }
       rows.push({ testCase, output, scores, ok, durationMs });
       console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${durationMs}ms)`);
     } catch (error) {
       const durationMs = Math.round(performance.now() - started);
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       const scores = [{ key: 'run_error', score: 0, comment: message.slice(0, 800) }];
-      await writeLangfuseEvalResult({
-        config,
-        datasetName: DATASET_NAME,
-        runName,
-        traceName: 'subagent-execution-eval',
-        testCase,
-        output: {},
-        scores,
-        durationMs,
-        error: message,
-        metadata: {
-          subjectModelProfileId: evalSubject.metadata.profileId,
-          subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
-        },
-      });
+      if (runtime) {
+        await writeLangfuseEvalResult({
+          runtime,
+          datasetName: DATASET_NAME,
+          runName,
+          traceName: 'subagent-execution-eval',
+          testCase,
+          output: {},
+          scores,
+          durationMs,
+          error: message,
+          metadata: {
+            subjectModelProfileId: evalSubject.metadata.profileId,
+            subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+          },
+        });
+      }
       rows.push({ testCase, output: {}, scores, ok: false, durationMs, error: message });
       console.log(`[ERROR] ${testCase.name} (${durationMs}ms): ${message}`);
     }
@@ -640,8 +869,10 @@ async function main() {
     const failedScores = row.scores.filter((item) => item.score !== 1);
     if (failedScores.length === 0) continue;
     console.log(`  - ${row.testCase.name}: ${failedScores.map((item) => item.comment).join(' | ')}`);
+    console.log(`    output=${JSON.stringify(row.output)}`);
   }
-  console.log('View results in Langfuse.');
+  console.log(runtime ? 'View results in Langfuse.' : 'Langfuse result storage disabled.');
+  await runtime?.shutdown();
   if (rows.some((row) => !row.ok)) process.exitCode = 1;
 }
 

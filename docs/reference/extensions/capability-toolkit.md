@@ -292,8 +292,11 @@ Capability Document Workspace。文件定义的 Capability 保留原始
 Planner 看不见的隐形 Capability。
 
 Planner 是一个框架内部的 tool-loop agent。runtime 从 effective workspace
-初始化一个包含 Capability 名称、职责摘要与搜索 cues 的紧凑路由清单；该清单帮助
-Planner 形成准确的 `capability_search` literal terms，但不替代完整文档。
+初始化一个包含 Capability 名称、职责摘要、搜索 cues，以及 compiled `uses`
+解析出的 Toolkit 名称与描述的紧凑路由清单；Toolkit scope 作为 registry 事实
+确定性保留，不受模型压缩结果影响。该清单帮助 Planner 选择候选；披露候选时以
+canonical Capability name 作为稳定的 `capability_search` literal term，但该清单
+不替代完整文档。
 Planner 使用 `capability_search` 按需披露匹配的完整 `CAPABILITY.md`，再统一完成：
 
 1. 划分当前与后续执行任务；

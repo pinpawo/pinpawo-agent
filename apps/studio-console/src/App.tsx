@@ -1,4 +1,11 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 type Page = 'studio' | 'kanban' | 'scheduler' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
@@ -176,6 +183,8 @@ export function App() {
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
   const [dispatchPet, setDispatchPet] = useState('');
   const [dispatchGoal, setDispatchGoal] = useState('');
+  const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
+  const dispatchSubmittingRef = useRef(false);
   const [retryingInvocationId, setRetryingInvocationId] = useState('');
   const [schedulePet, setSchedulePet] = useState('');
   const [scheduleRequest, setScheduleRequest] = useState('');
@@ -379,11 +388,14 @@ export function App() {
 
   const submitDispatch = (event: FormEvent) => {
     event.preventDefault();
+    if (dispatchSubmittingRef.current) return;
     const request = dispatchGoal.trim();
     if (!dispatchPet || !request) {
       setNotice('Dispatch requires a Pet and a goal.');
       return;
     }
+    dispatchSubmittingRef.current = true;
+    setDispatchSubmitting(true);
     void post<{ petId: string; invocationId: string }>('/dispatch', {
       petId: dispatchPet,
       request,
@@ -399,7 +411,16 @@ export function App() {
         source: 'admission_receipt',
       }));
       setNotice(`Dispatch accepted for ${receipt.petId}.`);
-    }).catch((error) => setNotice(connectionErrorMessage(error)));
+    }).catch((error) => setNotice(connectionErrorMessage(error))).finally(() => {
+      dispatchSubmittingRef.current = false;
+      setDispatchSubmitting(false);
+    });
+  };
+
+  const submitDispatchOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
   };
 
   const retryDispatch = (dispatch: DispatchRecord) => {
@@ -468,10 +489,28 @@ export function App() {
         {page === 'studio' && <>
           <div className="section-title"><span>RESIDENT PETS</span><b>{pets.length}</b></div>
           <div className="rows">{pets.map((pet) => <div className="row" key={pet.petId}><code>{pet.petId}</code><strong>{pet.name}</strong><span>{pet.role ?? pet.serviceSummary ?? 'resident'}</span></div>)}</div>
-          <form className="composer" onSubmit={submitDispatch}>
-            <select onChange={(event) => setDispatchPet(event.target.value)} value={dispatchPet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
-            <input onChange={(event) => setDispatchGoal(event.target.value)} placeholder="Dispatch a goal…" value={dispatchGoal} />
-            <button disabled={connectionState !== 'connected' || !dispatchPet || !dispatchGoal.trim()}>DISPATCH</button>
+          <form className="composer chat-composer" onSubmit={submitDispatch}>
+            <label className="composer-target">
+              <span>DISPATCH TO</span>
+              <select disabled={dispatchSubmitting} onChange={(event) => setDispatchPet(event.target.value)} value={dispatchPet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
+            </label>
+            <div className="chat-input">
+              <label htmlFor="dispatch-goal">MESSAGE</label>
+              <textarea
+                id="dispatch-goal"
+                onChange={(event) => setDispatchGoal(event.target.value)}
+                onKeyDown={submitDispatchOnEnter}
+                placeholder="Describe the goal for this Pet"
+                rows={4}
+                value={dispatchGoal}
+              />
+              <div className="chat-actions">
+                <span>Enter to send / Shift+Enter for a new line</span>
+                <button disabled={dispatchSubmitting || connectionState !== 'connected' || !dispatchPet || !dispatchGoal.trim()}>
+                  {dispatchSubmitting ? 'DISPATCHING…' : 'DISPATCH'}
+                </button>
+              </div>
+            </div>
           </form>
           <div className="section-title"><span>DISPATCH ACTIVITY</span><b>{dispatches.length}</b></div>
           {dispatches.length > 0

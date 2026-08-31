@@ -28,6 +28,11 @@ const REPAIR_LOCK_WAIT_TIMEOUT_MS = 5_000;
 export type CapabilityDocumentWorkspaceEntry = {
   readonly capabilityName: string;
   readonly description: string;
+  /** Toolkit responsibilities resolved from this Capability's compiled uses. */
+  readonly toolkits: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string;
+  }>;
   readonly relativePath: string;
   readonly documentDigest: string;
   readonly provenance: 'authored' | 'generated';
@@ -349,6 +354,9 @@ function freezeWorkspace(params: {
   const entries = params.documents.map((document) => Object.freeze({
     capabilityName: document.capabilityName,
     description: document.description,
+    toolkits: Object.freeze(document.registryFacts.toolkits.map((toolkit) =>
+      Object.freeze({ ...toolkit }),
+    )),
     relativePath: document.relativePath,
     documentDigest: document.documentDigest,
     provenance: document.provenance,

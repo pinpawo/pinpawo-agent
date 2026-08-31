@@ -316,6 +316,7 @@ async function createWorkspace(
       capabilityName,
       description: content.match(/^description:\s*(.+)$/m)?.[1]?.trim()
         .replace(/^['"]|['"]$/g, '') ?? `${capabilityName} capability`,
+      toolkits: [],
       relativePath,
       documentDigest: sha256(content),
       provenance: 'authored' as const,

@@ -23,6 +23,10 @@ export type CapabilityRegistryManifest = {
   readonly capabilities: ReadonlyArray<{
     readonly name: string;
     readonly description: string;
+    readonly toolkits: ReadonlyArray<{
+      readonly name: string;
+      readonly description: string;
+    }>;
   }>;
 };
 
@@ -32,6 +36,11 @@ export type CapabilityRoutingManifest = {
     readonly name: string;
     readonly purpose: string;
     readonly cues: readonly string[];
+    /** Deterministic execution scope; model compression must not erase it. */
+    readonly toolkits: ReadonlyArray<{
+      readonly name: string;
+      readonly description: string;
+    }>;
   }>;
 };
 
@@ -70,6 +79,9 @@ export function createCapabilityRegistryManifest(params: {
       Object.freeze({
         name: entry.capabilityName,
         description: entry.description,
+        toolkits: Object.freeze(entry.toolkits.map((toolkit) =>
+          Object.freeze({ ...toolkit }),
+        )),
       })),
     ),
   });
@@ -86,7 +98,11 @@ export function createDeterministicCapabilityRoutingManifest(
       Object.freeze({
         name: entry.name,
         purpose: entry.description,
-        cues: Object.freeze([entry.name]),
+        cues: Object.freeze([
+          entry.name,
+          ...entry.toolkits.map(({ name }) => name),
+        ]),
+        toolkits: entry.toolkits,
       })),
     ),
   });
@@ -119,6 +135,9 @@ function parseRoutingManifestCommit(
       : {}),
     capabilities: Object.freeze(sourceNames.map((name) => {
       const entry = committedByName.get(name)!;
+      const sourceEntry = source.capabilities.find(
+        (candidate) => candidate.name === name,
+      )!;
       const cues = entry.cues.map((cue) => cue.trim());
       if (new Set(cues.map((cue) => cue.toLowerCase())).size !== cues.length) {
         throw new Error(`Capability routing cues for "${name}" must not contain duplicates.`);
@@ -127,6 +146,7 @@ function parseRoutingManifestCommit(
         name,
         purpose: entry.purpose.trim(),
         cues: Object.freeze(cues),
+        toolkits: sourceEntry.toolkits,
       });
     })),
   });

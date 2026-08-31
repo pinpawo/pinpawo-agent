@@ -306,6 +306,10 @@ test('workspace digest changes with compiled executor facts', async (t) => {
 
   assert.notEqual(first.registryDigest, second.registryDigest);
   assert.notEqual(first.rootPath, second.rootPath);
+  assert.deepEqual(first.entries[0]?.toolkits, [{
+    name: 'workspace',
+    description: 'Workspace tools.',
+  }]);
 });
 
 test('workspace reuses a verified digest snapshot and repairs cache tampering', async (t) => {

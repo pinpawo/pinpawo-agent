@@ -15,12 +15,20 @@ function workspace(): CapabilityDocumentWorkspace {
   const entries = [{
     capabilityName: 'general',
     description: 'Handle ordinary workspace tasks.',
+    toolkits: [{
+      name: 'workspace',
+      description: 'Read, edit, and verify files in the local workspace.',
+    }],
     relativePath: 'general/CAPABILITY.md',
     documentDigest: 'a'.repeat(64),
     provenance: 'authored' as const,
   }, {
     capabilityName: 'github_project',
     description: 'Inspect and maintain GitHub Issues and Pull Requests.',
+    toolkits: [{
+      name: 'git',
+      description: 'Inspect Git repositories and view or maintain GitHub Issues and Pull Requests.',
+    }],
     relativePath: 'github_project/CAPABILITY.md',
     documentDigest: 'b'.repeat(64),
     provenance: 'authored' as const,
@@ -75,7 +83,11 @@ class RoutingManifestModel extends BaseChatModel {
     )?.[1]?.replaceAll(']]]]><![CDATA[>', ']]>');
     const source = JSON.parse(sourceText ?? '{}') as {
       default?: string | null;
-      capabilities: Array<{ name: string; description: string }>;
+      capabilities: Array<{
+        name: string;
+        description: string;
+        toolkits: Array<{ name: string; description: string }>;
+      }>;
     };
     const message = new AIMessage({
       content: '',
@@ -108,9 +120,17 @@ test('registry manifest contains every available Capability and the configured d
     capabilities: [{
       name: 'general',
       description: 'Handle ordinary workspace tasks.',
+      toolkits: [{
+        name: 'workspace',
+        description: 'Read, edit, and verify files in the local workspace.',
+      }],
     }, {
       name: 'github_project',
       description: 'Inspect and maintain GitHub Issues and Pull Requests.',
+      toolkits: [{
+        name: 'git',
+        description: 'Inspect Git repositories and view or maintain GitHub Issues and Pull Requests.',
+      }],
     }],
   });
 });
@@ -137,6 +157,10 @@ test('model initialization validates coverage and restores source order', async 
     'issue',
     'pull request',
   ]);
+  assert.deepEqual(manifest.capabilities[1]?.toolkits, [{
+    name: 'git',
+    description: 'Inspect Git repositories and view or maintain GitHub Issues and Pull Requests.',
+  }]);
 });
 
 test('invalid initialization falls back without dropping routing coverage', async (t) => {
@@ -149,11 +173,19 @@ test('invalid initialization falls back without dropping routing coverage', asyn
   assert.deepEqual(manifest.capabilities, [{
     name: 'general',
     purpose: 'Handle ordinary workspace tasks.',
-    cues: ['general'],
+    cues: ['general', 'workspace'],
+    toolkits: [{
+      name: 'workspace',
+      description: 'Read, edit, and verify files in the local workspace.',
+    }],
   }, {
     name: 'github_project',
     purpose: 'Inspect and maintain GitHub Issues and Pull Requests.',
-    cues: ['github_project'],
+    cues: ['github_project', 'git'],
+    toolkits: [{
+      name: 'git',
+      description: 'Inspect Git repositories and view or maintain GitHub Issues and Pull Requests.',
+    }],
   }]);
 });
 

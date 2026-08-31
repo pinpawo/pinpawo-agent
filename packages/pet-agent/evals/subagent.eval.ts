@@ -23,7 +23,6 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createSubagent } from '../src/subagent/createSubagent';
 import { materializeDelegation } from '../src/agent/orchestrator/delegation';
-import { parseCapabilityDocument } from '../src/types/capabilityDocument';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { resolveLangfuseConfig } from './scripts/langfuse-api';
 import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
@@ -34,15 +33,6 @@ const DATASET_DESCRIPTION = [
   'Evaluates Capability subagent execution against delegated task boundaries,',
   'tool evidence, continuation state, and truthful incomplete results.',
 ].join(' ');
-
-const STUDIO_PLANNING_CAPABILITY_PATH = resolve(
-  import.meta.dirname,
-  '../../studio/examples/kanban-workdir/.pinpawo/pets/planner/capabilities/studio-planning/CAPABILITY.md',
-);
-const STUDIO_PLANNING_CAPABILITY_PROMPT = parseCapabilityDocument(
-  readFileSync(STUDIO_PLANNING_CAPABILITY_PATH, 'utf8'),
-  STUDIO_PLANNING_CAPABILITY_PATH,
-).body;
 
 const examples = [
   {
@@ -185,51 +175,6 @@ const examples = [
       expected_tools: ['view_file_chunk'],
       expected_final_any_terms: ['不存在', '找不到', '未找到', '失败', 'not found'],
       reason: 'Subagent should report the evidence gap instead of inventing file contents.',
-    },
-  },
-  {
-    name: 'studio-planner-creates-minimal-kanban-graph-and-stops',
-    inputs: {
-      task: [
-        '为 issue #101 建立最小完整 task 图。',
-        '已确认的工作是：修复 auth token refresh 竞态并补齐回归测试；实现完成后由 Reviewer 独立审查。',
-        'Wiki 会由 task.done Trigger 自动对齐并沿事件流程推进。',
-      ].join('\n'),
-      essential_context: [
-        '项目事实已经充分，可直接形成 task 图。',
-        '当前 task 快照为空。可分派 Pet 为 executor、reviewer、wiki。',
-      ].join('\n'),
-      prompt_sections: [{
-        id: 'capability:studio_planning',
-        owner: 'studio_planning',
-        content: STUDIO_PLANNING_CAPABILITY_PROMPT,
-      }],
-      kanban: {
-        assignees: [
-          'petId=executor role=实现代码与验证 service=完成可运行改动和测试',
-          'petId=reviewer role=独立审查 service=审查实现与验证证据',
-          'petId=wiki role=维护项目知识 service=由 Trigger 对齐 Wiki',
-        ].join('\n'),
-        tasks: '(no tasks yet)',
-      },
-    },
-    outputs: {
-      expected_completion_reason: 'natural',
-      expected_tools: ['kanban_assignee_list', 'kanban_task_list', 'kanban_task_add'],
-      forbidden_tools: ['shell', 'kanban_task_complete', 'kanban_task_block'],
-      tool_call_ranges: {
-        kanban_assignee_list: { min: 1, max: 1 },
-        kanban_task_list: { min: 1, max: 1 },
-        kanban_task_add: { min: 2, max: 2 },
-      },
-      expected_kanban_plan: {
-        assignees: ['executor', 'reviewer'],
-        dependencies: [{ task: 'reviewer', dependsOn: 'executor' }],
-        forbiddenAssignees: ['wiki'],
-      },
-      expected_last_tool: 'kanban_task_add',
-      expected_final_any_terms: ['task', '任务', 'executor', 'reviewer'],
-      reason: 'Studio Planner should create one complete implementation delivery plus one dependent review delivery, omit Trigger-owned Wiki work, and stop without polling or reading Kanban persistence through shell.',
     },
   },
 ];
@@ -386,70 +331,8 @@ function buildMockTools(inputs: Record<string, unknown>) {
     schema: z.object({ query: z.string().describe('搜索 query') }),
   });
 
-  const kanbanInput = inputs.kanban && typeof inputs.kanban === 'object'
-    ? inputs.kanban as Record<string, unknown>
-    : null;
-  let kanbanTaskSequence = 0;
-  const kanbanAssigneeListTool = tool(async () => {
-    calls.push({ name: 'kanban_assignee_list', args: {} });
-    return String(kanbanInput?.assignees ?? '(no assignees)');
-  }, {
-    name: 'kanban_assignee_list',
-    description: '读取当前 Studio 可接收 task 的 Pet 快照，返回 petId、角色与服务摘要，用于选择职责匹配的执行者。',
-    schema: z.object({}),
-  });
-  const kanbanTaskListTool = tool(async () => {
-    calls.push({ name: 'kanban_task_list', args: {} });
-    return String(kanbanInput?.tasks ?? '(no tasks yet)');
-  }, {
-    name: 'kanban_task_list',
-    description: '读取调用时刻的 Kanban task 快照，适合作为当前决策的事实基线；持续变化通过 Studio 事件与 Trigger 流转。',
-    schema: z.object({}),
-  });
-  const kanbanTaskAddTool = tool(async ({ petId, brief, dependsOn }) => {
-    calls.push({ name: 'kanban_task_add', args: { petId, brief, dependsOn } });
-    kanbanTaskSequence += 1;
-    return `added KAN-${kanbanTaskSequence.toString()}`;
-  }, {
-    name: 'kanban_task_add',
-    description: '创建并指派一个可由单个 Pet 独立交付的完整 task；返回的 taskId 是持久化成功的确认。',
-    schema: z.object({
-      petId: z.string(),
-      brief: z.string(),
-      dependsOn: z.array(z.string()).optional(),
-    }),
-  });
-  const kanbanTaskCompleteTool = tool(async ({ taskId, result }) => {
-    calls.push({ name: 'kanban_task_complete', args: { taskId, result } });
-    return `completed ${taskId}`;
-  }, {
-    name: 'kanban_task_complete',
-    description: '由当前 task 的执行者提交完成状态。',
-    schema: z.object({ taskId: z.string(), result: z.string() }),
-  });
-  const kanbanTaskBlockTool = tool(async ({ taskId, reason }) => {
-    calls.push({ name: 'kanban_task_block', args: { taskId, reason } });
-    return `blocked ${taskId}`;
-  }, {
-    name: 'kanban_task_block',
-    description: '由当前 task 的执行者提交阻塞状态。',
-    schema: z.object({ taskId: z.string(), reason: z.string() }),
-  });
-
   return {
-    tools: [
-      viewFileChunkTool,
-      writeFileTool,
-      shellTool,
-      webSearchTool,
-      ...(kanbanInput ? [
-        kanbanAssigneeListTool,
-        kanbanTaskListTool,
-        kanbanTaskAddTool,
-        kanbanTaskCompleteTool,
-        kanbanTaskBlockTool,
-      ] : []),
-    ],
+    tools: [viewFileChunkTool, writeFileTool, shellTool, webSearchTool],
     calls,
     readFile: (path: string) => files.get(path) ?? null,
   };
@@ -492,9 +375,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const result = await createSubagent({
     model: evalSubject.model,
     tools: runtime.tools,
-    promptSections: Array.isArray(inputs.prompt_sections)
-      ? inputs.prompt_sections
-      : [],
+    promptSections: [],
     messages,
     maxIterations: 8,
   });
@@ -652,89 +533,6 @@ function fileContainsEvaluator({ outputs, referenceOutputs }) {
   };
 }
 
-function toolCallRangesEvaluator({ outputs, referenceOutputs }) {
-  const ranges = referenceOutputs?.tool_call_ranges;
-  if (!ranges || typeof ranges !== 'object') {
-    return { key: 'tool_call_ranges_correct', score: 1, comment: 'No tool call ranges specified' };
-  }
-  const called = Array.isArray(outputs?.called_tools) ? outputs.called_tools : [];
-  const failures = [];
-  for (const [name, range] of Object.entries(ranges)) {
-    const count = called.filter((calledName) => calledName === name).length;
-    const min = typeof range?.min === 'number' ? range.min : 0;
-    const max = typeof range?.max === 'number' ? range.max : Number.POSITIVE_INFINITY;
-    if (count < min || count > max) failures.push(`${name}: ${count}, expected ${min}-${max}`);
-  }
-  return {
-    key: 'tool_call_ranges_correct',
-    score: failures.length === 0 ? 1 : 0,
-    comment: failures.length === 0
-      ? 'Tool call counts are within the expected ranges'
-      : failures.join('; '),
-  };
-}
-
-function lastToolEvaluator({ outputs, referenceOutputs }) {
-  const expected = normalizeToolName(referenceOutputs?.expected_last_tool);
-  if (!expected) {
-    return { key: 'last_tool_correct', score: 1, comment: 'No final tool specified' };
-  }
-  const called = Array.isArray(outputs?.called_tools) ? outputs.called_tools : [];
-  const actual = normalizeToolName(called.at(-1));
-  return {
-    key: 'last_tool_correct',
-    score: actual === expected ? 1 : 0,
-    comment: actual === expected
-      ? `Correct: final tool is ${expected}`
-      : `Expected final tool ${expected}, got ${actual ?? '(none)'}`,
-  };
-}
-
-function kanbanPlanEvaluator({ outputs, referenceOutputs }) {
-  const expected = referenceOutputs?.expected_kanban_plan;
-  if (!expected || typeof expected !== 'object') {
-    return { key: 'kanban_plan_correct', score: 1, comment: 'No Kanban plan specified' };
-  }
-  const calls = Array.isArray(outputs?.calls) ? outputs.calls : [];
-  const additions = calls
-    .filter((call) => call?.name === 'kanban_task_add')
-    .map((call, index) => ({
-      taskId: `KAN-${(index + 1).toString()}`,
-      petId: typeof call?.args?.petId === 'string' ? call.args.petId : '',
-      dependsOn: Array.isArray(call?.args?.dependsOn) ? call.args.dependsOn : [],
-    }));
-  const failures = [];
-  const assignees = Array.isArray(expected.assignees) ? expected.assignees : [];
-  for (const petId of assignees) {
-    if (!additions.some((addition) => addition.petId === petId)) {
-      failures.push(`missing task for ${petId}`);
-    }
-  }
-  const forbiddenAssignees = Array.isArray(expected.forbiddenAssignees)
-    ? expected.forbiddenAssignees
-    : [];
-  for (const petId of forbiddenAssignees) {
-    if (additions.some((addition) => addition.petId === petId)) {
-      failures.push(`unexpected task for ${petId}`);
-    }
-  }
-  const dependencies = Array.isArray(expected.dependencies) ? expected.dependencies : [];
-  for (const dependency of dependencies) {
-    const task = additions.find((addition) => addition.petId === dependency.task);
-    const prerequisite = additions.find((addition) => addition.petId === dependency.dependsOn);
-    if (!task || !prerequisite || !task.dependsOn.includes(prerequisite.taskId)) {
-      failures.push(`${dependency.task} does not depend on ${dependency.dependsOn}`);
-    }
-  }
-  return {
-    key: 'kanban_plan_correct',
-    score: failures.length === 0 ? 1 : 0,
-    comment: failures.length === 0
-      ? 'Kanban task ownership and dependencies match the minimal graph'
-      : failures.join('; '),
-  };
-}
-
 const evaluators = [
   exactFieldEvaluator('completion_reason', 'expected_completion_reason'),
   requiredToolsEvaluator,
@@ -744,9 +542,6 @@ const evaluators = [
   finalTermsEvaluator,
   finalAnyTermsEvaluator,
   fileContainsEvaluator,
-  toolCallRangesEvaluator,
-  lastToolEvaluator,
-  kanbanPlanEvaluator,
 ];
 
 const scoreKeys = [
@@ -758,9 +553,6 @@ const scoreKeys = [
   'final_terms_present',
   'final_any_terms_present',
   'file_contains_correct',
-  'tool_call_ranges_correct',
-  'last_tool_correct',
-  'kanban_plan_correct',
 ];
 
 async function syncDataset(runtime: ReturnType<typeof createLangfuseV4Runtime>) {

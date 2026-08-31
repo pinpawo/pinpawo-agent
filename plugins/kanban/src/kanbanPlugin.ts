@@ -110,7 +110,10 @@ function buildTools(
     },
     {
       name: 'kanban_task_list',
-      description: '读取调用时刻的 Kanban task 快照，返回状态、执行者、依赖与已有结果，适合作为当前决策的事实基线。持续变化通过 Studio 事件与 Trigger 流转；持久化由 Plugin 内部负责。',
+      description:
+        '读取调用时刻的 Kanban task 快照，返回状态、执行者、依赖与已有结果。'
+        + '一次规划读取一份快照即可形成当前决策的事实基线；新增 task 返回的 taskId 是持久化确认，'
+        + '后续变化通过 Studio 事件与 Trigger 流转。',
       schema: z.object({}),
     },
   );

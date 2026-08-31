@@ -65,14 +65,13 @@ recreate datasets.
 - `agent-orchestrator-lifecycle-composition`: production graph and production
   prompt composition with a real decision model and controlled executor evidence.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection resuming inside the same subagent before normal handoff.
-- `subagent-execution`: direct Capability execution cases, including a Studio
-  Planner case that creates the minimal Kanban task graph and stops without
-  polling task state or reading private persistence through Shell.
+- `subagent-execution`: direct Capability execution cases with deterministic
+  mock tools for general delegation behavior.
 
-Run only that Planner case with:
+Run one case with:
 
 ```sh
-SUBAGENT_EVAL_CASES=studio-planner-creates-minimal-kanban-graph-and-stops \
+SUBAGENT_EVAL_CASES=read-file-and-summarize \
   npm run eval:subagent -w @pinpawo/pet-agent
 ```
 

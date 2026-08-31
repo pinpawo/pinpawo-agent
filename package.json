@@ -33,6 +33,7 @@
     "eval:langfuse:capability-planning": "npm -w @pinpawo/pet-agent run eval:langfuse:capability-planning",
     "eval:langfuse:multi-task-flow": "npm -w @pinpawo/pet-agent run eval:langfuse:multi-task-flow",
     "eval:langfuse:tool-review-reject": "npm -w @pinpawo/pet-agent run eval:langfuse:tool-review-reject",
+    "eval:studio-planning": "npm -w @pinpawo-tests/studio-e2e run eval:studio-planning",
     "eval:decision-stability": "npm -w @pinpawo/pet-agent run eval:decision-stability",
     "eval:prompt-stability": "npm -w @pinpawo/pet-agent run eval:prompt-stability",
     "eval:prompt-matrix": "npm -w @pinpawo/pet-agent run eval:prompt-matrix",

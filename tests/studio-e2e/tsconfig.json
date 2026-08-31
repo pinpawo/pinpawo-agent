@@ -3,8 +3,10 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
+      "@pinpawo/pet-agent": ["../../packages/pet-agent/src/index.ts"],
       "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
       "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
       "@pinpawo-plugin/kanban": ["../../plugins/kanban/src/index.ts"],

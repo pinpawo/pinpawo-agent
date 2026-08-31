@@ -65,6 +65,18 @@ recreate datasets.
 - `agent-orchestrator-lifecycle-composition`: production graph and production
   prompt composition with a real decision model and controlled executor evidence.
 - `agent-tool-review-reject-runtime`: runtime regression case for reviewed tool-call rejection resuming inside the same subagent before normal handoff.
+- `subagent-execution`: direct Capability execution cases with deterministic
+  mock tools for general delegation behavior.
+
+Run one case with:
+
+```sh
+SUBAGENT_EVAL_CASES=read-file-and-summarize \
+  npm run eval:subagent -w @pinpawo/pet-agent
+```
+
+When Langfuse is unavailable, add `SUBAGENT_EVAL_WRITE_LANGFUSE=false` to run
+the same model behavior checks without result storage.
 
 The `agent-*` datasets are seed coverage for future runners. They are meant to
 make the expected behavior explicit before each runner is migrated to Langfuse.

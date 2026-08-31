@@ -5,17 +5,21 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
+    "eval:studio-planning": "node --env-file-if-exists=../../packages/pet-agent/.env --import tsx/esm src/studioPlanning.eval.ts"
   },
   "devDependencies": {
+    "@langchain/core": "^1.2.1",
     "@pinpawo-plugin/studio-http": "*",
     "@pinpawo-plugin/kanban": "*",
     "@pinpawo-plugin/project-files": "*",
     "@pinpawo-plugin/scheduler": "*",
     "@pinpawo-plugin/trigger": "*",
+    "@pinpawo/pet-agent": "*",
     "@pinpawo/studio": "*",
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "zod": "^3.22.0"
   }
 }

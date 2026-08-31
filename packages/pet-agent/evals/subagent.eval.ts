@@ -9,6 +9,8 @@
  *
  * Optional env vars:
  *   SUBAGENT_EVAL_PROFILE — model profile id; defaults to the configured profile
+ *   SUBAGENT_EVAL_CASES — comma-separated case names or ids; defaults to all
+ *   SUBAGENT_EVAL_WRITE_LANGFUSE — set to false to run without result storage
  *
  * Run:
  *   npm run eval:subagent -w @pinpawo/pet-agent
@@ -22,8 +24,9 @@ import { z } from 'zod';
 import { createSubagent } from '../src/subagent/createSubagent';
 import { materializeDelegation } from '../src/agent/orchestrator/delegation';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
-import { langfuseFetch, resolveLangfuseConfig } from './scripts/langfuse-api';
+import { resolveLangfuseConfig } from './scripts/langfuse-api';
 import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
+import { createLangfuseV4Runtime } from './scripts/langfuse-v4-runtime';
 
 const DATASET_NAME = 'subagent-execution';
 const DATASET_DESCRIPTION = [
@@ -189,6 +192,23 @@ const testCases = examples.map((example, index) => ({
     source: 'subagent.eval.ts',
   },
 }));
+
+function selectTestCases() {
+  const requested = process.env.SUBAGENT_EVAL_CASES
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!requested?.length) return testCases;
+  const selected = testCases.filter((testCase) => (
+    requested.includes(testCase.id) || requested.includes(testCase.name)
+  ));
+  const found = new Set(selected.flatMap((testCase) => [testCase.id, testCase.name]));
+  const missing = requested.filter((value) => !found.has(value));
+  if (missing.length > 0) {
+    throw new Error(`Unknown SUBAGENT_EVAL_CASES: ${missing.join(', ')}`);
+  }
+  return selected;
+}
 
 function readConfiguredDefaultProfileId(): string {
   try {
@@ -535,51 +555,48 @@ const scoreKeys = [
   'file_contains_correct',
 ];
 
-async function syncDataset(config: ReturnType<typeof resolveLangfuseConfig>) {
-  const list = await langfuseFetch<{ data?: Array<{ name: string }> }>(config, '/datasets');
-  if (!(list.data?.some((dataset) => dataset.name === DATASET_NAME) ?? false)) {
-    await langfuseFetch(config, '/datasets', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: DATASET_NAME,
-        description: DATASET_DESCRIPTION,
-        metadata: { owner: 'pet-agent', areas: ['delegation_control'] },
-      }),
+async function syncDataset(runtime: ReturnType<typeof createLangfuseV4Runtime>) {
+  const list = await runtime.client.api.datasets.list();
+  if (!list.data.some((dataset) => dataset.name === DATASET_NAME)) {
+    await runtime.client.api.datasets.create({
+      name: DATASET_NAME,
+      description: DATASET_DESCRIPTION,
+      metadata: { owner: 'pet-agent', areas: ['delegation_control'] },
     });
   }
 
   for (const testCase of testCases) {
-    await langfuseFetch(config, '/dataset-items', {
-      method: 'POST',
-      body: JSON.stringify({
-        id: testCase.id,
-        datasetName: DATASET_NAME,
-        input: testCase.input,
-        expectedOutput: testCase.expected,
-        metadata: {
-          name: testCase.name,
-          suite: testCase.suite,
-          tags: testCase.tags,
-          ...testCase.metadata,
-        },
-      }),
+    await runtime.client.dataset.createItem({
+      id: testCase.id,
+      datasetName: DATASET_NAME,
+      input: testCase.input,
+      expectedOutput: testCase.expected,
+      metadata: {
+        name: testCase.name,
+        suite: testCase.suite,
+        tags: testCase.tags,
+        ...testCase.metadata,
+      },
     });
   }
 }
 
 async function main() {
-  const config = resolveLangfuseConfig();
-  await syncDataset(config);
+  const writeLangfuseResults = process.env.SUBAGENT_EVAL_WRITE_LANGFUSE !== 'false';
+  const config = writeLangfuseResults ? resolveLangfuseConfig() : null;
+  const runtime = config ? createLangfuseV4Runtime(config) : null;
+  if (runtime) await syncDataset(runtime);
+  const selectedTestCases = selectTestCases();
   const runName = process.env.LANGFUSE_RUN_NAME
     ?? `subagent-execution-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running Langfuse subagent eval: ${runName}`);
   console.log(`Dataset: ${DATASET_NAME}`);
   console.log(`Subagent model: ${evalSubject.label}`);
-  console.log(`Langfuse: ${config.baseUrl}`);
-  console.log(`Cases: ${testCases.length}\n`);
+  console.log(`Langfuse: ${config?.baseUrl ?? 'disabled'}`);
+  console.log(`Cases: ${selectedTestCases.length}\n`);
 
   const rows = [];
-  for (const testCase of testCases) {
+  for (const testCase of selectedTestCases) {
     const started = performance.now();
     try {
       const output = await target(testCase.input);
@@ -589,41 +606,45 @@ async function main() {
       }));
       const ok = scores.every(({ score }) => score === 1);
       const durationMs = Math.round(performance.now() - started);
-      await writeLangfuseEvalResult({
-        config,
-        datasetName: DATASET_NAME,
-        runName,
-        traceName: 'subagent-execution-eval',
-        testCase,
-        output,
-        scores,
-        durationMs,
-        metadata: {
-          subjectModelProfileId: evalSubject.metadata.profileId,
-          subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
-        },
-      });
+      if (runtime) {
+        await writeLangfuseEvalResult({
+          runtime,
+          datasetName: DATASET_NAME,
+          runName,
+          traceName: 'subagent-execution-eval',
+          testCase,
+          output,
+          scores,
+          durationMs,
+          metadata: {
+            subjectModelProfileId: evalSubject.metadata.profileId,
+            subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+          },
+        });
+      }
       rows.push({ testCase, output, scores, ok, durationMs });
       console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${durationMs}ms)`);
     } catch (error) {
       const durationMs = Math.round(performance.now() - started);
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       const scores = [{ key: 'run_error', score: 0, comment: message.slice(0, 800) }];
-      await writeLangfuseEvalResult({
-        config,
-        datasetName: DATASET_NAME,
-        runName,
-        traceName: 'subagent-execution-eval',
-        testCase,
-        output: {},
-        scores,
-        durationMs,
-        error: message,
-        metadata: {
-          subjectModelProfileId: evalSubject.metadata.profileId,
-          subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
-        },
-      });
+      if (runtime) {
+        await writeLangfuseEvalResult({
+          runtime,
+          datasetName: DATASET_NAME,
+          runName,
+          traceName: 'subagent-execution-eval',
+          testCase,
+          output: {},
+          scores,
+          durationMs,
+          error: message,
+          metadata: {
+            subjectModelProfileId: evalSubject.metadata.profileId,
+            subjectModelProfileFingerprint: evalSubject.metadata.fingerprint,
+          },
+        });
+      }
       rows.push({ testCase, output: {}, scores, ok: false, durationMs, error: message });
       console.log(`[ERROR] ${testCase.name} (${durationMs}ms): ${message}`);
     }
@@ -640,8 +661,10 @@ async function main() {
     const failedScores = row.scores.filter((item) => item.score !== 1);
     if (failedScores.length === 0) continue;
     console.log(`  - ${row.testCase.name}: ${failedScores.map((item) => item.comment).join(' | ')}`);
+    console.log(`    output=${JSON.stringify(row.output)}`);
   }
-  console.log('View results in Langfuse.');
+  console.log(runtime ? 'View results in Langfuse.' : 'Langfuse result storage disabled.');
+  await runtime?.shutdown();
   if (rows.some((row) => !row.ok)) process.exitCode = 1;
 }
 

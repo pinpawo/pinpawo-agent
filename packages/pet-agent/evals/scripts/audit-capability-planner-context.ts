@@ -1,4 +1,9 @@
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import {
+  AIMessage,
+  HumanMessage,
+  SystemMessage,
+  type BaseMessage,
+} from '@langchain/core/messages';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/capabilityPlanner/capabilityDisclosure.ts';
@@ -17,12 +22,14 @@ import {
 } from '../../src/agent/orchestrator/capabilityPlanner/routingManifest.ts';
 import { createPlannerSession } from '../../src/agent/orchestrator/capabilityPlanner/session.ts';
 import { createPlannerTerminalTools } from '../../src/agent/orchestrator/capabilityPlanner/terminalTools.ts';
-import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation/index.ts';
-import { modelVisibleMessages } from '../../src/agent/orchestrator/modelMessageView.ts';
+import {
+  DelegationAnnounceMessage,
+} from '../../src/agent/orchestrator/delegation/index.ts';
 import {
   queryAgentMessages,
   setAgentMessageMetadata,
 } from '../../src/agent/messages/index.ts';
+import { invokeOrchestratorModel } from '../../src/agent/orchestrator/modelInvocation.ts';
 import {
   buildCapabilityPlannerAgentInput,
   buildCapabilityPlannerAgentSystemPrompt,
@@ -170,10 +177,24 @@ function renderTool(tool: StructuredTool) {
   }, null, 2);
 }
 
-function renderMode(mode: CapabilityPlannerMode) {
+async function captureProviderHistory(messages: readonly BaseMessage[]) {
+  let invocation: BaseMessage[] = [];
+  await invokeOrchestratorModel({
+    async invoke(input) {
+      invocation = input;
+      return new AIMessage('audit capture');
+    },
+  }, {
+    systemMessage: new SystemMessage('audit system marker'),
+    messages,
+  });
+  return invocation.slice(1);
+}
+
+async function renderMode(mode: CapabilityPlannerMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
-  const projectedMessages = modelVisibleMessages(mainSelection.messages);
+  const projectedMessages = await captureProviderHistory(mainSelection.messages);
   const searchTool = createCapabilityPlannerSearchTool(async () => ({
     ok: true,
     data: { entries: [] },
@@ -199,7 +220,7 @@ function renderMode(mode: CapabilityPlannerMode) {
 console.log(`# Capability Planner Context Audit
 
 This is a static rendering of the production prompt builders, message projection,
-tool descriptions, and argument schemas. No model is called.
+tool descriptions, and argument schemas. No external model is called.
 
 Audit in this order:
 1. Goal: the system message names one clear decision objective for this mode.
@@ -209,5 +230,5 @@ Audit in this order:
 5. Scope: private executor-lane messages are absent; accepted main-history conclusions remain visible.
 6. Runtime: code validates identities and shapes only; semantic completion remains the Planner's decision.`);
 
-renderMode('entry');
-renderMode('boundary');
+await renderMode('entry');
+await renderMode('boundary');

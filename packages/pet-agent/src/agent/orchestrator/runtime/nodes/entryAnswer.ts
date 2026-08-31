@@ -10,7 +10,7 @@ import {
   queryAgentMessages,
   stampAgentMessageCreatedAt,
 } from '../../../messages';
-import { modelVisibleMessages } from '../../modelMessageView';
+import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -171,28 +171,31 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) => {
-    const mainSelection = queryAgentMessages(state.messages).main().select();
+    const mainQuery = queryAgentMessages(state.messages).main();
+    const mainSelection = mainQuery.select();
     observeAgentMessageSelection(
       'entry_answer.main',
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const history = [
-      new SystemMessage(buildEntryAnswerSystemPrompt({
-        actor: resolveActor(config, runnableConfig),
-      })),
-      ...modelVisibleMessages(mainSelection.messages),
-    ];
-    let response = await model.invoke(history, runnableConfig);
+    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt({
+      actor: resolveActor(config, runnableConfig),
+    }));
+    let response = await invokeOrchestratorModel(model, {
+      systemMessage,
+      messages: mainSelection.messages,
+    }, runnableConfig);
     if (!AIMessage.isInstance(response)) {
       throw new Error('Entry Answer model must return an AIMessage.');
     }
     if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
-      const retried = await model.invoke([
-        ...history,
-        response,
-        new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR),
-      ], runnableConfig);
+      const retrySelection = mainQuery
+        .append(response, new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR))
+        .select();
+      const retried = await invokeOrchestratorModel(model, {
+        systemMessage,
+        messages: retrySelection.messages,
+      }, runnableConfig);
       if (!AIMessage.isInstance(retried)) {
         throw new Error('Entry Answer model must return an AIMessage.');
       }

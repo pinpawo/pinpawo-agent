@@ -60,6 +60,7 @@ const privateMessages = query
 const capabilityHistory = query
   .main()
   .delegation(scope)
+  .append(delegationBriefing)
   .select();
 ```
 
@@ -70,41 +71,34 @@ The query knows only message ownership:
 
 - `main()` selects untagged main messages;
 - `delegation(scope)` selects private messages for one complete scope;
-- `select()` returns messages and identity-only diagnostics.
+- `append(messages)` adds invocation-only messages after canonical history;
+- `select()` returns the ordered input and identity-only canonical diagnostics.
 
-It does not know about Planner inputs, Announce, prompts, artifacts, provider
-roles, task completion, or visibility modes.
+`append()` does not classify its input or persist it. The node constructs the
+typed current message; the query only owns its position after selected history.
+The query knows nothing about Planner meaning, Announce rendering, prompts,
+artifacts, provider roles, or task completion.
 
-## Model-visible message view
+## Model invocation
 
-Selection, invocation input, and provider preparation are distinct. A node
-selects canonical history and constructs its current invocation message as
-agent state:
+Nodes use the same query for canonical selection and invocation-local input:
 
 ```ts
-const selection = queryAgentMessages(messages)
+const input = queryAgentMessages(messages)
   .main()
   .delegation(scope)
+  .append(delegationBriefing)
   .select();
 
-const agentMessages = [...selection.messages, delegationBriefing];
+agent.invoke({ messages: input.messages });
 ```
 
-That array remains Agent state. Immediately before every actual model call, the
-final `wrapModelCall` adapter replaces `request.messages` with its ephemeral
-model-visible view. The view projects known typed domain messages into standard
-messages and repairs tool-call protocol ordering. This happens after other
-middleware and after each AI/Tool turn; it never mutates Agent state.
-
-The node still owns the semantic choice of history and the construction of its
-current typed input. This is not a generic prompt builder: it knows no Planner
-mode, task state, artifact policy, or system-prompt parameters. Current messages
-remain invocation-only and are never written to canonical state.
-
-Entry Answer calls a model directly instead of using `createAgent`. It converts
-only selected Agent history to the same model-visible view, then places the
-Entry system message before that view. System prompts never enter the view;
-they remain owned by the caller or LangChain's `ModelRequest.systemMessage`.
+Provider-specific work is private runtime wiring, not another message API. The
+final Agent middleware renders typed Announces and repairs tool-call ordering on
+each real model call. Entry Answer uses the same runtime boundary for its direct
+model invocation. Nodes never call a separate prepare, project, or view helper.
+System prompts remain independently owned by the caller or LangChain's
+`ModelRequest.systemMessage` and never enter the lane query.
 
 ## Capability delegation protocol
 
@@ -205,17 +199,16 @@ that projection never mutates canonical state.
 
 ## Other model nodes
 
-Entry Answer selects clean main messages and uses the shared model-visible view.
+Entry Answer selects clean main messages through the same query and invokes its
+model through the shared runtime boundary.
 Answer receives a closed fact-only input and intentionally receives no canonical
 conversation history. Neither inspects private Capability messages or Planner
 provider messages.
 
-The lane query does not construct model calls. Agent nodes that consume
-canonical history install the shared final-request middleware rather than
-owning projection and provider protocol sanitation themselves. Direct model
-nodes apply the same pure preparation function at `model.invoke`. Isolated
-model calls that do not consume canonical history, such as routing-manifest
-initialization and context compaction, remain self-contained.
+The lane query constructs ordered Agent input but does not own provider details.
+The model runtime internally owns typed-message rendering and protocol
+sanitation. Isolated model calls that do not consume canonical history, such as
+routing-manifest initialization and context compaction, remain self-contained.
 
 ## Package boundaries
 
@@ -233,8 +226,8 @@ agent/orchestrator/delegation/
   announce.ts        exact-scope Announce selection
   handoff.ts         acceptance into main and private-message cleanup
 
-agent/orchestrator/modelMessageView.ts
-  ephemeral model-visible projection and protocol sanitation
+agent/orchestrator/modelInvocation.ts
+  internal model-call wiring for typed rendering and protocol sanitation
 
 agent/orchestrator/capabilityPlanner/
   input.ts           OrchestratorState -> CapabilityPlannerInput
@@ -269,16 +262,16 @@ observability data, not another message model.
    `messages`.
 6. Planner Boundary receives typed Announce evidence, not raw private messages.
 7. Handoff accepts typed Announces and clears the matching private messages.
-8. Nodes own history selection and current typed input; the shared final model-
-   request boundary owns projection and provider protocol sanitation.
+8. One query owns history selection and invocation-local append order; the
+   internal model runtime owns provider protocol details.
 
 ## Validation
 
 - query tests cover chronology, immutability, exact scope, and diagnostics;
 - Capability tests cover fresh-task isolation and same-delegation continuation;
 - Planner tests cover Entry and Boundary input shapes;
-- model-request tests cover projection, immutability, and tool-call protocol
-  sanitation; node tests cover history selection and current-input order;
+- model-invocation tests cover typed rendering, state immutability, and the real
+  Agent/direct-model boundaries;
 - Boundary tests prove ordered Announce evidence without raw private messages;
 - full typecheck, unit tests, context audit, and targeted real-model evals pass.
 

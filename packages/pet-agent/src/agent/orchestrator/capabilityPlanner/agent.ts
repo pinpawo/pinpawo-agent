@@ -17,7 +17,7 @@ import type {
 } from './runner';
 import { parsePlannerCommit } from './protocol';
 import { queryAgentMessages } from '../../messages';
-import { modelMessageViewMiddleware } from '../modelMessageView';
+import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
 import { createPlannerMiddleware } from './plannerMiddleware';
 import { plannerCommitContext } from './plannerState';
 import {
@@ -156,7 +156,7 @@ export function createCapabilityPlannerAgent(params: {
     middleware: [
       middleware,
       createPlannerSearchStateMiddleware(),
-      modelMessageViewMiddleware,
+      orchestratorModelInvocationMiddleware,
     ],
     checkpointer: false,
   });
@@ -226,10 +226,11 @@ export function createCapabilityPlannerAgent(params: {
             routingManifest,
           ),
         });
-        const agentMessages = [
-          ...queryAgentMessages(input.messages).main().select().messages,
-          plannerInputMessage,
-        ];
+        const agentMessages = queryAgentMessages(input.messages)
+          .main()
+          .append(plannerInputMessage)
+          .select()
+          .messages;
         const result = await agent.invoke({
           messages: agentMessages,
           currentInput: effectiveInput,

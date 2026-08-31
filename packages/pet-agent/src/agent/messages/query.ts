@@ -32,13 +32,16 @@ export type AgentMessageQuery = {
   main(): AgentMessageQuery;
   /** Include the private messages for one exact delegation scope. */
   delegation(scope: DelegationMessageScope): AgentMessageQuery;
-  /** Materialize selected canonical messages in their original chronology. */
+  /** Append invocation-only messages after the selected canonical history. */
+  append(...messages: readonly BaseMessage[]): AgentMessageQuery;
+  /** Materialize canonical history followed by invocation-only messages. */
   select(): AgentMessageSelection;
 };
 
 type AgentMessageQueryState = {
   includeMain: boolean;
   delegationScopes: readonly DelegationMessageScope[];
+  appendedMessages: readonly BaseMessage[];
 };
 
 function messageIdentity(message: BaseMessage, index: number) {
@@ -64,6 +67,14 @@ function createQuery(
         ...state,
         delegationScopes: [...state.delegationScopes, { ...scope }],
       });
+    },
+    append(...messages: readonly BaseMessage[]) {
+      return messages.length === 0
+        ? createQuery(canonicalMessages, state)
+        : createQuery(canonicalMessages, {
+            ...state,
+            appendedMessages: [...state.appendedMessages, ...messages],
+          });
     },
     select() {
       const messages: BaseMessage[] = [];
@@ -108,7 +119,7 @@ function createQuery(
       });
 
       return {
-        messages,
+        messages: [...messages, ...state.appendedMessages],
         diagnostics: {
           canonicalMessageCount: canonicalMessages.length,
           selectedMessageIds,
@@ -120,9 +131,9 @@ function createQuery(
 }
 
 /**
- * Start an immutable query over canonical Agent messages. This layer only
- * chooses main or delegation-private messages; model-input construction belongs to the
- * node or subagent protocol that owns the invocation.
+ * Start an immutable query over canonical Agent messages. The query selects
+ * message ownership and orders invocation-only messages after canonical
+ * history; provider rendering remains an internal model-runtime concern.
  */
 export function queryAgentMessages(
   canonicalMessages: readonly BaseMessage[],
@@ -131,6 +142,7 @@ export function queryAgentMessages(
   return createQuery(snapshot, {
     includeMain: false,
     delegationScopes: [],
+    appendedMessages: [],
   });
 }
 

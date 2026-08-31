@@ -12,7 +12,7 @@ import {
   readLatestAnnounce,
   reconcileDelegationPrivateMessages,
 } from '../../delegation';
-import { modelMessageViewMiddleware } from '../../modelMessageView';
+import { orchestratorModelInvocationMiddleware } from '../../modelInvocation';
 import {
   buildSubagentExecutionContext,
   collectToolkitOperations,
@@ -97,16 +97,6 @@ export function createCapabilityNode(params: {
       runId,
       delegationId: runNextDelegation.id,
     };
-    const canonicalSelection = queryAgentMessages(state.messages)
-      .main()
-      .delegation(delegationScope)
-      .select();
-    observeAgentMessageSelection(
-      'capability.private_messages',
-      canonicalSelection.diagnostics,
-      runnableConfig,
-    );
-    const canonicalMessages = canonicalSelection.messages;
     const briefingBase = {
       userRequest: state.runUserRequest,
       task: runNextDelegation.task,
@@ -124,7 +114,19 @@ export function createCapabilityNode(params: {
             guidance: runNextDelegation.contextSummary,
           },
     );
-    const scopedMessages = [...canonicalMessages, delegationBriefing];
+    const scopedQuery = queryAgentMessages(state.messages)
+      .main()
+      .delegation(delegationScope);
+    const canonicalSelection = scopedQuery.select();
+    const scopedSelection = scopedQuery
+      .append(delegationBriefing)
+      .select();
+    observeAgentMessageSelection(
+      'capability.private_messages',
+      scopedSelection.diagnostics,
+      runnableConfig,
+    );
+    const scopedMessages = scopedSelection.messages;
     const threadId = readThreadId(runnableConfig);
 
     const authorizationRecorder = createToolAuthorizationRecorder(
@@ -221,7 +223,7 @@ export function createCapabilityNode(params: {
         generationReserveTokens: subagentGenerationReserveTokens,
         middleware: [
           ...usedResolvedToolkitExecution.middleware,
-          modelMessageViewMiddleware,
+          orchestratorModelInvocationMiddleware,
         ],
         runtimeContext: {
           executionScope: {
@@ -286,7 +288,7 @@ export function createCapabilityNode(params: {
         task: runNextDelegation.task,
         announceMessageId: result.announceMessageId,
       },
-      canonicalMessages,
+      canonicalSelection.messages,
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
     const interrupted = result.completionReason === 'interrupted';

@@ -59,6 +59,18 @@ test('query is bound to the canonical snapshot captured at creation', () => {
   assert.deepEqual(query.select().messages, [first]);
 });
 
+test('query appends invocation-only messages without changing canonical selection diagnostics', () => {
+  const main = new HumanMessage({ id: 'main', content: 'goal' });
+  const current = new HumanMessage({ id: 'current', content: 'current input' });
+  const query = queryAgentMessages([main]).main();
+
+  const selection = query.append(current).select();
+
+  assert.deepEqual(selection.messages, [main, current]);
+  assert.deepEqual(selection.diagnostics.selectedMessageIds, ['main']);
+  assert.deepEqual(query.select().messages, [main]);
+});
+
 test('query explains exclusions without copying message content', () => {
   const current = setAgentMessageDelegationScope(
     new AIMessage({ id: 'current', content: 'current private message' }),

@@ -1,4 +1,5 @@
 import { SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT } from './templates/contextSummary.prompt';
+import { CAPABILITY_SYSTEM_PROMPT } from './templates/capability.prompt';
 import type { CapabilitySystemPromptVars } from './templates/capability.prompt';
 
 export type CapabilitySystemPromptInput = {
@@ -28,4 +29,12 @@ export function deriveCapabilitySystemPromptVars(
     toolkitInstructions: optionalInstructionBlock(input.toolkitInstructions),
     capabilityInstruction: `\n\n${input.capabilityInstruction}`,
   };
+}
+
+export function buildCapabilitySystemPrompt(
+  input: CapabilitySystemPromptInput,
+): string {
+  return CAPABILITY_SYSTEM_PROMPT.render(
+    deriveCapabilitySystemPromptVars(input),
+  );
 }

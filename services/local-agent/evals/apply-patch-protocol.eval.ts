@@ -15,7 +15,10 @@ import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { createSubagent } from '@pinpawo/pet-agent';
+import {
+  buildCapabilitySystemPrompt,
+  createSubagent,
+} from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/llmConfig';
 import { parsePatch } from '../src/toolkits/local/applyPatch';
@@ -149,7 +152,11 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
       const result = await createSubagent({
         model,
         tools: [viewFileChunkTool, applyPatchTool],
-        systemPrompt: '先读取目标文件，再使用 apply_patch 完成修改；工具成功后简短汇报。',
+        systemPrompt: buildCapabilitySystemPrompt({
+          contextSummaryEnabled: Boolean(llmConfig.contextWindowTokens),
+          toolkitInstructions: [],
+          capabilityInstruction: '先读取目标文件，再使用 apply_patch 完成修改；工具成功后简短汇报。',
+        }),
         messages: [new HumanMessage(`${scenario.instruction}\n文件路径：sample.txt`)],
         maxIterations: 8,
         contextWindowTokens: llmConfig.contextWindowTokens,

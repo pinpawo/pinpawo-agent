@@ -73,28 +73,28 @@ Diagnostics such as a template name or rendered-content digest are derived
 after rendering. They may observe construction but must not shape its input
 model.
 
-The Capability entry is the reference shape for a dynamic call:
+The construction contract ends with two model inputs: one rendered System
+Message and one selected message list. It does not prescribe a shared model
+consumer:
 
 ```ts
-const vars = deriveCapabilitySystemPromptVars({
-  contextSummaryEnabled,
-  toolkitInstructions,
-  capabilityInstruction,
-});
-const systemPrompt = CAPABILITY_SYSTEM_PROMPT.render(vars);
+const systemPrompt = DOMAIN_SYSTEM_PROMPT.render(deriveDomainPromptVars(state));
 
 const messages = queryAgentMessages(state.messages)
   .main()
-  .delegation(scope)
-  .append(runtimeContextMessage, delegationBriefing)
+  .append(invocationContext)
   .select()
   .messages;
-
-await createSubagent({ systemPrompt, messages, ...runtimeInput });
 ```
 
-This explicit call-site shape is intentional. Do not replace it with a generic
-`prepareModelRequest`, prompt-section composer, or model-context manager.
+The owning domain then passes those values to its existing model boundary. A
+root node may invoke a model directly; Capability execution uses its executor
+runtime; a closed maintenance call uses its own fixed boundary. None of those
+consumers defines another context-assembly path.
+
+This explicit construction shape is intentional. Do not replace it with a
+generic `prepareModelRequest`, prompt-section composer, model-context manager,
+or universal invocation wrapper.
 
 ## System Policy
 
@@ -155,8 +155,8 @@ The Capability domain derives render variables from these validated sources and
 renders one Capability System Prompt template:
 
 ```ts
-const systemPrompt = CAPABILITY_SYSTEM_PROMPT.render({
-  contextSummaryInstruction,
+const systemPrompt = buildCapabilitySystemPrompt({
+  contextSummaryEnabled,
   toolkitInstructions,
   capabilityInstruction,
 });
@@ -166,6 +166,24 @@ Framework policy, Toolkit instructions, and Capability instructions are not
 converted into a shared `SystemPolicyInstruction` section model. Formatting
 multiple Toolkit instructions is a Capability-domain render concern, not a
 generic System Policy composition protocol.
+
+Capability then selects its conversation and current invocation facts through
+the shared message query and hands both completed inputs to the Capability
+executor:
+
+```ts
+const messages = queryAgentMessages(state.messages)
+  .main()
+  .delegation(scope)
+  .append(runtimeContextMessage, delegationBriefing)
+  .select()
+  .messages;
+
+await createSubagent({ systemPrompt, messages, ...runtimeInput });
+```
+
+`createSubagent` is the Capability executor's model boundary. It is not a
+general context constructor and does not render or select either input.
 
 A model-selected Capability name becomes eligible only after the terminal
 commit is validated, the active delegation is materialized, and the name is

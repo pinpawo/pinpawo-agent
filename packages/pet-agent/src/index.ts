@@ -348,6 +348,9 @@ export {
   SUBAGENT_SYSTEM_POLICY_EVENT,
 } from './subagent/createSubagent';
 export {
+  buildCapabilitySystemPrompt,
+} from './subagent/prompts/capability';
+export {
   NamespacedProtocolToolEventReader,
   SubagentProtocolToolEventReader,
 } from './subagent/protocolToolEvents';

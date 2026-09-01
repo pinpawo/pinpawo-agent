@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { deriveCapabilitySystemPromptVars } from './capability';
+import {
+  buildCapabilitySystemPrompt,
+  deriveCapabilitySystemPromptVars,
+} from './capability';
 import { CAPABILITY_SYSTEM_PROMPT } from './templates/capability.prompt';
 
 test('Capability System Prompt renders typed sources in deterministic order', () => {
@@ -22,14 +25,16 @@ test('Capability System Prompt renders typed sources in deterministic order', ()
 });
 
 test('Capability System Prompt omits absent optional variables', () => {
-  const vars = deriveCapabilitySystemPromptVars({
+  const input = {
     contextSummaryEnabled: false,
     toolkitInstructions: [],
     capabilityInstruction: 'CAPABILITY_POLICY',
-  });
+  };
+  const vars = deriveCapabilitySystemPromptVars(input);
   const prompt = CAPABILITY_SYSTEM_PROMPT.render(vars);
 
   assert.equal(vars.contextSummaryInstruction, '');
+  assert.equal(buildCapabilitySystemPrompt(input), prompt);
   assert.match(prompt, /CAPABILITY_POLICY/);
 });
 

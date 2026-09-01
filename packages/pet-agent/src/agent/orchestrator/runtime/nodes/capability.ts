@@ -44,8 +44,7 @@ import {
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegation';
 import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
-import { deriveCapabilitySystemPromptVars } from '../../../../subagent/prompts/capability';
-import { CAPABILITY_SYSTEM_PROMPT } from '../../../../subagent/prompts/templates/capability.prompt';
+import { buildCapabilitySystemPrompt } from '../../../../subagent/prompts/capability';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -191,13 +190,12 @@ export function createCapabilityNode(params: {
         undefined,
         toolkitContext,
       );
-      const capabilitySystemPromptVars = deriveCapabilitySystemPromptVars({
+      const systemPrompt = buildCapabilitySystemPrompt({
         contextSummaryEnabled: Boolean(subagentContextWindowTokens),
         toolkitInstructions: usedResolvedToolkitExecution.toolkits.flatMap((toolkit) =>
           toolkit.instructions?.trim() ? [toolkit.instructions] : []),
         capabilityInstruction: capability.instructions.content,
       });
-      const systemPrompt = CAPABILITY_SYSTEM_PROMPT.render(capabilitySystemPromptVars);
       subagentInput = {
         model: config.models.subagent ?? config.models.act,
         tools: usedResolvedToolkitExecution.tools,

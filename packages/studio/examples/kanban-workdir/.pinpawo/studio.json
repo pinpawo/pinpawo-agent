@@ -39,7 +39,7 @@
             "triggerId": "wiki-on-task-done",
             "petId": "wiki",
             "request": {
-              "template": "Reconcile the project Wiki after {{event.type}} for task {{payload.taskId}}. Inspect the current code, review evidence, and Kanban task state before writing. Do not create, complete, or block Kanban tasks.",
+              "template": "Reconcile project knowledge after {{event.type}} for task {{payload.taskId}}.",
               "context": [
                 "payload.taskId",
                 "payload.petId",

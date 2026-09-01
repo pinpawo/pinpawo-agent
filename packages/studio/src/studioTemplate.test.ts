@@ -57,7 +57,7 @@ test('kickstart init preflights conflicts before copying any file', async () => 
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
 });
 
-test('shipped Planner separates project exploration from Kanban planning', async () => {
+test('shipped Pet Capabilities separate planning, execution, and Wiki observation', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
   await initStudioKickstart({ workdir });
 
@@ -100,10 +100,20 @@ test('shipped Planner separates project exploration from Kanban planning', async
     'reviewer',
     'capabilities',
   ));
+  const wikiCapabilities = await loadCapabilityDirectory(path.join(
+    workdir,
+    '.pinpawo',
+    'pets',
+    'wiki',
+    'capabilities',
+  ));
   assert.deepEqual(executorCapabilities.map(({ capability }) => capability.uses), [
     ['bash', 'git', 'kanban-execution'],
   ]);
   assert.deepEqual(reviewerCapabilities.map(({ capability }) => capability.uses), [
     ['bash', 'git', 'kanban-execution'],
+  ]);
+  assert.deepEqual(wikiCapabilities.map(({ capability }) => capability.uses), [
+    ['bash', 'git', 'kanban-observation'],
   ]);
 });

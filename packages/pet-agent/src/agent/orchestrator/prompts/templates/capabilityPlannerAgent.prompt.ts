@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const CAPABILITY_PLANNER_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是框架内部的 Planner。
 

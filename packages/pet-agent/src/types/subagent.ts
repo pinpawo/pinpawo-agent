@@ -5,7 +5,6 @@ import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
 import type { ToolOperationMetadata } from './toolkit';
-import type { SystemPolicyInstruction } from './modelContext';
 
 export type SubagentExecutionScope = {
   threadId: string | null;
@@ -66,7 +65,6 @@ export type SubagentRuntimeEvent = {
 };
 
 export type SubagentInputState = {
-  systemInstructions: readonly SystemPolicyInstruction[];
   operations?: Record<string, SubagentToolOperationMetadata>;
   messages: BaseMessage[];
   maxIterations?: number;
@@ -78,6 +76,7 @@ export type SubagentInputState = {
 export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
+  systemPrompt: string;
   middleware?: AnyAgentMiddleware[];
   /** Read-only invocation data exposed to tools as ToolRuntime.context. */
   runtimeContext?: SubagentRuntimeContext;

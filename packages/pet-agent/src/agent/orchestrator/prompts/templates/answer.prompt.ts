@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`你负责把本次运行的结果写成面向用户的回复。你没有工具，本轮也不发生任何执行；<answer_input> 里的事实是你唯一的依据。
 

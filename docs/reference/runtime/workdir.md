@@ -31,9 +31,9 @@ The runtime can also expose derived workspace metadata (`id`, `name`, and
 workspace registry or per-request workspace selection contract.
 
 The Host exposes its effective workdir to Agent model context and to
-review/authorization context. It is a runtime fact, not System Policy. The
-current Capability implementation still carries it in a subagent system
-section; the target assembly moves it to invocation-only context as defined by
+review/authorization context. It is a runtime fact, not System Policy.
+Capability supplies it through invocation-only `<capability_runtime_context>`
+as defined by
 [Agent model context assembly](../../design/agent-runtime/model-context-assembly.md).
 
 Workdir is not a filesystem sandbox or a hidden Tool argument: the model chooses

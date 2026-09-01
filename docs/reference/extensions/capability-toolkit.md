@@ -315,14 +315,16 @@ lane = capability:<name>
 executor = compiled Capability
 ```
 
-当前 subagent System Policy instruction 的装配顺序是：
+当前 Capability System Prompt template vars 的渲染顺序是：
 
 1. framework delegation contract；
 2. 可选的 context-summary governing instruction；
 3. `uses` 所解析 Toolkit 的 instructions；
 4. Capability Markdown instructions；
-其中 framework、Toolkit 和 Capability instructions 是 System Policy。workdir、
-runtime environment 和当前可用接口通过独立的
+Capability node 从 compiled Capability、resolved Toolkits 与 summary 配置派生
+这些 typed vars，渲染出完整 System Prompt 后再交给 subagent runtime；不会跨层
+传递 `{ id, source, owner, content }` section 数组。其中 framework、Toolkit 和
+Capability instructions 是 System Policy。workdir、runtime environment 和当前可用接口通过独立的
 `<capability_runtime_context>` Invocation Context 传入。统一的装配契约见
 [Agent model context assembly](../../design/agent-runtime/model-context-assembly.md)。
 

@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const CONTEXT_COMPACTION_SYSTEM_PROMPT = definePromptTemplate<{}>([
   '你在为一个长运行的任务执行通用 agent 压缩旧上下文。',

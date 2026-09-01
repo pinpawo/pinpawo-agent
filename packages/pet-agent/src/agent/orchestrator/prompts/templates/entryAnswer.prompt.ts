@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{
   repairInstruction: string;

@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const CAPABILITY_ROUTING_MANIFEST_SYSTEM_PROMPT = definePromptTemplate<{}>(`你负责初始化 Capability Planner 的路由清单。
 

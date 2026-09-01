@@ -30,10 +30,9 @@ runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace 
 公共协议。
 
 Host 将有效 workdir 提供给 Agent 模型上下文与 review/authorization context。
-它是运行事实，不是 System Policy。当前 Capability 实现仍通过 subagent system
-section 传入；目标装配会按
+它是运行事实，不是 System Policy。Capability 按
 [Agent model context assembly](../../../design/agent-runtime/model-context-assembly.md)
-将其移动到 invocation-only context。
+通过 invocation-only `<capability_runtime_context>` 提供该信息。
 
 Workdir 不是文件系统 sandbox，也不是隐式 Tool 参数：相对路径、绝对路径或 cwd
 由模型决定，执行层不会注入或改写输入。Toolkit Runtime binding 只用于 Toolkit

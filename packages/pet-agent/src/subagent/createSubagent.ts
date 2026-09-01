@@ -1,6 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   SubagentInputState,
   SubagentResult,
@@ -30,19 +30,13 @@ import { readToolkitReviewRunControl } from '../agent/orchestrator/review/review
 import { Command, END } from '@langchain/langgraph';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 import {
-  SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
   SUBAGENT_CONTEXT_SUMMARY_PREFIX,
   SUBAGENT_CONTEXT_SUMMARY_PROMPT,
 } from './prompts/templates/contextSummary.prompt';
-import { SUBAGENT_GOVERNING_PROMPT } from './prompts/templates/governing.prompt';
 import { messageHasToolCalls } from '../utils/messages';
 import {
   subagentRuntimeContextSchema,
 } from './runtimeContext';
-import {
-  composeCapabilitySystemPolicy,
-  SYSTEM_POLICY_SOURCE,
-} from './systemPolicy';
 
 // Fallback model-call budget when the caller does not pass maxIterations. The
 // subagent iteration guard should stop gracefully first; LangGraph recursionLimit
@@ -245,12 +239,14 @@ function writeSubagentRuntimeEvent(name: string, data: unknown) {
 
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
+  if (!input.systemPrompt.trim()) {
+    throw new Error('Subagent System Prompt must be non-empty.');
+  }
   // Parent lane reconciliation is identity-based because summarization may
   // replace or shrink the transcript. Stable ids distinguish preserved input
   // messages from summaries and model responses returned by the child graph.
   ensureSubagentMessageIds(input.messages);
   const inputState: SubagentInputState = {
-    systemInstructions: input.systemInstructions,
     operations: input.operations,
     messages: input.messages,
     maxIterations: input.maxIterations,
@@ -259,24 +255,6 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
-  const systemInstructions = [
-    {
-      id: 'framework:governing',
-      source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-      owner: 'framework',
-      content: SUBAGENT_GOVERNING_PROMPT,
-    },
-    ...(inputState.contextWindowTokens
-      ? [{
-          id: 'framework:context-summary',
-          source: SYSTEM_POLICY_SOURCE.FRAMEWORK,
-          owner: 'framework',
-          content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
-        }]
-      : []),
-    ...inputState.systemInstructions,
-  ];
-  const systemPolicy = composeCapabilitySystemPolicy(systemInstructions);
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
@@ -295,13 +273,13 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   const agent = createAgent({
     model: input.model,
     tools: input.tools,
-    systemPrompt: systemPolicy.message,
+    systemPrompt: input.systemPrompt,
     contextSchema: subagentRuntimeContextSchema,
     ...(middleware.length > 0 ? { middleware } : {}),
   });
 
   writeSubagentRuntimeEvent(SUBAGENT_SYSTEM_POLICY_EVENT, {
-    sections: systemPolicy.diagnostics.instructions,
+    digest: createHash('sha256').update(input.systemPrompt, 'utf8').digest('hex'),
   });
   if (inputState.operations && Object.keys(inputState.operations).length > 0) {
     writeSubagentRuntimeEvent(SUBAGENT_OPERATIONS_EVENT, { operations: inputState.operations });

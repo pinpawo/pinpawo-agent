@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const AUTO_REVIEW_SYSTEM_PROMPT = definePromptTemplate<{
   toolkitPolicyBlock: string;

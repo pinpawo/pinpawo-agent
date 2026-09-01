@@ -73,9 +73,9 @@ uses:
   - artifact_discovery
 ```
 
-编译成功后，framework 在 Capability 的执行 prompt section 中说明上述工具
-可用。它不会生成 synthetic history message，也不会把 artifact inventory 或
-内容直接塞进模型上下文。
+编译成功后，framework 通过 invocation-only
+`<capability_runtime_context>` 告诉 Capability 上述接口可用。它不会生成
+synthetic history message，也不会把 artifact inventory 或内容直接塞进模型上下文。
 
 空 thread 的 list 结果为空；这不是 Toolkit 不可用。local chat host 要求非空
 `threadId` 和 `CapabilityArtifactStore`，避免 scope 缺失导致依赖该 Toolkit 的

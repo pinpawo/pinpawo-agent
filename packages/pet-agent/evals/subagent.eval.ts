@@ -20,6 +20,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { createSubagent } from '../src/subagent/createSubagent';
+import { deriveCapabilitySystemPromptVars } from '../src/subagent/prompts/capability';
+import { CAPABILITY_SYSTEM_PROMPT } from '../src/subagent/prompts/templates/capability.prompt';
 import { materializeDelegation } from '../src/agent/orchestrator/delegation';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { langfuseFetch, resolveLangfuseConfig } from './scripts/langfuse-api';
@@ -355,7 +357,11 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const result = await createSubagent({
     model: evalSubject.model,
     tools: runtime.tools,
-    systemInstructions: [],
+    systemPrompt: CAPABILITY_SYSTEM_PROMPT.render(deriveCapabilitySystemPromptVars({
+      contextSummaryEnabled: false,
+      toolkitInstructions: [],
+      capabilityInstruction: 'Use the available tools to complete the current delegation.',
+    })),
     messages,
     maxIterations: 8,
   });

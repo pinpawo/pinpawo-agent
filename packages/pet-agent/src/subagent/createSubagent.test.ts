@@ -30,7 +30,8 @@ import {
   SUBAGENT_GUARD_STOP_MARKER_KEY,
   readSubagentGuardStopReason,
 } from './guardStop';
-import { SYSTEM_POLICY_SOURCE } from '../types/modelContext';
+
+const TEST_SUBAGENT_SYSTEM_PROMPT = 'You are a test subagent.';
 
 /**
  * Minimal model that never converges: it keeps emitting a fresh tool call every
@@ -71,26 +72,15 @@ class FailingSummaryModel extends BaseChatModel {
   }
 }
 
-test('createSubagent rejects duplicate System Policy instruction ids before invoking the model', async () => {
+test('createSubagent rejects an empty System Prompt before invoking the model', async () => {
   await assert.rejects(
     createSubagent({
       model: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
       tools: [],
-      systemInstructions: [
-        {
-          id: 'capability:test',
-          source: SYSTEM_POLICY_SOURCE.CAPABILITY,
-          content: 'First document.',
-        },
-        {
-          id: 'capability:test',
-          source: SYSTEM_POLICY_SOURCE.CAPABILITY,
-          content: 'Duplicate document.',
-        },
-      ],
+      systemPrompt: ' ',
       messages: [new HumanMessage('test')],
     }),
-    /Duplicate System Policy instruction id: capability:test/,
+    /Subagent System Prompt must be non-empty/,
   );
 });
 
@@ -122,7 +112,7 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
       ],
     }),
     tools: [inspectContext],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     messages: [new HumanMessage('Inspect the context.')],
     runtimeContext: {
       executionScope: {
@@ -176,12 +166,7 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
         ],
       }),
       tools: [readFile],
-      systemInstructions: [{
-        id: 'capability:read',
-        source: SYSTEM_POLICY_SOURCE.CAPABILITY,
-        owner: 'read',
-        content: 'Read the requested file.',
-      }],
+      systemPrompt: `${TEST_SUBAGENT_SYSTEM_PROMPT}\n\nRead the requested file.`,
       operations: {
         read_file: {
           title: 'Read File',
@@ -259,41 +244,12 @@ test('createSubagent surfaces tool lifecycle, guard decisions and operations on 
     (data) => data?.name === SUBAGENT_SYSTEM_POLICY_EVENT,
   );
   assert.equal(promptEvents.length, 1);
-  assert.deepEqual(
-    (promptEvents[0]?.data as {
-      sections?: Array<{
-        id: string;
-        source: string;
-        owner: string | null;
-        digest: string;
-      }>;
-    }).sections?.map(({ id, source, owner, digest }) => ({
-      id,
-      source,
-      owner,
-      digestLength: digest.length,
-    })),
-    [
-      {
-        id: 'framework:governing',
-        source: 'framework',
-        owner: 'framework',
-        digestLength: 64,
-      },
-      {
-        id: 'capability:read',
-        source: 'capability',
-        owner: 'read',
-        digestLength: 64,
-      },
-    ],
-  );
-  const capabilitySection = (promptEvents[0]?.data as {
-    sections?: Array<{ id: string; digest: string }>;
-  }).sections?.find(({ id }) => id === 'capability:read');
+  const promptDigest = (promptEvents[0]?.data as { digest?: string }).digest;
   assert.equal(
-    capabilitySection?.digest,
-    createHash('sha256').update('Read the requested file.', 'utf8').digest('hex'),
+    promptDigest,
+    createHash('sha256')
+      .update(`${TEST_SUBAGENT_SYSTEM_PROMPT}\n\nRead the requested file.`, 'utf8')
+      .digest('hex'),
   );
 });
 
@@ -308,7 +264,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
       sleep: 0,
     }),
     tools: [],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     contextWindowTokens: 1000,
     messages: [
       new HumanMessage(oldContext),
@@ -354,7 +310,7 @@ test('context summarization renders image payloads through LangChain text projec
       sleep: 0,
     }),
     tools: [],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     contextWindowTokens: 1000,
     messages: [
       new HumanMessage(`old investigation evidence\n${'x'.repeat(1200)}`),
@@ -406,7 +362,7 @@ test('summarization preserves the real image when it keeps the message', async (
       sleep: 0,
     }),
     tools: [],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     contextWindowTokens: 1000,
     messages: [
       new HumanMessage(`old investigation evidence\n${'x'.repeat(1600)}`),
@@ -436,7 +392,7 @@ test('createSubagent throws instead of committing an error summary', async () =>
     createSubagent({
       model,
       tools: [],
-      systemInstructions: [],
+      systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
       contextWindowTokens: 1000,
       messages: [
         new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
@@ -459,7 +415,7 @@ test('createSubagent throws when history cannot be trimmed into a summary', asyn
     createSubagent({
       model: new FakeListChatModel({ responses: ['must not continue'], sleep: 0 }),
       tools: [],
-      systemInstructions: [],
+      systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
       contextWindowTokens: 1000,
       messages: [
         new HumanMessage(`single oversized context\n${'x'.repeat(4_000)}`),
@@ -477,7 +433,7 @@ test('createSubagent throws on an empty context summary', async () => {
     createSubagent({
       model: new FakeListChatModel({ responses: ['', 'must not continue'], sleep: 0 }),
       tools: [],
-      systemInstructions: [],
+      systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
       contextWindowTokens: 1000,
       messages: [
         new HumanMessage(`old evidence\n${'x'.repeat(800)}`),
@@ -506,7 +462,7 @@ test('createSubagent leaves single-result sizing to the toolkit below the waterm
       ],
     }),
     tools: [readFile],
-      systemInstructions: [],
+      systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     messages: [new HumanMessage('read the file')],
     maxIterations: 4,
   });
@@ -520,7 +476,7 @@ test('createSubagent does not summarize history below the derived token trigger'
   const result = await createSubagent({
     model: new FakeListChatModel({ responses: ['done'], sleep: 0 }),
     tools: [],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     messages: [new HumanMessage('small delegated task context')],
     contextWindowTokens: 1000,
     maxIterations: 4,
@@ -547,7 +503,7 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   const result = await createSubagent({
     model: new FakeListChatModel({ responses: ['fresh answer'], sleep: 0 }),
     tools: [],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     messages: [new HumanMessage('do the task'), staleStopNotice, new HumanMessage('继续')],
     maxIterations: 4,
   });
@@ -585,7 +541,7 @@ test('createSubagent default iteration budget is a soft model-call guard', async
     model: model as unknown as BaseChatModel,
     tools: [noop],
     middleware: [progressMiddleware],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     messages: [new HumanMessage('go')],
     // no maxIterations -> default budget
   });
@@ -608,7 +564,7 @@ test('createSubagent reports no announce when a limited run has no AI text deliv
   const result = await createSubagent({
     model: new NeverConvergingModel({}) as unknown as BaseChatModel,
     tools: [noop],
-    systemInstructions: [],
+    systemPrompt: TEST_SUBAGENT_SYSTEM_PROMPT,
     messages: [
       new HumanMessage('go'),
       new AIMessage('上一轮的交付不能充当本轮 announce。'),

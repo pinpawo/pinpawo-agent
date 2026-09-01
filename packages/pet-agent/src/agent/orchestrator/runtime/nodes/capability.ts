@@ -44,7 +44,8 @@ import {
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegation';
 import { snapshotPlannerTaskContinuation } from '../../capabilityPlanner/session';
-import { SYSTEM_POLICY_SOURCE } from '../../../../types/modelContext';
+import { deriveCapabilitySystemPromptVars } from '../../../../subagent/prompts/capability';
+import { CAPABILITY_SYSTEM_PROMPT } from '../../../../subagent/prompts/templates/capability.prompt';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -190,25 +191,17 @@ export function createCapabilityNode(params: {
         undefined,
         toolkitContext,
       );
+      const capabilitySystemPromptVars = deriveCapabilitySystemPromptVars({
+        contextSummaryEnabled: Boolean(subagentContextWindowTokens),
+        toolkitInstructions: usedResolvedToolkitExecution.toolkits.flatMap((toolkit) =>
+          toolkit.instructions?.trim() ? [toolkit.instructions] : []),
+        capabilityInstruction: capability.instructions.content,
+      });
+      const systemPrompt = CAPABILITY_SYSTEM_PROMPT.render(capabilitySystemPromptVars);
       subagentInput = {
         model: config.models.subagent ?? config.models.act,
         tools: usedResolvedToolkitExecution.tools,
-        systemInstructions: [
-          ...usedResolvedToolkitExecution.toolkits
-            .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
-            .map((toolkit) => ({
-              id: `toolkit:${toolkit.name}`,
-              source: SYSTEM_POLICY_SOURCE.TOOLKIT,
-              owner: toolkit.name,
-              content: toolkit.instructions as string,
-            })),
-          {
-            id: `capability:${capability.name}`,
-            source: SYSTEM_POLICY_SOURCE.CAPABILITY,
-            owner: capability.name,
-            content: capability.instructions.content,
-          },
-        ],
+        systemPrompt,
         operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
         messages: scopedMessages,
         maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,

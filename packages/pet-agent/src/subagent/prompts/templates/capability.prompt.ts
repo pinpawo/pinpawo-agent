@@ -1,4 +1,12 @@
-export const SUBAGENT_GOVERNING_PROMPT = [
+import { definePromptTemplate } from '../../../prompts/template';
+
+export type CapabilitySystemPromptVars = {
+  contextSummaryInstruction: string;
+  toolkitInstructions: string;
+  capabilityInstruction: string;
+};
+
+export const CAPABILITY_SYSTEM_PROMPT = definePromptTemplate<CapabilitySystemPromptVars>([
   '你是 Capability 任务执行器。完成最新 <delegation_briefing> 中定义的当前任务。',
   '',
   '## 委派边界',
@@ -10,4 +18,9 @@ export const SUBAGENT_GOVERNING_PROMPT = [
   '## 执行结果',
   '- 根据任务需要使用可用工具，并核验足以支持结论的结果。',
   '- 最终回复交付当前任务的结果和关键证据；如果未完成，说明已有进展、阻碍和待处理事项。',
-].join('\n');
+  '{contextSummaryInstruction}{toolkitInstructions}{capabilityInstruction}',
+].join('\n'), [
+  'contextSummaryInstruction',
+  'toolkitInstructions',
+  'capabilityInstruction',
+]);

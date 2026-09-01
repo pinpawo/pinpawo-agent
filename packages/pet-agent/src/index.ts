@@ -40,12 +40,6 @@ export type {
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
-export {
-  SYSTEM_POLICY_SOURCE,
-  type SystemPolicyInstruction,
-  type SystemPolicySource,
-} from './types/modelContext';
-
 export type {
   Guard,
   GuardDecisionEmitter,

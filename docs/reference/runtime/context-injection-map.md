@@ -151,8 +151,11 @@ appended. It contains the run goal as read-only background and the current task
 as the execution boundary. A continuation reuses the exact delegation scope
 and may add current guidance.
 
-The Capability runtime supplies typed `systemInstructions`: Framework,
-Capability, and Toolkit instructions only. Workdir, runtime environment,
+The Capability node derives declared System Prompt variables from the compiled
+Capability, resolved Toolkits, and context-summary configuration, then renders
+one Capability template before calling the subagent runtime. The subagent
+runtime receives the rendered `systemPrompt`; it does not receive a section
+array or reconstruct domain state. Workdir, runtime environment,
 artifact-discovery availability, and other runtime facts use the invocation
 message and never become instruction authority.
 
@@ -232,10 +235,9 @@ replace it.
 
 ## Assembly implementation
 
-Ordinary nodes select a domain template and render typed variables directly.
-Only Capability subagents use
-`composeCapabilitySystemPolicy(systemInstructions)` because they genuinely
-compose Framework, Toolkit, and Capability instruction owners.
+Every node selects a domain template and renders typed variables directly.
+Capability's multiple registered instruction sources become declared Capability
+template variables, not a shared section-composition protocol.
 `queryAgentMessages()` is the shared history boundary. Domain builders own
 Invocation Context messages, and query `.append()` owns their final order.
 Provider projection happens after those channels meet.

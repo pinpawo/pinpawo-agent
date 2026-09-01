@@ -1,8 +1,8 @@
 # Agent model context assembly
 
-Status: implemented draft. The three-channel assembly contract is now present
-in runtime code; the draft remains open while production eval evidence is
-collected and the API names settle.
+Status: implemented draft. The channel boundaries and state-to-invocation
+construction contract are present in runtime code; the draft remains open while
+production eval evidence is collected.
 
 ## Goal
 
@@ -26,11 +26,13 @@ route for injecting Agent System Policy.
 ## The three context channels
 
 ```text
-                    +-> System Policy ----------------------+
-Typed invocation ---+                                       +-> model.invoke
-context             +-> Conversation History                |
-                    |      + Invocation Context ------------+
-                    +-----------------------------------------+
+typed domain state/input
+  +-> select System Prompt template + derive typed vars
+  |     `-> render one SystemMessage ------------------------+
+  |
+  `-> canonical messages + typed current facts              |
+        +-> query canonical lanes -> Conversation History ---+-> model.invoke
+        `-> render + append Invocation Context --------------+
 ```
 
 | Channel | Question it answers | Provider representation |
@@ -41,6 +43,58 @@ context             +-> Conversation History                |
 
 The channels may share a validated typed source. They never read one another's
 rendered output and meet only at the model invocation boundary.
+
+## Construction contract
+
+Every production model entry follows the same visible construction sequence:
+
+1. start from typed domain state or a typed domain input;
+2. select a domain-owned System Prompt template;
+3. derive that template's typed render variables;
+4. when the call consumes canonical history, select it with
+   `queryAgentMessages()`;
+5. render typed invocation-only facts and append them through the query;
+6. pass the rendered System Message and selected messages to the model boundary.
+
+The two projections are independent. System Prompt rendering does not consume
+selected messages, and message selection does not consume rendered prompt text.
+
+The following are explicitly not part of the contract:
+
+- a generic prompt manager or universal prompt request object;
+- a cross-layer array of pre-rendered prompt sections such as
+  `{ id, source, owner, content }`;
+- using observability metadata to determine Prompt construction;
+- passing arbitrary state fields as prompt parameters without first deriving
+  the template's declared variables;
+- hiding lane selection or Invocation Context append inside a prompt builder.
+
+Diagnostics such as a template name or rendered-content digest are derived
+after rendering. They may observe construction but must not shape its input
+model.
+
+The Capability entry is the reference shape for a dynamic call:
+
+```ts
+const vars = deriveCapabilitySystemPromptVars({
+  contextSummaryEnabled,
+  toolkitInstructions,
+  capabilityInstruction,
+});
+const systemPrompt = CAPABILITY_SYSTEM_PROMPT.render(vars);
+
+const messages = queryAgentMessages(state.messages)
+  .main()
+  .delegation(scope)
+  .append(runtimeContextMessage, delegationBriefing)
+  .select()
+  .messages;
+
+await createSubagent({ systemPrompt, messages, ...runtimeInput });
+```
+
+This explicit call-site shape is intentional. Do not replace it with a generic
+`prepareModelRequest`, prompt-section composer, or model-context manager.
 
 ## System Policy
 
@@ -84,31 +138,34 @@ CapabilityPlannerInput.mode
 These branches share one typed discriminator. None derives its value by parsing
 another branch's rendered prompt.
 
-### Registered instruction composition
+### Capability prompt variables
 
-Most model calls render one template and need no instruction-source structure.
-Capability execution is the exception because a subagent combines instructions
-registered by multiple owners:
+Capability execution has more dynamic System Prompt data than other nodes, but
+it follows the same template-and-vars contract. Its code-owned Framework policy
+lives in the template; typed domain input supplies only its declared dynamic
+variables:
 
-| Source | Examples |
+| Variable source | Render variable |
 |---|---|
-| `framework` | governing policy and role objective |
-| `capability` | instructions from a validated compiled Capability |
-| `toolkit` | instructions from Toolkits in the compiled Capability `uses` set |
+| context-window configuration | `contextSummaryInstruction` |
+| resolved Toolkits | `toolkitInstructions` |
+| validated compiled Capability | `capabilityInstruction` |
 
-Conditional instructions, such as informing a Capability that context
-summarization is enabled, remain Framework instruction sources. Their presence
-does not create another base variant.
-
-That narrow composition contract is:
+The Capability domain derives render variables from these validated sources and
+renders one Capability System Prompt template:
 
 ```ts
-composeCapabilitySystemPolicy(systemInstructions);
+const systemPrompt = CAPABILITY_SYSTEM_PROMPT.render({
+  contextSummaryInstruction,
+  toolkitInstructions,
+  capabilityInstruction,
+});
 ```
 
-It validates registered instruction ownership, joins the sections, and emits
-content-free diagnostics. It is not used by Entry, Answer, Planner, routing,
-review, or compaction prompt builders.
+Framework policy, Toolkit instructions, and Capability instructions are not
+converted into a shared `SystemPolicyInstruction` section model. Formatting
+multiple Toolkit instructions is a Capability-domain render concern, not a
+generic System Policy composition protocol.
 
 A model-selected Capability name becomes eligible only after the terminal
 commit is validated, the active delegation is materialized, and the name is
@@ -199,7 +256,7 @@ Use this rule before choosing an API:
 |---|---|
 | Agent identity, objective, and decision policy | System Policy |
 | Planner mode | System Policy variant selector |
-| Capability and Toolkit instructions | System Policy instruction sources |
+| Capability and Toolkit instructions | Capability System Prompt variables |
 | Structured-output protocol | System Policy template variable |
 | User goal, task, plan, Announce, and execution evidence | Invocation Context |
 | Workdir and runtime environment | Invocation Context |
@@ -213,7 +270,7 @@ Capability execution is the strongest legitimate intersection:
 
 ```text
 Validated active delegation + compiled Capability
-  +-> Capability/Toolkit instructions -> System Policy
+  +-> Capability/Toolkit data         -> System Prompt variables
   +-> delegation scope                -> Conversation History
   `-> task, goal, runtime facts       -> Invocation Context
 ```
@@ -222,9 +279,10 @@ The resolved typed identity is shared. System rendering does not inspect the
 selected history, and history selection does not inspect the rendered system
 prompt.
 
-Auto Review follows the same rule. Registered Toolkit policy is trusted System
-Policy; action inputs and review views are Invocation Context. A raw `reviews[]`
-object should not remain the long-term API for constructing both channels.
+Auto Review follows the same rule. Registered Toolkit policy is a trusted
+System Prompt variable; action inputs and review views are Invocation Context.
+A raw `reviews[]` object should not remain the long-term API for constructing
+both channels.
 
 ## Provider boundary
 
@@ -240,9 +298,9 @@ policy. Provider rendering is not a fourth context channel.
 ## Implementation status
 
 - Ordinary System Prompts use their domain template plus typed render variables.
-- `composeCapabilitySystemPolicy(systemInstructions)` belongs to the Capability
-  subagent domain; it preserves registered instruction order and emits
-  content-free digests.
+- Capability derives declared variables from its compiled Capability, resolved
+  Toolkits, and context-summary configuration, then renders one domain template
+  before calling the subagent runtime.
 - `createInvocationContextMessage()` preserves each domain-owned visible
   schema while applying the shared synthetic, invocation-only, and
   non-authoritative transport metadata.
@@ -259,16 +317,16 @@ policy. Provider rendering is not a fourth context channel.
 - Root ingress rejects canonical `SystemMessage` values; legacy checkpoint
   history containing one fails closed and is cleared rather than migrated.
 
-Capability System Policy diagnostics contain source, owner, and content digest
-only. Invocation Context identity remains observable through message selection
+System Prompt diagnostics are derived from the selected template and rendered
+output. Invocation Context identity remains observable through message selection
 diagnostics and stable synthetic-message metadata.
 
 ## Invariants
 
 1. Every Agent decision or execution call has exactly one node-owned System
    Policy; closed maintenance calls have one fixed maintenance instruction.
-2. Ordinary policy variables are typed; composed Capability instruction sources
-   are finite, typed, and trusted.
+2. Every dynamic System Prompt value is a declared template variable derived
+   from typed domain input.
 3. Root conversation cannot introduce another `SystemMessage` authority.
 4. All current facts and task boundaries use Invocation Context.
 5. Invocation Context is not persisted merely because it was appended.
@@ -276,13 +334,18 @@ diagnostics and stable synthetic-message metadata.
    do not read one another's rendered output.
 7. The three channels meet only at the model invocation boundary.
 8. Provider projection changes transport shape, not authority or ownership.
+9. Pre-rendered prompt-section arrays never cross a node, runtime, or subagent
+   boundary.
+10. Observability ids, sources, owners, and digests never become the System
+    Prompt construction model.
 
 ## Validation
 
 - unit tests assert exact channel shape at each real model boundary;
 - tests prove canonical `SystemMessage` values cannot bypass node ownership;
 - Planner context audit renders both variants, tools, history, and current input;
-- Capability tests distinguish trusted instruction sections from runtime facts;
+- Capability tests distinguish trusted System Prompt variables from runtime
+  facts and assert the complete model-entry shape;
 - model evals cover Entry routing, Planner Boundaries, Capability continuation,
   Auto Review, and terminal synthesis after channel migration.
 

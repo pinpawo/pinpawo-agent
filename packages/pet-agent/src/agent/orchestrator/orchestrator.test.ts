@@ -393,7 +393,7 @@ async function runToolkitToolCall(
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    systemInstructions: [],
+    systemPrompt: 'You are a test subagent.',
     operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage(`call ${toolCalls.map((call) => call.name).join(', ')}`)],
   });
@@ -3034,7 +3034,7 @@ test('deterministic toolkit policy block terminates without another model call',
     }),
     tools: resources.tools,
     middleware: resources.middleware,
-    systemInstructions: [],
+    systemPrompt: 'You are a test subagent.',
     operations: collectToolkitOperations(resources.toolkits),
     messages: [new HumanMessage('try guarded work')],
     runnableConfig: { callbacks: recorder.callbacks },
@@ -5758,7 +5758,7 @@ test('limit-reached subagent announce reaches the Planner boundary input', async
     }),
     tools: [noop],
     middleware: [progressMiddleware],
-    systemInstructions: [],
+    systemPrompt: 'You are a test subagent.',
     messages: baseInput.messages,
     maxIterations: 1,
   });
@@ -6854,6 +6854,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
       toolkits: [{
         name: 'artifact_discovery',
         description: 'artifact discovery toolkit',
+        instructions: 'ARTIFACT_DISCOVERY_TOOLKIT_POLICY',
         tools: toolDefinitions(
           mockTool('artifact_list'),
           mockTool('artifact_read'),
@@ -6919,6 +6920,8 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
       const systemText = typeof message.content === 'string'
         ? message.content
         : JSON.stringify(message.content);
+      assert.match(systemText, /ARTIFACT_DISCOVERY_TOOLKIT_POLICY/);
+      assert.match(systemText, /Execute the ops capability\./);
       assert.doesNotMatch(systemText, /关闭 GitHub Issue #272/);
       assert.doesNotMatch(systemText, /上下文摘要/);
       assert.doesNotMatch(systemText, /capability_runtime_context|artifact_list|artifact_read/);

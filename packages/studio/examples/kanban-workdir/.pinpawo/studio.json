@@ -14,7 +14,12 @@
         ]
       }
     },
-    { "id": "@pinpawo-plugin/kanban" },
+    {
+      "id": "@pinpawo-plugin/kanban",
+      "options": {
+        "assignablePetIds": ["executor", "reviewer"]
+      }
+    },
     { "id": "@pinpawo-plugin/scheduler" },
     { "id": "@pinpawo-plugin/project-files" },
     {

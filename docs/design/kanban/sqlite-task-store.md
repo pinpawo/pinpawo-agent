@@ -1,7 +1,7 @@
 # Kanban SQLite Task Store
 
 > 状态：Draft implementation contract
-> 更新：2026-08-27
+> 更新：2026-09-02
 
 本文定义独立 Kanban 领域的 task、dependency、history 与 SQLite persistence。
 Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition 使用；它的数据
@@ -20,7 +20,8 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
 - 运行时 JSON snapshot store 已移除，SQLite 是持久化路径。
 
 旧 dispatch-resume adapter 的 `waitTask(reason)`、public continuation 与
-`continuation_json` 已移除；schema v3 会显式删除 v2 的 continuation column。Studio
+`continuation_json` 已移除；schema v4 会显式删除 v2 的 continuation column，并将旧
+`brief` 拆分为供列表识别的 `title` 与承载完整执行输入的 `detail`。Studio
 dispatch receipt 只表示 resident 已接纳输入，不产生 Kanban task transition。
 
 仍未实现独立 Kanban CLI/Web composition，以及 Console 的真实 adapter；它们不能通过绕开
@@ -64,7 +65,8 @@ type KanbanTaskStatus = 'todo' | 'doing' | 'waiting' | 'done' | 'blocked';
 type KanbanTask = {
   taskId: string;
   assigneeId: string;
-  brief: string;
+  title: string;
+  detail: string;
   status: KanbanTaskStatus;
   deps: string[];
   note?: string;
@@ -85,6 +87,9 @@ type KanbanTaskEvent = {
 
 `assigneeId` 是 Kanban 的执行者标识，不预设执行者一定是 Pet。Studio adapter 可以把
 它解释为 `petId`，其他 application 可以映射到 worker、team 或用户。
+
+`title` 是面向列表和快速识别的简短交付名称；`detail` 是交给执行者的完整任务输入，包含
+目标、完成标准、必要上下文与应保留的证据。二者描述同一个 task，不形成额外的执行层级。
 
 状态语义：
 
@@ -109,7 +114,8 @@ type KanbanTaskEvent = {
 CREATE TABLE kanban_tasks (
   task_id       TEXT PRIMARY KEY,
   assignee_id   TEXT NOT NULL,
-  brief         TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  detail        TEXT NOT NULL,
   status        TEXT NOT NULL
                 CHECK (status IN ('todo', 'doing', 'waiting', 'done', 'blocked')),
   note          TEXT,
@@ -195,9 +201,10 @@ Repository 保证每个 mutation 在一个 transaction 内：
 `KanbanTaskService` 在 commit 后投射 `KanbanDomainEvent` 给当前 application 的 adapters。
 数据库失败时不得发布成功事件或启动外部执行。
 
-`claimNextReadyTask()` 使用原子 transaction：按 `created_at, task_id` 选择一个 dependency
-均完成的 `todo` task，以带 `status = todo` 条件的 update 改为 `doing`，并插入 claimed
-event。并发 claim 同一 task 只能成功一次。
+`claimNextReadyTask(excludedAssigneeIds)` 使用原子 transaction：按 `created_at, task_id`
+选择一个 dependency 均完成、且不属于调用方排除集合的 `todo` task，以带
+`status = todo` 条件的 update 改为 `doing`，并插入 claimed event。并发 claim 同一 task
+只能成功一次。assignee 并发策略由 runner 通过排除集合表达，不固化进通用 Kanban 领域。
 
 ## 5. Domain event 与历史
 
@@ -296,6 +303,15 @@ Studio Kanban Plugin 只是一个可选 adapter：claim 必须先由 service com
 Toolkit 连接 Studio，不读取 checkpoint、thread、Agent Session 或 execution metadata。
 HTTP route 与 Toolkit 也必须复用同一个 `KanbanTaskService`。
 
+Studio adapter 提供职责分离的 Toolkit projection：`kanban-planning` 读取 assignee/task
+快照并创建最终交付，`kanban-execution` 读取已分派 task 并提交完成或阻塞结果。通用
+`kanban` Toolkit 继续作为完整领域接口存在，但示例 Planner 与执行 Pet 使用各自的最小
+projection，使可调用能力与 Pet 职责一致。
+
+Studio dispatch adapter 将已有 `doing` / `waiting` task 的 Pet 加入下一次 claim 的排除集合，
+因此同一 Pet 默认串行执行，不同 Pet 仍可并行。该策略属于 Studio adapter；其他 Kanban
+runner 可以根据自己的 assignee 语义选择不同并发策略。
+
 ## 9. JSON snapshot 迁移
 
 SQLite 落地后，新 application 默认只创建 `kanban.sqlite`，不隐式扫描旧 JSON。
@@ -339,6 +355,7 @@ writable truth source。
 - Kanban domain/service/repository 不 import Studio、pet-agent 或 local-agent。
 - 每个 mutation 与 task event 原子提交；commit 失败不发布成功 event、不执行外部动作。
 - 同一 ready task 并发 claim 只成功一次。
+- Studio adapter 中同一 Pet 默认最多有一个 `doing` / `waiting` task，完成或阻塞后才 claim 下一项。
 - crash 后 `doing -> blocked`、`waiting` 保留，恢复变化进入 history。
 - CLI/Web 可独立运行 Kanban，不需要 Studio。
 - 所有 adapter 通过 service/command/read model 使用 Kanban，不直接写 SQLite。

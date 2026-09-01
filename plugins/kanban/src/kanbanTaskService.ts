@@ -9,7 +9,8 @@ export type KanbanTask = {
   taskId: string;
   /** A Kanban-owned executor identifier. A Studio adapter may map this to a petId. */
   assigneeId: string;
-  brief: string;
+  title: string;
+  detail: string;
   status: KanbanTaskStatus;
   deps: string[];
   note?: string;
@@ -39,7 +40,8 @@ export type KanbanTaskMutation = {
 
 export type CreateKanbanTaskInput = {
   assigneeId: string;
-  brief: string;
+  title: string;
+  detail: string;
   dependsOn?: readonly string[];
 };
 
@@ -47,7 +49,8 @@ export type CreateKanbanTaskInput = {
 export type LegacyKanbanTask = {
   taskId: string;
   assigneeId: string;
-  brief: string;
+  title: string;
+  detail: string;
   status: KanbanTaskStatus;
   deps: string[];
   note?: string;
@@ -61,7 +64,7 @@ export type KanbanTaskRepository = {
   readSnapshot: () => Promise<KanbanTaskSnapshot>;
   getTask: (taskId: string) => Promise<KanbanTask | null>;
   createTask: (input: CreateKanbanTaskInput) => Promise<KanbanTaskMutation>;
-  claimNextReadyTask: () => Promise<KanbanTaskMutation | null>;
+  claimNextReadyTask: (excludedAssigneeIds?: readonly string[]) => Promise<KanbanTaskMutation | null>;
   claimReadyTask: (taskId: string) => Promise<KanbanTaskMutation>;
   completeTask: (taskId: string, result: string) => Promise<KanbanTaskMutation>;
   blockTask: (taskId: string, reason: string) => Promise<KanbanTaskMutation>;
@@ -72,14 +75,16 @@ export type KanbanTaskRepository = {
 const TASK_STATUSES = new Set<KanbanTaskStatus>([
   'todo', 'doing', 'waiting', 'done', 'blocked',
 ]);
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
+const MAX_TASK_TITLE_LENGTH = 160;
 const DEFAULT_EVENT_LIMIT = 200;
 const MAX_EVENT_LIMIT = 1_000;
 
 type TaskRow = {
   task_id: string;
   assignee_id: string;
-  brief: string;
+  title: string;
+  detail: string;
   status: string;
   note: string | null;
   created_at: string;
@@ -102,6 +107,22 @@ function requireNonEmpty(value: string, label: string): string {
   return normalized;
 }
 
+function requireTaskTitle(value: string): string {
+  const title = requireNonEmpty(value, 'title').replace(/\s+/g, ' ');
+  if (title.length > MAX_TASK_TITLE_LENGTH) {
+    throw new Error(`Kanban title must not exceed ${MAX_TASK_TITLE_LENGTH.toString()} characters.`);
+  }
+  return title;
+}
+
+function titleFromLegacyBrief(brief: string): string {
+  const firstLine = brief.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? brief.trim();
+  const title = firstLine.replace(/\s+/g, ' ');
+  return title.length <= MAX_TASK_TITLE_LENGTH
+    ? title
+    : `${title.slice(0, MAX_TASK_TITLE_LENGTH - 1).trimEnd()}…`;
+}
+
 function requireStatus(value: string): KanbanTaskStatus {
   if (!TASK_STATUSES.has(value as KanbanTaskStatus)) {
     throw new Error(`Kanban database contains unsupported task status "${value}".`);
@@ -113,7 +134,8 @@ function taskFromRow(row: TaskRow, deps: string[]): KanbanTask {
   return {
     taskId: row.task_id,
     assigneeId: row.assignee_id,
-    brief: row.brief,
+    title: row.title,
+    detail: row.detail,
     status: requireStatus(row.status),
     deps,
     ...(row.note === null ? {} : { note: row.note }),
@@ -195,7 +217,8 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
         CREATE TABLE kanban_tasks (
           task_id TEXT PRIMARY KEY,
           assignee_id TEXT NOT NULL,
-          brief TEXT NOT NULL,
+          title TEXT NOT NULL,
+          detail TEXT NOT NULL,
           status TEXT NOT NULL CHECK (status IN ('todo', 'doing', 'waiting', 'done', 'blocked')),
           note TEXT,
           created_at TEXT NOT NULL,
@@ -224,7 +247,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           ON kanban_task_dependencies(depends_on_task_id, task_id);
         CREATE INDEX kanban_task_events_task_sequence
           ON kanban_task_events(task_id, sequence);
-        PRAGMA user_version = 3;
+        PRAGMA user_version = 4;
         COMMIT;
       `);
     }
@@ -233,6 +256,28 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     }
     if (version.user_version === 1 || version.user_version === 2) {
       this.database.exec('BEGIN IMMEDIATE; ALTER TABLE kanban_tasks DROP COLUMN continuation_json; PRAGMA user_version = 3; COMMIT;');
+    }
+    if (version.user_version >= 1 && version.user_version <= 3) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE kanban_tasks ADD COLUMN title TEXT NOT NULL DEFAULT '';
+        ALTER TABLE kanban_tasks ADD COLUMN detail TEXT NOT NULL DEFAULT '';
+      `);
+      try {
+        const legacyRows = this.database.prepare(
+          'SELECT task_id, brief FROM kanban_tasks',
+        ).all() as Array<{ task_id: string; brief: string }>;
+        const update = this.database.prepare(
+          'UPDATE kanban_tasks SET title = ?, detail = ? WHERE task_id = ?',
+        );
+        for (const row of legacyRows) {
+          update.run(titleFromLegacyBrief(row.brief), row.brief, row.task_id);
+        }
+        this.database.exec('ALTER TABLE kanban_tasks DROP COLUMN brief; PRAGMA user_version = 4; COMMIT;');
+      } catch (error) {
+        this.database.exec('ROLLBACK;');
+        throw error;
+      }
     }
     this.initialized = true;
   }
@@ -246,7 +291,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
   async readSnapshot(): Promise<KanbanTaskSnapshot> {
     this.assertReady();
     const tasks = (this.database.prepare(
-      'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks ORDER BY created_at, task_id',
+      'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks ORDER BY created_at, task_id',
     ).all() as TaskRow[]).map((row) => this.readTask(row));
     const sequence = this.database.prepare(
       'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM kanban_task_events',
@@ -257,7 +302,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
   async getTask(taskId: string): Promise<KanbanTask | null> {
     this.assertReady();
     const row = this.database.prepare(
-      'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+      'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
     ).get(taskId) as TaskRow | undefined;
     return row ? this.readTask(row) : null;
   }
@@ -266,7 +311,8 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     this.assertReady();
     const taskId = randomUUID();
     const assigneeId = requireNonEmpty(input.assigneeId, 'assigneeId');
-    const brief = requireNonEmpty(input.brief, 'brief');
+    const title = requireTaskTitle(input.title);
+    const detail = requireNonEmpty(input.detail, 'detail');
     const dependencies = normalizeDependencies(taskId, input.dependsOn);
     return this.transaction(() => {
       for (const dependencyId of dependencies) {
@@ -275,9 +321,9 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       }
       const now = new Date().toISOString();
       this.database.prepare(
-        `INSERT INTO kanban_tasks(task_id, assignee_id, brief, status, created_at, updated_at)
-         VALUES (?, ?, ?, 'todo', ?, ?)`,
-      ).run(taskId, assigneeId, brief, now, now);
+        `INSERT INTO kanban_tasks(task_id, assignee_id, title, detail, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'todo', ?, ?)`,
+      ).run(taskId, assigneeId, title, detail, now, now);
       const insertDependency = this.database.prepare(
         'INSERT INTO kanban_task_dependencies(task_id, depends_on_task_id) VALUES (?, ?)',
       );
@@ -286,13 +332,20 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     });
   }
 
-  async claimNextReadyTask(): Promise<KanbanTaskMutation | null> {
+  async claimNextReadyTask(excludedAssigneeIds: readonly string[] = []): Promise<KanbanTaskMutation | null> {
     this.assertReady();
+    const excluded = [...new Set(excludedAssigneeIds.map((assigneeId) => (
+      requireNonEmpty(assigneeId, 'excluded assignee id')
+    )))];
     return this.transaction(() => {
+      const exclusionClause = excluded.length > 0
+        ? `AND task.assignee_id NOT IN (${excluded.map(() => '?').join(', ')})`
+        : '';
       const row = this.database.prepare(`
-        SELECT task_id, assignee_id, brief, status, note, created_at, updated_at
+        SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at
         FROM kanban_tasks AS task
         WHERE task.status = 'todo'
+          ${exclusionClause}
           AND NOT EXISTS (
             SELECT 1
             FROM kanban_task_dependencies AS dependency
@@ -301,7 +354,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           )
         ORDER BY task.created_at, task.task_id
         LIMIT 1
-      `).get() as TaskRow | undefined;
+      `).get(...excluded) as TaskRow | undefined;
       if (!row) return null;
       const now = new Date().toISOString();
       const result = this.database.prepare(
@@ -317,7 +370,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     const normalizedTaskId = requireNonEmpty(taskId, 'taskId');
     return this.transaction(() => {
       const row = this.database.prepare(
-        'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+        'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
       ).get(normalizedTaskId) as TaskRow | undefined;
       if (!row) throw new Error(`Kanban task "${normalizedTaskId}" does not exist.`);
       const current = requireStatus(row.status);
@@ -403,12 +456,13 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           }
         }
         this.database.prepare(`
-          INSERT INTO kanban_tasks(task_id, assignee_id, brief, status, note, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO kanban_tasks(task_id, assignee_id, title, detail, status, note, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           task.taskId,
           task.assigneeId,
-          task.brief,
+          task.title,
+          task.detail,
           task.status,
           task.note ?? null,
           task.createdAt,
@@ -497,7 +551,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(taskId, eventType, fromStatus ?? null, toStatus, note ?? null, occurredAt);
     const task = this.database.prepare(
-      'SELECT task_id, assignee_id, brief, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+      'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
     ).get(taskId) as TaskRow | undefined;
     if (!task) throw new Error(`Kanban task "${taskId}" disappeared during mutation.`);
     return {
@@ -572,9 +626,9 @@ export class KanbanTaskService {
     return this.publish(await this.repository.createTask(input));
   }
 
-  async claimNextReadyTask(): Promise<KanbanTaskMutation | null> {
+  async claimNextReadyTask(excludedAssigneeIds?: readonly string[]): Promise<KanbanTaskMutation | null> {
     this.assertReady();
-    const mutation = await this.repository.claimNextReadyTask();
+    const mutation = await this.repository.claimNextReadyTask(excludedAssigneeIds);
     return mutation ? this.publish(mutation) : null;
   }
 

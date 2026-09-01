@@ -6,13 +6,18 @@ import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import {
+  createBashToolkit,
+  createGitToolkit,
+  createProjectInspectionToolkit,
+} from './toolkits/local';
 import {
   gitAddTool,
   gitCommitTool,
   gitDiffTool,
   gitPushTool,
   ghIssueCreateTool,
+  ghIssueListTool,
   ghIssueCommentsTool,
   ghIssueViewTool,
   ghPrCommentsTool,
@@ -168,6 +173,32 @@ esac`);
       repository: 'pinpawo/pinpawo-agent',
     }),
     'https://github.com/pinpawo/pinpawo-agent/issues/34',
+  );
+});
+
+test('gh_issue_list discovers structured issue candidates without shell commands', async (t) => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-gh-issue-list-'));
+  t.after(() => rmSync(workdir, { recursive: true, force: true }));
+  createFakeGh(t, `
+case "$*" in
+  "issue list --state open --limit 20 --json number,title,state,labels,assignees,author,url,updatedAt --repo pinpawo/pinpawo-agent --search label:priority-high")
+    printf '[{"number":645,"title":"Planner routing","state":"OPEN"}]\\n'
+    ;;
+  *)
+    printf 'unexpected gh arguments: %s\\n' "$*" >&2
+    exit 2
+    ;;
+esac`);
+
+  assert.deepEqual(
+    JSON.parse(String(await ghIssueListTool.invoke({
+      cwd: workdir,
+      repository: 'pinpawo/pinpawo-agent',
+      state: 'open',
+      limit: 20,
+      search: 'label:priority-high',
+    }))),
+    [{ number: 645, title: 'Planner routing', state: 'OPEN' }],
   );
 });
 
@@ -459,6 +490,7 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
       'gh_pr_comments',
       'gh_pr_diff',
       'gh_issue_create',
+      'gh_issue_list',
       'gh_issue_view',
       'gh_issue_comments',
       'gh_read_content',
@@ -502,4 +534,29 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
     review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
   );
+});
+
+test('project-inspection Toolkit exposes only read-only project evidence tools', () => {
+  const toolkit = createProjectInspectionToolkit();
+  const names = toolkit.tools.map(({ tool }) => tool.name);
+
+  assert.equal(toolkit.name, 'project-inspection');
+  assert.equal(names.includes('grep_search'), true);
+  assert.equal(names.includes('git_diff'), true);
+  assert.equal(names.includes('gh_issue_list'), true);
+  assert.equal(names.includes('gh_issue_view'), true);
+  for (const forbidden of [
+    'write_file',
+    'apply_patch',
+    'download_file',
+    'http_fetch',
+    'run_shell',
+    'git_add',
+    'git_commit',
+    'git_push',
+    'gh_pr_create',
+    'gh_issue_create',
+  ]) {
+    assert.equal(names.includes(forbidden), false, `${forbidden} must remain outside read-only inspection`);
+  }
 });

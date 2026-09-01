@@ -22,10 +22,11 @@ test('SQLite task service commits tasks, dependencies, and history atomically', 
   const service = await createService(path.join(root, 'state', 'kanban.sqlite'));
   t.after(() => service.close());
 
-  const first = await service.createTask({ assigneeId: 'writer', brief: 'draft' });
+  const first = await service.createTask({ assigneeId: 'writer', title: 'Draft', detail: 'draft' });
   const second = await service.createTask({
     assigneeId: 'editor',
-    brief: 'review',
+    title: 'Review',
+    detail: 'review',
     dependsOn: [first.task.taskId],
   });
 
@@ -37,11 +38,13 @@ test('SQLite task service commits tasks, dependencies, and history atomically', 
   const snapshot = await service.readSnapshot();
   assert.deepEqual(snapshot.tasks.map((task) => ({
     assigneeId: task.assigneeId,
+    title: task.title,
+    detail: task.detail,
     status: task.status,
     deps: task.deps,
   })).sort((left, right) => left.assigneeId.localeCompare(right.assigneeId)), [
-    { assigneeId: 'editor', status: 'doing', deps: [first.task.taskId] },
-    { assigneeId: 'writer', status: 'done', deps: [] },
+    { assigneeId: 'editor', title: 'Review', detail: 'review', status: 'doing', deps: [first.task.taskId] },
+    { assigneeId: 'writer', title: 'Draft', detail: 'draft', status: 'done', deps: [] },
   ]);
   assert.equal(snapshot.lastEventSequence, 5);
   assert.deepEqual(
@@ -57,7 +60,8 @@ test('SQLite task service rejects missing dependencies before creating a task', 
   await assert.rejects(
     () => service.createTask({
       assigneeId: 'writer',
-      brief: 'cannot start',
+      title: 'Cannot start',
+      detail: 'cannot start',
       dependsOn: ['missing-task'],
     }),
     /does not exist/,
@@ -69,10 +73,11 @@ test('SQLite task service starts one selected ready or blocked task explicitly',
   const service = await createService(':memory:');
   t.after(() => service.close());
 
-  const prerequisite = await service.createTask({ assigneeId: 'writer', brief: 'draft' });
+  const prerequisite = await service.createTask({ assigneeId: 'writer', title: 'Draft', detail: 'draft' });
   const dependent = await service.createTask({
     assigneeId: 'reviewer',
-    brief: 'review',
+    title: 'Review',
+    detail: 'review',
     dependsOn: [prerequisite.task.taskId],
   });
   await assert.rejects(
@@ -91,7 +96,7 @@ test('SQLite task service starts one selected ready or blocked task explicitly',
 test('SQLite task service commits one claim when callers race for ready work', async (t) => {
   const service = await createService(':memory:');
   t.after(() => service.close());
-  const task = await service.createTask({ assigneeId: 'worker', brief: 'claim once' });
+  const task = await service.createTask({ assigneeId: 'worker', title: 'Claim once', detail: 'claim once' });
 
   const claims = await Promise.all([
     service.claimNextReadyTask(),
@@ -102,11 +107,43 @@ test('SQLite task service commits one claim when callers race for ready work', a
   assert.equal((await service.getTask(task.task.taskId))?.status, 'doing');
 });
 
+test('SQLite task service can exclude assignees already active in an adapter', async (t) => {
+  const service = await createService(':memory:');
+  t.after(() => service.close());
+
+  const first = await service.createTask({
+    assigneeId: 'worker',
+    title: 'First delivery',
+    detail: 'finish the first delivery',
+  });
+  const second = await service.createTask({
+    assigneeId: 'worker',
+    title: 'Second delivery',
+    detail: 'finish the second delivery',
+  });
+  const claimedWorker = await service.claimNextReadyTask();
+  assert.equal(claimedWorker?.task.assigneeId, 'worker');
+  const independent = await service.createTask({
+    assigneeId: 'reviewer',
+    title: 'Independent review',
+    detail: 'review another completed change',
+  });
+  assert.equal((await service.claimNextReadyTask(['worker']))?.task.taskId, independent.task.taskId);
+  assert.equal(await service.claimNextReadyTask(['worker', 'reviewer']), null);
+
+  assert.ok(claimedWorker);
+  await service.completeTask(claimedWorker.task.taskId, 'first delivery ready');
+  const remainingWorkerTaskId = claimedWorker.task.taskId === first.task.taskId
+    ? second.task.taskId
+    : first.task.taskId;
+  assert.equal((await service.claimNextReadyTask(['reviewer']))?.task.taskId, remainingWorkerTaskId);
+});
+
 test('SQLite task service records interrupted work as a recovered block on restart', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-sqlite-'));
   const databasePath = path.join(root, 'kanban.sqlite');
   const firstProcess = await createService(databasePath);
-  const task = await firstProcess.createTask({ assigneeId: 'worker', brief: 'external work' });
+  const task = await firstProcess.createTask({ assigneeId: 'worker', title: 'External work', detail: 'external work' });
   await firstProcess.claimNextReadyTask();
   await firstProcess.close();
 
@@ -132,7 +169,7 @@ test('legacy JSON migration preserves the source and recovers imported doing wor
         {
           taskId: 'task-done',
           petId: 'writer',
-          brief: 'finished work',
+          brief: 'Finished work\nfinished work',
           status: 'done',
           deps: [],
           note: 'ready',
@@ -142,7 +179,7 @@ test('legacy JSON migration preserves the source and recovers imported doing wor
         {
           taskId: 'task-running',
           petId: 'editor',
-          brief: 'uncertain work',
+          brief: 'Uncertain work\nuncertain work',
           status: 'doing',
           deps: ['task-done'],
           createdAt: '2026-08-23T00:02:00.000Z',
@@ -185,12 +222,16 @@ test('a failing committed-event listener does not fail the persisted command', a
   t.after(() => service.close());
   service.subscribe(() => { throw new Error('observer unavailable'); });
 
-  const mutation = await service.createTask({ assigneeId: 'worker', brief: 'still committed' });
+  const mutation = await service.createTask({
+    assigneeId: 'worker',
+    title: 'Still committed',
+    detail: 'still committed',
+  });
   assert.equal(mutation.task.status, 'todo');
-  assert.equal((await service.getTask(mutation.task.taskId))?.brief, 'still committed');
+  assert.equal((await service.getTask(mutation.task.taskId))?.detail, 'still committed');
 });
 
-test('schema v2 migration removes the obsolete continuation column', async () => {
+test('schema v2 migration removes obsolete columns and separates task title from detail', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v2-'));
   const databasePath = path.join(root, 'kanban.sqlite');
   const legacy = new DatabaseSync(databasePath);
@@ -218,9 +259,56 @@ test('schema v2 migration removes the obsolete continuation column', async () =>
       name: string;
     }>;
     const version = migrated.prepare('PRAGMA user_version').get() as { user_version: number };
-    assert.equal(version.user_version, 3);
+    assert.equal(version.user_version, 4);
     assert.equal(columns.some(({ name }) => name === 'continuation_json'), false);
+    assert.equal(columns.some(({ name }) => name === 'brief'), false);
+    assert.equal(columns.some(({ name }) => name === 'title'), true);
+    assert.equal(columns.some(({ name }) => name === 'detail'), true);
   } finally {
     migrated.close();
+  }
+});
+
+test('schema v3 migration derives a concise title and preserves the complete brief as detail', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v3-'));
+  const databasePath = path.join(root, 'kanban.sqlite');
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec(`
+    CREATE TABLE kanban_tasks (
+      task_id TEXT PRIMARY KEY,
+      assignee_id TEXT NOT NULL,
+      brief TEXT NOT NULL,
+      status TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE kanban_task_dependencies (
+      task_id TEXT NOT NULL,
+      depends_on_task_id TEXT NOT NULL,
+      PRIMARY KEY (task_id, depends_on_task_id)
+    );
+    CREATE TABLE kanban_task_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      from_status TEXT,
+      to_status TEXT NOT NULL,
+      note TEXT,
+      occurred_at TEXT NOT NULL
+    );
+    INSERT INTO kanban_tasks(task_id, assignee_id, brief, status, created_at, updated_at)
+    VALUES ('task-1', 'worker', 'Implement search\nKeep acceptance evidence.', 'todo', '2026-01-01', '2026-01-01');
+    PRAGMA user_version = 3;
+  `);
+  legacy.close();
+
+  const service = await createService(databasePath);
+  try {
+    const task = await service.getTask('task-1');
+    assert.equal(task?.title, 'Implement search');
+    assert.equal(task?.detail, 'Implement search\nKeep acceptance evidence.');
+  } finally {
+    await service.close();
   }
 });

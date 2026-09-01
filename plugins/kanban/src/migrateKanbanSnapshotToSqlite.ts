@@ -52,10 +52,13 @@ function parseTask(value: unknown, filePath: string, index: number): LegacyKanba
   if (value.note !== undefined && typeof value.note !== 'string') {
     throw invalidSnapshot(filePath, `board.tasks[${index.toString()}].note must be a string`);
   }
+  const brief = readString(value, 'brief', filePath, index);
+  const firstLine = brief.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? brief.trim();
   return {
     taskId: readString(value, 'taskId', filePath, index),
     assigneeId: readString(value, 'petId', filePath, index),
-    brief: readString(value, 'brief', filePath, index),
+    title: firstLine.length <= 160 ? firstLine : `${firstLine.slice(0, 159).trimEnd()}…`,
+    detail: brief,
     status: status as KanbanTaskStatus,
     deps: [...value.deps] as string[],
     ...(value.note === undefined ? {} : { note: value.note }),

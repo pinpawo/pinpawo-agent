@@ -25,13 +25,18 @@ import {
 } from './kanbanTaskService';
 
 export const KANBAN_TOOLKIT_NAME = 'kanban';
+export const KANBAN_PLANNING_TOOLKIT_NAME = 'kanban-planning';
+export const KANBAN_EXECUTION_TOOLKIT_NAME = 'kanban-execution';
 
 const TOOL_TITLES = ['查看执行者', '查看任务', '新增任务', '完成任务', '阻塞任务'] as const;
 
 function describeTask(task: KanbanTask): string {
   const deps = task.deps.length > 0 ? ` deps=[${task.deps.join(', ')}]` : '';
   const note = task.note ? ` note=${task.note}` : '';
-  return `${task.taskId} [${task.status}] assignee=${task.assigneeId}${deps} ${task.brief}${note}`;
+  return [
+    `${task.taskId} [${task.status}] assignee=${task.assigneeId}${deps} title=${task.title}${note}`,
+    `detail=${task.detail}`,
+  ].join('\n');
 }
 
 function describeAssignee(assignee: StudioPetRegistration): string {
@@ -56,8 +61,9 @@ function buildTaskRequest(task: KanbanTask, dependencies: readonly KanbanTask[])
       ];
   return [
     `Kanban taskId: ${task.taskId}`,
+    `Title: ${task.title}`,
     '',
-    task.brief,
+    task.detail,
     ...dependencyResults,
     '',
     'When reporting completion or a block, pass this taskId to the Kanban tool.',
@@ -111,9 +117,9 @@ function buildTools(
     {
       name: 'kanban_task_list',
       description:
-        '读取调用时刻的 Kanban task 快照，返回状态、执行者、依赖与已有结果。'
-        + '一次规划读取一份快照即可形成当前决策的事实基线；新增 task 返回的 taskId 是持久化确认，'
-        + '后续变化通过 Studio 事件与 Trigger 流转。',
+        '为一次规划读取一份 Kanban task 基线快照，返回状态、执行者、依赖与已有结果。'
+        + '规划开始时调用一次并在本次规划中持续使用该快照；新增 task 返回的 taskId 是持久化确认，'
+        + '后续依赖直接使用这些 taskId，状态变化由 Studio 事件与 Trigger 流转。',
       schema: z.object({}),
     },
   );
@@ -128,7 +134,8 @@ function buildTools(
       // receives the generic assigneeId.
       const mutation = await service.createTask({
         assigneeId: input.petId,
-        brief: input.brief,
+        title: input.title,
+        detail: input.detail,
         ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
       });
       return `added ${mutation.task.taskId}`;
@@ -136,11 +143,12 @@ function buildTools(
     {
       name: 'kanban_task_add',
       description:
-        '创建并指派一个可由单个 Pet 独立交付的完整 task。一次调用只创建一个 task；'
+        '创建并指派一个由接收 Pet 直接完成的最终交付 task。一次调用只创建一个 task；'
         + 'dependsOn 表示真实的交付依赖，依赖完成后进入可派发状态。返回的 taskId 是持久化成功的确认。',
       schema: z.object({
         petId: z.string().describe('负责完整交付的 Studio petId'),
-        brief: z.string().describe('接收方的完整任务输入，包含目标、完成标准、必要上下文与应保留的证据；同一交付的实现步骤统一写入此 brief'),
+        title: z.string().max(160).describe('便于在看板列表识别任务的简短标题，只表达该 task 的完整交付主题'),
+        detail: z.string().describe('接收方的完整任务详情，包含目标、完成标准、必要上下文与应保留的证据'),
         dependsOn: z.array(z.string()).optional().describe('本 task 开始前必须完成的真实前置交付 taskId'),
       }),
     },
@@ -200,6 +208,8 @@ export type CreateKanbanPluginOptions = {
   };
   /** Automatic by default; manual keeps ready tasks queued until explicitly started. */
   dispatchMode?: KanbanDispatchMode;
+  /** Optional Studio Pet ids that may receive Kanban tasks. Defaults to every registered Pet. */
+  assignablePetIds?: readonly string[];
 };
 
 export type KanbanDispatchMode = 'automatic' | 'manual';
@@ -225,13 +235,58 @@ export function createKanbanToolkit(
   };
 }
 
+export function createKanbanPlanningToolkit(
+  service: KanbanTaskService,
+  readAssignees: () => readonly StudioPetRegistration[] | null = () => null,
+): AgentToolkit {
+  const declaredTools = buildTools(service, readAssignees).slice(0, 3);
+  return {
+    name: KANBAN_PLANNING_TOOLKIT_NAME,
+    description: 'Studio 的 task 规划接口：读取可分派 Pet 与当前 task 图，并登记新的完整交付及其依赖。',
+    tools: declaredTools.map((declared, index) => ({
+      tool: declared,
+      operation: { title: TOOL_TITLES[index] ?? declared.name },
+    })),
+  };
+}
+
+export function createKanbanExecutionToolkit(
+  service: KanbanTaskService,
+  readAssignees: () => readonly StudioPetRegistration[] | null = () => null,
+): AgentToolkit {
+  const declaredTools = buildTools(service, readAssignees);
+  const executionTools = [declaredTools[1], declaredTools[3], declaredTools[4]].filter(
+    (declared): declared is NamedStructuredTool => Boolean(declared),
+  );
+  const titles = ['查看任务', '完成任务', '阻塞任务'];
+  return {
+    name: KANBAN_EXECUTION_TOOLKIT_NAME,
+    description: 'Studio 的 task 执行回报接口：读取已分派 task，并提交完成结果或明确阻塞。',
+    tools: executionTools.map((declared, index) => ({
+      tool: declared,
+      operation: { title: titles[index] ?? declared.name },
+    })),
+  };
+}
+
 export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): KanbanPlugin {
+  const assignablePetIds = options.assignablePetIds?.map((petId) => petId.trim());
+  if (assignablePetIds) {
+    if (assignablePetIds.length === 0 || assignablePetIds.some((petId) => !petId)) {
+      throw new Error('Kanban assignablePetIds must contain at least one non-empty Studio petId.');
+    }
+    if (new Set(assignablePetIds).size !== assignablePetIds.length) {
+      throw new Error('Kanban assignablePetIds must not contain duplicate Studio petIds.');
+    }
+  }
   const ownsService = !options.service;
   const service = options.service ?? (options.databasePath
     ? new KanbanTaskService(new SqliteKanbanTaskRepository(options.databasePath))
     : createInMemoryKanbanTaskService());
   let assignees: readonly StudioPetRegistration[] | null = null;
   const toolkit = createKanbanToolkit(service, () => assignees);
+  const planningToolkit = createKanbanPlanningToolkit(service, () => assignees);
+  const executionToolkit = createKanbanExecutionToolkit(service, () => assignees);
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHttpRoute: (() => void) | undefined;
@@ -271,15 +326,30 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   async function runDispatchLoop(): Promise<void> {
     while (dispatchEnabled && context && dispatchRequested) {
       dispatchRequested = false;
+      const activeAssigneeIds = new Set(
+        (await service.readSnapshot()).tasks.filter(isActive).map(({ assigneeId }) => assigneeId),
+      );
       while (dispatchEnabled && context) {
-        const mutation = await service.claimNextReadyTask();
+        const mutation = await service.claimNextReadyTask([...activeAssigneeIds]);
         if (!mutation) break;
+        activeAssigneeIds.add(mutation.task.assigneeId);
         await dispatchClaimedTask(mutation.task).catch(() => undefined);
       }
     }
   }
 
   async function startTask(taskId: string): Promise<KanbanTask> {
+    const snapshot = await service.readSnapshot();
+    const target = snapshot.tasks.find((task) => task.taskId === taskId);
+    if (!target) throw new Error(`Kanban task "${taskId}" does not exist.`);
+    const active = snapshot.tasks.find((task) => (
+      task.assigneeId === target.assigneeId && task.taskId !== taskId && isActive(task)
+    ));
+    if (active) {
+      throw new Error(
+        `Studio Pet "${target.assigneeId}" is already working on task "${active.taskId}".`,
+      );
+    }
     const mutation = await service.claimReadyTask(taskId);
     await dispatchClaimedTask(mutation.task);
     return mutation.task;
@@ -309,26 +379,37 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   return {
     service,
     name: KANBAN_TOOLKIT_NAME,
-    toolkits: [toolkit],
+    toolkits: [toolkit, planningToolkit, executionToolkit],
     start: async (pluginContext) => {
       if (context) throw new Error('Kanban Plugin is already started.');
       context = pluginContext;
-      assignees = pluginContext.listPets();
-      unsubscribe = service.subscribe((mutation) => {
-        pluginContext.notify({
-          type: `task.${mutation.task.status}`,
-          payload: {
-            taskId: mutation.task.taskId,
-            // This is a Studio event projection, so retain the Studio-facing
-            // target name. The Kanban domain itself only has assigneeId.
-            petId: mutation.task.assigneeId,
-            note: mutation.task.note,
-            sequence: mutation.event.sequence,
-          },
-        });
-        dispatchReady();
-      });
       try {
+        const registeredPets = pluginContext.listPets();
+        const registeredById = new Map(registeredPets.map((registration) => (
+          [registration.petId, registration]
+        )));
+        const configuredAssignees = assignablePetIds?.map((petId) => {
+          const registration = registeredById.get(petId);
+          if (!registration) {
+            throw new Error(`Kanban assignable petId "${petId}" is not registered in this Studio.`);
+          }
+          return registration;
+        });
+        assignees = configuredAssignees ?? registeredPets;
+        unsubscribe = service.subscribe((mutation) => {
+          pluginContext.notify({
+            type: `task.${mutation.task.status}`,
+            payload: {
+              taskId: mutation.task.taskId,
+              // This is a Studio event projection, so retain the Studio-facing
+              // target name. The Kanban domain itself only has assigneeId.
+              petId: mutation.task.assigneeId,
+              note: mutation.task.note,
+              sequence: mutation.event.sequence,
+            },
+          });
+          dispatchReady();
+        });
         await service.init();
         const httpRoute = options.httpRoute;
         if (httpRoute !== false) {
@@ -443,7 +524,7 @@ export function createStudioPlugin(
   environment: InstalledKanbanPluginEnvironment,
 ): KanbanPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'httpRoute', 'dispatchMode']);
+  const allowed = new Set(['databasePath', 'httpRoute', 'dispatchMode', 'assignablePetIds']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Kanban Plugin option "${unknown}" is not supported.`);
   if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
@@ -453,6 +534,13 @@ export function createStudioPlugin(
     && options.dispatchMode !== 'automatic'
     && options.dispatchMode !== 'manual') {
     throw new Error('Kanban Plugin option "dispatchMode" must be automatic or manual.');
+  }
+  if (options.assignablePetIds !== undefined && (
+    !Array.isArray(options.assignablePetIds)
+    || options.assignablePetIds.length === 0
+    || options.assignablePetIds.some((petId) => typeof petId !== 'string')
+  )) {
+    throw new Error('Kanban Plugin option "assignablePetIds" must be a non-empty string array.');
   }
   const httpRoute = options.httpRoute;
   if (
@@ -481,6 +569,9 @@ export function createStudioPlugin(
     ...(options.dispatchMode === undefined
       ? {}
       : { dispatchMode: options.dispatchMode as KanbanDispatchMode }),
+    ...(options.assignablePetIds === undefined
+      ? {}
+      : { assignablePetIds: options.assignablePetIds as string[] }),
     ...(httpRoute !== undefined
       ? { httpRoute: httpRoute as CreateKanbanPluginOptions['httpRoute'] }
       : {}),

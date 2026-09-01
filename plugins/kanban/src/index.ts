@@ -4,8 +4,12 @@
 
 export {
   createKanbanPlugin,
+  createKanbanExecutionToolkit,
+  createKanbanPlanningToolkit,
   createKanbanToolkit,
   createStudioPlugin,
+  KANBAN_EXECUTION_TOOLKIT_NAME,
+  KANBAN_PLANNING_TOOLKIT_NAME,
   KANBAN_TOOLKIT_NAME,
 } from './kanbanPlugin';
 export type {

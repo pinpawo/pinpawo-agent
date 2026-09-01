@@ -66,7 +66,11 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
         petId: 'planner',
         tools: () => pluginTools(plugin),
         onInvoke: async () => {
-          await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'writer', brief: 'write draft' });
+          await pluginTools(plugin).kanban_task_add!.invoke({
+            petId: 'writer',
+            title: 'Write draft',
+            detail: 'write draft',
+          });
         },
       }),
       pet({
@@ -93,6 +97,8 @@ test('Studio adapter maps a committed Kanban task through dispatch and tools', a
 
   const snapshot = await plugin.service.readSnapshot();
   assert.match(workerRequest, /Kanban taskId:/);
+  assert.match(workerRequest, /Title: Write draft/);
+  assert.match(workerRequest, /\n\nwrite draft\n/);
   assert.deepEqual(snapshot.tasks.map((task) => ({
     assigneeId: task.assigneeId,
     status: task.status,
@@ -118,11 +124,60 @@ test('an accepted dispatch leaves the Kanban task active until its Toolkit repor
   });
   t.after(() => studio.shutdown());
 
-  await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'worker', brief: 'needs approval' });
+  await pluginTools(plugin).kanban_task_add!.invoke({
+    petId: 'worker',
+    title: 'Needs approval',
+    detail: 'needs approval',
+  });
   await flush();
   const [task] = (await plugin.service.readSnapshot()).tasks;
   assert.equal(task?.status, 'doing');
   assert.equal('continuation' in (task ?? {}), false);
+});
+
+test('automatic dispatch runs one active task per Studio Pet', async (t) => {
+  const plugin = createKanbanPlugin();
+  const requests: string[] = [];
+  const studio = await createStudio({
+    studioId: 'kanban-pet-concurrency',
+    entryPetId: 'planner',
+    pets: [
+      pet({ petId: 'planner', tools: () => pluginTools(plugin) }),
+      pet({
+        petId: 'worker',
+        tools: () => pluginTools(plugin),
+        onInvoke: async (request) => { requests.push(request); },
+      }),
+    ],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  await plugin.service.createTask({
+    assigneeId: 'worker',
+    title: 'First delivery',
+    detail: 'finish first',
+  });
+  await plugin.service.createTask({
+    assigneeId: 'worker',
+    title: 'Second delivery',
+    detail: 'finish second',
+  });
+  await flush();
+
+  assert.equal(requests.length, 1);
+  const initialTasks = (await plugin.service.readSnapshot()).tasks;
+  assert.deepEqual(initialTasks.map(({ status }) => status).sort(), ['doing', 'todo']);
+  const active = initialTasks.find(({ status }) => status === 'doing');
+  assert.ok(active);
+
+  await plugin.service.completeTask(active.taskId, 'first ready');
+  await flush();
+  assert.equal(requests.length, 2);
+  assert.deepEqual(
+    (await plugin.service.readSnapshot()).tasks.map(({ status }) => status).sort(),
+    ['doing', 'done'].sort(),
+  );
 });
 
 test('Kanban Toolkit lists and validates Studio Pet assignees', async (t) => {
@@ -154,11 +209,83 @@ test('Kanban Toolkit lists and validates Studio Pet assignees', async (t) => {
   assert.match(
     await pluginTools(plugin).kanban_task_add!.invoke({
       petId: 'missing',
-      brief: 'must not be persisted',
+      title: 'Must not be persisted',
+      detail: 'must not be persisted',
     }) as string,
     /unknown Studio petId/,
   );
   assert.equal((await plugin.service.readSnapshot()).tasks.length, 0);
+});
+
+test('Kanban planning Toolkit omits execution outcome tools', () => {
+  const plugin = createKanbanPlugin();
+  const planning = plugin.toolkits.find(({ name }) => name === 'kanban-planning');
+  assert.ok(planning);
+  assert.deepEqual(
+    planning.tools.map(({ tool }) => tool.name),
+    ['kanban_assignee_list', 'kanban_task_list', 'kanban_task_add'],
+  );
+});
+
+test('Kanban execution Toolkit cannot create or reassign tasks', () => {
+  const plugin = createKanbanPlugin();
+  const execution = plugin.toolkits.find(({ name }) => name === 'kanban-execution');
+  assert.ok(execution);
+  assert.deepEqual(
+    execution.tools.map(({ tool }) => tool.name),
+    ['kanban_task_list', 'kanban_task_complete', 'kanban_task_block'],
+  );
+});
+
+test('Kanban assignablePetIds limits both discovery and task creation', async (t) => {
+  const plugin = createKanbanPlugin({ assignablePetIds: ['writer'] });
+  const studio = await createStudio({
+    studioId: 'kanban-configured-assignees',
+    entryPetId: 'planner',
+    pets: [
+      pet({ petId: 'planner', tools: () => pluginTools(plugin) }),
+      pet({ petId: 'writer', tools: () => pluginTools(plugin) }),
+    ],
+    plugins: [plugin],
+  });
+  t.after(() => studio.shutdown());
+
+  const assignees = await pluginTools(plugin).kanban_assignee_list!.invoke({}) as string;
+  assert.doesNotMatch(assignees, /petId=planner/);
+  assert.match(assignees, /petId=writer/);
+  assert.match(
+    await pluginTools(plugin).kanban_task_add!.invoke({
+      petId: 'planner',
+      title: 'Must remain planning-only',
+      detail: 'must remain planning-only',
+    }) as string,
+    /unknown Studio petId/,
+  );
+  assert.match(
+    await pluginTools(plugin).kanban_task_add!.invoke({
+      petId: 'writer',
+      title: 'Deliver the implementation',
+      detail: 'deliver the implementation',
+    }) as string,
+    /added/,
+  );
+  assert.deepEqual(
+    (await plugin.service.readSnapshot()).tasks.map(({ assigneeId }) => assigneeId),
+    ['writer'],
+  );
+});
+
+test('Kanban startup rejects assignable Pet ids outside the Studio registry', async () => {
+  const plugin = createKanbanPlugin({ assignablePetIds: ['missing'] });
+  await assert.rejects(
+    createStudio({
+      studioId: 'kanban-invalid-assignee',
+      entryPetId: 'planner',
+      pets: [pet({ petId: 'planner', tools: () => pluginTools(plugin) })],
+      plugins: [plugin],
+    }),
+    /assignable petId "missing" is not registered/,
+  );
 });
 
 test('downstream dispatch includes completed dependency results', async (t) => {
@@ -178,13 +305,15 @@ test('downstream dispatch includes completed dependency results', async (t) => {
 
   const first = await plugin.service.createTask({
     assigneeId: 'writer',
-    brief: 'produce the outline',
+    title: 'Produce the outline',
+    detail: 'produce the outline',
   });
   await flush();
   await plugin.service.completeTask(first.task.taskId, 'outline is ready');
   await plugin.service.createTask({
     assigneeId: 'writer',
-    brief: 'write the article',
+    title: 'Write the article',
+    detail: 'write the article',
     dependsOn: [first.task.taskId],
   });
   await flush();
@@ -203,7 +332,11 @@ test('a late Toolkit report completes an active task independently of dispatch l
   });
   t.after(() => studio.shutdown());
 
-  await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'worker', brief: 'must report' });
+  await pluginTools(plugin).kanban_task_add!.invoke({
+    petId: 'worker',
+    title: 'Must report',
+    detail: 'must report',
+  });
   await flush();
   const [task] = (await plugin.service.readSnapshot()).tasks;
   assert.equal(task?.status, 'doing');
@@ -231,7 +364,11 @@ test('a dispatch admission failure blocks the already-claimed task', async (t) =
   });
   t.after(() => studio.shutdown());
 
-  await pluginTools(plugin).kanban_task_add!.invoke({ petId: 'worker', brief: 'cannot deliver' });
+  await pluginTools(plugin).kanban_task_add!.invoke({
+    petId: 'worker',
+    title: 'Cannot deliver',
+    detail: 'cannot deliver',
+  });
   await flush();
   const [task] = (await plugin.service.readSnapshot()).tasks;
   assert.equal(task?.status, 'blocked');
@@ -243,7 +380,11 @@ test('adapter startup recovers SQLite doing work as blocked before it can redisp
   const databasePath = path.join(root, 'kanban.sqlite');
   const first = new KanbanTaskService(new SqliteKanbanTaskRepository(databasePath));
   await first.init();
-  const task = await first.createTask({ assigneeId: 'worker', brief: 'unknown outcome' });
+  const task = await first.createTask({
+    assigneeId: 'worker',
+    title: 'Unknown outcome',
+    detail: 'unknown outcome',
+  });
   await first.claimNextReadyTask();
   await first.close();
 

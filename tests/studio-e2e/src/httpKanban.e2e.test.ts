@@ -114,7 +114,8 @@ test('HTTP dispatch reaches a Pet and Kanban completion returns to the frontend 
         assert.equal(request, 'plan an article');
         await invokeKanbanTool(kanban, 'kanban_task_add', {
           petId: 'writer',
-          brief: 'write the article',
+          title: 'Write the article',
+          detail: 'write the article',
         });
       }),
       pet('writer', async (request) => {
@@ -281,7 +282,11 @@ test('Kanban manual mode exposes an explicit task start control over HTTP', asyn
   const address = http.address();
   assert.ok(address);
   const authorization = { Authorization: `Bearer ${AUTH_TOKEN}` };
-  const task = await kanban.service.createTask({ assigneeId: 'worker', brief: 'run manually' });
+  const task = await kanban.service.createTask({
+    assigneeId: 'worker',
+    title: 'Run manually',
+    detail: 'run manually',
+  });
 
   const snapshotResponse = await fetch(
     `http://${address.host}:${address.port.toString()}/kanban`,

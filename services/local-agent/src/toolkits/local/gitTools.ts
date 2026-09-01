@@ -712,6 +712,45 @@ export const ghIssueCreateTool = tool(
   },
 );
 
+export const ghIssueListTool = tool(
+  async ({ cwd, repository, state = 'open', limit = 30, search }: {
+    cwd?: string;
+    repository?: string;
+    state?: 'open' | 'closed' | 'all';
+    limit?: number;
+    search?: string;
+  }, runtime: ToolRuntime) => {
+    try {
+      const args = [
+        'issue',
+        'list',
+        '--state',
+        state,
+        '--limit',
+        String(limit),
+        '--json',
+        'number,title,state,labels,assignees,author,url,updatedAt',
+      ];
+      if (repository?.trim()) args.push('--repo', repository.trim());
+      if (search?.trim()) args.push('--search', search.trim());
+      return await runGh(args, cwd, '[]');
+    } catch (error) {
+      return createGhToolError('gh_issue_list', error, runtime);
+    }
+  },
+  {
+    name: 'gh_issue_list',
+    description: '列出 GitHub issue 的结构化快照。可按状态、仓库和 GitHub 搜索表达式筛选；用于从尚未知晓编号的 issue 中发现候选，再用 gh_issue_view 读取选中项。',
+    schema: z.object({
+      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+      repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
+      state: z.enum(['open', 'closed', 'all']).optional().describe('Issue 状态，默认 open'),
+      limit: z.number().int().positive().max(100).optional().describe('最多返回条数，默认 30，最大 100'),
+      search: z.string().trim().min(1).optional().describe('可选 GitHub issue 搜索表达式，例如 label:priority-high 或 sort:updated-desc'),
+    }),
+  },
+);
+
 export const ghPrViewTool = tool(
   async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
     try {
@@ -876,6 +915,22 @@ export const gitTools = [
   ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
   ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
   ghIssueCreateTool as NamedStructuredTool<'gh_issue_create'>,
+  ghIssueListTool as NamedStructuredTool<'gh_issue_list'>,
+  ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
+  ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
+  ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
+] as const;
+
+export const gitInspectionTools = [
+  gitStatusTool as NamedStructuredTool<'git_status'>,
+  gitDiffTool as NamedStructuredTool<'git_diff'>,
+  gitLogTool as NamedStructuredTool<'git_log'>,
+  gitBranchTool as NamedStructuredTool<'git_branch'>,
+  gitShowTool as NamedStructuredTool<'git_show'>,
+  ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
+  ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
+  ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
+  ghIssueListTool as NamedStructuredTool<'gh_issue_list'>,
   ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
   ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
   ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
@@ -999,6 +1054,16 @@ export const gitOperationMetadata = {
       return {
         target: readString(record, 'repository') ?? readString(record, 'cwd'),
         summary: readString(record, 'title'),
+      };
+    },
+  },
+  gh_issue_list: {
+    title: '列出 GitHub issue',
+    summarizeInput: (input) => {
+      const record = readRecord(input);
+      return {
+        target: readString(record, 'repository') ?? readString(record, 'cwd'),
+        summary: readString(record, 'search'),
       };
     },
   },

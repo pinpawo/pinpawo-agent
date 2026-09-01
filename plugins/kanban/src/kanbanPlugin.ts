@@ -27,6 +27,7 @@ import {
 export const KANBAN_TOOLKIT_NAME = 'kanban';
 export const KANBAN_PLANNING_TOOLKIT_NAME = 'kanban-planning';
 export const KANBAN_EXECUTION_TOOLKIT_NAME = 'kanban-execution';
+export const KANBAN_OBSERVATION_TOOLKIT_NAME = 'kanban-observation';
 
 const TOOL_TITLES = ['查看执行者', '查看任务', '新增任务', '完成任务', '阻塞任务'] as const;
 
@@ -116,10 +117,7 @@ function buildTools(
     },
     {
       name: 'kanban_task_list',
-      description:
-        '为一次规划读取一份 Kanban task 基线快照，返回状态、执行者、依赖与已有结果。'
-        + '规划开始时调用一次并在本次规划中持续使用该快照；新增 task 返回的 taskId 是持久化确认，'
-        + '后续依赖直接使用这些 taskId，状态变化由 Studio 事件与 Trigger 流转。',
+      description: '读取当前 Kanban task 快照，返回每个 task 的状态、执行者、依赖、详情与已有结果。',
       schema: z.object({}),
     },
   );
@@ -269,6 +267,22 @@ export function createKanbanExecutionToolkit(
   };
 }
 
+export function createKanbanObservationToolkit(
+  service: KanbanTaskService,
+  readAssignees: () => readonly StudioPetRegistration[] | null = () => null,
+): AgentToolkit {
+  const listTasks = buildTools(service, readAssignees)[1];
+  if (!listTasks) throw new Error('Kanban task observation tool is unavailable.');
+  return {
+    name: KANBAN_OBSERVATION_TOOLKIT_NAME,
+    description: 'Studio 的只读 task 观察接口：读取当前 task 图、执行状态、依赖和已提交结果。',
+    tools: [{
+      tool: listTasks,
+      operation: { title: '查看任务' },
+    }],
+  };
+}
+
 export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): KanbanPlugin {
   const assignablePetIds = options.assignablePetIds?.map((petId) => petId.trim());
   if (assignablePetIds) {
@@ -287,6 +301,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   const toolkit = createKanbanToolkit(service, () => assignees);
   const planningToolkit = createKanbanPlanningToolkit(service, () => assignees);
   const executionToolkit = createKanbanExecutionToolkit(service, () => assignees);
+  const observationToolkit = createKanbanObservationToolkit(service, () => assignees);
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let unsubscribeHttpRoute: (() => void) | undefined;
@@ -379,7 +394,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
   return {
     service,
     name: KANBAN_TOOLKIT_NAME,
-    toolkits: [toolkit, planningToolkit, executionToolkit],
+    toolkits: [toolkit, planningToolkit, executionToolkit, observationToolkit],
     start: async (pluginContext) => {
       if (context) throw new Error('Kanban Plugin is already started.');
       context = pluginContext;

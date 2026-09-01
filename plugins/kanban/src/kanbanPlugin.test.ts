@@ -237,6 +237,16 @@ test('Kanban execution Toolkit cannot create or reassign tasks', () => {
   );
 });
 
+test('Kanban observation Toolkit exposes only the task snapshot', () => {
+  const plugin = createKanbanPlugin();
+  const observation = plugin.toolkits.find(({ name }) => name === 'kanban-observation');
+  assert.ok(observation);
+  assert.deepEqual(
+    observation.tools.map(({ tool }) => tool.name),
+    ['kanban_task_list'],
+  );
+});
+
 test('Kanban assignablePetIds limits both discovery and task creation', async (t) => {
   const plugin = createKanbanPlugin({ assignablePetIds: ['writer'] });
   const studio = await createStudio({

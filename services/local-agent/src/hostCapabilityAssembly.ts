@@ -42,7 +42,11 @@ import {
 } from './runtimeConfig';
 import { getConfig } from './config';
 import { loadAgentContext } from './contextLoader';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import {
+  createBashToolkit,
+  createGitToolkit,
+  createProjectInspectionToolkit,
+} from './toolkits/local';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import type {
   HostToolkitInventoryStore,
@@ -133,6 +137,7 @@ export class HostCapabilityAssembly {
     this.hostBuiltInToolkits = [
       createBashToolkit(),
       createGitToolkit(),
+      createProjectInspectionToolkit(),
       createCapabilityCreatorToolkit(),
       ...(browserSelected
         ? [createBrowserToolkit({ backend: () => getConfig().browserBackend })]

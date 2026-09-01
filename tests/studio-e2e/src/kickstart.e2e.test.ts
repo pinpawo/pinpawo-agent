@@ -80,7 +80,8 @@ test('kickstart composes HTTP, Kanban, automation, Wiki dispatch, and Markdown p
         record('planner', request);
         await invokeKanbanTool(kanban, 'kanban_task_add', {
           petId: 'executor',
-          brief: 'Implement the requested change.',
+          title: 'Implement the requested change',
+          detail: 'Implement the requested change.',
         });
         const executorTask = (await kanban.service.readSnapshot()).tasks.find(
           ({ assigneeId }) => assigneeId === 'executor',
@@ -88,7 +89,8 @@ test('kickstart composes HTTP, Kanban, automation, Wiki dispatch, and Markdown p
         assert.ok(executorTask);
         await invokeKanbanTool(kanban, 'kanban_task_add', {
           petId: 'reviewer',
-          brief: 'Review the implemented change.',
+          title: 'Review the implemented change',
+          detail: 'Review the implemented change.',
           dependsOn: [executorTask.taskId],
         });
       }),

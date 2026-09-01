@@ -11,7 +11,7 @@ type Page = 'studio' | 'kanban' | 'scheduler' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
-  taskId: string; assigneeId: string; brief: string;
+  taskId: string; assigneeId: string; title: string; detail: string;
   status: 'waiting' | 'doing' | 'todo' | 'blocked' | 'done';
   deps: string[]; note?: string; createdAt: string; updatedAt: string;
 };
@@ -632,39 +632,56 @@ function KanbanFlow({
         const incompleteDependencies = task.deps.filter((dependencyId) => (
           tasksById.get(dependencyId)?.status !== 'done'
         ));
+        const activeAssigneeTask = tasks.find((candidate) => (
+          candidate.taskId !== task.taskId
+          && candidate.assigneeId === task.assigneeId
+          && (candidate.status === 'doing' || candidate.status === 'waiting')
+        ));
         const startable = incompleteDependencies.length === 0
+          && !activeAssigneeTask
           && (task.status === 'todo' || task.status === 'blocked');
         const showStart = task.status === 'todo' || task.status === 'blocked';
         const starting = startingTaskId === task.taskId;
         const visibleStatus = task.status === 'todo' && incompleteDependencies.length > 0
           ? 'waiting deps'
           : task.status;
-        return <article className="task-card" key={task.taskId}>
-          <div className="task-card-head">
+        return <details className="task-card" key={task.taskId}>
+          <summary className="task-summary">
+            <div className="task-card-head">
             <em className={task.status}>{visibleStatus}</em>
             <code title={task.taskId}>{task.taskId.slice(0, 8)}</code>
             <span className="task-assignee">→ {task.assigneeId}</span>
-            {showStart && <button
-              aria-label={`${task.status === 'blocked' ? 'Retry' : 'Start'} task ${task.brief}`}
-              className="task-action"
-              disabled={!startable || Boolean(startingTaskId)}
-              onClick={() => onStart(task.taskId)}
-              title={startable ? undefined : `Waiting for: ${incompleteDependencies.join(', ')}`}
-              type="button"
-            >{starting ? 'STARTING…' : task.status === 'blocked' ? 'RETRY' : 'START'}</button>}
+            </div>
+            <strong className="task-title">{task.title}</strong>
+          </summary>
+          <div className="task-expanded">
+            <p className="task-detail">{task.detail}</p>
+            {task.deps.length > 0 && <div className="task-dependencies">
+              <span>DEPENDS ON</span>
+              {task.deps.map((dependencyId) => <code
+                className={tasksById.get(dependencyId)?.status === 'done' ? 'complete' : ''}
+                key={dependencyId}
+                title={dependencyId}
+              >{dependencyId.slice(0, 8)}</code>)}
+            </div>}
+            {task.note && <p className="task-note">{task.note}</p>}
+            <div className="task-expanded-footer">
+              <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
+              {showStart && <button
+                aria-label={`${task.status === 'blocked' ? 'Retry' : 'Start'} task ${task.title}`}
+                className="task-action"
+                disabled={!startable || Boolean(startingTaskId)}
+                onClick={() => onStart(task.taskId)}
+                title={startable
+                  ? undefined
+                  : activeAssigneeTask
+                    ? `${task.assigneeId} is working on ${activeAssigneeTask.taskId}`
+                    : `Waiting for: ${incompleteDependencies.join(', ')}`}
+                type="button"
+              >{starting ? 'STARTING…' : task.status === 'blocked' ? 'RETRY' : 'START'}</button>}
+            </div>
           </div>
-          <strong className="task-brief">{task.brief}</strong>
-          {task.deps.length > 0 && <div className="task-dependencies">
-            <span>DEPENDS ON</span>
-            {task.deps.map((dependencyId) => <code
-              className={tasksById.get(dependencyId)?.status === 'done' ? 'complete' : ''}
-              key={dependencyId}
-              title={dependencyId}
-            >{dependencyId.slice(0, 8)}</code>)}
-          </div>}
-          {task.note && <p className="task-note">{task.note}</p>}
-          <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
-        </article>;
+        </details>;
       })}</div>
     </section>)}
   </div>;

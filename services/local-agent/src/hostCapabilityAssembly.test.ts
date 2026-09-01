@@ -52,6 +52,7 @@ test('HostCapabilityAssembly can omit the global Browser runtime for an independ
     hostBuiltInToolkits: readonly { name: string }[];
   }).hostBuiltInToolkits;
   assert.equal(builtIns.some(({ name }) => name === 'browser'), false);
+  assert.equal(builtIns.some(({ name }) => name === 'project-inspection'), true);
 });
 
 test('HostCapabilityAssembly rejects extension definitions omitted from the first init call', async () => {

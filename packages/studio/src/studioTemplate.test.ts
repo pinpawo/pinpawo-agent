@@ -57,7 +57,7 @@ test('kickstart init preflights conflicts before copying any file', async () => 
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
 });
 
-test('shipped Planner Capability combines project exploration with Kanban planning', async () => {
+test('shipped Planner separates project exploration from Kanban planning', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
   await initStudioKickstart({ workdir });
 
@@ -68,7 +68,42 @@ test('shipped Planner Capability combines project exploration with Kanban planni
     'planner',
     'capabilities',
   ));
-  assert.equal(capabilities.length, 1);
-  assert.equal(capabilities[0]?.capability.name, 'studio_planning');
-  assert.deepEqual(capabilities[0]?.capability.uses, ['bash', 'git', 'kanban']);
+  assert.deepEqual(
+    capabilities.map(({ capability }) => ({
+      name: capability.name,
+      uses: capability.uses,
+    })),
+    [
+      { name: 'studio_exploration', uses: ['project-inspection'] },
+      { name: 'studio_planning', uses: ['kanban-planning'] },
+    ],
+  );
+
+  const studioConfig = JSON.parse(await readFile(
+    path.join(workdir, '.pinpawo', 'studio.json'),
+    'utf8',
+  )) as { plugins: Array<{ id: string; options?: Record<string, unknown> }> };
+  const kanban = studioConfig.plugins.find(({ id }) => id === '@pinpawo-plugin/kanban');
+  assert.deepEqual(kanban?.options?.assignablePetIds, ['executor', 'reviewer']);
+
+  const executorCapabilities = await loadCapabilityDirectory(path.join(
+    workdir,
+    '.pinpawo',
+    'pets',
+    'executor',
+    'capabilities',
+  ));
+  const reviewerCapabilities = await loadCapabilityDirectory(path.join(
+    workdir,
+    '.pinpawo',
+    'pets',
+    'reviewer',
+    'capabilities',
+  ));
+  assert.deepEqual(executorCapabilities.map(({ capability }) => capability.uses), [
+    ['bash', 'git', 'kanban-execution'],
+  ]);
+  assert.deepEqual(reviewerCapabilities.map(({ capability }) => capability.uses), [
+    ['bash', 'git', 'kanban-execution'],
+  ]);
 });

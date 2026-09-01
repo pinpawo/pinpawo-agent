@@ -102,13 +102,13 @@ async function writeStudioWorkdir(withPlanningCapability: boolean): Promise<stri
 name: studio_planning
 description: "Plan and advance work through the shared board."
 uses:
-  - kanban
+  - kanban-planning
 version: 1
 ---
 
 # Studio planning
 
-Use the kanban Toolkit to plan and advance assigned work.
+Create a minimal task graph and assign delivery work to the appropriate Pets.
 `);
   }
   return root;

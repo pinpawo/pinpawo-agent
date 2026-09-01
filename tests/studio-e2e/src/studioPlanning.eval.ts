@@ -7,7 +7,6 @@
  * agent-runtime eval fixture.
  */
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import { tool } from '@langchain/core/tools';
 import {
   createSubagent,
   parseCapabilityDocument,
@@ -15,12 +14,11 @@ import {
 } from '@pinpawo/pet-agent';
 import {
   createInMemoryKanbanTaskService,
-  createKanbanToolkit,
+  createKanbanPlanningToolkit,
 } from '@pinpawo-plugin/kanban';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { z } from 'zod';
 
 import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
 
@@ -28,6 +26,25 @@ const CAPABILITY_PATH = resolve(
   import.meta.dirname,
   '../../../packages/studio/examples/kanban-workdir/.pinpawo/pets/planner/capabilities/studio-planning/CAPABILITY.md',
 );
+const STUDIO_CONFIG_PATH = resolve(
+  import.meta.dirname,
+  '../../../packages/studio/examples/kanban-workdir/.pinpawo/studio.json',
+);
+
+function readAssignablePetIds(): string[] {
+  const config = JSON.parse(readFileSync(STUDIO_CONFIG_PATH, 'utf8')) as {
+    plugins?: Array<{ id?: unknown; options?: { assignablePetIds?: unknown } }>;
+  };
+  const assignablePetIds = config.plugins?.find(
+    ({ id }) => id === '@pinpawo-plugin/kanban',
+  )?.options?.assignablePetIds;
+  if (!Array.isArray(assignablePetIds) || !assignablePetIds.every(
+    (petId): petId is string => typeof petId === 'string',
+  )) {
+    throw new Error('Studio planning eval requires Kanban assignablePetIds in the shipped config.');
+  }
+  return assignablePetIds;
+}
 
 function readDefaultProfileId(): string {
   const configured = process.env.STUDIO_PLANNING_EVAL_PROFILE?.trim();
@@ -84,7 +101,13 @@ async function main() {
   const service = createInMemoryKanbanTaskService();
   await service.init();
 
-  const assignees = [
+  const registeredPets = [
+    {
+      petId: 'planner',
+      name: 'Planner',
+      role: '探索事实并安排任务',
+      serviceSummary: '维护最小完整 task 图',
+    },
     {
       petId: 'executor',
       name: 'Executor',
@@ -104,22 +127,15 @@ async function main() {
       serviceSummary: '由 Trigger 对齐 Wiki',
     },
   ];
-  const kanbanToolkit = createKanbanToolkit(service, () => assignees);
-  const runShell = tool(
-    async ({ command }) => `unexpected shell execution: ${command}`,
-    {
-      name: 'run_shell',
-      description: 'Execute a shell command in the current project workspace.',
-      schema: z.object({ command: z.string() }),
-    },
-  );
+  const assignablePetIds = new Set(readAssignablePetIds());
+  const assignees = registeredPets.filter(({ petId }) => assignablePetIds.has(petId));
+  const kanbanToolkit = createKanbanPlanningToolkit(service, () => assignees);
 
   try {
     const result = await createSubagent({
       model: subject.model,
       tools: [
         ...kanbanToolkit.tools.map(({ tool: declaredTool }) => declaredTool),
-        runShell,
       ],
       promptSections: [{
         id: 'capability:studio_planning',
@@ -128,7 +144,7 @@ async function main() {
       }],
       messages: [new HumanMessage([
         '为 issue #101 建立最小完整 task 图。',
-        '已确认的工作是：修复 auth token refresh 竞态并补齐回归测试；实现完成后由 Reviewer 独立审查。',
+        '已确认的工作是：改进 task 列表的标题与详情展示并补齐回归测试；实现完成后由 Reviewer 独立审查。',
         'Wiki 会由 task.done Trigger 自动对齐并沿事件流程推进。',
         '项目事实已经充分，当前 task 快照为空。',
       ].join('\n'))],
@@ -155,6 +171,9 @@ async function main() {
       snapshot.tasks.some(({ assigneeId }) => assigneeId === 'wiki')
         ? 'created a Trigger-owned Wiki task'
         : null,
+      snapshot.tasks.some(({ assigneeId }) => assigneeId === 'planner')
+        ? 'Planner assigned delivery work to itself'
+        : null,
       toolCalls.count('kanban_assignee_list') === 1
         ? null
         : `kanban_assignee_list called ${toolCalls.count('kanban_assignee_list').toString()} times`,
@@ -164,9 +183,6 @@ async function main() {
       toolCalls.count('kanban_task_add') === 2
         ? null
         : `kanban_task_add called ${toolCalls.count('kanban_task_add').toString()} times`,
-      toolCalls.count('run_shell') === 0 ? null : 'run_shell was called',
-      toolCalls.count('kanban_task_complete') === 0 ? null : 'kanban_task_complete was called',
-      toolCalls.count('kanban_task_block') === 0 ? null : 'kanban_task_block was called',
       toolCalls.calls.at(-1)?.name === 'kanban_task_add'
         ? null
         : `last tool was ${toolCalls.calls.at(-1)?.name ?? '(none)'}`,

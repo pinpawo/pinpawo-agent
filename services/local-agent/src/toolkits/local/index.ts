@@ -31,7 +31,7 @@ import {
 import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
 import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
-import { gitTools, gitOperationMetadata } from './gitTools';
+import { gitInspectionTools, gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
@@ -72,6 +72,18 @@ const bashToolkitTools: StructuredTool[] = [
   getCurrentTimeTool,
   runShellTool,
   ...processTools,
+];
+
+const projectInspectionTools: readonly NamedStructuredTool[] = [
+  readFileTool,
+  viewFileChunkTool,
+  statPathTool,
+  listDirTool,
+  jqQueryTool,
+  globSearchTool,
+  grepSearchTool,
+  getCurrentTimeTool,
+  ...gitInspectionTools,
 ];
 
 function createToolDefinitions(
@@ -129,13 +141,21 @@ const bashToolkitOperations = {
 
 const gitToolkitInstructions = [
   '你可以使用 git_status、git_diff、git_log、git_branch、git_show、git_add、git_commit、git_push 处理本地 git 仓库和普通分支推送。',
-  '你可以使用 gh_pr_create、gh_pr_view、gh_pr_comments、gh_pr_diff、gh_issue_create、gh_issue_view、gh_issue_comments、gh_read_content 创建或渐进式查看 GitHub PR/issue。',
+  '你可以使用 gh_pr_create、gh_pr_view、gh_pr_comments、gh_pr_diff、gh_issue_create、gh_issue_list、gh_issue_view、gh_issue_comments、gh_read_content 创建或渐进式查看 GitHub PR/issue。',
   '先用 gh_pr_view 查看 PR 概览；只有确实需要 review 或评论时才用 gh_pr_comments。',
   '先用 gh_issue_view 查看 issue 正文和评论总数；只有确实需要评论时才用 gh_issue_comments 小页翻阅；它返回文件交付时用 gh_read_content 分块读取。',
   '查看状态、diff、历史和提交内容时优先使用这些 git 工具，不要用 run_shell 包装 git 命令。',
   '做代码 review、PR review 或 diff 审查时，优先使用 gh_pr_view 和 gh_pr_diff；不要用 browser 或 http_fetch 拉取 GitHub PR 页面/diff。',
   'git_add 必须显式传 pathspecs；不要隐式暂存整个仓库。',
   'git_commit 只创建本地提交；需要推送时继续使用 git_push。git_push 不支持 force push 或删除远端引用。',
+];
+
+const projectInspectionInstructions = [
+  '你的目标是只读探索当前项目及其关联的 GitHub 事实，并交付足以支持后续规划的证据摘要。',
+  '根据当前目标选择范围最小、语义最直接的文件、搜索、Git 或 GitHub 工具。',
+  '读取代码、Markdown、JSON 与配置时优先使用 view_file_chunk；read_file 用于图片、PDF、Word、表格等非文本内容。',
+  '先从目录、搜索或列表结果定位候选，再读取与目标直接相关的内容。',
+  '交付物包含已确认事实、关键来源、仍存在的不确定性，以及后续规划可直接使用的边界。',
 ];
 
 function isWithinPath(root: string, target: string) {
@@ -231,6 +251,29 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         ));
       },
       stop: async (root) => { await (root as ShellRuntime).stop(); },
+    },
+  });
+}
+
+export function createProjectInspectionToolkit(): AgentToolkit {
+  const operations = {
+    ...fileOperationMetadata,
+    ...searchOperationMetadata,
+    ...networkOperationMetadata,
+    ...jsonOperationMetadata,
+    ...shellOperationMetadata,
+    ...gitOperationMetadata,
+  };
+  return defineToolkit({
+    name: 'project-inspection',
+    description: '只读探索本地项目、Git 历史与 GitHub PR/issue，形成可用于规划的事实证据。',
+    tools: createToolDefinitions(projectInspectionTools, operations),
+    instructions: projectInspectionInstructions.join('\n'),
+    runtime: {
+      start: () => undefined,
+      bindTools: (_binding, context) => projectInspectionTools.map((toolItem) => (
+        bindToolToExecutionWorkdir(toolItem, context.execution.workdir)
+      )),
     },
   });
 }

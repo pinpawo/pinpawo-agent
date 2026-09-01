@@ -16,7 +16,6 @@ import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
 import { projectCurrentPlan } from './currentPlanProjection';
-import { createLangfuseCallbacks } from './langfuseTracing';
 
 const HEADLESS_REVIEW_CAPABILITIES = {
   humanReview: false,
@@ -165,13 +164,6 @@ export class LocalAgentGraphService {
     inputOverride?: unknown,
   ): Promise<LocalAgentGraphEventStream> {
     const graph = this.getGraph(setup);
-    const callbacks = createLangfuseCallbacks({
-      sessionId: setup.input.threadId ?? setup.graphKey,
-      ...(setup.input.actor?.userId ? { userId: setup.input.actor.userId } : {}),
-      metadata: {
-        interface: setup.interfaceContext?.kind ?? 'headless',
-      },
-    });
     return await graph.streamEvents(
       (inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, {
         activeDelegationTransition: setup.input.activeDelegationTransition,
@@ -181,7 +173,6 @@ export class LocalAgentGraphService {
         signal: setup.input.signal,
         configurable: buildAgentGraphConfigurable(setup),
         recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
-        ...(callbacks ? { callbacks } : {}),
       },
     ) as LocalAgentGraphEventStream;
   }

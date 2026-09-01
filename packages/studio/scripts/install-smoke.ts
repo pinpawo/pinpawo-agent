@@ -148,6 +148,8 @@ try {
     '--input-type=module',
     '--eval',
     [
+      "const transport = await import('pinpawo/local-server-transport');",
+      'transport.ensureLocalServerAuthToken();',
       "const studio = await import('@pinpawo/studio');",
       'const workdir = process.env.PINPAWO_SMOKE_WORKDIR;',
       "if (!workdir) throw new Error('missing smoke workdir');",
@@ -161,6 +163,8 @@ try {
       "process.stdout.write(`${names.join(',')}\\n`);",
     ].join('\n'),
   ], consumerDir, 'resolve installed Studio kickstart Plugins', 30_000, {
+    HOME: join(tempRoot, 'home'),
+    USERPROFILE: join(tempRoot, 'home'),
     PINPAWO_SMOKE_WORKDIR: initializedWorkdir,
     PINPAWO_HELLO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
   });

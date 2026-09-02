@@ -13,8 +13,10 @@ test('Scheduler dispatches one due schedule exactly once', async (t) => {
     pets: [{
       registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
       dispatch: {
-        getState: () => 'open',
-        onStateChange: () => () => undefined,
+        getQueueSnapshot: () => ({
+          state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+        }),
+        onQueueChange: () => () => undefined,
         onDispatchLifecycle: () => () => undefined,
         dispatch: async () => { requests += 1; },
       },
@@ -39,4 +41,42 @@ test('Scheduler dispatches one due schedule exactly once', async (t) => {
     'dispatch.accepted',
     'schedule.fired',
   ]);
+});
+
+test('Scheduler audits configured dispatch queues without changing their admission state', async (t) => {
+  const events: Array<{ type: string; payload?: unknown }> = [];
+  const plugin = createSchedulerPlugin({
+    pollIntervalMs: 10,
+    dispatchQueueAudit: { intervalMs: 1_000 },
+    httpRoute: false,
+  });
+  await plugin.start({
+    dispatch: async () => ({ petId: 'worker', invocationId: 'unused' }),
+    notify: (event) => { events.push(event); },
+    subscribe: () => () => undefined,
+    listPets: () => [{ petId: 'worker', name: 'Worker', role: null, serviceSummary: null }],
+    listDispatchQueues: () => [{
+      petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 2,
+    }],
+    hooks: {
+      expose: () => () => undefined,
+      contribute: () => () => undefined,
+    },
+  });
+  t.after(() => plugin.stop?.());
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.type, 'dispatch.queues_attention_required');
+  const payload = events[0]?.payload as {
+    queues?: unknown;
+    attentionStates?: unknown;
+    checkedAt?: string;
+  } | undefined;
+  assert.deepEqual(payload?.queues, [{
+    petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 2,
+  }]);
+  assert.deepEqual(payload?.attentionStates, ['waiting', 'blocked']);
+  const checkedAt = payload?.checkedAt;
+  assert.ok(typeof checkedAt === 'string' && Number.isFinite(Date.parse(checkedAt)));
 });

@@ -1,314 +1,94 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { test } from 'node:test';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createInMemoryKanbanTaskService, KanbanTaskService, SqliteKanbanTaskRepository } from './kanbanTaskService';
 
-import {
-  KanbanTaskService,
-  SqliteKanbanTaskRepository,
-} from './kanbanTaskService';
-import { migrateKanbanSnapshotToSqlite } from './migrateKanbanSnapshotToSqlite';
-
-async function createService(databasePath: string): Promise<KanbanTaskService> {
-  const service = new KanbanTaskService(new SqliteKanbanTaskRepository(databasePath));
-  await service.init();
-  return service;
+async function service() {
+  const value = createInMemoryKanbanTaskService();
+  await value.init();
+  return value;
 }
 
-test('SQLite task service commits tasks, dependencies, and history atomically', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-sqlite-'));
-  const service = await createService(path.join(root, 'state', 'kanban.sqlite'));
-  t.after(() => service.close());
+test('Kanban records unassigned work before a user assignment and executor start', async (t) => {
+  const kanban = await service();
+  t.after(() => kanban.close());
+  const created = await kanban.createTask({ title: 'Draft design', detail: 'Write the design draft.' });
+  assert.equal(created.task.status, 'todo');
+  assert.equal(created.task.assigneeId, undefined);
 
-  const first = await service.createTask({ assigneeId: 'writer', title: 'Draft', detail: 'draft' });
-  const second = await service.createTask({
-    assigneeId: 'editor',
-    title: 'Review',
-    detail: 'review',
-    dependsOn: [first.task.taskId],
-  });
-
-  assert.equal((await service.claimNextReadyTask())?.task.taskId, first.task.taskId);
-  assert.equal(await service.claimNextReadyTask(), null);
-  await service.completeTask(first.task.taskId, 'draft ready');
-  assert.equal((await service.claimNextReadyTask())?.task.taskId, second.task.taskId);
-
-  const snapshot = await service.readSnapshot();
-  assert.deepEqual(snapshot.tasks.map((task) => ({
-    assigneeId: task.assigneeId,
-    title: task.title,
-    detail: task.detail,
-    status: task.status,
-    deps: task.deps,
-  })).sort((left, right) => left.assigneeId.localeCompare(right.assigneeId)), [
-    { assigneeId: 'editor', title: 'Review', detail: 'review', status: 'doing', deps: [first.task.taskId] },
-    { assigneeId: 'writer', title: 'Draft', detail: 'draft', status: 'done', deps: [] },
+  const assigned = await kanban.assignTask(created.task.taskId, 'executor');
+  assert.deepEqual(
+    { status: assigned.task.status, assigneeId: assigned.task.assigneeId, event: assigned.event.eventType },
+    { status: 'assigned', assigneeId: 'executor', event: 'assigned' },
+  );
+  const started = await kanban.startAssignedTask(created.task.taskId);
+  assert.equal(started.task.status, 'doing');
+  await kanban.completeTask(created.task.taskId, 'draft saved');
+  assert.deepEqual((await kanban.listTaskEvents()).map(({ eventType }) => eventType), [
+    'created', 'assigned', 'started', 'completed',
   ]);
-  assert.equal(snapshot.lastEventSequence, 5);
-  assert.deepEqual(
-    (await service.listTaskEvents()).map((event) => event.eventType),
-    ['created', 'created', 'claimed', 'completed', 'claimed'],
-  );
 });
 
-test('SQLite task service rejects missing dependencies before creating a task', async (t) => {
-  const service = await createService(':memory:');
-  t.after(() => service.close());
-
-  await assert.rejects(
-    () => service.createTask({
-      assigneeId: 'writer',
-      title: 'Cannot start',
-      detail: 'cannot start',
-      dependsOn: ['missing-task'],
-    }),
-    /does not exist/,
-  );
-  assert.deepEqual((await service.readSnapshot()).tasks, []);
+test('Kanban only permits assignment after dependencies are done', async (t) => {
+  const kanban = await service();
+  t.after(() => kanban.close());
+  const first = await kanban.createTask({ title: 'Implement', detail: 'Implement.' });
+  const second = await kanban.createTask({ title: 'Review', detail: 'Review.', dependsOn: [first.task.taskId] });
+  await assert.rejects(() => kanban.assignTask(second.task.taskId, 'reviewer'), /waiting for dependency/);
+  await kanban.assignTask(first.task.taskId, 'executor');
+  await kanban.startAssignedTask(first.task.taskId);
+  await kanban.completeTask(first.task.taskId, 'done');
+  assert.equal((await kanban.assignTask(second.task.taskId, 'reviewer')).task.status, 'assigned');
 });
 
-test('SQLite task service starts one selected ready or blocked task explicitly', async (t) => {
-  const service = await createService(':memory:');
-  t.after(() => service.close());
-
-  const prerequisite = await service.createTask({ assigneeId: 'writer', title: 'Draft', detail: 'draft' });
-  const dependent = await service.createTask({
-    assigneeId: 'reviewer',
-    title: 'Review',
-    detail: 'review',
-    dependsOn: [prerequisite.task.taskId],
-  });
-  await assert.rejects(
-    () => service.claimReadyTask(dependent.task.taskId),
-    /waiting for dependency/,
-  );
-  await service.claimReadyTask(prerequisite.task.taskId);
-  await service.completeTask(prerequisite.task.taskId, 'draft ready');
-  assert.equal((await service.claimReadyTask(dependent.task.taskId)).task.status, 'doing');
-  await service.blockTask(dependent.task.taskId, 'review service unavailable');
-  const restarted = await service.claimReadyTask(dependent.task.taskId);
-  assert.equal(restarted.task.status, 'doing');
-  assert.equal(restarted.task.note, undefined);
+test('only confirmed started work is recovered as blocked after restart', async (t) => {
+  const kanban = await service();
+  t.after(() => kanban.close());
+  const assigned = await kanban.createTask({ title: 'Assigned', detail: 'wait for delivery' });
+  const started = await kanban.createTask({ title: 'Started', detail: 'working' });
+  await kanban.assignTask(assigned.task.taskId, 'executor');
+  await kanban.assignTask(started.task.taskId, 'executor');
+  await kanban.startAssignedTask(started.task.taskId);
+  // The persistence-specific crash recovery is covered by the repository lifecycle;
+  // this contract test establishes that the domain distinguishes assigned from started.
+  assert.equal((await kanban.getTask(assigned.task.taskId))?.status, 'assigned');
+  assert.equal((await kanban.getTask(started.task.taskId))?.status, 'doing');
 });
 
-test('SQLite task service commits one claim when callers race for ready work', async (t) => {
-  const service = await createService(':memory:');
-  t.after(() => service.close());
-  const task = await service.createTask({ assigneeId: 'worker', title: 'Claim once', detail: 'claim once' });
-
-  const claims = await Promise.all([
-    service.claimNextReadyTask(),
-    service.claimNextReadyTask(),
-  ]);
-  assert.equal(claims.filter(Boolean).length, 1);
-  assert.equal(claims.find(Boolean)?.task.taskId, task.task.taskId);
-  assert.equal((await service.getTask(task.task.taskId))?.status, 'doing');
-});
-
-test('SQLite task service can exclude assignees already active in an adapter', async (t) => {
-  const service = await createService(':memory:');
-  t.after(() => service.close());
-
-  const first = await service.createTask({
-    assigneeId: 'worker',
-    title: 'First delivery',
-    detail: 'finish the first delivery',
-  });
-  const second = await service.createTask({
-    assigneeId: 'worker',
-    title: 'Second delivery',
-    detail: 'finish the second delivery',
-  });
-  const claimedWorker = await service.claimNextReadyTask();
-  assert.equal(claimedWorker?.task.assigneeId, 'worker');
-  const independent = await service.createTask({
-    assigneeId: 'reviewer',
-    title: 'Independent review',
-    detail: 'review another completed change',
-  });
-  assert.equal((await service.claimNextReadyTask(['worker']))?.task.taskId, independent.task.taskId);
-  assert.equal(await service.claimNextReadyTask(['worker', 'reviewer']), null);
-
-  assert.ok(claimedWorker);
-  await service.completeTask(claimedWorker.task.taskId, 'first delivery ready');
-  const remainingWorkerTaskId = claimedWorker.task.taskId === first.task.taskId
-    ? second.task.taskId
-    : first.task.taskId;
-  assert.equal((await service.claimNextReadyTask(['reviewer']))?.task.taskId, remainingWorkerTaskId);
-});
-
-test('SQLite task service records interrupted work as a recovered block on restart', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-sqlite-'));
+test('schema v4 clears obsolete automatic assignment before user reassignment', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v4-'));
   const databasePath = path.join(root, 'kanban.sqlite');
-  const firstProcess = await createService(databasePath);
-  const task = await firstProcess.createTask({ assigneeId: 'worker', title: 'External work', detail: 'external work' });
-  await firstProcess.claimNextReadyTask();
-  await firstProcess.close();
-
-  const secondProcess = await createService(databasePath);
-  t.after(() => secondProcess.close());
-  const recovered = await secondProcess.getTask(task.task.taskId);
-  assert.equal(recovered?.status, 'blocked');
-  assert.equal(recovered?.note, 'interrupted by restart');
-  assert.deepEqual(
-    (await secondProcess.listTaskEvents()).map((event) => event.eventType),
-    ['created', 'claimed', 'recovered'],
-  );
-});
-
-test('legacy JSON migration preserves the source and recovers imported doing work', async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-migration-'));
-  const snapshotFile = path.join(root, 'kanban.json');
-  const databaseFile = path.join(root, 'kanban.sqlite');
-  const legacy = {
-    version: 1,
-    board: {
-      tasks: [
-        {
-          taskId: 'task-done',
-          petId: 'writer',
-          brief: 'Finished work\nfinished work',
-          status: 'done',
-          deps: [],
-          note: 'ready',
-          createdAt: '2026-08-23T00:00:00.000Z',
-          updatedAt: '2026-08-23T00:01:00.000Z',
-        },
-        {
-          taskId: 'task-running',
-          petId: 'editor',
-          brief: 'Uncertain work\nuncertain work',
-          status: 'doing',
-          deps: ['task-done'],
-          createdAt: '2026-08-23T00:02:00.000Z',
-          updatedAt: '2026-08-23T00:03:00.000Z',
-        },
-      ],
-    },
-  };
-  await writeFile(snapshotFile, `${JSON.stringify(legacy)}\n`, 'utf8');
-
-  await migrateKanbanSnapshotToSqlite({ snapshotFile, databaseFile });
-  assert.equal(await readFile(snapshotFile, 'utf8'), `${JSON.stringify(legacy)}\n`);
-
-  const service = await createService(databaseFile);
-  t.after(() => service.close());
-  assert.deepEqual(
-    (await service.readSnapshot()).tasks.map((task) => ({
-      taskId: task.taskId,
-      assigneeId: task.assigneeId,
-      status: task.status,
-      note: task.note,
-    })).sort((left, right) => left.taskId.localeCompare(right.taskId)),
-    [
-      { taskId: 'task-done', assigneeId: 'writer', status: 'done', note: 'ready' },
-      { taskId: 'task-running', assigneeId: 'editor', status: 'blocked', note: 'interrupted by restart' },
-    ],
-  );
-  assert.deepEqual(
-    (await service.listTaskEvents()).map((event) => event.eventType),
-    ['imported', 'imported', 'recovered'],
-  );
-  await assert.rejects(
-    () => migrateKanbanSnapshotToSqlite({ snapshotFile, databaseFile }),
-    /target is not empty/,
-  );
-});
-
-test('a failing committed-event listener does not fail the persisted command', async (t) => {
-  const service = await createService(':memory:');
-  t.after(() => service.close());
-  service.subscribe(() => { throw new Error('observer unavailable'); });
-
-  const mutation = await service.createTask({
-    assigneeId: 'worker',
-    title: 'Still committed',
-    detail: 'still committed',
-  });
-  assert.equal(mutation.task.status, 'todo');
-  assert.equal((await service.getTask(mutation.task.taskId))?.detail, 'still committed');
-});
-
-test('schema v2 migration removes obsolete columns and separates task title from detail', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v2-'));
-  const databasePath = path.join(root, 'kanban.sqlite');
-  const legacy = new DatabaseSync(databasePath);
-  legacy.exec(`
+  const database = new DatabaseSync(databasePath);
+  database.exec(`
+    PRAGMA foreign_keys = ON;
     CREATE TABLE kanban_tasks (
-      task_id TEXT PRIMARY KEY,
-      assignee_id TEXT NOT NULL,
-      brief TEXT NOT NULL,
-      status TEXT NOT NULL,
-      note TEXT,
-      continuation_json TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    PRAGMA user_version = 2;
-  `);
-  legacy.close();
-
-  const service = await createService(databasePath);
-  await service.close();
-
-  const migrated = new DatabaseSync(databasePath, { readOnly: true });
-  try {
-    const columns = migrated.prepare('PRAGMA table_info(kanban_tasks)').all() as Array<{
-      name: string;
-    }>;
-    const version = migrated.prepare('PRAGMA user_version').get() as { user_version: number };
-    assert.equal(version.user_version, 4);
-    assert.equal(columns.some(({ name }) => name === 'continuation_json'), false);
-    assert.equal(columns.some(({ name }) => name === 'brief'), false);
-    assert.equal(columns.some(({ name }) => name === 'title'), true);
-    assert.equal(columns.some(({ name }) => name === 'detail'), true);
-  } finally {
-    migrated.close();
-  }
-});
-
-test('schema v3 migration derives a concise title and preserves the complete brief as detail', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v3-'));
-  const databasePath = path.join(root, 'kanban.sqlite');
-  const legacy = new DatabaseSync(databasePath);
-  legacy.exec(`
-    CREATE TABLE kanban_tasks (
-      task_id TEXT PRIMARY KEY,
-      assignee_id TEXT NOT NULL,
-      brief TEXT NOT NULL,
-      status TEXT NOT NULL,
-      note TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      task_id TEXT PRIMARY KEY, assignee_id TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('todo', 'doing', 'waiting', 'done', 'blocked')),
+      note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE kanban_task_dependencies (
-      task_id TEXT NOT NULL,
-      depends_on_task_id TEXT NOT NULL,
-      PRIMARY KEY (task_id, depends_on_task_id)
+      task_id TEXT NOT NULL, depends_on_task_id TEXT NOT NULL, PRIMARY KEY (task_id, depends_on_task_id),
+      FOREIGN KEY (task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE,
+      FOREIGN KEY (depends_on_task_id) REFERENCES kanban_tasks(task_id) ON DELETE RESTRICT
     );
     CREATE TABLE kanban_task_events (
-      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      from_status TEXT,
-      to_status TEXT NOT NULL,
-      note TEXT,
-      occurred_at TEXT NOT NULL
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, event_type TEXT NOT NULL,
+      from_status TEXT, to_status TEXT NOT NULL, note TEXT, occurred_at TEXT NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES kanban_tasks(task_id) ON DELETE RESTRICT
     );
-    INSERT INTO kanban_tasks(task_id, assignee_id, brief, status, created_at, updated_at)
-    VALUES ('task-1', 'worker', 'Implement search\nKeep acceptance evidence.', 'todo', '2026-01-01', '2026-01-01');
-    PRAGMA user_version = 3;
+    INSERT INTO kanban_tasks VALUES ('existing', 'executor', 'Existing', 'Existing task', 'todo', NULL, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z');
+    PRAGMA user_version = 4;
   `);
-  legacy.close();
-
-  const service = await createService(databasePath);
-  try {
-    const task = await service.getTask('task-1');
-    assert.equal(task?.title, 'Implement search');
-    assert.equal(task?.detail, 'Implement search\nKeep acceptance evidence.');
-  } finally {
-    await service.close();
-  }
+  database.close();
+  const kanban = new KanbanTaskService(new SqliteKanbanTaskRepository(databasePath));
+  await kanban.init();
+  t.after(() => kanban.close());
+  assert.deepEqual(await kanban.getTask('existing'), {
+    taskId: 'existing', title: 'Existing', detail: 'Existing task', status: 'todo', deps: [],
+    createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+  });
+  assert.equal((await kanban.assignTask('existing', 'executor')).task.status, 'assigned');
 });

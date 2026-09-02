@@ -26,26 +26,6 @@ const CAPABILITY_PATH = resolve(
   import.meta.dirname,
   '../../../packages/studio/examples/kanban-workdir/.pinpawo/pets/planner/capabilities/studio-planning/CAPABILITY.md',
 );
-const STUDIO_CONFIG_PATH = resolve(
-  import.meta.dirname,
-  '../../../packages/studio/examples/kanban-workdir/.pinpawo/studio.json',
-);
-
-function readAssignablePetIds(): string[] {
-  const config = JSON.parse(readFileSync(STUDIO_CONFIG_PATH, 'utf8')) as {
-    plugins?: Array<{ id?: unknown; options?: { assignablePetIds?: unknown } }>;
-  };
-  const assignablePetIds = config.plugins?.find(
-    ({ id }) => id === '@pinpawo-plugin/kanban',
-  )?.options?.assignablePetIds;
-  if (!Array.isArray(assignablePetIds) || !assignablePetIds.every(
-    (petId): petId is string => typeof petId === 'string',
-  )) {
-    throw new Error('Studio planning eval requires Kanban assignablePetIds in the shipped config.');
-  }
-  return assignablePetIds;
-}
-
 function readDefaultProfileId(): string {
   const configured = process.env.STUDIO_PLANNING_EVAL_PROFILE?.trim();
   if (configured) return configured;
@@ -101,35 +81,7 @@ async function main() {
   const service = createInMemoryKanbanTaskService();
   await service.init();
 
-  const registeredPets = [
-    {
-      petId: 'planner',
-      name: 'Planner',
-      role: '探索事实并安排任务',
-      serviceSummary: '维护最小完整 task 图',
-    },
-    {
-      petId: 'executor',
-      name: 'Executor',
-      role: '实现代码与验证',
-      serviceSummary: '完成可运行改动和测试',
-    },
-    {
-      petId: 'reviewer',
-      name: 'Reviewer',
-      role: '独立审查',
-      serviceSummary: '审查实现与验证证据',
-    },
-    {
-      petId: 'wiki',
-      name: 'Wiki',
-      role: '维护项目知识',
-      serviceSummary: '由 Trigger 对齐 Wiki',
-    },
-  ];
-  const assignablePetIds = new Set(readAssignablePetIds());
-  const assignees = registeredPets.filter(({ petId }) => assignablePetIds.has(petId));
-  const kanbanToolkit = createKanbanPlanningToolkit(service, () => assignees);
+  const kanbanToolkit = createKanbanPlanningToolkit(service);
 
   try {
     const result = await createSubagent({
@@ -153,8 +105,7 @@ async function main() {
 
     const snapshot = await service.readSnapshot();
     const toolCalls = countToolCalls(result.messages);
-    const executorTask = snapshot.tasks.find(({ assigneeId }) => assigneeId === 'executor');
-    const reviewerTask = snapshot.tasks.find(({ assigneeId }) => assigneeId === 'reviewer');
+    const [executorTask, reviewerTask] = snapshot.tasks;
     const finalMessage = findFinalResponse(result.messages);
     const failures = [
       result.completionReason === 'natural'
@@ -168,15 +119,9 @@ async function main() {
       reviewerTask && executorTask && reviewerTask.deps.includes(executorTask.taskId)
         ? null
         : 'reviewer task does not depend on executor task',
-      snapshot.tasks.some(({ assigneeId }) => assigneeId === 'wiki')
-        ? 'created a Trigger-owned Wiki task'
+      snapshot.tasks.some(({ assigneeId }) => assigneeId !== undefined)
+        ? 'Planner assigned a task instead of leaving assignment to the user'
         : null,
-      snapshot.tasks.some(({ assigneeId }) => assigneeId === 'planner')
-        ? 'Planner assigned delivery work to itself'
-        : null,
-      toolCalls.count('kanban_assignee_list') === 1
-        ? null
-        : `kanban_assignee_list called ${toolCalls.count('kanban_assignee_list').toString()} times`,
       toolCalls.count('kanban_task_list') === 1
         ? null
         : `kanban_task_list called ${toolCalls.count('kanban_task_list').toString()} times`,
@@ -193,7 +138,7 @@ async function main() {
 
     console.log(`Studio Planner eval model: ${subject.label}`);
     console.log(`Tool calls: ${toolCalls.calls.map(({ name }) => name).join(' -> ')}`);
-    console.log(`Tasks: ${snapshot.tasks.map((task) => `${task.assigneeId}:${task.taskId}`).join(', ')}`);
+    console.log(`Tasks: ${snapshot.tasks.map((task) => task.taskId).join(', ')}`);
     if (failures.length > 0) {
       throw new Error(`Studio Planner eval failed:\n- ${failures.join('\n- ')}`);
     }

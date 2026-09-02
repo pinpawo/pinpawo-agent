@@ -68,6 +68,13 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     return [...petsById.values()].map(({ registration }) => ({ ...registration }));
   }
 
+  function listDispatchQueues() {
+    return [...petsById.values()].map(({ registration, dispatch }) => ({
+      petId: registration.petId,
+      ...dispatch.getQueueSnapshot(),
+    }));
+  }
+
   function notify(event: StudioEvent): void {
     eventBus.publish(event);
   }
@@ -150,6 +157,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       }),
       subscribe: (handler) => eventBus.subscribe(handler, plugin.name),
       listPets,
+      listDispatchQueues,
       hooks: pluginHooks.contextFor(plugin.name),
     };
   }

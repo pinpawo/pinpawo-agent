@@ -7,13 +7,15 @@ packages; the standalone resolver loads only the packages listed in
 `.pinpawo/studio.json`.
 
 ```text
-external request -> planner -> executor -> reviewer
+external request -> planner -> Kanban tasks -> user assignment -> Trigger -> executor / reviewer
 Kanban task.done event --------------> Trigger binding -> wiki Pet -> wiki/PROJECT.md
 ```
 
-Kanban owns task, dependency, status, and history. The Wiki Pet owns Markdown
-knowledge alignment. The Trigger Plugin owns the binding from qualifying task
-events to a Wiki dispatch; no Wiki-specific integration Plugin is required.
+Kanban owns task, dependency, status, history, and the user-selected execution
+target. It does not discover Studio Pets or dispatch work. Trigger owns the
+rules that route qualifying events—both `task.assigned` and `task.done` in this
+example—to Pets. The Wiki Pet owns Markdown knowledge alignment; no
+Wiki-specific integration Plugin is required.
 
 From the repository root, build and start the Host plus the independent Console
 with one command. A local Trigger secret is generated when the environment does
@@ -73,10 +75,12 @@ To run the real project-delivery loop from the Console, open **studio**, keep
 Create a concise HELLO.md in the project root, then have an independent reviewer verify it.
 ```
 
-Watch **kanban** for the Planner-created dependency flow and **knowledge** for
-the Wiki Pet's `PROJECT.md` reconciliation. Knowledge is an ordinary project
-file rather than a Studio event projection, so use its explicit **REFRESH**
-action after the final `task.done` event.
+Watch **kanban** for the Planner-created dependency flow. Expand each ready task,
+select its executor, and choose **ASSIGN**; Trigger records the resulting delivery
+and routes it to the selected Pet. Then watch **knowledge** for the Wiki Pet's
+`PROJECT.md` reconciliation. Knowledge is an ordinary project file rather than a
+Studio event projection, so use its explicit **REFRESH** action after the final
+`task.done` event.
 
 The same entry can be exercised as an external HTTP Trigger using the secret
 printed by `npm run studio:hello`:

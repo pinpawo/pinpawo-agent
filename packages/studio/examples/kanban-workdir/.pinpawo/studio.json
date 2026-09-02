@@ -15,12 +15,32 @@
       }
     },
     {
-      "id": "@pinpawo-plugin/kanban",
+      "id": "@pinpawo-plugin/notice",
       "options": {
-        "assignablePetIds": ["executor", "reviewer"]
+        "rules": [
+          {
+            "noticeId": "dispatch-queues-attention",
+            "title": "Dispatch queues need attention",
+            "level": "warning",
+            "source": {
+              "kind": "studio_event",
+              "eventSource": "scheduler",
+              "type": "dispatch.queues_attention_required"
+            }
+          }
+        ]
       }
     },
-    { "id": "@pinpawo-plugin/scheduler" },
+    { "id": "@pinpawo-plugin/kanban" },
+    {
+      "id": "@pinpawo-plugin/scheduler",
+      "options": {
+        "dispatchQueueAudit": {
+          "intervalMs": 600000,
+          "attentionStates": ["waiting", "blocked"]
+        }
+      }
+    },
     { "id": "@pinpawo-plugin/project-files" },
     {
       "id": "@pinpawo-plugin/trigger",
@@ -52,6 +72,23 @@
               "kind": "studio_event",
               "eventSource": "kanban",
               "type": "task.done"
+            }
+          },
+          {
+            "triggerId": "dispatch-assigned-kanban-task",
+            "target": {
+              "kind": "event_payload",
+              "path": "payload.assigneeId",
+              "allowedPetIds": ["executor", "reviewer"]
+            },
+            "request": {
+              "template": "You were assigned Kanban task {{payload.taskId}}.\n\nTitle: {{payload.title}}\n\n{{payload.detail}}\n\nBefore work, call kanban_task_start with this taskId. Then report completion or a block with the same taskId.",
+              "context": ["payload.taskId", "payload.title", "payload.detail"]
+            },
+            "source": {
+              "kind": "studio_event",
+              "eventSource": "kanban",
+              "type": "task.assigned"
             }
           }
         ]

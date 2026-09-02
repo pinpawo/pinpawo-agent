@@ -45,6 +45,14 @@ import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
 export type PetDispatchSettledState = Exclude<PetDispatchState, 'busy'>;
 
+/** One coherent snapshot of the resident admission queue and its current state. */
+export type PetDispatchQueueSnapshot = {
+  state: PetDispatchState;
+  activeOperation: 'conversation' | 'dispatch' | null;
+  queuedConversations: number;
+  queuedDispatches: number;
+};
+
 /**
  * An opaque caller correlation key. The resident runtime does not interpret it;
  * it only returns the same key in lifecycle observations.
@@ -75,8 +83,8 @@ export type PetDispatchLifecycleEvent = {
 };
 
 export interface PetDispatchPort {
-  getState(): PetDispatchState;
-  onStateChange(listener: (state: PetDispatchState) => void): () => void;
+  getQueueSnapshot(): PetDispatchQueueSnapshot;
+  onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
   onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
   /** Accept one-way input into the resident queue. Execution is observed through Agent Session. */
   dispatch(request: PetDispatchRequest): Promise<void>;
@@ -137,10 +145,12 @@ export class ResidentPetCoordinator {
   private readonly conversationQueue: QueuedOperation[] = [];
   private readonly dispatchQueue: QueuedOperation[] = [];
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
+  private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
   private readonly logError: NonNullable<ResidentPetCoordinatorOptions['logError']>;
   private state: PetDispatchState;
   private active: Promise<void> | null = null;
+  private activeOperation: PetDispatchQueueSnapshot['activeOperation'] = null;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
 
@@ -154,9 +164,23 @@ export class ResidentPetCoordinator {
     return this.state;
   }
 
+  getQueueSnapshot(): PetDispatchQueueSnapshot {
+    return {
+      state: this.state,
+      activeOperation: this.activeOperation,
+      queuedConversations: this.conversationQueue.length,
+      queuedDispatches: this.dispatchQueue.length,
+    };
+  }
+
   onStateChange(listener: (state: PetDispatchState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void {
+    this.queueListeners.add(listener);
+    return () => this.queueListeners.delete(listener);
   }
 
   enqueueConversation<T>(operation: () => Promise<T>): Promise<T> {
@@ -224,6 +248,7 @@ export class ResidentPetCoordinator {
         reject,
       };
       (kind === 'conversation' ? this.conversationQueue : this.dispatchQueue).push(entry);
+      this.publishQueueSnapshot();
       this.drain();
     });
   }
@@ -233,11 +258,16 @@ export class ResidentPetCoordinator {
     const entry = this.conversationQueue.shift()
       ?? (this.state === 'open' ? this.dispatchQueue.shift() : undefined);
     if (!entry) return;
+    this.activeOperation = entry.kind;
     const active = Promise.resolve().then(() => this.run(entry));
     this.active = active;
     this.setState('busy');
     void active.then(() => {
-      if (this.active === active) this.active = null;
+      if (this.active === active) {
+        this.active = null;
+        this.activeOperation = null;
+        this.publishQueueSnapshot();
+      }
       this.drain();
     });
   }
@@ -279,12 +309,29 @@ export class ResidentPetCoordinator {
         this.logError('[resident-pet] state listener failed:', error);
       }
     }
+    // The active operation clears immediately after its settled state is read.
+    // Publish that single coherent snapshot from the completion callback instead
+    // of briefly reporting an idle state while an operation is still active.
+    if (this.active && next !== 'busy') return;
+    this.publishQueueSnapshot();
+  }
+
+  private publishQueueSnapshot(): void {
+    const snapshot = this.getQueueSnapshot();
+    for (const listener of this.queueListeners) {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        this.logError('[resident-pet] queue listener failed:', error);
+      }
+    }
   }
 
   private cancelQueue(queue: QueuedOperation[]): void {
     for (const entry of queue.splice(0)) {
       entry.reject(new ResidentPetOperationCancelledError('Resident Pet Host is closing.'));
     }
+    this.publishQueueSnapshot();
   }
 }
 
@@ -616,8 +663,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
   } = context;
 
   const dispatch: PetDispatchPort = {
-    getState: () => coordinator.getState(),
-    onStateChange: (listener) => coordinator.onStateChange(listener),
+    getQueueSnapshot: () => coordinator.getQueueSnapshot(),
+    onQueueChange: (listener) => coordinator.onQueueChange(listener),
     onDispatchLifecycle: (listener) => {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);

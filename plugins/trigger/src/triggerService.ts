@@ -9,6 +9,9 @@ export type TriggerDelivery = {
   deliveryId: string;
   triggerId: string;
   idempotencyKey: string;
+  /** Retained only so a failed delivery can be retried without reconstructing its event. */
+  targetPetId?: string;
+  request?: string;
   status: TriggerDeliveryStatus;
   note?: string;
   occurredAt: string;
@@ -19,7 +22,7 @@ export type TriggerDeliveryEvent = {
   sequence: number;
   deliveryId: string;
   triggerId: string;
-  eventType: 'received' | 'accepted' | 'failed' | 'recovered';
+  eventType: 'received' | 'accepted' | 'failed' | 'recovered' | 'retried';
   status: TriggerDeliveryStatus;
   note?: string;
   occurredAt: string;
@@ -34,6 +37,8 @@ type DeliveryRow = {
   delivery_id: string;
   trigger_id: string;
   idempotency_key: string;
+  target_pet_id: string | null;
+  request_text: string | null;
   status: TriggerDeliveryStatus;
   note: string | null;
   occurred_at: string;
@@ -61,6 +66,8 @@ function fromRow(row: DeliveryRow): TriggerDelivery {
     deliveryId: row.delivery_id,
     triggerId: row.trigger_id,
     idempotencyKey: row.idempotency_key,
+    ...(row.target_pet_id === null ? {} : { targetPetId: row.target_pet_id }),
+    ...(row.request_text === null ? {} : { request: row.request_text }),
     status: row.status,
     ...(row.note === null ? {} : { note: row.note }),
     occurredAt: row.occurred_at,
@@ -99,6 +106,8 @@ export class TriggerService {
         delivery_id TEXT PRIMARY KEY,
         trigger_id TEXT NOT NULL,
         idempotency_key TEXT NOT NULL,
+        target_pet_id TEXT,
+        request_text TEXT,
         status TEXT NOT NULL CHECK (status IN ('dispatching','accepted','failed')),
         note TEXT,
         occurred_at TEXT NOT NULL,
@@ -117,6 +126,13 @@ export class TriggerService {
       );
       COMMIT;
     `);
+    const columns = this.database.prepare('PRAGMA table_info(trigger_deliveries)').all() as Array<{ name: string }>;
+    if (!columns.some(({ name }) => name === 'target_pet_id')) {
+      this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN target_pet_id TEXT;');
+    }
+    if (!columns.some(({ name }) => name === 'request_text')) {
+      this.database.exec('ALTER TABLE trigger_deliveries ADD COLUMN request_text TEXT;');
+    }
     this.initialized = true;
     for (const mutation of this.recoverInterrupted()) this.publish(mutation);
   }
@@ -133,13 +149,15 @@ export class TriggerService {
     return () => this.listeners.delete(listener);
   }
 
-  async claim(triggerId: string, idempotencyKey: string): Promise<{
+  async claim(triggerId: string, idempotencyKey: string, dispatch?: { targetPetId: string; request: string }): Promise<{
     delivery: TriggerDelivery;
     duplicate: boolean;
   }> {
     this.assertReady();
     const normalizedTriggerId = nonEmpty(triggerId, 'triggerId');
     const normalizedKey = nonEmpty(idempotencyKey, 'idempotencyKey');
+    const targetPetId = dispatch === undefined ? undefined : nonEmpty(dispatch.targetPetId, 'targetPetId');
+    const request = dispatch === undefined ? undefined : nonEmpty(dispatch.request, 'request');
     const existing = this.find(normalizedTriggerId, normalizedKey);
     if (existing) return { delivery: existing, duplicate: true };
     const deliveryId = randomUUID();
@@ -149,9 +167,9 @@ export class TriggerService {
     try {
       this.database.prepare(`
         INSERT INTO trigger_deliveries(
-          delivery_id, trigger_id, idempotency_key, status, occurred_at, updated_at
-        ) VALUES (?, ?, ?, 'dispatching', ?, ?)
-      `).run(deliveryId, normalizedTriggerId, normalizedKey, now, now);
+          delivery_id, trigger_id, idempotency_key, target_pet_id, request_text, status, occurred_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'dispatching', ?, ?)
+      `).run(deliveryId, normalizedTriggerId, normalizedKey, targetPetId ?? null, request ?? null, now, now);
       event = this.insertEvent(
         deliveryId,
         normalizedTriggerId,
@@ -180,6 +198,28 @@ export class TriggerService {
     return this.transition(deliveryId, 'failed', 'failed', nonEmpty(note, 'failure'));
   }
 
+  async retry(deliveryId: string): Promise<TriggerDelivery> {
+    this.assertReady();
+    const normalizedId = nonEmpty(deliveryId, 'deliveryId');
+    const now = new Date().toISOString();
+    let event: TriggerDeliveryEvent;
+    this.database.exec('BEGIN IMMEDIATE;');
+    try {
+      const current = this.get(normalizedId);
+      if (!current || current.status !== 'failed') throw new Error(`Trigger delivery "${normalizedId}" is not retryable.`);
+      if (!current.targetPetId || !current.request) throw new Error(`Trigger delivery "${normalizedId}" has no retained dispatch input.`);
+      this.database.prepare("UPDATE trigger_deliveries SET status = 'dispatching', note = NULL, updated_at = ? WHERE delivery_id = ?").run(now, normalizedId);
+      event = this.insertEvent(normalizedId, current.triggerId, 'retried', 'dispatching', undefined, now);
+      this.database.exec('COMMIT;');
+    } catch (error) {
+      this.database.exec('ROLLBACK;');
+      throw error;
+    }
+    const delivery = this.get(normalizedId)!;
+    this.publish({ delivery, event: event! });
+    return delivery;
+  }
+
   async snapshot(): Promise<{ deliveries: TriggerDelivery[]; lastEventSequence: number }> {
     this.assertReady();
     const rows = this.database.prepare(
@@ -189,6 +229,11 @@ export class TriggerService {
       'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM trigger_delivery_events',
     ).get() as { sequence: number };
     return { deliveries: rows.map(fromRow), lastEventSequence: cursor.sequence };
+  }
+
+  async getDelivery(deliveryId: string): Promise<TriggerDelivery | null> {
+    this.assertReady();
+    return this.get(nonEmpty(deliveryId, 'deliveryId'));
   }
 
   async events(after = 0, limit = 200): Promise<TriggerDeliveryEvent[]> {

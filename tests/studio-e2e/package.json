@@ -12,6 +12,7 @@
     "@langchain/core": "^1.2.1",
     "@pinpawo-plugin/studio-http": "*",
     "@pinpawo-plugin/kanban": "*",
+    "@pinpawo-plugin/notice": "*",
     "@pinpawo-plugin/project-files": "*",
     "@pinpawo-plugin/scheduler": "*",
     "@pinpawo-plugin/trigger": "*",

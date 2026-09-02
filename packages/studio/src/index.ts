@@ -10,6 +10,7 @@ export type {
   Studio,
   StudioDispatchReceipt,
   StudioDispatchRequest,
+  StudioDispatchQueue,
   StudioEvent,
   StudioEventHandler,
   StudioEventInput,

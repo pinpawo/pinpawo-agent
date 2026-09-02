@@ -15,8 +15,8 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
   transaction、history cursor 和 `doing -> blocked` recovery；
 - `migrateKanbanSnapshotToSqlite()` 提供从旧 JSON snapshot 到空 SQLite target 的显式、
   一次性迁移；原文件会保留；
-- Studio Kanban Plugin 只通过 service 构建 Toolkit、dispatch adapter、Studio event
-  projection 和可选 HTTP read route；
+- Studio Kanban Plugin 只通过 service 构建 Toolkit、Studio event projection 和可选 HTTP
+  adapter；它不读取 Pet registry，也不发起 Studio dispatch。
 - 运行时 JSON snapshot store 已移除，SQLite 是持久化路径。
 
 旧 dispatch-resume adapter 的 `waitTask(reason)`、public continuation 与
@@ -24,8 +24,8 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
 `brief` 拆分为供列表识别的 `title` 与承载完整执行输入的 `detail`。Studio
 dispatch receipt 只表示 resident 已接纳输入，不产生 Kanban task transition。
 
-仍未实现独立 Kanban CLI/Web composition，以及 Console 的真实 adapter；它们不能通过绕开
-service 或直接读写 SQLite 来临时补齐。
+仍未实现独立 Kanban CLI/Web composition。Studio Console 已通过 Kanban HTTP command 做用户
+assignment；其他 UI 不能通过绕开 service 或直接读写 SQLite 来临时补齐。
 
 ## 1. 领域边界
 
@@ -37,7 +37,7 @@ Studio adapter ───┘             |
 ```
 
 - SQLite 是 Kanban task、dependency 和 task history 的唯一持久事实源。
-- `KanbanTaskService` 是 Kanban 的 application API。状态校验、transaction、claim 和
+- `KanbanTaskService` 是 Kanban 的 application API。状态校验、transaction、assignment 和
   recovery 只能通过该 API / repository 完成。
 - Kanban CLI/Web 可以在同一 application process 内直接使用 service，也可以通过一个
   Kanban-owned HTTP adapter 远程调用；它们不需要经过 Studio。
@@ -60,11 +60,11 @@ Studio adapter ───┘             |
 ## 2. 领域模型
 
 ```ts
-type KanbanTaskStatus = 'todo' | 'doing' | 'waiting' | 'done' | 'blocked';
+type KanbanTaskStatus = 'todo' | 'assigned' | 'doing' | 'waiting' | 'done' | 'blocked';
 
 type KanbanTask = {
   taskId: string;
-  assigneeId: string;
+  assigneeId?: string;
   title: string;
   detail: string;
   status: KanbanTaskStatus;
@@ -77,7 +77,7 @@ type KanbanTask = {
 type KanbanTaskEvent = {
   sequence: number;
   taskId: string;
-  eventType: 'created' | 'imported' | 'claimed' | 'waiting' | 'completed' | 'blocked' | 'recovered';
+  eventType: 'created' | 'imported' | 'assigned' | 'started' | 'waiting' | 'completed' | 'blocked' | 'recovered';
   fromStatus?: KanbanTaskStatus;
   toStatus: KanbanTaskStatus;
   note?: string;
@@ -85,16 +85,20 @@ type KanbanTaskEvent = {
 };
 ```
 
-`assigneeId` 是 Kanban 的执行者标识，不预设执行者一定是 Pet。Studio adapter 可以把
-它解释为 `petId`，其他 application 可以映射到 worker、team 或用户。
+`assigneeId` 是用户显式选择后的执行目标标识，初始为空；Kanban 不解析、不验证或枚举
+该标识。它可以代表 Pet、worker、team 或用户。Studio 中，Console 把用户的选择写成该值，
+随后 Trigger 规则自行决定是否以及如何把 `task.assigned` 路由到对应 Pet；允许的目标集合也由
+该规则配置，而不是由 Kanban 保存。
 
 `title` 是面向列表和快速识别的简短交付名称；`detail` 是交给执行者的完整任务输入，包含
 目标、完成标准、必要上下文与应保留的证据。二者描述同一个 task，不形成额外的执行层级。
 
 状态语义：
 
-- `todo`：尚未被 runner claim；全部 dependency 都是 `done` 后才 ready。
-- `doing`：已持久 claim，runner 准备或正在执行。
+- `todo`：尚未被用户指派。全部 dependency 都是 `done` 后才可以指派。
+- `assigned`：用户已选择执行目标，且已提交 `task.assigned` 事件；外部 dispatch 的接纳或失败
+  不会伪造为 task 正在执行。
+- `doing`：执行者通过 Kanban command 明确声明已经开始。
 - `waiting`：Kanban 已持久化一条由自身领域定义的 typed attention/authorization record；
   它优先进入人可处理的 attention read model。裸 reason、Studio gate 或 dispatch receipt
   不能产生这个状态。
@@ -113,11 +117,11 @@ type KanbanTaskEvent = {
 ```sql
 CREATE TABLE kanban_tasks (
   task_id       TEXT PRIMARY KEY,
-  assignee_id   TEXT NOT NULL,
+  assignee_id   TEXT,
   title         TEXT NOT NULL,
   detail        TEXT NOT NULL,
   status        TEXT NOT NULL
-                CHECK (status IN ('todo', 'doing', 'waiting', 'done', 'blocked')),
+                CHECK (status IN ('todo', 'assigned', 'doing', 'waiting', 'done', 'blocked')),
   note          TEXT,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL
@@ -182,7 +186,8 @@ type KanbanTaskRepository = {
   readSnapshot(): Promise<KanbanTaskSnapshot>;
   getTask(taskId: string): Promise<KanbanTask | null>;
   createTask(input: CreateKanbanTaskInput): Promise<KanbanMutation>;
-  claimNextReadyTask(): Promise<KanbanMutation | null>;
+  assignTask(taskId: string, assigneeId: string): Promise<KanbanMutation>;
+  startAssignedTask(taskId: string): Promise<KanbanMutation>;
   completeTask(taskId: string, result: string): Promise<KanbanMutation>;
   blockTask(taskId: string, reason: string): Promise<KanbanMutation>;
   recoverInterruptedTasks(): Promise<KanbanMutation[]>;
@@ -201,10 +206,10 @@ Repository 保证每个 mutation 在一个 transaction 内：
 `KanbanTaskService` 在 commit 后投射 `KanbanDomainEvent` 给当前 application 的 adapters。
 数据库失败时不得发布成功事件或启动外部执行。
 
-`claimNextReadyTask(excludedAssigneeIds)` 使用原子 transaction：按 `created_at, task_id`
-选择一个 dependency 均完成、且不属于调用方排除集合的 `todo` task，以带
-`status = todo` 条件的 update 改为 `doing`，并插入 claimed event。并发 claim 同一 task
-只能成功一次。assignee 并发策略由 runner 通过排除集合表达，不固化进通用 Kanban 领域。
+`assignTask` 使用原子 transaction：只接受 dependency 均完成的 `todo` task，把用户选择的
+不透明 `assigneeId` 与 `assigned` 状态一并写入，再追加 assigned event。`startAssignedTask`
+只允许该 task 的执行者在实际工作开始时把 `assigned` 改成 `doing`。Kanban 不根据 Pet 可用性
+自动 claim、排队或重试；并发、路由和 delivery policy 属于 Trigger / Host。
 
 ## 5. Domain event 与历史
 
@@ -223,22 +228,22 @@ Repository 保证每个 mutation 在一个 transaction 内：
 
 ## 6. Crash consistency 与恢复
 
-runner 必须先持久 claim，再执行外部动作：
+用户 assignment 必须先持久化，再由外部 Trigger 决定是否派发：
 
 ```text
 BEGIN IMMEDIATE
-  todo -> doing
-  append claimed event
+  todo -> assigned
+  append assigned event
 COMMIT
         |
         | only after commit
         v
-runner starts external work
+Trigger routes the selected target
 ```
 
-commit 失败时不得执行。commit 成功但进程在外部执行前或执行中崩溃时，数据库留下
-`doing`。下次 application start 在一个 transaction 中将所有 `doing` 改为 `blocked`，
-逐条写入 recovered event，避免无法证明旧动作是否发生时自动重试。
+commit 失败时不得派发。commit 成功但进程在外部执行前崩溃时，数据库保留 `assigned`，由
+Trigger delivery history 说明是否需要重试。只有执行者明确开始后的 `doing` 会在下次
+application start 中改为 `blocked`，逐条写入 recovered event，避免无法证明旧动作是否发生时自动重试。
 
 已有 `waiting` 在重启后保留；恢复它所需的 typed attention/authorization record 由
 Kanban 自己持久化和管理，不从 Agent checkpoint、Studio event 或 application adapter 的
@@ -260,6 +265,10 @@ PRAGMA trusted_schema = OFF
 SQLite migration 使用 `PRAGMA user_version`，只允许向前迁移。migration 失败必须让
 Kanban application start 失败，不能删除、重建或静默清空数据库。
 
+从自动派发 schema v4 迁移时，旧 `todo` task 的 assignee 会被清空：旧值代表曾经的
+自动路由意图，而不是本模型下用户确认过的 assignment。用户需要在 Console 中重新选择目标，
+才能产生新的 `task.assigned` 事件和 Trigger delivery。
+
 写 transaction 必须很短；禁止在 transaction 内等待 runner、event listener、HTTP 或
 其他网络操作。数据库目录权限为 `0700`，database/WAL/SHM 文件限制为当前用户可读写。
 
@@ -269,7 +278,7 @@ application lifecycle：
 2. transactionally recover `doing -> blocked`；
 3. 发布 committed recovery events；
 4. 对 adapter 开放 service；
-5. shutdown 时先停止新 command / claim，再等待 adapter 停止，最后关闭 repository。
+5. shutdown 时先停止新 command / assignment，再等待 adapter 停止，最后关闭 repository。
 
 ## 8. CLI、Web 与 adapter
 
@@ -296,21 +305,20 @@ storage 或 domain event 的所有权。
 第一阶段不提供绕过领域 command 的 task CRUD。人或 agent 如需直接管理 task，也必须
 调用 `createTask` / `completeTask` / `blockTask` 等明确 command。
 
-Studio Kanban Plugin 只是一个可选 adapter：claim 必须先由 service commit，再调用
-`context.dispatch()`。admission 失败时可以 block 已 claim task；一旦 resident 接纳，Studio
-不再提供 execution result，task 必须保持 active，直到 Agent 用 `kanban_task_complete` 或
-`kanban_task_block` 提交明确领域结果。Plugin 只通过 dispatch、event、hook 和自己定义的
-Toolkit 连接 Studio，不读取 checkpoint、thread、Agent Session 或 execution metadata。
+Studio Kanban Plugin 只是一个可选 adapter：用户 assignment 必须先由 service commit，再投射
+`task.assigned`。Trigger 是消费该事件并决定 Studio dispatch 的可选 adapter；admission 成功或失败
+写入 Trigger delivery history，不改变 Kanban task 的事实状态。执行者收到请求后以
+`kanban_task_start` 进入 `doing`，并用 `kanban_task_complete` 或 `kanban_task_block` 提交结果。
+Kanban Plugin 不读取 Pet registry、checkpoint、thread、Agent Session 或 execution metadata。
 HTTP route 与 Toolkit 也必须复用同一个 `KanbanTaskService`。
 
-Studio adapter 提供职责分离的 Toolkit projection：`kanban-planning` 读取 assignee/task
-快照并创建最终交付，`kanban-execution` 读取已分派 task 并提交完成或阻塞结果。通用
+Studio adapter 提供职责分离的 Toolkit projection：`kanban-planning` 读取 task
+快照并创建最终交付，`kanban-execution` 读取已分派 task 并提交开始、完成或阻塞结果。通用
 `kanban` Toolkit 继续作为完整领域接口存在，但示例 Planner 与执行 Pet 使用各自的最小
 projection，使可调用能力与 Pet 职责一致。
 
-Studio dispatch adapter 将已有 `doing` / `waiting` task 的 Pet 加入下一次 claim 的排除集合，
-因此同一 Pet 默认串行执行，不同 Pet 仍可并行。该策略属于 Studio adapter；其他 Kanban
-runner 可以根据自己的 assignee 语义选择不同并发策略。
+同一执行目标的并发、排队和重试不属于 Kanban 领域策略。它们由 Trigger rule、Host 或未来的
+专用 worker scheduler 明确配置；Kanban 只保留用户 assignment 与执行者的领域回报。
 
 ## 9. JSON snapshot 迁移
 
@@ -333,8 +341,8 @@ writable truth source。
 ### PR 1：独立 Kanban domain 与 SQLite repository
 
 - 把 task model、service、repository contract 从 Studio adapter 中分离；
-- 实现 schema、migration、transaction、atomic claim 和恢复；
-- 覆盖 dependency、状态转移、并发 claim、重启恢复和损坏 schema 测试；
+- 实现 schema、migration、transaction、atomic assignment 和恢复；
+- 覆盖 dependency、状态转移、assignment、重启恢复和损坏 schema 测试；
 - 不修改 Studio 或 Agent runtime。
 
 ### PR 2：现有 adapters 迁移
@@ -354,8 +362,8 @@ writable truth source。
 
 - Kanban domain/service/repository 不 import Studio、pet-agent 或 local-agent。
 - 每个 mutation 与 task event 原子提交；commit 失败不发布成功 event、不执行外部动作。
-- 同一 ready task 并发 claim 只成功一次。
-- Studio adapter 中同一 Pet 默认最多有一个 `doing` / `waiting` task，完成或阻塞后才 claim 下一项。
+- 同一 `todo` task 只能被一次有效 assignment 转成 `assigned`。
+- Studio 事件投射不枚举或隐式选择 Pet；外部路由必须通过显式 Trigger rule。
 - crash 后 `doing -> blocked`、`waiting` 保留，恢复变化进入 history。
 - CLI/Web 可独立运行 Kanban，不需要 Studio。
 - 所有 adapter 通过 service/command/read model 使用 Kanban，不直接写 SQLite。

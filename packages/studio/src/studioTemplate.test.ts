@@ -84,7 +84,27 @@ test('shipped Pet Capabilities separate planning, execution, and Wiki observatio
     'utf8',
   )) as { plugins: Array<{ id: string; options?: Record<string, unknown> }> };
   const kanban = studioConfig.plugins.find(({ id }) => id === '@pinpawo-plugin/kanban');
-  assert.deepEqual(kanban?.options?.assignablePetIds, ['executor', 'reviewer']);
+  assert.equal(kanban?.options, undefined);
+  const scheduler = studioConfig.plugins.find(({ id }) => id === '@pinpawo-plugin/scheduler');
+  assert.deepEqual(scheduler?.options, {
+    dispatchQueueAudit: {
+      intervalMs: 600000,
+      attentionStates: ['waiting', 'blocked'],
+    },
+  });
+  const notice = studioConfig.plugins.find(({ id }) => id === '@pinpawo-plugin/notice');
+  assert.deepEqual(notice?.options, {
+    rules: [{
+      noticeId: 'dispatch-queues-attention',
+      title: 'Dispatch queues need attention',
+      level: 'warning',
+      source: {
+        kind: 'studio_event',
+        eventSource: 'scheduler',
+        type: 'dispatch.queues_attention_required',
+      },
+    }],
+  });
 
   const executorCapabilities = await loadCapabilityDirectory(path.join(
     workdir,

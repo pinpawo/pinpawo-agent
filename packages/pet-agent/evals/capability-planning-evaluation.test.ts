@@ -168,7 +168,7 @@ test('supervisor goal evaluation rejects a semantically wrong plan with the corr
   });
 
   assert.equal(
-    evaluation.scores.find(({ key }) => key === 'planner_result_correct')?.score,
+    evaluation.scores.find(({ key }) => key === 'supervisor_result_correct')?.score,
     1,
   );
   assert.equal(

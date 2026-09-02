@@ -18,7 +18,7 @@ capability each case covers:
 - `structured_output`: produce schema-compatible orchestration outputs where a
   structured contract still exists.
 - `entry_answer`: answer from existing context or route execution work to Supervisor.
-- `planner_boundary`: accept execution evidence and select the next private
+- `supervisor_boundary`: accept execution evidence and select the next private
   Supervisor action.
 - `capability_discovery`: let the Supervisor explore Capability documents and select an executor.
 - `capability_planning`: define execution boundaries and materialize tasks.
@@ -215,28 +215,28 @@ action exclusivity, argument semantics, and run/message scope. Follow static
 review with behavior tests and targeted lifecycle evals; do not turn prompt prose
 into a literal snapshot contract.
 
-## Cross-Decision Stability Runner
+## Entry Answer Stability Runner
 
-Run every canonical entry, supervisor, capability, and outcome case repeatedly
-against the configured real model:
+Run every canonical Entry Answer routing case repeatedly against the configured
+real model:
 
 ```sh
 npm run eval:decision-stability
 ```
 
-The default is five repetitions per case. The summary reports pass rate,
-verdict distribution, distinct structured-output variants, schema errors,
-output-shape distribution (including supervisor task/tail counts and rubber-stamp
-status), invocation errors, failed score dimensions, and mean latency. This
-runner is local and does not require Langfuse.
+This command selects `entry_answer` and defaults to five repetitions per case.
+The summary reports pass rate, verdict distribution, distinct output variants,
+schema errors, output-shape distribution, invocation errors, failed score
+dimensions, and mean latency. This runner is local and does not require
+Langfuse.
 
 Useful filters:
 
 ```sh
-DECISION_EVAL_TARGETS=entry,supervisor DECISION_EVAL_REPEATS=5 \
+PROMPT_EVAL_TARGETS=entry_answer,answer PROMPT_EVAL_REPEATS=5 \
   npm run eval:decision-stability
 
-DECISION_EVAL_CASES=entry-uses-general-for-unmatched-work DECISION_EVAL_REPEATS=3 \
+PROMPT_EVAL_CASES=repository-task-enters-supervisor PROMPT_EVAL_REPEATS=3 \
   npm run eval:decision-stability
 
 DECISION_EVAL_TIMEOUT_MS=180000 npm run eval:decision-stability
@@ -245,9 +245,10 @@ DECISION_EVAL_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:decision-stability
 ```
 
 Model configuration is resolved by explicit Model Profile ID from the versioned
-`models` section in `~/.pinpawo/config.json`. Entry scoring covers only result
-availability; Supervisor scoring owns task boundaries, plan contents, and
-Capability selection.
+`models` section in `~/.pinpawo/config.json`. Entry Answer scoring covers route
+selection and the `plan_request` tool-call shape. Supervisor behavior is covered
+separately by `eval:langfuse:capability-planning` and
+`eval:lifecycle-composition`.
 
 ## Prompt Contract Evaluation
 
@@ -265,9 +266,9 @@ repeat count before comparing providers:
 npm run eval:prompt-v1
 ```
 
-It runs 35 canonical cases across `entry`, `supervisor`, `capability`, `outcome`,
-and `answer`, with three repeats per case. Select one subject and one independent
-fixed judge from the configured Model Profiles:
+It runs 17 canonical cases across `entry_answer` and `answer`, with three repeats
+per case. Select one subject and one independent fixed judge from the configured
+Model Profiles:
 
 ```sh
 PROMPT_EVAL_MODEL_PROFILE_ID=qwen-max \
@@ -290,19 +291,18 @@ cases, repetitions, and provider-reported token usage. The runner requires a cle
 `PROMPT_EVAL_ALLOW_DIRTY=1` is available for exploratory runs, whose reports stay
 marked as dirty.
 
-Exact actions, verdicts, enums, and mechanical plan relationships use
-deterministic contract criteria. Free-form entry tasks, supervisor task/tail
-objectives, and `answer` outputs use the independently selected fixed judge with
-the versioned `prompt-goal-v1` evaluator. The report records both profile
-identities and keeps subject-model usage separate from evaluator usage. A
-malformed or failed evaluator call makes the run not evaluable; it does not
-count as a failed objective.
+Entry Answer routes and tool-call shapes use deterministic contract criteria.
+Free-form `answer` outputs use the independently selected fixed judge with the
+versioned `prompt-goal-v1` evaluator. The report records both profile identities
+and keeps subject-model usage separate from evaluator usage. A malformed or
+failed evaluator call makes the run not evaluable; it does not count as a failed
+objective.
 
 Every criterion result records whether it was evaluated deterministically or by
 the LLM judge. Goal criteria contain only behavior owned by the prompt contract.
-Candidate recall, supervisor rubber-stamp status, gap-note presence, output shape,
-and similar measurements remain diagnostics. Schema-owned field and enum
-constraints remain schema failures rather than duplicated prompt-goal criteria.
+Answer length, prior-answer overlap, output shape, and similar measurements remain
+diagnostics. Schema-owned field constraints remain schema failures rather than
+duplicated prompt-goal criteria.
 
 The answer cases keep two different contracts separate:
 
@@ -317,7 +317,7 @@ and family unambiguously:
 PROMPT_EVAL_PROVIDER=openai \
 PROMPT_EVAL_MODEL_FAMILY=gpt-5 \
 PROMPT_EVAL_REASONING_EFFORT=low \
-PROMPT_EVAL_TARGETS=entry,answer \
+PROMPT_EVAL_TARGETS=entry_answer,answer \
 PROMPT_EVAL_REPEATS=5 \
 PROMPT_EVAL_REPORT_PATH=.eval-results/gpt-candidate.json \
   npm run eval:prompt-stability

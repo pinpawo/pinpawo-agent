@@ -766,7 +766,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-continues-incomplete-current-task`,
     name: 'boundary-continues-incomplete-current-task',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       messages: [{ role: 'user', content: '检查仓库并完成测试验证。' }],
@@ -794,7 +794,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     tags: [
       'capability_planning',
       'delegation_control',
-      'planner_boundary',
+      'supervisor_boundary',
       'interruption_recovery',
     ],
     input: {
@@ -828,7 +828,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-corrects-context-summary-output`,
     name: 'boundary-corrects-context-summary-output',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary', 'context_synthesis'],
     input: {
       mode: 'boundary',
       userRequest: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
@@ -870,7 +870,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-corrects-planning-only-output`,
     name: 'boundary-corrects-planning-only-output',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
@@ -904,7 +904,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-corrects-placeholder-output`,
     name: 'boundary-corrects-placeholder-output',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '根据每个菜单文本的含义绘制不同的白色线性 SVG 图标，不得继续使用四宫格占位符。',
@@ -938,7 +938,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-continues-after-script-only-progress`,
     name: 'boundary-continues-after-script-only-progress',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '重写图标生成脚本并实际生成、验证全部 70 个语义 SVG 图标。',
@@ -972,7 +972,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-requests-missing-verification`,
     name: 'boundary-requests-missing-verification',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '生成 70 个语义 SVG 图标，并确认文件数量、XML 有效性和图标内容均符合要求。',
@@ -1006,7 +1006,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-completes-user-goal`,
     name: 'boundary-completes-user-goal',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       messages: [{ role: 'user', content: '运行测试并报告结果。' }],
@@ -1029,7 +1029,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-asks-before-substituting-missing-target`,
     name: 'boundary-asks-before-substituting-missing-target',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary', 'context_synthesis'],
     input: {
       mode: 'boundary',
       userRequest: '帮我 review PR #662。',
@@ -1060,7 +1060,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-waits-for-user-input`,
     name: 'boundary-waits-for-user-input',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       messages: [{ role: 'user', content: '发布包；如果需要凭据就先停下来。' }],

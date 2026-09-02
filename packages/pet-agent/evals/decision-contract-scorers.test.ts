@@ -46,7 +46,7 @@ test('supervisor scorer enforces the mandatory General default candidate', () =>
     remainingPlan: [],
   }, testCase.expected);
   assert.equal(
-    scores.find(({ key }) => key === 'planner_capability_correct')?.score,
+    scores.find(({ key }) => key === 'supervisor_capability_correct')?.score,
     1,
   );
 });
@@ -79,7 +79,7 @@ test('supervisor deterministic scorer treats Capability as executor identity', (
     remainingPlan: [],
   }, testCase.expected);
   assert.equal(
-    scores.find(({ key }) => key === 'planner_capability_correct')?.score,
+    scores.find(({ key }) => key === 'supervisor_capability_correct')?.score,
     0,
   );
 });

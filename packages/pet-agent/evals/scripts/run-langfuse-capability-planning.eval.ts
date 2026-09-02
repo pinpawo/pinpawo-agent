@@ -69,7 +69,7 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
   });
 }
 
-function plannerOutput(
+function supervisorOutput(
   result: RunSupervisorResult,
 ): CapabilityPlanningEvalOutput {
   if (isRunSupervisorNoCommandResult(result)) {
@@ -99,7 +99,7 @@ function plannerOutput(
   };
 }
 
-function plannerDiagnostics(
+function supervisorDiagnostics(
   result: RunSupervisorResult,
   searchDiagnostics: CapabilitySearchDiagnostics,
 ) {
@@ -258,8 +258,8 @@ async function main() {
             callbacks: [searchDiagnostics.callback],
           },
         );
-        const output = plannerOutput(result);
-        const diagnostics = plannerDiagnostics(result, searchDiagnostics.read());
+        const output = supervisorOutput(result);
+        const diagnostics = supervisorDiagnostics(result, searchDiagnostics.read());
         const evaluation = await evaluateCapabilityPlanningOutput({
           input: testCase.input,
           expected: testCase.expected,
@@ -304,7 +304,7 @@ async function main() {
           `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
           + `search_calls=${diagnostics.searchCalls.toString()} `
           + `search_rounds=${diagnostics.searchRounds.toString()} `
-          + `planner_status=${diagnostics.supervisorStatus} `
+          + `supervisor_status=${diagnostics.supervisorStatus} `
           + evaluation.scores.map(({ key, score }) => `${key}=${score}`).join(' '),
         );
         if (!ok && showFailureDetails) {

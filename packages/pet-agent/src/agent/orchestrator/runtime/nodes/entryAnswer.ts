@@ -113,7 +113,7 @@ const EXECUTION_ANNOUNCEMENT_REPAIR = [
   '现在重新处理这一轮：需要执行就发起 plan_request 工具调用；不需要执行就直接给出面向用户的最终回复。',
 ].join('\n');
 
-function plannerDispatch(
+function supervisorDispatch(
   state: OrchestratorStateType,
   runUserRequest: string,
 ): RunSupervisorDispatch {
@@ -145,7 +145,7 @@ export function createPlanRequestTool() {
           runNextDelegation: null,
           runSupervisorSession: null,
         },
-        goto: new Send('runSupervisor', plannerDispatch(runtime.state, runUserRequest)),
+        goto: new Send('runSupervisor', supervisorDispatch(runtime.state, runUserRequest)),
       });
     },
     {

@@ -8,21 +8,25 @@ import {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export type InitStudioKickstartOptions = {
+export type InitStudioWorkdirOptions = {
   workdir: string;
   /** Test seam; production uses the template shipped with @pinpawo/studio. */
   templateRoot?: string;
 };
 
-export type InitStudioKickstartResult = {
+export type InitStudioWorkdirResult = {
   workdir: string;
   files: string[];
 };
 
 const DEFAULT_TEMPLATE_ROOT = fileURLToPath(
-  new URL('../examples/kanban-workdir', import.meta.url),
+  new URL('../templates/default', import.meta.url),
 );
-const TEMPLATE_ROOTS = ['.pinpawo/studio.json', '.pinpawo/pets', 'wiki'] as const;
+const TEMPLATE_DESTINATIONS = [
+  { source: 'studio.json', destination: '.pinpawo/studio.json' },
+  { source: 'pets', destination: '.pinpawo/pets' },
+  { source: 'wiki', destination: 'wiki' },
+] as const;
 
 async function exists(file: string): Promise<boolean> {
   try {
@@ -44,38 +48,57 @@ async function listFiles(root: string, relative: string): Promise<string[]> {
   return files;
 }
 
-async function listTemplateFiles(templateRoot: string): Promise<string[]> {
-  const files: string[] = [];
-  for (const relative of TEMPLATE_ROOTS) {
-    const absolute = path.join(templateRoot, relative);
+type TemplateFile = { source: string; destination: string };
+
+async function listTemplateFiles(templateRoot: string): Promise<TemplateFile[]> {
+  const files: TemplateFile[] = [];
+  for (const root of TEMPLATE_DESTINATIONS) {
+    const absolute = path.join(templateRoot, root.source);
     const entries = await readdir(path.dirname(absolute), { withFileTypes: true });
     const entry = entries.find(({ name }) => name === path.basename(absolute));
-    if (!entry) throw new Error(`Studio kickstart template is missing ${relative}.`);
-    if (entry.isDirectory()) files.push(...await listFiles(templateRoot, relative));
-    else if (entry.isFile()) files.push(relative);
-    else throw new Error(`Studio kickstart template entry is not a file or directory: ${relative}.`);
+    if (!entry) throw new Error(`Studio workdir template is missing ${root.source}.`);
+    if (entry.isDirectory()) {
+      const children = await listFiles(templateRoot, root.source);
+      files.push(...children.map((source) => ({
+        source,
+        destination: path.join(root.destination, path.relative(root.source, source)),
+      })));
+    } else if (entry.isFile()) {
+      files.push({ source: root.source, destination: root.destination });
+    } else {
+      throw new Error(`Studio workdir template entry is not a file or directory: ${root.source}.`);
+    }
   }
   return files;
 }
 
-/** Copy the shipped Studio kickstart config without overwriting project files. */
-export async function initStudioKickstart(
-  options: InitStudioKickstartOptions,
-): Promise<InitStudioKickstartResult> {
+/** Initialize a selected project workdir from the shipped Studio template. */
+export async function initStudioWorkdir(
+  options: InitStudioWorkdirOptions,
+): Promise<InitStudioWorkdirResult> {
   const workdir = path.resolve(options.workdir);
   const templateRoot = options.templateRoot ?? DEFAULT_TEMPLATE_ROOT;
   const files = await listTemplateFiles(templateRoot);
-  const conflicts = await Promise.all(files.map(async (relative) => (
-    await exists(path.join(workdir, relative)) ? relative : null
+  const conflicts = await Promise.all(files.map(async ({ destination }) => (
+    await exists(path.join(workdir, destination)) ? destination : null
   )));
   const conflict = conflicts.find((value): value is string => value !== null);
   if (conflict) {
-    throw new Error(`Studio kickstart init refuses to overwrite ${path.join(workdir, conflict)}.`);
+    throw new Error(`Studio init refuses to overwrite ${path.join(workdir, conflict)}.`);
   }
-  for (const relative of files) {
-    const destination = path.join(workdir, relative);
+  for (const file of files) {
+    const destination = path.join(workdir, file.destination);
     await mkdir(path.dirname(destination), { recursive: true });
-    await copyFile(path.join(templateRoot, relative), destination, constants.COPYFILE_EXCL);
+    await copyFile(path.join(templateRoot, file.source), destination, constants.COPYFILE_EXCL);
   }
-  return { workdir, files };
+  return { workdir, files: files.map(({ destination }) => destination) };
 }
+
+/** @deprecated Use initStudioWorkdir. */
+export const initStudioKickstart = initStudioWorkdir;
+
+/** @deprecated Use InitStudioWorkdirOptions. */
+export type InitStudioKickstartOptions = InitStudioWorkdirOptions;
+
+/** @deprecated Use InitStudioWorkdirResult. */
+export type InitStudioKickstartResult = InitStudioWorkdirResult;

@@ -36,12 +36,12 @@ test('Studio Host CLI defaults to an available Agent Session port', () => {
   });
 });
 
-test('Studio CLI initializes the kickstart template without starting a Host', async () => {
+test('Studio CLI initializes a workdir without starting a Host', async () => {
   let received: string | undefined;
   let output = '';
   await runStudioHostCli(['init', '--workdir', '/tmp/new-studio'], {
     runHost: () => assert.fail('init must not start a Host'),
-    initKickstart: async ({ workdir }) => {
+    initWorkdir: async ({ workdir }) => {
       received = workdir;
       return { workdir, files: ['.pinpawo/studio.json'] };
     },
@@ -49,7 +49,7 @@ test('Studio CLI initializes the kickstart template without starting a Host', as
   });
 
   assert.equal(received, '/tmp/new-studio');
-  assert.match(output, /Initialized Studio kickstart/);
+  assert.match(output, /Initialized Studio workdir/);
   assert.throws(
     () => parseStudioHostCliArgs(['init', '--pet-port', '3210']),
     /not valid for Studio init/,

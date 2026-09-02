@@ -24,7 +24,7 @@ import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scrip
 
 const CAPABILITY_PATH = resolve(
   import.meta.dirname,
-  '../../../packages/studio/examples/kanban-workdir/.pinpawo/pets/planner/capabilities/studio-planning/CAPABILITY.md',
+  '../../../packages/studio/templates/default/pets/planner/capabilities/studio-planning/CAPABILITY.md',
 );
 function readDefaultProfileId(): string {
   const configured = process.env.STUDIO_PLANNING_EVAL_PROFILE?.trim();

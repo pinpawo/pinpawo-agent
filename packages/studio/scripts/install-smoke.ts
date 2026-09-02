@@ -25,6 +25,7 @@ const packageRoots = [
   resolve(workspaceRoot, 'plugins', 'studio-http'),
   resolve(workspaceRoot, 'plugins', 'kanban'),
   resolve(workspaceRoot, 'plugins', 'scheduler'),
+  resolve(workspaceRoot, 'plugins', 'notice'),
   resolve(workspaceRoot, 'plugins', 'project-files'),
   resolve(workspaceRoot, 'plugins', 'trigger'),
 ];
@@ -37,6 +38,7 @@ if (!npmCli) {
 const tempRoot = await mkdtemp(join(tmpdir(), 'pinpawo-studio-install-smoke-'));
 const artifactDir = join(tempRoot, 'artifacts');
 const consumerDir = join(tempRoot, 'consumer');
+const smokeHome = join(tempRoot, 'home');
 const cacheDir = process.env.CI
   ? undefined
   : join(workspaceRoot, 'node_modules', '.cache', 'pinpawo-studio-install-smoke-npm');
@@ -51,8 +53,10 @@ try {
   await Promise.all([
     mkdir(artifactDir, { recursive: true }),
     mkdir(consumerDir, { recursive: true }),
+    mkdir(join(smokeHome, '.pinpawo'), { recursive: true }),
     ...(cacheDir ? [mkdir(cacheDir, { recursive: true })] : []),
   ]);
+  await writeFile(join(smokeHome, '.pinpawo', 'local-server-token'), 'studio-install-smoke-token\n');
   await writeFile(join(consumerDir, 'package.json'), `${JSON.stringify({
     name: 'pinpawo-studio-install-smoke',
     private: true,
@@ -91,8 +95,8 @@ try {
     access(join(installedStudio, 'dist', 'index.d.ts')),
     access(join(installedStudio, 'dist', 'cli.js')),
     access(installedBin),
-    access(join(installedStudio, 'examples', 'kanban-workdir', '.pinpawo', 'studio.json')),
-    access(join(installedStudio, 'examples', 'kanban-workdir', 'wiki', 'PROJECT.md')),
+    access(join(installedStudio, 'templates', 'default', 'studio.json')),
+    access(join(installedStudio, 'templates', 'default', 'wiki', 'PROJECT.md')),
   ]);
 
   const imported = await runProcess(process.execPath, [
@@ -126,17 +130,17 @@ try {
       process.execPath,
       [join(installedStudio, 'dist', 'cli.js'), 'init', '--workdir', initializedWorkdir],
       consumerDir,
-      'initialize installed Studio kickstart',
+      'initialize installed Studio workdir',
       30_000,
     )
     : await runProcess(
       installedBin,
       ['init', '--workdir', initializedWorkdir],
       consumerDir,
-      'initialize installed Studio kickstart',
+      'initialize installed Studio workdir',
       30_000,
     );
-  assert.match(initialized.stdout, /Initialized Studio kickstart/);
+  assert.match(initialized.stdout, /Initialized Studio workdir/);
   assert.equal(initialized.stderr, '');
   await Promise.all([
     access(join(initializedWorkdir, '.pinpawo', 'studio.json')),
@@ -160,9 +164,11 @@ try {
       "if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`unexpected Plugins: ${JSON.stringify(names)}`);",
       "process.stdout.write(`${names.join(',')}\\n`);",
     ].join('\n'),
-  ], consumerDir, 'resolve installed Studio kickstart Plugins', 30_000, {
+  ], consumerDir, 'resolve initialized Studio workdir Plugins', 30_000, {
     PINPAWO_SMOKE_WORKDIR: initializedWorkdir,
-    PINPAWO_HELLO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
+    PINPAWO_STUDIO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
+    HOME: smokeHome,
+    USERPROFILE: smokeHome,
   });
   assert.equal(resolvedKickstart.stdout.trim(), 'http,notice,kanban,scheduler,project-files,trigger');
   assert.equal(resolvedKickstart.stderr, '');

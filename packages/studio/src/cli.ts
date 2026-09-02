@@ -3,8 +3,8 @@ import {
   type StudioHostProcessOptions,
 } from './studioHostProcess';
 import {
-  initStudioKickstart,
-  type InitStudioKickstartOptions,
+  initStudioWorkdir,
+  type InitStudioWorkdirOptions,
 } from './studioTemplate';
 
 const HELP = `Usage: pinpawo-studio [start] [options]
@@ -17,13 +17,13 @@ Options:
   --pet-port <port>      resident Pet conversation listener (default: available port)
   -h, --help             display help
 
-Init copies the shipped kickstart Pet, Capability, Plugin, and Wiki files into
-the workdir without overwriting existing files.
+Init creates the shipped Studio configuration, Pet Capabilities, and initial
+Wiki files in the selected workdir without overwriting existing files.
 `;
 
 export type StudioHostCliHandlers = {
   runHost?: (options: StudioHostProcessOptions) => Promise<void> | void;
-  initKickstart?: (options: InitStudioKickstartOptions) => Promise<{
+  initWorkdir?: (options: InitStudioWorkdirOptions) => Promise<{
     workdir: string;
     files: string[];
   }>;
@@ -49,7 +49,7 @@ function parsePort(value: string): number {
 export type ParsedStudioHostCli =
   | { help: true }
   | { help: false; command: 'start'; options: StudioHostProcessOptions }
-  | { help: false; command: 'init'; options: InitStudioKickstartOptions };
+  | { help: false; command: 'init'; options: InitStudioWorkdirOptions };
 
 export function parseStudioHostCliArgs(args: readonly string[]): ParsedStudioHostCli {
   const command = args[0] === 'init' ? 'init' : 'start';
@@ -100,9 +100,9 @@ export async function runStudioHostCli(
     return;
   }
   if (parsed.command === 'init') {
-    const result = await (handlers.initKickstart ?? initStudioKickstart)(parsed.options);
+    const result = await (handlers.initWorkdir ?? initStudioWorkdir)(parsed.options);
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(
-      `Initialized Studio kickstart in ${result.workdir} (${result.files.length.toString()} files).\n`,
+      `Initialized Studio workdir in ${result.workdir} (${result.files.length.toString()} files).\n`,
     );
     return;
   }

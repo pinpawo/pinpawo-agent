@@ -156,7 +156,7 @@ try {
       '  resolvePlugin: studio.createInstalledStudioPluginResolver({ workdir }),',
       '});',
       'const names = configuration.plugins.map(({ name }) => name);',
-      "const expected = ['http', 'kanban', 'scheduler', 'project-files', 'trigger'];",
+      "const expected = ['http', 'notice', 'kanban', 'scheduler', 'project-files', 'trigger'];",
       "if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`unexpected Plugins: ${JSON.stringify(names)}`);",
       "process.stdout.write(`${names.join(',')}\\n`);",
     ].join('\n'),
@@ -164,7 +164,7 @@ try {
     PINPAWO_SMOKE_WORKDIR: initializedWorkdir,
     PINPAWO_HELLO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
   });
-  assert.equal(resolvedKickstart.stdout.trim(), 'http,kanban,scheduler,project-files,trigger');
+  assert.equal(resolvedKickstart.stdout.trim(), 'http,notice,kanban,scheduler,project-files,trigger');
   assert.equal(resolvedKickstart.stderr, '');
   process.stdout.write('[studio:install-smoke] installed library and CLI passed\n');
 } finally {

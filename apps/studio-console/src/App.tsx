@@ -7,25 +7,32 @@ import {
   useState,
 } from 'react';
 
-type Page = 'studio' | 'kanban' | 'scheduler' | 'trigger' | 'knowledge';
+type Page = 'studio' | 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
-  taskId: string; assigneeId: string; title: string; detail: string;
-  status: 'waiting' | 'doing' | 'todo' | 'blocked' | 'done';
+  taskId: string; assigneeId?: string; title: string; detail: string;
+  status: 'assigned' | 'waiting' | 'doing' | 'todo' | 'blocked' | 'done';
   deps: string[]; note?: string; createdAt: string; updatedAt: string;
 };
-type KanbanSnapshot = {
-  tasks: Task[];
-  dispatchMode: 'automatic' | 'manual';
-};
+type KanbanSnapshot = { tasks: Task[]; };
 type Schedule = {
   scheduleId: string; petId: string; request: string; runAt: string;
   status: 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled'; note?: string;
 };
+type Notice = {
+  noticeId: string;
+  ruleId: string;
+  level: 'info' | 'warning' | 'error';
+  title: string;
+  source: string;
+  eventType: string;
+  payload?: unknown;
+  occurredAt: string;
+};
 type TriggerDefinition = {
   triggerId: string;
-  petId: string;
+  target: { kind: 'pet'; petId: string } | { kind: 'event_payload'; path: string; allowedPetIds?: string[] };
   request: string | { template: string; context?: string[] };
   source: {
     kind: string;
@@ -84,6 +91,22 @@ function triggerSourceLabel(source: TriggerDefinition['source']): string {
 
 function triggerRequestLabel(request: TriggerDefinition['request']): string {
   return typeof request === 'string' ? request : request.template;
+}
+
+function noticeDetail(notice: Notice): string {
+  if (!notice.payload || typeof notice.payload !== 'object' || Array.isArray(notice.payload)) {
+    return `${notice.source}:${notice.eventType}`;
+  }
+  const queues = (notice.payload as Record<string, unknown>).queues;
+  if (!Array.isArray(queues)) return `${notice.source}:${notice.eventType}`;
+  const labels = queues.flatMap((queue) => {
+    if (!queue || typeof queue !== 'object' || Array.isArray(queue)) return [];
+    const value = queue as Record<string, unknown>;
+    return typeof value.petId === 'string' && typeof value.state === 'string'
+      ? [`${value.petId} · ${value.state}`]
+      : [];
+  });
+  return labels.length > 0 ? labels.join(', ') : `${notice.source}:${notice.eventType}`;
 }
 
 function connectionErrorMessage(error: unknown): string {
@@ -171,13 +194,13 @@ export function App() {
   const [pets, setPets] = useState<Pet[]>([]);
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
+  const [notices, setNotices] = useState<Resource<Notice[]>>(empty);
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
   const [knowledge, setKnowledge] = useState<Resource<ProjectDocumentSummary[]>>(empty);
   const [selectedDocument, setSelectedDocument] = useState<ProjectDocument | null>(null);
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [dispatches, setDispatches] = useState<DispatchRecord[]>([]);
-  const [kanbanDispatchMode, setKanbanDispatchMode] = useState<'automatic' | 'manual'>('automatic');
-  const [startingTaskId, setStartingTaskId] = useState('');
+  const [assigningTaskId, setAssigningTaskId] = useState('');
   const [kanbanHistory, setKanbanHistory] = useState<HistoryEvent[]>([]);
   const [schedulerHistory, setSchedulerHistory] = useState<HistoryEvent[]>([]);
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
@@ -186,12 +209,26 @@ export function App() {
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
   const dispatchSubmittingRef = useRef(false);
   const [retryingInvocationId, setRetryingInvocationId] = useState('');
+  const [retryingDeliveryId, setRetryingDeliveryId] = useState('');
   const [schedulePet, setSchedulePet] = useState('');
   const [scheduleRequest, setScheduleRequest] = useState('');
   const [scheduleRunAt, setScheduleRunAt] = useState('');
 
   const normalizedUrl = useMemo(() => baseUrl.trim().replace(/\/$/, ''), [baseUrl]);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const taskAssignmentTargets = useMemo(() => {
+    const routingRules = triggers.value?.triggers.filter((trigger) => (
+      trigger.source.kind === 'studio_event'
+      && trigger.source.eventSource === 'kanban'
+      && trigger.source.type === 'task.assigned'
+      && trigger.target.kind === 'event_payload'
+      && trigger.target.path === 'payload.assigneeId'
+    )) ?? [];
+    return pets.filter(({ petId }) => routingRules.some((rule) => (
+      rule.target.kind === 'event_payload'
+      && (rule.target.allowedPetIds === undefined || rule.target.allowedPetIds.includes(petId))
+    )));
+  }, [pets, triggers.value]);
 
   useEffect(() => {
     if (!token || connectionKey === 0) return undefined;
@@ -204,9 +241,10 @@ export function App() {
     };
     const refresh = async () => {
       const petResponse = await read<{ pets: Pet[] }>('/pets');
-      const [kanban, scheduler, trigger, projectFiles, kanbanEvents, schedulerEvents, triggerEvents] = await Promise.all([
+      const [kanban, scheduler, notice, trigger, projectFiles, kanbanEvents, schedulerEvents, triggerEvents] = await Promise.all([
         read<KanbanSnapshot>('/kanban').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ schedules: Schedule[] }>('/scheduler').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
+        read<{ notices: Notice[] }>('/notices').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>('/triggers').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ documents: ProjectDocumentSummary[] }>('/knowledge').catch((error) => ({ value: null, unavailable: false, error: String(error) })),
         read<{ events: HistoryEvent[] }>('/kanban/events').catch(() => ({ value: null, unavailable: true })),
@@ -218,8 +256,8 @@ export function App() {
       setDispatchPet((current) => current || nextPets[0]?.petId || '');
       setSchedulePet((current) => current || nextPets[0]?.petId || '');
       setTasks({ ...kanban, value: kanban.value?.tasks ?? null });
-      setKanbanDispatchMode(kanban.value?.dispatchMode ?? 'automatic');
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
+      setNotices({ ...notice, value: notice.value?.notices ?? null });
       setTriggers(trigger);
       setKnowledge({ ...projectFiles, value: projectFiles.value?.documents ?? null });
       setSelectedDocument((current) => (
@@ -259,7 +297,8 @@ export function App() {
                 if (dispatchRecord) {
                   setDispatches((current) => appendDispatchRecord(current, dispatchRecord));
                 }
-                if (event.source === 'kanban' || event.source === 'scheduler' || event.source === 'trigger') {
+                if (event.source === 'kanban' || event.source === 'scheduler'
+                  || event.source === 'notice' || event.source === 'trigger') {
                   await refresh();
                 }
               }
@@ -445,13 +484,22 @@ export function App() {
     });
   };
 
-  const startTask = (taskId: string) => {
-    setStartingTaskId(taskId);
-    void post('/kanban/control', { action: 'start', taskId }).then(() => {
-      setNotice(`Kanban task ${taskId} was accepted for dispatch.`);
+  const assignTask = (taskId: string, assigneeId: string) => {
+    setAssigningTaskId(taskId);
+    void post('/kanban/control', { action: 'assign', taskId, assigneeId }).then(() => {
+      setNotice(`Kanban task ${taskId} was assigned to ${assigneeId}.`);
     }).catch((error) => {
       setNotice(connectionErrorMessage(error));
-    }).finally(() => setStartingTaskId(''));
+    }).finally(() => setAssigningTaskId(''));
+  };
+
+  const retryTriggerDelivery = (deliveryId: string) => {
+    setRetryingDeliveryId(deliveryId);
+    void post('/triggers/control', { action: 'retry', deliveryId }).then(() => {
+      setNotice(`Trigger delivery ${deliveryId} was retried.`);
+    }).catch((error) => {
+      setNotice(connectionErrorMessage(error));
+    }).finally(() => setRetryingDeliveryId(''));
   };
 
   const unavailable = (resource: Resource<unknown>, name: string) => (
@@ -477,7 +525,7 @@ export function App() {
         </form>
       </header>
       <nav>
-        {(['studio', 'kanban', 'scheduler', 'trigger', 'knowledge'] as const).map((item) => (
+        {(['studio', 'kanban', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
@@ -539,11 +587,11 @@ export function App() {
           <div className="rows event-rows">{events.slice().reverse().map((event, index) => <div className="row" key={`${event.occurredAt}-${index.toString()}`}><time>{new Date(event.occurredAt).toLocaleTimeString()}</time><code>{event.source}</code><strong>{event.type}</strong><span>{eventMessage(event)}</span></div>)}</div>
         </>}
         {page === 'kanban' && (tasks.value ? <>
-          <div className="section-title"><span>TASK FLOW</span><span><em className="mode-label">{kanbanDispatchMode} dispatch</em><b>{tasks.value.length}</b></span></div>
+          <div className="section-title"><span>TASK FLOW</span><span><em className="mode-label">manual assignment</em><b>{tasks.value.length}</b></span></div>
           <KanbanFlow
-            dispatchMode={kanbanDispatchMode}
-            onStart={startTask}
-            startingTaskId={startingTaskId}
+            pets={taskAssignmentTargets}
+            onAssign={assignTask}
+            assigningTaskId={assigningTaskId}
             tasks={tasks.value}
           />
           <History title="KANBAN HISTORY" events={kanbanHistory} />
@@ -559,12 +607,23 @@ export function App() {
           <div className="rows">{schedules.value.map((schedule) => <div className="row" key={schedule.scheduleId}><em className={schedule.status}>{schedule.status}</em><time>{new Date(schedule.runAt).toLocaleString()}</time><strong>{schedule.request}</strong><span>{schedule.petId}{schedule.note ? ` · ${schedule.note}` : ''}{schedule.status === 'scheduled' && <button className="inline-action" onClick={() => { void post('/scheduler/control', { action: 'cancel', scheduleId: schedule.scheduleId }).catch((error) => setNotice(String(error))); }} type="button">cancel</button>}</span></div>)}</div>
           <History title="SCHEDULER HISTORY" events={schedulerHistory} />
         </> : unavailable(schedules, 'Scheduler'))}
+        {page === 'notice' && (notices.value ? <>
+          <div className="section-title"><span>NOTICES</span><b>{notices.value.length}</b></div>
+          {notices.value.length > 0
+            ? <div className="rows">{notices.value.map((item) => <div className="row" key={item.noticeId}>
+              <time>{new Date(item.occurredAt).toLocaleString()}</time>
+              <em className={item.level}>{item.level}</em>
+              <strong>{item.title}</strong>
+              <span>{noticeDetail(item)}</span>
+            </div>)}</div>
+            : <div className="compact-empty">No notices have been recorded.</div>}
+        </> : unavailable(notices, 'Notice'))}
         {page === 'trigger' && (triggers.value ? <>
           <div className="section-title"><span>TRIGGERS</span><b>{triggers.value.triggers.length}</b></div>
-          <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{triggerRequestLabel(trigger.request)}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.petId}</span></div>)}</div>
+          <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{triggerRequestLabel(trigger.request)}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.target.kind === 'pet' ? trigger.target.petId : trigger.target.path}</span></div>)}</div>
           <div className="hint">POST /triggers/invoke · Authorization: Trigger &lt;secret&gt; · body: triggerId, idempotencyKey, payload</div>
           <div className="section-title"><span>DELIVERIES</span><b>{triggers.value.deliveries.length}</b></div>
-          <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}</span></div>)}</div>
+          <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}{delivery.status === 'failed' && <button className="inline-action" disabled={retryingDeliveryId === delivery.deliveryId} onClick={() => retryTriggerDelivery(delivery.deliveryId)} type="button">{retryingDeliveryId === delivery.deliveryId ? 'retrying…' : 'retry'}</button>}</span></div>)}</div>
           <History title="TRIGGER HISTORY" events={triggerHistory} />
         </> : unavailable(triggers, 'Trigger'))}
         {page === 'knowledge' && (knowledge.value ? <>
@@ -595,19 +654,21 @@ export function App() {
 }
 
 function KanbanFlow({
-  dispatchMode,
-  onStart,
-  startingTaskId,
+  pets,
+  onAssign,
+  assigningTaskId,
   tasks,
 }: {
-  dispatchMode: 'automatic' | 'manual';
-  onStart: (taskId: string) => void;
-  startingTaskId: string;
+  pets: Pet[];
+  onAssign: (taskId: string, assigneeId: string) => void;
+  assigningTaskId: string;
   tasks: Task[];
 }) {
+  const [selectedTargets, setSelectedTargets] = useState<Record<string, string>>({});
   const tasksById = new Map(tasks.map((task) => [task.taskId, task]));
   const groups = [
     { id: 'active', label: 'ACTIVE', tasks: tasks.filter(({ status }) => status === 'doing' || status === 'waiting') },
+    { id: 'assigned', label: 'ASSIGNED', tasks: tasks.filter(({ status }) => status === 'assigned') },
     { id: 'queue', label: 'QUEUE', tasks: tasks.filter(({ status }) => status === 'todo') },
     { id: 'blocked', label: 'BLOCKED', tasks: tasks.filter(({ status }) => status === 'blocked') },
     { id: 'done', label: 'COMPLETED', tasks: tasks.filter(({ status }) => status === 'done') },
@@ -622,9 +683,9 @@ function KanbanFlow({
 
   return <div className="task-flow">
     <div className="flow-summary">
-      <span>{dispatchMode === 'automatic'
-        ? 'Ready tasks are dispatched automatically. Manual start remains available for queued or blocked work.'
-        : 'Tasks remain queued until START is selected.'}</span>
+      <span>{pets.length > 0
+        ? 'Planner records tasks. Select a Pet for a ready task; the Trigger rule then delivers it and records the outcome.'
+        : 'No Trigger rule currently exposes an eligible task destination.'}</span>
     </div>
     {groups.map((group) => group.tasks.length > 0 && <section className="task-group" key={group.id}>
       <div className="task-group-title"><span>{group.label}</span><b>{group.tasks.length}</b></div>
@@ -632,16 +693,8 @@ function KanbanFlow({
         const incompleteDependencies = task.deps.filter((dependencyId) => (
           tasksById.get(dependencyId)?.status !== 'done'
         ));
-        const activeAssigneeTask = tasks.find((candidate) => (
-          candidate.taskId !== task.taskId
-          && candidate.assigneeId === task.assigneeId
-          && (candidate.status === 'doing' || candidate.status === 'waiting')
-        ));
-        const startable = incompleteDependencies.length === 0
-          && !activeAssigneeTask
-          && (task.status === 'todo' || task.status === 'blocked');
-        const showStart = task.status === 'todo' || task.status === 'blocked';
-        const starting = startingTaskId === task.taskId;
+        const assignable = task.status === 'todo' && incompleteDependencies.length === 0;
+        const assigning = assigningTaskId === task.taskId;
         const visibleStatus = task.status === 'todo' && incompleteDependencies.length > 0
           ? 'waiting deps'
           : task.status;
@@ -650,7 +703,7 @@ function KanbanFlow({
             <div className="task-card-head">
             <em className={task.status}>{visibleStatus}</em>
             <code title={task.taskId}>{task.taskId.slice(0, 8)}</code>
-            <span className="task-assignee">→ {task.assigneeId}</span>
+            <span className="task-assignee">→ {task.assigneeId ?? 'unassigned'}</span>
             </div>
             <strong className="task-title">{task.title}</strong>
           </summary>
@@ -667,18 +720,14 @@ function KanbanFlow({
             {task.note && <p className="task-note">{task.note}</p>}
             <div className="task-expanded-footer">
               <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
-              {showStart && <button
-                aria-label={`${task.status === 'blocked' ? 'Retry' : 'Start'} task ${task.title}`}
-                className="task-action"
-                disabled={!startable || Boolean(startingTaskId)}
-                onClick={() => onStart(task.taskId)}
-                title={startable
-                  ? undefined
-                  : activeAssigneeTask
-                    ? `${task.assigneeId} is working on ${activeAssigneeTask.taskId}`
-                    : `Waiting for: ${incompleteDependencies.join(', ')}`}
-                type="button"
-              >{starting ? 'STARTING…' : task.status === 'blocked' ? 'RETRY' : 'START'}</button>}
+              {task.status === 'todo' && <label className="task-assignment">
+                <select aria-label={`Assign ${task.title}`} disabled={!assignable || Boolean(assigningTaskId)} onChange={(event) => setSelectedTargets((current) => ({ ...current, [task.taskId]: event.target.value }))} title={assignable ? undefined : `Waiting for: ${incompleteDependencies.join(', ')}`} value={selectedTargets[task.taskId] ?? ''}>
+                  <option disabled value="">{assignable ? 'ASSIGN TO…' : 'WAITING FOR DEPENDENCIES'}</option>
+                  {pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.name} ({pet.petId})</option>)}
+                </select>
+                <button className="task-action" disabled={!assignable || !selectedTargets[task.taskId] || Boolean(assigningTaskId)} onClick={() => onAssign(task.taskId, selectedTargets[task.taskId]!)} type="button">ASSIGN</button>
+                {assigning && <span>assigning…</span>}
+              </label>}
             </div>
           </div>
         </details>;

@@ -90,7 +90,21 @@ export type StudioPluginContext = {
   /** Studio 会在本 Plugin 停止时自动退订；返回值用于提前停止接收。 */
   subscribe: (handler: StudioEventHandler) => () => void;
   listPets: () => StudioPetRegistration[];
+  /**
+   * Read current resident dispatch-queue snapshots. This is observation only:
+   * Studio neither stores them nor decides how a queue should progress.
+   */
+  listDispatchQueues: () => StudioDispatchQueue[];
   hooks: StudioPluginHooks;
+};
+
+/** Read-only projection of one resident Pet's dispatch-admission queue. */
+export type StudioDispatchQueue = {
+  petId: string;
+  state: 'open' | 'busy' | 'waiting' | 'blocked';
+  activeOperation: 'conversation' | 'dispatch' | null;
+  queuedConversations: number;
+  queuedDispatches: number;
 };
 
 /**

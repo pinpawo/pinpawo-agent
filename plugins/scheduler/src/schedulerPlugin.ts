@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioDispatchQueue, StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import { SchedulerService } from './schedulerService';
 
@@ -7,6 +7,11 @@ export type CreateSchedulerPluginOptions = {
   service?: SchedulerService;
   databasePath?: string;
   pollIntervalMs?: number;
+  /** Optional recurring read-only audit of resident Pet dispatch queues. */
+  dispatchQueueAudit?: false | {
+    intervalMs: number;
+    attentionStates?: readonly StudioDispatchQueue['state'][];
+  };
   httpRoute?: false | { pluginName?: string };
 };
 
@@ -23,6 +28,24 @@ function readCursor(url: URL, name: string, fallback: number): number {
   return Number(raw);
 }
 
+function normalizeDispatchQueueAudit(
+  audit: CreateSchedulerPluginOptions['dispatchQueueAudit'],
+): { intervalMs: number; attentionStates: ReadonlySet<StudioDispatchQueue['state']> } | null {
+  if (audit === undefined || audit === false) return null;
+  if (!Number.isSafeInteger(audit.intervalMs) || audit.intervalMs < 1_000) {
+    throw new Error('Scheduler dispatchQueueAudit.intervalMs must be an integer of at least 1000.');
+  }
+  const attentionStates = audit.attentionStates ?? ['waiting', 'blocked'];
+  const allowedStates = new Set<StudioDispatchQueue['state']>(['open', 'busy', 'waiting', 'blocked']);
+  if (attentionStates.length === 0 || attentionStates.some((state) => !allowedStates.has(state))) {
+    throw new Error('Scheduler dispatchQueueAudit.attentionStates must contain known dispatch queue states.');
+  }
+  return {
+    intervalMs: audit.intervalMs,
+    attentionStates: new Set(attentionStates),
+  };
+}
+
 export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}): SchedulerPlugin {
   const ownsService = !options.service;
   const service = options.service ?? new SchedulerService(options.databasePath);
@@ -30,8 +53,11 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
   if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10) {
     throw new Error('Scheduler pollIntervalMs must be an integer of at least 10.');
   }
+  const dispatchQueueAudit = normalizeDispatchQueueAudit(options.dispatchQueueAudit);
   let context: StudioPluginContext | undefined;
   let timer: NodeJS.Timeout | undefined;
+  let dispatchQueueAuditTimer: NodeJS.Timeout | undefined;
+  let initialDispatchQueueAuditTimer: NodeJS.Timeout | undefined;
   let unsubscribeMutations: (() => void) | undefined;
   let unregisterRoutes: (() => void) | undefined;
   let polling: Promise<void> | undefined;
@@ -67,6 +93,21 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         type: 'schedule.poll_failed',
         payload: { message: asError(error).message },
       });
+    });
+  };
+
+  const auditDispatchQueues = () => {
+    if (!context || !dispatchQueueAudit) return;
+    const queues = context.listDispatchQueues();
+    const attention = queues.filter(({ state }) => dispatchQueueAudit.attentionStates.has(state));
+    if (attention.length === 0) return;
+    context.notify({
+      type: 'dispatch.queues_attention_required',
+      payload: {
+        queues: attention,
+        attentionStates: [...dispatchQueueAudit.attentionStates],
+        checkedAt: new Date().toISOString(),
+      },
     });
   };
 
@@ -177,8 +218,21 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
         }
         timer = setInterval(requestPoll, pollIntervalMs);
         timer.unref();
+        if (dispatchQueueAudit) {
+          dispatchQueueAuditTimer = setInterval(auditDispatchQueues, dispatchQueueAudit.intervalMs);
+          dispatchQueueAuditTimer.unref();
+          // Run after the activation loop has started all configured listeners.
+          initialDispatchQueueAuditTimer = setTimeout(auditDispatchQueues, 0);
+          initialDispatchQueueAuditTimer.unref();
+        }
         await poll();
       } catch (error) {
+        if (timer) clearInterval(timer);
+        timer = undefined;
+        if (dispatchQueueAuditTimer) clearInterval(dispatchQueueAuditTimer);
+        dispatchQueueAuditTimer = undefined;
+        if (initialDispatchQueueAuditTimer) clearTimeout(initialDispatchQueueAuditTimer);
+        initialDispatchQueueAuditTimer = undefined;
         context = undefined;
         unsubscribeMutations?.();
         unsubscribeMutations = undefined;
@@ -191,6 +245,10 @@ export function createSchedulerPlugin(options: CreateSchedulerPluginOptions = {}
     stop: async () => {
       if (timer) clearInterval(timer);
       timer = undefined;
+      if (dispatchQueueAuditTimer) clearInterval(dispatchQueueAuditTimer);
+      dispatchQueueAuditTimer = undefined;
+      if (initialDispatchQueueAuditTimer) clearTimeout(initialDispatchQueueAuditTimer);
+      initialDispatchQueueAuditTimer = undefined;
       await polling;
       context = undefined;
       unsubscribeMutations?.();
@@ -207,7 +265,7 @@ export function createStudioPlugin(
   environment: { workdir: string },
 ): SchedulerPlugin {
   const options = value ?? {};
-  const allowed = new Set(['databasePath', 'pollIntervalMs', 'httpRoute']);
+  const allowed = new Set(['databasePath', 'pollIntervalMs', 'dispatchQueueAudit', 'httpRoute']);
   const unknown = Object.keys(options).find((key) => !allowed.has(key));
   if (unknown) throw new Error(`Scheduler Plugin option "${unknown}" is not supported.`);
   if (options.databasePath !== undefined && typeof options.databasePath !== 'string') {
@@ -215,6 +273,21 @@ export function createStudioPlugin(
   }
   if (options.pollIntervalMs !== undefined && typeof options.pollIntervalMs !== 'number') {
     throw new Error('Scheduler Plugin option "pollIntervalMs" must be a number.');
+  }
+  const dispatchQueueAudit = options.dispatchQueueAudit;
+  if (dispatchQueueAudit !== undefined && dispatchQueueAudit !== false
+    && (!dispatchQueueAudit || typeof dispatchQueueAudit !== 'object' || Array.isArray(dispatchQueueAudit))) {
+    throw new Error('Scheduler Plugin option "dispatchQueueAudit" must be false or an object.');
+  }
+  if (dispatchQueueAudit && typeof dispatchQueueAudit === 'object' && !Array.isArray(dispatchQueueAudit)) {
+    const audit = dispatchQueueAudit as Record<string, unknown>;
+    if (Object.keys(audit).some((key) => key !== 'intervalMs' && key !== 'attentionStates')
+      || typeof audit.intervalMs !== 'number'
+      || (audit.attentionStates !== undefined
+        && (!Array.isArray(audit.attentionStates)
+          || audit.attentionStates.some((state) => typeof state !== 'string')))) {
+      throw new Error('Scheduler Plugin option "dispatchQueueAudit" is invalid.');
+    }
   }
   const httpRoute = options.httpRoute;
   if (httpRoute !== undefined && httpRoute !== false
@@ -231,6 +304,18 @@ export function createStudioPlugin(
   return createSchedulerPlugin({
     databasePath,
     ...(typeof options.pollIntervalMs === 'number' ? { pollIntervalMs: options.pollIntervalMs } : {}),
+    ...(dispatchQueueAudit === false
+      ? { dispatchQueueAudit: false as const }
+      : dispatchQueueAudit && typeof dispatchQueueAudit === 'object' && !Array.isArray(dispatchQueueAudit)
+        ? {
+          dispatchQueueAudit: {
+            intervalMs: (dispatchQueueAudit as { intervalMs: number }).intervalMs,
+            ...((dispatchQueueAudit as { attentionStates?: string[] }).attentionStates === undefined
+              ? {}
+              : { attentionStates: (dispatchQueueAudit as { attentionStates: StudioDispatchQueue['state'][] }).attentionStates }),
+          },
+        }
+        : {}),
     ...(httpRoute !== undefined
       ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),

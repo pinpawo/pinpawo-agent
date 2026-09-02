@@ -19,8 +19,10 @@ function binding(
   run: (request: string) => void | Promise<void> = () => undefined,
 ): StudioPetBinding {
   const port: PetDispatchPort = {
-    getState: () => 'open',
-    onStateChange: () => () => undefined,
+    getQueueSnapshot: () => ({
+      state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+    }),
+    onQueueChange: () => () => undefined,
     onDispatchLifecycle: () => () => undefined,
     dispatch: async ({ request }) => { await run(request); },
   };
@@ -71,8 +73,10 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
   const events: unknown[] = [];
   let lifecycleListener: Parameters<PetDispatchPort['onDispatchLifecycle']>[0] | undefined;
   const port: PetDispatchPort = {
-    getState: () => 'open',
-    onStateChange: () => () => undefined,
+    getQueueSnapshot: () => ({
+      state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+    }),
+    onQueueChange: () => () => undefined,
     onDispatchLifecycle: (listener) => {
       lifecycleListener = listener;
       return () => {
@@ -243,6 +247,7 @@ test('Plugin receives dispatch/event/hook context without a Pet runtime referenc
   assert.deepEqual(pluginContextKeys, [
     'dispatch',
     'hooks',
+    'listDispatchQueues',
     'listPets',
     'notify',
     'subscribe',

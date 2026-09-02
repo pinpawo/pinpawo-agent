@@ -121,8 +121,8 @@ the current protocol and replacement rules in detail.
 ## Studio collaboration
 
 Studio is for work that benefits from several specialized agents. It owns the
-shared dispatch channel: a Pet registry, one queue per Pet, runtime-gate
-observation, and an in-process plugin event bus. A planner, task board, or
+shared dispatch channel: a Pet registry, one dispatch queue per Pet (including
+its admission state), and an in-process plugin event bus. A planner, task board, or
 scheduler is a plugin or Pet concern; Studio does not store task state, infer
 completion, or own shared knowledge.
 

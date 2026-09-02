@@ -71,7 +71,7 @@ This is the core responsibility of an agent harness: **keep the loop running sta
 - Local HTTP/WebSocket or JSONL stdio host with checkpoint-backed sessions.
 - Ink and OpenTUI terminal clients with tool activity and human-review flows.
 - Browser automation through Playwright or a Chrome Extension plus Native Messaging host.
-- Studio runtime for multi-Pet dispatch, per-Pet queueing, runtime gates, and plugin-driven workflows.
+- Studio runtime for multi-Pet dispatch, per-Pet dispatch queues, and plugin-driven workflows.
 - Extensible local Capabilities and Toolkit-based plugins.
 
 ## Architecture
@@ -101,7 +101,7 @@ The main boundaries are:
 | Capability | A focused business ability executed in an isolated subagent lane. |
 | Toolkit | A typed family of tools, operation metadata, availability, and review guidance. |
 | Session | Runtime-neutral event projection, snapshots, resume state, and transport contracts. |
-| Studio | Multi-Pet dispatch, per-Pet queues, runtime gates, and plugin event fan-out. |
+| Studio | Multi-Pet dispatch, per-Pet dispatch queues, and plugin event fan-out. |
 
 ## Repository Layout
 

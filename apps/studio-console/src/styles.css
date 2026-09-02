@@ -40,7 +40,9 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .row span { overflow: hidden; color: #78888a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .inline-action { height: 24px; margin-left: 10px; padding: 0 7px; color: #d8b46c; background: transparent; }
 .row em.queued, .row em.running, .row em.waiting, .row em.scheduled, .row em.dispatching { color: #e0b15d; }
-.row em.blocked, .row em.failed { color: #df7a73; }
+.row em.blocked, .row em.failed, .row em.error { color: #df7a73; }
+.row em.warning { color: #e0b15d; }
+.row em.info { color: #86aaac; }
 .row em.done, .row em.dispatched, .row em.accepted, .row em.completed { color: #72c69c; }
 .row em.interrupted { color: #aab5b4; }
 .composer { display: grid; grid-template-columns: 180px minmax(0, 1fr) 110px; gap: 8px; padding: 16px 0 24px; }
@@ -83,6 +85,9 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .task-card-head em.done { color: #72c69c; }
 .task-assignee { overflow: hidden; color: #849597; font: 11px/1.3 ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .task-action { height: 26px; min-width: 70px; padding: 0 8px; color: #bdebed; font: 10px/1 ui-monospace, monospace; letter-spacing: .06em; }
+.task-assignment { display: flex; align-items: center; gap: 7px; }
+.task-assignment select { min-width: 160px; height: 26px; color: #b8cbca; border: 1px solid #385053; background: #101719; font: 10px/1 ui-monospace, monospace; }
+.task-assignment span { color: #718184; font: 10px/1 ui-monospace, monospace; }
 .task-title { color: #d3dcda; font-size: 13px; line-height: 1.45; }
 .task-expanded { display: grid; gap: 9px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #283639; }
 .task-detail { margin: 0; color: #aebcba; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }

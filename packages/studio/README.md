@@ -18,6 +18,7 @@ npm install --global \
   @pinpawo-plugin/studio-http \
   @pinpawo-plugin/kanban \
   @pinpawo-plugin/scheduler \
+  @pinpawo-plugin/notice \
   @pinpawo-plugin/project-files \
   @pinpawo-plugin/trigger
 

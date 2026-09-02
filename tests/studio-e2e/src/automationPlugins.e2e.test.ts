@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto';
 import { test } from 'node:test';
 
 import { createSchedulerPlugin } from '@pinpawo-plugin/scheduler';
+import { createNoticePlugin } from '@pinpawo-plugin/notice';
 import { createStudioHttpPlugin } from '@pinpawo-plugin/studio-http';
 import { createTriggerPlugin } from '@pinpawo-plugin/trigger';
 import { createStudio, type StudioPetBinding } from '@pinpawo/studio';
@@ -23,8 +24,10 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
   const worker: StudioPetBinding = {
     registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
     dispatch: {
-      getState: () => 'open',
-      onStateChange: () => () => undefined,
+      getQueueSnapshot: () => ({
+        state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+      }),
+      onQueueChange: () => () => undefined,
       onDispatchLifecycle: () => () => undefined,
       dispatch: async ({ request }) => { received.push(request); },
     },
@@ -97,13 +100,77 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
   assert.deepEqual(value.deliveries.map(({ status }) => status), ['accepted']);
 });
 
+test('Scheduler queue audit creates a durable Notice without dispatching recovery work', async (t) => {
+  let dispatched = 0;
+  const worker: StudioPetBinding = {
+    registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
+    dispatch: {
+      getQueueSnapshot: () => ({
+        state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+      }),
+      onQueueChange: () => () => undefined,
+      onDispatchLifecycle: () => () => undefined,
+      dispatch: async () => { dispatched += 1; },
+    },
+  };
+  const notice = createNoticePlugin({
+    rules: [{
+      noticeId: 'blocked-queues',
+      title: 'Dispatch queues need attention',
+      source: {
+        kind: 'studio_event',
+        eventSource: 'scheduler',
+        type: 'dispatch.queues_attention_required',
+      },
+    }],
+  });
+  const scheduler = createSchedulerPlugin({
+    pollIntervalMs: 10,
+    dispatchQueueAudit: { intervalMs: 1_000 },
+  });
+  const http = createStudioHttpPlugin({ port: 0, authToken: STUDIO_TOKEN });
+  const studio = await createStudio({
+    studioId: 'dispatch-gate-notice-e2e',
+    entryPetId: 'worker',
+    pets: [worker],
+    plugins: [http, notice, scheduler],
+  });
+  t.after(() => studio.shutdown());
+  const address = http.address();
+  assert.ok(address);
+  const base = `http://${address.host}:${address.port.toString()}`;
+
+  await waitFor(async () => (await notice.service.snapshot()).notices.length === 1);
+  const response = await fetch(`${base}/notices`, {
+    headers: { Authorization: `Bearer ${STUDIO_TOKEN}` },
+  });
+  assert.equal(response.status, 200);
+  const snapshot = await response.json() as { notices: Array<{ source: string; eventType: string; payload?: unknown }> };
+  assert.equal(snapshot.notices.length, 1);
+  assert.equal(snapshot.notices[0]?.source, 'scheduler');
+  assert.equal(snapshot.notices[0]?.eventType, 'dispatch.queues_attention_required');
+  const payload = snapshot.notices[0]?.payload as {
+    queues?: unknown;
+    attentionStates?: unknown;
+    checkedAt?: string;
+  } | undefined;
+  assert.deepEqual(payload?.queues, [{
+    petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+  }]);
+  assert.deepEqual(payload?.attentionStates, ['waiting', 'blocked']);
+  assert.ok(typeof payload?.checkedAt === 'string' && Number.isFinite(Date.parse(payload.checkedAt)));
+  assert.equal(dispatched, 0);
+});
+
 test('GitHub webhook Trigger verifies signatures, filters event action, and deduplicates delivery', async (t) => {
   const received: string[] = [];
   const worker: StudioPetBinding = {
     registration: { petId: 'reviewer', name: 'Reviewer', role: null, serviceSummary: null },
     dispatch: {
-      getState: () => 'open',
-      onStateChange: () => () => undefined,
+      getQueueSnapshot: () => ({
+        state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
+      }),
+      onQueueChange: () => () => undefined,
       onDispatchLifecycle: () => () => undefined,
       dispatch: async ({ request }) => { received.push(request); },
     },

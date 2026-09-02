@@ -32,10 +32,17 @@ export type TriggerRequestTemplate = {
 
 export type TriggerRequest = string | TriggerRequestTemplate;
 
+/** Explicit rule-owned target resolution. The producer only supplies event facts. */
+export type TriggerTarget =
+  | { kind: 'pet'; petId: string }
+  | { kind: 'event_payload'; path: string; allowedPetIds?: readonly string[] };
+
 export type TriggerDefinition = {
   triggerId: string;
   source: HttpTriggerSource | StudioEventTriggerSource | GitHubTriggerSource;
-  petId: string;
+  /** Legacy shorthand for a static target. New rules should use target. */
+  petId?: string;
+  target?: TriggerTarget;
   request: TriggerRequest;
 };
 
@@ -224,6 +231,33 @@ function buildTriggerRequest(
   return `${definition.request}\n\nTrigger context:\n${stringifyTriggerContext(detail)}`;
 }
 
+function triggerTarget(definition: TriggerDefinition): TriggerTarget {
+  if (definition.target) return definition.target;
+  if (definition.petId) return { kind: 'pet', petId: definition.petId };
+  throw new Error(`Trigger "${definition.triggerId}" has no target.`);
+}
+
+function resolveTargetPetId(definition: TriggerDefinition, envelope: TriggerRequestEnvelope): string {
+  const target = triggerTarget(definition);
+  if (target.kind === 'pet') return target.petId;
+  const value = readEnvelopePath(envelope, target.path);
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Trigger "${definition.triggerId}" target path "${target.path}" did not resolve to a petId.`);
+  }
+  const petId = value.trim();
+  if (target.allowedPetIds && !target.allowedPetIds.includes(petId)) {
+    throw new Error(`Trigger "${definition.triggerId}" target "${petId}" is not allowed by this rule.`);
+  }
+  return petId;
+}
+
+function permitsTargetPetId(definition: TriggerDefinition, petId: string): boolean {
+  const target = triggerTarget(definition);
+  return target.kind === 'pet'
+    ? target.petId === petId
+    : target.allowedPetIds === undefined || target.allowedPetIds.includes(petId);
+}
+
 function matchesStudioEvent(source: StudioEventTriggerSource, event: StudioEvent): boolean {
   if (source.eventSource !== event.source) return false;
   if (source.type !== undefined && source.type !== event.type) return false;
@@ -242,7 +276,7 @@ function publicDefinition(definition: TriggerDefinition): Record<string, unknown
           ...(definition.source.action === undefined ? {} : { action: definition.source.action }),
         }
         : { kind: 'http' },
-    petId: definition.petId,
+    target: triggerTarget(definition),
     request: definition.request,
   };
 }
@@ -251,7 +285,15 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
   const definitions = new Map<string, TriggerDefinition>();
   for (const definition of input) {
     const triggerId = definition.triggerId.trim();
-    const petId = definition.petId.trim();
+    const target = definition.target
+      ? definition.target.kind === 'pet'
+        ? { kind: 'pet' as const, petId: definition.target.petId.trim() }
+        : {
+          kind: 'event_payload' as const,
+          path: validateTemplatePath(definition.target.path, `Trigger "${definition.triggerId}" target path`),
+          ...(definition.target.allowedPetIds === undefined ? {} : { allowedPetIds: definition.target.allowedPetIds.map((petId) => petId.trim()) }),
+        }
+      : definition.petId === undefined ? undefined : { kind: 'pet' as const, petId: definition.petId.trim() };
     const request = typeof definition.request === 'string'
       ? definition.request.trim()
       : {
@@ -262,8 +304,8 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
             validateTemplatePath(pathValue, `Trigger "${triggerId}" request context path`)
           )) }),
       };
-    if (!triggerId || !petId || (typeof request === 'string' ? !request : !request.template)) {
-      throw new Error('Trigger definitions require triggerId, petId, and request.');
+    if (!triggerId || !target || (target.kind === 'pet' && !target.petId) || (target.kind === 'event_payload' && target.allowedPetIds?.some((petId) => !petId)) || (typeof request === 'string' ? !request : !request.template)) {
+      throw new Error('Trigger definitions require triggerId, target, and request.');
     }
     if (typeof request !== 'string') {
       const unmatched = request.template.replace(TEMPLATE_EXPRESSION, '');
@@ -275,12 +317,15 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
         throw new Error(`Trigger "${triggerId}" request context paths must be unique.`);
       }
     }
+    if (target.kind === 'event_payload' && target.allowedPetIds && new Set(target.allowedPetIds).size !== target.allowedPetIds.length) {
+      throw new Error(`Trigger "${triggerId}" allowedPetIds must be unique.`);
+    }
     if (definitions.has(triggerId)) throw new Error(`Duplicate Trigger triggerId "${triggerId}".`);
     if (definition.source.kind === 'http') {
       if (definition.source.secret.length < 16) {
         throw new Error(`HTTP Trigger "${triggerId}" requires a 16+ character secret.`);
       }
-      definitions.set(triggerId, { ...definition, triggerId, petId, request });
+      definitions.set(triggerId, { ...definition, triggerId, target, request });
       continue;
     }
     if (definition.source.kind === 'github') {
@@ -294,7 +339,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
       definitions.set(triggerId, {
         ...definition,
         triggerId,
-        petId,
+        target,
         request,
         source: {
           ...definition.source,
@@ -319,7 +364,7 @@ function parseDefinitions(input: readonly TriggerDefinition[]): Map<string, Trig
     definitions.set(triggerId, {
       ...definition,
       triggerId,
-      petId,
+      target,
       request,
       source: {
         ...definition.source,
@@ -351,21 +396,57 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
       if (context) throw new Error('Trigger Plugin is already started.');
       const petIds = new Set(pluginContext.listPets().map(({ petId }) => petId));
       for (const definition of definitions.values()) {
-        if (!petIds.has(definition.petId)) {
-          throw new Error(`Trigger "${definition.triggerId}" targets unknown pet "${definition.petId}".`);
+        const target = triggerTarget(definition);
+        if (target.kind === 'pet' && !petIds.has(target.petId)) {
+          throw new Error(`Trigger "${definition.triggerId}" targets unknown pet "${target.petId}".`);
+        }
+        if (target.kind === 'event_payload') {
+          for (const petId of target.allowedPetIds ?? []) {
+            if (!petIds.has(petId)) throw new Error(`Trigger "${definition.triggerId}" allows unknown pet "${petId}".`);
+          }
         }
       }
       context = pluginContext;
       try {
+        const dispatchDelivery = async (
+          definition: TriggerDefinition,
+          idempotencyKey: string,
+          input:
+            | { kind: 'http'; payload: unknown }
+            | { kind: 'github'; event: string; action?: string; deliveryId: string; payload: unknown }
+            | { kind: 'studio_event'; event: StudioEvent },
+        ) => {
+          const envelope = buildTriggerRequestEnvelope(definition, input);
+          const targetPetId = resolveTargetPetId(definition, envelope);
+          if (!petIds.has(targetPetId)) {
+            throw new Error(`Trigger "${definition.triggerId}" resolved unknown pet "${targetPetId}".`);
+          }
+          const request = buildTriggerRequest(definition, input);
+          const claimed = await service.claim(definition.triggerId, idempotencyKey, { targetPetId, request });
+          if (claimed.duplicate) return { duplicate: true, delivery: claimed.delivery };
+          try {
+            await pluginContext.dispatch({
+              petId: targetPetId,
+              request,
+              idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
+            });
+            return { duplicate: false, delivery: await service.accept(claimed.delivery.deliveryId) };
+          } catch (error) {
+            const delivery = await service.fail(claimed.delivery.deliveryId, asError(error).message);
+            return { duplicate: false, delivery, error: asError(error) };
+          }
+        };
         unsubscribeEvents = pluginContext.subscribe(async (event) => {
           if (!context) return;
           for (const definition of definitions.values()) {
             if (definition.source.kind !== 'studio_event'
               || !matchesStudioEvent(definition.source, event)) continue;
-            await pluginContext.dispatch({
-              petId: definition.petId,
-              request: buildTriggerRequest(definition, { kind: 'studio_event', event }),
-            });
+            const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+              ? event.payload as Record<string, unknown> : undefined;
+            const suffix = typeof payload?.sequence === 'number' || typeof payload?.sequence === 'string'
+              ? String(payload.sequence)
+              : event.occurredAt;
+            await dispatchDelivery(definition, `studio:${event.source}:${event.type}:${suffix}`, { kind: 'studio_event', event });
           }
         });
         unsubscribeMutations = service.subscribe(({ delivery, event }) => {
@@ -433,25 +514,14 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                         || !secret || !secureEqual(secret, definition.source.secret)) {
                         return { kind: 'json', status: 401, body: { error: 'Unauthorized.' } };
                       }
-                      const claimed = await service.claim(value.triggerId, value.idempotencyKey);
-                      if (claimed.duplicate) {
-                        return { kind: 'json', body: { duplicate: true, delivery: claimed.delivery } };
-                      }
                       try {
                         JSON.stringify(value.payload);
-                        await pluginContext.dispatch({
-                          petId: definition.petId,
-                          request: buildTriggerRequest(definition, { kind: 'http', payload: value.payload }),
-                          idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
-                        });
-                        const delivery = await service.accept(claimed.delivery.deliveryId);
-                        return { kind: 'json', status: 202, body: { duplicate: false, delivery } };
+                        const result = await dispatchDelivery(definition, value.idempotencyKey, { kind: 'http', payload: value.payload });
+                        return result.error
+                          ? { kind: 'json', status: 422, body: { error: result.error.message, delivery: result.delivery } }
+                          : { kind: 'json', status: result.duplicate ? 200 : 202, body: { duplicate: result.duplicate, delivery: result.delivery } };
                       } catch (error) {
-                        const delivery = await service.fail(
-                          claimed.delivery.deliveryId,
-                          asError(error).message,
-                        );
-                        return { kind: 'json', status: 422, body: { error: asError(error).message, delivery } };
+                        return { kind: 'json', status: 422, body: { error: asError(error).message } };
                       }
                     } catch (error) {
                       return { kind: 'json', status: 400, body: { error: asError(error).message } };
@@ -498,33 +568,47 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                     const deliveries = [];
                     let failed = false;
                     for (const definition of matching) {
-                      const claimed = await service.claim(definition.triggerId, deliveryId);
-                      if (claimed.duplicate) {
-                        deliveries.push(claimed.delivery);
-                        continue;
-                      }
-                      try {
-                        await pluginContext.dispatch({
-                          petId: definition.petId,
-                          request: buildTriggerRequest(definition, {
-                            kind: 'github', event, action, deliveryId, payload,
-                          }),
-                          idempotencyKey: `trigger:${claimed.delivery.deliveryId}`,
-                        });
-                        deliveries.push(await service.accept(claimed.delivery.deliveryId));
-                      } catch (error) {
-                        failed = true;
-                        deliveries.push(await service.fail(
-                          claimed.delivery.deliveryId,
-                          asError(error).message,
-                        ));
-                      }
+                      const result = await dispatchDelivery(definition, deliveryId, {
+                        kind: 'github', event, action, deliveryId, payload,
+                      });
+                      if (result.error) failed = true;
+                      deliveries.push(result.delivery);
                     }
                     return {
                       kind: 'json',
                       status: failed ? 422 : 202,
                       body: { ignored: false, deliveries },
                     };
+                  },
+                }));
+                unregister.push(routes.register({
+                  method: 'POST', path: `${base}/control`, authorization: 'route',
+                  handle: async ({ readJson }) => {
+                    try {
+                      const value = await readJson();
+                      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Trigger control request must be an object.');
+                      const input = value as Record<string, unknown>;
+                      if (input.action !== 'retry' || typeof input.deliveryId !== 'string' || Object.keys(input).some((key) => key !== 'action' && key !== 'deliveryId')) {
+                        throw new Error('Trigger control requires action "retry" and deliveryId.');
+                      }
+                      const prior = await service.getDelivery(input.deliveryId);
+                      if (!prior || !prior.targetPetId || !prior.request) throw new Error(`Trigger delivery "${input.deliveryId}" has no retained dispatch input.`);
+                      const definition = definitions.get(prior.triggerId);
+                      if (!definition || !petIds.has(prior.targetPetId) || !permitsTargetPetId(definition, prior.targetPetId)) {
+                        throw new Error(`Trigger delivery "${input.deliveryId}" is no longer routable by its current rule.`);
+                      }
+                      const targetPetId = prior.targetPetId;
+                      const request = prior.request;
+                      const delivery = await service.retry(input.deliveryId);
+                      try {
+                        await pluginContext.dispatch({ petId: targetPetId, request, idempotencyKey: `trigger:${delivery.deliveryId}` });
+                        return { kind: 'json', status: 202, body: { delivery: await service.accept(delivery.deliveryId) } };
+                      } catch (error) {
+                        return { kind: 'json', status: 422, body: { error: asError(error).message, delivery: await service.fail(delivery.deliveryId, asError(error).message) } };
+                      }
+                    } catch (error) {
+                      return { kind: 'json', status: 409, body: { error: asError(error).message } };
+                    }
                   },
                 }));
               } catch (error) {
@@ -636,23 +720,24 @@ export function createStudioPlugin(
       throw new Error(`Trigger Plugin triggers[${index.toString()}] must be an object.`);
     }
     const definition = input as Record<string, unknown>;
-    const definitionAllowed = new Set(['triggerId', 'petId', 'request', 'source']);
+    const definitionAllowed = new Set(['triggerId', 'petId', 'target', 'request', 'source']);
     const definitionUnknown = Object.keys(definition).find((key) => !definitionAllowed.has(key));
     if (definitionUnknown) {
       throw new Error(
         `Trigger Plugin triggers[${index.toString()}] option "${definitionUnknown}" is not supported.`,
       );
     }
+    const target = parseInstalledTarget(definition.target, definition.petId, index);
     if (typeof definition.triggerId !== 'string'
-      || typeof definition.petId !== 'string'
+      || !target
       || !isInstalledTriggerRequest(definition.request, index)) {
       throw new Error(
-        `Trigger Plugin triggers[${index.toString()}] requires triggerId, petId, request, and source.`,
+        `Trigger Plugin triggers[${index.toString()}] requires triggerId, target, request, and source.`,
       );
     }
     return {
       triggerId: definition.triggerId,
-      petId: definition.petId,
+      target,
       request: definition.request,
       source: parseSource(definition.source, index),
     };
@@ -676,6 +761,24 @@ export function createStudioPlugin(
       ? { httpRoute: httpRoute as false | { pluginName?: string } }
       : {}),
   });
+}
+
+function parseInstalledTarget(value: unknown, legacyPetId: unknown, index: number): TriggerTarget | null {
+  if (value === undefined) return typeof legacyPetId === 'string' ? { kind: 'pet', petId: legacyPetId } : null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const target = value as Record<string, unknown>;
+  if (target.kind === 'pet' && typeof target.petId === 'string' && Object.keys(target).every((key) => key === 'kind' || key === 'petId')) {
+    return { kind: 'pet', petId: target.petId };
+  }
+  if (target.kind === 'event_payload' && typeof target.path === 'string'
+    && (target.allowedPetIds === undefined || (Array.isArray(target.allowedPetIds) && target.allowedPetIds.every((petId) => typeof petId === 'string')))
+    && Object.keys(target).every((key) => key === 'kind' || key === 'path' || key === 'allowedPetIds')) {
+    return {
+      kind: 'event_payload', path: target.path,
+      ...(target.allowedPetIds === undefined ? {} : { allowedPetIds: target.allowedPetIds as string[] }),
+    };
+  }
+  throw new Error(`Trigger Plugin triggers[${index.toString()}].target must be a pet or event_payload target.`);
 }
 
 function isInstalledTriggerRequest(value: unknown, index: number): value is TriggerRequest {

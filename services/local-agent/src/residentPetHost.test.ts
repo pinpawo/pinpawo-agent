@@ -70,6 +70,12 @@ test('Coordinator keeps the active operation non-preemptive then drains conversa
     events.push('conversation-2');
   });
 
+  assert.deepEqual(coordinator.getQueueSnapshot(), {
+    state: 'busy',
+    activeOperation: 'dispatch',
+    queuedConversations: 2,
+    queuedDispatches: 1,
+  });
   assert.deepEqual(events, ['dispatch-1:start']);
   releaseFirst.resolve();
   await Promise.all([
@@ -288,11 +294,11 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
   try {
     petA.resident.dispatch.dispatch({ request: 'needs review' });
     await waitFor(
-      () => petA.resident.dispatch.getState() === 'waiting',
-      'resident dispatch did not close the gate for human review',
+      () => petA.resident.dispatch.getQueueSnapshot().state === 'waiting',
+      'resident dispatch queue did not enter waiting for human review',
     );
-    assert.equal(petA.resident.dispatch.getState(), 'waiting');
-    assert.equal(petB.resident.dispatch.getState(), 'open');
+    assert.equal(petA.resident.dispatch.getQueueSnapshot().state, 'waiting');
+    assert.equal(petB.resident.dispatch.getQueueSnapshot().state, 'open');
 
     const firstConnectionMessages: unknown[] = [];
     const firstConnection = peer(firstConnectionMessages);
@@ -317,7 +323,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
       interruptId: 'interrupt-1',
       responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
     });
-    assert.equal(petA.resident.dispatch.getState(), 'open');
+    assert.equal(petA.resident.dispatch.getQueueSnapshot().state, 'open');
     await petA.interaction.disconnect(resumedConnection);
 
     const finalConnectionMessages: unknown[] = [];

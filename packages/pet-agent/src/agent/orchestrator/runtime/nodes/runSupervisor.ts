@@ -3,28 +3,28 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { materializeCapabilityDocumentWorkspace } from '../../capabilityPlanner/documentWorkspace';
+import { materializeCapabilityDocumentWorkspace } from '../../runSupervisor/documentWorkspace';
 import {
-  createCapabilityPlannerAgent,
-  DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS,
-} from '../../capabilityPlanner/agent';
-import { resolveCapabilityDisclosureState } from '../../capabilityPlanner/capabilityDisclosure';
+  createRunSupervisorAgent,
+  DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS,
+} from '../../runSupervisor/agent';
+import { resolveCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
 import {
-  createPlannerSession,
-  updatePlannerSession,
-  type PlannerSessionState,
-} from '../../capabilityPlanner/session';
+  createRunSupervisorSession,
+  updateRunSupervisorSession,
+  type RunSupervisorSessionState,
+} from '../../runSupervisor/session';
 import {
-  type CapabilityPlannerDispatch,
-  type CapabilityPlannerRuntimeState,
-  type CapabilityPlannerRunner,
-  isCapabilityPlannerIncompleteResult,
-} from '../../capabilityPlanner/runner';
+  type RunSupervisorDispatch,
+  type RunSupervisorRuntimeState,
+  type RunSupervisorRunner,
+  isRunSupervisorNoCommandResult,
+} from '../../runSupervisor/runner';
 import {
-  parsePlannerCommit,
-  type PlannerCommit,
-  type PlannerReplyOutcome,
-} from '../../capabilityPlanner/protocol';
+  parseSupervisorCommand,
+  type SupervisorCommand,
+  type SupervisorReplyOutcome,
+} from '../../runSupervisor/protocol';
 import {
   appendRunDelegationSummary,
   resumeRunDelegationSummary,
@@ -47,10 +47,10 @@ import {
   readLatestAnnounceCompletionReason,
 } from '../../delegation';
 import {
-  buildCapabilityPlannerInput,
-  isPlannerDispatch,
-  plannerRuntimeStateFromRoot,
-} from '../../capabilityPlanner/input';
+  buildRunSupervisorInput,
+  isSupervisorDispatch,
+  supervisorRuntimeStateFromRoot,
+} from '../../runSupervisor/input';
 import {
   getInvokeOptions,
   getInvokeRegistry,
@@ -60,23 +60,23 @@ import {
   readCapabilityNameFromLane,
 } from '../decisions/delegationLifecycle';
 
-const DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT = join(
+const DEFAULT_RUN_SUPERVISOR_WORKSPACE_ROOT = join(
   tmpdir(),
   'pinpawo-capability-workspaces',
 );
 
 function materializeNextDelegation(params: {
-  state: CapabilityPlannerRuntimeState;
+  state: RunSupervisorRuntimeState;
   nextTask: CapabilityPlanTask;
   allowedCapabilityNames: readonly string[];
 }) {
   const { state, nextTask, allowedCapabilityNames } = params;
   if (!state.runUserRequest) {
-    throw new Error('Capability Planner requires runUserRequest before materializing a delegation.');
+    throw new Error('Run Supervisor requires runUserRequest before materializing a delegation.');
   }
   if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
-      `Capability Planner selected "${nextTask.capability}" outside the immutable workspace.`,
+      `Run Supervisor selected "${nextTask.capability}" outside the immutable workspace.`,
     );
   }
   const lane: CapabilityMessageLane = `capability:${nextTask.capability}`;
@@ -96,7 +96,7 @@ function materializeNextDelegation(params: {
   return {
     runNextDelegation,
     taskActiveDelegation,
-    taskPlannerContinuation: null,
+    taskRunContinuation: null,
     runDelegationSummaries: appendRunDelegationSummary(
       state.runDelegationSummaries,
       runNextDelegation,
@@ -110,7 +110,7 @@ function materializeNextDelegation(params: {
 function buildAcceptedDelegationUpdate(
   state: OrchestratorStateType,
   activeDelegation: TaskActiveDelegation,
-  outcome: PlannerReplyOutcome | null,
+  outcome: SupervisorReplyOutcome | null,
 ) {
   const completionReason = readLatestAnnounceCompletionReason(state.messages, {
     lane: activeDelegation.lane,
@@ -156,7 +156,7 @@ function buildAcceptedDelegationUpdate(
  * Materialize `continue_current`, which carries no tasks: the active
  * delegation's id, lane and task are reused verbatim and the session plan is
  * passed through untouched. This is where the "continue_current changes neither
- * the task nor the remaining plan" invariant is enforced — PlannerCommit is a
+ * the task nor the remaining plan" invariant is enforced — SupervisorCommand is a
  * flat shape and cannot express it in the type system.
  */
 function buildContinueCurrentUpdate(params: {
@@ -191,7 +191,7 @@ function buildContinueCurrentUpdate(params: {
 
 function buildWaitingUpdate(
   state: OrchestratorStateType,
-  commit: PlannerCommit,
+  command: SupervisorCommand,
 ) {
   const activeDelegation = state.taskActiveDelegation;
   return {
@@ -203,14 +203,14 @@ function buildWaitingUpdate(
             ? { ...delegation, status: 'progress' as const }
             : delegation)
       : state.runDelegationSummaries,
-    runLatestDelegationOutcome: commit.action,
-    runUserInputRequest: commit.userInputRequest ?? null,
+    runLatestDelegationOutcome: command.action,
+    runUserInputRequest: command.userInputRequest ?? null,
     runRuntimeFailure: null,
   };
 }
 
-function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlannerRunner {
-  return createCapabilityPlannerAgent({
+function createDefaultSupervisorRunner(config: OrchestratorConfig): RunSupervisorRunner {
+  return createRunSupervisorAgent({
     model: config.models.act,
     ...(config.defaultCapabilityName !== undefined
       ? { defaultCapabilityName: config.defaultCapabilityName }
@@ -219,42 +219,42 @@ function createDefaultPlannerRunner(config: OrchestratorConfig): CapabilityPlann
   });
 }
 
-export function createCapabilityPlannerNode(config: OrchestratorConfig) {
-  const runner = config.capabilityPlannerRunner ?? createDefaultPlannerRunner(config);
+export function createRunSupervisorNode(config: OrchestratorConfig) {
+  const runner = config.runSupervisorRunner ?? createDefaultSupervisorRunner(config);
 
-  return async function capabilityPlannerNode(
-    nodeInput: OrchestratorStateType | CapabilityPlannerDispatch,
+  return async function runSupervisorNode(
+    nodeInput: OrchestratorStateType | RunSupervisorDispatch,
     runnableConfig?: RunnableConfig,
   ) {
     const registry = getInvokeRegistry(runnableConfig);
     const allowedCapabilityNames = getInvokeOptions(runnableConfig).allowedCapabilityNames;
     const workspace = await materializeCapabilityDocumentWorkspace({
       registry,
-      cacheRoot: DEFAULT_CAPABILITY_PLANNER_WORKSPACE_ROOT,
+      cacheRoot: DEFAULT_RUN_SUPERVISOR_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
-    const state = isPlannerDispatch(nodeInput)
-      ? nodeInput.plannerState
-      : plannerRuntimeStateFromRoot(nodeInput);
-    const existingSession = state.runPlannerSession?.runId === state.runId
-      ? state.runPlannerSession
+    const state = isSupervisorDispatch(nodeInput)
+      ? nodeInput.supervisorState
+      : supervisorRuntimeStateFromRoot(nodeInput);
+    const existingSession = state.runSupervisorSession?.runId === state.runId
+      ? state.runSupervisorSession
       : null;
-    const continuation = !isPlannerDispatch(nodeInput)
+    const continuation = !isSupervisorDispatch(nodeInput)
       && nodeInput.taskActiveDelegation
-      && nodeInput.taskPlannerContinuation?.activeDelegationId
+      && nodeInput.taskRunContinuation?.activeDelegationId
         === nodeInput.taskActiveDelegation.id
-      ? nodeInput.taskPlannerContinuation
+      ? nodeInput.taskRunContinuation
       : null;
-    const isExplicitResume = !isPlannerDispatch(nodeInput)
+    const isExplicitResume = !isSupervisorDispatch(nodeInput)
       && nodeInput.runActiveDelegationTransition === 'resume_active';
-    if (!isPlannerDispatch(nodeInput)
+    if (!isSupervisorDispatch(nodeInput)
       && !existingSession
       && !continuation
       && !isExplicitResume) {
       return new Command({
         update: {
           runNextDelegation: null,
-          runPlannerSession: null,
+          runSupervisorSession: null,
           runLatestDelegationOutcome: null,
           runUserInputRequest: null,
           runRuntimeFailure: 'checkpoint_incompatible' as const,
@@ -262,7 +262,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         goto: 'answer',
       });
     }
-    const resumedCapabilityNames = !existingSession && !isPlannerDispatch(nodeInput)
+    const resumedCapabilityNames = !existingSession && !isSupervisorDispatch(nodeInput)
       ? [
           ...(nodeInput.taskActiveDelegation
             ? [readCapabilityNameFromLane(nodeInput.taskActiveDelegation.lane) ?? '']
@@ -276,27 +276,27 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       ...(resumedCapabilityNames.length > 0
         ? { seedCapabilityNames: resumedCapabilityNames }
         : {}),
-      maxEmptySearchRounds: config.capabilityPlannerMaxSearchRounds
-        ?? DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS,
+      maxEmptySearchRounds: config.runSupervisorMaxSearchRounds
+        ?? DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS,
     });
-    const plannerSession: PlannerSessionState = existingSession
+    const supervisorSession: RunSupervisorSessionState = existingSession
       ? {
           ...existingSession,
           capabilityDisclosure,
           ...(existingSession.capabilityDisclosure.registryDigest
             !== capabilityDisclosure.registryDigest
-            ? { lastCommit: null }
+            ? { lastCommand: null }
             : {}),
         }
-      : createPlannerSession({
+      : createRunSupervisorSession({
           runId: state.runId,
           plan: continuation?.remainingPlan ?? [],
           capabilityDisclosure,
         });
-    const { input, messageSelections } = buildCapabilityPlannerInput({
+    const { input, messageSelections } = buildRunSupervisorInput({
       nodeInput,
       workspace,
-      plannerSession,
+      supervisorSession,
     });
     for (const selection of messageSelections) {
       observeAgentMessageSelection(
@@ -308,37 +308,37 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     const result = await runner.invoke(input, runnableConfig);
     const updatedCapabilityDisclosure = result.capabilityDisclosure
       ?? input.capabilityDisclosure;
-    // A non-commit is not a model terminal action: do not invent General, do
+    // A missing command is not a state-changing action: do not invent General, do
     // not fabricate a ToolMessage, and do not accept an active delegation.
-    // Both modes report an explicit typed failure to Answer. Ordinary Planner
+    // Both modes report an explicit typed failure to Answer. Ordinary Supervisor
     // text remains private to invocation tracing and never becomes a root reply.
-    if (isCapabilityPlannerIncompleteResult(result)) {
-      const incompletePlan = input.mode === 'boundary' ? plannerSession.plan : [];
+    if (isRunSupervisorNoCommandResult(result)) {
+      const incompletePlan = input.mode === 'boundary' ? supervisorSession.plan : [];
       return new Command({
         update: {
           runNextDelegation: null,
           ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
-          taskPlannerContinuation: null,
-          runPlannerSession: updatePlannerSession({
-            current: plannerSession,
+          taskRunContinuation: null,
+          runSupervisorSession: updateRunSupervisorSession({
+            current: supervisorSession,
             plan: incompletePlan,
             capabilityDisclosure: updatedCapabilityDisclosure,
             inputId: input.inputId,
             registryDigest: workspace.registryDigest,
-            decision: null,
+            command: null,
           }),
-          runLatestDelegationOutcome: 'planner_incomplete' as const,
+          runLatestDelegationOutcome: 'supervisor_command_missing' as const,
           runUserInputRequest: null,
           runRuntimeFailure: null,
         },
         goto: 'answer',
       });
     }
-    // CapabilityPlannerRunner is an injectable seam: config.capabilityPlannerRunner
+    // RunSupervisorRunner is an injectable seam: config.runSupervisorRunner
     // may be a scripted or third-party implementation that never ran the agent's
     // own validation. This re-parse is the root's trust boundary, not a duplicate
-    // of the parse inside createCapabilityPlannerAgent() — do not remove it.
-    const commit = parsePlannerCommit(
+    // of the parse inside createRunSupervisorAgent() — do not remove it.
+    const command = parseSupervisorCommand(
       {
         action: result.action,
         tasks: result.tasks,
@@ -358,29 +358,29 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     // this node — the first to run outside that subgraph — is what commits the
     // resolved goal to root state for Capability, Answer and the delegation
     // snapshot to read.
-    const includePlannerSession = <T extends object>(
+    const includeSupervisorSession = <T extends object>(
       update: T,
       plan: readonly CapabilityPlanTask[],
     ) => ({
         ...update,
         ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
-        taskPlannerContinuation: null,
-        runPlannerSession: updatePlannerSession({
-          current: plannerSession,
+        taskRunContinuation: null,
+        runSupervisorSession: updateRunSupervisorSession({
+          current: supervisorSession,
           plan,
           capabilityDisclosure: updatedCapabilityDisclosure,
           inputId: input.inputId,
           registryDigest: workspace.registryDigest,
-          decision: commit,
+          command,
         }),
       });
 
     if (input.mode === 'entry') {
-      if (commit.action === 'execute_plan') {
-        const [nextTask, ...remainingPlan] = commit.tasks;
-        if (!nextTask) throw new Error('Planner execute_plan requires a task.');
+      if (command.action === 'execute_plan') {
+        const [nextTask, ...remainingPlan] = command.tasks;
+        if (!nextTask) throw new Error('Supervisor execute_plan requires a task.');
         return new Command({
-          update: includePlannerSession(materializeNextDelegation({
+          update: includeSupervisorSession(materializeNextDelegation({
             state,
             nextTask,
             allowedCapabilityNames: workspace.capabilityNames,
@@ -389,10 +389,10 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
         });
       }
       return new Command({
-        update: includePlannerSession({
+        update: includeSupervisorSession({
           runNextDelegation: null,
-          runLatestDelegationOutcome: commit.action,
-          runUserInputRequest: commit.userInputRequest ?? null,
+          runLatestDelegationOutcome: command.action,
+          runUserInputRequest: command.userInputRequest ?? null,
           runRuntimeFailure: null,
         }, []),
         goto: 'answer',
@@ -401,22 +401,22 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
 
     const rootState = nodeInput as OrchestratorStateType;
     const activeDelegation = rootState.taskActiveDelegation;
-    if (!activeDelegation) throw new Error('Boundary Planner lost active delegation.');
+    if (!activeDelegation) throw new Error('Boundary Supervisor lost active delegation.');
 
-    if (commit.action === 'continue_current') {
+    if (command.action === 'continue_current') {
       return new Command({
-        update: includePlannerSession(buildContinueCurrentUpdate({
+        update: includeSupervisorSession(buildContinueCurrentUpdate({
           state: rootState,
           activeDelegation,
-        }), plannerSession.plan),
+        }), supervisorSession.plan),
         goto: 'capability',
       });
     }
-    if (commit.action === 'user_input_required' || commit.action === 'unavailable') {
+    if (command.action === 'user_input_required' || command.action === 'unavailable') {
       return new Command({
-        update: includePlannerSession(
-          buildWaitingUpdate(rootState, commit),
-          plannerSession.plan,
+        update: includeSupervisorSession(
+          buildWaitingUpdate(rootState, command),
+          supervisorSession.plan,
         ),
         goto: 'answer',
       });
@@ -425,26 +425,26 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
     const accepted = buildAcceptedDelegationUpdate(
       rootState,
       activeDelegation,
-      commit.action === 'goal_done' ? 'goal_done' : null,
+      command.action === 'goal_done' ? 'goal_done' : null,
     );
     if (!accepted) {
       return new Command({
-        update: includePlannerSession({
+        update: includeSupervisorSession({
           runNextDelegation: null,
           runUserInputRequest: null,
-        }, plannerSession.plan),
+        }, supervisorSession.plan),
         goto: 'answer',
       });
     }
-    if (commit.action === 'goal_done') {
+    if (command.action === 'goal_done') {
       return new Command({
-        update: includePlannerSession(accepted, []),
+        update: includeSupervisorSession(accepted, []),
         goto: 'answer',
       });
     }
 
-    const [nextTask, ...remainingPlan] = commit.tasks;
-    if (!nextTask) throw new Error('Planner advance_plan requires a task.');
+    const [nextTask, ...remainingPlan] = command.tasks;
+    if (!nextTask) throw new Error('Supervisor advance_plan requires a task.');
     const next = materializeNextDelegation({
       state: {
         ...state,
@@ -454,7 +454,7 @@ export function createCapabilityPlannerNode(config: OrchestratorConfig) {
       allowedCapabilityNames: workspace.capabilityNames,
     });
     return new Command({
-      update: includePlannerSession({
+      update: includeSupervisorSession({
         ...accepted,
         ...next,
         messages: accepted.messages,

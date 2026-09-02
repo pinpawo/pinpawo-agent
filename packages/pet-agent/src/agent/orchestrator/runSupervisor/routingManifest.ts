@@ -180,14 +180,14 @@ export async function initializeCapabilityRoutingManifest(params: {
       })),
     ], {
       ...params.runnableConfig,
-      runName: 'framework.capability_planner.routing_manifest',
+      runName: 'framework.run_supervisor.routing_manifest',
       tags: [
         ...(params.runnableConfig?.tags ?? []),
-        'framework.capability_planner.routing_manifest',
+        'framework.run_supervisor.routing_manifest',
       ],
       metadata: {
         ...(params.runnableConfig?.metadata ?? {}),
-        frameworkComponent: 'capability_planner_routing_manifest',
+        frameworkComponent: 'run_supervisor_routing_manifest',
       },
     });
     params.runnableConfig?.signal?.throwIfAborted();

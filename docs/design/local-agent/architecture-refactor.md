@@ -457,7 +457,7 @@ type OperationRegistry = {
 - local-agent 可以为内置 local toolkit 提供 metadata。
 - local-agent 可以为 host-owned toolkit 提供 metadata，例如 `pet_profile` toolkit 中的 `describe_pet_profile`。
 - memory 机制需要单独设计；当前不把草稿 memory/web_search toolkit 放在 pet-agent core 中当作已落地架构。
-- Studio planner capability 使用的业务工具必须归属 Studio Host 注入的 Toolkit；Studio worker 的 wiki read tools 由 `wiki_read` Toolkit 暴露 metadata。Agent 框架内部 terminal actions 不进入 Host inventory。
+- Studio planner capability 使用的业务工具必须归属 Studio Host 注入的 Toolkit；Studio worker 的 wiki read tools 由 `wiki_read` Toolkit 暴露 metadata。Agent 框架内部 command actions 不进入 Host inventory。
 - 第三方/user Capability 通过其声明的 Toolkit 获得 tools 与 metadata。
 - 没有 metadata 时，local-agent 生成 runtime operation：`kind: 'runtime.<toolName>'`，`title: toolName`。
 - adapter 不应该回退解析 raw input/output。

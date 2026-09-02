@@ -8,10 +8,10 @@ import type { OrchestratorStateType } from '../../state';
 import { getInvokeOptions } from '../config';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
-export function createAfterPlannerBoundaryIterationGuard(params: {
+export function createAfterSupervisorBoundaryIterationGuard(params: {
   orchestratorMaxIterations: number;
 }) {
-  return function afterPlannerBoundaryIterationGuard(
+  return function afterSupervisorBoundaryIterationGuard(
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
@@ -20,12 +20,12 @@ export function createAfterPlannerBoundaryIterationGuard(params: {
     const outcome = evaluateGuard(runIterationLimitGuard, {
       state,
       config: { runIterationLimit },
-      position: ORCHESTRATOR_GUARD_POSITION.PLANNER_BOUNDARY_ITERATION,
+      position: ORCHESTRATOR_GUARD_POSITION.SUPERVISOR_BOUNDARY_ITERATION,
     }, {
       emit: guardDecisionEmitter(runnableConfig),
       runId: state.runId,
       iteration: state.runIterationCount,
     });
-    return outcome.kind === 'stop' ? 'answer' : 'capabilityPlanner';
+    return outcome.kind === 'stop' ? 'answer' : 'runSupervisor';
   };
 }

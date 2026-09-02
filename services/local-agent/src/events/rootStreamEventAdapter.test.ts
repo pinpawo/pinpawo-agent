@@ -61,10 +61,10 @@ async function collectChatEvents(graph: {
 
 test('adapter attributes root answer tokens to assistant and drops internal decision output', async () => {
   const graph = new StateGraph(MessagesAnnotation)
-    .addNode('capabilityPlanner', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
+    .addNode('runSupervisor', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
     .addNode('answer', streamingNode(new FakeListChatModel({ responses: ['你好，这是回复'], sleep: 0 })))
-    .addEdge(START, 'capabilityPlanner')
-    .addEdge('capabilityPlanner', 'answer')
+    .addEdge(START, 'runSupervisor')
+    .addEdge('runSupervisor', 'answer')
     .addEdge('answer', END)
     .compile();
 
@@ -430,7 +430,7 @@ test('readRootStreamChatEvent maps tool lifecycle and filters non-AI message del
     seq: 2,
     method: 'tools',
     params: {
-      namespace: ['capabilityPlanner:t1', 'tools:t2'],
+      namespace: ['runSupervisor:t1', 'tools:t2'],
       data: {
         event: 'tool-started',
         tool_call_id: 'planner-call-1',

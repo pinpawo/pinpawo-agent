@@ -58,7 +58,7 @@ subject. `run-decision-stability` enforces this; new runners must too.
 ## 4. A harness stub is a contract, not a convenience
 
 When a scenario declares a tool the production code also declares — a
-`plan_request` stub, a planner terminal tool — the stub is part of the measured
+`plan_request` stub, a Supervisor command tool — the stub is part of the measured
 surface. If it drifts from production, the eval silently measures the wrong
 thing and reports it as a model failure.
 

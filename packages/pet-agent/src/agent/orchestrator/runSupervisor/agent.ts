@@ -4,52 +4,52 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createAgent } from 'langchain';
 import {
-  createCapabilityPlannerFileExplorer,
-  type CapabilityPlannerCapabilityDocument,
-  type CapabilityPlannerFileExplorer,
+  createRunSupervisorFileExplorer,
+  type RunSupervisorCapabilityDocument,
+  type RunSupervisorFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
-import { buildCapabilityPlannerAgentInput } from '../prompts/capabilityPlannerAgent';
+import { buildRunSupervisorAgentInput } from '../prompts/runSupervisorAgent';
 import type {
-  CapabilityPlannerInput,
-  CapabilityPlannerResult,
-  CapabilityPlannerRunner,
+  RunSupervisorInput,
+  RunSupervisorResult,
+  RunSupervisorRunner,
 } from './runner';
-import { parsePlannerCommit } from './protocol';
+import { parseSupervisorCommand } from './protocol';
 import { queryAgentMessages } from '../../messages';
 import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
-import { createPlannerMiddleware } from './plannerMiddleware';
-import { plannerCommitContext } from './plannerState';
+import { createSupervisorMiddleware } from './supervisorMiddleware';
+import { supervisorCommandContext } from './supervisorState';
 import {
   applyCapabilitySearchObservations,
   removeSearchedCapabilities,
 } from './capabilityDisclosure';
 import {
-  createPlannerCapabilitySearchTool,
-  createPlannerSearchStateMiddleware,
+  createSupervisorCapabilitySearchTool,
+  createSupervisorSearchStateMiddleware,
 } from './searchTool';
-import { createPlannerTerminalTools } from './terminalTools';
-import { PlannerFileToolError } from './workspaceReader';
+import { createSupervisorCommandTools } from './commandTools';
+import { SupervisorFileToolError } from './workspaceReader';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-export const DEFAULT_CAPABILITY_PLANNER_MAX_SEARCH_ROUNDS = 2;
+export const DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS = 2;
 
-export type CapabilityPlannerAgentErrorCode =
-  | 'planning_limit_reached'
-  | 'planning_timeout';
+export type RunSupervisorAgentErrorCode =
+  | 'supervisor_discovery_limit_reached'
+  | 'supervisor_timeout';
 
-export class CapabilityPlannerAgentError extends Error {
-  readonly code: CapabilityPlannerAgentErrorCode;
+export class RunSupervisorAgentError extends Error {
+  readonly code: RunSupervisorAgentErrorCode;
 
-  constructor(code: CapabilityPlannerAgentErrorCode, message: string) {
+  constructor(code: RunSupervisorAgentErrorCode, message: string) {
     super(message);
-    this.name = 'CapabilityPlannerAgentError';
+    this.name = 'RunSupervisorAgentError';
     this.code = code;
   }
 }
 
-function mergePlannerSignal(
+function mergeSupervisorSignal(
   parentSignal: AbortSignal | undefined,
   timeoutMs: number,
 ) {
@@ -74,66 +74,66 @@ function assertPositiveInteger(value: number, label: string) {
   }
 }
 
-function readCachedPlannerCommit(input: CapabilityPlannerInput) {
-  const cached = input.plannerSession.lastCommit;
+function readCachedSupervisorCommand(input: RunSupervisorInput) {
+  const cached = input.supervisorSession.lastCommand;
   return cached
     && cached.inputId === input.inputId
     && cached.registryDigest === input.workspace.registryDigest
-    ? cached.decision
+    ? cached.command
     : null;
 }
 
-function buildPlannerRunnableConfig(params: {
-  input: CapabilityPlannerInput;
+function buildSupervisorRunnableConfig(params: {
+  input: RunSupervisorInput;
   runnableConfig?: RunnableConfig;
   signal: AbortSignal;
 }): RunnableConfig {
   return {
     ...params.runnableConfig,
     signal: params.signal,
-    runName: 'framework.capability_planner',
+    runName: 'framework.run_supervisor',
     tags: [
       ...(params.runnableConfig?.tags ?? []),
-      'framework.capability_planner',
+      'framework.run_supervisor',
     ],
     metadata: {
       ...(params.runnableConfig?.metadata ?? {}),
-      frameworkComponent: 'capability_planner',
+      frameworkComponent: 'run_supervisor',
       traceId: params.input.traceId,
       runId: params.input.runId,
-      plannerInputId: params.input.inputId,
+      supervisorInputId: params.input.inputId,
       registryDigest: params.input.workspace.registryDigest,
-      plannerMode: params.input.mode,
+      supervisorMode: params.input.mode,
     },
   };
 }
 
-export function createCapabilityPlannerAgent(params: {
+export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
-  /** Capability identified as the Planner's default candidate. */
+  /** Capability identified as the Supervisor's default candidate. */
   defaultCapabilityName?: string;
   timeoutMs?: number;
   registryBackend?: CapabilityRegistryBackend;
   maxDocumentReadBytes?: number;
-  /** Additional invocation-scoped Planner tools. */
+  /** Additional invocation-scoped Supervisor tools. */
   additionalTools?: StructuredTool[];
-}): CapabilityPlannerRunner {
+}): RunSupervisorRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  assertPositiveInteger(timeoutMs, 'Capability Planner timeoutMs');
+  assertPositiveInteger(timeoutMs, 'Run Supervisor timeoutMs');
   if (params.maxDocumentReadBytes !== undefined) {
     assertPositiveInteger(
       params.maxDocumentReadBytes,
-      'Capability Planner maxDocumentReadBytes',
+      'Run Supervisor maxDocumentReadBytes',
     );
   }
-  const explorers = new Map<string, CapabilityPlannerFileExplorer>();
+  const explorers = new Map<string, RunSupervisorFileExplorer>();
   const resolveRoutingManifest = createCapabilityRoutingManifestResolver({
     model: params.model,
   });
-  const explorerForInput = (input: CapabilityPlannerInput) => {
+  const explorerForInput = (input: RunSupervisorInput) => {
     const existing = explorers.get(input.inputId);
     if (existing) return existing;
-    const explorer = createCapabilityPlannerFileExplorer({
+    const explorer = createRunSupervisorFileExplorer({
       workspace: input.workspace,
       registryBackend: params.registryBackend ?? 'filesystem',
       ...(params.maxDocumentReadBytes
@@ -143,19 +143,19 @@ export function createCapabilityPlannerAgent(params: {
     explorers.set(input.inputId, explorer);
     return explorer;
   };
-  const terminalTools = createPlannerTerminalTools();
+  const commandTools = createSupervisorCommandTools();
   const additionalTools = params.additionalTools ?? [];
-  const capabilitySearchTool = createPlannerCapabilitySearchTool({
+  const capabilitySearchTool = createSupervisorCapabilitySearchTool({
     explorerForInput,
   });
-  const middleware = createPlannerMiddleware();
+  const middleware = createSupervisorMiddleware();
   const agent = createAgent({
-    name: 'capabilityPlanner',
+    name: 'runSupervisor',
     model: params.model,
-    tools: [capabilitySearchTool, ...terminalTools, ...additionalTools],
+    tools: [capabilitySearchTool, ...commandTools, ...additionalTools],
     middleware: [
       middleware,
-      createPlannerSearchStateMiddleware(),
+      createSupervisorSearchStateMiddleware(),
       orchestratorModelInvocationMiddleware,
     ],
     checkpointer: false,
@@ -163,21 +163,21 @@ export function createCapabilityPlannerAgent(params: {
 
   return Object.freeze({
     async invoke(
-      input: CapabilityPlannerInput,
+      input: RunSupervisorInput,
       runnableConfig?: RunnableConfig,
-    ): Promise<CapabilityPlannerResult> {
-      const timeout = mergePlannerSignal(runnableConfig?.signal, timeoutMs);
-      const config = buildPlannerRunnableConfig({
+    ): Promise<RunSupervisorResult> {
+      const timeout = mergeSupervisorSignal(runnableConfig?.signal, timeoutMs);
+      const config = buildSupervisorRunnableConfig({
         input,
         runnableConfig,
         signal: timeout.signal,
       });
       try {
         timeout.signal.throwIfAborted();
-        const cachedCommit = readCachedPlannerCommit(input);
-        if (cachedCommit) {
+        const cachedCommand = readCachedSupervisorCommand(input);
+        if (cachedCommand) {
           return {
-            ...parsePlannerCommit(cachedCommit, plannerCommitContext(input)),
+            ...parseSupervisorCommand(cachedCommand, supervisorCommandContext(input)),
             capabilityDisclosure: input.capabilityDisclosure,
           };
         }
@@ -191,15 +191,15 @@ export function createCapabilityPlannerAgent(params: {
         });
         timeout.signal.throwIfAborted();
         let explorer = explorerForInput(effectiveInput);
-        let disclosedCapabilities: CapabilityPlannerCapabilityDocument[];
+        let disclosedCapabilities: RunSupervisorCapabilityDocument[];
         try {
           disclosedCapabilities = await explorer.readCapabilities(
             effectiveInput.capabilityDisclosure.disclosedCapabilityNames,
             timeout.signal,
           );
         } catch (error) {
-          if (!(error instanceof PlannerFileToolError)
-            || error.code !== 'planning_limit_reached') {
+          if (!(error instanceof SupervisorFileToolError)
+            || error.code !== 'supervisor_discovery_limit_reached') {
             throw error;
           }
           effectiveInput = {
@@ -218,9 +218,9 @@ export function createCapabilityPlannerAgent(params: {
             timeout.signal,
           );
         }
-        const plannerInputMessage = new HumanMessage({
-          id: `planner:${input.inputId}`,
-          content: buildCapabilityPlannerAgentInput(
+        const supervisorInputMessage = new HumanMessage({
+          id: `supervisor:${input.inputId}`,
+          content: buildRunSupervisorAgentInput(
             effectiveInput,
             disclosedCapabilities,
             routingManifest,
@@ -228,7 +228,7 @@ export function createCapabilityPlannerAgent(params: {
         });
         const agentMessages = queryAgentMessages(input.messages)
           .main()
-          .append(plannerInputMessage)
+          .append(supervisorInputMessage)
           .select()
           .messages;
         const result = await agent.invoke({
@@ -240,32 +240,32 @@ export function createCapabilityPlannerAgent(params: {
           effectiveInput.capabilityDisclosure,
           result.capabilitySearchObservations ?? [],
         );
-        if (result.plannerCommit) {
-          const commit = parsePlannerCommit(
-            result.plannerCommit,
-            plannerCommitContext(input),
+        if (result.supervisorCommand) {
+          const command = parseSupervisorCommand(
+            result.supervisorCommand,
+            supervisorCommandContext(input),
           );
           return {
-            ...commit,
+            ...command,
             capabilityDisclosure,
           };
         }
         if (explorer.didReachDocumentReadLimit()) {
-          throw new CapabilityPlannerAgentError(
-            'planning_limit_reached',
-            'Capability Planner document read limit was reached before a valid commit.',
+          throw new RunSupervisorAgentError(
+            'supervisor_discovery_limit_reached',
+            'Run Supervisor document read limit was reached before a valid command.',
           );
         }
         return {
-          plannerStatus: 'incomplete',
-          reason: 'terminal_commit_missing',
+          supervisorStatus: 'no_command',
+          reason: 'command_missing',
           capabilityDisclosure,
         };
       } catch (error) {
         if (timeout.didTimeOut()) {
-          throw new CapabilityPlannerAgentError(
-            'planning_timeout',
-            `Capability Planner exceeded its ${String(timeoutMs)}ms timeout.`,
+          throw new RunSupervisorAgentError(
+            'supervisor_timeout',
+            `Run Supervisor exceeded its ${String(timeoutMs)}ms timeout.`,
           );
         }
         throw error;

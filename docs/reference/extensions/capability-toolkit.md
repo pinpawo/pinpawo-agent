@@ -22,7 +22,7 @@ ToolDefinition
   └─ 组成 AgentToolkit（编码实现、不可委派）
        └─ 被 AgentCapability.uses 静态引用
             └─ 编译为 CompiledCapability
-                 └─ 由 Capability Planner 选择并在独立 subagent 中执行
+                 └─ 由 Run Supervisor 选择并在独立 subagent 中执行
 ```
 
 只有两个扩展概念：
@@ -57,7 +57,7 @@ type InstructionDocument = {
 字段语义：
 
 - `name`：稳定 route id；使用小写字母、数字、`_` 或 `-`。
-- `description`：Capability 文档的摘要，帮助 Planner 判断是否继续阅读正文。
+- `description`：Capability 文档的摘要，帮助 Supervisor 判断是否继续阅读正文。
 - `uses`：required Toolkit 列表，也是该 Capability 的完整工具权限边界。
 - `instructions`：一个非空 Markdown 文档；digest 由
   `defineInstructionDocument()` 生成并校验。
@@ -210,7 +210,7 @@ invocation identity 传给自己的 Runtime；Agent 和通用 manager 不解释 
 Toolkit，例如注入 process registry；这类 binding 不再额外暴露到 Tool runtime
 context。框架会验证工具数量和名称与静态 inventory 相同，并继续使用静态 Tool 的
 schema、description、response format，以及静态 `operation`、`review`、权限与
-instructions。runtime binding 不会进入 registry、planner workspace、prompt 或
+instructions。runtime binding 不会进入 registry、Supervisor workspace、prompt 或
 checkpoint。
 
 通用 invocation identity 不经过 `bindTools`；Agent 把 `threadId`、`runId` 和
@@ -289,15 +289,15 @@ capability.uses
 运行时会把已经成功编译的 Capability 物化为一个 digest-addressed、只读的
 Capability Document Workspace。文件定义的 Capability 保留原始
 `CAPABILITY.md`；inline Capability 会生成等价文档，因此 registry 中不存在
-Planner 看不见的隐形 Capability。
+Supervisor 看不见的隐形 Capability。
 
-Planner 是一个框架内部的 tool-loop agent。runtime 从 effective workspace
+Supervisor 是一个框架内部的 tool-loop agent。runtime 从 effective workspace
 初始化一个包含 Capability 名称、职责摘要、搜索 cues，以及 compiled `uses`
 解析出的 Toolkit 名称与描述的紧凑路由清单；Toolkit scope 作为 registry 事实
-确定性保留，不受模型压缩结果影响。该清单帮助 Planner 选择候选；披露候选时以
+确定性保留，不受模型压缩结果影响。该清单帮助 Supervisor 选择候选；披露候选时以
 canonical Capability name 作为稳定的 `capability_search` literal term，但该清单
 不替代完整文档。
-Planner 使用 `capability_search` 按需披露匹配的完整 `CAPABILITY.md`，再统一完成：
+Supervisor 使用 `capability_search` 按需披露匹配的完整 `CAPABILITY.md`，再统一完成：
 
 1. 划分当前与后续执行任务；
 2. 为当前任务选择一个 workspace 内的 Capability；
@@ -305,7 +305,7 @@ Planner 使用 `capability_search` 按需披露匹配的完整 `CAPABILITY.md`�
 
 它不会把完整 registry、搜索结果或私有工具 transcript 写进父 graph state。
 `allowedCapabilityNames` 只负责限制 workspace 可见范围，不直接指定执行器。
-运行时随后确定性校验 Planner 输出：选中的名称必须存在于该 immutable
+运行时随后确定性校验 Supervisor 输出：选中的名称必须存在于该 immutable
 workspace，direct task 不得被改写，future plan 不得重复当前任务。
 
 校验成功后统一进入：
@@ -383,7 +383,7 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
    `artifact_discovery`。
 5. 调用 `compileAgentRegistry()`。
 6. 报告 `unavailableCapabilities`。
-7. 把同一个 `CompiledAgentRegistry` 交给 planner 与 executor。
+7. 把同一个 `CompiledAgentRegistry` 交给 Supervisor 与 executor。
 
 不要让 UI、HTTP handler 或另一个 registry getter 自己重新计算 Capability
 可用性；可用性必须来自同一次编译结果。

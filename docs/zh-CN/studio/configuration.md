@@ -19,7 +19,7 @@
 ```
 
 Pet 配置至少包含 `petId` 和 `name`，可选 `role`、`serviceSummary`、
-`modelProfileId` 与 `defaultCapabilityName`。后者只在 Planner 的紧凑路由清单中标记
+`modelProfileId` 与 `defaultCapabilityName`。后者只在 Supervisor 的紧凑路由清单中标记
 该 Pet 目录中已存在的一项默认候选；完整文档仍与其他 Capability 一样通过搜索披露，
 且不绕过可用性与 Toolkit 绑定。配置不包含
 `lazy`、`disabled`、Capability 名单、thread 或

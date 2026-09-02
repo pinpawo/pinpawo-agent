@@ -18,7 +18,7 @@ defaultEnabled: true
 
 ## 工作流程
 
-1. 先收敛可复用的职责边界：它负责什么、不负责什么、什么时候应被 Planner 选中。
+1. 先收敛可复用的职责边界：它负责什么、不负责什么、什么时候应被 Supervisor 选中。
 2. 确定最小 Toolkit 权限集。只声明已在当前 host 注册且任务确实需要的 Toolkit；不需要工具时使用空 `uses`。
 3. 创建前先阅读唯一的 Capability V2 参考示例。本地仓库中直接读取
    `services/local-agent/examples/capabilities/web_research_brief/CAPABILITY.md` 和 README；如果本地路径不可用，使用 `http_fetch` 直接读取
@@ -32,7 +32,7 @@ defaultEnabled: true
 ## 契约边界
 
 - `CAPABILITY.md` 正文只描述该 Capability 自己的业务执行流程。
-- `description` 是 Planner 的检索与路由入口，应包含用户会实际使用的意图词，但不夸大范围。
+- `description` 是 Supervisor 的检索与路由入口，应包含用户会实际使用的意图词，但不夸大范围。
 - 只有需要确定性整理已有执行结果时才声明 `entry`；entry 只能导出 `lifecycle.finalize`。
 - 所有模型调用的动作和外部业务副作用一律放入 Toolkit。
 - 如果 Capability 需要 API、浏览器、文件或 shell 能力，在正文中明确首选工具和禁用 / 兜底条件，并在 `uses` 中声明对应 Toolkit。

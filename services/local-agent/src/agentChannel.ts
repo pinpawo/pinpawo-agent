@@ -131,7 +131,7 @@ export function buildLocalChatAgentInput(params: {
   timezone?: string;
   /** Explicit Capability registry backend. Defaults to local-agent configuration. */
   capabilityRegistryBackend?: CapabilityRegistryBackend;
-  /** Capability preloaded by the entry Planner. */
+  /** Capability preloaded by the entry Supervisor. */
   defaultCapabilityName?: string;
 }): AgentChannelSetup {
   if (!params.threadId.trim()) {

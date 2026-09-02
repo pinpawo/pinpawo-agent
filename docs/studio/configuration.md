@@ -72,7 +72,7 @@ selects from that Pet's Capability directory instead.
 `modelProfileId` selects a host model profile when present. The old inline
 `model` field and the old `capabilities` name list are rejected explicitly.
 `defaultCapabilityName` marks one available Capability as the preferred default
-in the Planner's compact routing manifest. Its complete document still uses the
+in the Supervisor's compact routing manifest. Its complete document still uses the
 same discovery path as every other Capability, and the setting does not bypass
 availability or Toolkit binding.
 

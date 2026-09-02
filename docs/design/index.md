@@ -11,7 +11,7 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Run-scoped Planner session](agent-runtime/run-scoped-planner-session.md) and
+- [Run-scoped Supervisor session](agent-runtime/run-scoped-supervisor-session.md) and
   [terminal response finalization](agent-runtime/terminal-response.md)
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery

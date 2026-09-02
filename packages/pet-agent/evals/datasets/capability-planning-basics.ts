@@ -2,7 +2,7 @@ import { AgentEvalCase, AgentEvalDataset } from './types.ts';
 
 export type CapabilityPlanningInput = {
   mode: 'entry' | 'boundary';
-  /** Exact current user request available to every Planner invocation in the run. */
+  /** Exact current user request available to every Supervisor invocation in the run. */
   userRequest: string;
   messages: Array<{
     role: 'user' | 'assistant';
@@ -26,9 +26,9 @@ export type CapabilityPlanningExpected = {
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
   /**
-   * Whether future work must be materialized in this Planner invocation.
+   * Whether future work must be materialized in this Supervisor invocation.
    * `optional` accepts a self-contained current handoff task that leaves the
-   * Boundary Planner to materialize the next task from its result.
+   * Boundary Supervisor to materialize the next task from its result.
    */
   remainingPlanPolicy?: 'required' | 'optional';
   exactRemainingPlanLength?: number;
@@ -42,8 +42,8 @@ const SOURCE_FILE = 'packages/pet-agent/evals/datasets/capability-planning-basic
 
 type CapabilityPlanningMessageInput = Omit<CapabilityPlanningInput, 'userRequest'> & {
   /**
-   * Current user request that production stores for every Planner invocation.
-   * The input messages are projected into Planner as complete canonical
+   * Current user request that production stores for every Supervisor invocation.
+   * The input messages are projected into Supervisor as complete canonical
    * conversation context; contextual cases may provide a more precise
    * normalized request explicitly.
    */
@@ -105,7 +105,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       rubberStamp: false,
       reason: 'Entry planning creates an auth investigation boundary and either preserves refactoring as future work or gives Boundary enough direction to materialize it from the investigation result.',
     },
-    metadata: { difficulty: 'hard', reason: 'planner@entry dynamic plan.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'supervisor@entry dynamic plan.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.entry-focuses-on-latest-goal-despite-unrelated-history`,
@@ -203,7 +203,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       rubberStamp: false,
       reason: 'A simple request is materialized as one complete task without an artificial future tail.',
     },
-    metadata: { difficulty: 'medium', reason: 'Planner-owned one-task boundary.', source: SOURCE_FILE },
+    metadata: { difficulty: 'medium', reason: 'Supervisor-owned one-task boundary.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.entry-verifies-latest-main-instead-of-requesting-user-input`,
@@ -235,11 +235,11 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'The latest-main status is an executable repository fact that General can verify. Model uncertainty or an unchecked fact is not missing user input, so the Planner must delegate verification instead of asking the user for a commit or timestamp.',
+      reason: 'The latest-main status is an executable repository fact that General can verify. Model uncertainty or an unchecked fact is not missing user input, so the Supervisor must delegate verification instead of asking the user for a commit or timestamp.',
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Trace-derived regression from trace 01a02b00-9cb1-7044-827d-38f43795b2f8, where Planner incorrectly returned user_input_required for a Git-verifiable fact.',
+      reason: 'Trace-derived regression from trace 01a02b00-9cb1-7044-827d-38f43795b2f8, where Supervisor incorrectly returned user_input_required for a Git-verifiable fact.',
       source: SOURCE_FILE,
     },
   },
@@ -272,7 +272,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       rubberStamp: false,
       reason: 'Independent deliverables owned by different capabilities remain separate task boundaries.',
     },
-    metadata: { difficulty: 'hard', reason: 'Planner-owned multi-task boundary.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'Supervisor-owned multi-task boundary.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.entry-asks-for-user-owned-deployment-target`,
@@ -337,7 +337,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       rubberStamp: true,
       reason: 'The accepted handoff already supplies implementation details to the next executor, so the valid planned task remains unchanged.',
     },
-    metadata: { difficulty: 'hard', reason: 'planner@boundary materialization.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'supervisor@boundary materialization.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.boundary-ignores-closed-unrelated-history`,
@@ -408,7 +408,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'When no specialized Capability matches, the Planner materializes a concrete workspace task with general.',
+      reason: 'When no specialized Capability matches, the Supervisor materializes a concrete workspace task with general.',
     },
     metadata: { difficulty: 'medium', reason: 'Mandatory General default candidate.', source: SOURCE_FILE },
   },
@@ -608,9 +608,9 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'A stale pseudo-tool snippet is conversation content, not an available tool; the planner must submit the read-only verification task through its declared tool protocol.',
+      reason: 'A stale pseudo-tool snippet is conversation content, not an available tool; the supervisor must submit the read-only verification task through its declared tool protocol.',
     },
-    metadata: { difficulty: 'hard', reason: 'Trace-derived regression: historic pseudo-tool syntax must not become a planner tool call.', source: SOURCE_FILE },
+    metadata: { difficulty: 'hard', reason: 'Trace-derived regression: historic pseudo-tool syntax must not become a supervisor tool call.', source: SOURCE_FILE },
   },
   {
     id: `${SUITE}.entry-submits-pr-review-fix-plan-once`,
@@ -642,7 +642,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'Regression distilled from run-019fd602-745c-778f-a68a-4fd73fc8c0bc: one general Capability owns the complete review-fix task, and the Planner must submit that plan once then finish instead of re-planning after submit_plan succeeds.',
+      reason: 'Regression distilled from run-019fd602-745c-778f-a68a-4fd73fc8c0bc: one general Capability owns the complete review-fix task, and the Supervisor must submit that plan once then finish instead of re-planning after submit_plan succeeds.',
     },
     metadata: { difficulty: 'hard', reason: 'Trace-derived regression for submit_plan completion after a schema-repaired multi-task plan.', source: SOURCE_FILE },
   },
@@ -674,7 +674,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'The user asks for an evidence-based recommendation before confirming implementation. Recommendation work is still autonomous and executable, so the Planner delegates that analysis now and waits for confirmation only after its result.',
+      reason: 'The user asks for an evidence-based recommendation before confirming implementation. Recommendation work is still autonomous and executable, so the Supervisor delegates that analysis now and waits for confirmation only after its result.',
     },
     metadata: {
       difficulty: 'medium',
@@ -711,11 +711,11 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'Outcome established that follow-up work remains, but the Planner finds no executable Capability for that work and returns the blocking facts to Answer.',
+      reason: 'Outcome established that follow-up work remains, but the Supervisor finds no executable Capability for that work and returns the blocking facts to Answer.',
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Covers the valid boundary return path without letting Planner reinterpret an exhausted plan as goal completion.',
+      reason: 'Covers the valid boundary return path without letting Supervisor reinterpret an exhausted plan as goal completion.',
       source: SOURCE_FILE,
     },
   },
@@ -754,7 +754,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'created',
       rubberStamp: false,
-      reason: 'Outcome has already established that autonomous work remains; the latest result names that work, so the Planner materializes it even when the previous future tail is empty.',
+      reason: 'Outcome has already established that autonomous work remains; the latest result names that work, so the Supervisor materializes it even when the previous future tail is empty.',
     },
     metadata: {
       difficulty: 'hard',
@@ -766,7 +766,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-continues-incomplete-current-task`,
     name: 'boundary-continues-incomplete-current-task',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       messages: [{ role: 'user', content: '检查仓库并完成测试验证。' }],
@@ -794,7 +794,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     tags: [
       'capability_planning',
       'delegation_control',
-      'planner_boundary',
+      'supervisor_boundary',
       'interruption_recovery',
     ],
     input: {
@@ -828,7 +828,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-corrects-context-summary-output`,
     name: 'boundary-corrects-context-summary-output',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary', 'context_synthesis'],
     input: {
       mode: 'boundary',
       userRequest: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
@@ -870,7 +870,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-corrects-planning-only-output`,
     name: 'boundary-corrects-planning-only-output',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '用与菜单文本语义对应的白色线性 SVG 图标替换 70 个旧四宫格占位图，刷新预览页并验证生成结果。',
@@ -904,7 +904,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-corrects-placeholder-output`,
     name: 'boundary-corrects-placeholder-output',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '根据每个菜单文本的含义绘制不同的白色线性 SVG 图标，不得继续使用四宫格占位符。',
@@ -938,7 +938,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-continues-after-script-only-progress`,
     name: 'boundary-continues-after-script-only-progress',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '重写图标生成脚本并实际生成、验证全部 70 个语义 SVG 图标。',
@@ -972,7 +972,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-requests-missing-verification`,
     name: 'boundary-requests-missing-verification',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       userRequest: '生成 70 个语义 SVG 图标，并确认文件数量、XML 有效性和图标内容均符合要求。',
@@ -998,7 +998,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     },
     metadata: {
       difficulty: 'medium',
-      reason: 'Ensures the Planner asks for missing acceptance evidence instead of rerunning or accepting prematurely.',
+      reason: 'Ensures the Supervisor asks for missing acceptance evidence instead of rerunning or accepting prematurely.',
       source: SOURCE_FILE,
     },
   },
@@ -1006,7 +1006,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-completes-user-goal`,
     name: 'boundary-completes-user-goal',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       messages: [{ role: 'user', content: '运行测试并报告结果。' }],
@@ -1029,7 +1029,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-asks-before-substituting-missing-target`,
     name: 'boundary-asks-before-substituting-missing-target',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary', 'context_synthesis'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary', 'context_synthesis'],
     input: {
       mode: 'boundary',
       userRequest: '帮我 review PR #662。',
@@ -1048,7 +1048,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The requested PR does not exist and replacing it with a related PR would change the target, so the Planner must ask instead of rewriting and continuing the delegation.',
+      reason: 'The requested PR does not exist and replacing it with a related PR would change the target, so the Supervisor must ask instead of rewriting and continuing the delegation.',
     },
     metadata: {
       difficulty: 'hard',
@@ -1060,7 +1060,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     id: `${SUITE}.boundary-waits-for-user-input`,
     name: 'boundary-waits-for-user-input',
     suite: SUITE,
-    tags: ['capability_planning', 'delegation_control', 'planner_boundary'],
+    tags: ['capability_planning', 'delegation_control', 'supervisor_boundary'],
     input: {
       mode: 'boundary',
       messages: [{ role: 'user', content: '发布包；如果需要凭据就先停下来。' }],
@@ -1085,7 +1085,7 @@ const cases = messageCases.map(withUserRequest);
 
 export const capabilityPlanningBasicsDataset: AgentEvalDataset<CapabilityPlanningInput, CapabilityPlanningExpected> = {
   name: SUITE,
-  description: 'Production contracts for capabilityPlanner at entry and task boundaries.',
+  description: 'Production contracts for runSupervisor at entry and task boundaries.',
   cases,
   metadata: { owner: 'pet-agent', areas: ['capability_planning', 'entry_answer', 'delegation_control'] },
 };

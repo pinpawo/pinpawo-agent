@@ -108,7 +108,7 @@ services/local-agent/src/capabilities/general/
 
 该目录和其他内建 Capability 通过同一注册入口进入 runtime。`CAPABILITY.md`
 静态声明完整 `uses`；registry 不追加、过滤或改写 General 的依赖。
-Capability Planner 通过与其他 Capability 相同的文档探索与选择流程决定是否
+Run Supervisor 通过与其他 Capability 相同的文档探索与选择流程决定是否
 使用 `general`。之后仍然统一使用：
 
 ```txt
@@ -136,9 +136,9 @@ Toolkit `availability` 在编译前由调用入口或 host 解析；
 `threadId` 和 `CapabilityArtifactStore`；host 不能通过省略 thread scope 静默
 移除 Explore 等依赖该 Toolkit 的 Capability。General 不依赖这项运行期 scope。
 
-Capability Planner 探索的是 compiled registry 物化出的只读 Capability Document
+Run Supervisor 探索的是 compiled registry 物化出的只读 Capability Document
 Workspace。Capability 的 `CAPABILITY.md` 是发现与选择依据；Toolkit scope 仍然是
-执行期权限边界，并通过文档中的静态 `uses` 声明可见。Planner 不接收截断后的
+执行期权限边界，并通过文档中的静态 `uses` 声明可见。Supervisor 不接收截断后的
 registry context，也不使用代码关键词检索。
 
 ## 5. Toolkit Policy 与 HITL
@@ -288,7 +288,7 @@ const capabilityCreator = defineCapability({
 - capability instructions 描述业务目标、结果格式和任务约束。
 - orchestrator 仍然是唯一可以决定“下一步委派谁”的组件。
 - 如果多个 capability 高频组合成固定流程，应创建更高阶 workflow capability，而不是让 capability 互调。
-- Capability Planner 的内部文件探索和 terminal control actions 属于 Agent 框架
+- Run Supervisor 的内部文件探索和 terminal control actions 属于 Agent 框架
   内部协议，不进入 Host 的 Toolkit inventory；这不构成 Capability 私有业务工具。
 
 ## 9. 当前实现

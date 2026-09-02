@@ -17,10 +17,10 @@ capability each case covers:
 - `context_synthesis`: answer from completed subagent context.
 - `structured_output`: produce schema-compatible orchestration outputs where a
   structured contract still exists.
-- `entry_answer`: answer from existing context or route execution work to Planner.
-- `planner_boundary`: accept execution evidence and select the next private
-  Planner action.
-- `capability_discovery`: let the Planner explore Capability documents and select an executor.
+- `entry_answer`: answer from existing context or route execution work to Supervisor.
+- `supervisor_boundary`: accept execution evidence and select the next private
+  Supervisor action.
+- `capability_discovery`: let the Supervisor explore Capability documents and select an executor.
 - `capability_planning`: define execution boundaries and materialize tasks.
 - `multi_task_flow`: complete goals across isolated task executions and handoffs.
 
@@ -56,9 +56,9 @@ recreate datasets.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
 - `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
   clarification, task completion summary, and required-user-input return control.
-- `agent-entry-answer-routing`: direct-answer, clarification, and Planner handoff
+- `agent-entry-answer-routing`: direct-answer, clarification, and Supervisor handoff
   cases for Entry Answer.
-- `agent-capability-planning-basics`: production Planner entry and
+- `agent-capability-planning-basics`: production Supervisor entry and
   execution-boundary actions, including acceptance, continuation, completion,
   user-input, and unavailable-capability boundaries.
 - `agent-multi-task-flow-basics`: real graph baseline across meaningful task boundaries.
@@ -91,7 +91,7 @@ npm run eval:langfuse:route
 ```
 
 The runner uses the configured model for entry decisions and the real
-Capability Planner agent for document exploration and selection. It writes
+Run Supervisor agent for document exploration and selection. It writes
 traces, scores, and dataset run items to Langfuse. The runner is broad routing
 coverage; the lifecycle eval remains the stronger signal for multi-task
 composition.
@@ -111,7 +111,7 @@ Model configuration is read from `LLM_*`, `~/.pinpawo/.env`, or
 
 ## Decision Eval Boundaries
 
-These evals exercise the remaining public decision boundary and the Planner
+These evals exercise the remaining public decision boundary and the Supervisor
 through complete graph runs:
 
 1. Entry Answer either replies from existing conversation context or requests
@@ -123,12 +123,12 @@ through complete graph runs:
 
    The runner invokes the production Entry Answer prompt with only that control
    tool bound. It checks both route selection and the tool-call shape; execution
-   planning remains owned by the Capability Planner.
+   planning remains owned by the Run Supervisor.
 
-2. The Capability Planner is a private, trace-scoped tool-loop agent. It owns
+2. The Run Supervisor is a private, run-scoped tool-loop agent. It owns
    current-result acceptance and next-step planning together. Its provider messages and
    document observations are not a public graph decision contract, so its eval
-   invokes the complete production Planner loop against a materialized
+   invokes the complete production Supervisor loop against a materialized
    Capability Document Workspace rather than simulating a single Decision call:
 
    ```sh
@@ -147,11 +147,11 @@ through complete graph runs:
    ```
 
 The canonical two-task baseline is `explore auth -> implement from handoff`.
-The package test-script lookup plus test run is intentionally one Planner task
+The package test-script lookup plus test run is intentionally one Supervisor task
 because preparation, execution, and reporting belong to one workspace boundary.
 
 4. Lifecycle composition executes the production graph with the configured real
-   model for entry, Planner, capability, and answer. Executor results
+   model for entry, Supervisor, capability, and answer. Executor results
    are controlled so the final goal verdict measures orchestrator composition
    without tool or environment variance:
 
@@ -211,13 +211,13 @@ Both preview and stability evaluation use `decision-eval-scenarios.ts`, so the
 displayed entry-routing messages cannot drift from the messages sent by the
 runner.
 
-## Capability Planner Context Audit
+## Run Supervisor Context Audit
 
 Render the complete static Entry and Boundary provider contracts without calling
 a model:
 
 ```sh
-npm run planner:context-audit
+npm run supervisor:context-audit
 ```
 
 The audit includes production system and input messages, clean projected main
@@ -227,28 +227,28 @@ action exclusivity, argument semantics, and run/message scope. Follow static
 review with behavior tests and targeted lifecycle evals; do not turn prompt prose
 into a literal snapshot contract.
 
-## Cross-Decision Stability Runner
+## Entry Answer Stability Runner
 
-Run every canonical entry, planner, capability, and outcome case repeatedly
-against the configured real model:
+Run every canonical Entry Answer routing case repeatedly against the configured
+real model:
 
 ```sh
 npm run eval:decision-stability
 ```
 
-The default is five repetitions per case. The summary reports pass rate,
-verdict distribution, distinct structured-output variants, schema errors,
-output-shape distribution (including planner task/tail counts and rubber-stamp
-status), invocation errors, failed score dimensions, and mean latency. This
-runner is local and does not require Langfuse.
+This command selects `entry_answer` and defaults to five repetitions per case.
+The summary reports pass rate, verdict distribution, distinct output variants,
+schema errors, output-shape distribution, invocation errors, failed score
+dimensions, and mean latency. This runner is local and does not require
+Langfuse.
 
 Useful filters:
 
 ```sh
-DECISION_EVAL_TARGETS=entry,planner DECISION_EVAL_REPEATS=5 \
+PROMPT_EVAL_TARGETS=entry_answer,answer PROMPT_EVAL_REPEATS=5 \
   npm run eval:decision-stability
 
-DECISION_EVAL_CASES=entry-uses-general-for-unmatched-work DECISION_EVAL_REPEATS=3 \
+PROMPT_EVAL_CASES=repository-task-enters-supervisor PROMPT_EVAL_REPEATS=3 \
   npm run eval:decision-stability
 
 DECISION_EVAL_TIMEOUT_MS=180000 npm run eval:decision-stability
@@ -257,9 +257,10 @@ DECISION_EVAL_STRUCTURED_OUTPUT_METHOD=jsonMode npm run eval:decision-stability
 ```
 
 Model configuration is resolved by explicit Model Profile ID from the versioned
-`models` section in `~/.pinpawo/config.json`. Entry scoring covers only result
-availability; Planner scoring owns task boundaries, plan contents, and
-Capability selection.
+`models` section in `~/.pinpawo/config.json`. Entry Answer scoring covers route
+selection and the `plan_request` tool-call shape. Supervisor behavior is covered
+separately by `eval:langfuse:capability-planning` and
+`eval:lifecycle-composition`.
 
 ## Prompt Contract Evaluation
 
@@ -277,9 +278,9 @@ repeat count before comparing providers:
 npm run eval:prompt-v1
 ```
 
-It runs 35 canonical cases across `entry`, `planner`, `capability`, `outcome`,
-and `answer`, with three repeats per case. Select one subject and one independent
-fixed judge from the configured Model Profiles:
+It runs 17 canonical cases across `entry_answer` and `answer`, with three repeats
+per case. Select one subject and one independent fixed judge from the configured
+Model Profiles:
 
 ```sh
 PROMPT_EVAL_MODEL_PROFILE_ID=qwen-max \
@@ -302,19 +303,18 @@ cases, repetitions, and provider-reported token usage. The runner requires a cle
 `PROMPT_EVAL_ALLOW_DIRTY=1` is available for exploratory runs, whose reports stay
 marked as dirty.
 
-Exact actions, verdicts, enums, and mechanical plan relationships use
-deterministic contract criteria. Free-form entry tasks, planner task/tail
-objectives, and `answer` outputs use the independently selected fixed judge with
-the versioned `prompt-goal-v1` evaluator. The report records both profile
-identities and keeps subject-model usage separate from evaluator usage. A
-malformed or failed evaluator call makes the run not evaluable; it does not
-count as a failed objective.
+Entry Answer routes and tool-call shapes use deterministic contract criteria.
+Free-form `answer` outputs use the independently selected fixed judge with the
+versioned `prompt-goal-v1` evaluator. The report records both profile identities
+and keeps subject-model usage separate from evaluator usage. A malformed or
+failed evaluator call makes the run not evaluable; it does not count as a failed
+objective.
 
 Every criterion result records whether it was evaluated deterministically or by
 the LLM judge. Goal criteria contain only behavior owned by the prompt contract.
-Candidate recall, planner rubber-stamp status, gap-note presence, output shape,
-and similar measurements remain diagnostics. Schema-owned field and enum
-constraints remain schema failures rather than duplicated prompt-goal criteria.
+Answer length, prior-answer overlap, output shape, and similar measurements remain
+diagnostics. Schema-owned field constraints remain schema failures rather than
+duplicated prompt-goal criteria.
 
 The answer cases keep two different contracts separate:
 
@@ -329,7 +329,7 @@ and family unambiguously:
 PROMPT_EVAL_PROVIDER=openai \
 PROMPT_EVAL_MODEL_FAMILY=gpt-5 \
 PROMPT_EVAL_REASONING_EFFORT=low \
-PROMPT_EVAL_TARGETS=entry,answer \
+PROMPT_EVAL_TARGETS=entry_answer,answer \
 PROMPT_EVAL_REPEATS=5 \
 PROMPT_EVAL_REPORT_PATH=.eval-results/gpt-candidate.json \
   npm run eval:prompt-stability
@@ -376,7 +376,7 @@ bounded known-image understanding check. The runner rejects mixed harness,
 revision, subject, or judge identities.
 
 `PROMPT_EVAL_MATRIX_MAX_RUNS` is a hard preflight limit on scenario and image
-evaluation runs (not internal Planner loop iterations) and defaults to 500.
+evaluation runs (not internal Supervisor loop iterations) and defaults to 500.
 `PROMPT_EVAL_MATRIX_MAX_ESTIMATED_COST_USD` is an optional sequential stop
 budget; using it requires complete per-profile pricing through
 `PROMPT_EVAL_PRICING_JSON`.
@@ -432,14 +432,14 @@ before producing its real final result for normal handoff.
 ## Entry Answer Stability Runner
 
 The Entry Answer runner calls the production prompt with the configured real
-LLM. It repeats each case so direct-answer, clarification, and Planner-routing
-drift is visible without Capability Planner or graph noise:
+LLM. It repeats each case so direct-answer, clarification, and Supervisor-routing
+drift is visible without Run Supervisor or graph noise:
 
 ```sh
 npm run eval:entry-answer
 ```
 
-Task formation and task splitting belong to the Capability Planner datasets and
+Task formation and task splitting belong to the Run Supervisor datasets and
 graph-level evals.
 
 Useful knobs:

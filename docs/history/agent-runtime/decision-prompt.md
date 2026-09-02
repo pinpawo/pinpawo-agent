@@ -2,7 +2,7 @@
 
 > 状态：历史设计。以下正文保留迁移前背景，不再代表当前方向。
 > Planner 生命周期目标见
-> [run-scoped Planner session](../../design/agent-runtime/run-scoped-planner-session.md)。
+> [run-scoped Supervisor session](../../design/agent-runtime/run-scoped-supervisor-session.md)。
 > Entry 的后续收缩提案见
 > [`Entry Answer routing draft`](../../design/agent-runtime/entry-answer-routing.md)。
 > 范围：`entryDecision`、`capabilityPlanner`、`outcomeDecision` 与 `answer` 的职责和提示词边界。

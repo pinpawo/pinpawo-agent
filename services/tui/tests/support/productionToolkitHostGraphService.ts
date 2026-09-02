@@ -12,7 +12,7 @@ import {
   type AgentCapability,
   type AgentModels,
   type AgentToolkit,
-  type CapabilityPlannerRunner,
+  type RunSupervisorRunner,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import type {
@@ -220,7 +220,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
       }),
     }),
   } as unknown as AgentModels['act'];
-  const capabilityPlannerRunner: CapabilityPlannerRunner = {
+  const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
       if (input.mode === 'boundary') {
         return { action: 'goal_done', tasks: [] };
@@ -253,7 +253,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
           observe: routeModel,
           subagent: subagentModel,
         },
-        capabilityPlannerRunner,
+        runSupervisorRunner,
       },
       registry,
       input: {

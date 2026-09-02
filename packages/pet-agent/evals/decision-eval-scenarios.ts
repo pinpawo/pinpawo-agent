@@ -65,7 +65,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
       { role: 'user', text: '帮我 review PR #659 的方案。' },
       {
         role: 'assistant',
-        text: '现有方案通过 Goal Creation 生成独立目标，但一次普通生成容易偏离固定职责。可以把 Answer 前置，让它直接回答或交给 Planner。',
+        text: '现有方案通过 Goal Creation 生成独立目标，但一次普通生成容易偏离固定职责。可以把 Answer 前置，让它直接回答或交给 Supervisor。',
       },
       { role: 'user', text: '你有什么更优的解决方案，或者想法么？' },
     ],
@@ -77,7 +77,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
     expectedRoute: 'answer',
   },
   {
-    name: 'repository-task-enters-planner',
+    name: 'repository-task-enters-supervisor',
     messages: [{ role: 'user', text: '读取仓库文件，修复当前 TypeScript 错误并运行测试。' }],
     expectedRoute: 'plan_request',
   },
@@ -126,7 +126,7 @@ const actor = {
 // that parameter makes every correct route look like a shape failure.
 const planRequest = tool(async () => '', {
   name: PLAN_REQUEST_TOOL_NAME,
-  description: 'Hand the current user request to the Capability Planner when satisfying it requires any tool, external capability, or task execution.',
+  description: 'Hand the current user request to the Run Supervisor when satisfying it requires any tool, external capability, or task execution.',
   schema: z.object({
     goal: z.string().trim().min(1).max(2_000)
       .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),

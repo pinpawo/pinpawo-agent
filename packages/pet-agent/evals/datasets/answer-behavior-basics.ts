@@ -456,14 +456,14 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
       suite: ANSWER_BEHAVIOR_BASICS_DATASET,
       tags: ['context_synthesis', 'delegation_control'],
       input: {
-        userRequest: '只完成 Answer 节点与 run user goal 的对齐。\n\n本轮不修改 Entry、Planner 或 Outcome。',
+        userRequest: '只完成 Answer 节点与 run user goal 的对齐。\n\n本轮不修改 Entry、Supervisor 或 Outcome。',
         messages: [
-          { role: 'user', text: '继续优化 Entry、Planner、Outcome 和 Answer。' },
+          { role: 'user', text: '继续优化 Entry、Supervisor、Outcome 和 Answer。' },
           { role: 'assistant', text: '我们最后确认本轮先只处理 Answer 与 user goal 的对齐。' },
           { role: 'user', text: '按刚刚最后确认的范围继续。' },
           {
             role: 'assistant',
-            text: 'Answer 已改为以 run user goal 界定本次回复目标；Entry、Planner 和 Outcome 均未修改。',
+            text: 'Answer 已改为以 run user goal 界定本次回复目标；Entry、Supervisor 和 Outcome 均未修改。',
           },
         ],
         delegationOutcome: {
@@ -478,7 +478,7 @@ export const answerBehaviorBasicsDataset: AgentEvalDataset<
         objective: '依据规范化目标，只总结 Answer 节点的完成结果，不恢复更早的全节点优化目标。',
         acceptanceCriteria: [
           { id: 'answer_alignment_completed', statement: '明确说明 Answer 与 run user goal 的对齐已经完成。' },
-          { id: 'normalized_scope_respected', statement: '没有声称 Entry、Planner 或 Outcome 已在本轮修改，也没有把它们列为仍应继续的工作。' },
+          { id: 'normalized_scope_respected', statement: '没有声称 Entry、Supervisor 或 Outcome 已在本轮修改，也没有把它们列为仍应继续的工作。' },
           { id: 'user_facing_language', statement: '回复面向用户，不暴露 orchestrator、handoff、delegation 等内部执行语言。' },
         ],
         expectedBehavior: 'task_summary',

@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
-  CapabilityPlannerWorkspaceReader,
-  PlannerFileToolError,
-  throwIfPlannerFileExplorationAborted,
+  RunSupervisorWorkspaceReader,
+  SupervisorFileToolError,
+  throwIfSupervisorFileExplorationAborted,
 } from './workspaceReader';
 
 export const CAPABILITY_REGISTRY_BACKEND = {
@@ -71,7 +71,7 @@ function appendMatch(params: {
 }
 
 function createAbortError() {
-  return new PlannerFileToolError(
+  return new SupervisorFileToolError(
     'aborted',
     'Capability registry search was aborted.',
   );
@@ -166,7 +166,7 @@ async function runFilesystemGrep(params: {
       }
       if (spawnError) {
         const codeValue = (spawnError as NodeJS.ErrnoException).code;
-        reject(new PlannerFileToolError(
+        reject(new SupervisorFileToolError(
           'workspace_unavailable',
           codeValue === 'ENOENT'
             ? 'Capability registry filesystem backend requires the system grep executable.'
@@ -175,7 +175,7 @@ async function runFilesystemGrep(params: {
         return;
       }
       if (!stopped && code !== 0 && code !== 1) {
-        reject(new PlannerFileToolError(
+        reject(new SupervisorFileToolError(
           'workspace_unavailable',
           stderr.trim() || `Capability registry grep failed with exit code ${code ?? '?'}.`,
         ));
@@ -194,11 +194,11 @@ async function runFilesystemGrep(params: {
 
 class FileSystemCapabilityRegistryDocuments implements CapabilityRegistryDocuments {
   readonly #workspace: CapabilityDocumentWorkspace;
-  readonly #reader: CapabilityPlannerWorkspaceReader;
+  readonly #reader: RunSupervisorWorkspaceReader;
 
   constructor(workspace: CapabilityDocumentWorkspace) {
     this.#workspace = workspace;
-    this.#reader = new CapabilityPlannerWorkspaceReader(workspace);
+    this.#reader = new RunSupervisorWorkspaceReader(workspace);
   }
 
   async search(params: Parameters<CapabilityRegistryDocuments['search']>[0]) {
@@ -237,11 +237,11 @@ class FileSystemCapabilityRegistryDocuments implements CapabilityRegistryDocumen
 }
 
 class InMemoryCapabilityRegistryDocuments implements CapabilityRegistryDocuments {
-  readonly #reader: CapabilityPlannerWorkspaceReader;
+  readonly #reader: RunSupervisorWorkspaceReader;
   #documents: Promise<ReadonlyMap<string, string>> | null = null;
 
   constructor(workspace: CapabilityDocumentWorkspace) {
-    this.#reader = new CapabilityPlannerWorkspaceReader(workspace);
+    this.#reader = new RunSupervisorWorkspaceReader(workspace);
   }
 
   #load(signal?: AbortSignal) {
@@ -263,7 +263,7 @@ class InMemoryCapabilityRegistryDocuments implements CapabilityRegistryDocuments
     let stoppedBy: CapabilityRegistrySearchResult['stoppedBy'] = null;
 
     search: for (const [path, content] of documents) {
-      throwIfPlannerFileExplorationAborted(params.signal);
+      throwIfSupervisorFileExplorationAborted(params.signal);
       if (matchedTerms(content, params.terms).length === 0) continue;
       const appended = appendMatch({
         matches,

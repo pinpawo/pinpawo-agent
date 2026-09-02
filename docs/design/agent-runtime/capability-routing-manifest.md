@@ -4,15 +4,15 @@ Status: draft.
 
 ## Goal
 
-Give the Capability Planner enough registry vocabulary to form precise
+Give the Run Supervisor enough registry vocabulary to form precise
 `capability_search` terms before any Capability document has been disclosed.
 
 The routing manifest is a compact, immutable view of the effective Capability
-registry. It helps the Planner discover an executor. It does not replace
+registry. It helps the Supervisor discover an executor. It does not replace
 `CAPABILITY.md`, authorize execution, or describe how a Capability performs its
 work.
 
-This is a derived Planner input, not a package format or a revival of the removed
+This is a derived Supervisor input, not a package format or a revival of the removed
 Capability `manifest.json` plugin contract.
 
 ## Current problem
@@ -20,7 +20,7 @@ Capability `manifest.json` plugin contract.
 The current disclosure flow initially provides the complete document for the
 configured default Capability. Other Capability documents remain invisible until
 `capability_search` finds literal text inside them. After an empty search, the
-Planner may learn some undisclosed Capability names, but names alone often do not
+Supervisor may learn some undisclosed Capability names, but names alone often do not
 provide enough domain vocabulary for the next search.
 
 This produces two undesirable biases:
@@ -31,12 +31,12 @@ This produces two undesirable biases:
 
 For example, a user may ask to inspect GitHub Issues while the relevant
 Capability is described using repository, issue-triage, or project-maintenance
-language. The Toolkit is available, but the Planner cannot reliably discover the
+language. The Toolkit is available, but the Supervisor cannot reliably discover the
 Capability that owns it.
 
 ## Decision
 
-The compiled registry exposes a deterministic source manifest. The Planner
+The compiled registry exposes a deterministic source manifest. The Supervisor
 initialization step turns that source into a compact routing manifest before
 normal planning begins.
 
@@ -125,22 +125,22 @@ The manifest excludes:
 - document paths, digests, and provenance.
 
 Those fields either do not help responsibility routing or disclose execution
-detail before the Planner has selected a candidate. Registry digests may remain
+detail before the Supervisor has selected a candidate. Registry digests may remain
 internal cache and invalidation keys; they are not model context.
 
-## Planner flow
+## Supervisor flow
 
 ```text
 compiled Capability registry
   -> deterministic source manifest
   -> initialize compact routing manifest
-  -> initialize run-scoped Planner session with that routing manifest
-  -> Planner selects a candidate from user request + manifest
+  -> initialize run-scoped Supervisor session with that routing manifest
+  -> Supervisor selects a candidate from user request + manifest
   -> capability_search uses its canonical Capability name to disclose the complete CAPABILITY.md
-  -> Planner commits a plan or returns a terminal planning result
+  -> Supervisor submits a plan or another state-changing command
 ```
 
-The manifest is available in both Planner modes:
+The manifest is available in both Supervisor modes:
 
 - `entry` uses it to discover the initial executor responsibilities;
 - `boundary` uses the same immutable view when new work requires another
@@ -151,16 +151,16 @@ memory backends continue searching complete immutable Capability documents and
 return complete matching documents. The manifest does not become another search
 backend.
 
-Toolkit descriptions let the Planner select a candidate from known execution
+Toolkit descriptions let the Supervisor select a candidate from known execution
 scope, but do not replace the Capability document. The candidate's canonical
 name is the stable literal lookup term; semantic phrases are only useful when
-they are expected verbatim in the document. The Planner is instructed to
+they are expected verbatim in the document. The Supervisor is instructed to
 disclose a Capability's complete document before using workflow or contract
 details that are absent from the routing manifest. This applies to the configured
 default as well. The default document uses the same discovery path as every other
 Capability; an exact search for its manifest name is always available when the
-Planner needs the default's complete contract. This remains a Planner
-information-boundary rule rather than a new terminal protocol field; the terminal
+Supervisor needs the default's complete contract. This remains a Supervisor
+information-boundary rule rather than a new command protocol field; the root
 trust boundary continues validating canonical registry membership.
 
 Continuation seeds may disclose Capabilities already referenced by canonical
@@ -169,19 +169,19 @@ routing, and remains separate from the manifest.
 
 ## Lifetime and ownership
 
-The compiled registry owns the manifest. The Planner reads an immutable snapshot
+The compiled registry owns the manifest. The Supervisor reads an immutable snapshot
 corresponding to the same effective registry generation as its Capability
 Document Workspace.
 
-A new root run initializes a new Planner session with that snapshot. Boundary
+A new root run initializes a new Supervisor session with that snapshot. Boundary
 invocations in the same run reuse the same registry view. If the effective
-registry changes, the next Planner session receives the new manifest together
+registry changes, the next Supervisor session receives the new manifest together
 with the new document workspace.
 
 The manifest is not:
 
 - a root conversation message;
-- Planner-generated working memory;
+- Supervisor-generated working memory;
 - a checkpoint compatibility format;
 - a replacement for typed disclosure state.
 
@@ -195,8 +195,8 @@ must not copy it into canonical `messages`.
 ## Initialization and compression
 
 Initialization is a distinct runtime-owned phase, not an optional tool call in
-the normal Planner loop. When no routing manifest exists for the current registry
-generation, the runtime invokes the Planner model with the source manifest and
+the normal Supervisor loop. When no routing manifest exists for the current registry
+generation, the runtime invokes the Supervisor model with the source manifest and
 only one commit tool for the structured routing result. Normal entry or boundary
 planning starts after that result passes validation.
 
@@ -214,13 +214,13 @@ The model owns only `purpose` and `cues`. Toolkit names and descriptions are
 copied from the compiled source into the validated routing result after model
 initialization. A model may use those facts while compressing, but cannot omit or
 rewrite them. This prevents lossy summarization from hiding a registered ability
-such as GitHub Issue access from normal Planner routing.
+such as GitHub Issue access from normal Supervisor routing.
 
 The initialized result is cached by the internal registry generation together
-with the configured default identity and is not regenerated for each Planner
+with the configured default identity and is not regenerated for each Supervisor
 invocation or root run. The internal cache key does not enter model context.
 An in-flight initialization belongs to that cache generation rather than to one
-Planner invocation. Each caller still observes its own cancellation signal, but
+Supervisor invocation. Each caller still observes its own cancellation signal, but
 canceling one caller does not cancel initialization for other callers.
 
 If initialization fails validation or the model call is unavailable, planning
@@ -235,7 +235,7 @@ authoritative registry state.
 1. Derive `CapabilityRegistryManifest` from the effective compiled registry.
 2. Add a validated routing-manifest initialization result and deterministic
    fallback.
-3. Add the immutable routing manifest to Planner entry and boundary invocation
+3. Add the immutable routing manifest to Supervisor entry and boundary invocation
    context.
 4. Stop seeding the configured default into initial disclosed Capability names.
 5. Allow the default document to be found through the same
@@ -270,14 +270,14 @@ Behavioral coverage should demonstrate that:
 - continuation disclosures remain distinct from initial routing context.
 
 Model evals should include lexical-mismatch cases where the user request does
-not contain the authored Capability name. Success means the Planner uses the
+not contain the authored Capability name. Success means the Supervisor uses the
 manifest description to form a search that discloses the correct Capability,
 rather than immediately returning unavailable or selecting the default solely
 because it was preloaded.
 
 ## Model ownership
 
-The resolver that owns this cache is created with one Planner model instance.
+The resolver that owns this cache is created with one Supervisor model instance.
 Registry generation plus configured default is therefore sufficient as its local
 cache identity; a resolver is never shared across different model profiles. The
 source manifest and Capability contract remain model-independent.

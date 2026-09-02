@@ -17,7 +17,7 @@ import {
 } from './config';
 import { createAnswerNode } from './nodes/answer';
 import { createCapabilityNode } from './nodes/capability';
-import { createCapabilityPlannerNode } from './nodes/capabilityPlanner';
+import { createRunSupervisorNode } from './nodes/runSupervisor';
 import {
   captureRunUserRequest,
   createEntryAnswerSubgraph,
@@ -29,7 +29,7 @@ import {
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
-import { createAfterPlannerBoundaryIterationGuard } from './routes/afterPlannerBoundaryIterationGuard';
+import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
 import { createRunTerminationHandlers } from './runTermination';
 
 // --- Graph builder ---
@@ -41,9 +41,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const afterPlannerBoundaryIterationGuard =
-    createAfterPlannerBoundaryIterationGuard({ orchestratorMaxIterations });
-  const runCapabilityPlanner = createCapabilityPlannerNode(config);
+  const afterSupervisorBoundaryIterationGuard =
+    createAfterSupervisorBoundaryIterationGuard({ orchestratorMaxIterations });
+  const runSupervisor = createRunSupervisorNode(config);
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
@@ -56,20 +56,20 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   // Graph-visible anchor shared by resume and post-execution paths. Its
   // conditional edge owns deterministic guard evaluation and telemetry only;
   // it must not grow state updates or user-facing output.
-  const plannerBoundaryIterationGuard = () => ({});
+  const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
     .addNode('captureUserRequest', captureRunUserRequest)
     .addNode('entryAnswer', entryAnswer, {
-      ends: ['capabilityPlanner'],
+      ends: ['runSupervisor'],
     })
-    .addNode('capabilityPlanner', runCapabilityPlanner, {
+    .addNode('runSupervisor', runSupervisor, {
       ends: ['answer', 'capability', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
-    .addNode('plannerBoundaryIterationGuard', plannerBoundaryIterationGuard)
+    .addNode('supervisorBoundaryIterationGuard', supervisorBoundaryIterationGuard)
     .addNode('answer', resultAnswer, {
       ends: ['throwRunFailure'],
       errorHandler: runTermination.onNodeError,
@@ -87,20 +87,20 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     // Run entry uses explicit task lifecycle state. Lane announces remain
     // message/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
-      plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',
+      supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
       captureUserRequest: 'captureUserRequest',
       capability: 'capability',
     })
     .addEdge('captureUserRequest', 'entryAnswer')
-    .addConditionalEdges('plannerBoundaryIterationGuard', afterPlannerBoundaryIterationGuard, {
+    .addConditionalEdges('supervisorBoundaryIterationGuard', afterSupervisorBoundaryIterationGuard, {
       answer: 'answer',
-      capabilityPlanner: 'capabilityPlanner',
+      runSupervisor: 'runSupervisor',
     })
     .addEdge('entryAnswer', END)
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
       end: END,
-      plannerBoundaryIterationGuard: 'plannerBoundaryIterationGuard',
+      supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
     });
 
   return graph.compile({

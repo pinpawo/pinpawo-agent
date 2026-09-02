@@ -29,7 +29,7 @@ export type AgentInvokeInput = {
   /** Runtime environment summary injected into system prompts. Must not contain secrets. */
   runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
-  /** Optional allowlist exposed through the Planner document workspace. */
+  /** Optional allowlist exposed through the Supervisor document workspace. */
   allowedCapabilityNames?: string[];
   /**
    * Explicit fresh-turn treatment of an unfinished delegation. Ordinary user

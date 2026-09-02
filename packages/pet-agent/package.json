@@ -54,7 +54,7 @@
     "eval:lifecycle-composition": "node --env-file-if-exists=.env --import tsx/esm evals/scripts/run-lifecycle-composition.eval.ts",
     "eval:auto-review-risk": "node --env-file-if-exists=.env --import tsx/esm evals/auto-review-risk.eval.ts",
     "prompt:preview": "node --import tsx/esm evals/scripts/preview-decision-prompts.ts",
-    "planner:context-audit": "node --import tsx/esm evals/scripts/audit-capability-planner-context.ts",
+    "supervisor:context-audit": "node --import tsx/esm evals/scripts/audit-run-supervisor-context.ts",
     "eval:structured-output": "LANGCHAIN_TRACING_V2=false node --env-file=.env --import tsx/esm evals/structured-output-compat.eval.ts"
   },
   "dependencies": {

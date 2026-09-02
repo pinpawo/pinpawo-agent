@@ -13,7 +13,7 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { CapabilityPlannerRunner } from '../../src/agent/orchestrator/capabilityPlanner/runner.ts';
+import type { RunSupervisorRunner } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
 import { PLAN_REQUEST_TOOL_NAME } from '../../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
@@ -105,15 +105,15 @@ function buildScriptedAnswerModel() {
   return { model };
 }
 
-function buildScriptedPlannerRunner() {
-  let plannerDecisionCount = 0;
+function buildScriptedSupervisorRunner() {
+  let supervisorDecisionCount = 0;
   const selectedCapabilityNames: string[] = [];
   const plannedObjectives: string[] = [];
   let secondTaskSawHandoff = false;
-  const runner: CapabilityPlannerRunner = {
+  const runner: RunSupervisorRunner = {
     async invoke(input) {
-      plannerDecisionCount += 1;
-      if (plannerDecisionCount === 1) {
+      supervisorDecisionCount += 1;
+      if (supervisorDecisionCount === 1) {
         const objective = '调查 auth 模块的结构、依赖和风险';
         plannedObjectives.push(objective);
         selectedCapabilityNames.push('explore');
@@ -128,7 +128,7 @@ function buildScriptedPlannerRunner() {
           }],
         };
       }
-      if (plannerDecisionCount > 2) {
+      if (supervisorDecisionCount > 2) {
         return { action: 'goal_done', tasks: [] };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
@@ -149,7 +149,7 @@ function buildScriptedPlannerRunner() {
   return {
     runner,
     stats: () => ({
-      plannerDecisionCount,
+      supervisorDecisionCount,
       plannedObjectives,
       selectedCapabilityNames,
       secondTaskSawHandoff,
@@ -163,7 +163,7 @@ function taskMatches(actual: string, expectedTerms: string[]) {
 
 async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
   const answers = buildScriptedAnswerModel();
-  const planner = buildScriptedPlannerRunner();
+  const supervisor = buildScriptedSupervisorRunner();
   const subagent = buildRecordingSubagent(testCase.input.subagentResults);
   const graph = createOrchestratorGraph({
     models: {
@@ -173,7 +173,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       subagent: subagent.model,
     },
     actor,
-    capabilityPlannerRunner: planner.runner,
+    runSupervisorRunner: supervisor.runner,
   });
   const result = await graph.invoke(
     buildOrchestratorTurnInput([new HumanMessage(testCase.input.userMessage)]),
@@ -194,7 +194,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     .map((summary) => summary.resultPreview ?? '')
     .join('\n');
   const stats = {
-    ...planner.stats(),
+    ...supervisor.stats(),
   };
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
@@ -217,10 +217,10 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       score: stats.plannedObjectives.length === expected.expectedPlannedObjectiveTerms.length
         && stats.plannedObjectives.every((objective, index) =>
           (expected.expectedPlannedObjectiveTerms[index] ?? []).every((term) => objective.includes(term)))
-        && stats.plannerDecisionCount === expected.expectedDelegationCount + 1
+        && stats.supervisorDecisionCount === expected.expectedDelegationCount + 1
         && JSON.stringify(stats.selectedCapabilityNames) === JSON.stringify(expected.expectedCapabilityNames)
         && summaries.length === expected.expectedTaskTerms.length ? 1 : 0,
-      comment: `plannedObjectives=${JSON.stringify(stats.plannedObjectives)}, plannerDecisions=${stats.plannerDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,
+      comment: `plannedObjectives=${JSON.stringify(stats.plannedObjectives)}, supervisorDecisions=${stats.supervisorDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,
     },
     {
       key: 'handoff_consumed_by_next_task_correct',

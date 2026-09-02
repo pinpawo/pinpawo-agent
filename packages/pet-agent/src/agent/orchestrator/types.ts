@@ -9,8 +9,8 @@ import type {
   ToolkitReviewCapabilities,
 } from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
-import type { CapabilityPlannerRunner } from './capabilityPlanner/runner';
-import type { CapabilityRegistryBackend } from './capabilityPlanner/registryDocuments';
+import type { RunSupervisorRunner } from './runSupervisor/runner';
+import type { CapabilityRegistryBackend } from './runSupervisor/registryDocuments';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
@@ -67,7 +67,7 @@ export type DecisionMode = 'answer' | 'capability';
 export type OrchestratorConfig = {
   models: AgentModels;
   /**
-   * Capability identified in the Planner routing manifest as its default
+   * Capability identified in the Supervisor routing manifest as its default
    * candidate. Defaults to the well-known `general` Capability. This changes
    * candidate preference only; it does not disclose the Capability document,
    * bypass registry availability, or bypass an invocation-scoped allowlist.
@@ -103,16 +103,16 @@ export type OrchestratorConfig = {
    */
   capabilityArtifactStore?: CapabilityArtifactStore;
   /**
-   * Typed seam for the framework-internal Capability Planner. Production
-   * defaults to createCapabilityPlannerAgent(); graph tests may inject a
+   * Typed seam for the framework-internal Run Supervisor. Production
+   * defaults to createRunSupervisorAgent(); graph tests may inject a
    * scripted runner without simulating its private file-tool messages.
    */
-  capabilityPlannerRunner?: CapabilityPlannerRunner;
+  runSupervisorRunner?: RunSupervisorRunner;
   /**
-   * Maximum Capability discovery model turns per Planner input. Defaults to 2.
+   * Maximum Capability discovery model turns per Supervisor input. Defaults to 2.
    * Parallel capability_search calls in one model response count as one round.
    */
-  capabilityPlannerMaxSearchRounds?: number;
+  runSupervisorMaxSearchRounds?: number;
   /**
    * Storage/search backend for the immutable Capability registry documents.
    * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
@@ -137,7 +137,7 @@ export type OrchestratorInvokeOptions = {
   globalReviewPolicy?: GlobalReviewPolicy;
   maxRunIterations?: number;
   /**
-   * Explicit Capability scope for this run. The Planner workspace contains
+   * Explicit Capability scope for this run. The Supervisor workspace contains
    * only compiled capabilities in this allowlist. Omit to expose the complete
    * compiled registry.
    */

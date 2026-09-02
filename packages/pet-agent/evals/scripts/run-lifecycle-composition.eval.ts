@@ -81,7 +81,7 @@ const actor = {
   species: null,
 };
 
-type DecisionKind = 'entry_answer' | 'planner' | 'unknown';
+type DecisionKind = 'entry_answer' | 'supervisor' | 'unknown';
 
 type DecisionRecord = {
   kind: DecisionKind;
@@ -329,7 +329,7 @@ function createRecordingModels(model: AgentModels['act']) {
           continue;
         }
         decisions.push({
-          kind: 'planner',
+          kind: 'supervisor',
           output: { ...output, action: toolCall.name },
         });
       }
@@ -467,7 +467,7 @@ function countDecisions(
 ): Record<DecisionKind | 'answer', number> {
   const counts: Record<DecisionKind | 'answer', number> = {
     entry_answer: 0,
-    planner: 0,
+    supervisor: 0,
     unknown: 0,
     answer: 0,
   };

@@ -34,10 +34,10 @@ test('message utils read normalized tool calls from AI message shapes', () => {
     { id: 'call-1', name: 'read_file', args: { path: 'README.md' } },
   ]);
   assert.deepEqual(readMessageToolCalls(standard, {
-    fallbackIdPrefix: 'planner:1',
+    fallbackIdPrefix: 'supervisor:1',
   }), [
     { id: 'call-1', name: 'read_file', args: { path: 'README.md' } },
-    { id: 'planner:1:1', name: 'missing_id', args: {} },
+    { id: 'supervisor:1:1', name: 'missing_id', args: {} },
   ]);
   assert.deepEqual(readMessageToolCalls(legacy), [
     { id: 'call-2', name: 'run_shell', args: { command: 'pwd' } },

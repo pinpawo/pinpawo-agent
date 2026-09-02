@@ -39,8 +39,8 @@ test('lifecycle composition pass requires semantic goals and mechanical invarian
     finalState: {
       messages: [new AIMessage('done')],
       runNextDelegation: null,
-      runPlannerSession: null,
-      taskPlannerContinuation: null,
+      runSupervisorSession: null,
+      taskRunContinuation: null,
       taskActiveDelegation: null,
       runIterationCount: 0,
       runLatestDelegationOutcome: null,
@@ -72,8 +72,8 @@ test('lifecycle composition cannot pass an exactly-once case without an executor
     finalState: {
       messages: [new AIMessage('looks complete')],
       runNextDelegation: null,
-      runPlannerSession: null,
-      taskPlannerContinuation: null,
+      runSupervisorSession: null,
+      taskRunContinuation: null,
       taskActiveDelegation: null,
       runIterationCount: 0,
       runLatestDelegationOutcome: null,
@@ -114,8 +114,8 @@ test('lifecycle composition accepts an isolated resumable checkpoint for require
     finalState: {
       messages: [retainedAnnounce],
       runNextDelegation: null,
-      runPlannerSession: null,
-      taskPlannerContinuation: {
+      runSupervisorSession: null,
+      taskRunContinuation: {
         traceId: 'trace-1',
         userRequest: 'check staging deployment',
         activeDelegationId: 'delegation-1',

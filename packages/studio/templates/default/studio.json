@@ -1,5 +1,5 @@
 {
-  "studioId": "kanban-example",
+  "studioId": "studio",
   "entryPetId": "planner",
   "pets": ["planner", "executor", "reviewer", "wiki"],
   "plugins": [
@@ -47,12 +47,12 @@
       "options": {
         "triggers": [
           {
-            "triggerId": "hello",
+            "triggerId": "external-request",
             "petId": "planner",
             "request": "Plan the following external request with Kanban.",
             "source": {
               "kind": "http",
-              "secretEnv": "PINPAWO_HELLO_TRIGGER_SECRET"
+              "secretEnv": "PINPAWO_STUDIO_TRIGGER_SECRET"
             }
           },
           {

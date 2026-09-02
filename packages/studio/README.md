@@ -22,9 +22,11 @@ npm install --global \
   @pinpawo-plugin/project-files \
   @pinpawo-plugin/trigger
 
-pinpawo-studio init --workdir /path/to/project
-pinpawo-studio --workdir /path/to/project
-pinpawo-studio --workdir /path/to/project --pet-port 3212
+WORKDIR=/path/to/project
+pinpawo-studio init --workdir "$WORKDIR"
+export PINPAWO_STUDIO_TRIGGER_SECRET='choose-a-secret-at-least-16-characters'
+pinpawo-studio --workdir "$WORKDIR"
+pinpawo-studio --workdir "$WORKDIR" --pet-port 3212
 ```
 
 Configured Plugin IDs are installed package names. Each package exposes its
@@ -49,6 +51,12 @@ resident Pet. The workdir must contain
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.
 
-`pinpawo-studio init` copies the shipped four-Pet kickstart configuration,
-Capabilities, and initial `wiki/PROJECT.md` without overwriting existing files.
+`pinpawo-studio init` creates the shipped four-Pet configuration, Capabilities,
+and initial `wiki/PROJECT.md` in the selected workdir without overwriting
+existing files. The package template itself contains no `.pinpawo/` runtime
+directory or generated state.
+
+The default template includes an HTTP Trigger for external requests. Set
+`PINPAWO_STUDIO_TRIGGER_SECRET` before starting the Host, or replace that
+Trigger in the initialized `.pinpawo/studio.json`.
 The independent Studio Console remains a separate frontend application.

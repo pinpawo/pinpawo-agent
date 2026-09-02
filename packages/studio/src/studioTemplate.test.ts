@@ -4,19 +4,22 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import test from 'node:test';
-import { initStudioKickstart } from './studioTemplate';
+import {
+  initStudioKickstart,
+  initStudioWorkdir,
+} from './studioTemplate';
 
 async function createTemplate(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-template-'));
   await Promise.all([
-    mkdir(path.join(root, '.pinpawo', 'pets', 'planner', 'capabilities', 'planning'), { recursive: true }),
+    mkdir(path.join(root, 'pets', 'planner', 'capabilities', 'planning'), { recursive: true }),
     mkdir(path.join(root, 'wiki'), { recursive: true }),
   ]);
   await Promise.all([
-    writeFile(path.join(root, '.pinpawo', 'studio.json'), '{"studioId":"demo"}\n'),
-    writeFile(path.join(root, '.pinpawo', 'pets', 'planner.json'), '{"petId":"planner"}\n'),
+    writeFile(path.join(root, 'studio.json'), '{"studioId":"demo"}\n'),
+    writeFile(path.join(root, 'pets', 'planner.json'), '{"petId":"planner"}\n'),
     writeFile(
-      path.join(root, '.pinpawo', 'pets', 'planner', 'capabilities', 'planning', 'CAPABILITY.md'),
+      path.join(root, 'pets', 'planner', 'capabilities', 'planning', 'CAPABILITY.md'),
       '# Planning\n',
     ),
     writeFile(path.join(root, 'wiki', 'PROJECT.md'), '# Project\n'),
@@ -25,10 +28,10 @@ async function createTemplate(): Promise<string> {
   return root;
 }
 
-test('kickstart init copies only runtime config, Pet Capabilities, and Wiki Markdown', async () => {
+test('Studio init copies only configuration, Pet Capabilities, and Wiki Markdown', async () => {
   const templateRoot = await createTemplate();
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-workdir-'));
-  const result = await initStudioKickstart({ workdir, templateRoot });
+  const result = await initStudioWorkdir({ workdir, templateRoot });
 
   assert.deepEqual(result.files.sort(), [
     '.pinpawo/pets/planner.json',
@@ -40,14 +43,14 @@ test('kickstart init copies only runtime config, Pet Capabilities, and Wiki Mark
   await assert.rejects(readFile(path.join(workdir, 'README.md')), /ENOENT/);
 });
 
-test('kickstart init preflights conflicts before copying any file', async () => {
+test('Studio init preflights conflicts before copying any file', async () => {
   const templateRoot = await createTemplate();
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-conflict-'));
   await mkdir(path.join(workdir, 'wiki'), { recursive: true });
   await writeFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'keep me\n');
 
   await assert.rejects(
-    initStudioKickstart({ workdir, templateRoot }),
+    initStudioWorkdir({ workdir, templateRoot }),
     /refuses to overwrite/,
   );
   await assert.rejects(
@@ -57,9 +60,13 @@ test('kickstart init preflights conflicts before copying any file', async () => 
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
 });
 
+test('legacy kickstart initializer remains an alias for Studio init', () => {
+  assert.equal(initStudioKickstart, initStudioWorkdir);
+});
+
 test('shipped Pet Capabilities separate planning, execution, and Wiki observation', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
-  await initStudioKickstart({ workdir });
+  await initStudioWorkdir({ workdir });
 
   const capabilities = await loadCapabilityDirectory(path.join(
     workdir,

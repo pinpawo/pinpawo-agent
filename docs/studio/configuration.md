@@ -100,8 +100,9 @@ into its unified Toolkit inventory. Each loaded Capability's `uses` declaration
 selects the tools available to that Pet. A Toolkit such as `kanban` is therefore
 named in `CAPABILITY.md` under `uses`, never in Pet JSON.
 
-The repository includes a complete layout example under
-`packages/studio/examples/kanban-workdir/`.
+Run `pinpawo-studio init --workdir <directory>` to create the initial layout in
+a selected project. The package ships its source template under
+`packages/studio/templates/default/`; it is not itself a runnable workdir.
 
 ## Plugin assembly
 

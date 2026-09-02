@@ -25,6 +25,7 @@ const packageRoots = [
   resolve(workspaceRoot, 'plugins', 'studio-http'),
   resolve(workspaceRoot, 'plugins', 'kanban'),
   resolve(workspaceRoot, 'plugins', 'scheduler'),
+  resolve(workspaceRoot, 'plugins', 'notice'),
   resolve(workspaceRoot, 'plugins', 'project-files'),
   resolve(workspaceRoot, 'plugins', 'trigger'),
 ];
@@ -37,6 +38,7 @@ if (!npmCli) {
 const tempRoot = await mkdtemp(join(tmpdir(), 'pinpawo-studio-install-smoke-'));
 const artifactDir = join(tempRoot, 'artifacts');
 const consumerDir = join(tempRoot, 'consumer');
+const smokeHome = join(tempRoot, 'home');
 const cacheDir = process.env.CI
   ? undefined
   : join(workspaceRoot, 'node_modules', '.cache', 'pinpawo-studio-install-smoke-npm');
@@ -51,8 +53,10 @@ try {
   await Promise.all([
     mkdir(artifactDir, { recursive: true }),
     mkdir(consumerDir, { recursive: true }),
+    mkdir(join(smokeHome, '.pinpawo'), { recursive: true }),
     ...(cacheDir ? [mkdir(cacheDir, { recursive: true })] : []),
   ]);
+  await writeFile(join(smokeHome, '.pinpawo', 'local-server-token'), 'studio-install-smoke-token\n');
   await writeFile(join(consumerDir, 'package.json'), `${JSON.stringify({
     name: 'pinpawo-studio-install-smoke',
     private: true,
@@ -163,6 +167,8 @@ try {
   ], consumerDir, 'resolve initialized Studio workdir Plugins', 30_000, {
     PINPAWO_SMOKE_WORKDIR: initializedWorkdir,
     PINPAWO_STUDIO_TRIGGER_SECRET: 'install-smoke-trigger-secret-at-least-16-characters',
+    HOME: smokeHome,
+    USERPROFILE: smokeHome,
   });
   assert.equal(resolvedKickstart.stdout.trim(), 'http,notice,kanban,scheduler,project-files,trigger');
   assert.equal(resolvedKickstart.stderr, '');

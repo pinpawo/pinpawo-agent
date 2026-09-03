@@ -149,6 +149,25 @@ test('waiting state holds dispatch while conversation can reopen the gate', asyn
   assert.deepEqual(states, ['busy', 'open', 'busy', 'open']);
 });
 
+test('a submitted dispatch refreshes a stale waiting state before it is held', async () => {
+  const coordinator = new ResidentPetCoordinator({
+    initialState: 'waiting',
+    readSettledState: () => 'open',
+  });
+  const dispatched = deferred();
+
+  coordinator.submitDispatch(async () => {
+    dispatched.resolve();
+  });
+
+  await dispatched.promise;
+  await waitFor(
+    () => coordinator.getQueueSnapshot().state === 'open'
+      && coordinator.getQueueSnapshot().queuedDispatches === 0,
+    'submitted dispatch did not refresh the stale waiting gate',
+  );
+});
+
 test('a queued dispatch reads the active conversation thread only when it starts', async () => {
   let activeThread = 'thread-old';
   const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });

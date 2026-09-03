@@ -32,6 +32,18 @@ test('Kanban records unassigned work before a user assignment and executor start
   ]);
 });
 
+test('Kanban keeps an optional assignment note on the assignment event without changing task detail', async (t) => {
+  const kanban = await service();
+  t.after(() => kanban.close());
+  const created = await kanban.createTask({ title: 'Implement', detail: 'Implement the requested change.' });
+
+  const assigned = await kanban.assignTask(created.task.taskId, 'executor', 'Please validate the failure path first.');
+
+  assert.equal(assigned.event.note, 'Please validate the failure path first.');
+  assert.equal(assigned.task.note, undefined);
+  assert.equal((await kanban.listTaskEvents()).at(-1)?.note, 'Please validate the failure path first.');
+});
+
 test('Kanban only permits assignment after dependencies are done', async (t) => {
   const kanban = await service();
   t.after(() => kanban.close());

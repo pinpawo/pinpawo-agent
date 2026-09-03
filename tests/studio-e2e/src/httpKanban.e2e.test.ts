@@ -13,7 +13,7 @@ test('Kanban HTTP assignment is user-controlled and Trigger performs the routed 
     triggers: [{
       triggerId: 'assigned-task',
       target: { kind: 'event_payload', path: 'payload.assigneeId', allowedPetIds: ['executor'] },
-      request: 'Execute {{payload.taskId}}',
+      request: { template: 'Execute {{payload.taskId}}', context: ['payload.assignmentNote'] },
       source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.assigned' },
     }],
   });
@@ -53,11 +53,29 @@ test('Kanban HTTP assignment is user-controlled and Trigger performs the routed 
 
   const assigned = await fetch(`${base}/kanban/control`, {
     method: 'POST', headers,
-    body: JSON.stringify({ action: 'assign', taskId: task.task.taskId, assigneeId: 'executor' }),
+    body: JSON.stringify({
+      action: 'assign',
+      taskId: task.task.taskId,
+      assigneeId: 'executor',
+      assignmentNote: 'Please check the regression path before coding.',
+    }),
   });
   assert.equal(assigned.status, 202);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal((await kanban.service.getTask(task.task.taskId))?.status, 'assigned');
   assert.equal(requests.length, 1);
   assert.match(requests[0]!, new RegExp(task.task.taskId));
+  assert.match(requests[0]!, /Please check the regression path before coding/);
+
+  const acceptedDelivery = (await trigger.service.snapshot()).deliveries[0];
+  assert.equal(acceptedDelivery?.status, 'accepted');
+  const redelivered = await fetch(`${base}/triggers/control`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'redeliver', deliveryId: acceptedDelivery!.deliveryId }),
+  });
+  assert.equal(redelivered.status, 202);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(requests.length, 2);
+  assert.equal((await trigger.service.snapshot()).deliveries.length, 2);
 });

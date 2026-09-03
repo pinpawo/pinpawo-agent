@@ -194,6 +194,9 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
             title: mutation.task.title,
             detail: mutation.task.detail,
             deps: mutation.task.deps,
+            ...(mutation.event.eventType === 'assigned' && mutation.event.note !== undefined
+              ? { assignmentNote: mutation.event.note }
+              : {}),
             ...(mutation.task.note === undefined ? {} : { note: mutation.task.note }),
             sequence: mutation.event.sequence,
           },
@@ -215,10 +218,10 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
               const value = await readJson();
               if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Kanban control request must be an object.');
               const input = value as Record<string, unknown>;
-              if (input.action !== 'assign' || typeof input.taskId !== 'string' || typeof input.assigneeId !== 'string' || Object.keys(input).some((key) => !['action', 'taskId', 'assigneeId'].includes(key))) {
-                throw new Error('Kanban control requires action "assign", taskId, and assigneeId.');
+              if (input.action !== 'assign' || typeof input.taskId !== 'string' || typeof input.assigneeId !== 'string' || (input.assignmentNote !== undefined && typeof input.assignmentNote !== 'string') || Object.keys(input).some((key) => !['action', 'taskId', 'assigneeId', 'assignmentNote'].includes(key))) {
+                throw new Error('Kanban control requires action "assign", taskId, assigneeId, and an optional assignmentNote.');
               }
-              return { kind: 'json', status: 202, body: { task: (await service.assignTask(input.taskId, input.assigneeId)).task } };
+              return { kind: 'json', status: 202, body: { task: (await service.assignTask(input.taskId, input.assigneeId, input.assignmentNote)).task } };
             } catch (error) { return { kind: 'json', status: 409, body: { error: asError(error).message } }; }
           } });
           return () => { removeControl(); removeEvents(); removeSnapshot(); };

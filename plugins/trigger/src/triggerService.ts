@@ -22,7 +22,7 @@ export type TriggerDeliveryEvent = {
   sequence: number;
   deliveryId: string;
   triggerId: string;
-  eventType: 'received' | 'accepted' | 'failed' | 'recovered' | 'retried';
+  eventType: 'received' | 'accepted' | 'failed' | 'recovered' | 'retried' | 'redelivered';
   status: TriggerDeliveryStatus;
   note?: string;
   occurredAt: string;
@@ -216,6 +216,60 @@ export class TriggerService {
       throw error;
     }
     const delivery = this.get(normalizedId)!;
+    this.publish({ delivery, event: event! });
+    return delivery;
+  }
+
+  /**
+   * Explicitly create a fresh delivery for an input that was accepted by the
+   * resident admission queue. The original receipt remains immutable: an
+   * operator must consciously request this because acceptance does not prove
+   * whether a later runtime interruption occurred before useful work began.
+   */
+  async redeliver(deliveryId: string): Promise<TriggerDelivery> {
+    this.assertReady();
+    const normalizedId = nonEmpty(deliveryId, 'deliveryId');
+    const current = this.get(normalizedId);
+    if (!current || current.status !== 'accepted') {
+      throw new Error(`Trigger delivery "${normalizedId}" is not accepted and cannot be redelivered.`);
+    }
+    if (!current.targetPetId || !current.request) {
+      throw new Error(`Trigger delivery "${normalizedId}" has no retained dispatch input.`);
+    }
+
+    const nextDeliveryId = randomUUID();
+    const now = new Date().toISOString();
+    let event: TriggerDeliveryEvent;
+    this.database.exec('BEGIN IMMEDIATE;');
+    try {
+      this.database.prepare(`
+        INSERT INTO trigger_deliveries(
+          delivery_id, trigger_id, idempotency_key, target_pet_id, request_text, status, note, occurred_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'dispatching', ?, ?, ?)
+      `).run(
+        nextDeliveryId,
+        current.triggerId,
+        `${current.idempotencyKey}:redelivery:${nextDeliveryId}`,
+        current.targetPetId,
+        current.request,
+        `Redelivery requested for accepted delivery ${normalizedId}.`,
+        now,
+        now,
+      );
+      event = this.insertEvent(
+        nextDeliveryId,
+        current.triggerId,
+        'redelivered',
+        'dispatching',
+        `Redelivered from ${normalizedId}.`,
+        now,
+      );
+      this.database.exec('COMMIT;');
+    } catch (error) {
+      this.database.exec('ROLLBACK;');
+      throw error;
+    }
+    const delivery = this.get(nextDeliveryId)!;
     this.publish({ delivery, event: event! });
     return delivery;
   }

@@ -63,7 +63,7 @@ export type KanbanTaskRepository = {
   readSnapshot: () => Promise<KanbanTaskSnapshot>;
   getTask: (taskId: string) => Promise<KanbanTask | null>;
   createTask: (input: CreateKanbanTaskInput) => Promise<KanbanTaskMutation>;
-  assignTask: (taskId: string, assigneeId: string) => Promise<KanbanTaskMutation>;
+  assignTask: (taskId: string, assigneeId: string, assignmentNote?: string) => Promise<KanbanTaskMutation>;
   startAssignedTask: (taskId: string) => Promise<KanbanTaskMutation>;
   completeTask: (taskId: string, result: string) => Promise<KanbanTaskMutation>;
   blockTask: (taskId: string, reason: string) => Promise<KanbanTaskMutation>;
@@ -76,6 +76,7 @@ const TASK_STATUSES = new Set<KanbanTaskStatus>([
 ]);
 const SCHEMA_VERSION = 5;
 const MAX_TASK_TITLE_LENGTH = 160;
+const MAX_ASSIGNMENT_NOTE_LENGTH = 1_000;
 const DEFAULT_EVENT_LIMIT = 200;
 const MAX_EVENT_LIMIT = 1_000;
 
@@ -112,6 +113,15 @@ function requireTaskTitle(value: string): string {
     throw new Error(`Kanban title must not exceed ${MAX_TASK_TITLE_LENGTH.toString()} characters.`);
   }
   return title;
+}
+
+function normalizeAssignmentNote(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const note = value.trim();
+  if (note.length > MAX_ASSIGNMENT_NOTE_LENGTH) {
+    throw new Error(`Kanban assignment note must not exceed ${MAX_ASSIGNMENT_NOTE_LENGTH.toString()} characters.`);
+  }
+  return note || undefined;
 }
 
 function titleFromLegacyBrief(brief: string): string {
@@ -357,10 +367,11 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     });
   }
 
-  async assignTask(taskId: string, assigneeId: string): Promise<KanbanTaskMutation> {
+  async assignTask(taskId: string, assigneeId: string, assignmentNote?: string): Promise<KanbanTaskMutation> {
     this.assertReady();
     const normalizedTaskId = requireNonEmpty(taskId, 'taskId');
     const normalizedAssigneeId = requireNonEmpty(assigneeId, 'assigneeId');
+    const normalizedAssignmentNote = normalizeAssignmentNote(assignmentNote);
     return this.transaction(() => {
       const row = this.database.prepare(
         'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
@@ -390,7 +401,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       if (result.changes !== 1) {
         throw new Error(`Kanban task "${normalizedTaskId}" could not be assigned.`);
       }
-      return this.mutationFor(normalizedTaskId, 'assigned', current, 'assigned', undefined, now);
+      return this.mutationFor(normalizedTaskId, 'assigned', current, 'assigned', normalizedAssignmentNote, now);
     });
   }
 
@@ -623,8 +634,8 @@ export class KanbanTaskService {
     return this.publish(await this.repository.createTask(input));
   }
 
-  async assignTask(taskId: string, assigneeId: string): Promise<KanbanTaskMutation> {
-    return this.publish(await this.repository.assignTask(taskId, assigneeId));
+  async assignTask(taskId: string, assigneeId: string, assignmentNote?: string): Promise<KanbanTaskMutation> {
+    return this.publish(await this.repository.assignTask(taskId, assigneeId, assignmentNote));
   }
 
   async startAssignedTask(taskId: string): Promise<KanbanTaskMutation> {

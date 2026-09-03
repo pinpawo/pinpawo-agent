@@ -43,3 +43,27 @@ test('Trigger recovers an unknown dispatch outcome and preserves deduplication',
     ['received', 'recovered'],
   );
 });
+
+test('an accepted delivery can be explicitly redelivered without rewriting its receipt', async (t) => {
+  const service = new TriggerService();
+  await service.init();
+  t.after(() => service.close());
+
+  const original = await service.claim('build', 'delivery-1', {
+    targetPetId: 'worker',
+    request: 'Build the release.',
+  });
+  await service.accept(original.delivery.deliveryId);
+
+  const redelivery = await service.redeliver(original.delivery.deliveryId);
+  assert.notEqual(redelivery.deliveryId, original.delivery.deliveryId);
+  assert.equal(redelivery.status, 'dispatching');
+  assert.equal(redelivery.targetPetId, 'worker');
+  assert.equal(redelivery.request, 'Build the release.');
+  assert.match(redelivery.note ?? '', new RegExp(original.delivery.deliveryId));
+  assert.equal((await service.getDelivery(original.delivery.deliveryId))?.status, 'accepted');
+  assert.deepEqual(
+    (await service.events()).map(({ eventType }) => eventType),
+    ['received', 'accepted', 'redelivered'],
+  );
+});

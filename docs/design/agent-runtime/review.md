@@ -2,285 +2,357 @@
 
 > Status: Draft
 > Date: 2026-09-04
-> Related: issues #133, #675, #684, #721, and #747; PR #682
+> Related: issues #133, #675, #684, #721, #747, and #749; PR #682
 > Policy selection: [Toolkit HITL policy](toolkit-hitl-policy.md)
 > Host boundary: [Resident Pet Host ports](resident-pet-host-ports.md)
 
 ## Purpose
 
-The Agent has one execution lifecycle. It may be running, interrupted, resumed,
-or finished. Review is not a second state machine: it is one concrete reason why
-the execution is interrupted.
-
-This document is the single design source for:
-
-- the Runtime's typed interrupt abstraction;
-- Review request and resolution semantics;
-- the relationship between Review, task pause, and invocation cancellation;
-- message-history rules for approve, reject, respond, and Esc/cancel;
-- LangGraph, Pet Runtime, Host, session, and interface ownership;
-- migration from the current Review middleware without changing the parent
-  Planner/capability topology.
-
-The policy that decides whether an action requires Review remains separate in
-[Toolkit HITL policy](toolkit-hitl-policy.md).
-
-## Decision
-
-The proposed polymorphic interrupt abstraction is compatible with the current
-code structure, with one hard boundary:
-
-> Classes encapsulate Runtime behavior; only JSON-serializable data crosses a
-> LangGraph state, checkpoint, stream, or Host boundary.
-
-The current topology already provides the required insertion points:
-
-- `ToolkitReviewMiddleware.afterModel` raises Review before tool execution;
-- the child `createAgent` graph inherits the parent checkpointer and runnable
-  configuration;
-- an `afterModel` update can commit message changes before control reaches
-  `afterAgent`;
-- `afterAgent` can raise the next interrupt while the same child graph remains
-  active;
-- the parent capability and Planner see nothing until the child actually
-  finishes.
-
-Therefore the first implementation belongs entirely in `packages/pet-agent`.
-It does not require a new Agent Session status, a `continuationAvailable` event
-field, a Review completion reason, or a parent graph route.
-
-## Execution lifecycle
-
-There is only one lifecycle:
+The Agent has one execution lifecycle:
 
 ```text
 running -> interrupted -> running -> ... -> finished
 ```
 
-`ReviewInterrupt` and `PauseTaskInterrupt` describe the cause and resume
-contract of an interruption. They are not lifecycle states.
+Review is not another lifecycle or state machine. It is one concrete reason why
+execution is interrupted.
 
-The following terms are sufficient:
+This document defines:
 
-- **Agent interrupt**: a typed, durable LangGraph interrupt raised by Pet
-  Runtime.
-- **Review interrupt**: an Agent interrupt asking an external actor to decide a
-  proposed action.
-- **Pause-task interrupt**: an Agent interrupt retaining the unfinished child
-  task until an explicit continue command arrives.
-- **Invocation cancellation**: the Host aborting code that is currently
-  running, such as a streaming model request. This stops an invocation but does
-  not by itself create a durable LangGraph interrupt.
+- the Runtime interrupt abstraction;
+- the relationship between Review, task pause, and invocation cancellation;
+- Review approve, reject, respond, and Esc semantics;
+- message-history rules;
+- continuation behavior;
+- ownership across interfaces, Host, Pet Runtime, and LangGraph.
 
-Review is important business behavior, but it remains a specialization of
-Agent interrupt rather than an independent flow state.
+The policy that decides whether an action requires Review remains separate in
+[Toolkit HITL policy](toolkit-hitl-policy.md).
 
-## Runtime abstraction
+## Decisions
 
-### Behavior object
+Pet Runtime has two concrete interrupt concepts:
 
-Pet Runtime owns a runtime-local interface or abstract base class:
+```text
+AgentInterrupt
+├── ReviewInterrupt
+└── PauseTaskInterrupt
+```
+
+- `ReviewInterrupt` means that a proposed action is waiting for a decision.
+- `PauseTaskInterrupt` means that execution stopped while the task is still
+  unfinished and can be continued.
+
+The two concepts have different interactions and different resume behavior,
+but they describe the same `interrupted` lifecycle state.
+
+The implementation follows these constraints:
+
+- `ReviewInterrupt` uses LangGraph's dynamic `interrupt()` and typed resume
+  data.
+- Running Esc produces task-pause semantics: the Host cancels the active
+  invocation, and Pet Runtime exposes `PauseTaskInterrupt` when unfinished work
+  remains.
+- Reject and Review Esc resolve the current `ReviewInterrupt`, commit their
+  message transition, and request `PauseTaskInterrupt`.
+- Whether task pause is materialized by another LangGraph `interrupt()` or by
+  committing state and ending the current invocation is private to
+  `PauseTaskInterrupt`. Review middleware, capability, Host, and interfaces do
+  not choose that mechanism.
+- The target implementation wraps non-deterministic Review policy work in a
+  LangGraph `task()`, so resume restores its result instead of repeating it.
+- Until the upstream nested-task replay fix is released, one isolated
+  compatibility guard may inspect the current Pregel interrupt slot to skip the
+  repeated policy call. This exception is tracked by issue #749 and must not
+  become a Runtime or interface contract.
+- Stopping a run is control flow, not a subagent completion reason.
+- Pet Runtime does not read or edit checkpointer storage directly. It uses
+  LangGraph graph APIs and ordinary Runtime state.
+- Agent Session does not gain a derived `continuationAvailable` flag.
+
+## Interrupt abstraction
+
+Pet Runtime may implement each interrupt as a class or as an object satisfying
+an internal interface. The abstraction owns behavior; only serializable data
+crosses graph, checkpoint, stream, Host, or interface boundaries.
+
+A minimal shape is:
 
 ```ts
-type JsonObject = { [key: string]: JsonValue };
+interface AgentInterrupt<TInteraction, TTransition> {
+  readonly kind: string;
 
-interface AgentInterrupt<
-  TPayload extends JsonObject,
-  TResume,
-  TResolution,
-> {
-  readonly kind: TPayload['kind'];
-
-  /** JSON-safe value passed to LangGraph interrupt(). */
-  payload(): TPayload;
-
-  /** Validates untrusted resume data and returns a Runtime value. */
-  parseResume(value: unknown): TResume;
-
-  /** Applies the business meaning of that resume. */
-  resolve(resume: TResume): TResolution | Promise<TResolution>;
+  interaction(): TInteraction;
+  resume(value: unknown): TTransition | Promise<TTransition>;
 }
 ```
 
-Concrete implementations may be classes:
-
-```ts
-class ReviewInterrupt implements AgentInterrupt<
-  ReviewInterruptPayload,
-  ReviewInterruptResume,
-  ReviewInterruptResolution
-> { /* ... */ }
-
-class PauseTaskInterrupt implements AgentInterrupt<
-  PauseTaskInterruptPayload,
-  PauseTaskInterruptResume,
-  PauseTaskInterruptResolution
-> { /* ... */ }
-```
-
-The exact method names are implementation details. The important contract is
+The exact method names are not a public contract. The important boundary is
 that each concrete interrupt owns:
 
-- its serializable payload;
-- validation of its accepted resume value;
-- its business resolution;
-- the Runtime transition produced by that resolution.
+- the interaction projected to the caller;
+- parsing and validation of the semantic command it accepts;
+- the Runtime continuation needed for that interrupt kind.
 
-This replaces scattered `kind` switches and unrelated booleans with
-polymorphism inside Pet Runtime. Host and interfaces still use discriminated
-data because behavior cannot cross a process or checkpoint boundary.
+Parsing is deliberately not a separate adapter responsibility. The LangGraph
+node passes the raw value returned by `interrupt()` to the concrete interrupt's
+single `resume()` entry point.
 
-A small Runtime helper performs the LangGraph bridge:
+Class instances, methods, closures, and service references must never be
+persisted. Pet Runtime reconstructs behavior objects from ordinary graph or
+Runtime state.
 
-```ts
-async function raiseAgentInterrupt<TPayload extends JsonObject, TResume, TResult>(
-  definition: AgentInterrupt<TPayload, TResume, TResult>,
-) {
-  const rawResume = interrupt(definition.payload());
-  return definition.resolve(definition.parseResume(rawResume));
-}
+### Code organization
+
+Interrupt behavior has its own Runtime directory:
+
+```text
+packages/pet-agent/src/agent/orchestrator/
+├── interrupt/
+│   ├── agentInterrupt.ts
+│   ├── reviewInterrupt.ts
+│   ├── pauseTaskInterrupt.ts
+│   └── index.ts
+├── review/
+│   ├── globalReviewPolicy.ts
+│   ├── reviewAuthorizations.ts
+│   ├── reviewPolicies.ts
+│   ├── reviewResponseResolver.ts
+│   └── reviewSpec.ts
+└── toolkitReviewMiddleware.ts
 ```
 
-The concrete class controls the meaning of resume. It does not send the resume
-command from the Host side; only the Host that owns the active invocation can
-adapt an accepted interface command to LangGraph `Command({ resume })`.
+The boundary is deliberate:
 
-### Serialization boundary
+- `interrupt/agentInterrupt.ts` owns the internal behavior contract;
+- `interrupt/reviewInterrupt.ts` owns Review interrupt/resume orchestration and
+  the complete Approve, Respond, Reject, and Cancel outcome mapping, while
+  reusing the Review payload guards owned by `review/`;
+- `interrupt/pauseTaskInterrupt.ts` owns paused-task materialization,
+  propagation across the child invocation boundary, its payload guard,
+  interaction, and continue behavior;
+- `review/` owns pure Review policy, specification, authorization, decision
+  parsing, and message-construction helpers used by `ReviewInterrupt`;
+- `toolkitReviewMiddleware.ts` connects the LangChain `afterModel` hook to the
+  `ReviewInterrupt` adapter. It must not inspect raw Review decisions or
+  independently branch on Approve, Respond, Reject, or Cancel.
 
-An `AgentInterrupt` instance, method, function, closure, or service reference
-must never be written to graph state or passed as an interrupt/resume payload.
-Interrupt and resume payloads are plain JSON data. LangChain `BaseMessage`
-objects may remain in the graph's message channel, where the LangGraph
-serializer already owns them, but must not appear in the public resume value.
-
-Only descriptors such as these are persisted:
-
-```ts
-type AgentInterruptPayload =
-  | ReviewInterruptPayload
-  | PauseTaskInterruptPayload;
-
-type ReviewInterruptPayload = {
-  kind: 'review';
-  reviews: ReviewRequestData[];
-  error?: ReviewErrorData;
-};
-
-type PauseTaskInterruptPayload = {
-  kind: 'pause_task';
-};
-```
-
-On node replay, Pet Runtime deterministically reconstructs the appropriate
-behavior object from ordinary graph state and the descriptor. LangGraph owns
-the interrupt ID and namespace; Pet Runtime must not synthesize either.
-
-The current `review` and `review_batch` payloads may remain wire-compatible
-during migration. Internally they should normalize to one `ReviewInterrupt`
-whose `reviews` array has one or more items.
-
-### Why one deferred descriptor is necessary
-
-LangGraph does not commit a node's state update when that same node calls
-`interrupt()` before returning. Reject and Esc must first commit their message
-transition, then interrupt in the next superstep.
-
-The middleware therefore needs one small, private, serializable handoff:
-
-```ts
-type ReviewMiddlewareState = {
-  deferredInterrupt: PauseTaskInterruptPayload | null;
-};
-```
-
-This is not a global `task paused` state and not another state machine. It is a
-one-superstep instruction:
-
-1. Review resolution returns message updates plus
-   `deferredInterrupt: { kind: 'pause_task' }`.
-2. LangGraph commits that update.
-3. `afterAgent` reconstructs `PauseTaskInterrupt` and raises it.
-4. On continue, LangGraph replays `afterAgent`; the interrupt returns the resume
-   value, then the hook clears the descriptor and routes to the same child
-   model.
-
-The descriptor replaces the current `toolkitReviewPausePending` boolean. The
-typed value says what must happen next and remains extensible without adding a
-new boolean for every interrupt kind.
-
-## Concrete interrupts
+`reviewRunControl.ts` is not moved into the new directory. Its interrupted
+completion signal is removed rather than promoted into the interrupt model.
+Tests for each concrete interrupt are colocated in `interrupt/`; policy and
+message-resolution tests remain in `review/`.
 
 ### ReviewInterrupt
 
-`ReviewInterrupt` owns the full Review interaction. Its payload contains the
-runtime-held Review definitions needed to validate a response. The Host
-projects only presentation-safe fields to an interface.
-
-Its resume contract has two semantic variants:
+`ReviewInterrupt` is backed by a pending LangGraph dynamic interrupt. Its
+serializable payload includes one or more Review requests:
 
 ```ts
-type ReviewInterruptResume =
-  | {
-      action: 'respond';
-      responses: ReviewResponseData[];
-    }
-  | {
-      action: 'cancel';
-    };
+type ReviewInterruptPayload = {
+  kind: 'review_batch';
+  reviews: ReviewRequestData[];
+  error?: ReviewErrorData;
+};
 ```
 
-The existing `{ action: 'interrupt_run' }` value should be treated as migration
-compatibility only. It is a Review cancellation, not a command to terminate the
-whole run. Naming it `cancel` prevents the resume parser from leaking Host
-lifecycle vocabulary into Review business logic.
+Its semantic commands are Review decisions:
 
-The result should be a discriminated Runtime transition rather than the
-current combination of `resumeModel`, `rollbackAction`, and `pauseTask`
-booleans. For example:
+```ts
+type ReviewInterruptCommand =
+  | { decisions: ReviewResponseData[] }
+  | { action: 'cancel' };
+```
+
+The current `{ action: 'interrupt_run' }` value may remain as a migration alias
+for Review cancellation. New code should call it `cancel`; it closes the Review
+without pretending that the user made a rejection decision.
+
+The Host resumes the exact LangGraph interrupt ID and namespace that it
+observed. `ReviewInterrupt` validates the resume value and resolves its business
+meaning.
+
+`ReviewInterrupt.resume()` encapsulates the complete four-way outcome. The
+result keeps the semantic decision explicit even when two decisions eventually
+pause the task:
 
 ```ts
 type ReviewInterruptResolution =
-  | { type: 'execute'; authorizations: AuthorizationEffect[] }
-  | { type: 'continue_model'; messages: BaseMessage[] }
   | {
-      type: 'defer_interrupt';
-      messages: BaseMessage[];
-      interrupt: PauseTaskInterruptPayload;
+      type: 'approve';
+      authorizations: AuthorizationEffect[];
+      approvedReviewIds: string[];
+      next: 'tools';
     }
-  | { type: 'finish'; messages: BaseMessage[] };
+  | {
+      type: 'respond';
+      messages: BaseMessage[];
+      next: 'model';
+    }
+  | {
+      type: 'reject';
+      messages: BaseMessage[];
+      next: 'pause_task';
+    }
+  | {
+      type: 'cancel';
+      messages: BaseMessage[];
+      next: 'pause_task';
+    };
 ```
 
-`finish` is reserved for policy or guard outcomes that genuinely finish the
-child. Reject and Esc never resolve to it.
+The method owns this entire sequence:
+
+1. Parse and validate the resume command against the complete atomic Review
+   batch.
+2. Apply only the authorization effects allowed by the accepted decision.
+3. Construct protocol-complete message updates.
+4. Select tools, model, or task pause as the next Runtime behavior.
+
+| Resume result | Message/effect owned by `ReviewInterrupt` | Next behavior |
+| --- | --- | --- |
+| Approve | authorization effects for the accepted batch | tools |
+| Respond | protocol-complete synthetic tool results | model |
+| Reject | terminal rejected/cancelled results for every tool call | task pause |
+| Cancel | removal of the unexecuted AI tool-call action | task pause |
+
+Pure helpers in `review/` may implement individual validation, authorization,
+and message operations. No caller outside `ReviewInterrupt` may reconstruct the
+four-way policy by inspecting raw decisions, booleans, message shapes, or
+`jumpTo` values.
+
+Because `interrupt()` is called by the `afterModel` middleware node, resume
+replays that middleware node. It does not replay the already committed model
+node. The `interrupt()` call returns the accepted Review command on that replay,
+after which `ReviewInterrupt.resume()` completes the selected Review transition.
+The middleware only translates `resolution.next` to the LangChain hook result.
 
 ### PauseTaskInterrupt
 
-`PauseTaskInterrupt` means that the current child task is unfinished and may
-continue from its current committed history. It does not carry Review data and
-does not produce a Review UI.
+`PauseTaskInterrupt` represents stopped but unfinished work. Normal running Esc
+is its primary source.
 
-Its resume contract is explicit and JSON-safe:
+Its interaction contains no Review data. Its command is simply to continue,
+optionally with user guidance:
 
 ```ts
-type PauseTaskInterruptResume = {
+type PauseTaskInterruptPayload = {
+  kind: 'pause_task';
+};
+
+type PauseTaskInterruptCommand = {
   action: 'continue';
   guidance?: string;
 };
 ```
 
-Pet Runtime constructs a `HumanMessage` from validated guidance. The public
-resume value must not contain a LangChain `BaseMessage` instance.
+`PauseTaskInterrupt` decides how continuation re-enters the Runtime from the
+durable state that remains:
 
-Resolution clears the deferred marker and routes directly to the same child
-model. It does not return through capability finalization, Planner, delegation
-handoff, or a new subagent invocation.
+- after cancellation inside an unfinished LangGraph node, continue from the
+  last committed graph boundary using the graph's normal continuation path;
+- after Review resolution stopped the root run, re-enter the retained active
+  delegation as a new Runtime invocation;
+- when guidance is present, Pet Runtime constructs the corresponding
+  `HumanMessage`; interfaces do not send LangChain message instances.
+
+`PauseTaskInterrupt` therefore remains a required Runtime concept even though
+it is not always backed by a pending dynamic `interrupt()`. It normalizes the
+interaction and continuation contract for unfinished work. It must not create
+a second state machine or duplicate resumability in a boolean.
+
+#### Pause materialization boundary
+
+`PauseTaskInterrupt` is the only owner of how a semantic task pause is realized
+in LangGraph. Callers ask it to enter or continue a pause; they do not select a
+mechanism themselves:
+
+```text
+semantic pause request
+  -> PauseTaskInterrupt
+       -> dynamic interrupt and later resume
+       OR
+       -> commit + END/unwind and later re-entry
+```
+
+The initial implementation uses commit plus END/unwind for a Review-origin
+pause because the message transition must commit before the nested invocation
+returns. That is an implementation policy, not part of the Review contract.
+`PauseTaskInterrupt.enter()` owns the current `jumpTo: 'end'` choice.
+
+Consequently:
+
+- Review middleware may produce `next: 'pause_task'`, but must not directly call
+  a second `interrupt()` or choose `END` for that pause;
+- `createSubagent` and capability may invoke stable propagation adapters owned
+  by `PauseTaskInterrupt`, but must not inspect how the pause was materialized;
+- the Host sends semantic pause and continue commands through the Pet Runtime
+  API; it must not choose between LangGraph resume and a new invocation;
+- no public event or Agent Session field exposes the selected mechanism.
+
+The nested graph requires producer and parent-boundary adapter call sites, so
+the implementation cannot literally have only one call site. A later second
+dynamic interrupt may require a dedicated graph boundary so the message update
+commits first. That change may add PauseTaskInterrupt wiring, but must not alter
+Review resolution, capability business rules, Agent Session, or an interaction
+interface.
+
+Whether a task is paused is derived from durable Runtime and graph state, for
+example pending graph work or a retained active delegation. A finished task
+must not project `PauseTaskInterrupt`.
+
+## Replay-safe Review policy
+
+Review policy may call a model or custom resolver before Pet Runtime knows
+whether human Review is required. That work must not execute again when Review
+resumes.
+
+LangGraph's intended mechanism is a checkpointed `task()`. The enclosing node
+replays from the start, while a completed task returns its recorded value. The
+Review policy and `ReviewInterrupt` can therefore remain in one middleware:
+
+```text
+model
+  -> ToolkitReviewMiddleware.afterModel
+       -> prepare Review request
+       -> resolve global Review policy in task()
+       -> ReviewInterrupt when human input is required
+```
+
+LangGraph.js currently re-executes a completed `task()` when an interrupted
+nested subgraph resumes. The recorded task return exists, but nested replay does
+not apply it. This is upstream issue
+[`langgraphjs#2667`](https://github.com/langchain-ai/langgraphjs/issues/2667),
+with a pending fix in
+[`langgraphjs#2679`](https://github.com/langchain-ai/langgraphjs/pull/2679).
+
+Until that fix is released, `hasPendingReviewInterruptResume()` detects whether
+the exact next interrupt slot already has a resume value. On that replay, the
+middleware reconstructs the deterministic Review request but skips the global
+policy resolver and proceeds directly to `ReviewInterrupt`. Consequently,
+`reviewPolicy.request()` must remain deterministic and free of non-idempotent
+side effects.
+
+The compatibility helper is the only code allowed to inspect
+`__pregel_scratchpad`, `interruptCounter`, `resume`, or `nullResume`. It is
+tracked for removal in issue #749. After upgrading to a LangGraph release with
+the fix, replace the helper with `task()` inside the same middleware; do not add
+a preparation middleware or persisted prepared-action state.
 
 ## Review semantics
 
+One AI message may contain multiple tool calls. Review treats that proposed
+action atomically:
+
+- no reviewed call executes until every required response validates;
+- one rejection prevents every call in the action from executing;
+- Reject produces a terminal result for every tool-call ID;
+- Esc removes the complete proposed AI action;
+- authorization effects apply only after the complete batch validates.
+
 ### Approve
 
-Approve authorizes the reviewed action. Once every required item in an atomic
-batch is approved, the original tools execute and the child loop continues.
+Approve authorizes the reviewed action. Once the atomic Review batch validates,
+the original tools execute and the child loop continues.
 
 ```text
 ReviewInterrupt
@@ -290,22 +362,27 @@ ReviewInterrupt
   -> continue child
 ```
 
-An approve option may apply only the authorization effects declared by the
-runtime-held Review definition.
+### Respond
+
+Respond supplies requested information instead of authorizing the proposed
+action. The raw tools do not execute. Pet Runtime appends protocol-complete
+synthetic tool results containing the response and returns to the same child
+model.
+
+Respond is not rejection and does not stop the run unless a future Review
+option explicitly declares that behavior.
 
 ### Reject
 
 Reject is a semantic decision: the actor saw the proposed action and declined
-it. The history must preserve that fact.
-
-For the complete AI tool-call action:
+it. The message history preserves that decision:
 
 - keep the AI message containing all proposed tool calls;
 - execute none of the raw tools;
 - append one terminal `ToolMessage` for every tool-call ID;
 - mark the selected action as rejected, including its reason when available;
 - mark the remaining calls as cancelled with the rejected atomic batch;
-- defer a `PauseTaskInterrupt`.
+- stop the current run after the message update commits.
 
 ```text
 AI(tool calls)
@@ -313,46 +390,37 @@ AI(tool calls)
   -> reject
   -> ToolMessage(rejected: reason)
   -> ToolMessage(cancelled with batch) ...
-  -> commit
   -> PauseTaskInterrupt
 ```
 
-These protocol-complete tool results are rejection guidance. No separate
-`rejectionGuidance` state is needed. When continued, the same child model sees
+The terminal tool results are the rejection guidance. No separate
+`rejectionGuidance` state is required. On a later continue, the same child sees
 what it proposed and why it was rejected.
 
-### Respond
+Reject must not call the model, Run Supervisor, capability finalization, delegation
+announce, or handoff merely to stop the current run.
 
-Respond supplies requested information instead of authorizing the proposed
-action. The raw tools do not execute. Pet Runtime appends protocol-complete
-synthetic tool results containing the response, then routes directly to the
-same child model.
+### Review Esc or cancellation
 
-Respond is neither rejection nor task pause unless a future Review option
-explicitly declares another resolution.
-
-### Esc or Review cancellation
-
-Esc/cancel closes the Review without deciding that the proposed action was
-wrong.
+Review Esc closes the Review without deciding that the proposed action was
+wrong:
 
 - execute none of the raw tools;
 - remove the complete, unexecuted AI tool-call message;
-- append no rejection ToolMessage;
-- restore the child lane to the committed boundary before that proposal;
-- defer a `PauseTaskInterrupt`.
+- append no rejection `ToolMessage`;
+- restore the child lane to the committed boundary before the proposal;
+- stop the current run after the removal commits.
 
 ```text
 AI(tool calls)
   -> ReviewInterrupt
   -> cancel
   -> RemoveMessage(AI tool-call action)
-  -> commit
   -> PauseTaskInterrupt
 ```
 
 Continuing without guidance may cause the model to propose the same action
-again. That is correct because cancellation supplied no negative guidance.
+again. That is expected because cancellation supplied no negative guidance.
 
 ### Invalid or stale response
 
@@ -360,271 +428,272 @@ An unknown option, invalid option input, mismatched Review ID, stale interrupt
 ID, wrong namespace, or wrong session must not mutate graph state.
 
 The Host rejects identity mismatches before resume. `ReviewInterrupt` rejects
-invalid resume data. If the error is recoverable, the Runtime may raise the
-same Review again with JSON-safe error presentation; it must not silently
-convert invalid input into Reject or Esc.
+invalid semantic input. If an error is recoverable, the Runtime may present the
+same Review again with JSON-safe error details; it must not silently convert an
+invalid response into Reject or Esc.
 
-## Atomic batch rules
+## Review resolution to task pause
 
-One AI message may contain multiple tool calls. Review of that action is
-atomic:
+Reject and Review Esc consume the pending `ReviewInterrupt`. They must commit
+their different message changes and then request a task pause. They do not
+decide how that pause is materialized.
 
-- no reviewed call executes until every required response validates;
-- approval executes the approved batch;
-- one rejection prevents every call in the action from executing;
-- rejection produces one terminal result for every tool-call ID;
-- Esc removes the complete AI action rather than editing individual calls;
-- authorization effects apply only after the complete batch validates.
+Instead, `ReviewInterrupt.resume()` returns the four-way
+`ReviewInterruptResolution` defined above. Approve and Respond select tools and
+model respectively. Reject and Cancel remain different resolution types, but
+both select `next: 'pause_task'` after constructing their different message
+updates. `PauseTaskInterrupt` constructs and materializes its own payload.
 
-These rules prevent partial side effects and preserve provider tool-call
-protocol ordering.
+The `afterModel` adapter passes the resolution and message update to
+`PauseTaskInterrupt`. It does not reinterpret the Review command, merge Reject
+and Cancel into a generic stop decision, or choose between a second interrupt
+and END/unwind. `PauseTaskInterrupt` is Runtime control flow, not
+completed-result metadata.
 
-## LangGraph control flow
+The current subagent is invoked as a function from the capability node and has
+a different state shape from the root graph. Returning through that function
+boundary is necessary so capability can reconcile child messages and Runtime
+state. It is not a second lifecycle transition and must not be exposed as a
+`child END -> root END` business flow.
 
-### Review to task pause
+For an END/unwind implementation, the capability-side adapter propagates the
+same `PauseTaskInterrupt` after reconciliation. It retains the active
+delegation and skips finalize, announce, handoff, and Run Supervisor. The delegated
+task remains unfinished. A dynamic-interrupt implementation may stay suspended
+inside the child instead; this difference is hidden by `PauseTaskInterrupt`.
 
-Reject and Esc consume the original Review interrupt, but consuming an
-interrupt is not completion. The child must perform this exact sequence:
+No additional public stop-control concept or interrupted completion reason is
+needed. Only serializable `PauseTaskInterruptPayload` data may cross a graph or
+checkpoint boundary; Pet Runtime reconstructs its behavior object outside the
+graph. Mechanism-specific transport remains internal to
+`pauseTaskInterrupt.ts`.
 
-```text
-ReviewInterrupt
-  -> resume
-  -> resolve Review
-  -> return message update + deferred PauseTaskInterrupt descriptor
-  -> commit superstep
-  -> afterAgent raises PauseTaskInterrupt
-```
+This design does not replace `SubagentResult` with a completed/interrupted
+union. Existing completion reasons for genuinely completed subagent runs are a
+separate concern and remain unchanged in this work. Review and task pause must
+not be represented by a new or existing `completionReason`; their propagation
+is Runtime-private interrupt control flow between `createSubagent` and the
+capability node.
 
-There must be no model call, Planner call, capability finalization, delegation
-announce/handoff, or observable child completion between the two interrupts.
+## Running Esc
 
-In the current LangChain `createAgent` graph, `jumpTo: 'end'` from `afterModel`
-is an internal route to the configured `afterAgent` hook. It is acceptable as
-the bridge above; it must not be confused with the child graph reaching an
-observable `END`. If that framework mapping changes, tests must fail before
-the Runtime can accidentally finalize the child.
-
-### Replay and idempotency
-
-LangGraph resumes an interrupted node by running the node again from its
-beginning. Nested child graphs may also replay parent work. Therefore:
-
-- Review policy lookup before `interrupt()` must be deterministic and
-  side-effect free;
-- authorization effects must be idempotent or applied only after validated
-  resume;
-- tool execution must occur only after approval and exactly once;
-- class construction must be pure;
-- logic must not depend on object identity surviving replay;
-- the Host must resume the exact LangGraph interrupt ID/namespace it observed.
-
-The current use of private Pregel scratchpad fields to detect a resume is
-technical debt. Non-deterministic automatic Review work should eventually be a
-checkpointed LangGraph task or separate node, not a dependency of the typed
-interrupt abstraction.
-
-## Running Esc and invocation cancellation
-
-Esc while a model or tool is actively running is not a `ReviewInterrupt` or a
-`PauseTaskInterrupt`. The Host cancels the current invocation using its
-`AbortSignal`.
+Esc while a model or tool is actively running is a request to pause the task.
+The interaction layer sends a semantic pause command. The Host uses its
+`AbortSignal` to cancel the active invocation and waits for that invocation to
+settle.
 
 For an ordinary streaming model call:
 
 - streaming stops;
 - the unfinished node does not commit a partial AI message;
-- no Review decision or ToolMessage is invented;
-- no class instance or completion reason is stored.
+- no Review decision or synthetic `ToolMessage` is invented;
+- no subagent completion reason is recorded;
+- Pet Runtime determines whether unfinished work remains from graph and
+  Runtime state;
+- unfinished work is exposed as `PauseTaskInterrupt`.
 
-Cancellation alone does not manufacture a pending LangGraph `interrupt()`.
-After cancellation, the Host reads the settled graph snapshot:
+Cancellation is the mechanism that stops currently executing code.
+`PauseTaskInterrupt` is the Runtime meaning of the resulting unfinished task.
+Neither replaces the other.
 
-- if LangGraph reports a pending typed interrupt, the task is interrupted and
-  its payload determines the available interaction;
-- if the graph has pending `next/tasks` but no typed interrupt, resumability is
-  derived from that graph state according to the existing Runtime path;
-- if neither exists, the invocation stopped at its last committed boundary and
-  the next user message is a new input.
+The Host must not decide whether to resume the graph, manufacture another
+interrupt, or start a new invocation to realize the pause. It also must not read
+or edit checkpointer storage. After cancellation settles, it delegates pause
+projection and later continuation to the Pet Runtime interrupt API.
 
-If product semantics later require every running Esc to create a durable
-`PauseTaskInterrupt`, that requires a controlled graph node boundary. It is a
-separate Runtime feature; the Host must not fake it by resuming or editing a
-checkpoint.
+If no unfinished graph work or active delegation remains, the invocation ended
+instead of pausing; no `PauseTaskInterrupt` is exposed.
+
+Cancellation cannot roll back an external side effect that a tool already
+committed. Tool implementations must honor `AbortSignal` where possible and
+retain their own idempotency guarantees.
 
 ## Layer ownership
 
-### Toolkit policy
+### Interaction interfaces
 
-Toolkit policy decides whether a tool action executes automatically, requires
-Review, is blocked, or is covered by an existing authorization. It does not own
-interrupt control flow or interface behavior.
+TUI, Chat, App, Studio, and future interfaces own presentation and input. They
+send semantic commands such as:
+
+- pause the running task;
+- continue a paused task, optionally with guidance;
+- respond to or cancel the identified Review.
+
+They do not construct LangGraph commands, choose graph nodes, edit message
+history, or interpret authorization effects.
+
+### Agent Session and Host
+
+Agent Session carries interface-safe events and commands. It does not own the
+Runtime lifecycle and does not persist Pet Runtime classes, LangGraph commands,
+checkpoint data, or a derived `continuationAvailable` flag.
+
+The Host owns:
+
+- cancellation of the active invocation;
+- serialization of invocations for the same task;
+- correlation of session, interrupt ID, namespace, and request identity;
+- projection of Runtime interrupts to supported interfaces;
+- translation of accepted semantic commands into Runtime calls;
+- rejection of stale or mismatched commands.
+
+The Host does not decide Review business behavior or synthesize graph state.
 
 ### Pet Runtime
 
 Pet Runtime owns:
 
 - `AgentInterrupt`, `ReviewInterrupt`, and `PauseTaskInterrupt` behavior;
-- serializable payload and resume validation;
-- Review decision/effect resolution;
-- message-history updates;
-- the one-superstep deferred interrupt descriptor;
-- routing back to the same child model.
+- Review decision validation and effects;
+- message-history transitions;
+- detection of stopped but unfinished work from existing durable state;
+- continuation of the correct child or root execution;
+- stop-current-run propagation through a nested subagent boundary.
 
-It does not emit a Review-specific subagent completion reason and does not ask
-Planner to stop the task.
+Pet Runtime does not use subagent completion metadata to represent pause and
+does not route through Run Supervisor merely to stop a run.
 
 ### LangGraph
 
 LangGraph owns:
 
-- interrupt persistence;
+- dynamic Review interrupt persistence;
 - interrupt IDs and namespaces;
-- checkpoint writes and replay;
-- resume delivery;
-- graph task/next state.
+- graph state, checkpoints, replay, and pending tasks;
+- delivery of Review resume values;
+- continuation from the last committed graph boundary.
 
-Pet Runtime and Host use LangGraph APIs. Neither talks directly to the
-checkpointer for Review control flow.
-
-### Host adapter
-
-The Host owns:
-
-- invocation cancellation;
-- reading current graph state through the graph API;
-- correlating session, interrupt ID, and namespace;
-- projecting a typed payload to a supported interface interaction;
-- adapting an accepted semantic command to `Command({ resume })`;
-- rejecting stale or mismatched commands without resuming the graph.
-
-The Host switches only at the transport boundary to select an adapter for
-`payload.kind`. Review and pause business semantics remain in the concrete Pet
-Runtime class.
-
-### Agent Session
-
-Agent Session records public events and interface-safe pending interactions. It
-does not own the Runtime lifecycle and must not receive Pet Runtime classes,
-LangGraph commands, checkpoint data, or internal transition objects.
-
-No `continuationAvailable` field is required. Whether work remains is derived
-from current LangGraph `next/tasks` and pending interrupts. If a future shared
-interface must display `PauseTaskInterrupt`, the existing pending-interrupt
-projection can be generalized by `kind`; this is preferable to adding a second
-boolean that can disagree with graph state.
-
-The Pet Runtime refactor can be completed and tested before that protocol
-generalization.
-
-### Interaction interfaces
-
-An interface renders the interaction selected by the pending payload kind:
-
-- `review` renders Review options and declared inputs;
-- `pause_task` renders a continue affordance with optional guidance.
-
-Interfaces send semantic commands only. They never construct LangGraph
-`Command`, select graph nodes, pass `activeDelegationTransition`, or interpret
-internal Review effects.
-
-Chat, TUI, App, Studio, and future remote approval surfaces may present the
-same payload differently, but they return the same identity-based response.
-Unsupported required Review capabilities fail closed.
+Pet Runtime and Host use LangGraph APIs. Review and pause handling are
+checkpointer-transparent.
 
 ## Compatibility with the current implementation
 
-The refactor maps onto existing code without changing the parent execution
-topology:
+The first implementation is centered in `packages/pet-agent`. It does not
+require a new Agent Session lifecycle field.
 
 | Current implementation | Target design |
 | --- | --- |
-| `afterModel` calls `interrupt(reviewPayload)` | `afterModel` raises reconstructed `ReviewInterrupt` |
-| `resolveHumanToolkitReviews` and response helpers | `ReviewInterrupt.parseResume/resolve` |
-| `{ action: 'interrupt_run' }` | migration alias for `{ action: 'cancel' }` |
-| `resumeModel`, `rollbackAction`, `pauseTask` booleans | `ReviewInterruptResolution` union |
-| `toolkitReviewPausePending: boolean` | `deferredInterrupt: PauseTaskInterruptPayload \| null` |
-| `afterAgent` calls `interrupt(null)` | `afterAgent` raises `PauseTaskInterrupt` with typed payload |
-| resume contains `BaseMessage \| null` | JSON-safe continue command; Runtime builds the message |
-| child `completionReason: 'interrupted'` | removed; child has not completed |
-| capability/Planner special interrupt route | removed; parent is not entered while child is interrupted |
+| `afterModel` calls `interrupt(reviewPayload)` | `afterModel` raises `ReviewInterrupt` |
+| `resolveHumanToolkitReviews` and response helpers | `ReviewInterrupt` validation and resolution |
+| `hasPendingReviewInterruptResume()` and Pregel scratchpad inspection | temporary #749 compatibility; later replace with `task()` in the same middleware |
+| `{ action: 'interrupt_run' }` | migration alias for Review `{ action: 'cancel' }` |
+| `resumeModel`, `rollbackAction`, `pauseTask` booleans | explicit four-way `ReviewInterruptResolution` |
+| `toolkitReviewPausePending` | removed |
+| `afterAgent` calls `interrupt(null)` | centralized `PauseTaskInterrupt` materialization |
+| child `completionReason: 'interrupted'` | Runtime-private `PauseTaskInterruptPayload` control flow |
+| capability detects interruption policy itself | capability delegates child-boundary handling to `PauseTaskInterrupt` |
+| running Esc only aborts an invocation | cancellation followed by `PauseTaskInterrupt` projection when work remains |
 
-The abstraction is deliberately local to Pet Runtime. `createSubagent` still
-creates the child graph, the capability still awaits it, and Planner still runs
-only after an actual child result.
+`createSubagent` still owns child execution. The capability remains responsible
+for reconciling committed child messages. It delegates pause propagation to
+`PauseTaskInterrupt`; only the initial END/unwind implementation ends the root
+run at that boundary.
 
 ## Implementation sequence
 
-### Phase 1: Pet Runtime
+### Phase 1: Pet Runtime Review stop path
 
-1. Add the runtime-local `AgentInterrupt` contract and JSON-safe payload guards.
-2. Wrap current Review payload parsing and resolution in `ReviewInterrupt`.
-3. Add `PauseTaskInterrupt` with a typed continue resume.
-4. Replace Review-result booleans with a discriminated resolution.
-5. Replace `toolkitReviewPausePending` with the private deferred descriptor.
-6. Preserve `review`/`review_batch` and `interrupt_run` only as migration input
-   where current Host tests require them.
-7. Keep parent capability, Planner, subagent completion, and Agent Session
-   untouched.
+1. Create `orchestrator/interrupt/` and introduce the runtime-local interrupt
+   behavior contract without changing Agent Session.
+2. Add `ReviewInterrupt` and `PauseTaskInterrupt` in that directory; keep
+   Review policy and message rules in `orchestrator/review/`.
+3. Encapsulate Review payload parsing and resolution in `ReviewInterrupt`.
+4. Keep one Review middleware and isolate the temporary Pregel resume guard
+   tracked by #749; replace it with `task()` after the upstream fix is released.
+5. Replace Review-result booleans with a discriminated transition.
+6. Remove `reviewRunControl.ts`, `toolkitReviewPausePending`, and any deferred
+   interrupt descriptor.
+7. Remove `completionReason: 'interrupted'`; let `PauseTaskInterrupt` own its
+   Runtime-private transport without redesigning `SubagentResult` or its
+   genuine-completion reasons.
+8. Make the capability boundary call the stable `PauseTaskInterrupt` adapter
+   while retaining the unfinished active delegation and skipping Run Supervisor.
 
-### Phase 2: Host and interface projection
+### Phase 2: PauseTaskInterrupt and running Esc
 
-1. Teach the graph-state reader to retain every supported typed interrupt,
-   including its LangGraph ID and namespace.
-2. Keep the existing Review projection behavior.
-3. Project `pause_task` as a continue interaction or existing interrupted-task
-   affordance.
-4. Build the correct JSON-safe resume from the semantic interface command.
-5. Remove migration aliases after all active interfaces use the new commands.
+1. Connect running Esc to `PauseTaskInterrupt` as the behavior for stopped but
+   unfinished work.
+2. Route Esc through a semantic task-pause command and active
+   invocation cancellation.
+3. After settlement, derive pause availability from existing graph/Runtime
+   state rather than a new boolean.
+4. Implement continue for both an unfinished graph node and a retained active
+   delegation.
+5. Add optional guidance at the Runtime boundary.
 
-If shared Agent Session protocol changes are necessary, make them only in this
-phase and generalize `PendingInterruptProjection`; do not add a derived
-continuation flag.
+### Phase 3: Host and interface projection
 
-### Phase 3: running cancellation, if required
-
-Define whether a canceled running node should remain merely canceled at its
-last checkpoint or enter a durable `PauseTaskInterrupt`. Implement the latter
-inside the graph only if the product requires it.
+1. Project `review` and `pause_task` as different interactions.
+2. Keep exact Review interrupt identity for Review resume.
+3. Send task continue to `PauseTaskInterrupt` without fabricating a Review
+   resume.
+4. Generalize the existing pending-interaction projection only if a shared
+   interface requires it; do not add a continuation boolean.
+5. Remove migration aliases after all active interfaces use semantic commands.
 
 ## Required behavioral coverage
 
-### Runtime unit/integration tests
+### Review and Runtime
 
-- payloads and resumes are JSON-serializable;
-- class instances never appear in state or checkpoint values;
 - approve executes every approved tool exactly once;
-- reject executes no tool and records one terminal result per tool-call ID;
-- Esc executes no tool and removes the whole AI tool-call action;
-- respond returns to the same child with protocol-complete synthetic results;
-- Reject and Esc commit their history before `PauseTaskInterrupt` appears;
-- the pause interrupt has a different LangGraph interrupt ID from Review;
-- no model, Planner, finalize, announce, or handoff occurs between interrupts;
-- continue with and without guidance resumes the same child model;
-- replay or process-style graph reconstruction resumes the correct child;
-- invalid resume data leaves the active interrupt unresolved;
-- deterministic policy blocks retain their genuine terminal semantics.
+- respond appends protocol-complete synthetic results and returns to the same
+  child model;
+- reject executes no tool and appends one terminal result per tool-call ID;
+- Review Esc executes no tool and removes the complete AI tool-call action;
+- Reject and Review Esc commit their message changes before the run stops;
+- Review middleware and capability contain no direct decision between another
+  dynamic interrupt and END/unwind;
+- pause materialization and its mechanism-specific state are owned only by
+  `pauseTaskInterrupt.ts`;
+- global auto/custom Review policy resolution executes once across interrupt
+  and resume;
+- Review request reconstruction is deterministic while the #749 compatibility
+  guard is active;
+- private Pregel resume inspection is confined to the temporary #749 helper and
+  is removed when the policy resolver moves into `task()`;
+- each Review resume command is mapped exactly once by `ReviewInterrupt.resume()`
+  to Approve, Respond, Reject, or Cancel;
+- the middleware contains no independent branching on raw Review decisions and
+  only adapts the returned resolution to LangGraph;
+- no model, Run Supervisor, finalize, announce, or handoff runs merely to stop;
+- the active delegation remains unfinished and can later continue;
+- invalid Review responses leave the original interrupt unresolved;
+- class instances never appear in graph state or payloads.
 
-### Host and protocol tests
+### Running Esc and task continue
 
-- the exact interrupt ID and namespace are required for resume;
-- stale, wrong-session, wrong-kind, and duplicate responses do not mutate state;
-- reconnect projects current graph state rather than adapter-local memory;
-- `review` and `pause_task` produce different interaction affordances;
-- no continuation boolean is persisted independently of graph state;
-- running cancellation commits no partial model message;
-- unsupported Review capabilities fail closed.
+- Esc during model streaming aborts the invocation and commits no partial AI
+  message;
+- Esc during a cancellable tool propagates `AbortSignal`;
+- stopped unfinished work projects `PauseTaskInterrupt`;
+- genuinely finished work does not project `PauseTaskInterrupt`;
+- continue re-enters the correct pending graph node or retained delegation;
+- optional guidance becomes a Runtime-created message exactly once;
+- cancellation itself performs no model, Run Supervisor, or tool call;
+- reconnect derives the available interaction from durable graph/Runtime
+  state, not interface-local overlay state.
+
+### Identity and protocol
+
+- Review resume requires the exact interrupt ID and namespace;
+- stale, wrong-session, wrong-kind, and duplicate commands do not mutate state;
+- `review` and `pause_task` produce different interface affordances;
+- no continuation boolean is persisted independently of graph/Runtime state;
+- unsupported required Review capabilities fail closed.
 
 ## Non-goals
 
 - A separate Review state machine.
 - Persisting interrupt class instances or Runtime services.
 - Reading or editing checkpoint storage directly.
+- Making private Pregel scratchpad state part of the permanent Review design;
+  the isolated #749 compatibility helper is temporary.
+- A deferred Review-specific pause descriptor outside `PauseTaskInterrupt`.
+- Choosing the pause materialization mechanism outside
+  `pauseTaskInterrupt.ts`.
 - Using subagent `completionReason` to represent Review or pause.
-- Routing through Planner merely to stop or pause a child.
-- Treating consumption of one interrupt as child completion.
-- Treating internal `jumpTo: 'end'` as observable graph completion.
-- Letting interfaces send internal decisions, effects, graph nodes, delegation
-  transitions, or LangGraph resume values.
-- Adding a `continuationAvailable` field that duplicates graph-derived state.
-- Making TUI overlay state, Chat identity, or Studio dispatch identity part of
-  the Runtime Review contract.
+- Routing through Run Supervisor merely to stop or pause a child.
+- Adding a `continuationAvailable` field that duplicates derived state.
+- Letting interfaces send graph nodes, delegation transitions, LangGraph resume
+  values, or Runtime-internal Review effects.
+- Treating TUI overlay state as the durable Runtime state.

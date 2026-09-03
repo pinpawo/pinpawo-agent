@@ -35,6 +35,19 @@ test('Studio Console starts an unavailable local server before opening the brows
   assert.deepEqual(calls, [{ command: 'open', args: ['http://127.0.0.1:5173'] }]);
 });
 
+test('Studio Console stays available without trying to open a browser on headless Linux', async () => {
+  let output = '';
+  await openStudioConsole({ url: 'http://127.0.0.1:5176' }, {
+    platform: 'linux',
+    environment: {},
+    probeConsole: async () => true,
+    runOpenCommand: async () => assert.fail('headless Linux must not invoke xdg-open'),
+    writeOutput: (text) => { output += text; },
+  });
+  assert.match(output, /Studio Console ready: http:\/\/127\.0\.0\.1:5176/);
+  assert.match(output, /No graphical session was detected/);
+});
+
 test('Studio tmux connects configured Pet TUIs without starting the Host', async () => {
   const calls: string[][] = [];
   const opened: string[] = [];

@@ -200,6 +200,12 @@ export class ResidentPetCoordinator {
       if (error instanceof ResidentPetOperationCancelledError) return;
       this.logError('[resident-pet] dispatch execution failed:', error);
     });
+    // A pending review can be resolved through a reconnect or another
+    // session client. Do not let the queue keep that old settled state and
+    // strand a later one-way dispatch behind it.
+    void this.refreshState().catch((error) => {
+      this.logError('[resident-pet] failed to refresh dispatch admission state:', error);
+    });
   }
 
   async refreshState(): Promise<PetDispatchState> {

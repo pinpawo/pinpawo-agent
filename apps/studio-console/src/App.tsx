@@ -6,6 +6,8 @@ import {
   useRef,
   useState,
 } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 type Page = 'studio' | 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
@@ -484,9 +486,14 @@ export function App() {
     });
   };
 
-  const assignTask = (taskId: string, assigneeId: string) => {
+  const assignTask = (taskId: string, assigneeId: string, assignmentNote?: string) => {
     setAssigningTaskId(taskId);
-    void post('/kanban/control', { action: 'assign', taskId, assigneeId }).then(() => {
+    void post('/kanban/control', {
+      action: 'assign',
+      taskId,
+      assigneeId,
+      ...(assignmentNote?.trim() ? { assignmentNote: assignmentNote.trim() } : {}),
+    }).then(() => {
       setNotice(`Kanban task ${taskId} was assigned to ${assigneeId}.`);
     }).catch((error) => {
       setNotice(connectionErrorMessage(error));
@@ -497,6 +504,15 @@ export function App() {
     setRetryingDeliveryId(deliveryId);
     void post('/triggers/control', { action: 'retry', deliveryId }).then(() => {
       setNotice(`Trigger delivery ${deliveryId} was retried.`);
+    }).catch((error) => {
+      setNotice(connectionErrorMessage(error));
+    }).finally(() => setRetryingDeliveryId(''));
+  };
+
+  const redeliverTriggerDelivery = (deliveryId: string) => {
+    setRetryingDeliveryId(deliveryId);
+    void post('/triggers/control', { action: 'redeliver', deliveryId }).then(() => {
+      setNotice(`Trigger delivery ${deliveryId} was redelivered.`);
     }).catch((error) => {
       setNotice(connectionErrorMessage(error));
     }).finally(() => setRetryingDeliveryId(''));
@@ -623,7 +639,7 @@ export function App() {
           <div className="rows">{triggers.value.triggers.map((trigger) => <div className="row" key={trigger.triggerId}><code>{trigger.triggerId}</code><strong>{triggerRequestLabel(trigger.request)}</strong><span>{triggerSourceLabel(trigger.source)} → {trigger.target.kind === 'pet' ? trigger.target.petId : trigger.target.path}</span></div>)}</div>
           <div className="hint">POST /triggers/invoke · Authorization: Trigger &lt;secret&gt; · body: triggerId, idempotencyKey, payload</div>
           <div className="section-title"><span>DELIVERIES</span><b>{triggers.value.deliveries.length}</b></div>
-          <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}{delivery.status === 'failed' && <button className="inline-action" disabled={retryingDeliveryId === delivery.deliveryId} onClick={() => retryTriggerDelivery(delivery.deliveryId)} type="button">{retryingDeliveryId === delivery.deliveryId ? 'retrying…' : 'retry'}</button>}</span></div>)}</div>
+          <div className="rows">{triggers.value.deliveries.map((delivery) => <div className="row" key={delivery.deliveryId}><em className={delivery.status}>{delivery.status}</em><code>{delivery.triggerId}</code><strong>{delivery.idempotencyKey}</strong><span>{delivery.note ?? new Date(delivery.occurredAt).toLocaleString()}{delivery.status === 'failed' && <button className="inline-action" disabled={retryingDeliveryId === delivery.deliveryId} onClick={() => retryTriggerDelivery(delivery.deliveryId)} type="button">{retryingDeliveryId === delivery.deliveryId ? 'retrying…' : 'retry'}</button>}{delivery.status === 'accepted' && <button aria-label={`Redeliver ${delivery.deliveryId}`} className="inline-action" disabled={retryingDeliveryId === delivery.deliveryId} onClick={() => redeliverTriggerDelivery(delivery.deliveryId)} title="Send this accepted request again. Use only when its execution did not start or was interrupted." type="button">{retryingDeliveryId === delivery.deliveryId ? 'redelivering…' : 'redeliver'}</button>}</span></div>)}</div>
           <History title="TRIGGER HISTORY" events={triggerHistory} />
         </> : unavailable(triggers, 'Trigger'))}
         {page === 'knowledge' && (knowledge.value ? <>
@@ -660,11 +676,12 @@ function KanbanFlow({
   tasks,
 }: {
   pets: Pet[];
-  onAssign: (taskId: string, assigneeId: string) => void;
+  onAssign: (taskId: string, assigneeId: string, assignmentNote?: string) => void;
   assigningTaskId: string;
   tasks: Task[];
 }) {
   const [selectedTargets, setSelectedTargets] = useState<Record<string, string>>({});
+  const [assignmentNotes, setAssignmentNotes] = useState<Record<string, string>>({});
   const tasksById = new Map(tasks.map((task) => [task.taskId, task]));
   const groups = [
     { id: 'active', label: 'ACTIVE', tasks: tasks.filter(({ status }) => status === 'doing' || status === 'waiting') },
@@ -717,15 +734,20 @@ function KanbanFlow({
                 title={dependencyId}
               >{dependencyId.slice(0, 8)}</code>)}
             </div>}
-            {task.note && <p className="task-note">{task.note}</p>}
+            {task.note && <article className="task-note">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.note}</ReactMarkdown>
+            </article>}
             <div className="task-expanded-footer">
               <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
               {task.status === 'todo' && <label className="task-assignment">
-                <select aria-label={`Assign ${task.title}`} disabled={!assignable || Boolean(assigningTaskId)} onChange={(event) => setSelectedTargets((current) => ({ ...current, [task.taskId]: event.target.value }))} title={assignable ? undefined : `Waiting for: ${incompleteDependencies.join(', ')}`} value={selectedTargets[task.taskId] ?? ''}>
-                  <option disabled value="">{assignable ? 'ASSIGN TO…' : 'WAITING FOR DEPENDENCIES'}</option>
-                  {pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.name} ({pet.petId})</option>)}
-                </select>
-                <button className="task-action" disabled={!assignable || !selectedTargets[task.taskId] || Boolean(assigningTaskId)} onClick={() => onAssign(task.taskId, selectedTargets[task.taskId]!)} type="button">ASSIGN</button>
+                <div className="task-assignment-controls">
+                  <select aria-label={`Assign ${task.title}`} disabled={!assignable || Boolean(assigningTaskId)} onChange={(event) => setSelectedTargets((current) => ({ ...current, [task.taskId]: event.target.value }))} title={assignable ? undefined : `Waiting for: ${incompleteDependencies.join(', ')}`} value={selectedTargets[task.taskId] ?? ''}>
+                    <option disabled value="">{assignable ? 'ASSIGN TO…' : 'WAITING FOR DEPENDENCIES'}</option>
+                    {pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.name} ({pet.petId})</option>)}
+                  </select>
+                  <input aria-label={`Optional note for ${task.title}`} disabled={!assignable || Boolean(assigningTaskId)} maxLength={1000} onChange={(event) => setAssignmentNotes((current) => ({ ...current, [task.taskId]: event.target.value }))} placeholder="Optional note for this assignment" value={assignmentNotes[task.taskId] ?? ''} />
+                </div>
+                <button className="task-action" disabled={!assignable || !selectedTargets[task.taskId] || Boolean(assigningTaskId)} onClick={() => onAssign(task.taskId, selectedTargets[task.taskId]!, assignmentNotes[task.taskId])} type="button">ASSIGN</button>
                 {assigning && <span>assigning…</span>}
               </label>}
             </div>

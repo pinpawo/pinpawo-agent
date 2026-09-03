@@ -26,11 +26,20 @@ test('Kanban projects a user assignment but never dispatches a Studio Pet itself
   studio.subscribe((event) => { events.push({ type: event.type, payload: event.payload }); });
 
   const task = await plugin.service.createTask({ title: 'Plan', detail: 'Create a plan.' });
-  await plugin.service.assignTask(task.task.taskId, 'planner');
+  await plugin.service.assignTask(task.task.taskId, 'planner', 'Review the changed lines first.');
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(dispatches, 0);
   assert.ok(events.some(({ type }) => type === 'task.assigned'));
+  assert.deepEqual(events.find(({ type }) => type === 'task.assigned')?.payload, {
+    taskId: task.task.taskId,
+    assigneeId: 'planner',
+    title: 'Plan',
+    detail: 'Create a plan.',
+    deps: [],
+    assignmentNote: 'Review the changed lines first.',
+    sequence: 2,
+  });
 });
 
 test('planning and execution toolkits expose separate task responsibilities', async () => {

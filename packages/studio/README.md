@@ -27,6 +27,14 @@ pinpawo-studio init --workdir "$WORKDIR"
 export PINPAWO_STUDIO_TRIGGER_SECRET='choose-a-secret-at-least-16-characters'
 pinpawo-studio --workdir "$WORKDIR"
 pinpawo-studio --workdir "$WORKDIR" --pet-port 3212
+
+# Connect tiled Pet TUIs to the already-running Host. Read its Pet listener
+# port from Host startup output; Pets are discovered through Studio HTTP.
+pinpawo-studio tmux --pet-port 3212 --console
+
+# Start the separately served Studio Console Web if needed, then open it
+# (default: http://127.0.0.1:5173).
+pinpawo-studio console
 ```
 
 Configured Plugin IDs are installed package names. Each package exposes its
@@ -59,4 +67,8 @@ directory or generated state.
 The default template includes an HTTP Trigger for external requests. Set
 `PINPAWO_STUDIO_TRIGGER_SECRET` before starting the Host, or replace that
 Trigger in the initialized `.pinpawo/studio.json`.
-The independent Studio Console remains a separate frontend application.
+The independent Studio Console remains a separate frontend application. From a
+source checkout, `pinpawo-studio console` starts its local development server
+when it is not already running, then opens the page. A published Studio CLI can
+instead open a separately deployed Console with `pinpawo-studio console --url
+<origin>`.

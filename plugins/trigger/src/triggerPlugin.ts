@@ -588,8 +588,10 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       const value = await readJson();
                       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Trigger control request must be an object.');
                       const input = value as Record<string, unknown>;
-                      if (input.action !== 'retry' || typeof input.deliveryId !== 'string' || Object.keys(input).some((key) => key !== 'action' && key !== 'deliveryId')) {
-                        throw new Error('Trigger control requires action "retry" and deliveryId.');
+                      if ((input.action !== 'retry' && input.action !== 'redeliver')
+                        || typeof input.deliveryId !== 'string'
+                        || Object.keys(input).some((key) => key !== 'action' && key !== 'deliveryId')) {
+                        throw new Error('Trigger control requires action "retry" or "redeliver" and deliveryId.');
                       }
                       const prior = await service.getDelivery(input.deliveryId);
                       if (!prior || !prior.targetPetId || !prior.request) throw new Error(`Trigger delivery "${input.deliveryId}" has no retained dispatch input.`);
@@ -599,7 +601,9 @@ export function createTriggerPlugin(options: CreateTriggerPluginOptions): Trigge
                       }
                       const targetPetId = prior.targetPetId;
                       const request = prior.request;
-                      const delivery = await service.retry(input.deliveryId);
+                      const delivery = input.action === 'retry'
+                        ? await service.retry(input.deliveryId)
+                        : await service.redeliver(input.deliveryId);
                       try {
                         await pluginContext.dispatch({ petId: targetPetId, request, idempotencyKey: `trigger:${delivery.deliveryId}` });
                         return { kind: 'json', status: 202, body: { delivery: await service.accept(delivery.deliveryId) } };

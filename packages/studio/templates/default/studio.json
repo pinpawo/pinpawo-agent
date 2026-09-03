@@ -83,7 +83,7 @@
             },
             "request": {
               "template": "You were assigned Kanban task {{payload.taskId}}.\n\nTitle: {{payload.title}}\n\n{{payload.detail}}\n\nBefore work, call kanban_task_start with this taskId. Then report completion or a block with the same taskId.",
-              "context": ["payload.taskId", "payload.title", "payload.detail"]
+              "context": ["payload.taskId", "payload.title", "payload.detail", "payload.assignmentNote"]
             },
             "source": {
               "kind": "studio_event",

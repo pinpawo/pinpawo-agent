@@ -45,10 +45,12 @@ export type StudioTmuxLauncherDependencies = {
 
 export type StudioConsoleLauncherDependencies = {
   platform?: NodeJS.Platform;
+  environment?: NodeJS.ProcessEnv;
   runOpenCommand?: (command: string, args: string[]) => Promise<void>;
   probeConsole?: (url: string) => Promise<boolean>;
   startConsole?: (url: string) => Promise<void> | void;
   wait?: (milliseconds: number) => Promise<void>;
+  writeOutput?: (text: string) => void;
 };
 
 function nonEmpty(value: string | undefined, fallback: string): string {
@@ -245,6 +247,11 @@ function openingCommand(platform: NodeJS.Platform): { command: string; args: (ur
   return { command: 'xdg-open', args: (url) => [url] };
 }
 
+function hasGraphicalSession(platform: NodeJS.Platform, environment: NodeJS.ProcessEnv): boolean {
+  if (platform !== 'linux') return true;
+  return Boolean(environment.DISPLAY?.trim() || environment.WAYLAND_DISPLAY?.trim());
+}
+
 /** Ensure the separately served Studio Console is running, then open it in the user's default browser. */
 export async function openStudioConsole(
   options: StudioConsoleOptions = {},
@@ -258,7 +265,14 @@ export async function openStudioConsole(
       setTimeout(resolve, milliseconds);
     })));
   }
-  const opening = openingCommand(dependencies.platform ?? process.platform);
+  const platform = dependencies.platform ?? process.platform;
+  if (!hasGraphicalSession(platform, dependencies.environment ?? process.env)) {
+    (dependencies.writeOutput ?? process.stdout.write.bind(process.stdout))(
+      `Studio Console ready: ${url}\nNo graphical session was detected; open this URL from a browser that can reach the Host.\n`,
+    );
+    return;
+  }
+  const opening = openingCommand(platform);
   if (dependencies.runOpenCommand) {
     await dependencies.runOpenCommand(opening.command, opening.args(url));
     return;
@@ -348,6 +362,7 @@ export async function launchStudioTmux(
 
 export const __testOnly = {
   commandLine,
+  hasGraphicalSession,
   isInteractiveTerminal,
   normalizeStudioUrl,
   openingCommand,

@@ -9,7 +9,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-type Page = 'studio' | 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
+type Page = 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
@@ -72,14 +72,6 @@ type ProjectDocument = ProjectDocumentSummary & { content: string };
 
 type Resource<T> = { value: T | null; unavailable: boolean; error?: string };
 const empty = <T,>(): Resource<T> => ({ value: null, unavailable: false });
-
-function eventMessage(event: LiveEvent): string {
-  if (!event.payload || typeof event.payload !== 'object') return event.type;
-  const payload = event.payload as Record<string, unknown>;
-  return typeof payload.message === 'string'
-    ? payload.message
-    : typeof payload.note === 'string' ? payload.note : event.type;
-}
 
 function triggerSourceLabel(source: TriggerDefinition['source']): string {
   if (source.kind === 'studio_event') {
@@ -186,13 +178,18 @@ function canRetryDispatch(dispatch: DispatchRecord): boolean {
 }
 
 export function App() {
-  const [page, setPage] = useState<Page>('studio');
-  const [baseUrl, setBaseUrl] = useState(() => sessionStorage.getItem('studio.url') ?? 'http://127.0.0.1:3211');
-  const [token, setToken] = useState(() => sessionStorage.getItem('studio.token') ?? '');
-  const [connectionKey, setConnectionKey] = useState(0);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
+  const storedToken = sessionStorage.getItem('studio.token') ?? '';
+  const storedUrl = sessionStorage.getItem('studio.url') ?? 'http://127.0.0.1:3211';
+  const [page, setPage] = useState<Page>('kanban');
+  const [baseUrl, setBaseUrl] = useState(storedUrl);
+  const [token, setToken] = useState(storedToken);
+  const [connectionUrlDraft, setConnectionUrlDraft] = useState(storedUrl);
+  const [connectionTokenDraft, setConnectionTokenDraft] = useState(storedToken);
+  const [connectionKey, setConnectionKey] = useState(storedToken ? 1 : 0);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(storedToken ? 'connecting' : 'idle');
+  const [connectionModalOpen, setConnectionModalOpen] = useState(!storedToken);
   const [connectionError, setConnectionError] = useState('');
-  const [notice, setNotice] = useState('Enter the Studio HTTP token, then connect.');
+  const [notice, setNotice] = useState(storedToken ? 'Connecting…' : 'Enter the Studio HTTP token, then connect.');
   const [pets, setPets] = useState<Pet[]>([]);
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
@@ -200,7 +197,6 @@ export function App() {
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
   const [knowledge, setKnowledge] = useState<Resource<ProjectDocumentSummary[]>>(empty);
   const [selectedDocument, setSelectedDocument] = useState<ProjectDocument | null>(null);
-  const [events, setEvents] = useState<LiveEvent[]>([]);
   const [dispatches, setDispatches] = useState<DispatchRecord[]>([]);
   const [assigningTaskId, setAssigningTaskId] = useState('');
   const [kanbanHistory, setKanbanHistory] = useState<HistoryEvent[]>([]);
@@ -208,6 +204,8 @@ export function App() {
   const [triggerHistory, setTriggerHistory] = useState<HistoryEvent[]>([]);
   const [dispatchPet, setDispatchPet] = useState('');
   const [dispatchGoal, setDispatchGoal] = useState('');
+  const [dispatchDrawerOpen, setDispatchDrawerOpen] = useState(false);
+  const [dispatchTask, setDispatchTask] = useState<Task | null>(null);
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
   const dispatchSubmittingRef = useRef(false);
   const [retryingInvocationId, setRetryingInvocationId] = useState('');
@@ -272,6 +270,7 @@ export function App() {
       setTriggerHistory(triggerEvents.value?.events ?? []);
       setConnectionState('connected');
       setConnectionError('');
+      setConnectionModalOpen(false);
       setNotice('Connected.');
     };
     const run = async () => {
@@ -294,7 +293,6 @@ export function App() {
               const data = block.split('\n').find((line) => line.startsWith('data:'))?.slice(5).trim();
               if (data) {
                 const event = JSON.parse(data) as LiveEvent;
-                setEvents((current) => [...current.slice(-499), event]);
                 const dispatchRecord = dispatchRecordFromEvent(event);
                 if (dispatchRecord) {
                   setDispatches((current) => appendDispatchRecord(current, dispatchRecord));
@@ -313,6 +311,7 @@ export function App() {
           const message = connectionErrorMessage(error);
           setConnectionState('error');
           setConnectionError(message);
+          setConnectionModalOpen(true);
           setNotice(message);
         }
       }
@@ -323,24 +322,28 @@ export function App() {
 
   const connect = (event: FormEvent) => {
     event.preventDefault();
-    if (!token.trim()) {
+    if (!connectionTokenDraft.trim()) {
       setConnectionState('error');
       setConnectionError('Enter the Studio bearer token before connecting.');
       setNotice('Enter the Studio bearer token before connecting.');
       return;
     }
+    let nextUrl: string;
     try {
-      const parsed = new URL(normalizedUrl);
+      const parsed = new URL(connectionUrlDraft.trim().replace(/\/$/, ''));
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error();
+      nextUrl = parsed.origin;
     } catch {
       setConnectionState('error');
       setConnectionError('Enter a valid HTTP(S) Studio URL.');
       setNotice('Enter a valid HTTP(S) Studio URL.');
       return;
     }
-    sessionStorage.setItem('studio.url', normalizedUrl);
-    sessionStorage.setItem('studio.token', token);
-    setEvents([]);
+    const nextToken = connectionTokenDraft.trim();
+    sessionStorage.setItem('studio.url', nextUrl);
+    sessionStorage.setItem('studio.token', nextToken);
+    setBaseUrl(nextUrl);
+    setToken(nextToken);
     setDispatches([]);
     setConnectionState('connecting');
     setConnectionError('');
@@ -427,21 +430,49 @@ export function App() {
     }
   };
 
+  const openDispatch = (task: Task | null = null) => {
+    setDispatchTask(task);
+    setDispatchGoal('');
+    setDispatchPet(task?.assigneeId ?? taskAssignmentTargets[0]?.petId ?? pets[0]?.petId ?? '');
+    setDispatchDrawerOpen(true);
+  };
+
   const submitDispatch = (event: FormEvent) => {
     event.preventDefault();
     if (dispatchSubmittingRef.current) return;
     const request = dispatchGoal.trim();
-    if (!dispatchPet || !request) {
-      setNotice('Dispatch requires a Pet and a goal.');
+    if (!dispatchPet || (!dispatchTask && !request)) {
+      setNotice(dispatchTask ? 'Assignment requires a Pet.' : 'Dispatch requires a Pet and a message.');
       return;
     }
     dispatchSubmittingRef.current = true;
     setDispatchSubmitting(true);
+    if (dispatchTask) {
+      const task = dispatchTask;
+      setAssigningTaskId(task.taskId);
+      void post('/kanban/control', {
+        action: 'assign',
+        taskId: task.taskId,
+        assigneeId: dispatchPet,
+        ...(request ? { assignmentNote: request } : {}),
+      }).then(() => {
+        setNotice(`Kanban task ${task.taskId} was assigned to ${dispatchPet}.`);
+        setDispatchGoal('');
+        setDispatchTask(null);
+        setDispatchDrawerOpen(false);
+      }).catch((error) => setNotice(connectionErrorMessage(error))).finally(() => {
+        dispatchSubmittingRef.current = false;
+        setDispatchSubmitting(false);
+        setAssigningTaskId('');
+      });
+      return;
+    }
     void post<{ petId: string; invocationId: string }>('/dispatch', {
       petId: dispatchPet,
       request,
     }).then((receipt) => {
       setDispatchGoal('');
+      setDispatchDrawerOpen(false);
       setDispatches((current) => appendDispatchRecord(current, {
         invocationId: receipt.invocationId,
         petId: receipt.petId,
@@ -486,20 +517,6 @@ export function App() {
     });
   };
 
-  const assignTask = (taskId: string, assigneeId: string, assignmentNote?: string) => {
-    setAssigningTaskId(taskId);
-    void post('/kanban/control', {
-      action: 'assign',
-      taskId,
-      assigneeId,
-      ...(assignmentNote?.trim() ? { assignmentNote: assignmentNote.trim() } : {}),
-    }).then(() => {
-      setNotice(`Kanban task ${taskId} was assigned to ${assigneeId}.`);
-    }).catch((error) => {
-      setNotice(connectionErrorMessage(error));
-    }).finally(() => setAssigningTaskId(''));
-  };
-
   const retryTriggerDelivery = (deliveryId: string) => {
     setRetryingDeliveryId(deliveryId);
     void post('/triggers/control', { action: 'retry', deliveryId }).then(() => {
@@ -529,19 +546,19 @@ export function App() {
     <main className="shell">
       <header>
         <div className="brand">◎ PINPAWO <span>/ STUDIO CONSOLE</span></div>
-        <form className="connection" onSubmit={connect}>
-          <input aria-label="Studio HTTP URL" onChange={(event) => setBaseUrl(event.target.value)} value={baseUrl} />
-          <input aria-label="Studio bearer token" onChange={(event) => setToken(event.target.value)} placeholder="Bearer token" type="password" value={token} />
-          <button disabled={connectionState === 'connecting'}>
-            {connectionState === 'connecting' ? 'CONNECTING…' : 'CONNECT'}
-          </button>
+        <div className="connection">
+          <button className="connection-settings" onClick={() => {
+            setConnectionUrlDraft(baseUrl);
+            setConnectionTokenDraft(token);
+            setConnectionModalOpen(true);
+          }} type="button">CONNECTION</button>
           <span className={`connection-state ${connectionState}`} role="status">
             <i />{connectionState}
           </span>
-        </form>
+        </div>
       </header>
       <nav>
-        {(['studio', 'kanban', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
+        {(['kanban', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
@@ -550,63 +567,11 @@ export function App() {
           <strong>CONNECTION FAILED</strong>
           <span>{connectionError}</span>
         </div>}
-        {page === 'studio' && <>
-          <div className="section-title"><span>RESIDENT PETS</span><b>{pets.length}</b></div>
-          <div className="rows">{pets.map((pet) => <div className="row" key={pet.petId}><code>{pet.petId}</code><strong>{pet.name}</strong><span>{pet.role ?? pet.serviceSummary ?? 'resident'}</span></div>)}</div>
-          <form className="composer chat-composer" onSubmit={submitDispatch}>
-            <label className="composer-target">
-              <span>DISPATCH TO</span>
-              <select disabled={dispatchSubmitting} onChange={(event) => setDispatchPet(event.target.value)} value={dispatchPet}>{pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.petId}</option>)}</select>
-            </label>
-            <div className="chat-input">
-              <label htmlFor="dispatch-goal">MESSAGE</label>
-              <textarea
-                id="dispatch-goal"
-                onChange={(event) => setDispatchGoal(event.target.value)}
-                onKeyDown={submitDispatchOnEnter}
-                placeholder="Describe the goal for this Pet"
-                rows={4}
-                value={dispatchGoal}
-              />
-              <div className="chat-actions">
-                <span>Enter to send / Shift+Enter for a new line</span>
-                <button disabled={dispatchSubmitting || connectionState !== 'connected' || !dispatchPet || !dispatchGoal.trim()}>
-                  {dispatchSubmitting ? 'DISPATCHING…' : 'DISPATCH'}
-                </button>
-              </div>
-            </div>
-          </form>
-          <div className="section-title"><span>DISPATCH ACTIVITY</span><b>{dispatches.length}</b></div>
-          {dispatches.length > 0
-            ? <div className="rows dispatch-rows">
-              {dispatches.slice().reverse().map((dispatch) => (
-                <div className="row dispatch-row" key={dispatch.invocationId}>
-                  <time>{new Date(dispatch.updatedAt).toLocaleTimeString()}</time>
-                  <em className={dispatch.state}>{dispatch.state}</em>
-                  <strong>{dispatch.request}</strong>
-                  <span>
-                    {dispatch.petId} · {dispatch.error ?? `${dispatch.producer} · ${dispatch.invocationId.slice(0, 8)}`}
-                    {dispatch.state === 'failed' && canRetryDispatch(dispatch) && <button
-                      className="inline-action"
-                      disabled={retryingInvocationId === dispatch.invocationId}
-                      onClick={() => retryDispatch(dispatch)}
-                      type="button"
-                    >
-                      {retryingInvocationId === dispatch.invocationId ? 'retrying…' : 'retry'}
-                    </button>}
-                  </span>
-                </div>
-              ))}
-            </div>
-            : <div className="compact-empty">No dispatch has been accepted in this Console session.</div>}
-          <div className="section-title"><span>LIVE EVENTS</span><b>{events.length}</b></div>
-          <div className="rows event-rows">{events.slice().reverse().map((event, index) => <div className="row" key={`${event.occurredAt}-${index.toString()}`}><time>{new Date(event.occurredAt).toLocaleTimeString()}</time><code>{event.source}</code><strong>{event.type}</strong><span>{eventMessage(event)}</span></div>)}</div>
-        </>}
         {page === 'kanban' && (tasks.value ? <>
           <div className="section-title"><span>TASK FLOW</span><span><em className="mode-label">manual assignment</em><b>{tasks.value.length}</b></span></div>
           <KanbanFlow
             pets={taskAssignmentTargets}
-            onAssign={assignTask}
+            onAssign={(task) => openDispatch(task)}
             assigningTaskId={assigningTaskId}
             tasks={tasks.value}
           />
@@ -664,6 +629,71 @@ export function App() {
           </div>
         </> : unavailable(knowledge, 'Project Files'))}
       </section>
+      <button className="dispatch-launcher" disabled={connectionState !== 'connected'} onClick={() => openDispatch()} type="button">
+        <span>+</span> DISPATCH
+      </button>
+      {dispatchDrawerOpen && <div className="drawer-layer" role="presentation" onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !dispatchSubmitting) setDispatchDrawerOpen(false);
+      }}>
+        <aside aria-label={dispatchTask ? 'Assign Kanban task' : 'Dispatch to Pet'} aria-modal="true" className="dispatch-drawer" role="dialog">
+          <div className="drawer-head">
+            <div><span>{dispatchTask ? 'TASK ASSIGNMENT' : 'NEW DISPATCH'}</span><strong>{dispatchTask ? dispatchTask.title : 'Send work to a resident Pet'}</strong></div>
+            <button aria-label="Close dispatch" disabled={dispatchSubmitting} onClick={() => setDispatchDrawerOpen(false)} type="button">×</button>
+          </div>
+          <form className="drawer-composer" onSubmit={submitDispatch}>
+            {dispatchTask && <div className="task-reference">
+              <span>REFERENCED TASK</span>
+              <code>{dispatchTask.taskId.slice(0, 8)}</code>
+              <strong>{dispatchTask.title}</strong>
+              <p>{dispatchTask.detail}</p>
+            </div>}
+            <label className="composer-target">
+              <span>{dispatchTask ? 'ASSIGN TO' : 'DISPATCH TO'}</span>
+              <select disabled={dispatchSubmitting} onChange={(event) => setDispatchPet(event.target.value)} value={dispatchPet}>
+                {(dispatchTask ? taskAssignmentTargets : pets).map((pet) => <option key={pet.petId} value={pet.petId}>{pet.name} ({pet.petId})</option>)}
+              </select>
+            </label>
+            <div className="chat-input">
+              <label htmlFor="dispatch-goal">{dispatchTask ? 'ADDITIONAL CONTEXT · OPTIONAL' : 'MESSAGE'}</label>
+              <textarea
+                autoFocus
+                id="dispatch-goal"
+                onChange={(event) => setDispatchGoal(event.target.value)}
+                onKeyDown={submitDispatchOnEnter}
+                placeholder={dispatchTask ? 'Add guidance for the assigned Pet…' : 'Describe the goal for this Pet…'}
+                rows={7}
+                value={dispatchGoal}
+              />
+              <div className="chat-actions">
+                <span>Enter to send / Shift+Enter for a new line</span>
+                <button disabled={dispatchSubmitting || connectionState !== 'connected' || !dispatchPet || (!dispatchTask && !dispatchGoal.trim())}>
+                  {dispatchSubmitting ? 'SENDING…' : dispatchTask ? 'ASSIGN' : 'DISPATCH'}
+                </button>
+              </div>
+            </div>
+          </form>
+          {!dispatchTask && <div className="drawer-activity">
+            <div className="section-title"><span>RECENT ACTIVITY</span><b>{dispatches.length}</b></div>
+            {dispatches.length > 0 ? dispatches.slice(-6).reverse().map((dispatch) => <div className="dispatch-activity" key={dispatch.invocationId}>
+              <em className={dispatch.state}>{dispatch.state}</em>
+              <strong>{dispatch.request}</strong>
+              <span>{dispatch.petId}{dispatch.error ? ` · ${dispatch.error}` : ''}{dispatch.state === 'failed' && canRetryDispatch(dispatch) && <button className="inline-action" disabled={retryingInvocationId === dispatch.invocationId} onClick={() => retryDispatch(dispatch)} type="button">retry</button>}</span>
+            </div>) : <div className="compact-empty">No dispatch activity in this Console session.</div>}
+          </div>}
+        </aside>
+      </div>}
+      {connectionModalOpen && <div className="modal-layer" role="presentation">
+        <form aria-label="Connect to Studio" aria-modal="true" className="connection-modal" onSubmit={connect} role="dialog">
+          <div className="modal-title"><span>STUDIO CONNECTION</span><strong>Connect this Console to a running Studio Host</strong></div>
+          <label><span>HOST URL</span><input aria-label="Studio HTTP URL" autoFocus onChange={(event) => setConnectionUrlDraft(event.target.value)} value={connectionUrlDraft} /></label>
+          <label><span>BEARER TOKEN</span><input aria-label="Studio bearer token" onChange={(event) => setConnectionTokenDraft(event.target.value)} placeholder="Paste token" type="password" value={connectionTokenDraft} /></label>
+          {connectionError && <div className="modal-error" role="alert">{connectionError}</div>}
+          <div className="modal-actions">
+            {connectionState === 'connected' && <button onClick={() => setConnectionModalOpen(false)} type="button">CANCEL</button>}
+            <button disabled={connectionState === 'connecting'}>{connectionState === 'connecting' ? 'CONNECTING…' : 'CONNECT'}</button>
+          </div>
+        </form>
+      </div>}
       <footer>{notice}</footer>
     </main>
   );
@@ -676,12 +706,10 @@ function KanbanFlow({
   tasks,
 }: {
   pets: Pet[];
-  onAssign: (taskId: string, assigneeId: string, assignmentNote?: string) => void;
+  onAssign: (task: Task) => void;
   assigningTaskId: string;
   tasks: Task[];
 }) {
-  const [selectedTargets, setSelectedTargets] = useState<Record<string, string>>({});
-  const [assignmentNotes, setAssignmentNotes] = useState<Record<string, string>>({});
   const tasksById = new Map(tasks.map((task) => [task.taskId, task]));
   const groups = [
     { id: 'active', label: 'ACTIVE', tasks: tasks.filter(({ status }) => status === 'doing' || status === 'waiting') },
@@ -740,14 +768,7 @@ function KanbanFlow({
             <div className="task-expanded-footer">
               <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
               {task.status === 'todo' && <label className="task-assignment">
-                <div className="task-assignment-controls">
-                  <select aria-label={`Assign ${task.title}`} disabled={!assignable || Boolean(assigningTaskId)} onChange={(event) => setSelectedTargets((current) => ({ ...current, [task.taskId]: event.target.value }))} title={assignable ? undefined : `Waiting for: ${incompleteDependencies.join(', ')}`} value={selectedTargets[task.taskId] ?? ''}>
-                    <option disabled value="">{assignable ? 'ASSIGN TO…' : 'WAITING FOR DEPENDENCIES'}</option>
-                    {pets.map((pet) => <option key={pet.petId} value={pet.petId}>{pet.name} ({pet.petId})</option>)}
-                  </select>
-                  <input aria-label={`Optional note for ${task.title}`} disabled={!assignable || Boolean(assigningTaskId)} maxLength={1000} onChange={(event) => setAssignmentNotes((current) => ({ ...current, [task.taskId]: event.target.value }))} placeholder="Optional note for this assignment" value={assignmentNotes[task.taskId] ?? ''} />
-                </div>
-                <button className="task-action" disabled={!assignable || !selectedTargets[task.taskId] || Boolean(assigningTaskId)} onClick={() => onAssign(task.taskId, selectedTargets[task.taskId]!, assignmentNotes[task.taskId])} type="button">ASSIGN</button>
+                <button className="task-action" disabled={!assignable || pets.length === 0 || Boolean(assigningTaskId)} onClick={() => onAssign(task)} title={assignable ? 'Choose a Pet and add optional guidance' : `Waiting for: ${incompleteDependencies.join(', ')}`} type="button">ASSIGN</button>
                 {assigning && <span>assigning…</span>}
               </label>}
             </div>

@@ -394,9 +394,10 @@ test('Entry Answer leaves an ordinary reply untouched', async () => {
 test('root invocation context reaches direct Entry replies and final Answer without node plumbing', async () => {
   for (const mode of ['direct', 'plan'] as const) {
     const seen: BaseMessage[][] = [];
+    const legacyActorName = randomUUID();
     const scripted = entryAnswerModel(mode, messages => seen.push(messages), undefined, messages => seen.push(messages));
     const graph = createOrchestratorGraph({
-      models: { act: scripted.model, answer: scripted.model }, actor,
+      models: { act: scripted.model, answer: scripted.model }, actor: { ...actor, name: legacyActorName },
       runSupervisorRunner: { async invoke() { return { action: 'unavailable', tasks: [] }; } },
     });
     const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
@@ -405,11 +406,13 @@ test('root invocation context reaches direct Entry replies and final Answer with
     });
     assert.equal(seen.length, mode === 'plan' ? 2 : 1);
     for (const messages of seen) {
+      assert.equal(messages[0].text.includes(legacyActorName), false);
       for (const section of common) assert.equal(messages[0].text.split(section.content).length - 1, 1);
     }
     seen.length = 0;
     await runAgent(graph, { messages: [new HumanMessage('No common context this time.')] });
     for (const messages of seen) {
+      assert.equal(messages[0].text.includes(legacyActorName), false);
       for (const section of common) assert.equal(messages[0].text.includes(section.content), false);
     }
   }

@@ -90,7 +90,12 @@ formats the Pet document as a section. Order is role/framework instructions, com
 input order, then execution-local sections in input order. Empty IDs/content
 and duplicate IDs (after trimming) are errors, never silently skipped.
 
-Role builders still own role content. Supervisor and subagent assembly register
+Role builders still own role content. Entry and final Answer role templates are
+parameterless: they no longer receive an AgentActor or inject its display name.
+Pet identity and authored behavior come from PET.md. The legacy decision-config
+helper and its unused workdir/runtimeEnvironment arguments have been removed.
+Host identity/configuration and the optional Pet Profile Toolkit remain separate
+consumers; this change does not remove their fields. Supervisor and subagent assembly register
 the same reusable prompt middleware. Direct Entry/Answer model calls use the
 same accessor and composer. Business nodes do not extract or forward common
 sections. Every model call composes from its role message without mutating graph

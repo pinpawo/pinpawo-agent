@@ -2,6 +2,7 @@ export type { AgentInterrupt } from './agentInterrupt';
 export {
   PAUSE_TASK_INTERRUPT_KIND,
   PAUSE_TASK_INTERRUPT_STATE_KEY,
+  PauseTaskInterruptStateSchema,
   PauseTaskInterrupt,
   isPauseTaskInterruptPayload,
   pauseTaskInterrupt,
@@ -20,4 +21,6 @@ export type {
   ReviewInterruptOptions,
   ReviewInterruptResolution,
   ReviewInterruptReview,
+  ReviewInterruptStateUpdate,
+  ReviewInterruptTransition,
 } from './reviewInterrupt';

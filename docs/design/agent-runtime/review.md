@@ -130,7 +130,7 @@ The boundary is deliberate:
   reusing the Review payload guards owned by `review/`;
 - `interrupt/pauseTaskInterrupt.ts` owns paused-task materialization,
   propagation across the child invocation boundary, its payload guard,
-  interaction, and continue behavior;
+  state schema, interaction, and continue behavior;
 - `review/` owns pure Review policy, specification, authorization, decision
   parsing, and message-construction helpers used by `ReviewInterrupt`;
 - `toolkitReviewMiddleware.ts` connects the LangChain `afterModel` hook to the
@@ -223,8 +223,11 @@ four-way policy by inspecting raw decisions, booleans, message shapes, or
 Because `interrupt()` is called by the `afterModel` middleware node, resume
 replays that middleware node. It does not replay the already committed model
 node. The `interrupt()` call returns the accepted Review command on that replay,
-after which `ReviewInterrupt.resume()` completes the selected Review transition.
-The middleware only translates `resolution.next` to the LangChain hook result.
+after which `ReviewInterrupt.resume()` resolves its semantic outcome and
+`ReviewInterrupt.materialize()` consumes `resolution.next` to produce the
+complete LangChain state transition. The middleware records returned
+authorization effects, merges approved Review IDs, and applies that transition
+without branching on Approve, Respond, Reject, or Cancel.
 
 ### PauseTaskInterrupt
 

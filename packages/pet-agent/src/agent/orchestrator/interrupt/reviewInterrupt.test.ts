@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RemoveMessage, ToolMessage, type ToolCall } from '@langchain/core/messages';
+import { AIMessage, RemoveMessage, ToolMessage, type ToolCall } from '@langchain/core/messages';
+import {
+  Annotation,
+  Command,
+  END,
+  MemorySaver,
+  START,
+  StateGraph,
+} from '@langchain/langgraph';
 import { ReviewInterrupt, type ReviewInterruptReview } from './reviewInterrupt';
 import { buildReviewSpec, type HumanReviewInterruptPayload } from '../review/reviewSpec';
 
@@ -50,10 +58,17 @@ function reviews(): ReviewInterruptReview[] {
 }
 
 function createReviewInterrupt() {
+  const aiMessage = new AIMessage({
+    id: 'ai-action',
+    content: '',
+    tool_calls: toolCalls,
+  });
   return new ReviewInterrupt({
     reviews: reviews(),
-    toolCalls,
-    aiMessageId: 'ai-action',
+    messages: [aiMessage],
+    aiMessage,
+    aiMessageIndex: 0,
+    actionWasMaterialized: false,
   });
 }
 
@@ -109,4 +124,50 @@ test('ReviewInterrupt encapsulates cancel resolution by removing the proposed ac
   assert.equal(result.next, 'pause_task');
   assert.equal(result.type === 'cancel' && result.messages.length, 1);
   assert.ok(result.type === 'cancel' && result.messages[0] instanceof RemoveMessage);
+});
+
+test('ReviewInterrupt re-interrupts after an invalid resume before accepting a valid decision', async () => {
+  const HarnessState = Annotation.Root({
+    outcome: Annotation<string | null>({
+      reducer: (_current, next) => next,
+      default: () => null,
+    }),
+  });
+  const graph = new StateGraph(HarnessState)
+    .addNode('review', async () => {
+      const transition = await createReviewInterrupt().run();
+      return { outcome: transition.type };
+    })
+    .addEdge(START, 'review')
+    .addEdge('review', END)
+    .compile({ checkpointer: new MemorySaver() });
+  const config = { configurable: { thread_id: 'review-invalid-resume' } };
+
+  const initial = await graph.invoke({ outcome: null }, config) as {
+    __interrupt__?: Array<{ value?: { kind?: string; error?: string } }>;
+  };
+  assert.equal(initial.__interrupt__?.[0]?.value?.kind, 'review_batch');
+  assert.equal(initial.__interrupt__?.[0]?.value?.error, undefined);
+
+  const invalid = await graph.invoke(
+    new Command({ resume: { decisions: [] } }),
+    config,
+  ) as {
+    __interrupt__?: Array<{
+      value?: { kind?: string; error?: string };
+    }>;
+  };
+  assert.equal(invalid.__interrupt__?.[0]?.value?.kind, 'review_batch');
+  assert.equal(invalid.__interrupt__?.[0]?.value?.error, 'invalid_decision');
+
+  const completed = await graph.invoke(new Command({
+    resume: {
+      decisions: toolCalls.map((toolCall) => ({
+        reviewId: `review-${toolCall.id}`,
+        selectedOptionId: 'approve',
+      })),
+    },
+  }), config) as { outcome: string | null; __interrupt__?: unknown };
+  assert.equal(completed.outcome, 'approve');
+  assert.equal(completed.__interrupt__, undefined);
 });

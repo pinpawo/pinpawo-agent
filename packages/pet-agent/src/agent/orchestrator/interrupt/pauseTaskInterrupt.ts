@@ -1,5 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
+import { z } from 'zod';
 import type { AgentInterrupt } from './agentInterrupt';
 
 export const PAUSE_TASK_INTERRUPT_KIND = 'pause_task' as const;
@@ -8,6 +9,12 @@ export const PAUSE_TASK_INTERRUPT_STATE_KEY = 'pauseTaskInterrupt' as const;
 export type PauseTaskInterruptPayload = {
   kind: typeof PAUSE_TASK_INTERRUPT_KIND;
 };
+
+export const PauseTaskInterruptStateSchema = z.object({
+  [PAUSE_TASK_INTERRUPT_STATE_KEY]: z.object({
+    kind: z.literal(PAUSE_TASK_INTERRUPT_KIND),
+  }).nullable().default(null),
+});
 
 export type PauseTaskInterruptCommand = {
   action: 'continue';

@@ -1,10 +1,11 @@
 import {
+  AIMessage,
   RemoveMessage,
   ToolMessage,
   type BaseMessage,
   type ToolCall,
 } from '@langchain/core/messages';
-import { interrupt } from '@langchain/langgraph';
+import { REMOVE_ALL_MESSAGES, interrupt } from '@langchain/langgraph';
 import {
   applyReviewEffects,
   ReviewEffectApplicationError,
@@ -23,6 +24,11 @@ import {
   type ReviewResponseResolution,
 } from '../review/reviewSpec';
 import type { AgentInterrupt } from './agentInterrupt';
+import {
+  PAUSE_TASK_INTERRUPT_STATE_KEY,
+  pauseTaskInterrupt,
+  type PauseTaskInterruptPayload,
+} from './pauseTaskInterrupt';
 
 export type ReviewInterruptReview = {
   toolCall: ToolCall;
@@ -58,8 +64,23 @@ export type ReviewInterruptResolution =
 
 export type ReviewInterruptOptions = {
   reviews: ReviewInterruptReview[];
-  toolCalls: ToolCall[];
-  aiMessageId: string | null;
+  messages: BaseMessage[];
+  aiMessage: AIMessage;
+  aiMessageIndex: number;
+  actionWasMaterialized: boolean;
+};
+
+export type ReviewInterruptStateUpdate = {
+  messages?: BaseMessage[];
+  jumpTo?: 'model' | 'end';
+  [PAUSE_TASK_INTERRUPT_STATE_KEY]?: PauseTaskInterruptPayload;
+};
+
+export type ReviewInterruptTransition = {
+  type: ReviewInterruptResolution['type'];
+  authorizations: ToolAuthorizationRecord[];
+  approvedReviewIds: string[];
+  stateUpdate: ReviewInterruptStateUpdate;
 };
 
 function readToolCallId(toolCall: ToolCall) {
@@ -106,6 +127,21 @@ function buildToolMessage(toolCall: ToolCall, content: string) {
     name: toolCall.name,
     tool_call_id: readToolCallId(toolCall),
   });
+}
+
+function replaceMessageInState(
+  messages: BaseMessage[],
+  index: number,
+  replacement: BaseMessage,
+  appended: BaseMessage[],
+) {
+  return [
+    new RemoveMessage({ id: REMOVE_ALL_MESSAGES }) as BaseMessage,
+    ...messages.slice(0, index),
+    replacement,
+    ...messages.slice(index + 1),
+    ...appended,
+  ];
 }
 
 function appendInvalidDecisionMessage(
@@ -196,7 +232,7 @@ export class ReviewInterrupt implements AgentInterrupt<
 
   async resume(value: unknown): Promise<ReviewInterruptResolution> {
     if (isHumanReviewCancelResume(value)) {
-      const aiMessageId = this.#options.aiMessageId;
+      const aiMessageId = this.#options.aiMessage.id;
       if (!aiMessageId) {
         throw new Error('Cannot cancel a reviewed AI action without a message id.');
       }
@@ -225,7 +261,7 @@ export class ReviewInterrupt implements AgentInterrupt<
         return {
           type: 'respond',
           messages: buildDecisionMessages({
-            toolCalls: this.#options.toolCalls,
+            toolCalls: this.#options.aiMessage.tool_calls ?? [],
             review,
             decision,
           }),
@@ -238,7 +274,7 @@ export class ReviewInterrupt implements AgentInterrupt<
       return {
         type: 'reject',
         messages: buildDecisionMessages({
-          toolCalls: this.#options.toolCalls,
+          toolCalls: this.#options.aiMessage.tool_calls ?? [],
           review,
           decision,
         }),
@@ -254,12 +290,64 @@ export class ReviewInterrupt implements AgentInterrupt<
     };
   }
 
-  async run(): Promise<ReviewInterruptResolution> {
+  materialize(resolution: ReviewInterruptResolution): ReviewInterruptTransition {
+    if (resolution.next === 'tools') {
+      return {
+        type: resolution.type,
+        authorizations: resolution.authorizations,
+        approvedReviewIds: resolution.approvedReviewIds,
+        stateUpdate: this.#options.actionWasMaterialized
+          ? {
+              messages: replaceMessageInState(
+                this.#options.messages,
+                this.#options.aiMessageIndex,
+                this.#options.aiMessage,
+                [],
+              ),
+            }
+          : {},
+      };
+    }
+
+    if (resolution.next === 'model') {
+      return {
+        type: resolution.type,
+        authorizations: [],
+        approvedReviewIds: [],
+        stateUpdate: {
+          messages: replaceMessageInState(
+            this.#options.messages,
+            this.#options.aiMessageIndex,
+            this.#options.aiMessage,
+            resolution.messages,
+          ),
+          jumpTo: 'model',
+        },
+      };
+    }
+
+    const messages = resolution.type === 'cancel'
+      ? resolution.messages
+      : replaceMessageInState(
+          this.#options.messages,
+          this.#options.aiMessageIndex,
+          this.#options.aiMessage,
+          resolution.messages,
+        );
+    return {
+      type: resolution.type,
+      authorizations: [],
+      approvedReviewIds: [],
+      stateUpdate: pauseTaskInterrupt.enter({ messages }),
+    };
+  }
+
+  async run(): Promise<ReviewInterruptTransition> {
     let payload = this.interaction();
     while (true) {
       const value = interrupt(payload);
       try {
-        return await this.resume(value);
+        return this.materialize(await this.resume(value));
       } catch (error) {
         if (
           !(error instanceof ReviewResponseResolutionError)

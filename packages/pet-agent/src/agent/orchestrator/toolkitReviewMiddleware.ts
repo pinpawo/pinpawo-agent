@@ -40,11 +40,9 @@ import {
   type GlobalReviewPolicyResolution,
 } from './review/globalReviewPolicy';
 import {
-  PAUSE_TASK_INTERRUPT_KIND,
-  PAUSE_TASK_INTERRUPT_STATE_KEY,
+  PauseTaskInterruptStateSchema,
   ReviewInterrupt,
-  pauseTaskInterrupt,
-  type ReviewInterruptResolution,
+  type ReviewInterruptTransition,
   type ReviewInterruptReview,
 } from './interrupt';
 
@@ -432,20 +430,18 @@ type PreparedToolkitReviews = {
 
 type MaterializedToolCallMessage = {
   message: AIMessage;
+  messageIndex: number;
   toolCalls: ToolCall[];
   replacedMessage: boolean;
 };
 
-type ToolkitReviewResults = ReviewInterruptResolution
-  | { type: 'allow'; next: 'tools' }
-  | { type: 'block'; messages: BaseMessage[]; next: 'end' };
+type ToolkitReviewResults = Omit<ReviewInterruptTransition, 'type'> & {
+  type: ReviewInterruptTransition['type'] | 'allow' | 'block';
+};
 
 const ToolkitReviewStateSchema = z.object({
   toolkitReviewApprovals: z.record(z.boolean()).default({}),
-  [PAUSE_TASK_INTERRUPT_STATE_KEY]: z.object({
-    kind: z.literal(PAUSE_TASK_INTERRUPT_KIND),
-  }).nullable().default(null),
-});
+}).merge(PauseTaskInterruptStateSchema);
 
 type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
 
@@ -641,6 +637,7 @@ function materializeAIMessageToolCalls(params: {
     message: replacedMessage
       ? cloneAIMessageWithToolCalls(params.aiMessage, toolCalls)
       : params.aiMessage,
+    messageIndex: params.aiMessageIndex,
     toolCalls,
     replacedMessage,
   };
@@ -748,17 +745,20 @@ async function prepareToolkitReviews(params: {
 
 async function resolveHumanToolkitReviews(params: {
   reviews: ReviewInterruptReview[];
-  toolCalls: ToolCall[];
-  aiMessageId: string | null;
-}): Promise<ReviewInterruptResolution> {
+  messages: BaseMessage[];
+  reviewedMessage: MaterializedToolCallMessage;
+}): Promise<ReviewInterruptTransition> {
   return new ReviewInterrupt({
     reviews: params.reviews,
-    toolCalls: params.toolCalls,
-    aiMessageId: params.aiMessageId,
+    messages: params.messages,
+    aiMessage: params.reviewedMessage.message,
+    aiMessageIndex: params.reviewedMessage.messageIndex,
+    actionWasMaterialized: params.reviewedMessage.replacedMessage,
   }).run();
 }
 
 async function reviewToolkitToolCalls(params: {
+  messages: BaseMessage[];
   reviewedMessage: MaterializedToolCallMessage;
   bindingsByToolName: Map<string, ToolkitReviewBinding>;
   ctx: ToolkitReviewRuntimeContext;
@@ -771,14 +771,15 @@ async function reviewToolkitToolCalls(params: {
     approvedReviewIds: params.approvedReviewIds,
   });
   if (prepared.cancellation) {
-    return buildPolicyCancellationResult(
-      params.reviewedMessage.toolCalls,
-      prepared.cancellation,
-    );
+    return buildPolicyCancellationResult({
+      messages: params.messages,
+      reviewedMessage: params.reviewedMessage,
+      cancellation: prepared.cancellation,
+    });
   }
 
   if (prepared.reviews.length === 0) {
-    return { type: 'allow', next: 'tools' };
+    return buildAllowedToolkitReviewResult(params.messages, params.reviewedMessage);
   }
 
   const hasPendingResume = hasPendingReviewInterruptResume();
@@ -817,30 +818,27 @@ async function reviewToolkitToolCalls(params: {
       resolution: policyResolution,
       reviews: prepared.reviews,
     });
-    return { type: 'allow', next: 'tools' };
+    return buildAllowedToolkitReviewResult(params.messages, params.reviewedMessage);
   }
 
   if (!runtimeCanCollectHumanReview(params.ctx)) {
     const [firstReview] = prepared.reviews;
-    return buildPolicyCancellationResult(
-      params.reviewedMessage.toolCalls,
-      buildCancelledOutcomeForReview(
+    return buildPolicyCancellationResult({
+      messages: params.messages,
+      reviewedMessage: params.reviewedMessage,
+      cancellation: buildCancelledOutcomeForReview(
         firstReview,
         buildHumanReviewUnavailableReason(policyResolution),
         'review_unavailable',
       ),
-    );
+    });
   }
 
-  const resolution = await resolveHumanToolkitReviews({
+  return resolveHumanToolkitReviews({
     reviews: prepared.reviews.map(toReviewInterruptReview),
-    toolCalls: params.reviewedMessage.toolCalls,
-    aiMessageId: params.reviewedMessage.message.id ?? null,
+    messages: params.messages,
+    reviewedMessage: params.reviewedMessage,
   });
-  if (resolution.type === 'approve') {
-    await recordToolAuthorizations(params.ctx, resolution.authorizations);
-  }
-  return resolution;
 }
 
 async function canAutoAuthorizeCompleteBatch(params: {
@@ -873,83 +871,62 @@ async function canAutoAuthorizeCompleteBatch(params: {
   return true;
 }
 
-function buildPolicyCancellationResult(
-  toolCalls: ToolCall[],
-  cancellation: ToolkitReviewCancellation,
+function buildAllowedToolkitReviewResult(
+  messages: BaseMessage[],
+  reviewedMessage: MaterializedToolCallMessage,
 ): ToolkitReviewResults {
+  return {
+    type: 'allow',
+    authorizations: [],
+    approvedReviewIds: [],
+    stateUpdate: reviewedMessage.replacedMessage
+      ? {
+          messages: replaceMessageInState(
+            messages,
+            reviewedMessage.messageIndex,
+            reviewedMessage.message,
+            [],
+          ),
+        }
+      : {},
+  };
+}
+
+function buildPolicyCancellationResult(params: {
+  messages: BaseMessage[];
+  reviewedMessage: MaterializedToolCallMessage;
+  cancellation: ToolkitReviewCancellation;
+}): ToolkitReviewResults {
   const toolMessages: ToolMessage[] = [];
-  for (const toolCall of toolCalls) {
+  for (const toolCall of params.reviewedMessage.toolCalls) {
     toolMessages.push(buildToolMessage(
       toolCall,
-      readToolCallId(toolCall) === readToolCallId(cancellation.toolCall)
-        ? cancellation.content
+      readToolCallId(toolCall) === readToolCallId(params.cancellation.toolCall)
+        ? params.cancellation.content
         : buildSkippedAfterCancellationResult(toolCall),
     ));
   }
   return {
     type: 'block',
-    messages: [
-      ...toolMessages,
-      new AIMessage({
-        content: cancellation.source === 'policy_block'
-          ? `工具调用 ${cancellation.toolCall.name} 被策略阻止，未执行。原因：${cancellation.reason}`
-          : `工具调用 ${cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${cancellation.reason}`,
-      }),
-    ],
-    next: 'end',
+    authorizations: [],
+    approvedReviewIds: [],
+    stateUpdate: {
+      messages: replaceMessageInState(
+        params.messages,
+        params.reviewedMessage.messageIndex,
+        params.reviewedMessage.message,
+        [
+          ...toolMessages,
+          new AIMessage({
+            content: params.cancellation.source === 'policy_block'
+              ? `工具调用 ${params.cancellation.toolCall.name} 被策略阻止，未执行。原因：${params.cancellation.reason}`
+              : `工具调用 ${params.cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${params.cancellation.reason}`,
+          }),
+        ],
+      ),
+      jumpTo: 'end',
+    },
   };
-}
-
-function buildToolkitReviewStateUpdate(params: {
-  state: Partial<ToolkitReviewState>;
-  messages: BaseMessage[];
-  aiMessageIndex: number;
-  reviewedMessage: MaterializedToolCallMessage;
-  reviewResults: ToolkitReviewResults;
-}) {
-  const { reviewedMessage, reviewResults } = params;
-  const approvedReviewIds = reviewResults.type === 'approve'
-    ? new Set(reviewResults.approvedReviewIds)
-    : new Set<string>();
-  const approvalUpdate = approvedReviewIds.size > 0
-    ? { toolkitReviewApprovals: mergeApprovedReviewIds(params.state, approvedReviewIds) }
-    : {};
-
-  if (reviewResults.type === 'allow' || reviewResults.type === 'approve') {
-    // Return {} when no state or message updates are needed, so middleware can
-    // emit a stable state object in this no-op branch.
-    return reviewedMessage.replacedMessage
-      ? {
-          ...approvalUpdate,
-          messages: replaceMessageInState(params.messages, params.aiMessageIndex, reviewedMessage.message, []),
-        }
-      : Object.keys(approvalUpdate).length > 0
-        ? approvalUpdate
-        : {};
-  }
-
-  if (reviewResults.type === 'cancel') {
-    return pauseTaskInterrupt.enter({
-      messages: reviewResults.messages,
-    });
-  }
-
-  const update = {
-    ...approvalUpdate,
-    messages: replaceMessageInState(
-      params.messages,
-      params.aiMessageIndex,
-      reviewedMessage.message,
-      reviewResults.messages,
-    ),
-  };
-  if (reviewResults.type === 'reject') {
-    return pauseTaskInterrupt.enter(update);
-  }
-  if (reviewResults.type === 'respond') {
-    return { ...update, jumpTo: 'model' as const };
-  }
-  return update;
 }
 
 export function createToolkitReviewMiddleware(
@@ -976,19 +953,21 @@ export function createToolkitReviewMiddleware(
           aiMessageIndex: latestAIMessage.index,
         });
         const reviewResults = await reviewToolkitToolCalls({
+          messages,
           reviewedMessage,
           bindingsByToolName,
           ctx,
           approvedReviewIds: readApprovedReviewIds(state),
         });
-
-        return buildToolkitReviewStateUpdate({
-          state,
-          messages,
-          aiMessageIndex: latestAIMessage.index,
-          reviewedMessage,
-          reviewResults,
-        });
+        await recordToolAuthorizations(ctx, reviewResults.authorizations);
+        const approvedReviewIds = new Set(reviewResults.approvedReviewIds);
+        const approvalUpdate = approvedReviewIds.size > 0
+          ? { toolkitReviewApprovals: mergeApprovedReviewIds(state, approvedReviewIds) }
+          : {};
+        return {
+          ...approvalUpdate,
+          ...reviewResults.stateUpdate,
+        };
       },
       canJumpTo: ['model', 'end'],
     },

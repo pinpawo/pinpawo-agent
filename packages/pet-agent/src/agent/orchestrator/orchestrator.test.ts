@@ -4511,6 +4511,22 @@ test('toolkit review rejection records terminal tool results and retains the del
     'tool-review:run_shell:call-rejected-second',
   ]);
 
+  assert.ok(interruptId);
+  const invalidResume = await graph.invoke(new Command({
+    resume: {
+      [interruptId]: { decisions: [] },
+    },
+  }), config) as {
+    __interrupt__?: Array<{
+      id?: string;
+      value?: { error?: string };
+    }>;
+  };
+  const retryInterruptId = invalidResume.__interrupt__?.[0]?.id;
+  assert.ok(retryInterruptId);
+  assert.equal(invalidResume.__interrupt__?.[0]?.value?.error, 'invalid_decision');
+  assert.equal(autoReviewCount, 1, 'invalid Review resume must not repeat auto-review');
+
   const reviewResume = {
     decisions: [{
       reviewId: 'tool-review:run_shell:call-rejected-first',
@@ -4518,7 +4534,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     }],
   };
   const resumedRun = await graph.streamEvents(new Command({
-    resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
+    resume: { [retryInterruptId]: reviewResume },
   }), { version: 'v3', ...config });
   for await (const _event of resumedRun) {
     // Drain the root stream so the final output is materialized.
@@ -4531,7 +4547,7 @@ test('toolkit review rejection records terminal tool results and retains the del
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
-  assert.equal(reviewCount, 4);
+  assert.equal(reviewCount, 6);
   assert.equal(autoReviewCount, 1, 'pending review resume must reuse its checkpointed auto-review');
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);

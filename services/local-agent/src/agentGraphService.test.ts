@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { OrchestratorGraph } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
-import { buildAgentGraphConfigurable } from './agentGraphService';
+import {
+  LocalAgentGraphService,
+  buildAgentGraphConfigurable,
+} from './agentGraphService';
 
 function setup(
   interfaceContext?: AgentChannelSetup['interfaceContext'],
@@ -42,4 +46,30 @@ test('interactive graph sessions use interface-provided review capabilities', ()
     humanReview: true,
     sessionAuthorization: true,
   });
+});
+
+test('explicit null input continues the current LangGraph task', async () => {
+  const streamInputs: unknown[] = [];
+  const invokeInputs: unknown[] = [];
+  const graph = {
+    async streamEvents(input: unknown) {
+      streamInputs.push(input);
+      return {};
+    },
+    async invoke(input: unknown) {
+      invokeInputs.push(input);
+      return {};
+    },
+  } as unknown as OrchestratorGraph;
+  const service = new LocalAgentGraphService();
+  const graphs = (service as unknown as {
+    graphs: Map<string, OrchestratorGraph>;
+  }).graphs;
+  graphs.set('test', graph);
+
+  await service.streamEvents(setup(), null);
+  await service.invokeState(setup(), null);
+
+  assert.deepEqual(streamInputs, [null]);
+  assert.deepEqual(invokeInputs, [null]);
 });

@@ -1,14 +1,19 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { parseConfigDocument } from '@pinpawo/pet-agent';
+import {
+  parseConfigDocument,
+  type PetDocument,
+} from '@pinpawo/pet-agent';
+import { loadPetDocumentFile } from 'pinpawo/host-runtime';
 import { petLocalConfigSchema, type PetLocalConfig } from '../configSchema';
 import { isSafePetPathSegment } from '../petId';
 
 export type { PetLocalConfig };
 
-/** Capability collection root derived only from the validated Pet id. */
-export function resolvePetCapabilityDirectory(dir: string, petId: string): string {
+export const PET_DOCUMENT_FILE_NAME = 'PET.md';
+
+function resolvePetDirectory(dir: string, petId: string): string {
   if (!isSafePetPathSegment(petId)) {
     throw new Error(`petId "${petId}" must be a safe path segment`);
   }
@@ -22,7 +27,25 @@ export function resolvePetCapabilityDirectory(dir: string, petId: string): strin
   ) {
     throw new Error(`petId "${petId}" must stay inside the Pet configuration directory`);
   }
-  return path.join(petRoot, 'capabilities');
+  return petRoot;
+}
+
+/** Capability collection root derived only from the validated Pet id. */
+export function resolvePetCapabilityDirectory(dir: string, petId: string): string {
+  return path.join(resolvePetDirectory(dir, petId), 'capabilities');
+}
+
+/** Conventional authored root document for one validated Pet id. */
+export function resolvePetDocumentPath(dir: string, petId: string): string {
+  return path.join(resolvePetDirectory(dir, petId), PET_DOCUMENT_FILE_NAME);
+}
+
+/** PET.md is optional; when present it is one immutable Host configuration snapshot. */
+export async function loadPetDocument(
+  dir: string,
+  petId: string,
+): Promise<PetDocument | null> {
+  return loadPetDocumentFile(resolvePetDocumentPath(dir, petId));
 }
 
 /**

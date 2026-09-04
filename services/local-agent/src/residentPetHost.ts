@@ -13,6 +13,7 @@ import {
   type AgentActor,
   type AgentCapability,
   type CapabilityArtifactStore,
+  type PetDocument,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 
@@ -346,6 +347,7 @@ export type CreateResidentPetRuntimeOptions = {
   modelProfiles: LocalModelProfileRegistry;
   modelProfileId?: string;
   defaultCapabilityName?: string;
+  petDocument?: PetDocument;
   capabilities: readonly AgentCapability[];
   toolkitInventory: HostToolkitInventoryStore;
   toolkitRuntimeManager?: ToolkitRuntimeManager;
@@ -518,6 +520,7 @@ export async function createResidentPetRuntime(
     ...(options.defaultCapabilityName
       ? { defaultCapabilityName: options.defaultCapabilityName }
       : {}),
+    ...(options.petDocument ? { petDocument: options.petDocument } : {}),
     capabilityArtifactStore: options.capabilityArtifactStore,
   };
   const graphService = options.graphService ?? new LocalAgentGraphService();

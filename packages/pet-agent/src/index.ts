@@ -30,6 +30,9 @@ export {
   GENERAL_CAPABILITY_NAME,
 } from './types/capability';
 
+export type { PetDocument } from './types/petDocument';
+export { definePetDocument } from './types/petDocument';
+
 export type {
   SubagentInputState,
   SubagentExecutionScope,

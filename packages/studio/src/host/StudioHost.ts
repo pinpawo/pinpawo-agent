@@ -10,6 +10,7 @@ import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
   type CapabilityArtifactStore,
+  type PetDocument,
   type ToolkitRuntimeDiagnostic,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
@@ -31,7 +32,10 @@ import {
 } from './buildStudio';
 import type { Studio } from '../studioContract';
 import type { ResidentPetInteraction } from 'pinpawo/host-runtime';
-import { resolvePetCapabilityDirectory } from './petConfig';
+import {
+  loadPetDocument,
+  resolvePetCapabilityDirectory,
+} from './petConfig';
 
 export type StudioHostOptions = {
   runtimeConfig?: LocalAgentRuntimeConfig;
@@ -123,6 +127,7 @@ export class StudioHost {
         toolkitSources: pluginToolkitSources,
       });
       const petCapabilities = new Map<string, AgentCapability[]>();
+      const petDocuments = new Map<string, PetDocument>();
       for (const pet of configuration.resolved.pets) {
         const capabilityDir = resolvePetCapabilityDirectory(configuration.petsDir, pet.petId);
         const snapshot = await this.caps.getCapabilityCatalog().createDirectorySnapshot({
@@ -133,6 +138,8 @@ export class StudioHost {
           pet.petId,
           snapshot.capabilities.filter(({ name }) => name !== GENERAL_CAPABILITY_NAME),
         );
+        const document = await loadPetDocument(configuration.petsDir, pet.petId);
+        if (document) petDocuments.set(pet.petId, document);
       }
       // Build the resident Studio now — before any transport starts listening.
       // Requests only dispatch to this pre-built instance.
@@ -143,6 +150,7 @@ export class StudioHost {
           ({ name }) => name === GENERAL_CAPABILITY_NAME,
         ),
         petCapabilities,
+        petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),
         toolkitRuntimeManager: this.caps.getToolkitRuntimeManager(),
         capabilityArtifactStore: this.caps.getCapabilityArtifactStore(),

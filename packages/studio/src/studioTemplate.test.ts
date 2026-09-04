@@ -18,6 +18,7 @@ async function createTemplate(): Promise<string> {
   await Promise.all([
     writeFile(path.join(root, 'studio.json'), '{"studioId":"demo"}\n'),
     writeFile(path.join(root, 'pets', 'planner.json'), '{"petId":"planner"}\n'),
+    writeFile(path.join(root, 'pets', 'planner', 'PET.md'), '# Planner\n'),
     writeFile(
       path.join(root, 'pets', 'planner', 'capabilities', 'planning', 'CAPABILITY.md'),
       '# Planning\n',
@@ -28,13 +29,14 @@ async function createTemplate(): Promise<string> {
   return root;
 }
 
-test('Studio init copies only configuration, Pet Capabilities, and Wiki Markdown', async () => {
+test('Studio init copies configuration, Pet documents and Capabilities, and Wiki Markdown', async () => {
   const templateRoot = await createTemplate();
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-workdir-'));
   const result = await initStudioWorkdir({ workdir, templateRoot });
 
   assert.deepEqual(result.files.sort(), [
     '.pinpawo/pets/planner.json',
+    '.pinpawo/pets/planner/PET.md',
     '.pinpawo/pets/planner/capabilities/planning/CAPABILITY.md',
     '.pinpawo/studio.json',
     'wiki/PROJECT.md',

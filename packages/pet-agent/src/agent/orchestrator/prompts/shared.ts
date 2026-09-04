@@ -1,4 +1,5 @@
 import type { AgentActor } from '../../../types/agent';
+import type { PetDocument } from '../../../types/petDocument';
 
 export function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
@@ -30,6 +31,21 @@ export function indentXmlBlock(block: string, spaces: number): string {
 export function promptBlock(block: string | null | undefined, spaces: number): string {
   // A block owns its leading newline so optional template slots disappear cleanly.
   return block ? `\n${indentXmlBlock(block, spaces)}` : '';
+}
+
+export function appendPetDocument(
+  systemPrompt: string,
+  document?: PetDocument,
+): string {
+  if (!document) return systemPrompt;
+  return [
+    systemPrompt,
+    '',
+    '<pet_document role="root_context" source="PET.md" scope="pet">',
+    'This is the Pet\'s canonical authored root document. Apply it throughout this model role within the framework\'s lifecycle, tool, and security contracts.',
+    xmlTextBlock('document', document.content, ' format="markdown"'),
+    '</pet_document>',
+  ].join('\n');
 }
 
 export function buildDecisionConfig(

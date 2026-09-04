@@ -313,6 +313,7 @@ export class LocalServerTuiSessionService {
       ...(deps.defaultCapabilityName !== undefined
         ? { defaultCapabilityName: deps.defaultCapabilityName }
         : {}),
+      ...(deps.petDocument ? { petDocument: deps.petDocument } : {}),
       threadId,
       interfaceKind: 'tui',
       checkpoint: this.checkpointer,

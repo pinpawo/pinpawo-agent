@@ -1,5 +1,6 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
+import type { PetDocument } from '../../types/petDocument';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
@@ -66,6 +67,8 @@ export type DecisionMode = 'answer' | 'capability';
 
 export type OrchestratorConfig = {
   models: AgentModels;
+  /** Canonical PET.md root document applied to every model role of this Pet. */
+  petDocument?: PetDocument;
   /**
    * Capability identified in the Supervisor routing manifest as its default
    * candidate. Defaults to the well-known `general` Capability. This changes

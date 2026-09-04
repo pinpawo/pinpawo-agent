@@ -10,6 +10,7 @@ import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agent
 import type { AgentContext } from './contextLoader';
 import {
   defineInstructionDocument,
+  definePetDocument,
   type AgentCapability,
   type AgentToolkit,
   type CapabilityArtifactStore,
@@ -146,6 +147,24 @@ test('buildLocalChatAgentInput passes the Pet default Capability into the graph 
 
   assert.equal(planning.graphConfig.defaultCapabilityName, 'studio_planning');
   assert.notEqual(planning.graphKey, general.graphKey);
+});
+
+test('buildLocalChatAgentInput applies the Pet document to the cached Chat graph', () => {
+  const firstDocument = definePetDocument({ content: '# First Pet' });
+  const secondDocument = definePetDocument({ content: '# Second Pet' });
+  const first = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    petDocument: firstDocument,
+  });
+  const second = buildTestLocalChatAgentInput({
+    context: createContext(),
+    userMessage: 'hello',
+    petDocument: secondDocument,
+  });
+
+  assert.equal(first.graphConfig.petDocument, firstDocument);
+  assert.notEqual(first.graphKey, second.graphKey);
 });
 
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {

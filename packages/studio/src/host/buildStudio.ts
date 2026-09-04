@@ -3,6 +3,7 @@ import {
   GENERAL_CAPABILITY_NAME,
   type AgentCapability,
   type CapabilityArtifactStore,
+  type PetDocument,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { prepareStudio } from '../createStudio';
@@ -38,6 +39,8 @@ export type BuildStudioInput = {
   hostCapabilities: readonly AgentCapability[];
   /** 每个 Pet 从约定目录严格加载的 Agent Capability 定义。 */
   petCapabilities: ReadonlyMap<string, readonly AgentCapability[]>;
+  /** Optional PET.md root-document snapshot keyed by Pet id. */
+  petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
   toolkitRuntimeManager: ToolkitRuntimeManager;
   capabilityArtifactStore: CapabilityArtifactStore;
@@ -196,6 +199,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         ...(petConfig.modelProfileId ? { modelProfileId: petConfig.modelProfileId } : {}),
         ...(petConfig.defaultCapabilityName
           ? { defaultCapabilityName: petConfig.defaultCapabilityName }
+          : {}),
+        ...(input.petDocuments?.get(petConfig.petId)
+          ? { petDocument: input.petDocuments.get(petConfig.petId) }
           : {}),
         capabilities: selectStudioPetCapabilities({
           ...(petConfig.defaultCapabilityName

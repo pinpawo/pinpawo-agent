@@ -162,6 +162,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
     });
     const answerMessages = buildAnswerInvocationMessages({
       actor,
+      ...(config.petDocument ? { petDocument: config.petDocument } : {}),
       userRequest: state.runUserRequest,
       contextFacts: answerContextFacts,
     });

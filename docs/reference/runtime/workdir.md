@@ -11,6 +11,7 @@ process directory. Relative and `~/` values are normalized to an absolute path.
 
 ```text
 <workdir>/
+├── PET.md
 └── .pinpawo/
     ├── studio.json
     ├── pets/
@@ -25,6 +26,10 @@ uses `studio.json` and `pets/` from that state root. Capability artifacts and
 checkpoint/session files are separate host-owned state. A Studio shared wiki,
 due-run store, run identity, and scheduler policy are not part of the current
 Studio contract.
+
+The single-Pet Chat Host reads `<workdir>/PET.md` as that Pet's root document.
+Studio resolves the same `PetDocument` contract from each configured Pet's
+directory instead.
 
 The runtime can also expose derived workspace metadata (`id`, `name`, and
 `rootPath`) from the workdir. This is local metadata; there is no persisted

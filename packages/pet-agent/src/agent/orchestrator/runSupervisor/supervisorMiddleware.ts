@@ -6,6 +6,7 @@ import { Command, END } from '@langchain/langgraph';
 import { createMiddleware, ToolInvocationError } from 'langchain';
 import { ToolInputParsingException } from '@langchain/core/tools';
 import { buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
+import type { PetDocument } from '../../../types/petDocument';
 import { parseSupervisorCommand, type SupervisorCommand } from './protocol';
 import {
   currentSupervisorInput,
@@ -28,12 +29,15 @@ function readCommandResult(message: ToolMessage): unknown {
   }
 }
 
-function supervisorSystemMessage(input: ReturnType<typeof currentSupervisorInput>) {
-  return new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode));
+function supervisorSystemMessage(
+  input: ReturnType<typeof currentSupervisorInput>,
+  petDocument?: PetDocument,
+) {
+  return new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode, petDocument));
 }
 
 /** Framework lifecycle control only: model protocol and control commands. */
-export function createSupervisorMiddleware() {
+export function createSupervisorMiddleware(petDocument?: PetDocument) {
   return createMiddleware({
     name: 'RunSupervisor',
     stateSchema: supervisorInvocationStateSchema,
@@ -45,7 +49,7 @@ export function createSupervisorMiddleware() {
           goto: END,
         });
       }
-      const systemMessage = supervisorSystemMessage(input);
+      const systemMessage = supervisorSystemMessage(input, petDocument);
       const allowedCommandToolNames = supervisorCommandToolNamesForMode(input.mode);
       return handler({
         ...request,

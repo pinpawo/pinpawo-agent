@@ -1,6 +1,7 @@
 import type {
   BuiltinGlobalReviewPolicyMode,
   CapabilityArtifactStore,
+  PetDocument,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
@@ -45,6 +46,8 @@ export type LocalServerDeps = {
   capabilityCatalog: CapabilityCatalogReader;
   /** Capability preloaded by this resident Pet's entry Supervisor. */
   defaultCapabilityName?: string;
+  /** Host-loaded root document shared by every model role of this resident Pet. */
+  petDocument?: PetDocument;
   capabilityArtifactStore?: CapabilityArtifactStore;
 };
 

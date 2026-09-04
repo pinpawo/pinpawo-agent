@@ -212,6 +212,7 @@ function buildWaitingUpdate(
 function createDefaultSupervisorRunner(config: OrchestratorConfig): RunSupervisorRunner {
   return createRunSupervisorAgent({
     model: config.models.act,
+    ...(config.petDocument ? { petDocument: config.petDocument } : {}),
     ...(config.defaultCapabilityName !== undefined
       ? { defaultCapabilityName: config.defaultCapabilityName }
       : {}),

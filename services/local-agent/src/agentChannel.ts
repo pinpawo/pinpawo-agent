@@ -9,6 +9,7 @@ import {
   type CapabilityArtifactStore,
   type CapabilityRegistryBackend,
   type CompiledAgentRegistry,
+  type PetDocument,
   type OrchestratorConfig,
   type OrchestrationDecisionStructuredOutputConfig,
   type ToolkitRuntimeManager,
@@ -133,6 +134,8 @@ export function buildLocalChatAgentInput(params: {
   capabilityRegistryBackend?: CapabilityRegistryBackend;
   /** Capability preloaded by the entry Supervisor. */
   defaultCapabilityName?: string;
+  /** Canonical PET.md root document applied in Chat and delegated execution. */
+  petDocument?: PetDocument;
 }): AgentChannelSetup {
   if (!params.threadId.trim()) {
     throw new Error('Local chat requires a non-empty threadId');
@@ -189,9 +192,11 @@ export function buildLocalChatAgentInput(params: {
       params.checkpoint ? 'checkpoint' : 'memory',
       capabilityRegistryBackend,
       params.defaultCapabilityName ?? 'general',
+      params.petDocument?.digest,
     ]),
     graphConfig: {
       models,
+      ...(params.petDocument ? { petDocument: params.petDocument } : {}),
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,

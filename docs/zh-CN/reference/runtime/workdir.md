@@ -11,6 +11,7 @@
 
 ```text
 <workdir>/
+├── PET.md
 └── .pinpawo/
     ├── studio.json
     ├── pets/
@@ -24,6 +25,9 @@
 `studio.json` 与 `pets/`；Capability artifact、checkpoint 和 session 文件由宿主
 分别管理。shared wiki、due-run store、run identity 与 scheduler policy 都不是当前
 Studio 契约的一部分。
+
+单 Pet Chat Host 从 `<workdir>/PET.md` 读取该 Pet 的根文档；Studio 则从每个已配置
+Pet 的目录定位同一个 `PetDocument` 契约。
 
 runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace metadata。
 这是本地派生信息，不代表已有持久化 workspace registry 或按请求切换 workspace 的

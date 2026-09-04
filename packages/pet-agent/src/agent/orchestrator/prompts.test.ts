@@ -5,6 +5,7 @@ import {
   buildRunSupervisorAgentSystemPrompt,
 } from './prompts/runSupervisorAgent';
 import type { RunSupervisorInput } from './runSupervisor/runner';
+import { definePetDocument } from '../../types/petDocument';
 
 const plannerPromptWorkspace = {
   rootPath: '/tmp/capabilities',
@@ -109,6 +110,14 @@ test('Run Supervisor system prompt contains no dynamic Capability state', () => 
   const systemPrompt = buildRunSupervisorAgentSystemPrompt('entry');
   assert.doesNotMatch(systemPrompt, /<capability_context|<default_capability|registry_digest/);
   assert.doesNotMatch(systemPrompt, /# General|# Browser/);
+});
+
+test('Run Supervisor receives the Host-authored Pet document snapshot', () => {
+  const document = definePetDocument({ content: 'SUPERVISOR_PET_SENTINEL' });
+  assert.match(
+    buildRunSupervisorAgentSystemPrompt('entry', document),
+    /SUPERVISOR_PET_SENTINEL/,
+  );
 });
 
 test('Run Supervisor entry input represents an empty disclosure explicitly', () => {

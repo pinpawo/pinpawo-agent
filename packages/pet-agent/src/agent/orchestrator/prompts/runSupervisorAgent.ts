@@ -1,6 +1,7 @@
 import type { RunSupervisorCapabilityDocument } from '../runSupervisor/fileExplorer';
 import type { RunSupervisorInput } from '../runSupervisor/runner';
 import type { CapabilityRoutingManifest } from '../runSupervisor/routingManifest';
+import type { PetDocument } from '../../../types/petDocument';
 import {
   RUN_SUPERVISOR_BOUNDARY_INPUT_PROMPT,
   RUN_SUPERVISOR_BOUNDARY_SYSTEM_PROMPT,
@@ -8,7 +9,7 @@ import {
   RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT,
 } from './templates/runSupervisorAgent.prompt';
 import { buildRunUserRequestContext } from './context';
-import { indentXmlBlock, xmlTextBlock } from './shared';
+import { appendPetDocument, indentXmlBlock, xmlTextBlock } from './shared';
 
 function escapeXmlAttribute(value: string) {
   return value
@@ -105,10 +106,12 @@ function buildSupervisionBoundary(input: Extract<RunSupervisorInput, { mode: 'bo
 
 export function buildRunSupervisorAgentSystemPrompt(
   mode: RunSupervisorInput['mode'],
+  petDocument?: PetDocument,
 ) {
-  return mode === 'entry'
+  const prompt = mode === 'entry'
     ? RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT.render({})
     : RUN_SUPERVISOR_BOUNDARY_SYSTEM_PROMPT.render({});
+  return appendPetDocument(prompt, petDocument);
 }
 
 export function buildRunSupervisorAgentInput(

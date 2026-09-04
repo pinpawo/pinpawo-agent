@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { definePetDocument } from '../../../types/petDocument';
 import { getAgentMessageMetadata } from '../../messages';
 import {
   ANSWER_CONTEXT_LIMITS,
   ANSWER_INPUT_MESSAGE_NAME,
   appendAnswerInputMessage,
+  buildEntryAnswerSystemPrompt,
   buildAnswerInvocationMessages,
   type ModelAnswerContextFacts,
 } from './answer';
@@ -18,6 +20,26 @@ const actor = {
   stage: null,
   species: null,
 };
+
+test('Pet document reaches direct Chat and final Answer system prompts', () => {
+  const petDocument = definePetDocument({
+    content: '# Pet policy\n\nPET_INSTRUCTION_SENTINEL',
+  });
+  const direct = buildEntryAnswerSystemPrompt({ actor, petDocument });
+  const final = buildAnswerInvocationMessages({
+    actor,
+    petDocument,
+    contextFacts: {
+      mode: 'direct',
+      hasUserRequest: true,
+      acceptedResults: [],
+    },
+  });
+
+  assert.match(direct, /PET_INSTRUCTION_SENTINEL/);
+  assert.match(String(final[0]?.content), /PET_INSTRUCTION_SENTINEL/);
+  assert.doesNotMatch(String(final[1]?.content), /PET_INSTRUCTION_SENTINEL/);
+});
 
 test('Answer invocation is exactly the system prompt plus one answer_input message', () => {
   const messages = buildAnswerInvocationMessages({

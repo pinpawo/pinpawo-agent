@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { runAgent } from '../../../runAgent';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
@@ -30,6 +32,7 @@ function entryAnswerModel(
   mode: 'direct' | 'plan',
   onEntryInvoke?: (messages: BaseMessage[]) => void,
   planGoal?: string,
+  onAnswerInvoke?: (messages: BaseMessage[]) => void,
 ) {
   let boundCalls = 0;
   let resultCalls = 0;
@@ -53,7 +56,8 @@ function entryAnswerModel(
           : new AIMessage('可以，现有信息足够直接回答。');
       },
     }),
-    invoke: async () => {
+    invoke: async (messages: BaseMessage[]) => {
+      onAnswerInvoke?.(messages);
       resultCalls += 1;
       return new AIMessage('当前没有可执行该任务的 Capability。');
     },
@@ -384,4 +388,29 @@ test('Entry Answer leaves an ordinary reply untouched', async () => {
   );
 
   assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
+});
+
+
+test('root invocation context reaches direct Entry replies and final Answer without node plumbing', async () => {
+  for (const mode of ['direct', 'plan'] as const) {
+    const seen: BaseMessage[][] = [];
+    const scripted = entryAnswerModel(mode, messages => seen.push(messages), undefined, messages => seen.push(messages));
+    const graph = createOrchestratorGraph({
+      models: { act: scripted.model, answer: scripted.model }, actor,
+      runSupervisorRunner: { async invoke() { return { action: 'unavailable', tasks: [] }; } },
+    });
+    const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
+    await runAgent(graph, {
+      messages: [new HumanMessage('Handle this request.')], context: { systemPromptSections: common },
+    });
+    assert.equal(seen.length, mode === 'plan' ? 2 : 1);
+    for (const messages of seen) {
+      for (const section of common) assert.equal(messages[0].text.split(section.content).length - 1, 1);
+    }
+    seen.length = 0;
+    await runAgent(graph, { messages: [new HumanMessage('No common context this time.')] });
+    for (const messages of seen) {
+      for (const section of common) assert.equal(messages[0].text.includes(section.content), false);
+    }
+  }
 });

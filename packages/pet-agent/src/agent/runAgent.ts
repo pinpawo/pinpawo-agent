@@ -1,4 +1,5 @@
 import type { BaseMessage } from '@langchain/core/messages';
+import { getAgentRuntimeContext, type AgentRuntimeContext } from '../runtime/context';
 import type { AgentCapability } from '../types/capability';
 import type { AgentActor, AgentExecution } from '../types/agent';
 import {
@@ -17,6 +18,8 @@ import {
 } from './createAgentRuntime';
 
 export type AgentInvokeInput = {
+  /** Host-owned context reapplied on each invocation, including resumes. */
+  context?: AgentRuntimeContext;
   messages: BaseMessage[];
   actor?: AgentActor;
   threadId?: string;
@@ -82,6 +85,7 @@ export async function runAgent(
       traceId: input.traceId,
     }),
     {
+      context: getAgentRuntimeContext(input),
       signal: input.signal,
       configurable: Object.keys(configurable).length > 0 ? configurable : undefined,
       // Last-resort breaker for a runaway control loop; the soft run-iteration

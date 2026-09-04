@@ -28,9 +28,7 @@ function readCommandResult(message: ToolMessage): unknown {
   }
 }
 
-function supervisorSystemMessage(
-  input: ReturnType<typeof currentSupervisorInput>,
-) {
+function supervisorSystemMessage(input: ReturnType<typeof currentSupervisorInput>) {
   return new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode));
 }
 

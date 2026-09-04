@@ -6,7 +6,6 @@ import {
   ANSWER_CONTEXT_LIMITS,
   ANSWER_INPUT_MESSAGE_NAME,
   appendAnswerInputMessage,
-  buildEntryAnswerSystemPrompt,
   buildAnswerInvocationMessages,
   type ModelAnswerContextFacts,
 } from './answer';

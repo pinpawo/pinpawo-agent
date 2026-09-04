@@ -17,7 +17,8 @@ import type {
 } from './runner';
 import { parseSupervisorCommand } from './protocol';
 import { queryAgentMessages } from '../../messages';
-import { createOrchestratorModelInvocationMiddleware } from '../modelInvocation';
+import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
+import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { createSupervisorMiddleware } from './supervisorMiddleware';
 import { supervisorCommandContext } from './supervisorState';
 import {
@@ -31,7 +32,6 @@ import {
 import { createSupervisorCommandTools } from './commandTools';
 import { SupervisorFileToolError } from './workspaceReader';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
-import type { SystemPromptSection } from '../../../types/systemPrompt';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS = 2;
@@ -118,7 +118,6 @@ export function createRunSupervisorAgent(params: {
   maxDocumentReadBytes?: number;
   /** Additional invocation-scoped Supervisor tools. */
   additionalTools?: StructuredTool[];
-  systemPromptSections?: readonly SystemPromptSection[];
 }): RunSupervisorRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   assertPositiveInteger(timeoutMs, 'Run Supervisor timeoutMs');
@@ -158,7 +157,8 @@ export function createRunSupervisorAgent(params: {
     middleware: [
       middleware,
       createSupervisorSearchStateMiddleware(),
-      createOrchestratorModelInvocationMiddleware(params.systemPromptSections),
+      systemPromptMiddleware,
+      orchestratorModelInvocationMiddleware,
     ],
     checkpointer: false,
   });

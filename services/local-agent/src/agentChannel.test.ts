@@ -11,6 +11,7 @@ import type { AgentContext } from './contextLoader';
 import {
   defineInstructionDocument,
   definePetDocument,
+  petDocumentSystemPromptSection,
   type AgentCapability,
   type AgentToolkit,
   type CapabilityArtifactStore,
@@ -149,7 +150,7 @@ test('buildLocalChatAgentInput passes the Pet default Capability into the graph 
   assert.notEqual(planning.graphKey, general.graphKey);
 });
 
-test('buildLocalChatAgentInput applies the Pet document to the cached Chat graph', () => {
+test('buildLocalChatAgentInput supplies Pet context without changing graph identity', () => {
   const firstDocument = definePetDocument({ content: '# First Pet' });
   const secondDocument = definePetDocument({ content: '# Second Pet' });
   const first = buildTestLocalChatAgentInput({
@@ -163,11 +164,9 @@ test('buildLocalChatAgentInput applies the Pet document to the cached Chat graph
     petDocument: secondDocument,
   });
 
-  assert.match(
-    first.graphConfig.systemPromptSections?.[0]?.content ?? '',
-    /# First Pet/,
-  );
-  assert.notEqual(first.graphKey, second.graphKey);
+  assert.deepEqual(first.input.context?.systemPromptSections, [petDocumentSystemPromptSection(firstDocument)]);
+  assert.deepEqual(second.input.context?.systemPromptSections, [petDocumentSystemPromptSection(secondDocument)]);
+  assert.equal(first.graphKey, second.graphKey);
 });
 
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {

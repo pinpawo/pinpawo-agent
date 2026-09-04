@@ -26,8 +26,8 @@ The Studio path is derived from the validated Pet id and is not repeated in
 `pet.json`. Filesystem resolution belongs to each Host. Both modes produce the
 same `PetDocument` contract before constructing the Pet agent.
 
-Studio Host reads each document once during initialization and passes the
-immutable content and digest into the resident Pet graph. A changed document
+Each Host reads its document once during initialization. It supplies the
+content snapshot through runtime context on every root invocation. A changed document
 therefore takes effect after the Host is restarted.
 
 ## Prompt scope
@@ -57,88 +57,71 @@ The default Studio template uses `PET.md` to keep Git worktree isolation at
 Executor and Reviewer scope rather than duplicating it across their Capability
 documents.
 
-## Refactor handoff: shared system context
+## Shared system context
 
-Status: PET.md loading is implemented; configuration propagation and common
-prompt composition still need structural consolidation. PR #757 contains this
-intermediate implementation. The following work is an agreed direction, not a
-description of already-completed framework integration.
+Status: draft; implementation under review.
 
-### Current implementation
+### Lifetime and ownership
 
-- `services/local-agent/src/agentChannel.ts` converts the Host-loaded
-  `PetDocument` into `OrchestratorConfig.systemPromptSections` and includes the
-  document digest in the graph cache key.
-- Entry Answer and final Answer explicitly pass these sections to
-  `invokeOrchestratorModel` on each call.
-- Run Supervisor passes sections through its node and Agent factory into
-  `createOrchestratorModelInvocationMiddleware`'s closure.
-- Capability copies the same sections into `createSubagent`'s `promptSections`.
+Hosts read PET.md once at startup. Each root invocation (fresh input, stream,
+continuation, or interrupt resume) supplies that snapshot as
+`AgentInvokeInput.context.systemPromptSections`. Low-level graph callers supply
+it through LangGraph's `context` option. This context is not graph state and is
+not restored from checkpoints. A restarted Host supplies its newly loaded
+snapshot when it resumes an existing thread.
 
-### Open structural problems
+`OrchestratorConfig` owns graph dependencies, not common prompt content. PET.md
+no longer participates in graph cache identity: changing the invocation's
+sections does not require recompilation. Existing model, Pet identity, registry
+backend and other graph dependency cache boundaries remain unchanged.
 
-1. **Three separate injection paths.** Generic naming removed PetDocument from
-   role prompt builders, but each execution path still wires the sections
-   explicitly. Adding common context can still require edits across nodes.
-2. **Configuration lifetime and precedence are inconsistent.** Actor can come
-   from graph construction or invocation `configurable`; sections come only
-   from graph construction. Define which data belongs to the Pet definition,
-   invocation context, and persisted state before moving fields. Loading a
-   document once at startup does not require passing it through every factory.
-   Reassess graph cache identity together with this change.
-3. **Unrelated responsibilities share a middleware.**
-   `modelInvocation.ts` combines delegation announce projection/tool protocol
-   repair with system-prompt injection. They need independent ownership even
-   when composed at the same model-call boundary.
-4. **Composition has inconsistent contracts.** `createSubagent` validates
-   section IDs, non-empty content, and duplicates; main model calls only join
-   strings. The shared contract should define validation, ordering, and
-   duplicate handling consistently.
-5. **SystemMessage is flattened.** `withSystemPromptSections` rebuilds it from
-   `.text`, discarding content-block attributes and message metadata. Preserve
-   the original representation when composing common context.
-6. **Framework propagation has not been verified.** The existing child Agent
-   code forwards RunnableConfig and merges a separate runtime context, but the
-   proposed shared middleware has not been proven across those boundaries.
-   Earlier failed dependency-source searches are not evidence that automatic
-   inheritance works.
+There is one context source, with no graph-config fallback or mutable global.
+Dynamic children preserve the parent's RunnableConfig and extend its runtime
+context with execution scope and Toolkit runtime ports. Children cannot override
+the root's common sections through their local runtime context.
 
-### Intended implementation boundary
+### Construction
 
-The Host supplies one typed Pet context at the root invocation. Reuse the
-installed framework's supported runtime-context/config propagation mechanism,
-with one shared accessor. Verify the installed LangChain/LangGraph APIs before
-choosing between the existing `configurable` route and `contextSchema` route;
-avoid introducing parallel sources or a process-global mutable Pet object.
+`src/runtime/context.ts` owns the typed framework context schema and accessor.
+`src/types/systemPrompt.ts` defines the shared section schema, used by both
+root context and execution-local sections. `src/prompts/systemPrompt.ts` owns
+SystemMessage composition and its middleware adapter; `src/prompts/petDocument.ts`
+formats the Pet document as a section. Order is role/framework instructions, common Host sections in
+input order, then execution-local sections in input order. Empty IDs/content
+and duplicate IDs (after trimming) are errors, never silently skipped.
 
-A reusable system-prompt middleware reads that invocation's common sections.
-Its definition can be shared across Agents; its data must remain scoped to the
-current Pet. Register it at the relevant common Agent assembly points. Direct
-model calls reuse the same context accessor and SystemMessage composer.
-Message projection remains separately owned. Role builders own their role
-prompts; business nodes should not extract and forward individual common fields.
+Role builders still own role content. Supervisor and subagent assembly register
+the same reusable prompt middleware. Direct Entry/Answer model calls use the
+same accessor and composer. Business nodes do not extract or forward common
+sections. Every model call composes from its role message without mutating graph
+history or accumulating common content over model turns. SystemMessage content
+blocks and metadata are preserved via the framework message composition API.
 
-Keep this follow-up focused on common prompt context. Model dependencies,
-checkpointers, run state, and filesystem loading retain their own lifetimes.
+Delegation announce projection and tool-protocol repair remain separately owned
+in `modelInvocation.ts`; prompt composition does not project Agent messages.
+Subagent section diagnostics include common context without putting PET.md in
+checkpointed message history.
 
-### Acceptance evidence for the next session
+### Verification scope
 
-- Adding another common system section requires no changes to Answer,
-  Supervisor, or Capability node plumbing.
-- Chat and Studio resolve their existing PET.md paths and reach every intended
-  model role, including direct replies and resumed runs.
-- Concurrent invocations for different Pets cannot see each other's context;
-  dynamic child invocation preserves parent callbacks, cancellation, streaming,
-  and its existing tool runtime context.
-- Common sections appear once with consistent ordering and validation;
-  SystemMessage content blocks and metadata survive composition.
-- Delegation projection and tool protocol behavior remain independently tested.
-- Test observable model inputs/context boundaries, not exact prompt wording.
+Acceptance covers direct model calls, actual Supervisor and child Agents,
+concurrent Pets, repeated calls, root streams/callbacks/cancellation, and
+checkpoint interrupt resume. Tests inspect model inputs and structured context,
+not literal prompt prose. Host tests cover Chat and Studio file loading and the
+invocation/cache boundary. No live-model behavioral evaluation is implied by
+these deterministic checks.
 
-Previous verification: the pre-consolidation implementation passed targeted
-tests and Studio's 90-test suite. During consolidation the pet-agent suite had
-472 passing tests and one new composition-test failure; that failure was fixed
-and the targeted test rerun passed. Typechecks passed for pet-agent, local-agent,
-and Studio. A full post-fix pet-agent run and the new propagation/isolation tests
-are still required for the next structural change; these results are not model
-eval evidence.
+
+### Review entry points
+
+- [Context schema and root accessor](../../packages/pet-agent/src/runtime/context.ts)
+- [Shared SystemMessage composer and middleware](../../packages/pet-agent/src/prompts/systemPrompt.ts)
+- [Root context propagation into dynamic children](../../packages/pet-agent/src/subagent/systemContext.test.ts)
+- [Host invocation and graph reuse tests](../../services/local-agent/src/agentGraphService.test.ts)
+
+Validation on 2026-09-05: pet-agent 482 tests passed; Studio 90 passed;
+local-agent 606 passed with 5 skipped. Local-agent's full suite requires local
+port binding and process inspection and passed outside the filesystem/network
+sandbox. Typechecks passed for pet-agent (including eval types), local-agent,
+and Studio. External tracing was disabled for deterministic unit tests; no live
+model evals were run.

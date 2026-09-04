@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   mkdir,
   mkdtemp,
@@ -2544,4 +2544,34 @@ test('Supervisor Agent rejects a structured result produced after timeout', asyn
       error instanceof RunSupervisorAgentError
       && error.code === 'supervisor_timeout',
   );
+});
+
+
+test('one Supervisor runner reads each invocation context in entry and boundary modes', async (t) => {
+  const workspace = await createWorkspace(t, {});
+  const model = new ScriptedSupervisorModel([
+    { structuredOutput: { kind: 'unavailable', args: { reason: 'No execution available.', context: 'No capabilities.' } } },
+    { toolCalls: [{ id: 'continue', name: 'continue_current', args: {} }] },
+  ]);
+  const runner = createRunSupervisorAgent({ model });
+  const first = [{ id: 'host:pet', content: randomUUID() }];
+  const second = [{ id: 'host:pet', content: randomUUID() }];
+  // Invoke from a parent graph so this also verifies framework config propagation.
+  const parent = new StateGraph(Annotation.Root({ result: Annotation<unknown>() }))
+    .addNode('supervisor', async (_state, config) => ({
+      result: await runner.invoke(supervisorInput(workspace), config),
+    })).addEdge(START, 'supervisor').addEdge('supervisor', END).compile();
+  await parent.invoke({}, { context: { systemPromptSections: first } });
+  const config = { tags: [], context: { systemPromptSections: second } };
+  await runner.invoke(supervisorInput(workspace, {
+    mode: 'boundary', inputId: 'boundary-context-test',
+    activeDelegation: { delegationId: 'context-child', runId: 'run-test', capability: 'general', task: 'Continue.' },
+    latestAnnounce: { messageId: 'context-announce', completionReason: 'natural' },
+  }), config);
+  assert.equal(model.invocations.length, 2);
+  for (const [index, common] of [first, second].entries()) {
+    const message = model.invocations[index][0];
+    assert.equal(message.text.split(common[0].content).length - 1, 1);
+    assert.equal(message.text.includes((index === 0 ? second : first)[0].content), false);
+  }
 });

@@ -1,10 +1,11 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import type { RunnableConfig } from '@langchain/core/runnables';
+import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
 import type { SystemPromptSection } from './systemPrompt';
+import type { AgentRuntimeContext } from '../runtime/context';
 import type { ToolOperationMetadata } from './toolkit';
 
 export type SubagentExecutionScope = {
@@ -14,7 +15,7 @@ export type SubagentExecutionScope = {
   workdir?: string | null;
 };
 
-export type SubagentRuntimeContext = {
+export type SubagentRuntimeContext = AgentRuntimeContext & {
   executionScope?: SubagentExecutionScope;
   /** Opaque Toolkit Runtime ports, keyed by Toolkit name. */
   toolkitRuntimes?: Readonly<Record<string, unknown>>;
@@ -83,7 +84,7 @@ export type SubagentRunInput = SubagentInputState & {
   middleware?: AnyAgentMiddleware[];
   /** Read-only invocation data exposed to tools as ToolRuntime.context. */
   runtimeContext?: SubagentRuntimeContext;
-  runnableConfig?: RunnableConfig;
+  runnableConfig?: LangGraphRunnableConfig;
   signal?: AbortSignal;
 };
 

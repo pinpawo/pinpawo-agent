@@ -3,7 +3,6 @@ import type { AgentCapability } from '../../types/capability';
 import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
-import type { SystemPromptSection } from '../../types/systemPrompt';
 import type {
   AgentToolkit,
   ModelInputModality,
@@ -67,8 +66,6 @@ export type DecisionMode = 'answer' | 'capability';
 
 export type OrchestratorConfig = {
   models: AgentModels;
-  /** Host-authored system context applied to every model role of this Pet. */
-  systemPromptSections?: readonly SystemPromptSection[];
   /**
    * Capability identified in the Supervisor routing manifest as its default
    * candidate. Defaults to the well-known `general` Capability. This changes

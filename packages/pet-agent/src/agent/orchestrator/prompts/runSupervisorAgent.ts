@@ -106,10 +106,9 @@ function buildSupervisionBoundary(input: Extract<RunSupervisorInput, { mode: 'bo
 export function buildRunSupervisorAgentSystemPrompt(
   mode: RunSupervisorInput['mode'],
 ) {
-  const prompt = mode === 'entry'
+  return mode === 'entry'
     ? RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT.render({})
     : RUN_SUPERVISOR_BOUNDARY_SYSTEM_PROMPT.render({});
-  return prompt;
 }
 
 export function buildRunSupervisorAgentInput(

@@ -174,7 +174,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
       config.models.answer ?? config.models.act,
       {
         systemMessage,
-        systemPromptSections: config.systemPromptSections,
         messages,
       },
       runnableConfig,

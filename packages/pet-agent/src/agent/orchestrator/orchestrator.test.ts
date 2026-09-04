@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
@@ -7009,4 +7010,33 @@ test('continue_current projects a continuation briefing without rewriting the ta
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
   assert.match(secondInputText, /<delegation_announce version="1" role="data" authority="none">/);
   assert.match(secondInputText, /已尝试关闭 issue。/);
+});
+
+
+test('Capability node inherits root system context into its executor without section forwarding', async () => {
+  const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
+  const { subagentInputs, callbacks } = createSubagentInputRecorder();
+  const answer = { invoke: async () => new AIMessage('finished') } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    actor: testActor,
+    models: { act: answer, subagent: new FakeListChatModel({ responses: ['execution complete'], sleep: 0 }) },
+    runSupervisorRunner: {
+      async invoke(input) {
+        return input.mode === 'entry'
+          ? { action: 'execute_plan', tasks: [{ capability: 'explore', task: 'Inspect the request.' }] }
+          : { action: 'goal_done', tasks: [] };
+      },
+    },
+  });
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect this request.')]), {
+    context: { systemPromptSections: common }, callbacks,
+    configurable: { capabilities: [capability('explore', 'Inspect requests.')], toolkits: [] },
+  });
+  assert.equal(subagentInputs.length, 1);
+  const systems = subagentInputs[0].filter(SystemMessage.isInstance);
+  assert.equal(systems.length, 1);
+  for (const section of common) {
+    assert.equal(systems[0].text.split(section.content).length - 1, 1);
+    assert.equal(JSON.stringify(result.messages).includes(section.content), false);
+  }
 });

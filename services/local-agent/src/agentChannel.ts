@@ -193,13 +193,9 @@ export function buildLocalChatAgentInput(params: {
       params.checkpoint ? 'checkpoint' : 'memory',
       capabilityRegistryBackend,
       params.defaultCapabilityName ?? 'general',
-      params.petDocument?.digest,
     ]),
     graphConfig: {
       models,
-      ...(params.petDocument
-        ? { systemPromptSections: [petDocumentSystemPromptSection(params.petDocument)] }
-        : {}),
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,
@@ -216,6 +212,11 @@ export function buildLocalChatAgentInput(params: {
     },
     registry: preparedRegistry.registry,
     input: {
+      context: {
+        systemPromptSections: params.petDocument
+          ? [petDocumentSystemPromptSection(params.petDocument)]
+          : [],
+      },
       messages: [
         ...buildHistoryMessages(params.context.context.recentChatTurns),
         stampAgentMessageCreatedAt(new HumanMessage(params.userMessage)),

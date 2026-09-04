@@ -183,7 +183,6 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     }));
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
-      systemPromptSections: config.systemPromptSections,
       messages: mainSelection.messages,
     }, runnableConfig);
     if (!AIMessage.isInstance(response)) {
@@ -195,7 +194,6 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
         .select();
       const retried = await invokeOrchestratorModel(model, {
         systemMessage,
-        systemPromptSections: config.systemPromptSections,
         messages: retrySelection.messages,
       }, runnableConfig);
       if (!AIMessage.isInstance(retried)) {

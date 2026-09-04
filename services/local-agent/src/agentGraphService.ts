@@ -1,6 +1,7 @@
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  getAgentRuntimeContext,
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
   ORCHESTRATOR_RECURSION_LIMIT,
@@ -178,6 +179,7 @@ export class LocalAgentGraphService {
       })) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
+        context: getAgentRuntimeContext(setup.input),
         signal: setup.input.signal,
         configurable: buildAgentGraphConfigurable(setup),
         recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
@@ -193,6 +195,7 @@ export class LocalAgentGraphService {
         activeDelegationTransition: setup.input.activeDelegationTransition,
       }),
       {
+        context: getAgentRuntimeContext(setup.input),
         signal: setup.input.signal,
         configurable: buildAgentGraphConfigurable(setup),
         recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,

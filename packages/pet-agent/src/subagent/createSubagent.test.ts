@@ -81,7 +81,7 @@ test('createSubagent rejects duplicate prompt section ids before invoking the mo
       ],
       messages: [new HumanMessage('test')],
     }),
-    /Duplicate subagent prompt section id: capability:test/,
+    /Duplicate system prompt section id: capability:test/,
   );
 });
 

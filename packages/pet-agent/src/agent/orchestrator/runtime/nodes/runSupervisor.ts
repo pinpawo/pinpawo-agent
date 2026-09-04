@@ -212,9 +212,6 @@ function buildWaitingUpdate(
 function createDefaultSupervisorRunner(config: OrchestratorConfig): RunSupervisorRunner {
   return createRunSupervisorAgent({
     model: config.models.act,
-    ...(config.systemPromptSections
-      ? { systemPromptSections: config.systemPromptSections }
-      : {}),
     ...(config.defaultCapabilityName !== undefined
       ? { defaultCapabilityName: config.defaultCapabilityName }
       : {}),

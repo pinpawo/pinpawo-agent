@@ -1,5 +1,4 @@
 import type { AgentActor } from '../../../types/agent';
-import type { SystemPromptSection } from '../../../types/systemPrompt';
 
 export function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
@@ -31,15 +30,6 @@ export function indentXmlBlock(block: string, spaces: number): string {
 export function promptBlock(block: string | null | undefined, spaces: number): string {
   // A block owns its leading newline so optional template slots disappear cleanly.
   return block ? `\n${indentXmlBlock(block, spaces)}` : '';
-}
-
-export function composeSystemPrompt(
-  basePrompt: string,
-  sections: readonly SystemPromptSection[] = [],
-): string {
-  return [basePrompt, ...sections.map(({ content }) => content)]
-    .filter((content) => content.trim())
-    .join('\n\n');
 }
 
 export function buildDecisionConfig(

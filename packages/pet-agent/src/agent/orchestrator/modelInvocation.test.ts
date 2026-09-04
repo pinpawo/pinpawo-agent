@@ -11,7 +11,6 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createAgent, createMiddleware } from 'langchain';
 import { DelegationAnnounceMessage } from './delegation';
 import {
-  createOrchestratorModelInvocationMiddleware,
   invokeOrchestratorModel,
   orchestratorModelInvocationMiddleware,
 } from './modelInvocation';
@@ -130,25 +129,4 @@ test('Agent invocation applies after earlier middleware without mutating state',
   assert.equal(invoked.at(-1), invocationInput);
   assert.equal(result.messages.includes(accepted), true);
   assert.equal(result.messages.includes(invocationInput), false);
-});
-
-test('Agent invocation composes host-owned system prompt sections at the model boundary', async () => {
-  const model = new RecordingModel({});
-  const agent = createAgent({
-    model,
-    tools: [],
-    systemPrompt: 'ROLE_PROMPT',
-    middleware: [createOrchestratorModelInvocationMiddleware([{
-      id: 'pet-document',
-      owner: 'host',
-      content: '<pet_document>PROJECT_CONTEXT</pet_document>',
-    }])],
-  });
-
-  await agent.invoke({ messages: [new HumanMessage('继续。')] });
-
-  const invokedSystemMessage = model.invocations[0]?.[0];
-  assert.ok(SystemMessage.isInstance(invokedSystemMessage));
-  assert.match(invokedSystemMessage.text, /ROLE_PROMPT/);
-  assert.match(invokedSystemMessage.text, /PROJECT_CONTEXT/);
 });

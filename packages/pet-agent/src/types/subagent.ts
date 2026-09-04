@@ -93,7 +93,6 @@ export type SubagentRunInput = SubagentInputState & {
 export type SubagentCompletionReason =
   | 'natural'
   | 'limit_reached'
-  | 'interrupted'
   | 'error';
 
 export type SubagentResult = {

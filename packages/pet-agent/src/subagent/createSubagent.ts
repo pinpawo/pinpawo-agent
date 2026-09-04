@@ -26,8 +26,8 @@ import {
   buildSubagentIterationLimitStopNotice,
   readSubagentGuardStopReason,
 } from './guardStop';
-import { readToolkitReviewRunControl } from '../agent/orchestrator/review/reviewRunControl';
 import { Command, END } from '@langchain/langgraph';
+import { propagatePauseTaskInterrupt } from '../agent/orchestrator/interrupt';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 import {
   SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
@@ -350,7 +350,11 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     );
     latestMessages = readResultMessages(result) ?? latestMessages;
     ensureSubagentMessageIds(latestMessages);
-    const reviewRunControl = readToolkitReviewRunControl(result);
+    const artifacts = inputState.artifacts ?? [];
+    propagatePauseTaskInterrupt(result, {
+      messages: latestMessages,
+      artifacts,
+    });
 
     // A guard may have gracefully ended the agent by appending its stop
     // notice as the FINAL message (via Command goto END). That is a clean "limit
@@ -359,9 +363,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     // Summarization may rewrite the list so an index-based slice is unreliable.
     const lastMessage = latestMessages.at(-1);
     const stopReason = lastMessage ? readSubagentGuardStopReason(lastMessage) : null;
-    const announceMessageId = reviewRunControl
-      ? null
-      : stopReason
+    const announceMessageId = stopReason
       ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
       : lastMessage?._getType() === 'ai'
         && !messageHasToolCalls(lastMessage)
@@ -369,12 +371,10 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
         : null;
     return {
       messages: latestMessages,
-      artifacts: inputState.artifacts ?? [],
-      completionReason: reviewRunControl
-        ? 'interrupted'
-        : stopReason === 'subagent_iteration_limit_reached'
-          ? 'limit_reached'
-          : 'natural',
+      artifacts,
+      completionReason: stopReason === 'subagent_iteration_limit_reached'
+        ? 'limit_reached'
+        : 'natural',
       announceMessageId,
     };
   } catch (err) {

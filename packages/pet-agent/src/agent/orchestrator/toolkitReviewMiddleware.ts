@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
-import { REMOVE_ALL_MESSAGES, getConfig, interrupt } from '@langchain/langgraph';
+import { REMOVE_ALL_MESSAGES, getConfig } from '@langchain/langgraph';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -13,7 +13,6 @@ import type {
 import type { AgentActor, AgentModels } from '../../types/agent';
 import type { SubagentRuntimeEvent } from '../../types/subagent';
 import {
-  applyReviewEffects,
   buildToolAuthorizationRecord,
   findToolAuthorization,
   mergeToolAuthorizations,
@@ -24,19 +23,11 @@ import {
 } from './review/reviewAuthorizations';
 import type { ToolAuthorizationMatcher } from './review/authorizationMatchers';
 import {
-  isHumanReviewRunControlResume,
-  resolveHumanReviewBatchResume,
-  ReviewResponseResolutionError,
-} from './review/reviewResponseResolver';
-import {
-  appendReviewViewMessage,
   reviewViewToText,
 } from './review/reviewSpec';
 import type {
   PendingReviewAction,
-  ReviewResponseResolution,
   ReviewSpec,
-  HumanReviewBatchInterruptPayload,
   HumanReviewInterruptPayload,
 } from './review/reviewSpec';
 import {
@@ -49,9 +40,11 @@ import {
   type GlobalReviewPolicyResolution,
 } from './review/globalReviewPolicy';
 import {
-  TOOLKIT_REVIEW_RUN_CONTROL,
-  TOOLKIT_REVIEW_RUN_CONTROL_STATE_KEY,
-} from './review/reviewRunControl';
+  PauseTaskInterruptStateSchema,
+  ReviewInterrupt,
+  type ReviewInterruptTransition,
+  type ReviewInterruptReview,
+} from './interrupt';
 
 export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
@@ -79,15 +72,9 @@ function buildCancelledToolResult(params: {
   input: unknown;
   source: ToolkitReviewCancellationSource;
 }) {
-  const guidance = params.source === 'human_reject'
-    ? 'Follow the user rejection and any updated direction. Do not retry this exact tool call unless the user explicitly asks for it.'
-    : params.source === 'human_respond'
-      ? 'Treat the user response as new task guidance, replan, and continue without retrying this exact tool call.'
-      : params.source === 'human_interrupt'
-        ? 'The run was interrupted while awaiting review. Do not retry or continue in this invocation.'
-      : params.source === 'review_unavailable'
-        ? 'This action requires human authorization that is unavailable in this runtime. Do not retry it; choose an allowed alternative or explain the constraint.'
-        : 'This action is blocked by policy. Do not retry it; choose an allowed alternative or explain the constraint.';
+  const guidance = params.source === 'review_unavailable'
+    ? 'This action requires human authorization that is unavailable in this runtime. Do not retry it; choose an allowed alternative or explain the constraint.'
+    : 'This action is blocked by policy. Do not retry it; choose an allowed alternative or explain the constraint.';
   return JSON.stringify({
     ok: false,
     cancelled: true,
@@ -123,6 +110,13 @@ function runtimeCanCollectHumanReview(ctx: ToolkitReviewRuntimeContext) {
   return ctx.reviewCapabilities?.humanReview !== false;
 }
 
+/**
+ * Temporary compatibility tracked by pinpawo-agent#749 for
+ * langchain-ai/langgraphjs#2667. A completed
+ * task() is currently re-executed when an interrupted nested graph resumes, so
+ * detect the pending value for this exact interrupt slot and skip repeating the
+ * global Review policy. Remove this when the upstream fix is released.
+ */
 function hasPendingReviewInterruptResume() {
   try {
     const configurable = getConfig().configurable as Record<string, unknown> | undefined;
@@ -318,50 +312,6 @@ function buildHumanReviewInterruptPayload(params: {
   };
 }
 
-function buildHumanReviewActionInterruptPayload(
-  reviews: PreparedToolkitReview[],
-): HumanReviewBatchInterruptPayload {
-  return {
-    kind: 'review_batch',
-    reviews: reviews.map((review) => review.reviewPayload),
-  };
-}
-
-function appendInvalidDecisionMessage(
-  payload: HumanReviewInterruptPayload,
-): HumanReviewInterruptPayload {
-  const message = '无法识别你的决定。请批准、拒绝，或直接输入新的处理方向。';
-  return {
-    ...payload,
-    error: 'invalid_decision',
-    review: {
-      ...payload.review,
-      view: appendReviewViewMessage(payload.review.view, message),
-    },
-  };
-}
-
-function buildInvalidDecisionRequest(
-  payload: HumanReviewBatchInterruptPayload,
-): HumanReviewBatchInterruptPayload {
-  return {
-    ...payload,
-    error: 'invalid_decision',
-    reviews: payload.reviews.map(appendInvalidDecisionMessage),
-  };
-}
-
-async function buildRuntimeReviewAuthorizations(params: {
-  review: PreparedToolkitReview;
-  resolution: ReviewResponseResolution;
-}): Promise<ToolAuthorizationRecord[]> {
-  return applyReviewEffects({
-    toolName: params.review.toolName,
-    matcher: params.review.authorizationMatcher,
-    effects: params.resolution.effects,
-  });
-}
-
 async function recordToolAuthorizations(
   ctx: ToolkitReviewRuntimeContext,
   authorizations: ToolAuthorizationRecord[],
@@ -449,15 +399,6 @@ export type ToolkitReviewBinding = {
   operation?: ToolOperationMetadata;
 };
 
-const ToolkitReviewStateSchema = z.object({
-  toolkitReviewApprovals: z.record(z.boolean()).default({}),
-  [TOOLKIT_REVIEW_RUN_CONTROL_STATE_KEY]: z.literal(
-    TOOLKIT_REVIEW_RUN_CONTROL.INTERRUPTED,
-  ).nullable().default(null),
-});
-
-type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
-
 type PreparedToolkitReview = GlobalReviewPolicyBatchItem & {
   toolCall: ToolCall;
   reviewPolicy: ToolReviewPolicy;
@@ -479,9 +420,6 @@ type ToolkitReviewPreparation =
 type ToolkitReviewCancellation = Extract<ToolkitReviewPreparation, { type: 'cancel' }>;
 
 type ToolkitReviewCancellationSource =
-  | 'human_reject'
-  | 'human_respond'
-  | 'human_interrupt'
   | 'policy_block'
   | 'review_unavailable';
 
@@ -490,30 +428,22 @@ type PreparedToolkitReviews = {
   cancellation: ToolkitReviewCancellation | null;
 };
 
-type ToolkitReviewResolution =
-  | {
-      type: 'authorize';
-      authorizations: ToolAuthorizationRecord[];
-      newlyApprovedReviewIds: Set<string>;
-    }
-  | {
-      type: 'cancel';
-      cancellation: ToolkitReviewCancellation;
-    };
-
 type MaterializedToolCallMessage = {
   message: AIMessage;
+  messageIndex: number;
   toolCalls: ToolCall[];
   replacedMessage: boolean;
 };
 
-type ToolkitReviewResults = {
-  toolMessages: ToolMessage[];
-  terminalMessage: AIMessage | null;
-  resumeModel: boolean;
-  rollbackAction: boolean;
-  newlyApprovedReviewIds: Set<string>;
+type ToolkitReviewResults = Omit<ReviewInterruptTransition, 'type'> & {
+  type: ReviewInterruptTransition['type'] | 'allow' | 'block';
 };
+
+const ToolkitReviewStateSchema = z.object({
+  toolkitReviewApprovals: z.record(z.boolean()).default({}),
+}).merge(PauseTaskInterruptStateSchema);
+
+type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
 
 function readApprovedReviewIds(state: Partial<ToolkitReviewState>) {
   return new Set(Object.entries(state.toolkitReviewApprovals ?? {})
@@ -680,70 +610,6 @@ async function prepareToolkitToolReview(params: {
   };
 }
 
-type ReviewActionResumeResolution =
-  | { type: 'interrupt_run' }
-  | { type: 'decisions'; resolutions: ReviewResponseResolution[] };
-
-async function resolveReviewActionResume(params: {
-  reviews: PreparedToolkitReview[];
-  resume: unknown;
-}): Promise<ReviewActionResumeResolution> {
-  if (isHumanReviewRunControlResume(params.resume)) {
-    return { type: 'interrupt_run' };
-  }
-  return {
-    type: 'decisions',
-    resolutions: resolveHumanReviewBatchResume(
-      params.reviews.map((review) => ({
-        reviewSpec: review.reviewPayload.review,
-        ...(review.reviewPayload.pendingAction
-          ? { pendingAction: review.reviewPayload.pendingAction }
-          : {}),
-      })),
-      params.resume,
-    ),
-  };
-}
-
-async function authorizeApprovedReviewAction(params: {
-  reviews: PreparedToolkitReview[];
-  resolutions: ReviewResponseResolution[];
-}): Promise<ToolAuthorizationRecord[]> {
-  if (params.resolutions.length !== params.reviews.length) {
-    throw new ReviewResponseResolutionError(
-      'invalid_response',
-      `Review action approved ${params.resolutions.length} of ${params.reviews.length} pending reviews.`,
-    );
-  }
-
-  const authorizations: ToolAuthorizationRecord[] = [];
-  for (let index = 0; index < params.resolutions.length; index += 1) {
-    const resolution = params.resolutions[index]!;
-    const review = params.reviews[index]!;
-    authorizations.push(...await buildRuntimeReviewAuthorizations({
-      review,
-      resolution,
-    }));
-  }
-  return authorizations;
-}
-
-function buildCancellationForDecision(
-  review: PreparedToolkitReview,
-  decision: ReviewResponseResolution['decision'],
-): ToolkitReviewCancellation {
-  const reason = decision.type === 'respond'
-    ? decision.message
-    : decision.type === 'reject'
-      ? decision.message ?? 'tool call rejected by user'
-      : 'tool call rejected by user';
-  return buildCancelledOutcomeForReview(
-    review,
-    reason,
-    decision.type === 'respond' ? 'human_respond' : 'human_reject',
-  );
-}
-
 function readLatestAIMessage(messages: BaseMessage[]): {
   message: AIMessage;
   index: number;
@@ -771,8 +637,20 @@ function materializeAIMessageToolCalls(params: {
     message: replacedMessage
       ? cloneAIMessageWithToolCalls(params.aiMessage, toolCalls)
       : params.aiMessage,
+    messageIndex: params.aiMessageIndex,
     toolCalls,
     replacedMessage,
+  };
+}
+
+function toReviewInterruptReview(review: PreparedToolkitReview): ReviewInterruptReview {
+  return {
+    toolCall: review.toolCall,
+    toolkitName: review.toolkitName,
+    toolName: review.toolName,
+    input: review.input,
+    reviewPayload: review.reviewPayload,
+    authorizationMatcher: review.authorizationMatcher,
   };
 }
 
@@ -866,98 +744,49 @@ async function prepareToolkitReviews(params: {
 }
 
 async function resolveHumanToolkitReviews(params: {
-  reviews: PreparedToolkitReview[];
-}): Promise<ToolkitReviewResolution> {
-  let reviewPayload = buildHumanReviewActionInterruptPayload(params.reviews);
-  let resume = interrupt(reviewPayload);
-  while (true) {
-    try {
-      const resumeResolution = await resolveReviewActionResume({
-        reviews: params.reviews,
-        resume,
-      });
-      if (resumeResolution.type === 'interrupt_run') {
-        const firstReview = params.reviews[0];
-        if (!firstReview) {
-          throw new ReviewResponseResolutionError(
-            'invalid_response',
-            'Cannot interrupt an empty human review action.',
-          );
-        }
-        return {
-          type: 'cancel',
-          cancellation: buildCancelledOutcomeForReview(
-            firstReview,
-            'run interrupted while waiting for human review',
-            'human_interrupt',
-          ),
-        };
-      }
-      const { resolutions } = resumeResolution;
-      const firstCancellation = resolutions.find((resolution) =>
-        resolution.decision.type !== 'approve');
-      if (firstCancellation) {
-        const reviewIndex = resolutions.indexOf(firstCancellation);
-        return {
-          type: 'cancel',
-          cancellation: buildCancellationForDecision(
-            params.reviews[reviewIndex]!,
-            firstCancellation.decision,
-          ),
-        };
-      }
-      const authorizations = await authorizeApprovedReviewAction({
-        reviews: params.reviews,
-        resolutions,
-      });
-      return {
-        type: 'authorize',
-        authorizations,
-        newlyApprovedReviewIds: new Set(params.reviews.map((review) => review.reviewPayload.review.id)),
-      };
-    } catch (error) {
-      if (
-        !(error instanceof ReviewResponseResolutionError)
-        && !(error instanceof ReviewEffectApplicationError)
-      ) {
-        throw error;
-      }
-      reviewPayload = buildInvalidDecisionRequest(reviewPayload);
-      resume = interrupt(reviewPayload);
-    }
-  }
+  reviews: ReviewInterruptReview[];
+  messages: BaseMessage[];
+  reviewedMessage: MaterializedToolCallMessage;
+}): Promise<ReviewInterruptTransition> {
+  return new ReviewInterrupt({
+    reviews: params.reviews,
+    messages: params.messages,
+    aiMessage: params.reviewedMessage.message,
+    aiMessageIndex: params.reviewedMessage.messageIndex,
+    actionWasMaterialized: params.reviewedMessage.replacedMessage,
+  }).run();
 }
 
-async function resolvePreparedToolkitReviews(params: {
-  prepared: PreparedToolkitReviews;
+async function reviewToolkitToolCalls(params: {
+  messages: BaseMessage[];
+  reviewedMessage: MaterializedToolCallMessage;
+  bindingsByToolName: Map<string, ToolkitReviewBinding>;
   ctx: ToolkitReviewRuntimeContext;
-}): Promise<ToolkitReviewResolution> {
-  if (params.prepared.cancellation) {
-    return {
-      type: 'cancel',
-      cancellation: params.prepared.cancellation,
-    };
+  approvedReviewIds: Set<string>;
+}): Promise<ToolkitReviewResults> {
+  const prepared = await prepareToolkitReviews({
+    toolCalls: params.reviewedMessage.toolCalls,
+    bindingsByToolName: params.bindingsByToolName,
+    ctx: params.ctx,
+    approvedReviewIds: params.approvedReviewIds,
+  });
+  if (prepared.cancellation) {
+    return buildPolicyCancellationResult({
+      messages: params.messages,
+      reviewedMessage: params.reviewedMessage,
+      cancellation: prepared.cancellation,
+    });
   }
 
-  if (params.prepared.reviews.length === 0) {
-    return {
-      type: 'authorize',
-      authorizations: [],
-      newlyApprovedReviewIds: new Set<string>(),
-    };
+  if (prepared.reviews.length === 0) {
+    return buildAllowedToolkitReviewResult(params.messages, params.reviewedMessage);
   }
 
-  // LangGraph replays the enclosing afterModel node when a pending interrupt is
-  // resumed. The task-local scratchpad identifies whether the next interrupt
-  // slot already has a resume value for this exact checkpoint. In that case the
-  // action necessarily passed global policy into human review before pausing,
-  // so consume that review directly without running auto-review again. A later
-  // capability has a fresh graph task/scratchpad and evaluates new reviews.
   const hasPendingResume = hasPendingReviewInterruptResume();
   const deterministicallyAutoAuthorized = !hasPendingResume
     && await canAutoAuthorizeCompleteBatch({
       ctx: params.ctx,
-      reviews: params.prepared.reviews,
+      reviews: prepared.reviews,
     });
   const policyResolution = hasPendingResume
     ? { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION } as const
@@ -973,13 +802,13 @@ async function resolvePreparedToolkitReviews(params: {
           messages: params.ctx.messages,
           task: params.ctx.reviewContext?.task,
           workdir: params.ctx.reviewContext?.workdir,
-          reviews: params.prepared.reviews,
+          reviews: prepared.reviews,
         });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
     const sessionAuthorizations = await buildAutoReviewSessionAuthorizations({
       ctx: params.ctx,
-      reviews: params.prepared.reviews,
+      reviews: prepared.reviews,
     });
     // AUTO_AUTHORIZED is already the user-facing event for this decision.
     // The chat adapter treats auto_review record diagnostics as non-visible.
@@ -987,29 +816,28 @@ async function resolvePreparedToolkitReviews(params: {
     await emitGlobalReviewAuthorizationEvent({
       ctx: params.ctx,
       resolution: policyResolution,
-      reviews: params.prepared.reviews,
+      reviews: prepared.reviews,
     });
-    return {
-      type: 'authorize',
-      authorizations: [],
-      newlyApprovedReviewIds: new Set<string>(),
-    };
+    return buildAllowedToolkitReviewResult(params.messages, params.reviewedMessage);
   }
 
   if (!runtimeCanCollectHumanReview(params.ctx)) {
-    const [firstReview] = params.prepared.reviews;
-    return {
-      type: 'cancel',
+    const [firstReview] = prepared.reviews;
+    return buildPolicyCancellationResult({
+      messages: params.messages,
+      reviewedMessage: params.reviewedMessage,
       cancellation: buildCancelledOutcomeForReview(
         firstReview,
         buildHumanReviewUnavailableReason(policyResolution),
         'review_unavailable',
       ),
-    };
+    });
   }
 
   return resolveHumanToolkitReviews({
-    reviews: params.prepared.reviews,
+    reviews: prepared.reviews.map(toReviewInterruptReview),
+    messages: params.messages,
+    reviewedMessage: params.reviewedMessage,
   });
 }
 
@@ -1043,132 +871,61 @@ async function canAutoAuthorizeCompleteBatch(params: {
   return true;
 }
 
-function buildCancelledToolCallResults(
-  toolCalls: ToolCall[],
-  cancellation: ToolkitReviewCancellation,
+function buildAllowedToolkitReviewResult(
+  messages: BaseMessage[],
+  reviewedMessage: MaterializedToolCallMessage,
 ): ToolkitReviewResults {
-  const rollbackAction = cancellation.source === 'human_reject'
-    || cancellation.source === 'human_interrupt';
-  if (rollbackAction) {
-    return {
-      toolMessages: [],
-      terminalMessage: null,
-      resumeModel: false,
-      rollbackAction: true,
-      newlyApprovedReviewIds: new Set<string>(),
-    };
-  }
+  return {
+    type: 'allow',
+    authorizations: [],
+    approvedReviewIds: [],
+    stateUpdate: reviewedMessage.replacedMessage
+      ? {
+          messages: replaceMessageInState(
+            messages,
+            reviewedMessage.messageIndex,
+            reviewedMessage.message,
+            [],
+          ),
+        }
+      : {},
+  };
+}
 
+function buildPolicyCancellationResult(params: {
+  messages: BaseMessage[];
+  reviewedMessage: MaterializedToolCallMessage;
+  cancellation: ToolkitReviewCancellation;
+}): ToolkitReviewResults {
   const toolMessages: ToolMessage[] = [];
-  for (const toolCall of toolCalls) {
+  for (const toolCall of params.reviewedMessage.toolCalls) {
     toolMessages.push(buildToolMessage(
       toolCall,
-      toolCall === cancellation.toolCall
-        ? cancellation.content
+      readToolCallId(toolCall) === readToolCallId(params.cancellation.toolCall)
+        ? params.cancellation.content
         : buildSkippedAfterCancellationResult(toolCall),
     ));
   }
   return {
-    toolMessages,
-    terminalMessage: cancellation.source === 'policy_block'
-      || cancellation.source === 'review_unavailable'
-      ? new AIMessage({
-          content: cancellation.source === 'policy_block'
-            ? `工具调用 ${cancellation.toolCall.name} 被策略阻止，未执行。原因：${cancellation.reason}`
-            : `工具调用 ${cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${cancellation.reason}`,
-        })
-      : null,
-    resumeModel: cancellation.source === 'human_respond',
-    rollbackAction: false,
-    newlyApprovedReviewIds: new Set<string>(),
-  };
-}
-
-async function reviewToolkitToolCalls(params: {
-  toolCalls: ToolCall[];
-  bindingsByToolName: Map<string, ToolkitReviewBinding>;
-  ctx: ToolkitReviewRuntimeContext;
-  approvedReviewIds: Set<string>;
-}): Promise<ToolkitReviewResults> {
-  const prepared = await prepareToolkitReviews({
-    toolCalls: params.toolCalls,
-    bindingsByToolName: params.bindingsByToolName,
-    ctx: params.ctx,
-    approvedReviewIds: params.approvedReviewIds,
-  });
-  const resolution = await resolvePreparedToolkitReviews({
-    prepared,
-    ctx: params.ctx,
-  });
-
-  if (resolution.type === 'cancel') {
-    return buildCancelledToolCallResults(params.toolCalls, resolution.cancellation);
-  }
-
-  await recordToolAuthorizations(params.ctx, resolution.authorizations);
-  return {
-    toolMessages: [],
-    terminalMessage: null,
-    resumeModel: false,
-    rollbackAction: false,
-    newlyApprovedReviewIds: resolution.newlyApprovedReviewIds,
-  };
-}
-
-function buildToolkitReviewStateUpdate(params: {
-  state: Partial<ToolkitReviewState>;
-  messages: BaseMessage[];
-  aiMessageIndex: number;
-  reviewedMessage: MaterializedToolCallMessage;
-  reviewResults: ToolkitReviewResults;
-}) {
-  const { reviewedMessage, reviewResults } = params;
-  const approvalUpdate = reviewResults.newlyApprovedReviewIds.size > 0
-    ? { toolkitReviewApprovals: mergeApprovedReviewIds(params.state, reviewResults.newlyApprovedReviewIds) }
-    : {};
-  if (reviewResults.rollbackAction) {
-    if (!reviewedMessage.message.id) {
-      throw new Error('Cannot roll back a reviewed AI tool-call action without a message id.');
-    }
-    return {
-      ...approvalUpdate,
-      [TOOLKIT_REVIEW_RUN_CONTROL_STATE_KEY]: TOOLKIT_REVIEW_RUN_CONTROL.INTERRUPTED,
-      jumpTo: 'end' as const,
-      messages: [new RemoveMessage({ id: reviewedMessage.message.id }) as BaseMessage],
-    };
-  }
-  if (reviewResults.toolMessages.length === 0) {
-    // Return {} when no state or message updates are needed, so middleware can
-    // emit a stable state object in this no-op branch.
-    return reviewedMessage.replacedMessage
-      ? {
-          ...approvalUpdate,
-          messages: replaceMessageInState(params.messages, params.aiMessageIndex, reviewedMessage.message, []),
-        }
-      : Object.keys(approvalUpdate).length > 0
-        ? approvalUpdate
-        : {};
-  }
-
-  // Once every pending tool call has a ToolMessage, LangChain's normal
-  // after-model router considers the turn complete and exits the child agent.
-  // Human respond is task guidance, so explicitly return to the same child
-  // model. Deterministic policy blocks keep their terminal semantics.
-  const cancellationUpdate = reviewResults.resumeModel
-    ? { jumpTo: 'model' as const }
-    : {};
-  const appendedMessages = reviewResults.terminalMessage
-    ? [...reviewResults.toolMessages, reviewResults.terminalMessage]
-    : reviewResults.toolMessages;
-  return {
-    ...approvalUpdate,
-    ...cancellationUpdate,
-    messages: replaceMessageInState(
-      params.messages,
-      params.aiMessageIndex,
-      reviewedMessage.message,
-      appendedMessages,
-    ),
+    type: 'block',
+    authorizations: [],
+    approvedReviewIds: [],
+    stateUpdate: {
+      messages: replaceMessageInState(
+        params.messages,
+        params.reviewedMessage.messageIndex,
+        params.reviewedMessage.message,
+        [
+          ...toolMessages,
+          new AIMessage({
+            content: params.cancellation.source === 'policy_block'
+              ? `工具调用 ${params.cancellation.toolCall.name} 被策略阻止，未执行。原因：${params.cancellation.reason}`
+              : `工具调用 ${params.cancellation.toolCall.name} 需要人工确认，但当前运行环境无法收集确认，因此未执行。原因：${params.cancellation.reason}`,
+          }),
+        ],
+      ),
+      jumpTo: 'end',
+    },
   };
 }
 
@@ -1195,21 +952,22 @@ export function createToolkitReviewMiddleware(
           aiMessage: latestAIMessage.message,
           aiMessageIndex: latestAIMessage.index,
         });
-        const approvedReviewIds = readApprovedReviewIds(state);
         const reviewResults = await reviewToolkitToolCalls({
-          toolCalls: reviewedMessage.toolCalls,
+          messages,
+          reviewedMessage,
           bindingsByToolName,
           ctx,
-          approvedReviewIds,
+          approvedReviewIds: readApprovedReviewIds(state),
         });
-
-        return buildToolkitReviewStateUpdate({
-          state,
-          messages,
-          aiMessageIndex: latestAIMessage.index,
-          reviewedMessage,
-          reviewResults,
-        });
+        await recordToolAuthorizations(ctx, reviewResults.authorizations);
+        const approvedReviewIds = new Set(reviewResults.approvedReviewIds);
+        const approvalUpdate = approvedReviewIds.size > 0
+          ? { toolkitReviewApprovals: mergeApprovedReviewIds(state, approvedReviewIds) }
+          : {};
+        return {
+          ...approvalUpdate,
+          ...reviewResults.stateUpdate,
+        };
       },
       canJumpTo: ['model', 'end'],
     },

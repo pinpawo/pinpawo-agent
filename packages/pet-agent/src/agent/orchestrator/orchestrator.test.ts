@@ -86,7 +86,7 @@ function createPrivateAnnounce(params: {
   delegationId: string;
   task?: string | null;
   result: string;
-  completionReason?: 'natural' | 'limit_reached' | 'interrupted' | 'error';
+  completionReason?: 'natural' | 'limit_reached' | 'error';
 }) {
   const announceMessageId = params.id ?? `announce:${params.runId}:${params.delegationId}`;
   return setAgentMessageDelegationScope(new DelegationAnnounceMessage({
@@ -4239,8 +4239,6 @@ test('toolkit review policy records authorization through orchestrator runtime t
     source: 'human',
     scope: 'thread',
   });
-  // Resuming a LangGraph interrupt replays the node and rebuilds the same
-  // deterministic review request before consuming the saved decision.
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
 });
@@ -4384,7 +4382,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   }), null);
 });
 
-test('toolkit review rejection rolls back the full action and retains the delegation', async () => {
+test('toolkit review rejection records terminal tool results and retains the delegation', async () => {
   let runCount = 0;
   let reviewCount = 0;
   let autoReviewCount = 0;
@@ -4513,6 +4511,22 @@ test('toolkit review rejection rolls back the full action and retains the delega
     'tool-review:run_shell:call-rejected-second',
   ]);
 
+  assert.ok(interruptId);
+  const invalidResume = await graph.invoke(new Command({
+    resume: {
+      [interruptId]: { decisions: [] },
+    },
+  }), config) as {
+    __interrupt__?: Array<{
+      id?: string;
+      value?: { error?: string };
+    }>;
+  };
+  const retryInterruptId = invalidResume.__interrupt__?.[0]?.id;
+  assert.ok(retryInterruptId);
+  assert.equal(invalidResume.__interrupt__?.[0]?.value?.error, 'invalid_decision');
+  assert.equal(autoReviewCount, 1, 'invalid Review resume must not repeat auto-review');
+
   const reviewResume = {
     decisions: [{
       reviewId: 'tool-review:run_shell:call-rejected-first',
@@ -4520,7 +4534,7 @@ test('toolkit review rejection rolls back the full action and retains the delega
     }],
   };
   const resumedRun = await graph.streamEvents(new Command({
-    resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
+    resume: { [retryInterruptId]: reviewResume },
   }), { version: 'v3', ...config });
   for await (const _event of resumedRun) {
     // Drain the root stream so the final output is materialized.
@@ -4533,7 +4547,7 @@ test('toolkit review rejection rolls back the full action and retains the delega
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(runCount, 0);
-  assert.equal(reviewCount, 4);
+  assert.equal(reviewCount, 6);
   assert.equal(autoReviewCount, 1, 'pending review resume must reuse its checkpointed auto-review');
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
@@ -4552,14 +4566,23 @@ test('toolkit review rejection rolls back the full action and retains the delega
   );
   assert.equal(
     retainedLane.some((message) => ToolMessage.isInstance(message)),
-    false,
+    true,
   );
+  const rejectedToolResults = retainedLane
+    .filter((message): message is ToolMessage => ToolMessage.isInstance(message))
+    .map((message) => JSON.parse(String(message.content)) as {
+      source?: string;
+      skipped?: boolean;
+    });
+  assert.equal(rejectedToolResults.length, 2);
+  assert.equal(rejectedToolResults[0]?.source, 'human_reject');
+  assert.equal(rejectedToolResults[1]?.skipped, true);
   assert.equal(
     retainedLane.some((message) =>
       AIMessage.isInstance(message)
       && (message.tool_calls ?? []).some((toolCall) =>
         toolCall.id === 'call-rejected-first' || toolCall.id === 'call-rejected-second')),
-    false,
+    true,
   );
 
   const nextReview = await graph.invoke(
@@ -4581,7 +4604,7 @@ test('toolkit review rejection rolls back the full action and retains the delega
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
     continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
-    false,
+    true,
   );
   assert.equal(
     continuedSubagentInput.some((message) =>

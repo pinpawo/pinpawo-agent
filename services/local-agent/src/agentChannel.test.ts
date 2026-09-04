@@ -21,7 +21,8 @@ import {
 } from './capabilities/capabilityCreator';
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { createBashToolkit } from './toolkits/local';
+import { createGitToolkit } from './toolkits/git';
 import { createTestModelProfileRegistry } from './testing/modelProfiles';
 
 function createContext(): AgentContext {

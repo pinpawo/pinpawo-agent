@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { ToolkitRuntimeManager, type AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit, createGitToolkit } from './index';
+import { createBashToolkit } from './index';
+import { createGitToolkit } from '../git';
 
 function executionScope(workdir: string, suffix: string) {
   return {

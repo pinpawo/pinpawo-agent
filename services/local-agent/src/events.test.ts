@@ -12,7 +12,8 @@ import {
   createOperationRegistryFromToolkits,
 } from './events/operationRegistry';
 import { createBrowserToolkit } from '@pinpawo-toolkit/browser';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { createBashToolkit } from './toolkits/local';
+import { createGitToolkit } from './toolkits/git';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 function definition(toolkit: AgentToolkit, toolName: string) {

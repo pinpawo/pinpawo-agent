@@ -44,9 +44,9 @@ import { getConfig } from './config';
 import { loadAgentContext } from './contextLoader';
 import {
   createBashToolkit,
-  createGitToolkit,
   createProjectInspectionToolkit,
 } from './toolkits/local';
+import { createGitToolkit } from './toolkits/git';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import type {
   HostToolkitInventoryStore,

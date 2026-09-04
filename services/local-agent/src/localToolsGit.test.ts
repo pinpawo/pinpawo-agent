@@ -8,9 +8,9 @@ import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
   createBashToolkit,
-  createGitToolkit,
   createProjectInspectionToolkit,
 } from './toolkits/local';
+import { createGitToolkit } from './toolkits/git';
 import {
   gitAddTool,
   gitCommitTool,
@@ -26,7 +26,7 @@ import {
   ghPrViewTool,
   ghReadContentTool,
   gitStatusTool,
-} from './toolkits/local/gitTools';
+} from './toolkits/git/gitTools';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

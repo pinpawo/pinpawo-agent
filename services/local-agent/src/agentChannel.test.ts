@@ -163,7 +163,10 @@ test('buildLocalChatAgentInput applies the Pet document to the cached Chat graph
     petDocument: secondDocument,
   });
 
-  assert.equal(first.graphConfig.petDocument, firstDocument);
+  assert.match(
+    first.graphConfig.systemPromptSections?.[0]?.content ?? '',
+    /# First Pet/,
+  );
   assert.notEqual(first.graphKey, second.graphKey);
 });
 

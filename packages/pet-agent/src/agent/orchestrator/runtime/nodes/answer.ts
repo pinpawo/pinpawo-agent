@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   buildHandoffArtifactRefs,
@@ -30,6 +30,7 @@ import {
   resolveActor,
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
+import { invokeOrchestratorModel } from '../../modelInvocation';
 import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 
@@ -162,12 +163,20 @@ export function createAnswerNode(config: OrchestratorConfig) {
     });
     const answerMessages = buildAnswerInvocationMessages({
       actor,
-      ...(config.petDocument ? { petDocument: config.petDocument } : {}),
       userRequest: state.runUserRequest,
       contextFacts: answerContextFacts,
     });
-    const response = await (config.models.answer ?? config.models.act).invoke(
-      answerMessages,
+    const [systemMessage, ...messages] = answerMessages;
+    if (!SystemMessage.isInstance(systemMessage)) {
+      throw new Error('Answer invocation requires a system message.');
+    }
+    const response = await invokeOrchestratorModel(
+      config.models.answer ?? config.models.act,
+      {
+        systemMessage,
+        systemPromptSections: config.systemPromptSections,
+        messages,
+      },
       runnableConfig,
     );
     if (!readMessageText(response).trim()) {

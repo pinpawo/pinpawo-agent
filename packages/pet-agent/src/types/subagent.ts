@@ -4,6 +4,7 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
+import type { SystemPromptSection } from './systemPrompt';
 import type { ToolOperationMetadata } from './toolkit';
 
 export type SubagentExecutionScope = {
@@ -64,11 +65,7 @@ export type SubagentRuntimeEvent = {
   data: unknown;
 };
 
-export type SubagentPromptSection = {
-  readonly id: string;
-  readonly owner?: string;
-  readonly content: string;
-};
+export type SubagentPromptSection = SystemPromptSection;
 
 export type SubagentInputState = {
   promptSections: readonly SubagentPromptSection[];

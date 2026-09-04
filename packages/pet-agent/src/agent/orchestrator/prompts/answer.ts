@@ -4,7 +4,6 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import type { AgentActor } from '../../../types/agent';
-import type { PetDocument } from '../../../types/petDocument';
 import {
   MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH,
   MAX_HANDOFF_ARTIFACT_TITLE_LENGTH,
@@ -15,12 +14,7 @@ import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages
 import type { UserRequest } from '../types';
 import { clipForPrompt } from '../utils';
 import { buildRunUserRequestContext } from './context';
-import {
-  appendPetDocument,
-  buildDecisionConfig,
-  indentXmlBlock,
-  xmlTextBlock,
-} from './shared';
+import { buildDecisionConfig, indentXmlBlock, xmlTextBlock } from './shared';
 import { ANSWER_SYSTEM_PROMPT } from './templates/answer.prompt';
 import { ENTRY_ANSWER_SYSTEM_PROMPT } from './templates/entryAnswer.prompt';
 
@@ -227,20 +221,18 @@ export function appendAnswerInputMessage(
 
 export function buildAnswerSystemPrompt(params: {
   actor: AgentActor;
-  petDocument?: PetDocument;
 }): string {
-  return appendPetDocument(ANSWER_SYSTEM_PROMPT.render({
+  return ANSWER_SYSTEM_PROMPT.render({
     config: buildDecisionConfig(params.actor),
-  }), params.petDocument);
+  });
 }
 
 export function buildEntryAnswerSystemPrompt(params: {
   actor: AgentActor;
-  petDocument?: PetDocument;
 }): string {
-  return appendPetDocument(ENTRY_ANSWER_SYSTEM_PROMPT.render({
+  return ENTRY_ANSWER_SYSTEM_PROMPT.render({
     config: buildDecisionConfig(params.actor),
-  }), params.petDocument);
+  });
 }
 
 /**
@@ -256,15 +248,11 @@ export function buildEntryAnswerSystemPrompt(params: {
  */
 export function buildAnswerInvocationMessages(params: {
   actor: AgentActor;
-  petDocument?: PetDocument;
   userRequest?: UserRequest | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
   return [
-    new SystemMessage(buildAnswerSystemPrompt({
-      actor: params.actor,
-      ...(params.petDocument ? { petDocument: params.petDocument } : {}),
-    })),
+    new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
     ...appendAnswerInputMessage([], params.userRequest, params.contextFacts),
   ];
 }

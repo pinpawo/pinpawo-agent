@@ -17,7 +17,7 @@ import type {
 } from './runner';
 import { parseSupervisorCommand } from './protocol';
 import { queryAgentMessages } from '../../messages';
-import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
+import { createOrchestratorModelInvocationMiddleware } from '../modelInvocation';
 import { createSupervisorMiddleware } from './supervisorMiddleware';
 import { supervisorCommandContext } from './supervisorState';
 import {
@@ -31,7 +31,7 @@ import {
 import { createSupervisorCommandTools } from './commandTools';
 import { SupervisorFileToolError } from './workspaceReader';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
-import type { PetDocument } from '../../../types/petDocument';
+import type { SystemPromptSection } from '../../../types/systemPrompt';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 export const DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS = 2;
@@ -118,7 +118,7 @@ export function createRunSupervisorAgent(params: {
   maxDocumentReadBytes?: number;
   /** Additional invocation-scoped Supervisor tools. */
   additionalTools?: StructuredTool[];
-  petDocument?: PetDocument;
+  systemPromptSections?: readonly SystemPromptSection[];
 }): RunSupervisorRunner {
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   assertPositiveInteger(timeoutMs, 'Run Supervisor timeoutMs');
@@ -150,7 +150,7 @@ export function createRunSupervisorAgent(params: {
   const capabilitySearchTool = createSupervisorCapabilitySearchTool({
     explorerForInput,
   });
-  const middleware = createSupervisorMiddleware(params.petDocument);
+  const middleware = createSupervisorMiddleware();
   const agent = createAgent({
     name: 'runSupervisor',
     model: params.model,
@@ -158,7 +158,7 @@ export function createRunSupervisorAgent(params: {
     middleware: [
       middleware,
       createSupervisorSearchStateMiddleware(),
-      orchestratorModelInvocationMiddleware,
+      createOrchestratorModelInvocationMiddleware(params.systemPromptSections),
     ],
     checkpointer: false,
   });

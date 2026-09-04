@@ -31,7 +31,7 @@ export {
 } from './types/capability';
 
 export type { PetDocument } from './types/petDocument';
-export { definePetDocument } from './types/petDocument';
+export { definePetDocument, petDocumentSystemPromptSection } from './types/petDocument';
 
 export type {
   SubagentInputState,
@@ -44,6 +44,7 @@ export type {
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
+export type { SystemPromptSection } from './types/systemPrompt';
 
 export type {
   Guard,

@@ -180,10 +180,10 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     );
     const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt({
       actor: resolveActor(config, runnableConfig),
-      ...(config.petDocument ? { petDocument: config.petDocument } : {}),
     }));
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
+      systemPromptSections: config.systemPromptSections,
       messages: mainSelection.messages,
     }, runnableConfig);
     if (!AIMessage.isInstance(response)) {
@@ -195,6 +195,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
         .select();
       const retried = await invokeOrchestratorModel(model, {
         systemMessage,
+        systemPromptSections: config.systemPromptSections,
         messages: retrySelection.messages,
       }, runnableConfig);
       if (!AIMessage.isInstance(retried)) {

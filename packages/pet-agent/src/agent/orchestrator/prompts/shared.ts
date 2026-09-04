@@ -1,5 +1,5 @@
 import type { AgentActor } from '../../../types/agent';
-import type { PetDocument } from '../../../types/petDocument';
+import type { SystemPromptSection } from '../../../types/systemPrompt';
 
 export function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
@@ -33,19 +33,13 @@ export function promptBlock(block: string | null | undefined, spaces: number): s
   return block ? `\n${indentXmlBlock(block, spaces)}` : '';
 }
 
-export function appendPetDocument(
-  systemPrompt: string,
-  document?: PetDocument,
+export function composeSystemPrompt(
+  basePrompt: string,
+  sections: readonly SystemPromptSection[] = [],
 ): string {
-  if (!document) return systemPrompt;
-  return [
-    systemPrompt,
-    '',
-    '<pet_document role="root_context" source="PET.md" scope="pet">',
-    'This is the Pet\'s canonical authored root document. Apply it throughout this model role within the framework\'s lifecycle, tool, and security contracts.',
-    xmlTextBlock('document', document.content, ' format="markdown"'),
-    '</pet_document>',
-  ].join('\n');
+  return [basePrompt, ...sections.map(({ content }) => content)]
+    .filter((content) => content.trim())
+    .join('\n\n');
 }
 
 export function buildDecisionConfig(

@@ -194,13 +194,7 @@ export function createCapabilityNode(params: {
         model: config.models.subagent ?? config.models.act,
         tools: usedResolvedToolkitExecution.tools,
         promptSections: [
-          ...(config.petDocument
-            ? [{
-                id: 'pet:document',
-                owner: 'host',
-                content: config.petDocument.content,
-              }]
-            : []),
+          ...(config.systemPromptSections ?? []),
           ...usedResolvedToolkitExecution.toolkits
             .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
             .map((toolkit) => ({

@@ -2,6 +2,7 @@ import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messa
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
+  petDocumentSystemPromptSection,
   stampAgentMessageCreatedAt,
   type AgentCapability,
   type AgentInvokeInput,
@@ -196,7 +197,9 @@ export function buildLocalChatAgentInput(params: {
     ]),
     graphConfig: {
       models,
-      ...(params.petDocument ? { petDocument: params.petDocument } : {}),
+      ...(params.petDocument
+        ? { systemPromptSections: [petDocumentSystemPromptSection(params.petDocument)] }
+        : {}),
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
       actor,
       checkpoint: params.checkpoint,

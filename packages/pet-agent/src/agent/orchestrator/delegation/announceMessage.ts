@@ -36,7 +36,6 @@ function isCapabilityLane(value: unknown): value is CapabilityMessageLane {
 function isCompletionReason(value: unknown): value is SubagentCompletionReason {
   return value === 'natural'
     || value === 'limit_reached'
-    || value === 'interrupted'
     || value === 'error';
 }
 

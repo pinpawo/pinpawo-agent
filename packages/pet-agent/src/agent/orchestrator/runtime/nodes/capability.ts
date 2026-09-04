@@ -43,6 +43,10 @@ import {
 import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegation';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
+import {
+  readPauseTaskInterruptSignal,
+  type PausedSubagentState,
+} from '../../interrupt';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -156,7 +160,8 @@ export function createCapabilityNode(params: {
     let runtimeExecution: ToolkitRuntimeExecution | null = null;
     let usedResolvedToolkitExecution: Awaited<ReturnType<typeof resolveToolkitExecution>>;
     let subagentInput: SubagentRunInput;
-    let result: Awaited<ReturnType<typeof createSubagent>>;
+    let result: Awaited<ReturnType<typeof createSubagent>> | null = null;
+    let pausedSubagentState: PausedSubagentState | null = null;
     try {
       runtimeExecution = config.toolkitRuntimeManager
         ? await config.toolkitRuntimeManager.resolve({
@@ -240,15 +245,20 @@ export function createCapabilityNode(params: {
         signal: runnableConfig?.signal,
         artifacts: artifactRefs,
       };
-      result = await createSubagent(subagentInput);
+      try {
+        result = await createSubagent(subagentInput);
+      } catch (error) {
+        const pauseSignal = readPauseTaskInterruptSignal(error);
+        if (!pauseSignal) {
+          throw error;
+        }
+        pausedSubagentState = pauseSignal.state;
+      }
     } finally {
       await runtimeExecution?.release();
     }
 
-    if (
-      result.completionReason !== 'interrupted'
-      && capability.lifecycle?.finalize
-    ) {
+    if (result && capability.lifecycle?.finalize) {
       const finalized = await capability.lifecycle.finalize(result, {
         models: config.models,
         actor,
@@ -277,23 +287,30 @@ export function createCapabilityNode(params: {
       };
     }
 
+    if (!result && !pausedSubagentState) {
+      throw new Error('Capability subagent produced neither a result nor a pause signal.');
+    }
+    const resultMessages = pausedSubagentState?.messages ?? result!.messages;
+    const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
+    const completionReason = result?.completionReason ?? null;
+    const announceMessageId = result?.announceMessageId ?? null;
     const laneOutputMessages = reconcileDelegationPrivateMessages(
-      result.messages,
+      resultMessages,
       subagentInput.messages,
       lane,
       runId,
-      result.completionReason,
+      completionReason,
       {
         delegationId: runNextDelegation.id,
         task: runNextDelegation.task,
-        announceMessageId: result.announceMessageId,
+        announceMessageId,
       },
       canonicalSelection.messages,
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
-    const interrupted = result.completionReason === 'interrupted';
+    const paused = pausedSubagentState !== null;
     const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
-    const resultPreview = interrupted
+    const resultPreview = paused
       ? currentResultPreview
       : delegationAnnounce?.result ?? null;
     // The subagent node only records that the delegation ran (status 'progress');
@@ -308,7 +325,7 @@ export function createCapabilityNode(params: {
         resultPreview,
       },
     );
-    const interruptedContinuation = interrupted
+    const pauseContinuation = paused
       ? state.taskRunContinuation
         ?? snapshotRunTaskContinuation({
           activeDelegation,
@@ -317,18 +334,18 @@ export function createCapabilityNode(params: {
       : null;
     return {
       messages: laneOutputMessages,
-      sessionCapabilityArtifacts: result.artifacts,
+      sessionCapabilityArtifacts: resultArtifacts,
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {
         ...activeDelegation,
-        status: interrupted ? 'pending' as const : 'awaiting_decision' as const,
+        status: paused ? 'pending' as const : 'awaiting_decision' as const,
         resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
-      ...(interrupted ? {
+      ...(paused ? {
         runSupervisorSession: null,
-        taskRunContinuation: interruptedContinuation,
+        taskRunContinuation: pauseContinuation,
       } : {}),
       sessionToolAuthorizations: {
         generation: registry.authorizationGeneration,

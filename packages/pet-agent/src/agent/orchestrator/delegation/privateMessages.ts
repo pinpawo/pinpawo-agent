@@ -15,7 +15,7 @@ export function reconcileDelegationPrivateMessages(
   modelInputMessages: BaseMessage[],
   lane: CapabilityMessageLane,
   runId: string,
-  completionReason: SubagentCompletionReason,
+  completionReason: SubagentCompletionReason | null,
   reportMeta: {
     delegationId?: string | null;
     task?: string | null;
@@ -37,6 +37,9 @@ export function reconcileDelegationPrivateMessages(
   const announceMessage = reportMeta.announceMessageId
     ? reconciled.added.find((message) => message.id === reportMeta.announceMessageId)
     : null;
+  if (announceMessage && !completionReason) {
+    throw new Error('Delegation announce requires a genuine subagent completion reason.');
+  }
   const added = reconciled.added.map((message) => {
     if (message !== announceMessage) return message;
     const announceMessageId = message.id;
@@ -50,7 +53,7 @@ export function reconcileDelegationPrivateMessages(
       runId,
       announceMessageId,
       task: reportMeta.task ?? null,
-      completionReason,
+      completionReason: completionReason as SubagentCompletionReason,
       result: readMessageText(message),
       createdAt: readAgentMessageCreatedAt(message) ?? new Date().toISOString(),
     });

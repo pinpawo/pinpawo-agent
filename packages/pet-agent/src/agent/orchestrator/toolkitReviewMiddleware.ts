@@ -50,7 +50,7 @@ export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
   /** Input modalities the active model profile accepts. */
   modelInputModalities?: readonly ModelInputModality[];
-  actor: AgentActor;
+  actor?: AgentActor;
   messages: BaseMessage[];
   reviewContext?: {
     task?: string | null;

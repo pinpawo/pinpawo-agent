@@ -1,6 +1,5 @@
 export type {
   AgentActor,
-  AgentExecution,
   AgentModels,
 } from './types/agent';
 
@@ -345,7 +344,7 @@ export {
   readStringArray,
   resultStatusSummary,
 } from './utils/operationMetadata';
-export { runAgent } from './agent/runAgent';
+export { runAgent, buildAgentRunnableConfig } from './agent/runAgent';
 export type {
   AgentInvokeInput,
   AgentRunResult,

@@ -421,22 +421,7 @@ function withDefaultModelProfile(
 }
 
 function buildResidentAgentContext(petId: string, actor: AgentActor) {
-  return {
-    pet: {
-      id: petId,
-      name: actor.name,
-      personality: actor.personality ?? null,
-      species: actor.species ?? null,
-      stage: actor.stage ?? null,
-      growth_value: null,
-      stage_asset_id: null,
-    },
-    context: {
-      petMemoryText: '',
-      recentChatTurns: [],
-      today: new Date().toISOString().slice(0, 10),
-    },
-  };
+  return { pet: { id: petId, name: actor.name }, actor };
 }
 
 function isAbortError(error: unknown): boolean {

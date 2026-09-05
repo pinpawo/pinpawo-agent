@@ -1,12 +1,9 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
-/** Descriptive profile/review attributes; Pet routing identity belongs to the Host. */
+/** Optional caller metadata for review and attribution, never a prompt persona. */
 export type AgentActor = {
   userId: string | null;
   name: string;
-  personality: string | null;
-  stage: string | null;
-  species: string | null;
 };
 
 export type AgentModels = {
@@ -19,8 +16,4 @@ export type AgentModels = {
   observe?: BaseChatModel;
   /** Dedicated model variant for subagent execution. Falls back to `act` when omitted. */
   subagent?: BaseChatModel;
-};
-
-export type AgentExecution = {
-  threadId?: string;
 };

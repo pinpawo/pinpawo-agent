@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
@@ -15,7 +15,6 @@ import {
   type OrchestrationDecisionStructuredOutputConfig,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import { createPetProfileToolkit } from './toolkits/petProfile';
 import {
   buildLocalAgentModels,
   resolveLlmGenerationReserveTokens,
@@ -24,6 +23,7 @@ import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
 import { buildLocalLlmConfig } from './llmConfig';
 import { getConfig } from './config';
+import { resolveUserDir } from './runtimeConfig';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 import {
   buildLocalAgentInterfaceContext,
@@ -38,34 +38,6 @@ import {
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
 import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
-
-function buildActor(context: AgentContext) {
-  return {
-    userId: null,
-    name: context.pet.name,
-    personality: context.pet.personality,
-    stage: context.pet.stage,
-    species: context.pet.species,
-  };
-}
-
-function buildHistoryMessages(
-  turns: Array<{ userMessage: string | null; petMessage: string | null }>,
-  maxTurns = 3,
-): BaseMessage[] {
-  return turns
-    .slice(-Math.max(0, maxTurns))
-    .flatMap((turn) => {
-      const messages: BaseMessage[] = [];
-      if (typeof turn.userMessage === 'string' && turn.userMessage.trim()) {
-        messages.push(new HumanMessage(turn.userMessage.trim()));
-      }
-      if (typeof turn.petMessage === 'string' && turn.petMessage.trim()) {
-        messages.push(new AIMessage(turn.petMessage.trim()));
-      }
-      return messages;
-    });
-}
 
 export type AgentChannelSetup = {
   graphKey: string;
@@ -147,26 +119,12 @@ export function buildLocalChatAgentInput(params: {
   const capabilityRegistryBackend = params.capabilityRegistryBackend
     ?? getConfig().capabilityRegistryBackend;
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
-  const actor = buildActor(params.context);
+  const workdir = resolveUserDir(params.workdir ?? getConfig().workdir);
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
-  // These definitions are derived from invocation-local actor or artifact
-  // state. They overlay the Host inventory for this compiled run; they are
-  // not a second Host Toolkit inventory.
-  const invocationToolkits: AgentToolkit[] = [
-    createPetProfileToolkit({
-      actor,
-      profileText: params.context.context.petMemoryText,
-    }),
-  ];
-
   const capabilities = [...(params.capabilities ?? [])];
-  const baseToolkits = [
-    ...invocationToolkits,
-    ...(params.toolkits ?? []),
-  ];
   const preparedRegistry = prepareAgentRegistry({
-    toolkits: baseToolkits,
+    toolkits: params.toolkits ?? [],
     capabilities,
     threadId: params.threadId,
     capabilityArtifactStore: params.capabilityArtifactStore,
@@ -196,7 +154,6 @@ export function buildLocalChatAgentInput(params: {
     graphConfig: {
       models,
       modelInputModalities: llmConfig.inputModalities ?? ['text'],
-      actor,
       checkpoint: params.checkpoint,
       contextWindowTokens: llmConfig.contextWindowTokens,
       subagentContextWindowTokens: llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens,
@@ -211,23 +168,25 @@ export function buildLocalChatAgentInput(params: {
     },
     registry: preparedRegistry.registry,
     input: {
+      actor: params.context.actor,
       context: {
-        systemPromptSections: params.petDocument
-          ? [petDocumentSystemPromptSection(params.petDocument)]
-          : [],
+        workdir,
+        systemPromptSections: [
+          ...(params.petDocument ? [petDocumentSystemPromptSection(params.petDocument)] : []),
+          {
+            id: 'host:runtime-environment',
+            owner: 'host',
+            content: buildRuntimeEnvironmentSummary({
+              sessionStartedAt: params.sessionStartedAt,
+              timezone: params.timezone,
+            }),
+          },
+        ],
       },
-      messages: [
-        ...buildHistoryMessages(params.context.context.recentChatTurns),
-        stampAgentMessageCreatedAt(new HumanMessage(params.userMessage)),
-      ],
+      messages: [stampAgentMessageCreatedAt(new HumanMessage(params.userMessage))],
       threadId: params.threadId,
       capabilities,
       toolkits: [...preparedRegistry.toolkits],
-      workdir: params.workdir,
-      runtimeEnvironment: buildRuntimeEnvironmentSummary(params.workdir, {
-        sessionStartedAt: params.sessionStartedAt,
-        timezone: params.timezone,
-      }),
       globalReviewPolicy: {
         mode: llmConfig.globalReviewPolicyMode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
         ...(llmConfig.autoAuthorizationSafetyLevel ? {

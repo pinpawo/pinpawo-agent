@@ -3,6 +3,9 @@ import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { getConfig, setConfig } from './config';
+import { resolveUserDir } from './runtimeConfig';
+import { randomUUID } from 'node:crypto';
 
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -31,16 +34,6 @@ function createContext(): AgentContext {
     pet: {
       id: 'pet-a',
       name: 'Pet A',
-      personality: 'calm',
-      species: 'sheep',
-      stage: 'sprout',
-      growth_value: 5,
-      stage_asset_id: null,
-    },
-    context: {
-      petMemoryText: 'memory',
-      recentChatTurns: [],
-      today: '2026-06-02',
     },
   };
 }
@@ -164,8 +157,8 @@ test('buildLocalChatAgentInput supplies Pet context without changing graph ident
     petDocument: secondDocument,
   });
 
-  assert.deepEqual(first.input.context?.systemPromptSections, [petDocumentSystemPromptSection(firstDocument)]);
-  assert.deepEqual(second.input.context?.systemPromptSections, [petDocumentSystemPromptSection(secondDocument)]);
+  assert.deepEqual(first.input.context?.systemPromptSections?.[0], petDocumentSystemPromptSection(firstDocument));
+  assert.deepEqual(second.input.context?.systemPromptSections?.[0], petDocumentSystemPromptSection(secondDocument));
   assert.equal(first.graphKey, second.graphKey);
 });
 
@@ -191,7 +184,6 @@ test('buildLocalChatAgentInput passes a single toolkit list', () => {
   assert.deepEqual(
     setup.input.toolkits?.map((item) => item.name),
     [
-      'pet_profile',
       'capability_creator',
       'general-toolkit',
       'artifact_discovery',
@@ -427,9 +419,8 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
     workdir: '/tmp/pinpawo-chat-workdir',
   });
 
-  assert.equal(setup.input.workdir, '/tmp/pinpawo-chat-workdir');
-  assert.match(setup.input.runtimeEnvironment ?? '', /工作目录：\/tmp\/pinpawo-chat-workdir/);
-  assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
+  assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-chat-workdir');
+  assert.equal(setup.input.context?.systemPromptSections?.some(({ content }) => content.includes('/tmp/pinpawo-chat-workdir')), false);
 });
 
 test('buildLocalChatAgentInput registers artifact discovery for an empty thread', async (t) => {
@@ -550,9 +541,9 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
   const first = buildTestLocalChatAgentInput(params);
   const second = buildTestLocalChatAgentInput(params);
 
-  assert.equal(first.input.runtimeEnvironment, second.input.runtimeEnvironment);
-  assert.match(first.input.runtimeEnvironment ?? '', /会话开始时间：2026-06-23T10:30:00\+08:00/);
-  assert.match(first.input.runtimeEnvironment ?? '', /时区：Asia\/Shanghai/);
+  assert.deepEqual(first.input.context, second.input.context);
+  assert.ok(first.input.context?.systemPromptSections?.some(({ content }) => content.includes(params.sessionStartedAt)));
+  assert.ok(first.input.context?.systemPromptSections?.some(({ content }) => content.includes(params.timezone)));
 });
 
 
@@ -562,6 +553,29 @@ test('graph identity uses the Host Pet id independently of identical actor profi
   const second = buildTestLocalChatAgentInput({
     context: { ...context, pet: { ...context.pet, id: 'pet-b' } }, userMessage: 'hello',
   });
-  assert.deepEqual(first.graphConfig.actor, second.graphConfig.actor);
+  assert.deepEqual(first.input.actor, second.input.actor);
   assert.notEqual(first.graphKey, second.graphKey);
+});
+
+test('Host resolves default workdir once and carries actor metadata per invocation', () => {
+  const previous = getConfig();
+  try {
+    const fallback = `./${randomUUID()}`;
+    setConfig({ workdir: fallback });
+    const context = createContext();
+    const firstActor = { name: randomUUID(), userId: randomUUID() };
+    const secondActor = { name: randomUUID(), userId: randomUUID() };
+    const first = buildTestLocalChatAgentInput({ context: { ...context, actor: firstActor }, userMessage: 'first' });
+    const second = buildTestLocalChatAgentInput({ context: { ...context, actor: secondActor }, userMessage: 'second', workdir: '~/different' });
+    setConfig({ workdir: '/another-global-default' });
+    assert.equal(first.input.context?.workdir, resolveUserDir(fallback));
+    assert.equal(second.input.context?.workdir, resolveUserDir('~/different'));
+    assert.equal(first.graphKey, second.graphKey);
+    assert.deepEqual(first.input.actor, firstActor);
+    assert.deepEqual(second.input.actor, secondActor);
+    assert.equal('actor' in first.graphConfig, false);
+    assert.equal(first.input.messages.length, 1);
+  } finally {
+    setConfig(previous);
+  }
 });

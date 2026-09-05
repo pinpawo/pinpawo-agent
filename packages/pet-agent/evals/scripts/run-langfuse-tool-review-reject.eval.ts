@@ -60,9 +60,6 @@ type EvalRow = {
 const testActor: AgentActor = {
   userId: 'eval-user',
   name: '小白',
-  personality: '友好、乐于助人的宠物助手',
-  stage: 'adult',
-  species: 'cat',
 };
 
 const scoreKeys = [
@@ -230,7 +227,6 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
     runSupervisorRunner: {
       async invoke(supervisorInput) {

@@ -56,6 +56,19 @@ Studio dispatch/event HTTP is provided by the configured HTTP Plugin. The
 local-agent Agent Session listener is only for direct conversation with a
 resident Pet. The workdir must contain
 `.pinpawo/studio.json` and the referenced `.pinpawo/pets/*.json` files.
+Each Pet's authored identity and working conventions belong in
+`.pinpawo/pets/<petId>/PET.md` (or `<petsDir>/<petId>/PET.md` when using a custom
+Pet configuration directory). The Host loads the document at startup; restart
+it after changing the document.
+
+Pet JSON retains `petId`, `name`, `role`, `serviceSummary`, `modelProfileId` and
+`defaultCapabilityName`. Move former `personality`, `species` and `stage` values
+into PET.md prose and remove those JSON fields. Remove `serverBinding`; the
+local Host no longer consumes cloud Pet bindings. The parser reports these
+retired fields instead of silently ignoring them. The implicit Pet Profile
+Toolkit and cloud profile/history hydration have also been removed; conversation
+history remains owned by the session checkpoint.
+
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.
 

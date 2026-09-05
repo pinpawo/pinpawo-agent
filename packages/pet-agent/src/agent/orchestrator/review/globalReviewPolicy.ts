@@ -66,7 +66,7 @@ type ToolkitAutoReviewContext = {
 
 export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
-  actor: AgentActor;
+  actor?: AgentActor;
   /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
   toolkitName: string;
@@ -88,7 +88,7 @@ export type GlobalReviewPolicyBatchItem = Omit<
 
 export type GlobalReviewPolicyBatchContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
-  actor: AgentActor;
+  actor?: AgentActor;
   /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
   reviews: GlobalReviewPolicyBatchItem[];

@@ -25,9 +25,6 @@ import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 const actor = {
   userId: 'eval-user',
   name: 'multi-task-flow-eval',
-  personality: null,
-  stage: null,
-  species: null,
 };
 
 const generalToolkit = defineToolkit({
@@ -171,18 +168,16 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       observe: answers.model,
       subagent: subagent.model,
     },
-    actor,
     runSupervisorRunner: supervisor.runner,
   });
   const result = await graph.invoke(
     buildOrchestratorTurnInput([new HumanMessage(testCase.input.userMessage)]),
-    {
+    { context: { workdir: '/mock/project', systemPromptSections: [] },
       configurable: {
         thread_id: `multi-task-flow-${Date.now()}`,
         actor,
         registry,
         maxRunIterations: 10,
-        workdir: '/mock/project',
       },
     },
   ) as Record<string, unknown>;

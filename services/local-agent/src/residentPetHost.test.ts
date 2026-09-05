@@ -272,9 +272,6 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     actor: {
       name: 'Same display name',
       userId: null,
-      personality: null,
-      stage: null,
-      species: null,
     },
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
@@ -380,9 +377,6 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     actor: {
       name: 'pet-events',
       userId: null,
-      personality: null,
-      stage: null,
-      species: null,
     },
     modelProfiles: createTestModelProfiles(),
     capabilities: [],
@@ -562,9 +556,6 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     actor: {
       name: 'pet-late-observer',
       userId: null,
-      personality: null,
-      stage: null,
-      species: null,
     },
     modelProfiles: createTestModelProfiles(),
     capabilities: [],

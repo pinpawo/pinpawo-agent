@@ -87,28 +87,31 @@ the root's common sections through their local runtime context.
 root context and execution-local sections. `src/prompts/systemPrompt.ts` owns
 SystemMessage composition and its middleware adapter; `src/prompts/petDocument.ts`
 formats the Pet document as a section. Order is role/framework instructions, common Host sections in
-input order, then execution-local sections in input order. Empty IDs/content
+input order, the structured workdir projection, then execution-local sections in input order. Empty IDs/content
 and duplicate IDs (after trimming) are errors, never silently skipped.
 
 Role builders still own role content. Entry and final Answer role templates are
 parameterless: they no longer receive an AgentActor or inject its display name.
 Pet identity and authored behavior come from PET.md. The legacy decision-config
 helper and its unused workdir/runtimeEnvironment arguments have been removed.
-Host identity/configuration and the optional Pet Profile Toolkit remain separate
-consumers. `AgentActor` has no `petId`: local Host context owns that identity,
-and `CreateResidentPetRuntimeOptions.petId` supplies it explicitly to resident
-session initialization. Graph cache identity reads the Host Pet id directly,
-so equal actor profiles cannot merge different Pets' graphs.
+Host identity/configuration remains separate. `AgentActor` contains optional
+invocation metadata for review/finalize; it has no Pet id or persona fields.
+`CreateResidentPetRuntimeOptions.petId` supplies Host identity explicitly to
+resident session initialization. Graph cache identity reads that Host Pet id;
+actor metadata is read from each invocation rather than captured by the graph.
+The default Pet Profile Toolkit and its cloud profile/memory/history fields have
+been removed. PET.md is the authored persona source.
 
-The removed helper's workdir parameters were unused; actual execution workdir
-injection is unchanged. The Host renders it in `runtimeEnvironment`, which the
-Capability executor includes as the `runtime-environment` system section. Entry
-and Answer do not receive that execution environment section. Supervisor and subagent assembly register
-the same reusable prompt middleware. Direct Entry/Answer model calls use the
-same accessor and composer. Business nodes do not extract or forward common
-sections. Every model call composes from its role message without mutating graph
-history or accumulating common content over model turns. SystemMessage content
-blocks and metadata are preserved via the framework message composition API.
+The Host resolves one effective workdir into `AgentRuntimeContext.workdir`.
+The shared composer renders it once; Toolkit execution and review read the same
+structured value. Host machine/session facts use common system sections, so Entry,
+Supervisor, Capability executor and final Answer see the current environment.
+There is no `runtimeEnvironment` configurable fallback or separate executor copy.
+Supervisor and subagent assembly register the reusable prompt middleware. Direct
+Entry/Answer model calls use the same accessor and composer. Business nodes do
+not extract or forward common sections. Every model call composes from its role
+message without mutating graph history or accumulating common content over turns.
+SystemMessage content blocks and metadata are preserved via framework composition.
 
 Delegation announce projection and tool-protocol repair remain separately owned
 in `modelInvocation.ts`; prompt composition does not project Agent messages.
@@ -144,3 +147,41 @@ The subsequent actor-identity cleanup passed the same 482 pet-agent tests,
 90 Studio tests, and 36 targeted local-agent tests. These include executor
 workdir injection and isolation of equal actor profiles with different Host Pet
 ids. The three package typechecks, including pet-agent eval types, passed.
+
+## Invocation configuration cleanup (draft, issues #760–#763)
+
+All root entry points project invocation options through `buildAgentRunnableConfig`.
+The local Host adds only interface metadata and tracing callbacks. The same turn
+builder receives the requested trace identity for run, invokeState and stream;
+resume commands keep their checkpoint transition semantics.
+
+`AgentRuntimeContext.workdir` is the effective directory resolved once by the
+Host. Toolkit execution and review scopes read this same structured value. The
+common prompt composer renders it once as `framework:workdir`; executor prompt
+assembly no longer repeats it. Host environment sections contain machine/session
+facts, without a second workdir or global browser-backend lookup. They travel
+through common runtime context together with PET.md, including Entry and Answer.
+The previous `runtimeEnvironment` configurable/input text channel is removed.
+Low-level graph callers migrate `configurable.workdir` to `context.workdir`;
+`runAgent` callers use `input.context.workdir`. This slice preserves the existing
+system-level workdir semantics; broader fact-placement governance remains #519.
+
+`AgentActor` contains display name and user attribution only. It is optional per
+invocation for review/finalize, never a graph dependency or a persona source.
+Host Pet identity still owns routing and durable session isolation. The default
+Pet Profile Toolkit and personality/species/stage configuration are removed;
+old JSON fields report migration to PET.md. serverBinding is rejected because
+there is no active cloud synchronization consumer. Cloud memory/history shells,
+growth/asset/date fields and the duplicate AgentExecution port are removed.
+Checkpointed conversation history, Studio role/serviceSummary routing metadata,
+and default Capability selection retain their existing owners.
+
+
+Validation of #760–#763 on 2026-09-05: pet-agent full suite 484 passed;
+Studio full suite 90 passed; local-agent full suite 607 passed, 5 skipped.
+An additional local stream-resume regression passed after the full suite,
+confirming fresh actor/workdir with the checkpoint's original trace identity.
+The final context-focused tests (8) passed, including exact directory preservation,
+concurrent children and interrupt resume. All three package typechecks passed,
+including pet-agent eval types. pet-agent and Studio ESM/declaration builds passed.
+No live-model evaluations or suspended macOS companion checks were run.

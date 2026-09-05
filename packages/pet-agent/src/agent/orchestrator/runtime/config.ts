@@ -1,6 +1,6 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { isToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
-import type { AgentActor, AgentExecution } from '../../../types/agent';
+import type { AgentActor } from '../../../types/agent';
 import type { ToolkitReviewCapabilities } from '../../../types/toolkit';
 import type { CompiledAgentRegistry } from '../registry';
 import {
@@ -19,9 +19,6 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
   return {
     actor: cfg.actor as AgentActor | undefined,
     registry,
-    execution: cfg.execution as AgentExecution | undefined,
-    workdir: cfg.workdir as string | undefined,
-    runtimeEnvironment: cfg.runtimeEnvironment as string | undefined,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
     maxRunIterations: readRunIterationLimit(cfg.maxRunIterations),
@@ -149,15 +146,4 @@ export function readSubagentContextWindowTokens(config: OrchestratorConfig): num
 
 export function readSubagentGenerationReserveTokens(config: OrchestratorConfig): number | undefined {
   return config.subagentGenerationReserveTokens ?? config.generationReserveTokens;
-}
-
-export function resolveActor(config: OrchestratorConfig, runnableConfig?: RunnableConfig): AgentActor {
-  const invokeActor = getInvokeOptions(runnableConfig).actor;
-  if (invokeActor) {
-    return invokeActor;
-  }
-  if (config.actor) {
-    return config.actor;
-  }
-  throw new Error('Missing actor in orchestrator config and invoke options');
 }

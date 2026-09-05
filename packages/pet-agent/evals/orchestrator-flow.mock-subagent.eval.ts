@@ -454,9 +454,6 @@ function readReviewId(payload: Record<string, unknown> | null): string | null {
 const testActor: AgentActor = {
   userId: 'eval-user',
   name: '小白',
-  personality: '友好、乐于助人的宠物助手',
-  stage: 'adult',
-  species: 'cat',
 };
 
 let evalCounter = 0;
@@ -468,7 +465,6 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const checkpointer = new MemorySaver();
   const graph = createOrchestratorGraph({
     models,
-    actor: testActor,
     checkpoint: checkpointer,
   });
   const compiled = await graph;

@@ -1,6 +1,6 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
-import type { AgentActor, AgentExecution, AgentModels } from '../../types/agent';
+import type { AgentActor, AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type {
@@ -79,7 +79,6 @@ export type OrchestratorConfig = {
    * read as text-only.
    */
   modelInputModalities?: readonly ModelInputModality[];
-  actor?: AgentActor;
   checkpoint?: BaseCheckpointSaver;
   /**
    * Maximum number of orchestration iterations per active delegation lifecycle in one
@@ -130,9 +129,6 @@ export type OrchestratorInvokeOptions = {
   actor?: AgentActor;
   /** Host-compiled executable registry. Required by routing and executor nodes. */
   registry?: CompiledAgentRegistry;
-  execution?: AgentExecution;
-  workdir?: string;
-  runtimeEnvironment?: string;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
   maxRunIterations?: number;

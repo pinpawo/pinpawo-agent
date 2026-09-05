@@ -1,4 +1,5 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { getAgentRuntimeContext } from '../../../../runtime/context';
 import { createSubagent } from '../../../../subagent/createSubagent';
 import type { CapabilityArtifactRef } from '../../../../types/artifact';
 import type { SubagentRunInput } from '../../../../types/subagent';
@@ -31,7 +32,6 @@ import {
   getInvokeRegistry,
   getInvokeOptions,
   readThreadId,
-  resolveActor,
 } from '../config';
 import {
   readCapabilityNameFromLane,
@@ -59,16 +59,14 @@ export function createCapabilityNode(params: {
     subagentGenerationReserveTokens,
   } = params;
 
-  // Node: capability — reads capabilities, tools, execution from configurable
+  // Resolve invocation metadata and the Host's structured execution directory.
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
-      execution,
-      workdir,
-      runtimeEnvironment,
+      actor,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
+    const { workdir } = getAgentRuntimeContext(runnableConfig);
     const registry = getInvokeRegistry(runnableConfig);
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation) {
@@ -187,7 +185,6 @@ export function createCapabilityNode(params: {
         usedResolvedToolkitExecution.toolkits,
       );
       const executionContext = buildSubagentExecutionContext({
-        workdir: workdir ?? null,
         artifactDiscovery: canExploreArtifacts,
       });
       subagentInput = {
@@ -211,13 +208,6 @@ export function createCapabilityNode(params: {
                 id: 'execution-context',
                 owner: 'framework',
                 content: executionContext,
-              }]
-            : []),
-          ...(runtimeEnvironment
-            ? [{
-                id: 'runtime-environment',
-                owner: 'host',
-                content: runtimeEnvironment,
               }]
             : []),
         ],
@@ -263,7 +253,6 @@ export function createCapabilityNode(params: {
         models: config.models,
         actor,
         messages: scopedMessages,
-        execution,
         artifactStore: config.capabilityArtifactStore,
         recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
           artifactRefs.push(ref);

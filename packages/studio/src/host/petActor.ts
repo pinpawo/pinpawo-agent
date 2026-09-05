@@ -1,24 +1,10 @@
 import type { AgentActor } from '@pinpawo/pet-agent';
-
 import type { PetLocalConfig } from './petConfig';
 
-/**
- * 从 Studio pet 配置合成 AgentActor 资料；petId 由 Host 独立持有和传递。
- *
- * Studio 模式下 pet 身份是**本地 source of truth** —— 名称 / personality
- * 等都来自 `<workdir>/.pinpawo/pets/<petId>.json`,不依赖服务端 pet 记录。
- * `ownerUserId` 通常为 null(纯离线);若已登录服务端,可传入对应 user id
- * 用于 trace / attribution。
- */
+/** Host display/attribution metadata; Pet behavior is supplied by PET.md. */
 export function buildPetActorFromLocalConfig(
   petConfig: PetLocalConfig,
   ownerUserId: string | null,
 ): AgentActor {
-  return {
-    userId: ownerUserId,
-    name: petConfig.name,
-    personality: petConfig.personality ?? null,
-    stage: petConfig.stage ?? null,
-    species: petConfig.species ?? null,
-  };
+  return { userId: ownerUserId, name: petConfig.name };
 }

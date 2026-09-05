@@ -1,11 +1,9 @@
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
-  getAgentRuntimeContext,
+  buildAgentRunnableConfig,
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
-  ORCHESTRATOR_RECURSION_LIMIT,
-  runAgent,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
@@ -30,20 +28,24 @@ function resolveReviewCapabilities(setup: AgentChannelSetup) {
     : HEADLESS_REVIEW_CAPABILITIES;
 }
 
+function buildAgentGraphRunConfig(setup: AgentChannelSetup) {
+  const config = buildAgentRunnableConfig(setup.input, {
+    registry: setup.registry,
+    reviewCapabilities: resolveReviewCapabilities(setup),
+  });
+  return {
+    ...config,
+    configurable: {
+      ...config.configurable,
+      ...(setup.interfaceContext?.kind
+        ? { [LOCAL_AGENT_INTERFACE_CONFIG_KEY]: setup.interfaceContext }
+        : {}),
+    },
+  };
+}
+
 export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
-  const configurable: Record<string, unknown> = {};
-  configurable.registry = setup.registry;
-  configurable.actor = setup.input.actor;
-  if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
-  if (setup.input.execution) configurable.execution = setup.input.execution;
-  if (setup.input.workdir) configurable.workdir = setup.input.workdir;
-  if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
-  if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
-  if (setup.interfaceContext?.kind) {
-    configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
-  }
-  configurable.reviewCapabilities = resolveReviewCapabilities(setup);
-  return Object.keys(configurable).length > 0 ? configurable : undefined;
+  return buildAgentGraphRunConfig(setup).configurable;
 }
 
 export type LocalAgentGraphPendingInterrupt = {
@@ -148,10 +150,10 @@ export class LocalAgentGraphService {
   }
 
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
-    return runAgent(this.getGraph(setup), setup.input, {
-      registry: setup.registry,
-      reviewCapabilities: resolveReviewCapabilities(setup),
-    });
+    const state = await this.invokeState(setup);
+    const messages = state.messages ?? [];
+    const content = messages.at(-1)?.content;
+    return { messages, reply: typeof content === 'string' ? content.trim() : '' };
   }
 
   /**
@@ -174,15 +176,10 @@ export class LocalAgentGraphService {
       },
     });
     return await graph.streamEvents(
-      (inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, {
-        activeDelegationTransition: setup.input.activeDelegationTransition,
-      })) as Parameters<OrchestratorGraph['streamEvents']>[0],
+      (inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, setup.input)) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
-        context: getAgentRuntimeContext(setup.input),
-        signal: setup.input.signal,
-        configurable: buildAgentGraphConfigurable(setup),
-        recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
+        ...buildAgentGraphRunConfig(setup),
         ...(callbacks ? { callbacks } : {}),
       },
     ) as LocalAgentGraphEventStream;
@@ -191,15 +188,8 @@ export class LocalAgentGraphService {
   async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
     const graph = this.getGraph(setup);
     return await graph.invoke(
-      inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, {
-        activeDelegationTransition: setup.input.activeDelegationTransition,
-      }),
-      {
-        context: getAgentRuntimeContext(setup.input),
-        signal: setup.input.signal,
-        configurable: buildAgentGraphConfigurable(setup),
-        recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
-      },
+      inputOverride ?? buildOrchestratorTurnInput(setup.input.messages, setup.input),
+      buildAgentGraphRunConfig(setup),
     ) as OrchestratorStateType;
   }
 

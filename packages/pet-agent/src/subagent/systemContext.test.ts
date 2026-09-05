@@ -58,6 +58,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
       runtimeContext: {
         executionScope: { threadId: null, runId: key, delegationId: key },
         toolkitRuntimes: { example: { id: key } },
+        workdir: '/forbidden-child-override',
         systemPromptSections: [{ id: 'host:forbidden-child-override', content: 'override' }],
       },
     });
@@ -68,7 +69,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
     const key = `pet-${index}`;
     const callbackInputs: BaseMessage[][] = [];
     const run = await graph.streamEvents({ messages: [new HumanMessage(key)] }, {
-      version: 'v3', context: { systemPromptSections: sections, parentMarker: key },
+      version: 'v3', context: { workdir: `/workspace/${key}`, systemPromptSections: sections, parentMarker: key },
       callbacks: [{ handleChatModelStart: async (_model, messages) => { callbackInputs.push(...messages); } }],
     });
     const events = [];
@@ -79,6 +80,8 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
     assert.equal(callbackInputs.length, 2);
     for (const messages of [...seen, ...callbackInputs]) {
       assertSections(messages, [...sections, executionSection]);
+      assert.equal(messages[0].text.split(`/workspace/${key}`).length - 1, 1);
+      assert.equal(messages[0].text.includes('/forbidden-child-override'), false);
       assert.equal(JSON.stringify(messages).includes(inputs[1 - index][0].content), false);
     }
     assert.equal(output.messages.some(SystemMessage.isInstance), false);
@@ -88,12 +91,13 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
       && (event.params.data as { name?: string }).name === SUBAGENT_PROMPT_SECTIONS_EVENT);
     assert.ok(promptEvent);
     const diagnostics = (promptEvent.params.data as { data: { sections: Array<{ id: string }> } }).data.sections;
-    assert.deepEqual(diagnostics.map(s => s.id), ['framework:governing', ...sections.map(s => s.id), executionSection.id]);
+    assert.deepEqual(diagnostics.map(s => s.id), ['framework:governing', ...sections.map(s => s.id), 'framework:workdir', executionSection.id]);
   }));
   assert.equal(runtimeContexts.length, 2);
   for (const context of runtimeContexts) {
     const key = context.executionScope?.runId;
     assert.equal(context.parentMarker, key);
+    assert.equal(context.workdir, `/workspace/${key}`);
     assert.deepEqual(context.toolkitRuntimes, { example: { id: key } });
     const index = key === 'pet-0' ? 0 : 1;
     assert.deepEqual(context.systemPromptSections, inputs[index]);
@@ -115,15 +119,20 @@ test('checkpoint resume reapplies root context to the interrupted child without 
   }).addEdge(START, 'delegate').addEdge('delegate', END).compile({ checkpointer: new MemorySaver() });
   const before = commonSections();
   const after = commonSections();
+  const beforeWorkdir = `/workspace/${randomUUID()}`;
+  const afterWorkdir = `/workspace/${randomUUID()}`;
   const configurable = { thread_id: randomUUID() };
-  await graph.invoke({ messages: [new HumanMessage('resume')] }, { configurable, context: { systemPromptSections: before } });
+  await graph.invoke({ messages: [new HumanMessage('resume')] }, { configurable, context: { workdir: beforeWorkdir, systemPromptSections: before } });
   const snapshot = await graph.getState({ configurable });
   assert.ok(snapshot.tasks.some(task => task.interrupts?.length));
   assert.equal(JSON.stringify(snapshot.values).includes(before[0].content), false);
-  const output = await graph.invoke(new Command({ resume: true }), { configurable, context: { systemPromptSections: after } });
+  const output = await graph.invoke(new Command({ resume: true }), { configurable, context: { workdir: afterWorkdir, systemPromptSections: after } });
   assert.equal(seen.length, 2);
   assertSections(seen[0], before);
   assertSections(seen[1], after);
+  assert.equal(seen[0][0].text.split(beforeWorkdir).length - 1, 1);
+  assert.equal(seen[1][0].text.split(afterWorkdir).length - 1, 1);
+  assert.equal(seen[1][0].text.includes(beforeWorkdir), false);
   assert.equal(JSON.stringify(seen[1]).includes(before[0].content), false);
   assert.equal(output.messages.at(-1)?.text, 'done');
 });

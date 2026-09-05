@@ -7,12 +7,23 @@ export function validateSystemPromptSections(sections: readonly SystemPromptSect
   systemPromptSectionsSchema.parse(sections);
 }
 
-/** One ordering contract: role prompt, Host sections, execution sections. */
+/** Order after the role prompt: Host sections, structured workdir, execution sections. */
 export function resolveSystemPromptSections(
   context: AgentRuntimeContext,
   executionSections: readonly SystemPromptSection[] = [],
 ): readonly SystemPromptSection[] {
-  return systemPromptSectionsSchema.parse([...(context.systemPromptSections ?? []), ...executionSections]);
+  const workdir = agentRuntimeContextSchema.parse(context).workdir;
+  return systemPromptSectionsSchema.parse([
+    ...(context.systemPromptSections ?? []),
+    ...(workdir ? [{
+      id: 'framework:workdir',
+      owner: 'framework',
+      content: `## 执行目录
+当前工作目录：${JSON.stringify(workdir)}
+相对路径默认相对于当前工作目录。`,
+    }] : []),
+    ...executionSections,
+  ]);
 }
 
 /** Compose without flattening blocks, discarding metadata, or mutating the role message. */

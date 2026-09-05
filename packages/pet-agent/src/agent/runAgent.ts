@@ -1,7 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext, type AgentRuntimeContext } from '../runtime/context';
 import type { AgentCapability } from '../types/capability';
-import type { AgentActor, AgentExecution } from '../types/agent';
+import type { AgentActor } from '../types/agent';
 import {
   filterAvailableToolkits,
   type AgentToolkit,
@@ -25,12 +25,7 @@ export type AgentInvokeInput = {
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
-  execution?: AgentExecution;
   signal?: AbortSignal;
-  /** Agent working directory passed into system prompt so the agent knows its file scope. */
-  workdir?: string;
-  /** Runtime environment summary injected into system prompts. Must not contain secrets. */
-  runtimeEnvironment?: string;
   globalReviewPolicy?: GlobalReviewPolicy;
   /** Optional allowlist exposed through the Supervisor document workspace. */
   allowedCapabilityNames?: string[];
@@ -63,36 +58,14 @@ export async function runAgent(
     reviewCapabilities?: ToolkitReviewCapabilities;
   } = {},
 ): Promise<AgentRunResult> {
-  const configurable: Record<string, unknown> = {};
-  configurable.registry = options.registry ?? compileAgentRegistry({
+  const registry = options.registry ?? compileAgentRegistry({
     toolkits: await filterAvailableToolkits(input.toolkits ?? []),
     capabilities: input.capabilities ?? [],
   });
-  if (input.actor) configurable.actor = input.actor;
-  if (input.threadId) configurable.thread_id = input.threadId;
-  if (input.execution) configurable.execution = input.execution;
-  if (input.workdir) configurable.workdir = input.workdir;
-  if (input.runtimeEnvironment) configurable.runtimeEnvironment = input.runtimeEnvironment;
-  if (input.globalReviewPolicy) configurable.globalReviewPolicy = input.globalReviewPolicy;
-  if (options.reviewCapabilities) configurable.reviewCapabilities = options.reviewCapabilities;
-  if (input.allowedCapabilityNames) {
-    configurable.allowedCapabilityNames = input.allowedCapabilityNames;
-  }
 
   const result = await graph.invoke(
-    buildOrchestratorRunInput(input.messages, {
-      activeDelegationTransition: input.activeDelegationTransition,
-      traceId: input.traceId,
-    }),
-    {
-      context: getAgentRuntimeContext(input),
-      signal: input.signal,
-      configurable: Object.keys(configurable).length > 0 ? configurable : undefined,
-      // Last-resort breaker for a runaway control loop; the soft run-iteration
-      // guard is the normal stop. Without this the graph would run to LangGraph's
-      // default 25-node limit, which the soft guard can never beat. #275/P6.
-      recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
-    },
+    buildOrchestratorRunInput(input.messages, input),
+    buildAgentRunnableConfig(input, { ...options, registry }),
   );
 
   const messages = (result as { messages?: BaseMessage[] }).messages ?? [];
@@ -100,5 +73,31 @@ export async function runAgent(
   return {
     reply: readReply(messages),
     messages,
+  };
+}
+
+/** Project invocation data once; Hosts may add framework callbacks and interface metadata. */
+export function buildAgentRunnableConfig(
+  input: AgentInvokeInput,
+  options: {
+    registry: CompiledAgentRegistry;
+    reviewCapabilities?: ToolkitReviewCapabilities;
+  },
+) {
+  return {
+    context: getAgentRuntimeContext(input),
+    signal: input.signal,
+    configurable: {
+      registry: options.registry,
+      actor: input.actor,
+      ...(input.threadId ? { thread_id: input.threadId } : {}),
+      ...(input.globalReviewPolicy ? { globalReviewPolicy: input.globalReviewPolicy } : {}),
+      ...(options.reviewCapabilities ? { reviewCapabilities: options.reviewCapabilities } : {}),
+      ...(input.allowedCapabilityNames !== undefined
+        ? { allowedCapabilityNames: input.allowedCapabilityNames }
+        : {}),
+    },
+    // The soft iteration guard is the normal stop; this is the final loop breaker.
+    recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
   };
 }

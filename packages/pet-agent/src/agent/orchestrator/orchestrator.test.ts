@@ -5,6 +5,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
@@ -443,9 +444,6 @@ function readToolMessages(messages: unknown[]) {
 const testActor: AgentActor = {
   userId: 'user-1',
   name: '小白',
-  personality: '友好',
-  stage: 'adult',
-  species: 'cat',
 };
 
 function scriptedPlannerTask(
@@ -531,7 +529,6 @@ test('execution boundary routes through runSupervisor before the next task', asy
         sleep: 0,
       }),
     },
-    actor: testActor,
     runSupervisorRunner,
   });
 
@@ -626,7 +623,6 @@ test('a completed single-task goal is accepted by the boundary Supervisor', asyn
         sleep: 0,
       }),
     },
-    actor: testActor,
     runSupervisorRunner,
   });
 
@@ -696,7 +692,6 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
         sleep: 0,
       }),
     },
-    actor: testActor,
     runSupervisorRunner,
   });
 
@@ -750,7 +745,6 @@ test('Supervisor return routes bounded facts through the answer node', async () 
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
@@ -803,7 +797,6 @@ test('Entry Supervisor routes its structured user question through Answer withou
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke() {
         return {
@@ -853,7 +846,6 @@ test('Supervisor non-commit routes to Answer without inventing a General delegat
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke() {
         plannerCalls += 1;
@@ -903,7 +895,6 @@ test('Supervisor boundary non-commit preserves the active delegation and remaini
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         supervisorInput = input;
@@ -990,7 +981,6 @@ test('Supervisor boundary ordinary text cannot enter root messages through the r
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke() {
         return {
@@ -1063,7 +1053,6 @@ test('an explicit resume without Supervisor state initializes a fresh session', 
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: model },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(supervisorInput) {
         plannerCalls += 1;
@@ -1121,7 +1110,6 @@ test('capability supervisor reports an empty compiled registry without inventing
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         supervisorMode = input.mode;
@@ -1158,7 +1146,6 @@ test('Run Supervisor return is materialized without a second semantic policy che
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: model },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke() {
         return {
@@ -1204,7 +1191,6 @@ test('allowedCapabilityNames scopes the immutable Supervisor workspace', async (
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner,
   });
   const input = buildOrchestratorRunInput([new HumanMessage('做一支讲秋日食材的短视频')]);
@@ -1235,7 +1221,6 @@ test('Run Supervisor materializer rejects selections outside the workspace', asy
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         assert.equal(input.mode, 'entry');
@@ -1276,7 +1261,6 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
       observe: model,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
@@ -1333,7 +1317,6 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
       decision: new FakeListChatModel({ responses: ['直接回答当前请求。'], sleep: 0 }),
       observe: model,
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         supervisorInput = input;
@@ -1418,7 +1401,6 @@ test('answer node still sees compacted older results when the user asks to re-sh
 
   const graph = createOrchestratorGraph({
     models: { act: model, observe: model },
-    actor: testActor,
   });
   // After compaction the older result survives only as the canonical context message.
   const summary = createContextCompactionMessage(
@@ -1471,7 +1453,6 @@ test('delegation goal_done summarizes and preserves the handed-off result', asyn
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: routeModel },
-    actor: testActor,
   });
   const input = {
     ...buildOrchestratorRunInput([
@@ -1546,7 +1527,6 @@ test('user_input_required returns control without claiming delegation completion
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: routeModel },
-    actor: testActor,
   });
   const input = {
     ...buildOrchestratorRunInput([
@@ -1687,7 +1667,6 @@ test('capability errors retain the active delegation and lane without a handoff'
         sleep: 0,
       }),
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -1757,7 +1736,6 @@ test('supervisor errors checkpoint run-scoped cleanup before they are rethrown',
     models: {
       act: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
     runSupervisorRunner: {
       invoke: async () => {
@@ -1803,7 +1781,6 @@ test('answer errors checkpoint run-scoped cleanup before they are rethrown', asy
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: answerModel },
-    actor: testActor,
     checkpoint: new MemorySaver(),
     runSupervisorRunner: {
       invoke: async () => ({ action: 'unavailable', tasks: [] }),
@@ -1851,7 +1828,6 @@ test('answer filters private delegation messages by lane without parsing message
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: model, observe: model },
-    actor: testActor,
   });
 
   const privateMessage = new AIMessage('正文完全普通，但 metadata 表明它属于 delegation lane。');
@@ -1901,7 +1877,6 @@ test('answer returns model output unchanged without classifying its text shape',
       decision: new FakeListChatModel({ responses: ['回答当前版本问题。'], sleep: 0 }),
       observe: model,
     },
-    actor: testActor,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -1933,7 +1908,6 @@ test('answer does not special-case briefing-shaped output', async () => {
       decision: new FakeListChatModel({ responses: ['直接回答当前请求。'], sleep: 0 }),
       observe: model,
     },
-    actor: testActor,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -1979,7 +1953,6 @@ test('limit-reached progress announce lets model choose the same capability dele
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
     maxRunIterations: 1,
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         plannerCallCount += 1;
@@ -2064,12 +2037,10 @@ test('toolkits compose tools and instructions for capability runtimes', async ()
 
   const browserExecution = await resolveToolkitExecution(toolkits, ['browser'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
   });
   const allExecution = await resolveToolkitExecution(toolkits, undefined, {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
   });
 
@@ -2094,7 +2065,6 @@ test('tools requiring an input modality bind only to model profiles that accept 
     resolveToolkitExecution(toolkits, undefined, {
       models: {} as AgentModels,
       ...(modelInputModalities ? { modelInputModalities } : {}),
-      actor: testActor,
       messages: [],
     });
 
@@ -2163,7 +2133,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     toolkitRuntimeManager,
   });
 
@@ -2258,14 +2227,12 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
   const toolkitRuntimeManager = new ToolkitRuntimeManager();
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    actor: testActor,
     toolkitRuntimeManager,
   });
 
-  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), { context: { workdir: '/workspace', systemPromptSections: [] },
     configurable: {
       thread_id: 'browser-runtime-context',
-      workdir: '/workspace',
       actor: testActor,
       capabilities: [{
         name: 'inspect_browser',
@@ -2320,7 +2287,6 @@ test('artifact discovery tools reach a selected capability only when declared in
   };
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    actor: testActor,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
@@ -2391,7 +2357,6 @@ test('general Capability composes its declared Toolkits', async () => {
   const recorder = createSubagentInputRecorder();
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    actor: testActor,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
@@ -2468,7 +2433,6 @@ test('toolkit registration does not rely on lane authorization flags', async () 
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
@@ -2614,7 +2578,6 @@ test('capability finalize artifact refs are merged into state', async () => {
         toolCalls: [[{ id: 'call-persist', name: 'persist_report', args: {} }], []],
       }),
     },
-    actor: testActor,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('explore issue')]), {
@@ -2700,7 +2663,6 @@ test('capability finalize stores only artifact refs in state', async () => {
         toolCalls: [[{ id: 'call-persist', name: 'persist_result', args: {} }], []],
       }),
     },
-    actor: testActor,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('post')]), {
@@ -2877,7 +2839,6 @@ test('toolkit review policy runs after model without changing tool identity', as
 
   const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
   });
 
@@ -2962,7 +2923,6 @@ test('toolkit review cancellation stops the current review action', async () => 
 
   const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
   });
   const result = await runToolkitToolCall(resources, [
@@ -3022,7 +2982,6 @@ test('deterministic toolkit policy block terminates without another model call',
 
   const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
   });
   const recorder = createSubagentInputRecorder();
@@ -3073,7 +3032,6 @@ test('toolkit review materializes distinct fallback ids for missing tool call id
 
   const resources = await resolveToolkitExecution(toolkits, ['guarded'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
   });
   const result = await runToolkitToolCall(resources, [
@@ -3136,7 +3094,6 @@ test('global review policy full_access bypasses toolkit review prompts', async (
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: false,
@@ -3189,7 +3146,6 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [new HumanMessage('subagent context')],
     reviewContext: {
       task: 'Write the requested notes file',
@@ -3272,7 +3228,6 @@ test('global auto policy bypasses the model only for a deterministic complete ba
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [],
     reviewContext: {
       task: 'Patch notes',
@@ -3351,7 +3306,6 @@ test('global review policy reuses an exact auto authorization in the same sessio
 
   const resources = await resolveToolkitExecution(toolkits, ['bash'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [],
     reviewContext: {
       task: 'Inspect repository state',
@@ -3425,7 +3379,6 @@ test('global review policy reuses an exact auto authorization in the same sessio
   });
   const downgradedResources = await resolveToolkitExecution(toolkits, ['bash'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: false,
@@ -3541,7 +3494,6 @@ test('exact auto authorization survives graph rebuild but expires on registry re
       observe: autoReviewModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint,
   };
   const invokeConfig = {
@@ -3666,7 +3618,6 @@ test('global review policy does not record auto grants for policies without sess
   } as unknown as AgentModels['act'];
   const resources = await resolveToolkitExecution(toolkits, ['bash'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: true,
@@ -3724,7 +3675,6 @@ test('auto review never persists url_origin grants', async () => {
   } as unknown as AgentModels['act'];
   const resources = await resolveToolkitExecution(toolkits, ['browser'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: false,
@@ -3786,7 +3736,6 @@ test('matcher builder failures fail closed into review and never persist a grant
   } as unknown as AgentModels['act'];
   const resources = await resolveToolkitExecution(toolkits, ['bash'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: false,
@@ -3861,7 +3810,6 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [new HumanMessage('write both files')],
     reviewContext: {
       task: 'Write both requested files',
@@ -3948,7 +3896,6 @@ test('global review policy auto_authorization requires human authorization when 
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: { act: autoModel },
-    actor: testActor,
     messages: [new HumanMessage('rewrite the project')],
     reviewContext: {
       task: 'Rewrite the project',
@@ -4004,7 +3951,6 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: false,
@@ -4051,7 +3997,6 @@ test('custom review policy explicitly opts in before reusing auto grants', async
   }];
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
     models: {} as AgentModels,
-    actor: testActor,
     messages: [],
     reviewCapabilities: {
       humanReview: false,
@@ -4159,7 +4104,6 @@ test('toolkit review policy records authorization through orchestrator runtime t
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -4307,7 +4251,6 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -4469,7 +4412,6 @@ test('toolkit review rejection records terminal tool results and retains the del
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const recorder = createSubagentInputRecorder();
@@ -4678,7 +4620,6 @@ test('toolkit review run interruption retains the delegation without another mod
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const recorder = createSubagentInputRecorder();
@@ -4864,7 +4805,6 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
       observe: routeModel,
       subagent: subagentModel,
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -5156,7 +5096,6 @@ test('terminal Supervisor action keeps active delegation when handoff cannot be 
       act: routeModel,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
     maxRunIterations: 0,
   });
   const activeDelegation: TaskActiveDelegation = {
@@ -5239,7 +5178,6 @@ test('Supervisor continue_current action can re-enter main and finalize handoff'
       observe: routeModel,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    actor: testActor,
   });
   const activeDelegation: TaskActiveDelegation = {
     id: 'active-continue',
@@ -5330,7 +5268,6 @@ test('Supervisor continuation path rechecks run iteration guard before next deci
       observe: routeModel,
       subagent: new FakeListChatModel({ responses: ['已完成一段子任务。'], sleep: 0 }),
     },
-    actor: testActor,
   });
 
   const activeDelegation: TaskActiveDelegation = {
@@ -5411,7 +5348,6 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
         sleep: 0,
       }),
     },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(supervisorInput) {
         routeCallCount += 1;
@@ -5818,7 +5754,6 @@ test('limit-reached subagent announce reaches the Supervisor boundary input', as
   } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel },
-    actor: testActor,
     runSupervisorRunner: {
       async invoke(input) {
         supervisorInput = input;
@@ -5886,7 +5821,6 @@ test('Supervisor boundary does not handoff a limit_reached announce', async () =
       act: routeModel,
       observe: routeModel,
     },
-    actor: testActor,
   });
   const baseInput = buildOrchestratorRunInput(
     [new HumanMessage('继续')],
@@ -5971,7 +5905,6 @@ test('Supervisor boundary uses a unified run-iteration guard before invoking dec
       act: routeModel,
       observe: routeModel,
     },
-    actor: testActor,
     maxRunIterations: 2,
   });
   const baseInput = buildOrchestratorRunInput(
@@ -6557,7 +6490,6 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
         sleep: 0,
       }),
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -6659,7 +6591,6 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
         sleep: 0,
       }),
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
     runSupervisorRunner: {
       async invoke(input) {
@@ -6789,7 +6720,6 @@ test('legacy object UserRequest checkpoint returns a fixed incompatibility reply
       observe: actModel,
       subagent: new FakeListChatModel({ responses: [], sleep: 0 }),
     },
-    actor: testActor,
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -6860,7 +6790,6 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   const recorder = createSubagentInputRecorder();
   const graph = createOrchestratorGraph({
     models: { act: actModel, observe: actModel, subagent: subagentModel },
-    actor: testActor,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -6970,7 +6899,6 @@ test('continue_current projects a continuation briefing without rewriting the ta
   const recorder = createSubagentInputRecorder();
   const graph = createOrchestratorGraph({
     models: { act: actModel, observe: actModel, subagent: subagentModel },
-    actor: testActor,
   });
 
   const state = await graph.invoke(buildOrchestratorRunInput([
@@ -7015,11 +6943,9 @@ test('continue_current projects a continuation briefing without rewriting the ta
 test('Capability node inherits root system context into its executor without section forwarding', async () => {
   const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
   const workdir = `/workspace/${randomUUID()}`;
-  const runtimeEnvironment = JSON.stringify({ workdir });
   const { subagentInputs, callbacks } = createSubagentInputRecorder();
   const answer = { invoke: async () => new AIMessage('finished') } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
-    actor: testActor,
     models: { act: answer, subagent: new FakeListChatModel({ responses: ['execution complete'], sleep: 0 }) },
     runSupervisorRunner: {
       async invoke(input) {
@@ -7030,16 +6956,104 @@ test('Capability node inherits root system context into its executor without sec
     },
   });
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect this request.')]), {
-    context: { systemPromptSections: common }, callbacks,
-    configurable: { workdir, runtimeEnvironment, capabilities: [capability('explore', 'Inspect requests.')], toolkits: [] },
+    context: { workdir: workdir, systemPromptSections: common }, callbacks,
+    configurable: { capabilities: [capability('explore', 'Inspect requests.')], toolkits: [] },
   });
   assert.equal(subagentInputs.length, 1);
   const systems = subagentInputs[0].filter(SystemMessage.isInstance);
   assert.equal(systems.length, 1);
-  assert.equal(systems[0].text.split(runtimeEnvironment).length - 1, 1);
+  assert.equal(systems[0].text.split(workdir).length - 1, 1);
   assert.equal(systems[0].text.includes(workdir), true);
   for (const section of common) {
     assert.equal(systems[0].text.split(section.content).length - 1, 1);
     assert.equal(JSON.stringify(result.messages).includes(section.content), false);
+  }
+});
+
+test('one compiled graph isolates actor and workdir in model, runtime, review and finalize', async () => {
+  const modelsSeen: string[] = [];
+  const scopes: Array<{ threadId: string | null; workdir?: string | null }> = [];
+  const toolsSeen = new Map<string, string | null | undefined>();
+  const reviews = new Map<string, AgentActor | undefined>();
+  const finalized = new Map<string, AgentActor | undefined>();
+  class Executor extends BaseChatModel {
+    _llmType() { return 'execution-context-test'; }
+    bindTools() { return this; }
+    async _generate(messages: BaseMessage[]) {
+      modelsSeen.push(messages.filter(SystemMessage.isInstance).map(m => m.text).join('\n'));
+      const message = messages.some(ToolMessage.isInstance)
+        ? new AIMessage('inspected')
+        : new AIMessage({ content: '', tool_calls: [{ id: randomUUID(), name: 'inspect_context', args: {} }] });
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
+  const inspect = tool(async (_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
+    const scope = runtime.context.executionScope!;
+    assert.equal(scope.workdir, runtime.context.workdir);
+    toolsSeen.set(scope.threadId!, runtime.context.workdir);
+    return 'inspected';
+  }, { name: 'inspect_context', description: 'Inspect invocation context.', schema: z.object({}) });
+  const toolkit: AgentToolkit = {
+    name: 'inspection', description: 'Inspect context',
+    tools: [reviewedTool(inspect, ReviewPolicies.localMutation())],
+    runtime: {
+      start: () => ({}),
+      resolve: (_root, context) => { scopes.push(context.execution); return {}; },
+      bindTools: () => [inspect],
+    },
+  };
+  const item = {
+    ...capability('inspect', 'Inspect context', ['inspection']),
+    lifecycle: { finalize: (_result: unknown, ctx: { actor?: AgentActor; threadId?: string | null }) => {
+      finalized.set(ctx.threadId!, ctx.actor);
+    } },
+  };
+  const toolkitRuntimeManager = new ToolkitRuntimeManager();
+  const answer = { invoke: async () => new AIMessage('done') } as unknown as AgentModels['act'];
+  const graph = createOrchestratorGraph({
+    models: { act: answer, subagent: new Executor({}) }, toolkitRuntimeManager,
+    capabilityRegistryBackend: 'memory',
+    runSupervisorRunner: { async invoke(input) {
+      return input.mode === 'entry'
+        ? { action: 'execute_plan', tasks: [{ capability: 'inspect', task: 'Inspect context.' }] }
+        : { action: 'goal_done', tasks: [] };
+    } },
+  });
+  const actors: Array<AgentActor | undefined> = [
+    { name: randomUUID(), userId: randomUUID() }, { name: randomUUID(), userId: randomUUID() }, undefined,
+  ];
+  const cases = actors.map(actor => ({ actor, threadId: randomUUID(), workdir: `/workspace/${randomUUID()}` }));
+  const invoke = async ({ actor, threadId, workdir }: typeof cases[number]) => {
+    await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
+      context: { workdir, systemPromptSections: [] },
+      configurable: {
+        actor, thread_id: threadId, capabilities: [item], toolkits: [toolkit],
+        globalReviewPolicy: { mode: 'custom', resolve: async (ctx: { actor?: AgentActor; workdir?: string | null }) => {
+          reviews.set(ctx.workdir!, ctx.actor);
+          return { type: 'authorize' };
+        } },
+      },
+    });
+  };
+  try {
+    await Promise.all(cases.slice(0, 2).map(invoke));
+    await invoke(cases[2]);
+    assert.equal(finalized.size, 3);
+    assert.equal(reviews.size, 3);
+    for (const entry of cases) {
+      assert.deepEqual(finalized.get(entry.threadId), entry.actor);
+      assert.deepEqual(reviews.get(entry.workdir), entry.actor);
+      assert.equal(toolsSeen.get(entry.threadId), entry.workdir);
+      assert.equal(scopes.find(scope => scope.threadId === entry.threadId)?.workdir, entry.workdir);
+      const inputs = modelsSeen.filter(text => text.includes(entry.workdir));
+      assert.equal(inputs.length, 2);
+      for (const text of inputs) {
+        assert.equal(text.split(entry.workdir).length - 1, 1);
+        for (const other of cases.filter(value => value !== entry)) assert.equal(text.includes(other.workdir), false);
+        for (const actor of actors) if (actor) assert.equal(text.includes(actor.name), false);
+      }
+    }
+  } finally {
+    await toolkitRuntimeManager.stop();
   }
 });

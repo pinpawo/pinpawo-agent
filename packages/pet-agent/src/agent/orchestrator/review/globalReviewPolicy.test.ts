@@ -11,9 +11,6 @@ import {
 const testActor = {
   userId: 'user-1',
   name: 'Test actor',
-  personality: null,
-  stage: null,
-  species: null,
 } satisfies AgentActor;
 
 function review(input: Record<string, unknown> = { path: 'notes.md', content: 'hello' }) {

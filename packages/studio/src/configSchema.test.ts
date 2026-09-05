@@ -31,7 +31,6 @@ test('parsePetLocalConfig accepts minimal valid config', () => {
   );
   assert.equal(config.petId, 'p1');
   assert.equal(config.name, 'Pet 1');
-  assert.equal(config.serverBinding, undefined);
 });
 
 test('parsePetLocalConfig keeps optional fields when provided', () => {
@@ -39,19 +38,15 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
     {
       petId: 'p1',
       name: 'Script Pet',
-      personality: '创意丰富',
       role: '脚本撰写',
       serviceSummary: '短视频脚本',
       modelProfileId: 'qwen-max',
       defaultCapabilityName: 'studio_planning',
-      serverBinding: { petId: 'srv-001' },
     },
     'test-source',
   );
-  assert.equal(config.personality, '创意丰富');
   assert.equal(config.modelProfileId, 'qwen-max');
   assert.equal(config.defaultCapabilityName, 'studio_planning');
-  assert.deepEqual(config.serverBinding, { petId: 'srv-001' });
 });
 
 test('parsePetLocalConfig rejects non-object input', () => {
@@ -66,8 +61,8 @@ test('parsePetLocalConfig requires petId and name', () => {
 
 test('parsePetLocalConfig rejects bad types in optional fields', () => {
   assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', personality: '' }, 'src'),
-    /"personality" must be a non-empty string/,
+    () => parsePet({ petId: 'p1', name: 'X', role: '' }, 'src'),
+    /"role" must be a non-empty string/,
   );
 });
 
@@ -109,17 +104,14 @@ test('parsePetLocalConfig rejects the retired raw model override', () => {
   );
 });
 
-test('parsePetLocalConfig requires serverBinding.petId when serverBinding present', () => {
-  assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', serverBinding: {} }, 'src'),
-    /\(serverBinding\): missing required string "petId"/,
-  );
-  assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', serverBinding: 'string-not-object' }, 'src'),
-    /"serverBinding" must be an object/,
-  );
+test('retired cloud bindings and persona fields fail with migration guidance', () => {
+  for (const field of ['personality', 'species', 'stage']) {
+    assert.throws(() => parsePet({ petId: 'p1', name: 'X', [field]: 'old' }, 'src'), /PET\.md/);
+  }
+  for (const serverBinding of [{ petId: 'cloud' }, {}, null, 'old']) {
+    assert.throws(() => parsePet({ petId: 'p1', name: 'X', serverBinding }, 'src'), /serverBinding.*no longer supported/);
+  }
 });
-
 
 test('parseStudioLocalConfig accepts minimal valid config', () => {
   const cfg = parseStudio(

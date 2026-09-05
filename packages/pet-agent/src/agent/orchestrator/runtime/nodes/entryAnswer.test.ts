@@ -80,9 +80,6 @@ function invokeConfig() {
 const actor = {
   userId: 'user-1',
   name: '小白',
-  personality: null,
-  stage: null,
-  species: null,
 };
 
 test('entry capture clears any stale Supervisor session', () => {
@@ -129,7 +126,6 @@ test('Entry Answer returns an ordinary reply without invoking Supervisor', async
   let plannerCalls = 0;
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke() {
         plannerCalls += 1;
@@ -157,7 +153,6 @@ test('plan_request routes to Supervisor without persisting control messages', as
   const supervisorInputs: RunSupervisorInput[] = [];
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke(input) {
         supervisorInputs.push(input);
@@ -192,7 +187,6 @@ test('Entry Answer preserves the current textual HumanMessage exactly', async ()
   let plannerRequest = '';
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke(input) {
         plannerRequest = input.userRequest;
@@ -217,7 +211,6 @@ test('Entry Answer resolves a continuation utterance into the goal it refers bac
   let plannerRequest = '';
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke(input) {
         plannerRequest = input.userRequest;
@@ -248,7 +241,6 @@ test('Entry Answer receives normalized main conversation and excludes delegation
   });
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke() {
         throw new Error('Supervisor must not run for a direct reply.');
@@ -288,7 +280,6 @@ test('Entry Answer receives an accepted delegation result as execution data, not
   });
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke() {
         throw new Error('Supervisor must not run for a direct reply.');
@@ -345,7 +336,6 @@ test('Entry Answer retries when the model announces execution instead of calling
   let plannerRequest = '';
   const graph = createOrchestratorGraph({
     models: { act: model, answer: model },
-    actor,
     runSupervisorRunner: {
       async invoke(input) {
         plannerRequest = input.userRequest;
@@ -373,7 +363,6 @@ test('Entry Answer leaves an ordinary reply untouched', async () => {
   const scripted = entryAnswerModel('direct');
   const graph = createOrchestratorGraph({
     models: { act: scripted.model, answer: scripted.model },
-    actor,
     runSupervisorRunner: {
       async invoke() {
         throw new Error('Supervisor must not run for a direct reply.');
@@ -396,11 +385,12 @@ test('root invocation context reaches direct Entry replies and final Answer with
     const legacyActorName = randomUUID();
     const scripted = entryAnswerModel(mode, messages => seen.push(messages), undefined, messages => seen.push(messages));
     const graph = createOrchestratorGraph({
-      models: { act: scripted.model, answer: scripted.model }, actor: { ...actor, name: legacyActorName },
+      models: { act: scripted.model, answer: scripted.model },
       runSupervisorRunner: { async invoke() { return { action: 'unavailable', tasks: [] }; } },
     });
     const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
     await runAgent(graph, {
+      actor: { ...actor, name: legacyActorName },
       messages: [new HumanMessage('Handle this request.')], context: { systemPromptSections: common },
     });
     assert.equal(seen.length, mode === 'plan' ? 2 : 1);

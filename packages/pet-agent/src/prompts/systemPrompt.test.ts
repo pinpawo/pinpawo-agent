@@ -105,5 +105,23 @@ test('runtime context snapshots common sections and has no configurable fallback
   assert.notEqual(snapshot.systemPromptSections?.[0].content, source[0].content);
   assert.equal(Object.isFrozen(snapshot.systemPromptSections), true);
   assert.equal(Object.isFrozen(snapshot.systemPromptSections?.[0]), true);
-  assert.deepEqual(getAgentRuntimeContext({ configurable: { systemPromptSections: source } }), { systemPromptSections: [] });
+  assert.deepEqual(getAgentRuntimeContext({ configurable: { systemPromptSections: source } }), { workdir: null, systemPromptSections: [] });
+});
+
+test('workdir is rendered once from typed context across direct and middleware calls', async () => {
+  const workdir = `/workspace/${randomUUID()}`;
+  const model = new RecordingModel({});
+  const role = new SystemMessage('role');
+  const context = getAgentRuntimeContext({ context: { workdir } });
+  await invokeOrchestratorModel(model, { systemMessage: role, messages: [new HumanMessage('first')] }, { context });
+  const agent = createAgent({ model, tools: [], systemPrompt: role, middleware: [systemPromptMiddleware] });
+  await agent.invoke({ messages: [new HumanMessage('second')] }, { context });
+  for (const input of model.invocations) assert.equal(input[0].text.split(workdir).length - 1, 1);
+  assert.equal(model.invocations[0][0].text, model.invocations[1][0].text);
+  assert.equal(getAgentRuntimeContext({ configurable: { workdir } }).workdir, null);
+  assert.throws(() => getAgentRuntimeContext({ context: { workdir: '   ' } }));
+  assert.equal(getAgentRuntimeContext({ context: { workdir: `${workdir} ` } }).workdir, `${workdir} `);
+  assert.throws(() => composeSystemPrompt(role, {
+    workdir, systemPromptSections: [{ id: 'framework:workdir', content: 'conflict' }],
+  }), /Duplicate system prompt section id/);
 });

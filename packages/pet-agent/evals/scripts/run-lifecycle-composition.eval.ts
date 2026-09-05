@@ -75,9 +75,6 @@ export const LIFECYCLE_COMPOSITION_REPORT_VERSION = 2 as const;
 const actor = {
   userId: 'eval-user',
   name: 'lifecycle-composition-eval',
-  personality: null,
-  stage: null,
-  species: null,
 };
 
 type DecisionKind = 'entry_answer' | 'supervisor' | 'unknown';
@@ -509,7 +506,6 @@ async function runCase(params: {
       observe: recorder.act,
       subagent: executor.model,
     },
-    actor,
     checkpoint,
   });
   const runtime = capabilityRuntime(testCase.input.capabilityProfile);
@@ -550,15 +546,13 @@ async function runCase(params: {
       activeTurn = turn;
       finalState = await graph.invoke(
         buildOrchestratorTurnInput([new HumanMessage(turn.userMessage)]),
-        {
+        { context: { workdir: '/eval/workspace', systemPromptSections: [{ id: 'eval:environment', content: 'Controlled lifecycle composition evaluation.' }] },
           configurable: {
             thread_id: threadId,
             actor,
             registry,
             allowedCapabilityNames: runtime.allowedCapabilityNames,
             maxRunIterations: 12,
-            workdir: '/eval/workspace',
-            runtimeEnvironment: 'Controlled lifecycle composition evaluation.',
           },
           callbacks: [subjectUsage.callback],
           metadata: {

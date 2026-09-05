@@ -3,7 +3,7 @@ import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langcha
 import { tool } from '@langchain/core/tools';
 import { Command, MemorySaver } from '@langchain/langgraph';
 import { z } from 'zod';
-import type { AgentActor, AgentModels } from '../../src/types/agent';
+import type { AgentModels } from '../../src/types/agent';
 import { createOrchestratorGraph, buildOrchestratorRunInput } from '../../src/agent/createAgentRuntime';
 import { buildReviewSpec } from '../../src/agent/orchestrator/review/reviewSpec';
 import { randomUUID } from 'node:crypto';
@@ -55,11 +55,6 @@ type EvalRow = {
   scores: ScoreResult[];
   output: Partial<EvalOutput>;
   error?: string;
-};
-
-const testActor: AgentActor = {
-  userId: 'eval-user',
-  name: '小白',
 };
 
 const scoreKeys = [
@@ -247,7 +242,6 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     callbacks: recorder.callbacks,
     configurable: {
       thread_id: `eval-tool-review-reject-${Date.now()}-${randomUUID()}`,
-      actor: testActor,
       capabilities: [defineCapability({
         name: 'general',
         description: 'Execute the reviewed tool rejection eval task.',

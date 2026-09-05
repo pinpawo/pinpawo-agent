@@ -10,7 +10,6 @@ import {
 import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  type AgentActor,
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
@@ -345,7 +344,9 @@ export class ResidentPetCoordinator {
 export type CreateResidentPetRuntimeOptions = {
   /** Host identity used for session ownership and graph isolation. */
   petId: string;
-  actor: AgentActor;
+  petName: string;
+  /** Optional attribution passed to Host tracing, outside the Agent contract. */
+  traceUserId?: string;
   modelProfiles: LocalModelProfileRegistry;
   modelProfileId?: string;
   defaultCapabilityName?: string;
@@ -420,10 +421,6 @@ function withDefaultModelProfile(
   return Object.freeze({ ...registry, defaultProfileId: modelProfileId });
 }
 
-function buildResidentAgentContext(petId: string, actor: AgentActor) {
-  return { pet: { id: petId, name: actor.name }, actor };
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }
@@ -490,7 +487,7 @@ export async function createResidentPetRuntime(
   } = {
     serverMode: 'chat',
     actorId: options.petId,
-    actorName: options.actor.name,
+    actorName: options.petName,
     modelProfiles,
     globalReviewPolicyMode: llmConfig.globalReviewPolicyMode
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
@@ -512,7 +509,10 @@ export async function createResidentPetRuntime(
   };
   const graphService = options.graphService ?? new LocalAgentGraphService();
   const loadContext = options.loadContext
-    ?? (async () => buildResidentAgentContext(options.petId, options.actor));
+    ?? (async () => ({
+      pet: { id: options.petId, name: options.petName },
+      traceUserId: options.traceUserId,
+    }));
   const sessions = new LocalServerTuiSessionService({
     graphService,
     loadContext,

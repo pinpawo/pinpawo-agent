@@ -21,7 +21,7 @@ import {
   createOrchestratorGraph,
   buildOrchestratorTurnInput,
 } from '../src/agent/createAgentRuntime';
-import type { AgentActor, AgentModels } from '../src/types/agent';
+import type { AgentModels } from '../src/types/agent';
 import {
   defineInstructionDocument,
   type AgentCapability,
@@ -228,11 +228,6 @@ const mockCapabilities: AgentCapability[] = [
   ),
 ];
 
-const testActor: AgentActor = {
-  userId: 'eval-user',
-  name: '小白',
-};
-
 // ── Target function: run orchestrator and return route decision ──
 
 let evalCounter = 0;
@@ -377,7 +372,6 @@ export async function target(
     interruptBefore: ['capability'],
     configurable: {
       thread_id: threadId,
-      actor: testActor,
       toolkits: [mockGeneralToolkit],
       capabilities: capabilityList,
       ...(allowedCapabilityNames

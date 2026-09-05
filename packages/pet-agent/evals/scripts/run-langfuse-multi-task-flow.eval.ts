@@ -22,11 +22,6 @@ import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval
 import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
-const actor = {
-  userId: 'eval-user',
-  name: 'multi-task-flow-eval',
-};
-
 const generalToolkit = defineToolkit({
   name: 'multi_task_eval_general',
   description: 'General capability marker for deterministic multi-task flow evaluation.',
@@ -175,7 +170,6 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     { context: { workdir: '/mock/project', systemPromptSections: [] },
       configurable: {
         thread_id: `multi-task-flow-${Date.now()}`,
-        actor,
         registry,
         maxRunIterations: 10,
       },

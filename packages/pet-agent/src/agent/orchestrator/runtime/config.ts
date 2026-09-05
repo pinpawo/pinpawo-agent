@@ -1,6 +1,5 @@
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { isToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
-import type { AgentActor } from '../../../types/agent';
 import type { ToolkitReviewCapabilities } from '../../../types/toolkit';
 import type { CompiledAgentRegistry } from '../registry';
 import {
@@ -17,7 +16,6 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
   const cfg = runnableConfig?.configurable ?? {};
   const registry = cfg.registry as CompiledAgentRegistry | undefined;
   return {
-    actor: cfg.actor as AgentActor | undefined,
     registry,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),

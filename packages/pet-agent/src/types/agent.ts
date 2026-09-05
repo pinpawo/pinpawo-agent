@@ -1,11 +1,5 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
-/** Optional caller metadata for review and attribution, never a prompt persona. */
-export type AgentActor = {
-  userId: string | null;
-  name: string;
-};
-
 export type AgentModels = {
   /** Primary orchestration model; the local host keeps this variant non-thinking. */
   act: BaseChatModel;

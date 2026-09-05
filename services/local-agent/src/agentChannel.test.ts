@@ -547,33 +547,34 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
 });
 
 
-test('graph identity uses the Host Pet id independently of identical actor profiles', () => {
+test('graph identity uses the Host Pet id independently of display names', () => {
   const context = createContext();
   const first = buildTestLocalChatAgentInput({ context, userMessage: 'hello' });
   const second = buildTestLocalChatAgentInput({
     context: { ...context, pet: { ...context.pet, id: 'pet-b' } }, userMessage: 'hello',
   });
-  assert.deepEqual(first.input.actor, second.input.actor);
   assert.notEqual(first.graphKey, second.graphKey);
 });
 
-test('Host resolves default workdir once and carries actor metadata per invocation', () => {
+test('Host resolves workdir once and keeps tracing attribution out of Agent input', () => {
   const previous = getConfig();
   try {
     const fallback = `./${randomUUID()}`;
     setConfig({ workdir: fallback });
     const context = createContext();
-    const firstActor = { name: randomUUID(), userId: randomUUID() };
-    const secondActor = { name: randomUUID(), userId: randomUUID() };
-    const first = buildTestLocalChatAgentInput({ context: { ...context, actor: firstActor }, userMessage: 'first' });
-    const second = buildTestLocalChatAgentInput({ context: { ...context, actor: secondActor }, userMessage: 'second', workdir: '~/different' });
+    const firstUser = randomUUID();
+    const secondUser = randomUUID();
+    const first = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: firstUser }, userMessage: 'first' });
+    const second = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: secondUser }, userMessage: 'second', workdir: '~/different' });
     setConfig({ workdir: '/another-global-default' });
     assert.equal(first.input.context?.workdir, resolveUserDir(fallback));
     assert.equal(second.input.context?.workdir, resolveUserDir('~/different'));
     assert.equal(first.graphKey, second.graphKey);
-    assert.deepEqual(first.input.actor, firstActor);
-    assert.deepEqual(second.input.actor, secondActor);
-    assert.equal('actor' in first.graphConfig, false);
+    assert.equal(first.traceUserId, firstUser);
+    assert.equal(second.traceUserId, secondUser);
+    assert.equal(JSON.stringify(first.input).includes(firstUser), false);
+    assert.equal(JSON.stringify(second.input).includes(secondUser), false);
+    assert.equal('actor' in first.input, false);
     assert.equal(first.input.messages.length, 1);
   } finally {
     setConfig(previous);

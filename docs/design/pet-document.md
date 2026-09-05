@@ -94,11 +94,12 @@ Role builders still own role content. Entry and final Answer role templates are
 parameterless: they no longer receive an AgentActor or inject its display name.
 Pet identity and authored behavior come from PET.md. The legacy decision-config
 helper and its unused workdir/runtimeEnvironment arguments have been removed.
-Host identity/configuration remains separate. `AgentActor` contains optional
-invocation metadata for review/finalize; it has no Pet id or persona fields.
+Host identity/configuration remains separate. `AgentActor` and its
+invocation/review/finalize fields are removed. Display name and optional tracing
+user attribution belong to the Host.
 `CreateResidentPetRuntimeOptions.petId` supplies Host identity explicitly to
 resident session initialization. Graph cache identity reads that Host Pet id;
-actor metadata is read from each invocation rather than captured by the graph.
+Host metadata does not enter Agent configuration or review/finalize callbacks.
 The default Pet Profile Toolkit and its cloud profile/memory/history fields have
 been removed. PET.md is the authored persona source.
 
@@ -166,8 +167,9 @@ Low-level graph callers migrate `configurable.workdir` to `context.workdir`;
 `runAgent` callers use `input.context.workdir`. This slice preserves the existing
 system-level workdir semantics; broader fact-placement governance remains #519.
 
-`AgentActor` contains display name and user attribution only. It is optional per
-invocation for review/finalize, never a graph dependency or a persona source.
+`AgentActor` and the actor input/configurable/review/finalize chain are removed.
+`CreateResidentPetRuntimeOptions` takes explicit `petId`/`petName`; optional
+`traceUserId` stays in local Host setup and supplies tracing callbacks directly.
 Host Pet identity still owns routing and durable session isolation. The default
 Pet Profile Toolkit and personality/species/stage configuration are removed;
 old JSON fields report migration to PET.md. serverBinding is rejected because
@@ -177,11 +179,11 @@ Checkpointed conversation history, Studio role/serviceSummary routing metadata,
 and default Capability selection retain their existing owners.
 
 
-Validation of #760–#763 on 2026-09-05: pet-agent full suite 484 passed;
-Studio full suite 90 passed; local-agent full suite 607 passed, 5 skipped.
-An additional local stream-resume regression passed after the full suite,
-confirming fresh actor/workdir with the checkpoint's original trace identity.
-The final context-focused tests (8) passed, including exact directory preservation,
-concurrent children and interrupt resume. All three package typechecks passed,
-including pet-agent eval types. pet-agent and Studio ESM/declaration builds passed.
+Validation of #760–#763 and complete AgentActor removal on 2026-09-05:
+pet-agent full suite 484 passed; Studio full suite 90 passed; local-agent full
+suite 609 passed, 5 skipped. Regression coverage verifies concurrent execution
+scope isolation, Host-only tracing attribution, and fresh workdir on checkpoint
+resume while preserving the original trace identity. Explicit null continuation
+inputs remain unchanged. All three package typechecks passed, including
+pet-agent eval types. pet-agent and Studio ESM/declaration builds passed.
 No live-model evaluations or suspended macOS companion checks were run.

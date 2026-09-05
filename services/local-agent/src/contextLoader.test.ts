@@ -8,5 +8,5 @@ test('buildAgentContext returns an API-free fallback context', async () => {
 
   assert.equal(context.pet.id, LOCAL_ACTOR_ID);
   assert.equal(context.pet.name, LOCAL_ACTOR_NAME);
-  assert.equal(context.actor, undefined);
+  assert.equal(context.traceUserId, undefined);
 });

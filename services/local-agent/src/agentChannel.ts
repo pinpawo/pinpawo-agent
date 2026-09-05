@@ -44,6 +44,8 @@ export type AgentChannelSetup = {
   graphConfig: OrchestratorConfig;
   input: AgentInvokeInput;
   registry: CompiledAgentRegistry;
+  /** Host-only attribution; never included in Agent invocation/configurable. */
+  traceUserId?: string;
   interfaceContext?: LocalAgentInterfaceContext;
 };
 
@@ -167,8 +169,8 @@ export function buildLocalChatAgentInput(params: {
         : {}),
     },
     registry: preparedRegistry.registry,
+    traceUserId: params.context.traceUserId,
     input: {
-      actor: params.context.actor,
       context: {
         workdir,
         systemPromptSections: [

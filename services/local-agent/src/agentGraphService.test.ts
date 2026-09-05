@@ -16,7 +16,6 @@ function setup(
     graphConfig: {},
     registry: { authorizationGeneration: 'test' },
     input: {
-      actor: { userId: null, name: 'Pet' },
       messages: [],
       threadId: 'thread',
     },
@@ -85,7 +84,7 @@ test('cached graphs take current common context through run, invokeState and roo
 });
 
 test('all invocation entry points preserve scope, trace identity and current metadata', async () => {
-  const seen: Array<{ traceId: string; capabilities: readonly string[]; actor: unknown; workdir: unknown }> = [];
+  const seen: Array<{ traceId: string; capabilities: readonly string[]; workdir: unknown }> = [];
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
@@ -94,8 +93,8 @@ test('all invocation entry points preserve scope, trace identity and current met
   } as unknown as AgentModels['act'];
   const runner: RunSupervisorRunner = {
     async invoke(input, config) {
-      seen.push({ traceId: input.traceId, capabilities: input.workspace.capabilityNames,
-        actor: config?.configurable?.actor, workdir: getAgentRuntimeContext(config).workdir });
+      seen.push({ traceId: input.traceId, capabilities: input.workspace.capabilityNames, workdir: getAgentRuntimeContext(config).workdir });
+      assert.equal('actor' in (config?.configurable ?? {}), false);
       assert.ok(config?.signal);
       assert.equal(config?.signal?.aborted, false);
       assert.deepEqual(config?.configurable?.reviewCapabilities, { humanReview: false, sessionAuthorization: true });
@@ -111,12 +110,11 @@ test('all invocation entry points preserve scope, trace identity and current met
   const graph = createOrchestratorGraph(graphConfig);
   for (const path of ['core', 'run', 'invokeState', 'streamEvents']) {
     for (const allowedCapabilityNames of [['first'], []]) {
-      const actor = { name: randomUUID(), userId: randomUUID() };
       const traceId = randomUUID();
       const workdir = `/workspace/${randomUUID()}`;
       const input: AgentChannelSetup = {
         graphKey: 'same-cached-graph', registry, graphConfig,
-        input: { messages: [new HumanMessage('inspect')], actor, traceId, allowedCapabilityNames,
+        input: { messages: [new HumanMessage('inspect')], traceId, allowedCapabilityNames,
           context: { workdir }, signal: new AbortController().signal, globalReviewPolicy: { mode: 'full_access' } },
       };
       if (path === 'core') await runAgent(graph, input.input, { registry, reviewCapabilities: { humanReview: false, sessionAuthorization: true } });
@@ -127,14 +125,14 @@ test('all invocation entry points preserve scope, trace identity and current met
         for await (const _event of stream) { /* Consume the production stream. */ }
         await stream.output;
       }
-      assert.deepEqual(seen.at(-1), { traceId, capabilities: allowedCapabilityNames, actor, workdir }, path);
+      assert.deepEqual(seen.at(-1), { traceId, capabilities: allowedCapabilityNames, workdir }, path);
     }
   }
   assert.equal(seen.length, 8);
 });
 
 test('local stream resume refreshes invocation metadata while preserving the checkpoint task', async () => {
-  const seen: Array<{ traceId: string; actor: unknown; workdir: string | null }> = [];
+  const seen: Array<{ traceId: string; workdir: string | null }> = [];
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
@@ -142,8 +140,6 @@ test('local stream resume refreshes invocation metadata while preserving the che
     }] }) }),
   } as unknown as AgentModels['act'];
   const service = new LocalAgentGraphService();
-  const firstActor = { name: randomUUID(), userId: randomUUID() };
-  const nextActor = { name: randomUUID(), userId: randomUUID() };
   const workdirs = [`/workspace/${randomUUID()}`, `/workspace/${randomUUID()}`];
   const traceId = randomUUID();
   const input: AgentChannelSetup = {
@@ -151,7 +147,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
     graphConfig: {
       models: { act: model }, checkpoint: new MemorySaver(), capabilityRegistryBackend: 'memory',
       runSupervisorRunner: { async invoke(input, config) {
-        seen.push({ traceId: input.traceId, actor: config?.configurable?.actor,
+        seen.push({ traceId: input.traceId,
           workdir: getAgentRuntimeContext(config).workdir });
         assert.deepEqual(config?.configurable?.allowedCapabilityNames, []);
         interrupt({ kind: 'invocation-refresh-test' });
@@ -159,19 +155,19 @@ test('local stream resume refreshes invocation metadata while preserving the che
       } },
     },
     input: { messages: [new HumanMessage('inspect')], threadId: randomUUID(), traceId,
-      allowedCapabilityNames: [], actor: firstActor, context: { workdir: workdirs[0] } },
+      allowedCapabilityNames: [], context: { workdir: workdirs[0] } },
   };
   await service.invokeState(input);
   assert.equal(seen.length, 1);
   const resumed: AgentChannelSetup = { ...input,
-    input: { ...input.input, actor: nextActor, traceId: randomUUID(), context: { workdir: workdirs[1] } },
+    input: { ...input.input, traceId: randomUUID(), context: { workdir: workdirs[1] } },
   };
   const stream = await service.streamEvents(resumed, service.buildResumeCommand(true));
   for await (const _event of stream) { /* Resume through the production streaming path. */ }
   await stream.output;
   assert.deepEqual(seen, [
-    { traceId, actor: firstActor, workdir: workdirs[0] },
-    { traceId, actor: nextActor, workdir: workdirs[1] },
+    { traceId, workdir: workdirs[0] },
+    { traceId, workdir: workdirs[1] },
   ]);
 });
 

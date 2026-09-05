@@ -67,7 +67,8 @@ into PET.md prose and remove those JSON fields. Remove `serverBinding`; the
 local Host no longer consumes cloud Pet bindings. The parser reports these
 retired fields instead of silently ignoring them. The implicit Pet Profile
 Toolkit and cloud profile/history hydration have also been removed; conversation
-history remains owned by the session checkpoint.
+history remains owned by the session checkpoint. Programmatic resident Hosts use
+`petId` and `petName`; optional `traceUserId` is consumed only by Host tracing.
 
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.

@@ -1,17 +1,13 @@
 import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import test from 'node:test';
-import type { AgentActor, AgentModels } from '../../../types/agent';
+import type { AgentModels } from '../../../types/agent';
 import { buildAutoReviewPrompt } from '../prompts/autoReview';
 import { buildReviewSpec } from './reviewSpec';
 import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
   resolveGlobalReviewBatchPolicy,
 } from './globalReviewPolicy';
-const testActor = {
-  userId: 'user-1',
-  name: 'Test actor',
-} satisfies AgentActor;
 
 function review(input: Record<string, unknown> = { path: 'notes.md', content: 'hello' }) {
   return {
@@ -74,7 +70,6 @@ test('auto review keeps its private risk assessment off the root stream', async 
         return safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [],
     task: 'Check whether coscli is installed.',
     workdir: '/repo',
@@ -92,7 +87,6 @@ test('auto review applies strict and relaxed risk thresholds after one shared as
   };
   const baseOptions = {
     models: { act: autoModel(async () => moderateAssessment) },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: [review()],
@@ -120,7 +114,6 @@ test('relaxed auto review still rejects score 10', async () => {
         reason: 'The score 10 boundary always requires human review.',
       })),
     },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: [review()],
@@ -139,7 +132,6 @@ test('auto review prompt contains bounded task context, runtime scope, and tool 
         return safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [new HumanMessage('Conversation context must not reach the risk reviewer.')],
     task: 'Write a short notes.md file',
     workdir: '/repo',
@@ -212,7 +204,6 @@ test('auto review fails closed when an essential command cannot fit the evidence
         return safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: [{
@@ -242,7 +233,6 @@ test('auto review can authorize observational browser access without conversatio
         reason: 'Public browser navigation is observational and has no external side effect.',
       })),
     },
-    actor: testActor,
     messages: [],
     reviews: [browserReview()],
   });
@@ -263,7 +253,6 @@ test('auto review receives the current task when rejecting an unrelated low-risk
         };
       }),
     },
-    actor: testActor,
     messages: [],
     task: 'Explain what the existing code does without changing files',
     workdir: '/repo',
@@ -287,7 +276,6 @@ test('auto review requires human authorization when a batch cannot fit the safe 
         return safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: Array.from({ length: 7 }, (_, index) => ({
@@ -310,7 +298,6 @@ test('auto review requires authorization when the model identifies material risk
         reason: 'The proposed change is destructive.',
       })),
     },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: [review()],
@@ -336,7 +323,6 @@ test('auto review rejects an invalid risk score and fails closed', async () => {
           };
         }),
       },
-      actor: testActor,
       messages: [],
       workdir: '/repo',
       reviews: [review({ command: 'git stash && git checkout pr-391' })],
@@ -359,7 +345,6 @@ test('auto review preserves the model reason for an outside-workdir rejection', 
         reason: 'The write targets a path outside the workdir.',
       })),
     },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: [review({ path: '/tmp/notes.md', content: 'hello' })],
@@ -379,7 +364,6 @@ test('auto review repairs malformed structured output once by default', async ()
         return calls === 1 ? { riskScore: 'invalid' } : safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [],
     workdir: '/repo',
     reviews: [review()],
@@ -402,7 +386,6 @@ test('auto review puts registered toolkit policy in the trusted system prompt', 
         };
       }),
     },
-    actor: testActor,
     messages: [new HumanMessage('Conversation context must not reach the risk reviewer.')],
     reviews: [{
       toolkitName: 'git',
@@ -446,7 +429,6 @@ test('auto review gives jsonMode providers the canonical output protocol', async
         return safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [],
     reviews: [review()],
   });
@@ -472,7 +454,6 @@ test('auto review has no toolkit policy block when none is registered', async ()
         };
       }),
     },
-    actor: testActor,
     messages: [],
     reviews: [{
       ...review({ command: 'git push --force origin main' }),
@@ -500,7 +481,6 @@ test('auto review deduplicates toolkit policy across a batch', async () => {
         return safeAssessment;
       }),
     },
-    actor: testActor,
     messages: [],
     reviews: ['git_add', 'git_commit'].map((toolName) => ({
       ...review(),

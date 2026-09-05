@@ -72,11 +72,6 @@ const DEFAULT_REPEATS = 3;
 const EVALUATOR_VERSION = 'prompt-goal-v1';
 export const LIFECYCLE_COMPOSITION_REPORT_VERSION = 2 as const;
 
-const actor = {
-  userId: 'eval-user',
-  name: 'lifecycle-composition-eval',
-};
-
 type DecisionKind = 'entry_answer' | 'supervisor' | 'unknown';
 
 type DecisionRecord = {
@@ -549,7 +544,6 @@ async function runCase(params: {
         { context: { workdir: '/eval/workspace', systemPromptSections: [{ id: 'eval:environment', content: 'Controlled lifecycle composition evaluation.' }] },
           configurable: {
             thread_id: threadId,
-            actor,
             registry,
             allowedCapabilityNames: runtime.allowedCapabilityNames,
             maxRunIterations: 12,

@@ -1,5 +1,4 @@
 export type {
-  AgentActor,
   AgentModels,
 } from './types/agent';
 

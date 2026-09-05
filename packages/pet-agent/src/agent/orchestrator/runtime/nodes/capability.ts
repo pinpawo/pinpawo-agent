@@ -62,7 +62,6 @@ export function createCapabilityNode(params: {
   // Resolve invocation metadata and the Host's structured execution directory.
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
-      actor,
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
@@ -140,7 +139,6 @@ export function createCapabilityNode(params: {
     const toolkitContext = {
       models: config.models,
       modelInputModalities: config.modelInputModalities,
-      actor,
       messages: scopedMessages,
       reviewContext: {
         task: runNextDelegation.task,
@@ -251,7 +249,6 @@ export function createCapabilityNode(params: {
     if (result && capability.lifecycle?.finalize) {
       const finalized = await capability.lifecycle.finalize(result, {
         models: config.models,
-        actor,
         messages: scopedMessages,
         artifactStore: config.capabilityArtifactStore,
         recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {

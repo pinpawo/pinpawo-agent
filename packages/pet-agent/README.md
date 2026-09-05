@@ -21,8 +21,9 @@ in their runnable options. Reapply context when resuming a checkpoint; it is not
 conversation state. `buildAgentRunnableConfig` projects the shared options for
 Hosts that use the graph's streaming API directly.
 
-`actor` is optional invocation metadata for review and attribution. Graph config
-no longer accepts an actor, and actor fields do not define the model's persona.
+`AgentActor` and actor fields on invocation, review and finalize contracts have
+been removed. Display names and tracing user attribution stay in the Host;
+PET.md supplies authored persona context.
 The legacy top-level `workdir`, `runtimeEnvironment` and `execution` invocation
 fields were removed. Move workdir to context, authored environment content to
 `context.systemPromptSections`, and use the existing `threadId` for thread scope.

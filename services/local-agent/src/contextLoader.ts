@@ -1,10 +1,10 @@
-import type { AgentActor } from '@pinpawo/pet-agent';
 import { LOCAL_ACTOR_ID, LOCAL_ACTOR_NAME } from './actorSelection';
 
 /** Host identity and invocation metadata. Authored behavior belongs to PET.md. */
 export type AgentContext = {
   pet: { id: string; name: string };
-  actor?: AgentActor;
+  /** Optional attribution for Host tracing callbacks only. */
+  traceUserId?: string;
 };
 
 export function buildAgentContext(actorId = LOCAL_ACTOR_ID): AgentContext {

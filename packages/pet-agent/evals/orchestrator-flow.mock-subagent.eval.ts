@@ -25,7 +25,7 @@ import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
 } from '../src/agent/createAgentRuntime';
-import type { AgentActor, AgentModels } from '../src/types/agent';
+import type { AgentModels } from '../src/types/agent';
 import {
   defineInstructionDocument,
   type AgentCapability,
@@ -451,11 +451,6 @@ function readReviewId(payload: Record<string, unknown> | null): string | null {
   return typeof review?.id === 'string' ? review.id : null;
 }
 
-const testActor: AgentActor = {
-  userId: 'eval-user',
-  name: '小白',
-};
-
 let evalCounter = 0;
 
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -476,7 +471,6 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
 
   const configurable = {
     thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
-    actor: testActor,
     toolkits: [mockGeneralToolkit],
     capabilities: capabilityList,
     ...(allowedCapabilityNames

@@ -1,7 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext, type AgentRuntimeContext } from '../runtime/context';
 import type { AgentCapability } from '../types/capability';
-import type { AgentActor } from '../types/agent';
 import {
   filterAvailableToolkits,
   type AgentToolkit,
@@ -21,7 +20,6 @@ export type AgentInvokeInput = {
   /** Host-owned context reapplied on each invocation, including resumes. */
   context?: AgentRuntimeContext;
   messages: BaseMessage[];
-  actor?: AgentActor;
   threadId?: string;
   capabilities?: AgentCapability[];
   toolkits?: AgentToolkit[];
@@ -89,7 +87,6 @@ export function buildAgentRunnableConfig(
     signal: input.signal,
     configurable: {
       registry: options.registry,
-      actor: input.actor,
       ...(input.threadId ? { thread_id: input.threadId } : {}),
       ...(input.globalReviewPolicy ? { globalReviewPolicy: input.globalReviewPolicy } : {}),
       ...(options.reviewCapabilities ? { reviewCapabilities: options.reviewCapabilities } : {}),

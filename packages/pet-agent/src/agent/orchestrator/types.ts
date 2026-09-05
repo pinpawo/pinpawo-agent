@@ -1,6 +1,6 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
-import type { AgentActor, AgentModels } from '../../types/agent';
+import type { AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
 import type { SubagentCompletionReason } from '../../types/subagent';
 import type {
@@ -126,7 +126,6 @@ export type OrchestratorConfig = {
 };
 
 export type OrchestratorInvokeOptions = {
-  actor?: AgentActor;
   /** Host-compiled executable registry. Required by routing and executor nodes. */
   registry?: CompiledAgentRegistry;
   reviewCapabilities?: ToolkitReviewCapabilities;

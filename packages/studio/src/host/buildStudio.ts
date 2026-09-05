@@ -20,7 +20,6 @@ import {
 } from 'pinpawo/host-runtime';
 import { loadPetLocalConfigs } from './petConfig';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
-import { buildPetActorFromLocalConfig } from './petActor';
 
 /**
  * 当前 workdir 下没有 .pinpawo/studio.json 时抛此错。
@@ -195,7 +194,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
 
       const resident = await createResidentPetHost({
         petId: petConfig.petId,
-        actor: buildPetActorFromLocalConfig(petConfig, null),
+        petName: petConfig.name,
         modelProfiles: input.modelProfiles,
         ...(petConfig.modelProfileId ? { modelProfileId: petConfig.modelProfileId } : {}),
         ...(petConfig.defaultCapabilityName

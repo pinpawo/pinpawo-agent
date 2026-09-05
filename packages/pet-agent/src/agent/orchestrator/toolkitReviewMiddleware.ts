@@ -10,7 +10,7 @@ import type {
   ToolReviewPolicy,
   ToolOperationMetadata,
 } from '../../types/toolkit';
-import type { AgentActor, AgentModels } from '../../types/agent';
+import type { AgentModels } from '../../types/agent';
 import type { SubagentRuntimeEvent } from '../../types/subagent';
 import {
   buildToolAuthorizationRecord,
@@ -50,7 +50,6 @@ export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
   /** Input modalities the active model profile accepts. */
   modelInputModalities?: readonly ModelInputModality[];
-  actor?: AgentActor;
   messages: BaseMessage[];
   reviewContext?: {
     task?: string | null;
@@ -798,7 +797,6 @@ async function reviewToolkitToolCalls(params: {
       : await resolveGlobalReviewBatchPolicy({
           policy: params.ctx.globalReviewPolicy,
           models: params.ctx.models,
-          actor: params.ctx.actor,
           messages: params.ctx.messages,
           task: params.ctx.reviewContext?.task,
           workdir: params.ctx.reviewContext?.workdir,

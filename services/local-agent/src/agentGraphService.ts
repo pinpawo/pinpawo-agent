@@ -170,7 +170,7 @@ export class LocalAgentGraphService {
     const graph = this.getGraph(setup);
     const callbacks = createLangfuseCallbacks({
       sessionId: setup.input.threadId ?? setup.graphKey,
-      ...(setup.input.actor?.userId ? { userId: setup.input.actor.userId } : {}),
+      ...(setup.traceUserId ? { userId: setup.traceUserId } : {}),
       metadata: {
         interface: setup.interfaceContext?.kind ?? 'headless',
       },

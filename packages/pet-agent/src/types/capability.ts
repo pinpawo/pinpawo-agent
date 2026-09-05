@@ -2,7 +2,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { assertCapabilityDocumentMatches } from './capabilityDocument';
-import type { AgentActor, AgentModels } from './agent';
+import type { AgentModels } from './agent';
 import type { SubagentResult } from './subagent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
 
@@ -22,7 +22,6 @@ export type InstructionDocument = {
 
 export type CapabilityFinalizeContext = {
   models: AgentModels;
-  actor?: AgentActor;
   /** Read-only capability-lane history captured before this subagent run. */
   messages: readonly BaseMessage[];
   artifactStore?: CapabilityArtifactStore;

@@ -78,7 +78,6 @@ function invokeConfig() {
 }
 
 const actor = {
-  petId: 'pet-1',
   userId: 'user-1',
   name: '小白',
   personality: null,

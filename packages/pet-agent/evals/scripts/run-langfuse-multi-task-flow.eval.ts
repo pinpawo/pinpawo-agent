@@ -23,7 +23,6 @@ import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 
 const actor = {
-  petId: 'eval-pet',
   userId: 'eval-user',
   name: 'multi-task-flow-eval',
   personality: null,

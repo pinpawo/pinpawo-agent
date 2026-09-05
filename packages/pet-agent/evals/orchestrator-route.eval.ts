@@ -229,7 +229,6 @@ const mockCapabilities: AgentCapability[] = [
 ];
 
 const testActor: AgentActor = {
-  petId: 'eval-pet',
   userId: 'eval-user',
   name: '小白',
   personality: '友好、乐于助人的宠物助手',

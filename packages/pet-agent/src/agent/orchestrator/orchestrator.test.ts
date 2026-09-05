@@ -441,7 +441,6 @@ function readToolMessages(messages: unknown[]) {
 }
 
 const testActor: AgentActor = {
-  petId: 'pet-1',
   userId: 'user-1',
   name: '小白',
   personality: '友好',
@@ -7015,6 +7014,8 @@ test('continue_current projects a continuation briefing without rewriting the ta
 
 test('Capability node inherits root system context into its executor without section forwarding', async () => {
   const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
+  const workdir = `/workspace/${randomUUID()}`;
+  const runtimeEnvironment = JSON.stringify({ workdir });
   const { subagentInputs, callbacks } = createSubagentInputRecorder();
   const answer = { invoke: async () => new AIMessage('finished') } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
@@ -7030,11 +7031,13 @@ test('Capability node inherits root system context into its executor without sec
   });
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect this request.')]), {
     context: { systemPromptSections: common }, callbacks,
-    configurable: { capabilities: [capability('explore', 'Inspect requests.')], toolkits: [] },
+    configurable: { workdir, runtimeEnvironment, capabilities: [capability('explore', 'Inspect requests.')], toolkits: [] },
   });
   assert.equal(subagentInputs.length, 1);
   const systems = subagentInputs[0].filter(SystemMessage.isInstance);
   assert.equal(systems.length, 1);
+  assert.equal(systems[0].text.split(runtimeEnvironment).length - 1, 1);
+  assert.equal(systems[0].text.includes(workdir), true);
   for (const section of common) {
     assert.equal(systems[0].text.split(section.content).length - 1, 1);
     assert.equal(JSON.stringify(result.messages).includes(section.content), false);

@@ -294,7 +294,7 @@ function buildFakeSetup() {
     graphConfig: { contextWindowTokens: 4096 },
     input: {
       messages: [new HumanMessage('start')],
-      actor: { petId: 'eval-pet', userId: 'eval-user' },
+      actor: { userId: 'eval-user' },
       threadId: FAKE_THREAD_ID,
     },
     interfaceContext: { kind: 'tui' as const },

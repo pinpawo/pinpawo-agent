@@ -70,7 +70,6 @@ function loadLiveLlmConfig(): AgentLlmConfig {
 
 function buildActor(): AgentActor {
   return {
-    petId: 'pet-live-test',
     userId: 'user-live-test',
     name: '牛牛',
     personality: '稳重可靠，温和真诚，擅长总结热点并给出克制建议',

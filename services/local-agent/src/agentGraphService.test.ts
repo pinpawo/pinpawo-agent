@@ -15,7 +15,7 @@ function setup(
     graphConfig: {},
     registry: { authorizationGeneration: 'test' },
     input: {
-      actor: { petId: 'pet', userId: null, name: 'Pet' },
+      actor: { userId: null, name: 'Pet' },
       messages: [],
       threadId: 'thread',
     },
@@ -61,7 +61,7 @@ test('cached graphs take current common context through run, invokeState and roo
     }
   }
   const model = new Model({});
-  const actor = { petId: 'pet-context', userId: null, name: 'Pet', species: null, stage: null, personality: null };
+  const actor = { userId: null, name: 'Pet', species: null, stage: null, personality: null };
   const registry = compileAgentRegistry({ capabilities: [], toolkits: [] });
   const service = new LocalAgentGraphService();
   const tokens = [randomUUID(), randomUUID(), randomUUID()];

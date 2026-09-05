@@ -1,7 +1,7 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 
+/** Descriptive profile/review attributes; Pet routing identity belongs to the Host. */
 export type AgentActor = {
-  petId: string;
   userId: string | null;
   name: string;
   personality: string | null;

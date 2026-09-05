@@ -41,7 +41,6 @@ import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
 
 function buildActor(context: AgentContext) {
   return {
-    petId: context.pet.id,
     userId: null,
     name: context.pet.name,
     personality: context.pet.personality,
@@ -181,7 +180,7 @@ export function buildLocalChatAgentInput(params: {
     graphKey: buildGraphKey([
       'local',
       'chat',
-      actor.petId,
+      params.context.pet.id,
       llmConfig.modelProfileId,
       llmConfig.modelProfileFingerprint,
       params.sessionContextCacheKey,

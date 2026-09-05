@@ -452,7 +452,6 @@ function readReviewId(payload: Record<string, unknown> | null): string | null {
 }
 
 const testActor: AgentActor = {
-  petId: 'eval-pet',
   userId: 'eval-user',
   name: '小白',
   personality: '友好、乐于助人的宠物助手',

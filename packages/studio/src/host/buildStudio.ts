@@ -194,6 +194,7 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
       }
 
       const resident = await createResidentPetHost({
+        petId: petConfig.petId,
         actor: buildPetActorFromLocalConfig(petConfig, null),
         modelProfiles: input.modelProfiles,
         ...(petConfig.modelProfileId ? { modelProfileId: petConfig.modelProfileId } : {}),

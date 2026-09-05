@@ -73,7 +73,6 @@ const EVALUATOR_VERSION = 'prompt-goal-v1';
 export const LIFECYCLE_COMPOSITION_REPORT_VERSION = 2 as const;
 
 const actor = {
-  petId: 'eval-pet',
   userId: 'eval-user',
   name: 'lifecycle-composition-eval',
   personality: null,

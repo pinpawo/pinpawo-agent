@@ -95,7 +95,15 @@ parameterless: they no longer receive an AgentActor or inject its display name.
 Pet identity and authored behavior come from PET.md. The legacy decision-config
 helper and its unused workdir/runtimeEnvironment arguments have been removed.
 Host identity/configuration and the optional Pet Profile Toolkit remain separate
-consumers; this change does not remove their fields. Supervisor and subagent assembly register
+consumers. `AgentActor` has no `petId`: local Host context owns that identity,
+and `CreateResidentPetRuntimeOptions.petId` supplies it explicitly to resident
+session initialization. Graph cache identity reads the Host Pet id directly,
+so equal actor profiles cannot merge different Pets' graphs.
+
+The removed helper's workdir parameters were unused; actual execution workdir
+injection is unchanged. The Host renders it in `runtimeEnvironment`, which the
+Capability executor includes as the `runtime-environment` system section. Entry
+and Answer do not receive that execution environment section. Supervisor and subagent assembly register
 the same reusable prompt middleware. Direct Entry/Answer model calls use the
 same accessor and composer. Business nodes do not extract or forward common
 sections. Every model call composes from its role message without mutating graph
@@ -130,3 +138,9 @@ port binding and process inspection and passed outside the filesystem/network
 sandbox. Typechecks passed for pet-agent (including eval types), local-agent,
 and Studio. External tracing was disabled for deterministic unit tests; no live
 model evals were run.
+
+
+The subsequent actor-identity cleanup passed the same 482 pet-agent tests,
+90 Studio tests, and 36 targeted local-agent tests. These include executor
+workdir injection and isolation of equal actor profiles with different Host Pet
+ids. The three package typechecks, including pet-agent eval types, passed.

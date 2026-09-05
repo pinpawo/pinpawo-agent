@@ -35,8 +35,9 @@ The runtime can also expose derived workspace metadata (`id`, `name`, and
 `rootPath`) from the workdir. This is local metadata; there is no persisted
 workspace registry or per-request workspace selection contract.
 
-The Host exposes its effective workdir to the Agent prompt and to
-review/authorization context. It is not a filesystem sandbox or a hidden Tool
+The Host exposes its effective workdir in the Capability executor system prompt
+through the `runtime-environment` section, and separately to review/authorization
+context. Entry and final Answer role prompts do not inject the workdir. It is not a filesystem sandbox or a hidden Tool
 argument: the model chooses each relative path, absolute path, or cwd, and the
 execution layer does not inject or rewrite that input. Toolkit Runtime bindings
 are reserved for Toolkit-owned live resources and ownership.

@@ -9,7 +9,6 @@ import {
   resolveGlobalReviewBatchPolicy,
 } from './globalReviewPolicy';
 const testActor = {
-  petId: 'pet-1',
   userId: 'user-1',
   name: 'Test actor',
   personality: null,

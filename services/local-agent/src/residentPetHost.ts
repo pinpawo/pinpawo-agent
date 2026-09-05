@@ -343,6 +343,8 @@ export class ResidentPetCoordinator {
 }
 
 export type CreateResidentPetRuntimeOptions = {
+  /** Host identity used for session ownership and graph isolation. */
+  petId: string;
   actor: AgentActor;
   modelProfiles: LocalModelProfileRegistry;
   modelProfileId?: string;
@@ -418,10 +420,10 @@ function withDefaultModelProfile(
   return Object.freeze({ ...registry, defaultProfileId: modelProfileId });
 }
 
-function buildResidentAgentContext(actor: AgentActor) {
+function buildResidentAgentContext(petId: string, actor: AgentActor) {
   return {
     pet: {
-      id: actor.petId,
+      id: petId,
       name: actor.name,
       personality: actor.personality ?? null,
       species: actor.species ?? null,
@@ -502,7 +504,7 @@ export async function createResidentPetRuntime(
     capabilityArtifactStore: CapabilityArtifactStore;
   } = {
     serverMode: 'chat',
-    actorId: options.actor.petId,
+    actorId: options.petId,
     actorName: options.actor.name,
     modelProfiles,
     globalReviewPolicyMode: llmConfig.globalReviewPolicyMode
@@ -525,7 +527,7 @@ export async function createResidentPetRuntime(
   };
   const graphService = options.graphService ?? new LocalAgentGraphService();
   const loadContext = options.loadContext
-    ?? (async () => buildResidentAgentContext(options.actor));
+    ?? (async () => buildResidentAgentContext(options.petId, options.actor));
   const sessions = new LocalServerTuiSessionService({
     graphService,
     loadContext,

@@ -554,3 +554,14 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
   assert.match(first.input.runtimeEnvironment ?? '', /会话开始时间：2026-06-23T10:30:00\+08:00/);
   assert.match(first.input.runtimeEnvironment ?? '', /时区：Asia\/Shanghai/);
 });
+
+
+test('graph identity uses the Host Pet id independently of identical actor profiles', () => {
+  const context = createContext();
+  const first = buildTestLocalChatAgentInput({ context, userMessage: 'hello' });
+  const second = buildTestLocalChatAgentInput({
+    context: { ...context, pet: { ...context.pet, id: 'pet-b' } }, userMessage: 'hello',
+  });
+  assert.deepEqual(first.graphConfig.actor, second.graphConfig.actor);
+  assert.notEqual(first.graphKey, second.graphKey);
+});

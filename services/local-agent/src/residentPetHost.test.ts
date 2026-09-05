@@ -268,9 +268,9 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
   };
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
   const createPet = async (petId: string) => createResidentPetHost({
+    petId,
     actor: {
-      petId,
-      name: petId,
+      name: 'Same display name',
       userId: null,
       personality: null,
       stage: null,
@@ -376,8 +376,8 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     }),
   };
   const host = await createResidentPetHost({
+    petId: 'pet-events',
     actor: {
-      petId: 'pet-events',
       name: 'pet-events',
       userId: null,
       personality: null,
@@ -558,8 +558,8 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     }),
   };
   const host = await createResidentPetHost({
+    petId: 'pet-late-observer',
     actor: {
-      petId: 'pet-late-observer',
       name: 'pet-late-observer',
       userId: null,
       personality: null,

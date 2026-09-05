@@ -6,7 +6,6 @@ import { createPetProfileToolkit } from './toolkits/petProfile';
 test('pet profile toolkit exposes local operation metadata', () => {
   const toolkit = createPetProfileToolkit({
     actor: {
-      petId: 'pet-1',
       userId: null,
       name: '小羊',
       personality: '认真',

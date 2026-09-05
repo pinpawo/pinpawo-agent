@@ -225,3 +225,11 @@ Studio cross-package acceptance 5 passed. The final affected channel/handler
 suite passed 38 tests. Local-agent, Studio and acceptance-project typechecks
 passed; local-agent runtime and Studio ESM/declaration builds passed. No live
 model calls or macOS companion checks were involved.
+
+The model-configuration audit follow-up removes the external `temperature` and
+`subagentThinking` overrides, including the stored `subagent_thinking` reader.
+Provider temperature defaults and the existing per-role thinking policy determine
+model construction. This removes these two mutable inputs from graph cache
+identity concerns; other graph dependency/cache concerns remain separate.
+Validation for this follow-up: 63 model/config/channel tests and local-agent
+TypeScript checking passed; live-model smoke was updated but not executed.

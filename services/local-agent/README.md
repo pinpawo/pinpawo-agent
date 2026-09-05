@@ -35,7 +35,10 @@ Programmatic Chat and Studio Hosts resolve execution settings once with
 `resolveHostExecutionConfig(runtimeConfig, settings)`. The resolved settings own
 runtime paths, review mode, authorization safety level and registry backend.
 Agent input construction receives these settings explicitly. Model profiles no
-longer carry review policy. Conversation and background dispatch share the same
+longer carry review policy. Temperature uses the provider default; thinking follows
+the internal role policy (Answer and subagent request thinking where supported).
+The former `temperature` / `subagentThinking` inputs and stored `subagent_thinking`
+setting are no longer consumed. Conversation and background dispatch share the same
 Host policy store, so changes apply consistently to subsequent runs.
 
 For a local repository smoke test:

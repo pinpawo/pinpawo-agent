@@ -7,7 +7,6 @@ import {
   type ModelProfileRegistrySnapshot,
   type ModelProfileSummary,
 } from './modelProfiles';
-import { loadStoredConfig } from './storage';
 import {
   findLlmModelPresetByKey,
   inferLlmModelPreset,
@@ -56,11 +55,9 @@ function withPresetInputModalities(
 
 function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
   const config = getConfig();
-  const stored = loadStoredConfig();
   return {
     timeoutMs: 120000,
     maxRetries: 2,
-    subagentThinking: stored.subagent_thinking ?? true,
     ...(config.structuredOutputAutoRepair !== undefined
       ? { structuredOutputAutoRepair: config.structuredOutputAutoRepair }
       : {}),

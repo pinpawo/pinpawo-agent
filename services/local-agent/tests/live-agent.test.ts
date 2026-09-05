@@ -63,7 +63,6 @@ function loadLiveLlmConfig(): AgentLlmConfig {
       || 'https://api.deepseek.com',
     model: process.env.LLM_MODEL || stored.llm_model || 'deepseek-v4-pro',
     observeModel: process.env.LLM_OBSERVE_MODEL || stored.llm_observe_model || undefined,
-    temperature: Number(process.env.LLM_TEMPERATURE ?? 0.4),
     timeoutMs: Number(process.env.LLM_TIMEOUT_MS ?? 90000),
   };
 }

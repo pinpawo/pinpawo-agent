@@ -70,15 +70,9 @@ export function createTestModelProfiles(
       ...(input.subagentContextWindowTokens
         ? { subagentContextWindowTokens: input.subagentContextWindowTokens }
         : {}),
-      ...(input.temperature !== undefined
-        ? { temperature: input.temperature }
-        : {}),
       ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
       ...(input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {}),
       ...(input.verbose !== undefined ? { verbose: input.verbose } : {}),
-      ...(input.subagentThinking !== undefined
-        ? { subagentThinking: input.subagentThinking }
-        : {}),
       ...(input.structuredOutputAutoRepair !== undefined
         ? { structuredOutputAutoRepair: input.structuredOutputAutoRepair }
         : {}),

@@ -33,6 +33,10 @@ test('approval state follows the canonical waiting review and defaults to primar
     syncApprovalState(state, null).phase,
     'closed',
   );
+  assert.equal(
+    syncApprovalState(state, { payload: { kind: 'pause_task' } }).phase,
+    'closed',
+  );
 });
 
 test('approval navigation yields to free-text editing after the draft starts', () => {

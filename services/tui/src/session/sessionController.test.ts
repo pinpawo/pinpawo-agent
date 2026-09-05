@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createAgentSessionSnapshot,
+  readHumanReviewPendingInterrupt,
 } from '@pinpawo/agent-session';
 import { TuiSessionController } from './sessionController';
 import {
@@ -249,7 +250,9 @@ test('a pending interrupt invalidates an older in-flight refresh snapshot', () =
   connection.receive(snapshotResult('refresh', 'chat:one'));
 
   assert.equal(
-    controller.getState().session.pendingInterrupt?.interruptId,
+    readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    )?.interruptId,
     'interrupt-new',
   );
   controller.stop();
@@ -1211,7 +1214,7 @@ test('manual compaction binds the active session and uses its model-call timeout
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: null,
+      pendingInterrupt: { payload: { kind: 'pause_task' } },
     }),
   });
   assert.equal((await compacted).compacted, true);
@@ -1243,14 +1246,12 @@ test('delegation continuation sends resume_active and permits an empty paused re
     'continue-refresh',
   ];
   let connection!: FakeConnection;
-  const interruptedRequestIds: string[] = [];
   const controller = new TuiSessionController({
     connectionFactory: (handlers) => {
       connection = new FakeConnection(handlers);
       return connection;
     },
     requestIdFactory: () => requestIds.shift() ?? 'unexpected',
-    onRunInterrupted: (requestId) => interruptedRequestIds.push(requestId),
   });
   controller.start();
   connection.open();
@@ -1274,7 +1275,6 @@ test('delegation continuation sends resume_active and permits an empty paused re
     type: 'session.snapshot.get',
     requestId: 'interrupted-refresh',
   });
-  assert.deepEqual(interruptedRequestIds, ['review-cancel']);
   connection.receive({
     type: 'session.snapshot.result',
     requestId: 'interrupted-refresh',
@@ -1283,7 +1283,7 @@ test('delegation continuation sends resume_active and permits an empty paused re
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: null,
+      pendingInterrupt: { payload: { kind: 'pause_task' } },
     }),
   });
 
@@ -1312,18 +1312,18 @@ test('delegation continuation sends resume_active and permits an empty paused re
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: null,
+      pendingInterrupt: { payload: { kind: 'pause_task' } },
     }),
   });
   await resumeOriginal;
 
   connection.failNextSend = true;
   assert.deepEqual(
-    controller.continueActiveDelegation('apply the new constraints'),
+    controller.continuePausedTask('apply the new constraints'),
     { ok: false, reason: 'send-failed' },
   );
 
-  assert.deepEqual(controller.continueActiveDelegation(''), {
+  assert.deepEqual(controller.continuePausedTask(''), {
     ok: true,
     requestId: 'continue-empty',
   });
@@ -1334,7 +1334,7 @@ test('delegation continuation sends resume_active and permits an empty paused re
     activeDelegationTransition: 'resume_active',
   });
   assert.deepEqual(
-    controller.continueActiveDelegation('cannot overlap the active run'),
+    controller.continuePausedTask('cannot overlap the active run'),
     { ok: false, reason: 'busy' },
   );
   connection.receive(eventMessage({

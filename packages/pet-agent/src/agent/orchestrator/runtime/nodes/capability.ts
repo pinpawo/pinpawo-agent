@@ -44,6 +44,7 @@ import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
 import { materializeDelegation } from '../../delegation';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 import {
+  pauseTaskInterrupt,
   readPauseTaskInterruptSignal,
   type PausedSubagentState,
 } from '../../interrupt';
@@ -332,6 +333,7 @@ export function createCapabilityNode(params: {
       ...(paused ? {
         runSupervisorSession: null,
         taskRunContinuation: pauseContinuation,
+        taskPauseInterrupt: pauseTaskInterrupt.interaction(),
       } : {}),
       sessionToolAuthorizations: {
         generation: registry.authorizationGeneration,

@@ -4,9 +4,11 @@ import {
   buildAgentRunnableConfig,
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
+  readPauseTaskInterrupt,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
+  type PauseTaskInterruptPayload,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -56,6 +58,7 @@ export type LocalAgentGraphPendingInterrupt = {
 export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
   pendingInterrupt: LocalAgentGraphPendingInterrupt | null;
+  pauseTaskInterrupt: PauseTaskInterruptPayload | null;
   hasPendingContinuation: boolean;
   currentPlan: AgentPlan | null;
 };
@@ -210,6 +213,7 @@ export class LocalAgentGraphService {
     return {
       messages: readSnapshotMessages(snapshot),
       pendingInterrupt: projectPendingInterrupt(snapshot),
+      pauseTaskInterrupt: readPauseTaskInterrupt(snapshot),
       hasPendingContinuation: hasPendingContinuation(snapshot),
       currentPlan: projectCurrentPlan(values),
     };

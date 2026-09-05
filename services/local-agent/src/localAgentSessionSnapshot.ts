@@ -8,6 +8,7 @@ import type {
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
+import type { PauseTaskInterruptPayload } from '@pinpawo/pet-agent';
 import type { PendingInterruptSnapshot } from './localServerChatHandler';
 import type { LocalServerDeps } from './localServerTypes';
 import type { TuiCheckpointMessage } from './localServerTuiSessions';
@@ -26,12 +27,16 @@ export function buildLocalAgentSessionSnapshot(params: {
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingInterrupt?: PendingInterruptSnapshot | null;
+  pauseTaskInterrupt?: PauseTaskInterruptPayload | null;
   /** Live local transport state; never inferred from checkpoint plan data. */
   activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
-  const pendingInterrupt = params.pendingInterrupt ?? null;
+  const pendingInterrupt = params.pendingInterrupt?.pendingInterrupt
+    ?? (!params.activeRun && params.pauseTaskInterrupt
+      ? { payload: params.pauseTaskInterrupt }
+      : null);
   const runtime = buildLocalAgentRuntimeView(
     params.deps,
     params.modelProfileId,
@@ -50,7 +55,7 @@ export function buildLocalAgentSessionSnapshot(params: {
     kind: params.kind,
     timeline,
     activeRun: params.activeRun ?? null,
-    pendingInterrupt: pendingInterrupt?.pendingInterrupt ?? null,
+    pendingInterrupt,
     ...(params.currentPlan !== undefined ? { currentPlan: params.currentPlan } : {}),
     runtime,
     ...(sessionTokenUsage ? { sessionTokenUsage } : {}),

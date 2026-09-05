@@ -106,12 +106,12 @@ export function formatComposerPlaceholder(
   session: AgentSession,
   composerMode: AgentSession['kind'] = session.kind,
   options: {
-    pausedDelegation?: boolean;
+    pausedTask?: boolean;
   } = {},
 ) {
   const actor = sessionActorLabel(session);
   const run = session.activeRun;
-  if (session.pendingInterrupt) {
+  if (session.pendingInterrupt?.payload.kind === 'human_review') {
     return 'Review required · use the approval panel';
   }
   if (run?.state === 'interrupting') {
@@ -126,7 +126,7 @@ export function formatComposerPlaceholder(
   if (run) {
     return `Waiting for ${actor} · draft next message · Esc interrupt`;
   }
-  if (options.pausedDelegation) {
+  if (options.pausedTask) {
     return 'Task paused · Enter to continue · Esc starts a new task';
   }
   return COMPOSER_PLACEHOLDER;

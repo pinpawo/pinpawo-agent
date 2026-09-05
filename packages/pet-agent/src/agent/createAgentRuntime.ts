@@ -41,6 +41,12 @@ export {
   type OrchestratorGraph,
 } from './orchestrator/runtime/graph';
 export {
+  readPauseTaskInterrupt,
+} from './orchestrator/interrupt';
+export type {
+  PauseTaskInterruptPayload,
+} from './orchestrator/interrupt';
+export {
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
   type OrchestratorGraphStream,

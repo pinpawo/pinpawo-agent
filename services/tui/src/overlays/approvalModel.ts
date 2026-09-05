@@ -1,7 +1,9 @@
-import type {
-  PendingInterruptProjection,
-  ReviewResponse,
-  ReviewSpec,
+import {
+  readHumanReviewPendingInterrupt,
+  type HumanReviewPendingInterruptProjection,
+  type PendingInterruptProjection,
+  type ReviewResponse,
+  type ReviewSpec,
 } from '@pinpawo/agent-session';
 import { reviewResponsesRemainValid } from '../session/reviewDecision';
 import { truncateTerminalLine } from '../text/terminalText';
@@ -16,7 +18,7 @@ export type ApprovalState =
   | { phase: 'closed' }
   | {
       phase: ApprovalPhase;
-      pendingInterrupt: PendingInterruptProjection;
+      pendingInterrupt: HumanReviewPendingInterruptProjection;
       reviewIndex: number;
       responses: ReviewResponse[];
       selectedIndex: number;
@@ -113,19 +115,20 @@ export function syncApprovalState(
   pendingInterrupt: PendingInterruptProjection | null,
   resumeInFlight = false,
 ): ApprovalState {
-  if (!pendingInterrupt) {
+  const pendingReview = readHumanReviewPendingInterrupt(pendingInterrupt);
+  if (!pendingReview) {
     return state.phase === 'closed' ? state : createApprovalState();
   }
   if (
     state.phase !== 'closed'
-    && state.pendingInterrupt.interruptId === pendingInterrupt.interruptId
-    && reviewResponsesRemainValid(pendingInterrupt, state.responses)
+    && state.pendingInterrupt.interruptId === pendingReview.interruptId
+    && reviewResponsesRemainValid(pendingReview, state.responses)
   ) {
     if (state.phase === 'resolution-sent' && !resumeInFlight) {
       return {
         ...state,
         phase: 'ready',
-        pendingInterrupt,
+        pendingInterrupt: pendingReview,
         interruptSent: false,
         submissionFrame: 0,
         message: undefined,
@@ -133,20 +136,20 @@ export function syncApprovalState(
     }
     return {
       ...state,
-      pendingInterrupt,
+      pendingInterrupt: pendingReview,
       reviewIndex: state.responses.length,
       selectedIndex: clampOptionIndex(
         state.selectedIndex,
-        currentReviewFrom(pendingInterrupt, state.responses)?.options.length ?? 0,
+        currentReviewFrom(pendingReview, state.responses)?.options.length ?? 0,
       ),
     };
   }
   return {
     phase: 'ready',
-    pendingInterrupt,
+    pendingInterrupt: pendingReview,
     reviewIndex: 0,
     responses: [],
-    selectedIndex: defaultOptionIndex(pendingInterrupt.payload.interactions[0]),
+    selectedIndex: defaultOptionIndex(pendingReview.payload.interactions[0]),
     contentOffset: 0,
     draft: '',
     interruptSent: false,
@@ -522,7 +525,7 @@ function clampOptionIndex(index: number, count: number) {
 }
 
 function currentReviewFrom(
-  pendingInterrupt: PendingInterruptProjection,
+  pendingInterrupt: HumanReviewPendingInterruptProjection,
   responses: readonly ReviewResponse[],
 ) {
   return pendingInterrupt.payload.interactions[responses.length];

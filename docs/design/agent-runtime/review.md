@@ -299,12 +299,17 @@ commits first. That change may add PauseTaskInterrupt wiring, but must not alter
 Review resolution, capability business rules, Agent Session, or an interaction
 interface.
 
-Whether a task is paused is derived from durable Runtime and graph state, for
-example pending graph work or a retained active delegation after an explicit
-pause or Review cancellation. Retained work alone is insufficient: a normal
-Supervisor question may end its run while preserving work for continuation,
-without creating `PauseTaskInterrupt` or an `interrupted` event. That interaction
-is defined by the [Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+After an interruption request, Pet Runtime may use durable Runtime and graph
+state — pending graph work, or a retained active delegation after an explicit
+pause or Review cancellation — to decide whether the stopped invocation left
+work unfinished. It then materializes an explicit `PauseTaskInterrupt` payload
+in ordinary Runtime state. Host and interfaces project that payload; they must
+not infer the interruption reason from resumability alone. Retained work alone
+is insufficient: a normal limit-reached or user-input-required result may
+preserve work for continuation, and a normal Supervisor question may end its
+run while preserving work, without creating `PauseTaskInterrupt` or an
+`interrupted` event. That interaction is defined by the
+[Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
 A finished task must not project `PauseTaskInterrupt`.
 
 ## Replay-safe Review policy
@@ -497,7 +502,8 @@ For an ordinary streaming model call:
 - no subagent completion reason is recorded;
 - Pet Runtime determines whether unfinished work remains from graph and
   Runtime state;
-- unfinished work is exposed as `PauseTaskInterrupt`.
+- when cancellation actually left unfinished work, Pet Runtime materializes
+  and exposes `PauseTaskInterrupt` explicitly.
 
 Cancellation is the mechanism that stops currently executing code.
 `PauseTaskInterrupt` is the Runtime meaning of the resulting unfinished task.
@@ -622,8 +628,10 @@ run at that boundary.
    unfinished work.
 2. Route Esc through a semantic task-pause command and active
    invocation cancellation.
-3. After settlement, derive pause availability from existing graph/Runtime
-   state rather than a new boolean.
+3. After settlement, use existing graph/Runtime state to decide whether the
+   canceled invocation left unfinished work, then materialize
+   `PauseTaskInterrupt`; do not project pause from resumability alone or add a
+   continuation boolean.
 4. Implement continue for both an unfinished graph node and a retained active
    delegation.
 5. Add optional guidance at the Runtime boundary.
@@ -672,7 +680,10 @@ run at that boundary.
 - Esc during model streaming aborts the invocation and commits no partial AI
   message;
 - Esc during a cancellable tool propagates `AbortSignal`;
-- stopped unfinished work projects `PauseTaskInterrupt`;
+- canceled execution with unfinished work materializes and projects
+  `PauseTaskInterrupt`;
+- a normal limit-reached or user-input-required result is not misclassified as
+  an interruption merely because work remains resumable;
 - genuinely finished work does not project `PauseTaskInterrupt`;
 - continue re-enters the correct pending graph node or retained delegation;
 - optional guidance becomes a Runtime-created message exactly once;

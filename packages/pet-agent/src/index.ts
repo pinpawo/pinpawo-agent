@@ -117,6 +117,7 @@ export {
   DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
   isOrchestratorInternalAiStreamNode,
   ORCHESTRATOR_RECURSION_LIMIT,
+  readPauseTaskInterrupt,
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,
   compileAgentRegistry,
@@ -126,6 +127,7 @@ export {
 } from './agent/createAgentRuntime';
 export type {
   ActiveDelegationTransition,
+  PauseTaskInterruptPayload,
   RunSupervisorInput,
   RunSupervisorMode,
   RunSupervisorResult,

@@ -196,3 +196,28 @@ test('explicit null input continues the current LangGraph task', async () => {
   assert.deepEqual(streamInputs, [null]);
   assert.deepEqual(invokeInputs, [null]);
 });
+
+test('thread state projects an explicit Runtime task pause', async () => {
+  const graph = {
+    async getState() {
+      return {
+        values: {
+          messages: [],
+          taskPauseInterrupt: { kind: 'pause_task' },
+        },
+        next: [],
+        tasks: [],
+      };
+    },
+  } as unknown as OrchestratorGraph;
+  const service = new LocalAgentGraphService();
+  const graphs = (service as unknown as {
+    graphs: Map<string, OrchestratorGraph>;
+  }).graphs;
+  graphs.set('test', graph);
+
+  const state = await service.readThreadState(setup());
+
+  assert.deepEqual(state.pauseTaskInterrupt, { kind: 'pause_task' });
+  assert.equal(state.pendingInterrupt, null);
+});

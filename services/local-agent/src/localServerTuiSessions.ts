@@ -11,6 +11,7 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   mainConversationMessages,
+  type PauseTaskInterruptPayload,
   type ReviewSpec,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
@@ -75,6 +76,7 @@ export type TuiCheckpointPoint = {
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingInterrupt: ActivePendingInterrupt | null;
+  pauseTaskInterrupt: PauseTaskInterruptPayload | null;
   currentPlan: AgentPlan | null;
 };
 
@@ -405,6 +407,7 @@ export class LocalServerTuiSessionService {
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingInterrupt,
+      pauseTaskInterrupt: state.pauseTaskInterrupt,
       currentPlan: state.currentPlan,
     };
   }
@@ -498,6 +501,7 @@ export class LocalServerTuiSessionService {
       messages: checkpoint.messages,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingInterrupt: checkpoint.pendingInterrupt,
+      pauseTaskInterrupt: checkpoint.pauseTaskInterrupt,
       currentPlan: checkpoint.currentPlan,
     };
   }

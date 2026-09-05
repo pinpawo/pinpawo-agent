@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
+import {
+  createAgentSessionSnapshot,
+  readHumanReviewPendingInterrupt,
+} from '@pinpawo/agent-session';
 import { TuiSessionController } from './sessionController';
 import {
   FakeConnection,
@@ -204,7 +207,9 @@ test('authoritative completion snapshot closes a review rejected by the server',
     },
   });
   assert.equal(
-    controller.getState().session.pendingInterrupt?.interruptId,
+    readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    )?.interruptId,
     'review-action',
   );
   assert.deepEqual(connection.sent.at(-1), {
@@ -271,7 +276,9 @@ test('a sent review resolution can be followed by an ordered run interrupt', () 
   });
   assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
   assert.equal(
-    controller.getState().session.pendingInterrupt?.interruptId,
+    readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    )?.interruptId,
     'review-action',
   );
   controller.stop();

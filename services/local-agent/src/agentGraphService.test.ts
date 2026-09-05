@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { MemorySaver, interrupt } from '@langchain/langgraph';
-import { compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
+import { buildOrchestratorRunInput, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type RunSupervisorRunner } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import { buildAgentGraphConfigurable, LocalAgentGraphService } from './agentGraphService';
 
@@ -12,7 +12,6 @@ function setup(
   interfaceContext?: AgentChannelSetup['interfaceContext'],
 ): AgentChannelSetup {
   return {
-    graphKey: 'test',
     graphConfig: {},
     registry: { authorizationGeneration: 'test' },
     input: {
@@ -49,7 +48,7 @@ test('interactive graph sessions use interface-provided review capabilities', ()
 });
 
 
-test('cached graphs take current common context through run, invokeState and root stream entry points', async () => {
+test('graphs take current common context through run, invokeState and root stream entry points', async () => {
   const seen: BaseMessage[][] = [];
   class Model extends BaseChatModel {
     _llmType() { return 'local-context-recorder'; }
@@ -66,7 +65,7 @@ test('cached graphs take current common context through run, invokeState and roo
   const tokens = [randomUUID(), randomUUID(), randomUUID()];
   for (const [index, token] of tokens.entries()) {
     const input: AgentChannelSetup = {
-      graphKey: 'shared-context-test', registry,
+      registry,
       graphConfig: { models: { act: model } },
       input: { messages: [new HumanMessage('hello')], context: { systemPromptSections: [{ id: 'host:pet', content: token }] } },
     };
@@ -113,7 +112,7 @@ test('all invocation entry points preserve scope, trace identity and current met
       const traceId = randomUUID();
       const workdir = `/workspace/${randomUUID()}`;
       const input: AgentChannelSetup = {
-        graphKey: 'same-cached-graph', registry, graphConfig,
+        registry, graphConfig,
         input: { messages: [new HumanMessage('inspect')], traceId, allowedCapabilityNames,
           context: { workdir }, signal: new AbortController().signal, globalReviewPolicy: { mode: 'full_access' } },
       };
@@ -143,7 +142,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
   const workdirs = [`/workspace/${randomUUID()}`, `/workspace/${randomUUID()}`];
   const traceId = randomUUID();
   const input: AgentChannelSetup = {
-    graphKey: randomUUID(), registry: compileAgentRegistry({ toolkits: [], capabilities: [] }),
+    registry: compileAgentRegistry({ toolkits: [], capabilities: [] }),
     graphConfig: {
       models: { act: model }, checkpoint: new MemorySaver(), capabilityRegistryBackend: 'memory',
       runSupervisorRunner: { async invoke(input, config) {
@@ -171,28 +170,80 @@ test('local stream resume refreshes invocation metadata while preserving the che
   ]);
 });
 
-test('explicit null input continues the current LangGraph task', async () => {
-  const streamInputs: unknown[] = [];
-  const invokeInputs: unknown[] = [];
-  const graph = {
-    async streamEvents(input: unknown) {
-      streamInputs.push(input);
-      return {};
-    },
-    async invoke(input: unknown) {
-      invokeInputs.push(input);
-      return {};
-    },
-  } as unknown as OrchestratorGraph;
+test('explicit null input continues the checkpoint task through both execution paths', async () => {
+  const seen: BaseMessage[][] = [];
+  class Model extends BaseChatModel {
+    _llmType() { return 'checkpoint-continuation'; }
+    bindTools() { return this; }
+    async _generate(messages: BaseMessage[]) {
+      seen.push(messages);
+      const message = new AIMessage('continued');
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
   const service = new LocalAgentGraphService();
-  const graphs = (service as unknown as {
-    graphs: Map<string, OrchestratorGraph>;
-  }).graphs;
-  graphs.set('test', graph);
+  for (const path of ['stream', 'invoke']) {
+    const input: AgentChannelSetup = {
+      registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
+      graphConfig: { models: { act: new Model({}) }, checkpoint: new MemorySaver() },
+      input: { threadId: randomUUID(), messages: [new HumanMessage('unused new input')] },
+    };
+    await service.updateState(input, buildOrchestratorRunInput([
+      new HumanMessage('checkpointed request'),
+    ]), 'captureUserRequest');
+    assert.equal((await service.readThreadState(input)).hasPendingContinuation, true);
+    if (path === 'stream') {
+      const stream = await service.streamEvents(input, null);
+      for await (const _event of stream) { /* Consume the resumed task. */ }
+      await stream.output;
+    } else {
+      await service.invokeState(input, null);
+    }
+    const state = await service.readThreadState(input);
+    assert.equal(state.messages.at(-1)?.text, 'continued');
+    assert.ok(seen.at(-1)?.some(message => message.text === 'checkpointed request'));
+    assert.equal(seen.at(-1)?.some(message => message.text === 'unused new input'), false);
+    assert.equal(state.hasPendingContinuation, false);
+  }
+});
 
-  await service.streamEvents(setup(), null);
-  await service.invokeState(setup(), null);
+test('graph execution uses replacement models and checkpoint adapters for the same thread', async () => {
+  class Model extends BaseChatModel {
+    constructor(private readonly reply: string) { super({}); }
+    _llmType() { return 'same-model-identity'; }
+    bindTools() { return this; }
+    async _generate() {
+      const message = new AIMessage(this.reply);
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
+  const firstCheckpoint = new MemorySaver();
+  const secondCheckpoint = new MemorySaver();
+  const registry = compileAgentRegistry({ capabilities: [], toolkits: [] });
+  const service = new LocalAgentGraphService();
+  const input: AgentChannelSetup = {
+    registry,
+    graphConfig: { models: { act: new Model('first') }, checkpoint: firstCheckpoint },
+    input: { threadId: randomUUID(), messages: [new HumanMessage('first request')] },
+  };
+  assert.equal((await service.run(input)).reply, 'first');
 
-  assert.deepEqual(streamInputs, [null]);
-  assert.deepEqual(invokeInputs, [null]);
+  input.graphConfig.models = { act: new Model('replacement') };
+  input.input.messages = [new HumanMessage('second request')];
+  const continued = await service.run(input);
+  assert.equal(continued.reply, 'replacement');
+  assert.ok(continued.messages.some(message => message.text === 'first request'));
+
+  input.graphConfig.checkpoint = secondCheckpoint;
+  input.input.messages = [new HumanMessage('separate store')];
+  const isolated = await service.run(input);
+  assert.equal(isolated.reply, 'replacement');
+  assert.equal(isolated.messages.some(message => message.text === 'first request'), false);
+  assert.equal(isolated.messages.some(message => message.text === 'second request'), false);
+
+  input.graphConfig.checkpoint = firstCheckpoint;
+  const restored = await service.readThreadState(input);
+  assert.ok(restored.messages.some(message => message.text === 'first request'));
+  assert.ok(restored.messages.some(message => message.text === 'second request'));
+  assert.equal(restored.messages.some(message => message.text === 'separate store'), false);
 });

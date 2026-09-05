@@ -29,7 +29,7 @@ import {
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import { createTestModelProfiles, createTestModelProfileRegistry } from './testing/modelProfiles';
+import { createTestModelProfiles } from './testing/modelProfiles';
 
 function createContext(): AgentContext {
   return {
@@ -129,10 +129,9 @@ test('buildLocalChatAgentInput keeps the Capability registry backend explicit', 
 
   assert.equal(filesystem.graphConfig.capabilityRegistryBackend, 'filesystem');
   assert.equal(memory.graphConfig.capabilityRegistryBackend, 'memory');
-  assert.notEqual(filesystem.graphKey, memory.graphKey);
 });
 
-test('buildLocalChatAgentInput passes the Pet default Capability into the graph identity', () => {
+test('buildLocalChatAgentInput passes the Pet default Capability into graph construction', () => {
   const general = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
@@ -144,10 +143,10 @@ test('buildLocalChatAgentInput passes the Pet default Capability into the graph 
   });
 
   assert.equal(planning.graphConfig.defaultCapabilityName, 'studio_planning');
-  assert.notEqual(planning.graphKey, general.graphKey);
+  assert.equal(general.graphConfig.defaultCapabilityName, undefined);
 });
 
-test('buildLocalChatAgentInput supplies Pet context without changing graph identity', () => {
+test('buildLocalChatAgentInput supplies current Pet invocation context', () => {
   const firstDocument = definePetDocument({ content: '# First Pet' });
   const secondDocument = definePetDocument({ content: '# Second Pet' });
   const first = buildTestLocalChatAgentInput({
@@ -163,7 +162,6 @@ test('buildLocalChatAgentInput supplies Pet context without changing graph ident
 
   assert.deepEqual(first.input.context?.systemPromptSections?.[0], petDocumentSystemPromptSection(firstDocument));
   assert.deepEqual(second.input.context?.systemPromptSections?.[0], petDocumentSystemPromptSection(secondDocument));
-  assert.equal(first.graphKey, second.graphKey);
 });
 
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
@@ -345,52 +343,6 @@ test('buildDecisionStructuredOutput honors the resolved profile strategy before 
   });
 });
 
-test('graph identity distinguishes stable profiles with the same model on different endpoints', () => {
-  const profiles = createTestModelProfileRegistry([
-    {
-      modelProfileId: 'account-a',
-      model: 'same-model',
-      baseUrl: 'https://account-a.example.test/v1',
-    },
-    {
-      modelProfileId: 'account-b',
-      model: 'same-model',
-      baseUrl: 'https://account-b.example.test/v1',
-    },
-  ]);
-  const first = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    llmConfig: profiles.resolve('account-a'),
-  });
-  const second = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    llmConfig: profiles.resolve('account-b'),
-  });
-
-  assert.notEqual(first.graphKey, second.graphKey);
-  assert.match(first.graphKey, /account-a/);
-  assert.match(second.graphKey, /account-b/);
-});
-
-test('graph identity isolates session-scoped model input adapters', () => {
-  const params = {
-    context: createContext(),
-    userMessage: 'hello',
-  };
-  const first = buildTestLocalChatAgentInput({
-    ...params,
-    sessionContextCacheKey: 'session-a',
-  });
-  const second = buildTestLocalChatAgentInput({
-    ...params,
-    sessionContextCacheKey: 'session-b',
-  });
-
-  assert.notEqual(first.graphKey, second.graphKey);
-});
-
 test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
@@ -550,15 +502,6 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
 });
 
 
-test('graph identity uses the Host Pet id independently of display names', () => {
-  const context = createContext();
-  const first = buildTestLocalChatAgentInput({ context, userMessage: 'hello' });
-  const second = buildTestLocalChatAgentInput({
-    context: { ...context, pet: { ...context.pet, id: 'pet-b' } }, userMessage: 'hello',
-  });
-  assert.notEqual(first.graphKey, second.graphKey);
-});
-
 test('Host resolves workdir once and keeps tracing attribution out of Agent input', () => {
   const previous = getConfig();
   try {
@@ -574,7 +517,6 @@ test('Host resolves workdir once and keeps tracing attribution out of Agent inpu
     setConfig({ workdir: '/another-global-default' });
     assert.equal(first.input.context?.workdir, resolveUserDir(fallback));
     assert.equal(second.input.context?.workdir, resolveUserDir('~/different'));
-    assert.equal(first.graphKey, second.graphKey);
     assert.equal(first.traceUserId, firstUser);
     assert.equal(second.traceUserId, secondUser);
     assert.equal(JSON.stringify(first.input).includes(firstUser), false);

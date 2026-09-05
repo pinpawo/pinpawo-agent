@@ -36,7 +36,6 @@ import {
 import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
 
 export type AgentChannelSetup = {
-  graphKey: string;
   graphConfig: OrchestratorConfig;
   input: AgentInvokeInput;
   registry: CompiledAgentRegistry;
@@ -44,12 +43,6 @@ export type AgentChannelSetup = {
   traceUserId?: string;
   interfaceContext?: LocalAgentInterfaceContext;
 };
-
-function buildGraphKey(parts: Array<string | null | undefined>) {
-  return parts
-    .map((part) => (part == null || part === '' ? '_' : part))
-    .join(':');
-}
 
 export function buildDecisionStructuredOutput(
   llmConfig: AgentLlmConfig,
@@ -79,8 +72,6 @@ export function buildLocalChatAgentInput(params: {
   userMessage: string;
   llmConfig: AgentLlmConfig;
   hostConfig: HostExecutionConfig;
-  /** Cache identity for hosts that key a graph to one durable session ledger. */
-  sessionContextCacheKey?: string;
   toolkits?: AgentToolkit[];
   /** Complete Host inventory projection, including unavailable Toolkits and reasons. */
   toolkitInventoryEntries?: readonly ToolkitInventoryEntry[];
@@ -129,22 +120,6 @@ export function buildLocalChatAgentInput(params: {
   );
 
   return {
-    graphKey: buildGraphKey([
-      'local',
-      'chat',
-      params.context.pet.id,
-      llmConfig.modelProfileId,
-      llmConfig.modelProfileFingerprint,
-      params.sessionContextCacheKey,
-      llmConfig.model,
-      llmConfig.observeModel ?? llmConfig.model,
-      String(llmConfig.contextWindowTokens ?? 32000),
-      String(llmConfig.subagentContextWindowTokens ?? llmConfig.contextWindowTokens ?? 32000),
-      String(generationReserveTokens ?? 0),
-      params.checkpoint ? 'checkpoint' : 'memory',
-      capabilityRegistryBackend,
-      params.defaultCapabilityName ?? 'general',
-    ]),
     graphConfig: {
       models,
       modelInputModalities: llmConfig.inputModalities ?? ['text'],

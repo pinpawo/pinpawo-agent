@@ -24,11 +24,7 @@ import {
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { readMessageText } from '../../utils';
-import {
-  getInvokeOptions,
-  readRunIterationLimit,
-} from '../config';
-import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
+import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
@@ -101,7 +97,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
         ...buildAnswerCleanup(state),
       };
     }
-    const { maxRunIterations } = getInvokeOptions(runnableConfig);
     // The full main conversation queue. Completed subagent results live here as
     // handoff copies (first-class, lane-free). A user-input-required result is
     // different: its lane remains resumable, so its announce and artifact refs
@@ -155,9 +150,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       awaitingUserInput,
       userInputQuestion: state.runUserInputRequest?.question ?? null,
       userInputRequiredContext,
-      runIterationLimit: maxRunIterations
-        ?? readRunIterationLimit(config.maxRunIterations)
-        ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
+      runIterationLimit: ORCHESTRATOR_MAX_ITERATIONS,
     });
     const answerMessages = buildAnswerInvocationMessages({
       userRequest: state.runUserRequest,

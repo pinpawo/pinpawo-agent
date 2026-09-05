@@ -3,7 +3,7 @@ import { LangfuseSpanProcessor } from '@langfuse/otel';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 
 type LangfuseTraceContext = {
-  sessionId: string;
+  sessionId?: string;
   userId?: string;
   metadata: Record<string, unknown>;
 };

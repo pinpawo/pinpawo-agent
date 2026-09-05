@@ -3,6 +3,7 @@ import test from 'node:test';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { ToolMessage } from '@langchain/core/messages/tool';
 import { evaluateGuard } from '../../guards';
+import { ORCHESTRATOR_MAX_ITERATIONS } from './runtime/constants';
 import {
   contextCompactionWatermarkGuard,
   ORCHESTRATOR_GUARD_POSITION,
@@ -186,10 +187,10 @@ test('guard routes push decision records onto the LangGraph custom stream writer
     writer: (chunk: unknown) => void;
   };
 
-  const route = createAfterSupervisorBoundaryIterationGuard({ orchestratorMaxIterations: 5 });
+  const route = createAfterSupervisorBoundaryIterationGuard();
   route(baseState({
     taskActiveDelegation: activeDelegation,
-    runIterationCount: 5,
+    runIterationCount: ORCHESTRATOR_MAX_ITERATIONS,
   }), runnableConfig);
 
   const records = chunks.filter(isGuardDecisionStreamChunk);
@@ -201,10 +202,10 @@ test('guard routes push decision records onto the LangGraph custom stream writer
     outcome: {
       kind: 'stop',
       reason: 'run_iteration_limit_reached',
-      details: { runIterationCount: 5, runIterationLimit: 5 },
+      details: { runIterationCount: ORCHESTRATOR_MAX_ITERATIONS, runIterationLimit: ORCHESTRATOR_MAX_ITERATIONS },
     },
     runId: 'run-1',
-    iteration: 5,
+    iteration: ORCHESTRATOR_MAX_ITERATIONS,
   });
 });
 
@@ -235,9 +236,18 @@ test('run iteration limit guard routes through answer at the resolved limit', ()
     runIterationLimit: 5,
   });
 
-  const atLimitRoute = createAfterSupervisorBoundaryIterationGuard({ orchestratorMaxIterations: 5 });
-  assert.equal(atLimitRoute(state), 'answer');
+  const route = createAfterSupervisorBoundaryIterationGuard();
+  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }), 'answer');
+  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS - 1 }), 'runSupervisor');
+});
 
-  const belowLimitRoute = createAfterSupervisorBoundaryIterationGuard({ orchestratorMaxIterations: 25 });
-  assert.equal(belowLimitRoute(state), 'runSupervisor');
+test('legacy invocation overrides cannot change the internal run iteration limit', () => {
+  const route = createAfterSupervisorBoundaryIterationGuard();
+  const state = baseState({ taskActiveDelegation: activeDelegation });
+  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS - 1 }, {
+    configurable: { maxRunIterations: 1 },
+  }), 'runSupervisor');
+  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }, {
+    configurable: { maxRunIterations: ORCHESTRATOR_MAX_ITERATIONS + 100 },
+  }), 'answer');
 });

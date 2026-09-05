@@ -98,7 +98,7 @@ Host identity/configuration remains separate. `AgentActor` and its
 invocation/review/finalize fields are removed. Display name and optional tracing
 user attribution belong to the Host.
 `CreateResidentPetRuntimeOptions.petId` supplies Host identity explicitly to
-resident session initialization. Graph cache identity reads that Host Pet id;
+resident session initialization. Session ownership reads that Host Pet id;
 Host metadata does not enter Agent configuration or review/finalize callbacks.
 The default Pet Profile Toolkit and its cloud profile/memory/history fields have
 been removed. PET.md is the authored persona source.
@@ -233,3 +233,35 @@ model construction. This removes these two mutable inputs from graph cache
 identity concerns; other graph dependency/cache concerns remain separate.
 Validation for this follow-up: 63 model/config/channel tests and local-agent
 TypeScript checking passed; live-model smoke was updated but not executed.
+
+## Graph lifetime and internal iteration guard (2026-09-06 draft)
+
+LocalAgentGraphService builds a graph from the supplied Host configuration for
+each execution or checkpoint operation. It no longer caches graphs using a
+manually assembled model/session key. This removes stale model credentials,
+endpoints, request settings and runtime adapters from graph reuse decisions.
+`graphKey` and `sessionContextCacheKey` are removed. Tracing uses the actual thread
+id when available; a call without a thread does not invent a durable session id.
+Checkpoint adapters remain Host-owned: constructing a graph does not reset state,
+and continuation/resume still uses the same checkpoint thread and graph topology.
+This trades graph construction work for explicit dependency lifetime; any future
+cache must establish its necessity and a complete immutable dependency contract.
+
+The main run iteration guard uses the internal `ORCHESTRATOR_MAX_ITERATIONS = 25`
+constant. `maxRunIterations` is removed from graph and invocation contracts and
+from their parsers, and the former default constant is no longer a package export.
+The guard and Answer context use the same internal value. Tests exercise the
+boundary using run state near the limit, not configurable production guardrails.
+
+Resume validation also uncovered a Host boundary bug: every human-review response
+installed an interrupt callback after its checkpoint was persisted. Only review
+cancellation or an explicit interrupt request now installs that callback; ordinary
+approval continues execution. TUI fixtures now use the current Host config store,
+invocation context, required planning goal and checkpoint stream lifetime.
+
+Validation: 485 core tests, 608 local-agent tests (5 skipped), 90 Studio tests,
+5 Studio acceptance tests and 8 TUI Host tests passed. Core (including evals),
+local-agent, Studio and TUI TypeScript checks passed, as did core and local-agent
+ESM/declaration builds. Resume coverage includes explicit null continuation,
+review approval/cancellation, repeated suspension, model/checkpointer replacement,
+and process restart with persisted history.

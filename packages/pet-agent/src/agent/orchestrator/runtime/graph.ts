@@ -9,10 +9,6 @@ import type {
   OrchestratorConfig,
 } from '../types';
 import {
-  DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
-} from './constants';
-import {
-  readRunIterationLimit,
   readSubagentContextWindowTokens,
   readSubagentGenerationReserveTokens,
 } from './config';
@@ -36,14 +32,12 @@ import { createRunTerminationHandlers } from './runTermination';
 // --- Graph builder ---
 
 export function createOrchestratorGraph(config: OrchestratorConfig) {
-  const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
-    ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
   const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
   const afterSupervisorBoundaryIterationGuard =
-    createAfterSupervisorBoundaryIterationGuard({ orchestratorMaxIterations });
+    createAfterSupervisorBoundaryIterationGuard();
   const runSupervisor = createRunSupervisorNode(config);
   const runTermination = createRunTerminationHandlers();
 

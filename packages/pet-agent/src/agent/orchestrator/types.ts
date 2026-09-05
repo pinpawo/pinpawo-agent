@@ -80,11 +80,6 @@ export type OrchestratorConfig = {
    */
   modelInputModalities?: readonly ModelInputModality[];
   checkpoint?: BaseCheckpointSaver;
-  /**
-   * Maximum number of orchestration iterations per active delegation lifecycle in one
-   * run. This is runtime guardrail only; it does not replace LLM decision logic.
-   */
-  maxRunIterations?: number;
   contextWindowTokens?: number;
   /** Output + reasoning capacity reserved before deriving input maintenance thresholds. */
   generationReserveTokens?: number;
@@ -130,7 +125,6 @@ export type OrchestratorInvokeOptions = {
   registry?: CompiledAgentRegistry;
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
-  maxRunIterations?: number;
   /**
    * Explicit Capability scope for this run. The Supervisor workspace contains
    * only compiled capabilities in this allowlist. Omit to expose the complete

@@ -44,7 +44,6 @@ test('runChatSession does not settle before the underlying graph run output', as
     notifyStreamEnded = resolve;
   });
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -95,7 +94,6 @@ test('runChatSession defers interrupted terminalization until graph output settl
     notifyIteratorClosed = resolve;
   });
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -150,7 +148,6 @@ test('runChatSession sources tool operations from the root protocol stream, not 
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: unknown[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -233,7 +230,6 @@ test('runChatSession falls back to checkpoint final message when stream values o
     new AIMessage('checkpoint answer'),
   ];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -285,7 +281,6 @@ test('runChatSession falls back to checkpoint final message when stream values o
 test('runChatSession replaces the current plan from root values and clears it at settlement', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -368,7 +363,6 @@ test('runChatSession projects global policy authorization as completed operation
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -506,7 +500,6 @@ test('runChatSession emits one completed subagent block per child model message 
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -574,7 +567,6 @@ test('runChatSession emits one completed subagent block per child model message 
 test('runChatSession merges subagent_operations announcements through acceptDelegationOperations', async () => {
   const accepted: unknown[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -629,7 +621,6 @@ test('runChatSession merges subagent_operations announcements through acceptDele
 test('runChatSession projects review interrupts to public interaction contracts', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -708,7 +699,6 @@ test('runChatSession resumes explicit response after state update clears interru
   const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
   const finalMessages = [new AIMessage('approved')];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -781,7 +771,6 @@ test('runChatSession does not confirm a review resolution while checkpoint keeps
   };
   const finalMessages = [new AIMessage('continued')];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -839,7 +828,6 @@ test('runChatSession confirms the original resolution without interrupting a new
     view: { kind: 'plain' as const, body: 'Second approval?' },
   };
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -910,7 +898,6 @@ test('runChatSession does not confirm a review resolution when graph execution f
     options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
   };
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -962,7 +949,6 @@ test('runChatSession preserves review cancellation when the active checkpoint re
   };
   const finalMessages = [new AIMessage('must not be reported as completed')];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -1034,7 +1020,6 @@ test('runChatSession allows a user message after an aborted non-review run leave
   const finalMessages = [new AIMessage('continued after abort')];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -1086,7 +1071,6 @@ test('runChatSession allows a user message after an aborted non-review run leave
 
 test('runChatSession rejects stale resume with user-facing message', async () => {
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -1148,7 +1132,6 @@ test('runChatSession does not map pending review free text to review response', 
   };
   const finalMessages = [new AIMessage('continued')];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: [],
@@ -1216,7 +1199,6 @@ test('runChatSession does not map pending review free text to review response', 
 test('runChatSession degrades a GraphRecursionError to a completed 待续跑 reply', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -1258,7 +1240,6 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
 test('runChatSession keeps the streamed reply when GraphRecursionError fires mid-stream', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -1294,7 +1275,6 @@ test('runChatSession keeps the streamed reply when GraphRecursionError fires mid
 
 test('runChatSession rethrows non-recursion errors from the stream', async () => {
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
@@ -1342,7 +1322,6 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
     new AIMessage('这里是回执。'),
   ];
   const setup = {
-    graphKey: 'test',
     graphConfig: {},
     input: {
       messages: promptMessages,
@@ -1428,7 +1407,6 @@ test('runChatSession emits provider token usage from new state messages', async 
     finalReply,
   ];
   const setup = {
-    graphKey: 'test',
     graphConfig: {
       contextWindowTokens: 64000,
     },

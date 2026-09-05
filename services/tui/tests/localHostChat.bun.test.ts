@@ -29,6 +29,7 @@ import {
 import {
   createLocalServerHandlers,
 } from '../../local-agent/src/localServerHandlers';
+import { createLocalServerRuntimeDepsStore } from '../../local-agent/src/localServerTypes';
 import type {
   LocalServerPeerHandlers,
 } from '../../local-agent/src/localServerMessageDispatcher';
@@ -81,11 +82,10 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
   writeFileSync(attachmentPath, ATTACHMENT_CONTENT);
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
   const graphFixture = createHostGraphFixture();
-  const localServerHandlers = createLocalServerHandlers({
+  const localServerHandlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
     actorId: 'pet-host-integration',
     actorName: 'PinPawo',
-    workdir,
     runtimeConfig,
     ...createTestModelServerDeps({
       apiKey: 'offline-integration-key',
@@ -97,7 +97,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     capabilityArtifactStore: new FileCapabilityArtifactStore(
       runtimeConfig.capabilityArtifactRoot,
     ),
-  }, {
+  }), {
     chatGraphService: graphFixture.service,
     loadContext: async (actorId) => buildAgentContext(actorId),
   });
@@ -161,12 +161,14 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     'session-resume',
     'chat-interrupt',
     'snapshot-interrupt',
+    'snapshot-interrupt-settled',
     'chat-review-approve',
     'review-response-approve',
     'snapshot-review-approve',
     'chat-review-cancel',
     'review-cancel',
     'snapshot-review-cancel',
+    'snapshot-review-cancel-settled',
     'chat-review-continue',
     'review-response-continue',
     'snapshot-review-continue',
@@ -357,7 +359,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     );
     assert.ok(
       transportLogs.filter((message) => (
-        message === '[local-server] TUI client connected'
+        message === '[local-server] local client connected'
       )).length >= 2,
     );
 
@@ -421,7 +423,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
     await waitFor(() => (
       graphFixture.interruptObserved()
-      && snapshotRequestCount === 4
+      && snapshotRequestCount === 5
       && controller.getState().session.activeRun === null
     ));
     const interruptedEntries = controller.getState().session.timeline.filter(
@@ -443,7 +445,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       INTERRUPT_PARTIAL,
       'interrupted',
     ]);
-    assert.equal(snapshotRequestCount, 4);
+    assert.equal(snapshotRequestCount, 5);
 
     assert.deepEqual(controller.submitChat(REVIEW_APPROVE_MESSAGE), {
       ok: true,
@@ -464,7 +466,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(approvalResult.ok, true);
     assert.equal(approvalResult.ok ? approvalResult.status : null, 'sent');
     await waitFor(() => (
-      snapshotRequestCount === 5
+      snapshotRequestCount === 6
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -502,7 +504,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       ok: true,
     });
     await waitFor(() => controller.getState().session.activeRun === null);
-    assert.equal(snapshotRequestCount, 6);
+    assert.equal(snapshotRequestCount, 8);
     assert.deepEqual(graphFixture.reviewResumes()[1], {
       'review-interrupt-cancel': {
         action: 'interrupt_run',
@@ -531,7 +533,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     });
     assert.equal(continuedApproval.ok, true);
     await waitFor(() => (
-      snapshotRequestCount === 7
+      snapshotRequestCount === 9
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -560,7 +562,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-error',
     });
     await waitFor(() => (
-      snapshotRequestCount === 8
+      snapshotRequestCount === 10
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -593,7 +595,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-recovery',
     });
     await waitFor(() => (
-      snapshotRequestCount === 9
+      snapshotRequestCount === 11
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,

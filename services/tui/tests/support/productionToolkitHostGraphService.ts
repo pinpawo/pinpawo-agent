@@ -62,39 +62,25 @@ type ProductionToolkitFixture = {
 };
 
 export function createProductionToolkitHostGraphService() {
-  const fixtures = new Map<string, ProductionToolkitFixture>();
-  const fixtureFor = (setup: AgentChannelSetup) => {
-    const cached = fixtures.get(setup.graphKey);
-    if (cached) return cached;
-    const fixture = buildFixture(setup);
-    fixtures.set(setup.graphKey, fixture);
-    return fixture;
-  };
-
   return new class ProductionToolkitHostGraphService
     extends LocalAgentGraphService {
     override async streamEvents(
       setup: AgentChannelSetup,
       inputOverride?: unknown,
     ): Promise<LocalAgentGraphEventStream> {
-      const fixture = fixtureFor(setup);
-      fixture.setup.input.messages = setup.input.messages;
-      fixture.setup.input.signal = setup.input.signal;
-      fixture.setup.input.activeDelegationTransition =
-        setup.input.activeDelegationTransition;
-      return super.streamEvents(fixture.setup, inputOverride);
+      return super.streamEvents(buildFixture(setup).setup, inputOverride);
     }
 
     override async readThreadState(
       setup: AgentChannelSetup,
     ): Promise<LocalAgentGraphThreadState> {
-      return super.readThreadState(fixtureFor(setup).setup);
+      return super.readThreadState(buildFixture(setup).setup);
     }
   }();
 }
 
 function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
-  const workdir = setup.input.workdir;
+  const workdir = setup.input.context?.workdir;
   if (!workdir) {
     throw new Error('production toolkit host fixture requires a workdir');
   }
@@ -210,12 +196,12 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
       },
     }),
     bindTools: () => ({
-      invoke: async () => new AIMessage({
+      invoke: async (messages: BaseMessage[]) => new AIMessage({
         content: '',
         tool_calls: [{
           id: 'production-toolkit-plan-request',
           name: 'plan_request',
-          args: {},
+          args: { goal: messageText([...messages].reverse().find(message => message._getType() === 'human')!) },
         }],
       }),
     }),
@@ -244,7 +230,6 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   return {
     setup: {
       ...setup,
-      graphKey: `production-toolkit:${setup.graphKey}`,
       graphConfig: {
         ...setup.graphConfig,
         models: {

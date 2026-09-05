@@ -9,6 +9,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph';
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
+import { ORCHESTRATOR_MAX_ITERATIONS } from './runtime/constants';
 import {
   defineInstructionDocument,
   type AgentCapability,
@@ -1926,7 +1927,6 @@ test('limit-reached progress announce lets model choose the same capability dele
       observe: routeModel,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    maxRunIterations: 1,
     runSupervisorRunner: {
       async invoke(input) {
         plannerCallCount += 1;
@@ -1946,6 +1946,7 @@ test('limit-reached progress announce lets model choose the same capability dele
     ], { activeDelegationTransition: 'resume_active' }),
     taskActiveDelegation: null as TaskActiveDelegation | null,
   };
+  input.runIterationCount = ORCHESTRATOR_MAX_ITERATIONS - 1;
   const progressAnnounce = createPrivateAnnounce({
     lane: 'capability:inspect_repo',
     runId: input.runId,
@@ -5055,7 +5056,6 @@ test('terminal Supervisor action keeps active delegation when handoff cannot be 
       act: routeModel,
       subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
     },
-    maxRunIterations: 0,
   });
   const activeDelegation: TaskActiveDelegation = {
     id: 'active-1',
@@ -5254,6 +5254,7 @@ test('Supervisor continuation path rechecks run iteration guard before next deci
       resultPreview: activeDelegation.resultPreview,
     }] as RunDelegationSummary[],
   };
+  input.runIterationCount = ORCHESTRATOR_MAX_ITERATIONS - 1;
 
   const announce = createPrivateAnnounce({
     id: 'm-limit-announce',
@@ -5270,7 +5271,6 @@ test('Supervisor continuation path rechecks run iteration guard before next deci
     configurable: {
       thread_id: 'delegation-outcome-to-iteration-guard',
       capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      maxRunIterations: 1,
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -5357,7 +5357,6 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
     configurable: {
       thread_id: 'delegation-outcome-no-duplicate-handoff',
       capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      maxRunIterations: 10,
       toolkits: [{
         name: 'local',
         description: 'local tools',
@@ -5858,7 +5857,6 @@ test('Supervisor boundary uses a unified run-iteration guard before invoking dec
       act: routeModel,
       observe: routeModel,
     },
-    maxRunIterations: 2,
   });
   const baseInput = buildOrchestratorRunInput(
     [new HumanMessage('继续')],
@@ -5869,7 +5867,7 @@ test('Supervisor boundary uses a unified run-iteration guard before invoking dec
     taskActiveDelegation: null as TaskActiveDelegation | null,
     runDelegationSummaries: [] as RunDelegationSummary[],
   };
-  input.runIterationCount = 2;
+  input.runIterationCount = ORCHESTRATOR_MAX_ITERATIONS;
   const activeDelegation: TaskActiveDelegation = {
     id: 'limit-iter',
     lane: 'capability:general',

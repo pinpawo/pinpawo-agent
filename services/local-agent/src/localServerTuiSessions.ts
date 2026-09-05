@@ -299,7 +299,6 @@ export class LocalServerTuiSessionService {
       userMessage: '',
       llmConfig,
       hostConfig: deps,
-      sessionContextCacheKey: session.id,
       toolkits: [...toolkitInventory.effectiveToolkits],
       toolkitInventoryEntries: toolkitInventory.entries,
       toolkitRuntimeManager: deps.toolkitRuntimeManager,

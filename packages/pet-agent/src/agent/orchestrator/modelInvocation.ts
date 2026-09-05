@@ -1,8 +1,11 @@
 import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import { createMiddleware } from 'langchain';
 import { toolProtocolSafeMessages } from '../messages';
 import { projectDelegationAnnouncesForModel } from './delegation';
+import { getAgentRuntimeContext } from '../../runtime/context';
+import { composeSystemPrompt } from '../../prompts/systemPrompt';
 
 type InvokableMessageModel<TOutput extends BaseMessage> = {
   invoke(
@@ -17,7 +20,7 @@ function providerMessages(messages: readonly BaseMessage[]): BaseMessage[] {
   );
 }
 
-/** Internal LangChain wiring for Agent model calls. */
+/** Delegation projection and tool protocol repair have no prompt ownership. */
 export const orchestratorModelInvocationMiddleware = createMiddleware({
   name: 'OrchestratorModelInvocation',
   wrapModelCall: (request, handler) => handler({
@@ -33,10 +36,10 @@ export function invokeOrchestratorModel<TOutput extends BaseMessage>(
     systemMessage: SystemMessage;
     messages: readonly BaseMessage[];
   },
-  runnableConfig?: RunnableConfig,
+  runnableConfig?: LangGraphRunnableConfig,
 ) {
   return model.invoke([
-    input.systemMessage,
+    composeSystemPrompt(input.systemMessage, getAgentRuntimeContext(runnableConfig)),
     ...providerMessages(input.messages),
   ], runnableConfig);
 }

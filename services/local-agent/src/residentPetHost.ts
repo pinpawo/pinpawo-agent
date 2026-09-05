@@ -10,9 +10,9 @@ import {
 import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  type AgentActor,
   type AgentCapability,
   type CapabilityArtifactStore,
+  type PetDocument,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 
@@ -342,10 +342,15 @@ export class ResidentPetCoordinator {
 }
 
 export type CreateResidentPetRuntimeOptions = {
-  actor: AgentActor;
+  /** Host identity used for session ownership and graph isolation. */
+  petId: string;
+  petName: string;
+  /** Optional attribution passed to Host tracing, outside the Agent contract. */
+  traceUserId?: string;
   modelProfiles: LocalModelProfileRegistry;
   modelProfileId?: string;
   defaultCapabilityName?: string;
+  petDocument?: PetDocument;
   capabilities: readonly AgentCapability[];
   toolkitInventory: HostToolkitInventoryStore;
   toolkitRuntimeManager?: ToolkitRuntimeManager;
@@ -416,25 +421,6 @@ function withDefaultModelProfile(
   return Object.freeze({ ...registry, defaultProfileId: modelProfileId });
 }
 
-function buildResidentAgentContext(actor: AgentActor) {
-  return {
-    pet: {
-      id: actor.petId,
-      name: actor.name,
-      personality: actor.personality ?? null,
-      species: actor.species ?? null,
-      stage: actor.stage ?? null,
-      growth_value: null,
-      stage_asset_id: null,
-    },
-    context: {
-      petMemoryText: '',
-      recentChatTurns: [],
-      today: new Date().toISOString().slice(0, 10),
-    },
-  };
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }
@@ -500,8 +486,8 @@ export async function createResidentPetRuntime(
     capabilityArtifactStore: CapabilityArtifactStore;
   } = {
     serverMode: 'chat',
-    actorId: options.actor.petId,
-    actorName: options.actor.name,
+    actorId: options.petId,
+    actorName: options.petName,
     modelProfiles,
     globalReviewPolicyMode: llmConfig.globalReviewPolicyMode
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
@@ -518,11 +504,15 @@ export async function createResidentPetRuntime(
     ...(options.defaultCapabilityName
       ? { defaultCapabilityName: options.defaultCapabilityName }
       : {}),
+    ...(options.petDocument ? { petDocument: options.petDocument } : {}),
     capabilityArtifactStore: options.capabilityArtifactStore,
   };
   const graphService = options.graphService ?? new LocalAgentGraphService();
   const loadContext = options.loadContext
-    ?? (async () => buildResidentAgentContext(options.actor));
+    ?? (async () => ({
+      pet: { id: options.petId, name: options.petName },
+      traceUserId: options.traceUserId,
+    }));
   const sessions = new LocalServerTuiSessionService({
     graphService,
     loadContext,

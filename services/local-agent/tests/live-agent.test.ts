@@ -6,13 +6,13 @@ import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
-  type AgentActor,
-  type OrchestratorStateType,
+  runAgent,
+  definePetDocument,
+  petDocumentSystemPromptSection,
 } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
 import type { AgentLlmConfig } from '../src/agentConfig';
 import { loadStoredConfig } from '../src/storage';
-import { createPetProfileTool } from '../src/toolkits/petProfile';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = resolve(__dirname, '..');
@@ -68,45 +68,13 @@ function loadLiveLlmConfig(): AgentLlmConfig {
   };
 }
 
-function buildActor(): AgentActor {
-  return {
-    petId: 'pet-live-test',
-    userId: 'user-live-test',
-    name: '牛牛',
-    personality: '稳重可靠，温和真诚，擅长总结热点并给出克制建议',
-    stage: 'adult',
-    species: 'cow',
-  };
-}
-
-function createLiveFixture() {
-  const llmConfig = loadLiveLlmConfig();
-  return {
-    models: buildLocalAgentModels(llmConfig),
-    actor: buildActor(),
-  };
-}
-
-test('live chat smoke: use shared pet profile tool', { timeout: 120_000 }, async () => {
-  const { models, actor } = createLiveFixture();
+test('live chat smoke: authored PET.md identity', { timeout: 120_000 }, async () => {
+  const models = buildLocalAgentModels(loadLiveLlmConfig());
   const graph = createOrchestratorGraph({ models });
-  const state = await graph.invoke(
-    {
-      messages: [
-        new HumanMessage('请先调用 describe_pet_profile 了解你自己，再用两句中文介绍你自己，不要输出 JSON。'),
-      ],
-    },
-    {
-      configurable: {
-        actor,
-        tools: [createPetProfileTool({ actor })],
-      },
-    },
-  ) as OrchestratorStateType;
-
-  const reply = typeof state.messages.at(-1)?.content === 'string'
-    ? (state.messages.at(-1)!.content as string).trim()
-    : '';
-  assert.ok(reply.length > 0, 'reply should not be empty');
-  assert.equal(state.capabilityArtifacts.length, 0, 'no capability should produce artifacts');
+  const document = definePetDocument({ content: '你叫牛牛，是一位温和真诚、擅长总结的助手。' });
+  const result = await runAgent(graph, {
+    messages: [new HumanMessage('请用两句中文介绍你自己，不要输出 JSON。')],
+    context: { systemPromptSections: [petDocumentSystemPromptSection(document)] },
+  });
+  assert.ok(result.reply.length > 0, 'reply should not be empty');
 });

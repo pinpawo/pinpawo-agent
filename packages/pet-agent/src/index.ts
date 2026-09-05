@@ -1,6 +1,4 @@
 export type {
-  AgentActor,
-  AgentExecution,
   AgentModels,
 } from './types/agent';
 
@@ -30,6 +28,10 @@ export {
   GENERAL_CAPABILITY_NAME,
 } from './types/capability';
 
+export type { PetDocument } from './types/petDocument';
+export { definePetDocument } from './types/petDocument';
+export { petDocumentSystemPromptSection } from './prompts/petDocument';
+
 export type {
   SubagentInputState,
   SubagentExecutionScope,
@@ -41,6 +43,9 @@ export type {
   SubagentToolLifecycleEvent,
   SubagentToolOperationMetadata,
 } from './types/subagent';
+export type { SystemPromptSection } from './types/systemPrompt';
+export { getAgentRuntimeContext } from './runtime/context';
+export type { AgentRuntimeContext } from './runtime/context';
 
 export type {
   Guard,
@@ -338,7 +343,7 @@ export {
   readStringArray,
   resultStatusSummary,
 } from './utils/operationMetadata';
-export { runAgent } from './agent/runAgent';
+export { runAgent, buildAgentRunnableConfig } from './agent/runAgent';
 export type {
   AgentInvokeInput,
   AgentRunResult,

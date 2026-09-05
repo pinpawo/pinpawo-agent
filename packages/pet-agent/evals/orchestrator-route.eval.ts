@@ -21,7 +21,7 @@ import {
   createOrchestratorGraph,
   buildOrchestratorTurnInput,
 } from '../src/agent/createAgentRuntime';
-import type { AgentActor, AgentModels } from '../src/types/agent';
+import type { AgentModels } from '../src/types/agent';
 import {
   defineInstructionDocument,
   type AgentCapability,
@@ -228,15 +228,6 @@ const mockCapabilities: AgentCapability[] = [
   ),
 ];
 
-const testActor: AgentActor = {
-  petId: 'eval-pet',
-  userId: 'eval-user',
-  name: '小白',
-  personality: '友好、乐于助人的宠物助手',
-  stage: 'adult',
-  species: 'cat',
-};
-
 // ── Target function: run orchestrator and return route decision ──
 
 let evalCounter = 0;
@@ -271,7 +262,6 @@ export async function target(
   const checkpointer = new MemorySaver();
   const graph = createOrchestratorGraph({
     models,
-    actor: testActor,
     checkpoint: checkpointer,
   });
   const compiled = await graph;
@@ -382,7 +372,6 @@ export async function target(
     interruptBefore: ['capability'],
     configurable: {
       thread_id: threadId,
-      actor: testActor,
       toolkits: [mockGeneralToolkit],
       capabilities: capabilityList,
       ...(allowedCapabilityNames

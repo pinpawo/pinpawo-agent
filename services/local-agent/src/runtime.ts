@@ -1,3 +1,4 @@
+import type { PetDocument } from '@pinpawo/pet-agent';
 import { FileSaver } from './fileSaver';
 import { getConfig } from './config';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
@@ -6,6 +7,7 @@ import {
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
 import type { LocalServerDeps } from './localServerTypes';
+import { loadPetDocumentFile, resolveChatPetDocumentPath } from './petDocument';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 
 /**
@@ -23,6 +25,7 @@ import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 export class LocalAgentHost {
   private readonly caps: HostCapabilityAssembly;
   private readonly serverMode: ServerMode;
+  private petDocument: PetDocument | null = null;
   private stopRequested = false;
   private readonly stopController = new AbortController();
   constructor(
@@ -37,6 +40,9 @@ export class LocalAgentHost {
   }
 
   async init() {
+    this.petDocument = await loadPetDocumentFile(resolveChatPetDocumentPath(
+      this.getRuntimeConfig().workdir,
+    ));
     await this.caps.init();
   }
 
@@ -93,6 +99,10 @@ export class LocalAgentHost {
     return this.caps.getActorName();
   }
 
+  getPetDocument(): PetDocument | null {
+    return this.petDocument;
+  }
+
   // ---- Chat/ws-relay concerns (host-specific) ----
 
   private buildLocalServerDeps(): LocalServerDeps {
@@ -109,6 +119,7 @@ export class LocalAgentHost {
       toolkitInventory: this.getToolkitInventoryStore(),
       toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       capabilityCatalog: this.getCapabilityCatalog(),
+      ...(this.petDocument ? { petDocument: this.petDocument } : {}),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),
     };
   }

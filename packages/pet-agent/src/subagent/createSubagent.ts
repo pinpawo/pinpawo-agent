@@ -1,5 +1,11 @@
-import type { BaseMessage } from '@langchain/core/messages';
-import type { RunnableConfig } from '@langchain/core/runnables';
+import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { getAgentRuntimeContext } from '../runtime/context';
+import {
+  composeSystemPrompt,
+  createSystemPromptMiddleware,
+  resolveSystemPromptSections,
+  validateSystemPromptSections,
+} from '../prompts/systemPrompt';
 import { createHash, randomUUID } from 'node:crypto';
 import type {
   SubagentInputState,
@@ -255,37 +261,27 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     artifacts: input.artifacts,
   };
   const inputMessageIds = new Set(inputState.messages.map((message) => message.id as string));
-  const systemPromptSections = [
-    {
-      id: 'framework:governing',
+  const parentRuntimeContext = input.runnableConfig?.context;
+  const runtimeContext: SubagentRuntimeContext = {
+    ...parentRuntimeContext,
+    ...input.runtimeContext,
+    // Common context belongs to the root invocation, never to a child override.
+    ...getAgentRuntimeContext(input.runnableConfig),
+  };
+  const frameworkSections = [
+    { id: 'framework:governing', owner: 'framework', content: SUBAGENT_GOVERNING_PROMPT },
+    ...(inputState.contextWindowTokens ? [{
+      id: 'framework:context-summary',
       owner: 'framework',
-      content: SUBAGENT_GOVERNING_PROMPT,
-    },
-    ...(inputState.contextWindowTokens
-      ? [{
-          id: 'framework:context-summary',
-          owner: 'framework',
-          content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
-        }]
-      : []),
-    ...inputState.promptSections,
+      content: SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
+    }] : []),
   ];
-  const sectionIds = new Set<string>();
-  for (const section of systemPromptSections) {
-    if (!section.id.trim()) {
-      throw new Error('Subagent prompt section id must be non-empty');
-    }
-    if (!section.content.trim()) {
-      throw new Error(`Subagent prompt section "${section.id}" content must be non-empty`);
-    }
-    if (sectionIds.has(section.id)) {
-      throw new Error(`Duplicate subagent prompt section id: ${section.id}`);
-    }
-    sectionIds.add(section.id);
-  }
-  const systemPrompt = systemPromptSections
-    .map((section) => section.content)
-    .join('\n\n');
+  const systemPromptSections = [
+    ...frameworkSections,
+    ...resolveSystemPromptSections(runtimeContext, inputState.promptSections),
+  ];
+  validateSystemPromptSections(systemPromptSections);
+  const systemPrompt = composeSystemPrompt(new SystemMessage(''), {}, frameworkSections);
   // Decision records must never fail the run.
   const emitGuardDecision: GuardDecisionEmitter = (record) => {
     writeSubagentRuntimeEvent(SUBAGENT_GUARD_DECISION_EVENT, record);
@@ -296,6 +292,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     contextSummaryMiddleware,
     iterationGuardMiddleware,
     ...(input.middleware ?? []),
+    createSystemPromptMiddleware(inputState.promptSections),
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   // No checkpointer here: the child inherits the parent's through the runnable
@@ -322,15 +319,6 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
 
   let latestMessages = inputState.messages;
   try {
-    const parentRuntimeContext = (
-      input.runnableConfig as (RunnableConfig & {
-        context?: SubagentRuntimeContext;
-      }) | undefined
-    )?.context;
-    const runtimeContext: SubagentRuntimeContext = {
-      ...parentRuntimeContext,
-      ...input.runtimeContext,
-    };
     // The crucial #322 shape: invoke with the parent config passed through
     // untouched, instead of consuming a child streamEvents() run behind a
     // stripped config and a cleared ALS scope. Tokens, tool lifecycle,
@@ -342,7 +330,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
       {
         ...input.runnableConfig,
         context: runtimeContext,
-        signal: input.signal,
+        signal: input.signal ?? input.runnableConfig?.signal,
         // Normal stopping is controlled by the subagent iteration guard.
         // LangGraph recursionLimit stays intentionally high as a final breaker.
         recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,

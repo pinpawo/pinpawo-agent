@@ -1,5 +1,3 @@
-import type { AgentActor } from '../../../types/agent';
-
 export function xmlTextBlock(tag: string, text: string, attrs = ''): string {
   const safeText = text.replaceAll(']]>', ']]]]><![CDATA[>');
   return [
@@ -30,18 +28,4 @@ export function indentXmlBlock(block: string, spaces: number): string {
 export function promptBlock(block: string | null | undefined, spaces: number): string {
   // A block owns its leading newline so optional template slots disappear cleanly.
   return block ? `\n${indentXmlBlock(block, spaces)}` : '';
-}
-
-export function buildDecisionConfig(
-  actor: AgentActor,
-  workdir?: string,
-  runtimeEnvironment?: string,
-): string {
-  return [
-    '[配置]',
-    `角色：「${actor.name}」`,
-    workdir ? `工作目录：${workdir}` : null,
-    workdir ? '相对路径默认相对于工作目录；只有在工具显式指定其他目录时，才偏离这个目录。' : null,
-    runtimeEnvironment ? runtimeEnvironment : null,
-  ].filter((line) => line !== null).join('\n');
 }

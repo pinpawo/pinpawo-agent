@@ -61,6 +61,7 @@ export async function runAgent(options: RunAgentOptions) {
     // Init loads Toolkit definitions and starts their optional runtimes before
     // any local transport begins accepting execution requests.
     await runtime.init();
+    const petDocument = runtime.getPetDocument();
     logStartupConfig({
       mode: 'server',
       serverMode: mode,
@@ -81,6 +82,7 @@ export async function runAgent(options: RunAgentOptions) {
       toolkitInventory: runtime.getToolkitInventoryStore(),
       toolkitRuntimeManager: runtime.getToolkitRuntimeManager(),
       capabilityCatalog: runtime.getCapabilityCatalog(),
+      ...(petDocument ? { petDocument } : {}),
       capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
     };
 

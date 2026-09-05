@@ -284,6 +284,7 @@ version: 1
 
 Plan the work assigned to this Pet.
 `);
+  await writeFile(path.join(petsDir, 'planner', 'PET.md'), '# Planner\n\nCoordinate work.\n');
   const configured = {
     ...configuration([], ['planner']),
     workdir: root,
@@ -299,6 +300,7 @@ Plan the work assigned to this Pet.
         input.petCapabilities.get('planner')?.map(({ name }) => name),
         ['studio_planning'],
       );
+      assert.equal(input.petDocuments?.get('planner')?.content, '# Planner\n\nCoordinate work.');
       return result(fakeStudio(() => undefined));
     },
   });

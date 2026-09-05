@@ -1,10 +1,9 @@
 import {
   buildOrchestratorTurnInput,
   createOrchestratorGraph,
+  buildAgentRunnableConfig,
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
-  ORCHESTRATOR_RECURSION_LIMIT,
-  runAgent,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
@@ -29,20 +28,24 @@ function resolveReviewCapabilities(setup: AgentChannelSetup) {
     : HEADLESS_REVIEW_CAPABILITIES;
 }
 
+function buildAgentGraphRunConfig(setup: AgentChannelSetup) {
+  const config = buildAgentRunnableConfig(setup.input, {
+    registry: setup.registry,
+    reviewCapabilities: resolveReviewCapabilities(setup),
+  });
+  return {
+    ...config,
+    configurable: {
+      ...config.configurable,
+      ...(setup.interfaceContext?.kind
+        ? { [LOCAL_AGENT_INTERFACE_CONFIG_KEY]: setup.interfaceContext }
+        : {}),
+    },
+  };
+}
+
 export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
-  const configurable: Record<string, unknown> = {};
-  configurable.registry = setup.registry;
-  configurable.actor = setup.input.actor;
-  if (setup.input.threadId) configurable.thread_id = setup.input.threadId;
-  if (setup.input.execution) configurable.execution = setup.input.execution;
-  if (setup.input.workdir) configurable.workdir = setup.input.workdir;
-  if (setup.input.runtimeEnvironment) configurable.runtimeEnvironment = setup.input.runtimeEnvironment;
-  if (setup.input.globalReviewPolicy) configurable.globalReviewPolicy = setup.input.globalReviewPolicy;
-  if (setup.interfaceContext?.kind) {
-    configurable[LOCAL_AGENT_INTERFACE_CONFIG_KEY] = setup.interfaceContext;
-  }
-  configurable.reviewCapabilities = resolveReviewCapabilities(setup);
-  return Object.keys(configurable).length > 0 ? configurable : undefined;
+  return buildAgentGraphRunConfig(setup).configurable;
 }
 
 export type LocalAgentGraphPendingInterrupt = {
@@ -147,10 +150,10 @@ export class LocalAgentGraphService {
   }
 
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
-    return runAgent(this.getGraph(setup), setup.input, {
-      registry: setup.registry,
-      reviewCapabilities: resolveReviewCapabilities(setup),
-    });
+    const state = await this.invokeState(setup);
+    const messages = state.messages ?? [];
+    const content = messages.at(-1)?.content;
+    return { messages, reply: typeof content === 'string' ? content.trim() : '' };
   }
 
   /**
@@ -167,22 +170,18 @@ export class LocalAgentGraphService {
     const graph = this.getGraph(setup);
     const callbacks = createLangfuseCallbacks({
       sessionId: setup.input.threadId ?? setup.graphKey,
-      ...(setup.input.actor?.userId ? { userId: setup.input.actor.userId } : {}),
+      ...(setup.traceUserId ? { userId: setup.traceUserId } : {}),
       metadata: {
         interface: setup.interfaceContext?.kind ?? 'headless',
       },
     });
     return await graph.streamEvents(
       (inputOverride === undefined
-        ? buildOrchestratorTurnInput(setup.input.messages, {
-            activeDelegationTransition: setup.input.activeDelegationTransition,
-          })
+        ? buildOrchestratorTurnInput(setup.input.messages, setup.input)
         : inputOverride) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
-        signal: setup.input.signal,
-        configurable: buildAgentGraphConfigurable(setup),
-        recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
+        ...buildAgentGraphRunConfig(setup),
         ...(callbacks ? { callbacks } : {}),
       },
     ) as LocalAgentGraphEventStream;
@@ -192,15 +191,9 @@ export class LocalAgentGraphService {
     const graph = this.getGraph(setup);
     return await graph.invoke(
       inputOverride === undefined
-        ? buildOrchestratorTurnInput(setup.input.messages, {
-            activeDelegationTransition: setup.input.activeDelegationTransition,
-          })
+        ? buildOrchestratorTurnInput(setup.input.messages, setup.input)
         : inputOverride,
-      {
-        signal: setup.input.signal,
-        configurable: buildAgentGraphConfigurable(setup),
-        recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
-      },
+      buildAgentGraphRunConfig(setup),
     ) as OrchestratorStateType;
   }
 

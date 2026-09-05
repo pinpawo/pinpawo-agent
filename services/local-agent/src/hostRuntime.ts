@@ -39,6 +39,7 @@ export type {
 } from './hostCapabilityCatalog';
 export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';
+export { loadPetDocumentFile } from './petDocument';
 export type {
   HostCapabilityAssemblyInitOptions,
   HostCapabilityAssemblyOptions,

@@ -61,7 +61,6 @@ These are assembled by several nodes. Defined in
 
 | Block | Class | Built by | Notes |
 |---|---|---|---|
-| `[配置]` | `RUN-STABLE` / `INSTRUCTION` | `buildDecisionConfig(actor)` | Only `entryAnswer` and `answer` use it. It accepts `workdir`/`runtimeEnvironment`, but **no call site passes them** — both are currently dead parameters. |
 | `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor and finalizer use the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
 | `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + optional `<essential_context>` (initial) or `<guidance>` (continue). |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
@@ -69,9 +68,14 @@ These are assembled by several nodes. Defined in
 `xmlTextBlock()` wraps payloads in `CDATA` and escapes nested `]]>`. Always use
 it for free text — never interpolate user or tool text into a tag directly.
 
-> `buildDecisionConfig`'s `workdir`/`runtimeEnvironment` parameters are currently
-> dead. Treat them as unverified surface — if you start using them, check the
-> rendered prompt rather than assuming the intended behavior still holds.
+Role prompts no longer receive `AgentActor` or a legacy `[配置]` block. Common
+Host instructions, including PET.md, are composed at the model boundary from
+invocation runtime context; see [Pet root document](../../design/pet-document.md).
+`AgentRuntimeContext.workdir` is rendered once between common Host sections and
+execution-local sections. The same value supplies review and Toolkit execution
+scopes. Host environment facts also use common sections; there is no separate
+`runtimeEnvironment` configurable channel. Root context is reapplied on resume,
+without putting these sections in checkpointed messages.
 
 ## 4. Node: entryAnswer
 
@@ -80,7 +84,7 @@ Routes the request: reply directly, ask a question, or hand off via
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt({ actor })` — `[配置]` + routing rules |
+| system | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt()` — routing rules, plus shared invocation context |
 | history | `DYNAMIC` / `HISTORY` | `mainConversationMessages(state.messages)` |
 
 **This node receives no XML fact blocks.** It is the only model node that sees
@@ -154,7 +158,7 @@ Executes one delegated task. Source: `runtime/nodes/capability.ts`.
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static) + `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ workdir, artifactDiscovery })` |
+| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ artifactDiscovery })` |
 | history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().delegation(scope).select()` — canonical main conversation plus this delegation's private messages |
 | boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context and current task; always last |
 
@@ -197,7 +201,7 @@ Its invocation contains exactly:
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `buildAnswerSystemPrompt({ actor })` |
+| system | `RUN-STABLE` / `INSTRUCTION` | `buildAnswerSystemPrompt()` plus shared invocation context |
 | input | `DYNAMIC` / `FACT` | `<answer_input>` — the complete projected facts |
 
 `<answer_input>` contains `<run_user_request>` and `<answer_context>`, including

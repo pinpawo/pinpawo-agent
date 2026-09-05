@@ -63,16 +63,6 @@ function loadTestContext() {
     pet: {
       id: 'pet-a',
       name: 'Paw',
-      personality: null,
-      species: null,
-      stage: null,
-      growth_value: null,
-      stage_asset_id: null,
-    },
-    context: {
-      petMemoryText: '',
-      recentChatTurns: [],
-      today: '2026-07-30',
     },
   });
 }

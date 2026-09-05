@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { MemorySaver, interrupt } from '@langchain/langgraph';
-import { compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type RunSupervisorRunner } from '@pinpawo/pet-agent';
+import { compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import { buildAgentGraphConfigurable, LocalAgentGraphService } from './agentGraphService';
 
@@ -173,4 +173,30 @@ test('local stream resume refreshes invocation metadata while preserving the che
     { traceId, actor: firstActor, workdir: workdirs[0] },
     { traceId, actor: nextActor, workdir: workdirs[1] },
   ]);
+});
+
+test('explicit null input continues the current LangGraph task', async () => {
+  const streamInputs: unknown[] = [];
+  const invokeInputs: unknown[] = [];
+  const graph = {
+    async streamEvents(input: unknown) {
+      streamInputs.push(input);
+      return {};
+    },
+    async invoke(input: unknown) {
+      invokeInputs.push(input);
+      return {};
+    },
+  } as unknown as OrchestratorGraph;
+  const service = new LocalAgentGraphService();
+  const graphs = (service as unknown as {
+    graphs: Map<string, OrchestratorGraph>;
+  }).graphs;
+  graphs.set('test', graph);
+
+  await service.streamEvents(setup(), null);
+  await service.invokeState(setup(), null);
+
+  assert.deepEqual(streamInputs, [null]);
+  assert.deepEqual(invokeInputs, [null]);
 });

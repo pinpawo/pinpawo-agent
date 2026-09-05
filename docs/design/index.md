@@ -11,12 +11,11 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Run-scoped Supervisor session](agent-runtime/run-scoped-supervisor-session.md) and
-  [terminal response finalization](agent-runtime/terminal-response.md)
+- [Delegation Boundary Protocol](agent-runtime/delegation-boundary-protocol.md) —
+  working cross-layer contract for issue #755
+- [Run-scoped Supervisor session](agent-runtime/run-scoped-supervisor-session.md)
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery
-- [Entry Answer routing](agent-runtime/entry-answer-routing.md) and
-  [Delegation Announce messages](agent-runtime/delegation-announce-message.md)
 - [Capability / Toolkit composition](agent-runtime/toolkit-composition.md) and
   [Toolkit HITL policy](agent-runtime/toolkit-hitl-policy.md)
 

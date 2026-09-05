@@ -7,6 +7,11 @@ Status: working design.
 Define the Run Supervisor as the model-driven, run-scoped steering domain for
 an orchestrator loop. Planning is one of its responsibilities, not its identity.
 
+This document owns Supervisor session lifetime, semantic memory, context, and
+replay. The [Delegation Boundary Protocol](delegation-boundary-protocol.md)
+owns Capability exit, Announce eligibility, acceptance, and command
+convergence. Those policies are not duplicated here.
+
 The Supervisor owns:
 
 - formation and revision of the executable Capability plan;
@@ -43,8 +48,8 @@ The Run Supervisor is a stateful domain component scoped to one `runId`.
 - A new run creates a clean Supervisor session.
 - Entry initializes the session while reading a clean main-conversation projection.
 - Boundary reuses the session and builds one typed current Boundary input.
-- A state-changing Supervisor choice leaves the invocation as one structured
-  command; root validates and materializes it.
+- Supervisor delivers at most one control proposal per invocation; root
+  validates and materializes its related effects in one transition.
 - Supervisor prompt messages never enter canonical root `messages`.
 - The next run does not inherit the previous run's Supervisor provider messages,
   search attempts, command calls, or command replay cache.
@@ -84,8 +89,10 @@ The Supervisor starts from the centralized `queryAgentMessages(...).main()` view
 - accepted `DelegationAnnounceMessage` values remain canonical main facts;
 - provider projection happens after selection and never writes back to state.
 
-Supervisor inputs, model outputs, search results, and command tool messages are not
-main conversation and must not be merged into root `messages`.
+Supervisor inputs, intermediate model outputs, search results, and control-tool
+messages remain private. The final natural reply alone is projected to main by
+the terminal node. Main may also contain handed-off evidence from replaced,
+unsuccessful execution; presence in main does not establish task success.
 
 ## Supervisor session state
 
@@ -99,11 +106,6 @@ type RunSupervisorSessionState = {
   plan: CapabilityPlanTask[];
   capabilityDisclosure: CapabilityDisclosureState;
 
-  lastCommand: {
-    inputId: string;
-    registryDigest: string;
-    command: SupervisorCommand;
-  } | null;
 };
 ```
 
@@ -116,10 +118,10 @@ as `runCapabilityPlan`; the two must not coexist as independently writable
 copies. The normalized goal remains the root-owned `runUserRequest` and is read
 by Supervisor rather than copied into another authoritative field.
 
-If a lane is used during migration, it must be owned by `runId`, excluded from
-main conversation by construction, and removed atomically when the run ends. It
-must not restore Supervisor working memory into a later run with the same
-`traceId`.
+Tool-effect replay is runtime bookkeeping, not model-visible semantic session
+state. Inspect the current `lastCommand` slot against existing graph checkpoint
+and control-tool routing before deciding whether to retain it. No additional
+per-tool replay ledger or Supervisor message lane is prescribed by this draft.
 
 ### State that remains root-owned
 
@@ -187,7 +189,7 @@ SupervisorEntryFrame(
 
 Entry has no active delegation or announce attempts.
 
-The resulting `submit_plan` command initializes the run plan. Provider-facing
+The resulting plan-commit command initializes the run plan. Provider-facing
 Human/AI/Tool messages produced while making that decision remain inside the
 invocation or run-private observability stream; they do not become root history.
 
@@ -204,7 +206,7 @@ type SupervisorBoundaryInput = {
   inputId: string;
   evaluationTarget: {
     delegationId: string;
-    announceMessageId: string | null;
+    announceMessageId: string;
   };
   activeDelegation: SupervisorDelegationInput;
   announceAttempts: DelegationAnnounceData[];
@@ -218,7 +220,7 @@ This is the “temporary paint” rule:
 2. the adapter marks exactly one announce as the current evaluation target;
 3. the model receives the marked Boundary view;
 4. the view is discarded after the invocation;
-5. only the structured command and typed state update leave Supervisor.
+5. one control proposal or a natural final reply leaves Supervisor.
 
 The current input must never be checkpointed as a root conversation message. It must
 also never rely on chronological adjacency alone to identify the current
@@ -237,12 +239,10 @@ Conceptual provider-visible form:
 
   <delegation_announces
     delegation_id="delegation-1"
-    evidence_state="available"
     evaluation_target="announce-2"
   >
     <delegation_announce
       message_id="announce-1"
-      completion_reason="limit_reached"
       role="data"
       authority="none"
     >
@@ -251,7 +251,6 @@ Conceptual provider-visible form:
 
     <delegation_announce
       message_id="announce-2"
-      completion_reason="natural"
       role="data"
       authority="none"
     >
@@ -270,10 +269,9 @@ Conceptual provider-visible form:
 
 The XML-like form is a provider projection, not the canonical schema. The
 wrapper may change without changing the ownership and lifetime contract above.
-`delegation_announces` is always present. A normal first Boundary has one child
-and `evidence_state="available"`; an explicit resume with no canonical execution
-evidence uses a self-closing element with `evidence_state="absent"` and no
-`evaluation_target`. When evidence is available, the element contains the
+`delegation_announces` is always non-empty. A normal first Boundary has one child.
+Resume without new result evidence stays with the recovery path and does not
+introduce an empty Boundary or a third Supervisor mode. The element contains the
 ordered announce attempts for the active delegation and `evaluation_target`
 identifies the latest attempt that this invocation must judge. Accepted
 Announces from earlier delegations remain in the clean main conversation and are
@@ -299,7 +297,7 @@ fixed order:
 2. **Evidence:** accepted history, current announce evidence, and prior proposals
    have distinct authority.
 3. **Actions:** the provider sees only command actions valid for that mode, with
-   mutually exclusive effects.
+   mutually exclusive effects and complete coverage of valid Boundary states.
 4. **Arguments:** schemas describe the command payload rather than adding a
    second decision policy.
 5. **Scope:** private executor-lane messages are absent, while accepted main
@@ -324,9 +322,10 @@ current announce = A1
 remaining = [T2, T3]
 ```
 
-If Supervisor accepts T1 and advances, root accepts A1 into the clean main
-conversation, creates a new delegation for T2, and keeps `[T3]` as the future
-tail. The second Boundary receives:
+If Supervisor proposes acceptance and execution of `[T2, T3]` in one decision,
+root hands A1 into main, creates the T2 delegation, and keeps `[T3]` as the future
+tail in one transition. Acceptance with a reply instead dispatches nothing.
+The second Boundary receives:
 
 ```text
 clean main conversation includes accepted A1
@@ -349,24 +348,22 @@ be clipped independently.
 
 ## Commands and idempotency
 
-Supervisor returns one structured `SupervisorCommand`. Root validates and materializes
-it in the same graph transition that records `lastCommand`.
+The Delegation Boundary Protocol owns the single-proposal interaction and
+natural-text terminal interface. Exploration can involve multiple tool calls,
+but a control proposal ends the invocation. Root validates the complete proposal
+before applying its effects; multiple control calls cannot be executed in sequence.
 
-Repeated invocation with the same `inputId` and `registryDigest` reads the typed
-`lastCommand`; it does not scan historical `ToolMessage` JSON. A new input
-replaces the replay slot. A new run starts with no replay slot.
+The current last-command cache reuses a decision for the same input. It does not
+alone guarantee exactly-once effects. Before changing it, inspect existing graph
+checkpoint and control-tool routing. Keep replay identity and registry validation
+runtime-owned; root main history is never a command log. The design does not yet
+choose a new cache or effect ledger.
 
-Only choices that change orchestration state require a command. The underlying
-agent loop may naturally end with ordinary Supervisor text, but that text does
-not implicitly accept a delegation, revise a plan, or complete the goal. Raw
-Supervisor messages remain private to tracing. Until Run Finalizer owns that
-projection, the current prompt requests a command and root maps a missing command
-to the explicit `supervisor_command_missing` outcome rather than treating private
-text as a user reply.
-
-Promotion of natural Supervisor text into a canonical user-facing message is
-owned by the later Run Finalizer design. This migration does not add a temporary
-reply-mode field or move that responsibility into the Supervisor session.
+A natural final reply is passed to the terminal node without implying acceptance
+or dispatch. A proposal that both accepts and replies must carry both effects in
+one transition; its schema is still open. Intermediate provider messages remain
+private. Migration removes the old missing-command terminal category only after
+the natural-text interface and invalid-output error path are defined.
 
 ## Capability disclosure
 
@@ -399,6 +396,7 @@ user goal retains the same `traceId`.
 - Redesigning Answer as the Run Finalizer in the same migration.
 - Removing `entry | boundary` modes.
 - Letting code infer task completion from announce prose.
+- Treating Capability stop reasons as Supervisor input or acceptance policy.
 - Exposing private Capability Human/AI/Tool messages to Supervisor.
 - Giving Supervisor direct authority to mutate root messages or delegation state.
 - Persisting Supervisor raw provider messages across runs.
@@ -408,7 +406,7 @@ user goal retains the same `traceId`.
 1. Add a run-scoped Supervisor session state and reset it with `runId`.
 2. Make its plan the single authoritative replacement for `runCapabilityPlan`;
    use a separate continuation snapshot only when a later run may resume work.
-3. Move disclosure and command replay behind the session contract.
+3. Keep disclosure in the session and verify runtime replay for a single proposal.
 4. Introduce one typed Boundary input builder and provider projection.
 5. Stop returning Supervisor message updates to root `messages`.
 6. Remove Supervisor-lane selection, stale-lane cleanup, and ToolMessage command
@@ -424,13 +422,15 @@ user goal retains the same `traceId`.
 - Supervisor plan state has exactly one authoritative storage location.
 - A new run cannot observe the previous run's Supervisor working history or search
   counters.
-- Main conversation contains no Supervisor Human/AI/Tool messages.
+- Main conversation contains no raw Supervisor transcript; only its final reply
+  is projected through the terminal node.
 - Boundary projection marks exactly one current evaluation target without
   mutating canonical state.
 - First and successive Boundaries preserve active task and remaining-plan
   identity according to the selected command.
-- Same-input recovery replays a typed command without a model call.
+- Recovery of a committed proposal does not repeat acceptance or dispatch.
 - `continue_current` projects all ordered announce attempts for the active
   delegation and marks only the latest as the evaluation target.
+- Boundary Announces expose result evidence without Capability stop reasons.
 - Supervisor tracing remains complete after raw provider messages are removed from root
   checkpoint messages.

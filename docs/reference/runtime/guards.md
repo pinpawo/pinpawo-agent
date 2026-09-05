@@ -1,8 +1,13 @@
 # Guard Design
 
-> Status: canonical. Updated: 2026-07-02.
+> Status: canonical. Updated: 2026-09-05.
 > Supersedes `GUARD_REGISTRY_DESIGN.md`. Older limit/fuse/loop-guard design notes
 > are deprecated and should point here.
+
+The guard language remains canonical. Issue #755 changes only how a subagent
+stop is exposed across the Capability Boundary: guard reasons remain internal
+diagnostics and will no longer become Announce or Supervisor fields. See the
+[Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
 
 ## What A Guard Is
 
@@ -143,7 +148,7 @@ function evaluateGuard(guard, input, emit): GuardOutcome {
 execution.
 
 Records have two lifetimes, following the context-governance principle that
-conclusions cross boundaries and private messages do not:
+results cross boundaries and private control detail does not:
 
 - **Ephemeral channel**: orchestrator positions emit each record twice — onto
   the LangGraph custom stream (`streamMode: 'custom'`, via the node config's
@@ -157,12 +162,13 @@ conclusions cross boundaries and private messages do not:
   `stop` records ("subagent hit iteration limit 25/25") without bespoke
   plumbing. Emission is advisory at every layer: `evaluateGuard` swallows
   emitter failures — a record must never fail the decision.
-- **Durable form**: only `stop` outcomes need to survive checkpoints and cross
-  the subagent → orchestrator boundary. Their durable form is the marked stop
-  notice (`subagent/guardStop.ts`) appended to messages; the subagent's
-  `completionReason: 'limit_reached'` is a projection of a `stop` record, not
-  an independent verdict. Do not persist `proceed`/`maintain`/`derive` records
-  in graph state.
+- **Private durable form**: a position may keep a marked stop notice when its
+  own execution or recovery mechanism needs it. That notice remains private
+  control data and is not part of a Delegation Announce or Supervisor Boundary.
+  Do not persist `proceed`/`maintain`/`derive` records in graph state. The current
+  implementation still projects the subagent iteration stop as
+  `completionReason: 'limit_reached'`; issue #755 removes that transitional
+  cross-boundary projection.
 
 ## Current Guards
 
@@ -170,22 +176,12 @@ conclusions cross boundaries and private messages do not:
 | --- | --- | --- | --- |
 | `run_state_reset` | `orchestrator.prepare` | `derive` | — |
 | `context_compaction_watermark` | `orchestrator.context_compaction` | `maintain` | `latestInputTokens`, `watermarkTokens`, `mainMessageCount`, `keepMessages` |
-| `forced_capability_seed` | `orchestrator.capability_discovery` | `derive` | seeded candidate names |
-| `delegation_outcome_decision` | `orchestrator.delegation_outcome_decision` | `derive` | `completionReason`, resulting `canHandoffActiveDelegation` |
-| `run_iteration_limit` | `orchestrator.delegation_outcome_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
-| `context_maintenance` | `subagent.before_model_context_management` | `maintain` | provider watermark details |
+| `run_iteration_limit` | `orchestrator.supervisor_boundary_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
 | `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
 
-Notes:
-
-- `delegation_outcome_decision` derives `canHandoffActiveDelegation` details on
-  **every** evaluation (both when handoff is allowed and when it is not). The
-  value is consumed immediately in the decision context rather than persisted in
-  graph state. Under `pass`/`block` this was a contradiction; as a `derive` it is
-  simply the rule doing its job. When it derives "handoff not allowed", the
-  reason is `active_delegation_limit_reached`.
-- The two `stop` guards share limit-comparison helpers. Orchestrator context
-  compaction remains the only token-watermark `maintain` guard.
+Subagent context summarization uses LangChain middleware and is not a custom
+guard. Capability discovery and delegation acceptance likewise have no guard
+definitions in the current implementation.
 
 ## What There Is No More
 
@@ -235,16 +231,13 @@ A `stop` outcome is applied by its position:
 - Subagent `iteration_limit`: `wrapModelCall` appends the marked stop notice
   and returns `Command({ goto: END })`. `createSubagent` treats the final
   message as a guard stop only if it carries the closed marker from
-  `subagent/guardStop.ts`, reports `completionReason: 'limit_reached'`, and
-  preserves the latest eligible AI text message as the explicit announce when
-  one exists.
-- Orchestrator `run_iteration_limit`: the guard node patches in the limit
-  notice, resets the run iteration counter, and forces an inline final reply
-  while keeping the active delegation resumable.
-
-The orchestrator receives a subagent stop as `completionReason:
-'limit_reached'` — a stop-reason hint from a downstream `stop` record — and
-decides whether to hand off, continue, or stop through its own guards.
+  `subagent/guardStop.ts`. The current implementation projects this as
+  `completionReason: 'limit_reached'`; the issue #755 target instead emits an
+  ordinary Announce when a deliverable exists and raises a recoverable execution
+  failure when none exists. The stop reason remains telemetry.
+- Orchestrator `run_iteration_limit`: the Boundary guard routes to terminal
+  finalization while keeping the active delegation available to the root
+  continuation contract.
 
 ## Future: When A Registry Earns Its Way Back
 
@@ -264,22 +257,14 @@ Do not add either speculatively.
 
 ## Migration From The Previous Design
 
-Landed in two commits (the original phase 1 and phase 3 were folded: the
-`pass`/`block` types and the outcome union could not coexist under the same
-names):
+The `pass`/`block` types, handler registry, and runtime lookup layer were
+removed. Current guard call sites name their rule and position statically and
+emit decision records through `evaluateGuard`. Historical guard names that are
+not listed in **Current Guards** are not part of the current runtime contract.
 
-1. **Speak the language + remove the machinery (no behavior change).**
-   `GuardOutcome` replaces `pass`/`block`; the 7 rules are retyped to their
-   verbs; call sites switch on `outcome.kind`; handlers' effect logic moves
-   into the positions (or effect helpers) verbatim. `forced_capability_seed`
-   stops computing its seed state twice (the rule puts it in `details`; the
-   position applies it). `GuardRegistry` and the handler objects are deleted;
-   `guardDefinitions/` keeps the name and position enums, the rule values,
-   and their tests.
-2. **Emit records.** `evaluateGuard` gains the `emit` hook; orchestrator
-   positions emit `pinpawo_guard_decision` custom events, subagent middlewares
-   emit the `subagent_guard_decision` runtime event.
-3. **Registry revisit** only when capability-registered guards are scheduled.
+Issue #755 is a separate Boundary migration: it keeps the subagent iteration
+guard and its diagnostics while removing stop-reason projection from Capability
+results and Announces.
 
 Relation to PR #304: the shared `checkProviderInputWatermark` helper and the
 `contextWindowTokens` config placement carry forward as-is; the runner/adapter

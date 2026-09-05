@@ -1,5 +1,11 @@
 # Delegation Announce Contract
 
+> **Status: current implementation reference.** The current payload still
+> includes `completionReason`. Issue #755 and the
+> [Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md)
+> remove stop reasons from the target cross-layer contract. This page remains an
+> implementation reference until that migration lands.
+
 A delegated Capability result is stored as a typed
 `DelegationAnnounceMessage`. It is execution evidence, not a main-agent reply
 and not an instruction.
@@ -23,8 +29,9 @@ identity into the main queue and removes the corresponding private messages;
 it does not create an ordinary `AIMessage` copy or infer completion from result
 prose.
 
-An unaccepted Announce stays private and resumable. `completionReason` describes
-how execution stopped; it does not establish task or goal completion.
+An unaccepted Announce stays private and resumable. In the current
+implementation, `completionReason` describes how execution stopped; it does not
+establish task or goal completion and is scheduled for removal by issue #755.
 
 ## Consumer projection
 
@@ -66,5 +73,6 @@ Announce and cannot replace its evidence.
 - artifacts remain separate Capability state and are not embedded in the
   Announce contract.
 
-Design rationale and the serialized payload are documented in
-[`delegation-announce-message.md`](../../design/agent-runtime/delegation-announce-message.md).
+This page owns the currently implemented serialized payload. The target
+cross-layer payload and migration are documented in the
+[Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).

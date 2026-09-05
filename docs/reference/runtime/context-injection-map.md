@@ -34,6 +34,20 @@ The repo encodes Axis 2 in the XML itself — blocks carry `role=`, `source=` an
 `trust=`/`authority=` attributes. When adding a block, set these; they are the
 only thing preventing a data block from being read as a new user instruction.
 
+### Canonical message ownership
+
+`OrchestratorState.messages` is the only canonical message collection. An
+untagged message belongs to the main conversation; a private Capability message
+has one complete `{ lane, runId, delegationId }` scope. The immutable
+`queryAgentMessages()` selection preserves canonical chronology and may append
+invocation-only input without persisting it.
+
+A fresh delegation never inherits another delegation's private history.
+Continuing the exact delegation reuses its scope. Capability briefings and
+Supervisor provider messages are invocation-private and never enter root
+messages. Handoff accepts typed Announces into main and clears private messages
+for that exact scope.
+
 ## 2. Graph shape
 
 ```
@@ -51,8 +65,8 @@ Model-invoking nodes: **entryAnswer**, **runSupervisor**, **capability**
 `prepare`, `captureUserRequest` and the guards invoke no model.
 
 `answer` is the current implementation name, not a permanent domain role. The
-target finalization boundary and deterministic-response split are documented in
-[`terminal-response.md`](../../design/agent-runtime/terminal-response.md).
+target finalization boundary is intentionally deferred to a separate design
+topic after the Supervisor Boundary contract is settled.
 
 ## 3. Shared building blocks
 
@@ -101,6 +115,11 @@ conversation. This is the only place a goal is authored. See §8.
 Two modes use the same steering domain. The target lifetime and ownership
 contract is defined by
 [`run-scoped-supervisor-session.md`](../../design/agent-runtime/run-scoped-supervisor-session.md).
+Capability exit, Boundary entry, and the target command convergence are defined
+by the
+[`delegation-boundary-protocol.md`](../../design/agent-runtime/delegation-boundary-protocol.md)
+draft for issue #755. The tool names below describe the current implementation,
+not the target command surface.
 Sources:
 `runtime/nodes/runSupervisor.ts` (dispatch),
 `runSupervisor/agent.ts` (assembly),

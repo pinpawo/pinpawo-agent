@@ -77,6 +77,13 @@ in the Supervisor's compact routing manifest. Its complete document still uses t
 same discovery path as every other Capability, and the setting does not bypass
 availability or Toolkit binding.
 
+The former `personality`, `species` and `stage` fields are rejected with guidance
+to move their authored content into `PET.md`. `serverBinding` is also rejected:
+there is no active cloud Pet synchronization consumer. The implicit Pet Profile
+Toolkit and cloud memory/history hydration have been removed. Conversation
+history remains owned by session checkpoints; `role` and `serviceSummary` remain
+public routing metadata.
+
 ## Per-Pet root document
 
 `PET.md` is the conventional, optional root document for one Pet:

@@ -33,10 +33,20 @@ runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace 
 这是本地派生信息，不代表已有持久化 workspace registry 或按请求切换 workspace 的
 公共协议。
 
-Host 将有效 workdir 提供给 Agent prompt 与 review/authorization context。它不是文件
-系统 sandbox，也不是隐式 Tool 参数：相对路径、绝对路径或 cwd 由模型决定，执行层
-不会注入或改写输入。Toolkit Runtime binding 只用于 Toolkit 自己拥有的动态资源与
-ownership。
+Host 将解析后的目录放入 `AgentInvokeInput.context.workdir`；直接调用 graph 时使用
+runnable options 中的 `context.workdir`。共享 system-message 构造器为 Entry、Supervisor、
+Capability 执行器和最终 Answer 渲染一次工作目录。review context 与 Toolkit Runtime
+execution scope 读取同一个结构化值。Host 的机器和会话信息走公共 system sections，
+不再重复目录；旧 `runtimeEnvironment` 和 `configurable.workdir` 通道已移除。
+
+每次调用都需要重新提供 context，包括 checkpoint resume。它不从对话历史恢复，通用
+agent runtime 也不会从进程全局状态猜测目录。
+
+workdir 是路径解析基准，不是文件系统 sandbox。本地 bash、project-inspection 和 Git
+Toolkit 的绑定会将受支持的相对路径，以及相对或省略的 `cwd`，解析到执行目录下；绝对
+路径保持绝对路径。绑定不会修改进程 cwd，因此同一进程里的不同 Host 可以保持各自的
+执行范围。实现见
+[workdirBinding.ts](../../../../services/local-agent/src/toolkits/local/workdirBinding.ts)。
 
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见
 [workspace proposal（英文）](../../../design/local-agent/workspace-runtime-config.md)。

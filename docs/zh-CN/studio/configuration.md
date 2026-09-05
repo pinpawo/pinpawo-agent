@@ -26,6 +26,11 @@ Pet 配置至少包含 `petId` 和 `name`，可选 `role`、`serviceSummary`、
 `lazy`、`disabled`、Capability 名单、thread 或
 continuation。所有配置 Pet 都在 Host ready 前 eager 构造；任意一个失败都会整体回滚。
 
+旧 `personality`、`species`、`stage` 字段会报错，并提示将其内容迁移到 `PET.md`。
+`serverBinding` 也已移除，因为当前没有云端 Pet 同步消费方。默认 Pet Profile Toolkit
+及云端 memory/history 注入接口已删除；会话历史仍由 session checkpoint 管理，
+`role` 和 `serviceSummary` 继续作为公开路由元数据。
+
 `PET.md` 是这个 Pet 的根文档，定位与 agent 使用的 `AGENTS.md` 或 `CLAUDE.md`
 一致。它定义 Pet 的身份、职责、工作原则、边界和长期约定，并完整应用于该 Pet 的直接
 Chat 回复、Run Supervisor、Capability 执行和最终 Answer。可执行职责与 Toolkit 依赖

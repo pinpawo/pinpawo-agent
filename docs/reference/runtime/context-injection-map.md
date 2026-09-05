@@ -71,6 +71,11 @@ it for free text — never interpolate user or tool text into a tag directly.
 Role prompts no longer receive `AgentActor` or a legacy `[配置]` block. Common
 Host instructions, including PET.md, are composed at the model boundary from
 invocation runtime context; see [Pet root document](../../design/pet-document.md).
+`AgentRuntimeContext.workdir` is rendered once between common Host sections and
+execution-local sections. The same value supplies review and Toolkit execution
+scopes. Host environment facts also use common sections; there is no separate
+`runtimeEnvironment` configurable channel. Root context is reapplied on resume,
+without putting these sections in checkpointed messages.
 
 ## 4. Node: entryAnswer
 
@@ -153,7 +158,7 @@ Executes one delegated task. Source: `runtime/nodes/capability.ts`.
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static) + `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ workdir, artifactDiscovery })` |
+| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ artifactDiscovery })` |
 | history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().delegation(scope).select()` — canonical main conversation plus this delegation's private messages |
 | boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context and current task; always last |
 

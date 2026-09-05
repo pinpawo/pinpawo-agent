@@ -187,3 +187,41 @@ resume while preserving the original trace identity. Explicit null continuation
 inputs remain unchanged. All three package typechecks passed, including
 pet-agent eval types. pet-agent and Studio ESM/declaration builds passed.
 No live-model evaluations or suspended macOS companion checks were run.
+
+## Host configuration resolution follow-up (2026-09-06 draft)
+
+Host execution settings have one resolved contract, `HostExecutionConfig`:
+`runtimeConfig` owns the effective workdir and durable paths; review mode,
+authorization safety level and Capability registry backend are explicit Host
+settings. `HostCapabilityAssembly` snapshots process defaults when constructed.
+Chat and Studio forward this snapshot; Agent input construction consumes it
+without consulting global configuration or resolving directories again.
+`AgentLlmConfig` owns model settings only, not authorization policy.
+
+Each resident owns one `LocalServerRuntimeDepsStore`. Conversation, session
+projection and background dispatch read this same store. A policy update replaces
+mode and safety level together; subsequent runs use the new snapshot while an
+already-started run keeps its admitted configuration. Persistence continues to
+save startup defaults; it does not mutate other already-running Hosts.
+
+Migration: programmatic Hosts supply resolved settings through
+`resolveHostExecutionConfig(runtimeConfig, settings)` (the settings argument may
+be omitted only at a process composition boundary). `LocalServerDeps.workdir`
+is removed; consumers use `runtimeConfig.workdir`. `createLocalServerHandlers`
+accepts the shared store. Session services require runtime paths explicitly;
+Host-specific session/checkpoint path overrides remain deliberate storage scopes.
+Chat explicitly owns the existing `tuiCheckpointPath` adapter; the default session
+service now uses that same adapter rather than constructing a second writer.
+Studio retains its separate Host checkpoint root. Resident Hosts may supply their
+own policy persistence port; persistence succeeds before the live store changes.
+Registry/actor cleanup and graph cache invalidation are separate audit items.
+
+Validation must cover conflicting process defaults versus explicit Host values,
+independent Host directories and policies, and a policy change followed by both
+conversation and background dispatch on the same resident.
+
+Validation on 2026-09-06: local-agent 611 passed / 5 skipped; Studio 90 passed;
+Studio cross-package acceptance 5 passed. The final affected channel/handler
+suite passed 38 tests. Local-agent, Studio and acceptance-project typechecks
+passed; local-agent runtime and Studio ESM/declaration builds passed. No live
+model calls or macOS companion checks were involved.

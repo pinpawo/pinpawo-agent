@@ -1,14 +1,12 @@
 import { HumanMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import {
-  GLOBAL_REVIEW_POLICY_MODE,
   petDocumentSystemPromptSection,
   stampAgentMessageCreatedAt,
   type AgentCapability,
   type AgentInvokeInput,
   type AgentToolkit,
   type CapabilityArtifactStore,
-  type CapabilityRegistryBackend,
   type CompiledAgentRegistry,
   type PetDocument,
   type OrchestratorConfig,
@@ -21,9 +19,7 @@ import {
 } from './agentModels';
 import type { AgentLlmConfig } from './agentConfig';
 import type { AgentContext } from './contextLoader';
-import { buildLocalLlmConfig } from './llmConfig';
-import { getConfig } from './config';
-import { resolveUserDir } from './runtimeConfig';
+import type { HostExecutionConfig } from './hostExecutionConfig';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 import {
   buildLocalAgentInterfaceContext,
@@ -81,7 +77,8 @@ export function buildDecisionStructuredOutput(
 export function buildLocalChatAgentInput(params: {
   context: AgentContext;
   userMessage: string;
-  llmConfig?: AgentLlmConfig;
+  llmConfig: AgentLlmConfig;
+  hostConfig: HostExecutionConfig;
   /** Cache identity for hosts that key a graph to one durable session ledger. */
   sessionContextCacheKey?: string;
   toolkits?: AgentToolkit[];
@@ -98,14 +95,10 @@ export function buildLocalChatAgentInput(params: {
   capabilities?: readonly AgentCapability[];
   /** Store handed to capabilities so they can deterministically persist result artifacts */
   capabilityArtifactStore: CapabilityArtifactStore;
-  /** Effective agent workdir for prompt context and relative tool paths. */
-  workdir?: string;
   /** Fixed session/thread start timestamp used as a stable relative-time anchor. */
   sessionStartedAt?: string;
   /** IANA timezone name for interpreting relative dates in this session. */
   timezone?: string;
-  /** Explicit Capability registry backend. Defaults to local-agent configuration. */
-  capabilityRegistryBackend?: CapabilityRegistryBackend;
   /** Capability preloaded by the entry Supervisor. */
   defaultCapabilityName?: string;
   /** Canonical PET.md root document applied in Chat and delegated execution. */
@@ -117,11 +110,10 @@ export function buildLocalChatAgentInput(params: {
   if (!params.capabilityArtifactStore) {
     throw new Error('Local chat requires a capability artifact store');
   }
-  const llmConfig = params.llmConfig ?? buildLocalLlmConfig();
-  const capabilityRegistryBackend = params.capabilityRegistryBackend
-    ?? getConfig().capabilityRegistryBackend;
+  const { llmConfig, hostConfig } = params;
+  const { capabilityRegistryBackend } = hostConfig;
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
-  const workdir = resolveUserDir(params.workdir ?? getConfig().workdir);
+  const workdir = hostConfig.runtimeConfig.workdir;
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
   const capabilities = [...(params.capabilities ?? [])];
@@ -190,10 +182,8 @@ export function buildLocalChatAgentInput(params: {
       capabilities,
       toolkits: [...preparedRegistry.toolkits],
       globalReviewPolicy: {
-        mode: llmConfig.globalReviewPolicyMode ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-        ...(llmConfig.autoAuthorizationSafetyLevel ? {
-          safetyLevel: llmConfig.autoAuthorizationSafetyLevel,
-        } : {}),
+        mode: hostConfig.globalReviewPolicyMode,
+        safetyLevel: hostConfig.autoAuthorizationSafetyLevel,
         ...(decisionStructuredOutput ? { structuredOutput: decisionStructuredOutput } : {}),
       },
     },

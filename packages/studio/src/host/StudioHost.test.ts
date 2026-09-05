@@ -66,6 +66,7 @@ function fakeCapabilityAssembly(
       initialized = true;
     },
     shutdown: async () => { events.push('caps:shutdown'); },
+    getExecutionConfig: () => ({runtimeConfig, globalReviewPolicyMode: 'require_authorization' as const, autoAuthorizationSafetyLevel: 'strict' as const, capabilityRegistryBackend: 'memory' as const}),
     getRuntimeConfig: () => runtimeConfig,
     getModelProfiles: () => ({}) as never,
     getCapabilityCatalog: () => capabilityCatalog,

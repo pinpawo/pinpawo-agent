@@ -8,7 +8,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import type { LocalModelProfileRegistry } from './llmConfig';
-import { buildWorkspaceRuntimeConfig, type LocalAgentRuntimeConfig } from './runtimeConfig';
+import type { HostExecutionConfig } from './hostExecutionConfig';
 import type { ServerMode } from './serverMode';
 import {
   type HostToolkitInventorySnapshot,
@@ -20,24 +20,20 @@ export type CapabilityCatalogReader = Pick<
   'getSnapshot'
 >;
 
-export type LocalServerDeps = {
+export type LocalServerDeps = HostExecutionConfig & {
   /** Local-agent interaction mode; resident Pet adapters reuse the Chat semantics. */
   serverMode: ServerMode;
   actorId: string;
   actorName?: string;
   modelProfiles: LocalModelProfileRegistry;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
-  autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
-  workdir: string;
-  runtimeConfig?: LocalAgentRuntimeConfig;
   /**
    * Composition Host 持有的 conversation checkpointer。Chat Host 与 Studio Host
    * 使用独立 root，但都通过同一 local-agent session stack 注入。FileSaver 仍提供
    * store-wide filesystem writer lock，保护同一 root 被意外多进程打开时的
    * read-modify-write 与 GC。
    *
-   * 缺少它时 pet 的 graph 跑在无 checkpoint 状态 —— 执行进度只存在于内存,
-   * 中断后无法 resume。见 #613。
+   * Missing adapters use the explicit runtimeConfig.tuiCheckpointPath. Composing
+   * production Hosts supply their owned adapter so reads, writes and leases agree.
    */
   chatCheckpointer?: BaseCheckpointSaver;
   toolkitInventory: HostToolkitInventoryStore;
@@ -51,31 +47,13 @@ export type LocalServerDeps = {
   capabilityArtifactStore?: CapabilityArtifactStore;
 };
 
-export type NormalizedLocalServerDeps = Readonly<Omit<
-  LocalServerDeps,
-  'workdir' | 'runtimeConfig'
-> & {
-  workdir: string;
-  runtimeConfig: LocalAgentRuntimeConfig;
-}>;
-
 export type LocalServerRuntimeDepsStore = Readonly<{
-  get: () => NormalizedLocalServerDeps;
-  updateGlobalReviewPolicyMode: (
+  get: () => Readonly<LocalServerDeps>;
+  updateReviewPolicy: (
     mode: BuiltinGlobalReviewPolicyMode,
-  ) => NormalizedLocalServerDeps;
-  updateAutoAuthorizationSafetyLevel: (
     safetyLevel: ToolAuthorizationSafetyLevel,
-  ) => NormalizedLocalServerDeps;
+  ) => Readonly<LocalServerDeps>;
 }>;
-
-export function getLocalServerRuntimeConfig(deps: LocalServerDeps): LocalAgentRuntimeConfig {
-  return deps.runtimeConfig ?? buildWorkspaceRuntimeConfig({ workdir: deps.workdir });
-}
-
-export function getLocalServerWorkdir(deps: LocalServerDeps): string {
-  return deps.runtimeConfig?.workdir ?? deps.workdir;
-}
 
 export function getLocalServerToolkitInventory(
   deps: Pick<LocalServerDeps, 'toolkitInventory'>,
@@ -83,33 +61,15 @@ export function getLocalServerToolkitInventory(
   return deps.toolkitInventory.getSnapshot();
 }
 
-export function normalizeLocalServerDeps(deps: LocalServerDeps): NormalizedLocalServerDeps {
-  const runtimeConfig = getLocalServerRuntimeConfig(deps);
-  return Object.freeze({
-    ...deps,
-    workdir: runtimeConfig.workdir,
-    runtimeConfig,
-  });
-}
-
+/** One Host-owned current snapshot shared by conversation and dispatch surfaces. */
 export function createLocalServerRuntimeDepsStore(
   deps: LocalServerDeps,
 ): LocalServerRuntimeDepsStore {
-  let current = normalizeLocalServerDeps(deps);
+  let current = Object.freeze({ ...deps });
   return Object.freeze({
     get: () => current,
-    updateGlobalReviewPolicyMode: (globalReviewPolicyMode) => {
-      current = Object.freeze({
-        ...current,
-        globalReviewPolicyMode,
-      });
-      return current;
-    },
-    updateAutoAuthorizationSafetyLevel: (autoAuthorizationSafetyLevel) => {
-      current = Object.freeze({
-        ...current,
-        autoAuthorizationSafetyLevel,
-      });
+    updateReviewPolicy: (globalReviewPolicyMode, autoAuthorizationSafetyLevel) => {
+      current = Object.freeze({ ...current, globalReviewPolicyMode, autoAuthorizationSafetyLevel });
       return current;
     },
   });

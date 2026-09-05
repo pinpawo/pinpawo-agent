@@ -1,3 +1,5 @@
+import { resolveHostExecutionConfig } from './hostExecutionConfig';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -27,7 +29,7 @@ import {
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import { createTestModelProfileRegistry } from './testing/modelProfiles';
+import { createTestModelProfiles, createTestModelProfileRegistry } from './testing/modelProfiles';
 
 function createContext(): AgentContext {
   return {
@@ -67,12 +69,14 @@ const testArtifactStore: CapabilityArtifactStore = {
 type LocalChatAgentInputParams = Parameters<typeof buildLocalChatAgentInput>[0];
 
 function buildTestLocalChatAgentInput(
-  params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>
-    & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>>,
+  params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore' | 'llmConfig' | 'hostConfig'>
+    & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore' | 'llmConfig' | 'hostConfig'>>,
 ) {
   const { capabilities, toolkits, ...rest } = params;
   const general = loadGeneralCapability();
   return buildLocalChatAgentInput({
+    llmConfig: createTestModelProfiles().resolve(),
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp/pinpawo-channel-test')),
     threadId: 'agent-channel-test-thread',
     capabilityArtifactStore: testArtifactStore,
     ...rest,
@@ -115,12 +119,12 @@ test('buildLocalChatAgentInput keeps the Capability registry backend explicit', 
   const filesystem = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    capabilityRegistryBackend: 'filesystem',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), { globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict', capabilityRegistryBackend: 'filesystem' }),
   });
   const memory = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    capabilityRegistryBackend: 'memory',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), { globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict', capabilityRegistryBackend: 'memory' }),
   });
 
   assert.equal(filesystem.graphConfig.capabilityRegistryBackend, 'filesystem');
@@ -391,12 +395,11 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), {globalReviewPolicyMode: 'auto_authorization', autoAuthorizationSafetyLevel: 'relaxed', capabilityRegistryBackend: 'memory'}),
     llmConfig: {
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
-      globalReviewPolicyMode: 'auto_authorization',
-      autoAuthorizationSafetyLevel: 'relaxed',
       structuredOutputAutoRepair: true,
       structuredOutputRepairMaxRetries: 2,
     },
@@ -416,7 +419,7 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    workdir: '/tmp/pinpawo-chat-workdir',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp/pinpawo-chat-workdir')),
   });
 
   assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-chat-workdir');
@@ -534,7 +537,7 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
   const params = {
     context: createContext(),
     userMessage: 'hello',
-    workdir: '/tmp/pinpawo-chat-workdir',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp/pinpawo-chat-workdir')),
     sessionStartedAt: '2026-06-23T10:30:00+08:00',
     timezone: 'Asia/Shanghai',
   };
@@ -561,11 +564,13 @@ test('Host resolves workdir once and keeps tracing attribution out of Agent inpu
   try {
     const fallback = `./${randomUUID()}`;
     setConfig({ workdir: fallback });
+    const firstHost = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig(fallback));
+    const secondHost = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('~/different'));
     const context = createContext();
     const firstUser = randomUUID();
     const secondUser = randomUUID();
-    const first = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: firstUser }, userMessage: 'first' });
-    const second = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: secondUser }, userMessage: 'second', workdir: '~/different' });
+    const first = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: firstUser }, userMessage: 'first', hostConfig: firstHost });
+    const second = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: secondUser }, userMessage: 'second', hostConfig: secondHost });
     setConfig({ workdir: '/another-global-default' });
     assert.equal(first.input.context?.workdir, resolveUserDir(fallback));
     assert.equal(second.input.context?.workdir, resolveUserDir('~/different'));
@@ -576,6 +581,29 @@ test('Host resolves workdir once and keeps tracing attribution out of Agent inpu
     assert.equal(JSON.stringify(second.input).includes(secondUser), false);
     assert.equal('actor' in first.input, false);
     assert.equal(first.input.messages.length, 1);
+  } finally {
+    setConfig(previous);
+  }
+});
+
+test('explicit Host snapshots override changing process defaults at the Agent boundary', () => {
+  const previous = getConfig();
+  const host = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig(`/tmp/${randomUUID()}`), {
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
+  });
+  try {
+    setConfig({ workdir: '/unrelated-process-dir', globalReviewPolicyMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'relaxed', capabilityRegistryBackend: 'filesystem' });
+    const setup = buildTestLocalChatAgentInput({
+      context: createContext(), userMessage: 'inspect', hostConfig: host,
+    });
+    assert.equal(setup.input.context?.workdir, host.runtimeConfig.workdir);
+    assert.equal(setup.graphConfig.capabilityRegistryBackend, 'memory');
+    assert.equal(setup.input.globalReviewPolicy?.mode, 'require_authorization');
+    assert.equal(setup.input.globalReviewPolicy && 'safetyLevel' in setup.input.globalReviewPolicy
+      ? setup.input.globalReviewPolicy.safetyLevel : undefined, 'strict');
   } finally {
     setConfig(previous);
   }

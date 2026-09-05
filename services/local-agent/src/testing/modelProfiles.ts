@@ -7,6 +7,7 @@ import {
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from '../agentConfig';
+import type { HostExecutionConfig } from '../hostExecutionConfig';
 import { createLocalModelProfileRegistry } from '../llmConfig';
 import {
   buildModelProfileRegistry,
@@ -87,9 +88,6 @@ export function createTestModelProfiles(
               input.structuredOutputRepairMaxRetries,
           }
         : {}),
-      ...(input.globalReviewPolicyMode
-        ? { globalReviewPolicyMode: input.globalReviewPolicyMode }
-        : {}),
     },
   });
 }
@@ -137,11 +135,12 @@ export function createTestModelProfileRegistry(
 }
 
 export function createTestModelServerDeps(
-  input: Partial<AgentLlmConfig> = {},
+  input: Partial<AgentLlmConfig & HostExecutionConfig> = {},
 ): {
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
+  capabilityRegistryBackend: HostExecutionConfig['capabilityRegistryBackend'];
   toolkitInventory: HostToolkitInventoryStore;
   capabilityCatalog: CapabilityCatalogReader;
 } {
@@ -151,6 +150,7 @@ export function createTestModelServerDeps(
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+    capabilityRegistryBackend: input.capabilityRegistryBackend ?? 'memory',
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityCatalog: emptyCapabilityCatalog,
   };

@@ -69,6 +69,10 @@ retired fields instead of silently ignoring them. The implicit Pet Profile
 Toolkit and cloud profile/history hydration have also been removed; conversation
 history remains owned by the session checkpoint. Programmatic resident Hosts use
 `petId` and `petName`; optional `traceUserId` is consumed only by Host tracing.
+They also receive resolved `HostExecutionConfig` settings from the composing Host;
+use `resolveHostExecutionConfig(runtimeConfig, settings)` from `pinpawo/host-runtime`.
+Review policy belongs to these Host settings, not to model profiles. A resident's
+conversation and dispatch surfaces share subsequent policy updates.
 
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.

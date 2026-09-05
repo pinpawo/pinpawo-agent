@@ -67,8 +67,6 @@ function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
     ...(config.structuredOutputRepairMaxRetries !== undefined
       ? { structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries }
       : {}),
-    globalReviewPolicyMode: config.globalReviewPolicyMode,
-    autoAuthorizationSafetyLevel: config.autoAuthorizationSafetyLevel,
   };
 }
 

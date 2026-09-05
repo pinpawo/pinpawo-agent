@@ -17,7 +17,6 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     deps: {
       actorId: 'pet-a',
       ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
-      workdir: '/tmp/legacy-work',
       runtimeConfig: {
         workdir: '/tmp/work',
         workspace: {
@@ -130,7 +129,6 @@ test('buildLocalAgentSessionSnapshot preserves an in-flight running request', ()
     messages: [],
     deps: {
       actorId: 'pet-a',
-      workdir: '/tmp/work',
       ...createTestModelServerDeps(),
       runtimeConfig: {
         workdir: '/tmp/work',

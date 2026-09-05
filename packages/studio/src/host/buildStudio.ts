@@ -14,7 +14,7 @@ import {
   createResidentPetHost,
   type FileSaver,
   type HostToolkitInventoryStore,
-  type LocalAgentRuntimeConfig,
+  type HostExecutionConfig,
   type LocalModelProfileRegistry,
   type ResidentPetHost,
 } from 'pinpawo/host-runtime';
@@ -31,7 +31,7 @@ export class StudioNotConfiguredError extends Error {
   }
 }
 
-export type BuildStudioInput = {
+export type BuildStudioInput = HostExecutionConfig & {
   configuration: ResolvedStudioHostConfig;
   modelProfiles: LocalModelProfileRegistry;
   /** Host fallback Capability 池；Studio uses general only without an explicit default. */
@@ -44,7 +44,6 @@ export type BuildStudioInput = {
   toolkitRuntimeManager: ToolkitRuntimeManager;
   capabilityArtifactStore: CapabilityArtifactStore;
   checkpoint: FileSaver;
-  runtimeConfig: LocalAgentRuntimeConfig;
   /** Host composition defers Plugin listeners until Agent Session transport is ready. */
   deferPluginActivation?: boolean;
 };
@@ -215,6 +214,9 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         capabilityArtifactStore: input.capabilityArtifactStore,
         checkpointer: input.checkpoint,
         runtimeConfig: input.runtimeConfig,
+        globalReviewPolicyMode: input.globalReviewPolicyMode,
+        autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
+        capabilityRegistryBackend: input.capabilityRegistryBackend,
         sessionStatePath: path.join(
           input.runtimeConfig.stateRoot,
           'resident-sessions',

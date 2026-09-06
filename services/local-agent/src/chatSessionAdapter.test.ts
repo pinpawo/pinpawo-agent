@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import {
+  ToolMessage, AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
@@ -1336,4 +1337,75 @@ test('runChatSession emits provider token usage from new state messages', async 
     scope: 'run',
   });
   assert.equal(typeof completed.usage?.updatedAt, 'string');
+});
+
+test('runChatSession reports a task pause without turning its bookkeeping into an assistant reply', async () => {
+  // Regression: after a Review reject the run settles into a task pause. The
+  // checkpoint's last message is the rejected tool result — it is not a reply,
+  // and the run must not be reported as completed.
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [
+      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
+      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const, message: 'no' } },
+    ],
+  };
+  const rejectedResult = new ToolMessage({
+    content: JSON.stringify({ source: 'human_reject', message: 'no' }),
+    tool_call_id: 'call-1',
+    name: 'run_shell',
+  });
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  let reads = 0;
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const graphService = {
+    async readThreadState() {
+      reads += 1;
+      return reads === 1
+        ? {
+          messages: [],
+          pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
+          pauseTaskInterrupt: null,
+          hasPendingContinuation: true,
+        }
+        : {
+          messages: [rejectedResult],
+          pendingInterrupt: null,
+          pauseTaskInterrupt: { kind: 'pause_task' },
+          hasPendingContinuation: false,
+        };
+    },
+    buildResumeCommand(value: unknown) {
+      return value;
+    },
+    streamEvents() {
+      return (async function* () {})();
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'resume',
+      requestId: 'req-1',
+      resume: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => { throw new Error('the adapter does not finalize a pause itself'); },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'paused' });
+  assert.equal(emittedEvents.some((event) => event.type === 'message.completed'), false);
+  assert.equal(JSON.stringify(emittedEvents).includes('human_reject'), false);
 });

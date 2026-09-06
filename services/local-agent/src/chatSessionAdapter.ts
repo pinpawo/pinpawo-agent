@@ -48,7 +48,9 @@ const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮
 export type AgentSessionTurnResult =
   | { status: 'completed'; reply: string }
   | { status: 'waiting_human' }
-  | { status: 'interrupted' };
+  | { status: 'interrupted' }
+  /** The run settled into a task pause. There is no reply to report. */
+  | { status: 'paused' };
 
 /** @deprecated Use AgentSessionTurnResult. */
 export type ChatSessionResult = AgentSessionTurnResult;
@@ -531,6 +533,14 @@ export async function runAgentSessionTurn(
       emitEvent,
     });
     return { status: 'waiting_human' };
+  }
+
+  if (finalThreadState.pauseTaskInterrupt) {
+    // The run settled into a task pause. The checkpoint's last message is the
+    // pause's own bookkeeping — a rejected tool result, a cancelled action —
+    // and must not be reported as the assistant's reply.
+    clearAgentRunActivity(requestId);
+    return { status: 'paused' };
   }
 
   const streamedFinalReply = finalMessages.length > 0

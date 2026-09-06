@@ -350,6 +350,16 @@ export class LocalServerChatHandler {
         finishInterrupted();
         return 'interrupted';
       }
+      if (result.status === 'paused') {
+        // The protocol has no pause outcome yet: the TUI derives a task pause
+        // from the completion snapshot that follows an interrupted run. Report
+        // the settled pause as interrupted directly — nothing aborted it, so
+        // the abort-gated finishInterrupted would send nothing.
+        publishInterrupted();
+        this.inflightRequests.sendInterrupted(peer, inflight);
+        this.inflightRequests.clear(peer, inflight);
+        return 'interrupted';
+      }
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
       await this.tuiSessions.refreshActiveSessionSummary(deps);

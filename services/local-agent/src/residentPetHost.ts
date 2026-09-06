@@ -7,9 +7,7 @@ import {
   type AgentRuntimeEvent,
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
-import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import {
-  GLOBAL_REVIEW_POLICY_MODE,
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
@@ -23,14 +21,18 @@ import {
   type AgentSessionTurnResult,
 } from './chatSessionAdapter';
 import { loadAgentContext } from './contextLoader';
-import { createLocalServerHandlers } from './localServerHandlers';
+import { createLocalServerHandlers, type LocalServerHandlerOptions } from './localServerHandlers';
 import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
 } from './localServerMessageDispatcher';
 import { LocalServerTuiSessionService, type TuiSessionCheckpointer } from './localServerTuiSessions';
-import type { LocalServerDeps } from './localServerTypes';
-import type { LocalAgentRuntimeConfig } from './runtimeConfig';
+import {
+  createLocalServerRuntimeDepsStore,
+  type LocalServerDeps,
+  type LocalServerRuntimeDepsStore,
+} from './localServerTypes';
+import type { HostExecutionConfig } from './hostExecutionConfig';
 import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from './llmConfig';
 import {
@@ -341,7 +343,7 @@ export class ResidentPetCoordinator {
   }
 }
 
-export type CreateResidentPetRuntimeOptions = {
+export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   /** Host identity used for session ownership and graph isolation. */
   petId: string;
   petName: string;
@@ -356,7 +358,6 @@ export type CreateResidentPetRuntimeOptions = {
   toolkitRuntimeManager?: ToolkitRuntimeManager;
   capabilityArtifactStore: CapabilityArtifactStore;
   checkpointer: TuiSessionCheckpointer;
-  runtimeConfig: LocalAgentRuntimeConfig;
   /** Pet-scoped Agent Session registry path owned by the composing Host. */
   sessionStatePath: string;
   loadContext?: typeof loadAgentContext;
@@ -365,6 +366,8 @@ export type CreateResidentPetRuntimeOptions = {
   runAgentTurn?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   /** @deprecated Use runAgentTurn. */
   runChat?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
+  /** Host persistence port for updated startup defaults. */
+  persistGlobalReviewPolicyMode?: LocalServerHandlerOptions['persistGlobalReviewPolicyMode'];
   /** Existing opaque checkpoint thread, adopted only when no Agent Session exists. */
   adoptThreadId?: string;
 };
@@ -381,7 +384,7 @@ export interface ResidentPetRuntime {
 
 type ResidentPetRuntimeContext = {
   runtime: ResidentPetRuntime;
-  deps: LocalServerDeps;
+  runtimeDeps: LocalServerRuntimeDepsStore;
   graphService: LocalAgentGraphService;
   runAgentTurn: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   loadContext: typeof loadAgentContext;
@@ -480,7 +483,6 @@ export async function createResidentPetRuntime(
   options: CreateResidentPetRuntimeOptions,
 ): Promise<ResidentPetRuntime> {
   const modelProfiles = withDefaultModelProfile(options.modelProfiles, options.modelProfileId);
-  const llmConfig = modelProfiles.resolve();
   const deps: LocalServerDeps & {
     chatCheckpointer: TuiSessionCheckpointer;
     capabilityArtifactStore: CapabilityArtifactStore;
@@ -489,12 +491,10 @@ export async function createResidentPetRuntime(
     actorId: options.petId,
     actorName: options.petName,
     modelProfiles,
-    globalReviewPolicyMode: llmConfig.globalReviewPolicyMode
-      ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-    autoAuthorizationSafetyLevel: llmConfig.autoAuthorizationSafetyLevel
-      ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
-    workdir: options.runtimeConfig.workdir,
     runtimeConfig: options.runtimeConfig,
+    globalReviewPolicyMode: options.globalReviewPolicyMode,
+    autoAuthorizationSafetyLevel: options.autoAuthorizationSafetyLevel,
+    capabilityRegistryBackend: options.capabilityRegistryBackend,
     chatCheckpointer: options.checkpointer,
     toolkitInventory: options.toolkitInventory,
     ...(options.toolkitRuntimeManager ? { toolkitRuntimeManager: options.toolkitRuntimeManager } : {}),
@@ -507,6 +507,7 @@ export async function createResidentPetRuntime(
     ...(options.petDocument ? { petDocument: options.petDocument } : {}),
     capabilityArtifactStore: options.capabilityArtifactStore,
   };
+  const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
   const graphService = options.graphService ?? new LocalAgentGraphService();
   const loadContext = options.loadContext
     ?? (async () => ({
@@ -532,7 +533,7 @@ export async function createResidentPetRuntime(
 
   const readSettledState = async (): Promise<PetDispatchSettledState> => {
     const context = await loadContext(deps.actorId);
-    const setup = sessions.buildChatSetup(deps, context);
+    const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
     if (state.pendingInterrupt) return 'waiting';
     if (state.hasPendingContinuation) return 'blocked';
@@ -580,7 +581,8 @@ export async function createResidentPetRuntime(
     }
   };
   const runAgentTurn = options.runAgentTurn ?? options.runChat ?? runAgentSessionTurn;
-  const localHandlers = createLocalServerHandlers(deps, {
+  const localHandlers = createLocalServerHandlers(runtimeDeps, {
+    persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
@@ -617,7 +619,7 @@ export async function createResidentPetRuntime(
 
   const context: ResidentPetRuntimeContext = {
     runtime,
-    deps,
+    runtimeDeps,
     graphService,
     runAgentTurn,
     loadContext,
@@ -645,7 +647,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
   const context = readResidentPetRuntimeContext(runtime);
   const {
     coordinator,
-    deps,
+    runtimeDeps,
     graphService,
     runAgentTurn,
     loadContext,
@@ -678,8 +680,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           const run = createInflightOperationRun(requestId);
           let activeRun: ResidentActiveRun | null = null;
           try {
-            const context = await loadContext(deps.actorId);
-            const setup = sessions.buildChatSetup(deps, context);
+            const context = await loadContext(runtimeDeps.get().actorId);
+            const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
             configureInflightOperationRegistry(
               run,
               createOperationRegistryForAgentSetup(setup),

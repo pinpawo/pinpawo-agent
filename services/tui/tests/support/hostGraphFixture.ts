@@ -174,7 +174,10 @@ export function createHostGraphFixture() {
       }
       if (typeof inputText === 'string' && inputText.includes(INTERRUPT_MESSAGE)) {
         messagesByThread.set(threadKey, accumulatedInput);
-        return (async function* () {
+        const output = waitForAbort(setup.input.signal).then(() => {
+          observedInterrupt = true;
+        });
+        return Object.assign((async function* () {
           yield protocolEvent('messages', {
             event: 'message-start',
             id: 'assistant-interrupt',
@@ -186,10 +189,9 @@ export function createHostGraphFixture() {
               text: INTERRUPT_PARTIAL,
             },
           });
-          await waitForAbort(setup.input.signal);
-          observedInterrupt = true;
+          await output;
           yield protocolEvent('values', { messages: inputMessages });
-        })();
+        })(), { output });
       }
 
       const finalReply = new AIMessage({
@@ -351,7 +353,8 @@ function isInterruptRunResume(
 }
 
 function readThreadKey(setup: AgentChannelSetup) {
-  return setup.input.threadId ?? setup.graphKey;
+  assert.ok(setup.input.threadId, 'Host fixture requires a thread ID');
+  return setup.input.threadId;
 }
 
 async function waitForAbort(signal: AbortSignal | undefined) {

@@ -6,7 +6,7 @@ import {
   createLocalServerHandlers,
   type LocalServerHandlerOptions,
 } from './localServerHandlers';
-import type { LocalServerDeps } from './localServerTypes';
+import { createLocalServerRuntimeDepsStore, type LocalServerDeps } from './localServerTypes';
 import {
   startLocalServerTransport,
   type LocalServerTransport,
@@ -31,7 +31,7 @@ export async function startLocalServer(
   options: LocalServerOptions = {},
 ): Promise<LocalServerTransport> {
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
-  const handlers = createLocalServerHandlers(deps, options.handlerOptions ?? {});
+  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps), options.handlerOptions ?? {});
   return startLocalServerTransport(port, handlers.peerHandlers, {
     authToken,
     handleHttpRequest: (req, res) => {

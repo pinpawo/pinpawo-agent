@@ -98,7 +98,7 @@ Host identity/configuration remains separate. `AgentActor` and its
 invocation/review/finalize fields are removed. Display name and optional tracing
 user attribution belong to the Host.
 `CreateResidentPetRuntimeOptions.petId` supplies Host identity explicitly to
-resident session initialization. Graph cache identity reads that Host Pet id;
+resident session initialization. Session ownership reads that Host Pet id;
 Host metadata does not enter Agent configuration or review/finalize callbacks.
 The default Pet Profile Toolkit and its cloud profile/memory/history fields have
 been removed. PET.md is the authored persona source.
@@ -187,3 +187,81 @@ resume while preserving the original trace identity. Explicit null continuation
 inputs remain unchanged. All three package typechecks passed, including
 pet-agent eval types. pet-agent and Studio ESM/declaration builds passed.
 No live-model evaluations or suspended macOS companion checks were run.
+
+## Host configuration resolution follow-up (2026-09-06 draft)
+
+Host execution settings have one resolved contract, `HostExecutionConfig`:
+`runtimeConfig` owns the effective workdir and durable paths; review mode,
+authorization safety level and Capability registry backend are explicit Host
+settings. `HostCapabilityAssembly` snapshots process defaults when constructed.
+Chat and Studio forward this snapshot; Agent input construction consumes it
+without consulting global configuration or resolving directories again.
+`AgentLlmConfig` owns model settings only, not authorization policy.
+
+Each resident owns one `LocalServerRuntimeDepsStore`. Conversation, session
+projection and background dispatch read this same store. A policy update replaces
+mode and safety level together; subsequent runs use the new snapshot while an
+already-started run keeps its admitted configuration. Persistence continues to
+save startup defaults; it does not mutate other already-running Hosts.
+
+Migration: programmatic Hosts supply resolved settings through
+`resolveHostExecutionConfig(runtimeConfig, settings)` (the settings argument may
+be omitted only at a process composition boundary). `LocalServerDeps.workdir`
+is removed; consumers use `runtimeConfig.workdir`. `createLocalServerHandlers`
+accepts the shared store. Session services require runtime paths explicitly;
+Host-specific session/checkpoint path overrides remain deliberate storage scopes.
+Chat explicitly owns the existing `tuiCheckpointPath` adapter; the default session
+service now uses that same adapter rather than constructing a second writer.
+Studio retains its separate Host checkpoint root. Resident Hosts may supply their
+own policy persistence port; persistence succeeds before the live store changes.
+Registry/actor cleanup and graph cache invalidation are separate audit items.
+
+Validation must cover conflicting process defaults versus explicit Host values,
+independent Host directories and policies, and a policy change followed by both
+conversation and background dispatch on the same resident.
+
+Validation on 2026-09-06: local-agent 611 passed / 5 skipped; Studio 90 passed;
+Studio cross-package acceptance 5 passed. The final affected channel/handler
+suite passed 38 tests. Local-agent, Studio and acceptance-project typechecks
+passed; local-agent runtime and Studio ESM/declaration builds passed. No live
+model calls or macOS companion checks were involved.
+
+The model-configuration audit follow-up removes the external `temperature` and
+`subagentThinking` overrides, including the stored `subagent_thinking` reader.
+Provider temperature defaults and the existing per-role thinking policy determine
+model construction. This removes these two mutable inputs from graph cache
+identity concerns; other graph dependency/cache concerns remain separate.
+Validation for this follow-up: 63 model/config/channel tests and local-agent
+TypeScript checking passed; live-model smoke was updated but not executed.
+
+## Graph lifetime and internal iteration guard (2026-09-06 draft)
+
+LocalAgentGraphService builds a graph from the supplied Host configuration for
+each execution or checkpoint operation. It no longer caches graphs using a
+manually assembled model/session key. This removes stale model credentials,
+endpoints, request settings and runtime adapters from graph reuse decisions.
+`graphKey` and `sessionContextCacheKey` are removed. Tracing uses the actual thread
+id when available; a call without a thread does not invent a durable session id.
+Checkpoint adapters remain Host-owned: constructing a graph does not reset state,
+and continuation/resume still uses the same checkpoint thread and graph topology.
+This trades graph construction work for explicit dependency lifetime; any future
+cache must establish its necessity and a complete immutable dependency contract.
+
+The main run iteration guard uses the internal `ORCHESTRATOR_MAX_ITERATIONS = 25`
+constant. `maxRunIterations` is removed from graph and invocation contracts and
+from their parsers, and the former default constant is no longer a package export.
+The guard and Answer context use the same internal value. Tests exercise the
+boundary using run state near the limit, not configurable production guardrails.
+
+Resume validation also uncovered a Host boundary bug: every human-review response
+installed an interrupt callback after its checkpoint was persisted. Only review
+cancellation or an explicit interrupt request now installs that callback; ordinary
+approval continues execution. TUI fixtures now use the current Host config store,
+invocation context, required planning goal and checkpoint stream lifetime.
+
+Validation: 485 core tests, 608 local-agent tests (5 skipped), 90 Studio tests,
+5 Studio acceptance tests and 8 TUI Host tests passed. Core (including evals),
+local-agent, Studio and TUI TypeScript checks passed, as did core and local-agent
+ESM/declaration builds. Resume coverage includes explicit null continuation,
+review approval/cancellation, repeated suspension, model/checkpointer replacement,
+and process restart with persisted history.

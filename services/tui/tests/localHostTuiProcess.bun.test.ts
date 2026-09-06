@@ -4,6 +4,7 @@ import {
   type ChildProcessWithoutNullStreams,
 } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -1015,7 +1016,7 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       '  eof { exit 165 }',
       '}',
       'expect {',
-      '  -re "[Tt]ask paused" {}',
+      '  -re {[Tt]ask paused} {}',
       '  timeout { exit 166 }',
       '  eof { exit 167 }',
       '}',
@@ -1035,7 +1036,7 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       '  eof { exit 178 }',
       '}',
       'expect {',
-      '  -re "[Tt]ask paused" {}',
+      '  -re {[Tt]ask paused} {}',
       '  timeout { exit 183 }',
       '  eof { exit 184 }',
       '}',
@@ -1101,10 +1102,12 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       0,
       [
         `TUI production-toolkit PTY failed: signal=${result.signal}`,
+        host.stderr.join(''),
         stderr.join(''),
         output.slice(-4_000),
       ].join('\n'),
     );
+    assert.ok(existsSync(outputPath), compactTerminalObservation(output));
     assert.equal(readFileSync(outputPath, 'utf8'), GUARDED_HOST_OUTPUT_CONTENT);
     const searchableOutput = compactTerminalObservation(output);
     assert.ok(searchableOutput.includes(
@@ -1179,13 +1182,11 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       )),
       [
         `user:${GUARDED_HOST_INPUT}`,
-        'assistant:开始执行计划任务：write the guarded fixture',
         `user:${GUARDED_HOST_CONTINUATION_GUIDANCE}`,
         `user:${GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE}`,
         `subagent:${GUARDED_HOST_TOOL_OUTPUT}`,
         `assistant:${GUARDED_HOST_REPLY}`,
         `user:${checkpointAttachmentText}`,
-        'assistant:开始执行计划任务：read the selected attachment',
         `subagent:${ATTACHMENT_TOOL_OUTPUT}`,
         `assistant:${ATTACHMENT_TOOL_REPLY}`,
       ],

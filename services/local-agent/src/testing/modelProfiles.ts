@@ -7,6 +7,7 @@ import {
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from '../agentConfig';
+import type { HostExecutionConfig } from '../hostExecutionConfig';
 import { createLocalModelProfileRegistry } from '../llmConfig';
 import {
   buildModelProfileRegistry,
@@ -69,15 +70,9 @@ export function createTestModelProfiles(
       ...(input.subagentContextWindowTokens
         ? { subagentContextWindowTokens: input.subagentContextWindowTokens }
         : {}),
-      ...(input.temperature !== undefined
-        ? { temperature: input.temperature }
-        : {}),
       ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
       ...(input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {}),
       ...(input.verbose !== undefined ? { verbose: input.verbose } : {}),
-      ...(input.subagentThinking !== undefined
-        ? { subagentThinking: input.subagentThinking }
-        : {}),
       ...(input.structuredOutputAutoRepair !== undefined
         ? { structuredOutputAutoRepair: input.structuredOutputAutoRepair }
         : {}),
@@ -86,9 +81,6 @@ export function createTestModelProfiles(
             structuredOutputRepairMaxRetries:
               input.structuredOutputRepairMaxRetries,
           }
-        : {}),
-      ...(input.globalReviewPolicyMode
-        ? { globalReviewPolicyMode: input.globalReviewPolicyMode }
         : {}),
     },
   });
@@ -137,11 +129,12 @@ export function createTestModelProfileRegistry(
 }
 
 export function createTestModelServerDeps(
-  input: Partial<AgentLlmConfig> = {},
+  input: Partial<AgentLlmConfig & HostExecutionConfig> = {},
 ): {
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
+  capabilityRegistryBackend: HostExecutionConfig['capabilityRegistryBackend'];
   toolkitInventory: HostToolkitInventoryStore;
   capabilityCatalog: CapabilityCatalogReader;
 } {
@@ -151,6 +144,7 @@ export function createTestModelServerDeps(
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+    capabilityRegistryBackend: input.capabilityRegistryBackend ?? 'memory',
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityCatalog: emptyCapabilityCatalog,
   };

@@ -290,7 +290,6 @@ function createFakeGraphService(params: {
 
 function buildFakeSetup() {
   return {
-    graphKey: FAKE_THREAD_ID,
     graphConfig: { contextWindowTokens: 4096 },
     input: {
       messages: [new HumanMessage('start')],

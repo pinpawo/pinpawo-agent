@@ -1,6 +1,5 @@
 import type { PetDocument } from '@pinpawo/pet-agent';
 import { FileSaver } from './fileSaver';
-import { getConfig } from './config';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import {
   buildLocalAgentRuntimeConfig,
@@ -35,6 +34,8 @@ export class LocalAgentHost {
     this.caps = new HostCapabilityAssembly({
       runtimeConfig,
       sourceId: 'local-agent',
+      // Preserve the existing Chat session namespace while sharing its writer.
+      checkpointPath: runtimeConfig.tuiCheckpointPath,
     });
     this.serverMode = serverMode;
   }
@@ -105,17 +106,14 @@ export class LocalAgentHost {
 
   // ---- Chat/ws-relay concerns (host-specific) ----
 
-  private buildLocalServerDeps(): LocalServerDeps {
+  buildLocalServerDeps(): LocalServerDeps {
     return {
       serverMode: this.serverMode,
       actorId: this.getActorId(),
       actorName: this.getActorName() ?? undefined,
       chatCheckpointer: this.getChatCheckpointer(),
       modelProfiles: this.getModelProfiles(),
-      globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
-      autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
-      workdir: this.getRuntimeConfig().workdir,
-      runtimeConfig: this.getRuntimeConfig(),
+      ...this.caps.getExecutionConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),
       toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       capabilityCatalog: this.getCapabilityCatalog(),

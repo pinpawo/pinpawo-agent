@@ -1,8 +1,4 @@
-import type {
-  BuiltinGlobalReviewPolicyMode,
-  StructuredOutputMethod,
-} from '@pinpawo/pet-agent';
-import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
+import type { StructuredOutputMethod } from '@pinpawo/pet-agent';
 import type { ModelInputModality } from './modelProfiles';
 
 export type AgentLlmConfig = {
@@ -17,12 +13,9 @@ export type AgentLlmConfig = {
   observeModel?: string;
   contextWindowTokens?: number;
   subagentContextWindowTokens?: number;
-  temperature?: number;
   timeoutMs?: number;
   maxRetries?: number;
   verbose?: boolean;
-  /** Enable thinking/reasoning for subagent calls. Default: true. */
-  subagentThinking?: boolean;
   /**
    * Override structured-output retry behavior after parse/schema failure.
    * When unset, every structured-output method retries once.
@@ -30,8 +23,4 @@ export type AgentLlmConfig = {
   structuredOutputAutoRepair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
   structuredOutputRepairMaxRetries?: number;
-  /** Global handling for tool calls that request review. Default: require_authorization. */
-  globalReviewPolicyMode?: BuiltinGlobalReviewPolicyMode;
-  /** Review threshold used by auto_authorization. Default: strict. */
-  autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
 };

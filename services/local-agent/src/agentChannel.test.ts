@@ -1,3 +1,5 @@
+import { resolveHostExecutionConfig } from './hostExecutionConfig';
+import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -27,7 +29,7 @@ import {
 import { createExploreCapability } from './capabilities/explore';
 import { loadGeneralCapability } from './capabilities/general';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import { createTestModelProfileRegistry } from './testing/modelProfiles';
+import { createTestModelProfiles } from './testing/modelProfiles';
 
 function createContext(): AgentContext {
   return {
@@ -67,12 +69,14 @@ const testArtifactStore: CapabilityArtifactStore = {
 type LocalChatAgentInputParams = Parameters<typeof buildLocalChatAgentInput>[0];
 
 function buildTestLocalChatAgentInput(
-  params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>
-    & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore'>>,
+  params: Omit<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore' | 'llmConfig' | 'hostConfig'>
+    & Partial<Pick<LocalChatAgentInputParams, 'threadId' | 'capabilityArtifactStore' | 'llmConfig' | 'hostConfig'>>,
 ) {
   const { capabilities, toolkits, ...rest } = params;
   const general = loadGeneralCapability();
   return buildLocalChatAgentInput({
+    llmConfig: createTestModelProfiles().resolve(),
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp/pinpawo-channel-test')),
     threadId: 'agent-channel-test-thread',
     capabilityArtifactStore: testArtifactStore,
     ...rest,
@@ -115,20 +119,19 @@ test('buildLocalChatAgentInput keeps the Capability registry backend explicit', 
   const filesystem = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    capabilityRegistryBackend: 'filesystem',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), { globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict', capabilityRegistryBackend: 'filesystem' }),
   });
   const memory = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    capabilityRegistryBackend: 'memory',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), { globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict', capabilityRegistryBackend: 'memory' }),
   });
 
   assert.equal(filesystem.graphConfig.capabilityRegistryBackend, 'filesystem');
   assert.equal(memory.graphConfig.capabilityRegistryBackend, 'memory');
-  assert.notEqual(filesystem.graphKey, memory.graphKey);
 });
 
-test('buildLocalChatAgentInput passes the Pet default Capability into the graph identity', () => {
+test('buildLocalChatAgentInput passes the Pet default Capability into graph construction', () => {
   const general = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
@@ -140,10 +143,10 @@ test('buildLocalChatAgentInput passes the Pet default Capability into the graph 
   });
 
   assert.equal(planning.graphConfig.defaultCapabilityName, 'studio_planning');
-  assert.notEqual(planning.graphKey, general.graphKey);
+  assert.equal(general.graphConfig.defaultCapabilityName, undefined);
 });
 
-test('buildLocalChatAgentInput supplies Pet context without changing graph identity', () => {
+test('buildLocalChatAgentInput supplies current Pet invocation context', () => {
   const firstDocument = definePetDocument({ content: '# First Pet' });
   const secondDocument = definePetDocument({ content: '# Second Pet' });
   const first = buildTestLocalChatAgentInput({
@@ -159,7 +162,6 @@ test('buildLocalChatAgentInput supplies Pet context without changing graph ident
 
   assert.deepEqual(first.input.context?.systemPromptSections?.[0], petDocumentSystemPromptSection(firstDocument));
   assert.deepEqual(second.input.context?.systemPromptSections?.[0], petDocumentSystemPromptSection(secondDocument));
-  assert.equal(first.graphKey, second.graphKey);
 });
 
 test('buildLocalChatAgentInput rejects an empty artifact discovery scope', () => {
@@ -341,62 +343,15 @@ test('buildDecisionStructuredOutput honors the resolved profile strategy before 
   });
 });
 
-test('graph identity distinguishes stable profiles with the same model on different endpoints', () => {
-  const profiles = createTestModelProfileRegistry([
-    {
-      modelProfileId: 'account-a',
-      model: 'same-model',
-      baseUrl: 'https://account-a.example.test/v1',
-    },
-    {
-      modelProfileId: 'account-b',
-      model: 'same-model',
-      baseUrl: 'https://account-b.example.test/v1',
-    },
-  ]);
-  const first = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    llmConfig: profiles.resolve('account-a'),
-  });
-  const second = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    llmConfig: profiles.resolve('account-b'),
-  });
-
-  assert.notEqual(first.graphKey, second.graphKey);
-  assert.match(first.graphKey, /account-a/);
-  assert.match(second.graphKey, /account-b/);
-});
-
-test('graph identity isolates session-scoped model input adapters', () => {
-  const params = {
-    context: createContext(),
-    userMessage: 'hello',
-  };
-  const first = buildTestLocalChatAgentInput({
-    ...params,
-    sessionContextCacheKey: 'session-a',
-  });
-  const second = buildTestLocalChatAgentInput({
-    ...params,
-    sessionContextCacheKey: 'session-b',
-  });
-
-  assert.notEqual(first.graphKey, second.graphKey);
-});
-
 test('buildLocalChatAgentInput passes global review policy mode to graph input', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), {globalReviewPolicyMode: 'auto_authorization', autoAuthorizationSafetyLevel: 'relaxed', capabilityRegistryBackend: 'memory'}),
     llmConfig: {
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-v4-pro',
-      globalReviewPolicyMode: 'auto_authorization',
-      autoAuthorizationSafetyLevel: 'relaxed',
       structuredOutputAutoRepair: true,
       structuredOutputRepairMaxRetries: 2,
     },
@@ -416,7 +371,7 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    workdir: '/tmp/pinpawo-chat-workdir',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp/pinpawo-chat-workdir')),
   });
 
   assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-chat-workdir');
@@ -534,7 +489,7 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
   const params = {
     context: createContext(),
     userMessage: 'hello',
-    workdir: '/tmp/pinpawo-chat-workdir',
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp/pinpawo-chat-workdir')),
     sessionStartedAt: '2026-06-23T10:30:00+08:00',
     timezone: 'Asia/Shanghai',
   };
@@ -547,35 +502,50 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
 });
 
 
-test('graph identity uses the Host Pet id independently of display names', () => {
-  const context = createContext();
-  const first = buildTestLocalChatAgentInput({ context, userMessage: 'hello' });
-  const second = buildTestLocalChatAgentInput({
-    context: { ...context, pet: { ...context.pet, id: 'pet-b' } }, userMessage: 'hello',
-  });
-  assert.notEqual(first.graphKey, second.graphKey);
-});
-
 test('Host resolves workdir once and keeps tracing attribution out of Agent input', () => {
   const previous = getConfig();
   try {
     const fallback = `./${randomUUID()}`;
     setConfig({ workdir: fallback });
+    const firstHost = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig(fallback));
+    const secondHost = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('~/different'));
     const context = createContext();
     const firstUser = randomUUID();
     const secondUser = randomUUID();
-    const first = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: firstUser }, userMessage: 'first' });
-    const second = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: secondUser }, userMessage: 'second', workdir: '~/different' });
+    const first = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: firstUser }, userMessage: 'first', hostConfig: firstHost });
+    const second = buildTestLocalChatAgentInput({ context: { ...context, traceUserId: secondUser }, userMessage: 'second', hostConfig: secondHost });
     setConfig({ workdir: '/another-global-default' });
     assert.equal(first.input.context?.workdir, resolveUserDir(fallback));
     assert.equal(second.input.context?.workdir, resolveUserDir('~/different'));
-    assert.equal(first.graphKey, second.graphKey);
     assert.equal(first.traceUserId, firstUser);
     assert.equal(second.traceUserId, secondUser);
     assert.equal(JSON.stringify(first.input).includes(firstUser), false);
     assert.equal(JSON.stringify(second.input).includes(secondUser), false);
     assert.equal('actor' in first.input, false);
     assert.equal(first.input.messages.length, 1);
+  } finally {
+    setConfig(previous);
+  }
+});
+
+test('explicit Host snapshots override changing process defaults at the Agent boundary', () => {
+  const previous = getConfig();
+  const host = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig(`/tmp/${randomUUID()}`), {
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
+  });
+  try {
+    setConfig({ workdir: '/unrelated-process-dir', globalReviewPolicyMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'relaxed', capabilityRegistryBackend: 'filesystem' });
+    const setup = buildTestLocalChatAgentInput({
+      context: createContext(), userMessage: 'inspect', hostConfig: host,
+    });
+    assert.equal(setup.input.context?.workdir, host.runtimeConfig.workdir);
+    assert.equal(setup.graphConfig.capabilityRegistryBackend, 'memory');
+    assert.equal(setup.input.globalReviewPolicy?.mode, 'require_authorization');
+    assert.equal(setup.input.globalReviewPolicy && 'safetyLevel' in setup.input.globalReviewPolicy
+      ? setup.input.globalReviewPolicy.safetyLevel : undefined, 'strict');
   } finally {
     setConfig(previous);
   }

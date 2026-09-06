@@ -52,7 +52,6 @@ test('local server forwards structured local attachments to the chat session', a
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -118,7 +117,6 @@ test('replacement request waits for the previous thread invocation to settle', a
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -210,7 +208,6 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -246,6 +243,44 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
   ]);
 });
 
+test('ordinary review approval continues without requesting a checkpoint-boundary interruption', async () => {
+  const controls: unknown[] = [];
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        reviews: [{
+          id: 'review-current',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        }],
+      }),
+      buildChatSetup: () => ({ graphConfig: {}, input: { messages: [] } }),
+      refreshActiveSessionSummary: async () => undefined,
+    } as never,
+    inflightRequests: new InflightRequestController<LocalServerPeer>({
+      emitOperation: () => undefined,
+      sendControl: (_peer, message) => controls.push(message),
+    }),
+    loadContext: async () => ({} as never),
+    runAgentTurn: async (options) => {
+      assert.equal(options.interruptOnSettledResumeCheckpoint, undefined);
+      options.onResumeCheckpointed?.({ canInterrupt: true });
+      assert.equal(options.setup.input.signal?.aborted, false);
+      return { status: 'completed', reply: 'approved work completed' };
+    },
+  });
+  await handler.handleHumanReviewResponse(
+    createFakePeer(), humanReviewResponse('review-current'), { actorId: 'pet-1' } as never,
+  );
+  assert.deepEqual(controls, []);
+});
+
 test('review cancellation automatically interrupts at the first resolved checkpoint', async () => {
   const controls: unknown[] = [];
   const fakePeer = createFakePeer();
@@ -271,7 +306,6 @@ test('review cancellation automatically interrupts at the first resolved checkpo
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -328,7 +362,6 @@ test('run interrupt cancels a review that became pending before the client obser
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),

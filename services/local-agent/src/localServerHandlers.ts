@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL } from '@pinpawo/agent-contracts';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
@@ -31,7 +30,7 @@ import {
   supportsInputModalities,
 } from './modelProfiles';
 import {
-  createLocalServerRuntimeDepsStore,
+  type LocalServerRuntimeDepsStore,
   type LocalServerDeps,
 } from './localServerTypes';
 
@@ -97,10 +96,9 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * checkpoint-backed operations below.
  */
 export function createLocalServerHandlers(
-  deps: LocalServerDeps,
+  runtimeDeps: LocalServerRuntimeDepsStore,
   options: LocalServerHandlerOptions = {},
 ): LocalServerHandlers {
-  const runtimeDeps = createLocalServerRuntimeDepsStore(deps);
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
   const chatGraphService = options.chatGraphService ?? new LocalAgentGraphService();
@@ -108,6 +106,7 @@ export function createLocalServerHandlers(
     graphService: chatGraphService,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
+    ...(initialDeps.chatCheckpointer ? { checkpointer: initialDeps.chatCheckpointer } : {}),
     defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
   const publishRuntimeEvent = options.publishRuntimeEvent
@@ -657,14 +656,12 @@ export function createLocalServerHandlers(
       async () => {
         try {
           const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
-            ?? runtimeDeps.get().autoAuthorizationSafetyLevel
-            ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL;
+            ?? runtimeDeps.get().autoAuthorizationSafetyLevel;
           (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
             message.globalReviewPolicyMode,
             autoAuthorizationSafetyLevel,
           );
-          runtimeDeps.updateGlobalReviewPolicyMode(message.globalReviewPolicyMode);
-          runtimeDeps.updateAutoAuthorizationSafetyLevel(autoAuthorizationSafetyLevel);
+          runtimeDeps.updateReviewPolicy(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
           if (message.requestId) {
             client.send({
               type: 'runtime_config.result',

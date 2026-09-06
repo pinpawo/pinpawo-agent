@@ -192,6 +192,7 @@ test('LocalServerTuiSessionService creates and resets active sessions', async ()
     },
   } as TuiSessionCheckpointer;
   const service = new LocalServerTuiSessionService({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     state,
     saveState: () => {
       saved.push(1);
@@ -217,6 +218,7 @@ test('LocalServerTuiSessionService rolls back a model selection when persistence
   const state = createEmptyTuiSessionState();
   let failSave = false;
   const service = new LocalServerTuiSessionService({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     state,
     saveState: () => {
       if (failSave) {
@@ -290,6 +292,7 @@ test('LocalServerTuiSessionService rolls back image requirements when persistenc
 test('LocalServerTuiSessionService injects active session createdAt into runtime environment', () => {
   const state = createEmptyTuiSessionState();
   const service = new LocalServerTuiSessionService({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     state,
     saveState: () => {},
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
@@ -298,7 +301,7 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
   const setup = service.buildChatSetup({
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
-    workdir: '/tmp/pinpawo-tui-workdir',
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-tui-workdir'),
     capabilityArtifactStore: testArtifactStore,
   } as never, {
     pet: {
@@ -313,6 +316,7 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
 
 test('LocalServerTuiSessionService rejects chat setup without a thread-scoped artifact store', () => {
   const service = new LocalServerTuiSessionService({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     state: createEmptyTuiSessionState(),
     saveState: () => {},
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
@@ -323,7 +327,7 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
       serverMode: 'chat',
       actorId: 'pet-a',
       ...createTestModelServerDeps(),
-      workdir: '/tmp/pinpawo-missing-artifact-store',
+      runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-missing-artifact-store'),
     }, {
       pet: {
         id: 'pet-a',
@@ -336,6 +340,7 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
 
 test('runtime config updates reach the next chat setup through the normalized deps store', () => {
   const service = new LocalServerTuiSessionService({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     state: createEmptyTuiSessionState(),
     saveState: () => {},
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,
@@ -343,12 +348,11 @@ test('runtime config updates reach the next chat setup through the normalized de
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
     actorId: 'pet-a',
-    modelProfiles: createTestModelProfiles({
-      globalReviewPolicyMode: 'require_authorization',
-    }),
+    modelProfiles: createTestModelProfiles(),
+    capabilityRegistryBackend: 'memory',
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    workdir: '/tmp/pinpawo-policy-update',
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-policy-update'),
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: testArtifactStore,
     capabilityCatalog: createTestModelServerDeps().capabilityCatalog,
@@ -362,7 +366,7 @@ test('runtime config updates reach the next chat setup through the normalized de
 
   const beforeDeps = runtimeDeps.get();
   const before = service.buildChatSetup(beforeDeps, context);
-  runtimeDeps.updateGlobalReviewPolicyMode('auto_authorization');
+  runtimeDeps.updateReviewPolicy('auto_authorization', 'strict');
   const afterDeps = runtimeDeps.get();
   const after = service.buildChatSetup(afterDeps, context);
 
@@ -387,6 +391,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
     deleteThread: async () => {},
   } as unknown as TuiSessionCheckpointer;
   const service = new LocalServerTuiSessionService({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     state,
     saveState: () => {},
     checkpointer,
@@ -412,6 +417,7 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
 
   const session = service.getActiveSession('pet-a');
   const checkpoint = await service.readActiveCheckpointPoint({
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
     actorId: 'pet-a',
     ...createTestModelServerDeps(),
     capabilityArtifactStore: testArtifactStore,

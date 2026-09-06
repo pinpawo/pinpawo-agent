@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import {
   AIMessage,
@@ -99,10 +100,12 @@ export function createPersistentHostGraphService() {
   const graphs = new Map<string, ReturnType<typeof createGraph>>();
 
   const graphFor = (setup: AgentChannelSetup) => {
-    const cached = graphs.get(setup.graphKey);
+    const threadId = setup.input.threadId;
+    assert.ok(threadId, 'Host fixture requires a thread ID');
+    const cached = graphs.get(threadId);
     if (cached) return cached;
     const graph = createGraph(setup);
-    graphs.set(setup.graphKey, graph);
+    graphs.set(threadId, graph);
     return graph;
   };
 
@@ -174,7 +177,7 @@ function createGraph(setup: AgentChannelSetup) {
               description: 'Write the protected production fixture',
             },
           }))
-        : selectReply(input, setup.input.workdir);
+        : selectReply(input, setup.input.context?.workdir ?? undefined);
       return {
         messages: [new AIMessage({
           content,

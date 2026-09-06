@@ -51,7 +51,7 @@ const toolkits = [createBashToolkit(), createGitToolkit()];
 const transport = await startLocalServer(requestedPort, {
   actorId: 'pet-process-restart',
   actorName: 'PinPawo',
-  workdir,
+  serverMode: 'chat',
   runtimeConfig,
   ...createTestModelServerDeps({
     apiKey: 'offline-process-key',

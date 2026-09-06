@@ -13,8 +13,6 @@ export { resolveLlmGenerationReserveTokens } from './llmModelPresets';
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,
 ): AgentModels {
-  const subagentThinking = llmConfig.subagentThinking ?? true;
-
   const buildModel = (
     role: 'act' | 'decision' | 'answer' | 'observe' | 'subagent',
   ) => {
@@ -22,8 +20,7 @@ export function buildLocalAgentModels(
       ? llmConfig.observeModel
       : llmConfig.model;
 
-    const thinking = role === 'answer'
-      || (role === 'subagent' && subagentThinking);
+    const thinking = role === 'answer' || role === 'subagent';
     const modelKwargs = buildLlmModelKwargs(
       model,
       thinking,
@@ -32,9 +29,7 @@ export function buildLocalAgentModels(
 
     return new ChatOpenAI({
       model,
-      ...(typeof llmConfig.temperature === 'number'
-        ? { temperature: llmConfig.temperature }
-        : {}),
+      // Leave temperature to the provider; thinking follows the role policy.
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,

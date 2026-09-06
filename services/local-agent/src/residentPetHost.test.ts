@@ -276,6 +276,9 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     capabilityArtifactStore: testArtifactStore,
     checkpointer,
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup }) => {
@@ -378,6 +381,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-events-sessions.json'),
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup, emitEvent }) => {
@@ -554,6 +560,9 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, 'late-observer-sessions.json'),
     graphService: graphService as never,
     runAgentTurn: async ({ request, emitEvent }) => {
@@ -624,5 +633,66 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
   } finally {
     releaseTurn.resolve();
     await host.close();
+  }
+});
+
+test('resident policy updates reach conversation and dispatch without changing another Host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-host-config-'));
+  const seen: Array<{ petId: string; mode: string | undefined; safetyLevel: unknown; workdir: unknown }> = [];
+  const persisted: unknown[] = [];
+  const makeHost = async (petId: string) => {
+    const runtimeConfig = buildLocalAgentRuntimeConfig(join(root, petId));
+    return createResidentPetHost({
+      petId, petName: petId,
+      modelProfiles: createTestModelProfiles(),
+      runtimeConfig,
+      globalReviewPolicyMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'relaxed',
+      capabilityRegistryBackend: 'memory',
+      capabilities: [],
+      toolkitInventory: new HostToolkitInventoryStore(),
+      capabilityArtifactStore: testArtifactStore,
+      checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+      sessionStatePath: runtimeConfig.tuiSessionPath,
+      persistGlobalReviewPolicyMode: (mode, safetyLevel) => { persisted.push({ mode, safetyLevel }); },
+      graphService: {
+        readThreadState: async () => ({ messages: [], pendingInterrupt: null, hasPendingContinuation: false, currentPlan: null }),
+      } as never,
+      runAgentTurn: async ({ setup }) => {
+        seen.push({ petId, mode: setup.input.globalReviewPolicy?.mode,
+          safetyLevel: setup.input.globalReviewPolicy && 'safetyLevel' in setup.input.globalReviewPolicy
+            ? setup.input.globalReviewPolicy.safetyLevel : undefined,
+          workdir: setup.input.context?.workdir });
+        return { status: 'completed', reply: 'done' };
+      },
+    });
+  };
+  const hostA = await makeHost('a');
+  const hostB = await makeHost('b');
+  const connection = peer([]);
+  try {
+    await hostA.interaction.connect(connection);
+    await hostA.interaction.handle(connection, {
+      type: 'runtime_config.update', requestId: 'policy',
+      globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
+    });
+    await hostA.interaction.handle(connection, {
+      type: 'chat_request', requestId: 'chat', message: 'from conversation',
+    });
+    hostA.resident.dispatch.dispatch({ request: 'from dispatch' });
+    hostB.resident.dispatch.dispatch({ request: 'from other Host' });
+    await waitFor(() => seen.length === 3, 'both dispatches must reach the shared run boundary');
+    assert.deepEqual(persisted, [{ mode: 'require_authorization', safetyLevel: 'strict' }]);
+    const a = seen.filter(entry => entry.petId === 'a');
+    assert.equal(a.length, 2);
+    for (const entry of a) {
+      assert.deepEqual(entry, { petId: 'a', mode: 'require_authorization', safetyLevel: 'strict', workdir: join(root, 'a') });
+    }
+    assert.deepEqual(seen.find(entry => entry.petId === 'b'), {
+      petId: 'b', mode: 'full_access', safetyLevel: 'relaxed', workdir: join(root, 'b'),
+    });
+  } finally {
+    await hostA.close();
+    await hostB.close();
   }
 });

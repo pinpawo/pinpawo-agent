@@ -638,7 +638,10 @@ run at that boundary.
 
 ### Phase 3: Host and interface projection
 
-1. Project `review` and `pause_task` as different interactions.
+1. Project `review` and `pause_task` as different interactions. This includes
+   every Host read of settled thread state, such as Resident Pet dispatch
+   admission (`readSettledState`), which must consult the explicit
+   `PauseTaskInterrupt` payload before any resumability signal.
 2. Keep exact Review interrupt identity for Review resume.
 3. Send task continue to `PauseTaskInterrupt` without fabricating a Review
    resume.

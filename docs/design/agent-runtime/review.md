@@ -300,8 +300,12 @@ Review resolution, capability business rules, Agent Session, or an interaction
 interface.
 
 Whether a task is paused is derived from durable Runtime and graph state, for
-example pending graph work or a retained active delegation. A finished task
-must not project `PauseTaskInterrupt`.
+example pending graph work or a retained active delegation after an explicit
+pause or Review cancellation. Retained work alone is insufficient: a normal
+Supervisor question may end its run while preserving work for continuation,
+without creating `PauseTaskInterrupt` or an `interrupted` event. That interaction
+is defined by the [Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+A finished task must not project `PauseTaskInterrupt`.
 
 ## Replay-safe Review policy
 

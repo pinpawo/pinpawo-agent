@@ -12,10 +12,10 @@
 | Studio | `dispatch()` rejects for a stopped Studio, unknown Pet, invalid request, or Pet admission failure. | Show admission errors directly; after a receipt, let Agent Session or the owning Plugin's domain state decide recovery. |
 | Capability loading | Validation or installation can reject an invalid `CAPABILITY.md`. | Run `pinpawo capability validate <dir>` and surface the structured validation errors. |
 | Toolkit operation | Tool policy can require review, block an action, or let execution fail. | Render review separately from an operation failure; consume root events for diagnostics. |
-| Capability execution | An uncaught execution failure produced no deliverable. | Do not fabricate a Delegation Announce or ask Supervisor to infer an error from result prose; preserve recoverable ownership and show the failure with a concrete next action. |
+| Capability execution | An uncaught execution failure produced no deliverable. | Do not fabricate a Delegation Announce or ask Supervisor to infer an error from result prose; preserve recoverable ownership, available private execution records, and authorization state, and show the failure with a concrete next action. |
 | Agent system | The configured model or core Runtime cannot execute the run. | Surface the system error directly; do not rewrite it as an ordinary assistant result. |
 
-The target Capability-to-Supervisor error boundary is tracked by issue #755 and
+The Capability-to-Supervisor error boundary is tracked by issue #755 and
 the
 [Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
 

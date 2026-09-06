@@ -11,8 +11,9 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Delegation Boundary Protocol](agent-runtime/delegation-boundary-protocol.md) —
-  working cross-layer contract for issue #755
+- [Supervisor–Root Interaction Protocol](agent-runtime/delegation-boundary-protocol.md) —
+  per-loop decisions, returns, and root effects for issue #755;
+  [中文版本](agent-runtime/delegation-boundary-protocol.zh-CN.md)
 - [Run-scoped Supervisor session](agent-runtime/run-scoped-supervisor-session.md)
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery

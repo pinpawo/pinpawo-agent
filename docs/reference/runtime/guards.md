@@ -6,7 +6,7 @@
 
 The guard language remains canonical. Issue #755 changes only how a subagent
 stop is exposed across the Capability Boundary: guard reasons remain internal
-diagnostics and will no longer become Announce or Supervisor fields. See the
+diagnostics and do not become Announce or Supervisor fields. See the
 [Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
 
 ## What A Guard Is
@@ -165,10 +165,7 @@ results cross boundaries and private control detail does not:
 - **Private durable form**: a position may keep a marked stop notice when its
   own execution or recovery mechanism needs it. That notice remains private
   control data and is not part of a Delegation Announce or Supervisor Boundary.
-  Do not persist `proceed`/`maintain`/`derive` records in graph state. The current
-  implementation still projects the subagent iteration stop as
-  `completionReason: 'limit_reached'`; issue #755 removes that transitional
-  cross-boundary projection.
+  Do not persist `proceed`/`maintain`/`derive` records in graph state. No stop reason is projected into an Announce or Supervisor input.
 
 ## Current Guards
 
@@ -220,6 +217,18 @@ main-conversation AI message provider usage and compares it through
 (threshold ratio 0.75). When there is no provider usage or no context window,
 the rule proceeds.
 
+Root evaluates this maintenance rule only at new-run entry; the execution loop
+does not return to compaction. The 0.75 ratio applies after generation reserves,
+leaving about 25% of usable input capacity for new context. Under the
+[main-message evidence design](../../design/agent-runtime/delegation-boundary-protocol.md#check-compaction-only-when-a-new-run-starts),
+the compaction effect retains recent messages and all original Announces for the
+current unfinished delegation, including attempts outside the recent suffix.
+Those retention rules already exist; matching main Announces through their
+existing payload identities instead of private lane tags is pending migration.
+Other old history can compact normally even on continuation. Retention belongs
+to the compaction effect, without another guard, whole-step deferral, or new
+protection state. A more aggressive watermark must preserve the same evidence.
+
 Subagents use LangChain's pre-model approximate token counting with an absolute
 trigger derived from `contextWindowTokens`; they do not emit a guard decision
 for summarization.
@@ -231,10 +240,10 @@ A `stop` outcome is applied by its position:
 - Subagent `iteration_limit`: `wrapModelCall` appends the marked stop notice
   and returns `Command({ goto: END })`. `createSubagent` treats the final
   message as a guard stop only if it carries the closed marker from
-  `subagent/guardStop.ts`. The current implementation projects this as
-  `completionReason: 'limit_reached'`; the issue #755 target instead emits an
-  ordinary Announce when a deliverable exists and raises a recoverable execution
-  failure when none exists. The stop reason remains telemetry.
+  `subagent/guardStop.ts`. A stop with a new deliverable emits an ordinary
+  Announce. A stop without one preserves private execution records and task
+  ownership, then raises a recoverable execution failure through root cleanup.
+  The stop reason remains telemetry.
 - Orchestrator `run_iteration_limit`: the Boundary guard routes to terminal
   finalization while keeping the active delegation available to the root
   continuation contract.

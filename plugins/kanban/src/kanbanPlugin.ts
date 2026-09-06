@@ -37,7 +37,7 @@ function describeTask(task: KanbanTask): string {
 }
 
 function describeRelationship(relationship: KanbanTaskRelationship): string {
-  return `${relationship.sourceTaskId} -[${relationship.type}]-> ${relationship.targetTaskId}`;
+  return `${relationship.sourceTaskId} --[${relationship.type}]-- ${relationship.targetTaskId}`;
 }
 
 function isStarted(task: KanbanTask): boolean {
@@ -96,24 +96,24 @@ function buildTools(service: KanbanTaskService): {
   });
   const linkTasks = tool(async (input) => {
     await service.linkTasks(input.sourceTaskId, input.targetTaskId);
-    return `related ${input.sourceTaskId} -> ${input.targetTaskId}`;
+    return `related ${input.sourceTaskId} -- ${input.targetTaskId}`;
   }, {
     name: 'kanban_task_link',
     description: '为两个已有 task 添加直接的上下文关联。关联仅用于浏览任务图，不会阻止分配或执行。',
     schema: z.object({
-      sourceTaskId: z.string().describe('关系的起点 taskId'),
-      targetTaskId: z.string().describe('关系的终点 taskId'),
+      sourceTaskId: z.string().describe('关联的一方 taskId，顺序无关'),
+      targetTaskId: z.string().describe('关联的另一方 taskId'),
     }),
   });
   const unlinkTasks = tool(async (input) => {
     await service.unlinkTasks(input.sourceTaskId, input.targetTaskId);
-    return `unlinked ${input.sourceTaskId} -> ${input.targetTaskId}`;
+    return `unlinked ${input.sourceTaskId} -- ${input.targetTaskId}`;
   }, {
     name: 'kanban_task_unlink',
     description: '移除两个 task 之间的直接关联，不影响任何 task 本身。',
     schema: z.object({
-      sourceTaskId: z.string().describe('关系的起点 taskId'),
-      targetTaskId: z.string().describe('关系的终点 taskId'),
+      sourceTaskId: z.string().describe('关联的一方 taskId，顺序无关'),
+      targetTaskId: z.string().describe('关联的另一方 taskId'),
     }),
   });
   const removeTask = tool(async (input) => {

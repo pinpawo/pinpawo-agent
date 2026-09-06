@@ -12,6 +12,11 @@ async function service() {
   return value;
 }
 
+function edge(a: string, b: string) {
+  const [sourceTaskId, targetTaskId] = [a, b].sort();
+  return { sourceTaskId, targetTaskId, type: 'related' };
+}
+
 test('Kanban records unassigned work before a user assignment and executor start', async (t) => {
   const kanban = await service();
   t.after(() => kanban.close());
@@ -49,9 +54,8 @@ test('Kanban relationships describe task context without blocking assignment', a
   t.after(() => kanban.close());
   const first = await kanban.createTask({ title: 'Implement', detail: 'Implement.' });
   const second = await kanban.createTask({ title: 'Review', detail: 'Review.', relatedTaskIds: [first.task.taskId] });
-  assert.deepEqual((await kanban.readSnapshot()).relationships, [{
-    sourceTaskId: second.task.taskId, targetTaskId: first.task.taskId, type: 'related',
-  }]);
+  assert.deepEqual((await kanban.readSnapshot()).relationships, [edge(second.task.taskId, first.task.taskId)]);
+  await assert.rejects(() => kanban.linkTasks(first.task.taskId, second.task.taskId), /already related/);
   assert.equal((await kanban.assignTask(second.task.taskId, 'reviewer')).task.status, 'assigned');
 });
 
@@ -61,15 +65,14 @@ test('Kanban can unlink and delete a task without deleting its graph neighbors',
   const first = await kanban.createTask({ title: 'Implement', detail: 'Implement.' });
   const second = await kanban.createTask({ title: 'Review', detail: 'Review.' });
   await kanban.linkTasks(second.task.taskId, first.task.taskId);
-  await kanban.unlinkTasks(second.task.taskId, first.task.taskId);
+  await kanban.unlinkTasks(first.task.taskId, second.task.taskId);
+  assert.deepEqual((await kanban.readSnapshot()).relationships, []);
   await kanban.linkTasks(second.task.taskId, first.task.taskId);
 
   const deleted = await kanban.deleteTask(second.task.taskId);
 
   assert.equal(deleted.task.taskId, second.task.taskId);
-  assert.deepEqual(deleted.removedRelationships, [{
-    sourceTaskId: second.task.taskId, targetTaskId: first.task.taskId, type: 'related',
-  }]);
+  assert.deepEqual(deleted.removedRelationships, [edge(second.task.taskId, first.task.taskId)]);
   assert.ok(await kanban.getTask(first.task.taskId));
   assert.equal(await kanban.getTask(second.task.taskId), null);
   assert.deepEqual((await kanban.readSnapshot()).relationships, []);
@@ -124,7 +127,8 @@ test('schema v4 clears obsolete automatic assignment before user reassignment', 
   assert.equal((await kanban.assignTask('existing', 'executor')).task.status, 'assigned');
 });
 
-test('schema v5 migrates dependency rows to non-blocking task relationships', async (t) => {
+for (const version of [5, 6]) {
+test(`schema v${version} migrates relationships to unique unordered pairs`, async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-kanban-v5-'));
   const databasePath = path.join(root, 'kanban.sqlite');
   const database = new DatabaseSync(databasePath);
@@ -151,13 +155,30 @@ test('schema v5 migrates dependency rows to non-blocking task relationships', as
     INSERT INTO kanban_task_dependencies VALUES ('review', 'implement');
     PRAGMA user_version = 5;
   `);
+  if (version === 6) {
+    database.exec(`
+      DROP TABLE kanban_task_dependencies;
+      CREATE TABLE kanban_task_relationships (
+        source_task_id TEXT NOT NULL, target_task_id TEXT NOT NULL,
+        relationship_type TEXT NOT NULL,
+        PRIMARY KEY (source_task_id, target_task_id, relationship_type),
+        FOREIGN KEY (source_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE,
+        FOREIGN KEY (target_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE
+      );
+      INSERT INTO kanban_task_relationships VALUES ('review', 'implement', 'related'), ('implement', 'review', 'related');
+      PRAGMA user_version = 6;
+    `);
+  }
   database.close();
   const kanban = new KanbanTaskService(new SqliteKanbanTaskRepository(databasePath));
   await kanban.init();
   t.after(() => kanban.close());
 
   assert.deepEqual((await kanban.readSnapshot()).relationships, [{
-    sourceTaskId: 'review', targetTaskId: 'implement', type: 'related',
+    sourceTaskId: 'implement', targetTaskId: 'review', type: 'related',
   }]);
   assert.equal((await kanban.assignTask('review', 'reviewer')).task.status, 'assigned');
+  await kanban.unlinkTasks('review', 'implement');
+  assert.deepEqual((await kanban.readSnapshot()).relationships, []);
 });
+}

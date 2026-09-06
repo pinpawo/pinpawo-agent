@@ -17,7 +17,7 @@ export type KanbanTask = {
   updatedAt: string;
 };
 
-/** A descriptive graph edge. It never gates a task lifecycle transition. */
+/** An undirected edge, stored with lexically ordered endpoints. Never gates execution. */
 export type KanbanTaskRelationship = {
   sourceTaskId: string;
   targetTaskId: string;
@@ -89,7 +89,7 @@ export type KanbanTaskRepository = {
 const TASK_STATUSES = new Set<KanbanTaskStatus>([
   'todo', 'assigned', 'doing', 'waiting', 'done', 'blocked',
 ]);
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const MAX_TASK_TITLE_LENGTH = 160;
 const MAX_ASSIGNMENT_NOTE_LENGTH = 1_000;
 const DEFAULT_EVENT_LIMIT = 200;
@@ -375,6 +375,29 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       `);
       schemaVersion = 6;
     }
+    if (schemaVersion === 6) {
+      this.transaction(() => {
+        this.database.exec(`
+          CREATE TABLE kanban_relationships_next (
+            source_task_id TEXT NOT NULL,
+            target_task_id TEXT NOT NULL,
+            relationship_type TEXT NOT NULL CHECK (relationship_type = 'related'),
+            PRIMARY KEY (source_task_id, target_task_id, relationship_type),
+            CHECK (source_task_id < target_task_id),
+            FOREIGN KEY (source_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE,
+            FOREIGN KEY (target_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE
+          );
+          INSERT INTO kanban_relationships_next
+          SELECT MIN(source_task_id, target_task_id), MAX(source_task_id, target_task_id), relationship_type
+          FROM kanban_task_relationships WHERE 1
+          ON CONFLICT (source_task_id, target_task_id, relationship_type) DO NOTHING;
+          DROP TABLE kanban_task_relationships;
+          ALTER TABLE kanban_relationships_next RENAME TO kanban_task_relationships;
+          CREATE INDEX kanban_relationships_target ON kanban_task_relationships(target_task_id, source_task_id);
+          PRAGMA user_version = 7;
+        `);
+      });
+    }
     this.initialized = true;
   }
 
@@ -423,15 +446,14 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       const insertRelationship = this.database.prepare(
         "INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type) VALUES (?, ?, 'related')",
       );
-      for (const relatedTaskId of relatedTaskIds) insertRelationship.run(taskId, relatedTaskId);
+      for (const relatedTaskId of relatedTaskIds) insertRelationship.run(...[taskId, relatedTaskId].sort());
       return this.mutationFor(taskId, 'created', undefined, 'todo', undefined, now);
     });
   }
 
   async linkTasks(sourceTaskId: string, targetTaskId: string): Promise<KanbanTaskRelationship> {
     this.assertReady();
-    const source = requireNonEmpty(sourceTaskId, 'source taskId');
-    const target = requireNonEmpty(targetTaskId, 'target taskId');
+    const [source, target] = [requireNonEmpty(sourceTaskId, 'source taskId'), requireNonEmpty(targetTaskId, 'target taskId')].sort() as [string, string];
     if (source === target) throw new Error('Kanban task cannot relate to itself.');
     return this.transaction(() => {
       for (const taskId of [source, target]) {
@@ -455,8 +477,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
 
   async unlinkTasks(sourceTaskId: string, targetTaskId: string): Promise<void> {
     this.assertReady();
-    const source = requireNonEmpty(sourceTaskId, 'source taskId');
-    const target = requireNonEmpty(targetTaskId, 'target taskId');
+    const [source, target] = [requireNonEmpty(sourceTaskId, 'source taskId'), requireNonEmpty(targetTaskId, 'target taskId')].sort() as [string, string];
     this.transaction(() => {
       const result = this.database.prepare(
         "DELETE FROM kanban_task_relationships WHERE source_task_id = ? AND target_task_id = ? AND relationship_type = 'related'",
@@ -586,10 +607,10 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
         );
       }
       const insertRelationship = this.database.prepare(
-        "INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type) VALUES (?, ?, 'related')",
+        "INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type) VALUES (?, ?, 'related') ON CONFLICT (source_task_id, target_task_id, relationship_type) DO NOTHING",
       );
       for (const task of tasks) {
-        for (const relatedTaskId of task.deps) insertRelationship.run(task.taskId, relatedTaskId);
+        for (const relatedTaskId of task.deps) insertRelationship.run(...[task.taskId, relatedTaskId].sort());
       }
       return tasks.map((task) => this.mutationFor(
         task.taskId,

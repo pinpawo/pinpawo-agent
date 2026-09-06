@@ -12,10 +12,16 @@ export type KanbanTask = {
   title: string;
   detail: string;
   status: KanbanTaskStatus;
-  deps: string[];
   note?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+/** A descriptive graph edge. It never gates a task lifecycle transition. */
+export type KanbanTaskRelationship = {
+  sourceTaskId: string;
+  targetTaskId: string;
+  type: 'related';
 };
 
 export type KanbanTaskEvent = {
@@ -30,6 +36,7 @@ export type KanbanTaskEvent = {
 
 export type KanbanTaskSnapshot = {
   tasks: KanbanTask[];
+  relationships: KanbanTaskRelationship[];
   lastEventSequence: number;
 };
 
@@ -38,10 +45,15 @@ export type KanbanTaskMutation = {
   event: KanbanTaskEvent;
 };
 
+export type KanbanTaskDeletion = {
+  task: KanbanTask;
+  removedRelationships: KanbanTaskRelationship[];
+};
+
 export type CreateKanbanTaskInput = {
   title: string;
   detail: string;
-  dependsOn?: readonly string[];
+  relatedTaskIds?: readonly string[];
 };
 
 /** Strictly validated input for the one-way legacy JSON migration. */
@@ -63,6 +75,9 @@ export type KanbanTaskRepository = {
   readSnapshot: () => Promise<KanbanTaskSnapshot>;
   getTask: (taskId: string) => Promise<KanbanTask | null>;
   createTask: (input: CreateKanbanTaskInput) => Promise<KanbanTaskMutation>;
+  linkTasks: (sourceTaskId: string, targetTaskId: string) => Promise<KanbanTaskRelationship>;
+  unlinkTasks: (sourceTaskId: string, targetTaskId: string) => Promise<void>;
+  deleteTask: (taskId: string) => Promise<KanbanTaskDeletion>;
   assignTask: (taskId: string, assigneeId: string, assignmentNote?: string) => Promise<KanbanTaskMutation>;
   startAssignedTask: (taskId: string) => Promise<KanbanTaskMutation>;
   completeTask: (taskId: string, result: string) => Promise<KanbanTaskMutation>;
@@ -74,7 +89,7 @@ export type KanbanTaskRepository = {
 const TASK_STATUSES = new Set<KanbanTaskStatus>([
   'todo', 'assigned', 'doing', 'waiting', 'done', 'blocked',
 ]);
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const MAX_TASK_TITLE_LENGTH = 160;
 const MAX_ASSIGNMENT_NOTE_LENGTH = 1_000;
 const DEFAULT_EVENT_LIMIT = 200;
@@ -99,6 +114,12 @@ type EventRow = {
   to_status: string;
   note: string | null;
   occurred_at: string;
+};
+
+type RelationshipRow = {
+  source_task_id: string;
+  target_task_id: string;
+  relationship_type: string;
 };
 
 function requireNonEmpty(value: string, label: string): string {
@@ -139,14 +160,13 @@ function requireStatus(value: string): KanbanTaskStatus {
   return value as KanbanTaskStatus;
 }
 
-function taskFromRow(row: TaskRow, deps: string[]): KanbanTask {
+function taskFromRow(row: TaskRow): KanbanTask {
   return {
     taskId: row.task_id,
     ...(row.assignee_id === null ? {} : { assigneeId: row.assignee_id }),
     title: row.title,
     detail: row.detail,
     status: requireStatus(row.status),
-    deps,
     ...(row.note === null ? {} : { note: row.note }),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -171,15 +191,26 @@ function eventFromRow(row: EventRow): KanbanTaskEvent {
   };
 }
 
-function normalizeDependencies(taskId: string, dependencies: readonly string[] | undefined): string[] {
+function relationshipFromRow(row: RelationshipRow): KanbanTaskRelationship {
+  if (row.relationship_type !== 'related') {
+    throw new Error(`Kanban database contains unsupported relationship type "${row.relationship_type}".`);
+  }
+  return {
+    sourceTaskId: row.source_task_id,
+    targetTaskId: row.target_task_id,
+    type: 'related',
+  };
+}
+
+function normalizeRelatedTaskIds(taskId: string, relatedTaskIds: readonly string[] | undefined): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
-  for (const dependency of dependencies ?? []) {
-    const dependencyId = requireNonEmpty(dependency, 'dependency id');
-    if (dependencyId === taskId) throw new Error('Kanban task cannot depend on itself.');
-    if (seen.has(dependencyId)) throw new Error(`Kanban task has duplicate dependency "${dependencyId}".`);
-    seen.add(dependencyId);
-    normalized.push(dependencyId);
+  for (const relatedTaskId of relatedTaskIds ?? []) {
+    const normalizedTaskId = requireNonEmpty(relatedTaskId, 'related taskId');
+    if (normalizedTaskId === taskId) throw new Error('Kanban task cannot relate to itself.');
+    if (seen.has(normalizedTaskId)) throw new Error(`Kanban task repeats related task "${normalizedTaskId}".`);
+    seen.add(normalizedTaskId);
+    normalized.push(normalizedTaskId);
   }
   return normalized;
 }
@@ -217,10 +248,11 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     this.database.exec('PRAGMA busy_timeout = 5000;');
     this.database.exec('PRAGMA trusted_schema = OFF;');
     const version = this.database.prepare('PRAGMA user_version').get() as { user_version: number };
-    if (version.user_version > SCHEMA_VERSION) {
-      throw new Error(`Kanban database schema ${version.user_version.toString()} is newer than supported.`);
+    let schemaVersion = version.user_version;
+    if (schemaVersion > SCHEMA_VERSION) {
+      throw new Error(`Kanban database schema ${schemaVersion.toString()} is newer than supported.`);
     }
-    if (version.user_version === 0) {
+    if (schemaVersion === 0) {
       this.database.exec(`
         BEGIN IMMEDIATE;
         CREATE TABLE kanban_tasks (
@@ -233,13 +265,14 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-        CREATE TABLE kanban_task_dependencies (
-          task_id TEXT NOT NULL,
-          depends_on_task_id TEXT NOT NULL,
-          PRIMARY KEY (task_id, depends_on_task_id),
-          CHECK (task_id <> depends_on_task_id),
-          FOREIGN KEY (task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE,
-          FOREIGN KEY (depends_on_task_id) REFERENCES kanban_tasks(task_id) ON DELETE RESTRICT
+        CREATE TABLE kanban_task_relationships (
+          source_task_id TEXT NOT NULL,
+          target_task_id TEXT NOT NULL,
+          relationship_type TEXT NOT NULL CHECK (relationship_type = 'related'),
+          PRIMARY KEY (source_task_id, target_task_id, relationship_type),
+          CHECK (source_task_id <> target_task_id),
+          FOREIGN KEY (source_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE,
+          FOREIGN KEY (target_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE
         );
         CREATE TABLE kanban_task_events (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,21 +285,24 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           FOREIGN KEY (task_id) REFERENCES kanban_tasks(task_id) ON DELETE RESTRICT
         );
         CREATE INDEX kanban_tasks_status_created ON kanban_tasks(status, created_at, task_id);
-        CREATE INDEX kanban_dependencies_dependency
-          ON kanban_task_dependencies(depends_on_task_id, task_id);
+        CREATE INDEX kanban_relationships_target
+          ON kanban_task_relationships(target_task_id, source_task_id);
         CREATE INDEX kanban_task_events_task_sequence
           ON kanban_task_events(task_id, sequence);
-        PRAGMA user_version = 5;
+        PRAGMA user_version = 6;
         COMMIT;
       `);
+      schemaVersion = 6;
     }
-    if (version.user_version === 1) {
+    if (schemaVersion === 1) {
       this.database.exec(`BEGIN IMMEDIATE; ALTER TABLE kanban_tasks ADD COLUMN continuation_json TEXT; PRAGMA user_version = 2; COMMIT;`);
+      schemaVersion = 2;
     }
-    if (version.user_version === 1 || version.user_version === 2) {
+    if (schemaVersion === 2) {
       this.database.exec('BEGIN IMMEDIATE; ALTER TABLE kanban_tasks DROP COLUMN continuation_json; PRAGMA user_version = 3; COMMIT;');
+      schemaVersion = 3;
     }
-    if (version.user_version >= 1 && version.user_version <= 3) {
+    if (schemaVersion >= 1 && schemaVersion <= 3) {
       this.database.exec(`
         BEGIN IMMEDIATE;
         ALTER TABLE kanban_tasks ADD COLUMN title TEXT NOT NULL DEFAULT '';
@@ -283,12 +319,13 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           update.run(titleFromLegacyBrief(row.brief), row.brief, row.task_id);
         }
         this.database.exec('ALTER TABLE kanban_tasks DROP COLUMN brief; PRAGMA user_version = 4; COMMIT;');
+        schemaVersion = 4;
       } catch (error) {
         this.database.exec('ROLLBACK;');
         throw error;
       }
     }
-    if (version.user_version === 4) {
+    if (schemaVersion === 4) {
       this.database.exec(`
         PRAGMA foreign_keys = OFF;
         BEGIN IMMEDIATE;
@@ -314,6 +351,29 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
         COMMIT;
         PRAGMA foreign_keys = ON;
       `);
+      schemaVersion = 5;
+    }
+    if (schemaVersion === 5) {
+      this.database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE kanban_task_relationships (
+          source_task_id TEXT NOT NULL,
+          target_task_id TEXT NOT NULL,
+          relationship_type TEXT NOT NULL CHECK (relationship_type = 'related'),
+          PRIMARY KEY (source_task_id, target_task_id, relationship_type),
+          CHECK (source_task_id <> target_task_id),
+          FOREIGN KEY (source_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE,
+          FOREIGN KEY (target_task_id) REFERENCES kanban_tasks(task_id) ON DELETE CASCADE
+        );
+        INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type)
+        SELECT task_id, depends_on_task_id, 'related' FROM kanban_task_dependencies;
+        DROP TABLE kanban_task_dependencies;
+        CREATE INDEX kanban_relationships_target
+          ON kanban_task_relationships(target_task_id, source_task_id);
+        PRAGMA user_version = 6;
+        COMMIT;
+      `);
+      schemaVersion = 6;
     }
     this.initialized = true;
   }
@@ -328,11 +388,12 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     this.assertReady();
     const tasks = (this.database.prepare(
       'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks ORDER BY created_at, task_id',
-    ).all() as TaskRow[]).map((row) => this.readTask(row));
+    ).all() as TaskRow[]).map((row) => taskFromRow(row));
+    const relationships = this.readRelationships();
     const sequence = this.database.prepare(
       'SELECT COALESCE(MAX(sequence), 0) AS sequence FROM kanban_task_events',
     ).get() as { sequence: number };
-    return { tasks, lastEventSequence: sequence.sequence };
+    return { tasks, relationships, lastEventSequence: sequence.sequence };
   }
 
   async getTask(taskId: string): Promise<KanbanTask | null> {
@@ -340,7 +401,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     const row = this.database.prepare(
       'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
     ).get(taskId) as TaskRow | undefined;
-    return row ? this.readTask(row) : null;
+    return row ? taskFromRow(row) : null;
   }
 
   async createTask(input: CreateKanbanTaskInput): Promise<KanbanTaskMutation> {
@@ -348,22 +409,82 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     const taskId = randomUUID();
     const title = requireTaskTitle(input.title);
     const detail = requireNonEmpty(input.detail, 'detail');
-    const dependencies = normalizeDependencies(taskId, input.dependsOn);
+    const relatedTaskIds = normalizeRelatedTaskIds(taskId, input.relatedTaskIds);
     return this.transaction(() => {
-      for (const dependencyId of dependencies) {
-        const found = this.database.prepare('SELECT 1 FROM kanban_tasks WHERE task_id = ?').get(dependencyId);
-        if (!found) throw new Error(`Kanban dependency "${dependencyId}" does not exist.`);
+      for (const relatedTaskId of relatedTaskIds) {
+        const found = this.database.prepare('SELECT 1 FROM kanban_tasks WHERE task_id = ?').get(relatedTaskId);
+        if (!found) throw new Error(`Kanban related task "${relatedTaskId}" does not exist.`);
       }
       const now = new Date().toISOString();
       this.database.prepare(
         `INSERT INTO kanban_tasks(task_id, assignee_id, title, detail, status, created_at, updated_at)
          VALUES (?, NULL, ?, ?, 'todo', ?, ?)`,
       ).run(taskId, title, detail, now, now);
-      const insertDependency = this.database.prepare(
-        'INSERT INTO kanban_task_dependencies(task_id, depends_on_task_id) VALUES (?, ?)',
+      const insertRelationship = this.database.prepare(
+        "INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type) VALUES (?, ?, 'related')",
       );
-      for (const dependencyId of dependencies) insertDependency.run(taskId, dependencyId);
+      for (const relatedTaskId of relatedTaskIds) insertRelationship.run(taskId, relatedTaskId);
       return this.mutationFor(taskId, 'created', undefined, 'todo', undefined, now);
+    });
+  }
+
+  async linkTasks(sourceTaskId: string, targetTaskId: string): Promise<KanbanTaskRelationship> {
+    this.assertReady();
+    const source = requireNonEmpty(sourceTaskId, 'source taskId');
+    const target = requireNonEmpty(targetTaskId, 'target taskId');
+    if (source === target) throw new Error('Kanban task cannot relate to itself.');
+    return this.transaction(() => {
+      for (const taskId of [source, target]) {
+        if (!this.database.prepare('SELECT 1 FROM kanban_tasks WHERE task_id = ?').get(taskId)) {
+          throw new Error(`Kanban task "${taskId}" does not exist.`);
+        }
+      }
+      try {
+        this.database.prepare(
+          "INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type) VALUES (?, ?, 'related')",
+        ).run(source, target);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+          throw new Error(`Kanban tasks "${source}" and "${target}" are already related.`);
+        }
+        throw error;
+      }
+      return { sourceTaskId: source, targetTaskId: target, type: 'related' };
+    });
+  }
+
+  async unlinkTasks(sourceTaskId: string, targetTaskId: string): Promise<void> {
+    this.assertReady();
+    const source = requireNonEmpty(sourceTaskId, 'source taskId');
+    const target = requireNonEmpty(targetTaskId, 'target taskId');
+    this.transaction(() => {
+      const result = this.database.prepare(
+        "DELETE FROM kanban_task_relationships WHERE source_task_id = ? AND target_task_id = ? AND relationship_type = 'related'",
+      ).run(source, target);
+      if (result.changes !== 1) throw new Error(`Kanban tasks "${source}" and "${target}" are not related.`);
+    });
+  }
+
+  async deleteTask(taskId: string): Promise<KanbanTaskDeletion> {
+    this.assertReady();
+    const normalizedTaskId = requireNonEmpty(taskId, 'taskId');
+    return this.transaction(() => {
+      const row = this.database.prepare(
+        'SELECT task_id, assignee_id, title, detail, status, note, created_at, updated_at FROM kanban_tasks WHERE task_id = ?',
+      ).get(normalizedTaskId) as TaskRow | undefined;
+      if (!row) throw new Error(`Kanban task "${normalizedTaskId}" does not exist.`);
+      const removedRelationships = this.database.prepare(`
+        SELECT source_task_id, target_task_id, relationship_type
+        FROM kanban_task_relationships
+        WHERE source_task_id = ? OR target_task_id = ?
+        ORDER BY source_task_id, target_task_id
+      `).all(normalizedTaskId, normalizedTaskId) as RelationshipRow[];
+      this.database.prepare('DELETE FROM kanban_task_events WHERE task_id = ?').run(normalizedTaskId);
+      this.database.prepare('DELETE FROM kanban_tasks WHERE task_id = ?').run(normalizedTaskId);
+      return {
+        task: taskFromRow(row),
+        removedRelationships: removedRelationships.map(relationshipFromRow),
+      };
     });
   }
 
@@ -380,19 +501,6 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
       const current = requireStatus(row.status);
       if (current !== 'todo') {
         throw new Error(`Kanban task "${normalizedTaskId}" is ${current}, not assignable.`);
-      }
-      const incomplete = this.database.prepare(`
-        SELECT dependency.depends_on_task_id AS task_id
-        FROM kanban_task_dependencies AS dependency
-        JOIN kanban_tasks AS prerequisite ON prerequisite.task_id = dependency.depends_on_task_id
-        WHERE dependency.task_id = ? AND prerequisite.status <> 'done'
-        ORDER BY dependency.depends_on_task_id
-        LIMIT 1
-      `).get(normalizedTaskId) as { task_id: string } | undefined;
-      if (incomplete) {
-        throw new Error(
-          `Kanban task "${normalizedTaskId}" is waiting for dependency "${incomplete.task_id}".`,
-        );
       }
       const now = new Date().toISOString();
       const result = this.database.prepare(
@@ -477,11 +585,11 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
           task.updatedAt,
         );
       }
-      const insertDependency = this.database.prepare(
-        'INSERT INTO kanban_task_dependencies(task_id, depends_on_task_id) VALUES (?, ?)',
+      const insertRelationship = this.database.prepare(
+        "INSERT INTO kanban_task_relationships(source_task_id, target_task_id, relationship_type) VALUES (?, ?, 'related')",
       );
       for (const task of tasks) {
-        for (const dependencyId of task.deps) insertDependency.run(task.taskId, dependencyId);
+        for (const relatedTaskId of task.deps) insertRelationship.run(task.taskId, relatedTaskId);
       }
       return tasks.map((task) => this.mutationFor(
         task.taskId,
@@ -539,11 +647,13 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     });
   }
 
-  private readTask(row: TaskRow): KanbanTask {
-    const dependencyRows = this.database.prepare(
-      'SELECT depends_on_task_id FROM kanban_task_dependencies WHERE task_id = ? ORDER BY depends_on_task_id',
-    ).all(row.task_id) as Array<{ depends_on_task_id: string }>;
-    return taskFromRow(row, dependencyRows.map(({ depends_on_task_id: taskId }) => taskId));
+  private readRelationships(): KanbanTaskRelationship[] {
+    const rows = this.database.prepare(`
+      SELECT source_task_id, target_task_id, relationship_type
+      FROM kanban_task_relationships
+      ORDER BY source_task_id, target_task_id, relationship_type
+    `).all() as RelationshipRow[];
+    return rows.map(relationshipFromRow);
   }
 
   private mutationFor(
@@ -563,7 +673,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
     ).get(taskId) as TaskRow | undefined;
     if (!task) throw new Error(`Kanban task "${taskId}" disappeared during mutation.`);
     return {
-      task: this.readTask(task),
+      task: taskFromRow(task),
       event: {
         sequence: Number(inserted.lastInsertRowid),
         taskId,
@@ -597,7 +707,7 @@ export class SqliteKanbanTaskRepository implements KanbanTaskRepository {
 
 /** Application API and committed-event boundary for all Kanban adapters. */
 export class KanbanTaskService {
-  private readonly listeners = new Set<(mutation: KanbanTaskMutation) => void>();
+  private readonly listeners = new Set<(change: KanbanTaskMutation | KanbanTaskDeletion) => void>();
   private initialized = false;
 
   constructor(private readonly repository: KanbanTaskRepository) {}
@@ -615,7 +725,7 @@ export class KanbanTaskService {
     this.initialized = false;
   }
 
-  subscribe(listener: (mutation: KanbanTaskMutation) => void): () => void {
+  subscribe(listener: (change: KanbanTaskMutation | KanbanTaskDeletion) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -632,6 +742,20 @@ export class KanbanTaskService {
 
   async createTask(input: CreateKanbanTaskInput): Promise<KanbanTaskMutation> {
     return this.publish(await this.repository.createTask(input));
+  }
+
+  async linkTasks(sourceTaskId: string, targetTaskId: string): Promise<KanbanTaskRelationship> {
+    this.assertReady();
+    return this.repository.linkTasks(sourceTaskId, targetTaskId);
+  }
+
+  async unlinkTasks(sourceTaskId: string, targetTaskId: string): Promise<void> {
+    this.assertReady();
+    return this.repository.unlinkTasks(sourceTaskId, targetTaskId);
+  }
+
+  async deleteTask(taskId: string): Promise<KanbanTaskDeletion> {
+    return this.publish(await this.repository.deleteTask(taskId));
   }
 
   async assignTask(taskId: string, assigneeId: string, assignmentNote?: string): Promise<KanbanTaskMutation> {
@@ -655,10 +779,10 @@ export class KanbanTaskService {
     return this.repository.listTaskEvents(afterSequence, limit);
   }
 
-  private publish(mutation: KanbanTaskMutation): KanbanTaskMutation {
+  private publish<T extends KanbanTaskMutation | KanbanTaskDeletion>(change: T): T {
     for (const listener of this.listeners) {
       try {
-        listener(mutation);
+        listener(change);
       } catch (error) {
         console.error(
           '[kanban] committed domain-event listener failed:',
@@ -666,7 +790,7 @@ export class KanbanTaskService {
         );
       }
     }
-    return mutation;
+    return change;
   }
 
   private assertReady(): void {

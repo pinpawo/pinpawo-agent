@@ -36,7 +36,6 @@ test('Kanban projects a user assignment but never dispatches a Studio Pet itself
     assigneeId: 'planner',
     title: 'Plan',
     detail: 'Create a plan.',
-    deps: [],
     assignmentNote: 'Review the changed lines first.',
     sequence: 2,
   });
@@ -46,7 +45,9 @@ test('planning and execution toolkits expose separate task responsibilities', as
   const plugin = createKanbanPlugin();
   const planning = plugin.toolkits.find(({ name }) => name === 'kanban-planning');
   const execution = plugin.toolkits.find(({ name }) => name === 'kanban-execution');
-  assert.deepEqual(planning?.tools.map(({ tool: value }) => value.name), ['kanban_task_list', 'kanban_task_add']);
+  assert.deepEqual(planning?.tools.map(({ tool: value }) => value.name), [
+    'kanban_task_list', 'kanban_task_add', 'kanban_task_link', 'kanban_task_unlink', 'kanban_task_remove',
+  ]);
   assert.deepEqual(execution?.tools.map(({ tool: value }) => value.name), [
     'kanban_task_list', 'kanban_task_start', 'kanban_task_complete', 'kanban_task_block',
   ]);

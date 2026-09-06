@@ -16,6 +16,8 @@ import {
   KanbanTaskService,
   SqliteKanbanTaskRepository,
   type KanbanTask,
+  type KanbanTaskDeletion,
+  type KanbanTaskRelationship,
   type KanbanTaskMutation,
 } from './kanbanTaskService';
 
@@ -29,10 +31,13 @@ function asError(error: unknown): Error {
 }
 
 function describeTask(task: KanbanTask): string {
-  const deps = task.deps.length > 0 ? ` deps=[${task.deps.join(', ')}]` : '';
   const assignee = task.assigneeId ? ` assignee=${task.assigneeId}` : '';
   const note = task.note ? ` note=${task.note}` : '';
-  return [`${task.taskId} [${task.status}]${assignee}${deps} title=${task.title}${note}`, `detail=${task.detail}`].join('\n');
+  return [`${task.taskId} [${task.status}]${assignee} title=${task.title}${note}`, `detail=${task.detail}`].join('\n');
+}
+
+function describeRelationship(relationship: KanbanTaskRelationship): string {
+  return `${relationship.sourceTaskId} -[${relationship.type}]-> ${relationship.targetTaskId}`;
 }
 
 function isStarted(task: KanbanTask): boolean {
@@ -54,33 +59,70 @@ function readNonNegativeQueryInteger(value: string | null, field: string): numbe
 function buildTools(service: KanbanTaskService): {
   listTasks: NamedStructuredTool;
   addTask: NamedStructuredTool;
+  linkTasks: NamedStructuredTool;
+  unlinkTasks: NamedStructuredTool;
+  removeTask: NamedStructuredTool;
   startTask: NamedStructuredTool;
   completeTask: NamedStructuredTool;
   blockTask: NamedStructuredTool;
 } {
   const listTasks = tool(async () => {
-    const tasks = (await service.readSnapshot()).tasks;
-    return tasks.length === 0 ? '(no tasks yet)' : tasks.map(describeTask).join('\n');
+    const snapshot = await service.readSnapshot();
+    const tasks = snapshot.tasks.length === 0 ? '(no tasks yet)' : snapshot.tasks.map(describeTask).join('\n');
+    const relationships = snapshot.relationships.length === 0
+      ? '(no task relationships)'
+      : snapshot.relationships.map(describeRelationship).join('\n');
+    return `tasks:\n${tasks}\n\nrelationships:\n${relationships}`;
   }, {
     name: 'kanban_task_list',
-    description: '读取当前 Kanban task 快照，返回状态、已选执行目标、依赖、详情与已有结果。',
+    description: '读取当前 Kanban task 图，返回状态、已选执行目标、任务关联、详情与已有结果。',
     schema: z.object({}),
   });
   const addTask = tool(async (input) => {
     const mutation = await service.createTask({
       title: input.title,
       detail: input.detail,
-      ...(input.dependsOn ? { dependsOn: input.dependsOn } : {}),
+      ...(input.relatedTaskIds ? { relatedTaskIds: input.relatedTaskIds } : {}),
     });
     return `added ${mutation.task.taskId}`;
   }, {
     name: 'kanban_task_add',
-    description: '登记一个尚未分配执行者的完整交付 task。一次调用只创建一个 task；真实依赖使用 dependsOn 表达。任务由用户在 Kanban 中选择执行目标后才会派发。',
+    description: '登记一个尚未分配执行者的完整交付 task。一次调用只创建一个 task；可直接关联已有 task，但关联不阻止分配或执行。任务由用户在 Kanban 中选择执行目标后才会派发。',
     schema: z.object({
       title: z.string().max(160).describe('看板列表中识别完整交付主题的简短标题'),
       detail: z.string().describe('完整任务详情：目标、完成标准、必要上下文与应保留的证据'),
-      dependsOn: z.array(z.string()).optional().describe('此 task 被分配前必须完成的真实前置 taskId'),
+      relatedTaskIds: z.array(z.string()).optional().describe('与此 task 有直接上下文关联的已有 taskId；不代表执行前置条件'),
     }),
+  });
+  const linkTasks = tool(async (input) => {
+    await service.linkTasks(input.sourceTaskId, input.targetTaskId);
+    return `related ${input.sourceTaskId} -> ${input.targetTaskId}`;
+  }, {
+    name: 'kanban_task_link',
+    description: '为两个已有 task 添加直接的上下文关联。关联仅用于浏览任务图，不会阻止分配或执行。',
+    schema: z.object({
+      sourceTaskId: z.string().describe('关系的起点 taskId'),
+      targetTaskId: z.string().describe('关系的终点 taskId'),
+    }),
+  });
+  const unlinkTasks = tool(async (input) => {
+    await service.unlinkTasks(input.sourceTaskId, input.targetTaskId);
+    return `unlinked ${input.sourceTaskId} -> ${input.targetTaskId}`;
+  }, {
+    name: 'kanban_task_unlink',
+    description: '移除两个 task 之间的直接关联，不影响任何 task 本身。',
+    schema: z.object({
+      sourceTaskId: z.string().describe('关系的起点 taskId'),
+      targetTaskId: z.string().describe('关系的终点 taskId'),
+    }),
+  });
+  const removeTask = tool(async (input) => {
+    await service.deleteTask(input.taskId);
+    return `deleted ${input.taskId}`;
+  }, {
+    name: 'kanban_task_remove',
+    description: '删除错误或不再需要的 task。仅删除该 task、它的关联和历史记录；不会删除关联的其他 task。',
+    schema: z.object({ taskId: z.string().describe('要删除的 Kanban taskId') }),
   });
   const startTask = tool(async (input) => {
     const task = await service.getTask(input.taskId);
@@ -115,7 +157,7 @@ function buildTools(service: KanbanTaskService): {
     description: '由已分配或已开始 task 的执行者按 taskId 提交阻塞状态与原因。',
     schema: z.object({ taskId: z.string().describe('派发请求中的 Kanban taskId'), reason: z.string().describe('阻塞原因') }),
   });
-  return { listTasks, addTask, startTask, completeTask, blockTask };
+  return { listTasks, addTask, linkTasks, unlinkTasks, removeTask, startTask, completeTask, blockTask };
 }
 
 function toolkit(name: string, description: string, tools: readonly NamedStructuredTool[], titles: readonly string[]): AgentToolkit {
@@ -128,12 +170,12 @@ function toolkit(name: string, description: string, tools: readonly NamedStructu
 
 export function createKanbanToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_TOOLKIT_NAME, '共享 task 领域接口：登记任务、读取状态并提交执行生命周期。用户分配与 Studio 路由不属于此 Toolkit。', [tools.listTasks, tools.addTask, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务', '新增任务', '开始任务', '完成任务', '阻塞任务']);
+  return toolkit(KANBAN_TOOLKIT_NAME, '共享 task 领域接口：维护任务图并提交执行生命周期。用户分配与 Studio 路由不属于此 Toolkit。', [tools.listTasks, tools.addTask, tools.linkTasks, tools.unlinkTasks, tools.removeTask, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务图', '新增任务', '关联任务', '取消关联', '删除任务', '开始任务', '完成任务', '阻塞任务']);
 }
 
 export function createKanbanPlanningToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_PLANNING_TOOLKIT_NAME, 'task 规划接口：查看当前 task 图并登记完整交付及其依赖。它不选择执行者，也不派发工作。', [tools.listTasks, tools.addTask], ['查看任务', '新增任务']);
+  return toolkit(KANBAN_PLANNING_TOOLKIT_NAME, 'task 规划接口：查看并维护共享 task 图。它不选择执行者，也不派发工作。', [tools.listTasks, tools.addTask, tools.linkTasks, tools.unlinkTasks, tools.removeTask], ['查看任务图', '新增任务', '关联任务', '取消关联', '删除任务']);
 }
 
 export function createKanbanExecutionToolkit(service: KanbanTaskService): AgentToolkit {
@@ -143,7 +185,7 @@ export function createKanbanExecutionToolkit(service: KanbanTaskService): AgentT
 
 export function createKanbanObservationToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_OBSERVATION_TOOLKIT_NAME, '只读 task 观察接口：读取当前 task 图、执行状态、依赖与结果。', [tools.listTasks], ['查看任务']);
+  return toolkit(KANBAN_OBSERVATION_TOOLKIT_NAME, '只读 task 观察接口：读取当前 task 图、执行状态与结果。', [tools.listTasks], ['查看任务图']);
 }
 
 export type CreateKanbanPluginOptions = {
@@ -155,7 +197,8 @@ export type CreateKanbanPluginOptions = {
 export type KanbanPlugin = StudioPlugin & { service: KanbanTaskService };
 export type InstalledKanbanPluginEnvironment = { workdir: string };
 
-function eventTypeFor(mutation: KanbanTaskMutation): string {
+function eventTypeFor(mutation: KanbanTaskMutation | KanbanTaskDeletion): string {
+  if (!('event' in mutation)) return 'task.deleted';
   switch (mutation.event.eventType) {
     case 'assigned': return 'task.assigned';
     case 'started': return 'task.started';
@@ -186,6 +229,18 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     toolkits,
     start: async (context) => {
       unsubscribe = service.subscribe((mutation) => {
+        if (!('event' in mutation)) {
+          context.notify({
+            type: eventTypeFor(mutation),
+            payload: {
+              taskId: mutation.task.taskId,
+              title: mutation.task.title,
+              detail: mutation.task.detail,
+              removedRelationships: mutation.removedRelationships,
+            },
+          });
+          return;
+        }
         context.notify({
           type: eventTypeFor(mutation),
           payload: {
@@ -193,7 +248,6 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
             ...(mutation.task.assigneeId === undefined ? {} : { assigneeId: mutation.task.assigneeId }),
             title: mutation.task.title,
             detail: mutation.task.detail,
-            deps: mutation.task.deps,
             ...(mutation.event.eventType === 'assigned' && mutation.event.note !== undefined
               ? { assignmentNote: mutation.event.note }
               : {}),
@@ -218,8 +272,12 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
               const value = await readJson();
               if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Kanban control request must be an object.');
               const input = value as Record<string, unknown>;
+              if (input.action === 'delete' && typeof input.taskId === 'string' && Object.keys(input).every((key) => ['action', 'taskId'].includes(key))) {
+                const deleted = await service.deleteTask(input.taskId);
+                return { kind: 'json', status: 200, body: { deletedTaskId: deleted.task.taskId, removedRelationships: deleted.removedRelationships } };
+              }
               if (input.action !== 'assign' || typeof input.taskId !== 'string' || typeof input.assigneeId !== 'string' || (input.assignmentNote !== undefined && typeof input.assignmentNote !== 'string') || Object.keys(input).some((key) => !['action', 'taskId', 'assigneeId', 'assignmentNote'].includes(key))) {
-                throw new Error('Kanban control requires action "assign", taskId, assigneeId, and an optional assignmentNote.');
+                throw new Error('Kanban control requires either delete with taskId, or assign with taskId, assigneeId, and an optional assignmentNote.');
               }
               return { kind: 'json', status: 202, body: { task: (await service.assignTask(input.taskId, input.assigneeId, input.assignmentNote)).task } };
             } catch (error) { return { kind: 'json', status: 409, body: { error: asError(error).message } }; }

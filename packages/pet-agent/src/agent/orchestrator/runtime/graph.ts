@@ -30,6 +30,7 @@ import {
 import { afterContextPrep } from './routes/afterContextPrep';
 import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
+import { afterPauseGate, pauseGate } from './nodes/pauseGate';
 import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
 import { createRunTerminationHandlers } from './runTermination';
 
@@ -80,6 +81,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       errorHandler: runTermination.onNodeError,
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
+    .addNode('pauseGate', pauseGate)
     .addEdge(START, 'prepare')
     .addConditionalEdges('prepare', afterPrepare, {
       answer: 'answer',
@@ -100,8 +102,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addEdge('entryAnswer', END)
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
-      end: END,
+      pauseGate: 'pauseGate',
       supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
+    })
+    .addConditionalEdges('pauseGate', afterPauseGate, {
+      capability: 'capability',
+      answer: 'answer',
     });
 
   return graph.compile({

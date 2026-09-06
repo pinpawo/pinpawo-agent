@@ -4446,6 +4446,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     __interrupt__?: unknown;
     messages: BaseMessage[];
     taskActiveDelegation: TaskActiveDelegation | null;
+    taskPauseInterrupt: { kind: 'pause_task' } | null;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
@@ -4458,6 +4459,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     .find((message) => Boolean(getMessageHandoffSource(message)));
   assert.equal(handoffCopy, undefined);
   assert.equal(finalState.taskActiveDelegation?.status, 'pending');
+  assert.deepEqual(finalState.taskPauseInterrupt, { kind: 'pause_task' });
 
   const activeDelegation = finalState.taskActiveDelegation;
   assert.ok(activeDelegation);

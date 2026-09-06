@@ -22,7 +22,23 @@ export type HumanReviewInterruptProjection = {
   interactions: HumanReviewRequest[];
 };
 
-export type PendingInterruptProjection = {
+export type HumanReviewPendingInterruptProjection = {
   interruptId: string;
   payload: HumanReviewInterruptProjection;
 };
+
+export type PendingInterruptProjection =
+  | HumanReviewPendingInterruptProjection
+  | {
+      payload: {
+        kind: 'pause_task';
+      };
+    };
+
+export function readHumanReviewPendingInterrupt(
+  value: PendingInterruptProjection | null,
+): HumanReviewPendingInterruptProjection | null {
+  return value?.payload.kind === 'human_review' && 'interruptId' in value
+    ? value
+    : null;
+}

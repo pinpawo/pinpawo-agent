@@ -89,7 +89,9 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
   assert.equal(snapshot.session.activeRun, null);
   assert.equal(
-    snapshot.session.pendingInterrupt?.payload.interactions[0]?.interactionId,
+    snapshot.session.pendingInterrupt?.payload.kind === 'human_review'
+      ? snapshot.session.pendingInterrupt.payload.interactions[0]?.interactionId
+      : null,
     'review-1',
   );
   assert.deepEqual(snapshot.session.currentPlan, {
@@ -152,6 +154,7 @@ test('buildLocalAgentSessionSnapshot preserves an in-flight running request', ()
       activity: 'thinking',
       startedAt: 1_700_000_000_000,
     },
+    pauseTaskInterrupt: { kind: 'pause_task' },
   });
 
   assert.deepEqual(snapshot.session.activeRun, {
@@ -160,5 +163,6 @@ test('buildLocalAgentSessionSnapshot preserves an in-flight running request', ()
     activity: 'thinking',
     startedAt: 1_700_000_000_000,
   });
+  assert.equal(snapshot.session.pendingInterrupt, null);
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
 });

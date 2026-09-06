@@ -2,7 +2,7 @@ import {
   createAgentSessionSnapshot,
   type AgentClientMessage,
   type AgentServerMessage,
-  type PendingInterruptProjection,
+  type HumanReviewPendingInterruptProjection,
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
@@ -82,7 +82,7 @@ export function sessionSummary(
 
 export function reviewSnapshotResult(
   requestId: string,
-  reviews: PendingInterruptProjection['payload']['interactions'],
+  reviews: HumanReviewPendingInterruptProjection['payload']['interactions'],
 ): AgentServerMessage {
   return {
     type: 'session.snapshot.result',
@@ -105,7 +105,7 @@ export function reviewSnapshotResult(
 
 export function reviewSpec(
   id: string,
-  options: PendingInterruptProjection['payload']['interactions'][number]['options'],
+  options: HumanReviewPendingInterruptProjection['payload']['interactions'][number]['options'],
 ) {
   return {
     interactionId: id,

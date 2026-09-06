@@ -626,3 +626,51 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     await host.close();
   }
 });
+
+test('an explicit task pause holds dispatch as waiting even when resumability reports nothing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  let paused = false;
+  // Resumability is deliberately reported as absent throughout. A Review-origin
+  // task pause ends the root run cleanly, so `next`/`tasks` are empty; only the
+  // Runtime-materialized payload says the Pet is paused.
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingInterrupt: null,
+      pauseTaskInterrupt: paused ? { kind: 'pause_task' as const } : null,
+      hasPendingContinuation: false,
+      currentPlan: null,
+    }),
+  };
+  const pet = await createResidentPetHost({
+    petId: 'pet-paused',
+    petName: 'Paused Pet',
+    modelProfiles: createTestModelProfiles(),
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-paused-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async () => {
+      paused = true;
+      return { status: 'completed', reply: '' };
+    },
+  });
+
+  try {
+    assert.equal(pet.resident.dispatch.getQueueSnapshot().state, 'open');
+    pet.resident.dispatch.dispatch({ request: 'gets paused by a review' });
+    await waitFor(
+      () => pet.resident.dispatch.getQueueSnapshot().state === 'waiting',
+      'resident dispatch queue did not enter waiting for an explicit task pause',
+    );
+    // Not 'blocked': that state is the resumability guess and the error
+    // fallback, neither of which describes a healthy, explicit pause.
+    assert.equal(pet.resident.dispatch.getQueueSnapshot().state, 'waiting');
+  } finally {
+    await pet.close();
+  }
+});

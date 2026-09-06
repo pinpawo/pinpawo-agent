@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PendingInterruptProjection } from '@pinpawo/agent-session';
+import type { HumanReviewPendingInterruptProjection } from '@pinpawo/agent-session';
 import { prepareReviewDecision } from './reviewDecision';
 
 test('approved review batches advance without sending until the final review', () => {
@@ -47,7 +47,7 @@ test('review decision preparation validates required input and stale drafts', ()
   });
 });
 
-function reviewAction(): PendingInterruptProjection {
+function reviewAction(): HumanReviewPendingInterruptProjection {
   return {
     interruptId: 'review-pendingInterrupt',
     payload: {

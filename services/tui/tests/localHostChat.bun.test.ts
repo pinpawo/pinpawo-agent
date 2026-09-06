@@ -13,9 +13,10 @@ import {
   type CliRenderer,
 } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
-import type {
-  AgentSession,
-  AgentTimelineEntry,
+import {
+  readHumanReviewPendingInterrupt,
+  type AgentSession,
+  type AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import {
   FileCapabilityArtifactStore,
@@ -452,7 +453,9 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     await waitFor(() => (
       controller.getState().session.pendingInterrupt !== null
     ));
-    const approvalInterrupt = controller.getState().session.pendingInterrupt;
+    const approvalInterrupt = readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    );
     assert.ok(approvalInterrupt);
     assert.equal(approvalInterrupt.interruptId, 'review-interrupt-approve');
     assert.equal(approvalInterrupt.payload.interactions[0]?.interactionId, REVIEW_SPEC.id);
@@ -493,7 +496,9 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     await waitFor(() => (
       controller.getState().session.pendingInterrupt !== null
     ));
-    const cancellationInterrupt = controller.getState().session.pendingInterrupt;
+    const cancellationInterrupt = readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    );
     assert.ok(cancellationInterrupt);
     assert.equal(cancellationInterrupt.interruptId, 'review-interrupt-cancel');
     assert.deepEqual(controller.cancelReview({
@@ -509,7 +514,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       },
     });
     assert.deepEqual(
-      controller.continueActiveDelegation(REVIEW_CONTINUE_GUIDANCE),
+      controller.continuePausedTask(REVIEW_CONTINUE_GUIDANCE),
       {
         ok: true,
         requestId: 'chat-review-continue',
@@ -518,7 +523,9 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     await waitFor(() => (
       controller.getState().session.pendingInterrupt !== null
     ));
-    const continuedInterrupt = controller.getState().session.pendingInterrupt;
+    const continuedInterrupt = readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    );
     assert.ok(continuedInterrupt);
     assert.equal(
       continuedInterrupt.interruptId,

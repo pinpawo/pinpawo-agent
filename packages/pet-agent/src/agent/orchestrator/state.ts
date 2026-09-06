@@ -24,6 +24,7 @@ import type {
   RunSupervisorSessionState,
   RunTaskContinuation,
 } from './runSupervisor/session';
+import type { PauseTaskInterruptPayload } from './interrupt/pauseTaskInterrupt';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -96,6 +97,10 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 'supersede_active',
   }),
+  taskPauseInterrupt: Annotation<PauseTaskInterruptPayload | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   runId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
@@ -133,6 +138,7 @@ export type OrchestratorRunState = Pick<
   | 'runRuntimeFailure'
   | 'runTerminalError'
   | 'runActiveDelegationTransition'
+  | 'taskPauseInterrupt'
   | 'runId'
   | 'traceId'
 >;
@@ -158,6 +164,7 @@ export function buildRunStateReset(
     runTerminalError: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',
+    taskPauseInterrupt: null,
     runId: randomUUID().slice(0, 8),
     traceId: options.traceId ?? randomUUID(),
   };

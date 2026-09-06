@@ -5,6 +5,7 @@ import {
   PauseTaskInterruptSignal,
   pauseTaskInterrupt,
   propagatePauseTaskInterrupt,
+  readPauseTaskInterrupt,
 } from './pauseTaskInterrupt';
 
 test('PauseTaskInterrupt owns commit-and-unwind materialization', () => {
@@ -30,4 +31,20 @@ test('PauseTaskInterrupt parses continue guidance', () => {
     pauseTaskInterrupt.resume({ action: 'continue', guidance: '  try another way  ' }),
     { type: 'continue', guidance: 'try another way' },
   );
+});
+
+test('PauseTaskInterrupt is read only from explicit Runtime state', () => {
+  assert.deepEqual(readPauseTaskInterrupt({
+    values: { taskPauseInterrupt: { kind: 'pause_task' } },
+  }), { kind: 'pause_task' });
+  assert.equal(readPauseTaskInterrupt({
+    values: {},
+    next: ['answer'],
+    tasks: [],
+  }), null);
+  assert.equal(readPauseTaskInterrupt({
+    values: { taskActiveDelegation: { status: 'pending' } },
+    next: [],
+    tasks: [],
+  }), null);
 });

@@ -10,6 +10,7 @@ import type {
   AgentTimelineEntry,
 } from './domain';
 import type { AgentSessionSnapshot } from './snapshot';
+import { readHumanReviewPendingInterrupt } from './review';
 import { agentOperationEntryFromEvent, agentOperationEntryId } from './timeline';
 
 export type AgentSessionInput =
@@ -495,9 +496,10 @@ function acceptInterruptResume(
   input: Extract<AgentSessionInput, { type: 'interrupt.resume.accepted' }>,
   context: AgentSessionReductionContext,
 ): AgentSession {
+  const pendingReview = readHumanReviewPendingInterrupt(session.pendingInterrupt);
   if (
     session.activeRun
-    || session.pendingInterrupt?.interruptId !== input.interruptId
+    || pendingReview?.interruptId !== input.interruptId
   ) {
     return session;
   }

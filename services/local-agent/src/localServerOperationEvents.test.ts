@@ -12,7 +12,8 @@ import {
   isHumanReviewInterruptError,
 } from './localServerOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { createBashToolkit } from './toolkits/local';
+import { createGitToolkit } from './toolkits/git';
 
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createBashToolkit(),

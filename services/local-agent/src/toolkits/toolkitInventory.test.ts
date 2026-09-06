@@ -8,7 +8,8 @@ import {
   HostToolkitInventoryStore,
   reportUnavailableToolkitAvailability,
 } from './toolkitInventory';
-import { createBashToolkit, createGitToolkit } from './local';
+import { createBashToolkit } from './local';
+import { createGitToolkit } from './git';
 import { createOperationRegistryForLocalServerDeps } from '../runtimeOperationRegistry';
 
 function toolkit(name: string, available = true): AgentToolkit {

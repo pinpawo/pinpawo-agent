@@ -46,8 +46,10 @@ import {
 } from '../../local-agent/src/testing/toolkitInventory';
 import {
   createBashToolkit,
-  createGitToolkit,
 } from '../../local-agent/src/toolkits/local/index';
+import {
+  createGitToolkit,
+} from '../../local-agent/src/toolkits/git/index';
 import {
   LocalHostConnection,
 } from '../src/client/localHostConnection';

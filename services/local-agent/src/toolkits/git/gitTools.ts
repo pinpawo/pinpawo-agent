@@ -11,7 +11,7 @@ import {
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
-import { readTextFileChunkResult } from './fileTools';
+import { readTextFileChunkResult } from '../local/fileTools';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;

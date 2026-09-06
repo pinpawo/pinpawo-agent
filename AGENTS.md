@@ -11,6 +11,12 @@
 - `tools/agent-macos/` contains the macOS desktop companion.
 - `docs/` contains public architecture and capability design notes.
 
+### Toolkit Directory Rules
+
+- Each `AgentToolkit` (defined via `defineToolkit` / `createXxxToolkit`) lives in its own `toolkits/<name>/` directory whose name matches the toolkit `name` field (for example `toolkits/git/`, `toolkits/browser/`, `toolkits/petProfile/`).
+- The `local/` directory hosts the basic local utility tools (file/shell/search/network/json/process); a domain toolkit such as git only imports shared helpers from it and keeps its own `index.ts` with the `createXxxToolkit()` definition.
+- Toolkit instructions, review policies, and `runtime` bindings belong in the toolkit's own `index.ts`, not in another toolkit's file.
+
 ## macOS Companion Status
 
 - All functionality under `tools/agent-macos/` is suspended until the user explicitly reactivates it.

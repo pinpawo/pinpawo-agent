@@ -216,14 +216,6 @@ test('goal_done asks Answer to summarize the completed task from canonical histo
   });
   const answerNode = createAnswerNode({
     models: { act: model },
-    actor: {
-      petId: 'pet-1',
-      userId: 'user-1',
-      name: '小白',
-      personality: null,
-      stage: null,
-      species: null,
-    },
   });
 
   const result = await answerNode(state({

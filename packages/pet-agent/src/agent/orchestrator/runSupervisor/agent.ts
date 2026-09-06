@@ -18,6 +18,7 @@ import type {
 import { parseSupervisorCommand } from './protocol';
 import { queryAgentMessages } from '../../messages';
 import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
+import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { createSupervisorMiddleware } from './supervisorMiddleware';
 import { supervisorCommandContext } from './supervisorState';
 import {
@@ -156,6 +157,7 @@ export function createRunSupervisorAgent(params: {
     middleware: [
       middleware,
       createSupervisorSearchStateMiddleware(),
+      systemPromptMiddleware,
       orchestratorModelInvocationMiddleware,
     ],
     checkpointer: false,

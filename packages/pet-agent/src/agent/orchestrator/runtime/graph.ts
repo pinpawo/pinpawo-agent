@@ -1,5 +1,6 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
+import { agentRuntimeContextSchema } from '../../../runtime/context';
 import {
   OrchestratorState,
   type OrchestratorStateType,
@@ -58,7 +59,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   // it must not grow state updates or user-facing output.
   const supervisorBoundaryIterationGuard = () => ({});
 
-  const graph = new StateGraph(OrchestratorState)
+  const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
     .addNode('prepare', prepare)
     .addNode('compactContext', compactContext)
     .addNode('captureUserRequest', captureRunUserRequest)

@@ -56,7 +56,6 @@ test('bash toolkit external access policy reviews configured network calls', asy
 
   const baseContext = {
     models: {} as never,
-    actor: {} as never,
     messages: [],
     toolkitName: 'bash',
     reviewCapabilities: {

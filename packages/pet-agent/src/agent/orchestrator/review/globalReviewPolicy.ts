@@ -5,7 +5,7 @@ import {
   type ToolAuthorizationMode,
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
-import type { AgentActor, AgentModels } from '../../../types/agent';
+import type { AgentModels } from '../../../types/agent';
 import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
 import { invokeStructuredOutput } from '../../../utils/structuredOutput';
 import {
@@ -66,7 +66,6 @@ type ToolkitAutoReviewContext = {
 
 export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
-  actor: AgentActor;
   /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
   toolkitName: string;
@@ -83,12 +82,11 @@ export type GlobalReviewPolicyResolver = (
 
 export type GlobalReviewPolicyBatchItem = Omit<
   GlobalReviewPolicyContext,
-  'models' | 'actor' | 'messages' | keyof GlobalReviewRuntimeContext
+  'models' | 'messages' | keyof GlobalReviewRuntimeContext
 >;
 
 export type GlobalReviewPolicyBatchContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
-  actor: AgentActor;
   /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
   reviews: GlobalReviewPolicyBatchItem[];
@@ -267,7 +265,6 @@ export async function resolveGlobalReviewBatchPolicy(
       for (const review of options.reviews) {
         const resolution = await options.policy.resolve({
           models: options.models,
-          actor: options.actor,
           messages: options.messages,
           task: options.task,
           workdir: options.workdir,
@@ -300,7 +297,6 @@ export async function resolveGlobalReviewPolicy(
   const {
     policy,
     models,
-    actor,
     messages,
     task,
     workdir,
@@ -309,7 +305,6 @@ export async function resolveGlobalReviewPolicy(
   return resolveGlobalReviewBatchPolicy({
     policy,
     models,
-    actor,
     messages,
     task,
     workdir,

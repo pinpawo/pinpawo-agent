@@ -470,3 +470,5 @@ user goal retains the same `traceId`.
 - Boundary Announces expose result evidence without Capability stop reasons.
 - Supervisor tracing remains complete after raw provider messages are removed from root
   checkpoint messages.
+
+Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.

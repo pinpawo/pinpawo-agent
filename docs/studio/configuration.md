@@ -11,7 +11,8 @@ One workdir has one Studio configuration at
 `<workdir>/.pinpawo/studio.json`. Pet files live beside it in
 `<workdir>/.pinpawo/pets/<petId>.json`. Each Pet owns a conventional
 Capability collection at
-`<workdir>/.pinpawo/pets/<petId>/capabilities/`.
+`<workdir>/.pinpawo/pets/<petId>/capabilities/`. A Pet can also define stable,
+cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
 
 ## `studio.json`
 
@@ -75,6 +76,40 @@ selects from that Pet's Capability directory instead.
 in the Supervisor's compact routing manifest. Its complete document still uses the
 same discovery path as every other Capability, and the setting does not bypass
 availability or Toolkit binding.
+
+The former `personality`, `species` and `stage` fields are rejected with guidance
+to move their authored content into `PET.md`. `serverBinding` is also rejected:
+there is no active cloud Pet synchronization consumer. The implicit Pet Profile
+Toolkit and cloud memory/history hydration have been removed. Conversation
+history remains owned by session checkpoints; `role` and `serviceSummary` remain
+public routing metadata.
+
+## Per-Pet root document
+
+`PET.md` is the conventional, optional root document for one Pet:
+
+```text
+<workdir>/.pinpawo/pets/writer/PET.md
+```
+
+Studio owns this per-Pet location. The ordinary single-Pet Chat Host resolves
+the same document contract from `<workdir>/PET.md`; the agent receives a
+`PetDocument` and does not interpret either filesystem convention.
+
+It is the Pet's canonical root document, occupying the same place
+for a Pet that `AGENTS.md` or `CLAUDE.md` occupies for an agent. Define the
+Pet's identity, responsibilities, operating principles, boundaries, and durable
+working conventions here. The complete document applies to direct Chat replies,
+Run Supervisor decisions, Capability execution, and final answers.
+
+Keep executable responsibilities and Toolkit dependencies in `CAPABILITY.md`,
+machine settings in the Pet JSON, and repository-owned development rules in
+`AGENTS.md`.
+
+Studio reads `PET.md` once while the Host starts. Restart the Host after editing
+it. The document is supplied as authored root context. Tools and
+Capabilities still come from the compiled registry, while framework lifecycle
+and security contracts remain authoritative.
 
 ## Per-Pet Capability directory
 

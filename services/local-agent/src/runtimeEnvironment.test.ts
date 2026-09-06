@@ -1,23 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
+import { randomUUID } from 'node:crypto';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 
-test('buildRuntimeEnvironmentSummary includes caller-provided session start time and timezone', () => {
-  const summary = buildRuntimeEnvironmentSummary('/tmp/pinpawo-workdir', {
-    sessionStartedAt: '2026-06-23T10:30:00+08:00',
-    timezone: 'Asia/Shanghai',
-  });
-
-  assert.match(summary, /会话开始时间：2026-06-23T10:30:00\+08:00/);
-  assert.match(summary, /时区：Asia\/Shanghai/);
-  assert.match(summary, /工作目录：\/tmp\/pinpawo-workdir/);
-  assert.doesNotMatch(summary, /进程 cwd/);
-});
-
-test('buildRuntimeEnvironmentSummary omits session time unless caller provides a stable value', () => {
-  const summary = buildRuntimeEnvironmentSummary('/tmp/pinpawo-workdir');
-
-  assert.doesNotMatch(summary, /会话开始时间：/);
-  assert.doesNotMatch(summary, /时区：/);
+test('environment summary reflects invocation session facts without capturing a previous session', () => {
+  const sessionStartedAt = randomUUID();
+  const timezone = randomUUID();
+  const first = buildRuntimeEnvironmentSummary({ sessionStartedAt, timezone });
+  assert.ok(first.includes(sessionStartedAt));
+  assert.ok(first.includes(timezone));
+  const second = buildRuntimeEnvironmentSummary();
+  assert.equal(second.includes(sessionStartedAt), false);
+  assert.equal(second.includes(timezone), false);
 });

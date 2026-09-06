@@ -14,7 +14,6 @@ import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import { resolveActor } from '../config';
 import type { RunSupervisorDispatch } from '../../runSupervisor/runner';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
@@ -178,9 +177,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt({
-      actor: resolveActor(config, runnableConfig),
-    }));
+    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
       messages: mainSelection.messages,

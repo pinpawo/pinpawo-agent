@@ -82,18 +82,18 @@ The remaining plan supplies the established arrangement. Boundary chiefly judges
 
 ## One return boundary, two successful outputs
 
-Root awaits `runner.invoke(input)`. Supervisor returns an existing control proposal or `{ reply }`; unhandled exceptions propagate. Existing disclosure return fields carry information prepared at Entry; Boundary retains that execution scope.
+The root graph’s `runSupervisor` node invokes the Supervisor agent using main messages and receives its decision. Tool history is invocation-local; canonical state remains root-owned. Supervisor returns an existing control proposal or `{ reply }`; unhandled exceptions propagate. Existing disclosure return fields carry information prepared at Entry; Boundary retains that execution scope.
 
 Tools express operations; natural text expresses a reply. The existing three control tools suffice:
 
 | Return | When used | Root effect |
 | --- | --- | --- |
-| `submit_plan({ tasks, acceptCurrent })` | Start at Entry; accept and advance within the plan at Boundary; replace after user confirmation | Commit a non-empty plan, dispatch its first task, and save the tail. Entry requires `acceptCurrent: false`; at Boundary, true accepts the current task and false is reserved for user-confirmed replacement without acceptance |
+| `submit_plan({ tasks })` | Establish or resume a plan at Entry | Commit the plan and dispatch its first task only when no delegation is active; never accept a task |
 | `continue_current({ feedback?, remainingPlan? })` | Current Boundary task needs improvement or continues after user input | Preserve the exact delegation, task, and private history, then continue with feedback; retain the future plan by default or update it alongside continuation when the user confirmed a change |
-| `accept_result({ reply, remainingPlan })` | Current task can be accepted and this run should reply | Accept, emit the reply, and dispatch nothing; save the established unfinished tasks or the user-confirmed revised future plan. Use an empty plan only when none remain or the user confirmed cancellation |
+| `accept_result({ reply?, remainingPlan? })` | Accept the current Boundary task | Record acceptance and advance through the existing tail by default. A supplied reply ends this run and saves the tail; no remaining tasks requires a final reply. Omitted remainingPlan retains the tail; a supplied array requires user-confirmed changes |
 | Natural final text | Reply directly at Entry or Boundary | Emit the supplied text, preserving unfinished task ownership and the remaining plan; no implicit acceptance or dispatch |
 
-This table defines domain effects. The tool `submit_plan` maps to the existing result `action: 'execute_plan'`; the other controls retain their corresponding action names. No additional command envelope is needed.
+The three tools express plan establishment, continuation, and acceptance separately. Remove `acceptCurrent`; only `accept_result` expresses acceptance, never inferred from the mode. Explicit user cancellation or replacement of the current task uses existing task controls rather than a boolean hidden inside plan submission.
 
 Keeping these fields does not retain permission for arbitrary plan rewrites. Normal progression must match the established next task and tail. User confirmation remains in root's main conversation, without a new approval tool, confirmation flag, or change protocol. Root checks structural consistency of progression; Supervisor interprets the scope authorized by the user.
 
@@ -283,6 +283,8 @@ First fix per-loop inputs, return values, and root effects; then replace inner m
 Check each step against the complete scenarios above. Keep one decision objective when updating prompts and tools rather than copying the same policy into several layers.
 
 ### Current implementation status
+
+2026-09-07 tool simplification: `submit_plan` is Entry-only; `accept_result` owns acceptance with progression or a reply. Deterministic root handling lives in the `runSupervisor` TypeScript node and its LangGraph `Command`, not another judging model. These interface changes await implementation.
 
 These implementation observations refer to the local worktree, whose code changes remain uncommitted. This commit contains documentation only and does not imply that the PR includes those implementations.
 

@@ -77,7 +77,6 @@ These are assembled by several nodes. Defined in
 
 | Block | Class | Built by | Notes |
 |---|---|---|---|
-| `[配置]` | `RUN-STABLE` / `INSTRUCTION` | `buildDecisionConfig(actor)` | Used by `entryAnswer`; its builder currently lives in `prompts/answer.ts`. It accepts `workdir`/`runtimeEnvironment`, but **no call site passes them** — both are currently dead parameters. |
 | `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor uses the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
 | `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + optional `<essential_context>` (initial) or `<guidance>` (continue). |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
@@ -85,9 +84,14 @@ These are assembled by several nodes. Defined in
 `xmlTextBlock()` wraps payloads in `CDATA` and escapes nested `]]>`. Always use
 it for free text — never interpolate user or tool text into a tag directly.
 
-> `buildDecisionConfig`'s `workdir`/`runtimeEnvironment` parameters are currently
-> dead. Treat them as unverified surface — if you start using them, check the
-> rendered prompt rather than assuming the intended behavior still holds.
+Role prompts no longer receive `AgentActor` or a legacy `[配置]` block. Common
+Host instructions, including PET.md, are composed at the model boundary from
+invocation runtime context; see [Pet root document](../../design/pet-document.md).
+`AgentRuntimeContext.workdir` is rendered once between common Host sections and
+execution-local sections. The same value supplies review and Toolkit execution
+scopes. Host environment facts also use common sections; there is no separate
+`runtimeEnvironment` configurable channel. Root context is reapplied on resume,
+without putting these sections in checkpointed messages.
 
 ## 4. Node: entryAnswer
 
@@ -96,7 +100,7 @@ Routes the request: reply directly, ask a question, or hand off via
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt({ actor })` — `[配置]` + routing rules |
+| system | `RUN-STABLE` / `INSTRUCTION` | `buildEntryAnswerSystemPrompt()` — routing rules, plus shared invocation context |
 | history | `DYNAMIC` / `HISTORY` | `mainConversationMessages(state.messages)` |
 
 **This node receives no XML fact blocks.** It is the only model node that sees
@@ -137,7 +141,7 @@ Sources:
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation with typed result facts | current canonical main conversation including unaccepted Announces |
 | session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
-| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `continue_current`, `submit_plan`, `accept_result`; new-run user input may require discovery before execution resumes |
+| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `continue_current`, `accept_result`; new-run user input may require discovery before execution resumes |
 
 Entry initializes a clean run-scoped Supervisor session. In the target, root
 publishes normal Capability results directly into main before Boundary, including
@@ -202,7 +206,7 @@ Executes one delegated task. Source: `runtime/nodes/capability.ts`.
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static) + `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ workdir, artifactDiscovery })` |
+| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ artifactDiscovery })` |
 | history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().delegation(scope).select()` — canonical main conversation plus this delegation's private messages |
 | boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context and current task; always last |
 
@@ -241,7 +245,7 @@ limits and incompatible checkpoints have deterministic notices. An empty reply
 without a runtime stop is a protocol error, not a request for a fallback answer.
 
 Natural Supervisor replies retain the active delegation and remaining plan.
-`accept_result({ reply, remainingPlan })` accepts the active task before terminal
+`accept_result({ reply?, remainingPlan? })` accepts the active task before terminal
 cleanup and saves any remaining plan without dispatching it. The existing
 continuation snapshot also supports a remaining plan with no active delegation;
 explicit resume then starts a fresh Entry session.
@@ -341,3 +345,5 @@ ephemeral; Capability's private context maintenance remains subagent-owned.
    evidence stays in main messages intact during execution; compaction retains
    all Announces for the current unfinished delegation by existing identity,
    independently of the recent-message suffix.
+
+Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.

@@ -17,8 +17,7 @@ import { isSafePetPathSegment } from './petId';
  * Pet 本地配置。
  *
  * 设计立场:
- * - 本地配置是 source of truth(pet 行为完全由此决定)。
- * - `serverBinding` 仅作为绑定到服务端的 channel key,不放业务字段。
+ * - 本地配置声明 Host 身份与路由；行为与人设由 PET.md 定义。
  * - 同一台主机可以有多个 pet 配置共存(Studio 拼装多 pet 时用)。
  * - schema 只解析默认 Capability 名称；Studio Host composition 在 resident 启动前
  *   对已加载的 Pet Capability 做 fail-fast 可用性检查。
@@ -26,9 +25,6 @@ import { isSafePetPathSegment } from './petId';
 export type PetLocalConfig = {
   petId: string;
   name: string;
-  personality?: string;
-  species?: string;
-  stage?: string;
   /** 一句话角色描述,planner 用来挑 pet */
   role?: string;
   /** 简短服务能力概述,planner 在路由 task → pet 时参考 */
@@ -37,18 +33,11 @@ export type PetLocalConfig = {
   modelProfileId?: string;
   /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
   defaultCapabilityName?: string;
-  /** 可选:绑定到服务端 pet,仅用于 app 同步通道,不存业务数据 */
-  serverBinding?: {
-    petId: string;
-  };
 };
 
 export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSchema({
   kind: 'pet config',
   parse: (reader) => {
-    const personality = reader.optionalString('personality');
-    const species = reader.optionalString('species');
-    const stage = reader.optionalString('stage');
     const role = reader.optionalString('role');
     const serviceSummary = reader.optionalString('serviceSummary');
     const modelProfileId = reader.optionalString('modelProfileId');
@@ -60,7 +49,13 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
       reader.fail('"model" was replaced by stable "modelProfileId"', 'model');
     }
 
-    const serverBinding = reader.optionalSection('serverBinding');
+    for (const field of ['personality', 'species', 'stage', 'serverBinding']) {
+      if (reader.raw[field] !== undefined) {
+        reader.fail(field === 'serverBinding'
+          ? '"serverBinding" is no longer supported; Pet identity belongs to the local Host'
+          : `"${field}" was removed; move authored Pet behavior to PET.md`, field);
+      }
+    }
 
     const petId = reader.requiredString('petId');
     if (!isSafePetPathSegment(petId)) {
@@ -76,16 +71,10 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
     return {
       petId,
       name: reader.requiredString('name'),
-      ...(personality !== undefined ? { personality } : {}),
-      ...(species !== undefined ? { species } : {}),
-      ...(stage !== undefined ? { stage } : {}),
       ...(role !== undefined ? { role } : {}),
       ...(serviceSummary !== undefined ? { serviceSummary } : {}),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
       ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
-      ...(serverBinding
-        ? { serverBinding: { petId: serverBinding.requiredString('petId') } }
-        : {}),
     };
   },
 });

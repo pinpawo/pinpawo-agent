@@ -4,7 +4,12 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadPetLocalConfigs, resolvePetCapabilityDirectory } from './petConfig';
+import {
+  loadPetDocument,
+  loadPetLocalConfigs,
+  resolvePetCapabilityDirectory,
+  resolvePetDocumentPath,
+} from './petConfig';
 
 // 本文件只覆盖**文件入口**:去哪读、读哪些、目录级一致性。
 // schema 与字段校验的测试在上层 configSchema.test.ts。
@@ -88,4 +93,19 @@ test('resolvePetCapabilityDirectory derives the conventional per-Pet root', () =
     () => resolvePetCapabilityDirectory('/workspace/.pinpawo/pets', ''),
     /safe path segment/,
   );
+});
+
+test('loadPetDocument reads the conventional optional PET.md document', async () => {
+  const dir = await mkTempDir('pet-document-');
+  await fs.mkdir(path.join(dir, 'executor'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'executor', 'PET.md'), '# Executor\n\nUse one worktree.\n');
+
+  const loaded = await loadPetDocument(dir, 'executor');
+  assert.equal(loaded?.content, '# Executor\n\nUse one worktree.');
+  assert.equal(loaded?.digest.length, 64);
+  assert.equal(
+    resolvePetDocumentPath(dir, 'executor'),
+    path.join(dir, 'executor', 'PET.md'),
+  );
+  assert.equal(await loadPetDocument(dir, 'planner'), null);
 });

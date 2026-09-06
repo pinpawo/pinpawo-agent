@@ -8,7 +8,5 @@ test('buildAgentContext returns an API-free fallback context', async () => {
 
   assert.equal(context.pet.id, LOCAL_ACTOR_ID);
   assert.equal(context.pet.name, LOCAL_ACTOR_NAME);
-  assert.deepEqual(context.context.recentChatTurns, []);
-  assert.match(context.context.today, /^\d{4}-\d{2}-\d{2}$/);
-
+  assert.equal(context.traceUserId, undefined);
 });

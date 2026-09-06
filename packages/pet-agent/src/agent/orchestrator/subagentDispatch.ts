@@ -18,17 +18,9 @@ import {
 } from './artifacts/discovery';
 /** Runtime facts and conditional interfaces available to this execution. */
 export function buildSubagentExecutionContext(params: {
-  workdir?: string | null;
   artifactDiscovery: boolean;
 }): string | null {
   const sections = [
-    params.workdir
-      ? [
-          '## 执行上下文',
-          `- 当前工作目录：${params.workdir}`,
-          '- 相对路径默认相对于当前工作目录。',
-        ].join('\n')
-      : null,
     ...(params.artifactDiscovery
       ? [
           [

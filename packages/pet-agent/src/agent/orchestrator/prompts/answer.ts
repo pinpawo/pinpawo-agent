@@ -3,7 +3,6 @@ import {
   SystemMessage,
   type BaseMessage,
 } from '@langchain/core/messages';
-import type { AgentActor } from '../../../types/agent';
 import {
   MAX_HANDOFF_ARTIFACT_PREVIEW_LENGTH,
   MAX_HANDOFF_ARTIFACT_TITLE_LENGTH,
@@ -14,7 +13,7 @@ import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages
 import type { UserRequest } from '../types';
 import { clipForPrompt } from '../utils';
 import { buildRunUserRequestContext } from './context';
-import { buildDecisionConfig, indentXmlBlock, xmlTextBlock } from './shared';
+import { indentXmlBlock, xmlTextBlock } from './shared';
 import { ANSWER_SYSTEM_PROMPT } from './templates/answer.prompt';
 import { ENTRY_ANSWER_SYSTEM_PROMPT } from './templates/entryAnswer.prompt';
 
@@ -219,20 +218,12 @@ export function appendAnswerInputMessage(
   return [...canonicalHistory, inputMessage];
 }
 
-export function buildAnswerSystemPrompt(params: {
-  actor: AgentActor;
-}): string {
-  return ANSWER_SYSTEM_PROMPT.render({
-    config: buildDecisionConfig(params.actor),
-  });
+export function buildAnswerSystemPrompt(): string {
+  return ANSWER_SYSTEM_PROMPT.render({});
 }
 
-export function buildEntryAnswerSystemPrompt(params: {
-  actor: AgentActor;
-}): string {
-  return ENTRY_ANSWER_SYSTEM_PROMPT.render({
-    config: buildDecisionConfig(params.actor),
-  });
+export function buildEntryAnswerSystemPrompt(): string {
+  return ENTRY_ANSWER_SYSTEM_PROMPT.render({});
 }
 
 /**
@@ -247,12 +238,11 @@ export function buildEntryAnswerSystemPrompt(params: {
  * similarity across one session. The facts block is the whole input.
  */
 export function buildAnswerInvocationMessages(params: {
-  actor: AgentActor;
   userRequest?: UserRequest | null;
   contextFacts: ModelAnswerContextFacts;
 }): BaseMessage[] {
   return [
-    new SystemMessage(buildAnswerSystemPrompt({ actor: params.actor })),
+    new SystemMessage(buildAnswerSystemPrompt()),
     ...appendAnswerInputMessage([], params.userRequest, params.contextFacts),
   ];
 }

@@ -50,7 +50,6 @@ function reviewContext(toolName: string, input: unknown) {
   const toolkit = createBashToolkit();
   return {
     models: {} as never,
-    actor: {} as never,
     messages: [],
     toolkitName: 'bash',
     toolName,

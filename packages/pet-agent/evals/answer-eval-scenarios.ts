@@ -39,14 +39,6 @@ export type AnswerEvalScenario = {
   ): Promise<AnswerEvalRunResult>;
 };
 
-const actor = {
-  petId: 'eval-pet',
-  userId: 'eval-user',
-  name: 'answer-eval',
-  personality: null,
-  stage: null,
-  species: null,
-};
 
 function longestSharedSpan(left: string, right: string): number {
   let previous = new Array<number>(right.length + 1).fill(0);
@@ -129,7 +121,6 @@ function render(testCase: AnswerBehaviorCase): BaseMessage[] {
     ?? null;
   const hasUserRequest = Boolean(userRequest);
   return buildAnswerInvocationMessages({
-    actor,
     userRequest,
     contextFacts: delegationOutcome?.outcome === 'goal_done'
       ? {

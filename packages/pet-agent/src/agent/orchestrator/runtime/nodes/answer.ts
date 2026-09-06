@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
   buildHandoffArtifactRefs,
@@ -27,9 +27,9 @@ import { readMessageText } from '../../utils';
 import {
   getInvokeOptions,
   readRunIterationLimit,
-  resolveActor,
 } from '../config';
 import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
+import { invokeOrchestratorModel } from '../../modelInvocation';
 import { readCapabilityNameFromLane } from '../decisions/delegationLifecycle';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 
@@ -102,7 +102,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
       };
     }
     const { maxRunIterations } = getInvokeOptions(runnableConfig);
-    const actor = resolveActor(config, runnableConfig);
     // The full main conversation queue. Completed subagent results live here as
     // handoff copies (first-class, lane-free). A user-input-required result is
     // different: its lane remains resumable, so its announce and artifact refs
@@ -161,12 +160,19 @@ export function createAnswerNode(config: OrchestratorConfig) {
         ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
     });
     const answerMessages = buildAnswerInvocationMessages({
-      actor,
       userRequest: state.runUserRequest,
       contextFacts: answerContextFacts,
     });
-    const response = await (config.models.answer ?? config.models.act).invoke(
-      answerMessages,
+    const [systemMessage, ...messages] = answerMessages;
+    if (!SystemMessage.isInstance(systemMessage)) {
+      throw new Error('Answer invocation requires a system message.');
+    }
+    const response = await invokeOrchestratorModel(
+      config.models.answer ?? config.models.act,
+      {
+        systemMessage,
+        messages,
+      },
       runnableConfig,
     );
     if (!readMessageText(response).trim()) {

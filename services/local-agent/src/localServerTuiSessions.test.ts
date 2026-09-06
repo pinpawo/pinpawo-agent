@@ -304,23 +304,11 @@ test('LocalServerTuiSessionService injects active session createdAt into runtime
     pet: {
       id: 'pet-a',
       name: 'Paw',
-      personality: null,
-      species: null,
-      stage: null,
-      growth_value: null,
-      stage_asset_id: null,
-    },
-    context: {
-      petMemoryText: '',
-      recentChatTurns: [],
-      today: '2026-06-11',
     },
   });
 
-  assert.match(setup.input.runtimeEnvironment ?? '', new RegExp(`会话开始时间：${session.createdAt}`));
-  assert.match(setup.input.runtimeEnvironment ?? '', /时区：/);
-  assert.match(setup.input.runtimeEnvironment ?? '', /工作目录：\/tmp\/pinpawo-tui-workdir/);
-  assert.doesNotMatch(setup.input.runtimeEnvironment ?? '', /进程 cwd/);
+  assert.ok(setup.input.context?.systemPromptSections?.some(({ content }) => content.includes(session.createdAt)));
+  assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-tui-workdir');
 });
 
 test('LocalServerTuiSessionService rejects chat setup without a thread-scoped artifact store', () => {
@@ -340,16 +328,6 @@ test('LocalServerTuiSessionService rejects chat setup without a thread-scoped ar
       pet: {
         id: 'pet-a',
         name: 'Paw',
-        personality: null,
-        species: null,
-        stage: null,
-        growth_value: null,
-        stage_asset_id: null,
-      },
-      context: {
-        petMemoryText: '',
-        recentChatTurns: [],
-        today: '2026-06-11',
       },
     }),
     /requires a capability artifact store/,
@@ -379,16 +357,6 @@ test('runtime config updates reach the next chat setup through the normalized de
     pet: {
       id: 'pet-a',
       name: 'Paw',
-      personality: null,
-      species: null,
-      stage: null,
-      growth_value: null,
-      stage_asset_id: null,
-    },
-    context: {
-      petMemoryText: '',
-      recentChatTurns: [],
-      today: '2026-06-11',
     },
   };
 
@@ -437,16 +405,6 @@ test('LocalServerTuiSessionService reads one checkpoint point for messages and p
       pet: {
         id: 'pet-a',
         name: 'Paw',
-        personality: null,
-        species: null,
-        stage: null,
-        growth_value: null,
-        stage_asset_id: null,
-      },
-      context: {
-        petMemoryText: '',
-        recentChatTurns: [],
-        today: '2026-06-11',
       },
     }),
     defaultModelProfileId: TEST_MODEL_PROFILE_ID,

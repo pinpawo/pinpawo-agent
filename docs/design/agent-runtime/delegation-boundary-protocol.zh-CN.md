@@ -82,18 +82,18 @@ Supervisor 结合 goal 和 root 当前主对话判断：
 
 ## 一个返回边界，两类正常输出
 
-root 等待 `runner.invoke(input)` 返回。Supervisor 只返回已有的控制提案或 `{ reply }`；发生未处理异常时直接抛出。沿用已有 Capability 披露返回字段传递 Entry 准备的信息，Boundary 保持该执行范围不变。
+root 图中的 `runSupervisor` 节点基于 main messages 调用 Supervisor agent 并取得决定。调用内工具历史是临时的，正式状态仍由 root 持有。Supervisor 只返回已有的控制提案或 `{ reply }`；发生未处理异常时直接抛出。沿用已有 Capability 披露返回字段传递 Entry 准备的信息，Boundary 保持该执行范围不变。
 
 工具负责表达操作，普通文本负责表达回复。沿用现有三个控制工具即可：
 
 | 返回方式 | 适用时机 | root 落实的效果 |
 | --- | --- | --- |
-| `submit_plan({ tasks, acceptCurrent })` | Entry 开始执行；Boundary 采纳后按计划推进；用户确认变更后替换执行 | 提交非空计划并派发第一项，保存剩余项。Entry 的 `acceptCurrent` 必须为 `false`；Boundary 的 `true` 表示采纳当前任务，`false` 仅用于已获用户确认的替换，不验收旧任务 |
+| `submit_plan({ tasks })` | Entry 建立或恢复计划 | 无活动 delegation 时提交计划并派发第一项；不承担验收 |
 | `continue_current({ feedback?, remainingPlan? })` | Boundary 中当前任务还需完善，或收到用户补充后继续 | 保留同一个 delegation、任务和私有历史，携带反馈继续；默认保留后续计划，用户确认修改时可同时更新后续计划 |
-| `accept_result({ reply, remainingPlan })` | Boundary 中当前任务可采纳，本轮应回复 | 采纳当前任务，输出回复，不派发后续工作；保存既定未完成项或用户确认调整后的后续计划。仅在确无剩余项或用户确认取消时使用空计划 |
+| `accept_result({ reply?, remainingPlan? })` | Boundary 验收当前任务 | 记录验收；默认沿既定后续计划推进。提供 reply 时输出回复并结束本轮，保留后续计划；没有后续任务时必须提供最终回复。remainingPlan 省略则保留，提供时仅允许用户确认的调整 |
 | 普通最终文本 | Entry 或 Boundary 中直接回复用户 | 原文输出，保留已有未完成任务和剩余计划，不隐式验收或派发 |
 
-这张表定义业务效果。工具名 `submit_plan` 对应已有结果中的 `action: 'execute_plan'`，其他控制沿用同名 action；无需增加另一层命令封装。
+三个工具分别表达建立计划、继续当前任务和验收结果。移除 `acceptCurrent`，验收只通过 `accept_result` 表达；root 不根据 Entry/Boundary 自动猜测是否验收。当前任务的用户取消或替换沿已有任务控制入口处理，不隐藏在计划工具的布尔参数中。
 
 沿用这些字段不等于保留模型任意重写计划的权限。正常推进必须对应既定下一项和剩余项；用户确认的调整依据保存在 root 主对话中，不新增审批工具、确认标记或另一套变更协议。root 校验计划推进的结构一致性，Supervisor 根据用户表达判断获准变更的范围。
 
@@ -283,6 +283,8 @@ root 检查点负责已提交的状态变化和待执行节点。恢复已提交
 每一步用上述完整场景检查。更新提示词和工具说明时保持一个决策目标，不把同一套策略复制到多个位置。
 
 ### 当前实现状态
+
+2026-09-07 工具职责收敛：`submit_plan` 仅用于 Entry，`accept_result` 统一验收并推进或回复；root 的确定性处理由 `runSupervisor` 节点中的 TypeScript 分支及 LangGraph `Command` 承载，没有第二个判断模型。以上接口调整待开发落实。
 
 以下实现记录指本地工作区，相关代码尚未提交；本次提交仅包含文档，不能据此认为 PR 已包含这些实现。
 

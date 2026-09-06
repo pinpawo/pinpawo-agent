@@ -118,11 +118,21 @@ facts directly instead of making invocation ownership optional on a wait.
 
 Delegation continuation is checkpoint-owned rather than inferred from a
 particular client's review-cancellation history. The checkpoint's
-`taskActiveDelegation` pointer remains the sole authority for both transitions.
+`taskActiveDelegation` and saved `taskRunContinuation` determine available work;
+the latter also supports remaining tasks without an active delegation.
 After an authoritative `interrupted` event, the TUI may temporarily enter a
 local paused mode: Enter sends `resume_active`, while a second Esc leaves that
 mode and makes the following submission `supersede_active`. This local mode is
 not projected, persisted, or used to infer delegation availability.
+
+Under the [Supervisor interaction target](../../design/agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly),
+normal questions with saved work also expose continuation without an interrupted
+event. Append the user's answer or explicit plan adjustment to main while keeping
+the active delegation, then invoke Supervisor before execution. Receiving that
+input does not accept, end, or replace the task. With only a remaining plan,
+continue through Supervisor Entry; with neither a plan nor a delegation, process
+the answer through ordinary `entryAnswer` using main context. The normal-question
+UI integration is pending; this adds no new wait object or independent lifecycle.
 
 Live TUI actions carry `AgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`

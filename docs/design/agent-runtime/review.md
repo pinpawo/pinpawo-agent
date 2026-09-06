@@ -300,8 +300,12 @@ Review resolution, capability business rules, Agent Session, or an interaction
 interface.
 
 Whether a task is paused is derived from durable Runtime and graph state, for
-example pending graph work or a retained active delegation. A finished task
-must not project `PauseTaskInterrupt`.
+example pending graph work or a retained active delegation after an explicit
+pause or Review cancellation. Retained work alone is insufficient: a normal
+Supervisor question may end its run while preserving work for continuation,
+without creating `PauseTaskInterrupt` or an `interrupted` event. That interaction
+is defined by the [Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+A finished task must not project `PauseTaskInterrupt`.
 
 ## Replay-safe Review policy
 
@@ -472,11 +476,11 @@ graph. Mechanism-specific transport remains internal to
 `pauseTaskInterrupt.ts`.
 
 This design does not replace `SubagentResult` with a completed/interrupted
-union. Existing completion reasons for genuinely completed subagent runs are a
-separate concern and remain unchanged in this work. Review and task pause must
-not be represented by a new or existing `completionReason`; their propagation
-is Runtime-private interrupt control flow between `createSubagent` and the
-capability node.
+union. Review and task pause must not be represented by result metadata; their
+propagation is Runtime-private interrupt control flow between `createSubagent`
+and the capability node. Removal of the remaining cross-layer
+`completionReason` contract is owned separately by the
+[Delegation Boundary Protocol](delegation-boundary-protocol.md) and issue #755.
 
 ## Running Esc
 
@@ -607,8 +611,8 @@ run at that boundary.
 6. Remove `reviewRunControl.ts`, `toolkitReviewPausePending`, and any deferred
    interrupt descriptor.
 7. Remove `completionReason: 'interrupted'`; let `PauseTaskInterrupt` own its
-   Runtime-private transport without redesigning `SubagentResult` or its
-   genuine-completion reasons.
+   Runtime-private transport. Issue #755 separately removes stop reasons from
+   the normal `SubagentResult` and Announce contracts.
 8. Make the capability boundary call the stable `PauseTaskInterrupt` adapter
    while retaining the unfinished active delegation and skipping Run Supervisor.
 

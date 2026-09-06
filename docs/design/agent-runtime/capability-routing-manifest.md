@@ -143,8 +143,17 @@ compiled Capability registry
 The manifest is available in both Supervisor modes:
 
 - `entry` uses it to discover the initial executor responsibilities;
-- `boundary` uses the same immutable view when new work requires another
-  responsibility.
+- execution `boundary` invocations reuse the information prepared for the plan;
+- when a user supplements an unfinished task or confirms a plan adjustment, the
+  message enters main with the current delegation retained. The new run's first
+  Supervisor decision may use the manifest and discovery to prepare the needed
+  information, including in Boundary mode, before execution resumes.
+
+This follows the [Supervisor–Root interaction design](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+Execution evidence alone does not authorize new scope or replanning. User input
+does not first close or replace the current delegation, and no separate planning
+mode is added. Current code exposes discovery in every Boundary; restricting it
+to preparation for execution is pending implementation.
 
 `capability_search` remains the document-disclosure boundary. Its filesystem and
 memory backends continue searching complete immutable Capability documents and

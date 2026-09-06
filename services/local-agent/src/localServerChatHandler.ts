@@ -337,19 +337,6 @@ export class LocalServerChatHandler {
               ),
             }
           : {}),
-        ...(source.type === 'review.cancel'
-          || (source.type === 'human_review_response' && source.interruptRun)
-          ? { interruptOnSettledResumeCheckpoint: true }
-          : {}),
-        ...(source.type !== 'chat_request'
-          ? {
-            onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
-              if (canInterrupt) {
-                this.inflightRequests.interrupt(peer, { requestId });
-              }
-            },
-          }
-          : {}),
       });
       if (result.status === 'waiting_human') {
         this.inflightRequests.finish(peer, inflight, 'interrupted');

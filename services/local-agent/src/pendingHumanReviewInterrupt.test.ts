@@ -280,7 +280,7 @@ test('human review cancellation interrupts an approve-only review without fabric
   }]);
 });
 
-test('human review rejection queues the same checkpoint interruption as cancellation', async () => {
+test('human review rejection resumes with a reject decision', async () => {
   const route = {
     ...reviewRoute(['review-1'], 'interrupt-1'),
     requestId: 'req-1',
@@ -315,7 +315,6 @@ test('human review rejection queues the same checkpoint interruption as cancella
       interactionId: 'review-1',
       selectedOptionId: 'reject',
       decisionCount: 1,
-      interruptRun: true,
     },
   }]);
 });

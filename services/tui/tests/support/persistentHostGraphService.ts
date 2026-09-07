@@ -174,7 +174,7 @@ function createGraph(setup: AgentChannelSetup) {
               description: 'Write the protected production fixture',
             },
           }))
-        : selectReply(input, setup.input.workdir);
+        : selectReply(input, setup.input.context?.workdir ?? undefined);
       return {
         messages: [new AIMessage({
           content,

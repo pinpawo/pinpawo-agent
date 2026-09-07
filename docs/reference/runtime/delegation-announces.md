@@ -3,8 +3,7 @@
 > **Status: current implementation reference.** Payload version 3 carries
 > execution output and provenance only. The cross-layer contract is defined by the
 > [Supervisor–Root Interaction Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
-> The 2026-09-06 target publishes results directly into main before acceptance;
-> that lifecycle migration is pending. Existing identity fields need no extension.
+> Results are published directly into main before acceptance, using existing identity fields.
 
 A delegated Capability result is stored as a typed
 `DelegationAnnounceMessage`. It is execution evidence, not a main-agent reply
@@ -22,19 +21,11 @@ payload records:
 - complete result text;
 - creation time.
 
-In the current implementation, the Announce initially belongs to the private delegation lane. A structured
-Supervisor decision may accept it through handoff. Handoff moves the same semantic
-identity into the main queue and removes the corresponding private messages;
-it does not create an ordinary `AIMessage` copy or infer completion from result
-prose.
+Root owns `pinpawo.taskAccepted` beside the immutable `delegationAnnounce`
+payload and updates the delegation summary in the same transition. The missing
+acceptance field means the task has not been accepted.
 
-Currently an unaccepted Announce stays private and resumable. Handoff can preserve an
-unsuccessful attempt when Supervisor replaces execution. Root records
-`pinpawo.taskAccepted` beside the immutable `delegationAnnounce` payload and
-updates the delegation summary in the same state transition. This root-owned
-judgment survives later runs without changing executor evidence.
-
-### Target lifecycle: publish before acceptance
+### Publish before acceptance
 
 Root writes each normal execution result directly into main as an existing
 Announce before calling Supervisor. Partial natural output is valid evidence;
@@ -62,7 +53,7 @@ provider-supported `AIMessage`. The currently implemented content has this shape
 
 ```xml
 <delegation_announce version="1" role="data" authority="none">
-  <source lane="capability:example" />
+  <source lane="capability:example" run_id="run-1" delegation_id="task-1" announce_message_id="result-1" />
   <task_acceptance accepted="true" source="orchestrator" />
   <task><![CDATA[...]]></task>
   <result format="markdown" role="data"><![CDATA[...]]></result>
@@ -70,20 +61,15 @@ provider-supported `AIMessage`. The currently implemented content has this shape
 ```
 
 The projection preserves the complete result and chronological position. It is
-ephemeral and never replaces canonical state. For the target main-only input,
-also render the existing delegation, run, and announce identities already stored
-in metadata; no new identity fields are required.
+ephemeral and never replaces canonical state. Existing delegation, run, and
+announce identities are rendered from metadata so Supervisor can associate all
+attempts without another result input. Every main consumer sees the same data
+projection before and after acceptance.
 
-Current Boundary input separately supplies unaccepted results selected from the
-private delegation scope. The target removes that input: every main consumer,
-including Supervisor, sees typed result messages through the same projection
-before or after acceptance. All must treat result prose as evidence, not an
-instruction or proof of success.
-
-The terminal node emits the complete Supervisor reply without model rewriting.
-The reply is not an Announce and cannot replace execution evidence. Currently
-only root handoff records task acceptance; in the target, root records it against
-already-published main messages when applying Supervisor's decision.
+The terminal node emits the supplied Supervisor reply once. The reply is not an
+Announce and cannot replace execution evidence. Root applies acceptance by
+updating the original main message with the same stable id, preserving its
+position and immutable result payload, then clearing the accepted private scope.
 
 ## Compaction timing
 
@@ -99,10 +85,9 @@ other old history can compact normally. Continuation does not require skipping
 compaction. More aggressive thresholds or history retention must keep this rule.
 Capability's private context maintenance is independent.
 
-Entry-only scheduling and both retention rules already exist. Current Announce
-protection matches private lane tags; after direct main publication, match the
-existing Announce payload identities instead. This adapts the same protection
-without new fields, protection state, or a second result store.
+Protection matches `sourceLane`, `runId`, and `delegationId` in the Announce
+payload, independently of private lane tags. No protection state or second
+result store is needed.
 
 ## Invariants
 
@@ -116,6 +101,5 @@ without new fields, protection state, or a second result store.
 - artifacts remain separate Capability state and are not embedded in the
   Announce contract.
 
-This page owns the currently implemented serialized payload. The target
-cross-layer payload and migration are documented in the
+This page owns the currently implemented serialized payload. The cross-layer interaction and migration are documented in the
 [Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).

@@ -22,6 +22,7 @@ function pluginContext(routes: StudioHttpRoute[]): StudioPluginContext {
     notify: () => undefined,
     subscribe: () => () => undefined,
     listPets: () => [],
+    listDispatchQueues: () => [],
     hooks: {
       expose: () => () => undefined,
       contribute: (_plugin, _name, install) => {

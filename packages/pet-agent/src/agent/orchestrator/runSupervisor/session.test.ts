@@ -21,9 +21,7 @@ test('a new run creates a fresh Supervisor session without prior search or comma
     current: first,
     plan: [{ capability: 'general', task: 'Remaining task' }],
     capabilityDisclosure: disclosure,
-    inputId: 'boundary-1',
-    registryDigest: disclosure.registryDigest,
-    command: { action: 'continue_current', tasks: [] },
+
   });
   const nextRunDisclosure = {
     ...disclosure,
@@ -35,10 +33,10 @@ test('a new run creates a fresh Supervisor session without prior search or comma
   });
 
   assert.equal(committed.revision, 1);
-  assert.equal(committed.lastCommand?.inputId, 'boundary-1');
+  assert.equal(Object.hasOwn(committed, 'lastCommand'), false);
   assert.deepEqual(committed.plan, [{ capability: 'general', task: 'Remaining task' }]);
   assert.equal(nextRun.revision, 0);
   assert.deepEqual(nextRun.plan, []);
   assert.equal(nextRun.capabilityDisclosure.emptySearchRounds, 0);
-  assert.equal(nextRun.lastCommand, null);
+  assert.equal(Object.hasOwn(nextRun, 'lastCommand'), false);
 });

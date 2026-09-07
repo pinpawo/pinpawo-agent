@@ -70,7 +70,7 @@ export function buildCapabilityPlanningGoalContract(
   return {
     objective: `Produce ${expected.result} at this planning boundary. ${expected.reason}`,
     acceptanceCriteria: [
-      ...(expected.result === 'execute_plan' || expected.result === 'advance_plan'
+      ...(expected.result === 'execute_plan'
         ? [{
             id: 'materialized_task_correct',
             statement: [
@@ -91,7 +91,7 @@ export function buildCapabilityPlanningGoalContract(
               'A later task is justified when it depends on a prior returned result or requires a different independently executing ability.',
               'Stages one ability can perform continuously toward the same result should remain together.',
             ].join(' '),
-          }, ...(expected.result === 'advance_plan' ? [{
+          }, ...(expected.planEffect === 'revised' ? [{
             id: 'remaining_plan_change_is_minimal',
             statement: [
               'Revalidate the prior remaining-plan proposal against the user goal, accepted history, and current result.',

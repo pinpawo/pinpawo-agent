@@ -1,9 +1,9 @@
 # Run-scoped Supervisor session
 
-Status: working design. The 2026-09-06 interaction simplification uses native
-`returnDirect`; that integration is pending implementation. The same discussion
-fixes the execution plan and prepared Capability disclosure during execution;
-the current implementation still permits Boundary replanning and discovery.
+Status: working design, implemented on the Supervisor interaction branch.
+Control tools use native `returnDirect`; execution preserves the plan and
+prepared Capability disclosure. User supplements begin a fresh Supervisor
+invocation before the same delegation continues.
 
 ## Goal
 
@@ -255,13 +255,10 @@ it. This path needs no new Announce; without any result evidence it may guide or
 clarify work, but cannot accept the task. Automatic execution failure without a
 deliverable still stops instead of invoking Supervisor.
 
-Current code still constructs `announceAttempts` and `latestAnnounce` from a
-private delegation query and projects a separate Boundary result frame. Remove
-that result path when moving Announce publication into main. Entry and Boundary
-modes, root task ownership, and the existing return interface remain.
-The current unconditional Boundary evidence requirement and direct pending-task
-resume route also need to distinguish user-initiated input from automatic result
-evaluation. No third mode is introduced.
+Both modes receive canonical main messages. Boundary receives only the active
+association and plan as additional root state. There is no private result query,
+separate result body, or third mode. New HumanMessages carry the existing run id
+metadata, so a user supplement can be distinguished from checkpoint history.
 
 ## Provider contract audit
 
@@ -327,8 +324,7 @@ task, and private execution history. Omitted `remainingPlan` preserves the futur
 plan; a supplied array updates it to the user's confirmed revision, excluding
 the current task. `[]` clears only future tasks after user confirmation, without
 accepting or cancelling the active delegation. Root commits the plan update and
-continuation feedback together. The optional plan argument is pending implementation;
-the current tool accepts only feedback. The next normal result is
+continuation feedback together. The next normal result is
 appended to main under that delegation's existing identity. Supervisor reads all
 attempts in chronology and does not assume the latest is cumulative.
 
@@ -339,15 +335,14 @@ Announces for the current unfinished delegation, including attempts outside the
 recent suffix. Match them through existing Announce identity metadata and active
 task state; other old history can compact normally, including on continuation.
 There is no need to defer the entire compaction step or add protection state or a
-second result store. Current protection depends on private lane tags and must
-follow Announce identity after publication moves to main. Subagent-private context
+second result store. Protection matches the existing Announce payload identities. Subagent-private context
 maintenance remains separate.
 
 ## Commands and idempotency
 
 The [Supervisor–Root Interaction Protocol](delegation-boundary-protocol.md#one-return-boundary-two-successful-outputs)
-owns the single-proposal interaction and natural-text terminal interface. Root
-awaits the runner's return; no inner tool jumps directly into parent graph nodes.
+owns the single-proposal interaction and natural-text terminal interface. The root `runSupervisor` node invokes the internal agent using the main-message
+projection; the agent returns a proposal or reply to that node.
 Exploration can involve multiple tool calls. A control tool records the proposal
 in invocation-local `supervisorCommand` and ends through `returnDirect`; natural
 text ends through ordinary model routing. Both return through the same runner
@@ -356,8 +351,8 @@ validates the returned proposal before applying its effects.
 
 `supervisorCommand` is a single invocation's output slot, not session memory or
 an acceptance fact. Its acknowledgement ToolMessage stays private and is never
-parsed as command transport. The pending implementation removes middleware exit
-controls and the JSON round trip; it adds no new persistent state.
+parsed as command transport. Tool implementations return `Command({ update })`;
+there are no middleware exit controls or JSON transport round trips.
 
 The root graph commits the complete transition before routing to execution or
 terminal cleanup. Resuming a completed checkpoint does not rerun Supervisor or
@@ -366,7 +361,8 @@ remain subject to their existing replay and idempotency rules.
 
 A natural final reply is passed to the terminal node without implying acceptance
 or dispatch. A proposal that both accepts and replies must carry both effects in
-one transition; `accept_result` carries the reply and remaining plan. The terminal
+one transition; `accept_result` accepts the current task. Omitted `reply` advances
+the established plan; supplied `reply` ends the run and preserves the tail. The terminal
 node emits supplied text once and saves unfinished work through the existing
 continuation snapshot. This ends the root run, not a suspended inner invocation;
 it does not create an `interrupt`. Intermediate provider messages remain private.
@@ -471,4 +467,4 @@ user goal retains the same `traceId`.
 - Supervisor tracing remains complete after raw provider messages are removed from root
   checkpoint messages.
 
-Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+Tool responsibilities: `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.

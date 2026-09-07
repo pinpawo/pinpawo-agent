@@ -128,8 +128,8 @@ draft for issue #755. The implementation uses the single-proposal surface below.
 The lifetime and tool-scope table includes the 2026-09-06 target clarification:
 the committed plan and prepared disclosure stay stable during execution, and
 conversation plus execution evidence arrive only through main messages.
-Boundary plan rewrites, discovery, and separate private result extraction still
-exist in current code; the target changes below are pending implementation.
+Execution Boundaries cannot rewrite the plan or discover more Capabilities.
+A new user supplement allows confirmed adjustments before execution resumes.
 Sources:
 `runtime/nodes/runSupervisor.ts` (dispatch),
 `runSupervisor/agent.ts` (assembly),
@@ -143,27 +143,24 @@ Sources:
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
 | tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `continue_current`, `accept_result`; new-run user input may require discovery before execution resumes |
 
-Entry initializes a clean run-scoped Supervisor session. In the target, root
+Entry initializes a clean run-scoped Supervisor session. Root
 publishes normal Capability results directly into main before Boundary, including
 partial results. Supervisor associates attempts using existing Announce identities
 and chronology, without reading the private delegation scope or receiving another
-result body. Current code still builds `announceAttempts` and `latestAnnounce`
-through that private query; remove this separate result projection. Projection
+result body. Projection
 never changes canonical messages. Private Capability Human/AI/Tool messages remain
 excluded, and publication must not be interpreted as task acceptance.
 The remaining tail expresses task progress within the established plan. Boundary
 checks execution results against the goal and current task; it asks the user
 before changing task content, scope, or order. Task progress does not violate
 `RUN-STABLE`. Plan prose is data, not an instruction override or evidence of
-completion. Current input builders still label the tail as a proposal requiring
-revalidation; that wording must converge on this restricted meaning.
+completion. The tail is the established plan, stable until user confirmation.
 
-The target `continue_current({ feedback?, remainingPlan? })` can apply a
+`continue_current({ feedback?, remainingPlan? })` can apply a
 user-confirmed future-plan change while retaining and continuing the active
 delegation. Omission retains the existing tail; an array replaces only future
 tasks, and a confirmed empty array clears those tasks without ending the current
-one. Root commits both effects together. Current code supports feedback only;
-this optional argument and its validation remain to be implemented.
+one. Root commits both effects together.
 
 In the current implementation, Capability disclosure is run-scoped semantic state. It contains every
 Capability whose complete document was disclosed during this run in stable
@@ -176,7 +173,8 @@ facts nor search-round state enter the stable system prompt. A new run resets
 search attempts and revalidates disclosure; resumed root tasks may seed the
 capabilities named by their active and remaining plan.
 
-Currently `capability_search` remains callable in both modes with `tool_choice=auto`. Each ToolMessage
+`capability_search` is callable at Entry and at the first Boundary of a new user
+supplement, with automatic tool choice. It is unavailable during execution. Each ToolMessage
 reports the post-call disclosure state, remaining empty rounds, and a planning
 objective. After discovery closes, later calls return the stable
 `capability_search_round_limit_exceeded` result instead of changing tool

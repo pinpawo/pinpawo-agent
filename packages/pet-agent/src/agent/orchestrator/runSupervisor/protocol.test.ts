@@ -1,116 +1,40 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseSupervisorCommand } from './protocol';
+const context = { mode: 'boundary' as const, activeDelegation: {
+  delegationId: 'd1', runId: 'r1', capability: 'general', task: 'Verify the change.',
+}, allowedCapabilityNames: ['general'] };
+const tasks = [{ capability: 'general', task: 'Publish the change.' }];
 
-const boundaryContext = {
-  mode: 'boundary' as const,
-  activeDelegation: {
-    delegationId: 'delegation-1',
-    runId: 'run-1',
-    capability: 'general',
-    task: 'Complete the current task.',
-  },
-  allowedCapabilityNames: ['general', 'explore'],
-};
-
-test('Supervisor command exposes only action, plan tasks, and a bounded user-input request', () => {
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'execute_plan',
-    tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), {
-    action: 'execute_plan',
-    tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'unavailable',
-    tasks: [],
-    reason: 'private reasoning must not cross the seam',
-  }, boundaryContext));
-  assert.throws(() => parseSupervisorCommand({
-    action: 'user_input_required',
-    tasks: [],
-    userInputRequest: { question: 'Which target should I use?' },
-    question: 'private question must not cross the seam',
-  }, boundaryContext));
+test('entry cannot accept or continue an absent delegation', () => {
+  const entry = { ...context, mode: 'entry' as const, activeDelegation: null };
+  for (const command of [
+    { action: 'accept_result', remainingPlan: tasks, },
+    { action: 'continue_current' },
+    { action: 'accept_result', reply: 'Done.', remainingPlan: [] },
+  ]) assert.throws(() => parseSupervisorCommand(command, entry));
+  assert.equal(parseSupervisorCommand({ action: 'execute_plan', tasks, }, entry).action, 'execute_plan');
 });
 
-test('Supervisor command enforces entry and continuation invariants', () => {
-  assert.throws(() => parseSupervisorCommand({
-    action: 'goal_done',
-    tasks: [],
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), /invalid at entry/);
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'user_input_required',
-    tasks: [],
-    userInputRequest: { question: 'Which target should I use?' },
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), {
-    action: 'user_input_required',
-    tasks: [],
-    userInputRequest: { question: 'Which target should I use?' },
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'user_input_required',
-    tasks: [],
-  }, boundaryContext), /requires userInputRequest/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'unavailable',
-    tasks: [],
-    userInputRequest: { question: 'Unexpected question.' },
-  }, boundaryContext), /forbids userInputRequest/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'continue_current',
-    tasks: [{ capability: 'explore', task: 'Switch executor.' }],
-  }, boundaryContext), /forbids tasks/);
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'continue_current',
-    tasks: [],
-  }, boundaryContext), {
-    action: 'continue_current',
-    tasks: [],
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'continue_current',
-    tasks: [],
-    gapNote: 'The previous result omitted verification; run it and return the evidence.',
-  }, boundaryContext));
-  assert.throws(() => parseSupervisorCommand({
-    action: 'execute_plan',
-    tasks: [{ capability: 'explore', task: 'Start a replacement plan.' }],
-  }, boundaryContext), /invalid at a boundary/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'advance_plan',
-    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), /invalid at entry/);
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'advance_plan',
-    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
-  }, boundaryContext), {
-    action: 'advance_plan',
-    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'goal_done',
-    tasks: [{ capability: 'general', task: 'Unexpected work.' }],
-  }, boundaryContext), /forbids tasks/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'goal_done',
-    tasks: [],
-    gapNote: 'Unexpected continuation guidance.',
-  }, boundaryContext));
+test('Boundary accepts or continues but cannot submit a replacement plan', () => {
+  assert.throws(() => parseSupervisorCommand({ action: 'execute_plan', tasks }, context));
+  for (const action of ['accept_result', 'continue_current']) {
+    assert.deepEqual(parseSupervisorCommand({ action, remainingPlan: tasks }, context), { action, remainingPlan: tasks });
+  }
+});
+
+test('invalid combinations cannot dispatch, change continuation tasks, or reference unavailable capabilities', () => {
+  for (const command of [
+    { action: 'accept_result', remainingPlan: [] },
+    { action: 'execute_plan', tasks: [{ capability: 'missing', task: 'Work' }], },
+    { action: 'continue_current', tasks },
+    { action: 'accept_result', reply: ' ', remainingPlan: [] },
+    { action: 'accept_result', reply: 'Done', remainingPlan: [], tasks },
+    { action: 'goal_done', tasks: [] },
+  ]) assert.throws(() => parseSupervisorCommand(command, context));
+});
+
+test('acceptance with a reply preserves the exact supplied reply and revalidated remaining plan', () => {
+  const command = { action: 'accept_result', reply: '  Done.\nChoose a target.  ', remainingPlan: tasks };
+  assert.deepEqual(parseSupervisorCommand(command, context), command);
 });

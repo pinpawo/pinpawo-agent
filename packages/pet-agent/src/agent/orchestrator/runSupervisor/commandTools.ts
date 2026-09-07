@@ -1,129 +1,48 @@
-import { tool, type StructuredTool } from '@langchain/core/tools';
-import { z } from 'zod';
-
-const MAX_PLAN_TASKS = 24;
-const MAX_TASK_TEXT_CHARS = 2_000;
+import { ToolMessage } from '@langchain/core/messages';
+import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
+import { Command } from '@langchain/langgraph';
+import { acceptResultSchema, continueCurrentSchema, submitPlanSchema, parseSupervisorCommand } from './protocol';
+import { currentSupervisorInput, supervisorCommandContext, type SupervisorInvocationState } from './supervisorState';
 
 export const CONTINUE_CURRENT_TOOL_NAME = 'continue_current';
 export const SUBMIT_PLAN_TOOL_NAME = 'submit_plan';
-export const ADVANCE_PLAN_TOOL_NAME = 'advance_plan';
-export const COMPLETE_GOAL_TOOL_NAME = 'complete_goal';
-export const REQUEST_USER_INPUT_TOOL_NAME = 'request_user_input';
-export const REPORT_UNAVAILABLE_TOOL_NAME = 'report_unavailable';
-
+export const ACCEPT_RESULT_TOOL_NAME = 'accept_result';
 export type SupervisorCommandToolMode = 'entry' | 'boundary';
-
 export const SUPERVISOR_COMMAND_TOOL_NAMES = new Set([
-  CONTINUE_CURRENT_TOOL_NAME,
-  SUBMIT_PLAN_TOOL_NAME,
-  ADVANCE_PLAN_TOOL_NAME,
-  COMPLETE_GOAL_TOOL_NAME,
-  REQUEST_USER_INPUT_TOOL_NAME,
-  REPORT_UNAVAILABLE_TOOL_NAME,
+  CONTINUE_CURRENT_TOOL_NAME, SUBMIT_PLAN_TOOL_NAME, ACCEPT_RESULT_TOOL_NAME,
 ]);
-
-const ENTRY_COMMAND_TOOL_NAMES = new Set([
-  SUBMIT_PLAN_TOOL_NAME,
-  REQUEST_USER_INPUT_TOOL_NAME,
-  REPORT_UNAVAILABLE_TOOL_NAME,
-]);
-
-const BOUNDARY_COMMAND_TOOL_NAMES = new Set([
-  CONTINUE_CURRENT_TOOL_NAME,
-  ADVANCE_PLAN_TOOL_NAME,
-  COMPLETE_GOAL_TOOL_NAME,
-  REQUEST_USER_INPUT_TOOL_NAME,
-  REPORT_UNAVAILABLE_TOOL_NAME,
-]);
-
-export function supervisorCommandToolNamesForMode(
-  mode: SupervisorCommandToolMode,
-): ReadonlySet<string> {
-  return mode === 'entry'
-    ? ENTRY_COMMAND_TOOL_NAMES
-    : BOUNDARY_COMMAND_TOOL_NAMES;
+export function supervisorCommandToolNamesForMode(mode: SupervisorCommandToolMode): ReadonlySet<string> {
+  return mode === 'entry' ? new Set([SUBMIT_PLAN_TOOL_NAME])
+    : new Set([CONTINUE_CURRENT_TOOL_NAME, ACCEPT_RESULT_TOOL_NAME]);
 }
 
-function supervisorTaskSchema() {
-  return z.object({
-    capability: z.string().trim().min(1).max(200)
-      .describe('Name of a disclosed Capability whose responsibility matches this task.'),
-    task: z.string().trim().min(1).max(MAX_TASK_TEXT_CHARS)
-      .describe('One independently deliverable result for that Capability, not an internal phase.'),
-  });
+/** End this invocation with a typed proposal; only the root applies its effects. */
+function propose(name: string, value: unknown, runtime: ToolRuntime<SupervisorInvocationState>) {
+  const supervisorCommand = parseSupervisorCommand(value,
+    supervisorCommandContext(currentSupervisorInput(runtime.state)));
+  return new Command({ update: {
+    supervisorCommand,
+    messages: [new ToolMessage({ name, tool_call_id: runtime.toolCallId, content: 'Control proposal submitted.' })],
+  } });
 }
 
-function supervisorTasksSchema(description: string) {
-  return z.array(supervisorTaskSchema()).min(1).max(MAX_PLAN_TASKS)
-    .describe(description);
-}
-
-/**
- * Command tools serialize an already-made Supervisor decision. Runtime registers
- * the full superset; mode projects the provider-visible subset for static audits.
- */
-export function createSupervisorCommandTools(
-  mode?: SupervisorCommandToolMode,
-): StructuredTool[] {
+export function createSupervisorCommandTools(mode?: SupervisorCommandToolMode): StructuredTool[] {
   const tools = [
-    tool(async () => JSON.stringify({ action: 'continue_current', tasks: [] }), {
-      name: CONTINUE_CURRENT_TOOL_NAME,
-      description: 'Boundary only: keep the active delegation and prior plan unchanged for another autonomous attempt.',
-      schema: z.object({}).strict(),
+    tool((args, runtime: ToolRuntime<SupervisorInvocationState>) => propose(SUBMIT_PLAN_TOOL_NAME,
+      { action: 'execute_plan', ...args }, runtime), {
+      name: SUBMIT_PLAN_TOOL_NAME, schema: submitPlanSchema, returnDirect: true,
+      description: 'Entry only: submit the ordered execution plan. The root dispatches its first task.',
     }),
-    tool(
-      async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) =>
-        JSON.stringify({ action: 'execute_plan', tasks }),
-      {
-        name: SUBMIT_PLAN_TOOL_NAME,
-        description: 'Entry only: submit the initial executable plan for the user goal.',
-        schema: z.object({
-          tasks: supervisorTasksSchema(
-            'Non-empty ordered tasks required to deliver the user goal.',
-          ),
-        }),
-      },
-    ),
-    tool(
-      async ({ tasks }: { tasks: Array<{ capability: string; task: string }> }) =>
-        JSON.stringify({ action: 'advance_plan', tasks }),
-      {
-        name: ADVANCE_PLAN_TOOL_NAME,
-        description: 'Boundary only: accept the active result and replace the prior proposal with the tasks still required for the user goal.',
-        schema: z.object({
-          tasks: supervisorTasksSchema(
-            'Non-empty ordered tasks for results not yet satisfied by accepted history and the active result.',
-          ),
-        }),
-      },
-    ),
-    tool(async () => JSON.stringify({ action: 'goal_done', tasks: [] }), {
-      name: COMPLETE_GOAL_TOOL_NAME,
-      description: 'Boundary only: accept the active result and close the user goal when no requested result or user-owned input remains outstanding.',
-      schema: z.object({}).strict(),
+    tool((args, runtime: ToolRuntime<SupervisorInvocationState>) => propose(CONTINUE_CURRENT_TOOL_NAME,
+      { action: 'continue_current', ...args }, runtime), {
+      name: CONTINUE_CURRENT_TOOL_NAME, schema: continueCurrentSchema, returnDirect: true,
+      description: 'Boundary only: continue the same delegation with optional feedback. Omit remainingPlan to retain future tasks; change it only following user confirmation.',
     }),
-    tool(
-      async ({ question }: { question: string }) => JSON.stringify({
-        action: 'user_input_required',
-        tasks: [],
-        userInputRequest: { question },
-      }),
-      {
-        name: REQUEST_USER_INPUT_TOOL_NAME,
-        description: 'Pause the unfinished goal in a resumable state and ask for concrete information, a choice, or authorization only the user can provide.',
-        schema: z.object({
-          question: z.string().trim().min(1).max(1_000)
-            .describe('The single concrete question that unblocks the user goal.'),
-        }).strict(),
-      },
-    ),
-    tool(async () => JSON.stringify({ action: 'unavailable', tasks: [] }), {
-      name: REPORT_UNAVAILABLE_TOOL_NAME,
-      description: 'Return control because no disclosed or discoverable Capability can execute the remaining goal.',
-      schema: z.object({}).strict(),
+    tool((args, runtime: ToolRuntime<SupervisorInvocationState>) => propose(ACCEPT_RESULT_TOOL_NAME,
+      { action: 'accept_result', ...args }, runtime), {
+      name: ACCEPT_RESULT_TOOL_NAME, schema: acceptResultSchema, returnDirect: true,
+      description: 'Boundary only: accept the evidenced current task. Without reply, dispatch the next planned task. With reply, end this run and save future tasks. An empty future plan requires a final reply. Omit remainingPlan to retain it; changes require user confirmation.',
     }),
   ];
-  if (!mode) return tools;
-  const allowedNames = supervisorCommandToolNamesForMode(mode);
-  return tools.filter(({ name }) => allowedNames.has(name));
+  return mode ? tools.filter(({ name }) => supervisorCommandToolNamesForMode(mode).has(name)) : tools;
 }

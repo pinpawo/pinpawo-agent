@@ -1,9 +1,7 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
-import type { SubagentCompletionReason } from '../../../types/subagent';
 import {
   readAgentMessageCreatedAt,
   reconcileDelegationMessages,
-  setAgentMessageDelegationScope,
   type CapabilityMessageLane,
   type DelegationMessageScope,
 } from '../../messages';
@@ -15,7 +13,6 @@ export function reconcileDelegationPrivateMessages(
   modelInputMessages: BaseMessage[],
   lane: CapabilityMessageLane,
   runId: string,
-  completionReason: SubagentCompletionReason | null,
   reportMeta: {
     delegationId?: string | null;
     task?: string | null;
@@ -37,32 +34,25 @@ export function reconcileDelegationPrivateMessages(
   const announceMessage = reportMeta.announceMessageId
     ? reconciled.added.find((message) => message.id === reportMeta.announceMessageId)
     : null;
-  if (announceMessage && !completionReason) {
-    throw new Error('Delegation announce requires a genuine subagent completion reason.');
+  if (reportMeta.announceMessageId && (!announceMessage
+    || !AIMessage.isInstance(announceMessage)
+    || announceMessage.tool_calls?.length
+    || !readMessageText(announceMessage).trim())) {
+    throw new Error('Capability selected an invalid or non-new deliverable.');
   }
-  const added = reconciled.added.map((message) => {
-    if (message !== announceMessage) return message;
-    const announceMessageId = message.id;
-    if (!announceMessageId) {
-      throw new Error('Delegation announce is missing the required message id.');
-    }
-    const typedAnnounce = new DelegationAnnounceMessage({
-      id: announceMessageId,
+  const added = [...reconciled.added];
+  if (announceMessage) {
+    const announceMessageId = announceMessage.id!;
+    added.push(new DelegationAnnounceMessage({
+      id: `delegation-announce:${runId}:${delegationId}:${announceMessageId}`,
       sourceLane: lane,
       delegationId,
       runId,
       announceMessageId,
       task: reportMeta.task ?? null,
-      completionReason: completionReason as SubagentCompletionReason,
-      result: readMessageText(message),
-      createdAt: readAgentMessageCreatedAt(message) ?? new Date().toISOString(),
-    });
-    if (AIMessage.isInstance(message)) {
-      typedAnnounce.name = message.name;
-      typedAnnounce.response_metadata = message.response_metadata;
-      typedAnnounce.usage_metadata = message.usage_metadata;
-    }
-    return setAgentMessageDelegationScope(typedAnnounce, scope);
-  });
+      result: readMessageText(announceMessage),
+      createdAt: readAgentMessageCreatedAt(announceMessage) ?? new Date().toISOString(),
+    }));
+  }
   return [...reconciled.removed, ...added];
 }

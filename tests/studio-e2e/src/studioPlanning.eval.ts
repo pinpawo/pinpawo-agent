@@ -108,9 +108,7 @@ async function main() {
     const [executorTask, reviewerTask] = snapshot.tasks;
     const finalMessage = findFinalResponse(result.messages);
     const failures = [
-      result.completionReason === 'natural'
-        ? null
-        : `completion reason: ${result.completionReason}`,
+      result.announceMessageId ? null : 'execution produced no new deliverable',
       snapshot.tasks.length === 2
         ? null
         : `created ${snapshot.tasks.length.toString()} tasks instead of 2`,

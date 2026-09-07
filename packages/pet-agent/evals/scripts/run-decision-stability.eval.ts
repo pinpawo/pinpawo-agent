@@ -5,7 +5,6 @@ import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { getAnswerEvalScenarios } from '../answer-eval-scenarios.ts';
 import {
   getDecisionEvalScenarios,
   type DecisionEvalRunResult,
@@ -29,7 +28,7 @@ import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
-const TARGETS: PromptEvalTarget[] = ['entry_answer', 'answer'];
+const TARGETS: PromptEvalTarget[] = ['entry_answer'];
 const DEFAULT_REPEATS = 5;
 
 type PromptEvalScenario = {
@@ -157,15 +156,6 @@ export function getPromptEvalScenarios(): PromptEvalScenario[] {
         config: RunnableConfig,
         judge: PromptEvalJudge,
       ) => scenario.run(model, method, config, judge),
-    })),
-    ...getAnswerEvalScenarios().map((scenario) => ({
-      ...scenario,
-      run: (
-        model: AgentModels['act'],
-        _method: StructuredOutputMethod | undefined,
-        config: RunnableConfig,
-        judge: PromptEvalJudge,
-      ) => scenario.run(model, config, judge),
     })),
   ];
 }

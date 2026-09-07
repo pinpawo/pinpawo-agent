@@ -2,7 +2,6 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
-import type { SubagentCompletionReason } from '../../types/subagent';
 import type {
   AgentToolkit,
   ModelInputModality,
@@ -18,7 +17,6 @@ import type { CapabilityMessageLane } from '../messages';
 
 export type { CapabilityMessageLane };
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
-export type { SubagentCompletionReason };
 
 export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
 

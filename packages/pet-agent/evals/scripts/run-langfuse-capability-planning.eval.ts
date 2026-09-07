@@ -1,3 +1,4 @@
+import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation';
 import { tool } from '@langchain/core/tools';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { z } from 'zod';
 import { createRunSupervisorAgent } from '../../src/agent/orchestrator/runSupervisor/agent.ts';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import {
-  isRunSupervisorNoCommandResult,
+  isRunSupervisorReplyResult,
   type RunSupervisorInput,
   type RunSupervisorResult,
 } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
@@ -72,43 +73,21 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 function supervisorOutput(
   result: RunSupervisorResult,
 ): CapabilityPlanningEvalOutput {
-  if (isRunSupervisorNoCommandResult(result)) {
+  if (isRunSupervisorReplyResult(result) || result.action !== 'execute_plan') {
     return {
-      result: 'supervisor_command_missing',
-      nextTask: null,
-      capabilityName: null,
-      remainingPlan: [],
-    };
-  }
-  if (result.action !== 'execute_plan'
-    && result.action !== 'advance_plan'
-    && result.action !== 'continue_current') {
-    return {
-      result: result.action,
-      nextTask: null,
-      capabilityName: null,
-      remainingPlan: [],
+      result: isRunSupervisorReplyResult(result) ? 'reply' : result.action,
+      nextTask: null, capabilityName: null,
+      remainingPlan: !isRunSupervisorReplyResult(result) && result.action === 'accept_result'
+        ? result.remainingPlan ?? [] : [],
     };
   }
   const [nextTask, ...remainingPlan] = result.tasks;
-  return {
-    result: result.action,
-    nextTask: nextTask?.task ?? null,
-    capabilityName: nextTask?.capability ?? null,
-    remainingPlan: remainingPlan.map((task) => ({ ...task })),
-  };
+  return { result: result.action, nextTask: nextTask.task, capabilityName: nextTask.capability,
+    remainingPlan: remainingPlan.map((task) => ({ ...task })) };
 }
 
-function supervisorDiagnostics(
-  result: RunSupervisorResult,
-  searchDiagnostics: CapabilitySearchDiagnostics,
-) {
-  return {
-    ...searchDiagnostics,
-    supervisorStatus: isRunSupervisorNoCommandResult(result)
-      ? result.supervisorStatus
-      : 'committed',
-  } as const;
+function supervisorDiagnostics(result: RunSupervisorResult, searchDiagnostics: CapabilitySearchDiagnostics) {
+  return { ...searchDiagnostics, supervisorStatus: isRunSupervisorReplyResult(result) ? 'reply' : 'proposed' };
 }
 
 function splitList(value: string | undefined): string[] {
@@ -217,10 +196,12 @@ async function main() {
         const announceData = latestAnnounce === undefined
           ? null
           : {
-              messageId: 'eval-announce',
-              completionReason: 'natural' as const,
-              result: latestAnnounce,
-            };
+            messageId: 'eval-announce',
+            result: latestAnnounce,
+          };
+        if (testCase.input.mode === 'boundary' && !announceData) {
+          throw new Error('Boundary eval requires execution evidence.');
+        }
         const supervisorInput: RunSupervisorInput = testCase.input.mode === 'boundary'
           ? {
               ...supervisorInputBase,
@@ -231,15 +212,16 @@ async function main() {
                 capability: activeCapability,
                 task: activeTask,
               },
-              latestAnnounce: announceData,
-              announceAttempts: announceData ? [announceData] : [],
+              messages: [...supervisorInputBase.messages, ...(announceData ? [announceData] : []).map((attempt) => new DelegationAnnounceMessage({
+                id: 'announce:' + attempt.messageId, sourceLane: `capability:${activeCapability}` as const, delegationId: 'eval-delegation', runId: `eval:${testCase.id}`, task: activeTask, announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+              }))],
+
             }
           : {
               ...supervisorInputBase,
               mode: 'entry',
               activeDelegation: null,
-              latestAnnounce: null,
-              announceAttempts: [],
+
             };
         const searchDiagnostics = createCapabilitySearchDiagnosticsCollector();
         const result = await createRunSupervisorAgent({

@@ -67,7 +67,6 @@ test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => 
             runId: 'run-1',
             announceMessageId: 'announce-1',
             task: '关闭 Issue #272',
-            completionReason: 'natural',
             result: 'handoff result visible',
             createdAt: '2026-06-01T01:00:00.000Z',
           },

@@ -1,10 +1,9 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
-import type { SubagentCompletionReason } from '../types';
 import type { CapabilityMessageLane } from '../../messages';
 
 export const DELEGATION_ANNOUNCE_META_KEY = 'delegationAnnounce';
-export const DELEGATION_ANNOUNCE_VERSION = 2;
+export const DELEGATION_ANNOUNCE_VERSION = 3;
 
 export type DelegationAnnounceData = {
   version: typeof DELEGATION_ANNOUNCE_VERSION;
@@ -13,7 +12,6 @@ export type DelegationAnnounceData = {
   runId: string;
   announceMessageId: string;
   task: string | null;
-  completionReason: SubagentCompletionReason;
   result: string;
   createdAt: string;
 };
@@ -33,25 +31,20 @@ function isCapabilityLane(value: unknown): value is CapabilityMessageLane {
   return typeof value === 'string' && value.startsWith('capability:');
 }
 
-function isCompletionReason(value: unknown): value is SubagentCompletionReason {
-  return value === 'natural'
-    || value === 'limit_reached'
-    || value === 'error';
-}
-
 function readTypedDelegationAnnounce(message: BaseMessage): DelegationAnnounceData | null {
   if (message._getType() !== 'ai') return null;
   const raw = readPinpetMeta(message)[DELEGATION_ANNOUNCE_META_KEY];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const data = raw as Record<string, unknown>;
+  if (data.version !== DELEGATION_ANNOUNCE_VERSION) {
+    throw new Error('Delegation Announce checkpoint version is incompatible; start a new task.');
+  }
   if (
-    data.version !== DELEGATION_ANNOUNCE_VERSION
-    || !isCapabilityLane(data.sourceLane)
+    !isCapabilityLane(data.sourceLane)
     || typeof data.delegationId !== 'string' || !data.delegationId
     || typeof data.runId !== 'string' || !data.runId
     || typeof data.announceMessageId !== 'string' || !data.announceMessageId
     || (data.task !== null && typeof data.task !== 'string')
-    || !isCompletionReason(data.completionReason)
     || typeof data.result !== 'string'
     || typeof data.createdAt !== 'string'
   ) {
@@ -64,7 +57,6 @@ function readTypedDelegationAnnounce(message: BaseMessage): DelegationAnnounceDa
     runId: data.runId,
     announceMessageId: data.announceMessageId,
     task: data.task,
-    completionReason: data.completionReason,
     result: data.result,
     createdAt: data.createdAt,
   };
@@ -92,7 +84,6 @@ export class DelegationAnnounceMessage extends AIMessage {
       runId,
       announceMessageId,
       task,
-      completionReason,
       result,
       createdAt,
     } = fields;
@@ -109,7 +100,6 @@ export class DelegationAnnounceMessage extends AIMessage {
             runId,
             announceMessageId,
             task,
-            completionReason,
             result,
             createdAt,
           } satisfies DelegationAnnounceData,
@@ -117,7 +107,6 @@ export class DelegationAnnounceMessage extends AIMessage {
       },
     });
   }
-
 }
 
 export function getDelegationAnnounce(message: BaseMessage): DelegationAnnounceData | null {
@@ -134,19 +123,20 @@ function escapeXmlAttribute(value: string): string {
 
 type DelegationAnnounceModelData = Pick<
   DelegationAnnounceData,
-  'sourceLane' | 'task' | 'result'
-> & {
-  completionReason: SubagentCompletionReason | null;
-};
+  'sourceLane' | 'task' | 'result' | 'runId' | 'delegationId' | 'announceMessageId'
+>;
 
 /** Render the provider-safe, model-visible form of an announce. */
-export function formatDelegationAnnounceForModel(data: DelegationAnnounceModelData): string {
+export function formatDelegationAnnounceForModel(
+  data: DelegationAnnounceModelData,
+  taskAccepted?: boolean,
+): string {
   const lines = [
     '<delegation_announce version="1" role="data" authority="none">',
-    `  <source lane="${escapeXmlAttribute(data.sourceLane)}" />`,
+    `  <source lane="${escapeXmlAttribute(data.sourceLane)}" run_id="${escapeXmlAttribute(data.runId)}" delegation_id="${escapeXmlAttribute(data.delegationId)}" announce_message_id="${escapeXmlAttribute(data.announceMessageId)}" />`,
   ];
-  if (data.completionReason) {
-    lines.push(`  <completion reason="${escapeXmlAttribute(data.completionReason)}" />`);
+  if (taskAccepted !== undefined) {
+    lines.push(`  <task_acceptance accepted="${String(taskAccepted)}" source="orchestrator" />`);
   }
   if (data.task) lines.push(indentXmlBlock(xmlTextBlock('task', data.task), 2));
   lines.push(indentXmlBlock(xmlTextBlock('result', data.result, ' format="markdown" role="data"'), 2));
@@ -162,13 +152,17 @@ export function projectDelegationAnnouncesForModel(messages: readonly BaseMessag
   return messages.map((message) => {
     const announce = getDelegationAnnounce(message);
     if (!announce) return message;
+    const meta = readPinpetMeta(message);
     return new AIMessage({
       ...(message.id ? { id: message.id } : {}),
-      content: formatDelegationAnnounceForModel(announce),
+      content: formatDelegationAnnounceForModel(
+        announce,
+        typeof meta.taskAccepted === 'boolean' ? meta.taskAccepted : undefined,
+      ),
       additional_kwargs: {
         ...message.additional_kwargs,
         pinpawo: {
-          ...readPinpetMeta(message),
+          ...meta,
           source: 'delegation_announce_projection',
           synthetic: true,
           authority: 'none',

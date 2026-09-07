@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   applyCapabilitySearchObservations,
   createCapabilityDisclosureState,
-  removeSearchedCapabilities,
   resolveCapabilityDisclosureState,
 } from './capabilityDisclosure';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
@@ -101,24 +100,5 @@ test('Capability disclosure resets when the registry generation changes', () => 
     emptySearchRounds: 0,
     maxEmptySearchRounds: 3,
     status: 'open',
-  });
-});
-
-test('Capability disclosure can discard searched Capabilities without reopening discovery', () => {
-  const current = {
-    ...createCapabilityDisclosureState({
-      workspace: workspace(),
-      maxEmptySearchRounds: 2,
-    }),
-    disclosedCapabilityNames: ['general', 'explore', 'writer'],
-    emptySearchRounds: 2,
-    status: 'closed' as const,
-  };
-
-  assert.deepEqual(removeSearchedCapabilities({
-    current,
-  }), {
-    ...current,
-    disclosedCapabilityNames: [],
   });
 });

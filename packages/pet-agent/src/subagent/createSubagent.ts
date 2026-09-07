@@ -23,7 +23,6 @@ import {
   summarizationMiddleware,
   type AnyAgentMiddleware,
 } from 'langchain';
-import { isGraphRecursionLimitError } from '../utils/graphErrors';
 import {
   SUBAGENT_GUARD_POSITION,
   subagentIterationLimitGuard,
@@ -318,66 +317,31 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   }
 
   let latestMessages = inputState.messages;
-  try {
-    // The crucial #322 shape: invoke with the parent config passed through
-    // untouched, instead of consuming a child streamEvents() run behind a
-    // stripped config and a cleared ALS scope. Tokens, tool lifecycle,
-    // custom events and interrupts all surface on the ROOT stream with the
-    // child's namespace; the double-tracer class of bugs (#313/#316) cannot
-    // occur because there is no second stream consumer.
-    const result = await agent.invoke(
-      { messages: inputState.messages },
-      {
-        ...input.runnableConfig,
-        context: runtimeContext,
-        signal: input.signal ?? input.runnableConfig?.signal,
-        // Normal stopping is controlled by the subagent iteration guard.
-        // LangGraph recursionLimit stays intentionally high as a final breaker.
-        recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
-      },
-    );
-    latestMessages = readResultMessages(result) ?? latestMessages;
-    ensureSubagentMessageIds(latestMessages);
-    const artifacts = inputState.artifacts ?? [];
-    propagatePauseTaskInterrupt(result, {
-      messages: latestMessages,
-      artifacts,
-    });
+  // The crucial #322 shape: invoke with the parent config passed through
+  // untouched, instead of consuming a child streamEvents() run behind a
+  // stripped config and a cleared ALS scope. Tokens, tool lifecycle,
+  // custom events and interrupts all surface on the ROOT stream with the
+  // child's namespace; the double-tracer class of bugs (#313/#316) cannot
+  // occur because there is no second stream consumer.
+  const result = await agent.invoke(
+    { messages: inputState.messages },
+    {
+      ...input.runnableConfig,
+      context: runtimeContext,
+      signal: input.signal ?? input.runnableConfig?.signal,
+      // Normal stopping is controlled by the subagent iteration guard.
+      // LangGraph recursionLimit stays intentionally high as a final breaker.
+      recursionLimit: SUBAGENT_HARD_RECURSION_LIMIT,
+    },
+  );
+  latestMessages = readResultMessages(result) ?? latestMessages;
+  ensureSubagentMessageIds(latestMessages);
+  const artifacts = inputState.artifacts ?? [];
+  propagatePauseTaskInterrupt(result, {
+    messages: latestMessages,
+    artifacts,
+  });
 
-    // A guard may have gracefully ended the agent by appending its stop
-    // notice as the FINAL message (via Command goto END). That is a clean "limit
-    // reached" stop, not natural completion. Check only the last message — a stop
-    // marker buried in the input history must not be misread as our stop, and
-    // Summarization may rewrite the list so an index-based slice is unreliable.
-    const lastMessage = latestMessages.at(-1);
-    const stopReason = lastMessage ? readSubagentGuardStopReason(lastMessage) : null;
-    const announceMessageId = stopReason
-      ? findLatestDeliverableMessageId(latestMessages, inputMessageIds)
-      : lastMessage?._getType() === 'ai'
-        && !messageHasToolCalls(lastMessage)
-        ? lastMessage.id ?? null
-        : null;
-    return {
-      messages: latestMessages,
-      artifacts,
-      completionReason: stopReason === 'subagent_iteration_limit_reached'
-        ? 'limit_reached'
-        : 'natural',
-      announceMessageId,
-    };
-  } catch (err) {
-    // The agent's hard recursion breaker (recursionLimit) fired. The iteration
-    // guard is meant to stop before this, but keep it as a graceful last-resort:
-    // degrade to limit_reached instead of throwing through the orchestrator.
-    if (isGraphRecursionLimitError(err)) {
-      ensureSubagentMessageIds(latestMessages);
-      return {
-        messages: latestMessages,
-        artifacts: inputState.artifacts ?? [],
-        completionReason: 'limit_reached',
-        announceMessageId: findLatestDeliverableMessageId(latestMessages, inputMessageIds),
-      };
-    }
-    throw err;
-  }
+  const announceMessageId = findLatestDeliverableMessageId(latestMessages, inputMessageIds);
+  return { messages: latestMessages, artifacts, announceMessageId };
 }

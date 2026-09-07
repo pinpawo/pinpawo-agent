@@ -60,20 +60,6 @@ export function resolveCapabilityDisclosureState(params: {
 }
 
 /**
- * Drop every Capability learned through search while retaining the run's
- * discovery-round accounting. Routing remains available through the compact
- * manifest when disclosed documents exceed the invocation read limit.
- */
-export function removeSearchedCapabilities(params: {
-  current: CapabilityDisclosureState;
-}): CapabilityDisclosureState {
-  return {
-    ...params.current,
-    disclosedCapabilityNames: [],
-  };
-}
-
-/**
  * Project invocation-local search observations back into the run session
  * state. Parallel calls owned by one AI message form one search round.
  */

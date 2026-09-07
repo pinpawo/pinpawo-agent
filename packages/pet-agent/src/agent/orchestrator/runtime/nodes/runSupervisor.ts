@@ -18,12 +18,10 @@ import {
   type RunSupervisorDispatch,
   type RunSupervisorRuntimeState,
   type RunSupervisorRunner,
-  isRunSupervisorNoCommandResult,
+  isRunSupervisorReplyResult,
 } from '../../runSupervisor/runner';
 import {
   parseSupervisorCommand,
-  type SupervisorCommand,
-  type SupervisorReplyOutcome,
 } from '../../runSupervisor/protocol';
 import {
   appendRunDelegationSummary,
@@ -37,14 +35,11 @@ import type {
   RunNextDelegation,
   TaskActiveDelegation,
 } from '../../types';
-import { findLatestHandoffCopyForDelegation } from '../../artifacts/handoff';
 import {
   observeAgentMessageSelection,
 } from '../../../messages';
 import {
   buildSubagentHandoff,
-  getMessageHandoffSource,
-  readLatestAnnounceCompletionReason,
 } from '../../delegation';
 import {
   buildRunSupervisorInput,
@@ -101,42 +96,24 @@ function materializeNextDelegation(params: {
       state.runDelegationSummaries,
       runNextDelegation,
     ),
-    runLatestDelegationOutcome: null,
-    runUserInputRequest: null,
+    runSupervisorReply: null,
     runRuntimeFailure: null,
   };
 }
 
-function buildAcceptedDelegationUpdate(
+function buildDelegationHandoffUpdate(
   state: OrchestratorStateType,
   activeDelegation: TaskActiveDelegation,
-  outcome: SupervisorReplyOutcome | null,
 ) {
-  const completionReason = readLatestAnnounceCompletionReason(state.messages, {
-    lane: activeDelegation.lane,
-    runId: activeDelegation.runId,
-    delegationId: activeDelegation.id,
-  });
-  if (completionReason === 'limit_reached') {
-    return null;
-  }
-  const existingCopy = findLatestHandoffCopyForDelegation(
-    state.messages,
-    activeDelegation.id,
-    activeDelegation.lane,
-    activeDelegation.runId,
-    getMessageHandoffSource,
-  );
   const messages = buildSubagentHandoff({
+    taskAccepted: true,
     messages: state.messages,
     lane: activeDelegation.lane,
     runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
-    clearLane: true,
-    includeCopy: !existingCopy,
   });
   if (!messages) {
-    return null;
+    throw new Error('Cannot hand off a delegation without result evidence.');
   }
   return {
     messages,
@@ -146,22 +123,15 @@ function buildAcceptedDelegationUpdate(
       delegation.id === activeDelegation.id
         ? { ...delegation, status: 'completed' as const }
         : delegation),
-    runLatestDelegationOutcome: outcome,
-    runUserInputRequest: null,
+    runSupervisorReply: null,
     runRuntimeFailure: null,
   };
 }
 
-/**
- * Materialize `continue_current`, which carries no tasks: the active
- * delegation's id, lane and task are reused verbatim and the session plan is
- * passed through untouched. This is where the "continue_current changes neither
- * the task nor the remaining plan" invariant is enforced — SupervisorCommand is a
- * flat shape and cannot express it in the type system.
- */
 function buildContinueCurrentUpdate(params: {
   state: OrchestratorStateType;
   activeDelegation: TaskActiveDelegation;
+  feedback?: string;
 }) {
   const { state, activeDelegation } = params;
   const runNextDelegation: RunNextDelegation = {
@@ -169,7 +139,7 @@ function buildContinueCurrentUpdate(params: {
     lane: activeDelegation.lane,
     mode: 'continue',
     task: activeDelegation.task,
-    contextSummary: null,
+    contextSummary: params.feedback ?? null,
   };
   return {
     runNextDelegation,
@@ -183,28 +153,7 @@ function buildContinueCurrentUpdate(params: {
       state.runDelegationSummaries,
       runNextDelegation,
     ),
-    runLatestDelegationOutcome: null,
-    runUserInputRequest: null,
-    runRuntimeFailure: null,
-  };
-}
-
-function buildWaitingUpdate(
-  state: OrchestratorStateType,
-  command: SupervisorCommand,
-) {
-  const activeDelegation = state.taskActiveDelegation;
-  return {
-    runNextDelegation: null,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: activeDelegation
-      ? state.runDelegationSummaries.map((delegation) =>
-          delegation.id === activeDelegation.id
-            ? { ...delegation, status: 'progress' as const }
-            : delegation)
-      : state.runDelegationSummaries,
-    runLatestDelegationOutcome: command.action,
-    runUserInputRequest: command.userInputRequest ?? null,
+    runSupervisorReply: null,
     runRuntimeFailure: null,
   };
 }
@@ -240,11 +189,8 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       ? state.runSupervisorSession
       : null;
     const continuation = !isSupervisorDispatch(nodeInput)
-      && nodeInput.taskActiveDelegation
-      && nodeInput.taskRunContinuation?.activeDelegationId
-        === nodeInput.taskActiveDelegation.id
-      ? nodeInput.taskRunContinuation
-      : null;
+      && nodeInput.taskRunContinuation?.activeDelegationId === (nodeInput.taskActiveDelegation?.id ?? null)
+      ? nodeInput.taskRunContinuation : null;
     const isExplicitResume = !isSupervisorDispatch(nodeInput)
       && nodeInput.runActiveDelegationTransition === 'resume_active';
     if (!isSupervisorDispatch(nodeInput)
@@ -255,8 +201,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
         update: {
           runNextDelegation: null,
           runSupervisorSession: null,
-          runLatestDelegationOutcome: null,
-          runUserInputRequest: null,
+          runSupervisorReply: null,
           runRuntimeFailure: 'checkpoint_incompatible' as const,
         },
         goto: 'answer',
@@ -283,10 +228,6 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       ? {
           ...existingSession,
           capabilityDisclosure,
-          ...(existingSession.capabilityDisclosure.registryDigest
-            !== capabilityDisclosure.registryDigest
-            ? { lastCommand: null }
-            : {}),
         }
       : createRunSupervisorSession({
           runId: state.runId,
@@ -308,157 +249,70 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     const result = await runner.invoke(input, runnableConfig);
     const updatedCapabilityDisclosure = result.capabilityDisclosure
       ?? input.capabilityDisclosure;
-    // A missing command is not a state-changing action: do not invent General, do
-    // not fabricate a ToolMessage, and do not accept an active delegation.
-    // Both modes report an explicit typed failure to Answer. Ordinary Supervisor
-    // text remains private to invocation tracing and never becomes a root reply.
-    if (isRunSupervisorNoCommandResult(result)) {
-      const incompletePlan = input.mode === 'boundary' ? supervisorSession.plan : [];
-      return new Command({
-        update: {
-          runNextDelegation: null,
-          ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
-          taskRunContinuation: null,
-          runSupervisorSession: updateRunSupervisorSession({
-            current: supervisorSession,
-            plan: incompletePlan,
-            capabilityDisclosure: updatedCapabilityDisclosure,
-            inputId: input.inputId,
-            registryDigest: workspace.registryDigest,
-            command: null,
-          }),
-          runLatestDelegationOutcome: 'supervisor_command_missing' as const,
-          runUserInputRequest: null,
-          runRuntimeFailure: null,
-        },
-        goto: 'answer',
-      });
-    }
-    // RunSupervisorRunner is an injectable seam: config.runSupervisorRunner
-    // may be a scripted or third-party implementation that never ran the agent's
-    // own validation. This re-parse is the root's trust boundary, not a duplicate
-    // of the parse inside createRunSupervisorAgent() — do not remove it.
-    const command = parseSupervisorCommand(
-      {
-        action: result.action,
-        tasks: result.tasks,
-        ...('userInputRequest' in result
-          ? { userInputRequest: result.userInputRequest }
-          : {}),
-      },
-      {
-        mode: input.mode,
-        activeDelegation: input.activeDelegation,
-        allowedCapabilityNames: workspace.capabilityNames,
-      },
-    );
-    // On entry the goal reaching this node came from plan_request, resolved by
-    // Entry Answer against the whole conversation. Its Command.PARENT update is
-    // overwritten when the entryAnswer subgraph writes its own channels back, so
-    // this node — the first to run outside that subgraph — is what commits the
-    // resolved goal to root state for Capability, Answer and the delegation
-    // snapshot to read.
     const includeSupervisorSession = <T extends object>(
       update: T,
       plan: readonly CapabilityPlanTask[],
     ) => ({
-        ...update,
-        ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
-        taskRunContinuation: null,
-        runSupervisorSession: updateRunSupervisorSession({
-          current: supervisorSession,
-          plan,
-          capabilityDisclosure: updatedCapabilityDisclosure,
-          inputId: input.inputId,
-          registryDigest: workspace.registryDigest,
-          command,
-        }),
-      });
-
-    if (input.mode === 'entry') {
-      if (command.action === 'execute_plan') {
-        const [nextTask, ...remainingPlan] = command.tasks;
-        if (!nextTask) throw new Error('Supervisor execute_plan requires a task.');
-        return new Command({
-          update: includeSupervisorSession(materializeNextDelegation({
-            state,
-            nextTask,
-            allowedCapabilityNames: workspace.capabilityNames,
-          }), remainingPlan),
-          goto: 'capability',
-        });
+      ...update,
+      ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
+      taskRunContinuation: null,
+      runSupervisorSession: updateRunSupervisorSession({
+        current: supervisorSession,
+        plan,
+        capabilityDisclosure: updatedCapabilityDisclosure,
+      }),
+    });
+    if (isRunSupervisorReplyResult(result)) {
+      if (typeof result.reply !== 'string' || !result.reply.trim()) {
+        throw new Error('Supervisor returned an empty final reply.');
       }
       return new Command({
-        update: includeSupervisorSession({
-          runNextDelegation: null,
-          runLatestDelegationOutcome: command.action,
-          runUserInputRequest: command.userInputRequest ?? null,
-          runRuntimeFailure: null,
-        }, []),
+        update: includeSupervisorSession({ runNextDelegation: null, runSupervisorReply: result.reply }, supervisorSession.plan),
         goto: 'answer',
       });
     }
-
+    // Injectable runners cross the same root trust boundary as the production adapter.
+    const { capabilityDisclosure: _disclosure, ...proposal } = result;
+    const command = parseSupervisorCommand(proposal, {
+      mode: input.mode,
+      activeDelegation: input.activeDelegation,
+      allowedCapabilityNames: workspace.capabilityNames,
+    });
     const rootState = nodeInput as OrchestratorStateType;
-    const activeDelegation = rootState.taskActiveDelegation;
-    if (!activeDelegation) throw new Error('Boundary Supervisor lost active delegation.');
-
+    const proposedPlan = command.action === 'execute_plan' ? command.tasks
+      : command.remainingPlan ?? supervisorSession.plan;
+    const canChangePlan = (input.mode === 'entry' && supervisorSession.plan.length === 0)
+      || input.inputId.startsWith('human:');
+    if (!canChangePlan && JSON.stringify(proposedPlan) !== JSON.stringify(supervisorSession.plan)) {
+      throw new Error('Execution plan changes require fresh user confirmation.');
+    }
     if (command.action === 'continue_current') {
       return new Command({
         update: includeSupervisorSession(buildContinueCurrentUpdate({
           state: rootState,
-          activeDelegation,
-        }), supervisorSession.plan),
+          activeDelegation: rootState.taskActiveDelegation!,
+          feedback: command.feedback,
+        }), proposedPlan),
         goto: 'capability',
       });
     }
-    if (command.action === 'user_input_required' || command.action === 'unavailable') {
+    const handoff = command.action === 'accept_result'
+      ? buildDelegationHandoffUpdate(rootState, rootState.taskActiveDelegation!) : null;
+    if (command.action === 'accept_result' && command.reply) {
       return new Command({
-        update: includeSupervisorSession(
-          buildWaitingUpdate(rootState, command),
-          supervisorSession.plan,
-        ),
+        update: includeSupervisorSession({ ...handoff, runSupervisorReply: command.reply }, proposedPlan),
         goto: 'answer',
       });
     }
-
-    const accepted = buildAcceptedDelegationUpdate(
-      rootState,
-      activeDelegation,
-      command.action === 'goal_done' ? 'goal_done' : null,
-    );
-    if (!accepted) {
-      return new Command({
-        update: includeSupervisorSession({
-          runNextDelegation: null,
-          runUserInputRequest: null,
-        }, supervisorSession.plan),
-        goto: 'answer',
-      });
-    }
-    if (command.action === 'goal_done') {
-      return new Command({
-        update: includeSupervisorSession(accepted, []),
-        goto: 'answer',
-      });
-    }
-
-    const [nextTask, ...remainingPlan] = command.tasks;
-    if (!nextTask) throw new Error('Supervisor advance_plan requires a task.');
+    const [nextTask, ...remainingPlan] = proposedPlan;
+    if (!nextTask) throw new Error('accept_result requires a final reply when no planned work remains.');
     const next = materializeNextDelegation({
-      state: {
-        ...state,
-        runDelegationSummaries: accepted.runDelegationSummaries,
-      },
+      state: { ...state, ...(handoff ? { runDelegationSummaries: handoff.runDelegationSummaries } : {}) },
       nextTask,
       allowedCapabilityNames: workspace.capabilityNames,
     });
     return new Command({
-      update: includeSupervisorSession({
-        ...accepted,
-        ...next,
-        messages: accepted.messages,
-      }, remainingPlan),
+      update: includeSupervisorSession({ ...handoff, ...next }, remainingPlan),
       goto: 'capability',
     });
   };

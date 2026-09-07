@@ -99,7 +99,7 @@ test('all invocation entry points preserve scope, trace identity and current met
       assert.equal(config?.signal?.aborted, false);
       assert.deepEqual(config?.configurable?.reviewCapabilities, { humanReview: false, sessionAuthorization: true });
       assert.deepEqual(config?.configurable?.globalReviewPolicy, { mode: 'full_access' });
-      return { action: 'unavailable', tasks: [] };
+      return { reply: 'No execution available.' };
     },
   };
   const registry = compileAgentRegistry({ toolkits: [], capabilities: ['first', 'second'].map(name => ({
@@ -151,7 +151,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
           workdir: getAgentRuntimeContext(config).workdir });
         assert.deepEqual(config?.configurable?.allowedCapabilityNames, []);
         interrupt({ kind: 'invocation-refresh-test' });
-        return { action: 'unavailable', tasks: [] };
+        return { reply: 'No execution available.' };
       } },
     },
     input: { messages: [new HumanMessage('inspect')], threadId: randomUUID(), traceId,

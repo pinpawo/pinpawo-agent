@@ -10,7 +10,6 @@ type InterruptionRecoveryInput = {
   resumeCompletion?: {
     lane: string;
     task: string;
-    completionReason: 'natural' | 'limit_reached';
     result: string;
   };
   newUserIntent?: string;
@@ -46,7 +45,6 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
       resumeCompletion: {
         lane: 'capability:general',
         task: '处理 data/items.csv 的所有分片并汇总结果。',
-        completionReason: 'natural',
         result: '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
       },
     },
@@ -81,7 +79,6 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
       resumeCompletion: {
         lane: 'capability:explore',
         task: '调查 local-agent 的 capability 注册链路，列出关键文件和证据。',
-        completionReason: 'natural',
         result: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
       },
     },
@@ -116,7 +113,6 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
       resumeCompletion: {
         lane: 'capability:general',
         task: '运行 npm test 并修失败项。',
-        completionReason: 'natural',
         result: '已运行 npm test，全部 556 个测试通过，退出码 0。',
       },
     },
@@ -151,7 +147,6 @@ const cases: AgentEvalCase<InterruptionRecoveryInput, InterruptionRecoveryExpect
       resumeCompletion: {
         lane: 'capability:general',
         task: '处理 data/items.csv 的所有分片。',
-        completionReason: 'natural',
         result: '后续继续执行已经自然完成：全部分片处理完毕，共 120 条记录。',
       },
       newUserIntent: 'summarize_final_result',

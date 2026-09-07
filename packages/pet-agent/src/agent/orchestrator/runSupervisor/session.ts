@@ -4,18 +4,12 @@ import type {
   UserRequest,
 } from '../types';
 import type { CapabilityDisclosureState } from './capabilityDisclosure';
-import type { SupervisorCommand } from './protocol';
 
 export type RunSupervisorSessionState = {
   readonly runId: string;
   readonly revision: number;
   readonly plan: readonly CapabilityPlanTask[];
   readonly capabilityDisclosure: CapabilityDisclosureState;
-  readonly lastCommand: {
-    readonly inputId: string;
-    readonly registryDigest: string;
-    readonly command: SupervisorCommand;
-  } | null;
 };
 
 /**
@@ -26,20 +20,23 @@ export type RunSupervisorSessionState = {
 export type RunTaskContinuation = {
   readonly traceId: string;
   readonly userRequest: UserRequest;
-  readonly activeDelegationId: string;
+  readonly activeDelegationId: string | null;
   readonly remainingPlan: readonly CapabilityPlanTask[];
 };
 
 export function snapshotRunTaskContinuation(params: {
   activeDelegation: TaskActiveDelegation | null;
   supervisorSession: RunSupervisorSessionState | null;
+  traceId: string;
+  userRequest: UserRequest | null;
 }): RunTaskContinuation | null {
   const { activeDelegation, supervisorSession } = params;
-  if (!activeDelegation || !supervisorSession) return null;
+  if (!supervisorSession || !params.userRequest
+    || (!activeDelegation && supervisorSession.plan.length === 0)) return null;
   return {
-    traceId: activeDelegation.traceId,
-    userRequest: activeDelegation.userRequest,
-    activeDelegationId: activeDelegation.id,
+    traceId: activeDelegation?.traceId ?? params.traceId,
+    userRequest: activeDelegation?.userRequest ?? params.userRequest,
+    activeDelegationId: activeDelegation?.id ?? null,
     remainingPlan: [...supervisorSession.plan],
   };
 }
@@ -54,7 +51,6 @@ export function createRunSupervisorSession(params: {
     revision: 0,
     plan: [...(params.plan ?? [])],
     capabilityDisclosure: params.capabilityDisclosure,
-    lastCommand: null,
   };
 }
 
@@ -62,19 +58,11 @@ export function updateRunSupervisorSession(params: {
   current: RunSupervisorSessionState;
   plan: readonly CapabilityPlanTask[];
   capabilityDisclosure: CapabilityDisclosureState;
-  inputId: string;
-  registryDigest: string;
-  command: SupervisorCommand | null;
 }): RunSupervisorSessionState {
   return {
     runId: params.current.runId,
     revision: params.current.revision + 1,
     plan: [...params.plan],
     capabilityDisclosure: params.capabilityDisclosure,
-    lastCommand: params.command ? {
-      inputId: params.inputId,
-      registryDigest: params.registryDigest,
-      command: params.command,
-    } : null,
   };
 }

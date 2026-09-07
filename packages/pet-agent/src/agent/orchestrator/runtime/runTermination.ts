@@ -56,10 +56,9 @@ function restoreTerminalError(error: OrchestratorTerminalErrorState): Error {
 }
 
 function cloneError(error: Error): Error {
-  return Object.create(
-    Object.getPrototypeOf(error),
-    Object.getOwnPropertyDescriptors(error),
-  ) as Error;
+  const cloned = new Error(error.message);
+  Object.setPrototypeOf(cloned, Object.getPrototypeOf(error));
+  return Object.defineProperties(cloned, Object.getOwnPropertyDescriptors(error));
 }
 
 /**
@@ -81,12 +80,13 @@ export function createRunTerminationHandlers() {
           runSupervisorSession: null,
           taskRunContinuation: state.taskRunContinuation
             ?? snapshotRunTaskContinuation({
+          traceId: state.traceId,
+          userRequest: state.runUserRequest,
               activeDelegation: state.taskActiveDelegation ?? null,
               supervisorSession: state.runSupervisorSession ?? null,
             }),
           runIterationCount: 0,
-          runLatestDelegationOutcome: null,
-          runUserInputRequest: null,
+          runSupervisorReply: null,
           runRuntimeFailure: null,
           runTerminalError: terminalError,
         },

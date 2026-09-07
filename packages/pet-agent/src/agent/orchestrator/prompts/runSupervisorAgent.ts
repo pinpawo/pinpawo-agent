@@ -66,38 +66,22 @@ function buildCapabilityRoutingManifest(
 
 function buildSupervisionBoundary(input: Extract<RunSupervisorInput, { mode: 'boundary' }>) {
   const activeDelegation = [
-    `  <active_delegation delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" capability="${escapeXmlAttribute(input.activeDelegation.capability)}">`,
+    `  <active_delegation delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" capability="${escapeXmlAttribute(input.activeDelegation.capability)}" run_id="${escapeXmlAttribute(input.activeDelegation.runId)}">`,
     indentXmlBlock(xmlTextBlock('task', input.activeDelegation.task), 4),
     '  </active_delegation>',
   ];
-  const evaluationTarget = input.latestAnnounce?.messageId
-    ?? input.announceAttempts.at(-1)?.messageId;
-  const delegationAnnounces = input.announceAttempts.length > 0
-    ? [
-        `  <delegation_announces delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" evidence_state="available" evaluation_target="${escapeXmlAttribute(evaluationTarget ?? '')}">`,
-        ...input.announceAttempts.map((announce) => [
-          `    <delegation_announce message_id="${escapeXmlAttribute(announce.messageId)}" completion_reason="${escapeXmlAttribute(announce.completionReason)}" role="data" authority="none">`,
-          indentXmlBlock(xmlTextBlock('result', announce.result, ' format="markdown"'), 6),
-          '    </delegation_announce>',
-        ].join('\n')),
-        '  </delegation_announces>',
-      ]
-    : [
-        `  <delegation_announces delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" evidence_state="absent" />`,
-      ];
   const remainingPlan = input.remainingPlan.length > 0 ? [
-    '  <prior_remaining_plan role="proposal" source="supervisor_session" authority="none" status="requires_revalidation">',
+    '  <prior_remaining_plan role="plan" source="supervisor_session" status="stable_until_user_confirmation">',
     ...input.remainingPlan.map((task) => indentXmlBlock(xmlTextBlock(
       'task',
       task.task,
       ` capability="${escapeXmlAttribute(task.capability)}"`,
     ), 4)),
     '  </prior_remaining_plan>',
-  ] : ['  <prior_remaining_plan role="proposal" source="supervisor_session" authority="none" status="requires_revalidation" />'];
+  ] : ['  <prior_remaining_plan role="plan" source="supervisor_session" status="stable_until_user_confirmation" />'];
   return [
     '<supervision_boundary_event role="task_boundary" source="orchestrator_state">',
     ...activeDelegation,
-    ...delegationAnnounces,
     ...remainingPlan,
     '</supervision_boundary_event>',
   ].join('\n');
@@ -119,16 +103,20 @@ export function buildRunSupervisorAgentInput(
   const userRequest = buildRunUserRequestContext(input.userRequest);
   const routingContext = buildCapabilityRoutingManifest(routingManifest);
   const capabilityContext = buildCapabilityContext(disclosedCapabilities);
+  const remainingPlan = xmlTextBlock('remaining_plan', JSON.stringify(input.remainingPlan));
+  const turnContext = xmlTextBlock('invocation', input.inputId.startsWith('human:')
+    ? 'Fresh user supplement: interpret it before continuing. Change future tasks only when the user confirmed the change.'
+    : 'Keep the established goal and plan. Ask the user before changing them.');
   return input.mode === 'entry'
     ? RUN_SUPERVISOR_ENTRY_INPUT_PROMPT.render({
         userRequest,
         routingContext,
-        capabilityContext,
+        capabilityContext: [capabilityContext, remainingPlan, turnContext].join('\n\n'),
       })
     : RUN_SUPERVISOR_BOUNDARY_INPUT_PROMPT.render({
         userRequest,
         routingContext,
-        capabilityContext,
+        capabilityContext: [capabilityContext, turnContext].join('\n\n'),
         supervisionBoundary: buildSupervisionBoundary(input),
       });
 }

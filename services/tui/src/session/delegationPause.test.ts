@@ -46,3 +46,14 @@ test('new activity or an absent delegation returns to ordinary chat', () => {
     },
   }), 'ordinary');
 });
+
+test('ordinary Supervisor replies expose continuation from the authoritative unfinished plan', () => {
+  for (const status of ['active', 'pending'] as const) {
+    const session = { ...idleSession, currentPlan: { items: [{ id: 'task', capability: 'general', task: 'Finish work.', status }] } };
+    assert.equal(syncDelegationPauseMode('ordinary', session), 'paused');
+    assert.equal(syncDelegationPauseMode('leaving', session), 'leaving');
+  }
+  assert.equal(syncDelegationPauseMode('ordinary', { ...idleSession,
+    currentPlan: { items: [{ id: 'done', capability: 'general', task: 'Done.', status: 'completed' }] },
+  }), 'ordinary');
+});

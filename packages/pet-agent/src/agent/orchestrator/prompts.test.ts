@@ -1,3 +1,4 @@
+import { DelegationAnnounceMessage } from './delegation';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -69,7 +70,6 @@ function supervisorSession(
     revision: 0,
     plan,
     capabilityDisclosure,
-    lastCommand: null,
   };
 }
 
@@ -83,8 +83,7 @@ test('Run Supervisor entry input leads with the run user request', () => {
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     messages: [],
     activeDelegation: null,
-    latestAnnounce: null,
-    announceAttempts: [],
+
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
     supervisorSession: supervisorSession(),
@@ -121,8 +120,7 @@ test('Run Supervisor entry input represents an empty disclosure explicitly', () 
     userRequest: '整理下载目录。',
     messages: [],
     activeDelegation: null,
-    latestAnnounce: null,
-    announceAttempts: [],
+
     remainingPlan: [],
     capabilityDisclosure: {
       ...plannerDisclosure,
@@ -146,23 +144,19 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
-    messages: [],
+    messages: [...[], ...[{
+      messageId: 'announce-1',
+      result: '浏览器已连接。',
+    }].map((attempt) => new DelegationAnnounceMessage({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    }))],
     activeDelegation: {
       delegationId: 'delegation-1',
       runId: 'run-1',
       capability: 'browser',
       task: '确认浏览器可用',
     },
-    latestAnnounce: {
-      messageId: 'announce-1',
-      completionReason: 'natural',
-      result: '浏览器已连接。',
-    },
-    announceAttempts: [{
-      messageId: 'announce-1',
-      completionReason: 'natural',
-      result: '浏览器已连接。',
-    }],
+
     remainingPlan: [{
       capability: 'browser',
       task: '浏览相关内容',
@@ -176,45 +170,14 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
 
   assert.match(input, /^<run_user_request[^>]*>/);
   assert.match(input, /<supervision_boundary_event role="task_boundary" source="orchestrator_state">/);
-  assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
-  assert.match(input, /<delegation_announces delegation_id="delegation-1" evidence_state="available" evaluation_target="announce-1">/);
-  assert.match(input, /浏览器已连接。/);
+  assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser" run_id="run-1">/);
+
   assert.match(input, /确认浏览器可用/);
-  assert.match(input, /<prior_remaining_plan role="proposal" source="supervisor_session" authority="none" status="requires_revalidation">/);
+  assert.match(input, /<prior_remaining_plan role="plan" source="supervisor_session" status="stable_until_user_confirmation">/);
   assert.match(input, /<task capability="browser">/);
   assert.match(input, /浏览相关内容/);
   assert.doesNotMatch(input, /执行停止原因/);
   assert.doesNotMatch(input, /registry_digest|document_count|<planning_state>/);
-});
-
-test('Run Supervisor boundary input marks absent execution evidence explicitly', () => {
-  const input = buildRunSupervisorAgentInput({
-    mode: 'boundary',
-    inputId: 'human:run-1',
-    traceId: 'trace-1',
-    runId: 'run-1',
-    workspace: plannerPromptWorkspace,
-    userRequest: '继续检查仓库并完成测试验证。',
-    messages: [],
-    activeDelegation: {
-      delegationId: 'delegation-1',
-      runId: 'run-1',
-      capability: 'general',
-      task: '检查仓库并完成测试验证',
-    },
-    latestAnnounce: null,
-    announceAttempts: [],
-    remainingPlan: [],
-    capabilityDisclosure: plannerDisclosure,
-    supervisorSession: supervisorSession(),
-  } satisfies RunSupervisorInput, disclosedDocuments, routingManifest);
-
-  assert.match(
-    input,
-    /<delegation_announces delegation_id="delegation-1" evidence_state="absent" \/>/,
-  );
-  assert.doesNotMatch(input, /evaluation_target=/);
-  assert.doesNotMatch(input, /<delegation_announce /);
 });
 
 test('Run Supervisor boundary input omits the follow-up section once the plan is exhausted', () => {
@@ -225,30 +188,26 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
     runId: 'run-1',
     workspace: plannerPromptWorkspace,
     userRequest: '打开示例站点并浏览相关内容。',
-    messages: [],
+    messages: [...[], ...[{
+      messageId: 'announce-1',
+      result: '浏览器已连接。',
+    }].map((attempt) => new DelegationAnnounceMessage({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    }))],
     activeDelegation: {
       delegationId: 'delegation-1',
       runId: 'run-1',
       capability: 'browser',
       task: '确认浏览器可用',
     },
-    latestAnnounce: {
-      messageId: 'announce-1',
-      completionReason: 'natural',
-      result: '浏览器已连接。',
-    },
-    announceAttempts: [{
-      messageId: 'announce-1',
-      completionReason: 'natural',
-      result: '浏览器已连接。',
-    }],
+
     remainingPlan: [],
     capabilityDisclosure: plannerDisclosure,
     supervisorSession: supervisorSession(),
   } satisfies RunSupervisorInput, disclosedDocuments, routingManifest);
 
   assert.match(input, /^<run_user_request[^>]*>/);
-  assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser">/);
-  assert.match(input, /<prior_remaining_plan role="proposal" source="supervisor_session" authority="none" status="requires_revalidation" \/>/);
+  assert.match(input, /<active_delegation delegation_id="delegation-1" capability="browser" run_id="run-1">/);
+  assert.match(input, /<prior_remaining_plan role="plan" source="supervisor_session" status="stable_until_user_confirmation" \/>/);
   assert.doesNotMatch(input, /此前保留的后续任务|planner_request_briefing/);
 });

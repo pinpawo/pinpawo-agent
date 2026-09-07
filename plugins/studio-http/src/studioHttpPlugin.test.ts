@@ -42,6 +42,7 @@ function createContext(options: {
       return () => eventHandlers.delete(handler);
     },
     listPets: () => options.pets ?? [],
+    listDispatchQueues: () => [],
     hooks: {
       expose: () => () => undefined,
       contribute: () => () => undefined,

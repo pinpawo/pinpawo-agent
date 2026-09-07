@@ -41,7 +41,6 @@ function acceptedAnnounce() {
     runId: 'run-old',
     announceMessageId: 'announce-old',
     task: '检查历史实现',
-    completionReason: 'natural',
     result: '历史实现已检查。',
     createdAt: '2026-01-01T00:00:00.000Z',
   });

@@ -53,7 +53,6 @@ function evalAnnounce(params: {
   delegationId: string;
   task: string;
   result: string;
-  completionReason: 'natural' | 'limit_reached';
   accepted?: boolean;
 }) {
   const announceMessageId = `announce:${params.runId}:${params.delegationId}`;
@@ -64,7 +63,6 @@ function evalAnnounce(params: {
     delegationId: params.delegationId,
     announceMessageId,
     task: params.task,
-    completionReason: params.completionReason,
     result: params.result,
     createdAt: '2026-08-31T00:00:00.000Z',
   });
@@ -283,9 +281,6 @@ export async function target(
           delegationId: 'resume-progress-1',
           task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
           result: String(inputs.resume_progress_result ?? ''),
-          completionReason: inputs.resume_progress_completion_reason === 'limit_reached'
-            ? 'limit_reached'
-            : 'natural',
         }),
         new HumanMessage(userMessage),
       ]
@@ -325,7 +320,6 @@ export async function target(
         delegationId: `eval-${index + 1}`,
         task: completedTasks[index] ?? userMessage,
         result: text,
-        completionReason: 'natural',
         accepted: true,
       })),
     );
@@ -359,7 +353,6 @@ export async function target(
         delegationId: `eval-${offset + index + 1}`,
         task: userMessage,
         result: text,
-        completionReason: 'limit_reached',
       })),
     );
   }

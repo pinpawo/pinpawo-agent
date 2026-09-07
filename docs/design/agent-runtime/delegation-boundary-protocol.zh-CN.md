@@ -119,7 +119,7 @@ root 图中的 `runSupervisor` 节点基于 main messages 调用 Supervisor agen
 
 最简单的交互是：展示问题并保存未完成工作，用户在该工作的继续入口回答，然后以已有 `resume_active` 语义进入下一次调用。回答进入 root 主对话，Supervisor 按最新输入继续判断；补充条件不等于同意改计划，用户未同意时不能改派。界面应把继续原工作的入口展示出来，不要求用户知道内部命令，也不能把该入口的回答当作 `supersede_active`。
 
-当前 delegation 尚未结束时，用户回答或明确提出的计划调整都作为新的 HumanMessage 加入 main，保留 delegation 身份、私有历史、已有 Announce 和剩余计划，再进入 Supervisor / Boundary。消息到达本身不验收、不结束、不替换当前 delegation，也不先清空状态转去重新规划。Supervisor 根据补充判断：属于当前任务的条件或做法，就用反馈继续同一个 delegation；明确要求调整计划，就按用户授权通过现有控制决定落实。需要替换执行时也由该决定处理，不能把“收到补充”当作替换信号。
+当前 delegation 尚未结束时，用户回答或明确提出的计划调整都作为新的 HumanMessage 加入 main，保留 delegation 身份、私有历史、已有 Announce 和剩余计划，再进入 Supervisor / Boundary。消息到达本身不验收、不结束、不替换当前 delegation，也不先清空状态转去重新规划。Supervisor 根据补充判断：属于当前任务的条件或做法，就用反馈继续同一个 delegation；明确要求调整计划，就按用户授权通过现有控制决定落实。当前 delegation 的取消或替换通过已有任务控制入口处理，不能把“收到补充”当作替换信号。
 
 有用户补充是一次有效的判断输入，即使没有新的 Announce，也不必让 subagent 先重跑。若当前任务尚无结果，Supervisor 可以澄清、给出继续反馈或处理用户明确要求的调整，但不得验收没有证据的任务。无结果的执行异常仍按错误路径停止；这里是用户主动续接后的判断，不是自动补救循环。
 
@@ -135,7 +135,7 @@ root 校验返回值的结构、模式、Capability 范围、活动 delegation �
 | --- | --- | --- |
 | 采纳并推进 | 对 main 中已有结果记录任务验收，结束原私有执行范围，不再次搬运或发布结果 | 创建并执行下一项 delegation |
 | 继续完善 | 保留原 delegation 身份、任务和全部私有上下文；可同时保存用户确认的后续计划调整 | 在同一个 delegation 上继续；反馈进入下一次执行简报，不替换当前任务 |
-| 用户确认后的替换 | main 保留原结果，不标记任务成功，结束原执行范围 | 按用户确认的调整创建并执行替代任务 |
+| 用户显式替换当前任务 | 既有任务控制入口解除原活动任务关联；main 保留原证据，不记录成功 | 新任务沿普通目标确认和 Entry 规划入口开始 |
 | 采纳并回复 | 对 main 中已有结果记录任务验收 | 保存剩余计划，输出回复结束本轮 |
 | 普通回复 | 保留活动 delegation 和未采纳证据（若有） | 保存未完成工作，输出回复结束本轮 |
 
@@ -218,7 +218,7 @@ return new Command({
 
 官方[子图组合指南](https://docs.langchain.com/oss/javascript/langgraph/use-subgraphs#call-a-subgraph-inside-a-node)支持父节点调用子图并转换返回值；[returnDirect](https://reference.langchain.com/javascript/langchain/index/Tool/returnDirect)用于工具调用后结束 agent 循环。[Command 文档](https://docs.langchain.com/oss/javascript/langgraph/graph-api#command)说明 `goto` 增加动态出边，不覆盖已有静态出边。
 
-此前用 LangChain 1.5.2、LangGraph 1.4.7 和本地假模型验证：普通工具和 `Command({ update, goto: END })` 都触发两次模型调用，`returnDirect` 配合 `Command({ update })` 只有一次，状态更新得到保留。这支持实现选择，但不代表正式 Supervisor 集成已经完成验证。
+此前用 LangChain 1.5.2、LangGraph 1.4.7 和本地假模型验证：普通工具和 `Command({ update, goto: END })` 都触发两次模型调用，`returnDirect` 配合 `Command({ update })` 只有一次，状态更新得到保留。正式 Supervisor 行为测试也验证了控制工具只触发一次模型调用。
 
 ## 本轮结束与后续恢复
 
@@ -284,19 +284,15 @@ root 检查点负责已提交的状态变化和待执行节点。恢复已提交
 
 ### 当前实现状态
 
-2026-09-07 工具职责收敛：`submit_plan` 仅用于 Entry，`accept_result` 统一验收并推进或回复；root 的确定性处理由 `runSupervisor` 节点中的 TypeScript 分支及 LangGraph `Command` 承载，没有第二个判断模型。以上接口调整待开发落实。
+2026-09-07：实现已按本设计收敛。Entry 仅用 `submit_plan`；Boundary 用 `continue_current` 或 `accept_result`。三个控制工具直接返回 `Command({ update })` 并设置 `returnDirect`，root 的 `runSupervisor` 节点应用确定性状态变化。自然回复由当前 answer 节点原文输出一次，统一 Finalizer 仍留待后续。
 
-以下实现记录指本地工作区，相关代码尚未提交；本次提交仅包含文档，不能据此认为 PR 已包含这些实现。
+Announce 在验收前进入 main；Supervisor 不再接收独立结果列表或查询私有执行历史。验收以原消息 id 更新元数据；压缩仅在 run 入口发生，按已有 Announce 身份保留当前未完成任务的全部尝试。
 
-工作区已有三个提案、自然回复、root 状态处理、续接快照和 `completionReason` 清理。`returnDirect` 集成、供应商并行参数设置，以及本次明确的稳定计划约束、执行期间固定披露和普通提问续接入口尚需落实与验证。现有实现仍允许 Boundary 重写剩余计划并继续探索，不能视为已符合此约束。统一 Finalizer node 留到 Supervisor 优化之后。本文修改设计，没有修改运行时代码。
+用户补充先进入 main，再由 Supervisor 判断。`continue_current.remainingPlan` 支持经用户确认的未来计划调整；执行循环禁止修改既定计划和继续披露。TUI 根据未完成计划提供继续入口，保留已有退出当前任务操作。
 
-`continue_current` 当前代码只有可选 `feedback`；可选 `remainingPlan`、对应校验和 root 一次更新的效果是本次明确的待实现接口扩展。
+删除了 completionReason 协议、旧终结命令、answer 二次生成、控制工具 JSON 往返，以及披露／压缩失败后的丢弃重试。模型原生并行选项未强行加入未知兼容接口；批次合法性由执行前校验保证。
 
-本次补齐的续接目标还要求：用户补充先到 Supervisor，准备所需信息后再继续当前 delegation。现有 pending 恢复路由仍可能直接进入 Capability，Boundary 输入仍强制要求 Announce；这些需要随用户补充路径调整，不能因文档已明确就视为已经实现。
-
-Announce 已有识别字段，root 图也已只在 run 入口检查压缩；压缩已经保留最近消息和当前 delegation 的 Announce。尚待实现的是结果直接发布到 main、移除独立 Boundary 结果输入、调整现有模型投影与验收时搬运，以及让既有压缩保护按 Announce 身份匹配 main 中的结果。当前实现仍先把 Announce 存入私有范围，再于交接时放入 main；现有保护匹配仍依赖私有 lane 标签，不能直接视为已保护迁移后的 main Announce。
-
-此前共享运行时 458 项测试，以及全仓测试、类型检查、构建和上下文审计通过。这些是前一版实现的验证记录，不验证本次设计中的待实现部分。本地 `packages/pet-agent/evals/supervisor-boundary.eval.ts` 包含四个虚构场景的真实模型评测，尚未随文档提交，仍需出站授权且尚未通过验证。
+行为测试覆盖控制工具一次调用、消息证据、续接、计划约束、压缩保留和 checkpoint 恢复。真实模型评估脚本仅包含虚构场景，仍未运行；不能把离线验证视为真实模型质量验证。
 
 ## 相关文档
 

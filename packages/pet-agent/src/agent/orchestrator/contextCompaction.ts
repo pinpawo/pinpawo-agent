@@ -3,7 +3,6 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
-  getAgentMessageLane,
   getAgentMessageMetadata,
   mainConversationMessages,
   queryAgentMessages,
@@ -11,11 +10,10 @@ import {
   toolProtocolSafeMessages,
 } from '../messages';
 import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
-import { clipForPrompt, readMessageText } from './utils';
+import { readMessageText } from './utils';
 import { xmlTextBlock } from './prompts/shared';
 
 const DEFAULT_KEEP_MESSAGES = 10;
-const DEFAULT_FALLBACK_SUMMARY_CHARS = 4000;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
@@ -65,23 +63,25 @@ function selectMessagesToKeep(
 ): BaseMessage[] {
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
   const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
-  // An active delegation's lane Announces are canonical Boundary evidence
-  // until Supervisor accepts them. They are excluded from summaries, so pin every
-  // still-lane-tagged Announce even when it falls outside the recent suffix.
+  // Preserve every attempt for the unfinished delegation, including main evidence.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;
-    if (!preserveAnnouncesFor || !getDelegationAnnounce(message)) return false;
-    const meta = getAgentMessageMetadata(message);
-    return getAgentMessageLane(message) === preserveAnnouncesFor.lane
-      && meta.runId === preserveAnnouncesFor.runId
-      && meta.delegationId === preserveAnnouncesFor.delegationId;
+    const announce = getDelegationAnnounce(message);
+    return Boolean(preserveAnnouncesFor && announce
+      && announce.sourceLane === preserveAnnouncesFor.lane
+      && announce.runId === preserveAnnouncesFor.runId
+      && announce.delegationId === preserveAnnouncesFor.delegationId);
   });
   return toolProtocolSafeMessages(selected);
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
   const announce = getDelegationAnnounce(message);
-  if (announce) return formatDelegationAnnounceForModel(announce);
+  if (announce) {
+    const meta = message.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
+    return formatDelegationAnnounceForModel(announce,
+      typeof meta?.taskAccepted === 'boolean' ? meta.taskAccepted : undefined);
+  }
   const text = readMessageText(message);
   if (!text) return null;
   if (isContextCompactionMessage(message)) {
@@ -105,53 +105,12 @@ function buildSummaryItems(messages: BaseMessage[]): string[] {
   });
 }
 
-function buildNoisyFallbackSummary(messages: BaseMessage[]): string {
-  const mainMessageCount = queryAgentMessages(messages).main().select().messages.length;
-
-  return [
-    '[以下是更早上下文的自动压缩摘要]',
-    mainMessageCount > 0
-      ? `- main: ${mainMessageCount.toString()} 条旧消息已压缩，未发现需要保留的主线输入或任务结果。`
-      : '- 没有可保留的旧主线消息。',
-  ].join('\n');
-}
-
 function renderMessagesForSummary(messages: BaseMessage[]): string {
   // The compaction watermark is derived from the provider's measured input
   // usage, and the retained suffix is excluded before this point. Pass every
   // remaining main message to the summarizer: per-message sampling loses facts
   // before the model can decide what belongs in the durable summary.
   return buildSummaryItems(messages).join('\n\n');
-}
-
-function buildFallbackSummary(messages: BaseMessage[]): string {
-  const heading = '[以下是更早上下文的自动压缩摘要]';
-  const existingSummary = buildSummaryItems(
-    messages.filter(isContextCompactionMessage),
-  ).at(-1);
-  const recentItems = buildSummaryItems(
-    messages.filter((message) => !isContextCompactionMessage(message)),
-  ).slice(existingSummary ? -7 : -8);
-  const importantLines = recentItems
-    .map((item) => `- ${clipForPrompt(item.replace(/\n+/g, ' '), 260)}`);
-  const recentSummary = importantLines.length > 0
-    ? importantLines.join('\n')
-    : existingSummary
-      ? null
-      : buildNoisyFallbackSummary(messages).replace(`${heading}\n`, '');
-  const reservedChars = heading.length
-    + (recentSummary?.length ?? 0)
-    + (existingSummary && recentSummary ? 2 : 1);
-  const existingSummaryChars = Math.max(0, DEFAULT_FALLBACK_SUMMARY_CHARS - reservedChars);
-  const boundedExistingSummary = existingSummary && existingSummaryChars > 1
-    ? clipForPrompt(existingSummary, existingSummaryChars)
-    : null;
-
-  return [
-    heading,
-    boundedExistingSummary,
-    recentSummary,
-  ].filter((line): line is string => line !== null).join('\n');
 }
 
 async function summarizeMessages(params: {
@@ -161,7 +120,7 @@ async function summarizeMessages(params: {
 }): Promise<string> {
   const renderedMessages = renderMessagesForSummary(params.messages);
   if (!renderedMessages.trim()) {
-    return buildFallbackSummary(params.messages);
+    return '更早的私有执行上下文已压缩；没有需要摘要的主线消息。';
   }
 
   const response = await params.model.invoke(
@@ -179,7 +138,9 @@ async function summarizeMessages(params: {
     params.runnableConfig,
   );
 
-  return readMessageText(response) || buildFallbackSummary(params.messages);
+  const summary = readMessageText(response);
+  if (!summary.trim()) throw new Error('Context compaction produced an empty summary.');
+  return summary;
 }
 
 export async function compactOrchestratorMessages(params: {
@@ -208,19 +169,9 @@ export async function compactOrchestratorMessages(params: {
     return { messages: [], compacted: false, mainMessageCount };
   }
 
-  let summary = '';
-  try {
-    summary = await summarizeMessages({
-      model,
-      messages: messagesToSummarize,
-      runnableConfig: params.runnableConfig,
-    });
-  } catch (error) {
-    console.warn('[pet-agent] context compaction summarization failed:', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    summary = buildFallbackSummary(messagesToSummarize);
-  }
+  const summary = await summarizeMessages({
+    model, messages: messagesToSummarize, runnableConfig: params.runnableConfig,
+  });
 
   const summaryMessage = createContextCompactionMessage(summary, mainMessageCount);
 

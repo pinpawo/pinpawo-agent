@@ -1,3 +1,4 @@
+import { getAgentMessageLane, getAgentMessageRunId } from '../messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { readMessageText } from './utils';
 
@@ -9,4 +10,10 @@ export function readLatestHumanRequest(messages: readonly BaseMessage[]): string
     if (text) return text;
   }
   return null;
+}
+
+/** A fresh-turn supplement, distinguished from earlier checkpointed user messages. */
+export function hasRunHumanMessage(messages: readonly BaseMessage[], runId: string): boolean {
+  return messages.some((message) => message._getType() === 'human'
+    && !getAgentMessageLane(message) && getAgentMessageRunId(message) === runId);
 }

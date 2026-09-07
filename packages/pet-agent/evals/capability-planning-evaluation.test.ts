@@ -94,7 +94,7 @@ test('entry planning distinguishes verifiable facts from user-owned choices', ()
     ({ name }) => name === 'entry-asks-for-user-owned-deployment-target',
   );
   assert.equal(verifiableFact?.expected.result, 'execute_plan');
-  assert.equal(userOwnedChoice?.expected.result, 'user_input_required');
+  assert.equal(userOwnedChoice?.expected.result, 'reply');
 });
 
 test('supervisor goal contract keeps semantic plan checks outside the deterministic result score', () => {

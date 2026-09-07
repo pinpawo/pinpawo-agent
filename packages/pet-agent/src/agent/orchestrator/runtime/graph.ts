@@ -51,6 +51,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const resultAnswer = createAnswerNode(config);
   const capabilityNode = createCapabilityNode({
     config,
+    onNodeError: runTermination.onNodeError,
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   });
@@ -90,6 +91,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addConditionalEdges('compactContext', afterContextPrep, {
       supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
       captureUserRequest: 'captureUserRequest',
+      runSupervisor: 'runSupervisor',
       capability: 'capability',
     })
     .addEdge('captureUserRequest', 'entryAnswer')

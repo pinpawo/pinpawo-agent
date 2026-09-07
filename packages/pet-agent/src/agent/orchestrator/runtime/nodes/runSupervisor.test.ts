@@ -211,3 +211,43 @@ test('Boundary selects the current logical task across runs, including earlier d
   assert.equal(observed, true);
   assert.equal(getAgentMessageMetadata(supplement).traceId, undefined);
 });
+
+test('a natural question preserves work through terminal cleanup and resumes with the user answer', async () => {
+  for (const completed of [true, false]) {
+    const original = state();
+    const question = 'Which destination should we use?';
+    const waiting = apply(original, await node({ reply: question })(original, options));
+    const terminal = await createAnswerNode({ models })(waiting, options);
+    const saved = { ...waiting, ...terminal, messages: messagesStateReducer(waiting.messages, terminal.messages) };
+    assert.deepEqual(saved.taskActiveDelegation, original.taskActiveDelegation);
+    assert.deepEqual(saved.taskRunContinuation?.remainingPlan, tail);
+    assert.equal(getMessageHandoffSource(saved.messages.find((message) => message.id === 'a1')!)?.taskAccepted, null);
+    const reset = buildRunStateReset({ activeDelegationTransition: 'resume_active' });
+    const answer = setAgentMessageMetadata(new HumanMessage('Use the engineering project.'), { runId: reset.runId });
+    const resumed = { ...saved, ...reset, messages: messagesStateReducer(saved.messages, [answer]) };
+    const { createPrepareNode } = await import('./prepare');
+    const prepared = await createPrepareNode()(resumed);
+    Object.assign(resumed, prepared, { messages: messagesStateReducer(resumed.messages, prepared.messages) });
+    const command = await createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (input) => {
+      assert.equal(input.mode, 'boundary');
+      assert.equal(input.activeDelegation?.delegationId, original.taskActiveDelegation!.id);
+      assert.deepEqual(input.remainingPlan, tail);
+      assert.equal(input.traceId, original.traceId);
+      assert.ok(input.messages.some((message) => message.text === question));
+      assert.ok(input.messages.some((message) => message.text === answer.text));
+      assert.ok(input.messages.some((message) => message.id === 'a1'));
+      return { action: 'review_current', completed,
+        reason: completed ? 'The prepared document is delivered.' : 'Complete the document using the supplied project.' };
+    } } })(resumed, options);
+    const next = apply(resumed, command);
+    assert.deepEqual(command.goto, ['capability']);
+    if (completed) {
+      assert.notEqual(next.taskActiveDelegation?.id, original.taskActiveDelegation!.id);
+      assert.equal(next.runNextDelegation?.task, tail[0].task);
+    } else {
+      assert.equal(next.taskActiveDelegation?.id, original.taskActiveDelegation!.id);
+      assert.equal(next.runNextDelegation?.contextSummary, 'Complete the document using the supplied project.');
+      assert.deepEqual(next.runSupervisorSession?.plan, tail);
+    }
+  }
+});

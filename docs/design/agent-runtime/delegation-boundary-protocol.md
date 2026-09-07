@@ -110,7 +110,9 @@ Each invocation returns at most one control decision. Acceptance with dispatch a
 
 Natural text ends **this run** without changing whether an existing task is accepted. “Please provide test credentials” preserves the current delegation. Even if the text incorrectly claims everything is complete, root does not infer acceptance from it.
 
-completed=false cannot include reply; ask the user with natural text instead. When the current task is complete but an independent next step needs clarification, use `review_current(completed=true)` with the question and established remaining plan. When the current task is complete and no planned tasks remain, use it with an empty plan; Entry without an active task can simply return natural text. A goal-completion judgment must not silently skip outstanding tasks; ask the user if those tasks should be cancelled.
+completed=false cannot include reply; ask the user with natural text instead. When the current task is complete but an independent next step needs clarification, Supervisor may use `review_current(completed=true)` with the question and established remaining plan. When the current task is complete and no planned tasks remain, use it with an empty plan; Entry without an active task can simply return natural text. A goal-completion judgment must not silently skip outstanding tasks; ask the user if those tasks should be cancelled.
+
+Supervisor may also ask naturally before accepting a task with sufficient delivery evidence, retaining that delegation until the user answers. Evals must accept this path and verify preservation and resumption rather than require acceptance before every question. Finalization without missing user input remains a separate explicit-acceptance check.
 
 Both paths converge on the existing `answer` node, which emits one assistant reply and cleans up the run. No second model rewrite or root prose classification occurs. Text accompanying a control call is not another reply: the proposal owns that path, and user-facing text comes from `review_current.reply`.
 
@@ -312,9 +314,7 @@ Provider-native parallel flags are not forced onto unknown compatible endpoints;
 pre-tool response validation enforces the control-batch contract.
 
 Behavior tests cover single-call controls, evidence publication, continuation,
-plan constraints, protected compaction, and checkpoint recovery. The synthetic
-real-model evaluation script remains unrun; offline validation does not establish
-real-model decision quality.
+plan constraints, protected compaction, and checkpoint recovery. The synthetic real-model eval on DeepSeek v4-pro (2026-09-07) passed 7 of 8 cases in its latest run, including natural questions and two user-answer continuations. Finalization emitted XML text instead of calling the control tool and remains a failure. One run does not establish decision stability.
 
 ## Related documents
 

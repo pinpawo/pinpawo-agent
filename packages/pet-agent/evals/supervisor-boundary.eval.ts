@@ -37,19 +37,30 @@ try {
     } },
     { name: 'continue-missing-verification', goal: 'Fix the bug and confirm the tests pass.',
       task: 'Fix the bug and run the test suite.', evidence: 'The patch is saved. Tests have not been run. Test tools are available; no user input or permission is needed.',
-      check: (result) => { assert.equal(result.action, 'continue_current'); } },
+      check: (result) => { assert.equal(result.action, 'review_current');
+        if (result.action === 'review_current') { assert.equal(result.completed, false); assert.ok(result.reason.trim()); } } },
+    { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
+      task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
+      remaining: [{ capability: 'general', task: 'Fix the identified off-by-one check and run the regression suite.' }],
+      check: (result) => {
+        assert.equal(result.action, 'review_current');
+        if (result.action === 'review_current') {
+          assert.equal(result.completed, true); assert.ok(result.reason.trim());
+          assert.equal(result.reply, undefined); assert.equal(result.remainingPlan, undefined);
+        }
+      } },
     { name: 'accept-then-question', goal: 'Prepare the release notes and publish them to a destination I will select.',
       task: 'Prepare release notes.', evidence: 'Release notes are saved to RELEASE.md and verified against the commits. Preparation is complete. Nothing has been published. The user has not selected the destination.',
       remaining: [{ capability: 'general', task: 'Publish the prepared release notes after the user selects a destination.' }],
       check: (result) => {
-        assert.equal(result.action, 'accept_result');
-        if (result.action === 'accept_result') { assert.ok(result.reply?.trim()); if (result.remainingPlan) assert.equal(result.remainingPlan.length, 1); }
+        assert.equal(result.action, 'review_current');
+        if (result.action === 'review_current') { assert.equal(result.completed, true); assert.ok(result.reason.trim()); assert.ok(result.reply?.trim()); if (result.remainingPlan) assert.equal(result.remainingPlan.length, 1); }
       } },
     { name: 'accept-and-finish', goal: 'Fix the bug and confirm the tests pass.', task: 'Fix the bug and run the test suite.',
       evidence: 'The bug is fixed. The regression test and the full test suite passed: 42 tests, zero failures. No requested work remains.',
       check: (result) => {
-        assert.equal(result.action, 'accept_result');
-        if (result.action === 'accept_result') { assert.ok(result.reply?.trim()); assert.deepEqual(result.remainingPlan ?? [], []); }
+        assert.equal(result.action, 'review_current');
+        if (result.action === 'review_current') { assert.equal(result.completed, true); assert.ok(result.reason.trim()); assert.ok(result.reply?.trim()); assert.deepEqual(result.remainingPlan ?? [], []); }
       } },
   ];
   for (const scenario of cases) {

@@ -1,6 +1,7 @@
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   readAgentMessageCreatedAt,
+  setAgentMessageMetadata,
   reconcileDelegationMessages,
   type CapabilityMessageLane,
   type DelegationMessageScope,
@@ -14,6 +15,7 @@ export function reconcileDelegationPrivateMessages(
   lane: CapabilityMessageLane,
   runId: string,
   reportMeta: {
+    traceId?: string;
     delegationId?: string | null;
     task?: string | null;
     announceMessageId?: string | null;
@@ -43,7 +45,7 @@ export function reconcileDelegationPrivateMessages(
   const added = [...reconciled.added];
   if (announceMessage) {
     const announceMessageId = announceMessage.id!;
-    added.push(new DelegationAnnounceMessage({
+    added.push(setAgentMessageMetadata(new DelegationAnnounceMessage({
       id: `delegation-announce:${runId}:${delegationId}:${announceMessageId}`,
       sourceLane: lane,
       delegationId,
@@ -52,7 +54,7 @@ export function reconcileDelegationPrivateMessages(
       task: reportMeta.task ?? null,
       result: readMessageText(announceMessage),
       createdAt: readAgentMessageCreatedAt(announceMessage) ?? new Date().toISOString(),
-    }));
+    }), { traceId: reportMeta.traceId }));
   }
   return [...reconciled.removed, ...added];
 }

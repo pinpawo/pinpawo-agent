@@ -1,3 +1,5 @@
+import { HumanMessage } from '@langchain/core/messages';
+import { getAgentMessageLane, getAgentMessageRunId, setAgentMessageMetadata } from '../../../messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { evaluateGuard } from '../../../../guards';
 import { compactOrchestratorMessages } from '../../contextCompaction';
@@ -19,10 +21,15 @@ export function createPrepareNode() {
       config: {},
       position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
     }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
-    if (outcome.kind === 'derive') {
-      return buildRunStateReset();
-    }
-    return applyActiveDelegationTransition(state);
+    const update = outcome.kind === 'derive'
+      ? buildRunStateReset() : applyActiveDelegationTransition(state);
+    const traceId = update.traceId ?? state.traceId;
+    // Resolve resume identity before stamping the fresh user supplement. Never
+    // retag older conversation turns or Capability-private messages.
+    const messages = state.messages.filter((message) => HumanMessage.isInstance(message)
+      && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId)
+      .map((message) => setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
+    return { ...update, messages };
   };
 }
 
@@ -44,15 +51,14 @@ export function createCompactContextNode(params: {
     const compacted = await compactOrchestratorMessages({
       messages: state.messages,
       model: params.config.models.observe ?? params.config.models.act,
-      ...(state.taskActiveDelegation ? {
-        options: {
-          preserveAnnouncesFor: {
-            lane: state.taskActiveDelegation.lane,
-            runId: state.taskActiveDelegation.runId,
-            delegationId: state.taskActiveDelegation.id,
-          },
-        },
-      } : {}),
+      options: {
+        traceId: state.traceId,
+        ...(state.taskActiveDelegation ? { preserveAnnouncesFor: {
+          lane: state.taskActiveDelegation.lane,
+          runId: state.taskActiveDelegation.runId,
+          delegationId: state.taskActiveDelegation.id,
+        } } : {}),
+      },
       runnableConfig,
     });
     if (!compacted.compacted) {

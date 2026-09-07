@@ -18,6 +18,8 @@ export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
   keepMessages?: number;
+  /** Keep the current logical task summary separate from older conversations. */
+  traceId?: string;
   preserveAnnouncesFor?: {
     lane: string;
     runId: string;
@@ -169,16 +171,26 @@ export async function compactOrchestratorMessages(params: {
     return { messages: [], compacted: false, mainMessageCount };
   }
 
-  const summary = await summarizeMessages({
-    model, messages: messagesToSummarize, runnableConfig: params.runnableConfig,
-  });
-
-  const summaryMessage = createContextCompactionMessage(summary, mainMessageCount);
+  const traceId = params.options?.traceId;
+  // At most two summaries: current task and older history. A later compaction
+  // folds older task summaries together, so task boundaries do not accumulate.
+  const groups = traceId ? [
+    messagesToSummarize.filter((message) => getAgentMessageMetadata(message).traceId !== traceId),
+    messagesToSummarize.filter((message) => getAgentMessageMetadata(message).traceId === traceId),
+  ] : [messagesToSummarize];
+  const summaries: BaseMessage[] = [];
+  for (const group of groups) {
+    if (group.length === 0) continue;
+    const summary = await summarizeMessages({ model, messages: group, runnableConfig: params.runnableConfig });
+    const message = createContextCompactionMessage(summary, mainConversationMessages(group).length);
+    if (traceId && group === groups[1]) setAgentMessageMetadata(message, { traceId });
+    summaries.push(message);
+  }
 
   return {
     messages: [
       new RemoveMessage({ id: REMOVE_ALL_MESSAGES }),
-      summaryMessage,
+      ...summaries,
       ...keptMessages,
     ] as BaseMessage[],
     compacted: true,

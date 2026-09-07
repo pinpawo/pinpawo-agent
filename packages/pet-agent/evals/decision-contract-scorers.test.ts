@@ -28,8 +28,9 @@ test('an exhausted boundary plan can continue autonomous work or report a real c
   );
   const results = new Set(exhaustedBoundaryCases.map((testCase) => testCase.expected.result));
   assert.ok(results.has('execute_plan'));
-  assert.ok(results.has('continue_current'));
-  assert.ok(results.has('accept_result'));
+  assert.ok(results.has('review_current'));
+  const reviews = capabilityPlanningBasicsDataset.cases.filter(({ expected }) => expected.result === 'review_current');
+  assert.deepEqual(new Set(reviews.map(({ expected }) => expected.completed)), new Set([true, false]));
   assert.ok(results.has('reply'));
   assert.ok(results.has('reply'));
 });

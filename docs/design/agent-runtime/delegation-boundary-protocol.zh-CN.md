@@ -27,6 +27,10 @@ Supervisor 每次重新读取 root 的当前上下文，但当前事实变化不
 
 文中的“采纳”指 Supervisor 判断**当前 delegation 的任务已经满足要求**，对应现有的验收效果。Supervisor 可以综合多次尝试的结果作判断；这里不增加逐条选择消息、部分验收或按 Announce 分配完成状态的协议。
 
+## 提示词与工具的分工
+
+system prompt 只说明 Supervisor 的职责、当前阶段、goal 与当前 task 的关系，以及直接询问用户的原则。工具 description 和参数 schema 说明验收标准、reason、reply、后续计划和调用结束效果；确定性的参数、批次和状态合法性由代码校验。不增加先判断再控制的两次调用，也不增加第二个模型复核 completed。
+
 ## 一轮完整交互
 
 ```text
@@ -54,6 +58,8 @@ root 当前上下文 + goal
 | 当前 delegation 的身份和任务 | 无活动 delegation | 有，用于关联 main 中的结果；不另外传结果正文 |
 
 “看着 root messages”指读取 `root.messages` 的主对话投影。当前存储中还可能包含私有通道，不能直接把原始数组全部交给 Supervisor。main 是对话与执行证据的唯一输入通路；goal、固定计划和当前 delegation 关联仍是 root 持有的编排状态。Boundary 不再读取 Capability 私有范围，也不再附带 `announceAttempts` 或另一份结果正文。
+
+Boundary 只接收当前逻辑任务的 main 消息，按已有 `traceId` 选择；不按物理 `runId` 截断。用户续接沿用 traceId，因此同一目标下前序 delegation 的交付、当前 delegation 的全部尝试、Supervisor 提问和用户补充均可保留，其他任务的历史不进入 Boundary。Entry 仍可读取全对话以确定目标。root 在恢复身份后为本轮用户消息记录 traceId，并为普通回复和 main Announce 记录相同归属。
 
 Supervisor 的探索、工具调用和中间文本只属于本次调用；Capability 的私有 Human/AI/Tool 历史留在自身委派范围。跨界传递的是任务事实和结果证据。
 
@@ -84,20 +90,19 @@ Supervisor 结合 goal 和 root 当前主对话判断：
 
 root 图中的 `runSupervisor` 节点基于 main messages 调用 Supervisor agent 并取得决定。调用内工具历史是临时的，正式状态仍由 root 持有。Supervisor 只返回已有的控制提案或 `{ reply }`；发生未处理异常时直接抛出。沿用已有 Capability 披露返回字段传递 Entry 准备的信息，Boundary 保持该执行范围不变。
 
-工具负责表达操作，普通文本负责表达回复。沿用现有三个控制工具即可：
+工具负责表达操作，普通文本负责表达回复。沿用现有两个控制工具即可：
 
 | 返回方式 | 适用时机 | root 落实的效果 |
 | --- | --- | --- |
 | `submit_plan({ tasks })` | Entry 建立或恢复计划 | 无活动 delegation 时提交计划并派发第一项；不承担验收 |
-| `continue_current({ feedback?, remainingPlan? })` | Boundary 中当前任务还需完善，或收到用户补充后继续 | 保留同一个 delegation、任务和私有历史，携带反馈继续；默认保留后续计划，用户确认修改时可同时更新后续计划 |
-| `accept_result({ reply?, remainingPlan? })` | Boundary 验收当前任务 | 记录验收；默认沿既定后续计划推进。提供 reply 时输出回复并结束本轮，保留后续计划；没有后续任务时必须提供最终回复。remainingPlan 省略则保留，提供时仅允许用户确认的调整 |
+| `review_current({ completed, reason, reply?, remainingPlan? })` | Boundary 判断当前 delegation 是否交付 | true 验收并推进既定下一项，或提供 reply 结束本轮；false 保留当前 delegation，将 reason 作为继续反馈。remainingPlan 仅用于用户确认的未来计划变更 |
 | 普通最终文本 | Entry 或 Boundary 中直接回复用户 | 原文输出，保留已有未完成任务和剩余计划，不隐式验收或派发 |
 
-三个工具分别表达建立计划、继续当前任务和验收结果。移除 `acceptCurrent`，验收只通过 `accept_result` 表达；root 不根据 Entry/Boundary 自动猜测是否验收。当前任务的用户取消或替换沿已有任务控制入口处理，不隐藏在计划工具的布尔参数中。
+Entry 建立计划，Boundary 通过一个工具明确填写当前 delegation 是否完成及原因。`completed` 只表示当前 task 的验收，不表示整个 goal 完成，也不表示取消或替换。true 的 reason 说明交付证据；false 的 reason 必须指出当前 task 范围内的具体缺口。后续计划尚未完成不能作为 false 的理由。用户取消或替换当前任务继续沿既有任务控制入口处理。
 
 沿用这些字段不等于保留模型任意重写计划的权限。正常推进必须对应既定下一项和剩余项；用户确认的调整依据保存在 root 主对话中，不新增审批工具、确认标记或另一套变更协议。root 校验计划推进的结构一致性，Supervisor 根据用户表达判断获准变更的范围。
 
-`continue_current.remainingPlan` 只表示当前 delegation 之后的任务，不包含当前任务。省略时保留原后续计划；提供数组时，以用户确认后的任务列表替换后续计划；提供 `[]` 表示用户确认取消全部后续项。空数组不代表当前 delegation 完成或被取消。root 在同一次状态更新中落实后续计划与继续反馈，随后恢复同一个 delegation，不新增 `update_plan` 工具。
+`review_current.remainingPlan` 只表示当前 delegation 之后的任务，不包含当前任务。省略时保留原后续计划；提供数组时，以用户确认后的任务列表替换后续计划；提供 `[]` 表示用户确认取消全部后续项。空数组不代表当前 delegation 完成或被取消。root 在同一次状态更新中落实后续计划与继续反馈，随后恢复同一个 delegation，不新增 `update_plan` 工具。
 
 一次 Supervisor 调用最多返回一个控制决定。验收和派发、验收和回复分别由一个提案一起表达，root 一次性落实相关状态变化。探索工具的中间返回不会被误认为最终决定。
 
@@ -105,9 +110,9 @@ root 图中的 `runSupervisor` 节点基于 main messages 调用 Supervisor agen
 
 普通文本结束的是**本轮运行**，不改变已有任务是否验收。比如“请提供测试账号”会保留当前 delegation；即使文本误写成“已经全部完成”，root 也不会据此验收。
 
-当前任务已经完成、但需要询问独立的下一步时，应使用 `accept_result` 同时提供问题和既定剩余计划。在 Boundary 判断整体目标完成且计划确无剩余项时，同样使用 `accept_result`，并给出空的剩余计划；Entry 无活动任务时，直接自然回复即可。不能用“goal 已完成”的判断跳过尚未完成的计划项；认为这些项可以取消时先问用户。
+completed=false 不允许同时提供 reply；需要用户信息时直接自然回复。当前任务已经完成、但需要询问独立的下一步时，应使用 `review_current(completed=true)` 同时提供问题和既定剩余计划。当前 task 已完成且计划确无剩余项时，同样使用 `review_current(completed=true)`，并给出空的剩余计划；Entry 无活动任务时，直接自然回复即可。不能用“goal 已完成”的判断跳过尚未完成的计划项；认为这些项可以取消时先问用户。
 
-两条路径最终都由已有 `answer` 节点输出一条 assistant 回复，并完成本轮清理，不再让模型改写或让 root 分类判断正文。与控制调用同时出现的普通文本不构成第二份回复；控制路径以提案为准，用户回复取自 `accept_result.reply`。
+两条路径最终都由已有 `answer` 节点输出一条 assistant 回复，并完成本轮清理，不再让模型改写或让 root 分类判断正文。与控制调用同时出现的普通文本不构成第二份回复；控制路径以提案为准，用户回复取自 `review_current.reply`。
 
 `answer` 是当前实现出口。后续统一由 Finalizer node 处理收尾；其职责和实现等 Supervisor 优化完成后再设计，本方案不把现有节点固定为最终架构。
 
@@ -115,7 +120,7 @@ root 图中的 `runSupervisor` 节点基于 main messages 调用 Supervisor agen
 
 ### Supervisor 直接问用户
 
-缺少条件、执行结果与 goal 不对齐且现有任务无法补足、或建议修改计划时，由 Supervisor 节点直接生成问题，说明需要用户补充或决定什么。当前任务未完成时走普通回复；可采纳当前任务时通过 `accept_result` 一并回复。无需再安排一个模型节点替它组织问题。
+缺少条件、执行结果与 goal 不对齐且现有任务无法补足、或建议修改计划时，由 Supervisor 节点直接生成问题，说明需要用户补充或决定什么。当前任务未完成时走普通回复；可采纳当前任务时通过 `review_current(completed=true)` 一并回复。无需再安排一个模型节点替它组织问题。
 
 最简单的交互是：展示问题并保存未完成工作，用户在该工作的继续入口回答，然后以已有 `resume_active` 语义进入下一次调用。回答进入 root 主对话，Supervisor 按最新输入继续判断；补充条件不等于同意改计划，用户未同意时不能改派。界面应把继续原工作的入口展示出来，不要求用户知道内部命令，也不能把该入口的回答当作 `supersede_active`。
 
@@ -159,6 +164,8 @@ root 校验返回值的结构、模式、Capability 范围、活动 delegation �
 
 每次压缩沿用两条保留规则：保留最近若干条消息，并完整保留当前未完成 delegation 的所有 Announce，即使它们已落在最近消息范围之外。利用已有活动任务与 Announce metadata 中的身份关联判断即可；其余旧历史正常压缩。因此续接未完成任务也可以检查并执行压缩，不必跳过整个压缩步骤。
 
+压缩沿用现有摘要消息，按 traceId 将当前任务与其他历史分开摘要，最多两条；后续压缩继续合并各自历史。当前任务摘要保留 traceId，Boundary 只读这一条及保留的当前任务消息，避免混入旧任务或丢掉本任务先前已验收的结果。
+
 Announce 进入 main 后，保护条件应依据它已有的委派身份，而不是是否带有私有 lane 标签。需要验收的多次结果保留原文，不用摘要替代。即使以后调整压缩水位或旧历史保留范围，这条规则仍然成立，不增加保护状态、额外结果副本或 fallback。Capability 内部私有上下文的维护仍由 subagent 自己负责。
 
 ## 异常由谁处理
@@ -184,7 +191,7 @@ Supervisor 是 root 节点内部等待完成的一次 agent 调用。内部调�
 
 ### 控制工具使用 returnDirect
 
-三个控制工具在注册时设置 `returnDirect: true`，工具实现直接返回只包含 `update` 的 LangGraph `Command`：
+两个控制工具在注册时设置 `returnDirect: true`，工具实现直接返回只包含 `update` 的 LangGraph `Command`：
 
 ```ts
 // proposal 是已有的业务提案；工具注册时设置 returnDirect: true。
@@ -222,7 +229,7 @@ return new Command({
 
 ## 本轮结束与后续恢复
 
-自然回复或 `accept_result` 的回复都结束当前 root run，不创建 `interrupt`，也不把内部 Supervisor 调用留在挂起状态。
+自然回复或 `review_current(completed=true)` 的回复都结束当前 root run，不创建 `interrupt`，也不把内部 Supervisor 调用留在挂起状态。
 
 有未完成工作时，使用已有续接快照保存必要的 goal、活动 delegation 关联和剩余计划，清理本轮 Supervisor 会话。后续显式继续时，根据最新 root 上下文初始化新会话：活动 delegation 收到用户补充或有结果可评估时先进入 Boundary；没有补充也没有结果时沿现有机制恢复执行；只有剩余计划时进入 Entry。没有 delegation 和剩余计划的提问则沿普通对话回到 `entryAnswer`。Review 等中断仍由已有机制处理，不统一改成这种普通回复路径。
 
@@ -239,9 +246,9 @@ root 检查点负责已提交的状态变化和待执行节点。恢复已提交
 1. Entry 看现有 root 上下文，提交“修复并验证”和“准备发布说明”的计划。
 2. 第一次结果只有补丁、没有测试证据，先作为 Announce 进入 main。Boundary 据此让同一 delegation 继续补测；root 保留它的执行上下文。
 3. 下一次结果包含测试通过证据，追加到 main。Boundary 综合 main 中两次完整结果，采纳当前任务并派发发布说明；root 记录验收，不重复发布结果。
-4. 发布说明完成后，Boundary 根据更新后的主对话采纳结果，通过 `accept_result` 输出最终回复和空计划。
+4. 发布说明完成后，Boundary 根据更新后的主对话采纳结果，通过 `review_current(completed=true)` 输出最终回复和空计划。
 
-如果测试工具返回可处理的参数错误，Capability LLM 消化后继续；如果检查点或协议状态损坏，运行停止，由用户决定下一步。如果后续任务需要用户提供发布目的地，则在当前任务可采纳时使用 `accept_result` 携带问题和剩余计划；当前任务本身尚未完成时，普通回复保留它。两种情况不混成一个“已完成”标记。
+如果测试工具返回可处理的参数错误，Capability LLM 消化后继续；如果检查点或协议状态损坏，运行停止，由用户决定下一步。如果后续任务需要用户提供发布目的地，则在当前任务可采纳时使用 `review_current(completed=true)` 携带问题和剩余计划；当前任务本身尚未完成时，普通回复保留它。两种情况不混成一个“已完成”标记。
 
 如果执行中发现必须先升级依赖才能继续，且这超出既定任务范围，Supervisor 直接说明原因并询问是否调整计划。用户只提供测试账号时，仍按原计划执行；明确同意增加升级任务后，后续调用才应用该调整。补测、修正同一任务的实现细节不属于这类计划变更。
 
@@ -269,7 +276,7 @@ root 检查点负责已提交的状态变化和待执行节点。恢复已提交
 
 ## 实施顺序与遗留清理
 
-先固定每轮输入、返回值和 root 效果，再替换内部实现。沿用三个控制工具和现有 runner 接口，不同时重做会话存储、完整 Finalizer 或中断体系。
+先固定每轮输入、返回值和 root 效果，再替换内部实现。沿用两个控制工具和现有 runner 接口，不同时重做会话存储、完整 Finalizer 或中断体系。
 
 | 整理对象 | 处理方向 |
 | --- | --- |
@@ -284,11 +291,11 @@ root 检查点负责已提交的状态变化和待执行节点。恢复已提交
 
 ### 当前实现状态
 
-2026-09-07：实现已按本设计收敛。Entry 仅用 `submit_plan`；Boundary 用 `continue_current` 或 `accept_result`。三个控制工具直接返回 `Command({ update })` 并设置 `returnDirect`，root 的 `runSupervisor` 节点应用确定性状态变化。自然回复由当前 answer 节点原文输出一次，统一 Finalizer 仍留待后续。
+2026-09-07：实现已按本设计收敛。Entry 仅用 `submit_plan`；Boundary 用 `review_current`。两个控制工具直接返回 `Command({ update })` 并设置 `returnDirect`，root 的 `runSupervisor` 节点应用确定性状态变化。自然回复由当前 answer 节点原文输出一次，统一 Finalizer 仍留待后续。
 
 Announce 在验收前进入 main；Supervisor 不再接收独立结果列表或查询私有执行历史。验收以原消息 id 更新元数据；压缩仅在 run 入口发生，按已有 Announce 身份保留当前未完成任务的全部尝试。
 
-用户补充先进入 main，再由 Supervisor 判断。`continue_current.remainingPlan` 支持经用户确认的未来计划调整；执行循环禁止修改既定计划和继续披露。TUI 根据未完成计划提供继续入口，保留已有退出当前任务操作。
+用户补充先进入 main，再由 Supervisor 判断。`review_current.remainingPlan` 支持经用户确认的未来计划调整；执行循环禁止修改既定计划和继续披露。TUI 根据未完成计划提供继续入口，保留已有退出当前任务操作。
 
 删除了 completionReason 协议、旧终结命令、answer 二次生成、控制工具 JSON 往返，以及披露／压缩失败后的丢弃重试。模型原生并行选项未强行加入未知兼容接口；批次合法性由执行前校验保证。
 

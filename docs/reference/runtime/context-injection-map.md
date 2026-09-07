@@ -141,7 +141,7 @@ Sources:
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation with typed result facts | current canonical main conversation including unaccepted Announces |
 | session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
-| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `continue_current`, `accept_result`; new-run user input may require discovery before execution resumes |
+| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `review_current`; new-run user input may require discovery before execution resumes |
 
 Entry initializes a clean run-scoped Supervisor session. Root
 publishes normal Capability results directly into main before Boundary, including
@@ -156,7 +156,7 @@ before changing task content, scope, or order. Task progress does not violate
 `RUN-STABLE`. Plan prose is data, not an instruction override or evidence of
 completion. The tail is the established plan, stable until user confirmation.
 
-`continue_current({ feedback?, remainingPlan? })` can apply a
+`review_current({ completed: false, reason, remainingPlan? })` can apply a
 user-confirmed future-plan change while retaining and continuing the active
 delegation. Omission retains the existing tail; an array replaces only future
 tasks, and a confirmed empty array clears those tasks without ending the current
@@ -243,7 +243,7 @@ limits and incompatible checkpoints have deterministic notices. An empty reply
 without a runtime stop is a protocol error, not a request for a fallback answer.
 
 Natural Supervisor replies retain the active delegation and remaining plan.
-`accept_result({ reply?, remainingPlan? })` accepts the active task before terminal
+`review_current({ completed: true, reason, reply?, remainingPlan? })` accepts the active task before terminal
 cleanup and saves any remaining plan without dispatching it. The existing
 continuation snapshot also supports a remaining plan with no active delegation;
 explicit resume then starts a fresh Entry session.
@@ -344,4 +344,8 @@ ephemeral; Capability's private context maintenance remains subagent-owned.
    all Announces for the current unfinished delegation by existing identity,
    independently of the recent-message suffix.
 
-Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+
+Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
+
+The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Boundary has one review_current tool: completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.

@@ -163,7 +163,7 @@ class ScriptedSupervisorModel extends BaseChatModel {
       const parameters = entry.function?.parameters;
       const kind = name === 'submit_plan'
         ? 'plan'
-        : name === 'accept_result' ? 'advance'
+        : name === 'review_current' ? 'advance'
         : name === 'report_unavailable' ? 'unavailable' : null;
       if (name && kind) {
         this.structuredOutputToolNames.set(kind, name);
@@ -241,7 +241,7 @@ class ScriptedSupervisorModel extends BaseChatModel {
           args: response.structuredOutput.kind === 'unavailable'
             ? {}
             : response.structuredOutput.kind === 'advance'
-              ? { remainingPlan: response.structuredOutput.args.tasks } : response.structuredOutput.args,
+              ? { completed: true, reason: 'Current task delivery is evidenced.', remainingPlan: response.structuredOutput.args.tasks } : response.structuredOutput.args,
         }]
       : undefined;
     const message = new AIMessage({
@@ -440,8 +440,8 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   }, {
     toolCalls: [{
       id: 'done-a',
-      name: 'accept_result',
-      args: { reply: '已完成。', remainingPlan: [] },
+      name: 'review_current',
+      args: { completed: true, reason: 'Current task delivery is evidenced.',  reply: '已完成。', remainingPlan: [] },
     }],
   }, { content: '当前没有可用的 Capability。' }, { content: '当前没有可用的 Capability。' }]);
   const supervisor = createRunSupervisorAgent({ model });
@@ -506,8 +506,8 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     messages: [...entryA.messages, ...boundaryA.messages],
   };
   const boundaryState = await graph.invoke({ input: boundaryInput }, config);
-  assert.deepEqual(commandOnly(boundaryState.command), {
-    action: 'accept_result',
+  assert.deepEqual(commandOnly(boundaryState.command), { completed: true, reason: 'Current task delivery is evidenced.',
+    action: 'review_current',
     reply: '已完成。',
     remainingPlan: [],
   });
@@ -532,8 +532,8 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   };
 
   const duplicateState = await graph.invoke(null, config);
-  assert.deepEqual(commandOnly(duplicateState.command), {
-    action: 'accept_result',
+  assert.deepEqual(commandOnly(duplicateState.command), { completed: true, reason: 'Current task delivery is evidenced.',
+    action: 'review_current',
     reply: '已完成。',
     remainingPlan: [],
   });
@@ -549,8 +549,8 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     .addEdge('supervisor', END)
     .compile({ checkpointer });
   const restartedState = await restartedGraph.invoke(null, config);
-  assert.deepEqual(commandOnly(restartedState.command), {
-    action: 'accept_result',
+  assert.deepEqual(commandOnly(restartedState.command), { completed: true, reason: 'Current task delivery is evidenced.',
+    action: 'review_current',
     reply: '已完成。',
     remainingPlan: [],
   });
@@ -665,7 +665,7 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
   ]);
   assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), true);
-  assert.equal(model.boundToolNameHistory[0]?.includes('continue_current'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('review_current'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('complete_goal'), false);
   assert.equal(model.boundToolNameHistory[1]?.includes(
@@ -1020,8 +1020,8 @@ test('boundary projects the current lane announce into the standard model-visibl
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'continue-current',
-      name: 'continue_current',
-      args: {},
+      name: 'review_current',
+      args: { completed: false, reason: 'Complete the missing current-task work.', },
     }],
   }]);
 
@@ -1379,12 +1379,12 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
     }),
   );
 
-  assert.deepEqual(commandOnly(result), {
+  assert.deepEqual(commandOnly(result), { completed: true, reason: 'Current task delivery is evidenced.',
     remainingPlan: [{
       capability: 'document_writer',
       task: 'Update the README with the accepted issue status.',
     }],
-    action: 'accept_result',
+    action: 'review_current',
 
   });
   const firstSearchResult = model.invocations[1]?.find((message) =>
@@ -1436,8 +1436,8 @@ test('a Boundary search does not redisclose its seeded active General', async (t
   }, {
     toolCalls: [{
       id: 'continue-active-default',
-      name: 'continue_current',
-      args: {},
+      name: 'review_current',
+      args: { completed: false, reason: 'Complete the missing current-task work.', },
     }],
   }]);
 
@@ -1454,8 +1454,8 @@ test('a Boundary search does not redisclose its seeded active General', async (t
     }),
   );
 
-  assert.deepEqual(commandOnly(result), {
-    action: 'continue_current',
+  assert.deepEqual(commandOnly(result), { completed: false, reason: 'Complete the missing current-task work.',
+    action: 'review_current',
   });
   const searchResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
@@ -2092,12 +2092,12 @@ test('a boundary with an exhausted plan can still submit newly required work', a
 
   // An empty remaining plan is not by itself a terminal state: the latest
   // result may still require follow-up work.
-  assert.deepEqual(commandOnly(result), {
+  assert.deepEqual(commandOnly(result), { completed: true, reason: 'Current task delivery is evidenced.',
     remainingPlan: [{
       capability: 'general',
       task: 'Update the README section for issue #587.',
     }],
-    action: 'accept_result',
+    action: 'review_current',
 
   });
 });
@@ -2118,8 +2118,8 @@ test('boundary Supervisor continues without replacing the active task', async (t
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'continue-current',
-      name: 'continue_current',
-      args: {},
+      name: 'review_current',
+      args: { completed: false, reason: 'Complete the missing current-task work.', },
     }],
   }]);
 
@@ -2139,8 +2139,8 @@ test('boundary Supervisor continues without replacing the active task', async (t
     }),
   );
 
-  assert.deepEqual(commandOnly(result), {
-    action: 'continue_current',
+  assert.deepEqual(commandOnly(result), { completed: false, reason: 'Complete the missing current-task work.',
+    action: 'review_current',
   });
   assert.equal(model.invocations.length, 1);
 });
@@ -2243,12 +2243,11 @@ test('boundary Supervisor exposes only boundary command actions', async (t) => {
     }),
   );
 
-  assert.deepEqual(commandOnly(result), { action: 'accept_result', remainingPlan: tasks, });
+  assert.deepEqual(commandOnly(result), { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', remainingPlan: tasks, });
   assert.equal(model.invocations.length, 1);
   assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), false);
-  assert.equal(model.boundToolNameHistory[0]?.includes('continue_current'), true);
+  assert.equal(model.boundToolNameHistory[0]?.includes('review_current'), true);
   assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
-  assert.equal(model.boundToolNameHistory[0]?.includes('accept_result'), true);
 });
 
 test('oversized discovery is reported as supervisor_discovery_limit_reached', async (t) => {
@@ -2447,7 +2446,7 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
   const workspace = await createWorkspace(t, {});
   const model = new ScriptedSupervisorModel([
     { content: 'No execution available.' },
-    { toolCalls: [{ id: 'continue', name: 'continue_current', args: {} }] },
+    { toolCalls: [{ id: 'continue', name: 'review_current', args: { completed: false, reason: 'Complete the missing current-task work.', } }] },
   ]);
   const runner = createRunSupervisorAgent({ model });
   const first = [{ id: 'host:pet', content: randomUUID() }];

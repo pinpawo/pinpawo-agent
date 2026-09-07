@@ -27,6 +27,7 @@ function exact(
 export function scoreCapabilityPlanning(
   output: {
     result: string;
+    completed?: boolean;
     nextTask?: string | null;
     capabilityName?: string | null;
     remainingPlan: Array<{ capability: string; task: string }>;
@@ -40,6 +41,10 @@ export function scoreCapabilityPlanning(
       output.result,
       expected.result,
     ),
+    ...(expected.completed === undefined ? [] : [exact(
+      'delegation_completion_correct', 'Judge completion of the current delegation.',
+      output.completed, expected.completed,
+    )]),
     ...(expected.capabilityName === undefined
       ? []
       : [exact(

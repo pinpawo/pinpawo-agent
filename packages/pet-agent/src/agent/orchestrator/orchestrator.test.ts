@@ -292,8 +292,8 @@ function createQueuedPlannerRunner(
       }
       if (input.mode === 'boundary' && typeof planning.outcome === 'string') {
         if (planning.outcome === 'goal_done') {
-          return {
-            action: 'accept_result',
+          return { completed: true, reason: 'Current task delivery is evidenced.',
+            action: 'review_current',
             reply: '已完成。',
             remainingPlan: [],
           };
@@ -308,8 +308,9 @@ function createQueuedPlannerRunner(
         if (planning.outcome === 'continue') {
           const active = input.activeDelegation;
           if (!active) throw new Error('scripted continue requires active delegation');
-          return {
-            action: 'continue_current',
+          return { completed: false, reason: typeof planning.gap_note === 'string' && planning.gap_note.trim()
+              ? planning.gap_note : 'Complete the missing current-task work.',
+            action: 'review_current',
           };
         }
         if (planning.outcome !== 'task_done') {
@@ -332,7 +333,7 @@ function createQueuedPlannerRunner(
         (await nextStructuredValue()).capabilityName ?? '',
       );
       return {
-        ...(input.mode === 'entry' ? { action: 'execute_plan' as const } : { action: 'accept_result' as const }),
+        ...(input.mode === 'entry' ? { action: 'execute_plan' as const } : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' as const }),
         [input.mode === 'entry' ? 'tasks' : 'remainingPlan']: [
           {
             capability: capabilityName,
@@ -499,18 +500,18 @@ test('execution boundary routes through runSupervisor before the next task', asy
         };
       }
       if (supervisorInputs.length === 3) {
-        return {
-          action: 'accept_result',
+        return { completed: true, reason: 'Current task delivery is evidenced.',
+          action: 'review_current',
           reply: '已完成。',
           remainingPlan: [],
         };
       }
-      return {
+      return { completed: true, reason: 'Current task delivery is evidenced.',
         remainingPlan: [{
           capability: 'explore',
           task: '检索本地实现与 git log，判断需求点是否已覆盖。',
         }],
-        action: 'accept_result',
+        action: 'review_current',
 
       };
     },
@@ -601,7 +602,7 @@ test('a completed single-task goal is accepted by the boundary Supervisor', asyn
       supervisorInputs.push(input);
       return input.mode === 'entry'
         ? { action: 'execute_plan',  tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] }
-        : { action: 'accept_result', reply: '已完成。', remainingPlan: [] };
+        : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: '已完成。', remainingPlan: [] };
     },
   };
   const graph = createOrchestratorGraph({
@@ -659,18 +660,18 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
         };
       }
       if (supervisorInputs.length === 3) {
-        return {
-          action: 'accept_result',
+        return { completed: true, reason: 'Current task delivery is evidenced.',
+          action: 'review_current',
           reply: '已完成。',
           remainingPlan: [],
         };
       }
-      return {
+      return { completed: true, reason: 'Current task delivery is evidenced.',
         remainingPlan: [{
           capability: 'explore',
           task: '检索本地实现与 git log。',
         }],
-        action: 'accept_result',
+        action: 'review_current',
 
       };
     },
@@ -742,8 +743,8 @@ test('Supervisor return routes bounded facts through the answer node', async () 
     runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
-          return {
-            action: 'accept_result',
+          return { completed: true, reason: 'Current task delivery is evidenced.',
+            action: 'review_current',
             reply: '已完成。',
             remainingPlan: [],
           };
@@ -1042,11 +1043,11 @@ test('user supplement without result evidence enters Supervisor before executing
         plannerCalls += 1;
         if (plannerCalls === 1) {
           assert.equal(announces(supervisorInput).length, 0);
-          return { action: 'continue_current' };
+          return { completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' };
         }
         observedSessionRunId = supervisorInput.supervisorSession.runId;
-        return {
-          action: 'accept_result',
+        return { completed: true, reason: 'Current task delivery is evidenced.',
+          action: 'review_current',
           reply: '已完成。',
           remainingPlan: [],
         };
@@ -1249,8 +1250,8 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
     runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
-          return {
-            action: 'accept_result',
+          return { completed: true, reason: 'Current task delivery is evidenced.',
+            action: 'review_current',
             reply: '已完成。',
             remainingPlan: [],
           };
@@ -1309,8 +1310,8 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     runSupervisorRunner: {
       async invoke(input) {
         supervisorInput = input;
-        return {
-          action: 'accept_result',
+        return { completed: true, reason: 'Current task delivery is evidenced.',
+          action: 'review_current',
           reply: '已完成。',
           remainingPlan: [],
         };
@@ -1335,7 +1336,7 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
     task: '读取文件并运行 lint',
     result: currentAnnounceText,
   });
-  input.messages.push(currentAnnounce);
+  input.messages.push(setAgentMessageMetadata(currentAnnounce, { traceId: input.traceId }));
   input.runDelegationSummaries = [{
     id: 'task-1',
     lane: 'capability:general',
@@ -1593,7 +1594,7 @@ test('capability errors retain the active delegation and lane without a handoff'
         sleep: 0,
       }),
     },
-    runSupervisorRunner: { invoke: async () => ({ action: 'continue_current' }) },
+    runSupervisorRunner: { invoke: async () => ({ completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' }) },
     checkpoint: new MemorySaver(),
   });
   const config = {
@@ -1728,8 +1729,8 @@ test('limit-reached progress announce lets model choose the same capability dele
       async invoke(input) {
         plannerCallCount += 1;
         supervisorInput = input;
-        return {
-          action: 'continue_current',
+        return { completed: false, reason: 'Complete the missing current-task work.',
+          action: 'review_current',
         };
       },
     },
@@ -4819,7 +4820,7 @@ test('execution without a deliverable preserves ownership and never enters Super
   assert.equal(saved.messages.some((message) => getDelegationAnnounce(message)), false);
 });
 
-test('Supervisor continue_current action can re-enter main and finalize handoff', async () => {
+test('Supervisor review_current action can re-enter main and finalize handoff', async () => {
   const announceText = '已完成第一批抓取，接下来继续。';
   let routeCallCount = 0;
   const routeModel = {
@@ -5013,11 +5014,11 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
         routeCallCount += 1;
         supervisorInputs.push(supervisorInput);
         return routeCallCount <= 2
-          ? {
-            action: 'continue_current',
+          ? { completed: false, reason: 'Complete the missing current-task work.',
+            action: 'review_current',
           }
-          : {
-            action: 'accept_result',
+          : { completed: true, reason: 'Current task delivery is evidenced.',
+            action: 'review_current',
             reply: '已完成。',
             remainingPlan: [],
           };
@@ -5060,7 +5061,7 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
     task: activeDelegation.task,
     result: '进度更新：已完成一部分，继续保留。',
   });
-  input.messages.push(initialAnnounce);
+  input.messages.push(setAgentMessageMetadata(initialAnnounce, { traceId: activeDelegation.traceId }));
 
   const state = await graph.invoke(input, {
     configurable: {
@@ -5390,6 +5391,7 @@ test('limit-reached subagent announce reaches the Supervisor boundary input', as
     {
       delegationId,
       task: '继续探查 repo',
+      traceId: baseInput.traceId,
       announceMessageId: result.announceMessageId,
     },
   );
@@ -6192,7 +6194,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
     task: activeDelegation.task,
     result: activeDelegation.resultPreview ?? '',
   });
-  oldMessages.push(priorAnnounce);
+  oldMessages.push(setAgentMessageMetadata(priorAnnounce, { traceId: activeDelegation.traceId }));
   const supervisorInputs: RunSupervisorInput[] = [];
   let executedDelegation: { delegationId: string; runId: string } | null = null;
   const actModel = {
@@ -6226,11 +6228,11 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
       async invoke(input) {
         supervisorInputs.push(input);
         return supervisorInputs.length === 1
-          ? {
-            action: 'continue_current',
+          ? { completed: false, reason: 'Complete the missing current-task work.',
+            action: 'review_current',
           }
-          : {
-            action: 'accept_result',
+          : { completed: true, reason: 'Current task delivery is evidenced.',
+            action: 'review_current',
             reply: '已完成。',
             remainingPlan: [],
           };
@@ -6504,7 +6506,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   }
 });
 
-test('continue_current projects a continuation briefing without rewriting the task', async () => {
+test('review_current projects a continuation briefing without rewriting the task', async () => {
   let structuredCallCount = 0;
   const actModel = {
     invoke: async () => new AIMessage('issue 已确认关闭。'),
@@ -6556,7 +6558,7 @@ test('continue_current projects a continuation briefing without rewriting the ta
     continuation,
     /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/,
   );
-  assert.doesNotMatch(continuation, /<guidance>/);
+  assert.match(continuation, /未验证 issue 状态，请确认已关闭。/);
 
   // The continuation run keeps the same delegation private messages and reads the
   // continuation briefing as the latest message.
@@ -6578,7 +6580,7 @@ test('Capability node inherits root system context into its executor without sec
       async invoke(input) {
         return input.mode === 'entry'
           ? { action: 'execute_plan', tasks: [{ capability: 'explore', task: 'Inspect the request.' }] }
-          : { action: 'accept_result', reply: 'Done.' };
+          : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Done.' };
       },
     },
   });
@@ -6644,7 +6646,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
     runSupervisorRunner: { async invoke(input) {
       return input.mode === 'entry'
         ? { action: 'execute_plan', tasks: [{ capability: 'inspect', task: 'Inspect context.' }] }
-        : { action: 'accept_result', reply: 'Done.' };
+        : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Done.' };
     } },
   });
   const cases = Array.from({ length: 3 }, () => ({

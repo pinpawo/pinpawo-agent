@@ -83,7 +83,7 @@ test('resume planning represents absent execution evidence without a synthetic a
   assert.ok(testCase);
   assert.equal(testCase.input.mode, 'boundary');
   assert.equal(testCase.input.latestAnnounce, undefined);
-  assert.equal(testCase.expected.result, 'continue_current');
+  assert.equal(testCase.expected.result, 'review_current');
 });
 
 test('entry planning distinguishes verifiable facts from user-owned choices', () => {

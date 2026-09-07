@@ -5,36 +5,35 @@ const context = { mode: 'boundary' as const, activeDelegation: {
   delegationId: 'd1', runId: 'r1', capability: 'general', task: 'Verify the change.',
 }, allowedCapabilityNames: ['general'] };
 const tasks = [{ capability: 'general', task: 'Publish the change.' }];
+const review = { action: 'review_current', completed: true, reason: 'Verification passed.' };
 
-test('entry cannot accept or continue an absent delegation', () => {
+test('Entry only submits a plan and Boundary only reviews an active delegation', () => {
   const entry = { ...context, mode: 'entry' as const, activeDelegation: null };
-  for (const command of [
-    { action: 'accept_result', remainingPlan: tasks, },
-    { action: 'continue_current' },
-    { action: 'accept_result', reply: 'Done.', remainingPlan: [] },
-  ]) assert.throws(() => parseSupervisorCommand(command, entry));
-  assert.equal(parseSupervisorCommand({ action: 'execute_plan', tasks, }, entry).action, 'execute_plan');
-});
-
-test('Boundary accepts or continues but cannot submit a replacement plan', () => {
-  assert.throws(() => parseSupervisorCommand({ action: 'execute_plan', tasks }, context));
-  for (const action of ['accept_result', 'continue_current']) {
-    assert.deepEqual(parseSupervisorCommand({ action, remainingPlan: tasks }, context), { action, remainingPlan: tasks });
+  for (const completed of [true, false]) {
+    const command = { ...review, completed, remainingPlan: tasks };
+    assert.throws(() => parseSupervisorCommand(command, entry));
+    assert.throws(() => parseSupervisorCommand(command, { ...context, activeDelegation: null }));
+    assert.deepEqual(parseSupervisorCommand(command, context), command);
   }
+  assert.equal(parseSupervisorCommand({ action: 'execute_plan', tasks }, entry).action, 'execute_plan');
+  assert.throws(() => parseSupervisorCommand({ action: 'execute_plan', tasks }, context));
 });
 
-test('invalid combinations cannot dispatch, change continuation tasks, or reference unavailable capabilities', () => {
+test('review requires an explicit boolean and concrete reason and rejects invalid combinations', () => {
   for (const command of [
-    { action: 'accept_result', remainingPlan: [] },
-    { action: 'execute_plan', tasks: [{ capability: 'missing', task: 'Work' }], },
-    { action: 'continue_current', tasks },
-    { action: 'accept_result', reply: ' ', remainingPlan: [] },
-    { action: 'accept_result', reply: 'Done', remainingPlan: [], tasks },
-    { action: 'goal_done', tasks: [] },
+    { ...review, completed: undefined }, { ...review, completed: 'false' },
+    { ...review, reason: undefined }, { ...review, reason: ' ' },
+    { ...review, remainingPlan: [] },
+    { ...review, completed: false, reply: 'Need input.' },
+    { ...review, remainingPlan: [{ capability: 'missing', task: 'Work' }] },
+    { ...review, tasks }, { ...review, reply: ' ' },
+    { ...review, action: 'accept_result' }, { ...review, action: 'continue_current' },
   ]) assert.throws(() => parseSupervisorCommand(command, context));
 });
 
-test('acceptance with a reply preserves the exact supplied reply and revalidated remaining plan', () => {
-  const command = { action: 'accept_result', reply: '  Done.\nChoose a target.  ', remainingPlan: tasks };
+test('a completed review preserves the exact reply; an incomplete review can clear confirmed future work', () => {
+  const command = { ...review, reply: '  Done.\nChoose a target.  ', remainingPlan: tasks };
   assert.deepEqual(parseSupervisorCommand(command, context), command);
+  const incomplete = { ...review, completed: false, remainingPlan: [] };
+  assert.deepEqual(parseSupervisorCommand(incomplete, context), incomplete);
 });

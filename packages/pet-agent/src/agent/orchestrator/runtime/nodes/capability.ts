@@ -288,6 +288,7 @@ export function createCapabilityNode(params: {
       lane,
       runId,
       {
+        traceId: state.traceId,
         delegationId: runNextDelegation.id,
         task: runNextDelegation.task,
         announceMessageId,

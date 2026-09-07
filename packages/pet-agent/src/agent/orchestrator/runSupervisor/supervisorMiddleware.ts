@@ -7,8 +7,7 @@ import { SUPERVISOR_COMMAND_TOOL_NAMES, supervisorCommandToolNamesForMode } from
 
 const commandActions: Record<string, string> = {
   submit_plan: 'execute_plan',
-  continue_current: 'continue_current',
-  accept_result: 'accept_result',
+  review_current: 'review_current',
 };
 
 /** Validate the whole response before any tool runs; control calls only propose effects. */

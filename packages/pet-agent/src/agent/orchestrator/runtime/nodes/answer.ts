@@ -1,6 +1,6 @@
 import { AIMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { stampAgentMessageCreatedAt } from '../../../messages';
+import { setAgentMessageMetadata, stampAgentMessageCreatedAt } from '../../../messages';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
@@ -21,7 +21,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
           : null);
     if (!reply?.trim()) throw new Error('Terminal node requires a supplied reply or runtime stop.');
     return {
-      messages: [stampAgentMessageCreatedAt(new AIMessage(reply))],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(new AIMessage(reply)), { traceId: state.traceId })],
       ...(incompatible ? { taskActiveDelegation: null } : {}),
       runNextDelegation: null,
       runSupervisorSession: null,

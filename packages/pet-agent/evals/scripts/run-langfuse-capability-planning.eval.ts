@@ -77,7 +77,9 @@ function supervisorOutput(
     return {
       result: isRunSupervisorReplyResult(result) ? 'reply' : result.action,
       nextTask: null, capabilityName: null,
-      remainingPlan: !isRunSupervisorReplyResult(result) && result.action === 'accept_result'
+      ...(!isRunSupervisorReplyResult(result) && result.action === 'review_current'
+        ? { completed: result.completed, reason: result.reason } : {}),
+      remainingPlan: !isRunSupervisorReplyResult(result) && result.action === 'review_current'
         ? result.remainingPlan ?? [] : [],
     };
   }

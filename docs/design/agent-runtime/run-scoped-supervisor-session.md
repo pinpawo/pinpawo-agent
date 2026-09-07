@@ -319,7 +319,7 @@ This consumes the existing plan in order. Replacing `[T2, T3]` with different
 tasks, dropping T3, or reordering the tail requires asking the user first; a
 normal continuation or a new result alone does not authorize it.
 
-If Supervisor chooses `continue_current`, root preserves the exact delegation id,
+If Supervisor chooses `review_current(completed=false)`, root preserves the exact delegation id,
 task, and private execution history. Omitted `remainingPlan` preserves the future
 plan; a supplied array updates it to the user's confirmed revision, excluding
 the current task. `[]` clears only future tasks after user confirmation, without
@@ -361,7 +361,7 @@ remain subject to their existing replay and idempotency rules.
 
 A natural final reply is passed to the terminal node without implying acceptance
 or dispatch. A proposal that both accepts and replies must carry both effects in
-one transition; `accept_result` accepts the current task. Omitted `reply` advances
+one transition; `review_current(completed=true)` accepts the current task. Omitted `reply` advances
 the established plan; supplied `reply` ends the run and preserves the tail. The terminal
 node emits supplied text once and saves unfinished work through the existing
 continuation snapshot. This ends the root run, not a suspended inner invocation;
@@ -456,7 +456,7 @@ user goal retains the same `traceId`.
 - First and successive Boundaries preserve active task and remaining-plan
   identity according to the selected command.
 - Recovery of a committed proposal does not repeat acceptance or dispatch.
-- `continue_current` retains prior result messages in main and appends the next
+- `review_current(completed=false)` retains prior result messages in main and appends the next
   attempt without assuming cumulative output.
 - Its optional future-plan update commits with continuation: omission retains
   existing tasks, while a user-confirmed empty array clears only future tasks.
@@ -467,4 +467,8 @@ user goal retains the same `traceId`.
 - Supervisor tracing remains complete after raw provider messages are removed from root
   checkpoint messages.
 
-Tool responsibilities: `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+Tool responsibilities: `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+
+Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
+
+The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Boundary has one review_current tool: completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.

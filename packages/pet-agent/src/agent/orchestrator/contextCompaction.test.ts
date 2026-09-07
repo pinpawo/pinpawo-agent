@@ -332,3 +332,37 @@ test('aggressive compaction keeps all main attempts of unfinished work and summa
   assert.equal(summaryInput.includes(second.text), false);
   assert.equal(summaryInput.includes(other.text), true);
 });
+
+test('compaction separates current-task evidence from older history and folds each summary on resume', async () => {
+  const task = (message: BaseMessage) => setAgentMessageMetadata(message, { traceId: 'current-goal' });
+  const evidence = task(new DelegationAnnounceMessage({
+    id: 'active-evidence', sourceLane: 'capability:general', runId: 'previous-run', delegationId: 'active',
+    announceMessageId: 'active-evidence', task: 'Verify changes.', result: 'KEEP_VERBATIM', createdAt: '2026-09-05T00:00:00Z',
+  }));
+  const requests: string[] = [];
+  const model = { invoke: async (messages: BaseMessage[]) => {
+    const text = String(messages.at(-1)?.content); requests.push(text);
+    return new AIMessage(text.includes('CURRENT_TASK_FACT') ? 'CURRENT_TASK_FACT summary' : 'UNRELATED_TASK_FACT summary');
+  } } as unknown as BaseChatModel;
+  const options = { traceId: 'current-goal', keepMessages: 1,
+    preserveAnnouncesFor: { lane: 'capability:general', runId: 'previous-run', delegationId: 'active' } };
+  let messages: BaseMessage[] = [new HumanMessage('UNRELATED_TASK_FACT'), task(new HumanMessage('CURRENT_TASK_FACT')),
+    evidence, task(new HumanMessage('Continue.'))];
+  for (let round = 0; round < 2; round += 1) {
+    const result = await compactOrchestratorMessages({ messages, model, options });
+    messages = result.messages.slice(1);
+    assert.equal(messages.filter(isContextCompactionMessage).length, 2);
+    assert.ok(messages.includes(evidence));
+    const currentSummary = messages.find((message) => isContextCompactionMessage(message)
+      && getAgentMessageMetadata(message).traceId === 'current-goal');
+    assert.ok(currentSummary);
+    assert.match(String(currentSummary.content), /CURRENT_TASK_FACT/);
+    assert.doesNotMatch(String(currentSummary.content), /UNRELATED_TASK_FACT/);
+    messages.push(task(new HumanMessage('Additional current-task input.')));
+  }
+  assert.equal(requests.length, 4);
+  for (const request of requests) {
+    assert.equal(request.includes('CURRENT_TASK_FACT') && request.includes('UNRELATED_TASK_FACT'), false);
+    assert.equal(request.includes('KEEP_VERBATIM'), false);
+  }
+});

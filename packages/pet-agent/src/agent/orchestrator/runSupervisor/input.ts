@@ -1,6 +1,7 @@
 import { hasRunHumanMessage } from '../conversationMessages';
 import {
   queryAgentMessages,
+  getAgentMessageMetadata,
   type AgentMessageSelectionDiagnostics,
 } from '../../messages';
 import {
@@ -89,7 +90,8 @@ export function buildRunSupervisorInput(params: {
     runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
   };
-  const mainSelection = queryAgentMessages(state.messages).main().select();
+  const mainSelection = queryAgentMessages(state.messages.filter((message) =>
+    getAgentMessageMetadata(message).traceId === state.traceId)).main().select();
   const latestAnnounce = mainSelection.messages.flatMap((message) => {
     const announce = getDelegationAnnounce(message);
     return announce && announce.sourceLane === activeScope.lane

@@ -4,7 +4,7 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { END, START, Command, MemorySaver, StateGraph, messagesStateReducer } from '@langchain/langgraph';
 import type { AgentModels } from '../../../../types/agent';
 import { defineInstructionDocument } from '../../../../types/capability';
-import { setAgentMessageMetadata } from '../../../messages';
+import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../../messages';
 import { DelegationAnnounceMessage, getDelegationAnnounce, getMessageHandoffSource, projectDelegationAnnouncesForModel } from '../../delegation';
 import { compileAgentRegistry } from '../../registry';
 import { buildRunStateReset, OrchestratorState, type OrchestratorStateType } from '../../state';
@@ -32,7 +32,7 @@ function state(): OrchestratorStateType {
   });
   return {
     ...buildRunStateReset(), runId: 'r1', traceId: 't1', runUserRequest: 'Prepare and publish.',
-    messages: [new HumanMessage('Prepare and publish.'), announce],
+    messages: [new HumanMessage('Prepare and publish.'), announce].map((message) => setAgentMessageMetadata(message, { traceId: 't1' })),
     taskActiveDelegation: { id: 'd1', lane: scope.lane, runId: 'r1', traceId: 't1', task: 'Prepare the document.',
       contextSummary: null, status: 'awaiting_decision', resultPreview: announce.text, userRequest: 'Prepare and publish.' },
     runDelegationSummaries: [{ id: 'd1', lane: scope.lane, task: 'Prepare the document.', status: 'progress', resultPreview: announce.text }],
@@ -54,7 +54,7 @@ test('acceptance advances the stable plan and updates the original Announce in p
   const input = state();
   const evidence = input.messages.at(-1)!;
   input.messages.push(new HumanMessage('A later message.'));
-  const command = await node({ action: 'accept_result' })(input, options);
+  const command = await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' })(input, options);
   const next = apply(input, command);
   assert.deepEqual(command.goto, ['capability']);
   assert.notEqual(next.taskActiveDelegation?.id, 'd1');
@@ -68,7 +68,7 @@ test('acceptance advances the stable plan and updates the original Announce in p
 
 test('continue preserves exact scope and plan and supplies feedback through existing pending input', async () => {
   const input = state();
-  const next = apply(input, await node({ action: 'continue_current', feedback: 'Verify the saved document.' })(input, options));
+  const next = apply(input, await node({ completed: false,  action: 'review_current', reason: 'Verify the saved document.' })(input, options));
   assert.equal(next.taskActiveDelegation?.id, 'd1');
   assert.equal(next.runNextDelegation?.contextSummary, 'Verify the saved document.');
   assert.equal(next.runNextDelegation?.task, input.taskActiveDelegation?.task);
@@ -78,7 +78,7 @@ test('continue preserves exact scope and plan and supplies feedback through exis
 
 test('acceptance with a question dispatches nothing and plan-only continuation seeds a fresh Entry', async () => {
   const input = state();
-  const command = await node({ action: 'accept_result', reply: 'Choose a destination.', remainingPlan: tail })(input, options);
+  const command = await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Choose a destination.', remainingPlan: tail })(input, options);
   const accepted = apply(input, command);
   assert.deepEqual(command.goto, ['answer']);
   assert.equal(accepted.runNextDelegation, null);
@@ -121,7 +121,7 @@ test('Boundary without canonical evidence fails instead of accepting a preview',
 test('checkpoint recovery after root acceptance does not repeat acceptance or dispatch', async () => {
   const checkpointer = new MemorySaver(); let decisions = 0; let executions = 0;
   const supervisor = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async () => {
-    decisions += 1; return { action: 'accept_result',  remainingPlan: tail };
+    decisions += 1; return { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current',  remainingPlan: tail };
   } } });
   const build = () => new StateGraph(OrchestratorState)
     .addNode('runSupervisor', supervisor, { ends: ['capability', 'answer'] })
@@ -150,8 +150,8 @@ test('old Announce checkpoints cannot silently become ordinary assistant claims'
 test('a confirmed future-plan change continues the same unfinished delegation atomically', async () => {
   const input = state();
   input.runActiveDelegationTransition = 'resume_active';
-  input.messages.push(setAgentMessageMetadata(new HumanMessage('取消后续发布，只完善当前文档。'), { runId: input.runId }));
-  const next = apply(input, await node({ action: 'continue_current', remainingPlan: [], feedback: 'Complete the document.' })(input, options));
+  input.messages.push(setAgentMessageMetadata(new HumanMessage('取消后续发布，只完善当前文档。'), { runId: input.runId, traceId: input.traceId }));
+  const next = apply(input, await node({ completed: false,  action: 'review_current', remainingPlan: [], reason: 'Complete the document.' })(input, options));
   assert.equal(next.taskActiveDelegation?.id, input.taskActiveDelegation?.id);
   assert.equal(next.taskActiveDelegation?.task, input.taskActiveDelegation?.task);
   assert.deepEqual(next.runSupervisorSession?.plan, []);
@@ -162,24 +162,52 @@ test('a confirmed future-plan change continues the same unfinished delegation at
 test('execution cannot rewrite the plan or finish without a supplied reply', async () => {
   const input = state();
   for (const proposal of [
-    { action: 'continue_current' as const, remainingPlan: [] },
-    { action: 'accept_result' as const, remainingPlan: [{ capability: 'general', task: 'Unapproved extra task.' }] },
+    { completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' as const, remainingPlan: [] },
+    { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' as const, remainingPlan: [{ capability: 'general', task: 'Unapproved extra task.' }] },
   ]) await assert.rejects(node(proposal)(input, options), /require fresh user confirmation/);
   input.runSupervisorSession = { ...input.runSupervisorSession!, plan: [] };
-  await assert.rejects(node({ action: 'accept_result' })(input, options), /requires a final reply/);
-  const accepted = apply(input, await node({ action: 'accept_result', reply: 'Document complete.' })(input, options));
+  await assert.rejects(node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' })(input, options), /requires a final reply/);
+  const accepted = apply(input, await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Document complete.' })(input, options));
   assert.equal(accepted.taskActiveDelegation, null);
   assert.equal(accepted.runSupervisorReply, 'Document complete.');
 });
 
 test('user-driven Boundary without results can clarify or continue, but cannot accept', async () => {
-  const input = state(); input.messages = [setAgentMessageMetadata(new HumanMessage('Use the existing project.'), { runId: input.runId })];
+  const input = state(); input.messages = [setAgentMessageMetadata(new HumanMessage('Use the existing project.'), { runId: input.runId, traceId: input.traceId })];
   input.runActiveDelegationTransition = 'resume_active';
   input.taskActiveDelegation = { ...input.taskActiveDelegation!, status: 'pending' };
-  await assert.rejects(node({ action: 'accept_result', reply: 'Done.' })(input, options), /without result evidence/);
-  for (const result of [{ reply: 'Which project?' }, { action: 'continue_current' as const }]) {
+  await assert.rejects(node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Done.' })(input, options), /without result evidence/);
+  for (const result of [{ reply: 'Which project?' }, { completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' as const }]) {
     const next = apply(input, await node(result)(input, options));
     assert.equal(next.taskActiveDelegation?.id, input.taskActiveDelegation.id);
     assert.deepEqual(next.runSupervisorSession?.plan, tail);
   }
+});
+
+test('Boundary selects the current logical task across runs, including earlier deliveries and user replies', async () => {
+  const input = state();
+  const earlierDelivery = setAgentMessageMetadata(new DelegationAnnounceMessage({
+    id: 'earlier-delivery', sourceLane: 'capability:general', runId: 'previous-run', delegationId: 'previous-delegation',
+    announceMessageId: 'earlier-delivery', task: 'Collect source material.', result: 'Sources saved.', createdAt: '2026-09-05T00:00:00Z',
+  }), { traceId: input.traceId, taskAccepted: true });
+  const question = setAgentMessageMetadata(new AIMessage({ id: 'question', content: 'Which audience?' }), { traceId: input.traceId });
+  input.messages.unshift(new HumanMessage({ id: 'unrelated', content: 'An unrelated past task.' }), earlierDelivery, question);
+  input.runId = 'resumed-run';
+  input.runActiveDelegationTransition = 'resume_active';
+  const supplement = setAgentMessageMetadata(new HumanMessage({ id: 'supplement', content: 'Use the engineering audience.' }), { runId: input.runId });
+  input.messages.push(supplement);
+  const { createPrepareNode } = await import('./prepare');
+  const prepared = await createPrepareNode()(input);
+  Object.assign(input, prepared, { messages: messagesStateReducer(input.messages, prepared.messages) });
+  let observed = false;
+  await createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (boundary) => {
+    observed = true;
+    assert.equal(boundary.traceId, 't1');
+    assert.equal(boundary.inputId, 'human:resumed-run');
+    assert.deepEqual(boundary.messages.map((message) => message.id), ['earlier-delivery', 'question', input.messages[3].id, 'a1', 'supplement']);
+    assert.equal(boundary.activeDelegation?.runId, 'r1');
+    return { reply: 'I need the source URL as well.' };
+  } } })(input, options);
+  assert.equal(observed, true);
+  assert.equal(getAgentMessageMetadata(supplement).traceId, undefined);
 });

@@ -310,12 +310,8 @@ function createRecordingModels(model: AgentModels['act']) {
           ? toolCall.args
           : { value: toolCall.args };
         if (![
-          'continue_current',
+          'review_current',
           'submit_plan',
-          'advance_plan',
-          'complete_goal',
-          'request_user_input',
-          'report_unavailable',
         ].includes(toolCall.name)) {
           continue;
         }

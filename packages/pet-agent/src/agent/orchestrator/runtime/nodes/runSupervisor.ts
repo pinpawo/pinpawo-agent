@@ -286,26 +286,26 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     if (!canChangePlan && JSON.stringify(proposedPlan) !== JSON.stringify(supervisorSession.plan)) {
       throw new Error('Execution plan changes require fresh user confirmation.');
     }
-    if (command.action === 'continue_current') {
+    if (command.action === 'review_current' && !command.completed) {
       return new Command({
         update: includeSupervisorSession(buildContinueCurrentUpdate({
           state: rootState,
           activeDelegation: rootState.taskActiveDelegation!,
-          feedback: command.feedback,
+          feedback: command.reason,
         }), proposedPlan),
         goto: 'capability',
       });
     }
-    const handoff = command.action === 'accept_result'
+    const handoff = command.action === 'review_current'
       ? buildDelegationHandoffUpdate(rootState, rootState.taskActiveDelegation!) : null;
-    if (command.action === 'accept_result' && command.reply) {
+    if (command.action === 'review_current' && command.reply) {
       return new Command({
         update: includeSupervisorSession({ ...handoff, runSupervisorReply: command.reply }, proposedPlan),
         goto: 'answer',
       });
     }
     const [nextTask, ...remainingPlan] = proposedPlan;
-    if (!nextTask) throw new Error('accept_result requires a final reply when no planned work remains.');
+    if (!nextTask) throw new Error('A completed review requires a final reply when no planned work remains.');
     const next = materializeNextDelegation({
       state: { ...state, ...(handoff ? { runDelegationSummaries: handoff.runDelegationSummaries } : {}) },
       nextTask,

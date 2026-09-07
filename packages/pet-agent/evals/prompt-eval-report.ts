@@ -28,7 +28,8 @@ export type PromptEvalModelMetadata = {
   endpointOrigin: string;
   contextWindowTokens: number;
   maxOutputTokens: number | null;
-  temperature: number;
+  /** null means the request omits temperature and uses the provider default. */
+  temperature: number | null;
   reasoningEffort: string;
   timeoutMs: number;
   inputModalities: Array<'text' | 'image'>;

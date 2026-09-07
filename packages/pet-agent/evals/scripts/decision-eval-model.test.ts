@@ -202,3 +202,17 @@ test('legacy eval effort variables do not override provider defaults', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('eval temperature is omitted by default and explicit experiment overrides remain available', () => {
+  const { root, configPath } = writeProfiles();
+  try {
+    for (const temperature of [undefined, '0.7']) {
+      const evaluated = createDecisionEvalModel({ profileId: 'deepseek-default', role: 'subject',
+        env: { PROMPT_EVAL_CONFIG_PATH: configPath,
+          ...(temperature === undefined ? {} : { PROMPT_EVAL_SUBJECT_TEMPERATURE: temperature }) } });
+      assert.equal((evaluated.model as unknown as { temperature?: number }).temperature,
+        temperature === undefined ? undefined : 0.7);
+      assert.equal(evaluated.metadata.temperature, temperature === undefined ? null : 0.7);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

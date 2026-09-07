@@ -205,13 +205,10 @@ export function createDecisionEvalModel(options: {
   );
   if (timeout <= 0) throw new Error(`${timeoutName} must be greater than zero.`);
   const temperatureName = `${rolePrefix}_TEMPERATURE`;
-  const temperature = readFiniteNumber(
-    temperatureName,
-    env[temperatureName] ?? (
-      options.role === 'subject' ? env.PROMPT_EVAL_TEMPERATURE : undefined
-    ),
-    0,
-  );
+  const configuredTemperature = env[temperatureName]
+    ?? (options.role === 'subject' ? env.PROMPT_EVAL_TEMPERATURE : undefined);
+  const temperature = configuredTemperature === undefined
+    ? null : readFiniteNumber(temperatureName, configuredTemperature);
   const method = readStructuredOutputMethod(
     env[`${rolePrefix}_STRUCTURED_OUTPUT_METHOD`]
       ?? (options.role === 'subject'
@@ -225,7 +222,7 @@ export function createDecisionEvalModel(options: {
   return {
     model: new ChatOpenAI({
       model: profile.model,
-      temperature,
+      ...(temperature === null ? {} : { temperature }),
       timeout,
       maxRetries: 0,
       apiKey: profile.apiKey,

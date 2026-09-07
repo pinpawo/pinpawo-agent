@@ -48,7 +48,9 @@ const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮
 export type AgentSessionTurnResult =
   | { status: 'completed'; reply: string }
   | { status: 'waiting_human' }
-  | { status: 'interrupted' };
+  | { status: 'interrupted' }
+  /** The run settled into a task pause. There is no reply to report. */
+  | { status: 'paused' };
 
 /** @deprecated Use AgentSessionTurnResult. */
 export type ChatSessionResult = AgentSessionTurnResult;
@@ -75,14 +77,6 @@ export type AgentSessionTurnOptions = {
   emitEvent: (event: AgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
   /**
-   * A review.cancel run stops itself at a safe graph checkpoint. If the active
-   * boundary read is transiently unavailable, allow the final settled
-   * checkpoint to release the queued interrupt instead of reporting completed.
-   */
-  interruptOnSettledResumeCheckpoint?: boolean;
-  /** Called once checkpoint state no longer contains the original review. */
-  onResumeCheckpointed?: (result: { canInterrupt: boolean }) => void;
-  /**
    * Receives a delegation's `subagent_operations` announcement so the
    * caller's operation registry can join display metadata for
    * delegation-scoped toolkit tools (#322 Phase 4).
@@ -100,24 +94,6 @@ export type ChatSessionAdapterOptions = AgentSessionTurnOptions;
 
 function throwUnexpectedInterruptPayload(): never {
   throw new Error('Received an interrupt without canonical human review payload.');
-}
-
-function isSamePendingReview(
-  initial: LocalAgentGraphPendingInterrupt,
-  current: LocalAgentGraphPendingInterrupt | null,
-) {
-  if (!current) return false;
-  return initial.interruptId === current.interruptId;
-}
-
-function originalReviewWasCheckpointed(
-  initial: LocalAgentGraphThreadState,
-  current: LocalAgentGraphThreadState,
-) {
-  if (initial.pendingInterrupt) {
-    return !isSamePendingReview(initial.pendingInterrupt, current.pendingInterrupt);
-  }
-  return current.pendingInterrupt !== null || !current.hasPendingContinuation;
 }
 
 async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null) {
@@ -399,39 +375,12 @@ export async function runAgentSessionTurn(
     });
   };
   emitCurrentPlan(initialThreadState.currentPlan ?? null);
-  let resumeCheckpointed = false;
-  const confirmResumeCheckpoint = (state: LocalAgentGraphThreadState, runIsActive: boolean) => {
-    if (
-      !isResumeRequest
-      || !options.onResumeCheckpointed
-      || resumeCheckpointed
-      || !originalReviewWasCheckpointed(initialThreadState, state)
-    ) {
-      return;
-    }
-    resumeCheckpointed = true;
-    options.onResumeCheckpointed?.({
-      canInterrupt: runIsActive && state.pendingInterrupt === null,
-    });
-  };
-  const readResumeCheckpointAtBoundary = async () => {
-    if (!isResumeRequest || !options.onResumeCheckpointed || resumeCheckpointed) return;
-    try {
-      confirmResumeCheckpoint(await graphService.readThreadState(setup), true);
-    } catch {
-      // Checkpoint confirmation is best-effort while the stream is active. A
-      // failed read must not cancel an otherwise valid review resolution.
-    }
-  };
   let run: LocalAgentGraphEventStream | null = null;
   let finishInterruptedAfterSettlement = false;
   try {
     run = await graphService.streamEvents(setup, graphInput);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
-      if (chatEvent.type === 'values' || chatEvent.type === 'interrupt') {
-        await readResumeCheckpointAtBoundary();
-      }
       if (!isCurrent()) {
         finishInterruptedAfterSettlement = true;
         return { status: 'interrupted' };
@@ -571,10 +520,6 @@ export async function runAgentSessionTurn(
 
   const finalThreadState = await graphService.readThreadState(setup);
   emitCurrentPlan(finalThreadState.currentPlan ?? null);
-  confirmResumeCheckpoint(
-    finalThreadState,
-    options.interruptOnSettledResumeCheckpoint === true,
-  );
   if (!isCurrent()) {
     finishInterrupted();
     return { status: 'interrupted' };
@@ -588,6 +533,14 @@ export async function runAgentSessionTurn(
       emitEvent,
     });
     return { status: 'waiting_human' };
+  }
+
+  if (finalThreadState.pauseTaskInterrupt) {
+    // The run settled into a task pause. The checkpoint's last message is the
+    // pause's own bookkeeping — a rejected tool result, a cancelled action —
+    // and must not be reported as the assistant's reply.
+    clearAgentRunActivity(requestId);
+    return { status: 'paused' };
   }
 
   const streamedFinalReply = finalMessages.length > 0

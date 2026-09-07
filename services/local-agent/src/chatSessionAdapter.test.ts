@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import {
+  ToolMessage, AIMessage, HumanMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
@@ -704,7 +705,6 @@ test('runChatSession projects review interrupts to public interaction contracts'
 test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const streamInputs: unknown[] = [];
-  let resumeCheckpointedCount = 0;
   const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
   const finalMessages = [new AIMessage('approved')];
   const setup = {
@@ -750,9 +750,6 @@ test('runChatSession resumes explicit response after state update clears interru
       emittedEvents.push(event);
     },
     emitToolEvent: () => {},
-    onResumeCheckpointed: () => {
-      resumeCheckpointedCount += 1;
-    },
   });
 
   assert.deepEqual(result, { status: 'completed', reply: 'approved' });
@@ -761,72 +758,13 @@ test('runChatSession resumes explicit response after state update clears interru
     value: resume,
   }]);
   assert.deepEqual(setup.input.messages, []);
-  assert.equal(resumeCheckpointedCount, 1);
   assert.equal(
     emittedEvents.some((event) => event.type === 'human_review.requested'),
     false,
   );
 });
 
-test('runChatSession does not confirm a review resolution while checkpoint keeps the original review', async () => {
-  const review = {
-    id: 'review-original',
-    schemaVersion: 1,
-    view: { kind: 'plain' as const, body: 'Approve?' },
-    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
-  };
-  const pending = {
-    interruptId: 'interrupt-original',
-    reviews: [review],
-  };
-  const finalMessages = [new AIMessage('continued')];
-  const setup = {
-    graphKey: 'test',
-    graphConfig: {},
-    input: { messages: [] },
-  } as unknown as AgentChannelSetup;
-  let reads = 0;
-  let boundary = 0;
-  const confirmedAt: number[] = [];
-  const graphService = {
-    async readThreadState() {
-      reads += 1;
-      if (reads <= 2) {
-        return { messages: [], pendingInterrupt: pending, hasPendingContinuation: true };
-      }
-      return { messages: finalMessages, pendingInterrupt: null, hasPendingContinuation: false };
-    },
-    buildResumeCommand(value: unknown) {
-      return value;
-    },
-    streamEvents() {
-      return (async function* () {
-        boundary = 1;
-        yield protocolEvent('values', { messages: [] });
-        boundary = 2;
-        yield protocolEvent('values', { messages: finalMessages });
-      })();
-    },
-  };
-
-  const result = await runChatSession({
-    request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
-    setup,
-    graphService: graphService as unknown as LocalAgentGraphService,
-    isCurrent: () => true,
-    finishInterrupted: () => { throw new Error('should not interrupt'); },
-    emitEvent: () => {},
-    emitToolEvent: () => {},
-    onResumeCheckpointed: () => {
-      confirmedAt.push(boundary);
-    },
-  });
-
-  assert.deepEqual(result, { status: 'completed', reply: 'continued' });
-  assert.deepEqual(confirmedAt, [2]);
-});
-
-test('runChatSession confirms the original resolution without interrupting a newly pending review', async () => {
+test('runChatSession reports waiting_human when a resume raises a new review', async () => {
   const originalReview = {
     id: 'review-original',
     schemaVersion: 1,
@@ -844,7 +782,6 @@ test('runChatSession confirms the original resolution without interrupting a new
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
   let reads = 0;
-  const confirmations: Array<{ canInterrupt: boolean }> = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const graphService = {
     async readThreadState() {
@@ -886,13 +823,9 @@ test('runChatSession confirms the original resolution without interrupting a new
       emittedEvents.push(event);
     },
     emitToolEvent: () => {},
-    onResumeCheckpointed: (confirmation) => {
-      confirmations.push(confirmation);
-    },
   });
 
   assert.deepEqual(result, { status: 'waiting_human' });
-  assert.deepEqual(confirmations, [{ canInterrupt: false }]);
   assert.equal(emittedEvents[0]?.type, 'human_review.requested');
   assert.equal(
     emittedEvents[0]?.type === 'human_review.requested'
@@ -902,7 +835,7 @@ test('runChatSession confirms the original resolution without interrupting a new
   );
 });
 
-test('runChatSession does not confirm a review resolution when graph execution fails first', async () => {
+test('runChatSession rejects when graph execution fails during a resume', async () => {
   const review = {
     id: 'review-original',
     schemaVersion: 1,
@@ -914,7 +847,6 @@ test('runChatSession does not confirm a review resolution when graph execution f
     graphConfig: {},
     input: { messages: [] },
   } as unknown as AgentChannelSetup;
-  let confirmations = 0;
   const graphService = {
     async readThreadState() {
       return {
@@ -944,89 +876,8 @@ test('runChatSession does not confirm a review resolution when graph execution f
       finishInterrupted: () => { throw new Error('should not interrupt'); },
       emitEvent: () => {},
       emitToolEvent: () => {},
-      onResumeCheckpointed: () => {
-        confirmations += 1;
-      },
     }),
     /resume failed/,
-  );
-  assert.equal(confirmations, 0);
-});
-
-test('runChatSession preserves review cancellation when the active checkpoint read fails', async () => {
-  const review = {
-    id: 'review-original',
-    schemaVersion: 1,
-    view: { kind: 'plain' as const, body: 'Approve?' },
-    options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
-  };
-  const finalMessages = [new AIMessage('must not be reported as completed')];
-  const setup = {
-    graphKey: 'test',
-    graphConfig: {},
-    input: { messages: [] },
-  } as unknown as AgentChannelSetup;
-  let reads = 0;
-  let current = true;
-  let finishInterruptedCount = 0;
-  const emittedEvents: AgentRuntimeEvent[] = [];
-  const graphService = {
-    async readThreadState() {
-      reads += 1;
-      if (reads === 1) {
-        return {
-          messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-original', review },
-          hasPendingContinuation: true,
-        };
-      }
-      if (reads === 2) {
-        throw new Error('transient checkpoint read failure');
-      }
-      return {
-        messages: finalMessages,
-        pendingInterrupt: null,
-        hasPendingContinuation: false,
-      };
-    },
-    buildResumeCommand(value: unknown) {
-      return value;
-    },
-    streamEvents() {
-      return (async function* () {
-        yield protocolEvent('values', { messages: finalMessages });
-      })();
-    },
-  };
-
-  const result = await runChatSession({
-    request: {
-      kind: 'resume',
-      requestId: 'req-1',
-      resume: { action: 'interrupt_run' },
-    },
-    setup,
-    graphService: graphService as unknown as LocalAgentGraphService,
-    isCurrent: () => current,
-    finishInterrupted: () => {
-      finishInterruptedCount += 1;
-    },
-    emitEvent: (event) => {
-      emittedEvents.push(event);
-    },
-    emitToolEvent: () => {},
-    interruptOnSettledResumeCheckpoint: true,
-    onResumeCheckpointed: ({ canInterrupt }) => {
-      assert.equal(canInterrupt, true);
-      current = false;
-    },
-  });
-
-  assert.deepEqual(result, { status: 'interrupted' });
-  assert.equal(finishInterruptedCount, 1);
-  assert.equal(
-    emittedEvents.some((event) => event.type === 'message.completed'),
-    false,
   );
 });
 
@@ -1486,4 +1337,75 @@ test('runChatSession emits provider token usage from new state messages', async 
     scope: 'run',
   });
   assert.equal(typeof completed.usage?.updatedAt, 'string');
+});
+
+test('runChatSession reports a task pause without turning its bookkeeping into an assistant reply', async () => {
+  // Regression: after a Review reject the run settles into a task pause. The
+  // checkpoint's last message is the rejected tool result — it is not a reply,
+  // and the run must not be reported as completed.
+  const review = {
+    id: 'review-1',
+    schemaVersion: 1,
+    view: { kind: 'plain' as const, body: 'Approve?' },
+    options: [
+      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
+      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const, message: 'no' } },
+    ],
+  };
+  const rejectedResult = new ToolMessage({
+    content: JSON.stringify({ source: 'human_reject', message: 'no' }),
+    tool_call_id: 'call-1',
+    name: 'run_shell',
+  });
+  const setup = {
+    graphKey: 'test',
+    graphConfig: {},
+    input: { messages: [] },
+  } as unknown as AgentChannelSetup;
+  let reads = 0;
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const graphService = {
+    async readThreadState() {
+      reads += 1;
+      return reads === 1
+        ? {
+          messages: [],
+          pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
+          pauseTaskInterrupt: null,
+          hasPendingContinuation: true,
+        }
+        : {
+          messages: [rejectedResult],
+          pendingInterrupt: null,
+          pauseTaskInterrupt: { kind: 'pause_task' },
+          hasPendingContinuation: false,
+        };
+    },
+    buildResumeCommand(value: unknown) {
+      return value;
+    },
+    streamEvents() {
+      return (async function* () {})();
+    },
+  };
+
+  const result = await runChatSession({
+    request: {
+      kind: 'resume',
+      requestId: 'req-1',
+      resume: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
+    },
+    setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true,
+    finishInterrupted: () => { throw new Error('the adapter does not finalize a pause itself'); },
+    emitEvent: (event) => {
+      emittedEvents.push(event);
+    },
+    emitToolEvent: () => {},
+  });
+
+  assert.deepEqual(result, { status: 'paused' });
+  assert.equal(emittedEvents.some((event) => event.type === 'message.completed'), false);
+  assert.equal(JSON.stringify(emittedEvents).includes('human_reject'), false);
 });

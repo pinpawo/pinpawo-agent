@@ -337,19 +337,6 @@ export class LocalServerChatHandler {
               ),
             }
           : {}),
-        ...(source.type === 'review.cancel'
-          || (source.type === 'human_review_response' && source.interruptRun)
-          ? { interruptOnSettledResumeCheckpoint: true }
-          : {}),
-        ...(source.type !== 'chat_request'
-          ? {
-            onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
-              if (canInterrupt) {
-                this.inflightRequests.interrupt(peer, { requestId });
-              }
-            },
-          }
-          : {}),
       });
       if (result.status === 'waiting_human') {
         this.inflightRequests.finish(peer, inflight, 'interrupted');
@@ -361,6 +348,16 @@ export class LocalServerChatHandler {
       if (result.status === 'interrupted') {
         publishInterrupted();
         finishInterrupted();
+        return 'interrupted';
+      }
+      if (result.status === 'paused') {
+        // The protocol has no pause outcome yet: the TUI derives a task pause
+        // from the completion snapshot that follows an interrupted run. Report
+        // the settled pause as interrupted directly — nothing aborted it, so
+        // the abort-gated finishInterrupted would send nothing.
+        publishInterrupted();
+        this.inflightRequests.sendInterrupted(peer, inflight);
+        this.inflightRequests.clear(peer, inflight);
         return 'interrupted';
       }
       this.inflightRequests.finish(peer, inflight, 'completed');

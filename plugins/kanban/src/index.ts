@@ -27,9 +27,11 @@ export {
 export type {
   CreateKanbanTaskInput,
   KanbanTask,
+  KanbanTaskDeletion,
   KanbanTaskEvent,
   KanbanTaskMutation,
   KanbanTaskRepository,
+  KanbanTaskRelationship,
   KanbanTaskSnapshot,
   KanbanTaskStatus,
 } from './kanbanTaskService';

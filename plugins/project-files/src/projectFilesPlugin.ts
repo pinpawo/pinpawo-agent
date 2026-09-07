@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { StudioPlugin } from '@pinpawo/studio';
+import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
 import type { StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
 import {
   ProjectFileTooLargeError,
@@ -12,8 +12,16 @@ export type CreateProjectFilesPluginOptions = ProjectFilesServiceOptions & {
   httpRoute?: false | { pluginName?: string };
 };
 
+/**
+ * Project Files only contributes HTTP routes. Narrowing the start parameter
+ * keeps that fact in the type: this Plugin cannot reach dispatch, Pets, the
+ * event bus, or dispatch queues.
+ */
+export type ProjectFilesPluginContext = Pick<StudioPluginContext, 'hooks'>;
+
 export type ProjectFilesPlugin = StudioPlugin & {
   service: ProjectFilesService;
+  start: (context: ProjectFilesPluginContext) => void;
 };
 
 function asError(error: unknown): Error {

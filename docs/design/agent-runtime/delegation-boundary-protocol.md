@@ -314,7 +314,7 @@ Provider-native parallel flags are not forced onto unknown compatible endpoints;
 pre-tool response validation enforces the control-batch contract.
 
 Behavior tests cover single-call controls, evidence publication, continuation,
-plan constraints, protected compaction, and checkpoint recovery. The synthetic real-model eval on DeepSeek v4-pro (2026-09-07) passed 7 of 8 cases in its latest run, including natural questions and two user-answer continuations. Finalization emitted XML text instead of calling the control tool and remains a failure. One run does not establish decision stability.
+plan constraints, protected compaction, and checkpoint recovery. The synthetic real-model eval on DeepSeek v4-pro (2026-09-07) passed 7 of 8 cases with thinking disabled; finalization emitted XML text instead of calling the control tool. After enabling thinking by default as requested, the same 8 cases passed, including natural questions and two user-answer continuations; finalization called review_current. Production prompts were unchanged. This single-run comparison establishes neither stability nor causality.
 
 ## Related documents
 

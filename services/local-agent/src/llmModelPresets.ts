@@ -7,8 +7,6 @@ export type LlmThinkingControl =
   | 'always_enabled'
   | 'none';
 
-export type LlmRuntimeRole = 'act' | 'decision' | 'answer' | 'observe' | 'subagent';
-export type LlmReasoningEffort = 'low' | 'medium' | 'xhigh';
 
 export type LlmModelPreset = {
   key: string;
@@ -333,14 +331,6 @@ export function inferLlmStructuredOutputMethod(
   )?.method;
 }
 
-export function inferLlmRoleReasoningEffort(
-  model: string,
-  role: LlmRuntimeRole,
-): LlmReasoningEffort | undefined {
-  if (inferLlmModelPreset(model)?.key !== 'qwen-token-plan') return undefined;
-  return role === 'decision' || role === 'observe' ? 'low' : 'medium';
-}
-
 export function inferLlmAdditionalThinkingReserveTokens(model: string): number {
   return inferLlmModelPreset(model)?.key === 'qwen-token-plan' ? 16_384 : 0;
 }
@@ -351,33 +341,6 @@ export function resolveLlmGenerationReserveTokens(
   const reserve = (llmConfig.maxOutputTokens ?? 0)
     + inferLlmAdditionalThinkingReserveTokens(llmConfig.model);
   return reserve > 0 ? reserve : undefined;
-}
-
-export function buildLlmModelKwargs(
-  model: string,
-  thinking: boolean,
-  reasoningEffort?: LlmReasoningEffort,
-): Record<string, unknown> | undefined {
-  const normalized = normalizeModelName(model);
-  const control = inferLlmModelPreset(model)?.thinkingControl;
-  if (control === 'extra_body_enable_thinking') {
-    return { extra_body: { enable_thinking: thinking } };
-  }
-  if (control === 'thinking_type') {
-    return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
-  }
-  if (control === 'always_enabled') {
-    return reasoningEffort
-      ? { reasoning_effort: reasoningEffort }
-      : undefined;
-  }
-  if (normalized.includes('qwen') || normalized.includes('minimax')) {
-    return { extra_body: { enable_thinking: thinking } };
-  }
-  if (normalized.includes('glm') || normalized.includes('deepseek')) {
-    return { thinking: { type: thinking ? 'enabled' : 'disabled' } };
-  }
-  return undefined;
 }
 
 export function requiresLlmStreaming(model: string): boolean {

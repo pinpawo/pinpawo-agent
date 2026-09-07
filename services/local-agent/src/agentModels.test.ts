@@ -9,10 +9,6 @@ function readTemperature(model: unknown): number | undefined {
   return (model as { temperature?: number }).temperature;
 }
 
-function readModelKwargs(model: unknown): Record<string, unknown> | undefined {
-  return (model as { modelKwargs?: Record<string, unknown> }).modelKwargs;
-}
-
 function readMaxTokens(model: unknown): number | undefined {
   return (model as { maxTokens?: number }).maxTokens;
 }
@@ -57,48 +53,17 @@ test('an explicit temperature override applies consistently to every role', () =
   assert.equal(readTemperature(models.subagent), 0.2);
 });
 
-test('DeepSeek model roles apply the node-level thinking policy', () => {
-  const models = buildLocalAgentModels({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-v4-pro',
-    observeModel: 'deepseek-v4-pro',
-  });
-
-  assert.deepEqual(readModelKwargs(models.act), {
-    thinking: { type: 'disabled' },
-  });
-  assert.deepEqual(readModelKwargs(models.decision), {
-    thinking: { type: 'disabled' },
-  });
-  assert.deepEqual(readModelKwargs(models.answer), {
-    thinking: { type: 'enabled' },
-  });
-  assert.deepEqual(readModelKwargs(models.observe), {
-    thinking: { type: 'disabled' },
-  });
-  assert.deepEqual(readModelKwargs(models.subagent), {
-    thinking: { type: 'enabled' },
-  });
-  assert.equal(readMaxTokens(models.decision), undefined);
-  assert.equal(readMaxTokens(models.act), undefined);
-  assert.equal(readMaxTokens(models.answer), undefined);
-});
-
-test('an explicit subagent thinking override remains available', () => {
-  const models = buildLocalAgentModels({
-    apiKey: 'test-key',
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-v4-pro',
-    subagentThinking: false,
-  });
-
-  assert.deepEqual(readModelKwargs(models.subagent), {
-    thinking: { type: 'disabled' },
-  });
-  assert.deepEqual(readModelKwargs(models.answer), {
-    thinking: { type: 'enabled' },
-  });
+test('every runtime role leaves thinking and effort to the provider', () => {
+  for (const model of ['deepseek-v4-pro', 'glm-5', 'qwen3.8-max', 'k3']) {
+    const models = buildLocalAgentModels({ apiKey: 'test-key', baseUrl: 'https://example.test/v1', model });
+    for (const instance of Object.values(models)) {
+      const params = readInvocationParams(instance);
+      assert.equal(params.thinking, undefined);
+      assert.equal(params.enable_thinking, undefined);
+      assert.equal(params.extra_body, undefined);
+      assert.equal(params.reasoning_effort, undefined);
+    }
+  }
 });
 
 test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
@@ -109,11 +74,11 @@ test('Qwen 3.8 roles preserve the provider-enforced thinking mode', () => {
     maxOutputTokens: 131_072,
   });
 
-  assert.equal(readInvocationParams(models.act).reasoning_effort, 'medium');
-  assert.equal(readInvocationParams(models.decision).reasoning_effort, 'low');
-  assert.equal(readInvocationParams(models.answer).reasoning_effort, 'medium');
-  assert.equal(readInvocationParams(models.observe).reasoning_effort, 'low');
-  assert.equal(readInvocationParams(models.subagent).reasoning_effort, 'medium');
+  assert.equal(readInvocationParams(models.act).reasoning_effort, undefined);
+  assert.equal(readInvocationParams(models.decision).reasoning_effort, undefined);
+  assert.equal(readInvocationParams(models.answer).reasoning_effort, undefined);
+  assert.equal(readInvocationParams(models.observe).reasoning_effort, undefined);
+  assert.equal(readInvocationParams(models.subagent).reasoning_effort, undefined);
   assert.equal('extra_body' in readInvocationParams(models.act), false);
   assert.equal(readInvocationParams(models.act).max_tokens, 131_072);
   assert.equal(readMaxTokens(models.act), 131_072);

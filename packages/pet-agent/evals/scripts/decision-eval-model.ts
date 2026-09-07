@@ -14,7 +14,6 @@ import {
   type ModelProfileV1,
 } from '../../../../services/local-agent/src/modelProfiles.ts';
 import {
-  buildLlmModelKwargs,
   inferLlmStructuredOutputMethod,
 } from '../../../../services/local-agent/src/llmModelPresets.ts';
 import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
@@ -213,17 +212,6 @@ export function createDecisionEvalModel(options: {
     ),
     0,
   );
-  const configuredReasoningEffort = env[`${rolePrefix}_REASONING_EFFORT`]
-    ?? (options.role === 'subject'
-      ? env.PROMPT_EVAL_REASONING_EFFORT
-      : undefined)
-    ?? undefined;
-  const defaultThinkingKwargs = buildLlmModelKwargs(profile.model, true);
-  const reasoningEffort = configuredReasoningEffort
-    ?? (defaultThinkingKwargs ? 'enabled' : 'provider-default');
-  const modelKwargs = configuredReasoningEffort
-    ? { ...defaultThinkingKwargs, reasoning_effort: configuredReasoningEffort }
-    : defaultThinkingKwargs;
   const method = readStructuredOutputMethod(
     env[`${rolePrefix}_STRUCTURED_OUTPUT_METHOD`]
       ?? (options.role === 'subject'
@@ -248,7 +236,6 @@ export function createDecisionEvalModel(options: {
       ...(profile.maxOutputTokens
         ? { maxTokens: profile.maxOutputTokens }
         : {}),
-      ...(modelKwargs ? { modelKwargs } : {}),
     }) as unknown as AgentModels['act'],
     method,
     label: `${profile.label} (${profile.model} @ ${new URL(profile.baseUrl).host})`,
@@ -265,7 +252,7 @@ export function createDecisionEvalModel(options: {
       contextWindowTokens: profile.contextWindowTokens,
       maxOutputTokens: profile.maxOutputTokens ?? null,
       temperature,
-      reasoningEffort,
+      reasoningEffort: 'provider-default',
       timeoutMs: timeout,
       inputModalities: [...profile.inputModalities],
     },

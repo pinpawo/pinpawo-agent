@@ -316,6 +316,8 @@ pre-tool response validation enforces the control-batch contract.
 Behavior tests cover single-call controls, evidence publication, continuation,
 plan constraints, protected compaction, and checkpoint recovery. The synthetic real-model eval on DeepSeek v4-pro (2026-09-07) passed 7 of 8 cases with thinking disabled; finalization emitted XML text instead of calling the control tool. After enabling thinking by default as requested, the same 8 cases passed, including natural questions and two user-answer continuations; finalization called review_current. Production prompts were unchanged. This single-run comparison establishes neither stability nor causality.
 
+Current model policy: runtime and eval omit thinking and reasoning_effort overrides for every role, leaving provider defaults in effect. The old subagent thinking switch and per-role effort policy have been removed. The explicit-thinking results above are historical experiment settings.
+
 ## Related documents
 
 This document owns the overall interaction. Existing documents retain their details without introducing new concepts or duplicating field definitions here:

@@ -21,8 +21,6 @@ export type AgentLlmConfig = {
   timeoutMs?: number;
   maxRetries?: number;
   verbose?: boolean;
-  /** Enable thinking/reasoning for subagent calls. Default: true. */
-  subagentThinking?: boolean;
   /**
    * Override structured-output retry behavior after parse/schema failure.
    * When unset, every structured-output method retries once.

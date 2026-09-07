@@ -27,8 +27,6 @@ export type StoredConfig = {
    * Keys match AgentCapability.name / CapabilityMeta.id.
    * Absent key = use the capability's defaultEnabled value (true for built-ins).
    */
-  /** Enable thinking/reasoning for subagent calls. Default: false. */
-  subagent_thinking?: boolean;
   /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
   structured_output_auto_repair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */

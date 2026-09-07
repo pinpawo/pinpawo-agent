@@ -218,12 +218,12 @@ export function createDecisionEvalModel(options: {
       ? env.PROMPT_EVAL_REASONING_EFFORT
       : undefined)
     ?? undefined;
-  const runtimeDefaultModelKwargs = buildLlmModelKwargs(profile.model, false);
+  const defaultThinkingKwargs = buildLlmModelKwargs(profile.model, true);
   const reasoningEffort = configuredReasoningEffort
-    ?? (runtimeDefaultModelKwargs ? 'disabled' : 'provider-default');
+    ?? (defaultThinkingKwargs ? 'enabled' : 'provider-default');
   const modelKwargs = configuredReasoningEffort
-    ? { reasoning_effort: configuredReasoningEffort }
-    : runtimeDefaultModelKwargs;
+    ? { ...defaultThinkingKwargs, reasoning_effort: configuredReasoningEffort }
+    : defaultThinkingKwargs;
   const method = readStructuredOutputMethod(
     env[`${rolePrefix}_STRUCTURED_OUTPUT_METHOD`]
       ?? (options.role === 'subject'

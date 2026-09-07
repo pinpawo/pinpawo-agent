@@ -156,7 +156,7 @@ test('eval model resolution requires an explicit configured profile', () => {
   }
 });
 
-test('eval models use the production default thinking control', () => {
+test('eval models enable thinking by default', () => {
   const { root, configPath } = writeProfiles();
   try {
     const evaluated = createDecisionEvalModel({
@@ -171,15 +171,15 @@ test('eval models use the production default thinking control', () => {
       (evaluated.model as unknown as {
         modelKwargs: Record<string, unknown>;
       }).modelKwargs,
-      { thinking: { type: 'disabled' } },
+      { thinking: { type: 'enabled' } },
     );
-    assert.equal(evaluated.metadata.reasoningEffort, 'disabled');
+    assert.equal(evaluated.metadata.reasoningEffort, 'enabled');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('explicit eval reasoning effort overrides the production default', () => {
+test('explicit eval reasoning effort retains enabled thinking', () => {
   const { root, configPath } = writeProfiles();
   try {
     const evaluated = createDecisionEvalModel({
@@ -195,7 +195,7 @@ test('explicit eval reasoning effort overrides the production default', () => {
       (evaluated.model as unknown as {
         modelKwargs: Record<string, unknown>;
       }).modelKwargs,
-      { reasoning_effort: 'low' },
+      { thinking: { type: 'enabled' }, reasoning_effort: 'low' },
     );
     assert.equal(evaluated.metadata.reasoningEffort, 'low');
   } finally {

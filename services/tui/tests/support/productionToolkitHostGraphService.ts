@@ -94,7 +94,7 @@ export function createProductionToolkitHostGraphService() {
 }
 
 function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
-  const workdir = setup.input.workdir;
+  const workdir = setup.input.context?.workdir;
   if (!workdir) {
     throw new Error('production toolkit host fixture requires a workdir');
   }

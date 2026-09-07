@@ -2,7 +2,7 @@
 
 > Status: Draft
 > Date: 2026-09-07
-> Related: issues #675, #747, #754, #756; PRs #682, #758, #766, #767, #770
+> Related: issues #675, #747, #754, #756, #772; PRs #682, #758, #766, #767, #770
 > Kind semantics: [Review and Interrupt Runtime Design](review.md)
 > Host boundary: [Resident Pet Host ports](resident-pet-host-ports.md)
 
@@ -45,9 +45,15 @@ clearing ground for.
 4. **Resume is a value by id.** A kind defines the shape of its resume value.
    Cancelling a review and continuing a pause are both resume values, not
    separate request types.
-5. **Esc means abort a running run.** It has no meaning for a pending
-   interrupt. What Esc does while an interrupt is pending is an interface
-   decision that produces a resume value or a local UI transition.
+5. **Origin is private to the kind.** A kind may be raised for more than one
+   reason. `pause_task` is raised when a review resolution ends the task
+   unfinished, and when an invocation is aborted with work remaining. Nothing
+   above the Runtime learns which; both are the same interrupt, continued the
+   same way.
+6. **No compatibility layer.** Each change replaces a piece of the review or
+   pause chain with the interrupt chain and deletes what it replaces in the
+   same change. There are no legacy aliases, dual emissions, or deprecated
+   fields kept for a phase.
 
 ## The chain
 
@@ -69,10 +75,10 @@ Runtime    AgentInterrupt.resume(value)                                     pars
 - Each kind is an `AgentInterrupt` with `interaction()` (the payload),
   `resume(value)` (parse or throw), and the choice of **where** in the graph
   the interrupt is raised. Review raises inside the subagent's afterModel
-  boundary; pause raises at the root `pauseGate` node after the capability
-  node has committed the pending delegation. Both surface in the root
-  snapshot's `interrupts[]`.
-- A kind also declares its **new-input policy**: what happens if a fresh
+  boundary. Pause raises at the root `pauseGate` node, after the capability
+  node has committed the pending delegation, for every origin. Both surface
+  in the root snapshot's `interrupts[]`.
+- A kind declares its **new-input policy**: what happens if a fresh
   `chat_request` arrives while it is pending. `human_review` refuses (the
   reviewed tool call must be answered; the Host re-raises the same interrupt).
   `pause_task` supersedes (LangGraph drops the pending gate and the Runtime's
@@ -82,6 +88,13 @@ Runtime    AgentInterrupt.resume(value)                                     pars
   one task; a resolution that leads to another kind unwinds to that kind's own
   node rather than interrupting again in place. This is why a review
   rejection ends the subagent and lets `pauseGate` raise the pause.
+- `pause_task` from an aborted invocation is the open design point of #754.
+  The constraint this domain imposes is only that the result is a
+  `pause_task` interrupt with an id in `interrupts[]`, so the rest of the
+  chain is unchanged. A candidate mechanism is to settle the abort by invoking
+  the root graph toward `pauseGate`, so the gate raises against the last
+  committed delegation state. Until that lands, an aborted run with retained
+  work is not continuable, and interfaces must not pretend it is.
 
 ### Host
 
@@ -90,12 +103,13 @@ Runtime    AgentInterrupt.resume(value)                                     pars
   for an interrupt it does not understand.
 - Settlement after a turn is one of four states. `waiting` covers every
   pending interrupt. `interrupted` is reserved for an aborted run.
-  `waiting_human` and `paused` do not exist.
 - The resident Host's dispatch admission reads the same function: a pending
   interrupt of any kind holds dispatch as `waiting`.
 - The Host resumes by building `Command({ resume: { [interruptId]: value } })`
   from the client message unchanged. It validates identity (session, id) and
   nothing about the value.
+- `run.interrupt` aborts a running run and nothing else. The Host does not
+  resolve, cancel, or translate a pending interrupt on a request's behalf.
 - Finalization of an interrupted run is one path, described in #770: close
   operations, publish `run.interrupted`, clear the inflight run.
 
@@ -103,60 +117,38 @@ Runtime    AgentInterrupt.resume(value)                                     pars
 
 Runtime events:
 
-- `interrupt.requested { requestId, interruptId, payload }` replaces
-  `human_review.requested`. The payload is the kind's interaction payload.
-- Error codes `interrupt_closed`, `interrupt_stale`, `interrupt_wrong_session`
-  replace the `review_*` codes.
+- `interrupt.requested { requestId, interruptId, payload }`. The payload is
+  the kind's interaction payload.
+- Error codes `interrupt_closed`, `interrupt_stale`, `interrupt_wrong_session`.
 
 Client messages:
 
-- `interrupt.resume { requestId, interruptId, value }` replaces
-  `human_review_response` and `review.cancel`.
-- `chat_request` loses `activeDelegationTransition`. A message is a message;
-  whether it continues or supersedes is decided by the pending interrupt's
+- `interrupt.resume { requestId, interruptId, value }`.
+- `chat_request` carries a message and nothing about execution semantics.
+  Whether it continues or supersedes is decided by the pending interrupt's
   new-input policy in the Runtime (#756).
-- `run.interrupt { requestId }` stays and means abort the running run.
+- `run.interrupt { requestId }` aborts the running run.
 
 Snapshot projection:
 
 - `pendingInterrupt { interruptId, payload }` for every kind. The
-  `interruptId` is required. `readHumanReviewPendingInterrupt` and the
-  id-less `pause_task` projection variant are removed.
+  `interruptId` is required.
 
 ### Interface
 
-- Renders by `payload.kind`. Builds the resume value by kind:
-  review decisions and review cancel per [review.md](review.md); pause
-  continue as `{ action: 'continue', guidance? }`.
-- Esc while running sends `run.interrupt`. Esc with a pending review sends
-  `interrupt.resume` with the cancel value. Esc with a pending pause is a local
-  exit from paused mode, as [delegation-pause-interaction.md](../tui/delegation-pause-interaction.md)
-  already specifies; the next message supersedes through the Runtime.
+- Renders by `payload.kind`. Builds the resume value by kind: review decisions
+  and review cancel per [review.md](review.md); pause continue as
+  `{ action: 'continue', guidance? }`.
+- The Esc key is an interface gesture, not a domain concept. Its meaning
+  depends on what the interface is showing: while a run is running it sends
+  `run.interrupt`; while a `human_review` is pending it sends
+  `interrupt.resume` with the cancel value; while a `pause_task` is pending it
+  leaves paused mode locally, as
+  [delegation-pause-interaction.md](../tui/delegation-pause-interaction.md)
+  specifies, and the next message supersedes through the Runtime.
 - The composer is unavailable while a `human_review` interrupt is pending and
-  available while a `pause_task` interrupt is pending. That is the only place
-  an interface consults the kind for input policy, and it is a UX choice, not
-  the enforcement point.
-
-## Esc
-
-```text
-running  -- Esc --> run.interrupt --> abort --> run.interrupted
-pending human_review -- Esc --> interrupt.resume(cancel) --> resume by id
-pending pause_task   -- Esc --> local exit of paused mode
-```
-
-The Host's `handleRunInterrupt` therefore has two branches: an inflight Chat
-run, or a resident Host run. The current third branch, which recovers a
-pending review and cancels it on the interface's behalf, moves to the
-interface. The Host must not turn one request type into another.
-
-An aborted run that leaves unfinished work must end as a `pause_task`
-interrupt with an id, so that continuation is the same resume-by-id as every
-other case. The mechanism is Runtime-private and is the open design point of
-#754; a candidate is to settle the abort by invoking the root graph toward
-`pauseGate`, so the gate raises the interrupt against the last committed
-delegation state. Until that lands, an aborted run with retained work is not
-continuable through this domain and interfaces must not pretend it is.
+  available while a `pause_task` interrupt is pending. That is a UX choice;
+  the enforcement point is the Runtime's new-input policy.
 
 ## Current deviations
 
@@ -172,55 +164,53 @@ continuable through this domain and interfaces must not pretend it is.
 | Runtime | pause is an interrupt | done in #766 (`pauseGate`); `taskPauseInterrupt` channel still written for Host readers | `packages/pet-agent/src/agent/orchestrator/runtime/nodes/pauseGate.ts` |
 | Runtime | new-input policy on the kind | Host refuses text over a pending review inline; pause supersede is the `buildRunStateReset` default | `chatSessionAdapter.ts`, `packages/pet-agent/src/agent/orchestrator/state.ts` |
 
-## Migration sequence
+## Migration
 
-Each phase generalizes the review path into the interrupt path. No phase adds
-a pause-specific channel. Prerequisites: #766, #767, #770 merged.
+Three replacements. Each one deletes what it replaces. Prerequisites: #766,
+#767, #770 merged.
 
-### Phase 1: Host reads and settles by id
+### Replacement 1: pause continues by id
 
-- `readPendingInterrupt` recognizes every kind; unknown payloads throw.
-- Settlement gains `waiting` and drops `waiting_human` and `paused`.
-- `readSettledState` in the resident Host reads interrupts only.
-- The Chat handler's `paused` branch and the adapter's `pauseTaskInterrupt`
-  read are removed.
-- Legacy events are still emitted from the new read path so interfaces keep
-  working unchanged.
+Pause had no wire contract of its own, so this replacement touches nothing
+that review uses and can land first.
 
-### Phase 2: Protocol carries the domain
+- Add `interrupt.resume` to the protocol and the Host, resuming any id with
+  an opaque value.
+- `readPendingInterrupt` returns `pause_task` interrupts with their id; the
+  `pendingInterrupt` projection carries `interruptId` for pause.
+- Settlement of a pending pause is `waiting`.
+- The TUI's continue action sends `interrupt.resume` with the pause continue
+  value.
+- Delete in the same change: `chat_request.activeDelegationTransition`,
+  `LegacyActiveDelegationTransition`, `resume_active`, the externally
+  settable `runActiveDelegationTransition` (supersede stays as the Runtime
+  default), the `taskPauseInterrupt` state channel, `hasPendingContinuation`,
+  the adapter's `paused` result and the handler's `paused` branch, and the
+  `pauseTaskInterrupt` line in `readSettledState`.
 
-- Add `interrupt.requested`, `interrupt.resume`, the `interrupt_*` error
-  codes, and the required `interruptId` on every `pendingInterrupt`.
-- The parser accepts the legacy messages and canonicalizes them into the new
-  shapes, the same approach #682 used for identity aliases.
-- The Runtime exposes the new-input policy; the Host consults it instead of
-  its inline review refusal.
+### Replacement 2: review moves onto the same chain
 
-### Phase 3: Interfaces speak the domain
+- `interrupt.requested` replaces `human_review.requested`.
+- `interrupt.resume` carries review decisions and review cancel.
+- `waiting` replaces `waiting_human`.
+- `readPendingInterrupt` recognizes every kind and throws on an unknown
+  payload; `pendingInterrupt` is one shape.
+- The new-input policy moves to the Runtime; the Host's inline refusal of
+  text over a pending review is replaced by consulting it.
+- The Host has one resume entry point. `handleRunInterrupt` keeps its
+  inflight and resident-run branches only.
+- Error codes become `interrupt_*`.
+- TUI, Studio Console, and the macOS companion switch in the same change.
+- Delete in the same change: `human_review.requested`,
+  `human_review_response`, `review.cancel`, `handleHumanReviewResponse`,
+  `handleReviewCancel`, the review branch of `handleRunInterrupt`,
+  `readHumanReviewPendingInterrupt`, the `review_*` error codes.
 
-- TUI, Studio Console, and the macOS companion send `interrupt.resume` for
-  review decisions, review cancel, and pause continue.
-- `continuePausedTask` sends the pause continue value by id.
-  `activeDelegationTransition` is no longer sent.
-- Esc semantics per the Esc section. The TUI's paused-mode local exit is
-  already in place.
+### Replacement 3: abort raises a pause
 
-### Phase 4: Delete the legacy chain
-
-- Protocol: `human_review.requested`, `human_review_response`,
-  `review.cancel`, `chat_request.activeDelegationTransition`,
-  `LegacyActiveDelegationTransition`, the `review_*` error codes.
-- Host: `handleHumanReviewResponse`, `handleReviewCancel`, the review branch of
-  `handleRunInterrupt`, `hasPendingContinuation`,
-  `readHumanReviewPendingInterrupt`.
-- Runtime: the `taskPauseInterrupt` state channel; `resume_active` and the
-  externally settable `runActiveDelegationTransition`. The supersede
-  transition remains as the Runtime-internal default.
-
-### Phase 5: Running Esc raises a pause
-
-- #754. An aborted run with unfinished work becomes a `pause_task` interrupt
-  with an id. Continuation is then identical to a review-origin pause.
+- #754. An aborted invocation with unfinished work ends as a `pause_task`
+  interrupt with an id. Nothing above the Runtime changes, which is the test
+  that Replacements 1 and 2 were done right.
 
 ## Required behavioral coverage
 
@@ -233,8 +223,8 @@ a pause-specific channel. Prerequisites: #766, #767, #770 merged.
 - A `chat_request` over a pending review is refused by the Runtime's policy;
   over a pending pause it supersedes and the unfinished delegation is
   detached without fabricating a handoff.
-- Esc while running aborts and finalizes once; Esc with a pending review
-  resolves that review by id; Esc with a pending pause sends nothing.
+- A review-origin pause and an abort-origin pause are indistinguishable above
+  the Runtime and continue through the same resume value.
 - No handler, adapter, or projection code outside the Runtime and the
   interface renderers compares `payload.kind` to a literal.
 

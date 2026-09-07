@@ -60,17 +60,22 @@ export function createHostGraphFixture() {
   let streams = 0;
   const service = {
     async readThreadState(setup: AgentChannelSetup) {
-      const pendingInterrupt = pendingInterrupts.get(readThreadKey(setup)) ?? null;
+      const threadKey = readThreadKey(setup);
+      const pendingInterrupt = pendingInterrupts.get(threadKey) ?? null;
+      const pauseTaskInterrupt = suspendedReviews.has(threadKey)
+        ? { kind: 'pause_task' as const }
+        : null;
       return {
-        messages: messagesByThread.get(readThreadKey(setup)) ?? [],
+        messages: messagesByThread.get(threadKey) ?? [],
         pendingInterrupt: pendingInterrupt
           ? {
               interruptId: pendingInterrupt.interruptId,
               reviews: [pendingInterrupt.review],
             }
           : null,
+        pauseTaskInterrupt,
         hasPendingContinuation:
-          pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
+          pendingInterrupt !== null || pauseTaskInterrupt !== null,
       };
     },
     buildResumeCommand(resume: unknown) {
@@ -174,10 +179,7 @@ export function createHostGraphFixture() {
       }
       if (typeof inputText === 'string' && inputText.includes(INTERRUPT_MESSAGE)) {
         messagesByThread.set(threadKey, accumulatedInput);
-        const output = waitForAbort(setup.input.signal).then(() => {
-          observedInterrupt = true;
-        });
-        return Object.assign((async function* () {
+        return (async function* () {
           yield protocolEvent('messages', {
             event: 'message-start',
             id: 'assistant-interrupt',
@@ -189,9 +191,10 @@ export function createHostGraphFixture() {
               text: INTERRUPT_PARTIAL,
             },
           });
-          await output;
+          await waitForAbort(setup.input.signal);
+          observedInterrupt = true;
           yield protocolEvent('values', { messages: inputMessages });
-        })(), { output });
+        })();
       }
 
       const finalReply = new AIMessage({

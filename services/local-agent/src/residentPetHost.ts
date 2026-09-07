@@ -536,6 +536,11 @@ export async function createResidentPetRuntime(
     const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
     if (state.pendingInterrupt) return 'waiting';
+    // An explicit task pause is a Runtime-materialized signal: the Pet is
+    // healthy and awaiting a human decision to continue or supersede. Read it
+    // before resumability, which cannot tell a pause from ordinary retained
+    // work and must not be used to infer the interruption reason.
+    if (state.pauseTaskInterrupt) return 'waiting';
     if (state.hasPendingContinuation) return 'blocked';
     return 'open';
   };
@@ -701,7 +706,6 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               setup,
               graphService,
               isCurrent: () => !run.controller.signal.aborted,
-              finishInterrupted: () => undefined,
               emitEvent: publishRuntimeEvent,
               emitToolEvent: (payload) => {
                 emitLocalServerToolOperationEvent({

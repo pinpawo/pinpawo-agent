@@ -1,7 +1,7 @@
 {
   "name": "@pinpawo-plugin/kanban",
   "version": "0.1.0",
-  "description": "Studio task lifecycle Plugin and Agent Toolkit for assignment, dependencies, and shared progress",
+  "description": "Studio task lifecycle Plugin and Agent Toolkit for assignment, task graphs, and shared progress",
   "license": "MIT",
   "publishConfig": {
     "access": "public"

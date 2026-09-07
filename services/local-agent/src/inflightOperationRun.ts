@@ -12,7 +12,6 @@ export type InflightOperationRun = {
   requestId: string;
   controller: AbortController;
   operationTracker: ToolOperationTracker;
-  interruptedSent?: boolean;
 };
 
 export type TerminalOperationPhase = Extract<

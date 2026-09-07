@@ -1,7 +1,21 @@
 # Kanban SQLite Task Store
 
-> 状态：Draft implementation contract
-> 更新：2026-09-02
+> 状态：历史设计（schema v5 及以前），不是当前接口合同
+> 当前 task 关联、删除和 Planner 确认流程见 [Task graph draft](task-graph.md)。
+
+## 当前实现与本文的差异
+
+- 当前 snapshot 使用 `relationships`，task 不再包含 `deps`；创建参数为可选的
+  `relatedTaskIds`，仅引用已存在 task。schema v7 将关联保存为无方向、去重的端点对。
+- 关联不限制分配，`todo` task 无需等待邻居完成；关联可通过 link/unlink 修改，也允许环。
+- 删除 task 会在事务内清除其关联和历史，不删除邻居，也不会取消已派发的执行。
+- 创建和状态转换仍追加 history event；link/unlink 不追加 event，删除只发布实时通知。
+  因此下面“每次 mutation 都有 sequence”和仅靠 history 补齐的描述不再适用于所有操作；
+  重新连接后应读取完整 snapshot。删除最新历史后，当前 `MAX(sequence)` snapshot 游标可下降。
+- Planner 在对话中展示草稿、等待用户确认后逐条创建；草稿不持久化，服务端不强制确认。
+
+下文保留旧设计用于理解迁移背景；其中 dependency 表、强制依赖、不可修改关联及
+不清理历史等说明均已被上面的当前行为取代。
 
 本文定义独立 Kanban 领域的 task、dependency、history 与 SQLite persistence。
 Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition 使用；它的数据

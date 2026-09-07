@@ -4,10 +4,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import type { StudioPluginContext } from '@pinpawo/studio';
-import { createProjectFilesPlugin, createStudioPlugin } from './projectFilesPlugin';
+import {
+  createProjectFilesPlugin,
+  createStudioPlugin,
+  type ProjectFilesPluginContext,
+} from './projectFilesPlugin';
 
-function pluginContext(routes: StudioHttpRoute[]): StudioPluginContext {
+function pluginContext(routes: StudioHttpRoute[]): ProjectFilesPluginContext {
   const hook: StudioHttpRoutesHook = {
     register: (route) => {
       routes.push(route);
@@ -18,10 +21,6 @@ function pluginContext(routes: StudioHttpRoute[]): StudioPluginContext {
     },
   };
   return {
-    dispatch: async () => ({ petId: 'planner', invocationId: 'invocation-1' }),
-    notify: () => undefined,
-    subscribe: () => () => undefined,
-    listPets: () => [],
     hooks: {
       expose: () => () => undefined,
       contribute: (_plugin, _name, install) => {

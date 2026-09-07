@@ -480,7 +480,14 @@ function parsePendingInterrupt(
 ): PendingInterruptProjection | null {
   if (!isRecord(value)) return null;
   const payload = value.payload;
-  if (!isRecord(payload) || payload.kind !== 'human_review') return null;
+  if (!isRecord(payload)) return null;
+  if (payload.kind === 'pause_task') {
+    return Object.keys(value).every((key) => key === 'payload')
+      && Object.keys(payload).every((key) => key === 'kind')
+      ? { payload: { kind: 'pause_task' } }
+      : null;
+  }
+  if (payload.kind !== 'human_review') return null;
   const interactions = readReviews(payload.interactions);
   if (typeof value.interruptId !== 'string' || !interactions) {
     return null;

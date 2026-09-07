@@ -15,6 +15,7 @@ import {
 import {
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
+  readPauseTaskInterrupt,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -143,6 +144,7 @@ export function createPersistentHostGraphService() {
           ? values.messages as BaseMessage[]
           : [],
         pendingInterrupt: readPendingReview(snapshot),
+        pauseTaskInterrupt: readPauseTaskInterrupt(snapshot),
         hasPendingContinuation: hasPendingContinuation(snapshot),
         currentPlan: null,
       };

@@ -247,3 +247,27 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
   assert.ok(restored.messages.some(message => message.text === 'second request'));
   assert.equal(restored.messages.some(message => message.text === 'separate store'), false);
 });
+
+test('thread state projects an explicit Runtime task pause', async () => {
+  const service = new LocalAgentGraphService();
+  const model = {
+    invoke: async () => new AIMessage('unused'),
+    bindTools() { return this; },
+  } as unknown as AgentModels['act'];
+  const graphSetup: AgentChannelSetup = {
+    ...setup(),
+    graphConfig: {
+      models: { act: model },
+      checkpoint: new MemorySaver(),
+    },
+    input: { messages: [], threadId: randomUUID() },
+  };
+  await service.updateState(graphSetup, {
+    taskPauseInterrupt: { kind: 'pause_task' },
+  }, 'prepare');
+
+  const state = await service.readThreadState(graphSetup);
+
+  assert.deepEqual(state.pauseTaskInterrupt, { kind: 'pause_task' });
+  assert.equal(state.pendingInterrupt, null);
+});

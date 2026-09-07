@@ -13,9 +13,10 @@ import {
   type CliRenderer,
 } from '@opentui/core';
 import { createTestRenderer } from '@opentui/core/testing';
-import type {
-  AgentSession,
-  AgentTimelineEntry,
+import {
+  readHumanReviewPendingInterrupt,
+  type AgentSession,
+  type AgentTimelineEntry,
 } from '@pinpawo/agent-session';
 import {
   FileCapabilityArtifactStore,
@@ -161,14 +162,12 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     'session-resume',
     'chat-interrupt',
     'snapshot-interrupt',
-    'snapshot-interrupt-settled',
     'chat-review-approve',
     'review-response-approve',
     'snapshot-review-approve',
     'chat-review-cancel',
     'review-cancel',
     'snapshot-review-cancel',
-    'snapshot-review-cancel-settled',
     'chat-review-continue',
     'review-response-continue',
     'snapshot-review-continue',
@@ -423,7 +422,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(controller.getState().session.activeRun?.state, 'interrupting');
     await waitFor(() => (
       graphFixture.interruptObserved()
-      && snapshotRequestCount === 5
+      && snapshotRequestCount === 4
       && controller.getState().session.activeRun === null
     ));
     const interruptedEntries = controller.getState().session.timeline.filter(
@@ -436,7 +435,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       [
         `user:completed:${INTERRUPT_MESSAGE}`,
         `assistant:completed:${INTERRUPT_PARTIAL}`,
-        'system:completed:interrupted',
+        'system:completed:Run interrupted.',
       ],
     );
     const interruptedOutput = committedRows.join('\n');
@@ -445,7 +444,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       INTERRUPT_PARTIAL,
       'interrupted',
     ]);
-    assert.equal(snapshotRequestCount, 5);
+    assert.equal(snapshotRequestCount, 4);
 
     assert.deepEqual(controller.submitChat(REVIEW_APPROVE_MESSAGE), {
       ok: true,
@@ -454,7 +453,9 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     await waitFor(() => (
       controller.getState().session.pendingInterrupt !== null
     ));
-    const approvalInterrupt = controller.getState().session.pendingInterrupt;
+    const approvalInterrupt = readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    );
     assert.ok(approvalInterrupt);
     assert.equal(approvalInterrupt.interruptId, 'review-interrupt-approve');
     assert.equal(approvalInterrupt.payload.interactions[0]?.interactionId, REVIEW_SPEC.id);
@@ -466,7 +467,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     assert.equal(approvalResult.ok, true);
     assert.equal(approvalResult.ok ? approvalResult.status : null, 'sent');
     await waitFor(() => (
-      snapshotRequestCount === 6
+      snapshotRequestCount === 5
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -495,7 +496,9 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     await waitFor(() => (
       controller.getState().session.pendingInterrupt !== null
     ));
-    const cancellationInterrupt = controller.getState().session.pendingInterrupt;
+    const cancellationInterrupt = readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    );
     assert.ok(cancellationInterrupt);
     assert.equal(cancellationInterrupt.interruptId, 'review-interrupt-cancel');
     assert.deepEqual(controller.cancelReview({
@@ -504,14 +507,14 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       ok: true,
     });
     await waitFor(() => controller.getState().session.activeRun === null);
-    assert.equal(snapshotRequestCount, 8);
+    assert.equal(snapshotRequestCount, 6);
     assert.deepEqual(graphFixture.reviewResumes()[1], {
       'review-interrupt-cancel': {
         action: 'interrupt_run',
       },
     });
     assert.deepEqual(
-      controller.continueActiveDelegation(REVIEW_CONTINUE_GUIDANCE),
+      controller.continuePausedTask(REVIEW_CONTINUE_GUIDANCE),
       {
         ok: true,
         requestId: 'chat-review-continue',
@@ -520,7 +523,9 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     await waitFor(() => (
       controller.getState().session.pendingInterrupt !== null
     ));
-    const continuedInterrupt = controller.getState().session.pendingInterrupt;
+    const continuedInterrupt = readHumanReviewPendingInterrupt(
+      controller.getState().session.pendingInterrupt,
+    );
     assert.ok(continuedInterrupt);
     assert.equal(
       continuedInterrupt.interruptId,
@@ -533,7 +538,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     });
     assert.equal(continuedApproval.ok, true);
     await waitFor(() => (
-      snapshotRequestCount === 9
+      snapshotRequestCount === 7
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -562,7 +567,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-error',
     });
     await waitFor(() => (
-      snapshotRequestCount === 10
+      snapshotRequestCount === 8
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,
@@ -595,7 +600,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
       requestId: 'chat-recovery',
     });
     await waitFor(() => (
-      snapshotRequestCount === 11
+      snapshotRequestCount === 9
       && controller.getState().session.activeRun === null
       && hasCompletedRequestMessage(
         controller.getState().session,

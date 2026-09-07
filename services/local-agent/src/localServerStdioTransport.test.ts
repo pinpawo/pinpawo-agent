@@ -316,7 +316,7 @@ test('stdio peer queues messages while stdout is backpressured and resumes on dr
   });
 
   assert.equal(transport.peer.send({ type: 'pong' }), true);
-  assert.equal(transport.peer.send({ type: 'interrupted', requestId: 'req-1' }), true);
+  assert.equal(transport.peer.send({ type: 'interrupting', requestId: 'req-1' }), true);
   assert.equal(output.chunks.length, 1);
 
   output.releaseNext();
@@ -327,7 +327,7 @@ test('stdio peer queues messages while stdout is backpressured and resumes on dr
     output.chunks.map((line) => JSON.parse(line) as LocalAgentServerMessage),
     [
       { type: 'pong' },
-      { type: 'interrupted', requestId: 'req-1' },
+      { type: 'interrupting', requestId: 'req-1' },
     ],
   );
 
@@ -407,7 +407,7 @@ test('stdio peer closes when the bounded backpressure queue overflows', async ()
   });
 
   assert.equal(transport.peer.send({ type: 'pong' }), true);
-  assert.equal(transport.peer.send({ type: 'interrupted', requestId: 'req-1' }), false);
+  assert.equal(transport.peer.send({ type: 'interrupting', requestId: 'req-1' }), false);
   await transport.closed;
 
   output.releaseNext();

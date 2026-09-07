@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   AGENT_SESSION_SNAPSHOT_VERSION,
   applySessionSnapshot,
+  readHumanReviewPendingInterrupt,
   reduceSession,
   type AgentSession,
   type AgentSessionInput,
@@ -359,7 +360,10 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
   }, { observedAt: 1_100 });
 
   assert.equal(session.activeRun, null);
-  assert.equal(session.pendingInterrupt?.interruptId, 'interrupt-1');
+  assert.equal(
+    readHumanReviewPendingInterrupt(session.pendingInterrupt)?.interruptId,
+    'interrupt-1',
+  );
   const unknownRun = reduceSession(session, {
     type: 'run.interrupting',
     requestId: 'req-other',
@@ -386,7 +390,10 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
     interruptId: 'interrupt-1',
   }, { observedAt: 1_250 });
   assert.equal(session.activeRun?.requestId, 'req-resume');
-  assert.equal(session.pendingInterrupt?.interruptId, 'interrupt-1');
+  assert.equal(
+    readHumanReviewPendingInterrupt(session.pendingInterrupt)?.interruptId,
+    'interrupt-1',
+  );
 
   session = reduceSession(session, {
     type: 'runtime.event',
@@ -446,7 +453,7 @@ test('a failed interrupt resume keeps the checkpoint wait retryable', () => {
 
   assert.equal(session.activeRun, null);
   assert.equal(
-    session.pendingInterrupt?.interruptId,
+    readHumanReviewPendingInterrupt(session.pendingInterrupt)?.interruptId,
     'interrupt-retry',
   );
 });

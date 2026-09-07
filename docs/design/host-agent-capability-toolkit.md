@@ -206,8 +206,10 @@ Browser、bash、git 都是普通 Toolkit：
    Toolkit-name 分支。
 3. 所有暴露给 Capability subagent 的可执行业务/外部 Tool 必须归属一个 Toolkit；
    不存在 direct host tools、capability-private tools 或与 Toolkit 平级的
-   LocalTools。Run Supervisor 的 `submit_plan` / `return_to_answer` 等框架内部
-   control action 不属于扩展 inventory，不应为了形式统一伪装成 Host Toolkit。
+   LocalTools。Run Supervisor 的框架内部 control action 不属于扩展 inventory，
+   不应为了形式统一伪装成 Host Toolkit；具体 command contract 由
+   [Delegation Boundary Protocol](agent-runtime/delegation-boundary-protocol.md)
+   统一定义。
 4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 review/authorization
    context。Tool 的 path、cwd、command 等参数由模型决定并保持原样；不得为了
    workdir scoping 创建虚假 Toolkit Runtime，也不得由 binding 静默补全或改写输入。

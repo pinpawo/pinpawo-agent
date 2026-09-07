@@ -39,19 +39,17 @@ test('InflightRequestController tracks concurrent requests for the same transpor
   assert.deepEqual(operations.map((event) => event.phase), ['started']);
   assert.equal(observedOperations.length, 0);
 
-  controller.sendInterrupted('client', first);
-  assert.deepEqual(controls, [{
-    type: 'interrupted',
-    requestId: 'req-1',
-    message: 'interrupted',
-  }]);
+  controller.finish('client', first, 'interrupted');
+  // Terminal reporting is the owner's runtime event; the controller only
+  // closes the run's operations and acknowledges an interrupt request.
+  assert.deepEqual(controls, []);
   assert.deepEqual(operations.map((event) => event.phase), ['started', 'interrupted']);
   assert.deepEqual(observedOperations.map((event) => event.phase), ['interrupted']);
   controller.clear('client', first);
   assert.equal(controller.get('client'), second);
 });
 
-test('InflightRequestController does not report terminal interruption before the owner settles', () => {
+test('InflightRequestController only acknowledges an interrupt until the owner clears the run', () => {
   const { controller, controls } = createTestController();
   const run = controller.start('client', 'req-1');
 
@@ -66,10 +64,9 @@ test('InflightRequestController does not report terminal interruption before the
     message: 'interrupting',
   }]);
 
-  controller.sendInterrupted('client', run);
   controller.clear('client', run);
   assert.equal(controller.get('client'), null);
-  assert.equal(controls.at(-1)?.type, 'interrupted');
+  assert.equal(controls.length, 1);
 });
 
 test('InflightRequestController abortAll signals every request without clearing ownership', () => {

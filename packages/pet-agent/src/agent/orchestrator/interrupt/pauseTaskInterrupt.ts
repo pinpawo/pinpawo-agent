@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { AgentInterrupt } from './agentInterrupt';
 
 export const PAUSE_TASK_INTERRUPT_KIND = 'pause_task' as const;
-export const PAUSE_TASK_INTERRUPT_STATE_KEY = 'pauseTaskInterrupt' as const;
+export const PAUSE_TASK_INTERRUPT_STATE_KEY = 'taskPauseInterrupt' as const;
 
 export type PauseTaskInterruptPayload = {
   kind: typeof PAUSE_TASK_INTERRUPT_KIND;
@@ -49,8 +49,16 @@ export function readPauseTaskInterrupt(
   value: unknown,
 ): PauseTaskInterruptPayload | null {
   const record = readRecord(value);
+  if (isPauseTaskInterruptPayload(record)) {
+    return record;
+  }
   const payload = record?.[PAUSE_TASK_INTERRUPT_STATE_KEY];
-  return isPauseTaskInterruptPayload(payload) ? payload : null;
+  if (isPauseTaskInterruptPayload(payload)) {
+    return payload;
+  }
+  const snapshotValues = readRecord(record?.values);
+  const snapshotPayload = snapshotValues?.[PAUSE_TASK_INTERRUPT_STATE_KEY];
+  return isPauseTaskInterruptPayload(snapshotPayload) ? snapshotPayload : null;
 }
 
 /**

@@ -262,29 +262,29 @@ export class LocalServerChatHandler {
       abort: () => controller.abort(),
     });
     const isCurrent = invocation.isCurrent;
-    const finishInterrupted = () => {
-      if (!controller.signal.aborted) {
-        return;
-      }
-      this.inflightRequests.sendInterrupted(peer, inflight);
-      this.inflightRequests.clear(peer, inflight);
-    };
     let runStarted = false;
-    let interruptedPublished = false;
-    const publishInterrupted = () => {
-      if (!runStarted || interruptedPublished) return;
-      interruptedPublished = true;
-      this.publishRuntimeEvent(peer, {
-        type: 'run.interrupted',
-        requestId,
-        message: 'Run interrupted.',
-      });
+    let interruptedFinalized = false;
+    // The one interrupted finalization for this request. An abort, a
+    // superseding request, and a run that settled into a task pause all end
+    // here: open operations close first, then the run reports interrupted.
+    const finalizeInterrupted = () => {
+      if (interruptedFinalized) return;
+      interruptedFinalized = true;
+      this.inflightRequests.finish(peer, inflight, 'interrupted');
+      if (runStarted) {
+        this.publishRuntimeEvent(peer, {
+          type: 'run.interrupted',
+          requestId,
+          message: 'Run interrupted.',
+        });
+      }
+      this.inflightRequests.clear(peer, inflight);
     };
 
     try {
       await invocation.waitForTurn();
       if (!isCurrent()) {
-        finishInterrupted();
+        finalizeInterrupted();
         return 'interrupted';
       }
       this.publishRuntimeEvent(peer, {
@@ -299,8 +299,7 @@ export class LocalServerChatHandler {
       recordAgentRunActivity('thinking', requestId);
       const ctx = await this.loadContext(deps.actorId);
       if (!isCurrent()) {
-        publishInterrupted();
-        finishInterrupted();
+        finalizeInterrupted();
         return 'interrupted';
       }
 
@@ -315,7 +314,6 @@ export class LocalServerChatHandler {
         setup,
         graphService: this.graphService,
         isCurrent,
-        finishInterrupted,
         emitEvent: (event) => {
           if (!isCurrent()) return;
           this.publishRuntimeEvent(peer, event);
@@ -337,17 +335,6 @@ export class LocalServerChatHandler {
               ),
             }
           : {}),
-        ...(source.type === 'review.cancel'
-          || (source.type === 'human_review_response' && source.interruptRun)
-          ? {
-            interruptOnSettledResumeCheckpoint: true,
-            onResumeCheckpointed: ({ canInterrupt }: { canInterrupt: boolean }) => {
-              if (canInterrupt) {
-                this.inflightRequests.interrupt(peer, { requestId });
-              }
-            },
-          }
-          : {}),
       });
       if (result.status === 'waiting_human') {
         this.inflightRequests.finish(peer, inflight, 'interrupted');
@@ -357,8 +344,13 @@ export class LocalServerChatHandler {
         return 'waiting_human';
       }
       if (result.status === 'interrupted') {
-        publishInterrupted();
-        finishInterrupted();
+        finalizeInterrupted();
+        return 'interrupted';
+      }
+      if (result.status === 'paused') {
+        // The protocol has no pause outcome yet: the TUI derives a task pause
+        // from the completion snapshot that follows an interrupted run.
+        finalizeInterrupted();
         return 'interrupted';
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
@@ -373,10 +365,8 @@ export class LocalServerChatHandler {
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[local-server] chat interrupted requestId=${requestId}`);
-        this.inflightRequests.sendInterrupted(peer, inflight);
-        publishInterrupted();
+        finalizeInterrupted();
         recordAgentRunActivity('interrupted', requestId, 2_500);
-        this.inflightRequests.clear(peer, inflight);
         return 'interrupted';
       }
       this.inflightRequests.finish(peer, inflight, 'failed', err);

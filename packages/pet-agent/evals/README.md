@@ -54,8 +54,8 @@ recreate datasets.
 - `agent-interruption-recovery-basics`: resume, changed-intent, approval-resume, and natural-completion-after-resume cases.
 - `agent-permission-control-basics`: HITL, auto-authorization, scoped authorization, and permission-memory cases.
 - `agent-context-synthesis-basics`: answer-from-context and missing-information cases.
-- `agent-answer-behavior-basics`: direct reply, handoff synthesis, historical replay,
-  clarification, task completion summary, and required-user-input return control.
+- The Supervisor design retires Result-Answer model evals in favor of runtime tests for terminal projection and cleanup. That code migration remains in the local worktree and is not part of the documentation-only commit.
+
 - `agent-entry-answer-routing`: direct-answer, clarification, and Supervisor handoff
   cases for Entry Answer.
 - `agent-capability-planning-basics`: production Supervisor entry and
@@ -448,3 +448,11 @@ Useful knobs:
 PROMPT_EVAL_REPEATS=5 npm run eval:entry-answer
 PROMPT_EVAL_CASES=agent-entry-answer-routing.trace-pr-review-follow-up npm run eval:entry-answer
 ```
+
+The local worktree adds `npm run eval:supervisor-boundary` in `packages/pet-agent`
+for four synthetic real-model checks of the single-proposal protocol. The script
+and command registration are pending code submission and are not included in the
+documentation-only commit. Once available, it uses the configured default profile
+(override with `PROMPT_EVAL_PROFILE_ID`) and disables tracing. It sends framework
+prompts and synthetic Capability documents to that model. The proposed checks
+remain unverified.

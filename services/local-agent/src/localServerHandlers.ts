@@ -165,6 +165,7 @@ export function createLocalServerHandlers(
       requiredInputModalities: checkpoint.requiredInputModalities,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingInterrupt,
+      pauseTaskInterrupt: checkpoint.pauseTaskInterrupt,
       activeRun,
       currentPlan: checkpoint.currentPlan,
     });
@@ -502,6 +503,7 @@ export function createLocalServerHandlers(
           requiredInputModalities: result.session.requiredInputModalities,
           sessionTokenUsage: result.sessionTokenUsage,
           pendingInterrupt,
+          pauseTaskInterrupt: result.pauseTaskInterrupt,
           currentPlan: result.currentPlan,
         }),
       };

@@ -317,7 +317,6 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,
     isCurrent: () => true,
-    finishInterrupted: () => {},
     emitEvent: (event) => firstTurnEvents.push(event),
     emitToolEvent: () => {},
   });
@@ -376,7 +375,6 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,
     isCurrent: () => true,
-    finishInterrupted: () => {},
     emitEvent: (event) => secondTurnEvents.push(event),
     emitToolEvent: () => {},
   });

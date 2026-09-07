@@ -1,0 +1,56 @@
+name: Typecheck
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: workspaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install workspace dependencies
+        run: npm ci
+      # Studio and the Plugins reach local-agent source, which imports
+      # @pinpawo-toolkit/browser and pinpawo/local-server-transport by package
+      # name with no tsconfig path mapping, so those declarations must exist.
+      - name: Build typecheck prerequisites
+        run: |
+          npm run build -w @pinpawo-toolkit/browser
+          npm run build -w @pinpawo/agent-contracts
+          npm run build -w @pinpawo/agent-session
+          npm run build -w @pinpawo/pet-agent
+          npm run build -w pinpawo
+      # The root `typecheck` script ends by chaining `test:unit -w pinpawo`,
+      # which hangs on a Linux runner and does not belong in a typecheck job.
+      # Run the fourteen workspace typechecks it covers, and nothing else.
+      - name: Typecheck all workspaces
+        run: |
+          npm run typecheck -w @pinpawo/agent-contracts
+          npm run typecheck -w @pinpawo/pet-agent
+          npm run typecheck -w @pinpawo/studio
+          npm run typecheck -w @pinpawo/agent-session
+          npm run typecheck -w @pinpawo/tui
+          npm run typecheck -w @pinpawo-toolkit/browser
+          npm run typecheck -w @pinpawo-plugin/kanban
+          npm run typecheck -w @pinpawo-plugin/scheduler
+          npm run typecheck -w @pinpawo-plugin/notice
+          npm run typecheck -w @pinpawo-plugin/trigger
+          npm run typecheck -w @pinpawo-plugin/project-files
+          npm run typecheck -w @pinpawo-plugin/studio-http
+          npm run typecheck -w @pinpawo/studio-console
+          npm run typecheck -w @pinpawo-tests/studio-e2e

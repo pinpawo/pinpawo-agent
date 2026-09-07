@@ -78,4 +78,12 @@ test('Kanban HTTP assignment is user-controlled and Trigger performs the routed 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(requests.length, 2);
   assert.equal((await trigger.service.snapshot()).deliveries.length, 2);
+
+  const deleted = await fetch(`${base}/kanban/control`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ action: 'delete', taskId: task.task.taskId }),
+  });
+  assert.equal(deleted.status, 200);
+  assert.equal((await deleted.json() as { deletedTaskId: string }).deletedTaskId, task.task.taskId);
+  assert.equal(await kanban.service.getTask(task.task.taskId), null);
 });

@@ -7,6 +7,7 @@ import {
   createAgentSessionSnapshot,
   parseAgentServerMessage,
   parseAgentSessionSnapshot,
+  readHumanReviewPendingInterrupt,
   reduceSession,
   type AgentSession,
 } from './index';
@@ -80,6 +81,25 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   }), null);
 });
 
+test('snapshot parser accepts only the canonical task pause projection', () => {
+  const snapshot = createAgentSessionSnapshot({
+    ...createSession(),
+    pendingInterrupt: { payload: { kind: 'pause_task' } },
+  });
+
+  assert.deepEqual(parseAgentSessionSnapshot(snapshot), snapshot);
+  assert.equal(parseAgentSessionSnapshot({
+    ...snapshot,
+    session: {
+      ...snapshot.session,
+      pendingInterrupt: {
+        interruptId: 'not-a-langgraph-interrupt',
+        payload: { kind: 'pause_task' },
+      },
+    },
+  }), null);
+});
+
 test('snapshot parser migrates legacy V3 reviews to the V5 interrupt boundary', () => {
   const parsed = parseAgentSessionSnapshot({
     version: 3,
@@ -114,7 +134,9 @@ test('snapshot parser migrates legacy V3 reviews to the V5 interrupt boundary', 
 
   assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
   assert.deepEqual(
-    parsed?.session.pendingInterrupt?.payload.interactions,
+    parsed?.session.pendingInterrupt?.payload.kind === 'human_review'
+      ? parsed.session.pendingInterrupt.payload.interactions
+      : null,
     [{
       interactionId: 'review-1',
       schemaVersion: 2,
@@ -187,7 +209,9 @@ test('snapshot parser separates a V4 pending run and rejects it in V5', () => {
   assert.equal(parsed?.version, AGENT_SESSION_SNAPSHOT_VERSION);
   assert.equal(parsed?.session.activeRun, null);
   assert.equal(
-    parsed?.session.pendingInterrupt?.interruptId,
+    readHumanReviewPendingInterrupt(
+      parsed?.session.pendingInterrupt ?? null,
+    )?.interruptId,
     'interrupt-v4',
   );
   assert.equal(parseAgentSessionSnapshot({

@@ -214,7 +214,7 @@ Chat explicitly owns the existing `tuiCheckpointPath` adapter; the default sessi
 service now uses that same adapter rather than constructing a second writer.
 Studio retains its separate Host checkpoint root. Resident Hosts may supply their
 own policy persistence port; persistence succeeds before the live store changes.
-Registry/actor cleanup and graph cache invalidation are separate audit items.
+Registry and invocation-input cleanup remain separate audit items.
 
 Validation must cover conflicting process defaults versus explicit Host values,
 independent Host directories and policies, and a policy change followed by both
@@ -253,15 +253,15 @@ from their parsers, and the former default constant is no longer a package expor
 The guard and Answer context use the same internal value. Tests exercise the
 boundary using run state near the limit, not configurable production guardrails.
 
-Resume validation also uncovered a Host boundary bug: every human-review response
-installed an interrupt callback after its checkpoint was persisted. Only review
-cancellation or an explicit interrupt request now installs that callback; ordinary
-approval continues execution. TUI fixtures now use the current Host config store,
+The explicit task-pause implementation on main owns review cancellation and
+rejection settlement. This change does not restore the removed Host-side
+checkpoint/abort workaround. TUI fixtures use the current Host config store,
 invocation context, required planning goal and checkpoint stream lifetime.
 
-Validation: 485 core tests, 608 local-agent tests (5 skipped), 90 Studio tests,
+Validation after merging main: 489 core tests, 609 local-agent tests (5 skipped),
+90 Studio tests,
 5 Studio acceptance tests and 8 TUI Host tests passed. Core (including evals),
 local-agent, Studio and TUI TypeScript checks passed, as did core and local-agent
 ESM/declaration builds. Resume coverage includes explicit null continuation,
-review approval/cancellation, repeated suspension, model/checkpointer replacement,
-and process restart with persisted history.
+review approval/cancellation, streamed task-pause projection, repeated suspension,
+model/checkpointer replacement, and process restart with persisted history.

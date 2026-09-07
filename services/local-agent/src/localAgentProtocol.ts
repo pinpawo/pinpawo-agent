@@ -45,7 +45,6 @@ const AGENT_SERVER_MESSAGE_TYPES = {
   'runtime_config.result': true,
   'runtime_config.error': true,
   interrupting: true,
-  interrupted: true,
   'session.snapshot.result': true,
   'session.list.result': true,
   'session.new.result': true,

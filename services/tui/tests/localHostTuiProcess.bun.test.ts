@@ -4,7 +4,6 @@ import {
   type ChildProcessWithoutNullStreams,
 } from 'node:child_process';
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -1102,12 +1101,10 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       0,
       [
         `TUI production-toolkit PTY failed: signal=${result.signal}`,
-        host.stderr.join(''),
         stderr.join(''),
         output.slice(-4_000),
       ].join('\n'),
     );
-    assert.ok(existsSync(outputPath), compactTerminalObservation(output));
     assert.equal(readFileSync(outputPath, 'utf8'), GUARDED_HOST_OUTPUT_CONTENT);
     const searchableOutput = compactTerminalObservation(output);
     assert.ok(searchableOutput.includes(

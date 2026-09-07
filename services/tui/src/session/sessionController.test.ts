@@ -572,11 +572,11 @@ test('interrupting a running session is optimistic and idempotent', () => {
     reason: 'already-interrupting',
   });
 
-  connection.receive({
-    type: 'interrupted',
+  connection.receive(eventMessage({
+    type: 'run.interrupted',
     requestId: 'chat',
     message: 'stopped by user',
-  });
+  }));
   assert.equal(controller.getState().session.activeRun, null);
   const terminal = controller.getState().session.timeline.at(-1);
   assert.equal(
@@ -1266,11 +1266,11 @@ test('delegation continuation sends resume_active and permits an empty paused re
   assert.deepEqual(controller.cancelReview({
     interruptId: 'review-action',
   }), { ok: true });
-  connection.receive({
-    type: 'interrupted',
+  connection.receive(eventMessage({
+    type: 'run.interrupted',
     requestId: 'review-cancel',
     message: 'review interrupted',
-  });
+  }));
   assert.deepEqual(connection.sent.at(-1), {
     type: 'session.snapshot.get',
     requestId: 'interrupted-refresh',

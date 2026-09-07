@@ -68,9 +68,6 @@ test('runChatSession does not settle before the underlying graph run output', as
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: () => undefined,
     emitToolEvent: () => undefined,
   }).then((result) => {
@@ -116,7 +113,6 @@ test('runChatSession defers interrupted terminalization until graph output settl
     },
   };
   let currentChecks = 0;
-  let interruptedCalls = 0;
   let settled = false;
 
   const run = runChatSession({
@@ -127,9 +123,6 @@ test('runChatSession defers interrupted terminalization until graph output settl
       currentChecks += 1;
       return currentChecks === 1;
     },
-    finishInterrupted: () => {
-      interruptedCalls += 1;
-    },
     emitEvent: () => undefined,
     emitToolEvent: () => undefined,
   }).then((result) => {
@@ -139,12 +132,12 @@ test('runChatSession defers interrupted terminalization until graph output settl
 
   await iteratorClosed;
   await Promise.resolve();
-  assert.equal(interruptedCalls, 0);
+  // The interrupted result is the Host's cue to finalize; it must not be
+  // reported before the graph run has settled.
   assert.equal(settled, false);
 
   resolveOutput();
   assert.deepEqual(await run, { status: 'interrupted' });
-  assert.equal(interruptedCalls, 1);
 });
 
 test('runChatSession sources tool operations from the root protocol stream, not the callback', async () => {
@@ -189,9 +182,6 @@ test('runChatSession sources tool operations from the root protocol stream, not 
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -265,9 +255,6 @@ test('runChatSession falls back to checkpoint final message when stream values o
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -330,9 +317,6 @@ test('runChatSession replaces the current plan from root values and clears it at
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => emittedEvents.push(event),
     emitToolEvent: () => {},
   });
@@ -440,9 +424,6 @@ test('runChatSession projects global policy authorization as completed operation
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -547,9 +528,6 @@ test('runChatSession emits one completed subagent block per child model message 
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -611,9 +589,6 @@ test('runChatSession merges subagent_operations announcements through acceptDele
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: () => {},
     emitToolEvent: () => {},
     acceptDelegationOperations: (operations) => {
@@ -684,9 +659,6 @@ test('runChatSession projects review interrupts to public interaction contracts'
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -743,9 +715,6 @@ test('runChatSession resumes explicit response after state update clears interru
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -818,7 +787,6 @@ test('runChatSession reports waiting_human when a resume raises a new review', a
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => { throw new Error('should not interrupt'); },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -873,7 +841,6 @@ test('runChatSession rejects when graph execution fails during a resume', async 
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
       isCurrent: () => true,
-      finishInterrupted: () => { throw new Error('should not interrupt'); },
       emitEvent: () => {},
       emitToolEvent: () => {},
     }),
@@ -918,9 +885,6 @@ test('runChatSession allows a user message after an aborted non-review run leave
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -965,9 +929,6 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
       isCurrent: () => true,
-      finishInterrupted: () => {
-        throw new Error('should not interrupt');
-      },
       emitEvent: () => {},
       emitToolEvent: () => {},
     }),
@@ -1033,9 +994,6 @@ test('runChatSession does not map pending review free text to review response', 
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -1092,7 +1050,6 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => { throw new Error('should not interrupt'); },
     emitEvent: (event) => { emittedEvents.push(event); },
     emitToolEvent: () => {},
   });
@@ -1135,7 +1092,6 @@ test('runChatSession keeps the streamed reply when GraphRecursionError fires mid
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => { throw new Error('should not interrupt'); },
     emitEvent: (event) => { emittedEvents.push(event); },
     emitToolEvent: () => {},
   });
@@ -1169,7 +1125,6 @@ test('runChatSession rethrows non-recursion errors from the stream', async () =>
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
       isCurrent: () => true,
-      finishInterrupted: () => {},
       emitEvent: () => {},
       emitToolEvent: () => {},
     }),
@@ -1229,9 +1184,6 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -1314,9 +1266,6 @@ test('runChatSession emits provider token usage from new state messages', async 
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => {
-      throw new Error('should not interrupt');
-    },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },
@@ -1398,7 +1347,6 @@ test('runChatSession reports a task pause without turning its bookkeeping into a
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
-    finishInterrupted: () => { throw new Error('the adapter does not finalize a pause itself'); },
     emitEvent: (event) => {
       emittedEvents.push(event);
     },

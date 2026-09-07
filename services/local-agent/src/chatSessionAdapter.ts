@@ -73,7 +73,6 @@ export type AgentSessionTurnOptions = {
   setup: AgentChannelSetup;
   graphService: LocalAgentGraphService;
   isCurrent: () => boolean;
-  finishInterrupted: () => void;
   emitEvent: (event: AgentRuntimeEvent) => void;
   emitToolEvent: (payload: StreamToolsPayload) => void;
   /**
@@ -304,7 +303,6 @@ export async function runAgentSessionTurn(
     setup,
     graphService,
     isCurrent,
-    finishInterrupted,
     emitEvent,
     emitToolEvent,
     acceptDelegationOperations,
@@ -318,7 +316,6 @@ export async function runAgentSessionTurn(
 
   const initialThreadState = await graphService.readThreadState(setup);
   if (!isCurrent()) {
-    finishInterrupted();
     return { status: 'interrupted' };
   }
 
@@ -376,13 +373,11 @@ export async function runAgentSessionTurn(
   };
   emitCurrentPlan(initialThreadState.currentPlan ?? null);
   let run: LocalAgentGraphEventStream | null = null;
-  let finishInterruptedAfterSettlement = false;
   try {
     run = await graphService.streamEvents(setup, graphInput);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {
-        finishInterruptedAfterSettlement = true;
         return { status: 'interrupted' };
       }
 
@@ -483,7 +478,6 @@ export async function runAgentSessionTurn(
       throw error;
     }
     if (!isCurrent()) {
-      finishInterruptedAfterSettlement = true;
       return { status: 'interrupted' };
     }
     const reply = streamedReply.trim() || RECURSION_LIMIT_NOTICE;
@@ -508,20 +502,15 @@ export async function runAgentSessionTurn(
     return { status: 'completed', reply };
   } finally {
     await waitForGraphRunSettlement(run);
-    if (finishInterruptedAfterSettlement) {
-      finishInterrupted();
-    }
   }
 
   if (!isCurrent()) {
-    finishInterrupted();
     return { status: 'interrupted' };
   }
 
   const finalThreadState = await graphService.readThreadState(setup);
   emitCurrentPlan(finalThreadState.currentPlan ?? null);
   if (!isCurrent()) {
-    finishInterrupted();
     return { status: 'interrupted' };
   }
 

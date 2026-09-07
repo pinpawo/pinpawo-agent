@@ -160,8 +160,7 @@ export type AgentControlServerMessage =
       requestId: string;
       message: string;
     }
-  | { type: 'interrupting'; requestId: string; message?: string }
-  | { type: 'interrupted'; requestId: string; message?: string };
+  | { type: 'interrupting'; requestId: string; message?: string };
 
 export type AgentSessionServerMessage =
   | {
@@ -1127,7 +1126,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
     const event = eventRecord ? readAgentEvent(eventRecord) : null;
     return event && event.requestId === requestId ? { type, requestId, event } : null;
   }
-  if (type === 'interrupting' || type === 'interrupted') {
+  if (type === 'interrupting') {
     const message = readOptionalString(record, 'message');
     return {
       type,

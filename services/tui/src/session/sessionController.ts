@@ -562,21 +562,6 @@ export class TuiSessionController {
       return;
     }
 
-    if (message.type === 'interrupted') {
-      const session = reduceSession(this.state.session, {
-        type: 'run.finished',
-        requestId: message.requestId,
-        messages: [{
-          role: 'system',
-          requestId: message.requestId,
-          text: message.message?.trim() || 'Run interrupted.',
-        }],
-      }, { observedAt: this.now() });
-      this.updateSession(session);
-      this.transport.requestCompletionSnapshot();
-      return;
-    }
-
     if (message.type === 'pong') return;
     assertNever(message);
   }

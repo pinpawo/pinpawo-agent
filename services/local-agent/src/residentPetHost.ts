@@ -704,7 +704,6 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               setup,
               graphService,
               isCurrent: () => !run.controller.signal.aborted,
-              finishInterrupted: () => undefined,
               emitEvent: publishRuntimeEvent,
               emitToolEvent: (payload) => {
                 emitLocalServerToolOperationEvent({

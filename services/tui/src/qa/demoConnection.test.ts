@@ -135,11 +135,15 @@ test('QA demo interrupt cancels future stream events and settles the run', () =>
   assert.equal(scheduler.pending.length, 1);
 
   scheduler.runAll();
+  // Cancelled stream events never arrive; the run settles through the one
+  // run.interrupted runtime event.
+  const last = received.at(-1);
+  assert.equal(last?.type, 'event');
+  assert.equal(last?.type === 'event' ? last.event.type : null, 'run.interrupted');
   assert.equal(
-    received.some((message) => message.type === 'event'),
-    false,
+    received.filter((message) => message.type === 'event').length,
+    1,
   );
-  assert.equal(received.at(-1)?.type, 'interrupted');
 
   connection.send({
     type: 'session.snapshot.get',

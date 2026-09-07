@@ -3,6 +3,8 @@
 > Status: Draft
 > Date: 2026-09-04
 > Related: issues #133, #675, #684, #721, #747, and #749; PR #682
+> Domain: [Interrupt Domain](interrupt.md) owns the chain from Runtime to
+> interface; this document owns the semantics of each kind.
 > Policy selection: [Toolkit HITL policy](toolkit-hitl-policy.md)
 > Host boundary: [Resident Pet Host ports](resident-pet-host-ports.md)
 
@@ -500,10 +502,10 @@ and the capability node. Removal of the remaining cross-layer
 
 ## Running Esc
 
-Esc while a model or tool is actively running is a request to pause the task.
-The interaction layer sends a semantic pause command. The Host uses its
-`AbortSignal` to cancel the active invocation and waits for that invocation to
-settle.
+Esc is an interface gesture; what it sends, and how the Host answers it when
+the run has already settled into an interrupt, is defined in
+[interrupt.md](interrupt.md). This section keeps the Runtime constraints for
+cancellation of a running invocation.
 
 For an ordinary streaming model call:
 
@@ -520,13 +522,10 @@ Cancellation is the mechanism that stops currently executing code.
 `PauseTaskInterrupt` is the Runtime meaning of the resulting unfinished task.
 Neither replaces the other.
 
-The Host must not decide whether to resume the graph, manufacture another
-interrupt, or start a new invocation to realize the pause. It also must not read
-or edit checkpointer storage. After cancellation settles, it delegates pause
-projection and later continuation to the Pet Runtime interrupt API.
-
 If no unfinished graph work or active delegation remains, the invocation ended
-instead of pausing; no `PauseTaskInterrupt` is exposed.
+instead of pausing; no `PauseTaskInterrupt` is exposed. An abort-origin pause
+need not be raised at the same graph location as a Review-origin pause; the
+location is Runtime-private, and only the resulting interrupt is a contract.
 
 Cancellation cannot roll back an external side effect that a tool already
 committed. Tool implementations must honor `AbortSignal` where possible and
@@ -534,34 +533,13 @@ retain their own idempotency guarantees.
 
 ## Layer ownership
 
-### Interaction interfaces
+### Interaction interfaces, Agent Session, and Host
 
-TUI, Chat, App, Studio, and future interfaces own presentation and input. They
-send semantic commands such as:
-
-- pause the running task;
-- continue a paused task, optionally with guidance;
-- respond to or cancel the identified Review.
-
-They do not construct LangGraph commands, choose graph nodes, edit message
-history, or interpret authorization effects.
-
-### Agent Session and Host
-
-Agent Session carries interface-safe events and commands. It does not own the
-Runtime lifecycle and does not persist Pet Runtime classes, LangGraph commands,
-checkpoint data, or a derived `continuationAvailable` flag.
-
-The Host owns:
-
-- cancellation of the active invocation;
-- serialization of invocations for the same task;
-- correlation of session, interrupt ID, namespace, and request identity;
-- projection of Runtime interrupts to supported interfaces;
-- translation of accepted semantic commands into Runtime calls;
-- rejection of stale or mismatched commands.
-
-The Host does not decide Review business behavior or synthesize graph state.
+Defined in [interrupt.md](interrupt.md): interfaces render by kind and build
+resume values; Agent Session and the Host are kind-blind and carry
+`{ interruptId, payload }` and `interrupt.resume` unchanged. What remains
+here is the kind-specific content those layers carry: Review decisions and
+their effects, and the pause continue value.
 
 ### Pet Runtime
 
@@ -651,16 +629,10 @@ on `pauseGate`.
 
 ### Phase 3: Host and interface projection
 
-1. Project `review` and `pause_task` as different interactions. This includes
-   every Host read of settled thread state, such as Resident Pet dispatch
-   admission (`readSettledState`), which must consult the explicit
-   `PauseTaskInterrupt` payload before any resumability signal.
-2. Keep exact Review interrupt identity for Review resume.
-3. Send task continue to `PauseTaskInterrupt` without fabricating a Review
-   resume.
-4. Generalize the existing pending-interaction projection only if a shared
-   interface requires it; do not add a continuation boolean.
-5. Remove migration aliases after all active interfaces use semantic commands.
+Superseded by the migration in [interrupt.md](interrupt.md), tracked by #772.
+The Host reads every kind through one decoder, projects one
+`pendingInterrupt` shape with an id, and resumes through one message; no
+migration aliases are kept.
 
 ## Required behavioral coverage
 

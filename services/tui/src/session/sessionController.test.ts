@@ -1232,6 +1232,50 @@ test('manual compaction binds the active session and uses its model-call timeout
   controller.stop();
 });
 
+test('continuing a paused task refuses attachments instead of dropping them', () => {
+  const requestIds = ['startup', 'continue-attempt'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'startup',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+    }),
+  });
+
+  const sentBefore = connection.sent.length;
+  // The resume value has nowhere to carry an attachment, so reporting success
+  // would silently discard it once the composer clears.
+  assert.deepEqual(
+    controller.continuePausedTask('use this diagram', [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'file',
+      path: '/tmp/diagram.png',
+      name: 'diagram.png',
+    }]),
+    { ok: false, reason: 'attachments-unsupported' },
+  );
+  assert.equal(connection.sent.length, sentBefore, 'nothing is sent');
+  // The pause is untouched, so the person can drop the attachment and continue,
+  // or press Esc and start a new task that carries it.
+  assert.equal(controller.getState().session.pendingInterrupt?.payload.kind, 'pause_task');
+  controller.stop();
+});
+
 test('delegation continuation resumes the pause by id and permits an empty resume', async () => {
   const requestIds = [
     'startup',

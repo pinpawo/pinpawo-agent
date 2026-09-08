@@ -232,10 +232,16 @@ export class TuiSessionController {
    */
   continuePausedTask(
     message: string,
-    _attachments: readonly AgentLocalAttachment[] = [],
+    attachments: readonly AgentLocalAttachment[] = [],
   ): SubmitChatResult {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return { ok: false, reason: 'not-ready' };
+    }
+    // A continue carries guidance for work the Runtime already holds, and the
+    // resume value has nowhere to put an attachment. Refuse rather than report
+    // success and drop it: the caller keeps the attachment either way.
+    if (attachments.length > 0) {
+      return { ok: false, reason: 'attachments-unsupported' };
     }
     const pendingInterrupt = this.state.session.pendingInterrupt;
     if (

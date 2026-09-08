@@ -30,8 +30,8 @@ export function handleLocalHttpRequest(
   if (pathname === '/health') {
     writeJson(res, 200, {
       status: 'ok',
-      actor_id: deps.petId,
-      actor_name: deps.petName,
+      pet_id: deps.petId,
+      pet_name: deps.petName,
       ...readAgentActivityHealthFields(),
     });
     return true;

@@ -223,7 +223,11 @@ buildChatSetup → graph
 且由 `HostCapabilityAssembly` 在 `init()` 内赋值——身份不属于能力装配。
 现改由 Host 持有，与 `petDocument` 同级；`StudioHost.getActorId()` 一并删除，
 它返回硬编码 `'local-only'` 而 Studio 真实 petId 走另一条路，是个返回错误
-答案且无人调用的方法。`/health` 的对外字段名 `actor_id` 保持不变。
+答案且无人调用的方法。
+
+`/health` 的 `actor_id` / `actor_name` 一并改为 `pet_id` / `pet_name`：唯一的
+消费方是已废弃的 `tools/agent-macos`，没有活的外部契约需要保留旧名——留着只会
+让遗留命名从存储层一路脏到 HTTP 出口。
 
 **Step 4 — PET.md 路径收敛**
 Chat 兼容 `<workdir>/PET.md`（旧）与 `pets/<petId>/PET.md`（新），

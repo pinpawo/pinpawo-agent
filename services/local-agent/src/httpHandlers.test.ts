@@ -202,8 +202,12 @@ test('handleLocalHttpRequest rejects requests without a valid local token', asyn
   const okRes = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
     petId: 'pet-a',
+    petName: 'Pet A',
   } as ServerDeps, options), true);
   assert.equal(okRes.statusCode, 200);
+  const health = JSON.parse(okRes.body) as Record<string, unknown>;
+  assert.equal(health.pet_id, 'pet-a');
+  assert.equal(health.pet_name, 'Pet A');
 });
 
 test('handleLocalHttpRequest exposes active operation health fields', async () => {

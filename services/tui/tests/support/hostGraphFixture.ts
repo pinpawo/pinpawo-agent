@@ -60,17 +60,22 @@ export function createHostGraphFixture() {
   let streams = 0;
   const service = {
     async readThreadState(setup: AgentChannelSetup) {
-      const pendingInterrupt = pendingInterrupts.get(readThreadKey(setup)) ?? null;
+      const threadKey = readThreadKey(setup);
+      const pendingInterrupt = pendingInterrupts.get(threadKey) ?? null;
+      const pauseTaskInterrupt = suspendedReviews.has(threadKey)
+        ? { kind: 'pause_task' as const }
+        : null;
       return {
-        messages: messagesByThread.get(readThreadKey(setup)) ?? [],
+        messages: messagesByThread.get(threadKey) ?? [],
         pendingInterrupt: pendingInterrupt
           ? {
               interruptId: pendingInterrupt.interruptId,
               reviews: [pendingInterrupt.review],
             }
           : null,
+        pauseTaskInterrupt,
         hasPendingContinuation:
-          pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
+          pendingInterrupt !== null || pauseTaskInterrupt !== null,
       };
     },
     buildResumeCommand(resume: unknown) {
@@ -351,7 +356,8 @@ function isInterruptRunResume(
 }
 
 function readThreadKey(setup: AgentChannelSetup) {
-  return setup.input.threadId ?? setup.graphKey;
+  assert.ok(setup.input.threadId, 'Host fixture requires a thread ID');
+  return setup.input.threadId;
 }
 
 async function waitForAbort(signal: AbortSignal | undefined) {

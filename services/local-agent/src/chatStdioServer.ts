@@ -4,13 +4,13 @@ import {
   attachLocalServerStdioTransport,
   type LocalServerStdioTransportOptions,
 } from './localServerStdioTransport';
-import type { LocalServerDeps } from './localServerTypes';
+import { createLocalServerRuntimeDepsStore, type LocalServerDeps } from './localServerTypes';
 
 export function startLocalStdioServer(
   deps: LocalServerDeps,
   options: LocalServerStdioTransportOptions = {},
 ) {
-  const handlers = createLocalServerHandlers(deps);
+  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps));
   const transport = attachLocalServerStdioTransport(handlers.peerHandlers, options);
   return {
     ...transport,

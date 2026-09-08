@@ -9,6 +9,7 @@ import {
   projectHumanReviewRequest,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
+  readPauseTaskInterrupt,
   SUBAGENT_OPERATIONS_EVENT,
   type ReviewSpec,
   type SubagentToolOperationMetadata,
@@ -455,6 +456,10 @@ export async function runAgentSessionTurn(
           break;
         }
         case 'interrupt': {
+          if (hasPauseTaskInterrupt(chatEvent.interrupts)) {
+            clearAgentRunActivity(requestId);
+            return { status: 'paused' };
+          }
           const interruptPayload = readFirstHumanReviewInterrupt(chatEvent.interrupts);
           if (interruptPayload) {
             emitHumanReviewRequested({
@@ -558,6 +563,15 @@ export async function runAgentSessionTurn(
 
 /** @deprecated Use runAgentSessionTurn. */
 export const runChatSession = runAgentSessionTurn;
+
+function hasPauseTaskInterrupt(interrupts: unknown[]) {
+  return interrupts.some((item) => (
+    item !== null
+    && typeof item === 'object'
+    && 'value' in item
+    && readPauseTaskInterrupt(item.value) !== null
+  ));
+}
 
 function readFirstHumanReviewInterrupt(
   interrupts: unknown[],

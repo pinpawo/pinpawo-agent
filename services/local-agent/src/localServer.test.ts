@@ -46,7 +46,6 @@ function createDeps(workdir: string): LocalServerDeps {
   return {
     serverMode: 'chat',
     actorId: 'pet-local-server-lifecycle',
-    workdir,
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps({
       model: 'offline-lifecycle-model',

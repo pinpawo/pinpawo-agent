@@ -546,7 +546,6 @@ async function runCase(params: {
             thread_id: threadId,
             registry,
             allowedCapabilityNames: runtime.allowedCapabilityNames,
-            maxRunIterations: 12,
           },
           callbacks: [subjectUsage.callback],
           metadata: {

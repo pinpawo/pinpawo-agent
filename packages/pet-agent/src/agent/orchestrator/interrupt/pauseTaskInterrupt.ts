@@ -49,6 +49,9 @@ export function readPauseTaskInterrupt(
   value: unknown,
 ): PauseTaskInterruptPayload | null {
   const record = readRecord(value);
+  if (isPauseTaskInterruptPayload(record)) {
+    return record;
+  }
   const payload = record?.[PAUSE_TASK_INTERRUPT_STATE_KEY];
   if (isPauseTaskInterruptPayload(payload)) {
     return payload;

@@ -22,7 +22,6 @@ import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import {
-  getLocalServerRuntimeConfig,
   getLocalServerToolkitInventory,
   type LocalServerDeps,
 } from './localServerTypes';
@@ -32,7 +31,6 @@ import {
   readLocalChatDisplayText,
 } from './localChatAttachments';
 import { LocalImageAttachmentAdmission } from './localImageAttachments';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTuiSession,
@@ -189,12 +187,12 @@ export class LocalServerTuiSessionService {
     checkpointer?: TuiSessionCheckpointer;
     graphService?: TuiSessionGraphService;
     loadContext?: typeof loadAgentContext;
-    runtimeConfig?: LocalAgentRuntimeConfig;
+    runtimeConfig: LocalAgentRuntimeConfig;
     sessionStatePath?: string;
     checkpointPath?: string;
     defaultModelProfileId: string;
   }) {
-    const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
+    const runtimeConfig = options.runtimeConfig;
     const sessionStatePath = options.sessionStatePath ?? runtimeConfig.tuiSessionPath;
     this.defaultModelProfileId = options.defaultModelProfileId;
     this.state = options.state ?? loadTuiSessionState(
@@ -301,12 +299,8 @@ export class LocalServerTuiSessionService {
     return buildLocalChatAgentInput({
       context: ctx,
       userMessage: '',
-      llmConfig: {
-        ...llmConfig,
-        globalReviewPolicyMode: deps.globalReviewPolicyMode,
-        autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
-      },
-      sessionContextCacheKey: session.id,
+      llmConfig,
+      hostConfig: deps,
       toolkits: [...toolkitInventory.effectiveToolkits],
       toolkitInventoryEntries: toolkitInventory.entries,
       toolkitRuntimeManager: deps.toolkitRuntimeManager,
@@ -320,7 +314,6 @@ export class LocalServerTuiSessionService {
       interfaceKind: 'tui',
       checkpoint: this.checkpointer,
       capabilityArtifactStore: deps.capabilityArtifactStore,
-      workdir: deps.workdir,
       sessionStartedAt: session.createdAt,
     });
   }

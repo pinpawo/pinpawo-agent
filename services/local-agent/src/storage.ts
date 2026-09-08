@@ -22,13 +22,6 @@ export type StoredConfig = {
   browser_backend?: string;
   /** Capability document registry search backend: filesystem or memory. */
   capability_registry_backend?: string;
-  /**
-   * Per-capability enabled/disabled overrides.
-   * Keys match AgentCapability.name / CapabilityMeta.id.
-   * Absent key = use the capability's defaultEnabled value (true for built-ins).
-   */
-  /** Enable thinking/reasoning for subagent calls. Default: false. */
-  subagent_thinking?: boolean;
   /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
   structured_output_auto_repair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */
@@ -37,6 +30,11 @@ export type StoredConfig = {
   global_review_policy?: string;
   /** Automatic-review threshold: strict or relaxed. */
   auto_authorization_safety_level?: string;
+  /**
+   * Per-capability enabled/disabled overrides.
+   * Keys match AgentCapability.name / CapabilityMeta.id.
+   * Absent key = use the capability's defaultEnabled value (true for built-ins).
+   */
   capabilities?: Record<string, boolean>;
   /**
    * Additional directories to scan for user-defined capability plugins,

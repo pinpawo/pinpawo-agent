@@ -61,7 +61,6 @@ test('local server forwards structured local attachments to the chat session', a
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -127,7 +126,6 @@ test('replacement request waits for the previous thread invocation to settle', a
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -220,7 +218,6 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -274,7 +271,6 @@ test('run interrupt cancels a review that became pending before the client obser
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -1139,7 +1135,6 @@ test('a review resolution that settles into a task pause is finalized as interru
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),

@@ -7,7 +7,6 @@ import {
   redirectConsoleToStdioDiagnostics,
 } from '../localServerStdioTransport';
 import { startLocalStdioServer } from '../chatStdioServer';
-import type { LocalServerDeps } from '../localServerTypes';
 import type { ServerMode } from '../serverMode';
 
 export type RunAgentOptions = {
@@ -61,7 +60,6 @@ export async function runAgent(options: RunAgentOptions) {
     // Init loads Toolkit definitions and starts their optional runtimes before
     // any local transport begins accepting execution requests.
     await runtime.init();
-    const petDocument = runtime.getPetDocument();
     logStartupConfig({
       mode: 'server',
       serverMode: mode,
@@ -69,22 +67,7 @@ export async function runAgent(options: RunAgentOptions) {
       actorId: runtime.getActorId(),
       actorName: runtime.getActorName(),
     });
-    const deps: LocalServerDeps = {
-      serverMode: mode,
-      actorId: runtime.getActorId(),
-      actorName: runtime.getActorName() ?? undefined,
-      chatCheckpointer: runtime.getChatCheckpointer(),
-      modelProfiles: runtime.getModelProfiles(),
-      globalReviewPolicyMode: getConfig().globalReviewPolicyMode,
-      autoAuthorizationSafetyLevel: getConfig().autoAuthorizationSafetyLevel,
-      workdir: runtimeConfig.workdir,
-      runtimeConfig,
-      toolkitInventory: runtime.getToolkitInventoryStore(),
-      toolkitRuntimeManager: runtime.getToolkitRuntimeManager(),
-      capabilityCatalog: runtime.getCapabilityCatalog(),
-      ...(petDocument ? { petDocument } : {}),
-      capabilityArtifactStore: runtime.getCapabilityArtifactStore(),
-    };
+    const deps = runtime.buildLocalServerDeps();
 
     if (stopping) {
       runtime.requestStop();

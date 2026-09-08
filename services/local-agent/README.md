@@ -31,6 +31,16 @@ npx pinpawo tui
 
 Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. Credentials and endpoints are read only from the stored profile. `pinpawo init` creates an editable profile template and migrates a complete legacy `.env` model tuple when no `config.json` exists. Use `pinpawo setup` to check missing config and next steps. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
 
+Programmatic Chat and Studio Hosts resolve execution settings once with
+`resolveHostExecutionConfig(runtimeConfig, settings)`. The resolved settings own
+runtime paths, review mode, authorization safety level and registry backend.
+Agent input construction receives these settings explicitly. Model profiles no
+longer carry review policy. Temperature uses the provider default; thinking follows
+the internal role policy (Answer and subagent request thinking where supported).
+The former `temperature` / `subagentThinking` inputs and stored `subagent_thinking`
+setting are no longer consumed. Conversation and background dispatch share the same
+Host policy store, so changes apply consistently to subsequent runs.
+
 For a local repository smoke test:
 
 ```bash

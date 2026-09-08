@@ -33,7 +33,11 @@ test('PauseTaskInterrupt parses continue guidance', () => {
   );
 });
 
-test('PauseTaskInterrupt is read only from explicit Runtime state', () => {
+test('PauseTaskInterrupt reads explicit Runtime payloads and state', () => {
+  assert.deepEqual(
+    readPauseTaskInterrupt({ kind: 'pause_task' }),
+    { kind: 'pause_task' },
+  );
   assert.deepEqual(readPauseTaskInterrupt({
     values: { taskPauseInterrupt: { kind: 'pause_task' } },
   }), { kind: 'pause_task' });

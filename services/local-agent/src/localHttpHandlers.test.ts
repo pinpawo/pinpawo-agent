@@ -280,7 +280,6 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
     serverMode: 'chat',
     actorId: 'pet-a',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
-    workdir: `${workdir}-legacy`,
     runtimeConfig: {
       workdir,
       workspace: {

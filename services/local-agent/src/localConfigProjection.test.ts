@@ -8,12 +8,8 @@ import {
   buildLocalRuntimeProjection,
 } from './localConfigProjection';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import {
-  getLocalServerWorkdir,
-  normalizeLocalServerDeps,
-  type LocalServerDeps,
-} from './localServerTypes';
-import { buildWorkspaceRuntimeConfig } from './runtimeConfig';
+import type { LocalServerDeps } from './localServerTypes';
+import { buildLocalAgentRuntimeConfig, buildWorkspaceRuntimeConfig } from './runtimeConfig';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
 function createDeps(workdir: string): LocalServerDeps {
@@ -21,22 +17,9 @@ function createDeps(workdir: string): LocalServerDeps {
     serverMode: 'chat',
     actorId: 'pet-test',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
-    workdir,
+    runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
   };
 }
-
-test('normalizeLocalServerDeps creates one workspace runtime config and aligns workdir', () => {
-  const deps = normalizeLocalServerDeps(createDeps('/tmp/pinpawo-normalized-workdir'));
-
-  assert.equal(deps.workdir, deps.runtimeConfig.workdir);
-  assert.equal(deps.runtimeConfig.workspace?.rootPath, deps.workdir);
-  assert.equal(Object.isFrozen(deps.runtimeConfig), true);
-  assert.equal(Object.isFrozen(deps.runtimeConfig.workspace), true);
-});
-
-test('legacy workdir reads remain unchanged until the server boundary normalizes them', () => {
-  assert.equal(getLocalServerWorkdir(createDeps('relative-workdir')), 'relative-workdir');
-});
 
 test('HTTP and TUI projections expose the same normalized runtime values', () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-runtime-projection-'));
@@ -66,7 +49,7 @@ test('runtime projection excludes output and thinking reserves before context co
       contextWindowTokens: 983_616,
       maxOutputTokens: 131_072,
     }),
-    workdir: '/tmp/pinpawo-qwen-runtime',
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-qwen-runtime'),
   };
 
   assert.equal(
@@ -75,11 +58,12 @@ test('runtime projection excludes output and thinking reserves before context co
   );
 });
 
-test('projection without runtime config keeps workspace state optional', () => {
+test('projection uses explicit runtime paths while workspace metadata remains optional', () => {
   const runtime = buildLocalRuntimeProjection(createDeps('/tmp/runtime-without-config'));
 
   assert.equal(runtime.workdir, '/tmp/runtime-without-config');
-  assert.equal(runtime.stateRoot, undefined);
+  assert.equal(runtime.stateRoot, '/tmp/runtime-without-config/.pinpawo');
+  assert.equal(runtime.workspaceId, undefined);
 });
 
 test('session projection surfaces an unavailable selected profile without fallback', () => {

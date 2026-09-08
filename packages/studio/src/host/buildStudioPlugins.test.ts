@@ -98,6 +98,9 @@ function residentBuildResources(workdir: string) {
     capabilityArtifactStore: artifactStore,
     checkpoint: new FileSaver(path.join(runtimeConfig.stateRoot, 'test-checkpoints.json')),
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization' as const,
+    autoAuthorizationSafetyLevel: 'strict' as const,
+    capabilityRegistryBackend: 'memory' as const,
   };
 }
 

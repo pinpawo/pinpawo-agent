@@ -171,3 +171,17 @@ test('LocalAgentHost deleteThread callback calls both checkpointer.deleteThread 
   // Artifact should be gone (checkpoint deletion is covered by fileSaver.test.ts).
   assert.equal((await store.listArtifacts({ threadId: 'thread-1' })).length, 0);
 });
+
+test('Chat Host preserves the existing session checkpoint namespace', async () => {
+  const { LocalAgentHost } = await import('./runtime');
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-chat-checkpoint-'));
+  const runtimeConfig = buildTestConfig(root);
+  const existingWriter = new FileSaver(runtimeConfig.tuiCheckpointPath);
+  const host = new LocalAgentHost(runtimeConfig);
+  existingWriter.acquireHostWriterLease('existing-chat');
+  try {
+    assert.throws(() => host.getChatCheckpointer().acquireHostWriterLease('new-chat'), /already owned by existing-chat/);
+  } finally {
+    existingWriter.releaseHostWriterLease();
+  }
+});

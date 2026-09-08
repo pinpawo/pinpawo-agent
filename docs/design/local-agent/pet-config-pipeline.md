@@ -202,23 +202,28 @@ buildChatSetup → graph
 
 每步独立可验证、可单独成 PR。
 
-**Step 1 — 删死配置**（无依赖，最小）
+**Step 1 — 删死配置**（已完成）
 `user_id`、`nickname` 从 `StoredConfig` 移除。非测试代码零读取。
 不加 `reader.fail`：它们从无行为，静默忽略即可。
 
-**Step 2 — 上移 PetConfig 定义与加载器**
+**Step 2 — 上移 PetConfig 定义与加载器**（已完成）
 `PetConfig` / `petConfigSchema` / `loadPetConfigs` 从 `packages/studio`
 迁至 `services/local-agent`，Studio 改为从 `pinpawo/host-runtime` 导入。
 同批把 `PetLocalConfig` → `PetConfig`、`petLocalConfigSchema` → `petConfigSchema`。
 纯搬迁 + 改名，行为不变。
 
-**Step 3 — Chat 接上 PetConfig**
+**Step 3 — Chat 接上 PetConfig**（已完成）
 `AgentHost.init()` 读 `pets/`；空目录用内置默认
 `{ petId: 'local-only', name: 'Local Agent' }` —— 与现有常量同值，
 **故存量用户零行为变化、零迁移**。读到 >1 份时抛错并指向 Studio。
-`actorSelection.ts` 的两个常量退化为该默认值的来源。
-`StoredConfig.actor_id` / `actor_name` 移除，因为身份改由 `pets/` 表达；
-这两个键从未生效，删除不影响任何现存配置。
+`actorSelection.ts` → `defaultPet.ts`，两个常量合成 `DEFAULT_CHAT_PET`。
+
+同时修正一处早已存在的错位：`actorId` / `actorName` 只是 `petId` / `name` 的
+冗余别名（`residentPetHost.ts` 存入 `options.petId`、取出时又当 `petId` 用），
+且由 `HostCapabilityAssembly` 在 `init()` 内赋值——身份不属于能力装配。
+现改由 Host 持有，与 `petDocument` 同级；`StudioHost.getActorId()` 一并删除，
+它返回硬编码 `'local-only'` 而 Studio 真实 petId 走另一条路，是个返回错误
+答案且无人调用的方法。`/health` 的对外字段名 `actor_id` 保持不变。
 
 **Step 4 — PET.md 路径收敛**
 Chat 兼容 `<workdir>/PET.md`（旧）与 `pets/<petId>/PET.md`（新），

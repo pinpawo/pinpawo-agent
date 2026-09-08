@@ -178,8 +178,8 @@ export function createLocalServerHandlers(
 
   const listModelProfiles = async (sessionId: string) => {
     const requestDeps = runtimeDeps.get();
-    const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
-    if (!tuiSessions.getSession(requestDeps.actorId, sessionId)) {
+    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+    if (!tuiSessions.getSession(requestDeps.petId, sessionId)) {
       throw Object.assign(
         new Error('session not found'),
         { code: 'session_not_found' },
@@ -309,8 +309,8 @@ export function createLocalServerHandlers(
     let selectionCommitted = false;
     try {
       const requestDeps = runtimeDeps.get();
-      const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
-      if (!tuiSessions.getSession(requestDeps.actorId, message.sessionId)) {
+      const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+      if (!tuiSessions.getSession(requestDeps.petId, message.sessionId)) {
         sendModelSelectionError(
           peer,
           message,
@@ -389,7 +389,7 @@ export function createLocalServerHandlers(
         currentPlan: checkpoint.currentPlan,
       });
       const session = tuiSessions.selectModelProfile(
-        requestDeps.actorId,
+        requestDeps.petId,
         message.sessionId,
         message.modelProfileId,
       );
@@ -441,7 +441,7 @@ export function createLocalServerHandlers(
     sessionTransition = currentTransition;
     try {
       const requestDeps = runtimeDeps.get();
-      const session = tuiSessions.createNewSession(requestDeps.actorId);
+      const session = tuiSessions.createNewSession(requestDeps.petId);
       return {
         session: projectChatSessionSummary({
           ...session,
@@ -528,15 +528,15 @@ export function createLocalServerHandlers(
     sessionTransition = currentTransition;
     try {
       const requestDeps = runtimeDeps.get();
-      const session = tuiSessions.getSession(requestDeps.actorId, sessionId);
+      const session = tuiSessions.getSession(requestDeps.petId, sessionId);
       if (!session) {
         throw new Error('session not found');
       }
-      const activeSession = tuiSessions.getActiveSession(requestDeps.actorId);
+      const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
       if (activeSession.id !== session.id) {
         throw new Error('context compaction requires the active session');
       }
-      const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.actorId);
+      const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
       const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
       const state = await chatGraphService.readThreadState(setup);
       if (state.pendingInterrupt) {
@@ -649,9 +649,9 @@ export function createLocalServerHandlers(
       }
     },
     onNewSession: () => {
-      const actorId = runtimeDeps.get().actorId;
-      tuiSessions.createNewSession(actorId);
-      console.log(`[local-server] new session created for pet ${actorId}`);
+      const petId = runtimeDeps.get().petId;
+      tuiSessions.createNewSession(petId);
+      console.log(`[local-server] new session created for pet ${petId}`);
     },
     onRuntimeConfigUpdate: (client, message) => sessionCommands.enqueue(
       client,

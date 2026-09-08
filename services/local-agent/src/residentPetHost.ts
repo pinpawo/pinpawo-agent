@@ -488,8 +488,8 @@ export async function createResidentPetRuntime(
     capabilityArtifactStore: CapabilityArtifactStore;
   } = {
     serverMode: 'chat',
-    actorId: options.petId,
-    actorName: options.petName,
+    petId: options.petId,
+    petName: options.petName,
     modelProfiles,
     runtimeConfig: options.runtimeConfig,
     globalReviewPolicyMode: options.globalReviewPolicyMode,
@@ -523,16 +523,16 @@ export async function createResidentPetRuntime(
     defaultModelProfileId: deps.modelProfiles.defaultProfileId,
   });
 
-  if (!sessions.hasActiveSession(deps.actorId) && options.adoptThreadId) {
+  if (!sessions.hasActiveSession(deps.petId) && options.adoptThreadId) {
     const legacy = await options.checkpointer.getTuple({
       configurable: { thread_id: options.adoptThreadId },
     });
-    if (legacy) sessions.adoptInitialThread(deps.actorId, options.adoptThreadId);
+    if (legacy) sessions.adoptInitialThread(deps.petId, options.adoptThreadId);
   }
-  sessions.getActiveSession(deps.actorId);
+  sessions.getActiveSession(deps.petId);
 
   const readSettledState = async (): Promise<PetDispatchSettledState> => {
-    const context = await loadContext(deps.actorId);
+    const context = await loadContext(deps.petId);
     const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
     if (state.pendingInterrupt) return 'waiting';
@@ -608,7 +608,7 @@ export async function createResidentPetRuntime(
   let closing: Promise<void> | null = null;
 
   const runtime = Object.freeze({
-    petId: deps.actorId,
+    petId: deps.petId,
   }) as ResidentPetRuntime;
 
   const close = () => {
@@ -685,7 +685,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           const run = createInflightOperationRun(requestId);
           let activeRun: ResidentActiveRun | null = null;
           try {
-            const context = await loadContext(runtimeDeps.get().actorId);
+            const context = await loadContext(runtimeDeps.get().petId);
             const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
             configureInflightOperationRegistry(
               run,

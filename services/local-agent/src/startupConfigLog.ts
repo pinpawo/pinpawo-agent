@@ -10,8 +10,8 @@ export type StartupConfigSnapshot = {
   /** #561 server primary mode; absent for launch surfaces that have no mode. */
   serverMode?: ServerMode;
   workdir: string;
-  actorId?: string;
-  actorName?: string;
+  petId?: string;
+  petName?: string;
   localServerPort: number;
   modelProfileId: string;
   modelProfileFingerprint: string;
@@ -44,8 +44,8 @@ export function buildStartupConfigSnapshot(params: {
   mode: 'server' | 'tui';
   serverMode?: ServerMode;
   workdir: string;
-  actorId?: string;
-  actorName?: string | null;
+  petId?: string;
+  petName?: string | null;
 }): StartupConfigSnapshot {
   const config = getConfig();
   const profile = resolveModelProfile(
@@ -56,8 +56,8 @@ export function buildStartupConfigSnapshot(params: {
     mode: params.mode,
     ...(params.serverMode ? { serverMode: params.serverMode } : {}),
     workdir: params.workdir,
-    ...(params.actorId ? { actorId: params.actorId } : {}),
-    ...(params.actorName ? { actorName: params.actorName } : {}),
+    ...(params.petId ? { petId: params.petId } : {}),
+    ...(params.petName ? { petName: params.petName } : {}),
     localServerPort: config.localServerPort,
     modelProfileId: profile.id,
     modelProfileFingerprint: config.modelProfileFingerprint,
@@ -80,8 +80,8 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
     `  mode=${snapshot.mode}`,
     snapshot.serverMode ? `  serverMode=${snapshot.serverMode}` : null,
     `  workdir=${snapshot.workdir}`,
-    snapshot.actorId ? `  actorId=${snapshot.actorId}` : null,
-    snapshot.actorName ? `  actorName=${snapshot.actorName}` : null,
+    snapshot.petId ? `  petId=${snapshot.petId}` : null,
+    snapshot.petName ? `  petName=${snapshot.petName}` : null,
     `  localServerPort=${snapshot.localServerPort}`,
     `  modelProfileId=${snapshot.modelProfileId}`,
     `  modelProfileFingerprint=${snapshot.modelProfileFingerprint}`,
@@ -102,8 +102,8 @@ export function logStartupConfig(params: {
   mode: 'server' | 'tui';
   serverMode?: ServerMode;
   workdir: string;
-  actorId?: string;
-  actorName?: string | null;
+  petId?: string;
+  petName?: string | null;
 }) {
   console.log(formatStartupConfigSnapshot(buildStartupConfigSnapshot(params)));
 }

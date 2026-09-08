@@ -277,12 +277,4 @@ export class StudioHost {
     return this.caps.getCapabilityArtifactStore();
   }
 
-  getActorId(): string {
-    return this.caps.getActorId();
-  }
-
-  getActorName(): string | null {
-    return this.caps.getActorName();
-  }
-
 }

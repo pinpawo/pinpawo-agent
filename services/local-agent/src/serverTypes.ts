@@ -23,8 +23,8 @@ export type CapabilityCatalogReader = Pick<
 export type ServerDeps = HostExecutionConfig & {
   /** Local-agent interaction mode; resident Pet adapters reuse the Chat semantics. */
   serverMode: ServerMode;
-  actorId: string;
-  actorName?: string;
+  petId: string;
+  petName?: string;
   modelProfiles: LocalModelProfileRegistry;
   /**
    * Composition Host 持有的 conversation checkpointer。Chat Host 与 Studio Host

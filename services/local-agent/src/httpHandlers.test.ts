@@ -201,7 +201,7 @@ test('handleLocalHttpRequest rejects requests without a valid local token', asyn
 
   const okRes = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
-    actorId: 'pet-a',
+    petId: 'pet-a',
   } as ServerDeps, options), true);
   assert.equal(okRes.statusCode, 200);
 });
@@ -222,8 +222,8 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
 
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), res, {
-    actorId: 'pet-a',
-    actorName: '羊',
+    petId: 'pet-a',
+    petName: '羊',
   } as ServerDeps, {
     authToken: 'secret',
     loadSnapshot: async () => ({}),
@@ -278,7 +278,7 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
   const res = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer secret'), res, {
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     runtimeConfig: {
       workdir,

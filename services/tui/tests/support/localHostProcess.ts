@@ -49,8 +49,8 @@ const graphService = fixture === 'toolkit'
   : createPersistentHostGraphService();
 const toolkits = [createBashToolkit(), createGitToolkit()];
 const transport = await startLocalServer(requestedPort, {
-  actorId: 'pet-process-restart',
-  actorName: 'PinPawo',
+  petId: 'pet-process-restart',
+  petName: 'PinPawo',
   serverMode: 'chat',
   runtimeConfig,
   ...createTestModelServerDeps({
@@ -67,7 +67,7 @@ const transport = await startLocalServer(requestedPort, {
   authToken,
   handlerOptions: {
     chatGraphService: graphService,
-    loadContext: async (actorId) => buildAgentContext(actorId),
+    loadContext: async (petId) => buildAgentContext(petId),
   },
 });
 

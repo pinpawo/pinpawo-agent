@@ -216,7 +216,6 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         runtimeConfig: input.runtimeConfig,
         globalReviewPolicyMode: input.globalReviewPolicyMode,
         autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel,
-        capabilityRegistryBackend: input.capabilityRegistryBackend,
         sessionStatePath: path.join(
           input.runtimeConfig.stateRoot,
           'resident-sessions',

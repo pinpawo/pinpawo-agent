@@ -551,7 +551,7 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.equal(entryPlannerInput?.mode, 'entry');
   assert.equal(boundaryPlannerInput?.mode, 'boundary');
   assert.deepEqual(boundaryPlannerInput?.capabilityDisclosure, {
-    registryDigest: entryPlannerInput?.workspace.registryDigest,
+    registryDigest: entryPlannerInput?.catalog.registryDigest,
     disclosedCapabilityNames: ['explore'],
 
   });
@@ -1103,7 +1103,7 @@ test('capability supervisor reports an empty compiled registry without inventing
     runSupervisorRunner: {
       async invoke(input) {
         supervisorMode = input.mode;
-        supervisorCapabilityNames = input.workspace.capabilityNames;
+        supervisorCapabilityNames = input.catalog.capabilityNames;
         return {
           reply: '当前没有可用的 Capability。',
         };
@@ -1156,14 +1156,14 @@ test('Run Supervisor return is materialized without a second semantic policy che
   assert.equal(result.messages.at(-1)?.content, '当前没有可用的 Capability。');
 });
 
-test('allowedCapabilityNames scopes the immutable Supervisor workspace', async () => {
+test('allowedCapabilityNames scopes the immutable Supervisor catalog', async () => {
   let supervisorCapabilityNames: readonly string[] = [];
   const model = {
     invoke: async () => new AIMessage('answered'),
   } as unknown as AgentModels['act'];
   const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
-      supervisorCapabilityNames = input.workspace.capabilityNames;
+      supervisorCapabilityNames = input.catalog.capabilityNames;
       return {
         reply: '当前没有可用的 Capability。',
       };
@@ -1195,7 +1195,7 @@ test('allowedCapabilityNames scopes the immutable Supervisor workspace', async (
   assert.deepEqual(supervisorCapabilityNames, ['studio_plan']);
 });
 
-test('Run Supervisor materializer rejects selections outside the workspace', async () => {
+test('Run Supervisor materializer rejects selections outside the catalog', async () => {
   const model = {
     invoke: async () => new AIMessage('answered'),
   } as unknown as AgentModels['act'];
@@ -1231,7 +1231,7 @@ test('Run Supervisor materializer rejects selections outside the workspace', asy
         },
       },
     ),
-    /outside the immutable workspace/,
+    /outside the immutable catalog/,
   );
 });
 
@@ -5109,10 +5109,6 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
       ],
     ],
   );
-  assert.deepEqual(
-    supervisorInputs.map((supervisorInput) => supervisorInput.supervisorSession.revision),
-    [0, 1, 2],
-  );
   assert.equal(new Set(supervisorInputs.map((supervisorInput) =>
     supervisorInput.supervisorSession.runId)).size, 1);
   for (const supervisorInput of supervisorInputs) {
@@ -6660,7 +6656,6 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
   const answer = { invoke: async () => new AIMessage('done') } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: answer, subagent: new Executor({}) }, toolkitRuntimeManager,
-    capabilityRegistryBackend: 'memory',
     runSupervisorRunner: { async invoke(input) {
       return input.mode === 'entry'
         ? { action: 'execute_plan', tasks: [{ capability: 'inspect', task: 'Inspect context.' }] }

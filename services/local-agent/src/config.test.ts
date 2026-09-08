@@ -132,18 +132,6 @@ test('resolveNumberConfigValue prefers valid env number over stored number', asy
   assert.equal(resolveNumberConfigValue('64000', 131072), 64000);
 });
 
-test('Capability registry backend is explicit and rejects unknown values', async () => {
-  const { resolveCapabilityRegistryBackend } = await loadConfigHelpers();
-  assert.equal(resolveCapabilityRegistryBackend(undefined), undefined);
-  assert.equal(resolveCapabilityRegistryBackend('filesystem'), 'filesystem');
-  assert.equal(resolveCapabilityRegistryBackend(' MEMORY '), 'memory');
-  assert.throws(
-    () => resolveCapabilityRegistryBackend('auto'),
-    /filesystem.*memory/,
-  );
-});
-
-
 test('config workdir defaults to process cwd when no workdir is configured', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));
   writeStoredConfig(home, storedModelConfig());
@@ -167,7 +155,6 @@ test('config workdir defaults to process cwd when no workdir is configured', () 
 
   assert.equal(output, process.cwd());
 });
-
 
 test('config ignores the removed PINPAWO_REVIEW_POLICY_STRATEGY environment alias', () => {
   const home = mkdtempSync(resolve(tmpdir(), 'pinpawo-config-home-'));

@@ -21,7 +21,6 @@ export type StartupConfigSnapshot = {
   llmContextWindowTokens: number;
   globalReviewPolicyMode: string;
   browserBackend: string;
-  capabilityRegistryBackend: string;
   langsmithTracing: boolean;
   langsmithProject: string;
   langsmithEndpoint: string;
@@ -67,7 +66,6 @@ export function buildStartupConfigSnapshot(params: {
     llmContextWindowTokens: profile.contextWindowTokens,
     globalReviewPolicyMode: config.globalReviewPolicyMode,
     browserBackend: config.browserBackend,
-    capabilityRegistryBackend: config.capabilityRegistryBackend,
     langsmithTracing: readLangSmithTracingEnabled(),
     langsmithProject: process.env.LANGSMITH_PROJECT?.trim() || '',
     langsmithEndpoint: process.env.LANGSMITH_ENDPOINT?.trim() || '',
@@ -91,7 +89,6 @@ export function formatStartupConfigSnapshot(snapshot: StartupConfigSnapshot) {
     `  llmContextWindowTokens=${snapshot.llmContextWindowTokens}`,
     `  globalReviewPolicyMode=${snapshot.globalReviewPolicyMode}`,
     `  browserBackend=${snapshot.browserBackend}`,
-    `  capabilityRegistryBackend=${snapshot.capabilityRegistryBackend}`,
     `  langsmithTracing=${snapshot.langsmithTracing}`,
     `  langsmithProject=${snapshot.langsmithProject || 'not configured'}`,
     `  langsmithEndpoint=${snapshot.langsmithEndpoint || 'not configured'}`,

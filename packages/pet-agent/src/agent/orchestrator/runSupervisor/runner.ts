@@ -1,6 +1,6 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import type { CapabilityDocumentWorkspace } from './documentWorkspace';
+import type { CapabilityCatalog } from './capabilityCatalog';
 import type {
   CapabilityPlanTask,
   RunDelegationSummary,
@@ -49,7 +49,7 @@ type RunSupervisorInputBase = {
   /** Canonical main-view messages. The Supervisor domain owns provider projection. */
   readonly messages: readonly BaseMessage[];
   readonly remainingPlan: readonly CapabilityPlanTask[];
-  readonly workspace: CapabilityDocumentWorkspace;
+  readonly catalog: CapabilityCatalog;
   readonly capabilityDisclosure: CapabilityDisclosureState;
   /** The one typed run-scoped Supervisor state; never reconstructed from messages. */
   readonly supervisorSession: RunSupervisorSessionState;

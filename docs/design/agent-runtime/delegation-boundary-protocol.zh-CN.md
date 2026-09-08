@@ -4,11 +4,19 @@
 
 [English version](delegation-boundary-protocol.md)。中英文描述同一套设计。文件路径沿用原名，避免已有链接失效。
 
+## Supervisor 简化（2026-09-08）
+
+本次经用户确认：能力目录直接来自已编译且经过 Host 允许范围筛选的内存注册表。
+`capability_details` 按名称返回文档，删除搜索后端、磁盘快照、修复锁和模型生成路由摘要。
+保留注册表身份、允许能力校验、披露去重、文档大小限制和调用方主动中断。
+删除未被消费的 session revision 和任意附加 Supervisor 工具。
+暂停恢复明确排除在本次清理范围之外，相关问题由另一分支处理，见 [#785](https://github.com/pinpawo/pinpawo-agent/issues/785)。
+
 ## Capability 详情披露（2026-09-08）
 
 manifest 已列出可用能力，Supervisor 默认根据 main、manifest 和已披露信息安排计划。需要具体职责、约束或使用细节时，可调用 `capability_details({ names })`，按 manifest 完整名称读取详情；提交计划不要求先调用该工具或读完全部文档。root 继续校验能力名称属于不可变注册表。
 
-结果区分新增 `documents`、此前已披露的 `alreadyDisclosed`、不存在的 `unknownNames`。不再做关键词匹配，不引导扩大搜索；已披露文档不重复读取或返回。披露状态只保留注册表标识与已披露名称；删除空轮计数、开关状态和调用轮次记录，保留读取配额与超时保护，不增加“信息是否足够”的模型判断或规划阶段。执行中的 Boundary 继续复用稳定披露范围。
+结果区分新增 `documents`、此前已披露的 `alreadyDisclosed`、不存在的 `unknownNames`。不再做关键词匹配，不引导扩大搜索；已披露文档不重复读取或返回。披露状态只保留注册表标识与已披露名称；删除空轮计数、开关状态和调用轮次记录，保留读取配额，移除 Supervisor 总时间限制，继续响应调用方主动中断，不增加“信息是否足够”的模型判断或规划阶段。执行中的 Boundary 继续复用稳定披露范围。
 
 ## 要解决的问题
 

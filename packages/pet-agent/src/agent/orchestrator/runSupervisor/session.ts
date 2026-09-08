@@ -7,7 +7,6 @@ import type { CapabilityDisclosureState } from './capabilityDisclosure';
 
 export type RunSupervisorSessionState = {
   readonly runId: string;
-  readonly revision: number;
   readonly plan: readonly CapabilityPlanTask[];
   readonly capabilityDisclosure: CapabilityDisclosureState;
 };
@@ -15,7 +14,7 @@ export type RunSupervisorSessionState = {
 /**
  * Canonical resume seed written only when a root run ends with unfinished work.
  * It deliberately excludes Supervisor provider messages, tool-call history,
- * revision, and command replay state.
+ * and command replay state.
  */
 export type RunTaskContinuation = {
   readonly traceId: string;
@@ -48,7 +47,6 @@ export function createRunSupervisorSession(params: {
 }): RunSupervisorSessionState {
   return {
     runId: params.runId,
-    revision: 0,
     plan: [...(params.plan ?? [])],
     capabilityDisclosure: params.capabilityDisclosure,
   };
@@ -61,7 +59,6 @@ export function updateRunSupervisorSession(params: {
 }): RunSupervisorSessionState {
   return {
     runId: params.current.runId,
-    revision: params.current.revision + 1,
     plan: [...params.plan],
     capabilityDisclosure: params.capabilityDisclosure,
   };

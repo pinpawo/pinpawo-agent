@@ -67,7 +67,6 @@ async function residentBuildResources(workdir: string, plugins: ReturnType<typeo
     runtimeConfig,
     globalReviewPolicyMode: 'require_authorization' as const,
     autoAuthorizationSafetyLevel: 'strict' as const,
-    capabilityRegistryBackend: 'memory' as const,
   };
 }
 

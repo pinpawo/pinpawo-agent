@@ -16,8 +16,6 @@ export type StoredConfig = {
   models?: StoredModelProfilesV1;
   workdir?: string;
   browser_backend?: string;
-  /** Capability document registry search backend: filesystem or memory. */
-  capability_registry_backend?: string;
   /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
   structured_output_auto_repair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */

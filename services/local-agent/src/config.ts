@@ -11,7 +11,6 @@ import { loadStoredConfig } from './storage';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   type BuiltinGlobalReviewPolicyMode,
-  type CapabilityRegistryBackend,
 } from '@pinpawo/pet-agent';
 import {
   DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
@@ -132,22 +131,6 @@ function getAutoAuthorizationSafetyLevel(): ToolAuthorizationSafetyLevel {
   return resolveAutoAuthorizationSafetyLevel(stored.auto_authorization_safety_level);
 }
 
-export function resolveCapabilityRegistryBackend(
-  raw: string | undefined,
-): CapabilityRegistryBackend | undefined {
-  const normalized = raw?.trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (normalized === 'filesystem') {
-    return 'filesystem';
-  }
-  if (normalized === 'memory') {
-    return 'memory';
-  }
-  throw new Error(
-    'Capability registry backend must be "filesystem" or "memory".',
-  );
-}
-
 export type Config = Readonly<{
   modelProfileRegistry: ModelProfileRegistrySnapshot;
   modelProfileId: string;
@@ -158,7 +141,6 @@ export type Config = Readonly<{
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   browserBackend: string;
-  capabilityRegistryBackend: CapabilityRegistryBackend;
   localServerPort: number;
 }>;
 
@@ -191,12 +173,6 @@ function readConfigDefaults(): Config {
     autoAuthorizationSafetyLevel: getAutoAuthorizationSafetyLevel(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
     browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
-    capabilityRegistryBackend: resolveCapabilityRegistryBackend(
-      get(
-        'PINPAWO_CAPABILITY_REGISTRY_BACKEND',
-        'capability_registry_backend',
-      ),
-    ) ?? 'filesystem',
     localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });
 }

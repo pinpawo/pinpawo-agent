@@ -102,7 +102,6 @@ export function buildLocalChatAgentInput(params: {
     throw new Error('Local chat requires a capability artifact store');
   }
   const { llmConfig, hostConfig } = params;
-  const { capabilityRegistryBackend } = hostConfig;
   const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
   const workdir = hostConfig.runtimeConfig.workdir;
   const models = buildLocalAgentModels(llmConfig);
@@ -130,7 +129,7 @@ export function buildLocalChatAgentInput(params: {
       subagentGenerationReserveTokens: generationReserveTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
       toolkitRuntimeManager: params.toolkitRuntimeManager,
-      capabilityRegistryBackend,
+
       ...(params.defaultCapabilityName !== undefined
         ? { defaultCapabilityName: params.defaultCapabilityName }
         : {}),

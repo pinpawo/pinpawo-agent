@@ -47,7 +47,6 @@ test('interactive graph sessions use interface-provided review capabilities', ()
   });
 });
 
-
 test('graphs take current common context through run, invokeState and root stream entry points', async () => {
   const seen: BaseMessage[][] = [];
   class Model extends BaseChatModel {
@@ -92,7 +91,7 @@ test('all invocation entry points preserve scope, trace identity and current met
   } as unknown as AgentModels['act'];
   const runner: RunSupervisorRunner = {
     async invoke(input, config) {
-      seen.push({ traceId: input.traceId, capabilities: input.workspace.capabilityNames, workdir: getAgentRuntimeContext(config).workdir });
+      seen.push({ traceId: input.traceId, capabilities: input.catalog.capabilityNames, workdir: getAgentRuntimeContext(config).workdir });
       assert.equal('actor' in (config?.configurable ?? {}), false);
       assert.ok(config?.signal);
       assert.equal(config?.signal?.aborted, false);
@@ -104,7 +103,7 @@ test('all invocation entry points preserve scope, trace identity and current met
   const registry = compileAgentRegistry({ toolkits: [], capabilities: ['first', 'second'].map(name => ({
     name, description: name, uses: [], instructions: defineInstructionDocument({ content: name }),
   })) });
-  const graphConfig = { models: { act: model }, runSupervisorRunner: runner, capabilityRegistryBackend: 'memory' as const };
+  const graphConfig = { models: { act: model }, runSupervisorRunner: runner };
   const service = new LocalAgentGraphService();
   const graph = createOrchestratorGraph(graphConfig);
   for (const path of ['core', 'run', 'invokeState', 'streamEvents']) {
@@ -144,7 +143,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
   const input: AgentChannelSetup = {
     registry: compileAgentRegistry({ toolkits: [], capabilities: [] }),
     graphConfig: {
-      models: { act: model }, checkpoint: new MemorySaver(), capabilityRegistryBackend: 'memory',
+      models: { act: model }, checkpoint: new MemorySaver(),
       runSupervisorRunner: { async invoke(input, config) {
         seen.push({ traceId: input.traceId,
           workdir: getAgentRuntimeContext(config).workdir });

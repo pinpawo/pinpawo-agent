@@ -11,7 +11,6 @@ export type {
   CapabilityArtifactWritePayload,
 } from './types/artifact';
 
-
 export type {
   AgentCapability,
   CapabilityDocumentSource,
@@ -111,7 +110,6 @@ export {
 
 export {
   buildOrchestratorRunInput,
-  CAPABILITY_REGISTRY_BACKEND,
   createOrchestratorGraph,
   isOrchestratorInternalAiStreamNode,
   ORCHESTRATOR_RECURSION_LIMIT,
@@ -131,15 +129,13 @@ export type {
   RunSupervisorRunner,
   RunSupervisorSessionState,
   RunTaskContinuation,
-  CapabilityRegistryBackend,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';
 export {
-  CAPABILITY_DOCUMENT_WORKSPACE_SCHEMA_VERSION,
-  materializeCapabilityDocumentWorkspace,
+  createCapabilityCatalog,
   renderCapabilityDocument,
-} from './agent/orchestrator/runSupervisor/documentWorkspace';
+} from './agent/orchestrator/runSupervisor/capabilityCatalog';
 export {
   ToolkitRuntimeManager,
 } from './agent/orchestrator/toolkitRuntime';
@@ -150,9 +146,9 @@ export type {
   ToolkitRuntimeLifecycle,
 } from './agent/orchestrator/toolkitRuntime';
 export type {
-  CapabilityDocumentWorkspace,
-  CapabilityDocumentWorkspaceEntry,
-} from './agent/orchestrator/runSupervisor/documentWorkspace';
+  CapabilityCatalog,
+  CapabilityCatalogEntry,
+} from './agent/orchestrator/runSupervisor/capabilityCatalog';
 export {
   assertCapabilityDocumentMatches,
   CAPABILITY_DOCUMENT_FILE_NAME,

@@ -30,11 +30,11 @@ export function currentSupervisorInput(state: Partial<SupervisorInvocationState>
   return state.currentInput;
 }
 
-/** Keep every command-tool validation path on the same immutable workspace. */
+/** Keep every command-tool validation path on the same immutable catalog. */
 export function supervisorCommandContext(input: RunSupervisorInput) {
   return {
     mode: input.mode,
     activeDelegation: input.activeDelegation,
-    allowedCapabilityNames: input.workspace.capabilityNames,
+    allowedCapabilityNames: input.catalog.capabilityNames,
   };
 }

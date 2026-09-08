@@ -115,22 +115,6 @@ test('buildLocalChatAgentInput passes the generation reserve to main and subagen
   assert.equal(setup.graphConfig.subagentGenerationReserveTokens, 147_456);
 });
 
-test('buildLocalChatAgentInput keeps the Capability registry backend explicit', () => {
-  const filesystem = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), { globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict', capabilityRegistryBackend: 'filesystem' }),
-  });
-  const memory = buildTestLocalChatAgentInput({
-    context: createContext(),
-    userMessage: 'hello',
-    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), { globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict', capabilityRegistryBackend: 'memory' }),
-  });
-
-  assert.equal(filesystem.graphConfig.capabilityRegistryBackend, 'filesystem');
-  assert.equal(memory.graphConfig.capabilityRegistryBackend, 'memory');
-});
-
 test('buildLocalChatAgentInput passes the Pet default Capability into graph construction', () => {
   const general = buildTestLocalChatAgentInput({
     context: createContext(),
@@ -347,7 +331,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
-    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), {globalReviewPolicyMode: 'auto_authorization', autoAuthorizationSafetyLevel: 'relaxed', capabilityRegistryBackend: 'memory'}),
+    hostConfig: resolveHostExecutionConfig(buildLocalAgentRuntimeConfig('/tmp'), {globalReviewPolicyMode: 'auto_authorization', autoAuthorizationSafetyLevel: 'relaxed'}),
     llmConfig: {
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
@@ -501,7 +485,6 @@ test('buildLocalChatAgentInput uses caller-provided stable session time', () => 
   assert.ok(first.input.context?.systemPromptSections?.some(({ content }) => content.includes(params.timezone)));
 });
 
-
 test('Host resolves workdir once and keeps tracing attribution out of Agent input', () => {
   const previous = getConfig();
   try {
@@ -533,16 +516,14 @@ test('explicit Host snapshots override changing process defaults at the Agent bo
   const host = resolveHostExecutionConfig(buildLocalAgentRuntimeConfig(`/tmp/${randomUUID()}`), {
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
   });
   try {
     setConfig({ workdir: '/unrelated-process-dir', globalReviewPolicyMode: 'full_access',
-      autoAuthorizationSafetyLevel: 'relaxed', capabilityRegistryBackend: 'filesystem' });
+      autoAuthorizationSafetyLevel: 'relaxed' });
     const setup = buildTestLocalChatAgentInput({
       context: createContext(), userMessage: 'inspect', hostConfig: host,
     });
     assert.equal(setup.input.context?.workdir, host.runtimeConfig.workdir);
-    assert.equal(setup.graphConfig.capabilityRegistryBackend, 'memory');
     assert.equal(setup.input.globalReviewPolicy?.mode, 'require_authorization');
     assert.equal(setup.input.globalReviewPolicy && 'safetyLevel' in setup.input.globalReviewPolicy
       ? setup.input.globalReviewPolicy.safetyLevel : undefined, 'strict');

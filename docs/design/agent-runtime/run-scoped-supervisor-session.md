@@ -17,8 +17,9 @@ validates every selected name against the immutable registry.
 The result distinguishes newly supplied `documents`, `alreadyDisclosed` names and
 `unknownNames`. It never performs substring search or suggests keyword expansion.
 Already supplied documents are not read or repeated. Disclosure state keeps only registry identity and disclosed names. Empty-round
-counters, open/closed flags and model/tool-call observations are removed;
-byte-budget and invocation timeout protections remain; no separate sufficiency judge or new planning
+counters, open/closed flags and model/tool-call observations are removed.
+The document byte budget remains. Supervisor has no elapsed-time limit and
+continues to honor caller cancellation; no separate sufficiency judge or new planning
 stage is added. Disclosure stays stable during execution Boundaries, as before.
 
 ## Goal
@@ -133,7 +134,6 @@ The exact storage type may evolve, but its semantic shape is:
 ```ts
 type RunSupervisorSessionState = {
   runId: string;
-  revision: number;
 
   plan: CapabilityPlanTask[];
   capabilityDisclosure: CapabilityDisclosureState;
@@ -152,7 +152,7 @@ by Supervisor rather than copied into another authoritative field.
 The existing `plan` field stores remaining execution work. Its tail advances
 after acceptance, while task content, scope, and order remain fixed without user
 confirmation. This semantic distinction needs no second immutable-plan store or
-new progress protocol. The session's `revision` is not authorization to replan.
+new progress protocol or revision counter.
 
 Tool-effect replay remains runtime-owned. This implementation removes the old
 last-command cache and uses committed graph checkpoints and pending-node replay.
@@ -410,29 +410,24 @@ output uses the existing node-error cleanup and rethrow path.
 
 ## Capability disclosure
 
-Capability disclosure is run-scoped semantic state, not prompt history. Entry
-prepares the Capability information needed for the plan; successful searches may
-add documents before execution begins. Search calls use the existing local
-reducers and limits, with automatic tool choice and the existing closed-discovery
-result when the limit is reached.
+Capability disclosure stores the effective registry digest and disclosed names,
+not prompt history or search accounting. The deterministic routing manifest uses
+authored Capability descriptions and compiled Toolkit metadata from an immutable
+in-memory catalog. Exact-name `capability_details` reads return complete documents;
+there is no disk snapshot, search backend, or model-generated manifest cache.
 
-During execution, Boundary reuses the prepared disclosure. If the established
-Capabilities cannot support the goal, Supervisor asks about changing the plan
-instead of extending its execution scope autonomously. The user's answer enters
-main with the current delegation retained. On that new run's first decision,
-Supervisor may prepare information needed for the user's explicit adjustment,
-even in Boundary mode, before execution resumes and disclosure becomes stable
-again. There is no separate replanning stage or requirement to close the active
-delegation. Registry validation or session creation alone does not authorize a
-change.
+Entry and the first Boundary after new user input may disclose details under the
+existing middleware policy. Execution Boundaries reuse prepared disclosure. The
+user's answer may support an explicit plan adjustment; receiving input or creating
+a session alone does not authorize changes. Pause/resume routing is tracked
+separately in [issue #785](https://github.com/pinpawo/pinpawo-agent/issues/785).
 
-The current implementation still accumulates disclosure and empty-search counts
-across Entry and Boundary and exposes discovery tools to both. Freezing disclosure
-during execution is a target change, not an already verified runtime property.
+Document byte limits are per invocation and include injected prior disclosure.
+Supervisor has no elapsed-time deadline and propagates caller cancellation.
 
 ## Observability and recovery
 
-LangSmith or equivalent tracing owns raw Supervisor prompts, model outputs, search
+LangSmith or equivalent tracing owns raw Supervisor prompts, model outputs, detail
 calls, and command tool calls. Root conversation checkpointing must not double
 as the audit log.
 

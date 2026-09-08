@@ -134,7 +134,6 @@ export function createTestModelServerDeps(
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
-  capabilityRegistryBackend: HostExecutionConfig['capabilityRegistryBackend'];
   toolkitInventory: HostToolkitInventoryStore;
   capabilityCatalog: CapabilityCatalogReader;
 } {
@@ -144,7 +143,6 @@ export function createTestModelServerDeps(
       ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
     autoAuthorizationSafetyLevel: input.autoAuthorizationSafetyLevel
       ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
-    capabilityRegistryBackend: input.capabilityRegistryBackend ?? 'memory',
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityCatalog: emptyCapabilityCatalog,
   };

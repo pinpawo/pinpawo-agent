@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { Command } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { materializeCapabilityDocumentWorkspace } from '../../runSupervisor/documentWorkspace';
+import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import {
   createRunSupervisorAgent,
 } from '../../runSupervisor/agent';
@@ -54,11 +52,6 @@ import {
   readCapabilityNameFromLane,
 } from '../decisions/delegationLifecycle';
 
-const DEFAULT_RUN_SUPERVISOR_WORKSPACE_ROOT = join(
-  tmpdir(),
-  'pinpawo-capability-workspaces',
-);
-
 function materializeNextDelegation(params: {
   state: RunSupervisorRuntimeState;
   nextTask: CapabilityPlanTask;
@@ -70,7 +63,7 @@ function materializeNextDelegation(params: {
   }
   if (!allowedCapabilityNames.includes(nextTask.capability)) {
     throw new Error(
-      `Run Supervisor selected "${nextTask.capability}" outside the immutable workspace.`,
+      `Run Supervisor selected "${nextTask.capability}" outside the immutable catalog.`,
     );
   }
   const lane: CapabilityMessageLane = `capability:${nextTask.capability}`;
@@ -163,7 +156,6 @@ function createDefaultSupervisorRunner(config: OrchestratorConfig): RunSuperviso
     ...(config.defaultCapabilityName !== undefined
       ? { defaultCapabilityName: config.defaultCapabilityName }
       : {}),
-    registryBackend: config.capabilityRegistryBackend ?? 'filesystem',
   });
 }
 
@@ -176,9 +168,8 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
   ) {
     const registry = getInvokeRegistry(runnableConfig);
     const allowedCapabilityNames = getInvokeOptions(runnableConfig).allowedCapabilityNames;
-    const workspace = await materializeCapabilityDocumentWorkspace({
+    const catalog = createCapabilityCatalog({
       registry,
-      cacheRoot: DEFAULT_RUN_SUPERVISOR_WORKSPACE_ROOT,
       ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
     });
     const state = isSupervisorDispatch(nodeInput)
@@ -216,7 +207,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       : [];
     const capabilityDisclosure = resolveCapabilityDisclosureState({
       current: existingSession?.capabilityDisclosure ?? null,
-      workspace,
+      catalog,
       ...(resumedCapabilityNames.length > 0
         ? { seedCapabilityNames: resumedCapabilityNames }
         : {}),
@@ -233,7 +224,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
         });
     const { input, messageSelections } = buildRunSupervisorInput({
       nodeInput,
-      workspace,
+      catalog,
       supervisorSession,
     });
     for (const selection of messageSelections) {
@@ -273,7 +264,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     const command = parseSupervisorCommand(proposal, {
       mode: input.mode,
       activeDelegation: input.activeDelegation,
-      allowedCapabilityNames: workspace.capabilityNames,
+      allowedCapabilityNames: catalog.capabilityNames,
     });
     const rootState = nodeInput as OrchestratorStateType;
     const proposedPlan = command.action === 'execute_plan' ? command.tasks
@@ -306,7 +297,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     const next = materializeNextDelegation({
       state: { ...state, ...(handoff ? { runDelegationSummaries: handoff.runDelegationSummaries } : {}) },
       nextTask,
-      allowedCapabilityNames: workspace.capabilityNames,
+      allowedCapabilityNames: catalog.capabilityNames,
     });
     return new Command({
       update: includeSupervisorSession({ ...handoff, ...next }, remainingPlan),

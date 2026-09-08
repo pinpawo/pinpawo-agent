@@ -278,7 +278,6 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     runtimeConfig,
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup }) => {
@@ -383,7 +382,6 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     runtimeConfig,
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-events-sessions.json'),
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup, emitEvent }) => {
@@ -562,7 +560,6 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     runtimeConfig,
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, 'late-observer-sessions.json'),
     graphService: graphService as never,
     runAgentTurn: async ({ request, emitEvent }) => {
@@ -648,7 +645,6 @@ test('resident policy updates reach conversation and dispatch without changing a
       runtimeConfig,
       globalReviewPolicyMode: 'full_access',
       autoAuthorizationSafetyLevel: 'relaxed',
-      capabilityRegistryBackend: 'memory',
       capabilities: [],
       toolkitInventory: new HostToolkitInventoryStore(),
       capabilityArtifactStore: testArtifactStore,
@@ -719,7 +715,6 @@ test('an explicit task pause holds dispatch as waiting even when resumability re
     modelProfiles: createTestModelProfiles(),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: testArtifactStore,

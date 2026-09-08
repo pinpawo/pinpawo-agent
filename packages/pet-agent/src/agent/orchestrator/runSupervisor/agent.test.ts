@@ -1,14 +1,6 @@
 import { DelegationAnnounceMessage } from '../delegation';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  mkdir,
-  mkdtemp,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
 import {
   AIMessage,
@@ -17,7 +9,7 @@ import {
   type BaseMessage,
 } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { tool, type StructuredTool } from '@langchain/core/tools';
+import type { StructuredTool } from '@langchain/core/tools';
 import {
   Annotation,
   END,
@@ -28,16 +20,12 @@ import {
 import { z } from 'zod';
 import {
   RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
-} from './fileExplorer';
-import type { CapabilityDocumentWorkspace } from './documentWorkspace';
-import {
-  RunSupervisorAgentError,
-  createRunSupervisorAgent,
-} from './agent';
+} from './detailsTool';
+import type { CapabilityCatalog } from './capabilityCatalog';
+import { createRunSupervisorAgent } from './agent';
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { createRunSupervisorSession } from './session';
-import { CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME } from './routingManifest';
 import {
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
@@ -97,7 +85,6 @@ class ScriptedSupervisorModel extends BaseChatModel {
   readonly structuredOutputPlanLimits: number[] = [];
   readonly structuredOutputCapabilityEnums: string[][] = [];
   #responseIndex = 0;
-  #routingManifestInitializationBound = false;
 
   constructor(
     private readonly responses: ReadonlyArray<{
@@ -128,13 +115,6 @@ class ScriptedSupervisorModel extends BaseChatModel {
       const name = entry.name ?? entry.function?.name;
       return name ? [name] : [];
     });
-    if (
-      boundNames.length === 1
-      && boundNames[0] === CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME
-    ) {
-      this.#routingManifestInitializationBound = true;
-      return this;
-    }
     this.boundToolOptions.push(options);
     this.boundToolNames.splice(
       0,
@@ -197,38 +177,6 @@ class ScriptedSupervisorModel extends BaseChatModel {
   }
 
   async _generate(messages: BaseMessage[]) {
-    if (this.#routingManifestInitializationBound) {
-      this.#routingManifestInitializationBound = false;
-      const input = readMessageText(messages.at(-1)!);
-      const sourceText = input.match(
-        /<capability_registry_manifest[^>]*>\n<!\[CDATA\[\n([\s\S]*)\n\]\]>\n<\/capability_registry_manifest>/,
-      )?.[1]?.replaceAll(']]]]><![CDATA[>', ']]>');
-      const source = JSON.parse(sourceText ?? '{}') as {
-        default?: string | null;
-        capabilities?: Array<{ name: string; description: string }>;
-      };
-      const message = new AIMessage({
-        content: '',
-        tool_calls: [{
-          id: 'routing-manifest-commit',
-          name: CAPABILITY_ROUTING_MANIFEST_COMMIT_TOOL_NAME,
-          args: {
-            default: source.default ?? null,
-            capabilities: (source.capabilities ?? []).map((capability) => ({
-              name: capability.name,
-              purpose: capability.description,
-              cues: [
-                capability.name,
-                `${capability.name} task`,
-                `${capability.name} work`,
-              ],
-            })),
-          },
-          type: 'tool_call' as const,
-        }],
-      });
-      return { generations: [{ message, text: '' }] };
-    }
     this.invocations.push([...messages]);
     const response = this.responses[this.#responseIndex] ?? { content: 'done' };
     this.#responseIndex += 1;
@@ -255,19 +203,11 @@ class ScriptedSupervisorModel extends BaseChatModel {
   }
 }
 
-class DelayedStructuredSupervisorModel extends ScriptedSupervisorModel {
-  override async _generate(messages: BaseMessage[]) {
-    const result = await super._generate(messages);
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 30);
-    });
-    return result;
-  }
-}
+class AbortableSupervisorModel extends BaseChatModel {
+  onStarted: () => void = () => {};
 
-class SlowSupervisorModel extends BaseChatModel {
   _llmType() {
-    return 'slow-capability-supervisor';
+    return 'abortable-capability-supervisor';
   }
 
   bindTools() {
@@ -278,13 +218,12 @@ class SlowSupervisorModel extends BaseChatModel {
     _messages: BaseMessage[],
     options: this['ParsedCallOptions'],
   ) {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 5_000);
-      timer.unref();
+    await new Promise<void>((_resolve, reject) => {
+      options.signal?.throwIfAborted();
       options.signal?.addEventListener('abort', () => {
-        clearTimeout(timer);
         reject(options.signal?.reason ?? new Error('aborted'));
       }, { once: true });
+      this.onStarted();
     });
     const message = new AIMessage('late');
     return { generations: [{ message, text: 'late' }] };
@@ -295,40 +234,21 @@ function sha256(content: string) {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
-async function createWorkspace(
-  t: test.TestContext,
+function createTestCatalog(
   documents: Record<string, string>,
-): Promise<CapabilityDocumentWorkspace> {
-  const rootPath = await mkdtemp(join(tmpdir(), 'capability-supervisor-agent-'));
-  t.after(() => rm(rootPath, { recursive: true, force: true }));
-  const entries = [];
-  for (const capabilityName of Object.keys(documents).sort()) {
-    const content = documents[capabilityName] as string;
-    const relativePath = `${capabilityName}/CAPABILITY.md`;
-    await mkdir(join(rootPath, capabilityName));
-    await writeFile(join(rootPath, relativePath), content, 'utf8');
-    entries.push(Object.freeze({
-      capabilityName,
-      description: content.match(/^description:\s*(.+)$/m)?.[1]?.trim()
-        .replace(/^['"]|['"]$/g, '') ?? `${capabilityName} capability`,
-      toolkits: [],
-      relativePath,
-      documentDigest: sha256(content),
-      provenance: 'authored' as const,
-    }));
-  }
-  return Object.freeze({
-    rootPath,
-    registryDigest: sha256(JSON.stringify(
-      entries.map(({ capabilityName, documentDigest }) => ({
-        capabilityName,
-        documentDigest,
-      })),
-    )),
-    capabilityNames: Object.freeze(entries.map(({ capabilityName }) => capabilityName)),
-    entries: Object.freeze(entries),
-    reused: false,
-  });
+): CapabilityCatalog {
+  const entries = Object.entries(documents).sort(([a], [b]) => a.localeCompare(b)).map(([capabilityName, content]) => ({
+    capabilityName,
+    content,
+    description: content.match(/^description:\s*(.+)$/m)?.[1]?.trim()
+      .replace(/^['"]|['"]$/g, '') ?? `${capabilityName} capability`,
+    toolkits: [],
+  }));
+  return {
+    registryDigest: sha256(JSON.stringify(entries)),
+    capabilityNames: entries.map(({ capabilityName }) => capabilityName),
+    entries,
+  };
 }
 
 function capabilityDocument(params: {
@@ -350,7 +270,7 @@ function capabilityDocument(params: {
 }
 
 function supervisorInput(
-  workspace: CapabilityDocumentWorkspace,
+  catalog: CapabilityCatalog,
   overrides: Partial<RunSupervisorInput> = {},
 ): RunSupervisorInput {
   const base = {
@@ -362,9 +282,9 @@ function supervisorInput(
     activeDelegation: null,
 
     remainingPlan: [],
-    workspace,
+    catalog,
     capabilityDisclosure: createCapabilityDisclosureState({
-      workspace,
+      catalog,
 
     }),
   };
@@ -387,7 +307,7 @@ function supervisorInput(
       ...input.capabilityDisclosure,
       disclosedCapabilityNames: [...new Set([
         ...input.capabilityDisclosure.disclosedCapabilityNames,
-        ...boundaryNames.filter((name) => workspace.capabilityNames.includes(name)),
+        ...boundaryNames.filter((name) => catalog.capabilityNames.includes(name)),
       ])],
     };
   return {
@@ -416,14 +336,14 @@ function submitArgs(
 }
 
 test('completed graph checkpoints retain the decision without replaying the Supervisor invocation', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary workspace tasks.',
       instructions: 'Complete the requested work.',
     }),
   });
-  const changedWorkspace = await createWorkspace(t, {
+  const changedCatalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle updated workspace tasks.',
@@ -463,7 +383,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     .addEdge('supervisor', END)
     .compile({ checkpointer });
   const config = { configurable: { thread_id: 'supervisor-lane-root' } };
-  const entryA = supervisorInput(workspace, {
+  const entryA = supervisorInput(catalog, {
     inputId: 'trace_started:trace-a',
     traceId: 'trace-a',
     runId: 'run-a1',
@@ -473,7 +393,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
       new HumanMessage('PRIVATE_TRACE_A_GOAL'),
     ],
   });
-  const boundaryA = supervisorInput(workspace, {
+  const boundaryA = supervisorInput(catalog, {
     mode: 'boundary',
     inputId: 'announce:delegation-a:1',
     traceId: 'trace-a',
@@ -557,14 +477,14 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   assert.equal(restartedModel.invocations.length, 0, 'a rebuilt Supervisor must replay the persisted command');
 
   const changedRegistryState = await graph.invoke({
-    input: { ...completedBoundaryInput, workspace: changedWorkspace },
+    input: { ...completedBoundaryInput, catalog: changedCatalog },
   }, config);
   assert.deepEqual(commandOnly(changedRegistryState.command), {
     reply: '当前没有可用的 Capability。',
   });
   assert.equal(model.invocations.length, 3, 'a new invocation revalidates registry documents');
 
-  const entryB = supervisorInput(workspace, {
+  const entryB = supervisorInput(catalog, {
     inputId: 'trace_started:trace-b',
     traceId: 'trace-b',
     runId: 'run-b1',
@@ -582,55 +502,8 @@ test('completed graph checkpoints retain the decision without replaying the Supe
 
 });
 
-test('Supervisor supports additional invocation-scoped tools without child persistence', async (t) => {
-  const workspace = await createWorkspace(t, {
-    general: capabilityDocument({
-      name: 'general',
-      description: 'Handle ordinary workspace tasks.',
-      instructions: 'Complete the requested work.',
-    }),
-  });
-  const inspectSupervisor = tool(async () => 'approved', {
-    name: 'inspect_supervisor',
-    description: 'Return an invocation-scoped observation.',
-    schema: z.object({}).strict(),
-  });
-  const model = new ScriptedSupervisorModel([{
-    toolCalls: [{ id: 'inspect', name: 'inspect_supervisor', args: {} }],
-  }, {
-    structuredOutput: {
-      kind: 'plan',
-      args: {
-        tasks: [{ capability: 'general', task: 'Continue after approval.' }],
-      },
-    },
-  }]);
-  const supervisor = createRunSupervisorAgent({
-    model,
-    additionalTools: [inspectSupervisor],
-  });
-  const input = supervisorInput(workspace, {
-    inputId: 'trace_started:trace-interrupt',
-    traceId: 'trace-interrupt',
-    runId: 'run-interrupt',
-    userRequest: 'Continue after an invocation-scoped check.',
-  });
-
-  const result = await supervisor.invoke(input);
-  assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: [{ capability: 'general', task: 'Continue after approval.' }],
-
-  });
-  assert.equal(model.invocations.length, 2);
-  assert.match(
-    model.invocations[1]?.map(readMessageText).join('\n') ?? '',
-    /approved/,
-  );
-});
-
-test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordered task plan', async (t) => {
-  const workspace = await createWorkspace(t, {
+test('Supervisor Agent explores Capability documents and returns a compact ordered task plan', async (t) => {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories and gather evidence.',
@@ -658,7 +531,7 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
     },
   ]);
   const result = await createRunSupervisorAgent({ model })
-    .invoke(supervisorInput(workspace));
+    .invoke(supervisorInput(catalog));
 
   assert.deepEqual(model.boundToolNameHistory[0]?.slice(0, 1), [
     RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
@@ -682,9 +555,6 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
   assert.equal(model.boundToolOptions[0]?.tool_choice, undefined);
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
   assert.equal(model.invocations.length, 2);
-  assert.equal(model.invocations.flat().some((message) =>
-    message._getType() === 'system'
-    && String(message.content).includes(workspace.rootPath)), false);
   assert.ok(model.invocations[0]?.some((message) =>
     message instanceof HumanMessage
     && String(message.content).includes('Research the repository and then prepare a review.')));
@@ -693,17 +563,17 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
     (text) => text.includes('Research the repository and then prepare a review.'),
   );
   assert.ok(supervisorInputIndex >= 0);
-  const searchResult = model.invocations[1]?.find((message) =>
+  const detailsResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
     && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME);
-  assert.ok(ToolMessage.isInstance(searchResult));
-  const searchPayload = JSON.parse(String(searchResult.content));
+  assert.ok(ToolMessage.isInstance(detailsResult));
+  const detailsPayload = JSON.parse(String(detailsResult.content));
   assert.deepEqual(
-    searchPayload.documents.map((doc: { capabilityName: string }) => doc.capabilityName),
+    detailsPayload.documents.map((doc: { capabilityName: string }) => doc.capabilityName),
     ['explore'],
   );
   assert.deepEqual(
-    [...searchPayload.alreadyDisclosed, ...searchPayload.documents.map((doc: { capabilityName: string }) => doc.capabilityName)],
+    [...detailsPayload.alreadyDisclosed, ...detailsPayload.documents.map((doc: { capabilityName: string }) => doc.capabilityName)],
     ['explore'],
   );
   assert.deepEqual(commandOnly(result), {
@@ -723,7 +593,7 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
 });
 
 test('entry mode forms one executable task after Capability exploration', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -752,7 +622,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   ]);
 
   const result = await createRunSupervisorAgent({ model })
-    .invoke(supervisorInput(workspace));
+    .invoke(supervisorInput(catalog));
 
   assert.equal(model.invocations.length, 2);
   assert.equal(model.structuredOutputToolNames.size, 1);
@@ -768,7 +638,7 @@ test('entry mode forms one executable task after Capability exploration', async 
 });
 
 test('Supervisor accepts a detailed task beyond the legacy 500-character limit', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -789,7 +659,7 @@ test('Supervisor accepts a detailed task beyond the legacy 500-character limit',
   }]);
 
   const result = await createRunSupervisorAgent({ model })
-    .invoke(supervisorInput(workspace));
+    .invoke(supervisorInput(catalog));
 
   assert.deepEqual(commandOnly(result), {
     action: 'execute_plan',
@@ -802,7 +672,7 @@ test('Supervisor accepts a detailed task beyond the legacy 500-character limit',
 });
 
 test('Supervisor accepts consecutive tasks from one Capability when the model keeps distinct boundaries', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary workspace tasks.',
@@ -827,7 +697,7 @@ test('Supervisor accepts consecutive tasks from one Capability when the model ke
   ]);
 
   const result = await createRunSupervisorAgent({ model })
-    .invoke(supervisorInput(workspace));
+    .invoke(supervisorInput(catalog));
 
   assert.ok('tasks' in result);
   assert.deepEqual('tasks' in result ? result.tasks : [], [{
@@ -840,7 +710,7 @@ test('Supervisor accepts consecutive tasks from one Capability when the model ke
 });
 
 test('Supervisor receives General routing metadata without preloading its document', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: '处理不需要更具体 Capability 的通用任务。',
@@ -860,7 +730,7 @@ test('Supervisor receives General routing metadata without preloading its docume
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       userRequest: '查看并整理 /Users/mac/Downloads 目录。\n\n用户明确允许使用通用工具。',
     }),
   );
@@ -874,7 +744,7 @@ test('Supervisor receives General routing metadata without preloading its docume
 
   });
   // Dynamic Capability documents are projected into the invocation Human
-  // message; the stable system prompt contains no workspace content.
+  // message; the stable system prompt contains no catalog content.
   const systemMessage = model.invocations[0]?.[0];
   assert.ok(systemMessage);
   assert.equal(systemMessage._getType(), 'system');
@@ -894,7 +764,7 @@ test('Supervisor receives General routing metadata without preloading its docume
 });
 
 test('boundary projects the current lane announce into the standard model-visible shape', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -946,7 +816,7 @@ test('boundary projects the current lane announce into the standard model-visibl
   }]);
 
   await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-current',
@@ -997,7 +867,7 @@ test('boundary projects the current lane announce into the standard model-visibl
 });
 
 test('Supervisor identifies the configured default without preloading its document', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary work.',
@@ -1024,9 +894,9 @@ test('Supervisor identifies the configured default without preloading its docume
   const result = await createRunSupervisorAgent({
     model,
     defaultCapabilityName: 'kanban_planning',
-  }).invoke(supervisorInput(workspace, {
+  }).invoke(supervisorInput(catalog, {
     capabilityDisclosure: createCapabilityDisclosureState({
-      workspace,
+      catalog,
 
     }),
   }));
@@ -1052,8 +922,8 @@ test('Supervisor identifies the configured default without preloading its docume
   assert.doesNotMatch(readMessageText(supervisorInputMessage), /Use general tools/);
 });
 
-test('an explicit second search discloses a specific Capability after a miss', async (t) => {
-  const workspace = await createWorkspace(t, {
+test('an explicit second details discloses a specific Capability after a miss', async (t) => {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Inspect code structure and risks.',
@@ -1065,14 +935,14 @@ test('an explicit second search discloses a specific Capability after a miss', a
       instructions: 'Complete the requested work.',
     }),
   });
-  const search = (id: string, names: string[]) => ({
+  const details = (id: string, names: string[]) => ({
     id,
     name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     args: { names },
   });
   const model = new ScriptedSupervisorModel([
-    { toolCalls: [search('search-miss', ['auth'])] },
-    { toolCalls: [search('search-exact', ['explore'])] },
+    { toolCalls: [details('details-miss', ['auth'])] },
+    { toolCalls: [details('details-exact', ['explore'])] },
     {
       structuredOutput: {
         kind: 'plan',
@@ -1087,7 +957,7 @@ test('an explicit second search discloses a specific Capability after a miss', a
   ]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace),
+    supervisorInput(catalog),
   );
 
   assert.deepEqual(commandOnly(result), {
@@ -1098,21 +968,21 @@ test('an explicit second search discloses a specific Capability after a miss', a
     }],
 
   });
-  const searchResults = [...new Map(
+  const detailsResults = [...new Map(
     model.invocations.flat().filter(
       (message): message is ToolMessage => ToolMessage.isInstance(message)
         && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     ).map((message) => [message.tool_call_id, JSON.parse(String(message.content))]),
   ).values()];
-  assert.deepEqual(searchResults[0].documents, []);
-  assert.deepEqual(searchResults[0].alreadyDisclosed, []);
-  assert.deepEqual(searchResults[0].unknownNames, ['auth']);
-  assert.deepEqual(searchResults[1].documents.map((document: { capabilityName: string }) => document.capabilityName), ['explore']);
+  assert.deepEqual(detailsResults[0].documents, []);
+  assert.deepEqual(detailsResults[0].alreadyDisclosed, []);
+  assert.deepEqual(detailsResults[0].unknownNames, ['auth']);
+  assert.deepEqual(detailsResults[1].documents.map((document: { capabilityName: string }) => document.capabilityName), ['explore']);
 
 });
 
-test('General is disclosed through the same search path as other Capabilities', async (t) => {
-  const workspace = await createWorkspace(t, {
+test('General is disclosed through the same details path as other Capabilities', async (t) => {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Inspect code structure and risks.',
@@ -1126,7 +996,7 @@ test('General is disclosed through the same search path as other Capabilities', 
   });
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
-      id: 'search-default-only',
+      id: 'details-default-only',
       name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
       args: { names: ['general'] },
     }],
@@ -1142,13 +1012,13 @@ test('General is disclosed through the same search path as other Capabilities', 
     },
   }]);
 
-  await createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace));
+  await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
 
-  const searchResult = model.invocations[1]?.find((message) =>
+  const detailsResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
-    && message.tool_call_id === 'search-default-only');
-  assert.ok(ToolMessage.isInstance(searchResult));
-  const payload = JSON.parse(String(searchResult.content));
+    && message.tool_call_id === 'details-default-only');
+  assert.ok(ToolMessage.isInstance(detailsResult));
+  const payload = JSON.parse(String(detailsResult.content));
   assert.equal(payload.documents?.length, 1);
   assert.deepEqual(
     payload.documents.map((doc: { capabilityName: string }) => doc.capabilityName),
@@ -1161,8 +1031,8 @@ test('General is disclosed through the same search path as other Capabilities', 
   assert.equal(typeof payload.guidance, 'string');
 });
 
-test('a boundary search does not redisclose its active Capability', async (t) => {
-  const workspace = await createWorkspace(t, {
+test('a boundary details does not redisclose its active Capability', async (t) => {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Inspect release readiness without publishing packages.',
@@ -1171,14 +1041,14 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
   });
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
-      id: 'boundary-search-miss',
+      id: 'boundary-details-miss',
       name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
       args: { names: ['publish'] },
     }],
   }, { content: '当前没有可用的 Capability。' }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary', inputId: 'human:run-test',
       activeDelegation: {
         delegationId: 'delegation-1',
@@ -1193,11 +1063,11 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
   assert.deepEqual(commandOnly(result), {
     reply: '当前没有可用的 Capability。',
   });
-  const searchResult = model.invocations[1]?.find((message) =>
+  const detailsResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
     && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME);
-  assert.ok(ToolMessage.isInstance(searchResult));
-  const payload = JSON.parse(String(searchResult.content));
+  assert.ok(ToolMessage.isInstance(detailsResult));
+  const payload = JSON.parse(String(detailsResult.content));
   assert.deepEqual(payload.documents, []);
   assert.deepEqual(payload.documents.map((doc: { capabilityName: string }) => doc.capabilityName), []);
   assert.deepEqual(
@@ -1207,7 +1077,7 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
 });
 
 test('a boundary can disclose a non-active Capability after a miss', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories and report evidence.',
@@ -1224,14 +1094,14 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
       instructions: 'Complete the requested work.',
     }),
   });
-  const search = (id: string, names: string[]) => ({
+  const details = (id: string, names: string[]) => ({
     id,
     name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     args: { names },
   });
   const model = new ScriptedSupervisorModel([
-    { toolCalls: [search('boundary-miss', ['issue status'])] },
-    { toolCalls: [search('boundary-exact', ['document_writer'])] },
+    { toolCalls: [details('boundary-miss', ['issue status'])] },
+    { toolCalls: [details('boundary-exact', ['document_writer'])] },
     {
       structuredOutput: {
         kind: 'advance',
@@ -1246,7 +1116,7 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
   ]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary', inputId: 'human:run-test',
       activeDelegation: {
         delegationId: 'delegation-1',
@@ -1287,8 +1157,8 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
   );
 });
 
-test('a Boundary search does not redisclose its seeded active General', async (t) => {
-  const workspace = await createWorkspace(t, {
+test('a Boundary details does not redisclose its seeded active General', async (t) => {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary workspace tasks.',
@@ -1297,7 +1167,7 @@ test('a Boundary search does not redisclose its seeded active General', async (t
   });
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
-      id: 'search-active-default',
+      id: 'details-active-default',
       name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
       args: { names: ['general'] },
     }],
@@ -1310,7 +1180,7 @@ test('a Boundary search does not redisclose its seeded active General', async (t
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary', inputId: 'human:run-test',
       activeDelegation: {
         delegationId: 'delegation-general',
@@ -1325,18 +1195,18 @@ test('a Boundary search does not redisclose its seeded active General', async (t
   assert.deepEqual(commandOnly(result), { completed: false, reason: 'Complete the missing current-task work.',
     action: 'review_current',
   });
-  const searchResult = model.invocations[1]?.find((message) =>
+  const detailsResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
-    && message.tool_call_id === 'search-active-default');
-  assert.ok(ToolMessage.isInstance(searchResult));
-  const payload = JSON.parse(String(searchResult.content));
+    && message.tool_call_id === 'details-active-default');
+  assert.ok(ToolMessage.isInstance(detailsResult));
+  const payload = JSON.parse(String(detailsResult.content));
   assert.deepEqual(payload.documents, []);
   assert.deepEqual(payload.documents.map((doc: { capabilityName: string }) => doc.capabilityName), []);
   assert.deepEqual([...payload.alreadyDisclosed, ...payload.documents.map((doc: { capabilityName: string }) => doc.capabilityName)], ['general']);
 });
 
 test('Supervisor returns to Answer after one capability_details without general', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repository evidence.',
@@ -1355,7 +1225,7 @@ test('Supervisor returns to Answer after one capability_details without general'
   ]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace),
+    supervisorInput(catalog),
   );
 
   assert.deepEqual(commandOnly(result), {
@@ -1364,7 +1234,7 @@ test('Supervisor returns to Answer after one capability_details without general'
 });
 
 test('a submitted plan submits once without a final ordinary-text reply', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1385,7 +1255,7 @@ test('a submitted plan submits once without a final ordinary-text reply', async 
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace),
+    supervisorInput(catalog),
   );
 
   assert.deepEqual(commandOnly(result), {
@@ -1397,7 +1267,7 @@ test('a submitted plan submits once without a final ordinary-text reply', async 
 });
 
 test('Supervisor returns natural final text without a second generation', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1409,7 +1279,7 @@ test('Supervisor returns natural final text without a second generation', async 
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace),
+    supervisorInput(catalog),
   );
 
   assert.ok('reply' in result);
@@ -1420,7 +1290,7 @@ test('Supervisor returns natural final text without a second generation', async 
 });
 
 test('Supervisor can return bounded facts to Answer without submitting a plan', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -1436,7 +1306,7 @@ test('Supervisor can return bounded facts to Answer without submitting a plan', 
   }, { content: '当前没有可用的 Capability。' }]);
 
   const result = await createRunSupervisorAgent({ model })
-    .invoke(supervisorInput(workspace));
+    .invoke(supervisorInput(catalog));
 
   assert.deepEqual(commandOnly(result), {
     reply: '当前没有可用的 Capability。',
@@ -1446,7 +1316,7 @@ test('Supervisor can return bounded facts to Answer without submitting a plan', 
 });
 
 test('an unknown Capability fails before any control is committed', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1474,13 +1344,13 @@ test('an unknown Capability fails before any control is committed', async (t) =>
   ]);
 
   await assert.rejects(createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace),
+    supervisorInput(catalog),
   ));
   assert.equal(model.invocations.length, 1);
 });
 
 test('invalid discovery arguments return a tool error for the calling model', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1489,7 +1359,7 @@ test('invalid discovery arguments return a tool error for the calling model', as
   });
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
-      id: 'invalid-search',
+      id: 'invalid-details',
       name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
       args: { names: ['x'.repeat(201)] },
     }],
@@ -1505,20 +1375,20 @@ test('invalid discovery arguments return a tool error for the calling model', as
     },
   }]);
 
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace));
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
   assert.equal(model.invocations.length, 2);
-  const errorResult = model.invocations[1].find((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'invalid-search');
+  const errorResult = model.invocations[1].find((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'invalid-details');
   assert.ok(errorResult);
   assert.match(errorResult.text, /Error|200|schema/);
   assert.ok(result);
 });
 
-test('an empty workspace can return truthful facts to Answer', async (t) => {
-  const workspace = await createWorkspace(t, {});
+test('an empty catalog can return truthful facts to Answer', async (t) => {
+  const catalog = createTestCatalog({});
   const model = new ScriptedSupervisorModel([{ content: '当前没有可用的 Capability。' }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace),
+    supervisorInput(catalog),
   );
 
   assert.equal(model.structuredOutputToolNames.size, 1);
@@ -1531,7 +1401,7 @@ test('an empty workspace can return truthful facts to Answer', async (t) => {
 });
 
 test('an empty executable plan fails before discovery or dispatch', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -1574,7 +1444,7 @@ test('an empty executable plan fails before discovery or dispatch', async (t) =>
   const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
   await assert.rejects(createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
@@ -1596,7 +1466,7 @@ test('an empty executable plan fails before discovery or dispatch', async (t) =>
 });
 
 test('a boundary with an exhausted plan can still submit newly required work', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1616,7 +1486,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
@@ -1645,7 +1515,7 @@ test('a boundary with an exhausted plan can still submit newly required work', a
 });
 
 test('boundary Supervisor continues without replacing the active task', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -1666,7 +1536,7 @@ test('boundary Supervisor continues without replacing the active task', async (t
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
@@ -1688,7 +1558,7 @@ test('boundary Supervisor continues without replacing the active task', async (t
 });
 
 test('entry Supervisor can request a user-owned choice with a structured question', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1698,7 +1568,7 @@ test('entry Supervisor can request a user-owned choice with a structured questio
   const model = new ScriptedSupervisorModel([{ content: 'Should I deploy to production or staging?' }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       userRequest: 'Deploy the service to production or staging; I will choose the target.',
     }),
   );
@@ -1710,7 +1580,7 @@ test('entry Supervisor can request a user-owned choice with a structured questio
 });
 
 test('boundary Supervisor can stop for user confirmation with a structured question', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1720,7 +1590,7 @@ test('boundary Supervisor can stop for user confirmation with a structured quest
   const model = new ScriptedSupervisorModel([{ content: 'Should I review PR #663 instead?' }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-review-662',
@@ -1744,7 +1614,7 @@ test('boundary Supervisor can stop for user confirmation with a structured quest
 });
 
 test('boundary Supervisor exposes only boundary command actions', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -1768,7 +1638,7 @@ test('boundary Supervisor exposes only boundary command actions', async (t) => {
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
-    supervisorInput(workspace, {
+    supervisorInput(catalog, {
       mode: 'boundary',
       activeDelegation: {
         delegationId: 'delegation-1',
@@ -1793,7 +1663,7 @@ test('boundary Supervisor exposes only boundary command actions', async (t) => {
 });
 
 test('oversized discovery is reported as supervisor_discovery_limit_reached', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
       description: 'Investigate repositories.',
@@ -1812,7 +1682,7 @@ test('oversized discovery is reported as supervisor_discovery_limit_reached', as
     createRunSupervisorAgent({
       model,
       maxDocumentReadBytes: 1,
-    }).invoke(supervisorInput(workspace)),
+    }).invoke(supervisorInput(catalog)),
     (error: unknown) =>
       error instanceof Error && 'code' in error
       && error.code === 'supervisor_discovery_limit_reached',
@@ -1820,7 +1690,7 @@ test('oversized discovery is reported as supervisor_discovery_limit_reached', as
 });
 
 test('oversized persisted disclosure stops without dropping documents or retrying', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary tasks.',
@@ -1850,7 +1720,7 @@ test('oversized persisted disclosure stops without dropping documents or retryin
   }]);
   const initialDisclosure = {
     ...createCapabilityDisclosureState({
-      workspace,
+      catalog,
 
     }),
     disclosedCapabilityNames: ['general', 'explore', 'writer'],
@@ -1858,19 +1728,19 @@ test('oversized persisted disclosure stops without dropping documents or retryin
   };
 
   await assert.rejects(createRunSupervisorAgent({ model, maxDocumentReadBytes: 600 })
-    .invoke(supervisorInput(workspace, { capabilityDisclosure: initialDisclosure })),
-    /exceed the remaining Supervisor read limit/);
+    .invoke(supervisorInput(catalog, { capabilityDisclosure: initialDisclosure })),
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'supervisor_discovery_limit_reached');
   assert.equal(model.invocations.length, 0);
   assert.deepEqual(initialDisclosure.disclosedCapabilityNames, ['general', 'explore', 'writer']);
 });
 
 test('Supervisor returns natural text without a control proposal', async (t) => {
-  const workspace = await createWorkspace(t, {});
+  const catalog = createTestCatalog({});
   const model = new ScriptedSupervisorModel([{
     content: 'The user needs to choose a target first.',
   }]);
 
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace));
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
   assert.ok('reply' in result);
   if (!('reply' in result)) assert.fail('expected a natural Supervisor reply');
 
@@ -1880,7 +1750,7 @@ test('Supervisor returns natural text without a control proposal', async (t) => 
 });
 
 test('boundary natural text leaves acceptance to the root control protocol', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
       description: 'Handle ordinary workspace tasks.',
@@ -1891,7 +1761,7 @@ test('boundary natural text leaves acceptance to the root control protocol', asy
     { content: 'The current task should be handed over.' },
   ]);
 
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace, {
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog, {
     mode: 'boundary',
     userRequest: 'Finish the remaining request.',
     activeDelegation: {
@@ -1909,37 +1779,53 @@ test('boundary natural text leaves acceptance to the root control protocol', asy
   assert.equal('messageUpdates' in result, false);
 });
 
-test('Supervisor Agent enforces a total timeout', async (t) => {
-  const workspace = await createWorkspace(t, {});
+test('Supervisor Agent accepts a response after the former 60-second deadline', async (t) => {
+  const catalog = createTestCatalog({});
+  const model = new ScriptedSupervisorModel([{ content: '当前没有可用的 Capability。' }]);
+  const generate = model._generate.bind(model);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(model, '_generate', async (messages: BaseMessage[]) => {
+    t.mock.timers.tick(60_001);
+    return generate(messages);
+  });
+
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
+  assert.deepEqual(commandOnly(result), { reply: '当前没有可用的 Capability。' });
+});
+
+test('Supervisor Agent preserves caller cancellation during a model invocation', async (t) => {
+  const catalog = createTestCatalog({});
+  const controller = new AbortController();
+  const reason = new Error('User interrupted the run.');
+  const model = new AbortableSupervisorModel({});
+  model.onStarted = () => controller.abort(reason);
 
   await assert.rejects(
-    createRunSupervisorAgent({
-      model: new SlowSupervisorModel({}),
-      timeoutMs: 10,
-    }).invoke(supervisorInput(workspace)),
-    (error: unknown) =>
-      error instanceof RunSupervisorAgentError
-      && error.code === 'supervisor_timeout',
+    createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog), {
+      signal: controller.signal,
+    }),
+    (error: unknown) => error === reason,
   );
 });
 
-test('Supervisor Agent rejects a structured result produced after timeout', async (t) => {
-  const workspace = await createWorkspace(t, {});
-  const model = new DelayedStructuredSupervisorModel([{ content: '当前没有可用的 Capability。' }]);
+test('Supervisor Agent rejects an already cancelled invocation before calling the model', async (t) => {
+  const catalog = createTestCatalog({});
+  const controller = new AbortController();
+  const reason = new Error('User interrupted before execution.');
+  controller.abort(reason);
+  const model = new AbortableSupervisorModel({});
+  model.onStarted = () => assert.fail('Cancelled invocation must not call the model.');
 
   await assert.rejects(
-    createRunSupervisorAgent({
-      model,
-      timeoutMs: 10,
-    }).invoke(supervisorInput(workspace)),
-    (error: unknown) =>
-      error instanceof RunSupervisorAgentError
-      && error.code === 'supervisor_timeout',
+    createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog), {
+      signal: controller.signal,
+    }),
+    (error: unknown) => error === reason,
   );
 });
 
 test('one Supervisor runner reads each invocation context in entry and boundary modes', async (t) => {
-  const workspace = await createWorkspace(t, {});
+  const catalog = createTestCatalog({});
   const model = new ScriptedSupervisorModel([
     { content: 'No execution available.' },
     { toolCalls: [{ id: 'continue', name: 'review_current', args: { completed: false, reason: 'Complete the missing current-task work.', } }] },
@@ -1950,11 +1836,11 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
   // Invoke from a parent graph so this also verifies framework config propagation.
   const parent = new StateGraph(Annotation.Root({ result: Annotation<unknown>() }))
     .addNode('supervisor', async (_state, config) => ({
-      result: await runner.invoke(supervisorInput(workspace), config),
+      result: await runner.invoke(supervisorInput(catalog), config),
     })).addEdge(START, 'supervisor').addEdge('supervisor', END).compile();
   await parent.invoke({}, { context: { systemPromptSections: first } });
   const config = { tags: [], context: { systemPromptSections: second } };
-  await runner.invoke(supervisorInput(workspace, {
+  await runner.invoke(supervisorInput(catalog, {
     mode: 'boundary', inputId: 'boundary-context-test',
     activeDelegation: { delegationId: 'context-child', runId: 'run-test', capability: 'general', task: 'Continue.' },
     messages: [...[], ...[{ messageId: 'context-announce', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
@@ -1970,37 +1856,32 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
   }
 });
 test('multiple controls and mixed discovery/control responses run no tools or follow-up model calls', async (t) => {
-  const workspace = await createWorkspace(t, { general: capabilityDocument({
+  const catalog = createTestCatalog({ general: capabilityDocument({
     name: 'general', description: 'Execute work.', instructions: 'Execute work.',
   }) });
-  let probes = 0;
-  const probe = tool(async () => { probes += 1; return 'evidence'; }, {
-    name: 'probe', description: 'Read evidence.', schema: z.object({}),
-  });
   const proposal = { id: 'plan', name: 'submit_plan', args: {
     tasks: [{ capability: 'general', task: 'Execute work.' }],
   } };
   for (const toolCalls of [
     [proposal, { ...proposal, id: 'second' }],
-    [{ id: 'probe', name: 'probe', args: {} }, proposal],
+    [{ id: 'details', name: 'capability_details', args: { names: ['general'] } }, proposal],
   ]) {
     const model = new ScriptedSupervisorModel([{ toolCalls }, { content: 'must not run' }]);
-    await assert.rejects(createRunSupervisorAgent({ model, additionalTools: [probe] })
-      .invoke(supervisorInput(workspace)), /only tool call/);
+    await assert.rejects(createRunSupervisorAgent({ model })
+      .invoke(supervisorInput(catalog)), /only tool call/);
     assert.equal(model.invocations.length, 1);
-    assert.equal(probes, 0);
   }
 });
 
 test('empty final output follows the protocol error path without a fallback reply', async (t) => {
-  const workspace = await createWorkspace(t, {});
+  const catalog = createTestCatalog({});
   const model = new ScriptedSupervisorModel([{ content: ' ' }]);
-  await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace)), /neither a control proposal/);
+  await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /neither a control proposal/);
   assert.equal(model.invocations.length, 1);
 });
 
 test('details uses exact manifest names and distinguishes new, known, and unknown names', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({ name: 'general', description: 'General work.', instructions: 'Handle work.' }),
     explore: capabilityDocument({ name: 'explore', description: 'Research.', instructions: 'Inspect evidence.' }),
   });
@@ -2011,7 +1892,7 @@ test('details uses exact manifest names and distinguishes new, known, and unknow
       args: { names: ['explore', 'general'] } }] },
     { structuredOutput: { kind: 'plan', args: submitArgs('explore') } },
   ]);
-  const input = supervisorInput(workspace);
+  const input = supervisorInput(catalog);
   const result = await createRunSupervisorAgent({ model }).invoke({ ...input,
     capabilityDisclosure: { ...input.capabilityDisclosure, disclosedCapabilityNames: ['general'] },
   });
@@ -2027,9 +1908,8 @@ test('details uses exact manifest names and distinguishes new, known, and unknow
   assert.deepEqual(second.unknownNames, []);
 });
 
-
 test('repeated empty detail reads do not close disclosure and parallel names merge without loss', async (t) => {
-  const workspace = await createWorkspace(t, {
+  const catalog = createTestCatalog({
     general: capabilityDocument({ name: 'general', description: 'General work.', instructions: 'Handle work.' }),
     explore: capabilityDocument({ name: 'explore', description: 'Research.', instructions: 'Inspect evidence.' }),
   });
@@ -2040,7 +1920,7 @@ test('repeated empty detail reads do not close disclosure and parallel names mer
     { toolCalls: [details('known-again', ['general', 'explore'])] },
     { structuredOutput: { kind: 'plan', args: submitArgs('explore') } },
   ]);
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace));
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
   assert.deepEqual([...result.capabilityDisclosure!.disclosedCapabilityNames].sort(), ['explore', 'general']);
   assert.deepEqual(Object.keys(result.capabilityDisclosure!).sort(), ['disclosedCapabilityNames', 'registryDigest']);
   for (let i = 0; i < 4; i++) {

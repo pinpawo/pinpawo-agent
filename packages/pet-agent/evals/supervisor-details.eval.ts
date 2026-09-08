@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { HumanMessage } from '@langchain/core/messages';
@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { defineInstructionDocument } from '../src/types/capability.ts';
 import { DelegationAnnounceMessage } from '../src/agent/orchestrator/delegation/index.ts';
-import { materializeCapabilityDocumentWorkspace } from '../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
+import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import { createRunSupervisorSession } from '../src/agent/orchestrator/runSupervisor/session.ts';
 import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
@@ -15,8 +15,8 @@ import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orche
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 import { createSupervisorDetailsDiagnostics } from './supervisor-details-diagnostics.ts';
 
-// Isolated responsibility names make each search budget interpretable. These are
-// eval expectations, not production search limits or instructions to the model.
+// Isolated responsibility names make each disclosure budget interpretable. These are
+// eval expectations, not production discovery limits or instructions to the model.
 const capabilities = [
   ['repository', 'Read and edit repository source, investigate bugs and run tests.'],
   ['release_publisher', 'Publish prepared release notes to the destination selected by the user.'],
@@ -24,7 +24,7 @@ const capabilities = [
   ['image_editor', 'Edit images and illustrations.'],
   ['spreadsheet', 'Read spreadsheets and calculate spreadsheet formulas.'],
 ];
-const execution = tool(() => { throw new Error('Search eval must not execute business tools.'); }, {
+const execution = tool(() => { throw new Error('Details eval must not execute business tools.'); }, {
   name: 'execute_task', description: 'Perform the selected Capability responsibility.', schema: z.object({ task: z.string() }),
 });
 const registry = compileAgentRegistry({
@@ -77,43 +77,39 @@ if (!Number.isSafeInteger(repeats) || repeats < 1) throw new Error('DETAILS_EVAL
 const selectedNames = process.env.EVAL_CASES?.split(',').filter(Boolean) ?? [];
 if (selectedNames.some((name) => !scenarios.some((scenario) => scenario.name === name))) throw new Error('Unknown EVAL_CASES entry.');
 const selected = scenarios.filter(({ name }) => !selectedNames.length || selectedNames.includes(name));
-const root = await mkdtemp(join(tmpdir(), 'supervisor-details-eval-'));
 const results = [];
-try {
-  const workspace = await materializeCapabilityDocumentWorkspace({ registry, cacheRoot: root });
-  for (const scenario of selected) for (let repeat = 1; repeat <= repeats; repeat++) {
-    // Fresh runner per case: first-use routing-manifest cost is visible, not
-    // silently amortized across cases. Model timings include that preparation.
-    const supervisor = createRunSupervisorAgent({ model: subject.model });
-    const trace = createSupervisorDetailsDiagnostics();
-    const disclosure = { ...createCapabilityDisclosureState({ workspace }), disclosedCapabilityNames: scenario.disclosed };
-    const base = { inputId: scenario.name, traceId: scenario.name, runId: scenario.name, userRequest: scenario.goal,
-      messages: [new HumanMessage(scenario.goal)], remainingPlan: [], workspace, capabilityDisclosure: disclosure,
-      supervisorSession: createRunSupervisorSession({ runId: scenario.name, capabilityDisclosure: disclosure }),
-    };
-    const input: RunSupervisorInput = scenario.evidence ? { ...base, mode: 'boundary',
-      activeDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'repository', task: scenario.goal },
-      messages: [...base.messages, new DelegationAnnounceMessage({ id: 'announce:a1', sourceLane: 'capability:repository',
-        delegationId: 'd1', runId: scenario.name, task: scenario.goal, announceMessageId: 'a1', result: scenario.evidence, createdAt: '2026-09-08T00:00:00Z' })],
-    } : { ...base, mode: 'entry', activeDelegation: null };
-    let decision: RunSupervisorResult | undefined; let error;
-    try { decision = await supervisor.invoke(input, { callbacks: trace.callbacks }); }
-    catch (caught) { error = { name: caught instanceof Error ? caught.name : 'UnknownError' }; }
-    const diagnostics = trace.read();
-    const behaviorPassed = scenario.expected === 'plan'
-      ? decision?.action === 'execute_plan' && scenario.required!.every((name) => decision.tasks.some((task) => task.capability === name))
-      : scenario.expected === 'reply' ? decision?.action === undefined && Boolean(decision?.reply?.trim())
-      : decision?.action === 'review_current' && decision.completed === (scenario.expected === 'accept')
-        && (scenario.expected === 'accept' ? Boolean(decision.reply?.trim()) : !decision.reply);
-    const disclosureBudgetPassed = (scenario.name !== 'entry-requested-details' || diagnostics.detailCalls === 1) && diagnostics.detailCalls <= scenario.maxCalls && diagnostics.repeatedQueries === 0;
-    const result = { case: scenario.name, mode: input.mode, repeat, passed: !error && behaviorPassed && disclosureBudgetPassed,
-      behaviorPassed, disclosureBudgetPassed, maxDetailCalls: scenario.maxCalls,
-      decision: decision ? Object.fromEntries(Object.entries(decision).filter(([key]) => key !== 'capabilityDisclosure')) : null,
-      error, diagnostics };
-    results.push(result);
-    console.log(JSON.stringify(result));
-  }
-} finally { await rm(root, { recursive: true, force: true }); }
+const catalog = createCapabilityCatalog({ registry });
+for (const scenario of selected) for (let repeat = 1; repeat <= repeats; repeat++) {
+  // Fresh runner per case; routing metadata is built without a model call.
+  const supervisor = createRunSupervisorAgent({ model: subject.model });
+  const trace = createSupervisorDetailsDiagnostics();
+  const disclosure = { ...createCapabilityDisclosureState({ catalog }), disclosedCapabilityNames: scenario.disclosed };
+  const base = { inputId: scenario.name, traceId: scenario.name, runId: scenario.name, userRequest: scenario.goal,
+    messages: [new HumanMessage(scenario.goal)], remainingPlan: [], catalog, capabilityDisclosure: disclosure,
+    supervisorSession: createRunSupervisorSession({ runId: scenario.name, capabilityDisclosure: disclosure }),
+  };
+  const input: RunSupervisorInput = scenario.evidence ? { ...base, mode: 'boundary',
+    activeDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'repository', task: scenario.goal },
+    messages: [...base.messages, new DelegationAnnounceMessage({ id: 'announce:a1', sourceLane: 'capability:repository',
+      delegationId: 'd1', runId: scenario.name, task: scenario.goal, announceMessageId: 'a1', result: scenario.evidence, createdAt: '2026-09-08T00:00:00Z' })],
+  } : { ...base, mode: 'entry', activeDelegation: null };
+  let decision: RunSupervisorResult | undefined; let error;
+  try { decision = await supervisor.invoke(input, { callbacks: trace.callbacks }); }
+  catch (caught) { error = { name: caught instanceof Error ? caught.name : 'UnknownError' }; }
+  const diagnostics = trace.read();
+  const behaviorPassed = scenario.expected === 'plan'
+    ? decision?.action === 'execute_plan' && scenario.required!.every((name) => decision.tasks.some((task) => task.capability === name))
+    : scenario.expected === 'reply' ? decision?.action === undefined && Boolean(decision?.reply?.trim())
+    : decision?.action === 'review_current' && decision.completed === (scenario.expected === 'accept')
+      && (scenario.expected === 'accept' ? Boolean(decision.reply?.trim()) : !decision.reply);
+  const disclosureBudgetPassed = (scenario.name !== 'entry-requested-details' || diagnostics.detailCalls === 1) && diagnostics.detailCalls <= scenario.maxCalls && diagnostics.repeatedQueries === 0;
+  const result = { case: scenario.name, mode: input.mode, repeat, passed: !error && behaviorPassed && disclosureBudgetPassed,
+    behaviorPassed, disclosureBudgetPassed, maxDetailCalls: scenario.maxCalls,
+    decision: decision ? Object.fromEntries(Object.entries(decision).filter(([key]) => key !== 'capabilityDisclosure')) : null,
+    error, diagnostics };
+  results.push(result);
+  console.log(JSON.stringify(result));
+}
 const path = resolve(process.env.DETAILS_EVAL_REPORT_PATH ?? join(tmpdir(), `supervisor-details-${profileId}.json`));
 await writeFile(path, JSON.stringify({ model: subject.metadata, repeats, results }, null, 2) + '\n');
 console.log(`Passed ${results.filter(({ passed }) => passed).length}/${results.length}; report: ${path}`);

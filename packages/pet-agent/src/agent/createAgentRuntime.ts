@@ -1,10 +1,4 @@
 export type {
-  CapabilityRegistryBackend,
-} from './orchestrator/runSupervisor/registryDocuments';
-export {
-  CAPABILITY_REGISTRY_BACKEND,
-} from './orchestrator/runSupervisor/registryDocuments';
-export type {
   ActiveDelegationTransition,
   OrchestratorConfig,
   OrchestratorInvokeOptions,

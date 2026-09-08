@@ -52,16 +52,18 @@ test('review responses advance approved batches and send the final canonical res
   assert.equal(second.ok, true);
   assert.equal(second.ok ? second.status : null, 'sent');
   assert.deepEqual(connection.sent.at(-1), {
-    type: 'human_review_response',
+    type: 'interrupt.resume',
     requestId: 'startup',
     interruptId: 'review-action',
-    responses: [{
-      interactionId: 'review-1',
-      selectedOptionId: 'approve-1',
-    }, {
-      interactionId: 'review-2',
-      selectedOptionId: 'approve-2',
-    }],
+    value: {
+      decisions: [{
+        interactionId: 'review-1',
+        selectedOptionId: 'approve-1',
+      }, {
+        interactionId: 'review-2',
+        selectedOptionId: 'approve-2',
+      }],
+    },
   });
   controller.stop();
 });
@@ -121,14 +123,16 @@ test('review responses validate free text and reject stale local drafts', () => 
   });
   assert.equal(result.ok, true);
   assert.deepEqual(connection.sent.at(-1), {
-    type: 'human_review_response',
+    type: 'interrupt.resume',
     requestId: 'startup',
     interruptId: 'review-action',
-    responses: [{
-      interactionId: 'review-1',
-      selectedOptionId: 'respond',
-      input: { message: 'needs changes' },
-    }],
+    value: {
+      decisions: [{
+        interactionId: 'review-1',
+        selectedOptionId: 'respond',
+        input: { message: 'needs changes' },
+      }],
+    },
   });
   controller.stop();
 });
@@ -164,9 +168,10 @@ test('review cancellation targets only the current pending interrupt', () => {
     ok: true,
   });
   assert.deepEqual(connection.sent.at(-1), {
-    type: 'review.cancel',
+    type: 'interrupt.resume',
     requestId: 'startup',
     interruptId: 'review-action',
+    value: { action: 'cancel' },
   });
   controller.stop();
 });

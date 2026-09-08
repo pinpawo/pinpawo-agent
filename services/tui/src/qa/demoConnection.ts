@@ -230,14 +230,9 @@ export function createDemoConnectionFactory(
             snapshot: createAgentSessionSnapshot(session),
           });
         }
-        if (
-          options.review
-          && (
-            message.type === 'human_review_response'
-            || message.type === 'review.cancel'
-          )
-        ) {
-          if (message.type === 'review.cancel') {
+        if (options.review && message.type === 'interrupt.resume') {
+          const cancelled = (message.value as { action?: unknown }).action === 'cancel';
+          if (cancelled) {
             dispatchRuntimeEvent({
               type: 'run.interrupted',
               requestId: 'smoke-run',

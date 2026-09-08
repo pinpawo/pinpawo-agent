@@ -66,12 +66,6 @@ export type InterruptResumeMessage = {
   value: ContractJsonObject;
 };
 
-export type ReviewCancelMessage = {
-  type: 'review.cancel';
-  requestId: string;
-  interruptId: string;
-};
-
 export type NewSessionMessage = {
   type: 'new_session';
 };
@@ -83,13 +77,6 @@ export type RuntimeConfigUpdateMessage = {
   globalReviewPolicyMode: ToolAuthorizationMode;
   /** Omitted by older clients; the host retains the configured level. */
   autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
-};
-
-export type HumanReviewResponseMessage = {
-  type: 'human_review_response';
-  requestId: string;
-  interruptId: string;
-  responses: ReviewResponse[];
 };
 
 export type SessionSnapshotGetMessage = {
@@ -137,10 +124,8 @@ export type AgentClientMessage =
   | ChatRequestMessage
   | RunInterruptMessage
   | InterruptResumeMessage
-  | ReviewCancelMessage
   | NewSessionMessage
   | RuntimeConfigUpdateMessage
-  | HumanReviewResponseMessage
   | SessionSnapshotGetMessage
   | SessionListMessage
   | SessionNewMessage
@@ -816,73 +801,10 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     // is transportable JSON.
     return { type, requestId, interruptId, value: value as ContractJsonObject };
   }
-  if (type === 'human_review_response') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId', 'responses', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;
-    const requestId = readString(record, 'requestId');
-    const interruptId = readOptionalString(record, 'interruptId');
-    const actionId = readOptionalString(record, 'actionId');
-    const responses = readReviewResponses(record, 'responses');
-    const interactionId = readOptionalString(record, 'interactionId');
-    const reviewId = readOptionalString(record, 'reviewId');
-    const selectedOptionId = readOptionalString(record, 'selectedOptionId');
-    const input = readRecord(record, 'input');
-    const decisions = readReviewResponses(record, 'decisions');
-    if (record.responses !== undefined && !responses) return null;
-    if (record.input !== undefined && (!input || !isJsonValue(input))) return null;
-    if (record.decisions !== undefined && !decisions) return null;
-    if (record.interruptId !== undefined && !interruptId) return null;
-    if (record.actionId !== undefined && !actionId) return null;
-    if (interruptId !== undefined && actionId !== undefined && interruptId !== actionId) return null;
-    const canonicalInterruptId = interruptId ?? actionId;
-    if (!requestId || !canonicalInterruptId) return null;
-    if (responses && (interactionId || reviewId || selectedOptionId || input || decisions)) return null;
-    if (responses) {
-      return {
-        type,
-        requestId,
-        interruptId: canonicalInterruptId,
-        responses,
-      };
-    }
-    if ((!interactionId && !reviewId) || !selectedOptionId) return null;
-    if (interactionId !== undefined && reviewId !== undefined && interactionId !== reviewId) return null;
-    const canonicalInteractionId = interactionId ?? reviewId!;
-    const scalarResponse: ReviewResponse = {
-      interactionId: canonicalInteractionId,
-      selectedOptionId,
-      ...(input ? { input: input as ContractJsonObject } : {}),
-    };
-    const canonicalResponses = decisions ?? [scalarResponse];
-    const finalResponse = canonicalResponses.at(-1);
-    if (
-      !finalResponse
-      || finalResponse.interactionId !== scalarResponse.interactionId
-      || finalResponse.selectedOptionId !== scalarResponse.selectedOptionId
-    ) return null;
-    return {
-      type,
-      requestId,
-      interruptId: canonicalInterruptId,
-      responses: canonicalResponses,
-    };
-  }
   if (type === 'run.interrupt') {
     if (!hasOnlyKeys(record, ['type', 'requestId'])) return null;
     const requestId = readString(record, 'requestId');
     return requestId ? { type, requestId } : null;
-  }
-  if (type === 'review.cancel') {
-    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId'])) return null;
-    const requestId = readString(record, 'requestId');
-    const interruptId = readOptionalString(record, 'interruptId');
-    const actionId = readOptionalString(record, 'actionId');
-    if (record.interruptId !== undefined && !interruptId) return null;
-    if (record.actionId !== undefined && !actionId) return null;
-    if (interruptId !== undefined && actionId !== undefined && interruptId !== actionId) return null;
-    const canonicalInterruptId = interruptId ?? actionId;
-    return requestId && canonicalInterruptId
-      ? { type, requestId, interruptId: canonicalInterruptId }
-      : null;
   }
   if (type === 'new_session') {
     if (!hasOnlyKeys(record, ['type', 'userId'])) return null;

@@ -481,10 +481,10 @@ export class TuiSessionController {
     }
     const requestId = this.requestIdFactory();
     if (!this.transport.send({
-      type: 'human_review_response',
+      type: 'interrupt.resume',
       requestId,
       interruptId: pendingInterrupt.interruptId,
-      responses: prepared.responses,
+      value: { decisions: [...prepared.responses] },
     })) {
       return { ok: false, reason: 'send-failed' };
     }
@@ -519,9 +519,10 @@ export class TuiSessionController {
     }
     const requestId = this.requestIdFactory();
     if (!this.transport.send({
-      type: 'review.cancel',
+      type: 'interrupt.resume',
       requestId,
       interruptId: pendingInterrupt.interruptId,
+      value: { action: 'cancel' },
     })) {
       return { ok: false, reason: 'send-failed' };
     }

@@ -2,12 +2,10 @@ import {
   parseLocalAgentClientMessage,
   readLocalAgentClientMessageEnvelope,
   type ChatRequestMessage,
-  type HumanReviewResponseMessage,
   type InterruptResumeMessage,
   type ModelListMessage,
   type ModelSelectMessage,
   type NewSessionMessage,
-  type ReviewCancelMessage,
   type RunInterruptMessage,
   type RuntimeConfigUpdateMessage,
   type SessionListMessage,
@@ -25,11 +23,6 @@ export type ServerLogWarn = (message: string) => void;
 
 export type LocalServerPeerHandlers = {
   onChatRequest: (peer: ServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
-  onHumanReviewResponse: (
-    peer: ServerPeer,
-    message: HumanReviewResponseMessage,
-  ) => MaybePromise<void>;
-  onReviewCancel: (peer: ServerPeer, message: ReviewCancelMessage) => MaybePromise<void>;
   /** Continue any pending interrupt by id. */
   onInterruptResume: (
     peer: ServerPeer,
@@ -178,10 +171,6 @@ export function dispatchLocalServerMessage(
 
     if (msg.type === 'chat_request') {
       return dispatchOptional(peer, msg, handlers.onChatRequest, 'handleChatRequest', logError, logWarn);
-    } else if (msg.type === 'human_review_response') {
-      return dispatchOptional(peer, msg, handlers.onHumanReviewResponse, 'handleHumanReviewResponse', logError, logWarn);
-    } else if (msg.type === 'review.cancel') {
-      return dispatchOptional(peer, msg, handlers.onReviewCancel, 'handleReviewCancel', logError, logWarn);
     } else if (msg.type === 'interrupt.resume') {
       return dispatchOptional(peer, msg, handlers.onInterruptResume, 'handleInterruptResume', logError, logWarn);
     } else if (msg.type === 'run.interrupt') {

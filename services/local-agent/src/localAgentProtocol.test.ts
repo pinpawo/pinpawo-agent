@@ -47,165 +47,47 @@ test('parseLocalAgentClientMessage accepts valid chat requests and rejects malfo
   );
 });
 
-test('parseLocalAgentClientMessage accepts canonical human review response fields', () => {
+test('parseLocalAgentClientMessage accepts a review resume by interrupt id', () => {
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
+      type: 'interrupt.resume',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
-      responses: [{
-        interactionId: 'review-1',
-        selectedOptionId: 'respond',
-        input: { message: 'list files first' },
-      }],
+      value: {
+        decisions: [{
+          interactionId: 'review-1',
+          selectedOptionId: 'respond',
+          input: { message: 'list files first' },
+        }],
+      },
     })),
     {
-      type: 'human_review_response',
+      type: 'interrupt.resume',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
-      responses: [{
-        interactionId: 'review-1',
-        selectedOptionId: 'respond',
-        input: { message: 'list files first' },
-      }],
+      value: {
+        decisions: [{
+          interactionId: 'review-1',
+          selectedOptionId: 'respond',
+          input: { message: 'list files first' },
+        }],
+      },
     },
   );
+  // Cancelling a review is a resume value too, not a message of its own.
   assert.deepEqual(
     parseLocalAgentClientMessage(JSON.stringify({
-      type: 'review.cancel',
+      type: 'interrupt.resume',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
+      value: { action: 'cancel' },
     })),
     {
-      type: 'review.cancel',
+      type: 'interrupt.resume',
       requestId: 'req-1',
       interruptId: 'interrupt-1',
+      value: { action: 'cancel' },
     },
-  );
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'run.interrupt',
-      requestId: 'req-1',
-    })),
-    { type: 'run.interrupt', requestId: 'req-1' },
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'run.interrupt',
-      requestId: 'req-1',
-      actionId: 'interrupt-1',
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'review.cancel',
-      requestId: 'req-1',
-    })),
-    null,
-  );
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      interactionId: 'review-2',
-      reviewId: 'review-2',
-      selectedOptionId: 'approve',
-      decisions: [
-        { interactionId: 'review-1', selectedOptionId: 'approve' },
-        { interactionId: 'review-2', selectedOptionId: 'approve' },
-      ],
-    })),
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      responses: [
-        { interactionId: 'review-1', selectedOptionId: 'approve' },
-        { interactionId: 'review-2', selectedOptionId: 'approve' },
-      ],
-    },
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      selectedOptionId: 'respond',
-      input: { message: 'missing review id' },
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      reviewId: 'review-1',
-      selectedOptionId: 'approve',
-      message: '批准',
-      resume: { decisions: [{ type: 'approve' }] },
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      reviewId: 'review-1',
-      selectedOptionId: 'approve',
-      originSessionId: 'session-1',
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      reviewId: 'review-1',
-      selectedOptionId: 'respond',
-      input: 'not-an-object',
-    })),
-    null,
-  );
-  assert.equal(parseLocalAgentClientMessage(JSON.stringify({ type: 'human_review_response', requestId: 'req-1' })), null);
-});
-
-test('parseLocalAgentClientMessage normalizes legacy actionId to interruptId', () => {
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'human_review_response',
-      requestId: 'req-1',
-      actionId: 'interrupt-1',
-      interactionId: 'review-1',
-      selectedOptionId: 'approve',
-    })),
-    {
-      type: 'human_review_response',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
-    },
-  );
-  assert.deepEqual(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'review.cancel',
-      requestId: 'req-1',
-      actionId: 'interrupt-1',
-    })),
-    {
-      type: 'review.cancel',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-    },
-  );
-  assert.equal(
-    parseLocalAgentClientMessage(JSON.stringify({
-      type: 'review.cancel',
-      requestId: 'req-1',
-      interruptId: 'interrupt-1',
-      actionId: 'other-interrupt',
-    })),
-    null,
   );
 });
 

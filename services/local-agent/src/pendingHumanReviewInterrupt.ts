@@ -1,3 +1,4 @@
+import type { HumanReviewResponse } from '@pinpawo/agent-contracts';
 import {
   resolveHumanReviewResponse as resolveHumanReviewDecision,
   ReviewResponseResolutionError,
@@ -6,10 +7,29 @@ import {
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-import type {
-  HumanReviewResponseMessage,
-  ReviewCancelMessage,
-} from './localAgentProtocol';
+import type { InterruptResumeMessage } from './localAgentProtocol';
+
+/**
+ * The review kind's resume values. `decisions` answers the reviews; `cancel`
+ * withdraws the proposed action and stops the run. Both arrive through
+ * interrupt.resume and are validated here against the authoritative
+ * checkpoint before any of them reaches LangGraph.
+ */
+export type ReviewResumeValue =
+  | { decisions: HumanReviewResponse[] }
+  | { action: 'cancel' };
+
+export function readReviewResumeValue(value: unknown): ReviewResumeValue | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.action === 'cancel') {
+    return Object.keys(record).length === 1 ? { action: 'cancel' } : null;
+  }
+  if (!Array.isArray(record.decisions) || Object.keys(record).length !== 1) {
+    return null;
+  }
+  return { decisions: record.decisions as HumanReviewResponse[] };
+}
 
 /** Internal projection retaining authoritative pet-agent specs for response resolution. */
 export type PendingHumanReviewInterruptRoute = {
@@ -24,15 +44,17 @@ export function matchesPendingHumanReviewInterrupt(
   return interruptId === route.interruptId;
 }
 
-export function readHumanReviewResponses(msg: HumanReviewResponseMessage): ReviewResponse[] {
-  return msg.responses.map(toInternalReviewResponse);
+export function readHumanReviewResponses(
+  responses: HumanReviewResponse[],
+): ReviewResponse[] {
+  return responses.map(toInternalReviewResponse);
 }
 
 export function validateHumanReviewResponses(
   route: PendingHumanReviewInterruptRoute,
-  msg: HumanReviewResponseMessage,
+  responses: HumanReviewResponse[],
 ): ReviewResponse[] {
-  const decisions = readHumanReviewResponses(msg);
+  const decisions = readHumanReviewResponses(responses);
   if (!decisions.length) {
     throw new ReviewResponseResolutionError(
       'invalid_response',
@@ -109,42 +131,23 @@ export type HumanReviewResume =
   | ReturnType<typeof buildHumanReviewResume>
   | ReturnType<typeof buildHumanReviewCancelResume>;
 
+/** What the person decided, for logging. Not a message type. */
 export type HumanReviewResolutionSource =
   | {
-      type: 'human_review_response';
+      type: 'review_decision';
       interactionId: string;
       selectedOptionId: string;
       decisionCount: number;
     }
   | {
-      type: 'review.cancel';
+      type: 'review_cancel';
       interactionId: string;
       decisionCount: 0;
     };
 
-type HumanReviewResolutionMessage = HumanReviewResponseMessage | ReviewCancelMessage;
+type HumanReviewResolutionMessage = InterruptResumeMessage;
 
 type ResolvableHumanReviewRoute = PendingHumanReviewInterruptRoute & { requestId: string };
-
-type HumanReviewRunInterruptOptions<TRoute extends ResolvableHumanReviewRoute> = {
-  recover: () => Promise<TRoute | null>;
-  cancelPending: (route: TRoute) => Promise<void>;
-};
-
-/**
- * Normalizes a run-level stop intent against checkpoint-owned interrupt state. This
- * keeps clients transport-agnostic: a stale `run.interrupt` and an explicit
- * `review.cancel` follow the same canonical cancellation path once the server
- * knows that the run is waiting for review.
- */
-export async function routeRunInterruptThroughHumanReview<
-  TRoute extends ResolvableHumanReviewRoute,
->(options: HumanReviewRunInterruptOptions<TRoute>): Promise<boolean> {
-  const route = await options.recover();
-  if (!route) return false;
-  await options.cancelPending(route);
-  return true;
-}
 
 type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
   message: HumanReviewResolutionMessage;
@@ -189,14 +192,24 @@ export async function resolvePendingHumanReviewInterrupt<
     });
     return;
   }
+  const requested = readReviewResumeValue(message.value);
+  if (!requested) {
+    options.emitEvent({
+      type: 'error',
+      requestId: message.requestId,
+      message: '这个 review 应答格式无法识别，请重新在确认面板上操作。',
+      code: 'interrupt_stale',
+    });
+    return;
+  }
   let resume: HumanReviewResume;
   let source: HumanReviewResolutionSource;
-  if (message.type === 'human_review_response') {
+  if ('decisions' in requested) {
     let decisions: ReviewResponse[];
     try {
-      decisions = validateHumanReviewResponses(route, message);
+      decisions = validateHumanReviewResponses(route, requested.decisions);
     } catch (err) {
-      const interactionId = message.responses.at(-1)?.interactionId ?? 'missing';
+      const interactionId = requested.decisions.at(-1)?.interactionId ?? 'missing';
       console.warn(
         `[human-review] response rejected: interactionId=${interactionId} `
         + `does not match pending interrupt=${route.interruptId} reviews=${route.reviews.map((review) => review.id).join(',')} `
@@ -216,7 +229,7 @@ export async function resolvePendingHumanReviewInterrupt<
     resume = buildHumanReviewResume(route, decisions);
     const finalDecision = decisions.at(-1)!;
     source = {
-      type: 'human_review_response',
+      type: 'review_decision',
       interactionId: finalDecision.reviewId,
       selectedOptionId: finalDecision.selectedOptionId,
       decisionCount: decisions.length,
@@ -232,7 +245,7 @@ export async function resolvePendingHumanReviewInterrupt<
     }
     resume = buildHumanReviewCancelResume(route);
     source = {
-      type: 'review.cancel',
+      type: 'review_cancel',
       interactionId: firstReview.id,
       decisionCount: 0,
     };

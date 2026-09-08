@@ -610,28 +610,10 @@ export function createLocalServerHandlers(
         ),
       );
     },
-    onHumanReviewResponse: async (client, message) => {
-      // HITL 不经 Studio:pet 的 review 走 pet-agent 自己的中断/resume,
-      // 与 chat 同路。
-      return afterSessionCommands(
-        client,
-        message.requestId,
-        () => chatHandler.handleHumanReviewResponse(client, message, runtimeDeps.get()),
-      );
-    },
     onInterruptResume: (client, message) => afterSessionCommands(
       client,
       message.requestId,
       () => chatHandler.handleInterruptResume(
-        client,
-        message,
-        runtimeDeps.get(),
-      ),
-    ),
-    onReviewCancel: (client, message) => afterSessionCommands(
-      client,
-      message.requestId,
-      () => chatHandler.handleReviewCancel(
         client,
         message,
         runtimeDeps.get(),

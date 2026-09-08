@@ -694,6 +694,63 @@ test('resident policy updates reach conversation and dispatch without changing a
   }
 });
 
+test('an aborted resident dispatch is continuable by id, like an aborted Chat run', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-abort-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  let settleCalls = 0;
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingInterrupt: settleCalls > 0
+        ? { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' as const } }
+        : null,
+      acceptsResume: false,
+      currentPlan: null,
+    }),
+    settleAbortedRun: async () => {
+      settleCalls += 1;
+      return {
+        status: 'paused' as const,
+        pendingInterrupt: {
+          interruptId: 'interrupt-pause',
+          payload: { kind: 'pause_task' as const },
+        },
+      };
+    },
+  };
+  const pet = await createResidentPetHost({
+    petId: 'pet-aborted',
+    petName: 'Aborted Pet',
+    modelProfiles: createTestModelProfiles(),
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-aborted-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async () => ({ status: 'interrupted' as const }),
+  });
+  try {
+    pet.resident.dispatch.dispatch({ request: 'gets cancelled mid-delegation' });
+    await waitFor(
+      () => settleCalls > 0,
+      'an aborted dispatch never asked the Runtime whether it paused',
+    );
+    // The dispatch source must not decide continuability differently from Chat:
+    // the same unfinished delegation is announced by id either way.
+    await waitFor(
+      () => pet.resident.dispatch.getQueueSnapshot().state === 'waiting',
+      'an aborted dispatch that left work behind did not enter waiting',
+    );
+  } finally {
+    await pet.close();
+  }
+});
+
 test('a task pause holds dispatch as waiting through the same interrupt any kind uses', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(root);

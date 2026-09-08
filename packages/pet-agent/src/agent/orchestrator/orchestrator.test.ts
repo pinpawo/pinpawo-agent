@@ -6841,15 +6841,23 @@ test('an aborted delegation settles into a pause interrupt without re-running it
     withStructuredOutput: () => ({
       invoke: async () => {
         routeCallCount += 1;
-        if (routeCallCount === 1) return scriptedPlannerTask('run shell');
+        if (routeCallCount === 1) {
+          // Two tasks: the second must survive the cancellation.
+          return scriptedPlannerTask('run shell', [
+            { capability: 'general', task: 'summarise the result' },
+          ]);
+        }
         if (routeCallCount === 2) return scriptedSupervisorCapability('general');
-        return goalDoneDecision();
+        // The continued run advances the queued task rather than proposing a
+        // new plan, which the boundary only accepts from fresh user input.
+        return { outcome: 'continue', gap_note: null };
       },
     }),
   } as unknown as AgentModels['act'];
   const subagentModel = new FakeToolCallingModel({
     toolCalls: [
       [{ id: 'call-aborted', name: 'run_shell', args: { command: 'git status' } }],
+      [],
       [],
     ],
   });
@@ -6904,6 +6912,35 @@ test('an aborted delegation settles into a pause interrupt without re-running it
   // Reaching the pause repeats no work and consults no model.
   assert.equal(toolRuns, 1, 'settling must not re-run the delegation');
   assert.equal(routeCallCount, 2, 'settling must not call the planner or supervisor');
+  // The Supervisor's remaining plan is task-scoped now, so continuing can
+  // still reach the tasks queued behind the cancelled one.
+  assert.deepEqual(
+    settledState.values.taskRunContinuation?.remainingPlan?.map(
+      (task: { task: string }) => task.task,
+    ),
+    ['summarise the result'],
+    'the remaining plan survives the cancellation',
+  );
+
+  // Continue by id: the delegation is re-entered directly, carrying the queued
+  // task with it. Without the snapshot taken while settling, the continued run
+  // would resume against an empty plan.
+  const pauseId = settled.status === 'paused' ? settled.pendingInterrupt.interruptId : '';
+  await graph.invoke(
+    new Command({ resume: { [pauseId]: { action: 'continue' } } }),
+    config,
+  ).catch(() => undefined);
+  const continuedState = await graph.getState(config);
+  assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
+  assert.equal(
+    continuedState.values.runNextDelegation?.id
+      ?? continuedState.values.taskActiveDelegation?.id,
+    settledState.values.taskActiveDelegation?.id,
+    'continuing re-enters the same delegation',
+  );
+  // Only Supervisor boundary calls: the planner is not consulted again, so the
+  // continued run works from the plan the settlement preserved.
+  assert.ok(routeCallCount > 2, 'the continued run reached its Supervisor boundary');
 });
 
 test('a legacy resume_active turn over a pending task pause still re-enters the delegation', async () => {

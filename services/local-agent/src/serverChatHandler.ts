@@ -10,6 +10,7 @@ import {
   type RunInterruptMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
+import { projectPendingInterrupt } from './pendingInterruptProjection';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
@@ -165,15 +166,7 @@ export class ServerChatHandler {
     }
     return {
       sessionId: pending.sessionId,
-      pendingInterrupt: {
-        interruptId: pending.interruptId,
-        payload: pending.payload.kind === 'human_review'
-          ? {
-              kind: 'human_review',
-              interactions: pending.payload.reviews.map(projectHumanReviewRequest),
-            }
-          : { kind: 'pause_task' },
-      },
+      pendingInterrupt: projectPendingInterrupt(pending),
     };
   }
 
@@ -317,10 +310,7 @@ export class ServerChatHandler {
         this.publishRuntimeEvent(peer, {
           type: 'interrupt.requested',
           requestId,
-          pendingInterrupt: this.buildPendingInterruptSnapshot(deps, {
-            sessionId: this.tuiSessions.getActiveSessionId(deps.actorId) ?? '',
-            ...settled.pendingInterrupt,
-          })!.pendingInterrupt,
+          pendingInterrupt: projectPendingInterrupt(settled.pendingInterrupt),
         });
         this.inflightRequests.clear(peer, inflight);
         await this.tuiSessions.refreshActiveSessionSummary(deps);

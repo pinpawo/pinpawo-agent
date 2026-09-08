@@ -1115,7 +1115,7 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
   const sent: unknown[] = [];
   const fakePeer = createFakePeer(sent);
   let settleCalls = 0;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {
       settleAbortedRun: async () => {
         settleCalls += 1;
@@ -1134,7 +1134,7 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
       refreshActiveSessionSummary: async () => {},
       buildChatSetup: () => ({ graphKey: 'test', graphConfig: {}, input: { messages: [] } }),
     } as never,
-    inflightRequests: new InflightRequestController<LocalServerPeer>({
+    inflightRequests: new InflightRequestController<ServerPeer>({
       emitOperation: () => undefined,
       sendControl: (_peer, message) => controls.push(message),
     }),
@@ -1162,7 +1162,7 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
 test('an aborted run with nothing to continue still reports an interruption', async () => {
   const sent: unknown[] = [];
   const fakePeer = createFakePeer(sent);
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {
       settleAbortedRun: async () => ({ status: 'finished' as const }),
     } as never,
@@ -1172,7 +1172,7 @@ test('an aborted run with nothing to continue still reports an interruption', as
       refreshActiveSessionSummary: async () => {},
       buildChatSetup: () => ({ graphKey: 'test', graphConfig: {}, input: { messages: [] } }),
     } as never,
-    inflightRequests: new InflightRequestController<LocalServerPeer>({
+    inflightRequests: new InflightRequestController<ServerPeer>({
       emitOperation: () => undefined,
       sendControl: () => undefined,
     }),

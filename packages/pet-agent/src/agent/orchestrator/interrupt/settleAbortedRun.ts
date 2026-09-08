@@ -1,5 +1,7 @@
 import { Command } from '@langchain/langgraph';
+import { snapshotRunTaskContinuation } from '../runSupervisor/session';
 import type { OrchestratorStateType } from '../state';
+import type { TaskActiveDelegation } from '../types';
 import { pauseTaskInterrupt } from './pauseTaskInterrupt';
 import { readPendingInterrupt, type PendingInterrupt } from './readPendingInterrupt';
 
@@ -50,13 +52,11 @@ function readValues(snapshot: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function readResumableDelegationStatus(snapshot: unknown): string | null {
+function readActiveDelegation(snapshot: unknown): TaskActiveDelegation | null {
   const delegation = readValues(snapshot)?.taskActiveDelegation;
-  if (!delegation || typeof delegation !== 'object') {
-    return null;
-  }
-  const status = (delegation as { status?: unknown }).status;
-  return typeof status === 'string' ? status : null;
+  return delegation && typeof delegation === 'object'
+    ? delegation as TaskActiveDelegation
+    : null;
 }
 
 /**
@@ -99,9 +99,26 @@ export async function settleAbortedRun(
 
   // Only an unfinished delegation is continuable. `awaiting_decision` belongs
   // to the Supervisor boundary, not to a person, so it is not a pause either.
-  if (readResumableDelegationStatus(snapshot) !== 'pending') {
+  const activeDelegation = readActiveDelegation(snapshot);
+  if (activeDelegation?.status !== 'pending') {
     return { status: 'finished' };
   }
+
+  // The Supervisor's remaining plan lives in a run-scoped session that
+  // continuing detaches. Snapshot it into the task-scoped continuation first,
+  // exactly as the capability boundary does when a Review resolution pauses,
+  // or the tasks queued after this delegation are lost on continue.
+  const values = readValues(snapshot);
+  const taskRunContinuation = (values?.taskRunContinuation as
+    OrchestratorStateType['taskRunContinuation'] | undefined)
+    ?? snapshotRunTaskContinuation({
+      traceId: typeof values?.traceId === 'string' ? values.traceId : '',
+      userRequest: (values?.runUserRequest ?? null) as
+        Parameters<typeof snapshotRunTaskContinuation>[0]['userRequest'],
+      activeDelegation,
+      supervisorSession: (values?.runSupervisorSession ?? null) as
+        Parameters<typeof snapshotRunTaskContinuation>[0]['supervisorSession'],
+    });
 
   // Writing *as* the pending node satisfies its task, so resuming advances
   // instead of repeating the work it was cancelled in. The jump names the gate
@@ -112,6 +129,7 @@ export async function settleAbortedRun(
       goto: PAUSE_GATE_NODE,
       update: {
         runTerminalError: null,
+        taskRunContinuation,
         taskPauseInterrupt: pauseTaskInterrupt.interaction(),
       },
     }),

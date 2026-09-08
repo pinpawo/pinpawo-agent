@@ -10,7 +10,7 @@ import {
 import {
   emitLocalServerToolOperationEvent,
   isHumanReviewInterruptError,
-} from './localServerOperationEvents';
+} from './serverOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
 

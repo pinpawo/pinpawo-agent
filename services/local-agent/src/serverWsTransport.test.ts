@@ -6,11 +6,11 @@ import { WebSocket, type ClientOptions } from 'ws';
 import {
   attachLocalServerWebSocketTransport,
   createLocalServerWebSocketPeer,
-} from './localServerWsTransport';
+} from './serverWsTransport';
 import {
   type LocalServerPeerHandlers,
 } from './localServerMessageDispatcher';
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 
 test('local websocket peer owns socket readiness, serialization, and send failures', () => {
   const sent: unknown[] = [];
@@ -78,7 +78,7 @@ test('local websocket transport enforces token and Origin during upgrade', async
 
 test('local websocket transport keeps one peer identity through message and close', { timeout: 2_000 }, async () => {
   const server = createServer();
-  const peers: LocalServerPeer[] = [];
+  const peers: ServerPeer[] = [];
   let resolveMessageHandled: () => void = () => undefined;
   let resolveClosed: () => void = () => undefined;
   const messageHandled = new Promise<void>((resolve) => {

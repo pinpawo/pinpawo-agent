@@ -23,13 +23,13 @@ import {
   type InflightOperationRun,
 } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
-import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
+import { emitLocalServerToolOperationEvent } from './serverOperationEvents';
 import { LocalAgentGraphService } from './agentGraphService';
 import {
-  LocalServerTuiSessionService,
+  ServerTuiSessionService,
   type ActivePendingInterrupt,
-} from './localServerTuiSessions';
-import type { LocalServerDeps } from './localServerTypes';
+} from './serverTuiSessions';
+import type { ServerDeps } from './serverTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import {
   resolvePendingHumanReviewInterrupt,
@@ -42,7 +42,7 @@ import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
+import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
 import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
@@ -79,14 +79,14 @@ export function isToolProtocolHistoryError(value: unknown): boolean {
     || text.includes('insufficient tool messages following tool_calls message');
 }
 
-export class LocalServerChatHandler {
+export class ServerChatHandler {
   private readonly graphService: LocalAgentGraphService;
-  private readonly tuiSessions: LocalServerTuiSessionService;
-  private readonly inflightRequests: InflightRequestController<LocalServerPeer>;
+  private readonly tuiSessions: ServerTuiSessionService;
+  private readonly inflightRequests: InflightRequestController<ServerPeer>;
   private readonly loadContext: typeof loadAgentContext;
   private readonly runAgentTurn: RunAgentSessionTurn;
   private readonly publishRuntimeEvent: (
-    origin: LocalServerPeer,
+    origin: ServerPeer,
     event: AgentRuntimeEvent,
   ) => void;
   private readonly interruptHostRun?: (requestId: string) => boolean;
@@ -94,14 +94,14 @@ export class LocalServerChatHandler {
 
   constructor(options: {
     graphService: LocalAgentGraphService;
-    tuiSessions: LocalServerTuiSessionService;
-    inflightRequests: InflightRequestController<LocalServerPeer>;
+    tuiSessions: ServerTuiSessionService;
+    inflightRequests: InflightRequestController<ServerPeer>;
     loadContext?: typeof loadAgentContext;
     runAgentTurn?: RunAgentSessionTurn;
     /** @deprecated Use runAgentTurn. */
     runChat?: RunAgentSessionTurn;
     publishRuntimeEvent?: (
-      origin: LocalServerPeer,
+      origin: ServerPeer,
       event: AgentRuntimeEvent,
     ) => void;
     interruptHostRun?: (requestId: string) => boolean;
@@ -134,7 +134,7 @@ export class LocalServerChatHandler {
 
   private async recoverPendingInterruptRoute(
     requestId: string,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     try {
       const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
@@ -158,7 +158,7 @@ export class LocalServerChatHandler {
   }
 
   buildPendingInterruptSnapshot(
-    _deps: LocalServerDeps,
+    _deps: ServerDeps,
     pending: ActivePendingInterrupt | null,
   ): PendingInterruptSnapshot | null {
     if (!pending) {
@@ -176,7 +176,7 @@ export class LocalServerChatHandler {
     };
   }
 
-  private sendClosedReviewError(peer: LocalServerPeer, requestId: string) {
+  private sendClosedReviewError(peer: ServerPeer, requestId: string) {
     sendLocalServerPeerEvent(peer, {
       type: 'error',
       requestId,
@@ -186,9 +186,9 @@ export class LocalServerChatHandler {
   }
 
   async handleChatRequest(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     msg: ChatRequestMessage,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     await this.runChatRequest(peer, {
       kind: 'user_message',
@@ -202,9 +202,9 @@ export class LocalServerChatHandler {
   }
 
   async handleRunInterrupt(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     msg: RunInterruptMessage,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     const inflight = this.inflightRequests.interrupt(peer, { requestId: msg.requestId });
     if (inflight) {
@@ -230,9 +230,9 @@ export class LocalServerChatHandler {
   }
 
   private async runChatRequest(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     request: LocalServerRunRequest,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
     source: LocalServerRunSource,
   ): Promise<ChatRunOutcome> {
     const { requestId } = request;
@@ -408,25 +408,25 @@ export class LocalServerChatHandler {
   }
 
   async handleHumanReviewResponse(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     msg: HumanReviewResponseMessage,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     await this.resolvePendingInterrupt(peer, msg, deps);
   }
 
   async handleReviewCancel(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     msg: ReviewCancelMessage,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     await this.resolvePendingInterrupt(peer, msg, deps);
   }
 
   private async resolvePendingInterrupt(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     msg: HumanReviewResponseMessage | ReviewCancelMessage,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     await resolvePendingHumanReviewInterrupt({
       message: msg,
@@ -453,10 +453,10 @@ export class LocalServerChatHandler {
   }
 
   private acceptReviewRoute(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     route: PendingInterruptRoute,
     message: HumanReviewResponseMessage | ReviewCancelMessage,
-    deps: LocalServerDeps,
+    deps: ServerDeps,
   ) {
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
@@ -478,7 +478,7 @@ export class LocalServerChatHandler {
   }
 
   private sendStreamToolOperationEvent(
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     inflight: InflightRequest,
     payload: StreamToolsPayload,
   ) {

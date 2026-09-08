@@ -1,10 +1,10 @@
-export type LocalServerWirePeer<TMessage extends object> = {
+export type ServerWirePeer<TMessage extends object> = {
   isConnected: () => boolean;
   send: (message: TMessage) => boolean;
 };
 
-export type LocalServerWireLogError = (message: string, error: unknown) => void;
-export type LocalServerWireLogWarn = (message: string) => void;
+export type ServerWireLogError = (message: string, error: unknown) => void;
+export type ServerWireLogWarn = (message: string) => void;
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -13,15 +13,15 @@ type MaybePromise<T> = T | Promise<T>;
  * The transport treats each incoming frame as opaque bytes/text and only
  * serializes outbound objects; the owning Host parses and dispatches them.
  */
-export type LocalServerWireHandlers<TMessage extends object> = {
+export type ServerWireHandlers<TMessage extends object> = {
   onMessage: (
-    peer: LocalServerWirePeer<TMessage>,
+    peer: ServerWirePeer<TMessage>,
     data: Buffer | string,
   ) => MaybePromise<void>;
-  onClose?: (peer: LocalServerWirePeer<TMessage>) => MaybePromise<void>;
+  onClose?: (peer: ServerWirePeer<TMessage>) => MaybePromise<void>;
   log?: (message: string) => void;
-  logError?: LocalServerWireLogError;
-  logWarn?: LocalServerWireLogWarn;
+  logError?: ServerWireLogError;
+  logWarn?: ServerWireLogWarn;
 };
 
 export function defaultLocalServerWireLogError(message: string, error: unknown) {
@@ -35,7 +35,7 @@ export function defaultLocalServerWireLogWarn(message: string) {
 export function runLocalServerWireHandler(
   name: string,
   handler: () => MaybePromise<void>,
-  logError: LocalServerWireLogError,
+  logError: ServerWireLogError,
 ) {
   return Promise.resolve()
     .then(handler)

@@ -1,4 +1,4 @@
-import { createLocalServerRuntimeDepsStore } from './localServerTypes';
+import { createLocalServerRuntimeDepsStore } from './serverTypes';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync,
@@ -12,20 +12,20 @@ import test from 'node:test';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { LocalAgentGraphService } from './agentGraphService';
-import { createLocalServerHandlers as createProductionLocalServerHandlers } from './localServerHandlers';
+import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTestModelProfileRegistry,
   createTestModelServerDeps,
 } from './testing/modelProfiles';
-import type { LocalServerDeps } from './localServerTypes';
+import type { ServerDeps } from './serverTypes';
 import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 
 function createLocalServerHandlers(
-  deps: Omit<LocalServerDeps, 'toolkitInventory' | 'capabilityCatalog'> & Partial<Pick<
-    LocalServerDeps,
+  deps: Omit<ServerDeps, 'toolkitInventory' | 'capabilityCatalog'> & Partial<Pick<
+    ServerDeps,
     'toolkitInventory' | 'capabilityCatalog'
   >>,
   options?: Parameters<typeof createProductionLocalServerHandlers>[1],
@@ -49,7 +49,7 @@ const testArtifactStore: CapabilityArtifactStore = {
   getDownloadUri: async (uri) => uri,
 };
 
-function createPeer(sent: LocalAgentServerMessage[]): LocalServerPeer {
+function createPeer(sent: LocalAgentServerMessage[]): ServerPeer {
   return {
     isConnected: () => true,
     send: (message) => {
@@ -79,7 +79,7 @@ function deferred<T>() {
 test('session.new returns an authoritative empty snapshot for a unique session', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-session-new-'));
   const sent: LocalAgentServerMessage[] = [];
-  const peer: LocalServerPeer = {
+  const peer: ServerPeer = {
     isConnected: () => true,
     send: (message) => {
       sent.push(message);
@@ -1052,7 +1052,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-update-'));
   const sent: LocalAgentServerMessage[] = [];
   const persisted: Array<{ mode: string; safetyLevel: string }> = [];
-  const peer: LocalServerPeer = {
+  const peer: ServerPeer = {
     isConnected: () => true,
     send: (message) => {
       sent.push(message);
@@ -1119,7 +1119,7 @@ test('runtime config update preserves the configured safety level when the messa
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-preserve-'));
   const sent: LocalAgentServerMessage[] = [];
   const persisted: Array<{ mode: string; safetyLevel: string }> = [];
-  const peer: LocalServerPeer = {
+  const peer: ServerPeer = {
     isConnected: () => true,
     send: (message) => {
       sent.push(message);
@@ -1179,7 +1179,7 @@ test('runtime config update preserves the configured safety level when the messa
 test('runtime config update reports persistence failures without changing runtime state', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-policy-failure-'));
   const sent: LocalAgentServerMessage[] = [];
-  const peer: LocalServerPeer = {
+  const peer: ServerPeer = {
     isConnected: () => true,
     send: (message) => {
       sent.push(message);

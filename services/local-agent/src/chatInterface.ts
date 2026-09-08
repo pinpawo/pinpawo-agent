@@ -1,30 +1,30 @@
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
-export type LocalAgentInterfaceKind = 'tui' | 'app-chat';
+export type AgentInterfaceKind = 'tui' | 'app-chat';
 export const LOCAL_AGENT_INTERFACE_CONFIG_KEY = 'localAgentInterface';
 
-export type LocalAgentInterfaceCapabilities = {
+export type AgentInterfaceCapabilities = {
   humanReview: boolean;
   sessionAuthorization: boolean;
 };
 
-export type LocalAgentInterfaceContext = {
+export type AgentInterfaceContext = {
   threadId: string | null;
-  kind: LocalAgentInterfaceKind | null;
-  capabilities: LocalAgentInterfaceCapabilities;
+  kind: AgentInterfaceKind | null;
+  capabilities: AgentInterfaceCapabilities;
 };
 
-const NO_CAPABILITIES: LocalAgentInterfaceCapabilities = {
+const NO_CAPABILITIES: AgentInterfaceCapabilities = {
   humanReview: false,
   sessionAuthorization: false,
 };
 
-const TUI_CAPABILITIES: LocalAgentInterfaceCapabilities = {
+const TUI_CAPABILITIES: AgentInterfaceCapabilities = {
   humanReview: true,
   sessionAuthorization: true,
 };
 
-const APP_CHAT_CAPABILITIES: LocalAgentInterfaceCapabilities = {
+const APP_CHAT_CAPABILITIES: AgentInterfaceCapabilities = {
   humanReview: true,
   sessionAuthorization: true,
 };
@@ -42,14 +42,14 @@ export function buildAppChatThreadId(params: { petId: string; userId: string }) 
 }
 
 export function readLocalAgentInterfaceCapabilities(
-  kind: LocalAgentInterfaceKind | null,
-): LocalAgentInterfaceCapabilities {
+  kind: AgentInterfaceKind | null,
+): AgentInterfaceCapabilities {
   if (kind === 'tui') return TUI_CAPABILITIES;
   if (kind === 'app-chat') return APP_CHAT_CAPABILITIES;
   return NO_CAPABILITIES;
 }
 
-function readInterfaceKind(value: unknown): LocalAgentInterfaceKind | null {
+function readInterfaceKind(value: unknown): AgentInterfaceKind | null {
   return value === 'tui' || value === 'app-chat' ? value : null;
 }
 
@@ -59,8 +59,8 @@ function readThreadId(value: unknown): string | null {
 
 export function buildLocalAgentInterfaceContext(params: {
   threadId?: string | null;
-  kind?: LocalAgentInterfaceKind | null;
-}): LocalAgentInterfaceContext {
+  kind?: AgentInterfaceKind | null;
+}): AgentInterfaceContext {
   const kind = params.kind ?? null;
   return {
     threadId: readThreadId(params.threadId),
@@ -69,7 +69,7 @@ export function buildLocalAgentInterfaceContext(params: {
   };
 }
 
-export function readLocalAgentInterfaceContext(value: unknown): LocalAgentInterfaceContext {
+export function readLocalAgentInterfaceContext(value: unknown): AgentInterfaceContext {
   if (!value || typeof value !== 'object') {
     return buildLocalAgentInterfaceContext({});
   }
@@ -81,7 +81,7 @@ export function readLocalAgentInterfaceContext(value: unknown): LocalAgentInterf
   });
 }
 
-export function getCurrentLocalAgentInterface(): LocalAgentInterfaceContext {
+export function getCurrentLocalAgentInterface(): AgentInterfaceContext {
   const runnableConfig = AsyncLocalStorageProviderSingleton.getRunnableConfig();
   return readLocalAgentInterfaceContext(
     runnableConfig?.configurable?.[LOCAL_AGENT_INTERFACE_CONFIG_KEY],

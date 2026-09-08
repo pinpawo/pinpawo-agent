@@ -4,8 +4,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { handleLocalHttpRequest } from './localHttpHandlers';
-import type { LocalServerDeps } from './localServerTypes';
+import { handleLocalHttpRequest } from './httpHandlers';
+import type { ServerDeps } from './serverTypes';
 import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
 import { createTestModelServerDeps } from './testing/modelProfiles';
@@ -39,7 +39,7 @@ function makeRes() {
 }
 
 test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', async () => {
-  const deps = {} as LocalServerDeps;
+  const deps = {} as ServerDeps;
   const listRes = makeRes();
 
   assert.equal(handleLocalHttpRequest(makeReq('/sessions', 'Bearer secret'), listRes, deps, {
@@ -95,7 +95,7 @@ test('handleLocalHttpRequest reports an active-run resume conflict', async () =>
   handleLocalHttpRequest(
     makeReq('/sessions/resume?sessionId=pet-a%3Aone', 'Bearer secret'),
     res,
-    {} as LocalServerDeps,
+    {} as ServerDeps,
     {
       authToken: 'secret',
       loadSnapshot: async () => ({}),
@@ -116,7 +116,7 @@ test('handleLocalHttpRequest reports an active-run resume conflict', async () =>
 });
 
 test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
-  const deps = {} as LocalServerDeps;
+  const deps = {} as ServerDeps;
   const snapshotRes = makeRes();
 
   assert.equal(handleLocalHttpRequest(makeReq('/snapshot', 'Bearer secret'), snapshotRes, deps, {
@@ -165,7 +165,7 @@ test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
 
 test('handleLocalHttpRequest does not expose the removed history endpoint', () => {
   const res = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/history', 'Bearer secret'), res, {} as LocalServerDeps, {
+  assert.equal(handleLocalHttpRequest(makeReq('/history', 'Bearer secret'), res, {} as ServerDeps, {
     authToken: 'secret',
     loadSnapshot: async () => ({}),
     listSessions: async () => [],
@@ -176,7 +176,7 @@ test('handleLocalHttpRequest does not expose the removed history endpoint', () =
 });
 
 test('handleLocalHttpRequest rejects requests without a valid local token', async () => {
-  const deps = {} as LocalServerDeps;
+  const deps = {} as ServerDeps;
   const options = {
     authToken: 'secret',
     loadSnapshot: async () => {
@@ -202,7 +202,7 @@ test('handleLocalHttpRequest rejects requests without a valid local token', asyn
   const okRes = makeRes();
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
     actorId: 'pet-a',
-  } as LocalServerDeps, options), true);
+  } as ServerDeps, options), true);
   assert.equal(okRes.statusCode, 200);
 });
 
@@ -224,7 +224,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
   assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), res, {
     actorId: 'pet-a',
     actorName: '羊',
-  } as LocalServerDeps, {
+  } as ServerDeps, {
     authToken: 'secret',
     loadSnapshot: async () => ({}),
     listSessions: async () => [],
@@ -246,7 +246,7 @@ test('handleLocalHttpRequest exposes active operation health fields', async () =
 });
 
 test('Capability HTTP routes are not part of the local server contract', () => {
-  const deps = {} as LocalServerDeps;
+  const deps = {} as ServerDeps;
   const options = {
     authToken: 'secret',
     loadSnapshot: async () => ({}),
@@ -293,7 +293,7 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
       tuiSessionPath: join(stateRoot, 'tui-sessions.json'),
       capabilityArtifactRoot: join(stateRoot, 'capability-artifacts'),
     },
-  } as LocalServerDeps, {
+  } as ServerDeps, {
     authToken: 'secret',
     loadSnapshot: async () => ({}),
     listSessions: async () => [],

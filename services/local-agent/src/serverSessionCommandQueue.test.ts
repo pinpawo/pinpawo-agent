@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { LocalServerPeer } from './localServerPeer';
-import { LocalServerSessionCommandQueue } from './localServerSessionCommandQueue';
+import type { ServerPeer } from './localServerPeer';
+import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
 
-function createPeer(): LocalServerPeer {
+function createPeer(): ServerPeer {
   return {
     isConnected: () => true,
     send: (_message: LocalAgentServerMessage) => true,
@@ -12,7 +12,7 @@ function createPeer(): LocalServerPeer {
 }
 
 test('session command queue preserves peer-local arrival order', async () => {
-  const queue = new LocalServerSessionCommandQueue();
+  const queue = new ServerSessionCommandQueue();
   const peer = createPeer();
   const seen: string[] = [];
   let releaseFirst: () => void = () => undefined;
@@ -40,7 +40,7 @@ test('session command queue preserves peer-local arrival order', async () => {
 });
 
 test('session command queue does not poison later commands after a failure', async () => {
-  const queue = new LocalServerSessionCommandQueue();
+  const queue = new ServerSessionCommandQueue();
   const peer = createPeer();
   const expected = new Error('failed');
 

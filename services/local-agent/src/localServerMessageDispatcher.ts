@@ -15,52 +15,52 @@ import {
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
 } from './localAgentProtocol';
-import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
-import type { LocalServerWireHandlers } from './localServerWire';
+import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
+import type { ServerWireHandlers } from './localServerWire';
 
 type MaybePromise<T> = T | Promise<T>;
-export type LocalServerLogError = (message: string, error: unknown) => void;
-export type LocalServerLogWarn = (message: string) => void;
+export type ServerLogError = (message: string, error: unknown) => void;
+export type ServerLogWarn = (message: string) => void;
 
 export type LocalServerPeerHandlers = {
-  onChatRequest: (peer: LocalServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
+  onChatRequest: (peer: ServerPeer, message: ChatRequestMessage) => MaybePromise<void>;
   onHumanReviewResponse: (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     message: HumanReviewResponseMessage,
   ) => MaybePromise<void>;
-  onReviewCancel: (peer: LocalServerPeer, message: ReviewCancelMessage) => MaybePromise<void>;
-  onRunInterrupt: (peer: LocalServerPeer, message: RunInterruptMessage) => MaybePromise<void>;
-  onNewSession: (peer: LocalServerPeer, message: NewSessionMessage) => MaybePromise<void>;
+  onReviewCancel: (peer: ServerPeer, message: ReviewCancelMessage) => MaybePromise<void>;
+  onRunInterrupt: (peer: ServerPeer, message: RunInterruptMessage) => MaybePromise<void>;
+  onNewSession: (peer: ServerPeer, message: NewSessionMessage) => MaybePromise<void>;
   onRuntimeConfigUpdate: (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     message: RuntimeConfigUpdateMessage,
   ) => MaybePromise<void>;
   onSessionSnapshotGet: (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     message: SessionSnapshotGetMessage,
   ) => MaybePromise<void>;
-  onSessionList: (peer: LocalServerPeer, message: SessionListMessage) => MaybePromise<void>;
+  onSessionList: (peer: ServerPeer, message: SessionListMessage) => MaybePromise<void>;
   /** Optional so pre-v2 host embeddings can retain their existing handlers. */
-  onSessionCompact?: (peer: LocalServerPeer, message: SessionCompactMessage) => MaybePromise<void>;
-  onSessionNew: (peer: LocalServerPeer, message: SessionNewMessage) => MaybePromise<void>;
-  onSessionResume: (peer: LocalServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
-  onModelList: (peer: LocalServerPeer, message: ModelListMessage) => MaybePromise<void>;
-  onModelSelect: (peer: LocalServerPeer, message: ModelSelectMessage) => MaybePromise<void>;
-  onClose: (peer: LocalServerPeer) => MaybePromise<void>;
+  onSessionCompact?: (peer: ServerPeer, message: SessionCompactMessage) => MaybePromise<void>;
+  onSessionNew: (peer: ServerPeer, message: SessionNewMessage) => MaybePromise<void>;
+  onSessionResume: (peer: ServerPeer, message: SessionResumeMessage) => MaybePromise<void>;
+  onModelList: (peer: ServerPeer, message: ModelListMessage) => MaybePromise<void>;
+  onModelSelect: (peer: ServerPeer, message: ModelSelectMessage) => MaybePromise<void>;
+  onClose: (peer: ServerPeer) => MaybePromise<void>;
   log?: (message: string) => void;
-  logError?: LocalServerLogError;
-  logWarn?: LocalServerLogWarn;
+  logError?: ServerLogError;
+  logWarn?: ServerLogWarn;
 };
 
-export type LocalServerTransportHandlers = Partial<LocalServerPeerHandlers> & Pick<
+export type ServerTransportHandlers = Partial<LocalServerPeerHandlers> & Pick<
   LocalServerPeerHandlers,
   'log' | 'logError' | 'logWarn'
 >;
 
 function rejectUnsupportedMessage(
-  peer: LocalServerPeer,
+  peer: ServerPeer,
   message: { type: string; requestId?: string },
-  logWarn: LocalServerLogWarn,
+  logWarn: ServerLogWarn,
 ) {
   if (!message.requestId) {
     logWarn(
@@ -77,12 +77,12 @@ function rejectUnsupportedMessage(
 }
 
 function dispatchOptional<TMessage extends { type: string; requestId?: string }>(
-  peer: LocalServerPeer,
+  peer: ServerPeer,
   message: TMessage,
-  handler: ((peer: LocalServerPeer, message: TMessage) => MaybePromise<void>) | undefined,
+  handler: ((peer: ServerPeer, message: TMessage) => MaybePromise<void>) | undefined,
   handlerName: string,
-  logError: LocalServerLogError,
-  logWarn: LocalServerLogWarn,
+  logError: ServerLogError,
+  logWarn: ServerLogWarn,
 ) {
   return handler
     ? runLocalServerPeerHandler(handlerName, () => handler(peer, message), logError)
@@ -103,7 +103,7 @@ function formatMalformedClientMessage(prefix: string, data: Buffer | string) {
     + `type=${envelope?.type ?? 'unknown'} requestId=${envelope?.requestId ?? 'unknown'}`;
 }
 
-function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | string) {
+function sendMalformedClientMessageError(peer: ServerPeer, data: Buffer | string) {
   const envelope = readLocalAgentClientMessageEnvelope(data);
   if (!envelope?.requestId) {
     return;
@@ -146,7 +146,7 @@ function sendMalformedClientMessageError(peer: LocalServerPeer, data: Buffer | s
 export function runLocalServerPeerHandler(
   name: string,
   handler: () => MaybePromise<void>,
-  logError: LocalServerLogError,
+  logError: ServerLogError,
 ) {
   return Promise.resolve()
     .then(handler)
@@ -156,11 +156,11 @@ export function runLocalServerPeerHandler(
 }
 
 export function dispatchLocalServerMessage(
-  peer: LocalServerPeer,
+  peer: ServerPeer,
   data: Buffer | string,
-  handlers: LocalServerTransportHandlers,
-  logError: LocalServerLogError = handlers.logError ?? defaultLocalServerLogError,
-  logWarn: LocalServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
+  handlers: ServerTransportHandlers,
+  logError: ServerLogError = handlers.logError ?? defaultLocalServerLogError,
+  logWarn: ServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
 ) {
   try {
     const msg = parseLocalAgentClientMessage(data);
@@ -219,10 +219,10 @@ export function dispatchLocalServerMessage(
 }
 
 export function createLocalAgentWireHandlers(
-  handlers: LocalServerTransportHandlers,
-  logError: LocalServerLogError = handlers.logError ?? defaultLocalServerLogError,
-  logWarn: LocalServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
-): LocalServerWireHandlers<import('./localAgentProtocol').LocalAgentServerMessage> {
+  handlers: ServerTransportHandlers,
+  logError: ServerLogError = handlers.logError ?? defaultLocalServerLogError,
+  logWarn: ServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
+): ServerWireHandlers<import('./localAgentProtocol').LocalAgentServerMessage> {
   return {
     onMessage: (peer, data) => dispatchLocalServerMessage(
       peer,

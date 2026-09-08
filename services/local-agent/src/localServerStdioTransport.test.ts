@@ -3,7 +3,7 @@ import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
 import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 import {
   attachLocalServerStdioTransport,
   redirectConsoleToStdioDiagnostics,
@@ -88,7 +88,7 @@ test('stdio JSONL dispatch matches typed WebSocket behavior and closes one stabl
   const diagnostics = new PassThrough();
   const readOutput = collectText(output);
   const readDiagnostics = collectText(diagnostics);
-  const peers: LocalServerPeer[] = [];
+  const peers: ServerPeer[] = [];
   const transport = attachLocalServerStdioTransport(createHandlers({
     onChatRequest: (peer) => {
       peers.push(peer);

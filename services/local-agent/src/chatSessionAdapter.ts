@@ -17,7 +17,7 @@ import {
 import type { AgentChannelSetup } from './agentChannel';
 import type {
   LocalAgentGraphEventStream,
-  LocalAgentGraphPendingInterrupt,
+  AgentGraphPendingInterrupt,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
 } from './agentGraphService';
@@ -35,7 +35,7 @@ import {
   type RootProtocolEvent,
 } from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
-import { createLocalChatHumanMessage } from './localChatAttachments';
+import { createLocalChatHumanMessage } from './chatAttachments';
 import {
   currentPlansEqual,
   projectCurrentPlan,
@@ -575,7 +575,7 @@ function hasPauseTaskInterrupt(interrupts: unknown[]) {
 
 function readFirstHumanReviewInterrupt(
   interrupts: unknown[],
-): LocalAgentGraphPendingInterrupt | null {
+): AgentGraphPendingInterrupt | null {
   const firstInterrupt = interrupts[0] ?? null;
   const interruptId = firstInterrupt
     && typeof firstInterrupt === 'object'

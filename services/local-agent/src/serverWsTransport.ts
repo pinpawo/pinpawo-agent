@@ -7,26 +7,26 @@ import {
 import {
   createLocalAgentWireHandlers,
   defaultLocalServerLogError,
-  type LocalServerLogError,
-  type LocalServerTransportHandlers,
+  type ServerLogError,
+  type ServerTransportHandlers,
 } from './localServerMessageDispatcher';
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 import {
   defaultLocalServerWireLogError,
   runLocalServerWireHandler,
-  type LocalServerWireHandlers,
-  type LocalServerWirePeer,
+  type ServerWireHandlers,
+  type ServerWirePeer,
 } from './localServerWire';
 
-export type LocalServerWsTransportOptions = {
+export type ServerWsTransportOptions = {
   authToken: string;
   port: number;
 };
 
 export function createLocalServerWireWebSocketPeer<TMessage extends object>(
   ws: WebSocket,
-  logError: LocalServerLogError = defaultLocalServerWireLogError,
-): LocalServerWirePeer<TMessage> {
+  logError: ServerLogError = defaultLocalServerWireLogError,
+): ServerWirePeer<TMessage> {
   return {
     isConnected: () => ws.readyState === WebSocket.OPEN,
     send: (message) => {
@@ -44,15 +44,15 @@ export function createLocalServerWireWebSocketPeer<TMessage extends object>(
 
 export function createLocalServerWebSocketPeer(
   ws: WebSocket,
-  logError: LocalServerLogError = defaultLocalServerLogError,
-): LocalServerPeer {
+  logError: ServerLogError = defaultLocalServerLogError,
+): ServerPeer {
   return createLocalServerWireWebSocketPeer(ws, logError);
 }
 
 export function attachLocalServerWireWebSocketTransport<TMessage extends object>(
   server: Server,
-  handlers: LocalServerWireHandlers<TMessage>,
-  options: LocalServerWsTransportOptions,
+  handlers: ServerWireHandlers<TMessage>,
+  options: ServerWsTransportOptions,
 ) {
   const log = handlers.log ?? console.log;
   const logError = handlers.logError ?? defaultLocalServerWireLogError;
@@ -108,8 +108,8 @@ export function attachLocalServerWireWebSocketTransport<TMessage extends object>
 /** Chat/Agent Session adapter retained for the local-agent Host. */
 export function attachLocalServerWebSocketTransport(
   server: Server,
-  handlers: LocalServerTransportHandlers,
-  options: LocalServerWsTransportOptions,
+  handlers: ServerTransportHandlers,
+  options: ServerWsTransportOptions,
 ) {
   return attachLocalServerWireWebSocketTransport(
     server,

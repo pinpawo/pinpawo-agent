@@ -8,8 +8,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   startLocalServer,
-  type LocalServerDeps,
-} from './localServer';
+  type ServerDeps,
+} from './server';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
@@ -42,7 +42,7 @@ test('local server close is idempotent and releases its listening port', async (
   }
 });
 
-function createDeps(workdir: string): LocalServerDeps {
+function createDeps(workdir: string): ServerDeps {
   return {
     serverMode: 'chat',
     actorId: 'pet-local-server-lifecycle',

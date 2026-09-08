@@ -4,32 +4,32 @@
 import { ensureLocalServerAuthToken } from './localServerAuth';
 import {
   createLocalServerHandlers,
-  type LocalServerHandlerOptions,
-} from './localServerHandlers';
-import { createLocalServerRuntimeDepsStore, type LocalServerDeps } from './localServerTypes';
+  type ServerHandlerOptions,
+} from './serverHandlers';
+import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
 import {
   startLocalServerTransport,
-  type LocalServerTransport,
+  type ServerTransport,
 } from './localServerTransport';
 
-export type { LocalServerDeps };
+export type { ServerDeps };
 
-export type LocalServerOptions = {
+export type ServerOptions = {
   authToken?: string;
-  handlerOptions?: LocalServerHandlerOptions;
+  handlerOptions?: ServerHandlerOptions;
 };
 
 export { startLocalServerTransport } from './localServerTransport';
 export type {
-  LocalServerTransport,
-  LocalServerTransportOptions,
+  ServerTransport,
+  ServerTransportOptions,
 } from './localServerTransport';
 
 export async function startLocalServer(
   port: number,
-  deps: LocalServerDeps,
-  options: LocalServerOptions = {},
-): Promise<LocalServerTransport> {
+  deps: ServerDeps,
+  options: ServerOptions = {},
+): Promise<ServerTransport> {
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
   const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps), options.handlerOptions ?? {});
   return startLocalServerTransport(port, handlers.peerHandlers, {

@@ -26,7 +26,7 @@ export type AdmittedLocalAttachment =
   | AgentLocalAttachment
   | AdmittedLocalImageAttachment;
 
-export class LocalImageAdmissionError extends Error {
+export class ImageAdmissionError extends Error {
   constructor(
     public readonly code:
       | 'image_model_unsupported'
@@ -37,7 +37,7 @@ export class LocalImageAdmissionError extends Error {
     message: string,
   ) {
     super(message);
-    this.name = 'LocalImageAdmissionError';
+    this.name = 'ImageAdmissionError';
   }
 }
 
@@ -54,7 +54,7 @@ type ClassifiedImage = {
  * separate content store to keep in sync with the transcript and no reference
  * to rehydrate before a model call.
  */
-export class LocalImageAttachmentAdmission {
+export class ImageAttachmentAdmission {
   async admit(
     attachments: readonly AgentLocalAttachment[],
     options: { allowImages: boolean },
@@ -65,20 +65,20 @@ export class LocalImageAttachmentAdmission {
       const image = await this.classify(attachment);
       if (!image) continue;
       if (!options.allowImages) {
-        throw new LocalImageAdmissionError(
+        throw new ImageAdmissionError(
           'image_model_unsupported',
           'The selected model profile does not support image input.',
         );
       }
       if (images.length >= MAX_LOCAL_IMAGE_ATTACHMENTS) {
-        throw new LocalImageAdmissionError(
+        throw new ImageAdmissionError(
           'image_count_limit',
           `A single message may include at most ${MAX_LOCAL_IMAGE_ATTACHMENTS} images.`,
         );
       }
       totalBytes += image.bytes.length;
       if (totalBytes > MAX_LOCAL_IMAGE_TOTAL_BYTES) {
-        throw new LocalImageAdmissionError(
+        throw new ImageAdmissionError(
           'image_total_size_limit',
           `Image attachments exceed the ${MAX_LOCAL_IMAGE_TOTAL_BYTES} byte total limit.`,
         );
@@ -123,21 +123,21 @@ export class LocalImageAttachmentAdmission {
       const mimeType = detectSupportedImageMimeType(header.subarray(0, bytesRead));
       if (!mimeType) return null;
       if (stat.size > MAX_LOCAL_IMAGE_BYTES) {
-        throw new LocalImageAdmissionError(
+        throw new ImageAdmissionError(
           'image_size_limit',
           `Image "${attachment.name}" exceeds the ${MAX_LOCAL_IMAGE_BYTES} byte limit.`,
         );
       }
       const bytes = await handle.readFile();
       if (bytes.length > MAX_LOCAL_IMAGE_BYTES) {
-        throw new LocalImageAdmissionError(
+        throw new ImageAdmissionError(
           'image_size_limit',
           `Image "${attachment.name}" exceeds the ${MAX_LOCAL_IMAGE_BYTES} byte limit.`,
         );
       }
       const verifiedMimeType = detectSupportedImageMimeType(bytes);
       if (!verifiedMimeType || verifiedMimeType !== mimeType) {
-        throw new LocalImageAdmissionError(
+        throw new ImageAdmissionError(
           'image_invalid',
           `Image "${attachment.name}" changed while it was being admitted.`,
         );

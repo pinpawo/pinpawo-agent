@@ -1,14 +1,14 @@
 /** Chat handler composition for the shared local-agent stdio adapter. */
-import { createLocalServerHandlers } from './localServerHandlers';
+import { createLocalServerHandlers } from './serverHandlers';
 import {
   attachLocalServerStdioTransport,
-  type LocalServerStdioTransportOptions,
+  type ServerStdioTransportOptions,
 } from './localServerStdioTransport';
-import { createLocalServerRuntimeDepsStore, type LocalServerDeps } from './localServerTypes';
+import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
 
 export function startLocalStdioServer(
-  deps: LocalServerDeps,
-  options: LocalServerStdioTransportOptions = {},
+  deps: ServerDeps,
+  options: ServerStdioTransportOptions = {},
 ) {
   const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps));
   const transport = attachLocalServerStdioTransport(handlers.peerHandlers, options);

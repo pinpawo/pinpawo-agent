@@ -23,14 +23,14 @@ import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
 import {
   getLocalServerToolkitInventory,
-  type LocalServerDeps,
-} from './localServerTypes';
+  type ServerDeps,
+} from './serverTypes';
 import {
   createAdmittedLocalChatHumanMessage,
   createLocalChatHumanMessage,
   readLocalChatDisplayText,
-} from './localChatAttachments';
-import { LocalImageAttachmentAdmission } from './localImageAttachments';
+} from './chatAttachments';
+import { ImageAttachmentAdmission } from './imageAttachments';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTuiSession,
@@ -171,14 +171,14 @@ export function summarizeTuiCheckpointMessages(
   };
 }
 
-export class LocalServerTuiSessionService {
+export class ServerTuiSessionService {
   private readonly state: TuiSessionState;
   private readonly saveState: (state: TuiSessionState) => void;
   private readonly checkpointer: TuiSessionCheckpointer;
   private readonly graphService: TuiSessionGraphService;
   private readonly loadContext: typeof loadAgentContext;
   private readonly defaultModelProfileId: string;
-  private readonly imageAdmission = new LocalImageAttachmentAdmission();
+  private readonly imageAdmission = new ImageAttachmentAdmission();
   private readonly reportCapabilityDiagnostics = createCapabilityDiagnosticReporter();
 
   constructor(options: {
@@ -276,7 +276,7 @@ export class LocalServerTuiSessionService {
   }
 
   buildChatSetup(
-    deps: LocalServerDeps,
+    deps: ServerDeps,
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.actorId),
     modelProfileIdOverride?: string,
@@ -319,7 +319,7 @@ export class LocalServerTuiSessionService {
   }
 
   async createUserMessage(
-    deps: LocalServerDeps,
+    deps: ServerDeps,
     message: string,
     attachments: readonly AgentLocalAttachment[],
   ) {
@@ -366,7 +366,7 @@ export class LocalServerTuiSessionService {
   }
 
   async readSessionCheckpointPoint(
-    deps: LocalServerDeps,
+    deps: ServerDeps,
     session: TuiSessionRecord,
   ): Promise<TuiCheckpointPoint> {
     const ctx = await this.loadContext(deps.actorId);
@@ -406,7 +406,7 @@ export class LocalServerTuiSessionService {
   }
 
   async readSessionCheckpointMessages(
-    deps: LocalServerDeps,
+    deps: ServerDeps,
     session: TuiSessionRecord,
   ) {
     return (await this.readSessionCheckpointPoint(deps, session)).messages;
@@ -420,7 +420,7 @@ export class LocalServerTuiSessionService {
     this.save();
   }
 
-  async refreshActiveSessionSummary(deps: LocalServerDeps) {
+  async refreshActiveSessionSummary(deps: ServerDeps) {
     try {
       const session = this.getActiveSession(deps.actorId);
       const messages = await this.readSessionCheckpointMessages(deps, session);
@@ -430,12 +430,12 @@ export class LocalServerTuiSessionService {
     }
   }
 
-  async readActivePendingInterrupt(deps: LocalServerDeps): Promise<ActivePendingInterrupt | null> {
+  async readActivePendingInterrupt(deps: ServerDeps): Promise<ActivePendingInterrupt | null> {
     const session = this.getActiveSession(deps.actorId);
     return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
   }
 
-  async readActiveCheckpointPoint(deps: LocalServerDeps) {
+  async readActiveCheckpointPoint(deps: ServerDeps) {
     const session = this.getActiveSession(deps.actorId);
     const checkpoint = await this.readSessionCheckpointPoint(deps, session);
     updateTuiSessionSummary(
@@ -447,7 +447,7 @@ export class LocalServerTuiSessionService {
     return checkpoint;
   }
 
-  async listSessions(deps: LocalServerDeps) {
+  async listSessions(deps: ServerDeps) {
     this.getActiveSession(deps.actorId);
     const sessions = listTuiSessions(this.state, deps.actorId);
     const enriched = await Promise.all(sessions.map(async (session) => {
@@ -466,7 +466,7 @@ export class LocalServerTuiSessionService {
     return enriched.sort((a, b) => Number(b.active) - Number(a.active) || b.updatedAt.localeCompare(a.updatedAt));
   }
 
-  async resumeSession(deps: LocalServerDeps, sessionId: string) {
+  async resumeSession(deps: ServerDeps, sessionId: string) {
     const candidate = this.state.sessions[sessionId];
     if (!candidate || candidate.petId !== deps.actorId) {
       throw new Error('session not found');

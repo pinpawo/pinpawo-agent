@@ -7,7 +7,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { ToolkitDefinitionSource } from './toolkits/toolkitInventory';
 
-export type LocalAgentPlugin = {
+export type AgentPlugin = {
   name: string;
 };
 
@@ -15,7 +15,7 @@ const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
 
 export type LoadedLocalPlugins = {
   toolkitSources: ToolkitDefinitionSource[];
-  plugins: LocalAgentPlugin[];
+  plugins: AgentPlugin[];
 };
 
 function emptyLocalPlugins(): LoadedLocalPlugins {
@@ -40,7 +40,7 @@ export async function loadPluginsFromDir(
   if (files.length === 0) return emptyLocalPlugins();
 
   const toolkitSources: ToolkitDefinitionSource[] = [];
-  const plugins: LocalAgentPlugin[] = [];
+  const plugins: AgentPlugin[] = [];
 
   for (const file of files) {
     const filePath = resolve(pluginsDir, file);
@@ -53,7 +53,7 @@ export async function loadPluginsFromDir(
         continue;
       }
 
-      const loadedPlugin = plugin as LocalAgentPlugin;
+      const loadedPlugin = plugin as AgentPlugin;
       const definitions = Array.isArray(mod.toolkits)
         ? mod.toolkits as AgentToolkit[]
         : [];
@@ -73,7 +73,7 @@ export async function loadPluginsFromDir(
       const toolCount = Array.isArray(mod.tools) ? mod.tools.length : 0;
       const toolkitCount = Array.isArray(mod.toolkits) ? mod.toolkits.length : 0;
       const ignoredTools = toolCount > 0 ? `, ignored ${toolCount} unsupported tools export${toolCount !== 1 ? 's' : ''}` : '';
-      console.log(`[plugins] loaded "${(plugin as LocalAgentPlugin).name}" (${toolkitCount} toolkit${toolkitCount !== 1 ? 's' : ''}${ignoredTools})`);
+      console.log(`[plugins] loaded "${(plugin as AgentPlugin).name}" (${toolkitCount} toolkit${toolkitCount !== 1 ? 's' : ''}${ignoredTools})`);
     } catch (err) {
       console.warn(`[plugins] failed to load ${file}:`, err instanceof Error ? err.message : err);
     }

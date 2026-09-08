@@ -9,10 +9,10 @@ import type {
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import type { PauseTaskInterruptPayload } from '@pinpawo/pet-agent';
-import type { PendingInterruptSnapshot } from './localServerChatHandler';
-import type { LocalServerDeps } from './localServerTypes';
-import type { TuiCheckpointMessage } from './localServerTuiSessions';
-import { buildLocalRuntimeProjection } from './localConfigProjection';
+import type { PendingInterruptSnapshot } from './serverChatHandler';
+import type { ServerDeps } from './serverTypes';
+import type { TuiCheckpointMessage } from './serverTuiSessions';
+import { buildLocalRuntimeProjection } from './configProjection';
 import {
   missingInputModalities,
   supportsInputModalities,
@@ -22,7 +22,7 @@ export function buildLocalAgentSessionSnapshot(params: {
   sessionId: string;
   kind: AgentSession['kind'];
   messages: TuiCheckpointMessage[];
-  deps: LocalServerDeps;
+  deps: ServerDeps;
   modelProfileId?: string;
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
@@ -63,7 +63,7 @@ export function buildLocalAgentSessionSnapshot(params: {
 }
 
 export function buildLocalAgentRuntimeView(
-  deps: LocalServerDeps,
+  deps: ServerDeps,
   modelProfileId = deps.modelProfiles.defaultProfileId,
   requiredInputModalities: readonly AgentInputModality[] = ['text'],
 ): AgentRuntimeView {

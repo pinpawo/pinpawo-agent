@@ -50,14 +50,14 @@ export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
   return buildAgentGraphRunConfig(setup).configurable;
 }
 
-export type LocalAgentGraphPendingInterrupt = {
+export type AgentGraphPendingInterrupt = {
   interruptId: string;
   reviews: ReviewSpec[];
 };
 
 export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
-  pendingInterrupt: LocalAgentGraphPendingInterrupt | null;
+  pendingInterrupt: AgentGraphPendingInterrupt | null;
   pauseTaskInterrupt: PauseTaskInterruptPayload | null;
   hasPendingContinuation: boolean;
   currentPlan: AgentPlan | null;
@@ -113,7 +113,7 @@ function hasPendingContinuation(snapshot: unknown) {
   return tasks.length > 0;
 }
 
-function projectPendingInterrupt(snapshot: unknown): LocalAgentGraphPendingInterrupt | null {
+function projectPendingInterrupt(snapshot: unknown): AgentGraphPendingInterrupt | null {
   const pendingInterrupt = readGraphInterrupt(snapshot);
   if (!pendingInterrupt) {
     return null;

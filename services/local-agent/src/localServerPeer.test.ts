@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   sendLocalServerPeerEvent,
-  type LocalServerPeer,
+  type ServerPeer,
 } from './localServerPeer';
 
 test('local server peers preserve trusted event payloads by default', () => {
   const sent: unknown[] = [];
-  const peer: LocalServerPeer = {
+  const peer: ServerPeer = {
     isConnected: () => true,
     send: (message) => {
       sent.push(message);

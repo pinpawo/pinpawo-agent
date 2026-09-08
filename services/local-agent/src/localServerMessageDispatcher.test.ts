@@ -3,12 +3,12 @@ import test from 'node:test';
 import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
-  type LocalServerTransportHandlers,
+  type ServerTransportHandlers,
 } from './localServerMessageDispatcher';
 import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 
-function createFakePeer(sent: LocalAgentServerMessage[]): LocalServerPeer {
+function createFakePeer(sent: LocalAgentServerMessage[]): ServerPeer {
   return {
     isConnected: () => true,
     send(message) {
@@ -199,7 +199,7 @@ test('local server dispatcher reports unsupported messages without silently drop
   const sent: LocalAgentServerMessage[] = [];
   const warnings: string[] = [];
   const peer = createFakePeer(sent);
-  const handlers: LocalServerTransportHandlers = {
+  const handlers: ServerTransportHandlers = {
     logWarn: (message) => warnings.push(message),
   };
 

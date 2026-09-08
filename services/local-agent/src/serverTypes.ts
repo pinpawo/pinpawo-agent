@@ -20,7 +20,7 @@ export type CapabilityCatalogReader = Pick<
   'getSnapshot'
 >;
 
-export type LocalServerDeps = HostExecutionConfig & {
+export type ServerDeps = HostExecutionConfig & {
   /** Local-agent interaction mode; resident Pet adapters reuse the Chat semantics. */
   serverMode: ServerMode;
   actorId: string;
@@ -47,24 +47,24 @@ export type LocalServerDeps = HostExecutionConfig & {
   capabilityArtifactStore?: CapabilityArtifactStore;
 };
 
-export type LocalServerRuntimeDepsStore = Readonly<{
-  get: () => Readonly<LocalServerDeps>;
+export type ServerRuntimeDepsStore = Readonly<{
+  get: () => Readonly<ServerDeps>;
   updateReviewPolicy: (
     mode: BuiltinGlobalReviewPolicyMode,
     safetyLevel: ToolAuthorizationSafetyLevel,
-  ) => Readonly<LocalServerDeps>;
+  ) => Readonly<ServerDeps>;
 }>;
 
 export function getLocalServerToolkitInventory(
-  deps: Pick<LocalServerDeps, 'toolkitInventory'>,
+  deps: Pick<ServerDeps, 'toolkitInventory'>,
 ): HostToolkitInventorySnapshot {
   return deps.toolkitInventory.getSnapshot();
 }
 
 /** One Host-owned current snapshot shared by conversation and dispatch surfaces. */
 export function createLocalServerRuntimeDepsStore(
-  deps: LocalServerDeps,
-): LocalServerRuntimeDepsStore {
+  deps: ServerDeps,
+): ServerRuntimeDepsStore {
   let current = Object.freeze({ ...deps });
   return Object.freeze({
     get: () => current,

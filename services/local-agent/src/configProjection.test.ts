@@ -6,13 +6,13 @@ import test from 'node:test';
 import {
   buildLocalHttpRuntimeProjection,
   buildLocalRuntimeProjection,
-} from './localConfigProjection';
+} from './configProjection';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type { LocalServerDeps } from './localServerTypes';
+import type { ServerDeps } from './serverTypes';
 import { buildLocalAgentRuntimeConfig, buildWorkspaceRuntimeConfig } from './runtimeConfig';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
-function createDeps(workdir: string): LocalServerDeps {
+function createDeps(workdir: string): ServerDeps {
   return {
     serverMode: 'chat',
     actorId: 'pet-test',
@@ -41,7 +41,7 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
 });
 
 test('runtime projection excludes output and thinking reserves before context compaction', () => {
-  const deps: LocalServerDeps = {
+  const deps: ServerDeps = {
     serverMode: 'chat',
     actorId: 'pet-test',
     ...createTestModelServerDeps({

@@ -348,7 +348,6 @@ test('runtime config updates reach the next chat setup through the normalized de
     serverMode: 'chat',
     petId: 'pet-a',
     modelProfiles: createTestModelProfiles(),
-    capabilityRegistryBackend: 'memory',
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
     runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-policy-update'),

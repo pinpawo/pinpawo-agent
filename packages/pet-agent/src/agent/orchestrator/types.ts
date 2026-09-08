@@ -9,7 +9,6 @@ import type {
 } from '../../types/toolkit';
 import type { CompiledAgentRegistry } from './registry';
 import type { RunSupervisorRunner } from './runSupervisor/runner';
-import type { CapabilityRegistryBackend } from './runSupervisor/registryDocuments';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
 import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
@@ -97,14 +96,9 @@ export type OrchestratorConfig = {
   /**
    * Typed seam for the framework-internal Run Supervisor. Production
    * defaults to createRunSupervisorAgent(); graph tests may inject a
-   * scripted runner without simulating its private file-tool messages.
+   * scripted runner without simulating its private tool messages.
    */
   runSupervisorRunner?: RunSupervisorRunner;
-  /**
-   * Storage/search backend for the immutable Capability registry documents.
-   * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
-   */
-  capabilityRegistryBackend?: CapabilityRegistryBackend;
   /**
    * Host-owned optional Toolkit runtime lifecycle. The orchestrator resolves
    * per-subagent bindings through it, but the manager itself remains outside

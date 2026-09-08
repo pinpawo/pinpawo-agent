@@ -1,4 +1,4 @@
-import type { CapabilityDocumentWorkspace } from './documentWorkspace';
+import type { CapabilityCatalog } from './capabilityCatalog';
 
 export type CapabilityDisclosureState = {
   readonly registryDigest: string;
@@ -6,23 +6,23 @@ export type CapabilityDisclosureState = {
 };
 
 export function createCapabilityDisclosureState(params: {
-  workspace: CapabilityDocumentWorkspace;
+  catalog: CapabilityCatalog;
   seedCapabilityNames?: readonly string[];
 }): CapabilityDisclosureState {
   return {
-    registryDigest: params.workspace.registryDigest,
+    registryDigest: params.catalog.registryDigest,
     disclosedCapabilityNames: [...new Set((params.seedCapabilityNames ?? [])
-      .filter((name) => params.workspace.capabilityNames.includes(name)))],
+      .filter((name) => params.catalog.capabilityNames.includes(name)))],
   };
 }
 
 /** A registry generation change begins a new disclosure scope. */
 export function resolveCapabilityDisclosureState(params: {
   current: CapabilityDisclosureState | null;
-  workspace: CapabilityDocumentWorkspace;
+  catalog: CapabilityCatalog;
   seedCapabilityNames?: readonly string[];
 }): CapabilityDisclosureState {
-  if (!params.current || params.current.registryDigest !== params.workspace.registryDigest) {
+  if (!params.current || params.current.registryDigest !== params.catalog.registryDigest) {
     return createCapabilityDisclosureState(params);
   }
   return params.current;

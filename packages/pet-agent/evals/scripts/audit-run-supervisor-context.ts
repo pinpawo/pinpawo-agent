@@ -1,3 +1,4 @@
+import { createSupervisorCapabilityDetailsTool } from '../../src/agent/orchestrator/runSupervisor/detailsTool.ts';
 import {
   AIMessage,
   HumanMessage,
@@ -7,18 +8,17 @@ import {
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
-import type { CapabilityDocumentWorkspace } from '../../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
+import type { CapabilityCatalog } from '../../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import {
-  createRunSupervisorDetailsTool,
+  createSupervisorDocumentReader,
   type RunSupervisorCapabilityDocument,
-} from '../../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
+} from '../../src/agent/orchestrator/runSupervisor/capabilityDocuments.ts';
 import type {
   RunSupervisorInput,
   RunSupervisorMode,
 } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
 import {
-  createCapabilityRegistryManifest,
-  createDeterministicCapabilityRoutingManifest,
+  createCapabilityRoutingManifest,
 } from '../../src/agent/orchestrator/runSupervisor/routingManifest.ts';
 import { createRunSupervisorSession } from '../../src/agent/orchestrator/runSupervisor/session.ts';
 import { createSupervisorCommandTools } from '../../src/agent/orchestrator/runSupervisor/commandTools.ts';
@@ -37,44 +37,34 @@ import {
 
 const userRequest = 'Review the repository issue, implement the required fix, and report the verified result.';
 
-const workspace: CapabilityDocumentWorkspace = {
-  rootPath: '/audit/capabilities',
+const catalog: CapabilityCatalog = {
   registryDigest: 'audit-registry-digest',
   capabilityNames: ['general', 'repository'],
   entries: [{
     capabilityName: 'general',
     description: 'Handle ordinary tasks.',
     toolkits: [],
-    relativePath: 'general/CAPABILITY.md',
-    documentDigest: 'general-document-digest',
-    provenance: 'authored',
+    content: '# General\n\nHandle ordinary tasks.',
   }, {
     capabilityName: 'repository',
     description: 'Inspect, edit, and verify repository changes.',
     toolkits: [],
-    relativePath: 'repository/CAPABILITY.md',
-    documentDigest: 'repository-document-digest',
-    provenance: 'authored',
+    content: '# Repository\n\nInspect, edit, and verify repository changes.',
   }],
-  reused: true,
 };
 
-const routingManifest = createDeterministicCapabilityRoutingManifest(
-  createCapabilityRegistryManifest({ workspace }),
-);
+const routingManifest = createCapabilityRoutingManifest({ catalog });
 
 const documents: RunSupervisorCapabilityDocument[] = [{
   capabilityName: 'general',
-  path: '/audit/capabilities/general/CAPABILITY.md',
   content: '# General\n\nHandle ordinary tasks.',
 }, {
   capabilityName: 'repository',
-  path: '/audit/capabilities/repository/CAPABILITY.md',
   content: '# Repository\n\nInspect, edit, and verify repository changes.',
 }];
 
 const disclosure = createCapabilityDisclosureState({
-  workspace,
+  catalog,
 
   seedCapabilityNames: ['repository'],
 });
@@ -124,7 +114,7 @@ function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
       activeDelegation: null,
 
       remainingPlan,
-      workspace,
+      catalog,
       capabilityDisclosure: disclosure,
       supervisorSession,
     };
@@ -152,7 +142,7 @@ function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
     },
 
     remainingPlan,
-    workspace,
+    catalog,
     capabilityDisclosure: disclosure,
     supervisorSession,
   };
@@ -190,11 +180,8 @@ async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
   const projectedMessages = await captureProviderHistory(mainSelection.messages);
-  const searchTool = createRunSupervisorDetailsTool(async () => ({
-    ok: true,
-    data: { entries: [] },
-  }));
-  const tools = [...(mode === 'entry' ? [searchTool] : []), ...createSupervisorCommandTools(mode)];
+  const detailsTool = createSupervisorCapabilityDetailsTool({ documents: createSupervisorDocumentReader(catalog) });
+  const tools = [...(mode === 'entry' ? [detailsTool] : []), ...createSupervisorCommandTools(mode)];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);
   console.log('\n### SYSTEM');

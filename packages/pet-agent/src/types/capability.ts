@@ -60,7 +60,7 @@ export type AgentCapability = {
    * Optional authored CAPABILITY.md provenance.
    *
    * Inline definitions omit this field and are rendered into a normalized
-   * document when a Capability Document Workspace is materialized.
+   * document when the Supervisor Capability catalog is built.
    */
   readonly document?: CapabilityDocumentSource;
   readonly lifecycle?: CapabilityLifecycle;

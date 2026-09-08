@@ -165,10 +165,10 @@ one. Root commits both effects together.
 In the current implementation, Capability disclosure is run-scoped semantic state. It contains every
 Capability whose complete document was disclosed during this run in stable
 order; the configured default is candidate policy rather than an initial
-disclosure. A compact routing manifest initialized from the effective registry
+disclosure. A deterministic routing manifest projected from the effective in-memory registry
 is projected into each Supervisor invocation. It retains the Toolkit names and
 descriptions resolved from each Capability's compiled `uses`, while complete
-Capability documents remain progressively disclosed. Dynamic registry
+Capability documents remain progressively disclosed. No extra model call, filesystem snapshot, search backend, or routing cache is involved. Dynamic registry
 facts do not enter the stable system prompt. A new run revalidates disclosure; resumed root tasks may seed the
 capabilities named by their active and remaining plan.
 
@@ -177,8 +177,8 @@ supplement, with automatic tool choice. It is unavailable during execution. Each
 reports newly provided documents, already provided names and unknown names.
 There is no private search counter, empty-round allowance, disclosure open/closed
 flag, or round-limit response. Parallel reads merge only disclosed names.
-Call counts and timings remain eval diagnostics; byte limits and invocation
-timeouts remain runtime protections.
+Call counts and timings remain eval diagnostics. Document byte limits remain;
+Supervisor has no elapsed-time limit and honors caller cancellation.
 
 The manifest supports planning without a mandatory detail read. Exact-name detail
 reads are optional; they do not search document text. The target prepares any needed disclosure before execution and reuses it during execution
@@ -189,7 +189,7 @@ decision, including in Boundary mode. It then resumes execution with stable
 disclosure. No separate replanning stage, disclosure registry, or fallback is
 needed; receiving input alone does not end or replace the delegation.
 
-Supervisor provider messages, search ToolMessages, and terminal ToolMessages do not
+Supervisor provider messages, detail ToolMessages, and terminal ToolMessages do not
 belong in root `messages`. Only the final reply reaches main through the terminal
 node. Committed transitions are recovered from graph checkpoints; raw invocation
 detail belongs to tracing. No Supervisor provider lane is persisted

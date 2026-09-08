@@ -1,4 +1,4 @@
-import type { RunSupervisorCapabilityDocument } from '../runSupervisor/fileExplorer';
+import type { RunSupervisorCapabilityDocument } from '../runSupervisor/capabilityDocuments';
 import type { RunSupervisorInput } from '../runSupervisor/runner';
 import type { CapabilityRoutingManifest } from '../runSupervisor/routingManifest';
 import {
@@ -45,11 +45,6 @@ function buildCapabilityRoutingManifest(
       ? manifest.capabilities.map((capability) => [
           `  <capability name="${escapeXmlAttribute(capability.name)}">`,
           indentXmlBlock(xmlTextBlock('purpose', capability.purpose), 4),
-          '    <cues>',
-          ...capability.cues.map((cue) =>
-            indentXmlBlock(xmlTextBlock('cue', cue), 6),
-          ),
-          '    </cues>',
           '    <toolkits>',
           ...capability.toolkits.map((toolkit) => [
             `      <toolkit name="${escapeXmlAttribute(toolkit.name)}">`,

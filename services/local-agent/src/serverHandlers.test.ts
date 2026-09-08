@@ -227,7 +227,6 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
     modelProfiles,
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -346,7 +345,6 @@ test('model selection keeps the previous profile when checkpoint preparation fai
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -407,7 +405,6 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     modelProfiles: initialProfiles,
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
 
@@ -444,7 +441,6 @@ test('removed session profile stays visible and blocks runs until explicitly rep
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, { loadContext: loadTestContext });
   try {
@@ -529,7 +525,6 @@ test('model selection is rejected while the active session is running', async ()
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -688,7 +683,6 @@ test('model selection blocks a chat admitted by another peer until the selection
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -778,7 +772,6 @@ test('model selection is rejected while checkpoint state has pending review', as
     ], 'primary'),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -854,7 +847,6 @@ test('admitted images gate model selection through the transcript', async () => 
     ], 'vision-a'),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
@@ -993,7 +985,6 @@ test('text-only selected profile rejects image admission before graph invocation
     ]),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,

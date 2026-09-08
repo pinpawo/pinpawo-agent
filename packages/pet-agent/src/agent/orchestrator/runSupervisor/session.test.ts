@@ -30,10 +30,8 @@ test('a new run creates a fresh Supervisor session without prior invocation or c
     capabilityDisclosure: nextRunDisclosure,
   });
 
-  assert.equal(committed.revision, 1);
   assert.equal(Object.hasOwn(committed, 'lastCommand'), false);
   assert.deepEqual(committed.plan, [{ capability: 'general', task: 'Remaining task' }]);
-  assert.equal(nextRun.revision, 0);
   assert.deepEqual(nextRun.plan, []);
   assert.deepEqual(nextRun.capabilityDisclosure.disclosedCapabilityNames, ['general']);
   assert.equal(Object.hasOwn(nextRun, 'lastCommand'), false);

@@ -4,6 +4,25 @@ Status: working design for issue #755, fully rewritten around the direction disc
 
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 
+## Supervisor simplification (2026-09-08)
+
+User-approved cleanup: Supervisor reads an immutable in-memory Capability catalog
+built from the compiled, host-allowed registry. Exact-name `capability_details`
+returns catalog documents; there is no search backend, filesystem snapshot,
+repair lock, or model-generated routing manifest. The routing description comes
+directly from authored Capability and Toolkit descriptions. Keep registry identity,
+allowed-name validation, disclosure deduplication, and the document byte budget.
+
+Remove unused session revision counters and arbitrary additional Supervisor tools.
+The Supervisor only has capability details and phase-specific control tools.
+Keep caller cancellation, result provenance, plan continuation, and root validation.
+
+Pause-continuation routing is explicitly excluded from this cleanup. Its existing
+behavior is unchanged and tracked separately in [#785](https://github.com/pinpawo/pinpawo-agent/issues/785).
+
+Validation covers registry isolation and document fidelity, exact-name disclosure,
+no routing-preparation model call, caller cancellation, and existing continuation behavior.
+
 ## Capability details (2026-09-08)
 
 The manifest describes the available Capability set and supports planning directly.
@@ -16,8 +35,9 @@ validates every selected name against the immutable registry.
 The result distinguishes newly supplied `documents`, `alreadyDisclosed` names and
 `unknownNames`. It never performs substring search or suggests keyword expansion.
 Already supplied documents are not read or repeated. Disclosure state keeps only registry identity and disclosed names. Empty-round
-counters, open/closed flags and model/tool-call observations are removed;
-byte-budget and invocation timeout protections remain; no separate sufficiency judge or new planning
+counters, open/closed flags and model/tool-call observations are removed.
+The document byte budget remains. Supervisor has no elapsed-time limit and
+continues to honor caller cancellation; no separate sufficiency judge or new planning
 stage is added. Disclosure stays stable during execution Boundaries, as before.
 
 ## Problem to solve

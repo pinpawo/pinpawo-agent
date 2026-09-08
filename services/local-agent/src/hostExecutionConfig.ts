@@ -1,4 +1,4 @@
-import type { BuiltinGlobalReviewPolicyMode, CapabilityRegistryBackend } from '@pinpawo/pet-agent';
+import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import { getConfig } from './config';
 import type { LocalAgentRuntimeConfig } from './runtimeConfig';
@@ -8,7 +8,6 @@ export type HostExecutionConfig = Readonly<{
   runtimeConfig: LocalAgentRuntimeConfig;
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
-  capabilityRegistryBackend: CapabilityRegistryBackend;
 }>;
 
 /** Resolve process defaults once at the composing Host's construction boundary. */
@@ -20,6 +19,5 @@ export function resolveHostExecutionConfig(
     runtimeConfig,
     globalReviewPolicyMode: settings.globalReviewPolicyMode,
     autoAuthorizationSafetyLevel: settings.autoAuthorizationSafetyLevel,
-    capabilityRegistryBackend: settings.capabilityRegistryBackend,
   });
 }

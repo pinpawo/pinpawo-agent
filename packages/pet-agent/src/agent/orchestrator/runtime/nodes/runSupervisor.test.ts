@@ -114,7 +114,7 @@ test('plain final text preserves unfinished delegation and remaining plan', asyn
 test('Boundary without canonical evidence fails instead of accepting a preview', () => {
   const input = state(); input.messages = [new AIMessage('An ordinary assistant claim')];
   assert.throws(() => buildRunSupervisorInput({ nodeInput: input, supervisorSession: input.runSupervisorSession!,
-    workspace: { rootPath: '/tmp', registryDigest: 'r', capabilityNames: ['general'], entries: [], reused: false },
+    catalog: { registryDigest: 'r', capabilityNames: ['general'], entries: [] },
   }), /requires typed result evidence/);
 });
 

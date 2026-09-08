@@ -492,7 +492,6 @@ export async function createResidentPetRuntime(
     runtimeConfig: options.runtimeConfig,
     globalReviewPolicyMode: options.globalReviewPolicyMode,
     autoAuthorizationSafetyLevel: options.autoAuthorizationSafetyLevel,
-    capabilityRegistryBackend: options.capabilityRegistryBackend,
     chatCheckpointer: options.checkpointer,
     toolkitInventory: options.toolkitInventory,
     ...(options.toolkitRuntimeManager ? { toolkitRuntimeManager: options.toolkitRuntimeManager } : {}),

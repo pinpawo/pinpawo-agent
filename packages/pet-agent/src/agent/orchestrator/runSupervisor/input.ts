@@ -39,7 +39,7 @@ export function supervisorRuntimeStateFromRoot(
 
 export function buildRunSupervisorInput(params: {
   nodeInput: OrchestratorStateType | RunSupervisorDispatch;
-  workspace: RunSupervisorInput['workspace'];
+  catalog: RunSupervisorInput['catalog'];
   supervisorSession: RunSupervisorSessionState;
 }): {
   input: RunSupervisorInput;
@@ -49,7 +49,7 @@ export function buildRunSupervisorInput(params: {
     diagnostics: AgentMessageSelectionDiagnostics;
   }>;
 } {
-  const { nodeInput, workspace, supervisorSession } = params;
+  const { nodeInput, catalog, supervisorSession } = params;
   if (isSupervisorDispatch(nodeInput) || !nodeInput.taskActiveDelegation) {
     const state = isSupervisorDispatch(nodeInput) ? nodeInput.supervisorState : supervisorRuntimeStateFromRoot(nodeInput);
     const mainSelection = queryAgentMessages(nodeInput.messages).main().select();
@@ -69,7 +69,7 @@ export function buildRunSupervisorInput(params: {
         messages: mainSelection.messages,
         activeDelegation: null,
         remainingPlan: supervisorSession.plan,
-        workspace,
+        catalog,
         capabilityDisclosure: supervisorSession.capabilityDisclosure,
         supervisorSession,
       },
@@ -130,7 +130,7 @@ export function buildRunSupervisorInput(params: {
         task: activeDelegation.task,
       },
       remainingPlan: supervisorSession.plan,
-      workspace,
+      catalog,
       capabilityDisclosure: supervisorSession.capabilityDisclosure,
       supervisorSession,
     },

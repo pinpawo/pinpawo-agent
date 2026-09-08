@@ -1,8 +1,5 @@
 import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation';
 import { tool } from '@langchain/core/tools';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { z } from 'zod';
 import { createRunSupervisorAgent } from '../../src/agent/orchestrator/runSupervisor/agent.ts';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
@@ -11,7 +8,7 @@ import {
   type RunSupervisorInput,
   type RunSupervisorResult,
 } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
-import { materializeCapabilityDocumentWorkspace } from '../../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
+import { createCapabilityCatalog } from '../../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { createRunSupervisorSession } from '../../src/agent/orchestrator/runSupervisor/session.ts';
 import {
@@ -137,7 +134,6 @@ async function main() {
   }
   const runName = process.env.LANGFUSE_RUN_NAME
     || `capability-planning-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  const cacheRoot = await mkdtemp(join(tmpdir(), 'pinpawo-capability-planning-eval-'));
   let passed = 0;
 
   console.log(`Running ${capabilityPlanningBasicsDataset.name}: ${runName}`);
@@ -152,16 +148,15 @@ async function main() {
           toolkits: [evalExecutionToolkit],
           capabilities: testCase.input.capabilityRegistry.map(capabilityFromRegistryEntry),
         });
-        const workspace = await materializeCapabilityDocumentWorkspace({
+        const catalog = createCapabilityCatalog({
           registry,
-          cacheRoot,
         });
         const activeCapability = testCase.input.activeCapability
           ?? testCase.input.remainingPlan?.[0]?.capability
-          ?? workspace.capabilityNames[0]
+          ?? catalog.capabilityNames[0]
           ?? 'unavailable';
         const baseDisclosure = createCapabilityDisclosureState({
-          workspace,
+          catalog,
 
         });
         const boundaryCapabilityNames = testCase.input.mode === 'boundary'
@@ -175,7 +170,7 @@ async function main() {
           disclosedCapabilityNames: [...new Set([
             ...baseDisclosure.disclosedCapabilityNames,
             ...boundaryCapabilityNames.filter((capabilityName) =>
-              workspace.capabilityNames.includes(capabilityName)),
+              catalog.capabilityNames.includes(capabilityName)),
           ])],
         };
         const activeTask = testCase.input.activeTask ?? 'Evaluate the current task.';
@@ -186,7 +181,7 @@ async function main() {
           userRequest: testCase.input.userRequest,
           messages: buildCapabilityPlanningHistoryMessages(testCase.input),
           remainingPlan: testCase.input.remainingPlan ?? [],
-          workspace,
+          catalog,
           capabilityDisclosure,
           supervisorSession: createRunSupervisorSession({
             runId: `eval:${testCase.id}`,
@@ -322,7 +317,6 @@ async function main() {
       }
     }
   } finally {
-    await rm(cacheRoot, { recursive: true, force: true });
     await runtime?.shutdown();
   }
   console.log(`Cases: ${passed}/${cases.length} passed`);

@@ -7,35 +7,28 @@ import {
 } from './prompts/runSupervisorAgent';
 import type { RunSupervisorInput } from './runSupervisor/runner';
 
-const plannerPromptWorkspace = {
-  rootPath: '/tmp/capabilities',
+const plannerPromptCatalog = {
   registryDigest: 'a'.repeat(64),
   capabilityNames: ['general', 'browser'],
   entries: ['general', 'browser'].map((capabilityName) => ({
     capabilityName,
     description: `${capabilityName} capability`,
     toolkits: [],
-    relativePath: `${capabilityName}/CAPABILITY.md`,
-    documentDigest: 'b'.repeat(64),
-    provenance: 'authored' as const,
+    content: 'Capability instructions.',
   })),
-  reused: false,
 };
 
 const plannerDisclosure = {
-  registryDigest: plannerPromptWorkspace.registryDigest,
+  registryDigest: plannerPromptCatalog.registryDigest,
   disclosedCapabilityNames: ['general', 'browser'],
 
-  status: 'open' as const,
 };
 
 const disclosedDocuments = [{
   capabilityName: 'general',
-  path: 'general/CAPABILITY.md',
   content: '# General\n\n使用本地工具；保留 ]]> 作为文档数据。',
 }, {
   capabilityName: 'browser',
-  path: 'browser/CAPABILITY.md',
   content: '# Browser\n\n浏览网页。',
 }];
 
@@ -44,7 +37,6 @@ const routingManifest = {
   capabilities: [{
     name: 'general',
     purpose: '处理通用工作区任务',
-    cues: ['general', 'workspace', 'task'],
     toolkits: [{
       name: 'workspace',
       description: '读取、编辑并验证本地工作区文件。',
@@ -52,7 +44,6 @@ const routingManifest = {
   }, {
     name: 'browser',
     purpose: '打开并检查网页',
-    cues: ['browser', 'web page', 'navigate'],
     toolkits: [{
       name: 'browser',
       description: '打开网页并读取浏览器页面内容。',
@@ -66,7 +57,6 @@ function supervisorSession(
 ) {
   return {
     runId: 'run-1',
-    revision: 0,
     plan,
     capabilityDisclosure,
   };
@@ -78,7 +68,7 @@ test('Run Supervisor entry input leads with the run user request', () => {
     inputId: 'trace_started:trace-1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     messages: [],
     activeDelegation: null,
@@ -94,7 +84,6 @@ test('Run Supervisor entry input leads with the run user request', () => {
   assert.match(input, /<capability_context source="supervisor_state" trust="read_only">/);
   assert.match(input, /<capability_routing_manifest[^>]* default="general">/);
   assert.match(input, /<purpose>\s*<!\[CDATA\[\s*打开并检查网页/);
-  assert.match(input, /<cue>\s*<!\[CDATA\[\s*browser/);
   assert.match(input, /<toolkit name="browser">/);
   assert.match(input, /打开网页并读取浏览器页面内容。/);
   assert.match(input, /<capability name="general">/);
@@ -115,7 +104,7 @@ test('Run Supervisor entry input represents an empty disclosure explicitly', () 
     inputId: 'trace_started:trace-1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    catalog: plannerPromptCatalog,
     userRequest: '整理下载目录。',
     messages: [],
     activeDelegation: null,
@@ -141,7 +130,7 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
     inputId: 'announce:delegation-1:1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     messages: [...[], ...[{
       messageId: 'announce-1',
@@ -185,7 +174,7 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
     inputId: 'announce:delegation-1:1',
     traceId: 'trace-1',
     runId: 'run-1',
-    workspace: plannerPromptWorkspace,
+    catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。',
     messages: [...[], ...[{
       messageId: 'announce-1',

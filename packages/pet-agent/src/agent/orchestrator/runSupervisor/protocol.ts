@@ -64,7 +64,7 @@ export function parseSupervisorCommand(
   const tasks = command.action === 'execute_plan' ? command.tasks : command.remainingPlan ?? [];
   for (const task of tasks) {
     if (!context.allowedCapabilityNames.includes(task.capability)) {
-      throw new Error(`Run Supervisor selected "${task.capability}" outside the immutable workspace.`);
+      throw new Error(`Run Supervisor selected "${task.capability}" outside the immutable catalog.`);
     }
   }
   return command;

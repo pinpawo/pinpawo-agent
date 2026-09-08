@@ -100,7 +100,6 @@ function residentBuildResources(workdir: string) {
     runtimeConfig,
     globalReviewPolicyMode: 'require_authorization' as const,
     autoAuthorizationSafetyLevel: 'strict' as const,
-    capabilityRegistryBackend: 'memory' as const,
   };
 }
 

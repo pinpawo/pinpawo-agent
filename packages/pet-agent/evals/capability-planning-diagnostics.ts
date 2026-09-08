@@ -1,7 +1,7 @@
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { AIMessage } from '@langchain/core/messages';
 import type { LLMResult } from '@langchain/core/outputs';
-import { RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME } from '../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
+import { RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME } from '../src/agent/orchestrator/runSupervisor/detailsTool.ts';
 
 export type CapabilityDetailsDiagnostics = {
   detailCalls: number;

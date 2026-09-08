@@ -10,7 +10,7 @@
  *
  *   1. ReviewSpec option effect → runtime authorization state (no text-channel
  *      magic strings, no client-submitted authorization extras).
- *   2. Server-side `handleHumanReviewResponse` validates stale review ids and
+ *   2. Server-side `handleInterruptResume` validates stale review ids and
  *      session routing from server-held pending review metadata.
  *   3. runAgentSessionTurn surfaces the pendingInterrupt with canonical ReviewSpec
  *      options and structured resume semantics.

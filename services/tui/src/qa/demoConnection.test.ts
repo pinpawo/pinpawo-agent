@@ -172,9 +172,10 @@ test('review demo settles the active run after cancellation', () => {
   connection.connect();
 
   assert.equal(connection.send({
-    type: 'review.cancel',
+    type: 'interrupt.resume',
     requestId: 'smoke-run',
     interruptId: 'smoke-review-action',
+    value: { action: 'cancel' },
   }), true);
   assert.equal(connection.send({
     type: 'session.snapshot.get',

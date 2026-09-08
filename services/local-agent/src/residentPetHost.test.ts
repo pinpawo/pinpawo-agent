@@ -336,10 +336,10 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     assert.ok(waitingSnapshot?.snapshot?.session?.pendingInterrupt);
 
     await petA.interaction.handle(resumedConnection, {
-      type: 'human_review_response',
+      type: 'interrupt.resume',
       requestId: 'resume-1',
       interruptId: 'interrupt-1',
-      responses: [{ interactionId: 'review-1', selectedOptionId: 'approve' }],
+      value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
     });
     assert.equal(petA.resident.dispatch.getQueueSnapshot().state, 'open');
     await petA.interaction.disconnect(resumedConnection);

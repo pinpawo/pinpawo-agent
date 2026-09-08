@@ -156,8 +156,6 @@ test('local websocket transport keeps one peer identity through message and clos
 function createHandlers(): LocalServerPeerHandlers {
   return {
     onChatRequest: () => undefined,
-    onHumanReviewResponse: () => undefined,
-    onReviewCancel: () => undefined,
     onInterruptResume: () => undefined,
     onRunInterrupt: () => undefined,
     onNewSession: () => undefined,

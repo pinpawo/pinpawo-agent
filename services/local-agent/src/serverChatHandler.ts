@@ -5,9 +5,7 @@ import {
 import { loadAgentContext } from './contextLoader';
 import {
   type ChatRequestMessage,
-  type HumanReviewResponseMessage,
   type InterruptResumeMessage,
-  type ReviewCancelMessage,
   type RunInterruptMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
@@ -34,7 +32,6 @@ import type { ServerDeps } from './serverTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import {
   resolvePendingHumanReviewInterrupt,
-  routeRunInterruptThroughHumanReview,
   type PendingHumanReviewInterruptRoute,
   type HumanReviewResolutionSource,
 } from './pendingHumanReviewInterrupt';
@@ -202,8 +199,10 @@ export class ServerChatHandler {
   }
 
   /**
-   * Continue a pending interrupt by id. The value belongs to the interrupt's
-   * kind: the Host validates identity and forwards it unread.
+   * The one resume entry point. Identity is checked here; the value belongs to
+   * the interrupt's kind. A review's value is validated against the
+   * authoritative checkpoint first, because a malformed decision would leave a
+   * tool call unanswered.
    */
   async handleInterruptResume(
     peer: ServerPeer,
@@ -212,12 +211,11 @@ export class ServerChatHandler {
   ) {
     const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
     if (!pending || pending.interruptId !== msg.interruptId) {
-      sendLocalServerPeerEvent(peer, {
-        type: 'error',
-        requestId: msg.requestId,
-        message: '这个中断已关闭或不存在，请等待界面刷新后再继续。',
-        code: 'interrupt_stale',
-      });
+      this.sendClosedReviewError(peer, msg.requestId);
+      return;
+    }
+    if (pending.payload.kind === 'human_review') {
+      await this.resolvePendingReview(peer, msg, deps);
       return;
     }
     await this.runChatRequest(peer, {
@@ -244,14 +242,21 @@ export class ServerChatHandler {
       });
       return { requestId: msg.requestId };
     }
-    await routeRunInterruptThroughHumanReview({
-      recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps),
-      cancelPending: (route) => this.handleReviewCancel(peer, {
-        type: 'review.cancel',
+    // No run is in flight, so the run already settled into an interrupt before
+    // the interface observed it. Re-announce that interrupt and stop: the Host
+    // must not turn a stop request into a resume decision on the person's
+    // behalf. The interface reconciles and the person acts on what is pending.
+    const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
+    const snapshot = pending
+      ? this.buildPendingInterruptSnapshot(deps, pending)
+      : null;
+    if (snapshot) {
+      this.publishRuntimeEvent(peer, {
+        type: 'interrupt.requested',
         requestId: msg.requestId,
-        interruptId: route.interruptId,
-      }, deps),
-    });
+        pendingInterrupt: snapshot.pendingInterrupt,
+      });
+    }
     return null;
   }
 
@@ -266,15 +271,15 @@ export class ServerChatHandler {
 
     if (source.type === 'chat_request') {
       console.log(`[local-server] chat_request requestId=${requestId} message="${message.slice(0, 80)}"`);
-    } else if (source.type === 'human_review_response') {
+    } else if (source.type === 'review_decision') {
       console.log(
-        `[local-server] human_review_response requestId=${requestId} `
+        `[local-server] review decision requestId=${requestId} `
         + `interactionId=${source.interactionId} option=${source.selectedOptionId}`
         + (source.decisionCount ? ` decisions=${source.decisionCount}` : ''),
       );
     } else {
       console.log(
-        `[local-server] review.cancel resume human_review requestId=${requestId} `
+        `[local-server] review cancel requestId=${requestId} `
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
@@ -430,36 +435,18 @@ export class ServerChatHandler {
     }
   }
 
-  async handleHumanReviewResponse(
+  private async resolvePendingReview(
     peer: ServerPeer,
-    msg: HumanReviewResponseMessage,
-    deps: ServerDeps,
-  ) {
-    await this.resolvePendingInterrupt(peer, msg, deps);
-  }
-
-  async handleReviewCancel(
-    peer: ServerPeer,
-    msg: ReviewCancelMessage,
-    deps: ServerDeps,
-  ) {
-    await this.resolvePendingInterrupt(peer, msg, deps);
-  }
-
-  private async resolvePendingInterrupt(
-    peer: ServerPeer,
-    msg: HumanReviewResponseMessage | ReviewCancelMessage,
+    msg: InterruptResumeMessage,
     deps: ServerDeps,
   ) {
     await resolvePendingHumanReviewInterrupt({
       message: msg,
       recover: () => this.recoverPendingInterruptRoute(msg.requestId, deps),
       emitClosed: () => {
-        if (msg.type === 'human_review_response') {
-          console.warn(
-            `[local-server] human_review_response rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
-          );
-        }
+        console.warn(
+          `[local-server] interrupt.resume rejected: checkpoint has no matching pending interrupt requestId=${msg.requestId}`,
+        );
         this.sendClosedReviewError(peer, msg.requestId);
       },
       emitEvent: (event) => {
@@ -478,21 +465,19 @@ export class ServerChatHandler {
   private acceptReviewRoute(
     peer: ServerPeer,
     route: PendingInterruptRoute,
-    message: HumanReviewResponseMessage | ReviewCancelMessage,
+    message: InterruptResumeMessage,
     deps: ServerDeps,
   ) {
     const activeSessionId = this.tuiSessions.getActiveSessionId(deps.petId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
       console.warn(
-        `[local-server] ${message.type} rejected: route sessionId=${route.sessionId} `
+        `[local-server] interrupt.resume rejected: route sessionId=${route.sessionId} `
         + `does not match active session=${activeSessionId}`,
       );
       sendLocalServerPeerEvent(peer, {
         type: 'error',
         requestId: message.requestId,
-        message: message.type === 'review.cancel'
-          ? '请回到发起该 review 的会话再打断。'
-          : '请回到发起该 review 的会话再应答。',
+        message: '请回到发起该 review 的会话再操作。',
         code: 'interrupt_wrong_session',
       });
       return false;

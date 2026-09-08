@@ -14,8 +14,6 @@ function createHandlers(
 ): LocalServerPeerHandlers {
   return {
     onChatRequest: () => undefined,
-    onHumanReviewResponse: () => undefined,
-    onReviewCancel: () => undefined,
     onInterruptResume: () => undefined,
     onRunInterrupt: () => undefined,
     onNewSession: () => undefined,

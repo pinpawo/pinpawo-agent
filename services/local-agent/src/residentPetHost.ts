@@ -453,8 +453,6 @@ function admitConversationHandlers(
   );
   return {
     onChatRequest: admitRun(handlers.onChatRequest),
-    onHumanReviewResponse: admitRun(handlers.onHumanReviewResponse),
-    onReviewCancel: admitRun(handlers.onReviewCancel),
     onInterruptResume: admitRun(handlers.onInterruptResume),
     // These controls must reach the active conversation instead of waiting
     // behind it in the same queue.

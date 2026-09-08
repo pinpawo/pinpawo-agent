@@ -27,13 +27,6 @@ test('local server dispatcher routes typed client messages and pong', async () =
     onChatRequest: (_peer, message) => {
       seen.push(`chat:${message.requestId}:${message.message}`);
     },
-    onHumanReviewResponse: (_peer, message) => {
-      const response = message.responses.at(-1);
-      seen.push(`review:${message.requestId}:${response?.interactionId}:${response?.selectedOptionId}`);
-    },
-    onReviewCancel: (_peer, message) => {
-      seen.push(`review-cancel:${message.requestId}:${message.interruptId}`);
-    },
     onInterruptResume: (_peer, message) => {
       seen.push(`interrupt-resume:${message.requestId}:${message.interruptId}`);
     },
@@ -84,20 +77,22 @@ test('local server dispatcher routes typed client messages and pong', async () =
     message: 'hi',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
-    type: 'human_review_response',
+    type: 'interrupt.resume',
     requestId: 'review-1',
     interruptId: 'action-1',
-    reviewId: 'review-spec-1',
-    selectedOptionId: 'approve',
+    value: {
+      decisions: [{ interactionId: 'review-spec-1', selectedOptionId: 'approve' }],
+    },
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'run.interrupt',
     requestId: 'chat-1',
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
-    type: 'review.cancel',
-    requestId: 'review-1',
+    type: 'interrupt.resume',
+    requestId: 'review-cancel-1',
     interruptId: 'action-1',
+    value: { action: 'cancel' },
   }), handlers);
   dispatchLocalServerMessage(peer, JSON.stringify({
     type: 'new_session',
@@ -177,9 +172,9 @@ test('local server dispatcher routes typed client messages and pong', async () =
     ]);
     assert.deepEqual(seen, [
       'chat:chat-1:hi',
-      'review:review-1:review-spec-1:approve',
+      'interrupt-resume:review-1:action-1',
       'run-interrupt:chat-1',
-      'review-cancel:review-1:action-1',
+      'interrupt-resume:review-cancel-1:action-1',
       'new',
       'policy:auto_authorization',
       'policy:full_access',

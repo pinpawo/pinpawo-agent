@@ -49,6 +49,12 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
+  // A pause resume can add user input within the same run, after iteration zero.
+  // Consume this message identity in the next Supervisor decision only.
+  runSupervisorUserMessageId: Annotation<string | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   runSupervisorSession: Annotation<RunSupervisorSessionState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
@@ -126,6 +132,7 @@ export type OrchestratorRunState = Pick<
   OrchestratorStateType,
   | 'runNextDelegation'
   | 'runSupervisorSession'
+  | 'runSupervisorUserMessageId'
   | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runIterationCount'
@@ -150,6 +157,7 @@ export function buildRunStateReset(
   return {
     runNextDelegation: null,
     runSupervisorSession: null,
+    runSupervisorUserMessageId: null,
     runUserRequest: null,
     runDelegationSummaries: [],
     runIterationCount: 0,

@@ -15,7 +15,7 @@ import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '.
 import type { CapabilityMessageLane } from '../messages';
 
 export type { CapabilityMessageLane };
-export type DelegationStatus = 'pending' | 'progress' | 'completed';
+export type DelegationStatus = 'pending' | 'progress' | 'completed' | 'superseded';
 
 export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
 
@@ -41,7 +41,7 @@ export type CapabilityPlanTask = {
   task: string;
 };
 
-/** Exact text of the HumanMessage that started the current run. */
+/** Current user goal, including an explicitly requested Supervisor adjustment. */
 export type UserRequest = string;
 
 export type TaskActiveDelegation = {

@@ -114,7 +114,7 @@ the main queue. Entry Answer selects this history with the shared message query;
 the model-invocation runtime renders typed messages without changing state.
 
 **Output → state:** `plan_request(goal)` resolves the run goal against the whole
-conversation. This is the only place a goal is authored. See §8.
+conversation. This authors the initial goal; user-directed Supervisor adjustments may revise it. See §8.
 
 ## 5. Node: runSupervisor
 
@@ -141,7 +141,7 @@ Sources:
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation with typed result facts | current canonical main conversation including unaccepted Announces |
 | session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
-| tools | invocation projection / `INSTRUCTION` | `capability_details`, `submit_plan` | execution: `review_current`; new-run user input may require discovery before execution resumes |
+| tools | invocation projection / `INSTRUCTION` | `capability_details`, `submit_plan` | execution: `review_current`; fresh user input additionally enables `adjust_plan` and `capability_details` |
 
 Entry initializes a clean run-scoped Supervisor session. Root
 publishes normal Capability results directly into main before Boundary, including
@@ -151,16 +151,25 @@ result body. Projection
 never changes canonical messages. Private Capability Human/AI/Tool messages remain
 excluded, and publication must not be interpreted as task acceptance.
 The remaining tail expresses task progress within the established plan. Boundary
-checks execution results against the goal and current task; it asks the user
-before changing task content, scope, or order. Task progress does not violate
+checks execution results against the goal and current task. Changes require a
+user request or confirmation; explicit requests need no redundant confirmation. Task progress does not violate
 `RUN-STABLE`. Plan prose is data, not an instruction override or evidence of
 completion. The tail is the established plan, stable until user confirmation.
 
-`review_current({ completed: false, reason, remainingPlan? })` can apply a
-user-confirmed future-plan change while retaining and continuing the active
-delegation. Omission retains the existing tail; an array replaces only future
-tasks, and a confirmed empty array clears those tasks without ending the current
-one. Root commits both effects together.
+`review_current({ completed, reason, reply? })` has no plan parameter. Root reads
+its saved future tasks when applying a review. Acceptance advances that tail;
+acceptance of the final task with a reply ends the run. Continuation preserves
+the tail and supplies feedback to the same delegation. Plan changes go through
+`adjust_plan` with fresh user input.
+
+`adjust_plan({ goal, reason, currentDelegation, tasks })` is available at a Boundary
+with new user input. It commits the full pending plan and goal. Continue retains
+the active delegation identity and private scope while changing its task; replace
+creates a new scope and preserves the old records without marking them accepted.
+Pause guidance has a canonical HumanMessage id queued in
+`runSupervisorUserMessageId`; the next Supervisor result consumes it. This also
+works after iteration zero within the same run. Empty continue routes directly
+to Capability. Review approval stays on its existing interrupt chain.
 
 In the current implementation, Capability disclosure is run-scoped semantic state. It contains every
 Capability whose complete document was disclosed during this run in stable
@@ -244,7 +253,7 @@ limits and incompatible checkpoints have deterministic notices. An empty reply
 without a runtime stop is a protocol error, not a request for a fallback answer.
 
 Natural Supervisor replies retain the active delegation and remaining plan.
-`review_current({ completed: true, reason, reply?, remainingPlan? })` accepts the active task before terminal
+`review_current({ completed: true, reason, reply? })` accepts the active task before terminal
 cleanup and saves any remaining plan without dispatching it. The existing
 continuation snapshot also supports a remaining plan with no active delegation;
 explicit resume then starts a fresh Entry session.
@@ -275,26 +284,25 @@ The same canonical string reaches three nodes with these responsibilities:
 | capability | **Nested background.** `<run_user_request role="goal_context">` lives inside the briefing; `<task>` is the real boundary (§6). |
 | current terminal node | **Continuation.** Retained with unfinished work; no model projection. |
 
-**Lifecycle (3 writers, no drift):**
+**Lifecycle:**
 
 1. `captureRunUserRequest` — seeds a *provisional* value (last human message) so
    the state invariant holds. Not authoritative.
 2. `plan_request(goal)` → committed by `runSupervisor` on the entry path —
-   the **only** authoritative write.
+   the authoritative initial goal.
 3. `activeDelegationTransition` on resume — replays
    `activeDelegation.userRequest`, a **snapshot**, never a re-capture.
 
-Because writer 3 replays a snapshot, the goal is fixed for the life of a
-delegation. `readLatestHumanRequest()` at resume becomes `<guidance>` in the
-briefing and does **not** overwrite the goal. The only legitimate replacement is
-`supersede_active` — a genuinely new request, which runs a full fresh entry.
-Supplementing the current task or confirming a plan adjustment does not use that
-transition: append the user's message to main and let Supervisor consider it with
-the existing task still active. A new user input is not an automatic goal rewrite.
+4. `adjust_plan(goal, ...)` — a user-directed Boundary decision atomically updates
+   the goal and active delegation snapshot with the pending plan.
+
+Resume replays the latest snapshot. New text alone does not overwrite the goal:
+Supervisor interprets it first and may preserve or explicitly adjust the goal.
+`supersede_active` remains available for starting an unrelated fresh request.
 
 Why the goal is model-authored: the last human message is often a continuation
-utterance ("嗯。开始吧") that states no goal. Only entryAnswer sees enough
-conversation to resolve what it refers back to. Verbatim text is still preserved
+utterance ("嗯。开始吧") that states no goal. EntryAnswer resolves the initial goal from conversation; Supervisor uses the
+existing goal and current task conversation to interpret later adjustments. Verbatim text is still preserved
 when the resolved goal equals the current message, so formatting-sensitive
 requests are unaffected.
 
@@ -345,8 +353,8 @@ ephemeral; Capability's private context maintenance remains subagent-owned.
    all Announces for the current unfinished delegation by existing identity,
    independently of the recent-message suffix.
 
-Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Reviews do not carry plan updates; user-directed changes use adjust_plan. Root applies these effects inside its existing `runSupervisor` node.
 
 Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
 
-The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Boundary has one review_current tool: completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.
+The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Execution Boundary uses review_current; a fresh user input also enables adjust_plan. For review_current, completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.

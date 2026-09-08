@@ -76,8 +76,7 @@ function supervisorOutput(
       nextTask: null, capabilityName: null,
       ...(!isRunSupervisorReplyResult(result) && result.action === 'review_current'
         ? { completed: result.completed, reason: result.reason } : {}),
-      remainingPlan: !isRunSupervisorReplyResult(result) && result.action === 'review_current'
-        ? result.remainingPlan ?? [] : [],
+      remainingPlan: [],
     };
   }
   const [nextTask, ...remainingPlan] = result.tasks;

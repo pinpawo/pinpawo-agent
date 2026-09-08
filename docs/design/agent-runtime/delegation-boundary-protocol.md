@@ -4,6 +4,57 @@ Status: working design for issue #755, fully rewritten around the direction disc
 
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 
+## User-directed plan adjustment (2026-09-09)
+
+A task pause with new user text resumes through Supervisor Boundary before any
+Capability runs. Empty continue preserves the existing direct-resume behavior.
+Review approvals remain on the review interrupt chain. The same policy applies
+to the legacy fresh-turn resume entry.
+
+`adjust_plan({ goal, reason, currentDelegation, tasks })` is available only at a
+Boundary carrying new user input. `tasks` is the complete pending plan, including
+the first task to run immediately. `currentDelegation: "continue"` reuses the
+active delegation id, lane, run scope and private history, updates its task and
+goal, and supplies the reason as execution guidance. Its first task must keep the
+same Capability. `"replace"` marks the old summary superseded, preserves its
+messages and unaccepted evidence, and creates a new delegation for the first task.
+Both choices replace the future plan and resume execution atomically in root.
+Replacement does not accept the old task or replay its tool effects.
+
+User input opens this control; the model must apply only the changes the user
+requested or confirmed. A clear request is sufficient and requires no redundant
+confirmation. Ambiguous intent leads to a natural question. Ordinary execution
+Boundaries do not expose or accept this tool. `review_current` only accepts delivery or supplies continuation feedback; all
+user-directed plan changes use `adjust_plan`. It has no plan parameter.
+
+`runSupervisorUserMessageId` identifies the canonical HumanMessage queued by a
+pause resume. It is independent of run iteration count, consumed with the next
+Supervisor result, and reset on run termination. Multiple pauses within one run
+therefore create distinct inputs without reopening adjustment on later Announces.
+The existing task continuation snapshot preserves queued work across pauses.
+
+This supersedes the earlier restriction that replacing the active delegation
+requires a separate user task control. Validate same-run pause/resume with no
+Announce, repeated guidance, keep/replace identity and history, registry rejection,
+no adjustment without new input, and checkpoint resume without replayed effects.
+
+Validation (2026-09-09): runtime tests cover a real non-review tool abort followed
+by settlement into a pause, guided resume reaching Supervisor before execution,
+empty direct resume, continued/replaced scope identity, repeated guidance,
+clarification preservation, and committed checkpoint recovery. The local plan
+projection excludes superseded records from pending work. A bounded run of
+`npm run eval:supervisor-plan-adjustment -w @pinpawo/pet-agent` on qwen3.8-max
+passed all three synthetic cases: continue with corrected scope, replace using
+another Capability, and clarify an unspecified goal. Manual inspection confirmed
+the adjusted goals/tasks cancel publication and preserve the requested report
+scope. A separate fresh Entry check also returned `execute_plan`, preserving
+the normal planning tool path. No real Capability work ran; these bounded checks
+are not a stability measurement. A subsequent rerun passed the three Boundary cases but
+asked for missing publication details at Entry. The Entry fixture now supplies
+complete migration evidence and requests a private report in the conversation,
+matching the writer Capability. Its focused rerun passed with `execute_plan`
+and writer as the first task; the assertion was retained and strengthened.
+
 ## Supervisor simplification (2026-09-08)
 
 User-approved cleanup: Supervisor reads an immutable in-memory Capability catalog
@@ -131,14 +182,21 @@ Tools express operations; natural text expresses a reply. Two control tools suff
 | Return | When used | Root effect |
 | --- | --- | --- |
 | `submit_plan({ tasks })` | Establish or resume a plan at Entry | Commit the plan and dispatch its first task only when no delegation is active; never accept a task |
-| `review_current({ completed, reason, reply?, remainingPlan? })` | Review delivery of the current Boundary task | true accepts and advances the established plan, or ends the run with reply; false preserves the delegation and forwards reason as continuation feedback. remainingPlan only carries user-confirmed future-plan changes |
+| `review_current({ completed, reason, reply? })` | Review delivery of the current Boundary task | true accepts and advances the established plan, or ends the run with reply; false preserves the delegation and forwards reason as continuation feedback. The root owns and advances the saved plan |
 | Natural final text | Reply directly at Entry or Boundary | Emit the supplied text, preserving unfinished task ownership and the remaining plan; no implicit acceptance or dispatch |
 
 Entry establishes the plan; Boundary uses one tool with an explicit completion judgment and reason. completed concerns only the current task, not whole-goal completion, cancellation, or replacement. For true, reason identifies delivery evidence; for false, it specifies a concrete gap within the current task. Outstanding future tasks are not grounds for false. Explicit cancellation or replacement still uses existing user task controls.
 
 Keeping these fields does not retain permission for arbitrary plan rewrites. Normal progression must match the established next task and tail. User confirmation remains in root's main conversation, without a new approval tool, confirmation flag, or change protocol. Root checks structural consistency of progression; Supervisor interprets the scope authorized by the user.
 
-`review_current.remainingPlan` contains only tasks after the current delegation, excluding the current task. Omission retains the existing future plan; a supplied array replaces it with the user-confirmed list; `[]` means the user confirmed cancellation of all future tasks. An empty array neither completes nor cancels the current delegation. Root applies the future-plan update and continuation feedback in one transition, then resumes that same delegation. No `update_plan` tool is added.
+`review_current` cannot submit or overwrite a plan. Root takes the next task from
+its saved tail after acceptance. When the last task was dispatched, that tail
+became empty; accepting it with a final reply ends the run. `adjust_plan` is the
+only Boundary control that changes pending tasks, gated by new user input.
+A model-supplied `remainingPlan` is rejected by the strict review schema.
+Validation includes advancing into the final task and accepting it without new
+user input. The focused qwen3.8-max `accept-and-finish` eval passed after removal,
+returning only completed, reason, and reply through review_current.
 
 Each invocation returns at most one control decision. Acceptance with dispatch and acceptance with a reply are each expressed in one proposal, whose related state effects root applies together. Intermediate discovery returns are not final decisions.
 
@@ -162,11 +220,11 @@ When prerequisites are missing, a deviation from the goal cannot be corrected wi
 
 The simplest interaction displays the question and preserves unfinished work. The user answers through that work's continuation entry, which uses existing `resume_active` semantics for the next invocation. The answer enters root's main conversation and Supervisor evaluates current input. Supplying prerequisites does not approve a plan change; without agreement, no replacement occurs. The UI must expose continuation without requiring knowledge of internal commands, and must not submit an answer from that entry as `supersede_active`.
 
-While a delegation remains unfinished, a user answer or explicit plan adjustment enters main as a new HumanMessage. Retain its identity, private history, existing Announces, and remaining plan, then invoke Supervisor / Boundary. Arrival alone does not accept, end, replace, or clear the delegation for replanning. Supervisor uses feedback to continue the same delegation when the input supplies prerequisites or implementation guidance, or applies an explicitly requested plan adjustment through existing controls. Replacing the current delegation uses existing user task controls; receiving a supplement is not a replacement signal.
+While a delegation remains unfinished, a user answer or explicit plan adjustment enters main as a new HumanMessage. Retain its identity, private history, existing Announces, and remaining plan, then invoke Supervisor / Boundary. Arrival alone does not accept, end, replace, or clear the delegation for replanning. Supervisor uses feedback to continue the same delegation when the input supplies prerequisites or implementation guidance, or applies an explicitly requested plan adjustment through existing controls. For explicit adjustments, `adjust_plan` lets Supervisor choose whether to continue or replace the current delegation; receiving a supplement alone is not a replacement signal.
 
 User input is a valid decision input even without a new Announce; the subagent need not execute again first. If the task has no result evidence, Supervisor may clarify, supply continuation feedback, or address an explicit user adjustment, but cannot accept an unevidenced task. Execution failures without results still stop through the error path; this is user-initiated continuation, not an automatic repair loop.
 
-Plan and disclosure stability applies within the execution loop. This new-run decision may prepare Capability information required by an explicit user adjustment before resuming execution, without first ending the current delegation or introducing another Supervisor mode. Supervisor interprets user authorization from main; root validates structure and execution legality without another semantic approval layer.
+Plan and disclosure stability applies within the execution loop. This user-guided decision, including same-run pause resume, may prepare Capability information required by an explicit user adjustment before resuming execution, without first ending the current delegation or introducing another Supervisor mode. Supervisor interprets user authorization from main; root validates structure and execution legality without another semantic approval layer.
 
 An ordinary question requires neither an `interrupted` event nor a suspended inner agent invocation. Review and explicit user pauses retain existing interrupts; Supervisor questions add no separate waiting state machine.
 
@@ -177,8 +235,8 @@ Root validates result shape, mode, Capability scope, active delegation identity,
 | Decision | Current delegation and evidence | Subsequent execution |
 | --- | --- | --- |
 | Accept and advance | Record task acceptance against results already in main and close the old private scope without moving or publishing results again | Create and execute the next delegation |
-| Improve current work | Retain delegation identity, task, and complete private context; optionally save a user-confirmed future-plan revision | Continue the same delegation; feedback enters its next briefing without replacing the current task |
-| Explicit user task replacement | Existing task controls detach the old active scope while retaining evidence without success | The new task enters ordinary goal capture and planning |
+| Improve current work | Retain delegation identity, task, and complete private context; preserve the existing future plan | Continue the same delegation; feedback enters its next briefing without replacing the current task |
+| User-directed plan adjustment | `adjust_plan` updates the goal and pending plan; continue retains private scope, replace marks the old summary superseded without acceptance | Execute the first adjusted task, reusing or creating a delegation as directed |
 | Accept and reply | Record task acceptance against results already in main | Save the remaining plan, reply, and end this run |
 | Natural reply | Preserve the active delegation and unaccepted evidence, if any | Save unfinished work, reply, and end this run |
 
@@ -296,7 +354,7 @@ Checks exercise interaction behavior, not literal prompt wording:
 | --- | --- |
 | Per-loop context | Conversation and execution evidence come only from current main; no private delegation result channel or duplicate result injection; existing message identities associate the current task |
 | Entry decisions | Executable work produces a plan; questions or direct answers return naturally; no nonexistent task is accepted |
-| Improvement | Same task and private history survive; feedback reaches execution; omission retains the future plan, a confirmed array update commits with continuation, and an empty array does not end the current task |
+| Improvement | Same task and private history survive; feedback reaches execution; the future plan is preserved; user-directed changes use adjust_plan |
 | Acceptance and replacement | Acceptance advances within the established plan; replacement requires user confirmation and preserves evidence without success |
 | Plan stability | No task additions, removals, reordering, or goal changes without user confirmation; ordinary task progress needs no extra approval |
 | User interaction | Supervisor asks directly; answers through continuation return to the original goal and unfinished work; absent approval, the original plan survives |

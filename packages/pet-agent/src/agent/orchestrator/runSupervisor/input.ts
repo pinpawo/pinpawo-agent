@@ -98,9 +98,12 @@ export function buildRunSupervisorInput(params: {
       && announce.runId === activeScope.runId && announce.delegationId === activeScope.delegationId
       ? [announce] : [];
   }).at(-1);
-  // resume_active is a fresh Supervisor input only before this run executes a
-  // Capability. Later iterations use the identity of their latest Announce.
-  const freshTurn = state.runActiveDelegationTransition === 'resume_active'
+  // A new run or an explicitly queued pause-resume message is user input.
+  // Execution evidence alone must not reopen plan adjustment.
+  const resumedUserMessage = state.runSupervisorUserMessageId
+    ? mainSelection.messages.find((message) => message.id === state.runSupervisorUserMessageId
+      && message._getType() === 'human') : undefined;
+  const freshTurn = Boolean(resumedUserMessage) || state.runActiveDelegationTransition === 'resume_active'
     && state.runIterationCount === 0
     && hasRunHumanMessage(mainSelection.messages, state.runId);
   if (!latestAnnounce && !freshTurn) throw new Error('Boundary Supervisor requires typed result evidence or fresh user input.');
@@ -117,7 +120,7 @@ export function buildRunSupervisorInput(params: {
     input: {
       mode: 'boundary',
       inputId: freshTurn
-        ? `human:${state.runId}`
+        ? `human:${resumedUserMessage?.id ?? state.runId}`
         : `announce:${activeDelegation.id}:${latestAnnounce!.announceMessageId}`,
       traceId: state.traceId,
       runId: state.runId,

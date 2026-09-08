@@ -78,6 +78,7 @@ export function createRunTerminationHandlers() {
         update: {
           runNextDelegation: null,
           runSupervisorSession: null,
+          runSupervisorUserMessageId: null,
           taskRunContinuation: state.taskRunContinuation
             ?? snapshotRunTaskContinuation({
           traceId: state.traceId,

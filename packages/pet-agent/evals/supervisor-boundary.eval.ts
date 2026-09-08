@@ -54,7 +54,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       assert.equal(result.action, 'review_current');
       if (result.action === 'review_current') {
         assert.equal(result.completed, true); assert.ok(result.reason.trim());
-        assert.equal(result.reply, undefined); assert.equal(result.remainingPlan, undefined);
+        assert.equal(result.reply, undefined); assert.equal('remainingPlan' in result, false);
       }
     } },
   { name: 'completed-task-can-ask-before-or-after-acceptance', goal: 'Prepare the release notes and publish them to a destination I will select.',
@@ -68,7 +68,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
         if (result.action === 'review_current') {
           assert.equal(result.completed, true);
           assert.ok(result.reason.trim());
-          if (result.remainingPlan) assert.deepEqual(result.remainingPlan, publicationPlan);
+          assert.equal('remainingPlan' in result, false);
         }
       }
     },
@@ -82,7 +82,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
         if (result.action === 'review_current') {
           assert.equal(result.completed, true);
           assert.equal(result.reply, undefined, 'Proceed now that the destination is supplied.');
-          if (result.remainingPlan) assert.deepEqual(result.remainingPlan, publicationPlan);
+          assert.equal('remainingPlan' in result, false);
         }
       }
     } },
@@ -96,7 +96,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       if (result.action === 'review_current') {
         assert.equal(result.completed, false, 'User input is not publication evidence.');
         assert.ok(result.reason.trim()); assert.equal(result.reply, undefined);
-        assert.deepEqual(result.remainingPlan ?? [], []);
+        assert.equal('remainingPlan' in result, false);
       }
     } },
   { name: 'entry-asks-for-user-owned-choice', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.',
@@ -108,7 +108,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     evidence: 'The bug is fixed. The regression test and the full test suite passed: 42 tests, zero failures. No requested work remains.',
     check: (result) => {
       assert.equal(result.action, 'review_current');
-      if (result.action === 'review_current') { assert.equal(result.completed, true); assert.ok(result.reason.trim()); assert.ok(result.reply?.trim()); assert.deepEqual(result.remainingPlan ?? [], []); }
+      if (result.action === 'review_current') { assert.equal(result.completed, true); assert.ok(result.reason.trim()); assert.ok(result.reply?.trim()); assert.equal('remainingPlan' in result, false); }
     } },
 ];
 const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? []);
@@ -135,7 +135,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     if (scenario.supplement) {
       assert.ok('reply' in result && result.reply?.trim(), 'A question must precede the user supplement.');
       const accepted = result.action === 'review_current' && result.completed;
-      const remainingPlan = result.action === 'review_current' ? result.remainingPlan ?? input.remainingPlan : input.remainingPlan;
+      const remainingPlan = input.remainingPlan;
       const resumed = {
         ...input, runId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`, remainingPlan,
         messages: [...input.messages, new AIMessage(result.reply!), new HumanMessage(scenario.supplement)],

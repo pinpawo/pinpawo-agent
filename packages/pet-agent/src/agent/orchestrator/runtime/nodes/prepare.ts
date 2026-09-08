@@ -23,21 +23,26 @@ export function createPrepareNode() {
       config: {},
       position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
     }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
+    const freshMessages = state.messages.filter((message) => HumanMessage.isInstance(message)
+      && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId);
+    const guidedPauseResume = Boolean(state.taskPauseInterrupt
+      && state.runActiveDelegationTransition === 'resume_active' && freshMessages.length > 0);
     const update = outcome.kind === 'derive'
-      ? buildRunStateReset() : applyActiveDelegationTransition(state);
+      ? buildRunStateReset() : applyActiveDelegationTransition(state, { deferExecution: guidedPauseResume });
     const traceId = update.traceId ?? state.traceId;
     // Resolve resume identity before stamping the fresh user supplement. Never
     // retag older conversation turns or Capability-private messages.
-    const messages = state.messages.filter((message) => HumanMessage.isInstance(message)
-      && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId)
+    const messages = freshMessages
       .map((message) => setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
     if (state.taskPauseInterrupt && state.runActiveDelegationTransition === 'resume_active') {
       // A legacy continue request over a real pause mirrors pauseGate resume:
-      // apply guidance to the same delegation, without a new Supervisor decision.
+      // consult Supervisor when a new user message accompanies the resume.
       const resumed = { ...state, ...update };
       return new Command({
-        update: { ...update, messages, taskPauseInterrupt: null },
-        goto: resumed.runNextDelegation?.id === resumed.taskActiveDelegation?.id
+        update: { ...update, messages, taskPauseInterrupt: null,
+          runSupervisorUserMessageId: messages.at(-1)?.id ?? null },
+        goto: guidedPauseResume && resumed.taskActiveDelegation && !resumed.runRuntimeFailure ? 'runSupervisor'
+          : resumed.runNextDelegation?.id === resumed.taskActiveDelegation?.id
           && resumed.runNextDelegation ? 'capability' : 'answer',
       });
     }

@@ -296,7 +296,6 @@ function createQueuedPlannerRunner(
           return { completed: true, reason: 'Current task delivery is evidenced.',
             action: 'review_current',
             reply: '已完成。',
-            remainingPlan: [],
           };
         }
         if (planning.outcome === 'user_input_required') {
@@ -333,9 +332,13 @@ function createQueuedPlannerRunner(
       const capabilityName = String(
         (await nextStructuredValue()).capabilityName ?? '',
       );
+      if (input.mode === 'boundary') {
+        return { action: 'review_current', completed: true, reason: 'Current task delivery is evidenced.',
+          ...(input.remainingPlan.length === 0 ? { reply: '已完成。' } : {}) };
+      }
       return {
-        ...(input.mode === 'entry' ? { action: 'execute_plan' as const } : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' as const }),
-        [input.mode === 'entry' ? 'tasks' : 'remainingPlan']: [
+        action: 'execute_plan',
+        tasks: [
           {
             capability: capabilityName,
             task: String(nextTask.task ?? ''),
@@ -504,14 +507,9 @@ test('execution boundary routes through runSupervisor before the next task', asy
         return { completed: true, reason: 'Current task delivery is evidenced.',
           action: 'review_current',
           reply: '已完成。',
-          remainingPlan: [],
         };
       }
       return { completed: true, reason: 'Current task delivery is evidenced.',
-        remainingPlan: [{
-          capability: 'explore',
-          task: '检索本地实现与 git log，判断需求点是否已覆盖。',
-        }],
         action: 'review_current',
 
       };
@@ -601,7 +599,7 @@ test('a completed single-task goal is accepted by the boundary Supervisor', asyn
       supervisorInputs.push(input);
       return input.mode === 'entry'
         ? { action: 'execute_plan',  tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] }
-        : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: '已完成。', remainingPlan: [] };
+        : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: '已完成。', };
     },
   };
   const graph = createOrchestratorGraph({
@@ -662,14 +660,9 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
         return { completed: true, reason: 'Current task delivery is evidenced.',
           action: 'review_current',
           reply: '已完成。',
-          remainingPlan: [],
         };
       }
       return { completed: true, reason: 'Current task delivery is evidenced.',
-        remainingPlan: [{
-          capability: 'explore',
-          task: '检索本地实现与 git log。',
-        }],
         action: 'review_current',
 
       };
@@ -745,7 +738,6 @@ test('Supervisor return routes bounded facts through the answer node', async () 
           return { completed: true, reason: 'Current task delivery is evidenced.',
             action: 'review_current',
             reply: '已完成。',
-            remainingPlan: [],
           };
         }
         return {
@@ -1048,7 +1040,6 @@ test('user supplement without result evidence enters Supervisor before executing
         return { completed: true, reason: 'Current task delivery is evidenced.',
           action: 'review_current',
           reply: '已完成。',
-          remainingPlan: [],
         };
       },
     },
@@ -1252,7 +1243,6 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
           return { completed: true, reason: 'Current task delivery is evidenced.',
             action: 'review_current',
             reply: '已完成。',
-            remainingPlan: [],
           };
         }
         return {
@@ -1312,7 +1302,6 @@ test('a completed subagent announce reaches the decision, then Answer summarizes
         return { completed: true, reason: 'Current task delivery is evidenced.',
           action: 'review_current',
           reply: '已完成。',
-          remainingPlan: [],
         };
       },
     },
@@ -4374,6 +4363,7 @@ test('toolkit review run interruption retains the delegation without another mod
         if (routeCallCount === 2) {
           return scriptedSupervisorCapability('general');
         }
+        if (routeCallCount === 3) return continueDecision();
         return goalDoneDecision();
       },
     }),
@@ -4499,7 +4489,7 @@ test('toolkit review run interruption retains the delegation without another mod
     taskActiveDelegation: TaskActiveDelegation | null;
   };
 
-  assert.equal(routeCallCount, 3);
+  assert.equal(routeCallCount, 4);
   assert.equal(recorder.subagentInputs.length, 2);
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
@@ -5041,7 +5031,6 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
           : { completed: true, reason: 'Current task delivery is evidenced.',
             action: 'review_current',
             reply: '已完成。',
-            remainingPlan: [],
           };
       },
     },
@@ -6249,7 +6238,6 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
           : { completed: true, reason: 'Current task delivery is evidenced.',
             action: 'review_current',
             reply: '已完成。',
-            remainingPlan: [],
           };
       },
     },
@@ -6708,7 +6696,7 @@ function announces(input: RunSupervisorInput | undefined) {
       ? [{ messageId: value.announceMessageId, result: value.result }] : [];
   });
 }
-test('a review-origin task pause is a real interrupt that continues by id without re-planning', async () => {
+test('a review-origin task pause consults Supervisor on guided continue by id', async () => {
   let runCount = 0;
   const rawTool = tool(async ({ command }: { command: string }) => {
     runCount += 1;
@@ -6740,6 +6728,7 @@ test('a review-origin task pause is a real interrupt that continues by id withou
         routeCallCount += 1;
         if (routeCallCount === 1) return scriptedPlannerTask('run shell');
         if (routeCallCount === 2) return scriptedSupervisorCapability('general');
+        if (routeCallCount === 3) return continueDecision('Inspect recent commits as requested.');
         return goalDoneDecision();
       },
     }),
@@ -6789,11 +6778,11 @@ test('a review-origin task pause is a real interrupt that continues by id withou
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
 
-  // 3. continue by id → delegation re-entered directly: fresh subagent run, no planner/supervisor call
+  // 3. continue by id → Supervisor considers guidance before re-entering the delegation
   const continued = await graph.invoke(new Command({ resume: { [pauseId]: { action: 'continue', guidance: 'Skip git status; inspect recent commits.' } } }), config) as Out;
   assert.equal(continued.__interrupt__?.[0]?.value?.kind, 'review_batch', 'the continued subagent reaches its next reviewed tool call');
   assert.equal(recorder.subagentInputs.length, 2, 'continue is one fresh subagent invocation');
-  assert.equal(routeCallCount, 2, 'continue must not call the planner or supervisor');
+  assert.equal(routeCallCount, 3, 'guidance must reach Supervisor before continuing');
   assert.equal(runCount, 0);
   const continuedState = await graph.getState(config);
   assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
@@ -6805,143 +6794,179 @@ test('a review-origin task pause is a real interrupt that continues by id withou
   assert.equal(continuedState.values.taskActiveDelegation?.id, pausedState.values.taskActiveDelegation?.id);
 });
 
-test('an aborted delegation settles into a pause interrupt without re-running its work', async () => {
-  // Replacement 3: Esc during a delegation stops the run at the failure node
-  // with no interrupt, so nothing above the Runtime has an id to continue.
-  // settleAbortedRun turns that boundary into the same pause a Review
-  // rejection produces, without repeating the work already committed.
-  let toolRuns = 0;
-  const controller = new AbortController();
-  const rawTool = tool(async () => {
-    toolRuns += 1;
-    // Esc arrives while the delegation is running its tool.
-    controller.abort();
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(resolve, 5_000);
-      controller.signal.addEventListener('abort', () => {
-        clearTimeout(timer);
-        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-      }, { once: true });
+for (const guided of [false, true]) {
+  test(`an aborted delegation settles into a pause and resumes ${guided ? 'through Supervisor' : 'directly'}`, async () => {
+    // Replacement 3: Esc during a delegation stops the run at the failure node
+    // with no interrupt, so nothing above the Runtime has an id to continue.
+    // settleAbortedRun turns that boundary into the same pause a Review
+    // rejection produces, without repeating the work already committed.
+    let toolRuns = 0;
+    const controller = new AbortController();
+    const rawTool = tool(async () => {
+      toolRuns += 1;
+      // Esc arrives while the delegation is running its tool.
+      controller.abort();
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 5_000);
+        controller.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+        }, { once: true });
+      });
+      return 'never reached';
+    }, {
+      name: 'run_shell',
+      description: 'run shell',
+      schema: z.object({ command: z.string() }),
     });
-    return 'never reached';
-  }, {
-    name: 'run_shell',
-    description: 'run shell',
-    schema: z.object({ command: z.string() }),
-  });
-  const toolkits: AgentToolkit[] = [{
-    name: 'local',
-    description: 'local tools',
-    tools: [{ tool: rawTool, operation: {} }],
-  }];
-  let routeCallCount = 0;
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        if (routeCallCount === 1) {
-          // Two tasks: the second must survive the cancellation.
-          return scriptedPlannerTask('run shell', [
-            { capability: 'general', task: 'summarise the result' },
-          ]);
-        }
-        if (routeCallCount === 2) return scriptedSupervisorCapability('general');
-        // The continued run advances the queued task rather than proposing a
-        // new plan, which the boundary only accepts from fresh user input.
-        return { outcome: 'continue', gap_note: null };
+    const toolkits: AgentToolkit[] = [{
+      name: 'local',
+      description: 'local tools',
+      tools: [{ tool: rawTool, operation: {} }],
+    }];
+    let routeCallCount = 0;
+    const routeModel = {
+      invoke: async () => new AIMessage('answered'),
+      bindTools: () => ({ invoke: async () => new AIMessage('') }),
+      withStructuredOutput: () => ({
+        invoke: async () => {
+          routeCallCount += 1;
+          if (routeCallCount === 1) {
+            // Two tasks: the second must survive the cancellation.
+            return scriptedPlannerTask('run shell', [
+              { capability: 'general', task: 'summarise the result' },
+            ]);
+          }
+          if (routeCallCount === 2) return scriptedSupervisorCapability('general');
+          // The continued run advances the queued task rather than proposing a
+          // new plan, which the boundary only accepts from fresh user input.
+          return { outcome: 'continue', gap_note: null };
+        },
+      }),
+    } as unknown as AgentModels['act'];
+    const subagentModel = new FakeToolCallingModel({
+      toolCalls: [
+        [{ id: 'call-aborted', name: 'run_shell', args: { command: 'git status' } }],
+        [],
+        [],
+      ],
+    });
+    const fallbackRunner = createQueuedPlannerRunner(routeModel);
+    let guidedDecisions = 0;
+    const graph = createOrchestratorGraph({
+      models: { act: routeModel, observe: routeModel, subagent: subagentModel },
+      checkpoint: new MemorySaver(),
+      runSupervisorRunner: {
+        invoke: async (input, runnableConfig) => {
+          if (guided && input.mode === 'boundary' && input.inputId.startsWith('human:')) {
+            guidedDecisions++;
+            assert.equal(input.messages.at(-1)?.text, 'Inspect the correct project and keep the report private.');
+            assert.deepEqual(input.remainingPlan, [{ capability: 'general', task: 'summarise the result' }]);
+            return {
+              action: 'adjust_plan', currentDelegation: 'continue',
+              goal: 'Inspect the correct project and keep the report private.',
+              reason: 'The user corrected the project and report scope.',
+              tasks: [{ capability: 'general', task: 'Inspect the correct project.' },
+                { capability: 'general', task: 'Write the private report.' }],
+            };
+          }
+          return fallbackRunner.invoke(input, runnableConfig);
+        },
       },
-    }),
-  } as unknown as AgentModels['act'];
-  const subagentModel = new FakeToolCallingModel({
-    toolCalls: [
-      [{ id: 'call-aborted', name: 'run_shell', args: { command: 'git status' } }],
+    });
+    const config = {
+      configurable: {
+        thread_id: 'abort-settles-into-pause',
+        capabilities: [capability('general', 'General-purpose capability.', ['local'])],
+        toolkits,
+      },
+    };
+
+    await assert.rejects(
+      graph.invoke(
+        buildOrchestratorRunInput([new HumanMessage('run git status')]),
+        { ...config, signal: controller.signal },
+      ),
+    );
+    assert.equal(toolRuns, 1, 'the delegation was running when it was cancelled');
+
+    // The cancelled run holds unfinished work but raises no interrupt, so there
+    // is nothing for an interface to continue by id.
+    const abortedState = await graph.getState(config);
+    assert.deepEqual(
+      abortedState.tasks.flatMap((task) => task.interrupts ?? []),
       [],
-      [],
-    ],
+      'an abort raises no interrupt of its own',
+    );
+    assert.equal(abortedState.values.taskActiveDelegation?.status, 'pending');
+
+    const settled = await settleAbortedRun({
+      getState: () => graph.getState(config),
+      updateState: (values, asNode) => graph.updateState(config, values, asNode),
+      resume: () => graph.invoke(null, config),
+    });
+
+    assert.equal(settled.status, 'paused');
+    assert.equal(
+      settled.status === 'paused' ? settled.pendingInterrupt.payload.kind : null,
+      'pause_task',
+      'an aborted delegation becomes the same kind a Review rejection produces',
+    );
+    assert.ok(
+      settled.status === 'paused' && settled.pendingInterrupt.interruptId,
+      'the pause carries an id the interface can continue by',
+    );
+    const settledState = await graph.getState(config);
+    assert.equal(settledState.next?.[0], 'pauseGate');
+    // Reaching the pause repeats no work and consults no model.
+    assert.equal(toolRuns, 1, 'settling must not re-run the delegation');
+    assert.equal(routeCallCount, 2, 'settling must not call the planner or supervisor');
+    // The Supervisor's remaining plan is task-scoped now, so continuing can
+    // still reach the tasks queued behind the cancelled one.
+    assert.deepEqual(
+      settledState.values.taskRunContinuation?.remainingPlan?.map(
+        (task: { task: string }) => task.task,
+      ),
+      ['summarise the result'],
+      'the remaining plan survives the cancellation',
+    );
+
+    // Continue by id: the delegation is re-entered directly, carrying the queued
+    // task with it. Without the snapshot taken while settling, the continued run
+    // would resume against an empty plan.
+    const pauseId = settled.status === 'paused' ? settled.pendingInterrupt.interruptId : '';
+    if (guided) {
+      await graph.invoke(new Command({ resume: { [pauseId]: {
+        action: 'continue', guidance: 'Inspect the correct project and keep the report private.',
+      } } }), { ...config, interruptBefore: ['capability'] });
+      const adjusted = await graph.getState(config);
+      assert.equal(guidedDecisions, 1);
+      assert.equal(toolRuns, 1, 'new input is judged before any resumed work');
+      assert.equal(adjusted.next[0], 'capability');
+      assert.equal(adjusted.values.taskActiveDelegation.id, settledState.values.taskActiveDelegation.id);
+      assert.equal(adjusted.values.runNextDelegation.task, 'Inspect the correct project.');
+      assert.deepEqual(adjusted.values.runSupervisorSession.plan, [{ capability: 'general', task: 'Write the private report.' }]);
+      assert.equal(adjusted.values.runSupervisorUserMessageId, null);
+      return;
+    }
+
+    await graph.invoke(
+      new Command({ resume: { [pauseId]: { action: 'continue' } } }),
+      config,
+    ).catch(() => undefined);
+    const continuedState = await graph.getState(config);
+    assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
+    assert.equal(
+      continuedState.values.runNextDelegation?.id
+        ?? continuedState.values.taskActiveDelegation?.id,
+      settledState.values.taskActiveDelegation?.id,
+      'continuing re-enters the same delegation',
+    );
+    // Only Supervisor boundary calls: the planner is not consulted again, so the
+    // continued run works from the plan the settlement preserved.
+    assert.ok(routeCallCount > 2, 'the continued run reached its Supervisor boundary');
   });
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    checkpoint: new MemorySaver(),
-  });
-  const config = {
-    configurable: {
-      thread_id: 'abort-settles-into-pause',
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      toolkits,
-    },
-  };
-
-  await assert.rejects(
-    graph.invoke(
-      buildOrchestratorRunInput([new HumanMessage('run git status')]),
-      { ...config, signal: controller.signal },
-    ),
-  );
-  assert.equal(toolRuns, 1, 'the delegation was running when it was cancelled');
-
-  // The cancelled run holds unfinished work but raises no interrupt, so there
-  // is nothing for an interface to continue by id.
-  const abortedState = await graph.getState(config);
-  assert.deepEqual(
-    abortedState.tasks.flatMap((task) => task.interrupts ?? []),
-    [],
-    'an abort raises no interrupt of its own',
-  );
-  assert.equal(abortedState.values.taskActiveDelegation?.status, 'pending');
-
-  const settled = await settleAbortedRun({
-    getState: () => graph.getState(config),
-    updateState: (values, asNode) => graph.updateState(config, values, asNode),
-    resume: () => graph.invoke(null, config),
-  });
-
-  assert.equal(settled.status, 'paused');
-  assert.equal(
-    settled.status === 'paused' ? settled.pendingInterrupt.payload.kind : null,
-    'pause_task',
-    'an aborted delegation becomes the same kind a Review rejection produces',
-  );
-  assert.ok(
-    settled.status === 'paused' && settled.pendingInterrupt.interruptId,
-    'the pause carries an id the interface can continue by',
-  );
-  const settledState = await graph.getState(config);
-  assert.equal(settledState.next?.[0], 'pauseGate');
-  // Reaching the pause repeats no work and consults no model.
-  assert.equal(toolRuns, 1, 'settling must not re-run the delegation');
-  assert.equal(routeCallCount, 2, 'settling must not call the planner or supervisor');
-  // The Supervisor's remaining plan is task-scoped now, so continuing can
-  // still reach the tasks queued behind the cancelled one.
-  assert.deepEqual(
-    settledState.values.taskRunContinuation?.remainingPlan?.map(
-      (task: { task: string }) => task.task,
-    ),
-    ['summarise the result'],
-    'the remaining plan survives the cancellation',
-  );
-
-  // Continue by id: the delegation is re-entered directly, carrying the queued
-  // task with it. Without the snapshot taken while settling, the continued run
-  // would resume against an empty plan.
-  const pauseId = settled.status === 'paused' ? settled.pendingInterrupt.interruptId : '';
-  await graph.invoke(
-    new Command({ resume: { [pauseId]: { action: 'continue' } } }),
-    config,
-  ).catch(() => undefined);
-  const continuedState = await graph.getState(config);
-  assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
-  assert.equal(
-    continuedState.values.runNextDelegation?.id
-      ?? continuedState.values.taskActiveDelegation?.id,
-    settledState.values.taskActiveDelegation?.id,
-    'continuing re-enters the same delegation',
-  );
-  // Only Supervisor boundary calls: the planner is not consulted again, so the
-  // continued run works from the plan the settlement preserved.
-  assert.ok(routeCallCount > 2, 'the continued run reached its Supervisor boundary');
-});
+}
 
 test('a legacy resume_active turn over a pending task pause still re-enters the delegation', async () => {
   // Transition compatibility: the Host keeps sending resume_active turns until
@@ -6974,6 +6999,7 @@ test('a legacy resume_active turn over a pending task pause still re-enters the 
         routeCallCount += 1;
         if (routeCallCount === 1) return scriptedPlannerTask('run shell');
         if (routeCallCount === 2) return scriptedSupervisorCapability('general');
+        if (routeCallCount === 3) return continueDecision('Apply the new user guidance before continuing.');
         return goalDoneDecision();
       },
     }),
@@ -7016,7 +7042,7 @@ test('a legacy resume_active turn over a pending task pause still re-enters the 
   ) as Out;
   assert.equal(continued.__interrupt__?.[0]?.value?.kind, 'review_batch', 'the delegation is re-entered');
   assert.equal(recorder.subagentInputs.length, 2);
-  assert.equal(routeCallCount, 2, 'a legacy resume turn must not re-plan');
+  assert.equal(routeCallCount, 3, 'a legacy resume with user input consults Supervisor first');
   assert.equal(runCount, 0);
   const state = await graph.getState(config);
   assert.equal(state.values.taskPauseInterrupt, null, 'prepare clears the pause on a fresh turn');

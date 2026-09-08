@@ -78,7 +78,7 @@ test('continue preserves exact scope and plan and supplies feedback through exis
 
 test('acceptance with a question dispatches nothing and plan-only continuation seeds a fresh Entry', async () => {
   const input = state();
-  const command = await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Choose a destination.', remainingPlan: tail })(input, options);
+  const command = await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Choose a destination.', })(input, options);
   const accepted = apply(input, command);
   assert.deepEqual(command.goto, ['answer']);
   assert.equal(accepted.runNextDelegation, null);
@@ -121,7 +121,7 @@ test('Boundary without canonical evidence fails instead of accepting a preview',
 test('checkpoint recovery after root acceptance does not repeat acceptance or dispatch', async () => {
   const checkpointer = new MemorySaver(); let decisions = 0; let executions = 0;
   const supervisor = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async () => {
-    decisions += 1; return { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current',  remainingPlan: tail };
+    decisions += 1; return { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', };
   } } });
   const build = () => new StateGraph(OrchestratorState)
     .addNode('runSupervisor', supervisor, { ends: ['capability', 'answer'] })
@@ -151,7 +151,7 @@ test('a confirmed future-plan change continues the same unfinished delegation at
   const input = state();
   input.runActiveDelegationTransition = 'resume_active';
   input.messages.push(setAgentMessageMetadata(new HumanMessage('取消后续发布，只完善当前文档。'), { runId: input.runId, traceId: input.traceId }));
-  const next = apply(input, await node({ completed: false,  action: 'review_current', remainingPlan: [], reason: 'Complete the document.' })(input, options));
+  const next = apply(input, await node({ action: 'adjust_plan', currentDelegation: 'continue', goal: '只完善当前文档。', tasks: [{ capability: 'general', task: input.taskActiveDelegation!.task }], reason: 'Complete the document.' })(input, options));
   assert.equal(next.taskActiveDelegation?.id, input.taskActiveDelegation?.id);
   assert.equal(next.taskActiveDelegation?.task, input.taskActiveDelegation?.task);
   assert.deepEqual(next.runSupervisorSession?.plan, []);
@@ -163,8 +163,8 @@ test('execution cannot rewrite the plan or finish without a supplied reply', asy
   const input = state();
   for (const proposal of [
     { completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' as const, remainingPlan: [] },
-    { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' as const, remainingPlan: [{ capability: 'general', task: 'Unapproved extra task.' }] },
-  ]) await assert.rejects(node(proposal)(input, options), /require fresh user confirmation/);
+    { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' as const, remainingPlan: [] },
+  ]) await assert.rejects(node(proposal)(input, options), /Unrecognized key/);
   input.runSupervisorSession = { ...input.runSupervisorSession!, plan: [] };
   await assert.rejects(node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' })(input, options), /requires a final reply/);
   const accepted = apply(input, await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Document complete.' })(input, options));
@@ -250,4 +250,27 @@ test('a natural question preserves work through terminal cleanup and resumes wit
       assert.deepEqual(next.runSupervisorSession?.plan, tail);
     }
   }
+});
+
+test('accepting the last task finishes the stored plan without a plan parameter or new user input', async () => {
+  const first = state();
+  first.runIterationCount = 1;
+  const last = apply(first, await node({ action: 'review_current', completed: true, reason: 'Document verified.' })(first, options));
+  assert.deepEqual(last.runSupervisorSession?.plan, []);
+  assert.equal(last.taskActiveDelegation?.task, tail[0].task);
+  const active = last.taskActiveDelegation!;
+  last.runIterationCount = 2;
+  last.messages.push(setAgentMessageMetadata(new DelegationAnnounceMessage({
+    id: 'last-announce', sourceLane: active.lane, runId: active.runId,
+    delegationId: active.id, announceMessageId: 'last-announce', task: active.task,
+    result: 'Publication completed and verified.', createdAt: '2026-09-09T00:00:00Z',
+  }), { traceId: last.traceId }));
+  const command = await node({ action: 'review_current', completed: true,
+    reason: 'Publication verified.', reply: 'All requested work is complete.' })(last, options);
+  const finished = apply(last, command);
+  assert.deepEqual(command.goto, ['answer']);
+  assert.equal(finished.taskActiveDelegation, null);
+  assert.equal(finished.runNextDelegation, null);
+  assert.deepEqual(finished.runSupervisorSession?.plan, []);
+  assert.ok(finished.runDelegationSummaries.every((item) => item.status === 'completed'));
 });

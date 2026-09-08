@@ -23,6 +23,7 @@ export function createAnswerNode(config: OrchestratorConfig) {
       ...(incompatible ? { taskActiveDelegation: null } : {}),
       runNextDelegation: null,
       runSupervisorSession: null,
+      runSupervisorUserMessageId: null,
       taskRunContinuation: incompatible ? null : snapshotRunTaskContinuation({
         activeDelegation: state.taskActiveDelegation,
         supervisorSession: state.runSupervisorSession,

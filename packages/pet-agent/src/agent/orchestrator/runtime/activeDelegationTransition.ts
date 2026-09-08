@@ -39,6 +39,7 @@ function buildRunNextDelegation(
  */
 export function applyActiveDelegationTransition(
   state: OrchestratorStateType,
+  options: { deferExecution?: boolean } = {},
 ): Partial<OrchestratorStateType> {
   const activeDelegation = state.taskActiveDelegation;
   if (!activeDelegation) {
@@ -71,7 +72,7 @@ export function applyActiveDelegationTransition(
     : null;
   const resumedUserRequest = activeDelegation.userRequest;
   const continuation = state.taskRunContinuation
-    ?? (state.runSupervisorSession && state.runSupervisorSession.runId !== state.runId
+    ?? (state.runSupervisorSession && (options.deferExecution || state.runSupervisorSession.runId !== state.runId)
       ? {
           traceId: activeDelegation.traceId,
           userRequest: activeDelegation.userRequest,
@@ -79,6 +80,17 @@ export function applyActiveDelegationTransition(
           remainingPlan: [...state.runSupervisorSession.plan],
         }
       : null);
+  // New guidance must be judged before mutating or resuming the old work.
+  if (options.deferExecution) {
+    return {
+      traceId: activeDelegation.traceId,
+      runUserRequest: resumedUserRequest,
+      runSupervisorSession: null,
+      taskRunContinuation: continuation,
+      runNextDelegation: null,
+      runSupervisorReply: null,
+    };
+  }
   const runNextDelegation = buildRunNextDelegation(activeDelegation, guidance);
   const resumedSummaries = resumeRunDelegationSummary(
     state.runDelegationSummaries,

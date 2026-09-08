@@ -100,7 +100,9 @@ export function buildRunSupervisorAgentInput(
   const capabilityContext = buildCapabilityContext(disclosedCapabilities);
   const remainingPlan = xmlTextBlock('remaining_plan', JSON.stringify(input.remainingPlan));
   const turnContext = xmlTextBlock('invocation', input.inputId.startsWith('human:')
-    ? 'Fresh user supplement: interpret it before continuing. Change future tasks only when the user confirmed the change.'
+    ? input.mode === 'boundary'
+      ? 'Fresh user input: interpret it before any execution. If it explicitly requests or confirms a change, use adjust_plan to update the goal and pending work, choosing whether to continue or replace the active delegation. Do not ask again for an adjustment the user already requested.'
+      : 'Fresh user input: interpret it before submitting the execution plan. Preserve established requirements unless the user requests or confirms a change.'
     : 'Keep the established goal and plan. Ask the user before changing them.');
   return input.mode === 'entry'
     ? RUN_SUPERVISOR_ENTRY_INPUT_PROMPT.render({

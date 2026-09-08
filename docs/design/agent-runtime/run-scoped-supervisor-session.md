@@ -5,6 +5,16 @@ Control tools use native `returnDirect`; execution preserves the plan and
 prepared Capability disclosure. User supplements begin a fresh Supervisor
 invocation before the same delegation continues.
 
+## Plan adjustment follow-up (2026-09-09)
+
+Pause resumes with new text enter Supervisor before work. The Boundary-only
+`adjust_plan` control applies a user-requested goal and pending-plan change,
+choosing continuation of the active delegation or replacement with a new one.
+A root-owned pending HumanMessage id opens this control for one decision, including
+mid-run interrupt resumes. See [the interaction protocol](delegation-boundary-protocol.md#user-directed-plan-adjustment-2026-09-09)
+for the current contract; it supersedes older active-task replacement restrictions
+in this draft. Existing pause snapshots and review interrupt resolution remain.
+
 ## Capability details (2026-09-08)
 
 The manifest describes the available Capability set and supports planning directly.
@@ -193,17 +203,15 @@ from canonical facts such as the active delegation, remaining plan, accepted
 Announces, and normalized goal. It does not resume the previous Supervisor working
 history, search attempts, or command replay cache.
 
-A review-origin `pause_task` is a real LangGraph interrupt at root `pauseGate`.
-Continuing that interrupt re-enters the same pending delegation directly, with
-optional guidance added to main messages; it does not require a Supervisor
-decision before execution. The legacy `resume_active` request over this explicit
-pause follows the same path. Its input preserves the existing pause marker until
-Prepare consumes and clears it, then routes directly to Capability. Ordinary
-fresh user supplements without this pause still go through Supervisor, including
-supplements to a pending delegation without result evidence. Prepare uses a
-Command for exactly one destination, so direct pause recovery does not also run
-the normal context-preparation route. Supervisor observes the next actual
-delivery at Boundary and reconstructs its session from the continuation snapshot.
+A `pause_task` is a real LangGraph interrupt at root `pauseGate`, including
+settled caller aborts and review-origin pauses. Empty continue resumes the pending
+delegation directly. Guidance is appended to main with its own message id and
+queued in `runSupervisorUserMessageId`, then routed to Boundary before execution.
+The legacy `resume_active` request over this explicit pause follows the same rule.
+Prepare and pauseGate preserve old task state and the continuation plan until
+Supervisor decides whether to continue, adjust, replace, or ask for clarification.
+Each path selects exactly one destination. A successful Supervisor result consumes
+the queued message id, so a later Announce does not repeat the adjustment.
 
 The TUI treats only an authoritative `pause_task` interrupt as paused. A normal
 Supervisor question with an unfinished projected plan remains ordinary chat;
@@ -284,8 +292,8 @@ User input on continuation is also main-conversation evidence. Retain the active
 delegation, private history, Announces, and remaining plan when appending that
 HumanMessage, then invoke Boundary before further execution. Input arrival does
 not accept, terminate, replace, or clear the delegation. Supervisor interprets
-the user's requested adjustment and uses existing controls to continue or apply
-it. This path needs no new Announce; without any result evidence it may guide or
+the user's requested adjustment and uses `adjust_plan` to update the goal and
+pending tasks, continuing or replacing the active delegation as appropriate. This path needs no new Announce; without any result evidence it may guide or
 clarify work, but cannot accept the task. Automatic execution failure without a
 deliverable still stops instead of invoking Supervisor.
 
@@ -354,11 +362,9 @@ tasks, dropping T3, or reordering the tail requires asking the user first; a
 normal continuation or a new result alone does not authorize it.
 
 If Supervisor chooses `review_current(completed=false)`, root preserves the exact delegation id,
-task, and private execution history. Omitted `remainingPlan` preserves the future
-plan; a supplied array updates it to the user's confirmed revision, excluding
-the current task. `[]` clears only future tasks after user confirmation, without
-accepting or cancelling the active delegation. Root commits the plan update and
-continuation feedback together. The next normal result is
+task, private execution history, and saved future plan. The review tool has no
+plan parameter. User-directed changes use `adjust_plan`, which commits the new
+pending plan and continuation/replacement together. The next normal result is
 appended to main under that delegation's existing identity. Supervisor reads all
 attempts in chronology and does not assume the latest is cumulative.
 
@@ -487,8 +493,8 @@ user goal retains the same `traceId`.
 - Recovery of a committed proposal does not repeat acceptance or dispatch.
 - `review_current(completed=false)` retains prior result messages in main and appends the next
   attempt without assuming cumulative output.
-- Its optional future-plan update commits with continuation: omission retains
-  existing tasks, while a user-confirmed empty array clears only future tasks.
+- Review preserves future tasks; adjust_plan alone changes pending work in a
+  user-guided Boundary decision.
 - Root compaction runs only at new-run entry and retains recent messages plus all
   original Announces for the current unfinished delegation, even outside the
   recent suffix; other old history remains eligible for compaction.
@@ -496,7 +502,7 @@ user goal retains the same `traceId`.
 - Supervisor tracing remains complete after raw provider messages are removed from root
   checkpoint messages.
 
-Tool responsibilities: `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+Tool responsibilities: `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Review accepts no plan parameter; user-directed changes use adjust_plan. Root applies these effects inside its existing `runSupervisor` node.
 
 Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
 

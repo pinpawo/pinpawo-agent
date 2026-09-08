@@ -10,7 +10,7 @@ const review = { action: 'review_current', completed: true, reason: 'Verificatio
 test('Entry only submits a plan and Boundary only reviews an active delegation', () => {
   const entry = { ...context, mode: 'entry' as const, activeDelegation: null };
   for (const completed of [true, false]) {
-    const command = { ...review, completed, remainingPlan: tasks };
+    const command = { ...review, completed };
     assert.throws(() => parseSupervisorCommand(command, entry));
     assert.throws(() => parseSupervisorCommand(command, { ...context, activeDelegation: null }));
     assert.deepEqual(parseSupervisorCommand(command, context), command);
@@ -31,9 +31,9 @@ test('review requires an explicit boolean and concrete reason and rejects invali
   ]) assert.throws(() => parseSupervisorCommand(command, context));
 });
 
-test('a completed review preserves the exact reply; an incomplete review can clear confirmed future work', () => {
-  const command = { ...review, reply: '  Done.\nChoose a target.  ', remainingPlan: tasks };
+test('reviews preserve replies and cannot carry plan mutations', () => {
+  const command = { ...review, reply: '  Done.\nChoose a target.  ' };
   assert.deepEqual(parseSupervisorCommand(command, context), command);
   const incomplete = { ...review, completed: false, remainingPlan: [] };
-  assert.deepEqual(parseSupervisorCommand(incomplete, context), incomplete);
+  assert.throws(() => parseSupervisorCommand(incomplete, context));
 });

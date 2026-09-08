@@ -1,9 +1,9 @@
+import type { PetConfig } from 'pinpawo/host-runtime';
 import {
   defineConfigSchema,
   type ConfigReader,
   type ConfigSchema,
 } from '@pinpawo/pet-agent';
-import { isSafePetPathSegment } from './petId';
 
 /**
  * Studio 的配置 **schema**。
@@ -21,61 +21,6 @@ import { isSafePetPathSegment } from './petId';
  * - 同一台主机可以有多个 pet 配置共存(Studio 拼装多 pet 时用)。
  * - schema 只解析默认 Capability 名称；Studio Host composition 在 resident 启动前
  *   对已加载的 Pet Capability 做 fail-fast 可用性检查。
- */
-export type PetLocalConfig = {
-  petId: string;
-  name: string;
-  /** 该 pet 使用的 model profile id;留空则继承 host default profile。 */
-  modelProfileId?: string;
-  /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
-  defaultCapabilityName?: string;
-};
-
-export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSchema({
-  kind: 'pet config',
-  parse: (reader) => {
-    const modelProfileId = reader.optionalString('modelProfileId');
-    const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
-
-    // `model` 曾是内联的模型名,已被稳定的 profile id 取代。显式报错,
-    // 否则旧配置会被静默忽略、pet 悄悄跑在默认 profile 上。
-    if (reader.raw.model !== undefined) {
-      reader.fail('"model" was replaced by stable "modelProfileId"', 'model');
-    }
-
-    for (const field of ['personality', 'species', 'stage', 'serverBinding']) {
-      if (reader.raw[field] !== undefined) {
-        reader.fail(field === 'serverBinding'
-          ? '"serverBinding" is no longer supported; Pet identity belongs to the local Host'
-          : `"${field}" was removed; move authored Pet behavior to PET.md`, field);
-      }
-    }
-
-    const petId = reader.requiredString('petId');
-    if (!isSafePetPathSegment(petId)) {
-      reader.fail('"petId" must be a safe path segment', 'petId');
-    }
-    if (reader.raw.capabilities !== undefined) {
-      reader.fail(
-        '"capabilities" was replaced by the conventional pets/<petId>/capabilities directory',
-        'capabilities',
-      );
-    }
-
-    return {
-      petId,
-      name: reader.requiredString('name'),
-      ...(modelProfileId !== undefined ? { modelProfileId } : {}),
-      ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
-    };
-  },
-});
-
-/**
- * 一个插件的配置项。
- *
- * `options` 由插件自己解释与校验 —— studio 原样透传,不认识任何插件的
- * 领域概念(设计 §5)。
  */
 export type StudioPluginConfig = {
   id: string;
@@ -102,7 +47,7 @@ export type StudioLocalConfig = {
    */
   entryPetId: string;
 
-  /** 本 studio 可派活的 pet,引用 `PetLocalConfig.petId`。 */
+  /** 本 studio 可派活的 pet,引用 `PetConfig.petId`。 */
   pets: string[];
 
   /**
@@ -168,14 +113,14 @@ export const studioLocalConfigSchema: ConfigSchema<StudioLocalConfig> = defineCo
 });
 
 /**
- * Resolved studio:每个 pet 名都对应到具体的 PetLocalConfig。
+ * Resolved studio:每个 pet 名都对应到具体的 PetConfig。
  */
 export type ResolvedStudio = {
   studio: StudioLocalConfig;
-  /** 按 `studio.pets` 顺序排列的 PetLocalConfig */
-  pets: PetLocalConfig[];
-  /** `entryPetId` 对应的 PetLocalConfig(同时也在 pets 中) */
-  entryPet: PetLocalConfig;
+  /** 按 `studio.pets` 顺序排列的 PetConfig */
+  pets: PetConfig[];
+  /** `entryPetId` 对应的 PetConfig(同时也在 pets 中) */
+  entryPet: PetConfig;
 };
 
 /**
@@ -186,9 +131,9 @@ export type ResolvedStudio = {
  */
 export function resolveStudio(
   studio: StudioLocalConfig,
-  petConfigs: PetLocalConfig[],
+  petConfigs: PetConfig[],
 ): ResolvedStudio {
-  const petById = new Map<string, PetLocalConfig>();
+  const petById = new Map<string, PetConfig>();
   for (const pet of petConfigs) petById.set(pet.petId, pet);
 
   const seen = new Set<string>();
@@ -205,7 +150,7 @@ export function resolveStudio(
     );
   }
 
-  const resolvedPets: PetLocalConfig[] = [];
+  const resolvedPets: PetConfig[] = [];
   for (const petId of studio.pets) {
     const pet = petById.get(petId);
     if (!pet) {

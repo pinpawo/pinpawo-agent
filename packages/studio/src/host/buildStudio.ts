@@ -18,7 +18,7 @@ import {
   type LocalModelProfileRegistry,
   type ResidentPetHost,
 } from 'pinpawo/host-runtime';
-import { loadPetLocalConfigs } from './petConfig';
+import { loadPetConfigs } from 'pinpawo/host-runtime';
 import { loadStudioLocalConfig, resolveStudio, type ResolvedStudio } from './studioConfig';
 
 /**
@@ -132,7 +132,7 @@ export async function resolveStudioHostConfig(
   }
 
   const petsDir = input.petsDir ?? path.join(path.dirname(studioConfigPath), 'pets');
-  const resolved = resolveStudio(studioConfig, await loadPetLocalConfigs(petsDir));
+  const resolved = resolveStudio(studioConfig, await loadPetConfigs(petsDir));
   const plugins: StudioPlugin[] = [];
   for (const { id, options } of studioConfig.plugins ?? []) {
     if (!input.resolvePlugin) {

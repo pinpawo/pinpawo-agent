@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import {
   loadPetDocument,
-  loadPetLocalConfigs,
+  loadPetConfigs,
   resolvePetCapabilityDirectory,
   resolvePetDocumentPath,
 } from './petConfig';
@@ -22,18 +22,18 @@ async function writeJson(dir: string, file: string, value: unknown): Promise<voi
   await fs.writeFile(path.join(dir, file), JSON.stringify(value), 'utf8');
 }
 
-test('loadPetLocalConfigs returns [] when directory does not exist', async () => {
-  const result = await loadPetLocalConfigs(path.join(os.tmpdir(), 'nonexistent-dir-xyz-' + Date.now()));
+test('loadPetConfigs returns [] when directory does not exist', async () => {
+  const result = await loadPetConfigs(path.join(os.tmpdir(), 'nonexistent-dir-xyz-' + Date.now()));
   assert.deepEqual(result, []);
 });
 
-test('loadPetLocalConfigs returns [] for an empty directory', async () => {
+test('loadPetConfigs returns [] for an empty directory', async () => {
   const dir = await mkTempDir('pet-cfg-empty-');
-  const result = await loadPetLocalConfigs(dir);
+  const result = await loadPetConfigs(dir);
   assert.deepEqual(result, []);
 });
 
-test('loadPetLocalConfigs loads all *.json files in sorted order', async () => {
+test('loadPetConfigs loads all *.json files in sorted order', async () => {
   const dir = await mkTempDir('pet-cfg-multi-');
   await writeJson(dir, 'b.json', { petId: 'b', name: 'B' });
   await writeJson(dir, 'a.json', { petId: 'a', name: 'A' });
@@ -41,37 +41,37 @@ test('loadPetLocalConfigs loads all *.json files in sorted order', async () => {
   // 非 json 文件应被忽略
   await fs.writeFile(path.join(dir, 'notes.md'), 'hello', 'utf8');
 
-  const result = await loadPetLocalConfigs(dir);
+  const result = await loadPetConfigs(dir);
   assert.deepEqual(result.map((p) => p.petId), ['a', 'b', 'c']);
 });
 
-test('loadPetLocalConfigs rejects duplicate petIds across files', async () => {
+test('loadPetConfigs rejects duplicate petIds across files', async () => {
   const dir = await mkTempDir('pet-cfg-dup-');
   await writeJson(dir, 'first.json', { petId: 'shared', name: 'First' });
   await writeJson(dir, 'second.json', { petId: 'shared', name: 'Second' });
 
   await assert.rejects(
-    () => loadPetLocalConfigs(dir),
+    () => loadPetConfigs(dir),
     /duplicate pet config petId "shared"/,
   );
 });
 
-test('loadPetLocalConfigs surfaces invalid JSON with file path', async () => {
+test('loadPetConfigs surfaces invalid JSON with file path', async () => {
   const dir = await mkTempDir('pet-cfg-badjson-');
   await fs.writeFile(path.join(dir, 'broken.json'), '{not-json}', 'utf8');
 
   await assert.rejects(
-    () => loadPetLocalConfigs(dir),
+    () => loadPetConfigs(dir),
     /broken\.json is not valid JSON/,
   );
 });
 
-test('loadPetLocalConfigs surfaces schema errors with file path', async () => {
+test('loadPetConfigs surfaces schema errors with file path', async () => {
   const dir = await mkTempDir('pet-cfg-badschema-');
   await writeJson(dir, 'no-name.json', { petId: 'p1' });
 
   await assert.rejects(
-    () => loadPetLocalConfigs(dir),
+    () => loadPetConfigs(dir),
     /no-name\.json: missing required string "name"/,
   );
 });

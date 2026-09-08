@@ -22,12 +22,10 @@ export type {
 export { parseStudioDispatchRequest } from './studioInvocation';
 
 export {
-  petLocalConfigSchema,
   resolveStudio,
   studioLocalConfigSchema,
 } from './configSchema';
 export type {
-  PetLocalConfig,
   ResolvedStudio,
   StudioLocalConfig,
   StudioPluginConfig,

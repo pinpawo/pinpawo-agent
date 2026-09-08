@@ -35,7 +35,7 @@ import type { ResidentPetInteraction } from 'pinpawo/host-runtime';
 import {
   loadPetDocument,
   resolvePetCapabilityDirectory,
-} from './petConfig';
+} from 'pinpawo/host-runtime';
 
 export type StudioHostOptions = {
   runtimeConfig?: LocalAgentRuntimeConfig;

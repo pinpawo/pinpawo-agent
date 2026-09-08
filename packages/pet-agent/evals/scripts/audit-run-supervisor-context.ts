@@ -9,7 +9,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import type { CapabilityDocumentWorkspace } from '../../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
 import {
-  createRunSupervisorSearchTool,
+  createRunSupervisorDetailsTool,
   type RunSupervisorCapabilityDocument,
 } from '../../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
 import type {
@@ -190,7 +190,7 @@ async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
   const projectedMessages = await captureProviderHistory(mainSelection.messages);
-  const searchTool = createRunSupervisorSearchTool(async () => ({
+  const searchTool = createRunSupervisorDetailsTool(async () => ({
     ok: true,
     data: { entries: [] },
   }));

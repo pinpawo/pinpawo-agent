@@ -24,9 +24,9 @@ import {
   applyCapabilitySearchObservations,
 } from './capabilityDisclosure';
 import {
-  createSupervisorCapabilitySearchTool,
+  createSupervisorCapabilityDetailsTool,
   createSupervisorSearchStateMiddleware,
-} from './searchTool';
+} from './detailsTool';
 import { createSupervisorCommandTools } from './commandTools';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
 
@@ -134,14 +134,14 @@ export function createRunSupervisorAgent(params: {
   };
   const commandTools = createSupervisorCommandTools();
   const additionalTools = params.additionalTools ?? [];
-  const capabilitySearchTool = createSupervisorCapabilitySearchTool({
+  const capabilityDetailsTool = createSupervisorCapabilityDetailsTool({
     explorerForInput,
   });
   const middleware = createSupervisorMiddleware();
   const agent = createAgent({
     name: 'runSupervisor',
     model: params.model,
-    tools: [capabilitySearchTool, ...commandTools, ...additionalTools],
+    tools: [capabilityDetailsTool, ...commandTools, ...additionalTools],
     middleware: [
       middleware,
       createSupervisorSearchStateMiddleware(),

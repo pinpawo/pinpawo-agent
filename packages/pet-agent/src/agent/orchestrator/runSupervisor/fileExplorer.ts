@@ -14,8 +14,8 @@ import {
   type SupervisorFileToolErrorCode,
 } from './workspaceReader';
 
-export const RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME = 'capability_search';
-const RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_DESCRIPTION = 'Disclose undisclosed Capability documents whose text contains any supplied fixed substring. Every terms item is matched exactly, and items use OR semantics. A canonical Capability name from the routing manifest is the stable lookup term for that candidate. This tool discovers execution capabilities; it does not execute the user task.';
+export const RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME = 'capability_details';
+const RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_DESCRIPTION = '按 manifest 中的完整名称披露 Capability 详情。用于了解已知能力的具体职责、约束和使用说明，不搜索其他能力，也不执行任务。manifest 和已披露文档可直接用于安排计划；需要具体细节时才调用。可一次提供多个名称。已披露的名称只返回状态，不重复文档。';
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
@@ -51,29 +51,15 @@ export type RunSupervisorSearchResult = {
   };
 };
 
-export function createRunSupervisorSearchTool<
-  TState = Record<string, unknown>,
->(
-  search: (
-    terms: readonly string[],
-    runtime: ToolRuntime<TState>,
-  ) => Promise<unknown>,
+export function createRunSupervisorDetailsTool<TState = Record<string, unknown>>(
+  details: (names: readonly string[], runtime: ToolRuntime<TState>) => Promise<unknown>,
 ) {
-  return tool(
-    async ({ terms }: { terms: string[] }, runtime: ToolRuntime<TState>) =>
-      search(terms, runtime),
-    {
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      description: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_DESCRIPTION,
-      schema: z.object({
-        terms: z.array(
-          z.string().trim().min(1).max(MAX_CAPABILITY_SEARCH_TERM_CHARS)
-            .describe('One exact fixed substring expected verbatim in a Capability name, description, or document. A canonical Capability name from the routing manifest always identifies that candidate. Spaces remain part of the same substring and do not separate keywords; use a phrase only when that complete phrase is expected verbatim.'),
-        ).min(1)
-          .describe('OR alternatives for one Capability, supplied together in one call. Prefer the candidate\'s canonical Capability name; otherwise use separate literals such as ["github", "issue", "pull request"], not one combined keyword string such as ["analyze GitHub issue repository code"].'),
-      }),
-    },
-  );
+  return tool(async ({ names }: { names: string[] }, runtime: ToolRuntime<TState>) => details(names, runtime), {
+    name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+    description: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_DESCRIPTION,
+    schema: z.object({ names: z.array(z.string().trim().min(1).max(200)).min(1)
+      .describe('manifest 中需要进一步了解的 Capability 完整名称；精确匹配，不接受关键词或模糊查询。') }).strict(),
+  });
 }
 
 function utf8Bytes(content: string) {

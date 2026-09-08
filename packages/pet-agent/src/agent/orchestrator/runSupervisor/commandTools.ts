@@ -30,7 +30,7 @@ export function createSupervisorCommandTools(mode?: SupervisorCommandToolMode): 
     tool((args, runtime: ToolRuntime<SupervisorInvocationState>) => propose(SUBMIT_PLAN_TOOL_NAME,
       { action: 'execute_plan', ...args }, runtime), {
       name: SUBMIT_PLAN_TOOL_NAME, schema: submitPlanSchema, returnDirect: true,
-      description: 'Entry：提交完整、尽可能短的有序计划，root 执行第一项。先披露执行职责对应的完整 Capability 文档；已有剩余计划默认沿用，修改须经用户确认。此调用必须独占本次响应，调用后立即返回 root。',
+      description: 'Entry：提交完整、尽可能短的有序计划，root 执行第一项。根据 manifest 和已有 Capability 信息安排任务，无需先调用详情工具；已有剩余计划默认沿用，修改须经用户确认。此调用必须独占本次响应，调用后立即返回 root。',
     }),
     tool((args, runtime: ToolRuntime<SupervisorInvocationState>) => propose(REVIEW_CURRENT_TOOL_NAME,
       { action: 'review_current', ...args }, runtime), {

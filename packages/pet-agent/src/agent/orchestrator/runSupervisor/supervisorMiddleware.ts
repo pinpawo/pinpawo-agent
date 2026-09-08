@@ -23,7 +23,7 @@ export function createSupervisorMiddleware() {
         ...request,
         systemMessage: new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode)),
         tools: request.tools.filter(({ name }) =>
-          (name !== 'capability_search' || discoveryAllowed)
+          (name !== 'capability_details' || discoveryAllowed)
           && (typeof name !== 'string' || !SUPERVISOR_COMMAND_TOOL_NAMES.has(name) || allowed.has(name))),
       });
       if (!AIMessage.isInstance(response)) {
@@ -33,7 +33,7 @@ export function createSupervisorMiddleware() {
         throw new Error('Supervisor response contains invalid tool calls.');
       }
       const calls = response.tool_calls ?? [];
-      if (!discoveryAllowed && calls.some(({ name }) => name === 'capability_search')) {
+      if (!discoveryAllowed && calls.some(({ name }) => name === 'capability_details')) {
         throw new Error('Capability disclosure is stable during execution; changes require fresh user input.');
       }
       const controls = calls.filter(({ name }) => SUPERVISOR_COMMAND_TOOL_NAMES.has(name));

@@ -4,6 +4,21 @@ Status: working design for issue #755, fully rewritten around the direction disc
 
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 
+## Capability details (2026-09-08)
+
+The manifest describes the available Capability set and supports planning directly.
+Supervisor arranges the goal from main messages, the manifest and already provided
+information. `capability_details({ names })` optionally supplies full documents for
+exact manifest names when specific responsibilities, constraints or usage details
+are needed. Calling this tool is not a prerequisite for `submit_plan`; root still
+validates every selected name against the immutable registry.
+
+The result distinguishes newly supplied `documents`, `alreadyDisclosed` names and
+`unknownNames`. It never performs substring search or suggests keyword expansion.
+Already supplied documents are not read or repeated. The existing empty-round and
+byte-budget protections remain; no separate sufficiency judge or new planning
+stage is added. Disclosure stays stable during execution Boundaries, as before.
+
 ## Problem to solve
 
 Supervisor is the decision-maker within root's orchestration loop. Entry establishes a plan for the goal. Subsequent invocations read conversation and execution evidence only from root's current main messages, judge alignment with the established goal and current task, and decide whether to accept and advance or request improvement. Normal Capability subagent results enter main as existing Announce messages before acceptance. Root applies decisions and records new facts. New evidence does not authorize Supervisor to change the goal or rewrite the plan; it asks the user when a change is needed.

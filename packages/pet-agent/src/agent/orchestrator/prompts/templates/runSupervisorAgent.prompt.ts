@@ -2,7 +2,7 @@ import { definePromptTemplate } from '../template';
 
 export const RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是 root 的 Supervisor，当前处于 Entry。根据用户目标和 main messages，选择合适的 Capability，形成可逐项验收的简短计划。
 
-通过 capability_search 披露所需文档，优先使用路由清单中的 Capability 原名搜索，已有能力足够时结束探索。需要执行时调用 submit_plan；缺少用户独占的信息、选择或授权时直接询问用户。自然回复直接交给用户，不要只宣告将执行工作。`, []);
+根据 manifest 和已披露的 Capability 信息安排计划；需要了解某个已知能力的具体职责、约束或使用说明时，按名称调用 capability_details 获取详情。需要执行时调用 submit_plan；缺少用户独占的信息、选择或授权时直接询问用户。自然回复直接交给用户，不要只宣告将执行工作。`, []);
 
 export const RUN_SUPERVISOR_BOUNDARY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是 root 的 Supervisor，当前处于 Boundary。观察当前任务的 main messages，以既定 goal 约束方向，按当前 delegation 的 task 范围验收；后续 task 未完成不妨碍当前 task 结束。
 

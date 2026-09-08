@@ -13,7 +13,7 @@ import { createRunSupervisorSession } from '../src/agent/orchestrator/runSupervi
 import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
-import { createSupervisorSearchDiagnostics } from './supervisor-search-diagnostics.ts';
+import { createSupervisorDetailsDiagnostics } from './supervisor-details-diagnostics.ts';
 
 // Isolated responsibility names make each search budget interpretable. These are
 // eval expectations, not production search limits or instructions to the model.
@@ -38,9 +38,10 @@ type Scenario = {
   required?: string[]; evidence?: string;
 };
 const scenarios: Scenario[] = [
-  { name: 'entry-exact-capability', goal: 'Use repository to fix the failing unit test and verify it.', disclosed: [], maxCalls: 1, expected: 'plan', required: ['repository'] },
+  { name: 'entry-exact-capability', goal: 'Use repository to fix the failing unit test and verify it.', disclosed: [], maxCalls: 0, expected: 'plan', required: ['repository'] },
   { name: 'entry-disclosed-capability', goal: 'Fix the failing unit test and verify it.', disclosed: ['repository'], maxCalls: 0, expected: 'plan', required: ['repository'] },
-  { name: 'entry-two-responsibilities', goal: 'Use repository to prepare release notes, then release_publisher to publish them to the GitHub release for example/repo tag v1.0. I authorize publication.', disclosed: [], maxCalls: 2, expected: 'plan', required: ['repository', 'release_publisher'] },
+  { name: 'entry-two-responsibilities', goal: 'Use repository to prepare release notes, then release_publisher to publish them to the GitHub release for example/repo tag v1.0. I authorize publication.', disclosed: [], maxCalls: 0, expected: 'plan', required: ['repository', 'release_publisher'] },
+  { name: 'entry-requested-details', goal: 'Read the full repository Capability details first, then use it to fix the failing unit test and verify the fix.', disclosed: [], maxCalls: 1, expected: 'plan', required: ['repository'] },
   { name: 'entry-user-choice-before-work', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.', disclosed: [], maxCalls: 0, expected: 'reply' },
   { name: 'boundary-accept-no-discovery', goal: 'Fix the bug and run tests.', disclosed: ['repository'], maxCalls: 0, expected: 'accept', evidence: 'Bug fixed; regression test and full suite passed, 42 tests, zero failures. All requested work is delivered.' },
   { name: 'boundary-continue-no-discovery', goal: 'Fix the bug and run tests.', disclosed: ['repository'], maxCalls: 0, expected: 'continue', evidence: 'Patch saved, but tests have not run. Test tools are available. No user information or permission is missing.' },
@@ -48,12 +49,12 @@ const scenarios: Scenario[] = [
 const config = JSON.parse(await readFile(process.env.PROMPT_EVAL_CONFIG_PATH ?? join(homedir(), '.pinpawo/config.json'), 'utf8'));
 const profileId = process.env.PROMPT_EVAL_PROFILE_ID ?? config.models.defaultProfileId;
 const subject = createDecisionEvalModel({ profileId, role: 'subject' });
-const repeats = Number(process.env.SEARCH_EVAL_REPEATS ?? 1);
-if (!Number.isSafeInteger(repeats) || repeats < 1) throw new Error('SEARCH_EVAL_REPEATS must be a positive integer.');
+const repeats = Number(process.env.DETAILS_EVAL_REPEATS ?? 1);
+if (!Number.isSafeInteger(repeats) || repeats < 1) throw new Error('DETAILS_EVAL_REPEATS must be a positive integer.');
 const selectedNames = process.env.EVAL_CASES?.split(',').filter(Boolean) ?? [];
 if (selectedNames.some((name) => !scenarios.some((scenario) => scenario.name === name))) throw new Error('Unknown EVAL_CASES entry.');
 const selected = scenarios.filter(({ name }) => !selectedNames.length || selectedNames.includes(name));
-const root = await mkdtemp(join(tmpdir(), 'supervisor-search-eval-'));
+const root = await mkdtemp(join(tmpdir(), 'supervisor-details-eval-'));
 const results = [];
 try {
   const workspace = await materializeCapabilityDocumentWorkspace({ registry, cacheRoot: root });
@@ -61,7 +62,7 @@ try {
     // Fresh runner per case: first-use routing-manifest cost is visible, not
     // silently amortized across cases. Model timings include that preparation.
     const supervisor = createRunSupervisorAgent({ model: subject.model });
-    const trace = createSupervisorSearchDiagnostics();
+    const trace = createSupervisorDetailsDiagnostics();
     const disclosure = { ...createCapabilityDisclosureState({ workspace, maxEmptySearchRounds: 2 }), disclosedCapabilityNames: scenario.disclosed };
     const base = { inputId: scenario.name, traceId: scenario.name, runId: scenario.name, userRequest: scenario.goal,
       messages: [new HumanMessage(scenario.goal)], remainingPlan: [], workspace, capabilityDisclosure: disclosure,
@@ -81,16 +82,16 @@ try {
       : scenario.expected === 'reply' ? decision?.action === undefined && Boolean(decision?.reply?.trim())
       : decision?.action === 'review_current' && decision.completed === (scenario.expected === 'accept')
         && (scenario.expected === 'accept' ? Boolean(decision.reply?.trim()) : !decision.reply);
-    const searchBudgetPassed = diagnostics.searchCalls <= scenario.maxCalls && diagnostics.repeatedQueries === 0;
-    const result = { case: scenario.name, mode: input.mode, repeat, passed: !error && behaviorPassed && searchBudgetPassed,
-      behaviorPassed, searchBudgetPassed, maxSearchCalls: scenario.maxCalls,
+    const disclosureBudgetPassed = (scenario.name !== 'entry-requested-details' || diagnostics.detailCalls === 1) && diagnostics.detailCalls <= scenario.maxCalls && diagnostics.repeatedQueries === 0;
+    const result = { case: scenario.name, mode: input.mode, repeat, passed: !error && behaviorPassed && disclosureBudgetPassed,
+      behaviorPassed, disclosureBudgetPassed, maxDetailCalls: scenario.maxCalls,
       decision: decision ? Object.fromEntries(Object.entries(decision).filter(([key]) => key !== 'capabilityDisclosure')) : null,
       error, diagnostics };
     results.push(result);
     console.log(JSON.stringify(result));
   }
 } finally { await rm(root, { recursive: true, force: true }); }
-const path = resolve(process.env.SEARCH_EVAL_REPORT_PATH ?? join(tmpdir(), `supervisor-search-${profileId}.json`));
+const path = resolve(process.env.DETAILS_EVAL_REPORT_PATH ?? join(tmpdir(), `supervisor-details-${profileId}.json`));
 await writeFile(path, JSON.stringify({ model: subject.metadata, repeats, results }, null, 2) + '\n');
 console.log(`Passed ${results.filter(({ passed }) => passed).length}/${results.length}; report: ${path}`);
 if (results.some(({ passed }) => !passed)) process.exitCode = 1;

@@ -27,7 +27,7 @@ import {
 } from '@langchain/langgraph';
 import { z } from 'zod';
 import {
-  RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+  RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
 } from './fileExplorer';
 import type { CapabilityDocumentWorkspace } from './documentWorkspace';
 import {
@@ -646,8 +646,8 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
     {
       toolCalls: [{
         id: 'grep',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['research'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['explore'] },
       }],
     },
     {
@@ -661,7 +661,7 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
     .invoke(supervisorInput(workspace));
 
   assert.deepEqual(model.boundToolNameHistory[0]?.slice(0, 1), [
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ]);
   assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), true);
@@ -669,7 +669,7 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
   assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('complete_goal'), false);
   assert.equal(model.boundToolNameHistory[1]?.includes(
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolNameHistory[1]?.includes('request_user_input'), false);
   assert.equal(model.structuredOutputToolNames.size, 1);
@@ -695,7 +695,7 @@ test('Supervisor Agent explores CAPABILITY.md files and returns a compact ordere
   assert.ok(supervisorInputIndex >= 0);
   const searchResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
-    && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME);
+    && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME);
   assert.ok(ToolMessage.isInstance(searchResult));
   const searchPayload = JSON.parse(String(searchResult.content)) as {
     capabilityDiscovery?: {
@@ -740,8 +740,8 @@ test('entry mode forms one executable task after Capability exploration', async 
     {
       toolCalls: [{
         id: 'grep',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['investigate', 'repository'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['investigate', 'repository'] },
       }],
     },
     {
@@ -857,15 +857,15 @@ test('Supervisor reports closed discovery after two empty rounds while keeping s
     {
       toolCalls: [{
         id: 'grep-1',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['missing-responsibility-one'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['missing-responsibility-one'] },
       }],
     },
     {
       toolCalls: [{
         id: 'grep-2',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['missing-responsibility-two'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['missing-responsibility-two'] },
       }],
     },
     {
@@ -896,7 +896,7 @@ test('Supervisor reports closed discovery after two empty rounds while keeping s
   const searchResults = [...new Map(
     model.invocations.flat().filter(
       (message): message is ToolMessage => message instanceof ToolMessage
-        && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+        && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     ).map((message) => [message.tool_call_id, message]),
   ).values()];
   assert.equal(searchResults.length, 2);
@@ -910,10 +910,10 @@ test('Supervisor reports closed discovery after two empty rounds while keeping s
   assert.match(String(searchResults[0]?.content), /"disclosedCapabilityNames":\[\]/);
   assert.match(String(searchResults[0]?.content), /"newlyDisclosedCapabilityNames":\[\]/);
   assert.equal(model.boundToolNameHistory[1]?.includes(
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolNameHistory[2]?.includes(
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
   assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
@@ -969,7 +969,7 @@ test('Supervisor receives General routing metadata without preloading its docume
   assert.doesNotMatch(readMessageText(supervisorInputMessage), /通用工具读取和修改工作区/);
   assert.equal(model.invocations.flat().some(
     (message) => message instanceof ToolMessage
-      && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+      && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), false);
 });
 
@@ -1145,14 +1145,14 @@ test('an explicit second search discloses a specific Capability after a miss', a
       instructions: 'Complete the requested work.',
     }),
   });
-  const search = (id: string, terms: string[]) => ({
+  const search = (id: string, names: string[]) => ({
     id,
-    name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-    args: { terms },
+    name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+    args: { names },
   });
   const model = new ScriptedSupervisorModel([
     { toolCalls: [search('search-miss', ['auth'])] },
-    { toolCalls: [search('search-exact', ['explore repository structure inspect code'])] },
+    { toolCalls: [search('search-exact', ['explore'])] },
     {
       structuredOutput: {
         kind: 'plan',
@@ -1181,7 +1181,7 @@ test('an explicit second search discloses a specific Capability after a miss', a
   const searchResults = [...new Map(
     model.invocations.flat().filter(
       (message): message is ToolMessage => ToolMessage.isInstance(message)
-        && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+        && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     ).map((message) => [message.tool_call_id, JSON.parse(String(message.content)) as {
       capabilityDiscovery?: {
         status?: string;
@@ -1227,8 +1227,8 @@ test('General is disclosed through the same search path as other Capabilities', 
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'search-default-only',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['ordinary'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['general'] },
     }],
   }, {
     structuredOutput: {
@@ -1249,15 +1249,15 @@ test('General is disclosed through the same search path as other Capabilities', 
     && message.tool_call_id === 'search-default-only');
   assert.ok(ToolMessage.isInstance(searchResult));
   const payload = JSON.parse(String(searchResult.content)) as {
-    data?: { matches?: unknown[] };
+    documents?: unknown[]; alreadyDisclosed?: string[]; unknownNames?: string[];
     capabilityDiscovery?: {
       newlyDisclosedCapabilityNames?: string[];
       disclosedCapabilityNames?: string[];
       emptySearchRounds?: number;
     };
-    planningObjective?: string;
+    guidance?: string;
   };
-  assert.equal(payload.data?.matches?.length, 1);
+  assert.equal(payload.documents?.length, 1);
   assert.deepEqual(
     payload.capabilityDiscovery?.newlyDisclosedCapabilityNames,
     ['general'],
@@ -1267,7 +1267,7 @@ test('General is disclosed through the same search path as other Capabilities', 
     ['general'],
   );
   assert.equal(payload.capabilityDiscovery?.emptySearchRounds, 0);
-  assert.match(payload.planningObjective ?? '', /newly disclosed Capability/);
+  assert.equal(typeof payload.guidance, 'string');
 });
 
 test('a boundary search does not redisclose its active Capability', async (t) => {
@@ -1281,8 +1281,8 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'boundary-search-miss',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['publish'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['publish'] },
     }],
   }, { content: '当前没有可用的 Capability。' }]);
 
@@ -1304,10 +1304,10 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
   });
   const searchResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
-    && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME);
+    && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME);
   assert.ok(ToolMessage.isInstance(searchResult));
   const payload = JSON.parse(String(searchResult.content)) as {
-    data?: { matches?: unknown[] };
+    documents?: unknown[]; alreadyDisclosed?: string[]; unknownNames?: string[];
     capabilityDiscovery?: {
       status?: string;
       remainingEmptyRounds?: number;
@@ -1316,7 +1316,7 @@ test('a boundary search does not redisclose its active Capability', async (t) =>
       disclosedCapabilityNames?: string[];
     };
   };
-  assert.deepEqual(payload.data?.matches, []);
+  assert.deepEqual(payload.documents, []);
   assert.deepEqual(payload.capabilityDiscovery?.newlyDisclosedCapabilityNames, []);
   assert.deepEqual(
     payload.capabilityDiscovery?.disclosedCapabilityNames,
@@ -1345,10 +1345,10 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
       instructions: 'Complete the requested work.',
     }),
   });
-  const search = (id: string, terms: string[]) => ({
+  const search = (id: string, names: string[]) => ({
     id,
-    name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-    args: { terms },
+    name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+    args: { names },
   });
   const model = new ScriptedSupervisorModel([
     { toolCalls: [search('boundary-miss', ['issue status'])] },
@@ -1430,8 +1430,8 @@ test('a Boundary search does not redisclose its seeded active General', async (t
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'search-active-default',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['ordinary'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['general'] },
     }],
   }, {
     toolCalls: [{
@@ -1462,18 +1462,18 @@ test('a Boundary search does not redisclose its seeded active General', async (t
     && message.tool_call_id === 'search-active-default');
   assert.ok(ToolMessage.isInstance(searchResult));
   const payload = JSON.parse(String(searchResult.content)) as {
-    data?: { matches?: unknown[] };
+    documents?: unknown[]; alreadyDisclosed?: string[]; unknownNames?: string[];
     capabilityDiscovery?: {
       newlyDisclosedCapabilityNames?: string[];
       disclosedCapabilityNames?: string[];
     };
   };
-  assert.deepEqual(payload.data?.matches, []);
+  assert.deepEqual(payload.documents, []);
   assert.deepEqual(payload.capabilityDiscovery?.newlyDisclosedCapabilityNames, []);
   assert.deepEqual(payload.capabilityDiscovery?.disclosedCapabilityNames, ['general']);
 });
 
-test('Supervisor counts parallel capability_search calls as one disclosure round', async (t) => {
+test('Supervisor counts parallel capability_details calls as one disclosure round', async (t) => {
   const workspace = await createWorkspace(t, {
     general: capabilityDocument({
       name: 'general',
@@ -1485,12 +1485,12 @@ test('Supervisor counts parallel capability_search calls as one disclosure round
     {
       toolCalls: [{
         id: 'parallel-grep-1',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['general'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['general'] },
       }, {
         id: 'parallel-grep-2',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['general'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['general'] },
       }],
     },
     {
@@ -1521,7 +1521,7 @@ test('Supervisor counts parallel capability_search calls as one disclosure round
   const searchToolCallIds = new Set(
     model.invocations.flat().flatMap((message) =>
       message instanceof ToolMessage
-      && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME
+      && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME
       ? [message.tool_call_id]
       : [],
     ),
@@ -1532,7 +1532,7 @@ test('Supervisor counts parallel capability_search calls as one disclosure round
   ]));
   const searchResults = model.invocations[1]?.filter((message) =>
     message instanceof ToolMessage
-    && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME) ?? [];
+    && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME) ?? [];
   assert.equal(searchResults.length, 2);
   assert.ok(searchResults.every((message) =>
     String(message.content).includes('"status":"open"')));
@@ -1541,7 +1541,7 @@ test('Supervisor counts parallel capability_search calls as one disclosure round
   assert.ok(searchResults.every((message) =>
     String(message.content).includes('"status":"pending_parallel_batch"')));
   assert.equal(model.boundToolNameHistory[1]?.includes(
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
 });
@@ -1559,10 +1559,10 @@ test('a matching search keeps a parallel batch from consuming empty-search budge
       instructions: 'Complete the requested work.',
     }),
   });
-  const search = (id: string, terms: string[]) => ({
+  const search = (id: string, names: string[]) => ({
     id,
-    name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-    args: { terms },
+    name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+    args: { names },
   });
   const model = new ScriptedSupervisorModel([
     { toolCalls: [
@@ -1618,7 +1618,7 @@ test('a matching search keeps a parallel batch from consuming empty-search budge
   assert.equal(payload.capabilityDiscovery?.remainingEmptyRounds, 0);
 });
 
-test('Supervisor returns to Answer after one capability_search without general', async (t) => {
+test('Supervisor returns to Answer after one capability_details without general', async (t) => {
   const workspace = await createWorkspace(t, {
     explore: capabilityDocument({
       name: 'explore',
@@ -1630,8 +1630,8 @@ test('Supervisor returns to Answer after one capability_search without general',
     {
       toolCalls: [{
         id: 'grep-answer-1',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['explore'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['explore'] },
       }],
     },
     { content: '当前没有可用的 Capability。' },
@@ -1657,26 +1657,26 @@ test('Supervisor returns a stable limit result for every search after max rounds
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'search-telecom-1',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['telecom license', '增值电信', '审查'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['telecom license', '增值电信', '审查'] },
     }],
   }, {
     toolCalls: [{
       id: 'search-telecom-2',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['license review'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['license review'] },
     }],
   }, {
     toolCalls: [{
       id: 'search-telecom-over-limit-1',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['license'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['license'] },
     }],
   }, {
     toolCalls: [{
       id: 'search-telecom-over-limit-2',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['review'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['review'] },
     }],
   }, {
     structuredOutput: {
@@ -1706,7 +1706,7 @@ test('Supervisor returns a stable limit result for every search after max rounds
   const searchResults = [...new Map(
     model.invocations.flat().filter(
       (message): message is ToolMessage => ToolMessage.isInstance(message)
-        && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+        && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     ).map((message) => [message.tool_call_id, message]),
   ).values()];
   assert.equal(searchResults.length, 4);
@@ -1740,19 +1740,19 @@ test('Supervisor returns a stable limit result for every search after max rounds
         maxEmptySearchRounds?: number;
         remainingEmptyRounds?: number;
       };
-      planningObjective?: string;
+      guidance?: string;
     };
     assert.equal(payload.ok, false);
-    assert.equal(payload.error?.code, 'capability_search_round_limit_exceeded');
-    assert.match(payload.error?.message ?? '', /No search was executed/);
+    assert.equal(payload.error?.code, 'capability_details_round_limit_exceeded');
+    assert.equal(JSON.parse(String(message.content)).documents.length, 0);
     assert.equal(payload.capabilityDiscovery?.status, 'closed');
     assert.equal(payload.capabilityDiscovery?.emptySearchRounds, 2);
     assert.equal(payload.capabilityDiscovery?.maxEmptySearchRounds, 2);
     assert.equal(payload.capabilityDiscovery?.remainingEmptyRounds, 0);
-    assert.equal(typeof payload.planningObjective, 'string');
+    assert.equal(typeof payload.guidance, 'string');
   }
   assert.ok(model.boundToolNameHistory.every((toolNames) =>
-    toolNames.includes(RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME)));
+    toolNames.includes(RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME)));
   assert.ok(model.boundToolOptions.every((options) => options?.tool_choice === undefined));
 });
 
@@ -1823,8 +1823,8 @@ test('Supervisor can return bounded facts to Answer without submitting a plan', 
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'grep',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['unrelated task'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['unrelated task'] },
     }],
   }, { content: '当前没有可用的 Capability。' }]);
 
@@ -1883,8 +1883,8 @@ test('invalid discovery arguments return a tool error for the calling model', as
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'invalid-search',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['x'.repeat(81)] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['x'.repeat(201)] },
     }],
   }, {
     structuredOutput: {
@@ -1902,7 +1902,7 @@ test('invalid discovery arguments return a tool error for the calling model', as
   assert.equal(model.invocations.length, 2);
   const errorResult = model.invocations[1].find((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'invalid-search');
   assert.ok(errorResult);
-  assert.match(errorResult.text, /Error|80|schema/);
+  assert.match(errorResult.text, /Error|200|schema/);
   assert.equal(result.capabilityDisclosure?.emptySearchRounds, 0);
   assert.ok(result);
 });
@@ -1917,8 +1917,8 @@ test('Supervisor allows every search in one parallel disclosure round', async (t
   });
   const search = (id: string) => ({
     id,
-    name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-    args: { terms: ['ordinary'] },
+    name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+    args: { names: ['general'] },
   });
   const model = new ScriptedSupervisorModel([
     {
@@ -1956,7 +1956,7 @@ test('Supervisor allows every search in one parallel disclosure round', async (t
   });
   const successfulSearches = model.invocations[1]?.filter((message) =>
     message instanceof ToolMessage
-    && message.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME
+    && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME
     && message.status !== 'error') ?? [];
   assert.equal(successfulSearches.length, 4);
   assert.ok(successfulSearches.every((message) =>
@@ -1966,7 +1966,7 @@ test('Supervisor allows every search in one parallel disclosure round', async (t
   assert.ok(successfulSearches.every((message) =>
     String(message.content).includes('"status":"pending_parallel_batch"')));
   assert.equal(model.boundToolNameHistory[1]?.includes(
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolOptions[1]?.tool_choice, undefined);
 });
@@ -2013,8 +2013,8 @@ test('an empty executable plan fails before discovery or dispatch', async (t) =>
     {
       toolCalls: [{
         id: 'grep-general',
-        name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-        args: { terms: ['ordinary', 'task'] },
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+        args: { names: ['ordinary', 'task'] },
       }],
     },
     {
@@ -2261,8 +2261,8 @@ test('oversized discovery is reported as supervisor_discovery_limit_reached', as
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
       id: 'grep',
-      name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-      args: { terms: ['investigate'] },
+      name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['explore'] },
     }],
   }, { content: '' }]);
 
@@ -2272,7 +2272,7 @@ test('oversized discovery is reported as supervisor_discovery_limit_reached', as
       maxDocumentReadBytes: 1,
     }).invoke(supervisorInput(workspace)),
     (error: unknown) =>
-      error instanceof RunSupervisorAgentError
+      error instanceof Error && 'code' in error
       && error.code === 'supervisor_discovery_limit_reached',
   );
 });
@@ -2347,8 +2347,8 @@ test('Supervisor keeps search auto when closed exploration ends without a comman
   });
   const search = (id: string) => ({
     id,
-    name: RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
-    args: { terms: ['ordinary'] },
+    name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+    args: { names: ['general'] },
   });
   const model = new ScriptedSupervisorModel([
     { toolCalls: [search('search-1')] },
@@ -2366,7 +2366,7 @@ test('Supervisor keeps search auto when closed exploration ends without a comman
   assert.ok('reply' in result && typeof result.reply === 'string');
   assert.equal(model.invocations.length, 3);
   assert.equal(model.boundToolNameHistory[2]?.includes(
-    RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+    RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolOptions[2]?.tool_choice, undefined);
   assert.equal('messageUpdates' in result, false);
@@ -2501,4 +2501,33 @@ test('empty final output follows the protocol error path without a fallback repl
   const model = new ScriptedSupervisorModel([{ content: ' ' }]);
   await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(workspace)), /neither a control proposal/);
   assert.equal(model.invocations.length, 1);
+});
+
+test('details uses exact manifest names and distinguishes new, known, and unknown names', async (t) => {
+  const workspace = await createWorkspace(t, {
+    general: capabilityDocument({ name: 'general', description: 'General work.', instructions: 'Handle work.' }),
+    explore: capabilityDocument({ name: 'explore', description: 'Research.', instructions: 'Inspect evidence.' }),
+  });
+  const model = new ScriptedSupervisorModel([
+    { toolCalls: [{ id: 'details-1', name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['general', 'explore', 'research', 'EXPLORE', '../explore'] } }] },
+    { toolCalls: [{ id: 'details-2', name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['explore', 'general'] } }] },
+    { structuredOutput: { kind: 'plan', args: submitArgs('explore') } },
+  ]);
+  const input = supervisorInput(workspace);
+  const result = await createRunSupervisorAgent({ model }).invoke({ ...input,
+    capabilityDisclosure: { ...input.capabilityDisclosure, disclosedCapabilityNames: ['general'] },
+  });
+  const payload = (index: number, id: string) => JSON.parse(String(model.invocations[index].find((message) =>
+    ToolMessage.isInstance(message) && message.tool_call_id === id)?.content));
+  const first = payload(1, 'details-1');
+  assert.deepEqual(first.documents.map((document: { capabilityName: string }) => document.capabilityName), ['explore']);
+  assert.deepEqual(first.alreadyDisclosed, ['general']);
+  assert.deepEqual(first.unknownNames, ['research', 'EXPLORE', '../explore']);
+  const second = payload(2, 'details-2');
+  assert.deepEqual(second.documents, []);
+  assert.deepEqual(second.alreadyDisclosed, ['explore', 'general']);
+  assert.deepEqual(second.unknownNames, []);
+  assert.equal(result.capabilityDisclosure?.emptySearchRounds, 1);
 });

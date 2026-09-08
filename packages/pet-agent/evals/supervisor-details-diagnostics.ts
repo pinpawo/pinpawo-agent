@@ -1,6 +1,6 @@
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { AIMessage } from '@langchain/core/messages';
-import { createCapabilitySearchDiagnosticsCollector } from './capability-planning-diagnostics.ts';
+import { createCapabilityDetailsDiagnosticsCollector } from './capability-planning-diagnostics.ts';
 
 type Invocation = {
   id: string;
@@ -13,10 +13,10 @@ type Invocation = {
 };
 
 /** Eval-only timing; query/results remain owned by the existing search collector. */
-export function createSupervisorSearchDiagnostics(now = () => performance.now()) {
+export function createSupervisorDetailsDiagnostics(now = () => performance.now()) {
   const start = now();
   const calls = new Map<string, Invocation>();
-  const search = createCapabilitySearchDiagnosticsCollector();
+  const search = createCapabilityDetailsDiagnosticsCollector();
   const begin = (id: string, kind: Invocation['kind'], name: string) => {
     calls.set(id, { id, kind, name, startMs: now() - start, durationMs: null, status: 'pending' });
   };
@@ -46,7 +46,7 @@ export function createSupervisorSearchDiagnostics(now = () => performance.now())
       const invocations = [...calls.values()].map((call) => ({ ...call }));
       const diagnostics = search.read();
       const seen = new Set<string>();
-      const repeatedQueries = diagnostics.searchQueries.filter((terms) => {
+      const repeatedQueries = diagnostics.detailRequests.filter((terms) => {
         const key = JSON.stringify([...terms].map((term) => term.trim().toLowerCase()).sort());
         if (seen.has(key)) return true;
         seen.add(key); return false;

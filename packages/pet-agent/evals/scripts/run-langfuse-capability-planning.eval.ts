@@ -34,8 +34,8 @@ import { resolveLangfuseConfig } from './langfuse-api.ts';
 import { writeLangfuseEvalResult } from './langfuse-eval-writer.ts';
 import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
 import {
-  createCapabilitySearchDiagnosticsCollector,
-  type CapabilitySearchDiagnostics,
+  createCapabilityDetailsDiagnosticsCollector,
+  type CapabilityDetailsDiagnostics,
 } from '../capability-planning-diagnostics.ts';
 
 const evalExecutionToolkit = defineToolkit({
@@ -88,7 +88,7 @@ function supervisorOutput(
     remainingPlan: remainingPlan.map((task) => ({ ...task })) };
 }
 
-function supervisorDiagnostics(result: RunSupervisorResult, searchDiagnostics: CapabilitySearchDiagnostics) {
+function supervisorDiagnostics(result: RunSupervisorResult, searchDiagnostics: CapabilityDetailsDiagnostics) {
   return { ...searchDiagnostics, supervisorStatus: isRunSupervisorReplyResult(result) ? 'reply' : 'proposed' };
 }
 
@@ -225,7 +225,7 @@ async function main() {
               activeDelegation: null,
 
             };
-        const searchDiagnostics = createCapabilitySearchDiagnosticsCollector();
+        const searchDiagnostics = createCapabilityDetailsDiagnosticsCollector();
         const result = await createRunSupervisorAgent({
           model: modelConfig.model,
         }).invoke(
@@ -286,8 +286,8 @@ async function main() {
         }
         console.log(
           `[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: `
-          + `search_calls=${diagnostics.searchCalls.toString()} `
-          + `search_rounds=${diagnostics.searchRounds.toString()} `
+          + `search_calls=${diagnostics.detailCalls.toString()} `
+          + `search_rounds=${diagnostics.detailRounds.toString()} `
           + `supervisor_status=${diagnostics.supervisorStatus} `
           + evaluation.scores.map(({ key, score }) => `${key}=${score}`).join(' '),
         );

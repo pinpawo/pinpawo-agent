@@ -141,7 +141,7 @@ Sources:
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation with typed result facts | current canonical main conversation including unaccepted Announces |
 | session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
-| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `review_current`; new-run user input may require discovery before execution resumes |
+| tools | invocation projection / `INSTRUCTION` | `capability_details`, `submit_plan` | execution: `review_current`; new-run user input may require discovery before execution resumes |
 
 Entry initializes a clean run-scoped Supervisor session. Root
 publishes normal Capability results directly into main before Boundary, including
@@ -169,18 +169,18 @@ disclosure. A compact routing manifest initialized from the effective registry
 is projected into each Supervisor invocation. It retains the Toolkit names and
 descriptions resolved from each Capability's compiled `uses`, while complete
 Capability documents remain progressively disclosed. Neither dynamic registry
-facts nor search-round state enter the stable system prompt. A new run resets
-search attempts and revalidates disclosure; resumed root tasks may seed the
+facts nor disclosure-round state enter the stable system prompt. A new run resets
+detail-read attempts and revalidates disclosure; resumed root tasks may seed the
 capabilities named by their active and remaining plan.
 
-`capability_search` is callable at Entry and at the first Boundary of a new user
+`capability_details` is callable at Entry and at the first Boundary of a new user
 supplement, with automatic tool choice. It is unavailable during execution. Each ToolMessage
-reports the post-call disclosure state, remaining empty rounds, and a planning
-objective. After discovery closes, later calls return the stable
-`capability_search_round_limit_exceeded` result instead of changing tool
+reports the post-call disclosure state, remaining empty rounds, and explicit newly provided / already provided / unknown-name results. After discovery closes, later calls return the stable
+`capability_details_round_limit_exceeded` result instead of changing tool
 availability.
 
-The target prepares disclosure before execution and reuses it during execution
+The manifest supports planning without a mandatory detail read. Exact-name detail
+reads are optional; they do not search document text. The target prepares any needed disclosure before execution and reuses it during execution
 Boundaries. Needing a different scope leads to a direct question. The user's
 answer enters main with the active delegation retained, and Supervisor can
 prepare documents needed for the explicit adjustment on the new run's first

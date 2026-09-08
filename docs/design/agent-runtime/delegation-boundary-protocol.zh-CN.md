@@ -4,6 +4,12 @@
 
 [English version](delegation-boundary-protocol.md)。中英文描述同一套设计。文件路径沿用原名，避免已有链接失效。
 
+## Capability 详情披露（2026-09-08）
+
+manifest 已列出可用能力，Supervisor 默认根据 main、manifest 和已披露信息安排计划。需要具体职责、约束或使用细节时，可调用 `capability_details({ names })`，按 manifest 完整名称读取详情；提交计划不要求先调用该工具或读完全部文档。root 继续校验能力名称属于不可变注册表。
+
+结果区分新增 `documents`、此前已披露的 `alreadyDisclosed`、不存在的 `unknownNames`。不再做关键词匹配，不引导扩大搜索；已披露文档不重复读取或返回。沿用现有空披露轮数和读取配额保护，不增加“信息是否足够”的模型判断或规划阶段。执行中的 Boundary 继续复用稳定披露范围。
+
 ## 要解决的问题
 
 Supervisor 应当是 root 编排循环中的决策者：Entry 根据 goal 建立执行计划；后续每次被调用时，只从 root 当前 main messages 读取对话和执行证据，判断结果是否对齐既定 goal 和当前任务，应该采纳推进还是继续完善。Capability subagent 正常返回的结果先作为现有 Announce 消息进入 main，无需等到验收。root 负责落实决定并记录新的事实。Supervisor 不因新的执行结果而自行改变目标或重写计划；需要变更时直接询问用户。

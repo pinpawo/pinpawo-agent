@@ -107,7 +107,7 @@ export type OrchestratorConfig = {
   runSupervisorRunner?: RunSupervisorRunner;
   /**
    * Maximum Capability discovery model turns per Supervisor input. Defaults to 2.
-   * Parallel capability_search calls in one model response count as one round.
+   * Parallel capability_details calls in one model response count as one round.
    */
   runSupervisorMaxSearchRounds?: number;
   /**

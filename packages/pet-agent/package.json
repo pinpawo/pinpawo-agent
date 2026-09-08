@@ -43,7 +43,7 @@
     "eval:langfuse:tool-review-reject": "node --env-file=.env --import tsx/esm evals/scripts/run-langfuse-tool-review-reject.eval.ts",
     "eval:route": "node --env-file=.env --import tsx/esm evals/orchestrator-route.eval.ts",
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",
-    "eval:supervisor-search": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-search.eval.ts",
+    "eval:supervisor-details": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-details.eval.ts",
     "eval:supervisor-boundary": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-boundary.eval.ts",
     "eval:subagent": "node --env-file-if-exists=.env --import tsx/esm evals/subagent.eval.ts",
     "eval:langfuse:subagent": "node --env-file-if-exists=.env --import tsx/esm evals/subagent.eval.ts",

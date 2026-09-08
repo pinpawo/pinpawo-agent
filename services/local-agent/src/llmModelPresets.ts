@@ -231,6 +231,26 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     ],
   },
   {
+    key: 'deepseek-flash-vision',
+    label: 'DeepSeek V4 Flash Vision (Experimental)',
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash-vision-exp',
+    baseUrl: 'https://api.deepseek.com',
+    contextWindowTokens: 1_000_000,
+    maxOutputTokens: 384_000,
+    structuredOutputMethod: 'functionCalling',
+    inputModalities: ['text', 'image'],
+    thinkingControl: 'thinking_type',
+    aliases: [
+      'deepseek-v4-flash-vision-exp',
+    ],
+    officialDocs: [
+      'https://api-docs.deepseek.com/quick_start/pricing',
+      'https://api-docs.deepseek.com/guides/vision',
+      'https://api-docs.deepseek.com/guides/json_mode',
+    ],
+  },
+  {
     key: 'gemini',
     label: 'Gemini 3.5 Flash',
     provider: 'google',

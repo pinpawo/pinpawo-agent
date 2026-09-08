@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import {
-  buildOrchestratorTurnInput,
+  buildOrchestratorRunInput,
   createOrchestratorGraph,
 } from '../src/agent/createAgentRuntime';
 import type { AgentModels } from '../src/types/agent';
@@ -463,7 +463,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
     checkpoint: checkpointer,
   });
   const compiled = await graph;
-  const turnInput = buildOrchestratorTurnInput([new HumanMessage(userMessage)]);
+  const turnInput = buildOrchestratorRunInput([new HumanMessage(userMessage)]);
   const capabilityList = resolveCapabilityList(inputs.capability_pack);
   const allowedCapabilityNames = Array.isArray(inputs.allowed_capability_names)
     ? inputs.allowed_capability_names.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)

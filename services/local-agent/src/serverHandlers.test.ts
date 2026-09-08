@@ -533,7 +533,7 @@ test('model selection is rejected while the active session is running', async ()
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
-    runChat: async () => {
+    runAgentTurn: async () => {
       started.resolve();
       await release.promise;
       return { status: 'interrupted' };
@@ -620,7 +620,7 @@ test('completion snapshot does not reintroduce a settled active run', async () =
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
-    runChat: async () => ({ status: 'completed', reply: 'done' }),
+    runAgentTurn: async () => ({ status: 'completed', reply: 'done' }),
   });
 
   try {
@@ -693,7 +693,7 @@ test('model selection blocks a chat admitted by another peer until the selection
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
-    runChat: async () => {
+    runAgentTurn: async () => {
       chatStartCount += 1;
       chatStarted.resolve();
       await releaseChat.promise;
@@ -859,7 +859,7 @@ test('admitted images gate model selection through the transcript', async () => 
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       providerMessage = await options.prepareUserMessage?.();
       if (providerMessage) {
         persistedMessages.push(providerMessage as BaseMessage);
@@ -997,7 +997,7 @@ test('text-only selected profile rejects image admission before graph invocation
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       await options.prepareUserMessage?.();
       graphInvocations += 1;
       return { status: 'interrupted' };

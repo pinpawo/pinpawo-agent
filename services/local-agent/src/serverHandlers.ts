@@ -56,10 +56,6 @@ export type ServerHandlerOptions = {
   runAgentTurn?: (
     options: AgentSessionTurnOptions,
   ) => Promise<AgentSessionTurnResult>;
-  /** @deprecated Use runAgentTurn. */
-  runChat?: (
-    options: AgentSessionTurnOptions,
-  ) => Promise<AgentSessionTurnResult>;
   /** Publish one run event to every observer of the resident Agent Session. */
   publishRuntimeEvent?: (origin: ServerPeer, event: AgentRuntimeEvent) => void;
   /** Optional Host-owned run control used by resident headless inputs. */
@@ -125,11 +121,7 @@ export function createLocalServerHandlers(
     publishRuntimeEvent,
     ...(options.interruptHostRun ? { interruptHostRun: options.interruptHostRun } : {}),
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
-    ...(options.runAgentTurn
-      ? { runAgentTurn: options.runAgentTurn }
-      : options.runChat
-        ? { runChat: options.runChat }
-        : {}),
+    ...(options.runAgentTurn ? { runAgentTurn: options.runAgentTurn } : {}),
   });
   const sessionCommands = new ServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.

@@ -20,7 +20,7 @@ import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { MemorySaver } from '@langchain/langgraph';
 import { z } from 'zod';
 import {
-  buildOrchestratorTurnInput,
+  buildOrchestratorRunInput,
   compileAgentRegistry,
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
@@ -536,7 +536,7 @@ async function runCase(params: {
     for (const turn of testCase.input.turns) {
       activeTurn = turn;
       finalState = await graph.invoke(
-        buildOrchestratorTurnInput([new HumanMessage(turn.userMessage)]),
+        buildOrchestratorRunInput([new HumanMessage(turn.userMessage)]),
         { context: { workdir: '/eval/workspace', systemPromptSections: [{ id: 'eval:environment', content: 'Controlled lifecycle composition evaluation.' }] },
           configurable: {
             thread_id: threadId,

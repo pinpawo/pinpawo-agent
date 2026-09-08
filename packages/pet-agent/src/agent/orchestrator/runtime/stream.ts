@@ -1,8 +1,6 @@
 import type { OrchestratorGraph } from './graph';
 
 export type OrchestratorGraphStream = AsyncIterable<unknown>;
-/** @deprecated Use OrchestratorGraphStream. */
-export type OrchestratorTokenUsageStream = OrchestratorGraphStream;
 
 export function streamOrchestratorGraph(
   graph: OrchestratorGraph,
@@ -16,6 +14,3 @@ export function streamOrchestratorGraph(
     }
   })();
 }
-
-/** @deprecated Use streamOrchestratorGraph. */
-export const streamOrchestratorGraphWithTokenUsage = streamOrchestratorGraph;

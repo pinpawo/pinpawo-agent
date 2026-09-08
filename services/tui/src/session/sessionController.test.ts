@@ -1361,3 +1361,29 @@ test('delegation continuation sends resume_active and permits an empty paused re
   });
   controller.stop();
 });
+
+test('ordinary replies continue unfinished work while an explicit new-task choice supersedes it', () => {
+  for (const transition of [undefined, 'supersede_active'] as const) {
+    let connection!: FakeConnection;
+    const ids = ['snapshot', 'chat'];
+    const controller = new TuiSessionController({
+      connectionFactory: (handlers) => (connection = new FakeConnection(handlers)),
+      requestIdFactory: () => ids.shift() ?? 'unexpected',
+    });
+    controller.start();
+    connection.open();
+    connection.receive({
+      type: 'session.snapshot.result', requestId: 'snapshot',
+      snapshot: createAgentSessionSnapshot({
+        sessionId: 'chat:one', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null,
+        currentPlan: { items: [{ id: 'd1', capability: 'general', task: 'Publish report', status: 'active' }] },
+      }),
+    });
+    assert.deepEqual(controller.submitChat('Use the staging destination.', [], transition), { ok: true, requestId: 'chat' });
+    assert.deepEqual(connection.sent.at(-1), {
+      type: 'chat_request', requestId: 'chat', message: 'Use the staging destination.',
+      activeDelegationTransition: transition ?? 'resume_active',
+    });
+    controller.stop();
+  }
+});

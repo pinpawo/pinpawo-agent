@@ -59,7 +59,7 @@ function entryAnswerModel(
     invoke: async (messages: BaseMessage[]) => {
       onAnswerInvoke?.(messages);
       resultCalls += 1;
-      return new AIMessage('当前没有可执行该任务的 Capability。');
+      return new AIMessage('当前没有可用的 Capability。');
     },
   } as unknown as BaseChatModel;
   return {
@@ -124,7 +124,9 @@ test('Entry Answer returns an ordinary reply without invoking Supervisor', async
     runSupervisorRunner: {
       async invoke() {
         plannerCalls += 1;
-        return { action: 'unavailable', tasks: [] };
+        return {
+          reply: '当前没有可用的 Capability。',
+        };
       },
     },
   } as OrchestratorConfig);
@@ -152,8 +154,7 @@ test('plan_request routes to Supervisor without persisting control messages', as
       async invoke(input) {
         supervisorInputs.push(input);
         return {
-          action: 'unavailable',
-          tasks: [],
+          reply: '当前没有可用的 Capability。',
         };
       },
     },
@@ -165,7 +166,7 @@ test('plan_request routes to Supervisor without persisting control messages', as
     invokeConfig(),
   );
 
-  assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 1 });
+  assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
   assert.equal(supervisorInputs[0]?.userRequest, request);
   assert.equal(supervisorInputs[0]?.messages.some((message) => message.content === request), true);
   assert.equal(result.runUserRequest, request);
@@ -174,7 +175,7 @@ test('plan_request routes to Supervisor without persisting control messages', as
     AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
   )), false);
-  assert.equal(result.messages.at(-1)?.content, '当前没有可执行该任务的 Capability。');
+  assert.equal(result.messages.at(-1)?.content, '当前没有可用的 Capability。');
 });
 
 test('Entry Answer preserves the current textual HumanMessage exactly', async () => {
@@ -185,7 +186,9 @@ test('Entry Answer preserves the current textual HumanMessage exactly', async ()
     runSupervisorRunner: {
       async invoke(input) {
         plannerRequest = input.userRequest;
-        return { action: 'unavailable', tasks: [] };
+        return {
+          reply: '当前没有可用的 Capability。',
+        };
       },
     },
   });
@@ -209,7 +212,9 @@ test('Entry Answer resolves a continuation utterance into the goal it refers bac
     runSupervisorRunner: {
       async invoke(input) {
         plannerRequest = input.userRequest;
-        return { action: 'unavailable', tasks: [] };
+        return {
+          reply: '当前没有可用的 Capability。',
+        };
       },
     },
   });
@@ -288,7 +293,6 @@ test('Entry Answer receives an accepted delegation result as execution data, not
     runId: 'run-1',
     announceMessageId: 'announce-1',
     task: '检查仓库状态',
-    completionReason: 'natural',
     result: 'EXECUTED_RESULT_MARKER',
     createdAt: '2026-08-23T00:00:00.000Z',
   });
@@ -325,7 +329,7 @@ test('Entry Answer retries when the model announces execution instead of calling
         });
       },
     }),
-    invoke: async () => new AIMessage('当前没有可执行该任务的 Capability。'),
+    invoke: async () => new AIMessage('当前没有可用的 Capability。'),
   } as unknown as BaseChatModel;
 
   let plannerRequest = '';
@@ -334,7 +338,9 @@ test('Entry Answer retries when the model announces execution instead of calling
     runSupervisorRunner: {
       async invoke(input) {
         plannerRequest = input.userRequest;
-        return { action: 'unavailable', tasks: [] };
+        return {
+          reply: '当前没有可用的 Capability。',
+        };
       },
     },
   });
@@ -373,20 +379,19 @@ test('Entry Answer leaves an ordinary reply untouched', async () => {
   assert.deepEqual(scripted.counts(), { boundCalls: 1, resultCalls: 0 });
 });
 
-
 test('root invocation context reaches direct Entry replies and final Answer without node plumbing', async () => {
   for (const mode of ['direct', 'plan'] as const) {
     const seen: BaseMessage[][] = [];
     const scripted = entryAnswerModel(mode, messages => seen.push(messages), undefined, messages => seen.push(messages));
     const graph = createOrchestratorGraph({
       models: { act: scripted.model, answer: scripted.model },
-      runSupervisorRunner: { async invoke() { return { action: 'unavailable', tasks: [] }; } },
+      runSupervisorRunner: { async invoke() { return { reply: 'Unavailable.' }; } },
     });
     const common = [{ id: 'host:pet', content: randomUUID() }, { id: 'host:extra', content: randomUUID() }];
     await runAgent(graph, {
       messages: [new HumanMessage('Handle this request.')], context: { systemPromptSections: common },
     });
-    assert.equal(seen.length, mode === 'plan' ? 2 : 1);
+    assert.equal(seen.length, 1);
     for (const messages of seen) {
       for (const section of common) assert.equal(messages[0].text.split(section.content).length - 1, 1);
     }

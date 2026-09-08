@@ -1,3 +1,5 @@
+import { HumanMessage } from '@langchain/core/messages';
+import { setAgentMessageMetadata } from '../messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
@@ -17,8 +19,6 @@ import {
 } from './review/reviewAuthorizations';
 import type {
   OrchestratorRuntimeFailure,
-  SupervisorRouteOutcome,
-  SupervisorUserInputRequest,
 } from './runSupervisor/protocol';
 import type {
   RunSupervisorSessionState,
@@ -77,11 +77,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runLatestDelegationOutcome: Annotation<SupervisorRouteOutcome | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runUserInputRequest: Annotation<SupervisorUserInputRequest | null>({
+  runSupervisorReply: Annotation<string | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -133,8 +129,7 @@ export type OrchestratorRunState = Pick<
   | 'runUserRequest'
   | 'runDelegationSummaries'
   | 'runIterationCount'
-  | 'runLatestDelegationOutcome'
-  | 'runUserInputRequest'
+  | 'runSupervisorReply'
   | 'runRuntimeFailure'
   | 'runTerminalError'
   | 'runActiveDelegationTransition'
@@ -158,8 +153,7 @@ export function buildRunStateReset(
     runUserRequest: null,
     runDelegationSummaries: [],
     runIterationCount: 0,
-    runLatestDelegationOutcome: null,
-    runUserInputRequest: null,
+    runSupervisorReply: null,
     runRuntimeFailure: null,
     runTerminalError: null,
     runActiveDelegationTransition:
@@ -175,10 +169,17 @@ export function buildOrchestratorRunInput(
   options: BuildOrchestratorRunOptions = {},
 ) {
   const reset = buildRunStateReset(options);
+  messages = messages.map((message) => message._getType() === 'human'
+    ? setAgentMessageMetadata(new HumanMessage({ ...message, content: message.content }), { runId: reset.runId })
+    : message);
   if (options.activeDelegationTransition === 'resume_active') {
     // Preserve an interrupted prior run's session until prepare can extract
     // only its canonical plan into a fresh-run continuation seed.
-    const { runSupervisorSession: _priorRunSupervisorSession, ...resumeReset } = reset;
+    const {
+      runSupervisorSession: _priorRunSupervisorSession,
+      taskPauseInterrupt: _priorTaskPauseInterrupt,
+      ...resumeReset
+    } = reset;
     return {
       messages,
       ...resumeReset,

@@ -6,6 +6,7 @@ import { readLatestHumanRequest } from '../conversationMessages';
 import type { OrchestratorStateType } from '../state';
 import type { RunNextDelegation, TaskActiveDelegation } from '../types';
 import { clipForPrompt } from '../utils';
+import { readLatestAnnounce } from '../delegation';
 
 const RESUME_GUIDANCE_MAX_CHARS = 2_000;
 
@@ -41,7 +42,10 @@ export function applyActiveDelegationTransition(
 ): Partial<OrchestratorStateType> {
   const activeDelegation = state.taskActiveDelegation;
   if (!activeDelegation) {
-    return {};
+    const continuation = state.taskRunContinuation;
+    return state.runActiveDelegationTransition === 'resume_active' && continuation
+      ? { traceId: continuation.traceId, runUserRequest: continuation.userRequest, runSupervisorSession: null }
+      : { taskRunContinuation: null };
   }
 
   if (state.runActiveDelegationTransition === 'supersede_active') {
@@ -56,7 +60,7 @@ export function applyActiveDelegationTransition(
       runNextDelegation: null,
       runSupervisorSession: null,
       taskRunContinuation: null,
-      runLatestDelegationOutcome: null,
+      runSupervisorReply: null,
       runRuntimeFailure: 'checkpoint_incompatible',
     };
   }
@@ -81,7 +85,9 @@ export function applyActiveDelegationTransition(
     runNextDelegation,
   );
 
-  if (activeDelegation.status === 'awaiting_decision') {
+  if (activeDelegation.status === 'awaiting_decision' && readLatestAnnounce(state.messages, {
+    lane: activeDelegation.lane, runId: activeDelegation.runId, delegationId: activeDelegation.id,
+  })) {
     return {
       traceId: activeDelegation.traceId,
       runSupervisorSession: null,
@@ -111,7 +117,7 @@ export function applyActiveDelegationTransition(
       resultPreview: null,
     },
     runDelegationSummaries: resumedSummaries,
-    runLatestDelegationOutcome: null,
+    runSupervisorReply: null,
   };
 }
 

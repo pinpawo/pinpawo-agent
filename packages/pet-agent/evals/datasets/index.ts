@@ -10,7 +10,6 @@ import { permissionControlBasicsDataset } from './permission-control-basics.ts';
 import { toolReviewRejectRuntimeDataset } from './tool-review-reject-runtime.ts';
 
 export const agentEvalDatasets = [
-  answerBehaviorBasicsDataset,
   orchestratorRouteDataset,
   orchestratorFlowMockSubagentDataset,
   capabilityPlanningBasicsDataset,
@@ -24,7 +23,6 @@ export const agentEvalDatasets = [
 ] as const;
 
 export {
-  answerBehaviorBasicsDataset,
   capabilityPlanningBasicsDataset,
   contextSynthesisBasicsDataset,
   delegationControlBasicsDataset,
@@ -36,4 +34,3 @@ export {
   permissionControlBasicsDataset,
   toolReviewRejectRuntimeDataset,
 };
-import { answerBehaviorBasicsDataset } from './answer-behavior-basics.ts';

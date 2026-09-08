@@ -294,7 +294,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
     maxIterations: 4,
   });
 
-  assert.equal(result.completionReason, 'natural');
+  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.equal(result.announceMessageId, result.messages.at(-1)?.id);
   const summary = result.messages.find(
     (message) => message.additional_kwargs?.lc_source === 'summarization',
@@ -340,7 +340,7 @@ test('context summarization renders image payloads through LangChain text projec
     maxIterations: 4,
   });
 
-  assert.equal(result.completionReason, 'natural');
+  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.ok(
     result.messages.some(
       (message) => message.additional_kwargs?.lc_source === 'summarization',
@@ -391,7 +391,7 @@ test('summarization preserves the real image when it keeps the message', async (
     maxIterations: 4,
   });
 
-  assert.equal(result.completionReason, 'natural');
+  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.ok(
     result.messages.some(
       (message) => message.additional_kwargs?.lc_source === 'summarization',
@@ -526,7 +526,7 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
     maxIterations: 4,
   });
 
-  assert.equal(result.completionReason, 'natural');
+  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.equal(result.announceMessageId, result.messages.at(-1)?.id);
   // The final message is the fresh model answer, not the stale marker.
   assert.equal(readSubagentGuardStopReason(result.messages.at(-1) as BaseMessage), null);
@@ -564,7 +564,7 @@ test('createSubagent default iteration budget is a soft model-call guard', async
     // no maxIterations -> default budget
   });
 
-  assert.equal(result.completionReason, 'limit_reached');
+  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.equal(result.announceMessageId, progress.id);
   assert.ok(
     model.callCount > 20,
@@ -591,6 +591,6 @@ test('createSubagent reports no announce when a limited run has no AI text deliv
     maxIterations: 1,
   });
 
-  assert.equal(result.completionReason, 'limit_reached');
+  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.equal(result.announceMessageId, null);
 });

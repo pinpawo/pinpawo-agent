@@ -1,5 +1,6 @@
 import { HumanMessage } from '@langchain/core/messages';
 import { interrupt } from '@langchain/langgraph';
+import { setAgentMessageMetadata } from '../../../messages';
 import { pauseTaskInterrupt } from '../../interrupt';
 import type { OrchestratorStateType } from '../../state';
 import { applyActiveDelegationTransition } from '../activeDelegationTransition';
@@ -20,7 +21,10 @@ import { applyActiveDelegationTransition } from '../activeDelegationTransition';
  */
 export async function pauseGate(state: OrchestratorStateType) {
   const resumed = pauseTaskInterrupt.resume(interrupt(pauseTaskInterrupt.interaction()));
-  const guidanceMessage = resumed.guidance ? new HumanMessage(resumed.guidance) : null;
+  const guidanceMessage = resumed.guidance ? setAgentMessageMetadata(
+    new HumanMessage(resumed.guidance),
+    { traceId: state.taskActiveDelegation?.traceId ?? state.traceId, runId: state.runId },
+  ) : null;
   const transition = applyActiveDelegationTransition({
     ...state,
     ...(guidanceMessage ? { messages: [...state.messages, guidanceMessage] } : {}),

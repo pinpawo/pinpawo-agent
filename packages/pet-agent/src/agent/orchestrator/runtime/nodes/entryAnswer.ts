@@ -9,6 +9,7 @@ import {
   observeAgentMessageSelection,
   queryAgentMessages,
   stampAgentMessageCreatedAt,
+  setAgentMessageMetadata,
 } from '../../../messages';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
@@ -202,7 +203,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
     }
     return {
-      messages: [stampAgentMessageCreatedAt(response)],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(response), { traceId: state.traceId })],
     };
   };
 

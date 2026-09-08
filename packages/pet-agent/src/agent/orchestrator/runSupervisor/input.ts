@@ -1,5 +1,7 @@
+import { hasRunHumanMessage } from '../conversationMessages';
 import {
   queryAgentMessages,
+  getAgentMessageMetadata,
   type AgentMessageSelectionDiagnostics,
 } from '../../messages';
 import {
@@ -48,8 +50,8 @@ export function buildRunSupervisorInput(params: {
   }>;
 } {
   const { nodeInput, workspace, supervisorSession } = params;
-  if (isSupervisorDispatch(nodeInput)) {
-    const state = nodeInput.supervisorState;
+  if (isSupervisorDispatch(nodeInput) || !nodeInput.taskActiveDelegation) {
+    const state = isSupervisorDispatch(nodeInput) ? nodeInput.supervisorState : supervisorRuntimeStateFromRoot(nodeInput);
     const mainSelection = queryAgentMessages(nodeInput.messages).main().select();
     return {
       state,
@@ -59,14 +61,13 @@ export function buildRunSupervisorInput(params: {
       }],
       input: {
         mode: 'entry',
-        inputId: `run_started:${state.runId}`,
+        inputId: hasRunHumanMessage(mainSelection.messages, state.runId)
+          ? `human:${state.runId}` : `run_started:${state.runId}`,
         traceId: state.traceId,
         runId: state.runId,
         userRequest: state.runUserRequest,
         messages: mainSelection.messages,
         activeDelegation: null,
-        latestAnnounce: null,
-        announceAttempts: [],
         remainingPlan: supervisorSession.plan,
         workspace,
         capabilityDisclosure: supervisorSession.capabilityDisclosure,
@@ -89,25 +90,20 @@ export function buildRunSupervisorInput(params: {
     runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
   };
-  const mainSelection = queryAgentMessages(state.messages).main().select();
-  const delegationSelection = queryAgentMessages(state.messages)
-    .delegation(activeScope)
-    .select();
-  const announceAttempts = delegationSelection.messages
-    .flatMap((message) => {
-      const announce = getDelegationAnnounce(message);
-      if (!announce) return [];
-      return [{
-        messageId: announce.announceMessageId,
-        completionReason: announce.completionReason,
-        result: announce.result,
-      }];
-    });
-  const latestAnnounce = announceAttempts.at(-1) ?? null;
+  const mainSelection = queryAgentMessages(state.messages.filter((message) =>
+    getAgentMessageMetadata(message).traceId === state.traceId)).main().select();
+  const latestAnnounce = mainSelection.messages.flatMap((message) => {
+    const announce = getDelegationAnnounce(message);
+    return announce && announce.sourceLane === activeScope.lane
+      && announce.runId === activeScope.runId && announce.delegationId === activeScope.delegationId
+      ? [announce] : [];
+  }).at(-1);
   // resume_active is a fresh Supervisor input only before this run executes a
   // Capability. Later iterations use the identity of their latest Announce.
   const freshTurn = state.runActiveDelegationTransition === 'resume_active'
-    && state.runIterationCount === 0;
+    && state.runIterationCount === 0
+    && hasRunHumanMessage(mainSelection.messages, state.runId);
+  if (!latestAnnounce && !freshTurn) throw new Error('Boundary Supervisor requires typed result evidence or fresh user input.');
   const supervisorState = supervisorRuntimeStateFromRoot(state);
   return {
     state: supervisorState,
@@ -116,17 +112,13 @@ export function buildRunSupervisorInput(params: {
         location: 'run_supervisor.boundary.main',
         diagnostics: mainSelection.diagnostics,
       },
-      {
-        location: 'run_supervisor.boundary.delegation',
-        diagnostics: delegationSelection.diagnostics,
-      },
+
     ],
     input: {
       mode: 'boundary',
       inputId: freshTurn
         ? `human:${state.runId}`
-        : `announce:${activeDelegation.id}:${latestAnnounce?.messageId
-          ?? `${activeDelegation.runId}:${String(state.runIterationCount)}`}`,
+        : `announce:${activeDelegation.id}:${latestAnnounce!.announceMessageId}`,
       traceId: state.traceId,
       runId: state.runId,
       userRequest: supervisorState.runUserRequest,
@@ -137,8 +129,6 @@ export function buildRunSupervisorInput(params: {
         capability,
         task: activeDelegation.task,
       },
-      latestAnnounce,
-      announceAttempts,
       remainingPlan: supervisorSession.plan,
       workspace,
       capabilityDisclosure: supervisorSession.capabilityDisclosure,

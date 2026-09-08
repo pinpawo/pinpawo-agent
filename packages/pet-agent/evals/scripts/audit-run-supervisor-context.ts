@@ -9,7 +9,7 @@ import type { StructuredTool } from '@langchain/core/tools';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import type { CapabilityDocumentWorkspace } from '../../src/agent/orchestrator/runSupervisor/documentWorkspace.ts';
 import {
-  createRunSupervisorSearchTool,
+  createRunSupervisorDetailsTool,
   type RunSupervisorCapabilityDocument,
 } from '../../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
 import type {
@@ -75,7 +75,7 @@ const documents: RunSupervisorCapabilityDocument[] = [{
 
 const disclosure = createCapabilityDisclosureState({
   workspace,
-  maxEmptySearchRounds: 2,
+
   seedCapabilityNames: ['repository'],
 });
 
@@ -87,7 +87,6 @@ const acceptedAnnounce = new DelegationAnnounceMessage({
   runId: 'audit-prior-run',
   announceMessageId: 'audit-prior-result',
   task: 'Inspect the issue and identify the required change.',
-  completionReason: 'natural',
   result: 'Inspection completed and identified the affected module.',
   createdAt: '2026-01-01T00:00:00.000Z',
 });
@@ -123,8 +122,7 @@ function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
       userRequest,
       messages,
       activeDelegation: null,
-      latestAnnounce: null,
-      announceAttempts: [],
+
       remainingPlan,
       workspace,
       capabilityDisclosure: disclosure,
@@ -137,27 +135,22 @@ function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
     traceId: 'audit-trace',
     runId: 'audit-run',
     userRequest,
-    messages,
+    messages: [...messages, ...[{
+      messageId: 'audit-active-result-1',
+      result: 'Implementation started, but verification has not run yet.',
+    }, {
+      messageId: 'audit-active-result-2',
+      result: 'The change is implemented and focused tests pass.',
+    }].map((attempt) => new DelegationAnnounceMessage({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:repository' as const, delegationId: 'audit-active-delegation', runId: 'audit-active-run', task: 'Implement and verify the identified change.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    }))],
     activeDelegation: {
       delegationId: 'audit-active-delegation',
       runId: 'audit-active-run',
       capability: 'repository',
       task: 'Implement and verify the identified change.',
     },
-    latestAnnounce: {
-      messageId: 'audit-active-result-2',
-      completionReason: 'natural',
-      result: 'The change is implemented and focused tests pass.',
-    },
-    announceAttempts: [{
-      messageId: 'audit-active-result-1',
-      completionReason: 'limit_reached',
-      result: 'Implementation started, but verification has not run yet.',
-    }, {
-      messageId: 'audit-active-result-2',
-      completionReason: 'natural',
-      result: 'The change is implemented and focused tests pass.',
-    }],
+
     remainingPlan,
     workspace,
     capabilityDisclosure: disclosure,
@@ -197,11 +190,11 @@ async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
   const projectedMessages = await captureProviderHistory(mainSelection.messages);
-  const searchTool = createRunSupervisorSearchTool(async () => ({
+  const searchTool = createRunSupervisorDetailsTool(async () => ({
     ok: true,
     data: { entries: [] },
   }));
-  const tools = [searchTool, ...createSupervisorCommandTools(mode)];
+  const tools = [...(mode === 'entry' ? [searchTool] : []), ...createSupervisorCommandTools(mode)];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);
   console.log('\n### SYSTEM');

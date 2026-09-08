@@ -117,7 +117,7 @@ async function main() {
       console.log(`Turn ${index + 1}: ${request}`);
       console.log(`Tool calls: ${calls.calls.map(({ name }) => name).join(' -> ') || '(none)'}`);
       console.log(`Response: ${finalMessage ? readMessageText(finalMessage) : '(empty)'}`);
-      if (result.completionReason !== 'natural' || !finalMessage || !readMessageText(finalMessage).trim()) {
+      if (!result.announceMessageId || !finalMessage || !readMessageText(finalMessage).trim()) {
         throw new Error(`Turn ${index + 1}: missing natural final response.`);
       }
       if (index < 2) {

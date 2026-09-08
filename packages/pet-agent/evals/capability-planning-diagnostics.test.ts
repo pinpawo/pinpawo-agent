@@ -4,18 +4,18 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { createCapabilitySearchDiagnosticsCollector } from './capability-planning-diagnostics.ts';
+import { createCapabilityDetailsDiagnosticsCollector } from './capability-planning-diagnostics.ts';
 
 test('capability search diagnostics report traced calls, rounds, queries, and results', async () => {
-  const collector = createCapabilitySearchDiagnosticsCollector();
+  const collector = createCapabilityDetailsDiagnosticsCollector();
   await collector.callback.handleToolStart?.(
-    { name: 'capability_search' } as never,
-    JSON.stringify({ terms: ['kanban', 'task registration'] }),
+    { name: 'capability_details' } as never,
+    JSON.stringify({ names: ['kanban', 'task registration'] }),
     'search-run-1',
     'supervisor-run',
     [],
     {},
-    'capability_search',
+    'capability_details',
   );
   await collector.callback.handleToolEnd?.(new Command({
     update: {
@@ -32,18 +32,18 @@ test('capability search diagnostics report traced calls, rounds, queries, and re
         content: '',
         tool_calls: [{
           id: 'search-call-1',
-          name: 'capability_search',
-          args: { terms: ['kanban', 'task registration'] },
+          name: 'capability_details',
+          args: { names: ['kanban', 'task registration'] },
         }],
       }),
     }]],
   } as never, 'llm-run-1');
 
   assert.deepEqual(collector.read(), {
-    searchCalls: 1,
-    searchRounds: 1,
-    searchQueries: [['kanban', 'task registration']],
-    searchResults: [{
+    detailCalls: 1,
+    detailRounds: 1,
+    detailRequests: [['kanban', 'task registration']],
+    detailResults: [{
       ok: true,
       data: { matches: [{ path: 'studio/SKILL.md' }] },
     }],
@@ -51,22 +51,22 @@ test('capability search diagnostics report traced calls, rounds, queries, and re
 });
 
 test('capability search diagnostics recognize real tool callback events', async () => {
-  const collector = createCapabilitySearchDiagnosticsCollector();
-  const search = tool(async ({ terms }) => JSON.stringify({ ok: true, terms }), {
-    name: 'capability_search',
+  const collector = createCapabilityDetailsDiagnosticsCollector();
+  const search = tool(async ({ names: terms }) => JSON.stringify({ ok: true, names: terms }), {
+    name: 'capability_details',
     description: 'Search test capabilities.',
-    schema: z.object({ terms: z.array(z.string()) }),
+    schema: z.object({ names: z.array(z.string()) }),
   });
 
   await search.invoke(
-    { terms: ['kanban'] },
+    { names: ['kanban'] },
     { callbacks: [collector.callback] },
   );
 
   assert.deepEqual(collector.read(), {
-    searchCalls: 1,
-    searchRounds: 0,
-    searchQueries: [['kanban']],
-    searchResults: [{ ok: true, terms: ['kanban'] }],
+    detailCalls: 1,
+    detailRounds: 0,
+    detailRequests: [['kanban']],
+    detailResults: [{ ok: true, names: ['kanban'] }],
   });
 });

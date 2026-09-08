@@ -168,7 +168,6 @@ for (let repeat = 1; repeat <= repeats; repeat += 1) {
         firstAttemptSucceeded: calls[0]?.ok === true,
         validV4A: calls.every((call) => call.validV4A),
         calls,
-        completionReason: result.completionReason,
       });
     } finally {
       process.chdir(originalCwd);

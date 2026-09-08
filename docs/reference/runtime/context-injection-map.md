@@ -128,8 +128,8 @@ draft for issue #755. The implementation uses the single-proposal surface below.
 The lifetime and tool-scope table includes the 2026-09-06 target clarification:
 the committed plan and prepared disclosure stay stable during execution, and
 conversation plus execution evidence arrive only through main messages.
-Boundary plan rewrites, discovery, and separate private result extraction still
-exist in current code; the target changes below are pending implementation.
+Execution Boundaries cannot rewrite the plan or discover more Capabilities.
+A new user supplement allows confirmed adjustments before execution resumes.
 Sources:
 `runtime/nodes/runSupervisor.ts` (dispatch),
 `runSupervisor/agent.ts` (assembly),
@@ -141,29 +141,26 @@ Sources:
 | clean conversation | projected per invocation / `HISTORY` | canonical main conversation with typed result facts | current canonical main conversation including unaccepted Announces |
 | session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
-| tools | invocation projection / `INSTRUCTION` | `capability_search`, `submit_plan` | execution: `continue_current`, `accept_result`; new-run user input may require discovery before execution resumes |
+| tools | invocation projection / `INSTRUCTION` | `capability_details`, `submit_plan` | execution: `review_current`; new-run user input may require discovery before execution resumes |
 
-Entry initializes a clean run-scoped Supervisor session. In the target, root
+Entry initializes a clean run-scoped Supervisor session. Root
 publishes normal Capability results directly into main before Boundary, including
 partial results. Supervisor associates attempts using existing Announce identities
 and chronology, without reading the private delegation scope or receiving another
-result body. Current code still builds `announceAttempts` and `latestAnnounce`
-through that private query; remove this separate result projection. Projection
+result body. Projection
 never changes canonical messages. Private Capability Human/AI/Tool messages remain
 excluded, and publication must not be interpreted as task acceptance.
 The remaining tail expresses task progress within the established plan. Boundary
 checks execution results against the goal and current task; it asks the user
 before changing task content, scope, or order. Task progress does not violate
 `RUN-STABLE`. Plan prose is data, not an instruction override or evidence of
-completion. Current input builders still label the tail as a proposal requiring
-revalidation; that wording must converge on this restricted meaning.
+completion. The tail is the established plan, stable until user confirmation.
 
-The target `continue_current({ feedback?, remainingPlan? })` can apply a
+`review_current({ completed: false, reason, remainingPlan? })` can apply a
 user-confirmed future-plan change while retaining and continuing the active
 delegation. Omission retains the existing tail; an array replaces only future
 tasks, and a confirmed empty array clears those tasks without ending the current
-one. Root commits both effects together. Current code supports feedback only;
-this optional argument and its validation remain to be implemented.
+one. Root commits both effects together.
 
 In the current implementation, Capability disclosure is run-scoped semantic state. It contains every
 Capability whose complete document was disclosed during this run in stable
@@ -171,18 +168,20 @@ order; the configured default is candidate policy rather than an initial
 disclosure. A compact routing manifest initialized from the effective registry
 is projected into each Supervisor invocation. It retains the Toolkit names and
 descriptions resolved from each Capability's compiled `uses`, while complete
-Capability documents remain progressively disclosed. Neither dynamic registry
-facts nor search-round state enter the stable system prompt. A new run resets
-search attempts and revalidates disclosure; resumed root tasks may seed the
+Capability documents remain progressively disclosed. Dynamic registry
+facts do not enter the stable system prompt. A new run revalidates disclosure; resumed root tasks may seed the
 capabilities named by their active and remaining plan.
 
-Currently `capability_search` remains callable in both modes with `tool_choice=auto`. Each ToolMessage
-reports the post-call disclosure state, remaining empty rounds, and a planning
-objective. After discovery closes, later calls return the stable
-`capability_search_round_limit_exceeded` result instead of changing tool
-availability.
+`capability_details` is callable at Entry and at the first Boundary of a new user
+supplement, with automatic tool choice. It is unavailable during execution. Each ToolMessage
+reports newly provided documents, already provided names and unknown names.
+There is no private search counter, empty-round allowance, disclosure open/closed
+flag, or round-limit response. Parallel reads merge only disclosed names.
+Call counts and timings remain eval diagnostics; byte limits and invocation
+timeouts remain runtime protections.
 
-The target prepares disclosure before execution and reuses it during execution
+The manifest supports planning without a mandatory detail read. Exact-name detail
+reads are optional; they do not search document text. The target prepares any needed disclosure before execution and reuses it during execution
 Boundaries. Needing a different scope leads to a direct question. The user's
 answer enters main with the active delegation retained, and Supervisor can
 prepare documents needed for the explicit adjustment on the new run's first
@@ -245,7 +244,7 @@ limits and incompatible checkpoints have deterministic notices. An empty reply
 without a runtime stop is a protocol error, not a request for a fallback answer.
 
 Natural Supervisor replies retain the active delegation and remaining plan.
-`accept_result({ reply?, remainingPlan? })` accepts the active task before terminal
+`review_current({ completed: true, reason, reply?, remainingPlan? })` accepts the active task before terminal
 cleanup and saves any remaining plan without dispatching it. The existing
 continuation snapshot also supports a remaining plan with no active delegation;
 explicit resume then starts a fresh Entry session.
@@ -346,4 +345,8 @@ ephemeral; Capability's private context maintenance remains subagent-owned.
    all Announces for the current unfinished delegation by existing identity,
    independently of the recent-message suffix.
 
-Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `accept_result` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Both continuation and acceptance may carry an optional user-confirmed future-plan update. Root applies these effects inside its existing `runSupervisor` node.
+
+Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
+
+The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Boundary has one review_current tool: completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.

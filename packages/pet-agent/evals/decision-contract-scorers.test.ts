@@ -17,7 +17,7 @@ test('planning datasets cover entry and boundary distributions', () => {
     (testCase) => testCase.expected.capabilityName === 'general',
   ));
   assert.ok(capabilityPlanningBasicsDataset.cases.some(
-    (testCase) => testCase.expected.result === 'unavailable',
+    (testCase) => testCase.expected.result === 'reply',
   ));
 });
 
@@ -27,11 +27,12 @@ test('an exhausted boundary plan can continue autonomous work or report a real c
       && (testCase.input.remainingPlan ?? []).length === 0,
   );
   const results = new Set(exhaustedBoundaryCases.map((testCase) => testCase.expected.result));
-  assert.ok(results.has('advance_plan'));
-  assert.ok(results.has('continue_current'));
-  assert.ok(results.has('goal_done'));
-  assert.ok(results.has('user_input_required'));
-  assert.ok(results.has('unavailable'));
+  assert.ok(results.has('execute_plan'));
+  assert.ok(results.has('review_current'));
+  const reviews = capabilityPlanningBasicsDataset.cases.filter(({ expected }) => expected.result === 'review_current');
+  assert.deepEqual(new Set(reviews.map(({ expected }) => expected.completed)), new Set([true, false]));
+  assert.ok(results.has('reply'));
+  assert.ok(results.has('reply'));
 });
 
 test('supervisor scorer enforces the mandatory General default candidate', () => {
@@ -57,7 +58,7 @@ test('supervisor scorer reconstructs an unchanged plan from next task plus futur
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'advance_plan',
+    result: 'execute_plan',
     nextTask: materialized.task,
     capabilityName: materialized.capability,
     remainingPlan: [],
@@ -73,7 +74,7 @@ test('supervisor deterministic scorer treats Capability as executor identity', (
   const materialized = testCase.input.remainingPlan?.[0];
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
-    result: 'advance_plan',
+    result: 'execute_plan',
     nextTask: materialized.task,
     capabilityName: 'general',
     remainingPlan: [],

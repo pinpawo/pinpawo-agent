@@ -1,7 +1,5 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import type { SubagentCompletionReason } from '../../../types/subagent';
 import {
-  queryAgentMessages,
   type DelegationMessageScope,
 } from '../../messages';
 import {
@@ -24,7 +22,7 @@ export function selectDelegationAnnounceMessages(
     runId: options.runId,
     delegationId: options.delegationId,
   };
-  const candidates = queryAgentMessages(messages).delegation(scope).select().messages;
+  const candidates = messages;
   return candidates.filter((message) => {
     const announce = getDelegationAnnounce(message);
     if (!announce) return false;
@@ -50,11 +48,4 @@ export function readLatestAnnounce(
 ): DelegationAnnounceData | null {
   const message = selectDelegationAnnounceMessage(messages, options);
   return message ? getDelegationAnnounce(message) : null;
-}
-
-export function readLatestAnnounceCompletionReason(
-  messages: readonly BaseMessage[],
-  options: DelegationAnnounceSelector,
-): SubagentCompletionReason | null {
-  return readLatestAnnounce(messages, options)?.completionReason ?? null;
 }

@@ -2,8 +2,6 @@ import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { ChatOpenAI } from '@langchain/openai';
 import {
-  buildLlmModelKwargs,
-  inferLlmRoleReasoningEffort,
   requiresLlmStreaming,
   resolveLlmGenerationReserveTokens,
 } from './llmModelPresets';
@@ -20,16 +18,9 @@ export function buildLocalAgentModels(
       ? llmConfig.observeModel
       : llmConfig.model;
 
-    const thinking = role === 'answer' || role === 'subagent';
-    const modelKwargs = buildLlmModelKwargs(
-      model,
-      thinking,
-      inferLlmRoleReasoningEffort(model, role),
-    );
-
     return new ChatOpenAI({
       model,
-      // Leave temperature to the provider; thinking follows the role policy.
+      // Leave temperature to the provider; thinking and reasoning effort also use provider defaults.
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,
@@ -38,7 +29,6 @@ export function buildLocalAgentModels(
         : {}),
       streaming: requiresLlmStreaming(model),
       streamUsage: true,
-      modelKwargs,
       configuration: {
         baseURL: llmConfig.baseUrl,
         defaultHeaders: { Authorization: `Bearer ${llmConfig.apiKey}` },

@@ -16,12 +16,8 @@ export type CapabilityPlanningInput = {
 };
 
 export type CapabilityPlanningExpected = {
-  result: 'continue_current'
-    | 'execute_plan'
-    | 'advance_plan'
-    | 'goal_done'
-    | 'user_input_required'
-    | 'unavailable';
+  result: 'review_current' | 'execute_plan' | 'reply';
+  completed?: boolean;
   nextTaskTerms?: string[];
   capabilityName?: string;
   remainingPlan: Array<{ taskTerms: string[]; capability: string }>;
@@ -290,7 +286,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       ],
     },
     expected: {
-      result: 'user_input_required',
+      result: 'reply',
       remainingPlan: [],
       planEffect: 'empty',
       rubberStamp: false,
@@ -329,7 +325,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
     },
     expected: {
-      result: 'advance_plan',
+      result: 'execute_plan',
       nextTaskTerms: ['auth', '重构'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -373,7 +369,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块并验证。' }],
     },
     expected: {
-      result: 'advance_plan',
+      result: 'execute_plan',
       nextTaskTerms: ['auth', '重构', '验证'],
       capabilityName: 'general',
       remainingPlan: [],
@@ -440,7 +436,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
     },
     expected: {
-      result: 'advance_plan',
+      result: 'execute_plan',
       nextTaskTerms: ['报告', '发送', '负责人'],
       capabilityName: 'messaging',
       remainingPlan: [],
@@ -480,7 +476,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       ],
     },
     expected: {
-      result: 'advance_plan',
+      result: 'execute_plan',
       nextTaskTerms: ['auth', '风险', '修复'],
       capabilityName: 'general',
       remainingPlan: [{
@@ -529,7 +525,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       ],
     },
     expected: {
-      result: 'advance_plan',
+      result: 'execute_plan',
       nextTaskTerms: ['当前仓库', '实现', 'issue', '架构演进'],
       capabilityName: 'explore',
       remainingPlan: [],
@@ -706,7 +702,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'unavailable',
+      result: 'reply',
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -747,7 +743,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'advance_plan',
+      result: 'execute_plan',
       nextTaskTerms: ['README', '#587'],
       capabilityName: 'document_writer',
       remainingPlan: [],
@@ -779,7 +775,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       planEffect: 'empty',
       rubberStamp: false,
@@ -811,7 +808,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -853,7 +851,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -887,7 +886,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -921,7 +921,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -955,7 +956,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -989,7 +991,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'continue_current',
+      result: 'review_current',
+      completed: false,
       remainingPlan: [],
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
@@ -1017,7 +1020,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'goal_done',
+      result: 'review_current',
+      completed: true,
       remainingPlan: [],
       planEffect: 'empty',
       rubberStamp: false,
@@ -1044,7 +1048,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'user_input_required',
+      result: 'reply',
       remainingPlan: [],
       planEffect: 'empty',
       rubberStamp: false,
@@ -1052,7 +1056,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Regression from a trace where continue_current replaced the active task and injected an unsupported gap note.',
+      reason: 'Regression from a trace where review_current replaced the active task and injected an unsupported gap note.',
       source: SOURCE_FILE,
     },
   },
@@ -1071,7 +1075,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [],
     },
     expected: {
-      result: 'user_input_required',
+      result: 'reply',
       remainingPlan: [],
       planEffect: 'empty',
       rubberStamp: false,

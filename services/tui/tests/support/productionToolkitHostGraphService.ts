@@ -209,11 +209,16 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
       if (input.mode === 'boundary') {
-        return { action: 'goal_done', tasks: [] };
+        return { completed: true, reason: 'Current task delivery is evidenced.',
+          action: 'review_current',
+          remainingPlan: [],
+          reply: input.userRequest.includes(ATTACHMENT_TOOL_INPUT) ? ATTACHMENT_TOOL_REPLY : GUARDED_HOST_REPLY,
+        };
       }
       const readsAttachment = input.userRequest.includes(ATTACHMENT_TOOL_INPUT);
       return {
         action: 'execute_plan',
+
         tasks: [
           {
             capability: 'general',

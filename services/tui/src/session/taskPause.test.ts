@@ -48,3 +48,14 @@ test('an absent task pause or a Review interrupt returns to ordinary chat', () =
     },
   }), 'ordinary');
 });
+
+test('unfinished work stays ordinary and preserves an explicit choice to start a new task', () => {
+  const waiting = {
+    ...idleSession,
+    currentPlan: { items: [{ id: 'd1', capability: 'general', task: 'Publish report', status: 'active' as const }] },
+  };
+  assert.equal(syncTaskPauseMode('ordinary', waiting), 'ordinary');
+  assert.equal(resumesPausedTaskOnEmptySubmit('ordinary', '', 0), false);
+  assert.equal(syncTaskPauseMode(leaveTaskPauseMode('ordinary'), waiting), 'leaving');
+  assert.equal(syncTaskPauseMode('leaving', { ...waiting, currentPlan: null }), 'ordinary');
+});

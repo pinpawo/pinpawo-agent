@@ -50,7 +50,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
     | 'taskRunContinuation'
     | 'taskActiveDelegation'
     | 'runIterationCount'
-    | 'runLatestDelegationOutcome'
+    | 'runSupervisorReply'
   >;
   assistantMessageCount: number;
   executorCallCount: number;
@@ -70,7 +70,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
     && state.taskRunContinuation === null
     && activeDelegation === null
     && state.runIterationCount === 0
-    && state.runLatestDelegationOutcome === null;
+    && state.runSupervisorReply === null;
   const resumableCheckpoint = state.runNextDelegation === null
     && state.runSupervisorSession === null
     && activeDelegation?.status === 'awaiting_decision'
@@ -78,7 +78,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
     && state.taskRunContinuation.traceId === activeDelegation.traceId
     && state.taskRunContinuation.userRequest === activeDelegation.userRequest
     && state.runIterationCount === 0
-    && state.runLatestDelegationOutcome === null;
+    && state.runSupervisorReply === null;
   const checkpointStateMatches = params.expectedCheckpointState === 'clean'
     ? cleanCheckpoint
     : resumableCheckpoint;
@@ -104,7 +104,7 @@ export function evaluateLifecycleCompositionInvariants(params: {
         taskRunContinuation: state.taskRunContinuation,
         taskActiveDelegation: state.taskActiveDelegation,
         runIterationCount: state.runIterationCount,
-        runLatestDelegationOutcome: state.runLatestDelegationOutcome,
+        runSupervisorReply: state.runSupervisorReply,
       }),
     },
     {

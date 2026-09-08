@@ -1,3 +1,4 @@
+import { hasUnfinishedTask } from './taskPause';
 import {
   applySessionSnapshot,
   reduceSession,
@@ -224,11 +225,13 @@ export class TuiSessionController {
   submitChat(
     message: string,
     attachments: readonly AgentLocalAttachment[] = [],
+    transition?: ActiveDelegationTransition,
   ): SubmitChatResult {
     return this.submitChatWithTransition(
       message,
       attachments,
-      'supersede_active',
+      transition ?? (!this.state.session.pendingInterrupt && hasUnfinishedTask(this.state.session)
+        ? 'resume_active' : 'supersede_active'),
     );
   }
 

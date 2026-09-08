@@ -68,6 +68,7 @@ import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { latestCompletedAssistantReply } from './timeline/timelineModel';
 import {
   isTaskPaused,
+  hasUnfinishedTask,
   leaveTaskPauseMode,
   resumesPausedTaskOnEmptySubmit,
   syncTaskPauseMode,
@@ -622,12 +623,14 @@ renderer.keyInput.on('keypress', (key) => {
   if (
     owner.type === 'composer'
     && key.name === 'escape'
-    && isTaskPaused(taskPauseMode)
+    && !controller.getState().session.activeRun
+    && (isTaskPaused(taskPauseMode) || (!controller.getState().session.pendingInterrupt
+      && hasUnfinishedTask(controller.getState().session)))
   ) {
     key.preventDefault();
     key.stopPropagation();
     taskPauseMode = leaveTaskPauseMode(taskPauseMode);
-    localNotice = 'paused task left · next message starts a new task';
+    localNotice = 'task left · next message starts a new task';
     syncComposerModeUi();
     refreshStatus();
     return;
@@ -1770,7 +1773,7 @@ function copyLatestAssistantReply() {
 function submitChatInput(text: string) {
   const result = isTaskPaused(taskPauseMode)
     ? controller.continuePausedTask(text, attachments)
-    : controller.submitChat(text, attachments);
+    : controller.submitChat(text, attachments, taskPauseMode === 'leaving' ? 'supersede_active' : undefined);
   if (result.ok) {
     if (text.trim() || attachments.length > 0) {
       composerHistory = recordComposerHistoryEntry(composerHistory, text);

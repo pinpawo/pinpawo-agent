@@ -14,7 +14,6 @@ import {
   type ModelProfileV1,
 } from '../../../../services/local-agent/src/modelProfiles.ts';
 import {
-  buildLlmModelKwargs,
   inferLlmStructuredOutputMethod,
 } from '../../../../services/local-agent/src/llmModelPresets.ts';
 import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
@@ -206,24 +205,10 @@ export function createDecisionEvalModel(options: {
   );
   if (timeout <= 0) throw new Error(`${timeoutName} must be greater than zero.`);
   const temperatureName = `${rolePrefix}_TEMPERATURE`;
-  const temperature = readFiniteNumber(
-    temperatureName,
-    env[temperatureName] ?? (
-      options.role === 'subject' ? env.PROMPT_EVAL_TEMPERATURE : undefined
-    ),
-    0,
-  );
-  const configuredReasoningEffort = env[`${rolePrefix}_REASONING_EFFORT`]
-    ?? (options.role === 'subject'
-      ? env.PROMPT_EVAL_REASONING_EFFORT
-      : undefined)
-    ?? undefined;
-  const runtimeDefaultModelKwargs = buildLlmModelKwargs(profile.model, false);
-  const reasoningEffort = configuredReasoningEffort
-    ?? (runtimeDefaultModelKwargs ? 'disabled' : 'provider-default');
-  const modelKwargs = configuredReasoningEffort
-    ? { reasoning_effort: configuredReasoningEffort }
-    : runtimeDefaultModelKwargs;
+  const configuredTemperature = env[temperatureName]
+    ?? (options.role === 'subject' ? env.PROMPT_EVAL_TEMPERATURE : undefined);
+  const temperature = configuredTemperature === undefined
+    ? null : readFiniteNumber(temperatureName, configuredTemperature);
   const method = readStructuredOutputMethod(
     env[`${rolePrefix}_STRUCTURED_OUTPUT_METHOD`]
       ?? (options.role === 'subject'
@@ -237,7 +222,7 @@ export function createDecisionEvalModel(options: {
   return {
     model: new ChatOpenAI({
       model: profile.model,
-      temperature,
+      ...(temperature === null ? {} : { temperature }),
       timeout,
       maxRetries: 0,
       apiKey: profile.apiKey,
@@ -248,7 +233,6 @@ export function createDecisionEvalModel(options: {
       ...(profile.maxOutputTokens
         ? { maxTokens: profile.maxOutputTokens }
         : {}),
-      ...(modelKwargs ? { modelKwargs } : {}),
     }) as unknown as AgentModels['act'],
     method,
     label: `${profile.label} (${profile.model} @ ${new URL(profile.baseUrl).host})`,
@@ -265,7 +249,7 @@ export function createDecisionEvalModel(options: {
       contextWindowTokens: profile.contextWindowTokens,
       maxOutputTokens: profile.maxOutputTokens ?? null,
       temperature,
-      reasoningEffort,
+      reasoningEffort: 'provider-default',
       timeoutMs: timeout,
       inputModalities: [...profile.inputModalities],
     },

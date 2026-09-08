@@ -1,108 +1,51 @@
-import {
-  SystemMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
-import { Command, END } from '@langchain/langgraph';
-import { createMiddleware, ToolInvocationError } from 'langchain';
-import { ToolInputParsingException } from '@langchain/core/tools';
+import { AIMessage, SystemMessage } from '@langchain/core/messages';
+import { createMiddleware } from 'langchain';
 import { buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
-import { parseSupervisorCommand, type SupervisorCommand } from './protocol';
-import {
-  currentSupervisorInput,
-  supervisorCommandContext,
-  supervisorInvocationStateSchema,
-} from './supervisorState';
-import {
-  SUPERVISOR_COMMAND_TOOL_NAMES,
-  supervisorCommandToolNamesForMode,
-} from './commandTools';
+import { parseSupervisorCommand } from './protocol';
+import { currentSupervisorInput, supervisorCommandContext, supervisorInvocationStateSchema } from './supervisorState';
+import { SUPERVISOR_COMMAND_TOOL_NAMES, supervisorCommandToolNamesForMode } from './commandTools';
 
-function readCommandResult(message: ToolMessage): unknown {
-  if (message.status === 'error' || typeof message.content !== 'string') {
-    return null;
-  }
-  try {
-    return JSON.parse(message.content);
-  } catch {
-    return null;
-  }
-}
+const commandActions: Record<string, string> = {
+  submit_plan: 'execute_plan',
+  review_current: 'review_current',
+};
 
-function supervisorSystemMessage(input: ReturnType<typeof currentSupervisorInput>) {
-  return new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode));
-}
-
-/** Framework lifecycle control only: model protocol and control commands. */
+/** Validate the whole response before any tool runs; control calls only propose effects. */
 export function createSupervisorMiddleware() {
   return createMiddleware({
     name: 'RunSupervisor',
     stateSchema: supervisorInvocationStateSchema,
     wrapModelCall: async (request, handler) => {
       const input = currentSupervisorInput(request.state);
-      if (request.state.supervisorCommand) {
-        return new Command({
-          update: { jumpTo: 'end' },
-          goto: END,
-        });
-      }
-      const systemMessage = supervisorSystemMessage(input);
-      const allowedCommandToolNames = supervisorCommandToolNamesForMode(input.mode);
-      return handler({
+      const allowed = supervisorCommandToolNamesForMode(input.mode);
+      const discoveryAllowed = input.mode === 'entry' || input.inputId.startsWith('human:');
+      const response = await handler({
         ...request,
-        systemMessage,
+        systemMessage: new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode)),
         tools: request.tools.filter(({ name }) =>
-          typeof name !== 'string'
-          || !SUPERVISOR_COMMAND_TOOL_NAMES.has(name)
-          || allowedCommandToolNames.has(name)),
+          (name !== 'capability_details' || discoveryAllowed)
+          && (typeof name !== 'string' || !SUPERVISOR_COMMAND_TOOL_NAMES.has(name) || allowed.has(name))),
       });
-    },
-    wrapToolCall: async (request, handler) => {
-      let result: Awaited<ReturnType<typeof handler>>;
-      try {
-        result = await handler(request);
-      } catch (error) {
-        const parsingError = error instanceof ToolInputParsingException
-          ? error
-          : error instanceof ToolInvocationError
-            && error.toolError instanceof ToolInputParsingException
-            ? error.toolError
-            : null;
-        if (!parsingError || !request.toolCall.id) {
-          throw error;
+      if (!AIMessage.isInstance(response)) {
+        throw new Error('Supervisor model must return an AIMessage.');
+      }
+      if (response.invalid_tool_calls?.length) {
+        throw new Error('Supervisor response contains invalid tool calls.');
+      }
+      const calls = response.tool_calls ?? [];
+      if (!discoveryAllowed && calls.some(({ name }) => name === 'capability_details')) {
+        throw new Error('Capability disclosure is stable during execution; changes require fresh user input.');
+      }
+      const controls = calls.filter(({ name }) => SUPERVISOR_COMMAND_TOOL_NAMES.has(name));
+      if (controls.length > 0) {
+        if (calls.length !== 1) {
+          throw new Error('Supervisor control proposal must be the only tool call in its response.');
         }
-        return new ToolMessage({
-          content: parsingError.message,
-          name: request.toolCall.name,
-          status: 'error',
-          tool_call_id: request.toolCall.id,
-        });
+        const call = controls[0];
+        if (!allowed.has(call.name)) throw new Error('Supervisor control is invalid in this mode.');
+        parseSupervisorCommand({ ...call.args, action: commandActions[call.name] }, supervisorCommandContext(input));
       }
-      if (!ToolMessage.isInstance(result)
-        || !SUPERVISOR_COMMAND_TOOL_NAMES.has(request.toolCall.name)) {
-        return result;
-      }
-      const rawCommand = readCommandResult(result);
-      if (!rawCommand) return result;
-      const input = currentSupervisorInput(request.state);
-      let command: SupervisorCommand;
-      try {
-        command = parseSupervisorCommand(rawCommand, supervisorCommandContext(input));
-      } catch (error) {
-        return new ToolMessage({
-          content: error instanceof Error ? error.message : String(error),
-          name: result.name,
-          status: 'error',
-          tool_call_id: result.tool_call_id,
-        });
-      }
-      return new Command({
-        update: {
-          messages: [result],
-          supervisorCommand: command,
-          jumpTo: 'end',
-        },
-        goto: END,
-      });
+      return response;
     },
   });
 }

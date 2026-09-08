@@ -117,10 +117,15 @@ function buildScriptedSupervisorRunner() {
             capability: 'code_modify',
             task: '根据调查结论重构 auth 模块',
           }],
+
         };
       }
       if (supervisorDecisionCount > 2) {
-        return { action: 'goal_done', tasks: [] };
+        return { completed: true, reason: 'Current task delivery is evidenced.',
+          action: 'review_current',
+          reply: '已完成。',
+          remainingPlan: [],
+        };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
         input.messages.map((message) => message.text).join('\n'),
@@ -128,12 +133,13 @@ function buildScriptedSupervisorRunner() {
       const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
-      return {
-        action: 'advance_plan',
-        tasks: [{
+      return { completed: true, reason: 'Current task delivery is evidenced.',
+        remainingPlan: [{
           capability: 'code_modify',
           task: objective,
         }],
+        action: 'review_current',
+
       };
     },
   };

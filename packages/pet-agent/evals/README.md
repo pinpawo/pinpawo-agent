@@ -150,9 +150,10 @@ The canonical two-task baseline is `explore auth -> implement from handoff`.
 The package test-script lookup plus test run is intentionally one Supervisor task
 because preparation, execution, and reporting belong to one workspace boundary.
 
-4. Lifecycle composition executes the production graph with the configured real
-   model for entry, Supervisor, capability, and answer. Executor results
-   are controlled so the final goal verdict measures orchestrator composition
+4. Lifecycle composition executes the production graph with real models for
+   entry and Supervisor, plus an independent goal judge. Capability executor
+   results are controlled; the answer node delivers the existing reply without
+   another model call. The final verdict measures orchestrator composition
    without tool or environment variance:
 
    ```sh
@@ -178,6 +179,47 @@ because preparation, execution, and reporting belong to one workspace boundary.
    configuration, every decision output, controlled executor call, user-visible
    turn, semantic score, invariant, and token-usage split. This profile should be
    stabilized on one model before cross-model validation.
+
+   For the current pet-agent core lifecycle check, select the eight generic
+   scenarios explicitly. The Kanban-specific regression remains available but
+   is excluded from this run:
+
+   ```sh
+   LIFECYCLE_EVAL_CASES=direct-answer,single-task-completion,dynamic-multi-task,continues-incomplete-task,ignores-misleading-continue-in-announce,user-input-required,resume-after-user-input,capability-unavailable \
+   LIFECYCLE_EVAL_REPEATS=1 \
+   LIFECYCLE_EVAL_MODEL_PROFILE_ID=legacy-default \
+   LIFECYCLE_EVAL_JUDGE_PROFILE_ID=qwen3.8-max \
+     npm run eval:lifecycle-composition
+   ```
+
+   These synthetic fixtures specify file contents, findings, changes, commands
+   and results rather than bare completion claims. Same-delegation continuation
+   explicitly requests one investigation; the multi-task example requests two
+   delivery stages. This bounds each scenario's intended task granularity without
+   changing production planning or relaxing its acceptance criteria. The executor
+   still consumes a finite sequence: unexpected calls fail instead of receiving
+   fabricated fallback results. These examples do not represent actual repository
+   changes or test runs.
+
+   Validation on 2026-09-08 (DeepSeek V4 Pro subject, Qwen3.8 Max judge, provider
+   defaults): the core run had 6/8 achieved and two not-evaluable judge parsing
+   failures (`ignores-misleading-continue-in-announce`, `resume-after-user-input`).
+   Each of those two cases passed a separate full-lifecycle retry with unchanged
+   settings. No run reported a runtime timeout or controlled-executor exhaustion.
+   All eight cases thus have passing observations, but this is not an 8/8 clean
+   first run or a multi-model stability claim. Eval typechecking and six focused
+   harness/evaluation tests passed. Kanban was not run.
+
+   Main integration follow-up (base `e14c6b9e`, same models and defaults): 6/8
+   achieved on the first core run. `resume-after-user-input` had a judge score
+   contradicting its explanation and passed a full retry. `user-input-required`
+   failed checkpoint/lane-retention invariants on both runs: the model accepted
+   the conditional task (report missing connection information and ask the user)
+   as delivered, while the fixture expects an unfinished delegation. This is an
+   unresolved acceptance-semantics result, not a passing case or a timeout. No
+   runtime timeout or controlled-executor exhaustion occurred. Pause recovery,
+   ordinary user-supplement routing and TUI continuation have deterministic
+   regression coverage; the merge does not relax the model-eval criteria.
 
 ## Auto-review Risk Eval
 

@@ -24,7 +24,6 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterContextPrep } from './routes/afterContextPrep';
-import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
 import { afterPauseGate, pauseGate } from './nodes/pauseGate';
 import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
@@ -46,6 +45,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const resultAnswer = createAnswerNode(config);
   const capabilityNode = createCapabilityNode({
     config,
+    onNodeError: runTermination.onNodeError,
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   });
@@ -55,7 +55,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare)
+    .addNode('prepare', prepare, { ends: ['capability', 'answer', 'compactContext'] })
     .addNode('compactContext', compactContext)
     .addNode('captureUserRequest', captureRunUserRequest)
     .addNode('entryAnswer', entryAnswer, {
@@ -77,15 +77,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addNode('pauseGate', pauseGate)
     .addEdge(START, 'prepare')
-    .addConditionalEdges('prepare', afterPrepare, {
-      answer: 'answer',
-      compactContext: 'compactContext',
-    })
     // Run entry uses explicit task lifecycle state. Lane announces remain
     // message/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
       supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
       captureUserRequest: 'captureUserRequest',
+      runSupervisor: 'runSupervisor',
       capability: 'capability',
     })
     .addEdge('captureUserRequest', 'entryAnswer')

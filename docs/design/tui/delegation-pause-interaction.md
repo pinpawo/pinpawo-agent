@@ -1,9 +1,11 @@
 # Delegation pause interaction (draft)
 
-Updated design direction, 2026-09-06: explicit pauses retain their interrupt
+Updated integration, 2026-09-08: explicit pauses retain their interrupt
 behavior. Ordinary Supervisor questions use normal replies and existing work
 continuation, following the [Supervisor–Root Interaction Protocol](../agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
-The ordinary-reply continuation integration remains pending implementation.
+Ordinary text replies now use `resume_active` when the projected current plan has
+unfinished work; Esc explicitly selects a new task. Empty Enter remains reserved
+for an explicit pause.
 
 ## Problem
 
@@ -19,8 +21,9 @@ be the sole way to expose continuation.
 
 ## Interaction contract
 
-When the TUI receives an authoritative `interrupted` event, it enters **paused
-delegation** mode.
+When Agent Session projects an authoritative `pendingInterrupt` with payload
+kind `pause_task`, the TUI enters **paused delegation** mode. A generic
+`run.interrupted` event alone does not establish a task pause.
 
 - The footer states that the task is paused.
 - Enter sends `resume_active`, with or without drafted guidance. Any text is
@@ -66,12 +69,13 @@ the server to apply.
 
 Normal-reply continuation likewise relies on Runtime-owned saved work; it must
 not infer an interrupt solely from a retained delegation or plan. Exposing that
-availability is part of the pending integration with the existing projection.
+availability uses unfinished items in the existing `currentPlan` projection;
+the composer remains ordinary instead of displaying a synthetic pause.
 
 ## State transitions
 
 ```text
-running -- Esc --> interrupting -- interrupted --> paused
+review resolution stops task -- pause_task projection --> paused
 paused -- Enter --> resume_active --> running
 paused -- Esc --> ordinary composer -- Enter --> supersede_active --> running
 normal reply + saved work -- answer through continuation --> resume_active --> running
@@ -81,14 +85,15 @@ Starting a run, opening a review, or switching sessions clears paused mode.
 
 ## Acceptance criteria
 
-- A cancelled review or explicit pause opens paused mode after its authoritative
-  interrupted event.
+- A cancelled review or explicit pause opens paused mode only when the server
+  projects `pause_task`.
 - A normal Supervisor question with saved work exposes continuation without an
   interrupted event; its answer retains the original goal and remaining plan.
 - A saved remaining plan without an active delegation also supports continuation.
 - An answer before plan creation follows ordinary `entryAnswer`; an answer for an
   active delegation reaches Supervisor with that delegation and its messages
-  retained, before any execution or plan-adjustment effect.
+  retained, before any execution or plan-adjustment effect. Explicit pause
+  continuation instead re-enters the pending delegation directly.
 - Plain text and attachments submitted in paused mode carry `resume_active`.
 - A second Esc changes the next submission to `supersede_active` without
   sending a standalone request.

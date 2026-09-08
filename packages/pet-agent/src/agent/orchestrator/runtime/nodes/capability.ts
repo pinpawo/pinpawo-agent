@@ -1,3 +1,5 @@
+import { Command } from '@langchain/langgraph';
+import type { createRunTerminationHandlers } from '../runTermination';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { getAgentRuntimeContext } from '../../../../runtime/context';
 import { createSubagent } from '../../../../subagent/createSubagent';
@@ -51,6 +53,7 @@ import {
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
+  onNodeError: ReturnType<typeof createRunTerminationHandlers>['onNodeError'];
   subagentContextWindowTokens: number | undefined;
   subagentGenerationReserveTokens: number | undefined;
 }) {
@@ -279,15 +282,14 @@ export function createCapabilityNode(params: {
     }
     const resultMessages = pausedSubagentState?.messages ?? result!.messages;
     const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
-    const completionReason = result?.completionReason ?? null;
     const announceMessageId = result?.announceMessageId ?? null;
     const laneOutputMessages = reconcileDelegationPrivateMessages(
       resultMessages,
       subagentInput.messages,
       lane,
       runId,
-      completionReason,
       {
+        traceId: state.traceId,
         delegationId: runNextDelegation.id,
         task: runNextDelegation.task,
         announceMessageId,
@@ -296,6 +298,7 @@ export function createCapabilityNode(params: {
     );
     const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
     const paused = pausedSubagentState !== null;
+    const missingDeliverable = !paused && !delegationAnnounce;
     const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
     const resultPreview = paused
       ? currentResultPreview
@@ -315,18 +318,20 @@ export function createCapabilityNode(params: {
     const pauseContinuation = paused
       ? state.taskRunContinuation
         ?? snapshotRunTaskContinuation({
+          traceId: state.traceId,
+          userRequest: state.runUserRequest,
           activeDelegation,
           supervisorSession: state.runSupervisorSession,
         })
       : null;
-    return {
+    const update = {
       messages: laneOutputMessages,
       sessionCapabilityArtifacts: resultArtifacts,
       runDelegationSummaries: updatedRunDelegationSummaries,
       runNextDelegation: null,
       taskActiveDelegation: {
         ...activeDelegation,
-        status: paused ? 'pending' as const : 'awaiting_decision' as const,
+        status: paused || missingDeliverable ? 'pending' as const : 'awaiting_decision' as const,
         resultPreview,
       },
       runIterationCount: state.runIterationCount + 1,
@@ -340,5 +345,16 @@ export function createCapabilityNode(params: {
         records: authorizationRecorder.active,
       },
     };
+    if (missingDeliverable) {
+      const failure = params.onNodeError({ ...state, ...update }, {
+        node: 'capability',
+        error: new Error('Capability execution produced no new deliverable. Resume the task to continue execution.'),
+      });
+      return new Command({
+        update: { ...update, ...failure.update as Partial<OrchestratorStateType> },
+        goto: 'throwRunFailure',
+      });
+    }
+    return update;
   };
 }

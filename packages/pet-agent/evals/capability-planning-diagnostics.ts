@@ -1,13 +1,13 @@
 import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
 import { AIMessage } from '@langchain/core/messages';
 import type { LLMResult } from '@langchain/core/outputs';
-import { RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME } from '../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
+import { RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME } from '../src/agent/orchestrator/runSupervisor/fileExplorer.ts';
 
-export type CapabilitySearchDiagnostics = {
-  searchCalls: number;
-  searchRounds: number;
-  searchQueries: string[][];
-  searchResults: unknown[];
+export type CapabilityDetailsDiagnostics = {
+  detailCalls: number;
+  detailRounds: number;
+  detailRequests: string[][];
+  detailResults: unknown[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -24,8 +24,8 @@ function parseJson(value: string): unknown {
 
 function readSearchTerms(input: unknown): string[] {
   const parsed = typeof input === 'string' ? parseJson(input) : input;
-  if (!isRecord(parsed) || !Array.isArray(parsed.terms)) return [];
-  return parsed.terms.filter((term): term is string => typeof term === 'string');
+  if (!isRecord(parsed) || !Array.isArray(parsed.names)) return [];
+  return parsed.names.filter((term): term is string => typeof term === 'string');
 }
 
 function readToolOutput(value: unknown, depth = 0): unknown {
@@ -43,11 +43,11 @@ function readToolOutput(value: unknown, depth = 0): unknown {
 }
 
 function isCapabilitySearchTool(tool: unknown, runName: string | undefined) {
-  if (runName === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME) return true;
+  if (runName === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME) return true;
   if (!isRecord(tool)) return false;
-  if (tool.name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME) return true;
+  if (tool.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME) return true;
   return Array.isArray(tool.id)
-    && tool.id.includes(RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME);
+    && tool.id.includes(RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME);
 }
 
 function countSearchRounds(output: LLMResult): number {
@@ -55,40 +55,40 @@ function countSearchRounds(output: LLMResult): number {
     'message' in generation
     && AIMessage.isInstance(generation.message)
     && generation.message.tool_calls?.some(({ name }) =>
-      name === RUN_SUPERVISOR_CAPABILITY_SEARCH_TOOL_NAME,
+      name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
     ),
   )).length;
 }
 
 /** Collects invocation-only search evidence from callbacks without checkpointing it. */
-export function createCapabilitySearchDiagnosticsCollector() {
+export function createCapabilityDetailsDiagnosticsCollector() {
   const searchRunIds = new Set<string>();
-  const searchQueries: string[][] = [];
-  const searchResults: unknown[] = [];
-  let searchRounds = 0;
+  const detailRequests: string[][] = [];
+  const detailResults: unknown[] = [];
+  let detailRounds = 0;
   const callback = BaseCallbackHandler.fromMethods({
     handleToolStart(tool, input, runId, _parentRunId, _tags, _metadata, runName) {
       if (!isCapabilitySearchTool(tool, runName)) return;
       searchRunIds.add(runId);
-      searchQueries.push(readSearchTerms(input));
+      detailRequests.push(readSearchTerms(input));
     },
     handleToolEnd(output, runId) {
       if (!searchRunIds.has(runId)) return;
-      searchResults.push(readToolOutput(output));
+      detailResults.push(readToolOutput(output));
     },
     handleLLMEnd(output) {
-      searchRounds += countSearchRounds(output);
+      detailRounds += countSearchRounds(output);
     },
   });
 
   return {
     callback,
-    read(): CapabilitySearchDiagnostics {
+    read(): CapabilityDetailsDiagnostics {
       return {
-        searchCalls: searchQueries.length,
-        searchRounds,
-        searchQueries: searchQueries.map((terms) => [...terms]),
-        searchResults: [...searchResults],
+        detailCalls: detailRequests.length,
+        detailRounds,
+        detailRequests: detailRequests.map((terms) => [...terms]),
+        detailResults: [...detailResults],
       };
     },
   };

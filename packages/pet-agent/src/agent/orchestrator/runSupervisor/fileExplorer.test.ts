@@ -21,7 +21,7 @@ import {
 } from './documentWorkspace';
 import {
   createRunSupervisorFileExplorer,
-  createRunSupervisorSearchTool,
+  createRunSupervisorDetailsTool,
   type RunSupervisorFileExplorer,
 } from './fileExplorer';
 import { compileAgentRegistry } from '../registry';
@@ -113,7 +113,7 @@ test('Supervisor file explorer exposes a typed registry discovery service', asyn
   assert.equal('uses' in explorer, false);
 });
 
-test('capability_search finds candidates from immutable Workspace documents', async (t) => {
+test('registry document search finds candidates from immutable Workspace documents', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createRunSupervisorFileExplorer({ workspace });
 
@@ -141,7 +141,7 @@ test('capability_search finds candidates from immutable Workspace documents', as
   assert.equal(first.data.complete, true);
 });
 
-test('capability_search searches complete Capability documents', async (t) => {
+test('registry document search scans complete Capability documents', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createRunSupervisorFileExplorer({ workspace });
 
@@ -195,7 +195,7 @@ test('Supervisor can read any disclosed Capability and search every other docume
   }
 });
 
-test('capability_search discovers General through the same path as other Capabilities', async (t) => {
+test('registry document search finds General through the same path as other Capabilities', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createRunSupervisorFileExplorer({ workspace });
 
@@ -209,7 +209,7 @@ test('capability_search discovers General through the same path as other Capabil
   );
 });
 
-test('capability_search remains pure discovery after a literal miss', async (t) => {
+test('registry document search remains pure discovery after a literal miss', async (t) => {
   const { workspace } = await workspaceFixture(t);
   const explorer = createRunSupervisorFileExplorer({ workspace });
 
@@ -236,25 +236,12 @@ test('memory backend is explicit and preserves complete registry search results'
   assert.deepEqual(memorySearch.data.matches, filesystemSearch.data.matches);
 });
 
-test('capability_search bounds literal terms without an active Supervisor graph', async (t) => {
-  const { workspace } = await workspaceFixture(t);
-  const searchTool = createRunSupervisorSearchTool(
-    async () => JSON.stringify({ ok: true }),
-  );
-  // The term count is unbounded: per-term shape is what keeps a search literal.
-  assert.ok(await searchTool.invoke({ terms: ['one', 'two', 'three', 'four'] }));
-  assert.ok(await searchTool.invoke({
-    terms: ['failing test root cause analysis'],
-  }));
-  await assert.rejects(searchTool.invoke({
-    terms: ['x'.repeat(81)],
-  }), /String must contain at most 80 character/);
-
-  const explorer = createRunSupervisorFileExplorer({ workspace });
-  const first = await search(explorer, ['browser']);
-  assert.equal(first.ok, true);
-  const second = await search(explorer, ['browser']);
-  assert.equal(second.ok, true);
+test('capability_details accepts exact-name batches and rejects malformed arguments', async () => {
+  const details = createRunSupervisorDetailsTool(async (names) => JSON.stringify(names));
+  assert.equal(await details.invoke({ names: ['general', 'browser'] }), '["general","browser"]');
+  await assert.rejects(details.invoke({ terms: ['general'] } as never));
+  await assert.rejects(details.invoke({ names: [] }));
+  await assert.rejects(details.invoke({ names: ['x'.repeat(201)] }));
 });
 
 test('Supervisor document reads reject tampered workspace content', async (t) => {
@@ -283,7 +270,7 @@ test('Supervisor document reads reject tampered workspace content', async (t) =>
   assert.equal(searchResult.error.code, 'document_tampered');
 });
 
-test('capability_search rejects a symlink introduced after workspace publication', async (t) => {
+test('registry document search rejects a symlink introduced after workspace publication', async (t) => {
   const { root, workspace } = await workspaceFixture(t);
   const capabilityDir = join(workspace.rootPath, 'browser');
   const documentPath = join(capabilityDir, 'CAPABILITY.md');
@@ -300,7 +287,7 @@ test('capability_search rejects a symlink introduced after workspace publication
   assert.doesNotMatch(JSON.stringify(result), /outside secret/);
 });
 
-test('capability_search never returns a partial Capability document', async (t) => {
+test('registry document search never returns a partial Capability document', async (t) => {
   const { workspace } = await workspaceFixture(t, [
     capability({
       name: 'budget',
@@ -319,7 +306,7 @@ test('capability_search never returns a partial Capability document', async (t) 
   assert.doesNotMatch(JSON.stringify(result), /x{40}/);
 });
 
-test('capability_search returns no candidates for an empty Capability workspace', async (t) => {
+test('registry document search returns no candidates for an empty Capability workspace', async (t) => {
   const { workspace } = await workspaceFixture(t, []);
   const explorer = createRunSupervisorFileExplorer({ workspace });
 

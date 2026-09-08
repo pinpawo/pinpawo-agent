@@ -226,14 +226,19 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     runSupervisorRunner: {
       async invoke(supervisorInput) {
         return supervisorInput.mode === 'boundary'
-          ? { action: 'goal_done', tasks: [] }
+          ? { completed: true, reason: 'Current task delivery is evidenced.',
+            action: 'review_current',
+            reply: '已完成。',
+            remainingPlan: [],
+          }
           : {
-          action: 'execute_plan',
-          tasks: [{
+            action: 'execute_plan',
+            tasks: [{
             capability: 'general',
             task: input.delegatedTask,
           }],
-        };
+
+          };
       },
     },
   });

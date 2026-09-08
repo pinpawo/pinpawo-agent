@@ -1,116 +1,39 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseSupervisorCommand } from './protocol';
+const context = { mode: 'boundary' as const, activeDelegation: {
+  delegationId: 'd1', runId: 'r1', capability: 'general', task: 'Verify the change.',
+}, allowedCapabilityNames: ['general'] };
+const tasks = [{ capability: 'general', task: 'Publish the change.' }];
+const review = { action: 'review_current', completed: true, reason: 'Verification passed.' };
 
-const boundaryContext = {
-  mode: 'boundary' as const,
-  activeDelegation: {
-    delegationId: 'delegation-1',
-    runId: 'run-1',
-    capability: 'general',
-    task: 'Complete the current task.',
-  },
-  allowedCapabilityNames: ['general', 'explore'],
-};
-
-test('Supervisor command exposes only action, plan tasks, and a bounded user-input request', () => {
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'execute_plan',
-    tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), {
-    action: 'execute_plan',
-    tasks: [{ capability: 'explore', task: 'Inspect the repository.' }],
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'unavailable',
-    tasks: [],
-    reason: 'private reasoning must not cross the seam',
-  }, boundaryContext));
-  assert.throws(() => parseSupervisorCommand({
-    action: 'user_input_required',
-    tasks: [],
-    userInputRequest: { question: 'Which target should I use?' },
-    question: 'private question must not cross the seam',
-  }, boundaryContext));
+test('Entry only submits a plan and Boundary only reviews an active delegation', () => {
+  const entry = { ...context, mode: 'entry' as const, activeDelegation: null };
+  for (const completed of [true, false]) {
+    const command = { ...review, completed, remainingPlan: tasks };
+    assert.throws(() => parseSupervisorCommand(command, entry));
+    assert.throws(() => parseSupervisorCommand(command, { ...context, activeDelegation: null }));
+    assert.deepEqual(parseSupervisorCommand(command, context), command);
+  }
+  assert.equal(parseSupervisorCommand({ action: 'execute_plan', tasks }, entry).action, 'execute_plan');
+  assert.throws(() => parseSupervisorCommand({ action: 'execute_plan', tasks }, context));
 });
 
-test('Supervisor command enforces entry and continuation invariants', () => {
-  assert.throws(() => parseSupervisorCommand({
-    action: 'goal_done',
-    tasks: [],
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), /invalid at entry/);
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'user_input_required',
-    tasks: [],
-    userInputRequest: { question: 'Which target should I use?' },
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), {
-    action: 'user_input_required',
-    tasks: [],
-    userInputRequest: { question: 'Which target should I use?' },
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'user_input_required',
-    tasks: [],
-  }, boundaryContext), /requires userInputRequest/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'unavailable',
-    tasks: [],
-    userInputRequest: { question: 'Unexpected question.' },
-  }, boundaryContext), /forbids userInputRequest/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'continue_current',
-    tasks: [{ capability: 'explore', task: 'Switch executor.' }],
-  }, boundaryContext), /forbids tasks/);
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'continue_current',
-    tasks: [],
-  }, boundaryContext), {
-    action: 'continue_current',
-    tasks: [],
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'continue_current',
-    tasks: [],
-    gapNote: 'The previous result omitted verification; run it and return the evidence.',
-  }, boundaryContext));
-  assert.throws(() => parseSupervisorCommand({
-    action: 'execute_plan',
-    tasks: [{ capability: 'explore', task: 'Start a replacement plan.' }],
-  }, boundaryContext), /invalid at a boundary/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'advance_plan',
-    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
-  }, {
-    ...boundaryContext,
-    mode: 'entry',
-    activeDelegation: null,
-  }), /invalid at entry/);
-  assert.deepEqual(parseSupervisorCommand({
-    action: 'advance_plan',
-    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
-  }, boundaryContext), {
-    action: 'advance_plan',
-    tasks: [{ capability: 'explore', task: 'Continue with the next executor.' }],
-  });
-  assert.throws(() => parseSupervisorCommand({
-    action: 'goal_done',
-    tasks: [{ capability: 'general', task: 'Unexpected work.' }],
-  }, boundaryContext), /forbids tasks/);
-  assert.throws(() => parseSupervisorCommand({
-    action: 'goal_done',
-    tasks: [],
-    gapNote: 'Unexpected continuation guidance.',
-  }, boundaryContext));
+test('review requires an explicit boolean and concrete reason and rejects invalid combinations', () => {
+  for (const command of [
+    { ...review, completed: undefined }, { ...review, completed: 'false' },
+    { ...review, reason: undefined }, { ...review, reason: ' ' },
+    { ...review, remainingPlan: [] },
+    { ...review, completed: false, reply: 'Need input.' },
+    { ...review, remainingPlan: [{ capability: 'missing', task: 'Work' }] },
+    { ...review, tasks }, { ...review, reply: ' ' },
+    { ...review, action: 'accept_result' }, { ...review, action: 'continue_current' },
+  ]) assert.throws(() => parseSupervisorCommand(command, context));
+});
+
+test('a completed review preserves the exact reply; an incomplete review can clear confirmed future work', () => {
+  const command = { ...review, reply: '  Done.\nChoose a target.  ', remainingPlan: tasks };
+  assert.deepEqual(parseSupervisorCommand(command, context), command);
+  const incomplete = { ...review, completed: false, remainingPlan: [] };
+  assert.deepEqual(parseSupervisorCommand(incomplete, context), incomplete);
 });

@@ -44,7 +44,7 @@ const examples = [
       },
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['view_file_chunk'],
       expected_tool_sequence: ['view_file_chunk'],
       expected_final_terms: ['PinPawo'],
@@ -69,7 +69,7 @@ const examples = [
       },
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['view_file_chunk', 'write_file', 'shell'],
       expected_tool_sequence: ['view_file_chunk', 'write_file', 'shell'],
       expected_file_contains: { path: 'src/demo.ts', text: 'const count = 1' },
@@ -89,7 +89,7 @@ const examples = [
       },
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['web_search'],
       expected_tool_sequence: ['web_search'],
       expected_final_terms: ['DeepSeek'],
@@ -105,7 +105,7 @@ const examples = [
       },
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['shell'],
       expected_tool_sequence: ['shell'],
       expected_final_any_terms: ['失败', '未通过', '报错', 'failing', 'exit 1'],
@@ -123,7 +123,7 @@ const examples = [
       },
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['view_file_chunk'],
       forbidden_tools: ['write_file', 'shell'],
       expected_final_terms: ['PinPawo'],
@@ -143,7 +143,7 @@ const examples = [
       },
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['shell'],
       forbidden_tools: ['view_file_chunk', 'write_file', 'web_search'],
       expected_final_terms: ['0.2.0'],
@@ -158,7 +158,7 @@ const examples = [
       essential_context: '已确认当前发布通道是 beta。',
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       forbidden_tools: ['view_file_chunk', 'write_file', 'shell', 'web_search'],
       expected_final_terms: ['beta'],
       reason: 'Subagent should not call tools when the delegated evidence is already sufficient.',
@@ -171,7 +171,7 @@ const examples = [
       files: {},
     },
     outputs: {
-      expected_completion_reason: 'natural',
+      expected_has_deliverable: true,
       expected_tools: ['view_file_chunk'],
       expected_final_any_terms: ['不存在', '找不到', '未找到', '失败', 'not found'],
       reason: 'Subagent should report the evidence gap instead of inventing file contents.',
@@ -381,7 +381,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   });
 
   return {
-    completion_reason: result.completionReason,
+    has_deliverable: result.announceMessageId !== null,
     final_text: readFinalText(result.messages),
     called_tools: runtime.calls.map((call) => call.name),
     call_count: runtime.calls.length,
@@ -534,7 +534,7 @@ function fileContainsEvaluator({ outputs, referenceOutputs }) {
 }
 
 const evaluators = [
-  exactFieldEvaluator('completion_reason', 'expected_completion_reason'),
+  exactFieldEvaluator('has_deliverable', 'expected_has_deliverable'),
   requiredToolsEvaluator,
   forbiddenToolsEvaluator,
   toolSequenceEvaluator,
@@ -545,7 +545,7 @@ const evaluators = [
 ];
 
 const scoreKeys = [
-  'completion_reason_correct',
+  'has_deliverable_correct',
   'required_tools_called',
   'forbidden_tools_avoided',
   'tool_sequence_correct',

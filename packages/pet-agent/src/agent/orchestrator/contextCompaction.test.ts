@@ -155,7 +155,6 @@ test('orchestrator context compaction summarizes a complete accepted main announ
     runId: 'run-1',
     announceMessageId: 'announce-1',
     task: '生成完整报告',
-    completionReason: 'natural',
     result: `${'大结果内容 '.repeat(6000)}${resultTail}`,
     createdAt: '2026-08-24T00:00:00.000Z',
   });
@@ -190,7 +189,6 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
     delegationId: 'delegation-1',
     announceMessageId: 'announce-1',
     task: null,
-    completionReason: 'limit_reached',
     result: 'FIRST_ATTEMPT',
     createdAt: '2026-08-31T00:00:00.000Z',
   }), {
@@ -205,7 +203,6 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
     delegationId: 'delegation-1',
     announceMessageId: 'announce-2',
     task: null,
-    completionReason: 'natural',
     result: 'SECOND_ATTEMPT',
     createdAt: '2026-08-31T00:00:00.000Z',
   }), {
@@ -243,89 +240,18 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
   );
 });
 
-test('orchestrator context compaction falls back when summary model fails', async () => {
-  const messages: BaseMessage[] = Array.from({ length: 14 }, (_, index) => longMessage(index));
-  messages.push(usageMessage('模型已经看到了较长主线。', 900));
-  const model = {
-    invoke: async () => {
-      throw new Error('summary unavailable');
-    },
-  } as unknown as BaseChatModel;
-  const originalWarn = console.warn;
-  console.warn = () => {};
-
-  try {
-    const result = await compactOrchestratorMessages({
-      messages,
-      model,
-      options: { keepMessages: 4 },
-    });
-
-    assert.equal(result.compacted, true);
-    assert.match(String(result.messages[1].content), /自动压缩摘要/);
-    assert.match(String(result.messages[1].content), /message-9/);
-  } finally {
-    console.warn = originalWarn;
-  }
-});
-
-test('orchestrator context compaction fallback retains the prior cumulative summary', async () => {
-  const priorSummary = createContextCompactionMessage('必须保留的既有摘要', 12);
-  const messages: BaseMessage[] = [
-    priorSummary,
-    ...Array.from({ length: 20 }, (_, index) => longMessage(index)),
-    usageMessage('模型已经看到了新的较长主线。', 900),
-  ];
-  const model = {
-    invoke: async () => {
-      throw new Error('summary unavailable');
-    },
-  } as unknown as BaseChatModel;
-  const originalWarn = console.warn;
-  console.warn = () => {};
-
-  try {
-    const result = await compactOrchestratorMessages({
-      messages,
-      model,
-      options: { keepMessages: 4 },
-    });
-
-    assert.equal(result.messages.filter(isContextCompactionMessage).length, 1);
-    assert.match(String(result.messages[1].content), /必须保留的既有摘要/);
-  } finally {
-    console.warn = originalWarn;
-  }
-});
-
-test('orchestrator context compaction bounds repeated fallback summaries', async () => {
-  const priorSummary = createContextCompactionMessage(`prior ${'p'.repeat(10000)}`, 12);
-  const messages: BaseMessage[] = [
-    priorSummary,
-    new HumanMessage('fallback-new-context-marker'),
-    usageMessage('keep this recent message', 900),
-  ];
-  const model = {
-    invoke: async () => {
-      throw new Error('summary unavailable');
-    },
-  } as unknown as BaseChatModel;
-  const originalWarn = console.warn;
-  console.warn = () => {};
-
-  try {
-    const result = await compactOrchestratorMessages({
-      messages,
-      model,
-      options: { keepMessages: 1 },
-    });
-    const summary = String(result.messages[1].content);
-
-    assert.ok(summary.length < 4200);
-    assert.match(summary, /prior/);
-    assert.match(summary, /fallback-new-context-marker/);
-  } finally {
-    console.warn = originalWarn;
+test('summary failures and empty output stop without replacing canonical history', async () => {
+  const messages = [createContextCompactionMessage('Prior constraints.', 12),
+    ...Array.from({ length: 14 }, (_, index) => longMessage(index))];
+  const snapshot = messages.map((message) => message.toDict());
+  for (const failure of [true, false]) {
+    const model = { invoke: async () => {
+      if (failure) throw new Error('summary unavailable');
+      return new AIMessage(' ');
+    } } as unknown as BaseChatModel;
+    await assert.rejects(compactOrchestratorMessages({ messages, model, options: { keepMessages: 4 } }),
+      failure ? /summary unavailable/ : /empty summary/);
+    assert.deepEqual(messages.map((message) => message.toDict()), snapshot);
   }
 });
 
@@ -352,7 +278,6 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
     delegationId: 'task-1',
     announceMessageId: 'task-1-announce',
     task: '整理素材',
-    completionReason: 'natural',
     result: '素材已经整理完成，输出了 result.md。',
     createdAt: '2026-08-31T00:00:00.000Z',
   }), {
@@ -385,4 +310,59 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
   assert.doesNotMatch(summaryRequest, /结果：素材已经整理完成，输出了 result\.md/);
   assert.doesNotMatch(summaryRequest, /subagent verbose detail/);
   assert.doesNotMatch(summaryRequest, /内部路由决策/);
+});
+
+test('aggressive compaction keeps all main attempts of unfinished work and summarizes other scopes', async () => {
+  const attempt = (id: string, runId: string) => new DelegationAnnounceMessage({
+    id, sourceLane: 'capability:general', delegationId: 'active', runId, announceMessageId: id,
+    task: 'Verify work.', result: `Evidence ${id}`, createdAt: '2026-09-05T00:00:00Z',
+  });
+  const first = attempt('first', 'previous-run');
+  const second = attempt('second', 'previous-run');
+  const other = attempt('other', 'older-run');
+  let summaryInput = '';
+  const recent = new HumanMessage('Continue verification.');
+  const result = await compactOrchestratorMessages({
+    messages: [first, other, ...Array.from({ length: 12 }, (_, i) => longMessage(i)), second, recent],
+    model: fakeSummaryModel('Summary of other work.', (messages) => { summaryInput = String((messages.at(-1) as BaseMessage | undefined)?.content); }),
+    options: { keepMessages: 1, preserveAnnouncesFor: { lane: 'capability:general', runId: 'previous-run', delegationId: 'active' } },
+  });
+  assert.deepEqual(result.messages.slice(2), [first, second, recent]);
+  assert.equal(summaryInput.includes(first.text), false);
+  assert.equal(summaryInput.includes(second.text), false);
+  assert.equal(summaryInput.includes(other.text), true);
+});
+
+test('compaction separates current-task evidence from older history and folds each summary on resume', async () => {
+  const task = (message: BaseMessage) => setAgentMessageMetadata(message, { traceId: 'current-goal' });
+  const evidence = task(new DelegationAnnounceMessage({
+    id: 'active-evidence', sourceLane: 'capability:general', runId: 'previous-run', delegationId: 'active',
+    announceMessageId: 'active-evidence', task: 'Verify changes.', result: 'KEEP_VERBATIM', createdAt: '2026-09-05T00:00:00Z',
+  }));
+  const requests: string[] = [];
+  const model = { invoke: async (messages: BaseMessage[]) => {
+    const text = String(messages.at(-1)?.content); requests.push(text);
+    return new AIMessage(text.includes('CURRENT_TASK_FACT') ? 'CURRENT_TASK_FACT summary' : 'UNRELATED_TASK_FACT summary');
+  } } as unknown as BaseChatModel;
+  const options = { traceId: 'current-goal', keepMessages: 1,
+    preserveAnnouncesFor: { lane: 'capability:general', runId: 'previous-run', delegationId: 'active' } };
+  let messages: BaseMessage[] = [new HumanMessage('UNRELATED_TASK_FACT'), task(new HumanMessage('CURRENT_TASK_FACT')),
+    evidence, task(new HumanMessage('Continue.'))];
+  for (let round = 0; round < 2; round += 1) {
+    const result = await compactOrchestratorMessages({ messages, model, options });
+    messages = result.messages.slice(1);
+    assert.equal(messages.filter(isContextCompactionMessage).length, 2);
+    assert.ok(messages.includes(evidence));
+    const currentSummary = messages.find((message) => isContextCompactionMessage(message)
+      && getAgentMessageMetadata(message).traceId === 'current-goal');
+    assert.ok(currentSummary);
+    assert.match(String(currentSummary.content), /CURRENT_TASK_FACT/);
+    assert.doesNotMatch(String(currentSummary.content), /UNRELATED_TASK_FACT/);
+    messages.push(task(new HumanMessage('Additional current-task input.')));
+  }
+  assert.equal(requests.length, 4);
+  for (const request of requests) {
+    assert.equal(request.includes('CURRENT_TASK_FACT') && request.includes('UNRELATED_TASK_FACT'), false);
+    assert.equal(request.includes('KEEP_VERBATIM'), false);
+  }
 });

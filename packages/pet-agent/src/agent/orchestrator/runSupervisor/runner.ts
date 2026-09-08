@@ -7,8 +7,6 @@ import type {
   UserRequest,
 } from '../types';
 import type {
-  SupervisorAnnounceInput,
-  SupervisorAnnounceTarget,
   SupervisorCommand,
   SupervisorDelegationInput,
 } from './protocol';
@@ -61,16 +59,11 @@ export type RunSupervisorInput = RunSupervisorInputBase & (
   | {
       readonly mode: 'entry';
       readonly activeDelegation: null;
-      readonly latestAnnounce: null;
-      readonly announceAttempts: readonly SupervisorAnnounceInput[];
     }
   | {
       readonly mode: 'boundary';
       readonly activeDelegation: SupervisorDelegationInput;
-      /** Boundary identity and stop reason for the latest typed attempt. */
-      readonly latestAnnounce: SupervisorAnnounceTarget | null;
-      /** Ordered unaccepted announces owned by the active delegation. */
-      readonly announceAttempts: readonly SupervisorAnnounceInput[];
+
     }
 );
 
@@ -79,22 +72,17 @@ export type RunSupervisorCommandResult = SupervisorCommand & {
   readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
-/** A Supervisor turn ended without a state-changing control command. */
-export type RunSupervisorNoCommandResult = {
-  readonly supervisorStatus: 'no_command';
-  readonly reason: 'command_missing';
-  /** Production runners always return the updated run-scoped disclosure. */
+/** A natural final reply preserves unfinished work without accepting it. */
+export type RunSupervisorReplyResult = {
+  readonly action?: never;
+  readonly reply: string;
   readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
-export type RunSupervisorResult =
-  | RunSupervisorCommandResult
-  | RunSupervisorNoCommandResult;
+export type RunSupervisorResult = RunSupervisorCommandResult | RunSupervisorReplyResult;
 
-export function isRunSupervisorNoCommandResult(
-  result: RunSupervisorResult,
-): result is RunSupervisorNoCommandResult {
-  return 'supervisorStatus' in result && result.supervisorStatus === 'no_command';
+export function isRunSupervisorReplyResult(result: RunSupervisorResult): result is RunSupervisorReplyResult {
+  return !('action' in result);
 }
 
 /**

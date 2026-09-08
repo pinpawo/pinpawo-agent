@@ -88,14 +88,8 @@ export type SubagentRunInput = SubagentInputState & {
   signal?: AbortSignal;
 };
 
-export type SubagentCompletionReason =
-  | 'natural'
-  | 'limit_reached'
-  | 'error';
-
 export type SubagentResult = {
   messages: BaseMessage[];
   artifacts: CapabilityArtifactRef[];
-  completionReason: SubagentCompletionReason;
   announceMessageId: string | null;
 };

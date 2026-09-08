@@ -1,11 +1,10 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createAgent } from 'langchain';
 import {
   createRunSupervisorFileExplorer,
-  type RunSupervisorCapabilityDocument,
   type RunSupervisorFileExplorer,
 } from './fileExplorer';
 import type { CapabilityRegistryBackend } from './registryDocuments';
@@ -22,19 +21,16 @@ import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { createSupervisorMiddleware } from './supervisorMiddleware';
 import { supervisorCommandContext } from './supervisorState';
 import {
-  applyCapabilitySearchObservations,
-  removeSearchedCapabilities,
+  mergeCapabilityDisclosure,
 } from './capabilityDisclosure';
 import {
-  createSupervisorCapabilitySearchTool,
-  createSupervisorSearchStateMiddleware,
-} from './searchTool';
+  createSupervisorCapabilityDetailsTool,
+  createSupervisorDisclosureStateMiddleware,
+} from './detailsTool';
 import { createSupervisorCommandTools } from './commandTools';
-import { SupervisorFileToolError } from './workspaceReader';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-export const DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS = 2;
 
 export type RunSupervisorAgentErrorCode =
   | 'supervisor_discovery_limit_reached'
@@ -73,15 +69,6 @@ function assertPositiveInteger(value: number, label: string) {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${label} must be a positive integer`);
   }
-}
-
-function readCachedSupervisorCommand(input: RunSupervisorInput) {
-  const cached = input.supervisorSession.lastCommand;
-  return cached
-    && cached.inputId === input.inputId
-    && cached.registryDigest === input.workspace.registryDigest
-    ? cached.command
-    : null;
 }
 
 function buildSupervisorRunnableConfig(params: {
@@ -146,17 +133,17 @@ export function createRunSupervisorAgent(params: {
   };
   const commandTools = createSupervisorCommandTools();
   const additionalTools = params.additionalTools ?? [];
-  const capabilitySearchTool = createSupervisorCapabilitySearchTool({
+  const capabilityDetailsTool = createSupervisorCapabilityDetailsTool({
     explorerForInput,
   });
   const middleware = createSupervisorMiddleware();
   const agent = createAgent({
     name: 'runSupervisor',
     model: params.model,
-    tools: [capabilitySearchTool, ...commandTools, ...additionalTools],
+    tools: [capabilityDetailsTool, ...commandTools, ...additionalTools],
     middleware: [
       middleware,
-      createSupervisorSearchStateMiddleware(),
+      createSupervisorDisclosureStateMiddleware(),
       systemPromptMiddleware,
       orchestratorModelInvocationMiddleware,
     ],
@@ -176,14 +163,7 @@ export function createRunSupervisorAgent(params: {
       });
       try {
         timeout.signal.throwIfAborted();
-        const cachedCommand = readCachedSupervisorCommand(input);
-        if (cachedCommand) {
-          return {
-            ...parseSupervisorCommand(cachedCommand, supervisorCommandContext(input)),
-            capabilityDisclosure: input.capabilityDisclosure,
-          };
-        }
-        let effectiveInput = input;
+        const effectiveInput = input;
         const routingManifest = await resolveRoutingManifest({
           workspace: input.workspace,
           ...(params.defaultCapabilityName !== undefined
@@ -192,34 +172,10 @@ export function createRunSupervisorAgent(params: {
           runnableConfig: config,
         });
         timeout.signal.throwIfAborted();
-        let explorer = explorerForInput(effectiveInput);
-        let disclosedCapabilities: RunSupervisorCapabilityDocument[];
-        try {
-          disclosedCapabilities = await explorer.readCapabilities(
-            effectiveInput.capabilityDisclosure.disclosedCapabilityNames,
-            timeout.signal,
-          );
-        } catch (error) {
-          if (!(error instanceof SupervisorFileToolError)
-            || error.code !== 'supervisor_discovery_limit_reached') {
-            throw error;
-          }
-          effectiveInput = {
-            ...input,
-            capabilityDisclosure: removeSearchedCapabilities({
-              current: input.capabilityDisclosure,
-            }),
-          };
-          // The failed explorer has already marked its budget as exhausted.
-          // Recreate it so later searches use a clean invocation budget after
-          // oversized disclosures are discarded.
-          explorers.delete(input.inputId);
-          explorer = explorerForInput(effectiveInput);
-          disclosedCapabilities = await explorer.readCapabilities(
-            effectiveInput.capabilityDisclosure.disclosedCapabilityNames,
-            timeout.signal,
-          );
-        }
+        const explorer = explorerForInput(effectiveInput);
+        const disclosedCapabilities = await explorer.readCapabilities(
+          effectiveInput.capabilityDisclosure.disclosedCapabilityNames, timeout.signal,
+        );
         const supervisorInputMessage = new HumanMessage({
           id: `supervisor:${input.inputId}`,
           content: buildRunSupervisorAgentInput(
@@ -238,9 +194,9 @@ export function createRunSupervisorAgent(params: {
           currentInput: effectiveInput,
         }, config);
         timeout.signal.throwIfAborted();
-        const capabilityDisclosure = applyCapabilitySearchObservations(
+        const capabilityDisclosure = mergeCapabilityDisclosure(
           effectiveInput.capabilityDisclosure,
-          result.capabilitySearchObservations ?? [],
+          result.disclosedCapabilityNames ?? [],
         );
         if (result.supervisorCommand) {
           const command = parseSupervisorCommand(
@@ -258,11 +214,11 @@ export function createRunSupervisorAgent(params: {
             'Run Supervisor document read limit was reached before a valid command.',
           );
         }
-        return {
-          supervisorStatus: 'no_command',
-          reason: 'command_missing',
-          capabilityDisclosure,
-        };
+        const reply = result.messages.at(-1);
+        if (!reply || !AIMessage.isInstance(reply) || reply.tool_calls?.length || !reply.text.trim()) {
+          throw new Error('Supervisor produced neither a control proposal nor a usable final reply.');
+        }
+        return { reply: reply.text, capabilityDisclosure };
       } catch (error) {
         if (timeout.didTimeOut()) {
           throw new RunSupervisorAgentError(

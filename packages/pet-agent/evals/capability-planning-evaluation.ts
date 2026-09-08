@@ -19,6 +19,8 @@ import {
 
 export type CapabilityPlanningEvalOutput = {
   result: string;
+  completed?: boolean;
+  reason?: string;
   nextTask: string | null;
   capabilityName: string | null;
   remainingPlan: Array<{ capability: string; task: string }>;
@@ -36,8 +38,8 @@ export function buildCapabilityPlanningMessages(
 
 /**
  * Build canonical history for one Supervisor eval invocation. A Boundary's
- * current result belongs to the private delegation lane and is appended by the
- * runner with announce metadata, so remove one legacy message copy of that
+ * current result is appended to main as a typed Announce by the runner, so
+ * remove one legacy untyped message copy of that
  * same result from ordinary main history when present.
  */
 export function buildCapabilityPlanningHistoryMessages(
@@ -70,7 +72,7 @@ export function buildCapabilityPlanningGoalContract(
   return {
     objective: `Produce ${expected.result} at this planning boundary. ${expected.reason}`,
     acceptanceCriteria: [
-      ...(expected.result === 'execute_plan' || expected.result === 'advance_plan'
+      ...(expected.result === 'execute_plan'
         ? [{
             id: 'materialized_task_correct',
             statement: [
@@ -91,7 +93,7 @@ export function buildCapabilityPlanningGoalContract(
               'A later task is justified when it depends on a prior returned result or requires a different independently executing ability.',
               'Stages one ability can perform continuously toward the same result should remain together.',
             ].join(' '),
-          }, ...(expected.result === 'advance_plan' ? [{
+          }, ...(expected.planEffect === 'revised' ? [{
             id: 'remaining_plan_change_is_minimal',
             statement: [
               'Revalidate the prior remaining-plan proposal against the user goal, accepted history, and current result.',

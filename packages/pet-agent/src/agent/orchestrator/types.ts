@@ -2,7 +2,6 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { AgentCapability } from '../../types/capability';
 import type { AgentModels } from '../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../types/artifact';
-import type { SubagentCompletionReason } from '../../types/subagent';
 import type {
   AgentToolkit,
   ModelInputModality,
@@ -18,7 +17,6 @@ import type { CapabilityMessageLane } from '../messages';
 
 export type { CapabilityMessageLane };
 export type DelegationStatus = 'pending' | 'progress' | 'completed';
-export type { SubagentCompletionReason };
 
 export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
 
@@ -102,11 +100,6 @@ export type OrchestratorConfig = {
    * scripted runner without simulating its private file-tool messages.
    */
   runSupervisorRunner?: RunSupervisorRunner;
-  /**
-   * Maximum Capability discovery model turns per Supervisor input. Defaults to 2.
-   * Parallel capability_search calls in one model response count as one round.
-   */
-  runSupervisorMaxSearchRounds?: number;
   /**
    * Storage/search backend for the immutable Capability registry documents.
    * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.

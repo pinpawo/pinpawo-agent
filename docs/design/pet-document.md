@@ -228,7 +228,7 @@ model calls or macOS companion checks were involved.
 
 The model-configuration audit follow-up removes the external `temperature` and
 `subagentThinking` overrides, including the stored `subagent_thinking` reader.
-Provider temperature defaults and the existing per-role thinking policy determine
+Provider defaults for temperature, thinking and reasoning effort determine
 model construction. This removes these two mutable inputs from graph cache
 identity concerns; other graph dependency/cache concerns remain separate.
 Validation for this follow-up: 63 model/config/channel tests and local-agent

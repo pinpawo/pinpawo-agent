@@ -4,6 +4,22 @@ Status: working design for issue #755, fully rewritten around the direction disc
 
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 
+## Capability details (2026-09-08)
+
+The manifest describes the available Capability set and supports planning directly.
+Supervisor arranges the goal from main messages, the manifest and already provided
+information. `capability_details({ names })` optionally supplies full documents for
+exact manifest names when specific responsibilities, constraints or usage details
+are needed. Calling this tool is not a prerequisite for `submit_plan`; root still
+validates every selected name against the immutable registry.
+
+The result distinguishes newly supplied `documents`, `alreadyDisclosed` names and
+`unknownNames`. It never performs substring search or suggests keyword expansion.
+Already supplied documents are not read or repeated. Disclosure state keeps only registry identity and disclosed names. Empty-round
+counters, open/closed flags and model/tool-call observations are removed;
+byte-budget and invocation timeout protections remain; no separate sufficiency judge or new planning
+stage is added. Disclosure stays stable during execution Boundaries, as before.
+
 ## Problem to solve
 
 Supervisor is the decision-maker within root's orchestration loop. Entry establishes a plan for the goal. Subsequent invocations read conversation and execution evidence only from root's current main messages, judge alignment with the established goal and current task, and decide whether to accept and advance or request improvement. Normal Capability subagent results enter main as existing Announce messages before acceptance. Root applies decisions and records new facts. New evidence does not authorize Supervisor to change the goal or rewrite the plan; it asks the user when a change is needed.
@@ -26,6 +42,10 @@ Supervisor reads current root context on each invocation, but changing facts do 
 Plan stability means Supervisor does not autonomously add, remove, reorder, or change the scope of tasks. Accepting a task, dispatching the established next task, and shortening the remaining tail are progress, not plan revisions. This distinction needs no second plan copy or new state protocol. When a revision is needed, Supervisor explains the reason and proposed change and asks the user first; a subsequent invocation applies it after confirmation. Creating the initial plan from the user's goal does not require another approval step.
 
 Acceptance means judging that **the current delegation's task has been satisfied**, using the existing acceptance effect. Supervisor may combine evidence from multiple attempts. This design adds no per-message selection, partial acceptance, or per-Announce completion protocol.
+
+## Prompt and tool responsibilities
+
+The system prompt states the Supervisor role, phase, relation between goal and current task, and when to ask the user. Tool descriptions and parameter schemas own acceptance criteria, reason, reply, future-plan semantics, and invocation termination. Code enforces deterministic argument, batch, and state validity. Review and control are one call; no second model judges completed.
 
 ## A complete interaction
 
@@ -57,6 +77,8 @@ Observing root messages means reading the main-conversation projection of `root.
 
 Supervisor discovery, tool calls, and intermediate text belong to the invocation. Private Capability Human/AI/Tool history remains in its delegation scope. Task facts and result evidence cross the boundary.
 
+Boundary selects only the current logical task’s main messages using the existing `traceId`, not the physical `runId`. Resume retains traceId, including earlier delegation deliveries, all current attempts, Supervisor questions, and user supplements across runs. Unrelated tasks are excluded. Entry may still read the full conversation to establish the goal. Root stamps new human messages after resolving resume identity, and stamps replies and main Announces with the same traceId.
+
 ### Entry: how to achieve the goal
 
 Supervisor considers the user's goal, existing work, and available Capabilities to decide what actually needs execution. Existing facts may eliminate work; it need not start over.
@@ -84,20 +106,19 @@ The remaining plan supplies the established arrangement. Boundary chiefly judges
 
 The root graph’s `runSupervisor` node invokes the Supervisor agent using main messages and receives its decision. Tool history is invocation-local; canonical state remains root-owned. Supervisor returns an existing control proposal or `{ reply }`; unhandled exceptions propagate. Existing disclosure return fields carry information prepared at Entry; Boundary retains that execution scope.
 
-Tools express operations; natural text expresses a reply. The existing three control tools suffice:
+Tools express operations; natural text expresses a reply. Two control tools suffice:
 
 | Return | When used | Root effect |
 | --- | --- | --- |
 | `submit_plan({ tasks })` | Establish or resume a plan at Entry | Commit the plan and dispatch its first task only when no delegation is active; never accept a task |
-| `continue_current({ feedback?, remainingPlan? })` | Current Boundary task needs improvement or continues after user input | Preserve the exact delegation, task, and private history, then continue with feedback; retain the future plan by default or update it alongside continuation when the user confirmed a change |
-| `accept_result({ reply?, remainingPlan? })` | Accept the current Boundary task | Record acceptance and advance through the existing tail by default. A supplied reply ends this run and saves the tail; no remaining tasks requires a final reply. Omitted remainingPlan retains the tail; a supplied array requires user-confirmed changes |
+| `review_current({ completed, reason, reply?, remainingPlan? })` | Review delivery of the current Boundary task | true accepts and advances the established plan, or ends the run with reply; false preserves the delegation and forwards reason as continuation feedback. remainingPlan only carries user-confirmed future-plan changes |
 | Natural final text | Reply directly at Entry or Boundary | Emit the supplied text, preserving unfinished task ownership and the remaining plan; no implicit acceptance or dispatch |
 
-The three tools express plan establishment, continuation, and acceptance separately. Remove `acceptCurrent`; only `accept_result` expresses acceptance, never inferred from the mode. Explicit user cancellation or replacement of the current task uses existing task controls rather than a boolean hidden inside plan submission.
+Entry establishes the plan; Boundary uses one tool with an explicit completion judgment and reason. completed concerns only the current task, not whole-goal completion, cancellation, or replacement. For true, reason identifies delivery evidence; for false, it specifies a concrete gap within the current task. Outstanding future tasks are not grounds for false. Explicit cancellation or replacement still uses existing user task controls.
 
 Keeping these fields does not retain permission for arbitrary plan rewrites. Normal progression must match the established next task and tail. User confirmation remains in root's main conversation, without a new approval tool, confirmation flag, or change protocol. Root checks structural consistency of progression; Supervisor interprets the scope authorized by the user.
 
-`continue_current.remainingPlan` contains only tasks after the current delegation, excluding the current task. Omission retains the existing future plan; a supplied array replaces it with the user-confirmed list; `[]` means the user confirmed cancellation of all future tasks. An empty array neither completes nor cancels the current delegation. Root applies the future-plan update and continuation feedback in one transition, then resumes that same delegation. No `update_plan` tool is added.
+`review_current.remainingPlan` contains only tasks after the current delegation, excluding the current task. Omission retains the existing future plan; a supplied array replaces it with the user-confirmed list; `[]` means the user confirmed cancellation of all future tasks. An empty array neither completes nor cancels the current delegation. Root applies the future-plan update and continuation feedback in one transition, then resumes that same delegation. No `update_plan` tool is added.
 
 Each invocation returns at most one control decision. Acceptance with dispatch and acceptance with a reply are each expressed in one proposal, whose related state effects root applies together. Intermediate discovery returns are not final decisions.
 
@@ -105,9 +126,11 @@ Each invocation returns at most one control decision. Acceptance with dispatch a
 
 Natural text ends **this run** without changing whether an existing task is accepted. “Please provide test credentials” preserves the current delegation. Even if the text incorrectly claims everything is complete, root does not infer acceptance from it.
 
-When the current task is complete but an independent next step needs clarification, use `accept_result` with the question and established remaining plan. When Boundary judges the whole goal complete and no planned tasks remain, use it with an empty plan; Entry without an active task can simply return natural text. A goal-completion judgment must not silently skip outstanding tasks; ask the user if those tasks should be cancelled.
+completed=false cannot include reply; ask the user with natural text instead. When the current task is complete but an independent next step needs clarification, Supervisor may use `review_current(completed=true)` with the question and established remaining plan. When the current task is complete and no planned tasks remain, use it with an empty plan; Entry without an active task can simply return natural text. A goal-completion judgment must not silently skip outstanding tasks; ask the user if those tasks should be cancelled.
 
-Both paths converge on the existing `answer` node, which emits one assistant reply and cleans up the run. No second model rewrite or root prose classification occurs. Text accompanying a control call is not another reply: the proposal owns that path, and user-facing text comes from `accept_result.reply`.
+Supervisor may also ask naturally before accepting a task with sufficient delivery evidence, retaining that delegation until the user answers. Evals must accept this path and verify preservation and resumption rather than require acceptance before every question. Finalization without missing user input remains a separate explicit-acceptance check.
+
+Both paths converge on the existing `answer` node, which emits one assistant reply and cleans up the run. No second model rewrite or root prose classification occurs. Text accompanying a control call is not another reply: the proposal owns that path, and user-facing text comes from `review_current.reply`.
 
 `answer` is the current implementation exit. A unified Finalizer node will own finalization later; its responsibilities and implementation will be designed after Supervisor optimization. This proposal does not freeze the current node as the final architecture.
 
@@ -115,11 +138,11 @@ Without a proposal, the adapter accepts only the final non-empty AI text message
 
 ### Supervisor asks the user directly
 
-When prerequisites are missing, a deviation from the goal cannot be corrected within the current task, or the plan should change, the Supervisor node generates the question directly, explaining what input or decision is needed. Use natural text while the task is unfinished, or `accept_result` with a reply when it can be accepted. No extra model node composes the question.
+When prerequisites are missing, a deviation from the goal cannot be corrected within the current task, or the plan should change, the Supervisor node generates the question directly, explaining what input or decision is needed. Use natural text while the task is unfinished, or `review_current(completed=true)` with a reply when it can be accepted. No extra model node composes the question.
 
 The simplest interaction displays the question and preserves unfinished work. The user answers through that work's continuation entry, which uses existing `resume_active` semantics for the next invocation. The answer enters root's main conversation and Supervisor evaluates current input. Supplying prerequisites does not approve a plan change; without agreement, no replacement occurs. The UI must expose continuation without requiring knowledge of internal commands, and must not submit an answer from that entry as `supersede_active`.
 
-While a delegation remains unfinished, a user answer or explicit plan adjustment enters main as a new HumanMessage. Retain its identity, private history, existing Announces, and remaining plan, then invoke Supervisor / Boundary. Arrival alone does not accept, end, replace, or clear the delegation for replanning. Supervisor uses feedback to continue the same delegation when the input supplies prerequisites or implementation guidance, or applies an explicitly requested plan adjustment through existing controls. Any replacement follows that decision; receiving input is not a replacement signal.
+While a delegation remains unfinished, a user answer or explicit plan adjustment enters main as a new HumanMessage. Retain its identity, private history, existing Announces, and remaining plan, then invoke Supervisor / Boundary. Arrival alone does not accept, end, replace, or clear the delegation for replanning. Supervisor uses feedback to continue the same delegation when the input supplies prerequisites or implementation guidance, or applies an explicitly requested plan adjustment through existing controls. Replacing the current delegation uses existing user task controls; receiving a supplement is not a replacement signal.
 
 User input is a valid decision input even without a new Announce; the subagent need not execute again first. If the task has no result evidence, Supervisor may clarify, supply continuation feedback, or address an explicit user adjustment, but cannot accept an unevidenced task. Execution failures without results still stop through the error path; this is user-initiated continuation, not an automatic repair loop.
 
@@ -135,7 +158,7 @@ Root validates result shape, mode, Capability scope, active delegation identity,
 | --- | --- | --- |
 | Accept and advance | Record task acceptance against results already in main and close the old private scope without moving or publishing results again | Create and execute the next delegation |
 | Improve current work | Retain delegation identity, task, and complete private context; optionally save a user-confirmed future-plan revision | Continue the same delegation; feedback enters its next briefing without replacing the current task |
-| User-confirmed replacement | Retain results in main without marking success; close the old scope | Create and execute the replacement task according to the confirmed change |
+| Explicit user task replacement | Existing task controls detach the old active scope while retaining evidence without success | The new task enters ordinary goal capture and planning |
 | Accept and reply | Record task acceptance against results already in main | Save the remaining plan, reply, and end this run |
 | Natural reply | Preserve the active delegation and unaccepted evidence, if any | Save unfinished work, reply, and end this run |
 
@@ -161,6 +184,8 @@ Each compaction retains recent messages and every Announce for the current unfin
 
 After Announces enter main, match protection through their existing delegation identities rather than the presence of a private lane tag. Retain the original text of all attempts needed for acceptance instead of replacing it with a summary. This rule survives more aggressive watermark or history-retention settings without new protection state, duplicate result storage, or fallbacks. Capability retains ownership of its private subagent context maintenance.
 
+Compaction reuses the existing summary message type, separating the current traceId from older history into at most two summaries. Later compactions fold each group again. The current-task summary keeps traceId so Boundary retains earlier accepted work without importing unrelated tasks.
+
 ## Who handles errors
 
 The interaction needs two handling locations, not another error type system.
@@ -184,7 +209,7 @@ Supervisor is an agent invocation awaited inside a root node. Its completion ret
 
 ### Control tools use returnDirect
 
-Register the three control tools with `returnDirect: true`. Each directly returns a LangGraph `Command` containing only `update`:
+Register the two control tools with `returnDirect: true`. Each directly returns a LangGraph `Command` containing only `update`:
 
 ```ts
 // proposal is the existing domain proposal; register the tool with returnDirect: true.
@@ -222,7 +247,7 @@ A prior fake-model probe using LangChain 1.5.2 and LangGraph 1.4.7 observed two 
 
 ## Ending this run and recovering later
 
-Natural replies and `accept_result` replies both end the current root run. They do not create an `interrupt` or suspend the inner Supervisor invocation.
+Natural replies and `review_current(completed=true)` replies both end the current root run. They do not create an `interrupt` or suspend the inner Supervisor invocation.
 
 For unfinished work, use the existing continuation snapshot to retain the needed goal, active delegation association, and remaining plan, then clear the run's Supervisor session. Explicit continuation initializes a new session from current root context: an active delegation with user input or result evidence enters Boundary first; absent both, execution resumes through the existing mechanism; a remaining plan without an active delegation enters Entry. Questions without either an active delegation or remaining plan return through ordinary `entryAnswer`. Review and other interrupts retain their existing mechanisms rather than being converted to ordinary reply termination.
 
@@ -239,9 +264,9 @@ Consider “fix a bug, verify tests, then prepare release notes”:
 1. Entry reads existing root context and submits a plan to fix/verify, then prepare notes.
 2. The first result contains a patch but no test evidence and enters main as an Announce. Boundary continues the same delegation with feedback to test; root preserves its execution context.
 3. The next result includes passing tests and is appended to main. Boundary considers both complete attempts in main, accepts the task, and dispatches release notes. Root records acceptance without publishing results again.
-4. When notes are ready, Boundary uses updated main context to accept and return the final reply through `accept_result` with an empty plan.
+4. When notes are ready, Boundary uses updated main context to accept and return the final reply through `review_current(completed=true)` with an empty plan.
 
-A handled test-tool argument error returns to Capability's LLM. Corrupted checkpoint or protocol state stops execution for user decision. If later work requires a user-selected publication destination, use `accept_result` with a question and remaining plan when the current task is satisfied; use a natural reply to preserve the current task when it is not. These situations must not collapse into a single completed flag.
+A handled test-tool argument error returns to Capability's LLM. Corrupted checkpoint or protocol state stops execution for user decision. If later work requires a user-selected publication destination, use `review_current(completed=true)` with a question and remaining plan when the current task is satisfied; use a natural reply to preserve the current task when it is not. completed records current-task acceptance; reply supplies the user-facing output.
 
 If execution reveals that a dependency upgrade outside the established task scope is necessary, Supervisor explains why and asks whether to revise the plan. Providing test credentials alone preserves the original plan; explicitly agreeing to add the upgrade lets a subsequent invocation apply that change. Additional testing or corrections within the same task do not constitute such a revision.
 
@@ -269,7 +294,7 @@ Models must express completion judgments using the appropriate control. That sem
 
 ## Implementation order and legacy cleanup
 
-First fix per-loop inputs, return values, and root effects; then replace inner mechanics. Keep the three controls and existing runner interface rather than simultaneously redesigning session storage, the full Finalizer, or interrupts.
+First fix per-loop inputs, return values, and root effects; then replace inner mechanics. Keep the two controls and existing runner interface rather than simultaneously redesigning session storage, the full Finalizer, or interrupts.
 
 | Cleanup target | Direction |
 | --- | --- |
@@ -284,19 +309,30 @@ Check each step against the complete scenarios above. Keep one decision objectiv
 
 ### Current implementation status
 
-2026-09-07 tool simplification: `submit_plan` is Entry-only; `accept_result` owns acceptance with progression or a reply. Deterministic root handling lives in the `runSupervisor` TypeScript node and its LangGraph `Command`, not another judging model. These interface changes await implementation.
+2026-09-07: the implementation follows this interaction. Entry uses only
+`submit_plan`; Boundary uses `review_current`. Control tools
+return `Command({ update })` with `returnDirect`; the root `runSupervisor` node
+applies deterministic transitions. The current answer node emits supplied text
+once; the unified Finalizer remains deferred.
 
-These implementation observations refer to the local worktree, whose code changes remain uncommitted. This commit contains documentation only and does not imply that the PR includes those implementations.
+Announces enter main before acceptance. Supervisor has no separate result list
+or private execution query. Acceptance updates metadata on the original message
+id. Entry-only compaction protects every attempt of unfinished work through
+existing Announce identities.
 
-The worktree already has the three proposals, natural replies, root transitions, continuation snapshots, and `completionReason` cleanup. `returnDirect`, provider parallel-call settings, the newly clarified stable-plan constraint, fixed disclosure during execution, and continuation after ordinary questions still need implementation and validation. Current Boundary behavior still permits rewriting the remaining plan and further discovery; it does not yet satisfy this constraint. The unified Finalizer node follows Supervisor optimization. This revision changes documentation only.
+User supplements enter main before Supervisor. Optional continuation plan changes
+are applied atomically; normal execution cannot rewrite the established plan or
+expand disclosure. TUI exposes continuation from authoritative unfinished plans.
 
-Current `continue_current` code accepts only optional `feedback`. Optional `remainingPlan`, its validation, and the combined root update are a newly specified interface extension pending implementation.
+Removed completionReason transport, competing terminal commands, answer model
+rewrites, control JSON round trips, and disclosure/compaction failure fallbacks.
+Provider-native parallel flags are not forced onto unknown compatible endpoints;
+pre-tool response validation enforces the control-batch contract.
 
-The clarified continuation target also sends new user input to Supervisor before preparing needed information and continuing the delegation. Current pending-task recovery may still route directly to Capability, and Boundary input still requires an Announce. Both need adjustment for user-initiated input; documented intent is not an implementation claim.
+Behavior tests cover single-call controls, evidence publication, continuation,
+plan constraints, protected compaction, and checkpoint recovery. The synthetic real-model eval on DeepSeek v4-pro (2026-09-07) passed 7 of 8 cases with thinking disabled; finalization emitted XML text instead of calling the control tool. After enabling thinking by default as requested, the same 8 cases passed, including natural questions and two user-answer continuations; finalization called review_current. Production prompts were unchanged. This single-run comparison establishes neither stability nor causality.
 
-Announce identity fields and root entry-only compaction already exist; compaction already retains recent messages and current-delegation Announces. Direct main publication, removal of the separate Boundary result input, adjustment of model projection and acceptance-time movement, and matching existing compaction protection to main Announces by identity remain unimplemented. Current code stores Announces privately before handoff into main; protection still depends on private lane tags and does not yet cover the migrated main messages.
-
-Previously, 458 shared-runtime tests and the full workspace test command, typecheck, build, and context audit passed. These are observations of the earlier implementation, not validation of pending changes. The local `packages/pet-agent/evals/supervisor-boundary.eval.ts` contains four synthetic real-model cases; it is not included in this documentation commit, still requires outbound authorization, and remains unverified.
+Current model policy: runtime and eval omit thinking and reasoning_effort overrides for every role, leaving provider defaults in effect. The old subagent thinking switch and per-role effort policy have been removed. The explicit-thinking results above are historical experiment settings.
 
 ## Related documents
 

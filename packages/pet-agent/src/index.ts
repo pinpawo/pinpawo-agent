@@ -117,6 +117,7 @@ export {
   readPauseTaskInterrupt,
   readPendingInterrupt,
   readPendingInterruptInputPolicy,
+  settleAbortedRun,
   UnknownInterruptPayloadError,
   streamOrchestratorGraph,
   compileAgentRegistry,
@@ -127,6 +128,8 @@ export {
 export type {
   ActiveDelegationTransition,
   PauseTaskInterruptPayload,
+  AbortSettlement,
+  AbortSettlementGraph,
   PendingInterrupt,
   PendingInterruptInputPolicy,
   PendingInterruptPayload,

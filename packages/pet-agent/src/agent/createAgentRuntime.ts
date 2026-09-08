@@ -38,9 +38,12 @@ export {
   readPauseTaskInterrupt,
   readPendingInterrupt,
   readPendingInterruptInputPolicy,
+  settleAbortedRun,
   UnknownInterruptPayloadError,
 } from './orchestrator/interrupt';
 export type {
+  AbortSettlement,
+  AbortSettlementGraph,
   PauseTaskInterruptPayload,
   PendingInterrupt,
   PendingInterruptInputPolicy,

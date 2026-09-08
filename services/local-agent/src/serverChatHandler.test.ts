@@ -1110,6 +1110,90 @@ test('a review decision resume does not validate authorization effect context in
   assert.equal(sentEvents.length, 0);
 });
 
+test('an aborted run that left work behind is finalized as a pause, not an interruption', async () => {
+  const controls: unknown[] = [];
+  const sent: unknown[] = [];
+  const fakePeer = createFakePeer(sent);
+  let settleCalls = 0;
+  const handler = new LocalServerChatHandler({
+    graphService: {
+      settleAbortedRun: async () => {
+        settleCalls += 1;
+        return {
+          status: 'paused' as const,
+          pendingInterrupt: {
+            interruptId: 'interrupt-pause',
+            payload: { kind: 'pause_task' as const },
+          },
+        };
+      },
+    } as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      refreshActiveSessionSummary: async () => {},
+      buildChatSetup: () => ({ graphKey: 'test', graphConfig: {}, input: { messages: [] } }),
+    } as never,
+    inflightRequests: new InflightRequestController<LocalServerPeer>({
+      emitOperation: () => undefined,
+      sendControl: (_peer, message) => controls.push(message),
+    }),
+    loadContext: async () => ({} as never),
+    runChat: async () => ({ status: 'interrupted' as const }),
+  });
+
+  await handler.handleChatRequest(fakePeer, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'run something long',
+  }, { actorId: 'pet-1' } as never);
+
+  assert.equal(settleCalls, 1);
+  // The cancelled run is continuable, so it is announced by id like any other
+  // interrupt instead of reported as an interruption the person cannot resume.
+  assert.deepEqual(interruptedRuns(sent), []);
+  const announced = sent.find((item) => (
+    (item as { event?: { type?: string } }).event?.type === 'interrupt.requested'
+  )) as { event?: { pendingInterrupt?: { interruptId?: string; payload?: { kind?: string } } } } | undefined;
+  assert.equal(announced?.event?.pendingInterrupt?.interruptId, 'interrupt-pause');
+  assert.equal(announced?.event?.pendingInterrupt?.payload?.kind, 'pause_task');
+});
+
+test('an aborted run with nothing to continue still reports an interruption', async () => {
+  const sent: unknown[] = [];
+  const fakePeer = createFakePeer(sent);
+  const handler = new LocalServerChatHandler({
+    graphService: {
+      settleAbortedRun: async () => ({ status: 'finished' as const }),
+    } as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      refreshActiveSessionSummary: async () => {},
+      buildChatSetup: () => ({ graphKey: 'test', graphConfig: {}, input: { messages: [] } }),
+    } as never,
+    inflightRequests: new InflightRequestController<LocalServerPeer>({
+      emitOperation: () => undefined,
+      sendControl: () => undefined,
+    }),
+    loadContext: async () => ({} as never),
+    runChat: async () => ({ status: 'interrupted' as const }),
+  });
+
+  await handler.handleChatRequest(fakePeer, {
+    type: 'chat_request',
+    requestId: 'req-1',
+    message: 'answer briefly',
+  }, { actorId: 'pet-1' } as never);
+
+  assert.deepEqual(interruptedRuns(sent), ['req-1']);
+  assert.equal(
+    sent.some((item) => (item as { event?: { type?: string } }).event?.type === 'interrupt.requested'),
+    false,
+    'a run that merely ended must not claim a pause',
+  );
+});
+
 test('a review resolution that settles into a task pause finalizes as waiting, not interrupted', async () => {
   const controls: unknown[] = [];
   const sent: unknown[] = [];

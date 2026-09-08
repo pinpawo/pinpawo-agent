@@ -10,6 +10,7 @@ import { Command, MemorySaver, messagesStateReducer } from '@langchain/langgraph
 import { createMiddleware, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
 import { ORCHESTRATOR_MAX_ITERATIONS } from './runtime/constants';
+import { settleAbortedRun } from './interrupt';
 import {
   defineInstructionDocument,
   type AgentCapability,
@@ -6802,6 +6803,107 @@ test('a review-origin task pause is a real interrupt that continues by id withou
   assert.equal(getAgentMessageMetadata(guidance).traceId, continuedState.values.traceId);
   assert.equal(getAgentMessageRunId(guidance), continuedState.values.runId);
   assert.equal(continuedState.values.taskActiveDelegation?.id, pausedState.values.taskActiveDelegation?.id);
+});
+
+test('an aborted delegation settles into a pause interrupt without re-running its work', async () => {
+  // Replacement 3: Esc during a delegation stops the run at the failure node
+  // with no interrupt, so nothing above the Runtime has an id to continue.
+  // settleAbortedRun turns that boundary into the same pause a Review
+  // rejection produces, without repeating the work already committed.
+  let toolRuns = 0;
+  const controller = new AbortController();
+  const rawTool = tool(async () => {
+    toolRuns += 1;
+    // Esc arrives while the delegation is running its tool.
+    controller.abort();
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, 5_000);
+      controller.signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+      }, { once: true });
+    });
+    return 'never reached';
+  }, {
+    name: 'run_shell',
+    description: 'run shell',
+    schema: z.object({ command: z.string() }),
+  });
+  const toolkits: AgentToolkit[] = [{
+    name: 'local',
+    description: 'local tools',
+    tools: [{ tool: rawTool, operation: {} }],
+  }];
+  let routeCallCount = 0;
+  const routeModel = {
+    invoke: async () => new AIMessage('answered'),
+    bindTools: () => ({ invoke: async () => new AIMessage('') }),
+    withStructuredOutput: () => ({
+      invoke: async () => {
+        routeCallCount += 1;
+        if (routeCallCount === 1) return scriptedPlannerTask('run shell');
+        if (routeCallCount === 2) return scriptedSupervisorCapability('general');
+        return goalDoneDecision();
+      },
+    }),
+  } as unknown as AgentModels['act'];
+  const subagentModel = new FakeToolCallingModel({
+    toolCalls: [
+      [{ id: 'call-aborted', name: 'run_shell', args: { command: 'git status' } }],
+      [],
+    ],
+  });
+  const graph = createOrchestratorGraph({
+    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
+    checkpoint: new MemorySaver(),
+  });
+  const config = {
+    configurable: {
+      thread_id: 'abort-settles-into-pause',
+      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
+      toolkits,
+    },
+  };
+
+  await assert.rejects(
+    graph.invoke(
+      buildOrchestratorRunInput([new HumanMessage('run git status')]),
+      { ...config, signal: controller.signal },
+    ),
+  );
+  assert.equal(toolRuns, 1, 'the delegation was running when it was cancelled');
+
+  // The cancelled run holds unfinished work but raises no interrupt, so there
+  // is nothing for an interface to continue by id.
+  const abortedState = await graph.getState(config);
+  assert.deepEqual(
+    abortedState.tasks.flatMap((task) => task.interrupts ?? []),
+    [],
+    'an abort raises no interrupt of its own',
+  );
+  assert.equal(abortedState.values.taskActiveDelegation?.status, 'pending');
+
+  const settled = await settleAbortedRun({
+    getState: () => graph.getState(config),
+    updateState: (values, asNode) => graph.updateState(config, values, asNode),
+    resume: () => graph.invoke(null, config),
+  });
+
+  assert.equal(settled.status, 'paused');
+  assert.equal(
+    settled.status === 'paused' ? settled.pendingInterrupt.payload.kind : null,
+    'pause_task',
+    'an aborted delegation becomes the same kind a Review rejection produces',
+  );
+  assert.ok(
+    settled.status === 'paused' && settled.pendingInterrupt.interruptId,
+    'the pause carries an id the interface can continue by',
+  );
+  const settledState = await graph.getState(config);
+  assert.equal(settledState.next?.[0], 'pauseGate');
+  // Reaching the pause repeats no work and consults no model.
+  assert.equal(toolRuns, 1, 'settling must not re-run the delegation');
+  assert.equal(routeCallCount, 2, 'settling must not call the planner or supervisor');
 });
 
 test('a legacy resume_active turn over a pending task pause still re-enters the delegation', async () => {

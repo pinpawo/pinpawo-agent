@@ -138,7 +138,7 @@ test('HostCapabilityAssembly.deleteThreadArtifacts delegates to the capability a
   assert.equal(calledThreadId, 'thread-42');
 });
 
-test('LocalAgentHost deleteThread callback calls both checkpointer.deleteThread and caps.deleteThreadArtifacts', async () => {
+test('AgentHost deleteThread callback calls both checkpointer.deleteThread and caps.deleteThreadArtifacts', async () => {
   // This is a structural test: it verifies that the deleteThread callback
   // in runtime.ts invokes BOTH cleanup paths.  We instantiate
   // HostCapabilityAssembly, then call both methods the way the callback does
@@ -173,11 +173,11 @@ test('LocalAgentHost deleteThread callback calls both checkpointer.deleteThread 
 });
 
 test('Chat Host preserves the existing session checkpoint namespace', async () => {
-  const { LocalAgentHost } = await import('./runtime');
+  const { AgentHost } = await import('./runtime');
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-chat-checkpoint-'));
   const runtimeConfig = buildTestConfig(root);
   const existingWriter = new FileSaver(runtimeConfig.tuiCheckpointPath);
-  const host = new LocalAgentHost(runtimeConfig);
+  const host = new AgentHost(runtimeConfig);
   existingWriter.acquireHostWriterLease('existing-chat');
   try {
     assert.throws(() => host.getChatCheckpointer().acquireHostWriterLease('new-chat'), /already owned by existing-chat/);

@@ -1,13 +1,13 @@
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 
 /**
  * Preserve wire arrival order for checkpoint-backed session commands without
  * serializing long-running agent execution or delaying interrupts.
  */
-export class LocalServerSessionCommandQueue {
-  private readonly tails = new WeakMap<LocalServerPeer, Promise<void>>();
+export class ServerSessionCommandQueue {
+  private readonly tails = new WeakMap<ServerPeer, Promise<void>>();
 
-  enqueue(peer: LocalServerPeer, command: () => Promise<void>) {
+  enqueue(peer: ServerPeer, command: () => Promise<void>) {
     const previous = this.waitForIdle(peer);
     const current = previous.then(command);
     this.tails.set(peer, current);
@@ -20,14 +20,14 @@ export class LocalServerSessionCommandQueue {
     return current;
   }
 
-  waitForIdle(peer: LocalServerPeer) {
+  waitForIdle(peer: ServerPeer) {
     const current = this.tails.get(peer);
     return current
       ? current.then(() => undefined, () => undefined)
       : Promise.resolve();
   }
 
-  clear(peer: LocalServerPeer) {
+  clear(peer: ServerPeer) {
     this.tails.delete(peer);
   }
 }

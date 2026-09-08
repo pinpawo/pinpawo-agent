@@ -6,12 +6,12 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type { LocalServerDeps } from './localServerTypes';
+import type { ServerDeps } from './serverTypes';
 import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 import { resolveLlmGenerationReserveTokens } from './llmModelPresets';
 
-export type LocalRuntimeProjection = {
+export type RuntimeProjection = {
   /** Local-agent projection is always the Chat Host. */
   serverMode: ServerMode;
   modelProfileId: string;
@@ -32,9 +32,9 @@ export type LocalRuntimeProjection = {
 };
 
 export function buildLocalRuntimeProjection(
-  deps: LocalServerDeps,
+  deps: ServerDeps,
   modelProfileId = deps.modelProfiles.defaultProfileId,
-): LocalRuntimeProjection {
+): RuntimeProjection {
   const runtimeConfig = deps.runtimeConfig;
   const profile = deps.modelProfiles.snapshot.profiles[modelProfileId];
   if (!profile) {
@@ -90,7 +90,7 @@ export function buildLocalRuntimeProjection(
   };
 }
 
-export function buildLocalHttpRuntimeProjection(deps: LocalServerDeps) {
+export function buildLocalHttpRuntimeProjection(deps: ServerDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
     local_agent_version: readLocalAgentPackageVersion(),

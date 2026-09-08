@@ -23,8 +23,8 @@ import type { HostExecutionConfig } from './hostExecutionConfig';
 import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
 import {
   buildLocalAgentInterfaceContext,
-  type LocalAgentInterfaceContext,
-  type LocalAgentInterfaceKind,
+  type AgentInterfaceContext,
+  type AgentInterfaceKind,
 } from './chatInterface';
 import {
   inferLlmStructuredOutputMethod,
@@ -41,7 +41,7 @@ export type AgentChannelSetup = {
   registry: CompiledAgentRegistry;
   /** Host-only attribution; never included in Agent invocation/configurable. */
   traceUserId?: string;
-  interfaceContext?: LocalAgentInterfaceContext;
+  interfaceContext?: AgentInterfaceContext;
 };
 
 export function buildDecisionStructuredOutput(
@@ -80,7 +80,7 @@ export function buildLocalChatAgentInput(params: {
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
   /** Stable thread scope required by artifact discovery and checkpoint routing. */
   threadId: string;
-  interfaceKind?: LocalAgentInterfaceKind | null;
+  interfaceKind?: AgentInterfaceKind | null;
   checkpoint?: BaseCheckpointSaver;
   /** Already-resolved Capability snapshot supplied by the Host catalog. */
   capabilities?: readonly AgentCapability[];

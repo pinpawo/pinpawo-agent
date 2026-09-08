@@ -9,13 +9,13 @@ import {
   getConfig,
   setConfig,
 } from './config';
-import { LocalAgentHost } from './runtime';
+import { AgentHost } from './runtime';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 
 test('requestStop ends runForever promptly', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-runtime-stop-'));
   const originalConfig = getConfig();
-  const runtime = new LocalAgentHost(
+  const runtime = new AgentHost(
     buildLocalAgentRuntimeConfig(workdir),
   );
   try {

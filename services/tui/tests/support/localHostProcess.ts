@@ -6,7 +6,7 @@ import {
 } from '../../../local-agent/src/contextLoader';
 import {
   startLocalServer,
-} from '../../../local-agent/src/localServer';
+} from '../../../local-agent/src/server';
 import {
   buildLocalAgentRuntimeConfig,
 } from '../../../local-agent/src/runtimeConfig';

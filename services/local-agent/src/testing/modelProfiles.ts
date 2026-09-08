@@ -16,7 +16,7 @@ import {
   type ModelProfileV1,
 } from '../modelProfiles';
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
-import type { CapabilityCatalogReader } from '../localServerTypes';
+import type { CapabilityCatalogReader } from '../serverTypes';
 import type { CapabilityCatalogSnapshot } from '../hostCapabilityCatalog';
 
 const emptyCapabilityCatalogSnapshot: CapabilityCatalogSnapshot = Object.freeze({

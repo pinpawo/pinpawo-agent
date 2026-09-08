@@ -21,17 +21,17 @@ import {
   type AgentSessionTurnResult,
 } from './chatSessionAdapter';
 import { loadAgentContext } from './contextLoader';
-import { createLocalServerHandlers, type LocalServerHandlerOptions } from './localServerHandlers';
+import { createLocalServerHandlers, type ServerHandlerOptions } from './serverHandlers';
 import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
 } from './localServerMessageDispatcher';
-import { LocalServerTuiSessionService, type TuiSessionCheckpointer } from './localServerTuiSessions';
+import { ServerTuiSessionService, type TuiSessionCheckpointer } from './serverTuiSessions';
 import {
   createLocalServerRuntimeDepsStore,
-  type LocalServerDeps,
-  type LocalServerRuntimeDepsStore,
-} from './localServerTypes';
+  type ServerDeps,
+  type ServerRuntimeDepsStore,
+} from './serverTypes';
 import type { HostExecutionConfig } from './hostExecutionConfig';
 import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 import type { LocalModelProfileRegistry } from './llmConfig';
@@ -41,7 +41,7 @@ import {
   finishInflightOperations,
   overlayInflightDelegationOperations,
 } from './inflightOperationRun';
-import { emitLocalServerToolOperationEvent } from './localServerOperationEvents';
+import { emitLocalServerToolOperationEvent } from './serverOperationEvents';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
@@ -367,7 +367,7 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   /** @deprecated Use runAgentTurn. */
   runChat?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   /** Host persistence port for updated startup defaults. */
-  persistGlobalReviewPolicyMode?: LocalServerHandlerOptions['persistGlobalReviewPolicyMode'];
+  persistGlobalReviewPolicyMode?: ServerHandlerOptions['persistGlobalReviewPolicyMode'];
   /** Existing opaque checkpoint thread, adopted only when no Agent Session exists. */
   adoptThreadId?: string;
 };
@@ -384,11 +384,11 @@ export interface ResidentPetRuntime {
 
 type ResidentPetRuntimeContext = {
   runtime: ResidentPetRuntime;
-  runtimeDeps: LocalServerRuntimeDepsStore;
+  runtimeDeps: ServerRuntimeDepsStore;
   graphService: LocalAgentGraphService;
   runAgentTurn: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   loadContext: typeof loadAgentContext;
-  sessions: LocalServerTuiSessionService;
+  sessions: ServerTuiSessionService;
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;
@@ -483,7 +483,7 @@ export async function createResidentPetRuntime(
   options: CreateResidentPetRuntimeOptions,
 ): Promise<ResidentPetRuntime> {
   const modelProfiles = withDefaultModelProfile(options.modelProfiles, options.modelProfileId);
-  const deps: LocalServerDeps & {
+  const deps: ServerDeps & {
     chatCheckpointer: TuiSessionCheckpointer;
     capabilityArtifactStore: CapabilityArtifactStore;
   } = {
@@ -514,7 +514,7 @@ export async function createResidentPetRuntime(
       pet: { id: options.petId, name: options.petName },
       traceUserId: options.traceUserId,
     }));
-  const sessions = new LocalServerTuiSessionService({
+  const sessions = new ServerTuiSessionService({
     graphService,
     loadContext,
     runtimeConfig: deps.runtimeConfig,

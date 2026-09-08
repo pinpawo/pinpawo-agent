@@ -3,19 +3,19 @@ import { stderr, stdin, stdout } from 'node:process';
 import type { Readable, Writable } from 'node:stream';
 import {
   createLocalAgentWireHandlers,
-  type LocalServerLogError,
-  type LocalServerLogWarn,
-  type LocalServerTransportHandlers,
+  type ServerLogError,
+  type ServerLogWarn,
+  type ServerTransportHandlers,
 } from './localServerMessageDispatcher';
 import type {
-  LocalServerWireHandlers,
-  LocalServerWirePeer,
+  ServerWireHandlers,
+  ServerWirePeer,
 } from './localServerWire';
 
 const DEFAULT_MAX_PENDING_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_INPUT_LINE_BYTES = 8 * 1024 * 1024;
 
-export type LocalServerStdioTransportOptions = {
+export type ServerStdioTransportOptions = {
   input?: Readable;
   output?: Writable;
   diagnostics?: Writable;
@@ -23,13 +23,13 @@ export type LocalServerStdioTransportOptions = {
   maxInputLineBytes?: number;
 };
 
-export type LocalServerWireStdioTransport<TMessage extends object> = {
-  peer: LocalServerWirePeer<TMessage>;
+export type ServerWireStdioTransport<TMessage extends object> = {
+  peer: ServerWirePeer<TMessage>;
   closed: Promise<void>;
   close: () => void;
 };
 
-export type LocalServerStdioTransport = LocalServerWireStdioTransport<
+export type ServerStdioTransport = ServerWireStdioTransport<
   import('./localAgentProtocol').LocalAgentServerMessage
 >;
 
@@ -61,15 +61,15 @@ export function redirectConsoleToStdioDiagnostics(diagnostics: Writable = stderr
 }
 
 export function attachLocalServerWireStdioTransport<TMessage extends object>(
-  handlers: LocalServerWireHandlers<TMessage>,
-  options: LocalServerStdioTransportOptions = {},
-): LocalServerWireStdioTransport<TMessage> {
+  handlers: ServerWireHandlers<TMessage>,
+  options: ServerStdioTransportOptions = {},
+): ServerWireStdioTransport<TMessage> {
   const input = options.input ?? stdin;
   const output = options.output ?? stdout;
   const diagnostics = options.diagnostics ?? stderr;
   const maxPendingBytes = options.maxPendingBytes ?? DEFAULT_MAX_PENDING_BYTES;
   const maxInputLineBytes = options.maxInputLineBytes ?? DEFAULT_MAX_INPUT_LINE_BYTES;
-  const logError: LocalServerLogError = handlers.logError
+  const logError: ServerLogError = handlers.logError
     ?? ((message, error) => writeDiagnostic(diagnostics, `${message} ${formatError(error)}`));
   const pending: string[] = [];
   const pendingDispatches = new Set<Promise<void>>();
@@ -144,7 +144,7 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
     finish();
   }
 
-  const peer: LocalServerWirePeer<TMessage> = {
+  const peer: ServerWirePeer<TMessage> = {
     isConnected: () => connected,
     send: (message: TMessage) => {
       if (!connected) {
@@ -283,13 +283,13 @@ export function attachLocalServerWireStdioTransport<TMessage extends object>(
 
 /** Chat/Agent Session adapter retained for the local-agent Host. */
 export function attachLocalServerStdioTransport(
-  handlers: LocalServerTransportHandlers,
-  options: LocalServerStdioTransportOptions = {},
-): LocalServerStdioTransport {
+  handlers: ServerTransportHandlers,
+  options: ServerStdioTransportOptions = {},
+): ServerStdioTransport {
   const diagnostics = options.diagnostics ?? stderr;
-  const logError: LocalServerLogError = handlers.logError
+  const logError: ServerLogError = handlers.logError
     ?? ((message, error) => writeDiagnostic(diagnostics, `${message} ${formatError(error)}`));
-  const logWarn: LocalServerLogWarn = handlers.logWarn
+  const logWarn: ServerLogWarn = handlers.logWarn
     ?? ((message) => writeDiagnostic(diagnostics, message));
   return attachLocalServerWireStdioTransport(
     createLocalAgentWireHandlers(handlers, logError, logWarn),

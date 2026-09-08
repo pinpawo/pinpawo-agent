@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { loadStoredConfig, type StoredConfig } from './storage';
 
-export type LocalAgentWorkspaceConfig = Readonly<{
+export type AgentWorkspaceConfig = Readonly<{
   id: string;
   name: string;
   rootPath: string;
@@ -12,7 +12,7 @@ export type LocalAgentWorkspaceConfig = Readonly<{
 
 export type LocalAgentRuntimeConfig = Readonly<{
   workdir: string;
-  workspace?: LocalAgentWorkspaceConfig;
+  workspace?: AgentWorkspaceConfig;
   stateRoot: string;
   checkpointPath: string;
   tuiCheckpointPath: string;

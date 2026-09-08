@@ -6,11 +6,11 @@ import test from 'node:test';
 import type { AgentLocalAttachment } from '@pinpawo/agent-session';
 import {
   detectSupportedImageMimeType,
-  LocalImageAdmissionError,
-  LocalImageAttachmentAdmission,
+  ImageAdmissionError,
+  ImageAttachmentAdmission,
   MAX_LOCAL_IMAGE_ATTACHMENTS,
   MAX_LOCAL_IMAGE_BYTES,
-} from './localImageAttachments';
+} from './imageAttachments';
 
 const PNG_BYTES = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -53,7 +53,7 @@ test('image admission prepares a standard block payload and preserves ordinary f
   const textPath = join(root, 'notes.png');
   await fs.writeFile(imagePath, PNG_BYTES);
   await fs.writeFile(textPath, 'not really an image');
-  const admission = new LocalImageAttachmentAdmission();
+  const admission = new ImageAttachmentAdmission();
 
   try {
     const admitted = await admission.admit([
@@ -78,7 +78,7 @@ test('text-only admission rejects a real image', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-input-images-text-'));
   const imagePath = join(root, 'image.png');
   await fs.writeFile(imagePath, PNG_BYTES);
-  const admission = new LocalImageAttachmentAdmission();
+  const admission = new ImageAttachmentAdmission();
 
   try {
     await assert.rejects(
@@ -87,7 +87,7 @@ test('text-only admission rejects a real image', async () => {
         { allowImages: false },
       ),
       (error: unknown) => (
-        error instanceof LocalImageAdmissionError
+        error instanceof ImageAdmissionError
         && error.code === 'image_model_unsupported'
       ),
     );
@@ -98,7 +98,7 @@ test('text-only admission rejects a real image', async () => {
 
 test('image admission enforces count and byte limits', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-input-images-limit-'));
-  const admission = new LocalImageAttachmentAdmission();
+  const admission = new ImageAttachmentAdmission();
   try {
     const attachments: AgentLocalAttachment[] = [];
     for (let index = 0; index < MAX_LOCAL_IMAGE_ATTACHMENTS + 1; index += 1) {
@@ -109,7 +109,7 @@ test('image admission enforces count and byte limits', async () => {
     await assert.rejects(
       () => admission.admit(attachments, { allowImages: true }),
       (error: unknown) => (
-        error instanceof LocalImageAdmissionError
+        error instanceof ImageAdmissionError
         && error.code === 'image_count_limit'
       ),
     );
@@ -125,7 +125,7 @@ test('image admission enforces count and byte limits', async () => {
         { allowImages: true },
       ),
       (error: unknown) => (
-        error instanceof LocalImageAdmissionError
+        error instanceof ImageAdmissionError
         && error.code === 'image_size_limit'
       ),
     );

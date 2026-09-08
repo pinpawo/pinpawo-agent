@@ -3,7 +3,7 @@ import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
-import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
+import { buildLocalAgentSessionSnapshot } from './agentSessionSnapshot';
 import type {
   AgentModelProfileSummary,
   AgentRuntimeEvent,
@@ -13,16 +13,16 @@ import type {
 import type {
   LocalAgentSessionServerMessage,
 } from './localAgentProtocol';
-import { handleLocalHttpRequest } from './localHttpHandlers';
-import { sendLocalServerPeerEvent, type LocalServerPeer } from './localServerPeer';
+import { handleLocalHttpRequest } from './httpHandlers';
+import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
 import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
-import { LocalServerSessionCommandQueue } from './localServerSessionCommandQueue';
-import { LocalServerChatHandler } from './localServerChatHandler';
+import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
+import { ServerChatHandler } from './serverChatHandler';
 import type {
   AgentSessionTurnOptions,
   AgentSessionTurnResult,
 } from './chatSessionAdapter';
-import { LocalServerTuiSessionService } from './localServerTuiSessions';
+import { ServerTuiSessionService } from './serverTuiSessions';
 import { persistGlobalReviewPolicyMode } from './globalReviewPolicyConfig';
 import { loadAgentContext } from './contextLoader';
 import {
@@ -30,11 +30,11 @@ import {
   supportsInputModalities,
 } from './modelProfiles';
 import {
-  type LocalServerRuntimeDepsStore,
-  type LocalServerDeps,
-} from './localServerTypes';
+  type ServerRuntimeDepsStore,
+  type ServerDeps,
+} from './serverTypes';
 
-export type LocalServerHandlers = {
+export type ServerHandlers = {
   peerHandlers: LocalServerPeerHandlers;
   handleHttpRequest: (
     req: IncomingMessage,
@@ -44,12 +44,12 @@ export type LocalServerHandlers = {
   close: () => void;
 };
 
-export type LocalServerHandlerOptions = {
+export type ServerHandlerOptions = {
   persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
   /** Composition hook for embedded hosts and deterministic integration tests. */
   chatGraphService?: LocalAgentGraphService;
   /** Host-owned session service shared with another surface of the same resident Pet. */
-  tuiSessions?: LocalServerTuiSessionService;
+  tuiSessions?: ServerTuiSessionService;
   /** Must be shared by chat execution and checkpoint-backed session reads. */
   loadContext?: typeof loadAgentContext;
   /** Deterministic run-boundary hook for embedded hosts and tests. */
@@ -61,7 +61,7 @@ export type LocalServerHandlerOptions = {
     options: AgentSessionTurnOptions,
   ) => Promise<AgentSessionTurnResult>;
   /** Publish one run event to every observer of the resident Agent Session. */
-  publishRuntimeEvent?: (origin: LocalServerPeer, event: AgentRuntimeEvent) => void;
+  publishRuntimeEvent?: (origin: ServerPeer, event: AgentRuntimeEvent) => void;
   /** Optional Host-owned run control used by resident headless inputs. */
   interruptHostRun?: (requestId: string) => boolean;
   /** Resident-wide live run projection used by observing peers and startup snapshots. */
@@ -96,13 +96,13 @@ function projectChatSessionSummary(session: SessionSummarySource): AgentSessionS
  * checkpoint-backed operations below.
  */
 export function createLocalServerHandlers(
-  runtimeDeps: LocalServerRuntimeDepsStore,
-  options: LocalServerHandlerOptions = {},
-): LocalServerHandlers {
+  runtimeDeps: ServerRuntimeDepsStore,
+  options: ServerHandlerOptions = {},
+): ServerHandlers {
   const initialDeps = runtimeDeps.get();
   const effectiveRuntimeConfig = initialDeps.runtimeConfig;
   const chatGraphService = options.chatGraphService ?? new LocalAgentGraphService();
-  const tuiSessions = options.tuiSessions ?? new LocalServerTuiSessionService({
+  const tuiSessions = options.tuiSessions ?? new ServerTuiSessionService({
     graphService: chatGraphService,
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     runtimeConfig: effectiveRuntimeConfig,
@@ -110,15 +110,15 @@ export function createLocalServerHandlers(
     defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
   });
   const publishRuntimeEvent = options.publishRuntimeEvent
-    ?? ((peer: LocalServerPeer, event: AgentRuntimeEvent) => {
+    ?? ((peer: ServerPeer, event: AgentRuntimeEvent) => {
       sendLocalServerPeerEvent(peer, event);
     });
-  const inflightRequests = new InflightRequestController<LocalServerPeer>({
+  const inflightRequests = new InflightRequestController<ServerPeer>({
     // Local TUI / companion / spawned stdio peer: trusted local transports.
     emitOperation: publishRuntimeEvent,
     sendControl: (peer, message) => peer.send(message),
   });
-  const chatHandler = new LocalServerChatHandler({
+  const chatHandler = new ServerChatHandler({
     graphService: chatGraphService,
     tuiSessions,
     inflightRequests,
@@ -131,13 +131,13 @@ export function createLocalServerHandlers(
         ? { runChat: options.runChat }
         : {}),
   });
-  const sessionCommands = new LocalServerSessionCommandQueue();
+  const sessionCommands = new ServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.
   let activeChatOperations = 0;
   let sessionTransition: Promise<void> | null = null;
-  const activeChatRuns = new WeakMap<LocalServerPeer, ActiveChatRun>();
+  const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
 
-  const loadSnapshot = async (peer?: LocalServerPeer) => {
+  const loadSnapshot = async (peer?: ServerPeer) => {
     const requestDeps = runtimeDeps.get();
     const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
     const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
@@ -253,7 +253,7 @@ export function createLocalServerHandlers(
   };
 
   const sendModelSelectionError = (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     message: {
       requestId: string;
       sessionId: string;
@@ -282,7 +282,7 @@ export function createLocalServerHandlers(
   };
 
   const selectModelProfile = async (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     message: {
       requestId: string;
       sessionId: string;
@@ -563,7 +563,7 @@ export function createLocalServerHandlers(
   };
 
   const respondToSessionRequest = async (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     requestId: string,
     operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
     load: () => Promise<LocalAgentSessionServerMessage>,
@@ -581,7 +581,7 @@ export function createLocalServerHandlers(
   };
 
   const afterSessionCommands = async (
-    peer: LocalServerPeer,
+    peer: ServerPeer,
     requestId: string,
     admit: () => Promise<void>,
   ) => {

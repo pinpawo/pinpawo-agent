@@ -1,5 +1,5 @@
-import { LocalAgentHost } from '../runtime';
-import { startLocalServer } from '../localServer';
+import { AgentHost } from '../runtime';
+import { startLocalServer } from '../server';
 import { getConfig } from '../config';
 import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 import { logStartupConfig } from '../startupConfigLog';
@@ -25,7 +25,7 @@ export async function runAgent(options: RunAgentOptions) {
     ? redirectConsoleToStdioDiagnostics()
     : () => undefined;
   let stopping = false;
-  let runtime: LocalAgentHost | null = null;
+  let runtime: AgentHost | null = null;
   let closeLocalTransport: (() => void) | null = null;
   const handleSigint = () => {
     if (stopping) {
@@ -53,9 +53,9 @@ export async function runAgent(options: RunAgentOptions) {
     const runtimeConfig = buildRunAgentRuntimeConfig(options);
     const mode = options.mode;
 
-    // LocalAgentHost shares capability supply via HostCapabilityAssembly and
+    // AgentHost shares capability supply via HostCapabilityAssembly and
     // adds Chat/ws-relay concerns on top.
-    runtime = new LocalAgentHost(runtimeConfig, mode);
+    runtime = new AgentHost(runtimeConfig, mode);
 
     // Init loads Toolkit definitions and starts their optional runtimes before
     // any local transport begins accepting execution requests.

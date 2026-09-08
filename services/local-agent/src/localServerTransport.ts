@@ -11,18 +11,18 @@ import type { WebSocketServer } from 'ws';
 import { ensureLocalServerAuthToken } from './localServerAuth';
 import {
   createLocalAgentWireHandlers,
-  type LocalServerTransportHandlers,
+  type ServerTransportHandlers,
 } from './localServerMessageDispatcher';
-import { attachLocalServerWireWebSocketTransport } from './localServerWsTransport';
-import type { LocalServerWireHandlers } from './localServerWire';
+import { attachLocalServerWireWebSocketTransport } from './serverWsTransport';
+import type { ServerWireHandlers } from './localServerWire';
 
-export type LocalServerTransport = {
+export type ServerTransport = {
   port: number;
   close: () => void;
   closed: Promise<void>;
 };
 
-export type LocalServerTransportOptions = {
+export type ServerTransportOptions = {
   authToken?: string;
   handleHttpRequest?: (req: IncomingMessage, res: ServerResponse) => void;
   closeHandlers?: () => void;
@@ -30,9 +30,9 @@ export type LocalServerTransportOptions = {
 
 export async function startLocalServerWireTransport<TMessage extends object>(
   port: number,
-  peerHandlers: LocalServerWireHandlers<TMessage>,
-  options: LocalServerTransportOptions = {},
-): Promise<LocalServerTransport> {
+  peerHandlers: ServerWireHandlers<TMessage>,
+  options: ServerTransportOptions = {},
+): Promise<ServerTransport> {
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
   const server = createServer(options.handleHttpRequest ?? ((_req, res) => {
     res.writeHead(404);
@@ -95,9 +95,9 @@ export async function startLocalServerWireTransport<TMessage extends object>(
 /** Chat/Agent Session adapter retained for the local-agent Host. */
 export function startLocalServerTransport(
   port: number,
-  peerHandlers: LocalServerTransportHandlers,
-  options: LocalServerTransportOptions = {},
-): Promise<LocalServerTransport> {
+  peerHandlers: ServerTransportHandlers,
+  options: ServerTransportOptions = {},
+): Promise<ServerTransport> {
   return startLocalServerWireTransport(
     port,
     createLocalAgentWireHandlers(peerHandlers),

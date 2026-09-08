@@ -12,7 +12,7 @@ import {
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
 } from './localServerAuth';
-import type { LocalServerTransport } from './localServerTransport';
+import type { ServerTransport } from './localServerTransport';
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,
@@ -116,7 +116,7 @@ export async function startResidentPetAgentSessionTransport(
   port: number,
   interactions: ReadonlyMap<string, ResidentPetInteraction>,
   options: ResidentPetAgentSessionTransportOptions = {},
-): Promise<LocalServerTransport> {
+): Promise<ServerTransport> {
   const authToken = options.authToken ?? ensureLocalServerAuthToken();
   const log = options.log ?? console.log;
   const logError = options.logError ?? ((message, error) => {

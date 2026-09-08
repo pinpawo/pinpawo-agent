@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import type { HumanReviewResponseMessage } from '@pinpawo/agent-session';
-import { isToolProtocolHistoryError, LocalServerChatHandler } from './localServerChatHandler';
+import { isToolProtocolHistoryError, ServerChatHandler } from './serverChatHandler';
 import { InflightRequestController } from './inflightRequestController';
-import type { LocalServerPeer } from './localServerPeer';
+import type { ServerPeer } from './localServerPeer';
 
 function createFakePeer(
   sent: unknown[] = [],
   isConnected: () => boolean = () => true,
-): LocalServerPeer {
+): ServerPeer {
   return {
     isConnected,
     send: (message) => {
@@ -56,7 +56,7 @@ test('isToolProtocolHistoryError recognizes LangGraph tool history protocol fail
 test('local server forwards structured local attachments to the chat session', async () => {
   const peer = createFakePeer();
   let receivedRequest: unknown;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
@@ -121,7 +121,7 @@ test('replacement request waits for the previous thread invocation to settle', a
     releaseFirst = resolve;
   });
   let replacementStarted = false;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
@@ -195,13 +195,13 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
   const sent: unknown[] = [];
   let runCount = 0;
   const fakePeer = createFakePeer(sent);
-  const inflightRequests = new InflightRequestController<LocalServerPeer>({
+  const inflightRequests = new InflightRequestController<ServerPeer>({
     emitOperation: () => undefined,
     sendControl: (_peer, message) => {
       controls.push(message);
     },
   });
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -254,7 +254,7 @@ test('run interrupt cancels a review that became pending before the client obser
   const requests: unknown[] = [];
   const sent: unknown[] = [];
   const fakePeer = createFakePeer(sent);
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -275,7 +275,7 @@ test('run interrupt cancels a review that became pending before the client obser
         input: { messages: [] },
       }),
     } as never,
-    inflightRequests: new InflightRequestController<LocalServerPeer>({
+    inflightRequests: new InflightRequestController<ServerPeer>({
       emitOperation: () => undefined,
       sendControl: (_peer, message) => controls.push(message),
     }),
@@ -324,7 +324,7 @@ test('handleHumanReviewResponse rejects a stale canonical interactionId before f
       }],
     }),
   } as never;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
@@ -374,7 +374,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     getChatThreadId: () => 'thread-x',
     readActivePendingInterrupt: async () => pendingInterrupt,
   } as never;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
@@ -447,7 +447,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
     view: { kind: 'plain' as const, body: 'Approve?' },
     options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
   };
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -501,7 +501,7 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -558,7 +558,7 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
   let connected = false;
   const handleChatCalls: unknown[] = [];
   const fakePeer = createFakePeer([], () => connected);
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -600,7 +600,7 @@ test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', (
     view: { kind: 'plain' as const, body: 'Approve?' },
     options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' as const } }],
   };
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -638,7 +638,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
   // Mirrors the checkpoint: once a resume is applied, LangGraph stops
   // reporting that interrupt, so recovery finds nothing pending afterwards.
   let reviewResumed = false;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -724,7 +724,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
   const handleChatCalls: unknown[] = [];
   const sentEvents: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -801,7 +801,7 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
     }],
   };
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -875,7 +875,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
       }],
     }),
   } as never;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
@@ -940,7 +940,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
       }],
     }),
   } as never;
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions,
     inflightRequests: new InflightRequestController({
@@ -975,7 +975,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
   const updateStateCalls: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
 
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {
       updateState: async (...args: unknown[]) => {
         updateStateCalls.push(args);
@@ -1061,7 +1061,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   const updateStateCalls: unknown[] = [];
   const fakePeer = createFakePeer(sentEvents);
 
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {
       updateState: async (...args: unknown[]) => {
         updateStateCalls.push(args);
@@ -1115,7 +1115,7 @@ test('a review resolution that settles into a task pause is finalized as interru
   const controls: unknown[] = [];
   const sent: unknown[] = [];
   const fakePeer = createFakePeer(sent);
-  const handler = new LocalServerChatHandler({
+  const handler = new ServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
@@ -1139,7 +1139,7 @@ test('a review resolution that settles into a task pause is finalized as interru
         input: { messages: [] },
       }),
     } as never,
-    inflightRequests: new InflightRequestController<LocalServerPeer>({
+    inflightRequests: new InflightRequestController<ServerPeer>({
       emitOperation: () => undefined,
       sendControl: (_peer, message) => controls.push(message),
     }),

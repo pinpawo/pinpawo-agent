@@ -7,7 +7,7 @@ import { stampAgentMessageCreatedAt } from '@pinpawo/pet-agent';
 import type {
   AdmittedLocalAttachment,
   AdmittedLocalImageAttachment,
-} from './localImageAttachments';
+} from './imageAttachments';
 
 const DISPLAY_TEXT_METADATA_KEY = 'localChatDisplayText';
 

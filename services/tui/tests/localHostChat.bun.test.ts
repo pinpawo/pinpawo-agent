@@ -26,17 +26,17 @@ import {
 } from '../../local-agent/src/contextLoader';
 import {
   readLocalChatDisplayText,
-} from '../../local-agent/src/localChatAttachments';
+} from '../../local-agent/src/chatAttachments';
 import {
   createLocalServerHandlers,
-} from '../../local-agent/src/localServerHandlers';
-import { createLocalServerRuntimeDepsStore } from '../../local-agent/src/localServerTypes';
+} from '../../local-agent/src/serverHandlers';
+import { createLocalServerRuntimeDepsStore } from '../../local-agent/src/serverTypes';
 import type {
   LocalServerPeerHandlers,
 } from '../../local-agent/src/localServerMessageDispatcher';
 import {
   attachLocalServerWebSocketTransport,
-} from '../../local-agent/src/localServerWsTransport';
+} from '../../local-agent/src/serverWsTransport';
 import {
   buildLocalAgentRuntimeConfig,
 } from '../../local-agent/src/runtimeConfig';

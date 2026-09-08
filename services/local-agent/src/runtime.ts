@@ -5,7 +5,7 @@ import {
   buildLocalAgentRuntimeConfig,
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
-import type { LocalServerDeps } from './localServerTypes';
+import type { ServerDeps } from './serverTypes';
 import { loadPetDocumentFile, resolveChatPetDocumentPath } from './petDocument';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 
@@ -21,7 +21,7 @@ import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
  * Studio is started from its own package and composes the exported resident
  * runtime/interaction surfaces; this Chat Host never imports it.
  */
-export class LocalAgentHost {
+export class AgentHost {
   private readonly caps: HostCapabilityAssembly;
   private readonly serverMode: ServerMode;
   private petDocument: PetDocument | null = null;
@@ -106,7 +106,7 @@ export class LocalAgentHost {
 
   // ---- Chat/ws-relay concerns (host-specific) ----
 
-  buildLocalServerDeps(): LocalServerDeps {
+  buildLocalServerDeps(): ServerDeps {
     return {
       serverMode: this.serverMode,
       actorId: this.getActorId(),

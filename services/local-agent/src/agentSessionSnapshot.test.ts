@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseAgentSessionSnapshot } from '@pinpawo/agent-session';
-import { buildLocalAgentSessionSnapshot } from './localAgentSessionSnapshot';
-import type { LocalServerDeps } from './localServerTypes';
+import { buildLocalAgentSessionSnapshot } from './agentSessionSnapshot';
+import type { ServerDeps } from './serverTypes';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
 test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot', () => {
@@ -30,7 +30,7 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
         capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
-    } as LocalServerDeps,
+    } as ServerDeps,
     requiredInputModalities: ['text', 'image'],
     sessionTokenUsage: {
       inputTokens: 100,
@@ -145,7 +145,7 @@ test('buildLocalAgentSessionSnapshot preserves an in-flight running request', ()
         tuiSessionPath: '/tmp/work/.pinpawo/tui-sessions.json',
         capabilityArtifactRoot: '/tmp/work/.pinpawo/capability-artifacts',
       },
-    } as LocalServerDeps,
+    } as ServerDeps,
     activeRun: {
       requestId: 'req-live',
       state: 'running',

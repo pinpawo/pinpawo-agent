@@ -10,8 +10,8 @@ export {
   startLocalServerWireTransport,
 } from './localServerTransport';
 export type {
-  LocalServerTransport,
-  LocalServerTransportOptions,
+  ServerTransport,
+  ServerTransportOptions,
 } from './localServerTransport';
 export {
   attachLocalServerStdioTransport,
@@ -19,23 +19,23 @@ export {
   redirectConsoleToStdioDiagnostics,
 } from './localServerStdioTransport';
 export type {
-  LocalServerStdioTransport,
-  LocalServerWireStdioTransport,
-  LocalServerStdioTransportOptions,
+  ServerStdioTransport,
+  ServerWireStdioTransport,
+  ServerStdioTransportOptions,
 } from './localServerStdioTransport';
 export type {
-  LocalServerWireHandlers,
-  LocalServerWireLogError,
-  LocalServerWireLogWarn,
-  LocalServerWirePeer,
+  ServerWireHandlers,
+  ServerWireLogError,
+  ServerWireLogWarn,
+  ServerWirePeer,
 } from './localServerWire';
 export type {
-  LocalServerLogError,
-  LocalServerLogWarn,
+  ServerLogError,
+  ServerLogWarn,
   LocalServerPeerHandlers,
-  LocalServerTransportHandlers,
+  ServerTransportHandlers,
 } from './localServerMessageDispatcher';
-export type { LocalServerPeer } from './localServerPeer';
+export type { ServerPeer } from './localServerPeer';
 export { sendLocalServerPeerEvent } from './localServerPeer';
 export type { LocalAgentServerMessage } from './localAgentProtocol';
 export {

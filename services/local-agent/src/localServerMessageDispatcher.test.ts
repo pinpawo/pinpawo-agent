@@ -34,6 +34,9 @@ test('local server dispatcher routes typed client messages and pong', async () =
     onReviewCancel: (_peer, message) => {
       seen.push(`review-cancel:${message.requestId}:${message.interruptId}`);
     },
+    onInterruptResume: (_peer, message) => {
+      seen.push(`interrupt-resume:${message.requestId}:${message.interruptId}`);
+    },
     onRunInterrupt: (_peer, message) => {
       seen.push(`run-interrupt:${message.requestId}`);
     },

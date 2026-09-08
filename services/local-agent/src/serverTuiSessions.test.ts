@@ -400,8 +400,8 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
         capturedThreadId = setup.input.threadId;
         return {
           messages: [new HumanMessage('checkpoint prompt')],
-          pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
-          hasPendingContinuation: true,
+          pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } },
+        acceptsResume: true,
         };
       },
     } as never,
@@ -425,7 +425,7 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.deepEqual(checkpoint.pendingInterrupt, {
     sessionId: session.id,
     interruptId: 'interrupt-1',
-    reviews: [review],
+    payload: { kind: 'human_review', reviews: [review] },
   });
   assert.deepEqual(checkpoint.messages, [{ role: 'user', text: 'checkpoint prompt' }]);
   assert.equal(checkpoint.sessionTokenUsage, null);

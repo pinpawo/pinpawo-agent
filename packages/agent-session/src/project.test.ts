@@ -342,7 +342,7 @@ test('reduceSession keeps review and terminal control scoped to the owning run',
   session = reduceSession(session, {
     type: 'runtime.event',
     event: {
-      type: 'human_review.requested',
+      type: 'interrupt.requested',
       requestId: 'req-1',
       pendingInterrupt: {
         interruptId: 'interrupt-1',
@@ -428,7 +428,7 @@ test('a failed interrupt resume keeps the checkpoint wait retryable', () => {
   session = reduceSession(session, {
     type: 'runtime.event',
     event: {
-      type: 'human_review.requested',
+      type: 'interrupt.requested',
       requestId: 'req-initial',
       pendingInterrupt: {
         interruptId: 'interrupt-retry',

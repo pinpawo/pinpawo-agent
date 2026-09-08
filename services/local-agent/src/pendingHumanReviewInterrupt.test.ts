@@ -193,7 +193,7 @@ test('a same-id re-ask is read from the latest checkpoint', async () => {
     isConnected: () => true,
     run: async () => {
       pending = reasked;
-      return 'waiting_human';
+      return 'waiting';
     },
   });
 
@@ -238,7 +238,7 @@ test('human review response validation runs before the route boundary guard', as
   assert.equal(guardCalls, 0);
   assert.equal(
     (events[0] as Extract<AgentRuntimeEvent, { type: 'error' }> | undefined)?.code,
-    'review_stale',
+    'interrupt_stale',
   );
 });
 

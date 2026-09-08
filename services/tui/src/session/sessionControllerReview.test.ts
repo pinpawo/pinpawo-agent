@@ -203,7 +203,7 @@ test('authoritative completion snapshot closes a review rejected by the server',
       type: 'error',
       requestId: 'resume',
       message: 'review closed',
-      code: 'review_closed',
+      code: 'interrupt_closed',
     },
   });
   assert.equal(

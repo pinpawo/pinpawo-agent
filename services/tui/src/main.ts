@@ -1773,7 +1773,7 @@ function copyLatestAssistantReply() {
 function submitChatInput(text: string) {
   const result = isTaskPaused(taskPauseMode)
     ? controller.continuePausedTask(text, attachments)
-    : controller.submitChat(text, attachments, taskPauseMode === 'leaving' ? 'supersede_active' : undefined);
+    : controller.submitChat(text, attachments);
   if (result.ok) {
     if (text.trim() || attachments.length > 0) {
       composerHistory = recordComposerHistoryEntry(composerHistory, text);

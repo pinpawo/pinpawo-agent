@@ -15,6 +15,14 @@ import type { LocalAgentGraphService } from './agentGraphService';
 import { runAgentSessionTurn } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
 
+/** The reviews an interrupt.requested event carries, or [] for another kind. */
+function reviewInteractions(event: AgentRuntimeEvent | undefined) {
+  return event?.type === 'interrupt.requested'
+    && event.pendingInterrupt.payload.kind === 'human_review'
+    ? event.pendingInterrupt.payload.interactions
+    : [];
+}
+
 /**
  * runAgentSessionTurn consumes the ROOT `streamEvents(v3)` protocol stream
  * (#322 Phase 4); the fakes below emit raw protocol events.
@@ -54,7 +62,7 @@ test('runAgentSessionTurn does not settle before the underlying graph run output
   })(), { output });
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return stream;
@@ -104,7 +112,7 @@ test('runAgentSessionTurn defers interrupted terminalization until graph output 
   })(), { output });
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return stream;
@@ -150,7 +158,7 @@ test('runAgentSessionTurn sources tool operations from the root protocol stream,
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -234,7 +242,6 @@ test('runAgentSessionTurn falls back to checkpoint final message when stream val
       return {
         messages: readThreadStateCalls === 1 ? [] : finalMessages,
         pendingInterrupt: null,
-        hasPendingContinuation: false,
       };
     },
     streamEvents() {
@@ -280,7 +287,6 @@ test('runAgentSessionTurn replaces the current plan from root values and clears 
       return {
         messages: threadStateRead === 1 ? [] : finalMessages,
         pendingInterrupt: null,
-        hasPendingContinuation: false,
         currentPlan: null,
       };
     },
@@ -356,7 +362,7 @@ test('runAgentSessionTurn projects global policy authorization as completed oper
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -490,7 +496,7 @@ test('runAgentSessionTurn emits one completed subagent block per child model mes
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -554,7 +560,7 @@ test('runAgentSessionTurn merges subagent_operations announcements through accep
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -618,7 +624,7 @@ test('runAgentSessionTurn projects review interrupts to public interaction contr
   };
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -656,13 +662,10 @@ test('runAgentSessionTurn projects review interrupts to public interaction contr
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'waiting_human' });
+  assert.deepEqual(result, { status: 'waiting' });
   const event = emittedEvents[0];
-  assert.equal(event?.type, 'human_review.requested');
-  assert.deepEqual(
-    event.pendingInterrupt.payload.interactions,
-    [projectHumanReviewRequest(review)],
-  );
+  assert.equal(event?.type, 'interrupt.requested');
+  assert.deepEqual(reviewInteractions(event), [projectHumanReviewRequest(review)]);
 });
 
 test('runAgentSessionTurn resumes explicit response after state update clears interrupt payload', async () => {
@@ -682,8 +685,8 @@ test('runAgentSessionTurn resumes explicit response after state update clears in
     async readThreadState() {
       readThreadStateCalls += 1;
       return readThreadStateCalls === 1
-        ? { messages: [], pendingInterrupt: null, hasPendingContinuation: true }
-        : { messages: finalMessages, pendingInterrupt: null, hasPendingContinuation: false };
+        ? { messages: [], pendingInterrupt: null, acceptsResume: true }
+        : { messages: finalMessages, pendingInterrupt: null, acceptsResume: false };
     },
     buildResumeCommand(value: unknown) {
       return { kind: 'resume-command', value };
@@ -718,7 +721,7 @@ test('runAgentSessionTurn resumes explicit response after state update clears in
   }]);
   assert.deepEqual(setup.input.messages, []);
   assert.equal(
-    emittedEvents.some((event) => event.type === 'human_review.requested'),
+    emittedEvents.some((event) => event.type === 'interrupt.requested'),
     false,
   );
 });
@@ -747,13 +750,13 @@ test('runAgentSessionTurn reports waiting_human when a resume raises a new revie
       return reads === 1
         ? {
           messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-original', reviews: [originalReview] },
-          hasPendingContinuation: true,
+          pendingInterrupt: { interruptId: 'interrupt-original', payload: { kind: 'human_review', reviews: [originalReview] } },
+        acceptsResume: true,
         }
         : {
           messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-next', reviews: [nextReview] },
-          hasPendingContinuation: true,
+          pendingInterrupt: { interruptId: 'interrupt-next', payload: { kind: 'human_review', reviews: [nextReview] } },
+        acceptsResume: true,
         };
     },
     buildResumeCommand(value: unknown) {
@@ -782,14 +785,9 @@ test('runAgentSessionTurn reports waiting_human when a resume raises a new revie
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'waiting_human' });
-  assert.equal(emittedEvents[0]?.type, 'human_review.requested');
-  assert.equal(
-    emittedEvents[0]?.type === 'human_review.requested'
-      ? emittedEvents[0].pendingInterrupt.payload.interactions[0]?.interactionId
-      : null,
-    'review-next',
-  );
+  assert.deepEqual(result, { status: 'waiting' });
+  assert.equal(emittedEvents[0]?.type, 'interrupt.requested');
+  assert.equal(reviewInteractions(emittedEvents[0])[0]?.interactionId, 'review-next');
 });
 
 test('runAgentSessionTurn rejects when graph execution fails during a resume', async () => {
@@ -807,8 +805,8 @@ test('runAgentSessionTurn rejects when graph execution fails during a resume', a
     async readThreadState() {
       return {
         messages: [],
-        pendingInterrupt: { interruptId: 'interrupt-original', review },
-        hasPendingContinuation: true,
+        pendingInterrupt: { interruptId: 'interrupt-original', payload: { kind: 'human_review', reviews: [review] } },
+        acceptsResume: true,
       };
     },
     buildResumeCommand(value: unknown) {
@@ -851,8 +849,8 @@ test('runAgentSessionTurn allows a user message after an aborted non-review run 
     async readThreadState() {
       readThreadStateCalls += 1;
       return readThreadStateCalls === 1
-        ? { messages: [], pendingInterrupt: null, hasPendingContinuation: true }
-        : { messages: finalMessages, pendingInterrupt: null, hasPendingContinuation: false };
+        ? { messages: [], pendingInterrupt: null, acceptsResume: true }
+        : { messages: finalMessages, pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents(streamSetup: AgentChannelSetup, inputOverride?: unknown) {
       return (async function* () {
@@ -881,7 +879,7 @@ test('runAgentSessionTurn allows a user message after an aborted non-review run 
   assert.deepEqual(result, { status: 'completed', reply: 'continued after abort' });
   assert.deepEqual(streamInputs, [undefined]);
   assert.equal(
-    emittedEvents.some((event) => event.type === 'human_review.requested' || event.type === 'system.notice'),
+    emittedEvents.some((event) => event.type === 'interrupt.requested' || event.type === 'system.notice'),
     false,
   );
 });
@@ -895,7 +893,7 @@ test('runAgentSessionTurn rejects stale resume with user-facing message', async 
   } as unknown as AgentChannelSetup;
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     buildResumeCommand() {
       throw new Error('should not build resume command');
@@ -955,8 +953,8 @@ test('runAgentSessionTurn does not map pending review free text to review respon
     async readThreadState() {
       return {
         messages: [],
-        pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
-        hasPendingContinuation: true,
+        pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } },
+        acceptsResume: true,
       };
     },
     buildResumeCommand(value: unknown) {
@@ -989,7 +987,7 @@ test('runAgentSessionTurn does not map pending review free text to review respon
     },
   });
 
-  assert.deepEqual(result, { status: 'waiting_human' });
+  assert.deepEqual(result, { status: 'waiting' });
   assert.deepEqual(streamInputs, []);
   assert.deepEqual(setup.input.messages, []);
   assert.equal(preparedUserMessages, 0);
@@ -998,11 +996,9 @@ test('runAgentSessionTurn does not map pending review free text to review respon
     emittedEvents[0]?.type === 'system.notice' ? emittedEvents[0].message : '',
     /确认面板/,
   );
-  assert.equal(emittedEvents[1]?.type, 'human_review.requested');
+  assert.equal(emittedEvents[1]?.type, 'interrupt.requested');
   assert.deepEqual(
-    emittedEvents[1]?.type === 'human_review.requested'
-      ? emittedEvents[1].pendingInterrupt.payload.interactions[0]
-      : null,
+    reviewInteractions(emittedEvents[1])[0],
     projectHumanReviewRequest(review),
   );
 });
@@ -1016,7 +1012,7 @@ test('runAgentSessionTurn degrades a GraphRecursionError to a completed 待续�
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -1056,7 +1052,7 @@ test('runAgentSessionTurn keeps the streamed reply when GraphRecursionError fire
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -1090,7 +1086,7 @@ test('runAgentSessionTurn rethrows non-recursion errors from the stream', async 
 
   const graphService = {
     async readThreadState() {
-      return { messages: [], pendingInterrupt: null, hasPendingContinuation: false };
+      return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
     streamEvents() {
       return (async function* () {
@@ -1143,7 +1139,6 @@ test('runAgentSessionTurn omits token usage when provider usage is unavailable',
       return {
         messages: readThreadStateCalls === 1 ? snapshotMessages : finalMessages,
         pendingInterrupt: null,
-        hasPendingContinuation: false,
       };
     },
     streamEvents() {
@@ -1227,7 +1222,6 @@ test('runAgentSessionTurn emits provider token usage from new state messages', a
       return {
         messages: readThreadStateCalls === 1 ? initialMessages : finalMessages,
         pendingInterrupt: null,
-        hasPendingContinuation: false,
       };
     },
     streamEvents() {
@@ -1298,15 +1292,15 @@ test('runAgentSessionTurn reports a task pause without turning its bookkeeping i
       return reads === 1
         ? {
           messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-1', reviews: [review] },
-          pauseTaskInterrupt: null,
-          hasPendingContinuation: true,
+          pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } },
+        acceptsResume: true,
         }
         : {
+          // The reject settled into a task pause, which is a pending
+          // interrupt with an id like any other.
           messages: [rejectedResult],
-          pendingInterrupt: null,
-          pauseTaskInterrupt: { kind: 'pause_task' },
-          hasPendingContinuation: false,
+          pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+          acceptsResume: true,
         };
     },
     buildResumeCommand(value: unknown) {
@@ -1332,9 +1326,16 @@ test('runAgentSessionTurn reports a task pause without turning its bookkeeping i
     emitToolEvent: () => {},
   });
 
-  assert.deepEqual(result, { status: 'paused' });
+  assert.deepEqual(result, { status: 'waiting' });
   assert.equal(emittedEvents.some((event) => event.type === 'message.completed'), false);
   assert.equal(JSON.stringify(emittedEvents).includes('human_reject'), false);
+  // The pause is announced by id, so the interface can continue it without
+  // inferring anything from the run's ending.
+  const requested = emittedEvents.find((event) => event.type === 'interrupt.requested');
+  assert.deepEqual(
+    requested?.type === 'interrupt.requested' ? requested.pendingInterrupt : null,
+    { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+  );
 });
 
 test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt graph', async () => {
@@ -1347,8 +1348,7 @@ test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt
       return {
         messages: [],
         pendingInterrupt: null,
-        pauseTaskInterrupt: null,
-        hasPendingContinuation: true,
+        acceptsResume: true,
       };
     },
     buildResumeCommand(value: unknown) {
@@ -1370,5 +1370,5 @@ test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt
     isCurrent: () => true,
     emitEvent: () => {},
     emitToolEvent: () => {},
-  }), { status: 'paused' });
+  }), { status: 'waiting' });
 });

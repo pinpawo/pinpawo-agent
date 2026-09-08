@@ -70,12 +70,14 @@ export function createHostGraphFixture() {
         pendingInterrupt: pendingInterrupt
           ? {
               interruptId: pendingInterrupt.interruptId,
-              reviews: [pendingInterrupt.review],
+              payload: {
+                kind: 'human_review' as const,
+                reviews: [pendingInterrupt.review],
+              },
             }
           : null,
-        pauseTaskInterrupt,
-        hasPendingContinuation:
-          pendingInterrupt !== null || pauseTaskInterrupt !== null,
+        acceptsResume:
+          pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
       };
     },
     buildResumeCommand(resume: unknown) {
@@ -129,16 +131,8 @@ export function createHostGraphFixture() {
         ...(messagesByThread.get(threadKey) ?? []),
         ...inputMessages,
       ];
-      const suspendedReview = suspendedReviews.get(threadKey);
-      if (
-        setup.input.activeDelegationTransition === 'resume_active'
-        && suspendedReview
-      ) {
-        suspendedReviews.delete(threadKey);
-        messagesByThread.set(threadKey, accumulatedInput);
-        pendingInterrupts.set(threadKey, suspendedReview);
-        return reviewInterruptStream(suspendedReview);
-      }
+      // A suspended review is re-raised by resuming its interrupt, not by a
+      // transition flag on the next chat request.
       suspendedReviews.delete(threadKey);
       if (
         typeof inputText === 'string'

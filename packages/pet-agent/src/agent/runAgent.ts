@@ -27,11 +27,6 @@ export type AgentInvokeInput = {
   globalReviewPolicy?: GlobalReviewPolicy;
   /** Optional allowlist exposed through the Supervisor document workspace. */
   allowedCapabilityNames?: string[];
-  /**
-   * Explicit fresh-turn treatment of an unfinished delegation. Ordinary user
-   * requests supersede it; callers must opt in to continuation.
-   */
-  activeDelegationTransition?: ActiveDelegationTransition;
   /** Optional stable task identity supplied by a host that owns task lifecycle. */
   traceId?: string;
 };

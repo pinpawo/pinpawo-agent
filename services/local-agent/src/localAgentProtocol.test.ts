@@ -512,7 +512,7 @@ test('parseLocalAgentServerMessage keeps review reconciliation error code', () =
         type: 'error',
         requestId: 'req-1',
         message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
-        code: 'review_closed',
+        code: 'interrupt_closed',
       },
     })),
     {
@@ -522,7 +522,7 @@ test('parseLocalAgentServerMessage keeps review reconciliation error code', () =
         type: 'error',
         requestId: 'req-1',
         message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
-        code: 'review_closed',
+        code: 'interrupt_closed',
       },
     },
   );
@@ -580,13 +580,13 @@ test('parseLocalAgentServerMessage accepts completed subagent message events', (
   );
 });
 
-test('parseLocalAgentServerMessage accepts public human_review.requested interactions', () => {
+test('parseLocalAgentServerMessage accepts public interrupt.requested interactions', () => {
   assert.deepEqual(
     parseLocalAgentServerMessage(JSON.stringify({
       type: 'event',
       requestId: 'req-1',
       event: {
-        type: 'human_review.requested',
+        type: 'interrupt.requested',
         requestId: 'req-1',
         pendingInterrupt: {
           interruptId: 'interrupt-1',
@@ -614,7 +614,7 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
       type: 'event',
       requestId: 'req-1',
       event: {
-        type: 'human_review.requested',
+        type: 'interrupt.requested',
         requestId: 'req-1',
         pendingInterrupt: {
           interruptId: 'interrupt-1',
@@ -638,105 +638,6 @@ test('parseLocalAgentServerMessage accepts public human_review.requested interac
         },
       },
     },
-  );
-});
-
-test('parseLocalAgentServerMessage normalizes legacy human_review.requested fields', () => {
-  const canonicalEvent = {
-    type: 'human_review.requested',
-    requestId: 'req-1',
-    interruptId: 'interrupt-1',
-    review: {
-      interactionId: 'review-1',
-      schemaVersion: 2,
-      view: {
-        kind: 'plain',
-        body: 'Run command?',
-      },
-      options: [{
-        id: 'approve',
-        label: 'Approve',
-        batchSubmission: 'immediate',
-      }],
-    },
-  };
-
-  assert.deepEqual(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'event',
-      requestId: 'req-1',
-      event: canonicalEvent,
-    })),
-    {
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        type: 'human_review.requested',
-        requestId: 'req-1',
-        pendingInterrupt: {
-          interruptId: 'interrupt-1',
-          payload: {
-            kind: 'human_review',
-            interactions: [canonicalEvent.review],
-          },
-        },
-      },
-    },
-  );
-
-  assert.equal(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        ...canonicalEvent,
-        prompt: 'Run command?',
-      },
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        ...canonicalEvent,
-        payload: { kind: 'review' },
-      },
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        ...canonicalEvent,
-        review: {
-          ...canonicalEvent.review,
-          schemaVersion: 1,
-        },
-      },
-    })),
-    null,
-  );
-  assert.equal(
-    parseLocalAgentServerMessage(JSON.stringify({
-      type: 'event',
-      requestId: 'req-1',
-      event: {
-        ...canonicalEvent,
-        review: {
-          ...canonicalEvent.review,
-          options: [{
-            id: 'edit',
-            label: 'Edit',
-            decision: { type: 'edit' },
-          }],
-        },
-      },
-    })),
-    null,
   );
 });
 

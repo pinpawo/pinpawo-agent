@@ -133,7 +133,6 @@ test('session.compact is a v2 session command and returns the authoritative snap
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: null,
-      hasPendingContinuation: false,
       currentPlan: null,
     }),
     updateState: async () => {
@@ -607,7 +606,6 @@ test('completion snapshot does not reintroduce a settled active run', async () =
       return {
         messages: [],
         pendingInterrupt: null,
-        hasPendingContinuation: false,
       };
     },
   } as unknown as LocalAgentGraphService;
@@ -674,7 +672,6 @@ test('model selection blocks a chat admitted by another peer until the selection
       return {
         messages: [],
         pendingInterrupt: null,
-        hasPendingContinuation: false,
       };
     },
   } as unknown as LocalAgentGraphService;
@@ -765,7 +762,6 @@ test('model selection is rejected while checkpoint state has pending review', as
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: { review },
-      hasPendingContinuation: true,
     }),
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
@@ -831,7 +827,6 @@ test('admitted images gate model selection through the transcript', async () => 
     readThreadState: async () => ({
       messages: persistedMessages,
       pendingInterrupt: null,
-      hasPendingContinuation: false,
     }),
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({

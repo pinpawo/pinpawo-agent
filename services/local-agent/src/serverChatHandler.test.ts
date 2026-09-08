@@ -210,12 +210,12 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        }],
+        }] },
       }),
       buildChatSetup: () => ({
         graphConfig: {},
@@ -227,7 +227,7 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
     runAgentTurn: async (options) => {
       runCount += 1;
       // A review cancellation settles into a task pause; the handler finalizes it.
-      return { status: 'paused' };
+      return { status: 'waiting' };
     },
   });
   const resolution = handler.handleHumanReviewResponse(
@@ -244,9 +244,9 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
 
   assert.equal(runCount, 1);
   assert.deepEqual(controls, []);
-  // Both invocations carry the client's requestId: the unstarted response that
-  // was superseded, and the cancellation that settled into a task pause.
-  assert.deepEqual(interruptedRuns(sent), ['req-1', 'req-1']);
+  // Only the superseded response reports an interruption. The cancellation
+  // settles into a pause, which is announced by id instead.
+  assert.deepEqual(interruptedRuns(sent), ['req-1']);
 });
 
 test('run interrupt cancels a review that became pending before the client observed it', async () => {
@@ -263,12 +263,12 @@ test('run interrupt cancels a review that became pending before the client obser
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-race',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-race',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        }],
+        }] },
       }),
       buildChatSetup: () => ({
         graphConfig: {},
@@ -283,7 +283,7 @@ test('run interrupt cancels a review that became pending before the client obser
     runAgentTurn: async (options) => {
       requests.push(options.request);
       // A review cancellation settles into a task pause; the handler finalizes it.
-      return { status: 'paused' };
+      return { status: 'waiting' };
     },
   });
   // The TUI chose run.interrupt from stale thinking state, but the active
@@ -303,7 +303,8 @@ test('run interrupt cancels a review that became pending before the client obser
     },
   }]);
   assert.deepEqual(controls, []);
-  assert.deepEqual(interruptedRuns(sent), ['req-race']);
+  // The cancellation settles into a pause, so nothing reports interrupted.
+  assert.deepEqual(interruptedRuns(sent), []);
 });
 
 test('handleHumanReviewResponse rejects a stale canonical interactionId before forwarding', async () => {
@@ -316,12 +317,12 @@ test('handleHumanReviewResponse rejects a stale canonical interactionId before f
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
-      reviews: [{
+      payload: { kind: 'human_review', reviews: [{
         id: 'review-current',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-      }],
+      }] },
     }),
   } as never;
   const handler = new ServerChatHandler({
@@ -352,7 +353,7 @@ test('handleHumanReviewResponse rejects a stale canonical interactionId before f
   assert.equal(event.event?.type, 'error');
   assert.equal(event.event?.requestId, 'req-1');
   assert.match(event.event?.message ?? '', /过期/);
-  assert.equal(event.event?.code, 'review_stale');
+  assert.equal(event.event?.code, 'interrupt_stale');
 });
 
 test('handleHumanReviewResponse consumes matching canonical review route once', async () => {
@@ -362,12 +363,12 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   let pendingInterrupt: unknown = {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
-    reviews: [{
+    payload: { kind: 'human_review', reviews: [{
       id: 'review-current',
       schemaVersion: 1,
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    }],
+    }] },
   };
   const tuiSessions = {
     getActiveSessionId: () => 'sess-active',
@@ -423,7 +424,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
-  assert.equal(event.event?.code, 'review_closed');
+  assert.equal(event.event?.code, 'interrupt_closed');
 
   await handler.handleReviewCancel(
     fakePeer,
@@ -434,7 +435,7 @@ test('handleHumanReviewResponse consumes matching canonical review route once', 
     },
     { petId: 'pet-1' } as never,
   );
-  assert.equal((sentEvents.at(-1) as { event?: { code?: string } }).event?.code, 'review_closed');
+  assert.equal((sentEvents.at(-1) as { event?: { code?: string } }).event?.code, 'interrupt_closed');
 });
 
 test('handleHumanReviewResponse keeps single-review review as batch resume shape', async () => {
@@ -455,7 +456,7 @@ test('handleHumanReviewResponse keeps single-review review as batch resume shape
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [review],
+        payload: { kind: 'human_review', reviews: [review] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -509,12 +510,12 @@ test('handleHumanReviewResponse recovers missing route from active checkpoint re
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        }],
+        }] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -566,12 +567,12 @@ test('handleHumanReviewResponse releases a recovered review when its peer discon
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
           options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        }],
+        }] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -618,7 +619,7 @@ test('buildPendingInterruptSnapshot projects the active checkpoint interrupt', (
   assert.deepEqual(handler.buildPendingInterruptSnapshot({ petId: 'pet-1' } as never, {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
-    reviews: [review],
+    payload: { kind: 'human_review', reviews: [review] },
   }), {
     sessionId: 'sess-active',
     pendingInterrupt: {
@@ -646,7 +647,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
       readActivePendingInterrupt: async () => (reviewResumed ? null : {
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -654,7 +655,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
             { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
             { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
           ],
-        }],
+        }] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -717,7 +718,7 @@ test('handleReviewCancel resumes pending review with run interruption control', 
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /已关闭|不存在/);
-  assert.equal(event.event?.code, 'review_closed');
+  assert.equal(event.event?.code, 'interrupt_closed');
 });
 
 test('handleReviewCancel recovers missing route from active checkpoint review', async () => {
@@ -732,7 +733,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -740,7 +741,7 @@ test('handleReviewCancel recovers missing route from active checkpoint review', 
             { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
             { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
           ],
-        }],
+        }] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -794,12 +795,12 @@ test('handleReviewCancel interrupts an approve-only pending review', async () =>
   let pendingInterrupt: unknown = {
     sessionId: 'sess-active',
     interruptId: 'interrupt-1',
-    reviews: [{
+    payload: { kind: 'human_review', reviews: [{
       id: 'review-current',
       schemaVersion: 1,
       view: { kind: 'plain', body: 'Approve?' },
       options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-    }],
+    }] },
   };
   const handler = new ServerChatHandler({
     graphService: {} as never,
@@ -862,7 +863,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-active',
       interruptId: 'interrupt-1',
-      reviews: [{
+      payload: { kind: 'human_review', reviews: [{
         id: 'review-current',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Need input' },
@@ -872,7 +873,7 @@ test('handleHumanReviewResponse forwards canonical selected option without resol
           input: { kind: 'text', key: 'message', required: true, multiline: true },
           decision: { type: 'respond', messageInputKey: 'message' },
         }],
-      }],
+      }] },
     }),
   } as never;
   const handler = new ServerChatHandler({
@@ -932,12 +933,12 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
     readActivePendingInterrupt: async () => ({
       sessionId: 'sess-origin',
       interruptId: 'interrupt-1',
-      reviews: [{
+      payload: { kind: 'human_review', reviews: [{
         id: 'review-current',
         schemaVersion: 1,
         view: { kind: 'plain', body: 'Approve?' },
         options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-      }],
+      }] },
     }),
   } as never;
   const handler = new ServerChatHandler({
@@ -966,7 +967,7 @@ test('handleHumanReviewResponse rejects canonical review response from a differe
   assert.equal(event.type, 'event');
   assert.equal(event.event?.type, 'error');
   assert.match(event.event?.message ?? '', /发起该 review 的会话/);
-  assert.equal(event.event?.code, 'review_wrong_session');
+  assert.equal(event.event?.code, 'interrupt_wrong_session');
 });
 
 test('handleHumanReviewResponse forwards effect-bearing options without local authorization side effects', async () => {
@@ -987,7 +988,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -1000,7 +1001,7 @@ test('handleHumanReviewResponse forwards effect-bearing options without local au
               scope: 'thread',
             }],
           }],
-        }],
+        }] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -1073,7 +1074,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-current',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -1088,7 +1089,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
               matcher: { type: 'policy_hook' },
             }],
           }],
-        }],
+        }] },
       }),
     } as never,
     inflightRequests: new InflightRequestController({
@@ -1111,7 +1112,7 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   assert.equal(sentEvents.length, 0);
 });
 
-test('a review resolution that settles into a task pause is finalized as interrupted', async () => {
+test('a review resolution that settles into a task pause finalizes as waiting, not interrupted', async () => {
   const controls: unknown[] = [];
   const sent: unknown[] = [];
   const fakePeer = createFakePeer(sent);
@@ -1124,7 +1125,7 @@ test('a review resolution that settles into a task pause is finalized as interru
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
-        reviews: [{
+        payload: { kind: 'human_review', reviews: [{
           id: 'review-1',
           schemaVersion: 1,
           view: { kind: 'plain', body: 'Approve?' },
@@ -1132,7 +1133,7 @@ test('a review resolution that settles into a task pause is finalized as interru
             { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
             { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
           ],
-        }],
+        }] },
       }),
       buildChatSetup: () => ({
         graphConfig: {},
@@ -1144,7 +1145,7 @@ test('a review resolution that settles into a task pause is finalized as interru
       sendControl: (_peer, message) => controls.push(message),
     }),
     loadContext: async () => ({} as never),
-    runAgentTurn: async () => ({ status: 'paused' }),
+    runAgentTurn: async () => ({ status: 'waiting' }),
   });
 
   await handler.handleReviewCancel(fakePeer, {
@@ -1153,9 +1154,9 @@ test('a review resolution that settles into a task pause is finalized as interru
     interruptId: 'interrupt-1',
   }, { petId: 'pet-1' } as never);
 
-  // The protocol has no pause outcome; the TUI derives the pause from the
-  // snapshot that follows an interrupted run. Nothing aborted this run, and it
-  // must still be finalized on the wire.
+  // The pause has an outcome of its own now: the adapter announced it by id
+  // through interrupt.requested, so the run does not report an interruption
+  // and the interface never has to infer a pause from a run ending.
   assert.deepEqual(controls, []);
-  assert.deepEqual(interruptedRuns(sent), ['req-1']);
+  assert.deepEqual(interruptedRuns(sent), []);
 });

@@ -11,7 +11,7 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   mainConversationMessages,
-  type PauseTaskInterruptPayload,
+  type PendingInterrupt,
   type ReviewSpec,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
@@ -61,10 +61,8 @@ type TuiCheckpointMessageSource =
   | { role: 'user' | 'assistant' }
   | { role: 'subagent'; requestId: string };
 
-export type ActivePendingInterrupt = {
+export type ActivePendingInterrupt = PendingInterrupt & {
   sessionId: string;
-  interruptId: string;
-  reviews: ReviewSpec[];
 };
 
 export type TuiCheckpointPoint = {
@@ -74,7 +72,6 @@ export type TuiCheckpointPoint = {
   messages: TuiCheckpointMessage[];
   sessionTokenUsage: (TokenUsageSnapshot & { scope: 'session' }) | null;
   pendingInterrupt: ActivePendingInterrupt | null;
-  pauseTaskInterrupt: PauseTaskInterruptPayload | null;
   currentPlan: AgentPlan | null;
 };
 
@@ -387,11 +384,7 @@ export class ServerTuiSessionService {
     );
     const state = await this.graphService.readThreadState(setup);
     const pendingInterrupt = state.pendingInterrupt
-      ? {
-          sessionId: session.id,
-          interruptId: state.pendingInterrupt.interruptId,
-          reviews: state.pendingInterrupt.reviews,
-        }
+      ? { sessionId: session.id, ...state.pendingInterrupt }
       : null;
     return {
       sessionId: session.id,
@@ -400,7 +393,6 @@ export class ServerTuiSessionService {
       messages: readTuiCheckpointMessages(state.messages),
       sessionTokenUsage: readTuiCheckpointTokenUsage(state.messages),
       pendingInterrupt,
-      pauseTaskInterrupt: state.pauseTaskInterrupt,
       currentPlan: state.currentPlan,
     };
   }
@@ -494,7 +486,6 @@ export class ServerTuiSessionService {
       messages: checkpoint.messages,
       sessionTokenUsage: checkpoint.sessionTokenUsage,
       pendingInterrupt: checkpoint.pendingInterrupt,
-      pauseTaskInterrupt: checkpoint.pauseTaskInterrupt,
       currentPlan: checkpoint.currentPlan,
     };
   }

@@ -70,10 +70,6 @@ export type {
   TuiSessionState,
 } from './sessionControllerTypes';
 
-type ActiveDelegationTransition = NonNullable<
-  ChatRequestMessage['activeDelegationTransition']
->;
-
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const DEFAULT_SNAPSHOT_TIMEOUT_MS = 5_000;
 const DEFAULT_SESSION_COMMAND_TIMEOUT_MS = 5_000;
@@ -225,23 +221,54 @@ export class TuiSessionController {
   submitChat(
     message: string,
     attachments: readonly AgentLocalAttachment[] = [],
-    transition?: ActiveDelegationTransition,
   ): SubmitChatResult {
-    return this.submitChatWithTransition(
-      message,
-      attachments,
-      transition ?? (!this.state.session.pendingInterrupt && hasUnfinishedTask(this.state.session)
-        ? 'resume_active' : 'supersede_active'),
-    );
+    return this.submitChatWithTransition(message, attachments);
   }
 
+  /**
+   * Continue the pending task pause by its interrupt id. Optional text becomes
+   * guidance for the delegation the Runtime is already holding, which is why
+   * this is a resume and not a new chat request.
+   */
   continuePausedTask(
     message: string,
-    attachments: readonly AgentLocalAttachment[] = [],
+    _attachments: readonly AgentLocalAttachment[] = [],
   ): SubmitChatResult {
-    // Compatibility transport until the next phase replaces the legacy field
-    // with a semantic task-continue command handled by PauseTaskInterrupt.
-    return this.submitChatWithTransition(message, attachments, 'resume_active');
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
+      return { ok: false, reason: 'not-ready' };
+    }
+    const pendingInterrupt = this.state.session.pendingInterrupt;
+    if (
+      pendingInterrupt?.payload.kind !== 'pause_task'
+      || this.state.session.activeRun
+    ) {
+      return { ok: false, reason: 'busy' };
+    }
+    const guidance = message.trim();
+    const requestId = this.requestIdFactory();
+    if (!this.transport.send({
+      type: 'interrupt.resume',
+      requestId,
+      interruptId: pendingInterrupt.interruptId,
+      value: { action: 'continue', ...(guidance ? { guidance } : {}) },
+    })) {
+      return { ok: false, reason: 'send-failed' };
+    }
+    this.transport.invalidateCompletionSnapshotState();
+    // The resume owns the run whether or not it carried guidance, so a second
+    // continue cannot overlap it.
+    this.updateSession(reduceSession(this.state.session, {
+      type: 'interrupt.resume.accepted',
+      requestId,
+      interruptId: pendingInterrupt.interruptId,
+    }, { observedAt: this.now() }));
+    if (guidance) {
+      this.updateSession(reduceSession(this.state.session, {
+        type: 'message.appended',
+        message: { role: 'user', requestId, text: guidance },
+      }, { observedAt: this.now() }));
+    }
+    return { ok: true, requestId };
   }
 
   refreshSession(): { ok: true } | { ok: false; reason: 'not-ready' } {
@@ -255,13 +282,8 @@ export class TuiSessionController {
   private submitChatWithTransition(
     message: string,
     attachments: readonly AgentLocalAttachment[],
-    activeDelegationTransition?: ActiveDelegationTransition,
   ): SubmitChatResult {
-    if (
-      !message.trim()
-      && attachments.length === 0
-      && activeDelegationTransition !== 'resume_active'
-    ) {
+    if (!message.trim() && attachments.length === 0) {
       return { ok: false, reason: 'empty' };
     }
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
@@ -283,7 +305,6 @@ export class TuiSessionController {
       requestId,
       message,
       ...(attachments.length ? { attachments: [...attachments] } : {}),
-      ...(activeDelegationTransition ? { activeDelegationTransition } : {}),
     })) {
       return { ok: false, reason: 'send-failed' };
     }
@@ -537,7 +558,7 @@ export class TuiSessionController {
     }
 
     if (message.type === 'event') {
-      if (message.event.type === 'human_review.requested') {
+      if (message.event.type === 'interrupt.requested') {
         // A pending interrupt is newer than every completion refresh requested
         // before this runtime boundary. Those older responses may still update
         // aggregate metadata, but cannot replace live projection state.

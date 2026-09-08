@@ -3,6 +3,7 @@ import {
   readLocalAgentClientMessageEnvelope,
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
+  type InterruptResumeMessage,
   type ModelListMessage,
   type ModelSelectMessage,
   type NewSessionMessage,
@@ -29,6 +30,11 @@ export type LocalServerPeerHandlers = {
     message: HumanReviewResponseMessage,
   ) => MaybePromise<void>;
   onReviewCancel: (peer: ServerPeer, message: ReviewCancelMessage) => MaybePromise<void>;
+  /** Continue any pending interrupt by id. */
+  onInterruptResume: (
+    peer: ServerPeer,
+    message: InterruptResumeMessage,
+  ) => MaybePromise<void>;
   onRunInterrupt: (peer: ServerPeer, message: RunInterruptMessage) => MaybePromise<void>;
   onNewSession: (peer: ServerPeer, message: NewSessionMessage) => MaybePromise<void>;
   onRuntimeConfigUpdate: (
@@ -176,6 +182,8 @@ export function dispatchLocalServerMessage(
       return dispatchOptional(peer, msg, handlers.onHumanReviewResponse, 'handleHumanReviewResponse', logError, logWarn);
     } else if (msg.type === 'review.cancel') {
       return dispatchOptional(peer, msg, handlers.onReviewCancel, 'handleReviewCancel', logError, logWarn);
+    } else if (msg.type === 'interrupt.resume') {
+      return dispatchOptional(peer, msg, handlers.onInterruptResume, 'handleInterruptResume', logError, logWarn);
     } else if (msg.type === 'run.interrupt') {
       return dispatchOptional(peer, msg, handlers.onRunInterrupt, 'handleRunInterrupt', logError, logWarn);
     } else if (msg.type === 'new_session') {

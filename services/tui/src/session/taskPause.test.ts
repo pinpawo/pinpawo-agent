@@ -17,7 +17,7 @@ const idleSession = {
 
 const pausedSession = {
   ...idleSession,
-  pendingInterrupt: { payload: { kind: 'pause_task' } },
+  pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
 } satisfies AgentSession;
 
 test('an authoritative task pause enters paused composer mode', () => {

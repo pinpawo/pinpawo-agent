@@ -22,23 +22,32 @@ export type HumanReviewInterruptProjection = {
   interactions: HumanReviewRequest[];
 };
 
-export type HumanReviewPendingInterruptProjection = {
-  interruptId: string;
-  payload: HumanReviewInterruptProjection;
+export type PauseTaskInterruptProjection = {
+  kind: 'pause_task';
 };
 
-export type PendingInterruptProjection =
-  | HumanReviewPendingInterruptProjection
-  | {
-      payload: {
-        kind: 'pause_task';
-      };
-    };
+export type InterruptPayloadProjection =
+  | HumanReviewInterruptProjection
+  | PauseTaskInterruptProjection;
+
+/**
+ * Every pending interrupt carries its id, whatever the kind. Interfaces
+ * render by `payload.kind` and resume by `interruptId`; nothing else needs to
+ * tell the kinds apart.
+ */
+export type PendingInterruptProjection = {
+  interruptId: string;
+  payload: InterruptPayloadProjection;
+};
+
+export type HumanReviewPendingInterruptProjection = PendingInterruptProjection & {
+  payload: HumanReviewInterruptProjection;
+};
 
 export function readHumanReviewPendingInterrupt(
   value: PendingInterruptProjection | null,
 ): HumanReviewPendingInterruptProjection | null {
-  return value?.payload.kind === 'human_review' && 'interruptId' in value
-    ? value
+  return value?.payload.kind === 'human_review'
+    ? value as HumanReviewPendingInterruptProjection
     : null;
 }

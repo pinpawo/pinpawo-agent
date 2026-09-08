@@ -185,7 +185,7 @@ export async function resolvePendingHumanReviewInterrupt<
       type: 'error',
       requestId: message.requestId,
       message: '这个 interrupt 已经过期，请等待当前确认面板刷新后再操作。',
-      code: 'review_stale',
+      code: 'interrupt_stale',
     });
     return;
   }
@@ -206,7 +206,7 @@ export async function resolvePendingHumanReviewInterrupt<
         type: 'error',
         requestId: message.requestId,
         message: '这个 review 已经过期，请等待当前确认面板刷新后再应答。',
-        code: 'review_stale',
+        code: 'interrupt_stale',
       });
       return;
     }

@@ -19,7 +19,6 @@ const RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_DESCRIPTION = '按 manifest 中的�
 
 const DEFAULT_MAX_DOCUMENT_READ_BYTES = 64 * 1024;
 const MAX_CAPABILITY_SEARCH_RESULTS = 50;
-const MAX_CAPABILITY_SEARCH_TERM_CHARS = 80;
 const MAX_CAPABILITY_SEARCH_RESULT_BYTES = 64 * 1024;
 export type RunSupervisorFileExplorer = {
   readonly didReachDocumentReadLimit: () => boolean;

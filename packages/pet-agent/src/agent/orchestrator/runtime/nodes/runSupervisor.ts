@@ -6,7 +6,6 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { materializeCapabilityDocumentWorkspace } from '../../runSupervisor/documentWorkspace';
 import {
   createRunSupervisorAgent,
-  DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS,
 } from '../../runSupervisor/agent';
 import { resolveCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
 import {
@@ -221,8 +220,6 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       ...(resumedCapabilityNames.length > 0
         ? { seedCapabilityNames: resumedCapabilityNames }
         : {}),
-      maxEmptySearchRounds: config.runSupervisorMaxSearchRounds
-        ?? DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS,
     });
     const supervisorSession: RunSupervisorSessionState = existingSession
       ? {

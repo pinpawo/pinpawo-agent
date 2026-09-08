@@ -14,7 +14,7 @@ export type RunSupervisorSessionState = {
 
 /**
  * Canonical resume seed written only when a root run ends with unfinished work.
- * It deliberately excludes Supervisor provider messages, disclosure/search accounting,
+ * It deliberately excludes Supervisor provider messages, tool-call history,
  * revision, and command replay state.
  */
 export type RunTaskContinuation = {

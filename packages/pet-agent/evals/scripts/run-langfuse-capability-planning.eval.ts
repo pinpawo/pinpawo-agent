@@ -162,7 +162,7 @@ async function main() {
           ?? 'unavailable';
         const baseDisclosure = createCapabilityDisclosureState({
           workspace,
-          maxEmptySearchRounds: 2,
+
         });
         const boundaryCapabilityNames = testCase.input.mode === 'boundary'
           ? [

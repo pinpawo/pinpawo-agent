@@ -15,8 +15,9 @@ validates every selected name against the immutable registry.
 
 The result distinguishes newly supplied `documents`, `alreadyDisclosed` names and
 `unknownNames`. It never performs substring search or suggests keyword expansion.
-Already supplied documents are not read or repeated. The existing empty-round and
-byte-budget protections remain; no separate sufficiency judge or new planning
+Already supplied documents are not read or repeated. Disclosure state keeps only registry identity and disclosed names. Empty-round
+counters, open/closed flags and model/tool-call observations are removed;
+byte-budget and invocation timeout protections remain; no separate sufficiency judge or new planning
 stage is added. Disclosure stays stable during execution Boundaries, as before.
 
 ## Problem to solve

@@ -26,8 +26,8 @@ test('terminal preserves a remaining plan after accepting the active task', asyn
   const result = await createAnswerNode({ models })(state({
     runUserRequest: 'Prepare and publish.', traceId: 'task-1', runSupervisorReply: 'Choose a target.',
     runSupervisorSession: createRunSupervisorSession({ runId: 'run-1', plan, capabilityDisclosure: {
-      registryDigest: 'registry', disclosedCapabilityNames: ['general'], emptySearchRounds: 0,
-      maxEmptySearchRounds: 2, status: 'open',
+      registryDigest: 'registry', disclosedCapabilityNames: ['general'],
+
     } }),
   }));
   assert.deepEqual(result.taskRunContinuation, {

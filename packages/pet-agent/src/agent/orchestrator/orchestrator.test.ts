@@ -241,9 +241,7 @@ function createOrchestratorGraph(
         capabilityDisclosure: {
           registryDigest: 'test-fixture-registry-generation',
           disclosedCapabilityNames: [],
-          emptySearchRounds: 0,
-          maxEmptySearchRounds: 2,
-          status: 'open',
+
         },
       },
     };
@@ -494,7 +492,7 @@ test('execution boundary routes through runSupervisor before the next task', asy
           capabilityDisclosure: {
             ...input.capabilityDisclosure,
             disclosedCapabilityNames: ['explore'],
-            emptySearchRounds: 1,
+
           },
 
         };
@@ -553,9 +551,7 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.deepEqual(boundaryPlannerInput?.capabilityDisclosure, {
     registryDigest: entryPlannerInput?.workspace.registryDigest,
     disclosedCapabilityNames: ['explore'],
-    emptySearchRounds: 1,
-    maxEmptySearchRounds: 2,
-    status: 'open',
+
   });
   assert.deepEqual(supervisorInputs[2]?.capabilityDisclosure, boundaryPlannerInput?.capabilityDisclosure);
   assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');

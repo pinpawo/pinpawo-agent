@@ -168,16 +168,17 @@ order; the configured default is candidate policy rather than an initial
 disclosure. A compact routing manifest initialized from the effective registry
 is projected into each Supervisor invocation. It retains the Toolkit names and
 descriptions resolved from each Capability's compiled `uses`, while complete
-Capability documents remain progressively disclosed. Neither dynamic registry
-facts nor disclosure-round state enter the stable system prompt. A new run resets
-detail-read attempts and revalidates disclosure; resumed root tasks may seed the
+Capability documents remain progressively disclosed. Dynamic registry
+facts do not enter the stable system prompt. A new run revalidates disclosure; resumed root tasks may seed the
 capabilities named by their active and remaining plan.
 
 `capability_details` is callable at Entry and at the first Boundary of a new user
 supplement, with automatic tool choice. It is unavailable during execution. Each ToolMessage
-reports the post-call disclosure state, remaining empty rounds, and explicit newly provided / already provided / unknown-name results. After discovery closes, later calls return the stable
-`capability_details_round_limit_exceeded` result instead of changing tool
-availability.
+reports newly provided documents, already provided names and unknown names.
+There is no private search counter, empty-round allowance, disclosure open/closed
+flag, or round-limit response. Parallel reads merge only disclosed names.
+Call counts and timings remain eval diagnostics; byte limits and invocation
+timeouts remain runtime protections.
 
 The manifest supports planning without a mandatory detail read. Exact-name detail
 reads are optional; they do not search document text. The target prepares any needed disclosure before execution and reuses it during execution

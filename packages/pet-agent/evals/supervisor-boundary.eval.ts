@@ -34,7 +34,7 @@ const registry = compileAgentRegistry({ toolkits: [{ name: 'workspace', descript
 let failures = 0;
 try {
   const workspace = await materializeCapabilityDocumentWorkspace({ registry, cacheRoot: root });
-  const disclosure = { ...createCapabilityDisclosureState({ workspace, maxEmptySearchRounds: 2 }), disclosedCapabilityNames: ['general'] };
+  const disclosure = { ...createCapabilityDisclosureState({ workspace }), disclosedCapabilityNames: ['general'] };
   const supervisor = createRunSupervisorAgent({ model: subject.model });
   const publicationPlan = [{ capability: 'general', task: 'Publish the prepared release notes after the user selects a destination.' }];
   const cases: Array<{ name: string; goal: string; task?: string; evidence?: string;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  applyCapabilitySearchObservations,
+  mergeCapabilityDisclosure,
   createCapabilityDisclosureState,
   resolveCapabilityDisclosureState,
 } from './capabilityDisclosure';
@@ -27,78 +27,18 @@ function workspace(
   };
 }
 
-test('Capability disclosure starts empty and persists discoveries in order', () => {
-  const initial = createCapabilityDisclosureState({
-    workspace: workspace(),
-    maxEmptySearchRounds: 2,
-  });
-  const afterEntry = applyCapabilitySearchObservations(initial, [{
-    modelMessageId: 'entry-round-1',
-    toolCallId: 'entry-search',
-    disclosedCapabilityNames: ['explore'],
-  }]);
-  const afterBoundary = applyCapabilitySearchObservations(afterEntry, [{
-    modelMessageId: 'boundary-round-1',
-    toolCallId: 'boundary-search',
-    disclosedCapabilityNames: ['writer', 'explore'],
-  }]);
-
-  assert.deepEqual(afterBoundary.disclosedCapabilityNames, [
-    'explore',
-    'writer',
-  ]);
-  assert.equal(afterBoundary.emptySearchRounds, 0);
-  assert.equal(afterBoundary.status, 'open');
+test('disclosure merges names idempotently and keeps their order', () => {
+  const initial = createCapabilityDisclosureState({ workspace: workspace(), seedCapabilityNames: ['general', 'missing', 'general'] });
+  const next = mergeCapabilityDisclosure(initial, ['explore', 'writer', 'explore']);
+  assert.deepEqual(next, { registryDigest: initial.registryDigest, disclosedCapabilityNames: ['general', 'explore', 'writer'] });
+  assert.deepEqual(mergeCapabilityDisclosure(next, []), next);
+  assert.deepEqual(mergeCapabilityDisclosure(next, ['explore']), next);
 });
 
-test('Capability disclosure counts a wholly empty parallel batch once', () => {
-  const initial = createCapabilityDisclosureState({
-    workspace: workspace(),
-    maxEmptySearchRounds: 2,
-  });
-  const afterFirstBoundary = applyCapabilitySearchObservations(initial, [{
-    modelMessageId: 'round-1',
-    toolCallId: 'search-1',
-    disclosedCapabilityNames: [],
-  }, {
-    modelMessageId: 'round-1',
-    toolCallId: 'search-2',
-    disclosedCapabilityNames: [],
-  }]);
-  const closed = applyCapabilitySearchObservations(afterFirstBoundary, [{
-    modelMessageId: 'round-2',
-    toolCallId: 'search-3',
-    disclosedCapabilityNames: [],
-  }]);
-
-  assert.equal(afterFirstBoundary.emptySearchRounds, 1);
-  assert.equal(afterFirstBoundary.status, 'open');
-  assert.equal(closed.emptySearchRounds, 2);
-  assert.equal(closed.status, 'closed');
-});
-
-test('Capability disclosure resets when the registry generation changes', () => {
-  const firstWorkspace = workspace('a'.repeat(64));
-  const current = {
-    ...createCapabilityDisclosureState({
-      workspace: firstWorkspace,
-      maxEmptySearchRounds: 2,
-    }),
-    disclosedCapabilityNames: ['general', 'explore'],
-    emptySearchRounds: 2,
-    status: 'closed' as const,
-  };
-  const nextWorkspace = workspace('b'.repeat(64));
-
-  assert.deepEqual(resolveCapabilityDisclosureState({
-    current,
-    workspace: nextWorkspace,
-    maxEmptySearchRounds: 3,
-  }), {
-    registryDigest: nextWorkspace.registryDigest,
-    disclosedCapabilityNames: [],
-    emptySearchRounds: 0,
-    maxEmptySearchRounds: 3,
-    status: 'open',
+test('disclosure resets only on a new registry generation', () => {
+  const current = createCapabilityDisclosureState({ workspace: workspace(), seedCapabilityNames: ['general'] });
+  assert.equal(resolveCapabilityDisclosureState({ current, workspace: workspace() }), current);
+  assert.deepEqual(resolveCapabilityDisclosureState({ current, workspace: workspace('b'.repeat(64)) }), {
+    registryDigest: 'b'.repeat(64), disclosedCapabilityNames: [],
   });
 });

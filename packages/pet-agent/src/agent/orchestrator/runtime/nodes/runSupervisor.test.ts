@@ -37,7 +37,7 @@ function state(): OrchestratorStateType {
       contextSummary: null, status: 'awaiting_decision', resultPreview: announce.text, userRequest: 'Prepare and publish.' },
     runDelegationSummaries: [{ id: 'd1', lane: scope.lane, task: 'Prepare the document.', status: 'progress', resultPreview: announce.text }],
     runSupervisorSession: createRunSupervisorSession({ runId: 'r1', plan: tail, capabilityDisclosure: {
-      registryDigest: 'registry', disclosedCapabilityNames: ['general'], emptySearchRounds: 0, maxEmptySearchRounds: 2, status: 'open',
+      registryDigest: 'registry', disclosedCapabilityNames: ['general'],
     } }),
     taskRunContinuation: null, sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
   };

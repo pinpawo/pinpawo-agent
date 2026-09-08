@@ -106,11 +106,6 @@ export type OrchestratorConfig = {
    */
   runSupervisorRunner?: RunSupervisorRunner;
   /**
-   * Maximum Capability discovery model turns per Supervisor input. Defaults to 2.
-   * Parallel capability_details calls in one model response count as one round.
-   */
-  runSupervisorMaxSearchRounds?: number;
-  /**
    * Storage/search backend for the immutable Capability registry documents.
    * Defaults to filesystem. Memory is opt-in and never used as an automatic fallback.
    */

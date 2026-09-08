@@ -21,17 +21,16 @@ import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { createSupervisorMiddleware } from './supervisorMiddleware';
 import { supervisorCommandContext } from './supervisorState';
 import {
-  applyCapabilitySearchObservations,
+  mergeCapabilityDisclosure,
 } from './capabilityDisclosure';
 import {
   createSupervisorCapabilityDetailsTool,
-  createSupervisorSearchStateMiddleware,
+  createSupervisorDisclosureStateMiddleware,
 } from './detailsTool';
 import { createSupervisorCommandTools } from './commandTools';
 import { createCapabilityRoutingManifestResolver } from './routingManifest';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
-export const DEFAULT_RUN_SUPERVISOR_MAX_SEARCH_ROUNDS = 2;
 
 export type RunSupervisorAgentErrorCode =
   | 'supervisor_discovery_limit_reached'
@@ -144,7 +143,7 @@ export function createRunSupervisorAgent(params: {
     tools: [capabilityDetailsTool, ...commandTools, ...additionalTools],
     middleware: [
       middleware,
-      createSupervisorSearchStateMiddleware(),
+      createSupervisorDisclosureStateMiddleware(),
       systemPromptMiddleware,
       orchestratorModelInvocationMiddleware,
     ],
@@ -195,9 +194,9 @@ export function createRunSupervisorAgent(params: {
           currentInput: effectiveInput,
         }, config);
         timeout.signal.throwIfAborted();
-        const capabilityDisclosure = applyCapabilitySearchObservations(
+        const capabilityDisclosure = mergeCapabilityDisclosure(
           effectiveInput.capabilityDisclosure,
-          result.capabilitySearchObservations ?? [],
+          result.disclosedCapabilityNames ?? [],
         );
         if (result.supervisorCommand) {
           const command = parseSupervisorCommand(

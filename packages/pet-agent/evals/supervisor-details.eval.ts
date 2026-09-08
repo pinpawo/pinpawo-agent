@@ -63,7 +63,7 @@ try {
     // silently amortized across cases. Model timings include that preparation.
     const supervisor = createRunSupervisorAgent({ model: subject.model });
     const trace = createSupervisorDetailsDiagnostics();
-    const disclosure = { ...createCapabilityDisclosureState({ workspace, maxEmptySearchRounds: 2 }), disclosedCapabilityNames: scenario.disclosed };
+    const disclosure = { ...createCapabilityDisclosureState({ workspace }), disclosedCapabilityNames: scenario.disclosed };
     const base = { inputId: scenario.name, traceId: scenario.name, runId: scenario.name, userRequest: scenario.goal,
       messages: [new HumanMessage(scenario.goal)], remainingPlan: [], workspace, capabilityDisclosure: disclosure,
       supervisorSession: createRunSupervisorSession({ runId: scenario.name, capabilityDisclosure: disclosure }),

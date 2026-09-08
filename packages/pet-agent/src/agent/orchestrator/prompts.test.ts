@@ -25,8 +25,7 @@ const plannerPromptWorkspace = {
 const plannerDisclosure = {
   registryDigest: plannerPromptWorkspace.registryDigest,
   disclosedCapabilityNames: ['general', 'browser'],
-  emptySearchRounds: 0,
-  maxEmptySearchRounds: 2,
+
   status: 'open' as const,
 };
 

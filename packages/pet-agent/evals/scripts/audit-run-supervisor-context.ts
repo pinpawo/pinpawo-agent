@@ -75,7 +75,7 @@ const documents: RunSupervisorCapabilityDocument[] = [{
 
 const disclosure = createCapabilityDisclosureState({
   workspace,
-  maxEmptySearchRounds: 2,
+
   seedCapabilityNames: ['repository'],
 });
 

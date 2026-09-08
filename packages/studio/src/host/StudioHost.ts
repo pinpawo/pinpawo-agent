@@ -35,7 +35,7 @@ import type { ResidentPetInteraction } from 'pinpawo/host-runtime';
 import {
   loadPetDocument,
   resolvePetCapabilityDirectory,
-} from './petConfig';
+} from 'pinpawo/host-runtime';
 
 export type StudioHostOptions = {
   runtimeConfig?: LocalAgentRuntimeConfig;
@@ -275,14 +275,6 @@ export class StudioHost {
 
   getCapabilityArtifactStore(): CapabilityArtifactStore {
     return this.caps.getCapabilityArtifactStore();
-  }
-
-  getActorId(): string {
-    return this.caps.getActorId();
-  }
-
-  getActorName(): string | null {
-    return this.caps.getActorName();
   }
 
 }

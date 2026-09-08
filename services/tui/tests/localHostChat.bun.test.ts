@@ -85,8 +85,8 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
   const graphFixture = createHostGraphFixture();
   const localServerHandlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
-    actorId: 'pet-host-integration',
-    actorName: 'PinPawo',
+    petId: 'pet-host-integration',
+    petName: 'PinPawo',
     runtimeConfig,
     ...createTestModelServerDeps({
       apiKey: 'offline-integration-key',
@@ -100,7 +100,7 @@ test('production local-agent handlers drive the v2 host vertical slice', async (
     ),
   }), {
     chatGraphService: graphFixture.service,
-    loadContext: async (actorId) => buildAgentContext(actorId),
+    loadContext: async (petId) => buildAgentContext(petId),
   });
 
   const server = createServer((_request, response) => {

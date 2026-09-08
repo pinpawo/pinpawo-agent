@@ -384,11 +384,11 @@ test('legacy model fields are removed when versioned profiles are persisted', ()
     llm_model: 'deepseek-v4-pro',
     llm_observe_model: 'deepseek-v4-pro',
     llm_context_window_tokens: 1_000_000,
-    actor_id: 'actor-1',
+    workdir: '/tmp/keep-me',
   };
   const migrated = removeLegacyModelConfigFields(original);
 
-  assert.equal(migrated.actor_id, 'actor-1');
+  assert.equal(migrated.workdir, '/tmp/keep-me');
   assert.equal('llm_api_key' in migrated, false);
   assert.equal('llm_model_preset' in migrated, false);
   assert.equal('llm_base_url' in migrated, false);

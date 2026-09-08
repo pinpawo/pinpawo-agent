@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import test from 'node:test';
-import {
-  initStudioKickstart,
-  initStudioWorkdir,
-} from './studioTemplate';
+import { initStudioWorkdir } from './studioTemplate';
 
 async function createTemplate(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-template-'));
@@ -60,10 +57,6 @@ test('Studio init preflights conflicts before copying any file', async () => {
     /ENOENT/,
   );
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
-});
-
-test('legacy kickstart initializer remains an alias for Studio init', () => {
-  assert.equal(initStudioKickstart, initStudioWorkdir);
 });
 
 test('shipped Pet Capabilities separate planning, execution, and Wiki observation', async () => {

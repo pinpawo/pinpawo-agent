@@ -17,6 +17,8 @@ export type LocalAgentRuntimeConfig = Readonly<{
   checkpointPath: string;
   tuiCheckpointPath: string;
   tuiSessionPath: string;
+  /** Pet configuration directory; Chat reads one Pet here, Studio reads many. */
+  petsDir: string;
   capabilityArtifactRoot: string;
 }>;
 
@@ -92,6 +94,7 @@ export function buildLocalAgentRuntimeConfig(workdir = resolveDefaultWorkdir()):
       stateRoot,
       `tui-sessions-${LOCAL_AGENT_CHECKPOINT_CONTRACT}.json`,
     ),
+    petsDir: resolve(stateRoot, 'pets'),
     capabilityArtifactRoot: resolve(stateRoot, 'capability-artifacts'),
   });
 }

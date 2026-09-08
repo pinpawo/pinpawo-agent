@@ -98,8 +98,6 @@ export class ServerChatHandler {
     inflightRequests: InflightRequestController<ServerPeer>;
     loadContext?: typeof loadAgentContext;
     runAgentTurn?: RunAgentSessionTurn;
-    /** @deprecated Use runAgentTurn. */
-    runChat?: RunAgentSessionTurn;
     publishRuntimeEvent?: (
       origin: ServerPeer,
       event: AgentRuntimeEvent,
@@ -110,7 +108,7 @@ export class ServerChatHandler {
     this.tuiSessions = options.tuiSessions;
     this.inflightRequests = options.inflightRequests;
     this.loadContext = options.loadContext ?? loadAgentContext;
-    this.runAgentTurn = options.runAgentTurn ?? options.runChat ?? runAgentSessionTurn;
+    this.runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
     this.publishRuntimeEvent = options.publishRuntimeEvent
       ?? ((peer, event) => {
         sendLocalServerPeerEvent(peer, event);
@@ -252,7 +250,7 @@ export class ServerChatHandler {
         + `interactionId=${source.interactionId} action=interrupt_run`,
       );
     }
-    const threadId = this.tuiSessions.getChatThreadId(deps.actorId);
+    const threadId = this.tuiSessions.getChatThreadId(deps.petId);
     const inflight = this.inflightRequests.start(peer, requestId);
     const { controller } = inflight;
     const invocation = this.threadInvocations.enqueue({
@@ -297,7 +295,7 @@ export class ServerChatHandler {
       });
       runStarted = true;
       recordAgentRunActivity('thinking', requestId);
-      const ctx = await this.loadContext(deps.actorId);
+      const ctx = await this.loadContext(deps.petId);
       if (!isCurrent()) {
         finalizeInterrupted();
         return 'interrupted';
@@ -376,7 +374,7 @@ export class ServerChatHandler {
       const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
       if (recoveredFromToolProtocolError) {
         try {
-          await this.tuiSessions.resetSession(deps.actorId, {
+          await this.tuiSessions.resetSession(deps.petId, {
             deletePrevious: true,
           });
           console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
@@ -458,7 +456,7 @@ export class ServerChatHandler {
     message: HumanReviewResponseMessage | ReviewCancelMessage,
     deps: ServerDeps,
   ) {
-    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.actorId);
+    const activeSessionId = this.tuiSessions.getActiveSessionId(deps.petId);
     if (route.sessionId && activeSessionId && route.sessionId !== activeSessionId) {
       console.warn(
         `[local-server] ${message.type} rejected: route sessionId=${route.sessionId} `

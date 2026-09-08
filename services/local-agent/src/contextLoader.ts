@@ -1,4 +1,4 @@
-import { LOCAL_ACTOR_ID, LOCAL_ACTOR_NAME } from './actorSelection';
+import { DEFAULT_CHAT_PET } from './defaultPet';
 
 /** Host identity and invocation metadata. Authored behavior belongs to PET.md. */
 export type AgentContext = {
@@ -7,11 +7,11 @@ export type AgentContext = {
   traceUserId?: string;
 };
 
-export function buildAgentContext(actorId = LOCAL_ACTOR_ID): AgentContext {
-  return { pet: { id: actorId, name: LOCAL_ACTOR_NAME } };
+export function buildAgentContext(petId = DEFAULT_CHAT_PET.petId): AgentContext {
+  return { pet: { id: petId, name: DEFAULT_CHAT_PET.name } };
 }
 
 /** Injectable Host identity loader; no cloud profile, memory or history hydration. */
-export async function loadAgentContext(actorId: string): Promise<AgentContext> {
-  return buildAgentContext(actorId);
+export async function loadAgentContext(petId: string): Promise<AgentContext> {
+  return buildAgentContext(petId);
 }

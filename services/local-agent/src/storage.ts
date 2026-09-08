@@ -6,10 +6,6 @@ import type { StoredModelProfilesV1 } from './modelProfiles';
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 
 export type StoredConfig = {
-  user_id?: string;
-  nickname?: string;
-  actor_id?: string;
-  actor_name?: string;
   llm_api_key?: string;
   llm_model_preset?: string;
   llm_base_url?: string;

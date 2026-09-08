@@ -265,7 +265,7 @@ test('ServerTuiSessionService rolls back image requirements when persistence fai
   try {
     await assert.rejects(
       () => service.createUserMessage({
-        actorId: 'pet-a',
+        petId: 'pet-a',
         ...createTestModelServerDeps({
           inputModalities: ['text', 'image'],
         }),
@@ -298,7 +298,7 @@ test('ServerTuiSessionService injects active session createdAt into runtime envi
   });
   const session = service.getActiveSession('pet-a');
   const setup = service.buildChatSetup({
-    actorId: 'pet-a',
+    petId: 'pet-a',
     ...createTestModelServerDeps(),
     runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-tui-workdir'),
     capabilityArtifactStore: testArtifactStore,
@@ -324,7 +324,7 @@ test('ServerTuiSessionService rejects chat setup without a thread-scoped artifac
   assert.throws(
     () => service.buildChatSetup({
       serverMode: 'chat',
-      actorId: 'pet-a',
+      petId: 'pet-a',
       ...createTestModelServerDeps(),
       runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-missing-artifact-store'),
     }, {
@@ -346,7 +346,7 @@ test('runtime config updates reach the next chat setup through the normalized de
   });
   const runtimeDeps = createLocalServerRuntimeDepsStore({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     modelProfiles: createTestModelProfiles(),
     capabilityRegistryBackend: 'memory',
     globalReviewPolicyMode: 'require_authorization',
@@ -417,7 +417,7 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   const session = service.getActiveSession('pet-a');
   const checkpoint = await service.readActiveCheckpointPoint({
     runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
-    actorId: 'pet-a',
+    petId: 'pet-a',
     ...createTestModelServerDeps(),
     capabilityArtifactStore: testArtifactStore,
   } as never);

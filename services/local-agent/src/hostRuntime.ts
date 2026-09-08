@@ -58,3 +58,14 @@ export type {
 
 export { resolveHostExecutionConfig } from './hostExecutionConfig';
 export type { HostExecutionConfig } from './hostExecutionConfig';
+
+export {
+  loadPetConfigs,
+  loadPetDocument,
+  petConfigSchema,
+  PET_DOCUMENT_FILE_NAME,
+  resolvePetCapabilityDirectory,
+  resolvePetDocumentPath,
+} from './petConfig';
+export type { PetConfig } from './petConfig';
+export { isSafePetPathSegment } from './petId';

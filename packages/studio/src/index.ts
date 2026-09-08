@@ -22,12 +22,10 @@ export type {
 export { parseStudioDispatchRequest } from './studioInvocation';
 
 export {
-  petLocalConfigSchema,
   resolveStudio,
   studioLocalConfigSchema,
 } from './configSchema';
 export type {
-  PetLocalConfig,
   ResolvedStudio,
   StudioLocalConfig,
   StudioPluginConfig,
@@ -67,12 +65,9 @@ export type {
   StudioHostProcessOptions,
 } from './studioHostProcess';
 export {
-  initStudioKickstart,
   initStudioWorkdir,
 } from './studioTemplate';
 export type {
-  InitStudioKickstartOptions,
-  InitStudioKickstartResult,
   InitStudioWorkdirOptions,
   InitStudioWorkdirResult,
 } from './studioTemplate';

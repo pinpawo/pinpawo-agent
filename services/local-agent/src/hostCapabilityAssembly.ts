@@ -30,7 +30,6 @@ import {
   buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
 } from './llmConfig';
-import { LOCAL_ACTOR_ID, LOCAL_ACTOR_NAME } from './actorSelection';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import {
   createHostBaselineCapabilities,
@@ -117,8 +116,6 @@ export class HostCapabilityAssembly {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
   private readonly executionConfig: HostExecutionConfig;
   private readonly sourceId: string;
-  private actorId: string | null = null;
-  private actorName: string | null = null;
   private modelProfiles: LocalModelProfileRegistry | null = null;
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
@@ -235,8 +232,6 @@ export class HostCapabilityAssembly {
         definitions: this.hostBuiltInToolkits,
       },
     ]);
-    this.actorId = LOCAL_ACTOR_ID;
-    this.actorName = LOCAL_ACTOR_NAME;
   }
 
   getExecutionConfig(): HostExecutionConfig {
@@ -282,17 +277,6 @@ export class HostCapabilityAssembly {
 
   async deleteThreadArtifacts(threadId: string): Promise<void> {
     await this.capabilityArtifactStore.deleteThreadArtifacts(threadId);
-  }
-
-  getActorId(): string {
-    if (!this.actorId) {
-      throw new Error(`${this.sourceId} actorId is not initialized`);
-    }
-    return this.actorId;
-  }
-
-  getActorName(): string | null {
-    return this.actorName;
   }
 
   async shutdown(): Promise<void> {

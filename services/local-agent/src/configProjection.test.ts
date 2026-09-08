@@ -15,7 +15,7 @@ import { createTestModelServerDeps } from './testing/modelProfiles';
 function createDeps(workdir: string): ServerDeps {
   return {
     serverMode: 'chat',
-    actorId: 'pet-test',
+    petId: 'pet-test',
     ...createTestModelServerDeps({ contextWindowTokens: 32000 }),
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
   };
@@ -43,7 +43,7 @@ test('HTTP and TUI projections expose the same normalized runtime values', () =>
 test('runtime projection excludes output and thinking reserves before context compaction', () => {
   const deps: ServerDeps = {
     serverMode: 'chat',
-    actorId: 'pet-test',
+    petId: 'pet-test',
     ...createTestModelServerDeps({
       model: 'qwen3.8-max',
       contextWindowTokens: 983_616,

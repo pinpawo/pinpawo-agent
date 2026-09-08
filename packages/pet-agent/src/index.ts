@@ -111,14 +111,12 @@ export {
 
 export {
   buildOrchestratorRunInput,
-  buildOrchestratorTurnInput,
   CAPABILITY_REGISTRY_BACKEND,
   createOrchestratorGraph,
   isOrchestratorInternalAiStreamNode,
   ORCHESTRATOR_RECURSION_LIMIT,
   readPauseTaskInterrupt,
   streamOrchestratorGraph,
-  streamOrchestratorGraphWithTokenUsage,
   compileAgentRegistry,
   formatExecutorCompilationIssues,
   validateUniqueCapabilityNames,
@@ -186,7 +184,6 @@ export {
 } from './agent/orchestrator/contextCompaction';
 export type {
   OrchestratorGraphStream,
-  OrchestratorTokenUsageStream,
 } from './agent/createAgentRuntime';
 export type {
   ProviderTokenUsage,

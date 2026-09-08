@@ -1,22 +1,21 @@
+import { petConfigSchema, type PetConfig } from 'pinpawo/host-runtime';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseConfigValue } from '@pinpawo/pet-agent';
 
 import {
-  petLocalConfigSchema,
   resolveStudio,
   studioLocalConfigSchema,
-  type PetLocalConfig,
   type StudioLocalConfig,
 } from './configSchema';
 
 // schema 只负责结构;文件入口由宿主提供，因此这里直接喂已解析的值。
-const parsePet = (raw: unknown, source: string): PetLocalConfig =>
-  parseConfigValue(raw, petLocalConfigSchema, source);
+const parsePet = (raw: unknown, source: string): PetConfig =>
+  parseConfigValue(raw, petConfigSchema, source);
 const parseStudio = (raw: unknown, source: string): StudioLocalConfig =>
   parseConfigValue(raw, studioLocalConfigSchema, source);
 
-function pet(petId: string, overrides: Partial<PetLocalConfig> = {}): PetLocalConfig {
+function pet(petId: string, overrides: Partial<PetConfig> = {}): PetConfig {
   return {
     petId,
     name: `Pet ${petId}`,

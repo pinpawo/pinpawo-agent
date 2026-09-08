@@ -12,11 +12,11 @@ import {
 import type { AgentChannelSetup } from './agentChannel';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 import type { LocalAgentGraphService } from './agentGraphService';
-import { runChatSession } from './chatSessionAdapter';
+import { runAgentSessionTurn } from './chatSessionAdapter';
 import { readFinalMessageText, type StreamToolsPayload } from './agentStreamEvents';
 
 /**
- * runChatSession consumes the ROOT `streamEvents(v3)` protocol stream
+ * runAgentSessionTurn consumes the ROOT `streamEvents(v3)` protocol stream
  * (#322 Phase 4); the fakes below emit raw protocol events.
  */
 function protocolEvent(method: string, data: unknown, namespace: string[] = []) {
@@ -35,7 +35,7 @@ function messageLifecycle(text: string, namespace: string[] = [], id = 'msg-1') 
   ];
 }
 
-test('runChatSession does not settle before the underlying graph run output', async () => {
+test('runAgentSessionTurn does not settle before the underlying graph run output', async () => {
   let resolveOutput!: () => void;
   const output = new Promise<void>((resolve) => {
     resolveOutput = resolve;
@@ -62,7 +62,7 @@ test('runChatSession does not settle before the underlying graph run output', as
   };
 
   let settled = false;
-  const run = runChatSession({
+  const run = runAgentSessionTurn({
     request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -82,7 +82,7 @@ test('runChatSession does not settle before the underlying graph run output', as
   assert.deepEqual(await run, { status: 'completed', reply: 'done' });
 });
 
-test('runChatSession defers interrupted terminalization until graph output settles', async () => {
+test('runAgentSessionTurn defers interrupted terminalization until graph output settles', async () => {
   let resolveOutput!: () => void;
   const output = new Promise<void>((resolve) => {
     resolveOutput = resolve;
@@ -113,7 +113,7 @@ test('runChatSession defers interrupted terminalization until graph output settl
   let currentChecks = 0;
   let settled = false;
 
-  const run = runChatSession({
+  const run = runAgentSessionTurn({
     request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -138,7 +138,7 @@ test('runChatSession defers interrupted terminalization until graph output settl
   assert.deepEqual(await run, { status: 'interrupted' });
 });
 
-test('runChatSession sources tool operations from the root protocol stream, not the callback', async () => {
+test('runAgentSessionTurn sources tool operations from the root protocol stream, not the callback', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: unknown[] = [];
   const setup = {
@@ -170,7 +170,7 @@ test('runChatSession sources tool operations from the root protocol stream, not 
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -214,7 +214,7 @@ test('runChatSession sources tool operations from the root protocol stream, not 
   );
 });
 
-test('runChatSession falls back to checkpoint final message when stream values omit messages', async () => {
+test('runAgentSessionTurn falls back to checkpoint final message when stream values omit messages', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const finalMessages = [
     new HumanMessage('hello'),
@@ -242,7 +242,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -266,7 +266,7 @@ test('runChatSession falls back to checkpoint final message when stream values o
   assert.equal(completed?.text, 'checkpoint answer');
 });
 
-test('runChatSession replaces the current plan from root values and clears it at settlement', async () => {
+test('runAgentSessionTurn replaces the current plan from root values and clears it at settlement', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphConfig: {},
@@ -307,7 +307,7 @@ test('runChatSession replaces the current plan from root values and clears it at
     },
   };
 
-  await runChatSession({
+  await runAgentSessionTurn({
     request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -344,7 +344,7 @@ test('runChatSession replaces the current plan from root values and clears it at
   }]);
 });
 
-test('runChatSession projects global policy authorization as completed operations', async () => {
+test('runAgentSessionTurn projects global policy authorization as completed operations', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
@@ -409,7 +409,7 @@ test('runChatSession projects global policy authorization as completed operation
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -478,7 +478,7 @@ test('runChatSession projects global policy authorization as completed operation
   );
 });
 
-test('runChatSession emits one completed subagent block per child model message lifecycle', async () => {
+test('runAgentSessionTurn emits one completed subagent block per child model message lifecycle', async () => {
   const emittedTools: StreamToolsPayload[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
@@ -512,7 +512,7 @@ test('runChatSession emits one completed subagent block per child model message 
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -543,7 +543,7 @@ test('runChatSession emits one completed subagent block per child model message 
   );
 });
 
-test('runChatSession merges subagent_operations announcements through acceptDelegationOperations', async () => {
+test('runAgentSessionTurn merges subagent_operations announcements through acceptDelegationOperations', async () => {
   const accepted: unknown[] = [];
   const setup = {
     graphConfig: {},
@@ -572,7 +572,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -594,7 +594,7 @@ test('runChatSession merges subagent_operations announcements through acceptDele
   }]);
 });
 
-test('runChatSession projects review interrupts to public interaction contracts', async () => {
+test('runAgentSessionTurn projects review interrupts to public interaction contracts', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphConfig: {},
@@ -641,7 +641,7 @@ test('runChatSession projects review interrupts to public interaction contracts'
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -665,7 +665,7 @@ test('runChatSession projects review interrupts to public interaction contracts'
   );
 });
 
-test('runChatSession resumes explicit response after state update clears interrupt payload', async () => {
+test('runAgentSessionTurn resumes explicit response after state update clears interrupt payload', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const streamInputs: unknown[] = [];
   const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
@@ -696,7 +696,7 @@ test('runChatSession resumes explicit response after state update clears interru
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'resume',
       requestId: 'req-1',
@@ -723,7 +723,7 @@ test('runChatSession resumes explicit response after state update clears interru
   );
 });
 
-test('runChatSession reports waiting_human when a resume raises a new review', async () => {
+test('runAgentSessionTurn reports waiting_human when a resume raises a new review', async () => {
   const originalReview = {
     id: 'review-original',
     schemaVersion: 1,
@@ -771,7 +771,7 @@ test('runChatSession reports waiting_human when a resume raises a new review', a
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -792,7 +792,7 @@ test('runChatSession reports waiting_human when a resume raises a new review', a
   );
 });
 
-test('runChatSession rejects when graph execution fails during a resume', async () => {
+test('runAgentSessionTurn rejects when graph execution fails during a resume', async () => {
   const review = {
     id: 'review-original',
     schemaVersion: 1,
@@ -824,7 +824,7 @@ test('runChatSession rejects when graph execution fails during a resume', async 
   };
 
   await assert.rejects(
-    runChatSession({
+    runAgentSessionTurn({
       request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
@@ -836,7 +836,7 @@ test('runChatSession rejects when graph execution fails during a resume', async 
   );
 });
 
-test('runChatSession allows a user message after an aborted non-review run leaves pending continuation', async () => {
+test('runAgentSessionTurn allows a user message after an aborted non-review run leaves pending continuation', async () => {
   const finalMessages = [new AIMessage('continued after abort')];
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
@@ -863,7 +863,7 @@ test('runChatSession allows a user message after an aborted non-review run leave
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -886,7 +886,7 @@ test('runChatSession allows a user message after an aborted non-review run leave
   );
 });
 
-test('runChatSession rejects stale resume with user-facing message', async () => {
+test('runAgentSessionTurn rejects stale resume with user-facing message', async () => {
   const setup = {
     graphConfig: {},
     input: {
@@ -906,7 +906,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
   };
 
   await assert.rejects(
-    () => runChatSession({
+    () => runAgentSessionTurn({
       request: {
         kind: 'resume',
         requestId: 'req-1',
@@ -922,7 +922,7 @@ test('runChatSession rejects stale resume with user-facing message', async () =>
   );
 });
 
-test('runChatSession does not map pending review free text to review response', async () => {
+test('runAgentSessionTurn does not map pending review free text to review response', async () => {
   const streamInputs: unknown[] = [];
   const emittedEvents: AgentRuntimeEvent[] = [];
   let preparedUserMessages = 0;
@@ -970,7 +970,7 @@ test('runChatSession does not map pending review free text to review response', 
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -1007,7 +1007,7 @@ test('runChatSession does not map pending review free text to review response', 
   );
 });
 
-test('runChatSession degrades a GraphRecursionError to a completed 待续跑 reply', async () => {
+test('runAgentSessionTurn degrades a GraphRecursionError to a completed 待续跑 reply', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphConfig: {},
@@ -1029,7 +1029,7 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -1047,7 +1047,7 @@ test('runChatSession degrades a GraphRecursionError to a completed 待续跑 rep
   assert.match(completed?.text ?? '', /步数已达上限/);
 });
 
-test('runChatSession keeps the streamed reply when GraphRecursionError fires mid-stream', async () => {
+test('runAgentSessionTurn keeps the streamed reply when GraphRecursionError fires mid-stream', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const setup = {
     graphConfig: {},
@@ -1070,7 +1070,7 @@ test('runChatSession keeps the streamed reply when GraphRecursionError fires mid
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -1082,7 +1082,7 @@ test('runChatSession keeps the streamed reply when GraphRecursionError fires mid
   assert.deepEqual(result, { status: 'completed', reply: '部分进度' });
 });
 
-test('runChatSession rethrows non-recursion errors from the stream', async () => {
+test('runAgentSessionTurn rethrows non-recursion errors from the stream', async () => {
   const setup = {
     graphConfig: {},
     input: { messages: [] },
@@ -1102,7 +1102,7 @@ test('runChatSession rethrows non-recursion errors from the stream', async () =>
   };
 
   await assert.rejects(
-    () => runChatSession({
+    () => runAgentSessionTurn({
       request: { kind: 'user_message', requestId: 'req-1', message: 'hello' },
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
@@ -1114,7 +1114,7 @@ test('runChatSession rethrows non-recursion errors from the stream', async () =>
   );
 });
 
-test('runChatSession omits token usage when provider usage is unavailable', async () => {
+test('runAgentSessionTurn omits token usage when provider usage is unavailable', async () => {
   const emittedEvents: unknown[] = [];
   const promptMessages = [
     new HumanMessage('历史问题'),
@@ -1156,7 +1156,7 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -1179,7 +1179,7 @@ test('runChatSession omits token usage when provider usage is unavailable', asyn
   assert.equal(completed.usage, undefined);
 });
 
-test('runChatSession emits provider token usage from new state messages', async () => {
+test('runAgentSessionTurn emits provider token usage from new state messages', async () => {
   const emittedEvents: unknown[] = [];
   const historicalReply = new AIMessage({
     content: '历史回答。',
@@ -1237,7 +1237,7 @@ test('runChatSession emits provider token usage from new state messages', async 
     },
   };
 
-  await runChatSession({
+  await runAgentSessionTurn({
     request: {
       kind: 'user_message',
       requestId: 'req-1',
@@ -1268,7 +1268,7 @@ test('runChatSession emits provider token usage from new state messages', async 
   assert.equal(typeof completed.usage?.updatedAt, 'string');
 });
 
-test('runChatSession reports a task pause without turning its bookkeeping into an assistant reply', async () => {
+test('runAgentSessionTurn reports a task pause without turning its bookkeeping into an assistant reply', async () => {
   // Regression: after a Review reject the run settles into a task pause. The
   // checkpoint's last message is the rejected tool result — it is not a reply,
   // and the run must not be reported as completed.
@@ -1317,7 +1317,7 @@ test('runChatSession reports a task pause without turning its bookkeeping into a
     },
   };
 
-  const result = await runChatSession({
+  const result = await runAgentSessionTurn({
     request: {
       kind: 'resume',
       requestId: 'req-1',
@@ -1337,7 +1337,7 @@ test('runChatSession reports a task pause without turning its bookkeeping into a
   assert.equal(JSON.stringify(emittedEvents).includes('human_reject'), false);
 });
 
-test('runChatSession accepts a streamed task-pause interrupt from a rebuilt graph', async () => {
+test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt graph', async () => {
   const setup = {
     graphConfig: {},
     input: { messages: [] },
@@ -1363,7 +1363,7 @@ test('runChatSession accepts a streamed task-pause interrupt from a rebuilt grap
     },
   };
 
-  assert.deepEqual(await runChatSession({
+  assert.deepEqual(await runAgentSessionTurn({
     request: { kind: 'resume', requestId: 'req-1', resume: { action: 'cancel' } },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,

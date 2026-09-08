@@ -191,9 +191,4 @@ export function buildOrchestratorRunInput(
   };
 }
 
-/** @deprecated Use buildRunStateReset. Kept temporarily for external callers. */
-export const buildTurnStateReset = buildRunStateReset;
-/** @deprecated Use buildOrchestratorRunInput. Kept temporarily for external callers. */
-export const buildOrchestratorTurnInput = buildOrchestratorRunInput;
-
 export type { CapabilityMessageLane };

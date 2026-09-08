@@ -71,7 +71,7 @@ test('local server forwards structured local attachments to the chat session', a
       sendControl: () => undefined,
     }),
     loadContext: async () => ({} as never),
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       receivedRequest = options.request;
       return { status: 'completed', reply: 'done' };
     },
@@ -138,7 +138,7 @@ test('replacement request waits for the previous thread invocation to settle', a
       },
     }),
     loadContext: async () => ({} as never),
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       if (options.request.requestId !== 'req-old') {
         replacementStarted = true;
         return { status: 'completed', reply: 'replacement completed' };
@@ -224,7 +224,7 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
     } as never,
     inflightRequests,
     loadContext: async () => ({} as never),
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       runCount += 1;
       // A review cancellation settles into a task pause; the handler finalizes it.
       return { status: 'paused' };
@@ -280,7 +280,7 @@ test('run interrupt cancels a review that became pending before the client obser
       sendControl: (_peer, message) => controls.push(message),
     }),
     loadContext: async () => ({} as never),
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       requests.push(options.request);
       // A review cancellation settles into a task pause; the handler finalizes it.
       return { status: 'paused' };
@@ -1144,7 +1144,7 @@ test('a review resolution that settles into a task pause is finalized as interru
       sendControl: (_peer, message) => controls.push(message),
     }),
     loadContext: async () => ({} as never),
-    runChat: async () => ({ status: 'paused' }),
+    runAgentTurn: async () => ({ status: 'paused' }),
   });
 
   await handler.handleReviewCancel(fakePeer, {

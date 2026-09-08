@@ -364,8 +364,6 @@ export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {
   graphService?: LocalAgentGraphService;
   /** Shared Agent Session turn runner used by conversation and headless input. */
   runAgentTurn?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
-  /** @deprecated Use runAgentTurn. */
-  runChat?: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;
   /** Host persistence port for updated startup defaults. */
   persistGlobalReviewPolicyMode?: ServerHandlerOptions['persistGlobalReviewPolicyMode'];
   /** Existing opaque checkpoint thread, adopted only when no Agent Session exists. */
@@ -585,7 +583,7 @@ export async function createResidentPetRuntime(
       }
     }
   };
-  const runAgentTurn = options.runAgentTurn ?? options.runChat ?? runAgentSessionTurn;
+  const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
   const localHandlers = createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,

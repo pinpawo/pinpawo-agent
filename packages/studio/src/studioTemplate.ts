@@ -93,12 +93,3 @@ export async function initStudioWorkdir(
   }
   return { workdir, files: files.map(({ destination }) => destination) };
 }
-
-/** @deprecated Use initStudioWorkdir. */
-export const initStudioKickstart = initStudioWorkdir;
-
-/** @deprecated Use InitStudioWorkdirOptions. */
-export type InitStudioKickstartOptions = InitStudioWorkdirOptions;
-
-/** @deprecated Use InitStudioWorkdirResult. */
-export type InitStudioKickstartResult = InitStudioWorkdirResult;

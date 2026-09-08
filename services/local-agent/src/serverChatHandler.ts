@@ -98,8 +98,6 @@ export class ServerChatHandler {
     inflightRequests: InflightRequestController<ServerPeer>;
     loadContext?: typeof loadAgentContext;
     runAgentTurn?: RunAgentSessionTurn;
-    /** @deprecated Use runAgentTurn. */
-    runChat?: RunAgentSessionTurn;
     publishRuntimeEvent?: (
       origin: ServerPeer,
       event: AgentRuntimeEvent,
@@ -110,7 +108,7 @@ export class ServerChatHandler {
     this.tuiSessions = options.tuiSessions;
     this.inflightRequests = options.inflightRequests;
     this.loadContext = options.loadContext ?? loadAgentContext;
-    this.runAgentTurn = options.runAgentTurn ?? options.runChat ?? runAgentSessionTurn;
+    this.runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
     this.publishRuntimeEvent = options.publishRuntimeEvent
       ?? ((peer, event) => {
         sendLocalServerPeerEvent(peer, event);

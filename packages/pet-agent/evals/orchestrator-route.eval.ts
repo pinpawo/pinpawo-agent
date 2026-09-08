@@ -19,7 +19,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
-  buildOrchestratorTurnInput,
+  buildOrchestratorRunInput,
 } from '../src/agent/createAgentRuntime';
 import type { AgentModels } from '../src/types/agent';
 import {
@@ -272,7 +272,7 @@ export async function target(
     && inputs.resume_progress_lane.trim()
     ? inputs.resume_progress_lane.trim()
     : null;
-  const turnInput = buildOrchestratorTurnInput(resumeProgressLane
+  const turnInput = buildOrchestratorRunInput(resumeProgressLane
     ? [
         new HumanMessage(String(inputs.resume_original_user_message ?? userMessage)),
         evalAnnounce({

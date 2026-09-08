@@ -3,7 +3,7 @@ import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import {
-  buildOrchestratorTurnInput,
+  buildOrchestratorRunInput,
   createOrchestratorGraph,
 } from '../../src/agent/createAgentRuntime.ts';
 import { getAgentMessageLane } from '../../src/agent/messages/index.ts';
@@ -172,7 +172,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
     runSupervisorRunner: supervisor.runner,
   });
   const result = await graph.invoke(
-    buildOrchestratorTurnInput([new HumanMessage(testCase.input.userMessage)]),
+    buildOrchestratorRunInput([new HumanMessage(testCase.input.userMessage)]),
     { context: { workdir: '/mock/project', systemPromptSections: [] },
       configurable: {
         thread_id: `multi-task-flow-${Date.now()}`,

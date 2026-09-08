@@ -64,8 +64,8 @@ export async function runAgent(options: RunAgentOptions) {
       mode: 'server',
       serverMode: mode,
       workdir: runtimeConfig.workdir,
-      actorId: runtime.getActorId(),
-      actorName: runtime.getActorName(),
+      petId: runtime.getPetConfig().petId,
+      petName: runtime.getPetConfig().name,
     });
     const deps = runtime.buildLocalServerDeps();
 

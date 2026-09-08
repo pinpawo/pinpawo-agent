@@ -21,7 +21,7 @@ export type {
   RunSupervisorSessionState,
   RunTaskContinuation,
 } from './orchestrator/runSupervisor/session';
-export { buildOrchestratorRunInput, buildOrchestratorTurnInput } from './orchestrator/state';
+export { buildOrchestratorRunInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
 export {
   compileAgentRegistry,
@@ -47,7 +47,5 @@ export type {
 } from './orchestrator/interrupt';
 export {
   streamOrchestratorGraph,
-  streamOrchestratorGraphWithTokenUsage,
   type OrchestratorGraphStream,
-  type OrchestratorTokenUsageStream,
 } from './orchestrator/runtime/stream';

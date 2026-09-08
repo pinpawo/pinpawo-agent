@@ -6,6 +6,8 @@ import {
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
 import type { ServerDeps } from './serverTypes';
+import { DEFAULT_CHAT_PET } from './defaultPet';
+import { loadPetConfigs, type PetConfig } from './petConfig';
 import { loadPetDocumentFile, resolveChatPetDocumentPath } from './petDocument';
 import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
 
@@ -21,10 +23,30 @@ import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
  * Studio is started from its own package and composes the exported resident
  * runtime/interaction surfaces; this Chat Host never imports it.
  */
+/**
+ * Chat runs one Pet. A second configuration file is a composition mistake
+ * rather than an unsupported feature, so it fails loudly and points at the
+ * Host that does own multi-Pet identity.
+ */
+export async function loadChatPetConfig(
+  runtimeConfig: Pick<LocalAgentRuntimeConfig, 'petsDir'>,
+): Promise<PetConfig> {
+  const { petsDir } = runtimeConfig;
+  const configs = await loadPetConfigs(petsDir);
+  if (configs.length > 1) {
+    throw new Error(
+      `Chat Host runs one Pet, but ${configs.length.toString()} are configured in ${petsDir}. `
+      + 'Use Studio to run several Pets.',
+    );
+  }
+  return configs[0] ?? DEFAULT_CHAT_PET;
+}
+
 export class AgentHost {
   private readonly caps: HostCapabilityAssembly;
   private readonly serverMode: ServerMode;
   private petDocument: PetDocument | null = null;
+  private petConfig: PetConfig = DEFAULT_CHAT_PET;
   private stopRequested = false;
   private readonly stopController = new AbortController();
   constructor(
@@ -41,11 +63,13 @@ export class AgentHost {
   }
 
   async init() {
+    this.petConfig = await loadChatPetConfig(this.getRuntimeConfig());
     this.petDocument = await loadPetDocumentFile(resolveChatPetDocumentPath(
       this.getRuntimeConfig().workdir,
     ));
     await this.caps.init();
   }
+
 
   requestStop() {
     this.stopRequested = true;
@@ -92,12 +116,8 @@ export class AgentHost {
     return this.caps.getCapabilityArtifactStore();
   }
 
-  getActorId(): string {
-    return this.caps.getActorId();
-  }
-
-  getActorName(): string | null {
-    return this.caps.getActorName();
+  getPetConfig(): PetConfig {
+    return this.petConfig;
   }
 
   getPetDocument(): PetDocument | null {
@@ -109,8 +129,8 @@ export class AgentHost {
   buildLocalServerDeps(): ServerDeps {
     return {
       serverMode: this.serverMode,
-      actorId: this.getActorId(),
-      actorName: this.getActorName() ?? undefined,
+      petId: this.petConfig.petId,
+      petName: this.petConfig.name,
       chatCheckpointer: this.getChatCheckpointer(),
       modelProfiles: this.getModelProfiles(),
       ...this.caps.getExecutionConfig(),

@@ -12,16 +12,16 @@
  *      magic strings, no client-submitted authorization extras).
  *   2. Server-side `handleHumanReviewResponse` validates stale review ids and
  *      session routing from server-held pending review metadata.
- *   3. runChatSession surfaces the pendingInterrupt with canonical ReviewSpec
+ *   3. runAgentSessionTurn surfaces the pendingInterrupt with canonical ReviewSpec
  *      options and structured resume semantics.
  *
  * SUT seams:
- *   - services/local-agent/src/chatSessionAdapter.ts (runChatSession)
+ *   - services/local-agent/src/chatSessionAdapter.ts (runAgentSessionTurn)
  *   - services/local-agent/src/localServerChatHandler.ts (review route guard)
  *   - packages/pet-agent/src/agent/orchestrator/review/reviewAuthorizations.ts
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the
- * exact v3 protocol events runChatSession reads — the interrupt shape
+ * exact v3 protocol events runAgentSessionTurn reads — the interrupt shape
  * is the canonical HumanReviewInterruptPayload emitted by pet-agent.
  *
  * Run:
@@ -38,7 +38,7 @@ import {
   isToolActionAuthorized,
   type ToolAuthorizationRecord,
 } from '@pinpawo/pet-agent';
-import { runChatSession } from '../src/chatSessionAdapter';
+import { runAgentSessionTurn } from '../src/chatSessionAdapter';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 const DATASET_NAME = 'local-agent-hitl-resume';
@@ -197,7 +197,7 @@ function buildShellReviewInterrupt(command: string) {
 }
 
 /**
- * Hand-built fake of LocalAgentGraphService that drives runChatSession through
+ * Hand-built fake of LocalAgentGraphService that drives runAgentSessionTurn through
  * an interrupt-then-resume sequence without invoking a real LLM. Mirrors the
  * raw protocol events produced by graph.streamEvents({ version: 'v3' }).
  */
@@ -297,7 +297,7 @@ function buildFakeSetup() {
       threadId: FAKE_THREAD_ID,
     },
     interfaceContext: { kind: 'tui' as const },
-  } as unknown as Parameters<typeof runChatSession>[0]['setup'];
+  } as unknown as Parameters<typeof runAgentSessionTurn>[0]['setup'];
 }
 
 async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
@@ -306,13 +306,13 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     finalReply: inputs.final_reply ?? '',
   });
 
-  // Turn 1 (clean thread): runChatSession sees no pending interrupt via
+  // Turn 1 (clean thread): runAgentSessionTurn sees no pending interrupt via
   // readThreadState(), then stream emits __interrupt__ → status: waiting_human.
   // Turn 2 (resume): readThreadState() now reports the interrupt; the resume
   // Command flows back into stream which emits the final AI message.
 
   const firstTurnEvents: AgentRuntimeEvent[] = [];
-  const firstTurn = await runChatSession({
+  const firstTurn = await runAgentSessionTurn({
     request: { kind: 'user_message', requestId: FAKE_REQUEST_ID, message: inputs.user_message },
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,
@@ -366,7 +366,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   }
 
   const secondTurnEvents: AgentRuntimeEvent[] = [];
-  const secondTurn = await runChatSession({
+  const secondTurn = await runAgentSessionTurn({
     request: {
       kind: 'resume',
       requestId: FAKE_REQUEST_ID,

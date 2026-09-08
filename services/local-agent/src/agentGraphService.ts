@@ -1,5 +1,5 @@
 import {
-  buildOrchestratorTurnInput,
+  buildOrchestratorRunInput,
   createOrchestratorGraph,
   buildAgentRunnableConfig,
   isHumanReviewBatchInterruptPayload,
@@ -168,7 +168,7 @@ export class LocalAgentGraphService {
     });
     return await graph.streamEvents(
       (inputOverride === undefined
-        ? buildOrchestratorTurnInput(setup.input.messages, setup.input)
+        ? buildOrchestratorRunInput(setup.input.messages, setup.input)
         : inputOverride) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
@@ -182,7 +182,7 @@ export class LocalAgentGraphService {
     const graph = createOrchestratorGraph(setup.graphConfig);
     return await graph.invoke(
       inputOverride === undefined
-        ? buildOrchestratorTurnInput(setup.input.messages, setup.input)
+        ? buildOrchestratorRunInput(setup.input.messages, setup.input)
         : inputOverride,
       buildAgentGraphRunConfig(setup),
     ) as OrchestratorStateType;

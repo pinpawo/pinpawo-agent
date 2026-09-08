@@ -53,9 +53,6 @@ export type AgentSessionTurnResult =
   /** The run settled into a task pause. There is no reply to report. */
   | { status: 'paused' };
 
-/** @deprecated Use AgentSessionTurnResult. */
-export type ChatSessionResult = AgentSessionTurnResult;
-
 export type AgentSessionTurnRequest =
   | {
       kind: 'user_message';
@@ -65,9 +62,6 @@ export type AgentSessionTurnRequest =
       activeDelegationTransition?: AgentChannelSetup['input']['activeDelegationTransition'];
     }
   | { kind: 'resume'; requestId: string; resume: unknown };
-
-/** @deprecated Use AgentSessionTurnRequest. */
-export type ChatSessionRequest = AgentSessionTurnRequest;
 
 export type AgentSessionTurnOptions = {
   request: AgentSessionTurnRequest;
@@ -88,9 +82,6 @@ export type AgentSessionTurnOptions = {
    */
   prepareUserMessage?: () => Promise<BaseMessage>;
 };
-
-/** @deprecated Use AgentSessionTurnOptions. */
-export type ChatSessionAdapterOptions = AgentSessionTurnOptions;
 
 function throwUnexpectedInterruptPayload(): never {
   throw new Error('Received an interrupt without canonical human review payload.');
@@ -560,9 +551,6 @@ export async function runAgentSessionTurn(
 
   return { status: 'completed', reply: finalReply };
 }
-
-/** @deprecated Use runAgentSessionTurn. */
-export const runChatSession = runAgentSessionTurn;
 
 function hasPauseTaskInterrupt(interrupts: unknown[]) {
   return interrupts.some((item) => (

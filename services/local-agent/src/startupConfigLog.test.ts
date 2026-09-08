@@ -19,8 +19,8 @@ test('startup config snapshot prints non-sensitive runtime configuration', () =>
     const text = formatStartupConfigSnapshot(buildStartupConfigSnapshot({
       mode: 'server',
       workdir: '/tmp/workdir',
-      actorId: 'pet-1',
-      actorName: '小白',
+      petId: 'pet-1',
+      petName: '小白',
     }));
 
     assert.match(text, /langsmithTracing=true/);

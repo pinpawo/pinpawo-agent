@@ -88,7 +88,7 @@ test('session.new returns an authoritative empty snapshot for a unique session',
   };
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
   });
@@ -142,7 +142,7 @@ test('session.compact is a v2 session command and returns the authoritative snap
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
     capabilityArtifactStore: testArtifactStore,
@@ -222,7 +222,7 @@ test('model protocol lists sanitized profiles and persists an acknowledged sessi
   ], 'primary');
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig,
     modelProfiles,
     globalReviewPolicyMode: 'require_authorization',
@@ -338,7 +338,7 @@ test('model selection keeps the previous profile when checkpoint preparation fai
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
@@ -402,7 +402,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   const initialPeer = createPeer(initialSent);
   const initialHandlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig,
     modelProfiles: initialProfiles,
     globalReviewPolicyMode: 'require_authorization',
@@ -437,7 +437,7 @@ test('removed session profile stays visible and blocks runs until explicitly rep
   const peer = createPeer(sent);
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
@@ -521,7 +521,7 @@ test('model selection is rejected while the active session is running', async ()
   const release = deferred<void>();
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
@@ -533,7 +533,7 @@ test('model selection is rejected while the active session is running', async ()
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
-    runChat: async () => {
+    runAgentTurn: async () => {
       started.resolve();
       await release.promise;
       return { status: 'interrupted' };
@@ -613,14 +613,14 @@ test('completion snapshot does not reintroduce a settled active run', async () =
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps(),
     capabilityArtifactStore: testArtifactStore,
   }, {
     chatGraphService: graphService,
     loadContext: loadTestContext,
-    runChat: async () => ({ status: 'completed', reply: 'done' }),
+    runAgentTurn: async () => ({ status: 'completed', reply: 'done' }),
   });
 
   try {
@@ -680,7 +680,7 @@ test('model selection blocks a chat admitted by another peer until the selection
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
@@ -693,7 +693,7 @@ test('model selection blocks a chat admitted by another peer until the selection
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
-    runChat: async () => {
+    runAgentTurn: async () => {
       chatStartCount += 1;
       chatStarted.resolve();
       await releaseChat.promise;
@@ -770,7 +770,7 @@ test('model selection is rejected while checkpoint state has pending review', as
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     modelProfiles: createTestModelProfileRegistry([
       { modelProfileId: 'primary' },
@@ -836,7 +836,7 @@ test('admitted images gate model selection through the transcript', async () => 
   } as unknown as LocalAgentGraphService;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
       {
@@ -859,7 +859,7 @@ test('admitted images gate model selection through the transcript', async () => 
   }, {
     loadContext: loadTestContext,
     chatGraphService: graphService,
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       providerMessage = await options.prepareUserMessage?.();
       if (providerMessage) {
         persistedMessages.push(providerMessage as BaseMessage);
@@ -983,7 +983,7 @@ test('text-only selected profile rejects image admission before graph invocation
   let graphInvocations = 0;
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig,
     modelProfiles: createTestModelProfileRegistry([
       {
@@ -997,7 +997,7 @@ test('text-only selected profile rejects image admission before graph invocation
     capabilityArtifactStore: testArtifactStore,
   }, {
     loadContext: loadTestContext,
-    runChat: async (options) => {
+    runAgentTurn: async (options) => {
       await options.prepareUserMessage?.();
       graphInvocations += 1;
       return { status: 'interrupted' };
@@ -1061,7 +1061,7 @@ test('runtime config update persists the safety level, acknowledges, and reaches
   };
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps({
       globalReviewPolicyMode: 'require_authorization',
@@ -1128,7 +1128,7 @@ test('runtime config update preserves the configured safety level when the messa
   };
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps({
       globalReviewPolicyMode: 'auto_authorization',
@@ -1188,7 +1188,7 @@ test('runtime config update reports persistence failures without changing runtim
   };
   const handlers = createLocalServerHandlers({
     serverMode: 'chat',
-    actorId: 'pet-a',
+    petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     ...createTestModelServerDeps({
       globalReviewPolicyMode: 'require_authorization',
@@ -1237,7 +1237,7 @@ test('session execution uses the checkpointer supplied by its Host', async () =>
   let actual: unknown;
   const handlers = createLocalServerHandlers({
     ...createTestModelServerDeps(),
-    serverMode: 'chat', actorId: 'pet-a',
+    serverMode: 'chat', petId: 'pet-a',
     runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
     chatCheckpointer: checkpointer,
     capabilityArtifactStore: testArtifactStore,

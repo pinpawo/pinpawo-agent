@@ -278,7 +278,7 @@ export class ServerTuiSessionService {
   buildChatSetup(
     deps: ServerDeps,
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
-    threadId = this.getChatThreadId(deps.actorId),
+    threadId = this.getChatThreadId(deps.petId),
     modelProfileIdOverride?: string,
   ) {
     if (!deps.capabilityArtifactStore) {
@@ -288,7 +288,7 @@ export class ServerTuiSessionService {
     }
     const session = Object.values(this.state.sessions)
       .find((candidate) => candidate.threadId === threadId)
-      ?? this.getActiveSession(deps.actorId);
+      ?? this.getActiveSession(deps.petId);
     const modelProfileId = modelProfileIdOverride ?? session.modelProfileId;
     const llmConfig = deps.modelProfiles.resolve(modelProfileId);
     // Compatibility is enforced where the transcript is readable: model
@@ -326,7 +326,7 @@ export class ServerTuiSessionService {
     if (attachments.length === 0) {
       return createLocalChatHumanMessage(message);
     }
-    const session = this.getActiveSession(deps.actorId);
+    const session = this.getActiveSession(deps.petId);
     const profile = deps.modelProfiles.resolve(session.modelProfileId);
     const admitted = await this.imageAdmission.admit(attachments, {
       allowImages: (profile.inputModalities ?? ['text']).includes('image'),
@@ -369,7 +369,7 @@ export class ServerTuiSessionService {
     deps: ServerDeps,
     session: TuiSessionRecord,
   ): Promise<TuiCheckpointPoint> {
-    const ctx = await this.loadContext(deps.actorId);
+    const ctx = await this.loadContext(deps.petId);
     let checkpointReaderProfileId = session.modelProfileId;
     try {
       deps.modelProfiles.resolve(checkpointReaderProfileId);
@@ -422,7 +422,7 @@ export class ServerTuiSessionService {
 
   async refreshActiveSessionSummary(deps: ServerDeps) {
     try {
-      const session = this.getActiveSession(deps.actorId);
+      const session = this.getActiveSession(deps.petId);
       const messages = await this.readSessionCheckpointMessages(deps, session);
       this.updateSessionSummaryFromCheckpoint(session, messages);
     } catch (err) {
@@ -431,12 +431,12 @@ export class ServerTuiSessionService {
   }
 
   async readActivePendingInterrupt(deps: ServerDeps): Promise<ActivePendingInterrupt | null> {
-    const session = this.getActiveSession(deps.actorId);
+    const session = this.getActiveSession(deps.petId);
     return (await this.readSessionCheckpointPoint(deps, session)).pendingInterrupt;
   }
 
   async readActiveCheckpointPoint(deps: ServerDeps) {
-    const session = this.getActiveSession(deps.actorId);
+    const session = this.getActiveSession(deps.petId);
     const checkpoint = await this.readSessionCheckpointPoint(deps, session);
     updateTuiSessionSummary(
       this.state,
@@ -448,8 +448,8 @@ export class ServerTuiSessionService {
   }
 
   async listSessions(deps: ServerDeps) {
-    this.getActiveSession(deps.actorId);
-    const sessions = listTuiSessions(this.state, deps.actorId);
+    this.getActiveSession(deps.petId);
+    const sessions = listTuiSessions(this.state, deps.petId);
     const enriched = await Promise.all(sessions.map(async (session) => {
       const messages = await this.readSessionCheckpointMessages(deps, session);
       const summary = summarizeTuiCheckpointMessages(messages, session.updatedAt);
@@ -468,11 +468,11 @@ export class ServerTuiSessionService {
 
   async resumeSession(deps: ServerDeps, sessionId: string) {
     const candidate = this.state.sessions[sessionId];
-    if (!candidate || candidate.petId !== deps.actorId) {
+    if (!candidate || candidate.petId !== deps.petId) {
       throw new Error('session not found');
     }
     const checkpoint = await this.readSessionCheckpointPoint(deps, candidate);
-    const session = resumeTuiSession(this.state, deps.actorId, sessionId);
+    const session = resumeTuiSession(this.state, deps.petId, sessionId);
     if (!session) {
       throw new Error('session not found');
     }

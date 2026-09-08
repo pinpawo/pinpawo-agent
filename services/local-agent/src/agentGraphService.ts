@@ -204,14 +204,24 @@ export class LocalAgentGraphService {
    * settled and forwards the result.
    */
   settleAbortedRun(setup: AgentChannelSetup): Promise<AbortSettlement> {
+    // Settling runs *after* the cancellation, so it must not inherit the
+    // signal that cancelled it: reaching the pause gate under an aborted
+    // signal throws before the interrupt is raised, leaving nothing to
+    // continue. Callers that reuse their run's setup would otherwise
+    // reintroduce that silently, so the detachment lives here.
+    const { signal: _abortedSignal, ...settlementInput } = setup.input;
+    const settlementSetup: AgentChannelSetup = {
+      ...setup,
+      input: settlementInput,
+    };
     return settleAbortedRun({
-      getState: () => this.getRawState(setup),
+      getState: () => this.getRawState(settlementSetup),
       updateState: (values, asNode) => this.updateState(
-        setup,
+        settlementSetup,
         values as Partial<OrchestratorStateType>,
         asNode,
       ),
-      resume: () => this.invokeState(setup, null),
+      resume: () => this.invokeState(settlementSetup, null),
     });
   }
 

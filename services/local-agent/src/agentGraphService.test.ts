@@ -246,3 +246,59 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
   assert.ok(restored.messages.some(message => message.text === 'second request'));
   assert.equal(restored.messages.some(message => message.text === 'separate store'), false);
 });
+
+test('settling a cancelled run does not inherit the signal that cancelled it', async () => {
+  // The resident Host reuses its run's setup to settle, so the settlement must
+  // detach the aborted signal itself. Carrying it through means the resume
+  // throws before the pause gate raises its interrupt, leaving the person with
+  // unfinished work and no id to continue by.
+  const controller = new AbortController();
+  controller.abort();
+  const service = new LocalAgentGraphService();
+  const seenSignals: Array<AbortSignal | undefined> = [];
+  const graph = {
+    async getState() {
+      return {
+        values: { taskActiveDelegation: { status: 'pending' } },
+        next: ['capability'],
+        tasks: [],
+      };
+    },
+    async updateState(config: { signal?: AbortSignal }) {
+      seenSignals.push(config?.signal);
+      return {};
+    },
+    async invoke(_input: unknown, config: { signal?: AbortSignal }) {
+      seenSignals.push(config?.signal);
+      // A real graph rejects here when the signal is already aborted.
+      if (config?.signal?.aborted) {
+        throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+      }
+      return {};
+    },
+  } as unknown as OrchestratorGraph;
+  (service as unknown as { graphs: Map<string, OrchestratorGraph> }).graphs.set('settle-signal', graph);
+  const input: AgentChannelSetup = {
+    graphKey: 'settle-signal',
+    registry: compileAgentRegistry({ toolkits: [], capabilities: [] }),
+    graphConfig: { models: {} as AgentModels, capabilityRegistryBackend: 'memory' },
+    input: {
+      messages: [new HumanMessage('inspect')],
+      threadId: randomUUID(),
+      allowedCapabilityNames: [],
+      signal: controller.signal,
+    },
+  };
+
+  const settled = await service.settleAbortedRun(input);
+
+  assert.ok(seenSignals.length > 0, 'the settlement reached the graph');
+  assert.deepEqual(
+    seenSignals.map((signal) => signal?.aborted ?? null),
+    seenSignals.map(() => null),
+    'no settlement call carries the cancelled signal',
+  );
+  assert.equal(settled.status, 'finished', 'settling reached a decision, not a rethrow');
+  // Detaching is local to settling; the caller's own setup is untouched.
+  assert.equal(input.input.signal, controller.signal);
+});

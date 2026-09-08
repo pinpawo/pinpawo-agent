@@ -23,14 +23,14 @@ test('Kanban HTTP assignment is user-controlled and Trigger performs the routed 
     studioId: 'http-kanban-e2e', entryPetId: 'planner',
     pets: [
       {
-        registration: { petId: 'planner', name: 'Planner', role: null, serviceSummary: null },
+        registration: { petId: 'planner', name: 'Planner' },
         dispatch: {
           getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
           onQueueChange: () => () => undefined, onDispatchLifecycle: () => () => undefined, dispatch: async () => undefined,
         },
       },
       {
-        registration: { petId: 'executor', name: 'Executor', role: null, serviceSummary: null },
+        registration: { petId: 'executor', name: 'Executor' },
         dispatch: {
           getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
           onQueueChange: () => () => undefined, onDispatchLifecycle: () => () => undefined, dispatch: async ({ request }) => { requests.push(request); },

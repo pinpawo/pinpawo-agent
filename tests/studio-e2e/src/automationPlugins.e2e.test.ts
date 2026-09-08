@@ -22,7 +22,7 @@ async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
 test('Scheduler and Trigger contribute independent durable APIs through HTTP', async (t) => {
   const received: string[] = [];
   const worker: StudioPetBinding = {
-    registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
+    registration: { petId: 'worker', name: 'Worker' },
     dispatch: {
       getQueueSnapshot: () => ({
         state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
@@ -103,7 +103,7 @@ test('Scheduler and Trigger contribute independent durable APIs through HTTP', a
 test('Scheduler queue audit creates a durable Notice without dispatching recovery work', async (t) => {
   let dispatched = 0;
   const worker: StudioPetBinding = {
-    registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
+    registration: { petId: 'worker', name: 'Worker' },
     dispatch: {
       getQueueSnapshot: () => ({
         state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
@@ -165,7 +165,7 @@ test('Scheduler queue audit creates a durable Notice without dispatching recover
 test('GitHub webhook Trigger verifies signatures, filters event action, and deduplicates delivery', async (t) => {
   const received: string[] = [];
   const worker: StudioPetBinding = {
-    registration: { petId: 'reviewer', name: 'Reviewer', role: null, serviceSummary: null },
+    registration: { petId: 'reviewer', name: 'Reviewer' },
     dispatch: {
       getQueueSnapshot: () => ({
         state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,

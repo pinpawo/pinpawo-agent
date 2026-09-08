@@ -111,7 +111,7 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
   await mkdir(path.join(stateRoot, 'pets'), { recursive: true });
   await writeFile(
     path.join(stateRoot, 'pets', 'planner.json'),
-    JSON.stringify({ petId: 'planner', name: 'Planner', role: 'planner' }),
+    JSON.stringify({ petId: 'planner', name: 'Planner' }),
   );
   await writeFile(
     path.join(stateRoot, 'studio.json'),

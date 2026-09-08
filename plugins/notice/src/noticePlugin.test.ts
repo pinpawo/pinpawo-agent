@@ -4,7 +4,7 @@ import { createStudio, type StudioPetBinding } from '@pinpawo/studio';
 import { createNoticePlugin } from './noticePlugin';
 
 const worker: StudioPetBinding = {
-  registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
+  registration: { petId: 'worker', name: 'Worker' },
   dispatch: {
     getQueueSnapshot: () => ({
       state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,

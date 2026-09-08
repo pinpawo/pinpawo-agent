@@ -259,9 +259,12 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
       return {
         messages: state.messages,
         pendingInterrupt: state.pendingInterrupt
-          ? { interruptId: 'interrupt-1', reviews: [state.pendingInterrupt] }
+          ? {
+              interruptId: 'interrupt-1',
+              payload: { kind: 'human_review' as const, reviews: [state.pendingInterrupt] },
+            }
           : null,
-        hasPendingContinuation: state.pendingInterrupt !== null,
+        acceptsResume: state.pendingInterrupt !== null,
         currentPlan: null,
       };
     },
@@ -297,7 +300,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
           messages: [new AIMessage('waiting for approval')],
           pendingInterrupt: review,
         });
-        return { status: 'waiting_human' };
+        return { status: 'waiting' };
       }
       states.set(threadId, { ...state, pendingInterrupt: null });
       return { status: 'completed', reply: 'approved' };
@@ -367,7 +370,6 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: null,
-      hasPendingContinuation: false,
       currentPlan: null,
     }),
   };
@@ -545,7 +547,6 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: null,
-      hasPendingContinuation: false,
       currentPlan: null,
     }),
   };
@@ -693,19 +694,19 @@ test('resident policy updates reach conversation and dispatch without changing a
   }
 });
 
-test('an explicit task pause holds dispatch as waiting even when resumability reports nothing', async () => {
+test('a task pause holds dispatch as waiting through the same interrupt any kind uses', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(root);
   let paused = false;
-  // Resumability is deliberately reported as absent throughout. A Review-origin
-  // task pause ends the root run cleanly, so `next`/`tasks` are empty; only the
-  // Runtime-materialized payload says the Pet is paused.
+  // Resumability is deliberately reported as absent: admission must follow the
+  // pending interrupt alone, never a resumability guess.
   const graphService = {
     readThreadState: async () => ({
       messages: [],
-      pendingInterrupt: null,
-      pauseTaskInterrupt: paused ? { kind: 'pause_task' as const } : null,
-      hasPendingContinuation: false,
+      pendingInterrupt: paused
+        ? { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' as const } }
+        : null,
+      acceptsResume: false,
       currentPlan: null,
     }),
   };
@@ -735,8 +736,8 @@ test('an explicit task pause holds dispatch as waiting even when resumability re
       () => pet.resident.dispatch.getQueueSnapshot().state === 'waiting',
       'resident dispatch queue did not enter waiting for an explicit task pause',
     );
-    // Not 'blocked': that state is the resumability guess and the error
-    // fallback, neither of which describes a healthy, explicit pause.
+    // Not 'blocked': that state was the resumability guess, which no longer
+    // takes part in admission at all.
     assert.equal(pet.resident.dispatch.getQueueSnapshot().state, 'waiting');
   } finally {
     await pet.close();

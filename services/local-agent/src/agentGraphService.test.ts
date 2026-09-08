@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { MemorySaver, interrupt } from '@langchain/langgraph';
-import { buildOrchestratorRunInput, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type RunSupervisorRunner } from '@pinpawo/pet-agent';
+import { buildOrchestratorRunInput, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import { buildAgentGraphConfigurable, LocalAgentGraphService } from './agentGraphService';
 
@@ -190,7 +190,7 @@ test('explicit null input continues the checkpoint task through both execution p
     await service.updateState(input, buildOrchestratorRunInput([
       new HumanMessage('checkpointed request'),
     ]), 'captureUserRequest');
-    assert.equal((await service.readThreadState(input)).hasPendingContinuation, true);
+    assert.equal((await service.readThreadState(input)).acceptsResume, true);
     if (path === 'stream') {
       const stream = await service.streamEvents(input, null);
       for await (const _event of stream) { /* Consume the resumed task. */ }
@@ -202,7 +202,7 @@ test('explicit null input continues the checkpoint task through both execution p
     assert.equal(state.messages.at(-1)?.text, 'continued');
     assert.ok(seen.at(-1)?.some(message => message.text === 'checkpointed request'));
     assert.equal(seen.at(-1)?.some(message => message.text === 'unused new input'), false);
-    assert.equal(state.hasPendingContinuation, false);
+    assert.equal(state.acceptsResume, false);
   }
 });
 
@@ -245,28 +245,4 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
   assert.ok(restored.messages.some(message => message.text === 'first request'));
   assert.ok(restored.messages.some(message => message.text === 'second request'));
   assert.equal(restored.messages.some(message => message.text === 'separate store'), false);
-});
-
-test('thread state projects an explicit Runtime task pause', async () => {
-  const service = new LocalAgentGraphService();
-  const model = {
-    invoke: async () => new AIMessage('unused'),
-    bindTools() { return this; },
-  } as unknown as AgentModels['act'];
-  const graphSetup: AgentChannelSetup = {
-    ...setup(),
-    graphConfig: {
-      models: { act: model },
-      checkpoint: new MemorySaver(),
-    },
-    input: { messages: [], threadId: randomUUID() },
-  };
-  await service.updateState(graphSetup, {
-    taskPauseInterrupt: { kind: 'pause_task' },
-  }, 'prepare');
-
-  const state = await service.readThreadState(graphSetup);
-
-  assert.deepEqual(state.pauseTaskInterrupt, { kind: 'pause_task' });
-  assert.equal(state.pendingInterrupt, null);
 });

@@ -34,7 +34,7 @@ test('approval state follows the canonical waiting review and defaults to primar
     'closed',
   );
   assert.equal(
-    syncApprovalState(state, { payload: { kind: 'pause_task' } }).phase,
+    syncApprovalState(state, { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } }).phase,
     'closed',
   );
 });

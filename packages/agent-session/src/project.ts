@@ -10,7 +10,6 @@ import type {
   AgentTimelineEntry,
 } from './domain';
 import type { AgentSessionSnapshot } from './snapshot';
-import { readHumanReviewPendingInterrupt } from './review';
 import { agentOperationEntryFromEvent, agentOperationEntryId } from './timeline';
 
 export type AgentSessionInput =
@@ -218,8 +217,8 @@ function reduceRuntimeEvent(
       return applyPlanUpdate(session, event);
     case 'subagent.message.completed':
       return appendSubagentMessage(session, event, context);
-    case 'human_review.requested':
-      return applyReviewRequest(session, event);
+    case 'interrupt.requested':
+      return applyInterruptRequest(session, event);
     case 'system.notice':
       return appendRuntimeSystemMessage(session, event.requestId, event.message, message, context);
     case 'error':
@@ -440,9 +439,9 @@ function appendSubagentMessage(
   }));
 }
 
-function applyReviewRequest(
+function applyInterruptRequest(
   session: AgentSession,
-  event: Extract<AgentRuntimeEvent, { type: 'human_review.requested' }>,
+  event: Extract<AgentRuntimeEvent, { type: 'interrupt.requested' }>,
 ) {
   if (!ownsRun(session, event.requestId)) return session;
   return {
@@ -496,10 +495,11 @@ function acceptInterruptResume(
   input: Extract<AgentSessionInput, { type: 'interrupt.resume.accepted' }>,
   context: AgentSessionReductionContext,
 ): AgentSession {
-  const pendingReview = readHumanReviewPendingInterrupt(session.pendingInterrupt);
+  // Any kind resumes the same way: the id must match the pending interrupt and
+  // no run may already be active.
   if (
     session.activeRun
-    || pendingReview?.interruptId !== input.interruptId
+    || session.pendingInterrupt?.interruptId !== input.interruptId
   ) {
     return session;
   }

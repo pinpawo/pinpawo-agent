@@ -2,14 +2,11 @@ import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
   buildAgentRunnableConfig,
-  isHumanReviewBatchInterruptPayload,
-  isHumanReviewInterruptPayload,
-  readPauseTaskInterrupt,
+  readPendingInterrupt,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
-  type PauseTaskInterruptPayload,
-  type ReviewSpec,
+  type PendingInterrupt,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Command, type GraphRunStream } from '@langchain/langgraph';
@@ -50,18 +47,34 @@ export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
   return buildAgentGraphRunConfig(setup).configurable;
 }
 
-export type AgentGraphPendingInterrupt = {
-  interruptId: string;
-  reviews: ReviewSpec[];
-};
-
 export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
-  pendingInterrupt: AgentGraphPendingInterrupt | null;
-  pauseTaskInterrupt: PauseTaskInterruptPayload | null;
-  hasPendingContinuation: boolean;
+  /**
+   * The interrupt this thread is waiting on, of any kind, decoded by the
+   * Runtime. The Host forwards it without reading `payload.kind`.
+   */
+  pendingInterrupt: PendingInterrupt | null;
+  /**
+   * Whether the graph has work a resume command can be delivered to. This is
+   * not an interruption signal and must never be used to infer one: a resume
+   * that arrives after the graph already consumed its interrupt still has a
+   * pending task to resume into.
+   */
+  acceptsResume: boolean;
   currentPlan: AgentPlan | null;
 };
+
+function acceptsResume(snapshot: unknown) {
+  const record = snapshot && typeof snapshot === 'object'
+    ? snapshot as { next?: unknown; tasks?: unknown }
+    : null;
+  const next = Array.isArray(record?.next) ? record.next : [];
+  if (next.length > 0) {
+    return true;
+  }
+  const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
+  return tasks.length > 0;
+}
 
 /**
  * The root v3 run stream. The GraphRunStream projections (raw protocol
@@ -101,44 +114,6 @@ function readGraphInterrupt(snapshot: unknown): { id: string; value: Record<stri
   return null;
 }
 
-function hasPendingContinuation(snapshot: unknown) {
-  const record = snapshot && typeof snapshot === 'object'
-    ? snapshot as { next?: unknown; tasks?: unknown }
-    : null;
-  const next = Array.isArray(record?.next) ? record.next : [];
-  if (next.length > 0) {
-    return true;
-  }
-  const tasks = Array.isArray(record?.tasks) ? record.tasks : [];
-  return tasks.length > 0;
-}
-
-function projectPendingInterrupt(snapshot: unknown): AgentGraphPendingInterrupt | null {
-  const pendingInterrupt = readGraphInterrupt(snapshot);
-  if (!pendingInterrupt) {
-    return null;
-  }
-  if (isHumanReviewBatchInterruptPayload(pendingInterrupt.value)) {
-    const reviews = pendingInterrupt.value.reviews.map((item) => item.review);
-    const review = reviews[0];
-    if (!review) {
-      return null;
-    }
-    return {
-      interruptId: pendingInterrupt.id,
-      reviews,
-    };
-  }
-  if (!isHumanReviewInterruptPayload(pendingInterrupt.value)) {
-    return null;
-  }
-  return {
-    interruptId: pendingInterrupt.id,
-    reviews: [pendingInterrupt.value.review],
-  };
-}
-
-/** Graphs use current Host dependencies; durable state belongs to the checkpointer. */
 export class LocalAgentGraphService {
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
     const state = await this.invokeState(setup);
@@ -200,9 +175,8 @@ export class LocalAgentGraphService {
     const values = readSnapshotValues(snapshot);
     return {
       messages: readSnapshotMessages(snapshot),
-      pendingInterrupt: projectPendingInterrupt(snapshot),
-      pauseTaskInterrupt: readPauseTaskInterrupt(snapshot),
-      hasPendingContinuation: hasPendingContinuation(snapshot),
+      pendingInterrupt: readPendingInterrupt(snapshot),
+      acceptsResume: acceptsResume(snapshot),
       currentPlan: projectCurrentPlan(values),
     };
   }

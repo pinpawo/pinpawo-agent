@@ -1773,7 +1773,7 @@ function copyLatestAssistantReply() {
 function submitChatInput(text: string) {
   const result = isTaskPaused(taskPauseMode)
     ? controller.continuePausedTask(text, attachments)
-    : controller.submitChat(text, attachments, taskPauseMode === 'leaving' ? 'supersede_active' : undefined);
+    : controller.submitChat(text, attachments);
   if (result.ok) {
     if (text.trim() || attachments.length > 0) {
       composerHistory = recordComposerHistoryEntry(composerHistory, text);
@@ -2007,6 +2007,7 @@ function submitFailureText(
     | 'not-ready'
     | 'busy'
     | 'empty'
+    | 'attachments-unsupported'
     | 'send-failed',
 ) {
   switch (reason) {
@@ -2016,6 +2017,8 @@ function submitFailureText(
       return 'wait for the current response to finish';
     case 'empty':
       return 'message is empty';
+    case 'attachments-unsupported':
+      return 'attachments cannot be sent while a task is paused; press Esc to start a new task';
     case 'send-failed':
       return 'message could not be sent';
   }

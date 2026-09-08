@@ -15,6 +15,7 @@ export type {
   ModelListMessage,
   ModelSelectMessage,
   NewSessionMessage,
+  InterruptResumeMessage,
   ReviewCancelMessage,
   RunInterruptMessage,
   RuntimeConfigUpdateMessage,

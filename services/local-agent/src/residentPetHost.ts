@@ -455,6 +455,7 @@ function admitConversationHandlers(
     onChatRequest: admitRun(handlers.onChatRequest),
     onHumanReviewResponse: admitRun(handlers.onHumanReviewResponse),
     onReviewCancel: admitRun(handlers.onReviewCancel),
+    onInterruptResume: admitRun(handlers.onInterruptResume),
     // These controls must reach the active conversation instead of waiting
     // behind it in the same queue.
     onRunInterrupt: handlers.onRunInterrupt,
@@ -532,13 +533,10 @@ export async function createResidentPetRuntime(
     const context = await loadContext(deps.petId);
     const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
+    // Any pending interrupt holds dispatch, whatever its kind. Resumability
+    // is not consulted: it cannot tell a paused task from ordinary retained
+    // work, and the interrupt is the authoritative signal.
     if (state.pendingInterrupt) return 'waiting';
-    // An explicit task pause is a Runtime-materialized signal: the Pet is
-    // healthy and awaiting a human decision to continue or supersede. Read it
-    // before resumability, which cannot tell a pause from ordinary retained
-    // work and must not be used to infer the interruption reason.
-    if (state.pauseTaskInterrupt) return 'waiting';
-    if (state.hasPendingContinuation) return 'blocked';
     return 'open';
   };
   const coordinator = new ResidentPetCoordinator({ readSettledState });
@@ -715,7 +713,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                 overlayInflightDelegationOperations(run, operations);
               },
             });
-            if (result.status === 'waiting_human') {
+            if (result.status === 'waiting') {
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
               publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;

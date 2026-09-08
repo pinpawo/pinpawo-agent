@@ -63,7 +63,6 @@ test('TuiSessionController synchronizes one session and projects a chat run', ()
     type: 'chat_request',
     requestId: 'chat-1',
     message: 'hello',
-    activeDelegationTransition: 'supersede_active',
   });
   assert.equal(controller.getState().session.timeline[0]?.type, 'message');
   assert.deepEqual(controller.getState().session.activeRun, {
@@ -232,7 +231,7 @@ test('a pending interrupt invalidates an older in-flight refresh snapshot', () =
   assert.equal(controller.submitChat('needs approval').ok, true);
   assert.deepEqual(controller.refreshSession(), { ok: true });
   connection.receive(eventMessage({
-    type: 'human_review.requested',
+    type: 'interrupt.requested',
     requestId: 'chat',
     pendingInterrupt: {
       interruptId: 'interrupt-new',
@@ -336,7 +335,6 @@ test('TuiSessionController submits local attachments and keeps paths out of opti
       path: '/Users/example/private/spec.md',
       name: 'spec.md',
     }],
-    activeDelegationTransition: 'supersede_active',
   });
   const optimistic = controller.getState().session.timeline[0];
   assert.equal(
@@ -1214,7 +1212,7 @@ test('manual compaction binds the active session and uses its model-call timeout
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: { payload: { kind: 'pause_task' } },
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
     }),
   });
   assert.equal((await compacted).compacted, true);
@@ -1234,7 +1232,51 @@ test('manual compaction binds the active session and uses its model-call timeout
   controller.stop();
 });
 
-test('delegation continuation sends resume_active and permits an empty paused resume', async () => {
+test('continuing a paused task refuses attachments instead of dropping them', () => {
+  const requestIds = ['startup', 'continue-attempt'];
+  let connection!: FakeConnection;
+  const controller = new TuiSessionController({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
+  });
+  controller.start();
+  connection.open();
+  connection.receive({
+    type: 'session.snapshot.result',
+    requestId: 'startup',
+    snapshot: createAgentSessionSnapshot({
+      sessionId: 'chat:one',
+      kind: 'chat',
+      timeline: [],
+      activeRun: null,
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+    }),
+  });
+
+  const sentBefore = connection.sent.length;
+  // The resume value has nowhere to carry an attachment, so reporting success
+  // would silently discard it once the composer clears.
+  assert.deepEqual(
+    controller.continuePausedTask('use this diagram', [{
+      id: 'attachment-1',
+      source: 'local-path',
+      kind: 'file',
+      path: '/tmp/diagram.png',
+      name: 'diagram.png',
+    }]),
+    { ok: false, reason: 'attachments-unsupported' },
+  );
+  assert.equal(connection.sent.length, sentBefore, 'nothing is sent');
+  // The pause is untouched, so the person can drop the attachment and continue,
+  // or press Esc and start a new task that carries it.
+  assert.equal(controller.getState().session.pendingInterrupt?.payload.kind, 'pause_task');
+  controller.stop();
+});
+
+test('delegation continuation resumes the pause by id and permits an empty resume', async () => {
   const requestIds = [
     'startup',
     'review-cancel',
@@ -1283,7 +1325,7 @@ test('delegation continuation sends resume_active and permits an empty paused re
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: { payload: { kind: 'pause_task' } },
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
     }),
   });
 
@@ -1312,7 +1354,7 @@ test('delegation continuation sends resume_active and permits an empty paused re
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: { payload: { kind: 'pause_task' } },
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
     }),
   });
   await resumeOriginal;
@@ -1323,15 +1365,16 @@ test('delegation continuation sends resume_active and permits an empty paused re
     { ok: false, reason: 'send-failed' },
   );
 
+  // An empty continue is valid: it resumes the delegation with no guidance.
   assert.deepEqual(controller.continuePausedTask(''), {
     ok: true,
     requestId: 'continue-empty',
   });
   assert.deepEqual(connection.sent.at(-1), {
-    type: 'chat_request',
+    type: 'interrupt.resume',
     requestId: 'continue-empty',
-    message: '',
-    activeDelegationTransition: 'resume_active',
+    interruptId: 'interrupt-pause',
+    value: { action: 'continue' },
   });
   assert.deepEqual(
     controller.continuePausedTask('cannot overlap the active run'),
@@ -1360,30 +1403,4 @@ test('delegation continuation sends resume_active and permits an empty paused re
     }),
   });
   controller.stop();
-});
-
-test('ordinary replies continue unfinished work while an explicit new-task choice supersedes it', () => {
-  for (const transition of [undefined, 'supersede_active'] as const) {
-    let connection!: FakeConnection;
-    const ids = ['snapshot', 'chat'];
-    const controller = new TuiSessionController({
-      connectionFactory: (handlers) => (connection = new FakeConnection(handlers)),
-      requestIdFactory: () => ids.shift() ?? 'unexpected',
-    });
-    controller.start();
-    connection.open();
-    connection.receive({
-      type: 'session.snapshot.result', requestId: 'snapshot',
-      snapshot: createAgentSessionSnapshot({
-        sessionId: 'chat:one', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null,
-        currentPlan: { items: [{ id: 'd1', capability: 'general', task: 'Publish report', status: 'active' }] },
-      }),
-    });
-    assert.deepEqual(controller.submitChat('Use the staging destination.', [], transition), { ok: true, requestId: 'chat' });
-    assert.deepEqual(connection.sent.at(-1), {
-      type: 'chat_request', requestId: 'chat', message: 'Use the staging destination.',
-      activeDelegationTransition: transition ?? 'resume_active',
-    });
-    controller.stop();
-  }
 });

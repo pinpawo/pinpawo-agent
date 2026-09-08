@@ -13,9 +13,7 @@ import {
   StateGraph,
 } from '@langchain/langgraph';
 import {
-  isHumanReviewBatchInterruptPayload,
-  isHumanReviewInterruptPayload,
-  readPauseTaskInterrupt,
+  readPendingInterrupt,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -143,9 +141,8 @@ export function createPersistentHostGraphService() {
         messages: Array.isArray(values.messages)
           ? values.messages as BaseMessage[]
           : [],
-        pendingInterrupt: readPendingReview(snapshot),
-        pauseTaskInterrupt: readPauseTaskInterrupt(snapshot),
-        hasPendingContinuation: hasPendingContinuation(snapshot),
+        pendingInterrupt: readPendingInterrupt(snapshot),
+        acceptsResume: acceptsResume(snapshot),
         currentPlan: null,
       };
     },
@@ -329,42 +326,7 @@ function readReviewDecisions(value: unknown): ReviewResponse[] {
   return [];
 }
 
-function readPendingReview(
-  snapshot: unknown,
-): LocalAgentGraphThreadState['pendingInterrupt'] {
-  const pending = readPendingInterrupt(snapshot);
-  if (!pending?.id) return null;
-  if (isHumanReviewBatchInterruptPayload(pending.value)) {
-    const reviews = pending.value.reviews.map((item) => item.review);
-    return reviews.length
-      ? { interruptId: pending.id, reviews }
-      : null;
-  }
-  return isHumanReviewInterruptPayload(pending.value)
-    ? {
-        interruptId: pending.id,
-        reviews: [pending.value.review],
-      }
-    : null;
-}
-
-function readPendingInterrupt(snapshot: unknown) {
-  const tasks = readRecord(snapshot)?.tasks;
-  if (!Array.isArray(tasks)) return null;
-  for (const task of tasks) {
-    const interrupts = readRecord(task)?.interrupts;
-    if (!Array.isArray(interrupts)) continue;
-    const first = readRecord(interrupts[0]);
-    if (!first || !first.value || typeof first.value !== 'object') continue;
-    return {
-      ...(typeof first.id === 'string' ? { id: first.id } : {}),
-      value: first.value,
-    };
-  }
-  return null;
-}
-
-function hasPendingContinuation(snapshot: unknown) {
+function acceptsResume(snapshot: unknown) {
   const record = readRecord(snapshot);
   const next = record?.next;
   if (Array.isArray(next) && next.length > 0) return true;

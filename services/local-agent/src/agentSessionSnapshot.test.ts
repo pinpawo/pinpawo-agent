@@ -152,7 +152,6 @@ test('buildLocalAgentSessionSnapshot preserves an in-flight running request', ()
       activity: 'thinking',
       startedAt: 1_700_000_000_000,
     },
-    pauseTaskInterrupt: { kind: 'pause_task' },
   });
 
   assert.deepEqual(snapshot.session.activeRun, {

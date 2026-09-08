@@ -27,16 +27,12 @@ export function buildLocalAgentSessionSnapshot(params: {
   requiredInputModalities?: readonly AgentInputModality[];
   sessionTokenUsage?: AgentSession['sessionTokenUsage'] | null;
   pendingInterrupt?: PendingInterruptSnapshot | null;
-  pauseTaskInterrupt?: PauseTaskInterruptPayload | null;
   /** Live local transport state; never inferred from checkpoint plan data. */
   activeRun?: Extract<AgentRunView, { state: 'running' }> | null;
   currentPlan?: AgentPlan | null;
 }): AgentSessionSnapshot {
   const timeline = timelineFromCheckpointMessages(params.messages);
-  const pendingInterrupt = params.pendingInterrupt?.pendingInterrupt
-    ?? (!params.activeRun && params.pauseTaskInterrupt
-      ? { payload: params.pauseTaskInterrupt }
-      : null);
+  const pendingInterrupt = params.pendingInterrupt?.pendingInterrupt ?? null;
   const runtime = buildLocalAgentRuntimeView(
     params.deps,
     params.modelProfileId,

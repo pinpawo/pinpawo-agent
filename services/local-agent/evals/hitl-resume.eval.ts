@@ -3,7 +3,7 @@
  * LangSmith evaluation: local-agent HITL resume flow (#20 cleanup).
  *
  * This eval covers the *local-agent* HITL seam — the layer that translates a
- * structured human_review.requested event into a typed resume. The old
+ * structured interrupt.requested event into a typed resume. The old
  * pet-agent orchestrator HITL eval was removed because orchestrator iteration
  * limits are now handled as guard state patches, not LangGraph interrupts.
  * This local-agent eval still covers the #20 cleanup items:
@@ -58,7 +58,7 @@ type ExampleOutputs = {
   expected_interrupt_received: boolean;
   expected_authorization_option_present: boolean;
   expected_resume_authorized_matcher_type?: 'exact' | null;
-  expected_final_status: 'completed' | 'waiting_human' | 'interrupted';
+  expected_final_status: 'completed' | 'waiting' | 'interrupted';
   expected_final_reply?: string;
   expected_authorization_recorded?: boolean;
   reason: string;
@@ -132,9 +132,9 @@ const examples: Array<{
     outputs: {
       expected_interrupt_received: true,
       expected_authorization_option_present: true,
-      expected_final_status: 'waiting_human',
+      expected_final_status: 'waiting',
       expected_authorization_recorded: false,
-      reason: 'First turn with no resume should leave the session in waiting_human; second turn never runs.',
+      reason: 'First turn with no resume should leave the session waiting on the interrupt; second turn never runs.',
     },
   },
 ];
@@ -215,15 +215,18 @@ function createFakeGraphService(params: {
     const payload = buildShellReviewInterrupt(params.pendingShellCommand);
     return {
       messages: [],
-      pendingHumanReview: { review: payload.review },
-      hasPendingContinuation: true,
+      pendingInterrupt: {
+        interruptId: 'interrupt-1',
+        payload: { kind: 'human_review' as const, reviews: [payload.review] },
+      },
+      acceptsResume: true,
     };
   }
   function threadStateClean() {
     return {
       messages: interruptResumed ? [new AIMessage(params.finalReply)] : [],
-      pendingHumanReview: null,
-      hasPendingContinuation: false,
+      pendingInterrupt: null,
+      acceptsResume: false,
     };
   }
 
@@ -321,10 +324,10 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     emitToolEvent: () => {},
   });
 
-  if (firstTurn.status !== 'waiting_human' || !inputs.resume) {
+  if (firstTurn.status !== 'waiting' || !inputs.resume) {
     const reviewEvent = firstTurnEvents.find(
-      (event) => event.type === 'human_review.requested',
-    ) as Extract<AgentRuntimeEvent, { type: 'human_review.requested' }> | undefined;
+      (event) => event.type === 'interrupt.requested',
+    ) as Extract<AgentRuntimeEvent, { type: 'interrupt.requested' }> | undefined;
     return {
       first_turn_status: firstTurn.status,
       authorization_option_present: Boolean(
@@ -332,7 +335,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
           option.effects?.some((effect) => effect.type === 'graph.authorize_tool_action'),
         ),
       ),
-      interrupt_received: firstTurn.status === 'waiting_human',
+      interrupt_received: firstTurn.status === 'waiting',
       authorized_matcher_type: null,
       authorization_recorded: false,
       final_reply: '',
@@ -341,8 +344,8 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
   }
 
   const reviewEvent = firstTurnEvents.find(
-    (event) => event.type === 'human_review.requested',
-  ) as Extract<AgentRuntimeEvent, { type: 'human_review.requested' }> | undefined;
+    (event) => event.type === 'interrupt.requested',
+  ) as Extract<AgentRuntimeEvent, { type: 'interrupt.requested' }> | undefined;
   const selectedOption = reviewEvent?.review?.options.find((option) =>
     option.id === inputs.resume?.selectedOptionId,
   );
@@ -385,7 +388,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
 
   return {
     first_turn_status: firstTurn.status,
-    interrupt_received: firstTurn.status === 'waiting_human',
+    interrupt_received: firstTurn.status === 'waiting',
     authorization_option_present: authorizationOptionPresent,
     authorized_matcher_type: authorizedMatcherType,
     authorization_recorded: isToolActionAuthorized({

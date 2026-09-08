@@ -81,21 +81,20 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   }), null);
 });
 
-test('snapshot parser accepts only the canonical task pause projection', () => {
+test('snapshot parser requires an interrupt id for a task pause, as for a review', () => {
   const snapshot = createAgentSessionSnapshot({
     ...createSession(),
-    pendingInterrupt: { payload: { kind: 'pause_task' } },
+    pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
   });
 
   assert.deepEqual(parseAgentSessionSnapshot(snapshot), snapshot);
+  // A pause without an id cannot be continued, so it is not a valid pending
+  // interrupt at all.
   assert.equal(parseAgentSessionSnapshot({
     ...snapshot,
     session: {
       ...snapshot.session,
-      pendingInterrupt: {
-        interruptId: 'not-a-langgraph-interrupt',
-        payload: { kind: 'pause_task' },
-      },
+      pendingInterrupt: { payload: { kind: 'pause_task' } },
     },
   }), null);
 });

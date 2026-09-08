@@ -292,7 +292,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
     formatLiveSession({
       ...session,
       activeRun: null,
-      pendingInterrupt: { payload: { kind: 'pause_task' } },
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
     }),
     'task paused',
   );
@@ -300,7 +300,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
     formatLiveActivity({
       ...session,
       activeRun: null,
-      pendingInterrupt: { payload: { kind: 'pause_task' } },
+      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
     }),
     '◌ task paused',
   );

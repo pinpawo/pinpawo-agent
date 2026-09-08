@@ -33,6 +33,7 @@ export type SubmitChatResult =
         | 'not-ready'
         | 'busy'
         | 'empty'
+        | 'attachments-unsupported'
         | 'send-failed';
     };
 

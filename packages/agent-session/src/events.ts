@@ -2,7 +2,7 @@ import type {
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
-import type { HumanReviewPendingInterruptProjection } from './review';
+import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
   | AgentRunStartedEvent
@@ -11,7 +11,7 @@ export type AgentRuntimeEvent =
   | AgentSubagentMessageCompletedEvent
   | AgentOperationEvent
   | AgentPlanUpdatedEvent
-  | AgentHumanReviewRequestedEvent
+  | AgentInterruptRequestedEvent
   | AgentSystemNoticeEvent
   | AgentErrorEvent;
 
@@ -121,10 +121,10 @@ export type AgentPlanUpdatedEvent = {
   plan: AgentPlan | null;
 };
 
-export type AgentHumanReviewRequestedEvent = {
-  type: 'human_review.requested';
+export type AgentInterruptRequestedEvent = {
+  type: 'interrupt.requested';
   requestId: string;
-  pendingInterrupt: HumanReviewPendingInterruptProjection;
+  pendingInterrupt: PendingInterruptProjection;
 };
 
 export type AgentSystemNoticeEvent = {
@@ -134,9 +134,9 @@ export type AgentSystemNoticeEvent = {
 };
 
 export type AgentErrorCode =
-  | 'review_closed'
-  | 'review_stale'
-  | 'review_wrong_session'
+  | 'interrupt_closed'
+  | 'interrupt_stale'
+  | 'interrupt_wrong_session'
   // The agent could not run at all (model quota exhausted, auth rejected).
   // The invocation terminates; checkpoint state remains authoritative for any
   // pending interrupt and is reconciled separately.

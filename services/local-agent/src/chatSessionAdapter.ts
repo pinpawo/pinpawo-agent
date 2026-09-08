@@ -3,21 +3,19 @@ import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
-  isHumanReviewBatchInterruptPayload,
-  isHumanReviewInterruptPayload,
   NamespacedProtocolToolEventReader,
   projectHumanReviewRequest,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
-  readPauseTaskInterrupt,
+  readPendingInterrupt,
+  readPendingInterruptInputPolicy,
   SUBAGENT_OPERATIONS_EVENT,
-  type ReviewSpec,
+  type PendingInterrupt,
   type SubagentToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type {
   LocalAgentGraphEventStream,
-  AgentGraphPendingInterrupt,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
 } from './agentGraphService';
@@ -48,10 +46,9 @@ const RECURSION_LIMIT_NOTICE = '本轮处理步数已达上限，未能在一轮
 
 export type AgentSessionTurnResult =
   | { status: 'completed'; reply: string }
-  | { status: 'waiting_human' }
-  | { status: 'interrupted' }
-  /** The run settled into a task pause. There is no reply to report. */
-  | { status: 'paused' };
+  /** The run is waiting on a pending interrupt of any kind. */
+  | { status: 'waiting' }
+  | { status: 'interrupted' };
 
 export type AgentSessionTurnRequest =
   | {
@@ -59,7 +56,6 @@ export type AgentSessionTurnRequest =
       requestId: string;
       message: string;
       attachments?: AgentLocalAttachment[];
-      activeDelegationTransition?: AgentChannelSetup['input']['activeDelegationTransition'];
     }
   | { kind: 'resume'; requestId: string; resume: unknown };
 
@@ -83,9 +79,8 @@ export type AgentSessionTurnOptions = {
   prepareUserMessage?: () => Promise<BaseMessage>;
 };
 
-function throwUnexpectedInterruptPayload(): never {
-  throw new Error('Received an interrupt without canonical human review payload.');
-}
+/** @deprecated Use AgentSessionTurnOptions. */
+export type ChatSessionAdapterOptions = AgentSessionTurnOptions;
 
 async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null) {
   const output = (run as { output?: PromiseLike<unknown> } | null)?.output;
@@ -98,25 +93,29 @@ async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null)
   }
 }
 
-function emitHumanReviewRequested(params: {
-  interruptId: string;
-  reviews: ReviewSpec[];
+/**
+ * Announce the interrupt the run is waiting on. The Host projects the kind's
+ * payload onto the wire and carries the id; it does not decide what the
+ * interface should do with either.
+ */
+function emitInterruptRequested(params: {
+  pendingInterrupt: PendingInterrupt;
   requestId: string;
   emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
-  if (!params.reviews.length) {
-    return;
-  }
+  const { interruptId, payload } = params.pendingInterrupt;
   recordAgentRunActivity('waiting_human', params.requestId);
   params.emitEvent({
-    type: 'human_review.requested',
+    type: 'interrupt.requested',
     requestId: params.requestId,
     pendingInterrupt: {
-      interruptId: params.interruptId,
-      payload: {
-        kind: 'human_review',
-        interactions: params.reviews.map(projectHumanReviewRequest),
-      },
+      interruptId,
+      payload: payload.kind === 'human_review'
+        ? {
+            kind: 'human_review',
+            interactions: payload.reviews.map(projectHumanReviewRequest),
+          }
+        : { kind: 'pause_task' },
     },
   });
 }
@@ -311,7 +310,15 @@ export async function runAgentSessionTurn(
     return { status: 'interrupted' };
   }
 
-  if (initialThreadState.pendingInterrupt && !isResumeRequest) {
+  if (
+    initialThreadState.pendingInterrupt
+    && !isResumeRequest
+    && readPendingInterruptInputPolicy(
+      initialThreadState.pendingInterrupt.payload,
+    ) === 'refuse'
+  ) {
+    // The kind owns this decision. A review holds a tool call open, so new
+    // input cannot be admitted; a pause supersedes and falls through.
     if (message.trim() || attachments.length > 0) {
       emitEvent({
         type: 'system.notice',
@@ -319,16 +326,15 @@ export async function runAgentSessionTurn(
         message: PENDING_REVIEW_TEXT_NOTICE,
       });
     }
-    emitHumanReviewRequested({
-      interruptId: initialThreadState.pendingInterrupt.interruptId,
-      reviews: initialThreadState.pendingInterrupt.reviews,
+    emitInterruptRequested({
+      pendingInterrupt: initialThreadState.pendingInterrupt,
       requestId,
       emitEvent,
     });
-    return { status: 'waiting_human' };
+    return { status: 'waiting' };
   }
 
-  if (isResumeRequest && !initialThreadState.hasPendingContinuation) {
+  if (isResumeRequest && !initialThreadState.acceptsResume) {
     throw new Error(STALE_RESUME_MESSAGE);
   }
 
@@ -336,7 +342,6 @@ export async function runAgentSessionTurn(
     ? graphService.buildResumeCommand(request.resume)
     : undefined;
   if (!isResumeRequest) {
-    setup.input.activeDelegationTransition = request.activeDelegationTransition;
     const userMessage = options.prepareUserMessage
       ? await options.prepareUserMessage()
       : createLocalChatHumanMessage(message, attachments);
@@ -447,19 +452,13 @@ export async function runAgentSessionTurn(
           break;
         }
         case 'interrupt': {
-          if (hasPauseTaskInterrupt(chatEvent.interrupts)) {
-            clearAgentRunActivity(requestId);
-            return { status: 'paused' };
-          }
-          const interruptPayload = readFirstHumanReviewInterrupt(chatEvent.interrupts);
-          if (interruptPayload) {
-            emitHumanReviewRequested({
-              interruptId: interruptPayload.interruptId,
-              reviews: interruptPayload.reviews,
-              requestId,
-              emitEvent,
-            });
-            return { status: 'waiting_human' };
+          // Decoded by the Runtime, exactly as the settled state is below.
+          const pendingInterrupt = readPendingInterrupt({
+            tasks: [{ interrupts: chatEvent.interrupts }],
+          });
+          if (pendingInterrupt) {
+            emitInterruptRequested({ pendingInterrupt, requestId, emitEvent });
+            return { status: 'waiting' };
           }
           break;
         }
@@ -511,21 +510,15 @@ export async function runAgentSessionTurn(
   }
 
   if (finalThreadState.pendingInterrupt) {
-    emitHumanReviewRequested({
-      interruptId: finalThreadState.pendingInterrupt.interruptId,
-      reviews: finalThreadState.pendingInterrupt.reviews,
+    // Whatever the kind, the run is waiting for a person. A pause's last
+    // checkpoint message is its own bookkeeping — a rejected tool result, a
+    // cancelled action — and is never reported as the assistant's reply.
+    emitInterruptRequested({
+      pendingInterrupt: finalThreadState.pendingInterrupt,
       requestId,
       emitEvent,
     });
-    return { status: 'waiting_human' };
-  }
-
-  if (finalThreadState.pauseTaskInterrupt) {
-    // The run settled into a task pause. The checkpoint's last message is the
-    // pause's own bookkeeping — a rejected tool result, a cancelled action —
-    // and must not be reported as the assistant's reply.
-    clearAgentRunActivity(requestId);
-    return { status: 'paused' };
+    return { status: 'waiting' };
   }
 
   const streamedFinalReply = finalMessages.length > 0
@@ -552,49 +545,6 @@ export async function runAgentSessionTurn(
   return { status: 'completed', reply: finalReply };
 }
 
-function hasPauseTaskInterrupt(interrupts: unknown[]) {
-  return interrupts.some((item) => (
-    item !== null
-    && typeof item === 'object'
-    && 'value' in item
-    && readPauseTaskInterrupt(item.value) !== null
-  ));
-}
+/** @deprecated Use runAgentSessionTurn. */
+export const runChatSession = runAgentSessionTurn;
 
-function readFirstHumanReviewInterrupt(
-  interrupts: unknown[],
-): AgentGraphPendingInterrupt | null {
-  const firstInterrupt = interrupts[0] ?? null;
-  const interruptId = firstInterrupt
-    && typeof firstInterrupt === 'object'
-    && typeof (firstInterrupt as { id?: unknown }).id === 'string'
-    ? (firstInterrupt as { id: string }).id
-    : null;
-  const value = firstInterrupt
-    && typeof firstInterrupt === 'object'
-    && 'value' in firstInterrupt
-    && firstInterrupt.value
-    && typeof firstInterrupt.value === 'object'
-    ? firstInterrupt.value as Record<string, unknown>
-    : null;
-  if (!interruptId || !value) {
-    return null;
-  }
-  if (isHumanReviewBatchInterruptPayload(value)) {
-    const reviews = value.reviews.map((item) => item.review);
-    if (!reviews.length) {
-      return null;
-    }
-    return {
-      interruptId,
-      reviews,
-    };
-  }
-  if (!isHumanReviewInterruptPayload(value)) {
-    throwUnexpectedInterruptPayload();
-  }
-  return {
-    interruptId,
-    reviews: [value.review],
-  };
-}

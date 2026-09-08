@@ -6,6 +6,7 @@ import { loadAgentContext } from './contextLoader';
 import {
   type ChatRequestMessage,
   type HumanReviewResponseMessage,
+  type InterruptResumeMessage,
   type ReviewCancelMessage,
   type RunInterruptMessage,
 } from './localAgentProtocol';
@@ -51,7 +52,7 @@ type LocalServerRunRequest = AgentSessionTurnRequest;
 type RunAgentSessionTurn = typeof runAgentSessionTurn;
 type ChatRunOutcome =
   | 'completed'
-  | 'waiting_human'
+  | 'waiting'
   | 'interrupted'
   | 'failed'
   | 'fatal_failed';
@@ -136,13 +137,15 @@ export class ServerChatHandler {
   ) {
     try {
       const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
-      if (!pending) {
+      // Review resolution needs the reviews themselves. A pause has none and
+      // is continued by id instead, so it is not a route.
+      if (!pending || pending.payload.kind !== 'human_review') {
         return null;
       }
       const route = this.buildPendingInterruptRoute({
         requestId,
         interruptId: pending.interruptId,
-        reviews: pending.reviews,
+        reviews: pending.payload.reviews,
         sessionId: pending.sessionId,
       });
       return route;
@@ -166,10 +169,12 @@ export class ServerChatHandler {
       sessionId: pending.sessionId,
       pendingInterrupt: {
         interruptId: pending.interruptId,
-        payload: {
-          kind: 'human_review',
-          interactions: pending.reviews.map(projectHumanReviewRequest),
-        },
+        payload: pending.payload.kind === 'human_review'
+          ? {
+              kind: 'human_review',
+              interactions: pending.payload.reviews.map(projectHumanReviewRequest),
+            }
+          : { kind: 'pause_task' },
       },
     };
   }
@@ -179,7 +184,7 @@ export class ServerChatHandler {
       type: 'error',
       requestId,
       message: '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。',
-      code: 'review_closed',
+      code: 'interrupt_closed',
     });
   }
 
@@ -193,9 +198,32 @@ export class ServerChatHandler {
       requestId: msg.requestId,
       message: msg.message,
       ...(msg.attachments ? { attachments: msg.attachments } : {}),
-      ...(msg.activeDelegationTransition
-        ? { activeDelegationTransition: msg.activeDelegationTransition }
-        : {}),
+    }, deps, { type: 'chat_request' });
+  }
+
+  /**
+   * Continue a pending interrupt by id. The value belongs to the interrupt's
+   * kind: the Host validates identity and forwards it unread.
+   */
+  async handleInterruptResume(
+    peer: ServerPeer,
+    msg: InterruptResumeMessage,
+    deps: ServerDeps,
+  ) {
+    const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
+    if (!pending || pending.interruptId !== msg.interruptId) {
+      sendLocalServerPeerEvent(peer, {
+        type: 'error',
+        requestId: msg.requestId,
+        message: '这个中断已关闭或不存在，请等待界面刷新后再继续。',
+        code: 'interrupt_stale',
+      });
+      return;
+    }
+    await this.runChatRequest(peer, {
+      kind: 'resume',
+      requestId: msg.requestId,
+      resume: { [msg.interruptId]: msg.value },
     }, deps, { type: 'chat_request' });
   }
 
@@ -334,20 +362,17 @@ export class ServerChatHandler {
             }
           : {}),
       });
-      if (result.status === 'waiting_human') {
+      if (result.status === 'waiting') {
+        // Every kind settles here. The run's own operations close, and the
+        // interrupt.requested event already told the interface what it is
+        // waiting on and under which id.
         this.inflightRequests.finish(peer, inflight, 'interrupted');
         await this.tuiSessions.refreshActiveSessionSummary(deps);
-        console.log(`[local-server] human_review.requested requestId=${requestId}`);
+        console.log(`[local-server] interrupt.requested requestId=${requestId}`);
         this.inflightRequests.clear(peer, inflight);
-        return 'waiting_human';
+        return 'waiting';
       }
       if (result.status === 'interrupted') {
-        finalizeInterrupted();
-        return 'interrupted';
-      }
-      if (result.status === 'paused') {
-        // The protocol has no pause outcome yet: the TUI derives a task pause
-        // from the completion snapshot that follows an interrupted run.
         finalizeInterrupted();
         return 'interrupted';
       }
@@ -468,7 +493,7 @@ export class ServerChatHandler {
         message: message.type === 'review.cancel'
           ? '请回到发起该 review 的会话再打断。'
           : '请回到发起该 review 的会话再应答。',
-        code: 'review_wrong_session',
+        code: 'interrupt_wrong_session',
       });
       return false;
     }

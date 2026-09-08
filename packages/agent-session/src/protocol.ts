@@ -43,19 +43,27 @@ import {
  * Deprecated wire compatibility only. Runtime delegation transitions are not
  * part of agent-contracts and new callers must not emit this field.
  */
-type LegacyActiveDelegationTransition = 'supersede_active' | 'resume_active';
-
 export type ChatRequestMessage = {
   type: 'chat_request';
   requestId: string;
   message: string;
   attachments?: AgentLocalAttachment[];
-  activeDelegationTransition?: LegacyActiveDelegationTransition;
 };
 
 export type RunInterruptMessage = {
   type: 'run.interrupt';
   requestId: string;
+};
+
+/**
+ * Continue a pending interrupt by id. The `value` shape is owned by the
+ * interrupt's kind and is not interpreted between here and the Runtime.
+ */
+export type InterruptResumeMessage = {
+  type: 'interrupt.resume';
+  requestId: string;
+  interruptId: string;
+  value: ContractJsonObject;
 };
 
 export type ReviewCancelMessage = {
@@ -128,6 +136,7 @@ export type ModelSelectMessage = {
 export type AgentClientMessage =
   | ChatRequestMessage
   | RunInterruptMessage
+  | InterruptResumeMessage
   | ReviewCancelMessage
   | NewSessionMessage
   | RuntimeConfigUpdateMessage
@@ -263,16 +272,6 @@ function readString(record: Record<string, unknown>, key: string) {
 function readOptionalString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' ? value : undefined;
-}
-
-function readActiveDelegationTransition(
-  record: Record<string, unknown>,
-): LegacyActiveDelegationTransition | null | undefined {
-  const value = record.activeDelegationTransition;
-  if (value === undefined) return undefined;
-  return value === 'supersede_active' || value === 'resume_active'
-    ? value
-    : null;
 }
 
 function readOptionalStringArray(record: Record<string, unknown>, key: string) {
@@ -665,69 +664,39 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       ? null
       : { type, requestId, plan };
   }
-  if (type === 'human_review.requested') {
-    if (!hasOnlyKeys(record, [
-      'type',
-      'requestId',
-      'pendingInterrupt',
-      // Compatibility input only; canonical events emit pendingInterrupt.
-      'interruptId',
-      'review',
-      'reviews',
-      'actor',
-    ])) return null;
+  if (type === 'interrupt.requested') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'pendingInterrupt'])) return null;
     const pending = readRecord(record, 'pendingInterrupt');
     const pendingPayload = pending ? readRecord(pending, 'payload') : null;
-    const canonicalInteractions = pendingPayload
-      ? readReviewSpecs(pendingPayload, 'interactions')
-      : null;
-    const canonicalInterruptId = pending
-      ? readString(pending, 'interruptId')
-      : null;
-    if (pending) {
-      if (
-        !hasOnlyKeys(pending, ['interruptId', 'payload'])
-        || !pendingPayload
-        || !hasOnlyKeys(pendingPayload, ['kind', 'interactions'])
-        || pendingPayload.kind !== 'human_review'
-        || !canonicalInterruptId
-        || !canonicalInteractions
-      ) return null;
-      return {
-        type,
-        requestId,
-        pendingInterrupt: {
-          interruptId: canonicalInterruptId,
-          payload: {
-            kind: 'human_review',
-            interactions: canonicalInteractions,
-          },
-        },
-      };
-    }
-    const legacyInterruptId = readString(record, 'interruptId');
-    const legacyReview = readReviewSpec(record, 'review');
-    const legacyReviews = readReviewSpecs(record, 'reviews');
-    const legacyActor = readRecord(record, 'actor');
+    const interruptId = pending ? readString(pending, 'interruptId') : null;
     if (
-      !legacyInterruptId
-      || !legacyReview
-      || (record.actor !== undefined && !legacyActor)
-      || (legacyActor && (
-        !hasOnlyKeys(legacyActor, ['petId'])
-        || (legacyActor.petId !== undefined
-          && !readOptionalString(legacyActor, 'petId'))
-      ))
+      !pending
+      || !pendingPayload
+      || !interruptId
+      || !hasOnlyKeys(pending, ['interruptId', 'payload'])
+    ) return null;
+    // Every kind carries an id; only the payload differs.
+    if (pendingPayload.kind === 'pause_task') {
+      return hasOnlyKeys(pendingPayload, ['kind'])
+        ? {
+            type,
+            requestId,
+            pendingInterrupt: { interruptId, payload: { kind: 'pause_task' } },
+          }
+        : null;
+    }
+    const interactions = readReviewSpecs(pendingPayload, 'interactions');
+    if (
+      pendingPayload.kind !== 'human_review'
+      || !hasOnlyKeys(pendingPayload, ['kind', 'interactions'])
+      || !interactions
     ) return null;
     return {
       type,
       requestId,
       pendingInterrupt: {
-        interruptId: legacyInterruptId,
-        payload: {
-          kind: 'human_review',
-          interactions: legacyReviews ?? [legacyReview],
-        },
+        interruptId,
+        payload: { kind: 'human_review', interactions },
       },
     };
   }
@@ -757,9 +726,9 @@ function readJsonObject(
 function readAgentErrorCode(record: Record<string, unknown>): AgentErrorCode | null {
   const code = readOptionalString(record, 'code');
   if (
-    code === 'review_closed'
-    || code === 'review_stale'
-    || code === 'review_wrong_session'
+    code === 'interrupt_closed'
+    || code === 'interrupt_stale'
+    || code === 'interrupt_wrong_session'
     || code === 'agent_unavailable'
   ) {
     return code;
@@ -820,17 +789,14 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       'message',
       'attachments',
       'userId',
-      'activeDelegationTransition',
     ])) return null;
     const requestId = readString(record, 'requestId');
     const message = readString(record, 'message');
     const attachments = readLocalAttachments(record, 'attachments');
-    const activeDelegationTransition = readActiveDelegationTransition(record);
     if (
       !requestId
       || message == null
       || attachments === null
-      || activeDelegationTransition === null
       || (record.userId !== undefined && !readOptionalString(record, 'userId'))
     ) return null;
     return {
@@ -838,10 +804,17 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
       requestId,
       message,
       ...(attachments ? { attachments } : {}),
-      ...(activeDelegationTransition
-        ? { activeDelegationTransition }
-        : {}),
     };
+  }
+  if (type === 'interrupt.resume') {
+    if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'value'])) return null;
+    const requestId = readString(record, 'requestId');
+    const interruptId = readString(record, 'interruptId');
+    const value = readRecord(record, 'value');
+    if (!requestId || !interruptId || !value || !isJsonValue(value)) return null;
+    // The value belongs to the interrupt's kind; the protocol only checks it
+    // is transportable JSON.
+    return { type, requestId, interruptId, value: value as ContractJsonObject };
   }
   if (type === 'human_review_response') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'interruptId', 'actionId', 'responses', 'interactionId', 'reviewId', 'selectedOptionId', 'input', 'decisions'])) return null;

@@ -16,6 +16,17 @@ export type {
   PauseTaskInterruptPayload,
   PauseTaskInterruptResolution,
 } from './pauseTaskInterrupt';
+export {
+  HUMAN_REVIEW_INTERRUPT_KIND,
+  readPendingInterrupt,
+  readPendingInterruptInputPolicy,
+  UnknownInterruptPayloadError,
+} from './readPendingInterrupt';
+export type {
+  PendingInterrupt,
+  PendingInterruptInputPolicy,
+  PendingInterruptPayload,
+} from './readPendingInterrupt';
 export { ReviewInterrupt } from './reviewInterrupt';
 export type {
   ReviewInterruptOptions,

@@ -16,6 +16,7 @@ function createHandlers(
     onChatRequest: () => undefined,
     onHumanReviewResponse: () => undefined,
     onReviewCancel: () => undefined,
+    onInterruptResume: () => undefined,
     onRunInterrupt: () => undefined,
     onNewSession: () => undefined,
     onRuntimeConfigUpdate: () => undefined,

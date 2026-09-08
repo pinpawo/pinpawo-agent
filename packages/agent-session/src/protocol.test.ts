@@ -12,7 +12,6 @@ test('chat request parser accepts bounded local path attachments', () => {
     type: 'chat_request',
     requestId: 'request-1',
     message: '',
-    activeDelegationTransition: 'resume_active',
     attachments: [{
       id: 'attachment-1',
       source: 'local-path',
@@ -24,7 +23,6 @@ test('chat request parser accepts bounded local path attachments', () => {
     type: 'chat_request',
     requestId: 'request-1',
     message: '',
-    activeDelegationTransition: 'resume_active',
     attachments: [{
       id: 'attachment-1',
       source: 'local-path',
@@ -309,25 +307,34 @@ test('model protocol accepts correlated selection messages and sanitized profile
   }), null);
 });
 
-test('chat_request accepts an explicit active delegation transition', () => {
-  assert.deepEqual(parseAgentClientMessage({
-    type: 'chat_request',
-    requestId: 'request-1',
-    message: '继续旧任务',
-    activeDelegationTransition: 'resume_active',
-  }), {
-    type: 'chat_request',
-    requestId: 'request-1',
-    message: '继续旧任务',
-    activeDelegationTransition: 'resume_active',
-  });
-});
-
-test('chat_request rejects an unknown active delegation transition', () => {
+test('chat_request carries no execution semantics of its own', () => {
+  // Continuing a task is interrupt.resume by id, not a field on a message.
   assert.equal(parseAgentClientMessage({
     type: 'chat_request',
     requestId: 'request-1',
     message: '继续旧任务',
-    activeDelegationTransition: 'guess_from_text',
+    activeDelegationTransition: 'resume_active',
+  }), null);
+});
+
+test('interrupt.resume carries an id and a kind-owned value', () => {
+  assert.deepEqual(parseAgentClientMessage({
+    type: 'interrupt.resume',
+    requestId: 'request-1',
+    interruptId: 'interrupt-1',
+    value: { action: 'continue', guidance: '换个方向' },
+  }), {
+    type: 'interrupt.resume',
+    requestId: 'request-1',
+    interruptId: 'interrupt-1',
+    value: { action: 'continue', guidance: '换个方向' },
+  });
+});
+
+test('interrupt.resume requires an interrupt id', () => {
+  assert.equal(parseAgentClientMessage({
+    type: 'interrupt.resume',
+    requestId: 'request-1',
+    value: { action: 'continue' },
   }), null);
 });

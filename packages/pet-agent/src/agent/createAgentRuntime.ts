@@ -34,10 +34,17 @@ export {
   type OrchestratorGraph,
 } from './orchestrator/runtime/graph';
 export {
+  HUMAN_REVIEW_INTERRUPT_KIND,
   readPauseTaskInterrupt,
+  readPendingInterrupt,
+  readPendingInterruptInputPolicy,
+  UnknownInterruptPayloadError,
 } from './orchestrator/interrupt';
 export type {
   PauseTaskInterruptPayload,
+  PendingInterrupt,
+  PendingInterruptInputPolicy,
+  PendingInterruptPayload,
 } from './orchestrator/interrupt';
 export {
   streamOrchestratorGraph,

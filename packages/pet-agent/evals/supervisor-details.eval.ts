@@ -37,14 +37,37 @@ type Scenario = {
   name: string; goal: string; disclosed: string[]; maxCalls: number; expected: 'plan' | 'reply' | 'accept' | 'continue';
   required?: string[]; evidence?: string;
 };
+// Synthetic executor reports: these describe fixture deliveries, not changes
+// made in this repository. Keep the completed/pending pair on the same task.
+const boundaryGoal = 'In the checkout project, fix calculateSubtotal in src/cart.ts: '
+  + 'it currently adds item.quantity instead of item.price * item.quantity. '
+  + 'For [{ price: 12, quantity: 3 }, { price: 5, quantity: 2 }], return 46 instead of 5. '
+  + 'Add a regression test in tests/cart.test.ts and run both that test file and the full npm test suite. '
+  + 'Report the change and test results. No commit, publication or deployment is requested.';
+const boundaryPatchReport = [
+  'Located the bug in src/cart.ts, calculateSubtotal: the reducer added item.quantity and ignored item.price.',
+  'Changed the reducer from sum + item.quantity to sum + item.price * item.quantity; retained the initial accumulator 0.',
+  'Added tests/cart.test.ts case "multiplies each item price by quantity": input [{ price: 12, quantity: 3 }, { price: 5, quantity: 2 }], expected 46.',
+  'Before the fix, npm test -- tests/cart.test.ts exited 1: this regression expected 46 but received 5; the other 3 tests passed.',
+].join('\n');
 const scenarios: Scenario[] = [
   { name: 'entry-exact-capability', goal: 'Use repository to fix the failing unit test and verify it.', disclosed: [], maxCalls: 0, expected: 'plan', required: ['repository'] },
   { name: 'entry-disclosed-capability', goal: 'Fix the failing unit test and verify it.', disclosed: ['repository'], maxCalls: 0, expected: 'plan', required: ['repository'] },
   { name: 'entry-two-responsibilities', goal: 'Use repository to prepare release notes, then release_publisher to publish them to the GitHub release for example/repo tag v1.0. I authorize publication.', disclosed: [], maxCalls: 0, expected: 'plan', required: ['repository', 'release_publisher'] },
   { name: 'entry-requested-details', goal: 'Read the full repository Capability details first, then use it to fix the failing unit test and verify the fix.', disclosed: [], maxCalls: 1, expected: 'plan', required: ['repository'] },
   { name: 'entry-user-choice-before-work', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.', disclosed: [], maxCalls: 0, expected: 'reply' },
-  { name: 'boundary-accept-no-discovery', goal: 'Fix the bug and run tests.', disclosed: ['repository'], maxCalls: 0, expected: 'accept', evidence: 'Bug fixed; regression test and full suite passed, 42 tests, zero failures. All requested work is delivered.' },
-  { name: 'boundary-continue-no-discovery', goal: 'Fix the bug and run tests.', disclosed: ['repository'], maxCalls: 0, expected: 'continue', evidence: 'Patch saved, but tests have not run. Test tools are available. No user information or permission is missing.' },
+  { name: 'boundary-accept-no-discovery', goal: boundaryGoal, disclosed: ['repository'], maxCalls: 0, expected: 'accept', evidence: [
+    boundaryPatchReport,
+    'After the fix, npm test -- tests/cart.test.ts exited 0: Test Files 1 passed (1); Tests 4 passed (4), including the new regression.',
+    'Then npm test exited 0: Test Files 8 passed (8); Tests 42 passed (42); no failures or skipped tests.',
+    'Working tree changes are limited to src/cart.ts and tests/cart.test.ts. The patch is saved locally; no commit or deployment was made.',
+  ].join('\n') },
+  { name: 'boundary-continue-no-discovery', goal: boundaryGoal, disclosed: ['repository'], maxCalls: 0, expected: 'continue', evidence: [
+    boundaryPatchReport,
+    'The patch and regression test are saved locally in src/cart.ts and tests/cart.test.ts.',
+    'Execution stopped after saving the fix. The targeted regression and full suite have NOT been run after the change; the earlier failing run is the only test result available.',
+    'The test runner and dependencies are installed, and the terminal tool is available. No user information or permission is missing.',
+  ].join('\n') },
 ];
 const config = JSON.parse(await readFile(process.env.PROMPT_EVAL_CONFIG_PATH ?? join(homedir(), '.pinpawo/config.json'), 'utf8'));
 const profileId = process.env.PROMPT_EVAL_PROFILE_ID ?? config.models.defaultProfileId;

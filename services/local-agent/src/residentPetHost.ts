@@ -8,13 +8,16 @@ import {
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
 import {
+  type AbortSettlement,
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 
+import type { AgentChannelSetup } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
+import { projectPendingInterrupt } from './pendingInterruptProjection';
 import {
   runAgentSessionTurn,
   type AgentSessionTurnOptions,
@@ -677,9 +680,49 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           const requestId = `host-${randomUUID()}`;
           const run = createInflightOperationRun(requestId);
           let activeRun: ResidentActiveRun | null = null;
+          let abortedSetup: AgentChannelSetup | null = null;
+          /**
+           * A cancelled dispatch that left work behind becomes a task pause,
+           * so resident runs are continuable by id exactly like Chat runs.
+           */
+          const settleInterruptedDispatch = async (params: {
+            setup: AgentChannelSetup | null;
+            announce?: boolean;
+          }) => {
+            finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
+            let settled: AbortSettlement = { status: 'finished' };
+            if (params.setup) {
+              try {
+                settled = await graphService.settleAbortedRun(params.setup);
+              } catch (settleError) {
+                console.warn(
+                  '[resident-pet] failed to settle an aborted dispatch:',
+                  settleError instanceof Error ? settleError.message : settleError,
+                );
+              }
+            }
+            if (settled.status === 'paused') {
+              publishRuntimeEvent({
+                type: 'interrupt.requested',
+                requestId,
+                pendingInterrupt: projectPendingInterrupt(settled.pendingInterrupt),
+              });
+              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
+              return;
+            }
+            if (params.announce !== false) {
+              publishRuntimeEvent({
+                type: 'run.interrupted',
+                requestId,
+                message: 'Run interrupted.',
+              });
+            }
+            publishDispatchLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
+          };
           try {
             const context = await loadContext(runtimeDeps.get().petId);
             const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
+            abortedSetup = setup;
             configureInflightOperationRegistry(
               run,
               createOperationRegistryForAgentSetup(setup),
@@ -717,28 +760,17 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               return;
             }
             if (result.status === 'interrupted') {
-              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              publishRuntimeEvent({
-                type: 'run.interrupted',
-                requestId,
-                message: 'Run interrupted.',
-              });
-              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
+              await settleInterruptedDispatch({ setup });
               return;
             }
             finishInflightOperations(run, 'completed', publishRuntimeEvent);
             publishDispatchLifecycle({ dispatchId, request, requestId, state: 'completed' });
           } catch (error) {
             if (run.controller.signal.aborted || isAbortError(error)) {
-              finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              if (activeRun) {
-                publishRuntimeEvent({
-                  type: 'run.interrupted',
-                  requestId,
-                  message: 'Run interrupted.',
-                });
-              }
-              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
+              await settleInterruptedDispatch({
+                setup: abortedSetup,
+                announce: activeRun !== null,
+              });
               return;
             }
             finishInflightOperations(run, 'failed', publishRuntimeEvent, error);

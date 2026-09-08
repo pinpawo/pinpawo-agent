@@ -3,9 +3,11 @@ import {
   createOrchestratorGraph,
   buildAgentRunnableConfig,
   readPendingInterrupt,
+  settleAbortedRun,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
+  type AbortSettlement,
   type PendingInterrupt,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -194,6 +196,33 @@ export class LocalAgentGraphService {
       values,
       asNode,
     );
+  }
+
+  /**
+   * Turn a cancelled invocation into a pending interrupt when it left work
+   * behind. The Runtime owns the mechanism; the Host only says which thread
+   * settled and forwards the result.
+   */
+  settleAbortedRun(setup: AgentChannelSetup): Promise<AbortSettlement> {
+    // Settling runs *after* the cancellation, so it must not inherit the
+    // signal that cancelled it: reaching the pause gate under an aborted
+    // signal throws before the interrupt is raised, leaving nothing to
+    // continue. Callers that reuse their run's setup would otherwise
+    // reintroduce that silently, so the detachment lives here.
+    const { signal: _abortedSignal, ...settlementInput } = setup.input;
+    const settlementSetup: AgentChannelSetup = {
+      ...setup,
+      input: settlementInput,
+    };
+    return settleAbortedRun({
+      getState: () => this.getRawState(settlementSetup),
+      updateState: (values, asNode) => this.updateState(
+        settlementSetup,
+        values as Partial<OrchestratorStateType>,
+        asNode,
+      ),
+      resume: () => this.invokeState(settlementSetup, null),
+    });
   }
 
   buildResumeCommand(resume: unknown) {

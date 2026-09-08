@@ -27,6 +27,11 @@ export type {
   PendingInterruptInputPolicy,
   PendingInterruptPayload,
 } from './readPendingInterrupt';
+export { settleAbortedRun } from './settleAbortedRun';
+export type {
+  AbortSettlement,
+  AbortSettlementGraph,
+} from './settleAbortedRun';
 export { ReviewInterrupt } from './reviewInterrupt';
 export type {
   ReviewInterruptOptions,

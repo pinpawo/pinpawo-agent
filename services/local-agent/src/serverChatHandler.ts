@@ -1,5 +1,6 @@
 import {
   projectHumanReviewRequest,
+  type AbortSettlement,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
@@ -9,6 +10,7 @@ import {
   type RunInterruptMessage,
 } from './localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
+import { projectPendingInterrupt } from './pendingInterruptProjection';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
@@ -164,15 +166,7 @@ export class ServerChatHandler {
     }
     return {
       sessionId: pending.sessionId,
-      pendingInterrupt: {
-        interruptId: pending.interruptId,
-        payload: pending.payload.kind === 'human_review'
-          ? {
-              kind: 'human_review',
-              interactions: pending.payload.reviews.map(projectHumanReviewRequest),
-            }
-          : { kind: 'pause_task' },
-      },
+      pendingInterrupt: projectPendingInterrupt(pending),
     };
   }
 
@@ -295,6 +289,36 @@ export class ServerChatHandler {
     const isCurrent = invocation.isCurrent;
     let runStarted = false;
     let interruptedFinalized = false;
+    /**
+     * A cancelled run that left unfinished work becomes a task pause, so it is
+     * continued by id like any other interrupt. The Runtime owns whether that
+     * applies and how; the Host only asks and reports what came back.
+     */
+    const settleInterrupted = async (): Promise<ChatRunOutcome> => {
+      let settled: AbortSettlement = { status: 'finished' };
+      try {
+        const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
+        settled = await this.graphService.settleAbortedRun(setup);
+      } catch (settleError) {
+        console.warn(
+          '[local-server] failed to settle an aborted run:',
+          settleError instanceof Error ? settleError.message : settleError,
+        );
+      }
+      if (settled.status === 'paused') {
+        this.inflightRequests.finish(peer, inflight, 'interrupted');
+        this.publishRuntimeEvent(peer, {
+          type: 'interrupt.requested',
+          requestId,
+          pendingInterrupt: projectPendingInterrupt(settled.pendingInterrupt),
+        });
+        this.inflightRequests.clear(peer, inflight);
+        await this.tuiSessions.refreshActiveSessionSummary(deps);
+        return 'waiting';
+      }
+      finalizeInterrupted();
+      return 'interrupted';
+    };
     // The one interrupted finalization for this request. An abort, a
     // superseding request, and a run that settled into a task pause all end
     // here: open operations close first, then the run reports interrupted.
@@ -378,8 +402,7 @@ export class ServerChatHandler {
         return 'waiting';
       }
       if (result.status === 'interrupted') {
-        finalizeInterrupted();
-        return 'interrupted';
+        return await settleInterrupted();
       }
       this.inflightRequests.finish(peer, inflight, 'completed');
       this.inflightRequests.clear(peer, inflight);
@@ -393,9 +416,8 @@ export class ServerChatHandler {
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[local-server] chat interrupted requestId=${requestId}`);
-        finalizeInterrupted();
         recordAgentRunActivity('interrupted', requestId, 2_500);
-        return 'interrupted';
+        return await settleInterrupted();
       }
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);

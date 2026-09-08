@@ -62,6 +62,18 @@ test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () =
   assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
 });
 
+test('DeepSeek V4 Flash Vision preset enables image input independently', () => {
+  const preset = findLlmModelPresetByKey('deepseek-flash-vision');
+
+  assert.equal(preset?.model, 'deepseek-v4-flash-vision-exp');
+  assert.deepEqual(preset?.inputModalities, ['text', 'image']);
+  assert.equal(
+    inferLlmModelPreset('deepseek-v4-flash-vision-exp')?.key,
+    'deepseek-flash-vision',
+  );
+  assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
+});
+
 test('Qwen 3.8 Max has a Token Plan-specific preset', () => {
   const preset = findLlmModelPresetByKey('qwen-token-plan');
 

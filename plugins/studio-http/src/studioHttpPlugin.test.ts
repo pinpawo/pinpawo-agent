@@ -127,8 +127,6 @@ test('HTTP Plugin exposes Studio Pet registrations without Agent-private actor f
     pets: [{
       petId: 'planner',
       name: 'Planner',
-      role: 'plans work',
-      serviceSummary: null,
     }],
   });
   const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });

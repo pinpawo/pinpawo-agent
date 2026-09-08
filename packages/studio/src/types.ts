@@ -4,8 +4,6 @@ import type { PetDispatchPort } from 'pinpawo/host-runtime';
 export type StudioPetRegistration = {
   petId: string;
   name: string;
-  role?: string | null;
-  serviceSummary?: string | null;
 };
 
 /** Studio combines its own registration with a borrowed local-agent port. */

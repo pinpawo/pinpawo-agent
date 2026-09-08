@@ -25,10 +25,6 @@ import { isSafePetPathSegment } from './petId';
 export type PetLocalConfig = {
   petId: string;
   name: string;
-  /** 一句话角色描述,planner 用来挑 pet */
-  role?: string;
-  /** 简短服务能力概述,planner 在路由 task → pet 时参考 */
-  serviceSummary?: string;
   /** 该 pet 使用的 model profile id;留空则继承 host default profile。 */
   modelProfileId?: string;
   /** Agent entry Planner 优先加载的 Capability；留空时使用通用 general。 */
@@ -38,8 +34,6 @@ export type PetLocalConfig = {
 export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSchema({
   kind: 'pet config',
   parse: (reader) => {
-    const role = reader.optionalString('role');
-    const serviceSummary = reader.optionalString('serviceSummary');
     const modelProfileId = reader.optionalString('modelProfileId');
     const defaultCapabilityName = reader.optionalString('defaultCapabilityName');
 
@@ -71,8 +65,6 @@ export const petLocalConfigSchema: ConfigSchema<PetLocalConfig> = defineConfigSc
     return {
       petId,
       name: reader.requiredString('name'),
-      ...(role !== undefined ? { role } : {}),
-      ...(serviceSummary !== undefined ? { serviceSummary } : {}),
       ...(modelProfileId !== undefined ? { modelProfileId } : {}),
       ...(defaultCapabilityName !== undefined ? { defaultCapabilityName } : {}),
     };

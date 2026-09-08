@@ -175,8 +175,8 @@ Pet Profile Toolkit and personality/species/stage configuration are removed;
 old JSON fields report migration to PET.md. serverBinding is rejected because
 there is no active cloud synchronization consumer. Cloud memory/history shells,
 growth/asset/date fields and the duplicate AgentExecution port are removed.
-Checkpointed conversation history, Studio role/serviceSummary routing metadata,
-and default Capability selection retain their existing owners.
+Checkpointed conversation history and default Capability selection retain their
+existing owners. The unread Studio `role`/`serviceSummary` metadata is removed.
 
 
 Validation of #760–#763 and complete AgentActor removal on 2026-09-05:

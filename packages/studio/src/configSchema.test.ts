@@ -38,8 +38,6 @@ test('parsePetLocalConfig keeps optional fields when provided', () => {
     {
       petId: 'p1',
       name: 'Script Pet',
-      role: '脚本撰写',
-      serviceSummary: '短视频脚本',
       modelProfileId: 'qwen-max',
       defaultCapabilityName: 'studio_planning',
     },
@@ -61,8 +59,8 @@ test('parsePetLocalConfig requires petId and name', () => {
 
 test('parsePetLocalConfig rejects bad types in optional fields', () => {
   assert.throws(
-    () => parsePet({ petId: 'p1', name: 'X', role: '' }, 'src'),
-    /"role" must be a non-empty string/,
+    () => parsePet({ petId: 'p1', name: 'X', modelProfileId: '' }, 'src'),
+    /"modelProfileId" must be a non-empty string/,
   );
 });
 

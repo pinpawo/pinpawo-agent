@@ -11,7 +11,7 @@ test('Scheduler dispatches one due schedule exactly once', async (t) => {
     studioId: 'scheduler-test',
     entryPetId: 'worker',
     pets: [{
-      registration: { petId: 'worker', name: 'Worker', role: null, serviceSummary: null },
+      registration: { petId: 'worker', name: 'Worker' },
       dispatch: {
         getQueueSnapshot: () => ({
           state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0,
@@ -54,7 +54,7 @@ test('Scheduler audits configured dispatch queues without changing their admissi
     dispatch: async () => ({ petId: 'worker', invocationId: 'unused' }),
     notify: (event) => { events.push(event); },
     subscribe: () => () => undefined,
-    listPets: () => [{ petId: 'worker', name: 'Worker', role: null, serviceSummary: null }],
+    listPets: () => [{ petId: 'worker', name: 'Worker' }],
     listDispatchQueues: () => [{
       petId: 'worker', state: 'blocked', activeOperation: null, queuedConversations: 0, queuedDispatches: 2,
     }],

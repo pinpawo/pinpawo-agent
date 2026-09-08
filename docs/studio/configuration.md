@@ -59,8 +59,6 @@ is its lifecycle and event-source identity inside Studio.
 {
   "petId": "writer",
   "name": "Writer",
-  "role": "Turn outlines into complete drafts",
-  "serviceSummary": "Long-form writing and structured rewriting",
   "modelProfileId": "qwen-max",
   "defaultCapabilityName": "studio-planning"
 }
@@ -81,8 +79,8 @@ The former `personality`, `species` and `stage` fields are rejected with guidanc
 to move their authored content into `PET.md`. `serverBinding` is also rejected:
 there is no active cloud Pet synchronization consumer. The implicit Pet Profile
 Toolkit and cloud memory/history hydration have been removed. Conversation
-history remains owned by session checkpoints; `role` and `serviceSummary` remain
-public routing metadata.
+history remains owned by session checkpoints. The former `role` and
+`serviceSummary` fields are removed; no consumer ever read them.
 
 ## Per-Pet root document
 

@@ -67,7 +67,7 @@ async function residentBuildResources(workdir: string, plugins: ReturnType<typeo
     runtimeConfig,
     globalReviewPolicyMode: 'require_authorization' as const,
     autoAuthorizationSafetyLevel: 'strict' as const,
-    capabilityRegistryBackend: 'filesystem' as const,
+    capabilityRegistryBackend: 'memory' as const,
   };
 }
 
@@ -89,7 +89,6 @@ async function writeStudioWorkdir(withPlanningCapability: boolean): Promise<stri
     JSON.stringify({
       petId: 'planner',
       name: 'Planner',
-      role: 'planner',
     }),
   );
   if (withPlanningCapability) {

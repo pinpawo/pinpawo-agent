@@ -30,8 +30,6 @@ function binding(
     registration: {
       petId,
       name: petId.toUpperCase(),
-      role: `${petId} role`,
-      serviceSummary: `${petId} service`,
     },
     dispatch: port,
   };
@@ -217,8 +215,6 @@ test('listPets exposes only Studio registration metadata', async () => {
   assert.deepEqual(studio.listPets(), [{
     petId: 'worker',
     name: 'WORKER',
-    role: 'worker role',
-    serviceSummary: 'worker service',
   }]);
   await studio.shutdown();
 });

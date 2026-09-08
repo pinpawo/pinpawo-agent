@@ -1139,7 +1139,7 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
       sendControl: (_peer, message) => controls.push(message),
     }),
     loadContext: async () => ({} as never),
-    runChat: async () => ({ status: 'interrupted' as const }),
+    runAgentTurn: async () => ({ status: 'interrupted' as const }),
   });
 
   await handler.handleChatRequest(fakePeer, {
@@ -1177,7 +1177,7 @@ test('an aborted run with nothing to continue still reports an interruption', as
       sendControl: () => undefined,
     }),
     loadContext: async () => ({} as never),
-    runChat: async () => ({ status: 'interrupted' as const }),
+    runAgentTurn: async () => ({ status: 'interrupted' as const }),
   });
 
   await handler.handleChatRequest(fakePeer, {

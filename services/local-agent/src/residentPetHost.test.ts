@@ -724,7 +724,6 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
     modelProfiles: createTestModelProfiles(),
     globalReviewPolicyMode: 'require_authorization',
     autoAuthorizationSafetyLevel: 'strict',
-    capabilityRegistryBackend: 'memory',
     capabilities: [],
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: testArtifactStore,

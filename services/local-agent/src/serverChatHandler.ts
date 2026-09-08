@@ -297,7 +297,7 @@ export class ServerChatHandler {
     const settleInterrupted = async (): Promise<ChatRunOutcome> => {
       let settled: AbortSettlement = { status: 'finished' };
       try {
-        const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.actorId), threadId);
+        const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
         settled = await this.graphService.settleAbortedRun(setup);
       } catch (settleError) {
         console.warn(

@@ -67,12 +67,13 @@ import {
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { latestCompletedAssistantReply } from './timeline/timelineModel';
 import {
-  isDelegationPaused,
-  leaveDelegationPauseMode,
-  resumesPausedDelegationOnEmptySubmit,
-  syncDelegationPauseMode,
-  type DelegationPauseMode,
-} from './session/delegationPause';
+  isTaskPaused,
+  hasUnfinishedTask,
+  leaveTaskPauseMode,
+  resumesPausedTaskOnEmptySubmit,
+  syncTaskPauseMode,
+  type TaskPauseMode,
+} from './session/taskPause';
 import { TuiSessionController } from './session/sessionController';
 import {
   APPROVAL_FOOTER_ROWS,
@@ -278,7 +279,7 @@ let composerHistory = createComposerHistoryState();
 let timelineReplayPending = false;
 let timelineResizeReplayTimer: ReturnType<typeof setTimeout> | null = null;
 let timelineWidth = renderer.width;
-let delegationPauseMode: DelegationPauseMode = 'ordinary';
+let taskPauseMode: TaskPauseMode = 'ordinary';
 const controller = new TuiSessionController({
   connectionFactory: launchOptions.useDemoConnection
     ? createDemoConnectionFactory({
@@ -293,10 +294,6 @@ const controller = new TuiSessionController({
       }),
   onManualSnapshotApplied: () => {
     timelineReplayPending = true;
-  },
-  onRunInterrupted: () => {
-    delegationPauseMode = 'paused';
-    localNotice = 'task paused · Enter continues · Esc starts a new task';
   },
 });
 const interruptPendingNoticeController =
@@ -440,10 +437,10 @@ const unsubscribe = controller.subscribe((state) => {
   syncOverlayLoading();
   if (state.session.sessionId !== focusedSessionId) {
     focusedSessionId = state.session.sessionId;
-    delegationPauseMode = 'ordinary';
+    taskPauseMode = 'ordinary';
   }
-  delegationPauseMode = syncDelegationPauseMode(
-    delegationPauseMode,
+  taskPauseMode = syncTaskPauseMode(
+    taskPauseMode,
     state.session,
   );
   syncApprovalFromSession();
@@ -626,12 +623,14 @@ renderer.keyInput.on('keypress', (key) => {
   if (
     owner.type === 'composer'
     && key.name === 'escape'
-    && isDelegationPaused(delegationPauseMode)
+    && !controller.getState().session.activeRun
+    && (isTaskPaused(taskPauseMode) || (!controller.getState().session.pendingInterrupt
+      && hasUnfinishedTask(controller.getState().session)))
   ) {
     key.preventDefault();
     key.stopPropagation();
-    delegationPauseMode = leaveDelegationPauseMode(delegationPauseMode);
-    localNotice = 'paused task left · next message starts a new task';
+    taskPauseMode = leaveTaskPauseMode(taskPauseMode);
+    localNotice = 'task left · next message starts a new task';
     syncComposerModeUi();
     refreshStatus();
     return;
@@ -777,7 +776,7 @@ function syncComposerModeUi() {
     controller.getState().session,
     composerMode,
     {
-      pausedDelegation: isDelegationPaused(delegationPauseMode),
+      pausedTask: isTaskPaused(taskPauseMode),
     },
   );
   refreshHeader();
@@ -1665,8 +1664,8 @@ function submitComposerInput(input = composer.plainText) {
 
   switch (intent.type) {
     case 'none':
-      if (resumesPausedDelegationOnEmptySubmit(
-        delegationPauseMode,
+      if (resumesPausedTaskOnEmptySubmit(
+        taskPauseMode,
         input,
         attachments.length,
       )) {
@@ -1772,9 +1771,9 @@ function copyLatestAssistantReply() {
 }
 
 function submitChatInput(text: string) {
-  const result = isDelegationPaused(delegationPauseMode)
-    ? controller.continueActiveDelegation(text, attachments)
-    : controller.submitChat(text, attachments);
+  const result = isTaskPaused(taskPauseMode)
+    ? controller.continuePausedTask(text, attachments)
+    : controller.submitChat(text, attachments, taskPauseMode === 'leaving' ? 'supersede_active' : undefined);
   if (result.ok) {
     if (text.trim() || attachments.length > 0) {
       composerHistory = recordComposerHistoryEntry(composerHistory, text);

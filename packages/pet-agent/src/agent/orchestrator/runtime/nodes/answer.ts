@@ -4,15 +4,13 @@ import { setAgentMessageMetadata, stampAgentMessageCreatedAt } from '../../../me
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import { getInvokeOptions, readRunIterationLimit } from '../config';
-import { DEFAULT_ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
+import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
 /** Project the supplied reply once; semantic decisions already belong to Supervisor. */
 export function createAnswerNode(config: OrchestratorConfig) {
   return async (state: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
     const incompatible = state.runRuntimeFailure === 'checkpoint_incompatible';
-    const limit = getInvokeOptions(runnableConfig).maxRunIterations
-      ?? readRunIterationLimit(config.maxRunIterations) ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
+    const limit = ORCHESTRATOR_MAX_ITERATIONS;
     const reply = incompatible
       ? '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。'
       : state.runSupervisorReply

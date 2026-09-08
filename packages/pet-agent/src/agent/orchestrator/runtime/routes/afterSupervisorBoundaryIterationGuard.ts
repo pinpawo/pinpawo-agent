@@ -5,21 +5,17 @@ import {
   runIterationLimitGuard,
 } from '../../guardDefinitions';
 import type { OrchestratorStateType } from '../../state';
-import { getInvokeOptions } from '../config';
+import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 
-export function createAfterSupervisorBoundaryIterationGuard(params: {
-  orchestratorMaxIterations: number;
-}) {
+export function createAfterSupervisorBoundaryIterationGuard() {
   return function afterSupervisorBoundaryIterationGuard(
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) {
-    const invokeOptions = getInvokeOptions(runnableConfig);
-    const runIterationLimit = invokeOptions.maxRunIterations ?? params.orchestratorMaxIterations;
     const outcome = evaluateGuard(runIterationLimitGuard, {
       state,
-      config: { runIterationLimit },
+      config: { runIterationLimit: ORCHESTRATOR_MAX_ITERATIONS },
       position: ORCHESTRATOR_GUARD_POSITION.SUPERVISOR_BOUNDARY_ITERATION,
     }, {
       emit: guardDecisionEmitter(runnableConfig),

@@ -193,6 +193,24 @@ from canonical facts such as the active delegation, remaining plan, accepted
 Announces, and normalized goal. It does not resume the previous Supervisor working
 history, search attempts, or command replay cache.
 
+A review-origin `pause_task` is a real LangGraph interrupt at root `pauseGate`.
+Continuing that interrupt re-enters the same pending delegation directly, with
+optional guidance added to main messages; it does not require a Supervisor
+decision before execution. The legacy `resume_active` request over this explicit
+pause follows the same path. Its input preserves the existing pause marker until
+Prepare consumes and clears it, then routes directly to Capability. Ordinary
+fresh user supplements without this pause still go through Supervisor, including
+supplements to a pending delegation without result evidence. Prepare uses a
+Command for exactly one destination, so direct pause recovery does not also run
+the normal context-preparation route. Supervisor observes the next actual
+delivery at Boundary and reconstructs its session from the continuation snapshot.
+
+The TUI treats only an authoritative `pause_task` interrupt as paused. A normal
+Supervisor question with an unfinished projected plan remains ordinary chat;
+the next text reply uses the existing `resume_active` transition. Esc may still
+select `supersede_active` for the next message. An unfinished plan alone does
+not enable empty-Enter pause recovery or create an interrupt.
+
 Terminal Supervisor, Capability, and Answer exceptions follow the same lifetime
 rule. Root first checkpoints a continuation snapshot for resumable work and
 clears the run-scoped Supervisor session, then rethrows the failure. An exception

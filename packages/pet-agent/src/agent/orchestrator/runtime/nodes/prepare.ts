@@ -1,4 +1,5 @@
 import { HumanMessage } from '@langchain/core/messages';
+import { Command } from '@langchain/langgraph';
 import { getAgentMessageLane, getAgentMessageRunId, setAgentMessageMetadata } from '../../../messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { evaluateGuard } from '../../../../guards';
@@ -13,6 +14,7 @@ import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
 import { applyActiveDelegationTransition } from '../activeDelegationTransition';
+import { afterPrepare } from '../routes/afterPrepare';
 
 export function createPrepareNode() {
   return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -29,7 +31,17 @@ export function createPrepareNode() {
     const messages = state.messages.filter((message) => HumanMessage.isInstance(message)
       && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId)
       .map((message) => setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
-    return { ...update, messages };
+    if (state.taskPauseInterrupt && state.runActiveDelegationTransition === 'resume_active') {
+      // A legacy continue request over a real pause mirrors pauseGate resume:
+      // apply guidance to the same delegation, without a new Supervisor decision.
+      const resumed = { ...state, ...update };
+      return new Command({
+        update: { ...update, messages, taskPauseInterrupt: null },
+        goto: resumed.runNextDelegation?.id === resumed.taskActiveDelegation?.id
+          && resumed.runNextDelegation ? 'capability' : 'answer',
+      });
+    }
+    return new Command({ update: { ...update, messages }, goto: afterPrepare({ ...state, ...update }) });
   };
 }
 

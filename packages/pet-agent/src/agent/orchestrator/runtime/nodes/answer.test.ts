@@ -4,6 +4,7 @@ import type { AgentModels } from '../../../../types/agent';
 import { buildRunStateReset, type OrchestratorStateType } from '../../state';
 import { createRunSupervisorSession } from '../../runSupervisor/session';
 import { createAnswerNode } from './answer';
+import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
 const models = { act: { invoke: () => { throw new Error('Terminal must not invoke a model'); } } } as unknown as AgentModels;
 function state(patch: Partial<OrchestratorStateType> = {}): OrchestratorStateType {
@@ -40,7 +41,7 @@ test('terminal does not fabricate a reply for a missing proposal and empty text'
 });
 
 test('root iteration stop is rendered deterministically', async () => {
-  const result = await createAnswerNode({ models, maxRunIterations: 2 })(state({ runIterationCount: 2 }));
+  const result = await createAnswerNode({ models })(state({ runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }));
   assert.equal(result.messages.length, 1);
   assert.equal(result.runIterationCount, 0);
 });

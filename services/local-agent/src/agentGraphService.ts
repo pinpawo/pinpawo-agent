@@ -4,9 +4,11 @@ import {
   buildAgentRunnableConfig,
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
+  readPauseTaskInterrupt,
   type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
+  type PauseTaskInterruptPayload,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -56,6 +58,7 @@ export type LocalAgentGraphPendingInterrupt = {
 export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
   pendingInterrupt: LocalAgentGraphPendingInterrupt | null;
+  pauseTaskInterrupt: PauseTaskInterruptPayload | null;
   hasPendingContinuation: boolean;
   currentPlan: AgentPlan | null;
 };
@@ -135,20 +138,8 @@ function projectPendingInterrupt(snapshot: unknown): LocalAgentGraphPendingInter
   };
 }
 
+/** Graphs use current Host dependencies; durable state belongs to the checkpointer. */
 export class LocalAgentGraphService {
-  private readonly graphs = new Map<string, OrchestratorGraph>();
-
-  private getGraph(setup: AgentChannelSetup) {
-    const cached = this.graphs.get(setup.graphKey);
-    if (cached) {
-      return cached;
-    }
-
-    const graph = createOrchestratorGraph(setup.graphConfig);
-    this.graphs.set(setup.graphKey, graph);
-    return graph;
-  }
-
   async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
     const state = await this.invokeState(setup);
     const messages = state.messages ?? [];
@@ -167,9 +158,9 @@ export class LocalAgentGraphService {
     setup: AgentChannelSetup,
     inputOverride?: unknown,
   ): Promise<LocalAgentGraphEventStream> {
-    const graph = this.getGraph(setup);
+    const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
-      sessionId: setup.input.threadId ?? setup.graphKey,
+      ...(setup.input.threadId ? { sessionId: setup.input.threadId } : {}),
       ...(setup.traceUserId ? { userId: setup.traceUserId } : {}),
       metadata: {
         interface: setup.interfaceContext?.kind ?? 'headless',
@@ -188,7 +179,7 @@ export class LocalAgentGraphService {
   }
 
   async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
-    const graph = this.getGraph(setup);
+    const graph = createOrchestratorGraph(setup.graphConfig);
     return await graph.invoke(
       inputOverride === undefined
         ? buildOrchestratorTurnInput(setup.input.messages, setup.input)
@@ -198,7 +189,7 @@ export class LocalAgentGraphService {
   }
 
   private async getRawState(setup: AgentChannelSetup) {
-    const graph = this.getGraph(setup);
+    const graph = createOrchestratorGraph(setup.graphConfig);
     return graph.getState({
       configurable: buildAgentGraphConfigurable(setup),
     });
@@ -210,6 +201,7 @@ export class LocalAgentGraphService {
     return {
       messages: readSnapshotMessages(snapshot),
       pendingInterrupt: projectPendingInterrupt(snapshot),
+      pauseTaskInterrupt: readPauseTaskInterrupt(snapshot),
       hasPendingContinuation: hasPendingContinuation(snapshot),
       currentPlan: projectCurrentPlan(values),
     };
@@ -220,7 +212,7 @@ export class LocalAgentGraphService {
     values: Partial<OrchestratorStateType>,
     asNode?: string,
   ) {
-    const graph = this.getGraph(setup);
+    const graph = createOrchestratorGraph(setup.graphConfig);
     return graph.updateState(
       {
         configurable: buildAgentGraphConfigurable(setup),

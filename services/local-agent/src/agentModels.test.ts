@@ -21,7 +21,7 @@ function readInvocationParams(model: unknown): Record<string, unknown> {
   return invocationParams.call(model);
 }
 
-test('models use the provider temperature default when no override is configured', () => {
+test('model roles leave temperature to the provider', () => {
   const models = buildLocalAgentModels({
     apiKey: 'test-key',
     baseUrl: 'https://api.kimi.com/coding/v1',
@@ -35,22 +35,6 @@ test('models use the provider temperature default when no override is configured
   assert.equal(readTemperature(models.answer), undefined);
   assert.equal(readTemperature(models.observe), undefined);
   assert.equal(readTemperature(models.subagent), undefined);
-});
-
-test('an explicit temperature override applies consistently to every role', () => {
-  const models = buildLocalAgentModels({
-    apiKey: 'test-key',
-    baseUrl: 'https://example.test/v1',
-    model: 'custom-model',
-    observeModel: 'custom-model',
-    temperature: 0.2,
-  });
-
-  assert.equal(readTemperature(models.act), 0.2);
-  assert.equal(readTemperature(models.decision), 0.2);
-  assert.equal(readTemperature(models.answer), 0.2);
-  assert.equal(readTemperature(models.observe), 0.2);
-  assert.equal(readTemperature(models.subagent), 0.2);
 });
 
 test('every runtime role leaves thinking and effort to the provider', () => {

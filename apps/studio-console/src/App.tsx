@@ -1,4 +1,4 @@
-import {
+import React, {
   type FormEvent,
   type KeyboardEvent,
   useEffect,
@@ -15,9 +15,10 @@ type Pet = { petId: string; name: string; role?: string | null; serviceSummary?:
 type Task = {
   taskId: string; assigneeId?: string; title: string; detail: string;
   status: 'assigned' | 'waiting' | 'doing' | 'todo' | 'blocked' | 'done';
-  deps: string[]; note?: string; createdAt: string; updatedAt: string;
+  note?: string; createdAt: string; updatedAt: string;
 };
-type KanbanSnapshot = { tasks: Task[]; };
+type Relationship = { sourceTaskId: string; targetTaskId: string; type: 'related' };
+type KanbanSnapshot = { tasks: Task[]; relationships: Relationship[] };
 type Schedule = {
   scheduleId: string; petId: string; request: string; runAt: string;
   status: 'scheduled' | 'dispatching' | 'dispatched' | 'failed' | 'cancelled'; note?: string;
@@ -192,6 +193,7 @@ export function App() {
   const [notice, setNotice] = useState(storedToken ? 'Connecting…' : 'Enter the Studio HTTP token, then connect.');
   const [pets, setPets] = useState<Pet[]>([]);
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
+  const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
   const [notices, setNotices] = useState<Resource<Notice[]>>(empty);
   const [triggers, setTriggers] = useState<Resource<{ triggers: TriggerDefinition[]; deliveries: Delivery[] }>>(empty);
@@ -256,6 +258,7 @@ export function App() {
       setDispatchPet((current) => current || nextPets[0]?.petId || '');
       setSchedulePet((current) => current || nextPets[0]?.petId || '');
       setTasks({ ...kanban, value: kanban.value?.tasks ?? null });
+      setRelationships(kanban.value?.relationships ?? []);
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
       setNotices({ ...notice, value: notice.value?.notices ?? null });
       setTriggers(trigger);
@@ -574,6 +577,7 @@ export function App() {
             onAssign={(task) => openDispatch(task)}
             assigningTaskId={assigningTaskId}
             tasks={tasks.value}
+            relationships={relationships}
           />
           <History title="KANBAN HISTORY" events={kanbanHistory} />
         </> : unavailable(tasks, 'Kanban'))}
@@ -699,16 +703,18 @@ export function App() {
   );
 }
 
-function KanbanFlow({
+export function KanbanFlow({
   pets,
   onAssign,
   assigningTaskId,
   tasks,
+  relationships,
 }: {
   pets: Pet[];
   onAssign: (task: Task) => void;
   assigningTaskId: string;
   tasks: Task[];
+  relationships: Relationship[];
 }) {
   const tasksById = new Map(tasks.map((task) => [task.taskId, task]));
   const groups = [
@@ -735,14 +741,12 @@ function KanbanFlow({
     {groups.map((group) => group.tasks.length > 0 && <section className="task-group" key={group.id}>
       <div className="task-group-title"><span>{group.label}</span><b>{group.tasks.length}</b></div>
       <div className="task-list">{group.tasks.map((task) => {
-        const incompleteDependencies = task.deps.filter((dependencyId) => (
-          tasksById.get(dependencyId)?.status !== 'done'
+        const relatedIds = relationships.flatMap(({ sourceTaskId, targetTaskId }) => (
+          sourceTaskId === task.taskId ? [targetTaskId] : targetTaskId === task.taskId ? [sourceTaskId] : []
         ));
-        const assignable = task.status === 'todo' && incompleteDependencies.length === 0;
+        const assignable = task.status === 'todo';
         const assigning = assigningTaskId === task.taskId;
-        const visibleStatus = task.status === 'todo' && incompleteDependencies.length > 0
-          ? 'waiting deps'
-          : task.status;
+        const visibleStatus = task.status;
         return <details className="task-card" key={task.taskId}>
           <summary className="task-summary">
             <div className="task-card-head">
@@ -754,13 +758,12 @@ function KanbanFlow({
           </summary>
           <div className="task-expanded">
             <p className="task-detail">{task.detail}</p>
-            {task.deps.length > 0 && <div className="task-dependencies">
-              <span>DEPENDS ON</span>
-              {task.deps.map((dependencyId) => <code
-                className={tasksById.get(dependencyId)?.status === 'done' ? 'complete' : ''}
-                key={dependencyId}
-                title={dependencyId}
-              >{dependencyId.slice(0, 8)}</code>)}
+            {relatedIds.length > 0 && <div className="task-dependencies">
+              <span>RELATED TASKS</span>
+              {relatedIds.map((relatedId) => <code
+                key={relatedId}
+                title={relatedId}
+              >{tasksById.get(relatedId)?.title ?? relatedId.slice(0, 8)}</code>)}
             </div>}
             {task.note && <article className="task-note">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.note}</ReactMarkdown>
@@ -768,7 +771,7 @@ function KanbanFlow({
             <div className="task-expanded-footer">
               <time>updated {new Date(task.updatedAt).toLocaleString()}</time>
               {task.status === 'todo' && <label className="task-assignment">
-                <button className="task-action" disabled={!assignable || pets.length === 0 || Boolean(assigningTaskId)} onClick={() => onAssign(task)} title={assignable ? 'Choose a Pet and add optional guidance' : `Waiting for: ${incompleteDependencies.join(', ')}`} type="button">ASSIGN</button>
+                <button className="task-action" disabled={!assignable || pets.length === 0 || Boolean(assigningTaskId)} onClick={() => onAssign(task)} title="Choose a Pet and add optional guidance" type="button">ASSIGN</button>
                 {assigning && <span>assigning…</span>}
               </label>}
             </div>

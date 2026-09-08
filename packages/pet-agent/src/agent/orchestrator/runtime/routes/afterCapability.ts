@@ -1,12 +1,12 @@
 import type { OrchestratorStateType } from '../../state';
 
 /**
- * A task pause ends the root run at the capability checkpoint. The
- * active delegation remains pending and is only re-entered by an explicit
- * resume_active transition on a later request.
+ * A task pause suspends the root at pauseGate after the capability checkpoint.
+ * Its pending delegation resumes through the interrupt or a legacy
+ * resume_active turn; a delivered result goes to Supervisor Boundary.
  */
 export function afterCapability(state: OrchestratorStateType) {
   return state.taskActiveDelegation?.status === 'pending'
-    ? 'end'
+    ? 'pauseGate'
     : 'supervisorBoundaryIterationGuard';
 }

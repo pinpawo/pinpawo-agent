@@ -73,8 +73,19 @@ export type CreateStudioHttpPluginOptions = {
   heartbeatIntervalMs?: number;
 };
 
+/**
+ * The HTTP surface forwards dispatch and Pet listing and subscribes to the
+ * event bus. Narrowing the start parameter keeps out what it must not reach,
+ * such as dispatch-queue observation, which belongs to domain Plugins.
+ */
+export type StudioHttpPluginContext = Pick<
+  StudioPluginContext,
+  'dispatch' | 'listPets' | 'subscribe' | 'hooks'
+>;
+
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
+  start: (context: StudioHttpPluginContext) => Promise<void>;
   stop: () => Promise<void>;
 };
 
@@ -307,7 +318,7 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
     'Studio HTTP Plugin heartbeatIntervalMs',
   );
 
-  let context: StudioPluginContext | undefined;
+  let context: StudioHttpPluginContext | undefined;
   let server: Server | undefined;
   let currentAddress: StudioHttpPluginAddress | null = null;
   let unsubscribeEvents: (() => void) | undefined;

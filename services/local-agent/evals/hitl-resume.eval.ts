@@ -290,7 +290,6 @@ function createFakeGraphService(params: {
 
 function buildFakeSetup() {
   return {
-    graphKey: FAKE_THREAD_ID,
     graphConfig: { contextWindowTokens: 4096 },
     input: {
       messages: [new HumanMessage('start')],
@@ -318,7 +317,6 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,
     isCurrent: () => true,
-    finishInterrupted: () => {},
     emitEvent: (event) => firstTurnEvents.push(event),
     emitToolEvent: () => {},
   });
@@ -377,7 +375,6 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,
     isCurrent: () => true,
-    finishInterrupted: () => {},
     emitEvent: (event) => secondTurnEvents.push(event),
     emitToolEvent: () => {},
   });

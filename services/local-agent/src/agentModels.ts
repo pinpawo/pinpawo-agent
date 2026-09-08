@@ -20,9 +20,7 @@ export function buildLocalAgentModels(
 
     return new ChatOpenAI({
       model,
-      ...(typeof llmConfig.temperature === 'number'
-        ? { temperature: llmConfig.temperature }
-        : {}),
+      // Leave temperature to the provider; thinking and reasoning effort also use provider defaults.
       timeout: llmConfig.timeoutMs ?? 45000,
       maxRetries: llmConfig.maxRetries ?? 2,
       apiKey: llmConfig.apiKey,

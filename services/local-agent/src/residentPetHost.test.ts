@@ -276,6 +276,9 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     capabilityArtifactStore: testArtifactStore,
     checkpointer,
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, `${petId}-sessions.json`),
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup }) => {
@@ -378,6 +381,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, 'pet-events-sessions.json'),
     graphService: graphService as never,
     runAgentTurn: async ({ request, setup, emitEvent }) => {
@@ -554,6 +560,9 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
     capabilityArtifactStore: testArtifactStore,
     checkpointer: new FileSaver(runtimeConfig.checkpointPath),
     runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
     sessionStatePath: join(runtimeConfig.stateRoot, 'late-observer-sessions.json'),
     graphService: graphService as never,
     runAgentTurn: async ({ request, emitEvent }) => {
@@ -624,5 +633,117 @@ test('a TUI attaching mid-dispatch snapshots the resident run and projects later
   } finally {
     releaseTurn.resolve();
     await host.close();
+  }
+});
+
+test('resident policy updates reach conversation and dispatch without changing another Host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-host-config-'));
+  const seen: Array<{ petId: string; mode: string | undefined; safetyLevel: unknown; workdir: unknown }> = [];
+  const persisted: unknown[] = [];
+  const makeHost = async (petId: string) => {
+    const runtimeConfig = buildLocalAgentRuntimeConfig(join(root, petId));
+    return createResidentPetHost({
+      petId, petName: petId,
+      modelProfiles: createTestModelProfiles(),
+      runtimeConfig,
+      globalReviewPolicyMode: 'full_access',
+      autoAuthorizationSafetyLevel: 'relaxed',
+      capabilityRegistryBackend: 'memory',
+      capabilities: [],
+      toolkitInventory: new HostToolkitInventoryStore(),
+      capabilityArtifactStore: testArtifactStore,
+      checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+      sessionStatePath: runtimeConfig.tuiSessionPath,
+      persistGlobalReviewPolicyMode: (mode, safetyLevel) => { persisted.push({ mode, safetyLevel }); },
+      graphService: {
+        readThreadState: async () => ({ messages: [], pendingInterrupt: null, hasPendingContinuation: false, currentPlan: null }),
+      } as never,
+      runAgentTurn: async ({ setup }) => {
+        seen.push({ petId, mode: setup.input.globalReviewPolicy?.mode,
+          safetyLevel: setup.input.globalReviewPolicy && 'safetyLevel' in setup.input.globalReviewPolicy
+            ? setup.input.globalReviewPolicy.safetyLevel : undefined,
+          workdir: setup.input.context?.workdir });
+        return { status: 'completed', reply: 'done' };
+      },
+    });
+  };
+  const hostA = await makeHost('a');
+  const hostB = await makeHost('b');
+  const connection = peer([]);
+  try {
+    await hostA.interaction.connect(connection);
+    await hostA.interaction.handle(connection, {
+      type: 'runtime_config.update', requestId: 'policy',
+      globalReviewPolicyMode: 'require_authorization', autoAuthorizationSafetyLevel: 'strict',
+    });
+    await hostA.interaction.handle(connection, {
+      type: 'chat_request', requestId: 'chat', message: 'from conversation',
+    });
+    hostA.resident.dispatch.dispatch({ request: 'from dispatch' });
+    hostB.resident.dispatch.dispatch({ request: 'from other Host' });
+    await waitFor(() => seen.length === 3, 'both dispatches must reach the shared run boundary');
+    assert.deepEqual(persisted, [{ mode: 'require_authorization', safetyLevel: 'strict' }]);
+    const a = seen.filter(entry => entry.petId === 'a');
+    assert.equal(a.length, 2);
+    for (const entry of a) {
+      assert.deepEqual(entry, { petId: 'a', mode: 'require_authorization', safetyLevel: 'strict', workdir: join(root, 'a') });
+    }
+    assert.deepEqual(seen.find(entry => entry.petId === 'b'), {
+      petId: 'b', mode: 'full_access', safetyLevel: 'relaxed', workdir: join(root, 'b'),
+    });
+  } finally {
+    await hostA.close();
+    await hostB.close();
+  }
+});
+
+test('an explicit task pause holds dispatch as waiting even when resumability reports nothing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  let paused = false;
+  // Resumability is deliberately reported as absent throughout. A Review-origin
+  // task pause ends the root run cleanly, so `next`/`tasks` are empty; only the
+  // Runtime-materialized payload says the Pet is paused.
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingInterrupt: null,
+      pauseTaskInterrupt: paused ? { kind: 'pause_task' as const } : null,
+      hasPendingContinuation: false,
+      currentPlan: null,
+    }),
+  };
+  const pet = await createResidentPetHost({
+    petId: 'pet-paused',
+    petName: 'Paused Pet',
+    modelProfiles: createTestModelProfiles(),
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilityRegistryBackend: 'memory',
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-paused-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async () => {
+      paused = true;
+      return { status: 'completed', reply: '' };
+    },
+  });
+
+  try {
+    assert.equal(pet.resident.dispatch.getQueueSnapshot().state, 'open');
+    pet.resident.dispatch.dispatch({ request: 'gets paused by a review' });
+    await waitFor(
+      () => pet.resident.dispatch.getQueueSnapshot().state === 'waiting',
+      'resident dispatch queue did not enter waiting for an explicit task pause',
+    );
+    // Not 'blocked': that state is the resumability guess and the error
+    // fallback, neither of which describes a healthy, explicit pause.
+    assert.equal(pet.resident.dispatch.getQueueSnapshot().state, 'waiting');
+  } finally {
+    await pet.close();
   }
 });

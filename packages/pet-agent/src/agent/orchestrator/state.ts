@@ -24,6 +24,7 @@ import type {
   RunSupervisorSessionState,
   RunTaskContinuation,
 } from './runSupervisor/session';
+import type { PauseTaskInterruptPayload } from './interrupt/pauseTaskInterrupt';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -92,6 +93,10 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 'supersede_active',
   }),
+  taskPauseInterrupt: Annotation<PauseTaskInterruptPayload | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   runId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
@@ -128,6 +133,7 @@ export type OrchestratorRunState = Pick<
   | 'runRuntimeFailure'
   | 'runTerminalError'
   | 'runActiveDelegationTransition'
+  | 'taskPauseInterrupt'
   | 'runId'
   | 'traceId'
 >;
@@ -152,6 +158,7 @@ export function buildRunStateReset(
     runTerminalError: null,
     runActiveDelegationTransition:
       options.activeDelegationTransition ?? 'supersede_active',
+    taskPauseInterrupt: null,
     runId: randomUUID().slice(0, 8),
     traceId: options.traceId ?? randomUUID(),
   };
@@ -168,7 +175,11 @@ export function buildOrchestratorRunInput(
   if (options.activeDelegationTransition === 'resume_active') {
     // Preserve an interrupted prior run's session until prepare can extract
     // only its canonical plan into a fresh-run continuation seed.
-    const { runSupervisorSession: _priorRunSupervisorSession, ...resumeReset } = reset;
+    const {
+      runSupervisorSession: _priorRunSupervisorSession,
+      taskPauseInterrupt: _priorTaskPauseInterrupt,
+      ...resumeReset
+    } = reset;
     return {
       messages,
       ...resumeReset,

@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import {
   AIMessage,
@@ -14,6 +15,7 @@ import {
 import {
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
+  readPauseTaskInterrupt,
   type ReviewResponse,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
@@ -99,10 +101,12 @@ export function createPersistentHostGraphService() {
   const graphs = new Map<string, ReturnType<typeof createGraph>>();
 
   const graphFor = (setup: AgentChannelSetup) => {
-    const cached = graphs.get(setup.graphKey);
+    const threadId = setup.input.threadId;
+    assert.ok(threadId, 'Host fixture requires a thread ID');
+    const cached = graphs.get(threadId);
     if (cached) return cached;
     const graph = createGraph(setup);
-    graphs.set(setup.graphKey, graph);
+    graphs.set(threadId, graph);
     return graph;
   };
 
@@ -140,6 +144,7 @@ export function createPersistentHostGraphService() {
           ? values.messages as BaseMessage[]
           : [],
         pendingInterrupt: readPendingReview(snapshot),
+        pauseTaskInterrupt: readPauseTaskInterrupt(snapshot),
         hasPendingContinuation: hasPendingContinuation(snapshot),
         currentPlan: null,
       };

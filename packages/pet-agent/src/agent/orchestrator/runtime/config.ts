@@ -19,7 +19,6 @@ export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorI
     registry,
     reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
     globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
-    maxRunIterations: readRunIterationLimit(cfg.maxRunIterations),
     allowedCapabilityNames: Array.isArray(
       (cfg as { allowedCapabilityNames?: unknown }).allowedCapabilityNames,
     )
@@ -129,13 +128,6 @@ function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilitie
     humanReview: record.humanReview,
     sessionAuthorization: record.sessionAuthorization,
   };
-}
-
-export function readRunIterationLimit(value: unknown): number | undefined {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    return undefined;
-  }
-  return value;
 }
 
 export function readSubagentContextWindowTokens(config: OrchestratorConfig): number | undefined {

@@ -41,6 +41,7 @@ import {
   type LocalAgentRuntimeConfig,
 } from './runtimeConfig';
 import { getConfig } from './config';
+import { resolveHostExecutionConfig, type HostExecutionConfig } from './hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
 import {
   createBashToolkit,
@@ -114,6 +115,7 @@ function assertInitOptionsCompatible(
 
 export class HostCapabilityAssembly {
   private readonly runtimeConfig: LocalAgentRuntimeConfig;
+  private readonly executionConfig: HostExecutionConfig;
   private readonly sourceId: string;
   private actorId: string | null = null;
   private actorName: string | null = null;
@@ -131,6 +133,7 @@ export class HostCapabilityAssembly {
 
   constructor(options: HostCapabilityAssemblyOptions) {
     this.runtimeConfig = options.runtimeConfig;
+    this.executionConfig = resolveHostExecutionConfig(options.runtimeConfig);
     this.sourceId = options.sourceId;
     const browserSelected = options.includeBrowser
       ?? loadStoredConfig().capabilities?.browser !== false;
@@ -234,6 +237,10 @@ export class HostCapabilityAssembly {
     ]);
     this.actorId = LOCAL_ACTOR_ID;
     this.actorName = LOCAL_ACTOR_NAME;
+  }
+
+  getExecutionConfig(): HostExecutionConfig {
+    return this.executionConfig;
   }
 
   getRuntimeConfig(): LocalAgentRuntimeConfig {

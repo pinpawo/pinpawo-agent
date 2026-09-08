@@ -7,11 +7,11 @@ import type {
   StudioEvent,
   StudioEventHandler,
   StudioPetRegistration,
-  StudioPluginContext,
 } from '@pinpawo/studio';
 
 import {
   createStudioHttpPlugin,
+  type StudioHttpPluginContext,
   type StudioHttpRoutesHook,
 } from './studioHttpPlugin';
 
@@ -31,18 +31,16 @@ function createContext(options: {
 } = {}) {
   const eventHandlers = new Set<StudioEventHandler>();
   const requests: StudioDispatchRequest[] = [];
-  const context: StudioPluginContext = {
+  const context: StudioHttpPluginContext = {
     dispatch: async (request) => {
       requests.push(request);
       return options.dispatch ? options.dispatch(request) : receipt(request);
     },
-    notify: () => undefined,
     subscribe: (handler) => {
       eventHandlers.add(handler);
       return () => eventHandlers.delete(handler);
     },
     listPets: () => options.pets ?? [],
-    listDispatchQueues: () => [],
     hooks: {
       expose: () => () => undefined,
       contribute: () => () => undefined,

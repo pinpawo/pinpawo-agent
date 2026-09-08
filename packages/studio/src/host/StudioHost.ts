@@ -155,7 +155,7 @@ export class StudioHost {
         toolkitRuntimeManager: this.caps.getToolkitRuntimeManager(),
         capabilityArtifactStore: this.caps.getCapabilityArtifactStore(),
         checkpoint: this.getCheckpointer(),
-        runtimeConfig,
+        ...this.caps.getExecutionConfig(),
         deferPluginActivation: true,
       });
     } catch (error) {

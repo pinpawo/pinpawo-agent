@@ -115,7 +115,6 @@ export type HumanReviewResolutionSource =
       interactionId: string;
       selectedOptionId: string;
       decisionCount: number;
-      interruptRun?: true;
     }
   | {
       type: 'review.cancel';
@@ -192,7 +191,6 @@ export async function resolvePendingHumanReviewInterrupt<
   }
   let resume: HumanReviewResume;
   let source: HumanReviewResolutionSource;
-  let interruptRun = false;
   if (message.type === 'human_review_response') {
     let decisions: ReviewResponse[];
     try {
@@ -212,12 +210,6 @@ export async function resolvePendingHumanReviewInterrupt<
       });
       return;
     }
-    interruptRun = decisions.some((decision, index) => {
-      const review = route.reviews[index];
-      return review
-        ? resolveHumanReviewDecision({ reviewSpec: review }, decision).decision.type === 'reject'
-        : false;
-    });
     if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
       return;
     }
@@ -228,7 +220,6 @@ export async function resolvePendingHumanReviewInterrupt<
       interactionId: finalDecision.reviewId,
       selectedOptionId: finalDecision.selectedOptionId,
       decisionCount: decisions.length,
-      ...(interruptRun ? { interruptRun: true } : {}),
     };
   } else {
     if (options.acceptRoute && !(await options.acceptRoute(route, message))) {

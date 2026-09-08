@@ -19,6 +19,15 @@ function createFakePeer(
   };
 }
 
+function interruptedRuns(sent: unknown[]): string[] {
+  return sent.flatMap((item) => {
+    const envelope = item as { type?: string; event?: { type?: string; requestId?: string } };
+    return envelope.type === 'event' && envelope.event?.type === 'run.interrupted'
+      ? [envelope.event.requestId ?? '']
+      : [];
+  });
+}
+
 function humanReviewResponse(
   interactionId: string,
   selectedOptionId = 'approve',
@@ -52,7 +61,6 @@ test('local server forwards structured local attachments to the chat session', a
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -118,7 +126,6 @@ test('replacement request waits for the previous thread invocation to settle', a
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -177,17 +184,17 @@ test('replacement request waits for the previous thread invocation to settle', a
   releaseFirst();
   await Promise.all([oldRun, replacementRun]);
   assert.equal(replacementStarted, true);
-  assert.deepEqual(controls, [{
-    type: 'interrupted',
-    requestId: 'req-old',
-    message: 'interrupted',
-  }]);
+  // A superseded run reports once through its runtime event; there is no
+  // separate control message for a finished interruption.
+  assert.deepEqual(controls, []);
+  assert.deepEqual(interruptedRuns(sent), ['req-old']);
 });
 
 test('run interrupt supersedes an unstarted response and cancels through the pending checkpoint', async () => {
   const controls: unknown[] = [];
+  const sent: unknown[] = [];
   let runCount = 0;
-  const fakePeer = createFakePeer();
+  const fakePeer = createFakePeer(sent);
   const inflightRequests = new InflightRequestController<LocalServerPeer>({
     emitOperation: () => undefined,
     sendControl: (_peer, message) => {
@@ -199,6 +206,7 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
+      refreshActiveSessionSummary: async () => {},
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-1',
@@ -210,7 +218,6 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -219,11 +226,8 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
     loadContext: async () => ({} as never),
     runChat: async (options) => {
       runCount += 1;
-      assert.equal(options.setup.input.signal?.aborted, false);
-      options.onResumeCheckpointed?.({ canInterrupt: true });
-      assert.equal(options.setup.input.signal?.aborted, true);
-      options.finishInterrupted();
-      return { status: 'interrupted' };
+      // A review cancellation settles into a task pause; the handler finalizes it.
+      return { status: 'paused' };
     },
   });
   const resolution = handler.handleHumanReviewResponse(
@@ -239,84 +243,23 @@ test('run interrupt supersedes an unstarted response and cancels through the pen
   await resolution;
 
   assert.equal(runCount, 1);
-  assert.deepEqual(controls, [
-    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
-    { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
-    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
-  ]);
-});
-
-test('review cancellation automatically interrupts at the first resolved checkpoint', async () => {
-  const controls: unknown[] = [];
-  const fakePeer = createFakePeer();
-  const inflightRequests = new InflightRequestController<LocalServerPeer>({
-    emitOperation: () => undefined,
-    sendControl: (_peer, message) => {
-      controls.push(message);
-    },
-  });
-  const handler = new LocalServerChatHandler({
-    graphService: {} as never,
-    tuiSessions: {
-      getActiveSessionId: () => 'sess-active',
-      getChatThreadId: () => 'thread-x',
-      readActivePendingInterrupt: async () => ({
-        sessionId: 'sess-active',
-        interruptId: 'interrupt-1',
-        reviews: [{
-          id: 'review-current',
-          schemaVersion: 1,
-          view: { kind: 'plain', body: 'Approve?' },
-          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
-        }],
-      }),
-      buildChatSetup: () => ({
-        graphKey: 'test',
-        graphConfig: {},
-        input: { messages: [] },
-      }),
-    } as never,
-    inflightRequests,
-    loadContext: async () => ({} as never),
-    runChat: async (options) => {
-      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
-      assert.deepEqual(options.request, {
-        kind: 'resume',
-        requestId: 'req-1',
-        resume: {
-          'interrupt-1': {
-            action: 'interrupt_run',
-          },
-        },
-      });
-      assert.equal(options.setup.input.signal?.aborted, false);
-      options.onResumeCheckpointed?.({ canInterrupt: true });
-      assert.equal(options.setup.input.signal?.aborted, true);
-      options.finishInterrupted();
-      return { status: 'interrupted' };
-    },
-  });
-  await handler.handleReviewCancel(fakePeer, {
-    type: 'review.cancel',
-    requestId: 'req-1',
-    interruptId: 'interrupt-1',
-  }, { actorId: 'pet-1' } as never);
-
-  assert.deepEqual(controls, [
-    { type: 'interrupting', requestId: 'req-1', message: 'interrupting' },
-    { type: 'interrupted', requestId: 'req-1', message: 'interrupted' },
-  ]);
+  assert.deepEqual(controls, []);
+  // Both invocations carry the client's requestId: the unstarted response that
+  // was superseded, and the cancellation that settled into a task pause.
+  assert.deepEqual(interruptedRuns(sent), ['req-1', 'req-1']);
 });
 
 test('run interrupt cancels a review that became pending before the client observed it', async () => {
   const controls: unknown[] = [];
   const requests: unknown[] = [];
-  const fakePeer = createFakePeer();
+  const sent: unknown[] = [];
+  const fakePeer = createFakePeer(sent);
   const handler = new LocalServerChatHandler({
     graphService: {} as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',
       getChatThreadId: () => 'thread-x',
+      refreshActiveSessionSummary: async () => {},
       readActivePendingInterrupt: async () => ({
         sessionId: 'sess-active',
         interruptId: 'interrupt-race',
@@ -328,7 +271,6 @@ test('run interrupt cancels a review that became pending before the client obser
         }],
       }),
       buildChatSetup: () => ({
-        graphKey: 'test',
         graphConfig: {},
         input: { messages: [] },
       }),
@@ -340,10 +282,8 @@ test('run interrupt cancels a review that became pending before the client obser
     loadContext: async () => ({} as never),
     runChat: async (options) => {
       requests.push(options.request);
-      assert.equal(options.interruptOnSettledResumeCheckpoint, true);
-      options.onResumeCheckpointed?.({ canInterrupt: true });
-      options.finishInterrupted();
-      return { status: 'interrupted' };
+      // A review cancellation settles into a task pause; the handler finalizes it.
+      return { status: 'paused' };
     },
   });
   // The TUI chose run.interrupt from stale thinking state, but the active
@@ -362,10 +302,8 @@ test('run interrupt cancels a review that became pending before the client obser
       'interrupt-race': { action: 'interrupt_run' },
     },
   }]);
-  assert.deepEqual(controls, [
-    { type: 'interrupting', requestId: 'req-race', message: 'interrupting' },
-    { type: 'interrupted', requestId: 'req-race', message: 'interrupted' },
-  ]);
+  assert.deepEqual(controls, []);
+  assert.deepEqual(interruptedRuns(sent), ['req-race']);
 });
 
 test('handleHumanReviewResponse rejects a stale canonical interactionId before forwarding', async () => {
@@ -1171,4 +1109,53 @@ test('handleHumanReviewResponse does not validate authorization effect context i
   assert.equal(handleChatCalls.length, 1);
   assert.equal(updateStateCalls.length, 0);
   assert.equal(sentEvents.length, 0);
+});
+
+test('a review resolution that settles into a task pause is finalized as interrupted', async () => {
+  const controls: unknown[] = [];
+  const sent: unknown[] = [];
+  const fakePeer = createFakePeer(sent);
+  const handler = new LocalServerChatHandler({
+    graphService: {} as never,
+    tuiSessions: {
+      getActiveSessionId: () => 'sess-active',
+      getChatThreadId: () => 'thread-x',
+      refreshActiveSessionSummary: async () => {},
+      readActivePendingInterrupt: async () => ({
+        sessionId: 'sess-active',
+        interruptId: 'interrupt-1',
+        reviews: [{
+          id: 'review-1',
+          schemaVersion: 1,
+          view: { kind: 'plain', body: 'Approve?' },
+          options: [
+            { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
+            { id: 'reject', label: 'Reject', decision: { type: 'reject' } },
+          ],
+        }],
+      }),
+      buildChatSetup: () => ({
+        graphConfig: {},
+        input: { messages: [] },
+      }),
+    } as never,
+    inflightRequests: new InflightRequestController<LocalServerPeer>({
+      emitOperation: () => undefined,
+      sendControl: (_peer, message) => controls.push(message),
+    }),
+    loadContext: async () => ({} as never),
+    runChat: async () => ({ status: 'paused' }),
+  });
+
+  await handler.handleReviewCancel(fakePeer, {
+    type: 'review.cancel',
+    requestId: 'req-1',
+    interruptId: 'interrupt-1',
+  }, { actorId: 'pet-1' } as never);
+
+  // The protocol has no pause outcome; the TUI derives the pause from the
+  // snapshot that follows an interrupted run. Nothing aborted this run, and it
+  // must still be finalized on the wire.
+  assert.deepEqual(controls, []);
+  assert.deepEqual(interruptedRuns(sent), ['req-1']);
 });

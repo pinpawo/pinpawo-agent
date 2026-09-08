@@ -1,4 +1,7 @@
-import type { PendingInterruptProjection, ReviewResponse } from '@pinpawo/agent-session';
+import {
+  type HumanReviewPendingInterruptProjection,
+  type ReviewResponse,
+} from '@pinpawo/agent-session';
 
 export type PreparedReviewDecision =
   | {
@@ -13,7 +16,7 @@ export type PreparedReviewDecision =
     };
 
 export function prepareReviewDecision(params: {
-  pendingInterrupt: PendingInterruptProjection;
+  pendingInterrupt: HumanReviewPendingInterruptProjection;
   responses: readonly ReviewResponse[];
   optionId: string;
   inputText?: string;
@@ -54,7 +57,7 @@ export function prepareReviewDecision(params: {
 }
 
 export function reviewResponsesRemainValid(
-  pendingInterrupt: PendingInterruptProjection,
+  pendingInterrupt: HumanReviewPendingInterruptProjection,
   responses: readonly ReviewResponse[],
 ) {
   const interactions = pendingInterrupt.payload.interactions;

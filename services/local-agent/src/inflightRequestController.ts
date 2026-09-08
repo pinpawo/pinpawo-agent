@@ -9,7 +9,7 @@ import {
 
 type InflightInterruptMessage = Extract<
   LocalAgentControlServerMessage,
-  { type: 'interrupting' | 'interrupted' }
+  { type: 'interrupting' }
 >;
 
 type InflightRequestControllerOptions<TKey> = {
@@ -92,19 +92,6 @@ export class InflightRequestController<TKey> {
       this.emitOperation(key, event);
       this.operationObservers.get(run)?.(event);
     }, error);
-  }
-
-  sendInterrupted(key: TKey, run: InflightOperationRun) {
-    if (run.interruptedSent) {
-      return;
-    }
-    run.interruptedSent = true;
-    this.finish(key, run, 'interrupted');
-    this.sendControl(key, {
-      type: 'interrupted',
-      requestId: run.requestId,
-      message: 'interrupted',
-    });
   }
 
   interrupt(key: TKey, options: InterruptInflightRequestOptions = {}) {

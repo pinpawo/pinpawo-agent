@@ -26,6 +26,7 @@ const CAPABILITY_PATH = resolve(
   import.meta.dirname,
   '../../../packages/studio/templates/default/pets/planner/capabilities/studio-planning/CAPABILITY.md',
 );
+const PET_PATH = resolve(import.meta.dirname, '../../../packages/studio/templates/default/pets/planner/PET.md');
 function readDefaultProfileId(): string {
   const configured = process.env.STUDIO_PLANNING_EVAL_PROFILE?.trim();
   if (configured) return configured;
@@ -84,63 +85,57 @@ async function main() {
   const kanbanToolkit = createKanbanPlanningToolkit(service);
 
   try {
-    const result = await createSubagent({
+    console.log(`Studio Planner eval model: ${subject.label}`);
+    const invoke = (messages: BaseMessage[]) => createSubagent({
       model: subject.model,
       tools: [
         ...kanbanToolkit.tools.map(({ tool: declaredTool }) => declaredTool),
       ],
       promptSections: [{
+        id: 'pet:planner',
+        owner: 'planner',
+        content: readFileSync(PET_PATH, 'utf8'),
+      }, {
         id: 'capability:studio_planning',
         owner: 'studio_planning',
         content: capability.body,
       }],
-      messages: [new HumanMessage([
-        '为 issue #101 建立最小完整 task 图。',
-        '已确认的工作是：改进 task 列表的标题与详情展示并补齐回归测试；实现完成后由 Reviewer 独立审查。',
-        'Wiki 会由 task.done Trigger 自动对齐并沿事件流程推进。',
-        '项目事实已经充分，当前 task 快照为空。',
-      ].join('\n'))],
+      messages,
       maxIterations: 8,
     });
-
-    const snapshot = await service.readSnapshot();
-    const toolCalls = countToolCalls(result.messages);
-    const [executorTask, reviewerTask] = snapshot.tasks;
-    const finalMessage = findFinalResponse(result.messages);
-    const failures = [
-      result.announceMessageId ? null : 'execution produced no new deliverable',
-      snapshot.tasks.length === 2
-        ? null
-        : `created ${snapshot.tasks.length.toString()} tasks instead of 2`,
-      executorTask ? null : 'executor task is missing',
-      reviewerTask ? null : 'reviewer task is missing',
-      reviewerTask && executorTask && reviewerTask.deps.includes(executorTask.taskId)
-        ? null
-        : 'reviewer task does not depend on executor task',
-      snapshot.tasks.some(({ assigneeId }) => assigneeId !== undefined)
-        ? 'Planner assigned a task instead of leaving assignment to the user'
-        : null,
-      toolCalls.count('kanban_task_list') === 1
-        ? null
-        : `kanban_task_list called ${toolCalls.count('kanban_task_list').toString()} times`,
-      toolCalls.count('kanban_task_add') === 2
-        ? null
-        : `kanban_task_add called ${toolCalls.count('kanban_task_add').toString()} times`,
-      toolCalls.calls.at(-1)?.name === 'kanban_task_add'
-        ? null
-        : `last tool was ${toolCalls.calls.at(-1)?.name ?? '(none)'}`,
-      finalMessage && readMessageText(finalMessage).trim()
-        ? null
-        : 'final response is empty',
-    ].filter((failure): failure is string => Boolean(failure));
-
-    console.log(`Studio Planner eval model: ${subject.label}`);
-    console.log(`Tool calls: ${toolCalls.calls.map(({ name }) => name).join(' -> ')}`);
-    console.log(`Tasks: ${snapshot.tasks.map((task) => task.taskId).join(', ')}`);
-    if (failures.length > 0) {
-      throw new Error(`Studio Planner eval failed:\n- ${failures.join('\n- ')}`);
+    let history: BaseMessage[] = [];
+    const turns = [
+      '帮我安排一个任务：任务列表的长标题会挤掉状态标签，需要修复展示并补齐回归测试。',
+      '再加上窄屏布局的验证，还是放在同一个任务里。',
+      '确认，就按修改后的草稿添加这一条任务。',
+    ];
+    for (const [index, request] of turns.entries()) {
+      const result = await invoke([...history, new HumanMessage(request)]);
+      const finalMessage = findFinalResponse(result.messages);
+      const calls = countToolCalls(result.messages.slice(history.length));
+      const snapshot = await service.readSnapshot();
+      console.log(`Turn ${index + 1}: ${request}`);
+      console.log(`Tool calls: ${calls.calls.map(({ name }) => name).join(' -> ') || '(none)'}`);
+      console.log(`Response: ${finalMessage ? readMessageText(finalMessage) : '(empty)'}`);
+      if (!result.announceMessageId || !finalMessage || !readMessageText(finalMessage).trim()) {
+        throw new Error(`Turn ${index + 1}: missing natural final response.`);
+      }
+      if (index < 2) {
+        if (snapshot.tasks.length !== 0 || snapshot.lastEventSequence !== 0
+          || calls.calls.some(({ name }) => name !== 'kanban_task_list')) {
+          throw new Error(`Turn ${index + 1}: mutated Kanban before confirmation.`);
+        }
+      } else {
+        if (snapshot.tasks.length !== 1 || calls.count('kanban_task_add') !== 1
+          || snapshot.tasks[0]?.assigneeId !== undefined || snapshot.relationships.length !== 0) {
+          throw new Error('Confirmation must create exactly one unassigned task without relationships.');
+        }
+        console.log(`Created tasks: ${JSON.stringify(snapshot.tasks, null, 2)}`);
+      }
+      history = result.messages;
+      console.log(`PASS turn ${index + 1}`);
     }
-    console.log('PASS: Studio Planner created the minimal production Kanban task graph and stopped.');
+    console.log('PASS: Planner drafts, revises without writing, and creates only after user confirmation.');
   } finally {
     await service.close();
   }

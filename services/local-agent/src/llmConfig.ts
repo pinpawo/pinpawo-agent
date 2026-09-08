@@ -7,7 +7,6 @@ import {
   type ModelProfileRegistrySnapshot,
   type ModelProfileSummary,
 } from './modelProfiles';
-import { loadStoredConfig } from './storage';
 import {
   findLlmModelPresetByKey,
   inferLlmModelPreset,
@@ -56,7 +55,6 @@ function withPresetInputModalities(
 
 function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
   const config = getConfig();
-  const stored = loadStoredConfig();
   return {
     timeoutMs: 120000,
     maxRetries: 2,
@@ -66,8 +64,6 @@ function readModelIndependentLlmConfig(): ModelIndependentLlmConfig {
     ...(config.structuredOutputRepairMaxRetries !== undefined
       ? { structuredOutputRepairMaxRetries: config.structuredOutputRepairMaxRetries }
       : {}),
-    globalReviewPolicyMode: config.globalReviewPolicyMode,
-    autoAuthorizationSafetyLevel: config.autoAuthorizationSafetyLevel,
   };
 }
 

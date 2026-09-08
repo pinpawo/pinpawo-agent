@@ -238,17 +238,8 @@ export function createDemoConnectionFactory(
           )
         ) {
           if (message.type === 'review.cancel') {
-            project({
-              type: 'run.finished',
-              requestId: 'smoke-run',
-              messages: [{
-                role: 'system',
-                requestId: 'smoke-run',
-                text: 'Review demo cancelled.',
-              }],
-            });
-            handlers.onMessage({
-              type: 'interrupted',
+            dispatchRuntimeEvent({
+              type: 'run.interrupted',
               requestId: 'smoke-run',
               message: 'Review demo cancelled.',
             });
@@ -292,17 +283,8 @@ export function createDemoConnectionFactory(
             message: 'QA response is stopping.',
           });
           scheduleQa(message.requestId, 100, () => {
-            project({
-              type: 'run.finished',
-              requestId: message.requestId,
-              messages: [{
-                role: 'system',
-                requestId: message.requestId,
-                text: 'QA response interrupted.',
-              }],
-            });
-            handlers.onMessage({
-              type: 'interrupted',
+            dispatchRuntimeEvent({
+              type: 'run.interrupted',
               requestId: message.requestId,
               message: 'QA response interrupted.',
             });

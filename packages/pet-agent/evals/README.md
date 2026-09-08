@@ -210,6 +210,17 @@ because preparation, execution, and reporting belong to one workspace boundary.
    first run or a multi-model stability claim. Eval typechecking and six focused
    harness/evaluation tests passed. Kanban was not run.
 
+   Main integration follow-up (base `e14c6b9e`, same models and defaults): 6/8
+   achieved on the first core run. `resume-after-user-input` had a judge score
+   contradicting its explanation and passed a full retry. `user-input-required`
+   failed checkpoint/lane-retention invariants on both runs: the model accepted
+   the conditional task (report missing connection information and ask the user)
+   as delivered, while the fixture expects an unfinished delegation. This is an
+   unresolved acceptance-semantics result, not a passing case or a timeout. No
+   runtime timeout or controlled-executor exhaustion occurred. Pause recovery,
+   ordinary user-supplement routing and TUI continuation have deterministic
+   regression coverage; the merge does not relax the model-eval criteria.
+
 ## Auto-review Risk Eval
 
 Run the production auto-review model boundary against a destructive operation:

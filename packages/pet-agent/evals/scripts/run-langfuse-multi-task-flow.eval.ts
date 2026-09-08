@@ -177,7 +177,6 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       configurable: {
         thread_id: `multi-task-flow-${Date.now()}`,
         registry,
-        maxRunIterations: 10,
       },
     },
   ) as Record<string, unknown>;

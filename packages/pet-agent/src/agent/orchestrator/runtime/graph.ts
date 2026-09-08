@@ -9,10 +9,6 @@ import type {
   OrchestratorConfig,
 } from '../types';
 import {
-  DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
-} from './constants';
-import {
-  readRunIterationLimit,
   readSubagentContextWindowTokens,
   readSubagentGenerationReserveTokens,
 } from './config';
@@ -28,22 +24,20 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterContextPrep } from './routes/afterContextPrep';
-import { afterPrepare } from './routes/afterPrepare';
 import { afterCapability } from './routes/afterCapability';
+import { afterPauseGate, pauseGate } from './nodes/pauseGate';
 import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
 import { createRunTerminationHandlers } from './runTermination';
 
 // --- Graph builder ---
 
 export function createOrchestratorGraph(config: OrchestratorConfig) {
-  const orchestratorMaxIterations = readRunIterationLimit(config.maxRunIterations)
-    ?? DEFAULT_ORCHESTRATOR_MAX_ITERATIONS;
   const subagentContextWindowTokens = readSubagentContextWindowTokens(config);
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
   const afterSupervisorBoundaryIterationGuard =
-    createAfterSupervisorBoundaryIterationGuard({ orchestratorMaxIterations });
+    createAfterSupervisorBoundaryIterationGuard();
   const runSupervisor = createRunSupervisorNode(config);
   const runTermination = createRunTerminationHandlers();
 
@@ -61,7 +55,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare)
+    .addNode('prepare', prepare, { ends: ['capability', 'answer', 'compactContext'] })
     .addNode('compactContext', compactContext)
     .addNode('captureUserRequest', captureRunUserRequest)
     .addNode('entryAnswer', entryAnswer, {
@@ -81,11 +75,8 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       errorHandler: runTermination.onNodeError,
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
+    .addNode('pauseGate', pauseGate)
     .addEdge(START, 'prepare')
-    .addConditionalEdges('prepare', afterPrepare, {
-      answer: 'answer',
-      compactContext: 'compactContext',
-    })
     // Run entry uses explicit task lifecycle state. Lane announces remain
     // message/context storage and are not the normal control-flow signal.
     .addConditionalEdges('compactContext', afterContextPrep, {
@@ -102,8 +93,12 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     .addEdge('entryAnswer', END)
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
-      end: END,
+      pauseGate: 'pauseGate',
       supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
+    })
+    .addConditionalEdges('pauseGate', afterPauseGate, {
+      capability: 'capability',
+      answer: 'answer',
     });
 
   return graph.compile({

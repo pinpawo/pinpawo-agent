@@ -3,6 +3,8 @@
 > Status: Draft
 > Date: 2026-09-04
 > Related: issues #133, #675, #684, #721, #747, and #749; PR #682
+> Domain: [Interrupt Domain](interrupt.md) owns the chain from Runtime to
+> interface; this document owns the semantics of each kind.
 > Policy selection: [Toolkit HITL policy](toolkit-hitl-policy.md)
 > Host boundary: [Resident Pet Host ports](resident-pet-host-ports.md)
 
@@ -135,7 +137,10 @@ The boundary is deliberate:
   parsing, and message-construction helpers used by `ReviewInterrupt`;
 - `toolkitReviewMiddleware.ts` connects the LangChain `afterModel` hook to the
   `ReviewInterrupt` adapter. It must not inspect raw Review decisions or
-  independently branch on Approve, Respond, Reject, or Cancel.
+  independently branch on Approve, Respond, Reject, or Cancel;
+- `runtime/nodes/pauseGate.ts` is the root graph boundary that raises the
+  pause interrupt and, on resume, hands the continue command to
+  `PauseTaskInterrupt.resume()`. It owns graph wiring only, no pause semantics.
 
 `reviewRunControl.ts` is not moved into the new directory. Its interrupted
 completion signal is removed rather than promoted into the interrupt model.
@@ -253,15 +258,19 @@ durable state that remains:
 
 - after cancellation inside an unfinished LangGraph node, continue from the
   last committed graph boundary using the graph's normal continuation path;
-- after Review resolution stopped the root run, re-enter the retained active
-  delegation as a new Runtime invocation;
+- after Review resolution, the root run does not stop: it suspends on the
+  `pauseGate` node's dynamic `interrupt()`, and continue resumes that
+  interrupt by id, re-entering the retained active delegation within the same
+  run. During the transition a new invocation carrying `resume_active` still
+  re-enters it;
 - when guidance is present, Pet Runtime constructs the corresponding
   `HumanMessage`; interfaces do not send LangChain message instances.
 
-`PauseTaskInterrupt` therefore remains a required Runtime concept even though
-it is not always backed by a pending dynamic `interrupt()`. It normalizes the
-interaction and continuation contract for unfinished work. It must not create
-a second state machine or duplicate resumability in a boolean.
+`PauseTaskInterrupt` therefore remains a required Runtime concept. For a
+Review-origin pause it is backed by a pending dynamic `interrupt()` on the
+root run; for a not-yet-wired running Esc it may not be. Either way it
+normalizes the interaction and continuation contract for unfinished work. It
+must not create a second state machine or duplicate resumability in a boolean.
 
 #### Pause materialization boundary
 
@@ -277,10 +286,13 @@ semantic pause request
        -> commit + END/unwind and later re-entry
 ```
 
-The initial implementation uses commit plus END/unwind for a Review-origin
-pause because the message transition must commit before the nested invocation
-returns. That is an implementation policy, not part of the Review contract.
-`PauseTaskInterrupt.enter()` owns the current `jumpTo: 'end'` choice.
+The current implementation combines both for a Review-origin pause. The nested
+invocation commits its message transition and ends — `PauseTaskInterrupt.enter()`
+owns that `jumpTo: 'end'` — the capability node commits the retained delegation
+and the pause payload, and a dedicated root node, `pauseGate`, then raises the
+dynamic `interrupt()`. Committing before the gate is what keeps the capability
+node from replaying on resume; only the gate replays. That ordering is an
+implementation policy, not part of the Review contract.
 
 Consequently:
 
@@ -293,18 +305,23 @@ Consequently:
 - no public event or Agent Session field exposes the selected mechanism.
 
 The nested graph requires producer and parent-boundary adapter call sites, so
-the implementation cannot literally have only one call site. A later second
-dynamic interrupt may require a dedicated graph boundary so the message update
-commits first. That change may add PauseTaskInterrupt wiring, but must not alter
-Review resolution, capability business rules, Agent Session, or an interaction
-interface.
+the implementation cannot literally have only one call site. The dedicated
+root boundary — `pauseGate` — exists so the message update and the retained
+delegation commit before the interrupt is raised. Adding it changed graph
+wiring only; it did not alter Review resolution, capability business rules,
+Agent Session, or an interaction interface.
 
-Whether a task is paused is derived from durable Runtime and graph state, for
-example pending graph work or a retained active delegation after an explicit
-pause or Review cancellation. Retained work alone is insufficient: a normal
-Supervisor question may end its run while preserving work for continuation,
-without creating `PauseTaskInterrupt` or an `interrupted` event. That interaction
-is defined by the [Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+After an interruption request, Pet Runtime may use durable Runtime and graph
+state — pending graph work, or a retained active delegation after an explicit
+pause or Review cancellation — to decide whether the stopped invocation left
+work unfinished. It then materializes an explicit `PauseTaskInterrupt` payload
+in ordinary Runtime state. Host and interfaces project that payload; they must
+not infer the interruption reason from resumability alone. Retained work alone
+is insufficient: a normal limit-reached or user-input-required result may
+preserve work for continuation, and a normal Supervisor question may end its
+run while preserving work, without creating `PauseTaskInterrupt` or an
+`interrupted` event. That interaction is defined by the
+[Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
 A finished task must not project `PauseTaskInterrupt`.
 
 ## Replay-safe Review policy
@@ -463,11 +480,12 @@ boundary is necessary so capability can reconcile child messages and Runtime
 state. It is not a second lifecycle transition and must not be exposed as a
 `child END -> root END` business flow.
 
-For an END/unwind implementation, the capability-side adapter propagates the
-same `PauseTaskInterrupt` after reconciliation. It retains the active
-delegation and skips finalize, announce, handoff, and Run Supervisor. The delegated
-task remains unfinished. A dynamic-interrupt implementation may stay suspended
-inside the child instead; this difference is hidden by `PauseTaskInterrupt`.
+The capability-side adapter propagates the same `PauseTaskInterrupt` after
+reconciliation. It retains the active delegation and skips finalize, announce,
+handoff, and Run Supervisor; the delegated task remains unfinished. The root
+run then suspends on `pauseGate` rather than ending. Whether a future
+implementation stays suspended inside the child instead is hidden by
+`PauseTaskInterrupt`.
 
 No additional public stop-control concept or interrupted completion reason is
 needed. Only serializable `PauseTaskInterruptPayload` data may cross a graph or
@@ -484,10 +502,10 @@ and the capability node. Removal of the remaining cross-layer
 
 ## Running Esc
 
-Esc while a model or tool is actively running is a request to pause the task.
-The interaction layer sends a semantic pause command. The Host uses its
-`AbortSignal` to cancel the active invocation and waits for that invocation to
-settle.
+Esc is an interface gesture; what it sends, and how the Host answers it when
+the run has already settled into an interrupt, is defined in
+[interrupt.md](interrupt.md). This section keeps the Runtime constraints for
+cancellation of a running invocation.
 
 For an ordinary streaming model call:
 
@@ -497,19 +515,17 @@ For an ordinary streaming model call:
 - no subagent completion reason is recorded;
 - Pet Runtime determines whether unfinished work remains from graph and
   Runtime state;
-- unfinished work is exposed as `PauseTaskInterrupt`.
+- when cancellation actually left unfinished work, Pet Runtime materializes
+  and exposes `PauseTaskInterrupt` explicitly.
 
 Cancellation is the mechanism that stops currently executing code.
 `PauseTaskInterrupt` is the Runtime meaning of the resulting unfinished task.
 Neither replaces the other.
 
-The Host must not decide whether to resume the graph, manufacture another
-interrupt, or start a new invocation to realize the pause. It also must not read
-or edit checkpointer storage. After cancellation settles, it delegates pause
-projection and later continuation to the Pet Runtime interrupt API.
-
 If no unfinished graph work or active delegation remains, the invocation ended
-instead of pausing; no `PauseTaskInterrupt` is exposed.
+instead of pausing; no `PauseTaskInterrupt` is exposed. An abort-origin pause
+need not be raised at the same graph location as a Review-origin pause; the
+location is Runtime-private, and only the resulting interrupt is a contract.
 
 Cancellation cannot roll back an external side effect that a tool already
 committed. Tool implementations must honor `AbortSignal` where possible and
@@ -517,34 +533,13 @@ retain their own idempotency guarantees.
 
 ## Layer ownership
 
-### Interaction interfaces
+### Interaction interfaces, Agent Session, and Host
 
-TUI, Chat, App, Studio, and future interfaces own presentation and input. They
-send semantic commands such as:
-
-- pause the running task;
-- continue a paused task, optionally with guidance;
-- respond to or cancel the identified Review.
-
-They do not construct LangGraph commands, choose graph nodes, edit message
-history, or interpret authorization effects.
-
-### Agent Session and Host
-
-Agent Session carries interface-safe events and commands. It does not own the
-Runtime lifecycle and does not persist Pet Runtime classes, LangGraph commands,
-checkpoint data, or a derived `continuationAvailable` flag.
-
-The Host owns:
-
-- cancellation of the active invocation;
-- serialization of invocations for the same task;
-- correlation of session, interrupt ID, namespace, and request identity;
-- projection of Runtime interrupts to supported interfaces;
-- translation of accepted semantic commands into Runtime calls;
-- rejection of stale or mismatched commands.
-
-The Host does not decide Review business behavior or synthesize graph state.
+Defined in [interrupt.md](interrupt.md): interfaces render by kind and build
+resume values; Agent Session and the Host are kind-blind and carry
+`{ interruptId, payload }` and `interrupt.resume` unchanged. What remains
+here is the kind-specific content those layers carry: Review decisions and
+their effects, and the pause continue value.
 
 ### Pet Runtime
 
@@ -564,10 +559,10 @@ does not route through Run Supervisor merely to stop a run.
 
 LangGraph owns:
 
-- dynamic Review interrupt persistence;
+- dynamic Review and task-pause interrupt persistence;
 - interrupt IDs and namespaces;
 - graph state, checkpoints, replay, and pending tasks;
-- delivery of Review resume values;
+- delivery of Review and task-continue resume values;
 - continuation from the last committed graph boundary.
 
 Pet Runtime and Host use LangGraph APIs. Review and pause handling are
@@ -593,8 +588,8 @@ require a new Agent Session lifecycle field.
 
 `createSubagent` still owns child execution. The capability remains responsible
 for reconciling committed child messages. It delegates pause propagation to
-`PauseTaskInterrupt`; only the initial END/unwind implementation ends the root
-run at that boundary.
+`PauseTaskInterrupt`; the root run no longer ends at that boundary but suspends
+on `pauseGate`.
 
 ## Implementation sequence
 
@@ -622,21 +617,22 @@ run at that boundary.
    unfinished work.
 2. Route Esc through a semantic task-pause command and active
    invocation cancellation.
-3. After settlement, derive pause availability from existing graph/Runtime
-   state rather than a new boolean.
+3. After settlement, use existing graph/Runtime state to decide whether the
+   canceled invocation left unfinished work, then materialize
+   `PauseTaskInterrupt`; do not project pause from resumability alone or add a
+   continuation boolean.
 4. Implement continue for both an unfinished graph node and a retained active
-   delegation.
-5. Add optional guidance at the Runtime boundary.
+   delegation. (Done for a retained delegation: `pauseGate` resumes it by
+   interrupt id. The unfinished-graph-node case belongs to running Esc.)
+5. Add optional guidance at the Runtime boundary. (Done: `pauseGate` turns
+   `guidance` into one Runtime-created message.)
 
 ### Phase 3: Host and interface projection
 
-1. Project `review` and `pause_task` as different interactions.
-2. Keep exact Review interrupt identity for Review resume.
-3. Send task continue to `PauseTaskInterrupt` without fabricating a Review
-   resume.
-4. Generalize the existing pending-interaction projection only if a shared
-   interface requires it; do not add a continuation boolean.
-5. Remove migration aliases after all active interfaces use semantic commands.
+Superseded by the migration in [interrupt.md](interrupt.md), tracked by #772.
+The Host reads every kind through one decoder, projects one
+`pendingInterrupt` shape with an id, and resumes through one message; no
+migration aliases are kept.
 
 ## Required behavioral coverage
 
@@ -672,7 +668,10 @@ run at that boundary.
 - Esc during model streaming aborts the invocation and commits no partial AI
   message;
 - Esc during a cancellable tool propagates `AbortSignal`;
-- stopped unfinished work projects `PauseTaskInterrupt`;
+- canceled execution with unfinished work materializes and projects
+  `PauseTaskInterrupt`;
+- a normal limit-reached or user-input-required result is not misclassified as
+  an interruption merely because work remains resumable;
 - genuinely finished work does not project `PauseTaskInterrupt`;
 - continue re-enters the correct pending graph node or retained delegation;
 - optional guidance becomes a Runtime-created message exactly once;

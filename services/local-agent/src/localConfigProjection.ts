@@ -1,10 +1,8 @@
 import {
-  GLOBAL_REVIEW_POLICY_MODE,
   resolveProviderInputWatermarkTokens,
   type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import {
-  DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
@@ -49,19 +47,15 @@ export function buildLocalRuntimeProjection(
         deps.modelProfiles.snapshot.unavailableProfiles[modelProfileId]
           ?.map((issue) => issue.message)
         ?? [`Unknown model profile "${modelProfileId}"`],
-      globalReviewPolicyMode: deps.globalReviewPolicyMode
-        ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-      autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel
-        ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
-      workdir: runtimeConfig?.workdir ?? deps.workdir,
-      ...(runtimeConfig?.workspace ? {
+      globalReviewPolicyMode: deps.globalReviewPolicyMode,
+      autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
+      workdir: runtimeConfig.workdir,
+      ...(runtimeConfig.workspace ? {
         workspaceId: runtimeConfig.workspace.id,
         workspaceName: runtimeConfig.workspace.name,
         workspaceRoot: runtimeConfig.workspace.rootPath,
       } : {}),
-      ...(runtimeConfig ? {
-        stateRoot: runtimeConfig.stateRoot,
-      } : {}),
+      stateRoot: runtimeConfig.stateRoot,
     };
   }
   const llmConfig = deps.modelProfiles.resolve(modelProfileId);
@@ -78,25 +72,21 @@ export function buildLocalRuntimeProjection(
     modelProfileIssues: [],
     model: llmConfig.model,
     inputModalities: llmConfig.inputModalities ?? ['text'],
-    globalReviewPolicyMode: deps.globalReviewPolicyMode
-      ?? GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION,
-    autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel
-      ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
+    globalReviewPolicyMode: deps.globalReviewPolicyMode,
+    autoAuthorizationSafetyLevel: deps.autoAuthorizationSafetyLevel,
     ...(llmConfig.contextWindowTokens !== undefined
       ? { contextWindow: llmConfig.contextWindowTokens }
       : {}),
     ...(contextCompactionWatermarkTokens !== null
       ? { contextCompactionWatermarkTokens }
       : {}),
-    workdir: runtimeConfig?.workdir ?? deps.workdir,
-    ...(runtimeConfig?.workspace ? {
+    workdir: runtimeConfig.workdir,
+    ...(runtimeConfig.workspace ? {
       workspaceId: runtimeConfig.workspace.id,
       workspaceName: runtimeConfig.workspace.name,
       workspaceRoot: runtimeConfig.workspace.rootPath,
     } : {}),
-    ...(runtimeConfig ? {
-      stateRoot: runtimeConfig.stateRoot,
-    } : {}),
+    stateRoot: runtimeConfig.stateRoot,
   };
 }
 

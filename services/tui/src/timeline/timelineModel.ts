@@ -124,7 +124,14 @@ export function formatLiveSession(
     return singleLine(formatTimelineEntry(pending));
   }
   const run = session.activeRun;
-  if (!run) return session.pendingInterrupt ? 'waiting for review' : 'idle';
+  if (!run) {
+    if (session.pendingInterrupt?.payload.kind === 'human_review') {
+      return 'waiting for review';
+    }
+    return session.pendingInterrupt?.payload.kind === 'pause_task'
+      ? 'task paused'
+      : 'idle';
+  }
   if (run.state === 'interrupting') return 'interrupting';
   if (run.activity === 'using_tool') return 'using tool';
   if (run.activity === 'streaming') return 'streaming response';
@@ -140,8 +147,11 @@ export function formatLiveActivity(
 ) {
   const run = session.activeRun;
   if (!run) {
-    return session.pendingInterrupt
-      ? '! waiting for review'
+    if (session.pendingInterrupt?.payload.kind === 'human_review') {
+      return '! waiting for review';
+    }
+    return session.pendingInterrupt?.payload.kind === 'pause_task'
+      ? '◌ task paused'
       : formatLiveSession(session, maxCodePoints);
   }
   const elapsed = formatElapsed(run.startedAt, now);

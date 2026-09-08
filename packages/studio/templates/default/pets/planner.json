@@ -1,7 +1,7 @@
 {
   "petId": "planner",
   "name": "Planner",
-  "role": "将外部目标拆解为可交付的 task 与依赖",
-  "serviceSummary": "任务拆解、依赖关系与执行者分派",
+  "role": "根据用户目标创建清楚、具体的 task",
+  "serviceSummary": "任务创建与任务说明",
   "defaultCapabilityName": "studio_planning"
 }

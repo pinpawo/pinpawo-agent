@@ -1,3 +1,4 @@
+import { hasUnfinishedTask } from './taskPause';
 import {
   applySessionSnapshot,
   reduceSession,
@@ -6,6 +7,7 @@ import {
   type AgentSession,
   type AgentSessionSnapshot,
   type BuiltinGlobalReviewPolicyMode,
+  readHumanReviewPendingInterrupt,
   type ReviewResponse,
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-session';
@@ -85,7 +87,6 @@ export class TuiSessionController {
   private readonly sessionCommands: SessionCommandCoordinator;
   private readonly modelProfiles: ModelProfileCoordinator;
   private readonly runtimeConfig: RuntimeConfigCoordinator;
-  private readonly onRunInterrupted?: (requestId: string) => void;
   private state: TuiSessionState = {
     connection: 'idle',
     session: createPendingSession(),
@@ -94,7 +95,6 @@ export class TuiSessionController {
   constructor(options: TuiSessionControllerOptions) {
     this.now = options.now ?? Date.now;
     this.requestIdFactory = options.requestIdFactory ?? (() => crypto.randomUUID());
-    this.onRunInterrupted = options.onRunInterrupted;
     const sessionCommandTimeoutMs = options.sessionCommandTimeoutMs
       ?? DEFAULT_SESSION_COMMAND_TIMEOUT_MS;
     const setTimer = options.setTimer ?? setTimeout;
@@ -225,18 +225,22 @@ export class TuiSessionController {
   submitChat(
     message: string,
     attachments: readonly AgentLocalAttachment[] = [],
+    transition?: ActiveDelegationTransition,
   ): SubmitChatResult {
     return this.submitChatWithTransition(
       message,
       attachments,
-      'supersede_active',
+      transition ?? (!this.state.session.pendingInterrupt && hasUnfinishedTask(this.state.session)
+        ? 'resume_active' : 'supersede_active'),
     );
   }
 
-  continueActiveDelegation(
+  continuePausedTask(
     message: string,
     attachments: readonly AgentLocalAttachment[] = [],
   ): SubmitChatResult {
+    // Compatibility transport until the next phase replaces the legacy field
+    // with a semantic task-continue command handled by PauseTaskInterrupt.
     return this.submitChatWithTransition(message, attachments, 'resume_active');
   }
 
@@ -265,7 +269,7 @@ export class TuiSessionController {
     }
     if (
       this.state.session.activeRun
-      || this.state.session.pendingInterrupt
+      || readHumanReviewPendingInterrupt(this.state.session.pendingInterrupt)
       || this.sessionCommands.hasPending()
       || this.modelProfiles.hasPending()
       || this.runtimeConfig.hasPending()
@@ -299,7 +303,7 @@ export class TuiSessionController {
     }
     const run = this.state.session.activeRun;
     if (!run) {
-      return this.state.session.pendingInterrupt
+      return readHumanReviewPendingInterrupt(this.state.session.pendingInterrupt)
         ? { ok: false, reason: 'review-active' }
         : { ok: false, reason: 'idle' };
     }
@@ -330,7 +334,9 @@ export class TuiSessionController {
       return { ok: false, reason: 'not-ready' };
     }
     const run = this.state.session.activeRun;
-    const pendingInterrupt = this.state.session.pendingInterrupt;
+    const pendingInterrupt = readHumanReviewPendingInterrupt(
+      this.state.session.pendingInterrupt,
+    );
     if (!pendingInterrupt) {
       return { ok: false, reason: 'closed' };
     }
@@ -420,7 +426,9 @@ export class TuiSessionController {
     if (!this.reviewTransportReady()) {
       return { ok: false, reason: 'not-ready' };
     }
-    const pendingInterrupt = this.state.session.pendingInterrupt;
+    const pendingInterrupt = readHumanReviewPendingInterrupt(
+      this.state.session.pendingInterrupt,
+    );
     if (!pendingInterrupt || this.state.session.activeRun) {
       return { ok: false, reason: 'closed' };
     }
@@ -473,7 +481,9 @@ export class TuiSessionController {
     if (!this.reviewTransportReady()) {
       return { ok: false, reason: 'not-ready' };
     }
-    const pendingInterrupt = this.state.session.pendingInterrupt;
+    const pendingInterrupt = readHumanReviewPendingInterrupt(
+      this.state.session.pendingInterrupt,
+    );
     if (!pendingInterrupt || this.state.session.activeRun) {
       return { ok: false, reason: 'closed' };
     }
@@ -555,24 +565,6 @@ export class TuiSessionController {
       return;
     }
 
-    if (message.type === 'interrupted') {
-      const session = reduceSession(this.state.session, {
-        type: 'run.finished',
-        requestId: message.requestId,
-        messages: [{
-          role: 'system',
-          requestId: message.requestId,
-          text: message.message?.trim() || 'Run interrupted.',
-        }],
-      }, { observedAt: this.now() });
-      if (session !== this.state.session) {
-        this.onRunInterrupted?.(message.requestId);
-      }
-      this.updateSession(session);
-      this.transport.requestCompletionSnapshot();
-      return;
-    }
-
     if (message.type === 'pong') return;
     assertNever(message);
   }
@@ -581,7 +573,10 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
-    if (this.state.session.activeRun || this.state.session.pendingInterrupt) {
+    if (
+      this.state.session.activeRun
+      || readHumanReviewPendingInterrupt(this.state.session.pendingInterrupt)
+    ) {
       return 'wait for the current response to finish';
     }
     if (this.modelProfiles.hasPending()) {
@@ -597,7 +592,10 @@ export class TuiSessionController {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'local-agent is not connected';
     }
-    if (this.state.session.activeRun || this.state.session.pendingInterrupt) {
+    if (
+      this.state.session.activeRun
+      || readHumanReviewPendingInterrupt(this.state.session.pendingInterrupt)
+    ) {
       return 'wait for the current response to finish';
     }
     if (this.sessionCommands.hasPending()) {
@@ -620,7 +618,10 @@ export class TuiSessionController {
     if (this.state.session.sessionId === 'pending') {
       return 'wait for session synchronization';
     }
-    if (this.state.session.activeRun || this.state.session.pendingInterrupt) {
+    if (
+      this.state.session.activeRun
+      || readHumanReviewPendingInterrupt(this.state.session.pendingInterrupt)
+    ) {
       return 'wait for the current response to finish';
     }
     if (this.sessionCommands.hasPending()) {

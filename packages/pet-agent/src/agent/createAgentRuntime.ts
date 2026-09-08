@@ -33,13 +33,18 @@ export type {
 } from './orchestrator/registry';
 export { ORCHESTRATOR_RECURSION_LIMIT } from './orchestrator/controlPrimitives';
 export {
-  DEFAULT_ORCHESTRATOR_MAX_ITERATIONS,
   isOrchestratorInternalAiStreamNode,
 } from './orchestrator/runtime/constants';
 export {
   createOrchestratorGraph,
   type OrchestratorGraph,
 } from './orchestrator/runtime/graph';
+export {
+  readPauseTaskInterrupt,
+} from './orchestrator/interrupt';
+export type {
+  PauseTaskInterruptPayload,
+} from './orchestrator/interrupt';
 export {
   streamOrchestratorGraph,
   streamOrchestratorGraphWithTokenUsage,

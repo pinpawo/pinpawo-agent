@@ -197,8 +197,8 @@ test('Boundary selects the current logical task across runs, including earlier d
   const supplement = setAgentMessageMetadata(new HumanMessage({ id: 'supplement', content: 'Use the engineering audience.' }), { runId: input.runId });
   input.messages.push(supplement);
   const { createPrepareNode } = await import('./prepare');
-  const prepared = await createPrepareNode()(input);
-  Object.assign(input, prepared, { messages: messagesStateReducer(input.messages, prepared.messages) });
+  const prepared = (await createPrepareNode()(input)).update as Partial<OrchestratorStateType>;
+  Object.assign(input, prepared, { messages: messagesStateReducer(input.messages, prepared.messages ?? []) });
   let observed = false;
   await createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (boundary) => {
     observed = true;
@@ -226,8 +226,8 @@ test('a natural question preserves work through terminal cleanup and resumes wit
     const answer = setAgentMessageMetadata(new HumanMessage('Use the engineering project.'), { runId: reset.runId });
     const resumed = { ...saved, ...reset, messages: messagesStateReducer(saved.messages, [answer]) };
     const { createPrepareNode } = await import('./prepare');
-    const prepared = await createPrepareNode()(resumed);
-    Object.assign(resumed, prepared, { messages: messagesStateReducer(resumed.messages, prepared.messages) });
+    const prepared = (await createPrepareNode()(resumed)).update as Partial<OrchestratorStateType>;
+    Object.assign(resumed, prepared, { messages: messagesStateReducer(resumed.messages, prepared.messages ?? []) });
     const command = await createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (input) => {
       assert.equal(input.mode, 'boundary');
       assert.equal(input.activeDelegation?.delegationId, original.taskActiveDelegation!.id);

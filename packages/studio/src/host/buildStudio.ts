@@ -229,8 +229,6 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
         registration: {
           petId: petConfig.petId,
           name: petConfig.name,
-          role: petConfig.role ?? null,
-          serviceSummary: petConfig.serviceSummary ?? null,
         },
         dispatch: resident.resident.dispatch,
       });

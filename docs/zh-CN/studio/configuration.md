@@ -19,8 +19,8 @@
 }
 ```
 
-Pet 配置至少包含 `petId` 和 `name`，可选 `role`、`serviceSummary`、
-`modelProfileId` 与 `defaultCapabilityName`。后者只在 Supervisor 的紧凑路由清单中标记
+Pet 配置至少包含 `petId` 和 `name`，可选 `modelProfileId` 与
+`defaultCapabilityName`。后者只在 Supervisor 的紧凑路由清单中标记
 该 Pet 目录中已存在的一项默认候选；完整文档仍与其他 Capability 一样通过搜索披露，
 且不绕过可用性与 Toolkit 绑定。配置不包含
 `lazy`、`disabled`、Capability 名单、thread 或
@@ -28,8 +28,8 @@ continuation。所有配置 Pet 都在 Host ready 前 eager 构造；任意一�
 
 旧 `personality`、`species`、`stage` 字段会报错，并提示将其内容迁移到 `PET.md`。
 `serverBinding` 也已移除，因为当前没有云端 Pet 同步消费方。默认 Pet Profile Toolkit
-及云端 memory/history 注入接口已删除；会话历史仍由 session checkpoint 管理，
-`role` 和 `serviceSummary` 继续作为公开路由元数据。
+及云端 memory/history 注入接口已删除；会话历史仍由 session checkpoint 管理。
+原 `role` 与 `serviceSummary` 字段已移除——从未有消费方读取它们。
 
 `PET.md` 是这个 Pet 的根文档，定位与 agent 使用的 `AGENTS.md` 或 `CLAUDE.md`
 一致。它定义 Pet 的身份、职责、工作原则、边界和长期约定，并完整应用于该 Pet 的直接

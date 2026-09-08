@@ -12,8 +12,6 @@ type StudioPetBinding = {
   registration: {
     petId: string;
     name: string;
-    role?: string | null;
-    serviceSummary?: string | null;
   };
   dispatch: PetDispatchPort;
 };

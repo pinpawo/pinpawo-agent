@@ -86,7 +86,6 @@ async function writeStudioWorkdir(withPlanningCapability: boolean): Promise<stri
     JSON.stringify({
       petId: 'planner',
       name: 'Planner',
-      role: 'planner',
     }),
   );
   if (withPlanningCapability) {

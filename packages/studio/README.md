@@ -61,8 +61,9 @@ Each Pet's authored identity and working conventions belong in
 Pet configuration directory). The Host loads the document at startup; restart
 it after changing the document.
 
-Pet JSON retains `petId`, `name`, `role`, `serviceSummary`, `modelProfileId` and
-`defaultCapabilityName`. Move former `personality`, `species` and `stage` values
+Pet JSON retains `petId`, `name`, `modelProfileId` and
+`defaultCapabilityName`. The former `role` and `serviceSummary` are removed; no
+consumer read them. Move former `personality`, `species` and `stage` values
 into PET.md prose and remove those JSON fields. Remove `serverBinding`; the
 local Host no longer consumes cloud Pet bindings. The parser reports these
 retired fields instead of silently ignoring them. The implicit Pet Profile

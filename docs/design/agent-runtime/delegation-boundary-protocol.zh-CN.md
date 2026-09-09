@@ -333,6 +333,91 @@ Announce 在验收前进入 main；Supervisor 不再接收独立结果列表或�
 
 当前模型策略：runtime 和 eval 的所有角色均不传 thinking 或 reasoning_effort 覆盖，采用服务端默认值。移除旧 subagent 开关和按角色设置 effort 的逻辑。上面的显式开启结果仅记录实验当时的参数。
 
+## Capability subagent 调用边界
+
+Capability 执行封装保持独立，调用入口不拥有它的内部职责：
+
+```text
+Capability executor
+  briefing / 私有上下文选择
+    → Toolkit 绑定
+    → createSubagent（内部 createAgent）
+    → runtime release / finalize
+    → handoff（本次消息更新、交付物、产物、授权结果）
+```
+
+[执行模块](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts)接收明确的 Capability、delegation 任务和历史输入，不接收整个 Root state。每次调用独立管理执行数据；验收、状态提交、任务调度不属于 executor。这里的 handoff 是执行结果交接，不是任务验收。
+
+### Executor 输入契约
+
+固定依赖在 `createCapabilityExecutor(options)` 时传入：模型、模态支持、artifact store、Toolkit runtime manager 和上下文预算。每次执行则区分任务输入与宿主上下文：
+
+```ts
+executeCapability({
+  capability,                 // 调用方从 registry 解析的 Capability + Toolkits
+  delegation: {
+    id, runId, traceId,        // 执行归属
+    userRequest, task,        // 用户目标与本次任务
+    mode: 'initial',
+    essentialContext,        // continue 模式改用 guidance
+  },
+  history,                   // 历史快照；内部选择 main + 当前 delegation
+}, {
+  review: {
+    hostCapabilities,        // 宿主支持的人工审批、会话授权能力
+    policy,                  // 本次采用的审核策略
+    authorizations,          // 已过滤到当前 generation 的已有授权
+  },
+  runnableConfig,            // thread ID / workdir 的唯一来源，原样转交 LangGraph
+});
+```
+
+任务对象不混入宿主审核配置；briefing 在 executor 内部由 delegation 数据生成。消息 lane 从已解析 Capability 名称推导，不再让调用方同时填写 Capability 和 lane。初次执行与继续执行保留判别联合类型，避免同时传 essentialContext 和 guidance。此接口是 runtime 内部接口，不是模型工具参数 schema；模型不能提供编译后的 Capability、身份、历史或授权对象。
+
+`runnableConfig.configurable.thread_id` 和 `runnableConfig.context.workdir` 是执行身份与目录的唯一来源，不在上下文外层重复传递。选中的历史消息必须已有非空稳定 ID；executor 在执行前校验，不给调用方的原始消息补写 ID。Root 正常持久化的历史已经满足此条件。
+
+当前返回值仍为 `{ status, scope, handoff, artifacts, toolAuthorizations }`，其中 `handoff` 含私有消息更新和 Announce，输出协议未随输入整理改变。接入工具调用时，拟将交付正文与私有消息更新分开返回，由外部适配层包装为 ToolMessage；工具 call id 不属于 executor 的任务输入。
+
+### 当前调用方式
+
+```text
+Supervisor：提交计划 / 验收决定
+  → Root：根据决定派发
+    → capability 节点
+      → Capability executor
+      ← handoff
+    → Root：应用消息与状态更新
+  → Supervisor：从 main 中的 Announce 读取结果
+```
+
+当前由 Root 串行调度。结果沿用类型化 Announce，发送给模型时仍投影为 assistant XML。此次模块抽取没有改变这个协议，也没有将 Capability 实现搬入 Supervisor。
+
+### 目标调用方式（尚未实现）
+
+```text
+Supervisor：真实 delegate_task tool call
+  → Root / 委派工具适配层：校验并调用
+    → 同一个 Capability executor
+    ← handoff
+  → 提交执行状态，返回对应 tool_call_id 的 ToolMessage
+  → Supervisor：读取工具结果，验收或决定下一次调用
+```
+
+改变的是 executor 外面的请求与返回协议，不是里面的执行过程。Supervisor 只负责委派决定，不负责 briefing、Toolkit 生命周期或创建 Capability subagent；Root 保留校验及状态提交职责。适配层最终接在现有图路由还是 createAgent 工具执行入口，需要结合中断和流事件验证确定，但不能形成两套执行路径。
+
+| 边界 | 当前 | 目标 |
+| --- | --- | --- |
+| 执行请求 | Root 根据计划或验收决定隐式派发 | Supervisor 发出真实委派工具调用 |
+| 执行封装 | Capability executor | 同一个独立 executor |
+| 返回模型 | Announce → assistant XML | 原委派调用对应的 ToolMessage |
+| 验收与执行 | 验收决定可触发自动推进/续跑 | 验收与下一次委派调用分离 |
+
+每次执行结果必须关联原始调用，不能补造历史调用；结果返回不等于验收通过。暂停和授权恢复必须区分“本次调用未结束”与“后续新调用继续任务”，不能在未闭合的工具历史上继续请求模型。私有轨迹留在 Capability 上下文，main 只接收交付物及必要执行事实。
+
+### 并行调用边界
+
+未来 Supervisor 可以决定多个独立委派，各自调用 executor；模块无需为此承担调度职责。当前尚未启用并行：调用方仍需定义独立 checkpoint namespace、共享 Toolkit 资源约束，以及消息、产物、授权和验收状态的合并规则，不能用最后一个执行快照覆盖其他结果。
+
 ## 相关文档
 
 本文负责整体交互；细节由已有文档维护，不在这里另建概念或重复定义字段：

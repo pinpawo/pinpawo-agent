@@ -244,6 +244,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       ...update,
       ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
       taskRunContinuation: null,
+      runSupervisorUserMessageId: null,
       runSupervisorSession: updateRunSupervisorSession({
         current: supervisorSession,
         plan,
@@ -263,15 +264,38 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     const { capabilityDisclosure: _disclosure, ...proposal } = result;
     const command = parseSupervisorCommand(proposal, {
       mode: input.mode,
+      hasNewUserInput: input.inputId.startsWith('human:'),
       activeDelegation: input.activeDelegation,
       allowedCapabilityNames: catalog.capabilityNames,
     });
     const rootState = nodeInput as OrchestratorStateType;
+    if (command.action === 'adjust_plan') {
+      const [first, ...remainingPlan] = command.tasks;
+      const activeDelegation = rootState.taskActiveDelegation!;
+      const adjustedState = { ...state, runUserRequest: command.goal };
+      const update = command.currentDelegation === 'continue'
+        ? buildContinueCurrentUpdate({
+            state: { ...rootState, runUserRequest: command.goal },
+            activeDelegation: { ...activeDelegation, task: first.task, userRequest: command.goal },
+            feedback: command.reason,
+          })
+        : materializeNextDelegation({
+            state: { ...adjustedState, runDelegationSummaries: state.runDelegationSummaries.map((delegation) =>
+              delegation.id === activeDelegation.id ? { ...delegation, status: 'superseded' as const } : delegation) },
+            nextTask: first,
+            allowedCapabilityNames: catalog.capabilityNames,
+          });
+      return new Command({
+        update: { ...includeSupervisorSession(update, remainingPlan), runUserRequest: command.goal },
+        goto: 'capability',
+      });
+    }
+
     const proposedPlan = command.action === 'execute_plan' ? command.tasks
-      : command.remainingPlan ?? supervisorSession.plan;
+      : supervisorSession.plan;
     const canChangePlan = (input.mode === 'entry' && supervisorSession.plan.length === 0)
       || input.inputId.startsWith('human:');
-    if (!canChangePlan && JSON.stringify(proposedPlan) !== JSON.stringify(supervisorSession.plan)) {
+    if (command.action === 'execute_plan' && !canChangePlan && JSON.stringify(proposedPlan) !== JSON.stringify(supervisorSession.plan)) {
       throw new Error('Execution plan changes require fresh user confirmation.');
     }
     if (command.action === 'review_current' && !command.completed) {

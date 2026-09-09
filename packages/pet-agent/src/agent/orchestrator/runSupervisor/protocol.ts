@@ -18,18 +18,24 @@ export const submitPlanSchema = z.object({
   tasks: z.array(supervisorTaskSchema).min(1).max(24),
 }).strict();
 
+export const adjustPlanSchema = z.object({
+  goal: z.string().trim().min(1).max(4_000).describe('结合用户新输入后的完整目标，保留仍适用的要求。'),
+  reason: z.string().trim().min(1).max(2_000).describe('说明用户要求的调整，以及继续或替换当前 delegation 的原因。'),
+  currentDelegation: z.enum(['continue', 'replace']).describe('continue 复用当前 delegation 的身份和私有历史；replace 保留旧记录但新建 delegation。'),
+  tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的完整待执行计划。第一项立即执行，其余为未来任务；continue 时第一项必须使用当前 Capability，可更新其任务范围。'),
+}).strict();
+
 export const reviewCurrentSchema = z.object({
   completed: z.boolean().describe('当前 delegation 的 task 是否已交付。按当前 task 的范围验收；goal 是方向约束，后续计划尚未完成不构成当前 task 的缺口。'),
   reason: z.string().trim().min(1).max(2_000).describe('completed=true：说明当前 task 的交付证据。false：指出当前 task 范围内的具体缺口，这段文字会原样作为继续执行的反馈。'),
   reply: z.string().refine((text) => text.trim().length > 0, 'Reply must be non-empty.').optional()
     .describe('仅 completed=true 时可用。完整的用户回复，直接结束本轮并保留未来计划；不填则执行下一项。没有剩余计划时必须填写。'),
-  remainingPlan: z.array(supervisorTaskSchema).max(24).optional()
-    .describe('仅在用户已确认修改未来计划时填写；省略保留原计划，[] 清空未来任务。此参数不替换或结束当前 delegation。'),
 }).strict();
 
 export const supervisorCommandSchema = z.discriminatedUnion('action', [
   submitPlanSchema.extend({ action: z.literal('execute_plan') }),
   reviewCurrentSchema.extend({ action: z.literal('review_current') }),
+  adjustPlanSchema.extend({ action: z.literal('adjust_plan') }),
 ]);
 
 export type SupervisorCommand = z.infer<typeof supervisorCommandSchema>;
@@ -41,6 +47,7 @@ export function parseSupervisorCommand(
     mode: 'entry' | 'boundary';
     activeDelegation: SupervisorDelegationInput | null;
     allowedCapabilityNames: readonly string[];
+    hasNewUserInput?: boolean;
   },
 ): SupervisorCommand {
   const command = supervisorCommandSchema.parse(value);
@@ -53,15 +60,21 @@ export function parseSupervisorCommand(
   if (context.mode === 'boundary' && command.action === 'execute_plan') {
     throw new Error('submit_plan is only available at Entry.');
   }
+  if (command.action === 'adjust_plan') {
+    if (!context.hasNewUserInput) {
+      throw new Error('adjust_plan requires fresh user input.');
+    }
+    if (command.currentDelegation === 'continue'
+      && command.tasks[0].capability !== context.activeDelegation?.capability) {
+      throw new Error('Continuing a delegation must keep its Capability; use replace to change Capability.');
+    }
+  }
   if (command.action === 'review_current') {
     if (!command.completed && command.reply) {
       throw new Error('An incomplete review cannot include a reply; ask the user directly instead.');
     }
-    if (command.completed && command.remainingPlan?.length === 0 && !command.reply) {
-      throw new Error('A completed review requires a final reply when no planned work remains.');
-    }
   }
-  const tasks = command.action === 'execute_plan' ? command.tasks : command.remainingPlan ?? [];
+  const tasks = command.action !== 'review_current' ? command.tasks : [];
   for (const task of tasks) {
     if (!context.allowedCapabilityNames.includes(task.capability)) {
       throw new Error(`Run Supervisor selected "${task.capability}" outside the immutable catalog.`);

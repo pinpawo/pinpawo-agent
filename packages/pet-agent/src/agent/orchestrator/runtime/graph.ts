@@ -55,7 +55,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare, { ends: ['capability', 'answer', 'compactContext'] })
+    .addNode('prepare', prepare, { ends: ['capability', 'answer', 'compactContext', 'runSupervisor'] })
     .addNode('compactContext', compactContext)
     .addNode('captureUserRequest', captureRunUserRequest)
     .addNode('entryAnswer', entryAnswer, {
@@ -97,6 +97,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
     })
     .addConditionalEdges('pauseGate', afterPauseGate, {
+      runSupervisor: 'runSupervisor',
       capability: 'capability',
       answer: 'answer',
     });

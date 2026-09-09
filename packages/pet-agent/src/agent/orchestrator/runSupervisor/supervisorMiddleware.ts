@@ -8,6 +8,7 @@ import { SUPERVISOR_COMMAND_TOOL_NAMES, supervisorCommandToolNamesForMode } from
 const commandActions: Record<string, string> = {
   submit_plan: 'execute_plan',
   review_current: 'review_current',
+  adjust_plan: 'adjust_plan',
 };
 
 /** Validate the whole response before any tool runs; control calls only propose effects. */
@@ -17,7 +18,7 @@ export function createSupervisorMiddleware() {
     stateSchema: supervisorInvocationStateSchema,
     wrapModelCall: async (request, handler) => {
       const input = currentSupervisorInput(request.state);
-      const allowed = supervisorCommandToolNamesForMode(input.mode);
+      const allowed = supervisorCommandToolNamesForMode(input.mode, input.inputId.startsWith('human:'));
       const discoveryAllowed = input.mode === 'entry' || input.inputId.startsWith('human:');
       const response = await handler({
         ...request,

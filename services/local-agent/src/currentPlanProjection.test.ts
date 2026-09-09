@@ -137,3 +137,17 @@ test('keeps delegation identifiers exact while normalizing display text', () => 
     }],
   });
 });
+
+test('a Supervisor replacement excludes superseded work from the current plan', () => {
+  const result = projectCurrentPlan({
+    taskActiveDelegation: { id: 'new', lane: 'capability:writer', task: 'Write the private report.' },
+    runDelegationSummaries: [
+      { id: 'old', lane: 'capability:general', task: 'Inspect the old project.', status: 'superseded' },
+      { id: 'new', lane: 'capability:writer', task: 'Write the private report.', status: 'pending' },
+    ],
+    runSupervisorSession: { plan: [] },
+  });
+  assert.deepEqual(result?.items, [
+    { id: 'new', capability: 'writer', task: 'Write the private report.', status: 'active' },
+  ]);
+});

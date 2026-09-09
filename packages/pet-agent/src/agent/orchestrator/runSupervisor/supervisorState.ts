@@ -34,6 +34,7 @@ export function currentSupervisorInput(state: Partial<SupervisorInvocationState>
 export function supervisorCommandContext(input: RunSupervisorInput) {
   return {
     mode: input.mode,
+    hasNewUserInput: input.inputId.startsWith('human:'),
     activeDelegation: input.activeDelegation,
     allowedCapabilityNames: input.catalog.capabilityNames,
   };

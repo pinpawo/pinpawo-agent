@@ -257,6 +257,9 @@ Chat 兼容 `<workdir>/PET.md`（旧）与 `pets/<petId>/PET.md`（新），
 
 ## 八、不在本设计内
 
+模块边界与目录切分见 `module-boundaries.md`（#790）。
+
+
 - `runtimeConfig.checkpointPath` 死字段与 checkpoint 三套路径收敛（含数据迁移）。
 - 跨包 `Local*` 符号改名（`LocalAgentRuntimeConfig` 等 6 个 + `local-server-transport` 出口）。
 - 10 处 `@deprecated` 别名清理。

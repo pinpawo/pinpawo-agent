@@ -4,7 +4,7 @@ import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import type { HumanReviewResponse, InterruptResumeMessage } from '@pinpawo/agent-session';
 import { isToolProtocolHistoryError, ServerChatHandler } from './serverChatHandler';
 import { InflightRequestController } from './inflightRequestController';
-import type { ServerPeer } from './localServerPeer';
+import type { ServerPeer } from './wire/localServerPeer';
 
 function createFakePeer(
   sent: unknown[] = [],

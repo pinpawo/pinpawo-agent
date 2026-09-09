@@ -33,7 +33,7 @@ import {
 import { createLocalServerRuntimeDepsStore } from '../../local-agent/src/serverTypes';
 import type {
   LocalServerPeerHandlers,
-} from '../../local-agent/src/localServerMessageDispatcher';
+} from '../../local-agent/src/wire/localServerMessageDispatcher';
 import {
   attachLocalServerWebSocketTransport,
 } from '../../local-agent/src/serverWsTransport';

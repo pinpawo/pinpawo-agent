@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { emitInflightToolEvent } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
-import type { LocalAgentControlServerMessage } from './localAgentProtocol';
+import type { LocalAgentControlServerMessage } from './wire/localAgentProtocol';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 
 function createTestController() {

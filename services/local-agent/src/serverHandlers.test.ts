@@ -13,8 +13,8 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { LocalAgentGraphService } from './agentGraphService';
 import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
-import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { ServerPeer } from './localServerPeer';
+import type { LocalAgentServerMessage } from './wire/localAgentProtocol';
+import type { ServerPeer } from './wire/localServerPeer';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTestModelProfileRegistry,

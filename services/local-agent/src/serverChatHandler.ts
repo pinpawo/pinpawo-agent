@@ -8,7 +8,7 @@ import {
   type ChatRequestMessage,
   type InterruptResumeMessage,
   type RunInterruptMessage,
-} from './localAgentProtocol';
+} from './wire/localAgentProtocol';
 import { recordAgentRunActivity } from './operationActivityState';
 import { projectPendingInterrupt } from './pendingInterruptProjection';
 import {
@@ -42,7 +42,7 @@ import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
+import { sendLocalServerPeerEvent, type ServerPeer } from './wire/localServerPeer';
 import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;

@@ -6,7 +6,7 @@ import test, { type TestContext } from 'node:test';
 import {
   globSearchTool,
   grepSearchTool,
-} from './toolkits/local/searchTools';
+} from './searchTools';
 
 function createSearchFixture(t: TestContext) {
   const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-search-'));

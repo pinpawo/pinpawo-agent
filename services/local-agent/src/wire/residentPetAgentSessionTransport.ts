@@ -16,7 +16,7 @@ import type { ServerTransport } from './localServerTransport';
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,
-} from './residentPetHost';
+} from '../residentPetHost';
 
 export const RESIDENT_PET_AGENT_SESSION_ROUTE_PREFIX = '/agent-session/pets/';
 

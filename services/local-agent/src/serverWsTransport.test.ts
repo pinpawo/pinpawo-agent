@@ -9,8 +9,8 @@ import {
 } from './serverWsTransport';
 import {
   type LocalServerPeerHandlers,
-} from './localServerMessageDispatcher';
-import type { ServerPeer } from './localServerPeer';
+} from './wire/localServerMessageDispatcher';
+import type { ServerPeer } from './wire/localServerPeer';
 
 test('local websocket peer owns socket readiness, serialization, and send failures', () => {
   const sent: unknown[] = [];

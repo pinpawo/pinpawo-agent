@@ -22,7 +22,9 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
     hostRuntime: 'src/hostRuntime.ts',
-    localServerTransportApi: 'src/localServerTransportApi.ts',
+    // Entry key is the published artifact name; keep it stable so the
+    // `pinpawo/local-server-transport` subpath keeps resolving after the move.
+    localServerTransportApi: 'src/wire/index.ts',
   },
   format: ['esm'],
   platform: 'node',

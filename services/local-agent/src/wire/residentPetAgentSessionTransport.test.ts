@@ -10,7 +10,7 @@ import {
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,
-} from './residentPetHost';
+} from '../residentPetHost';
 
 function connect(url: string, token: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {

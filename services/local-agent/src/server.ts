@@ -1,7 +1,7 @@
 /**
  * Local HTTP/WebSocket server for TUI ↔ run process communication.
  */
-import { ensureLocalServerAuthToken } from './localServerAuth';
+import { ensureLocalServerAuthToken } from './wire/localServerAuth';
 import {
   createLocalServerHandlers,
   type ServerHandlerOptions,
@@ -10,7 +10,7 @@ import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverType
 import {
   startLocalServerTransport,
   type ServerTransport,
-} from './localServerTransport';
+} from './wire/localServerTransport';
 
 export type { ServerDeps };
 
@@ -19,11 +19,11 @@ export type ServerOptions = {
   handlerOptions?: ServerHandlerOptions;
 };
 
-export { startLocalServerTransport } from './localServerTransport';
+export { startLocalServerTransport } from './wire/localServerTransport';
 export type {
   ServerTransport,
   ServerTransportOptions,
-} from './localServerTransport';
+} from './wire/localServerTransport';
 
 export async function startLocalServer(
   port: number,

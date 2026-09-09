@@ -10,7 +10,7 @@ import {
   createBashToolkit,
   createGitToolkit,
   createProjectInspectionToolkit,
-} from './toolkits/local';
+} from './index';
 import {
   gitAddTool,
   gitCommitTool,
@@ -26,7 +26,7 @@ import {
   ghPrViewTool,
   ghReadContentTool,
   gitStatusTool,
-} from './toolkits/local/gitTools';
+} from './gitTools';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

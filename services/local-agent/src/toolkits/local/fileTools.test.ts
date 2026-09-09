@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit } from './toolkits/local';
+import { createBashToolkit } from './index';
 import {
   applyPatchTool as rawApplyPatchTool,
   copyPathTool,
@@ -18,11 +18,11 @@ import {
   viewFileChunkTool,
   VIEW_FILE_CHUNK_MAX_BYTES,
   writeFileTool,
-} from './toolkits/local/fileTools';
+} from './fileTools';
 import {
   parsePatch,
   PatchParseError,
-} from './toolkits/local/applyPatch';
+} from './applyPatch';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

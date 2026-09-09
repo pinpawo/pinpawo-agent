@@ -13,7 +13,7 @@ import {
   createLocalAgentWireHandlers,
   type ServerTransportHandlers,
 } from './localServerMessageDispatcher';
-import { attachLocalServerWireWebSocketTransport } from './serverWsTransport';
+import { attachLocalServerWireWebSocketTransport } from '../serverWsTransport';
 import type { ServerWireHandlers } from './localServerWire';
 
 export type ServerTransport = {

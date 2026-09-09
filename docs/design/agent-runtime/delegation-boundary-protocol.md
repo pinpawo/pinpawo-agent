@@ -412,6 +412,91 @@ plan constraints, protected compaction, and checkpoint recovery. The synthetic r
 
 Current model policy: runtime and eval omit thinking and reasoning_effort overrides for every role, leaving provider defaults in effect. The old subagent thinking switch and per-role effort policy have been removed. The explicit-thinking results above are historical experiment settings.
 
+## Capability subagent invocation boundary
+
+Capability execution remains an independent unit; its caller does not take over its internal responsibilities:
+
+```text
+Capability executor
+  briefing / private-context selection
+    → Toolkit binding
+    → createSubagent (createAgent internally)
+    → runtime release / finalize
+    → handoff (message patch, delivery, artifacts, authorization results)
+```
+
+The [executor](../../../packages/pet-agent/src/agent/orchestrator/capabilityExecution/runner.ts) takes an explicit Capability, delegation task and history, not the entire Root state. Each invocation owns its execution data. Acceptance, state application and scheduling belong to the caller; execution handoff is not task acceptance.
+
+### Executor input contract
+
+Fixed dependencies are supplied to `createCapabilityExecutor(options)`: models, modality support, artifact store, Toolkit runtime manager and context budgets. Each invocation separates task data from host execution context:
+
+```ts
+executeCapability({
+  capability,                 // Capability + Toolkits resolved from the registry
+  delegation: {
+    id, runId, traceId,        // Execution identity
+    userRequest, task,        // User goal and delegated task
+    mode: 'initial',
+    essentialContext,        // Continuations use guidance instead
+  },
+  history,                   // Snapshot; executor selects main + this delegation
+}, {
+  review: {
+    hostCapabilities,        // Human-review and session-authorization support
+    policy,                  // Review policy for this execution
+    authorizations,          // Grants filtered to the current generation
+  },
+  runnableConfig,            // Sole source of thread ID / workdir; forwarded unchanged
+});
+```
+
+Host review settings do not belong to task data. The executor renders the briefing from the typed delegation and derives its message lane from the selected Capability. Initial/continue is a discriminated union with essentialContext/guidance respectively. This is an internal runtime interface, not the model-facing tool schema: compiled Capabilities, identities, history and authorization objects are supplied by the runtime, not the model.
+
+`runnableConfig.configurable.thread_id` and `runnableConfig.context.workdir` are the sole sources of execution identity and directory, not duplicated in outer context fields. Selected history messages must already have nonblank stable IDs; the executor validates before execution rather than assigning IDs to caller-owned messages. Normal Root-persisted history already satisfies this requirement.
+
+The output remains `{ status, scope, handoff, artifacts, toolAuthorizations }`; handoff still contains private message updates and Announce evidence. Input cleanup does not change that output protocol. For tool integration, delivery text and private updates should become separate outputs, with ToolMessage construction and call-id matching owned by the external adapter.
+
+### Current invocation
+
+```text
+Supervisor: submit plan / review decision
+  → Root: dispatch according to the decision
+    → capability node
+      → Capability executor
+      ← handoff
+    → Root: apply message and state updates
+  → Supervisor: consume Announce evidence from main
+```
+
+Root currently schedules serially. Typed Announce results still become assistant XML at the model boundary. Extracting the executor changed neither that protocol nor Capability ownership.
+
+### Target invocation (not implemented)
+
+```text
+Supervisor: real delegate_task tool call
+  → Root / delegation-tool adapter: validate and invoke
+    → the same Capability executor
+    ← handoff
+  → commit execution state and return the matching ToolMessage
+  → Supervisor: read the result, review or decide the next call
+```
+
+Only the request/return protocol outside the executor changes. Supervisor decides what to delegate; it does not build briefings, manage Toolkit lifecycles or construct Capability subagents. Root retains validation and state application. Whether the adapter attaches through existing graph routing or createAgent tool execution requires interrupt and streaming verification; there must not be two executable paths.
+
+| Boundary | Current | Target |
+| --- | --- | --- |
+| Request | Root implicitly dispatches from plan/review decisions | Supervisor issues a real delegation tool call |
+| Execution | Independent Capability executor | The same executor |
+| Model-visible return | Announce → assistant XML | ToolMessage answering the actual call |
+| Acceptance vs. execution | Review may automatically advance/continue | Review and the next delegation call are separate |
+
+Results must answer actual calls, not invented historical calls. A returned result is not acceptance. Pause and authorization handling must distinguish an unfinished call from a later continuation call, and never invoke a model with incomplete tool history. Private traces stay inside Capability context; main receives deliveries and necessary execution facts.
+
+### Parallel invocation boundary
+
+Supervisor may eventually choose multiple independent delegations, each invoking the executor without moving scheduling into it. Parallel scheduling is not enabled. The caller must define checkpoint namespaces, shared Toolkit resource constraints and message/artifact/authorization/acceptance merging; last-writer-wins execution snapshots are not a valid merge.
+
 ## Related documents
 
 This document owns the overall interaction. Existing documents retain their details without introducing new concepts or duplicating field definitions here:

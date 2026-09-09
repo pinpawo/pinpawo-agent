@@ -1,55 +1,14 @@
 import { Command } from '@langchain/langgraph';
-import type { createRunTerminationHandlers } from '../runTermination';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { getAgentRuntimeContext } from '../../../../runtime/context';
-import { createSubagent } from '../../../../subagent/createSubagent';
-import type { CapabilityArtifactRef } from '../../../../types/artifact';
-import type { SubagentRunInput } from '../../../../types/subagent';
 import type { OrchestratorStateType } from '../../state';
+import type { OrchestratorConfig } from '../../types';
+import { createCapabilityExecutor } from '../../capabilityExecution';
 import { updateRunDelegationSummaryResult } from '../../delegations';
-import {
-  observeAgentMessageSelection,
-  queryAgentMessages,
-} from '../../../messages';
-import {
-  readLatestAnnounce,
-  reconcileDelegationPrivateMessages,
-} from '../../delegation';
-import { orchestratorModelInvocationMiddleware } from '../../modelInvocation';
-import {
-  buildSubagentExecutionContext,
-  collectToolkitOperations,
-  resolveToolkitExecution,
-} from '../../subagentDispatch';
-import type {
-  CapabilityMessageLane,
-  OrchestratorConfig,
-} from '../../types';
-import { emitRuntimeEventToStreamWriter } from '../../../../utils/streamWriterEvents';
-import { createToolAuthorizationRecorder } from '../authorization';
-import {
-  CAPABILITY_SUBAGENT_MAX_ITERATIONS,
-} from '../constants';
-import {
-  getInvokeRegistry,
-  getInvokeOptions,
-  readThreadId,
-} from '../config';
-import {
-  readCapabilityNameFromLane,
-  resolveDelegationRunId,
-} from '../decisions/delegationLifecycle';
-import {
-  hasArtifactDiscoveryToolkit,
-} from '../../artifacts/discovery';
-import type { ToolkitRuntimeExecution } from '../../toolkitRuntime';
-import { materializeDelegation } from '../../delegation';
 import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
-import {
-  pauseTaskInterrupt,
-  readPauseTaskInterruptSignal,
-  type PausedSubagentState,
-} from '../../interrupt';
+import { pauseTaskInterrupt } from '../../interrupt';
+import type { createRunTerminationHandlers } from '../runTermination';
+import { getInvokeRegistry, getInvokeOptions } from '../config';
+import { readCapabilityNameFromLane, resolveDelegationRunId } from '../decisions/delegationLifecycle';
 
 export function createCapabilityNode(params: {
   config: OrchestratorConfig;
@@ -63,13 +22,21 @@ export function createCapabilityNode(params: {
     subagentGenerationReserveTokens,
   } = params;
 
+  const executeCapability = createCapabilityExecutor({
+    models: config.models,
+    modelInputModalities: config.modelInputModalities,
+    capabilityArtifactStore: config.capabilityArtifactStore,
+    toolkitRuntimeManager: config.toolkitRuntimeManager,
+    subagentContextWindowTokens,
+    subagentGenerationReserveTokens,
+  });
+
   // Resolve invocation metadata and the Host's structured execution directory.
   return async function capabilityNode(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
     const {
       reviewCapabilities,
       globalReviewPolicy,
     } = getInvokeOptions(runnableConfig);
-    const { workdir } = getAgentRuntimeContext(runnableConfig);
     const registry = getInvokeRegistry(runnableConfig);
     const runNextDelegation = state.runNextDelegation;
     if (!runNextDelegation) {
@@ -93,212 +60,42 @@ export function createCapabilityNode(params: {
         `Capability node cannot resolve an available capability "${capabilityName}".`,
       );
     }
-    const { capability } = compiledCapability;
-    const toolkitList = [...compiledCapability.toolkits];
-    const lane: CapabilityMessageLane = runNextDelegation.lane;
     const runId = resolveDelegationRunId(state, runNextDelegation);
-    const delegationScope = {
-      lane,
+    const delegation = {
+      id: runNextDelegation.id,
       runId,
-      delegationId: runNextDelegation.id,
-    };
-    const briefingBase = {
+      traceId: state.traceId,
       userRequest: state.runUserRequest,
       task: runNextDelegation.task,
     };
-    const delegationBriefing = materializeDelegation(
-      runNextDelegation.mode === 'initial'
+    const execution = await executeCapability({
+      capability: compiledCapability,
+      delegation: runNextDelegation.mode === 'initial'
         ? {
-            ...briefingBase,
+            ...delegation,
             mode: 'initial',
             essentialContext: runNextDelegation.contextSummary,
           }
         : {
-            ...briefingBase,
+            ...delegation,
             mode: 'continue',
             guidance: runNextDelegation.contextSummary,
           },
-    );
-    const scopedQuery = queryAgentMessages(state.messages)
-      .main()
-      .delegation(delegationScope);
-    const canonicalSelection = scopedQuery.select();
-    const scopedSelection = scopedQuery
-      .append(delegationBriefing)
-      .select();
-    observeAgentMessageSelection(
-      'capability.private_messages',
-      scopedSelection.diagnostics,
+      history: state.messages,
+    }, {
+      review: {
+        authorizations: state.sessionToolAuthorizations.generation === registry.authorizationGeneration
+          ? state.sessionToolAuthorizations.records
+          : [],
+        hostCapabilities: reviewCapabilities,
+        policy: globalReviewPolicy,
+      },
       runnableConfig,
-    );
-    const scopedMessages = scopedSelection.messages;
-    const threadId = readThreadId(runnableConfig);
-
-    const authorizationRecorder = createToolAuthorizationRecorder(
-      state.sessionToolAuthorizations.generation === registry.authorizationGeneration
-        ? state.sessionToolAuthorizations.records
-        : [],
-    );
-    const artifactRefs: CapabilityArtifactRef[] = [];
-    const toolkitContext = {
-      models: config.models,
-      modelInputModalities: config.modelInputModalities,
-      messages: scopedMessages,
-      reviewContext: {
-        task: runNextDelegation.task,
-        workdir: workdir ?? null,
-      },
-      reviewCapabilities,
-      globalReviewPolicy,
-      toolAuthorizations: authorizationRecorder.active,
-      recordToolAuthorizations: authorizationRecorder.recordToolAuthorizations,
-      // Runtime events (authorization notices) surface as `custom` protocol
-      // events on the root stream (#322); review emits from afterModel
-      // middleware, where the writer is reachable at call time.
-      emitRuntimeEvent: emitRuntimeEventToStreamWriter,
-    };
-    let runtimeExecution: ToolkitRuntimeExecution | null = null;
-    let usedResolvedToolkitExecution: Awaited<ReturnType<typeof resolveToolkitExecution>>;
-    let subagentInput: SubagentRunInput;
-    let result: Awaited<ReturnType<typeof createSubagent>> | null = null;
-    let pausedSubagentState: PausedSubagentState | null = null;
-    try {
-      runtimeExecution = config.toolkitRuntimeManager
-        ? await config.toolkitRuntimeManager.resolve({
-            toolkits: toolkitList,
-            execution: {
-              threadId,
-              runId,
-              delegationId: runNextDelegation.id,
-              workdir: workdir ?? null,
-              signal: runnableConfig?.signal,
-            },
-          })
-        : null;
-      const executionToolkits = runtimeExecution
-        ? [...runtimeExecution.toolkits]
-        : toolkitList;
-      usedResolvedToolkitExecution = await resolveToolkitExecution(
-        executionToolkits,
-        undefined,
-        toolkitContext,
-      );
-      const canExploreArtifacts = hasArtifactDiscoveryToolkit(
-        usedResolvedToolkitExecution.toolkits,
-      );
-      const executionContext = buildSubagentExecutionContext({
-        artifactDiscovery: canExploreArtifacts,
-      });
-      subagentInput = {
-        model: config.models.subagent ?? config.models.act,
-        tools: usedResolvedToolkitExecution.tools,
-        promptSections: [
-          ...usedResolvedToolkitExecution.toolkits
-            .filter((toolkit) => Boolean(toolkit.instructions?.trim()))
-            .map((toolkit) => ({
-              id: `toolkit:${toolkit.name}`,
-              owner: toolkit.name,
-              content: toolkit.instructions as string,
-            })),
-          {
-            id: `capability:${capability.name}`,
-            owner: capability.name,
-            content: capability.instructions.content,
-          },
-          ...(executionContext
-            ? [{
-                id: 'execution-context',
-                owner: 'framework',
-                content: executionContext,
-              }]
-            : []),
-        ],
-        operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
-        messages: scopedMessages,
-        maxIterations: CAPABILITY_SUBAGENT_MAX_ITERATIONS,
-        contextWindowTokens: subagentContextWindowTokens,
-        generationReserveTokens: subagentGenerationReserveTokens,
-        middleware: [
-          ...usedResolvedToolkitExecution.middleware,
-          orchestratorModelInvocationMiddleware,
-        ],
-        runtimeContext: {
-          executionScope: {
-            threadId,
-            runId,
-            delegationId: runNextDelegation.id,
-            workdir: workdir ?? null,
-          },
-          ...(runtimeExecution
-            ? { toolkitRuntimes: runtimeExecution.runtimes }
-            : {}),
-        },
-        runnableConfig,
-        signal: runnableConfig?.signal,
-        artifacts: artifactRefs,
-      };
-      try {
-        result = await createSubagent(subagentInput);
-      } catch (error) {
-        const pauseSignal = readPauseTaskInterruptSignal(error);
-        if (!pauseSignal) {
-          throw error;
-        }
-        pausedSubagentState = pauseSignal.state;
-      }
-    } finally {
-      await runtimeExecution?.release();
-    }
-
-    if (result && capability.lifecycle?.finalize) {
-      const finalized = await capability.lifecycle.finalize(result, {
-        models: config.models,
-        messages: scopedMessages,
-        artifactStore: config.capabilityArtifactStore,
-        recordCapabilityArtifact: (ref: CapabilityArtifactRef) => {
-          artifactRefs.push(ref);
-        },
-        threadId,
-        capabilityId: capability.name,
-        delegationId: runNextDelegation.id,
-        runId,
-      });
-      const artifactsById = new Map(
-        [...result.artifacts, ...artifactRefs, ...(finalized?.artifactRefs ?? [])]
-          .map((ref) => [ref.id, ref]),
-      );
-      result = {
-        ...result,
-        ...(finalized?.messages ? { messages: finalized.messages } : {}),
-        ...(finalized?.announceMessageId !== undefined
-          ? { announceMessageId: finalized.announceMessageId }
-          : {}),
-        artifacts: [...artifactsById.values()],
-      };
-    }
-
-    if (!result && !pausedSubagentState) {
-      throw new Error('Capability subagent produced neither a result nor a pause signal.');
-    }
-    const resultMessages = pausedSubagentState?.messages ?? result!.messages;
-    const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
-    const announceMessageId = result?.announceMessageId ?? null;
-    const laneOutputMessages = reconcileDelegationPrivateMessages(
-      resultMessages,
-      subagentInput.messages,
-      lane,
-      runId,
-      {
-        traceId: state.traceId,
-        delegationId: runNextDelegation.id,
-        task: runNextDelegation.task,
-        announceMessageId,
-      },
-      canonicalSelection.messages,
-    );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, delegationScope);
-    const paused = pausedSubagentState !== null;
-    const missingDeliverable = !paused && !delegationAnnounce;
+    });
+    const { messages: laneOutputMessages, announce: delegationAnnounce } = execution.handoff;
+    const resultArtifacts = execution.artifacts;
+    const paused = execution.status === 'paused';
+    const missingDeliverable = execution.status === 'missing_deliverable';
     const currentResultPreview = state.taskActiveDelegation?.resultPreview ?? null;
     const resultPreview = paused
       ? currentResultPreview
@@ -342,7 +139,7 @@ export function createCapabilityNode(params: {
       } : {}),
       sessionToolAuthorizations: {
         generation: registry.authorizationGeneration,
-        records: authorizationRecorder.active,
+        records: execution.toolAuthorizations,
       },
     };
     if (missingDeliverable) {

@@ -31,7 +31,7 @@ export type ExecutorCompilationIssue =
       toolkitNames: readonly [string, string];
     };
 
-type CompiledCapability = {
+export type CompiledCapability = {
   capability: AgentCapability;
   toolkits: readonly AgentToolkit[];
   tools: readonly StructuredTool[];

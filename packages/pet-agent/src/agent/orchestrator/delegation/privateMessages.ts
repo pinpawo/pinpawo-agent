@@ -19,6 +19,7 @@ export function reconcileDelegationPrivateMessages(
     delegationId?: string | null;
     task?: string | null;
     announceMessageId?: string | null;
+    publishAnnounce?: boolean;
   } = {},
   canonicalMessages: BaseMessage[] = modelInputMessages,
 ) {
@@ -43,7 +44,7 @@ export function reconcileDelegationPrivateMessages(
     throw new Error('Capability selected an invalid or non-new deliverable.');
   }
   const added = [...reconciled.added];
-  if (announceMessage) {
+  if (announceMessage && reportMeta.publishAnnounce !== false) {
     const announceMessageId = announceMessage.id!;
     added.push(setAgentMessageMetadata(new DelegationAnnounceMessage({
       id: `delegation-announce:${runId}:${delegationId}:${announceMessageId}`,

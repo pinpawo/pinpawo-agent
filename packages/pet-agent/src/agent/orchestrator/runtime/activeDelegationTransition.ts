@@ -42,6 +42,8 @@ export function applyActiveDelegationTransition(
   options: { deferExecution?: boolean } = {},
 ): Partial<OrchestratorStateType> {
   const activeDelegation = state.taskActiveDelegation;
+  const sameRunSession = state.runSupervisorSession?.runId === state.runId
+    ? state.runSupervisorSession : null;
   if (!activeDelegation) {
     const continuation = state.taskRunContinuation;
     return state.runActiveDelegationTransition === 'resume_active' && continuation
@@ -85,7 +87,7 @@ export function applyActiveDelegationTransition(
     return {
       traceId: activeDelegation.traceId,
       runUserRequest: resumedUserRequest,
-      runSupervisorSession: null,
+      runSupervisorSession: sameRunSession,
       taskRunContinuation: continuation,
       runNextDelegation: null,
       runSupervisorReply: null,
@@ -97,12 +99,14 @@ export function applyActiveDelegationTransition(
     runNextDelegation,
   );
 
-  if (activeDelegation.status === 'awaiting_decision' && readLatestAnnounce(state.messages, {
+  if (activeDelegation.status === 'awaiting_decision' && ((state.sessionDelegationResults ?? []).some((delivery) =>
+    delivery.scope.delegationId === activeDelegation.id && delivery.scope.runId === activeDelegation.runId)
+    || readLatestAnnounce(state.messages, {
     lane: activeDelegation.lane, runId: activeDelegation.runId, delegationId: activeDelegation.id,
-  })) {
+  }))) {
     return {
       traceId: activeDelegation.traceId,
-      runSupervisorSession: null,
+      runSupervisorSession: sameRunSession,
       taskRunContinuation: continuation,
       runUserRequest: resumedUserRequest,
       runDelegationSummaries: updateRunDelegationSummaryResult(
@@ -118,7 +122,7 @@ export function applyActiveDelegationTransition(
 
   return {
     traceId: activeDelegation.traceId,
-    runSupervisorSession: null,
+    runSupervisorSession: sameRunSession,
     taskRunContinuation: continuation,
     runUserRequest: resumedUserRequest,
     runNextDelegation,

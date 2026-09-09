@@ -1,9 +1,109 @@
 # Run-scoped Supervisor session
 
-Status: working design, implemented on the Supervisor interaction branch.
-Control tools use native `returnDirect`; execution preserves the plan and
-prepared Capability disclosure. User supplements begin a fresh Supervisor
-invocation before the same delegation continues.
+Status: working design. The following run-scoped tool-handoff contract describes
+the current implementation; the older rationale below is historical where it
+describes Announce-only evidence or discarding working messages after each decision.
+
+## Current ownership and lifetime
+
+Root owns the session: canonical user conversation, durable execution evidence,
+artifacts, authorization generation, task continuation, and the checkpointer.
+Supervisor owns only the current run's working state: plan, capability disclosure,
+model/tool transcript, consumed user-input identity, and pending delegation call.
+Persistence through Root's checkpointer does not make that state session-scoped.
+The historical field name `runSupervisorSession` denotes this run-scoped state.
+
+Resuming the same interrupted run retains Supervisor state. A new run seeds a
+fresh Supervisor from Root facts and explicit continuation, never from the prior
+Supervisor transcript or pending call. Ordinary final replies clear the run's
+working state; unfinished goal, active delegation and remaining plan survive as
+Root continuation facts. Review interrupts preserve the pending call; explicit
+task pauses and settled cancellations close it with a paused result. Continuing
+such a task issues a new call, retaining the same delegation identity if appropriate.
+
+Only working conversation and tool messages persist within the run. Per-invocation
+goal/catalog/disclosure frames are rebuilt, not appended to the saved transcript.
+Legacy Announce checkpoints remain readable as non-assistant data projections;
+the model adapter no longer emits assistant XML or invents past tool calls for them.
+
+Capability executor retains briefing, scoped history selection, Toolkit lifecycle,
+createAgent-based execution, finalize, and delivery extraction. It does not create
+Supervisor ToolMessages, mutate Root state, or accept tasks.
+
+## Current call and result contract
+
+Supervisor uses planning/review controls to establish or advance a validated task,
+then emits a real `delegate_capability({ capability, task })` tool call. A narrow
+graph-visible adapter validates that call against the pending task and dispatches
+the executor. The committed result completes the same `tool_call_id` in the run's
+working history. Planning acknowledgments are not execution evidence; calls are
+never fabricated after execution and new deliveries are not assistant XML.
+
+The graph-visible execution boundary is deliberate: the installed runtime's
+child-in-tool regression test loses inner live model events. The delegation tool
+uses LangGraph's parent Command to yield to its runtime adapter, retaining the
+model-emitted message. Capability remains a node-level child. There is one
+execution path, not both inline execution and graph dispatch. Deterministic Root
+edges commit validated effects and schedule the pending operation; they neither
+choose tasks nor accept results. Execution is currently serial.
+
+Keeping planning/review controls separate from delegation adds one Supervisor
+model turn per execution attempt. This is an explicit tradeoff of preserving the
+existing validated plan/acceptance boundary while requiring a real execution call;
+it is not represented as a latency optimization.
+
+Executor returns `{ status, scope, delivery, privateMessages, artifacts,
+toolAuthorizations }`. Root stores delivery records in `sessionDelegationResults`,
+independently of user-facing messages. Supervisor receives current-run execution
+results in matching ToolMessages, not duplicate Announce inputs. A fresh run receives
+Root evidence as data without invented historical tool calls. Acceptance updates
+task state and retires private history, without rewriting the original delivery.
+
+The registry, workdir, review authority and execution identities remain runtime
+inputs; model arguments cannot supply them. Same-run fresh guidance is consumed
+once; clearing its queued message ID must not reopen the original run input.
+
+## Validation and exclusions
+
+Behavioral tests cover actual model call/result correlation, no new Announce in
+main, run lifetime isolation within one persistent Root session, native Root stream
+visibility, and graph restart before execution or after committed delivery.
+Existing review/pause/abort, multi-attempt, scope, Toolkit, and authorization tests
+remain part of the regression suite. Model decision quality still requires live
+model evaluation; scripted model tests establish structural behavior only.
+
+Local validation: 494 pet-agent tests passed, including the real createAgent-based
+handoff/restart fixtures. Pet-agent and eval typechecks and local-agent typecheck
+passed. Local-agent's eight sandbox-dependent failures passed when their five
+files were rerun with local port/process access (33 tests). Live-model evaluation
+passed Supervisor details (7/7), Boundary decisions (8/8 across the initial run
+and focused reruns), plan adjustment (4/4), and the pending delegation tool call
+(1/1). Deterministic multi-task and review-rejection flows both passed locally
+(1/1 each); their Langfuse uploads were unavailable because the configured local
+endpoint at `localhost:3000` could not be reached.
+
+## Remaining boundary work
+
+The current Root graph still stores Supervisor working state and schedules its
+plan, dispatch and review invocations. Moving this loop into a run-scoped
+Supervisor subgraph is a follow-up; the independent Capability executor remains
+responsible for briefing, Toolkit binding and createAgent execution. Root should
+retain session facts and provide checkpoint storage without interpreting each
+pending tool call. Historical snapshot normalization should move to a loading
+boundary instead of weakening the runtime state type. Session delivery retention
+and compaction also need an explicit policy. Existing short-flow tests do not
+establish that a full 25-attempt run reaches its soft guard before the graph's
+hard recursion limit; that boundary needs dedicated validation.
+
+Parallel scheduling, resource arbitration and concurrent authorization merging
+are outside this change. Root session persistence is not moved to Supervisor;
+Entry Answer remains the user-facing entry gate.
+
+## Historical design rationale
+
+The dated sections below record the prior proposal-only/Announce protocol. They
+are not an alternative current execution path. The contract above supersedes their
+message-storage and per-invocation-history rules.
 
 ## Plan adjustment follow-up (2026-09-09)
 

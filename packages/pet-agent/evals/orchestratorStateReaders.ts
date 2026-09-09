@@ -22,14 +22,14 @@ function isCapabilityLane(value: unknown): value is CapabilityMessageLane {
 }
 
 function isDelegationStatus(value: unknown): value is RunDelegationSummary['status'] {
-  return value === 'pending' || value === 'progress' || value === 'completed';
+  return value === 'pending' || value === 'progress' || value === 'completed'
+    || value === 'superseded';
 }
 
 function isRunDelegationSummary(value: unknown): value is RunDelegationSummary {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
     && isCapabilityLane(value.lane)
-    && (value.mode === 'initial' || value.mode === 'continue')
     && typeof value.task === 'string'
     && isDelegationStatus(value.status)
     && (value.resultPreview === null || typeof value.resultPreview === 'string');

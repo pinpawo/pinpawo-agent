@@ -11,6 +11,7 @@ import { buildRunStateReset, OrchestratorState, type OrchestratorStateType } fro
 import { createRunSupervisorSession } from '../../runSupervisor/session';
 import { buildRunSupervisorInput } from '../../runSupervisor/input';
 import type { RunSupervisorResult } from '../../runSupervisor/runner';
+import { withScriptedDelegation } from '../../runSupervisor/testing';
 import { applyActiveDelegationTransition } from '../activeDelegationTransition';
 import { afterContextPrep } from '../routes/afterContextPrep';
 import { createAnswerNode } from './answer';
@@ -56,7 +57,7 @@ test('acceptance advances the stable plan and updates the original Announce in p
   input.messages.push(new HumanMessage('A later message.'));
   const command = await node({ completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current' })(input, options);
   const next = apply(input, command);
-  assert.deepEqual(command.goto, ['capability']);
+  assert.deepEqual(command.goto, ['runSupervisor']);
   assert.notEqual(next.taskActiveDelegation?.id, 'd1');
   assert.equal(next.runDelegationSummaries[0].status, 'completed');
   assert.equal(next.messages.length, input.messages.length);
@@ -120,9 +121,9 @@ test('Boundary without canonical evidence fails instead of accepting a preview',
 
 test('checkpoint recovery after root acceptance does not repeat acceptance or dispatch', async () => {
   const checkpointer = new MemorySaver(); let decisions = 0; let executions = 0;
-  const supervisor = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async () => {
+  const supervisor = createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async () => {
     decisions += 1; return { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', };
-  } } });
+  } }) });
   const build = () => new StateGraph(OrchestratorState)
     .addNode('runSupervisor', supervisor, { ends: ['capability', 'answer'] })
     .addNode('capability', () => { executions += 1; return {}; })
@@ -240,7 +241,7 @@ test('a natural question preserves work through terminal cleanup and resumes wit
         reason: completed ? 'The prepared document is delivered.' : 'Complete the document using the supplied project.' };
     } } })(resumed, options);
     const next = apply(resumed, command);
-    assert.deepEqual(command.goto, ['capability']);
+    assert.deepEqual(command.goto, ['runSupervisor']);
     if (completed) {
       assert.notEqual(next.taskActiveDelegation?.id, original.taskActiveDelegation!.id);
       assert.equal(next.runNextDelegation?.task, tail[0].task);

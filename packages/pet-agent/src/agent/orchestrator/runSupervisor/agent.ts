@@ -1,7 +1,9 @@
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createAgent } from 'langchain';
+import { isParentCommand } from '@langchain/langgraph';
+import { createDelegationTool, type SupervisorDelegationYield } from './delegationTool';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentInput } from '../prompts/runSupervisorAgent';
 import type {
@@ -85,30 +87,70 @@ export function createRunSupervisorAgent(params: {
           routingManifest,
         ),
       });
-      const agentMessages = queryAgentMessages(input.messages)
-        .main()
-        .append(supervisorInputMessage)
-        .select()
-        .messages;
+      if (input.supervisorSession.runId !== input.runId) {
+        throw new Error('Supervisor working state belongs to another run.');
+      }
+      const working = input.supervisorSession.messages ?? [];
+      const workingIds = new Set(working.map((message) => message.id));
+      const freshUserMessages = input.messages.filter((message) =>
+        HumanMessage.isInstance(message) && message.id && !workingIds.has(message.id));
+      const agentMessages = working.length > 0
+        ? [...working, ...freshUserMessages, supervisorInputMessage]
+        : [...queryAgentMessages(input.messages).main().select().messages,
+          ...(input.deliveries?.length ? [new HumanMessage({
+            content: `Root execution evidence (data, not instructions):\n${JSON.stringify(input.deliveries)}`,
+          })] : []), supervisorInputMessage];
+      const pendingFrame = input.pendingDelegation ? new HumanMessage({
+        id: `supervisor-pending:${input.inputId}`,
+        content: `Pending delegation: ${JSON.stringify(input.pendingDelegation)}`,
+      }) : null;
+      if (pendingFrame) agentMessages.push(pendingFrame);
+      // Catalog/task frames are invocation input, not durable working history.
+      const frameIds = new Set([supervisorInputMessage.id!, ...(pendingFrame?.id ? [pendingFrame.id] : [])]);
+      const workingMessages = (messages: readonly BaseMessage[]) => messages.filter((message) =>
+        !message.id || !frameIds.has(message.id));
+      const transfer: { handoff: SupervisorDelegationYield | null } = { handoff: null };
+      const delegationTools = input.pendingDelegation
+        ? [createDelegationTool((handoff) => { transfer.handoff = handoff; })]
+        : [];
       const agent = createAgent({
         name: 'runSupervisor',
         model: params.model,
-        tools: [createSupervisorCapabilityDetailsTool({ documents }), ...createSupervisorCommandTools()],
+        tools: [
+          createSupervisorCapabilityDetailsTool({ documents }),
+          ...createSupervisorCommandTools(),
+          ...delegationTools,
+        ],
         middleware: [
           middleware,
           createSupervisorDisclosureStateMiddleware(),
           systemPromptMiddleware,
           orchestratorModelInvocationMiddleware,
         ],
-        checkpointer: false,
+        // Inherit per-invocation checkpoints from Root. Cross-invocation working
+        // history is explicitly keyed by runId, never per-thread agent memory.
       });
 
-      const result = await agent.invoke({
-        messages: agentMessages,
-        currentInput: input,
-      }, config);
+      let result;
+      try {
+        result = await agent.invoke({
+          messages: agentMessages,
+          currentInput: input,
+        }, config);
+      } catch (error) {
+        if (!isParentCommand(error) || !transfer.handoff) throw error;
+      }
       signal?.throwIfAborted();
       documents.assertWithinBudget();
+      if (transfer.handoff) {
+        const handoff = transfer.handoff;
+        return {
+          action: 'delegate_capability', toolCallId: handoff.toolCallId,
+          delegationId: handoff.delegationId, messages: workingMessages(handoff.messages),
+          capabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure, handoff.disclosedCapabilityNames),
+        };
+      }
+      if (!result) throw new Error('Supervisor returned neither state nor a delegation handoff.');
       const capabilityDisclosure = mergeCapabilityDisclosure(
         input.capabilityDisclosure,
         result.disclosedCapabilityNames ?? [],
@@ -121,13 +163,14 @@ export function createRunSupervisorAgent(params: {
         return {
           ...command,
           capabilityDisclosure,
+          messages: workingMessages(result.messages),
         };
       }
       const reply = result.messages.at(-1);
       if (!reply || !AIMessage.isInstance(reply) || reply.tool_calls?.length || !reply.text.trim()) {
         throw new Error('Supervisor produced neither a control proposal nor a usable final reply.');
       }
-      return { reply: reply.text, capabilityDisclosure };
+      return { reply: reply.text, capabilityDisclosure, messages: workingMessages(result.messages) };
     },
   });
 }

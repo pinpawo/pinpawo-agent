@@ -12,12 +12,14 @@ import type {
 } from './protocol';
 import type { CapabilityDisclosureState } from './capabilityDisclosure';
 import type { RunSupervisorSessionState } from './session';
+import type { DelegationDelivery } from '../delegation/delivery';
 
 export type RunSupervisorMode = 'entry' | 'boundary';
 
 /**
  * Root-owned control state needed to materialize a Supervisor result. Canonical
- * messages cross the invocation seam separately and never become Supervisor state.
+ * messages cross the invocation seam separately. Supervisor may seed a run-local
+ * working view but never owns the canonical session conversation.
  */
 export type RunSupervisorRuntimeState = Pick<
   {
@@ -42,6 +44,8 @@ export type RunSupervisorDispatch =
   };
 
 type RunSupervisorInputBase = {
+  readonly pendingDelegation?: SupervisorDelegationInput | null;
+  readonly deliveries?: readonly DelegationDelivery[];
   readonly inputId: string;
   readonly traceId: string;
   readonly runId: string;
@@ -68,18 +72,28 @@ export type RunSupervisorInput = RunSupervisorInputBase & (
 );
 
 export type RunSupervisorCommandResult = SupervisorCommand & {
+  readonly messages?: readonly BaseMessage[];
   /** Production runners always return the updated run-scoped disclosure. */
   readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
 /** A natural final reply preserves unfinished work without accepting it. */
 export type RunSupervisorReplyResult = {
+  readonly messages?: readonly BaseMessage[];
   readonly action?: never;
   readonly reply: string;
   readonly capabilityDisclosure?: CapabilityDisclosureState;
 };
 
-export type RunSupervisorResult = RunSupervisorCommandResult | RunSupervisorReplyResult;
+export type RunSupervisorDelegationResult = {
+  readonly action: 'delegate_capability';
+  readonly toolCallId: string;
+  readonly delegationId: string;
+  readonly messages: readonly BaseMessage[];
+  readonly capabilityDisclosure?: CapabilityDisclosureState;
+};
+
+export type RunSupervisorResult = RunSupervisorCommandResult | RunSupervisorReplyResult | RunSupervisorDelegationResult;
 
 export function isRunSupervisorReplyResult(result: RunSupervisorResult): result is RunSupervisorReplyResult {
   return !('action' in result);
@@ -89,8 +103,8 @@ export function isRunSupervisorReplyResult(result: RunSupervisorResult): result 
  * Typed graph seam for the framework-internal Run Supervisor.
  *
  * Graph tests inject a scripted implementation of this interface. Production
- * uses createRunSupervisorAgent(), whose raw model/tool messages remain private to
- * invocation tracing and never cross this seam into root messages.
+ * uses createRunSupervisorAgent(). Its working transcript crosses this seam into
+ * run-scoped state, never into Root's user-facing session messages.
  */
 export interface RunSupervisorRunner {
   invoke(

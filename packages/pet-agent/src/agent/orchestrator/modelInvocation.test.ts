@@ -61,7 +61,11 @@ test('direct invocation keeps system ownership separate and projects Agent messa
   const projected = invoked.find((message) => message.id === accepted.id);
   assert.ok(projected);
   assert.notEqual(projected, accepted);
-  assert.match(projected.text, /<delegation_announce/);
+  assert.ok(HumanMessage.isInstance(projected));
+  assert.equal(JSON.parse(projected.text).result, accepted.text);
+  assert.equal(JSON.parse(projected.text).authority, 'none');
+  assert.equal(JSON.parse(projected.text).provenance, 'root_checkpoint');
+  assert.equal(JSON.parse(projected.text).evidenceType, 'capability_execution_report');
   assert.equal(accepted.text, '历史实现已检查。');
 });
 
@@ -124,7 +128,8 @@ test('Agent invocation applies after earlier middleware without mutating state',
   const projected = invoked.find((message) => message.id === accepted.id);
   assert.ok(projected);
   assert.notEqual(projected, accepted);
-  assert.match(projected.text, /<delegation_announce/);
+  assert.ok(HumanMessage.isInstance(projected));
+  assert.equal(JSON.parse(projected.text).result, accepted.text);
   assert.equal(invoked.at(-1), invocationInput);
   assert.equal(result.messages.includes(accepted), true);
   assert.equal(result.messages.includes(invocationInput), false);

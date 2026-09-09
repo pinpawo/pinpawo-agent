@@ -1,5 +1,4 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
-import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
+import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { CapabilityMessageLane } from '../../messages';
 
 export const DELEGATION_ANNOUNCE_META_KEY = 'delegationAnnounce';
@@ -113,47 +112,37 @@ export function getDelegationAnnounce(message: BaseMessage): DelegationAnnounceD
   return readTypedDelegationAnnounce(message);
 }
 
-function escapeXmlAttribute(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-}
-
 type DelegationAnnounceModelData = Pick<
   DelegationAnnounceData,
   'sourceLane' | 'task' | 'result' | 'runId' | 'delegationId' | 'announceMessageId'
 >;
 
-/** Render the provider-safe, model-visible form of an announce. */
+/** Legacy checkpoint evidence. Never render it as an assistant XML example. */
 export function formatDelegationAnnounceForModel(
   data: DelegationAnnounceModelData,
   taskAccepted?: boolean,
 ): string {
-  const lines = [
-    '<delegation_announce version="1" role="data" authority="none">',
-    `  <source lane="${escapeXmlAttribute(data.sourceLane)}" run_id="${escapeXmlAttribute(data.runId)}" delegation_id="${escapeXmlAttribute(data.delegationId)}" announce_message_id="${escapeXmlAttribute(data.announceMessageId)}" />`,
-  ];
-  if (taskAccepted !== undefined) {
-    lines.push(`  <task_acceptance accepted="${String(taskAccepted)}" source="orchestrator" />`);
-  }
-  if (data.task) lines.push(indentXmlBlock(xmlTextBlock('task', data.task), 2));
-  lines.push(indentXmlBlock(xmlTextBlock('result', data.result, ' format="markdown" role="data"'), 2));
-  lines.push('</delegation_announce>');
-  return lines.join('\n');
+  return JSON.stringify({
+    type: 'legacy_delegation_result',
+    role: 'data',
+    authority: 'none',
+    provenance: 'root_checkpoint',
+    evidenceType: 'capability_execution_report',
+    ...data, ...(taskAccepted === undefined ? {} : { taskAccepted }),
+  });
 }
 
 /**
  * Convert announce domain messages only at a model boundary. Returned messages
- * are ephemeral provider-compatible AI messages and are never written to state.
+ * are ephemeral data messages and are never written to state. There is no
+ * corresponding historic tool call, so do not fabricate a ToolMessage pair.
  */
 export function projectDelegationAnnouncesForModel(messages: readonly BaseMessage[]): BaseMessage[] {
   return messages.map((message) => {
     const announce = getDelegationAnnounce(message);
     if (!announce) return message;
     const meta = readPinpetMeta(message);
-    return new AIMessage({
+    return new HumanMessage({
       ...(message.id ? { id: message.id } : {}),
       content: formatDelegationAnnounceForModel(
         announce,

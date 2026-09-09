@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph,
+  ORCHESTRATOR_RECURSION_LIMIT,
 } from '../../src/agent/createAgentRuntime.ts';
 import { getAgentMessageLane } from '../../src/agent/messages/index.ts';
 import {
@@ -14,6 +15,7 @@ import {
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { RunSupervisorRunner } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
+import { withScriptedDelegation } from '../../src/agent/orchestrator/runSupervisor/testing.ts';
 import { PLAN_REQUEST_TOOL_NAME } from '../../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
 import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
@@ -77,7 +79,7 @@ function buildRecordingSubagent(responses: string[]) {
   return { model, laneMessageCounts };
 }
 
-function buildScriptedAnswerModel() {
+function buildScriptedAnswerModel(goal: string) {
   const model = {
     invoke: async () => new AIMessage(
       'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
@@ -88,7 +90,7 @@ function buildScriptedAnswerModel() {
         tool_calls: [{
           id: 'multi-task-eval-plan-request',
           name: PLAN_REQUEST_TOOL_NAME,
-          args: {},
+          args: { goal },
         }],
       }),
     }),
@@ -123,21 +125,16 @@ function buildScriptedSupervisorRunner() {
       if (supervisorDecisionCount > 2) {
         return { completed: true, reason: 'Current task delivery is evidenced.',
           action: 'review_current',
-          reply: '已完成。',
-          remainingPlan: [],
+          reply: 'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
         };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
-        input.messages.map((message) => message.text).join('\n'),
+        (input.deliveries ?? []).map((delivery) => delivery.text).join('\n'),
       );
-      const objective = '根据调查结论重构 auth 模块，提取 token validation 并移除循环依赖';
+      const objective = input.remainingPlan[0]?.task ?? '';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return { completed: true, reason: 'Current task delivery is evidenced.',
-        remainingPlan: [{
-          capability: 'code_modify',
-          task: objective,
-        }],
         action: 'review_current',
 
       };
@@ -159,7 +156,7 @@ function taskMatches(actual: string, expectedTerms: string[]) {
 }
 
 async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
-  const answers = buildScriptedAnswerModel();
+  const answers = buildScriptedAnswerModel(testCase.input.userMessage);
   const supervisor = buildScriptedSupervisorRunner();
   const subagent = buildRecordingSubagent(testCase.input.subagentResults);
   const graph = createOrchestratorGraph({
@@ -169,11 +166,12 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       observe: answers.model,
       subagent: subagent.model,
     },
-    runSupervisorRunner: supervisor.runner,
+    runSupervisorRunner: withScriptedDelegation(supervisor.runner),
   });
   const result = await graph.invoke(
     buildOrchestratorRunInput([new HumanMessage(testCase.input.userMessage)]),
     { context: { workdir: '/mock/project', systemPromptSections: [] },
+      recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
       configurable: {
         thread_id: `multi-task-flow-${Date.now()}`,
         registry,
@@ -224,7 +222,7 @@ async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]
       key: 'lane_isolation_correct',
       score: remainingLaneMessageCount === 0
         && subagent.laneMessageCounts.length === expected.expectedDelegationCount
-        && subagent.laneMessageCounts.every((count) => count === 1) ? 1 : 0,
+        && subagent.laneMessageCounts.every((count) => count === 0) ? 1 : 0,
       comment: `subagentInputLaneMessages=${JSON.stringify(subagent.laneMessageCounts)}, remainingLaneMessages=${remainingLaneMessageCount}`,
     },
     {
@@ -270,31 +268,38 @@ async function main() {
     || `multi-task-flow-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   console.log(`Running ${multiTaskFlowBasicsDataset.name}: ${runName}`);
   let passed = 0;
+  let uploadFailures = 0;
   for (const testCase of multiTaskFlowBasicsDataset.cases) {
     const started = performance.now();
     try {
       const { output, scores } = await runCase(testCase);
       const ok = scores.every((score) => score.score === 1);
       if (ok) passed += 1;
-      await writeLangfuseEvalResult({
-        runtime,
-        datasetName: multiTaskFlowBasicsDataset.name,
-        runName,
-        traceName: 'multi-task-flow-eval',
-        testCase,
-        output,
-        scores,
-        durationMs: Math.round(performance.now() - started),
-      });
       console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: ${scores.map((score) => `${score.key}=${score.score}`).join(' ')}`);
       if (!ok) console.log(`  output=${JSON.stringify(output)}`);
+      try {
+        await writeLangfuseEvalResult({
+          runtime,
+          datasetName: multiTaskFlowBasicsDataset.name,
+          runName,
+          traceName: 'multi-task-flow-eval',
+          testCase,
+          output,
+          scores,
+          durationMs: Math.round(performance.now() - started),
+        });
+      } catch (error) {
+        uploadFailures += 1;
+        console.log(`[UPLOAD ERROR] ${testCase.name}: ${String(error)}`);
+      }
     } catch (error) {
       console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
     }
   }
   await runtime.shutdown();
   console.log(`Cases: ${passed}/${multiTaskFlowBasicsDataset.cases.length} passed`);
-  if (passed !== multiTaskFlowBasicsDataset.cases.length) process.exitCode = 1;
+  console.log(`Uploads: ${multiTaskFlowBasicsDataset.cases.length - uploadFailures}/${multiTaskFlowBasicsDataset.cases.length} succeeded`);
+  if (passed !== multiTaskFlowBasicsDataset.cases.length || uploadFailures > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {

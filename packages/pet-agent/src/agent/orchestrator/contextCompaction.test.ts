@@ -173,7 +173,7 @@ test('orchestrator context compaction summarizes a complete accepted main announ
   });
 
   assert.match(summaryInput, /用户目标：保留完整的委派结果并总结。/);
-  assert.match(summaryInput, /<delegation_announce/);
+  assert.ok(summaryInput.includes(JSON.stringify(acceptedAnnounce.text)), 'legacy result remains complete');
   assert.match(summaryInput, new RegExp(resultTail));
   assert.equal(
     result.messages.some((message) => message.id === acceptedAnnounce.id),

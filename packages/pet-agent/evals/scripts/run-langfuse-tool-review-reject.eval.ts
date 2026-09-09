@@ -3,16 +3,20 @@ import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langcha
 import { tool } from '@langchain/core/tools';
 import { Command, MemorySaver } from '@langchain/langgraph';
 import { z } from 'zod';
+import { withScriptedDelegation } from '../../src/agent/orchestrator/runSupervisor/testing';
+import { PLAN_REQUEST_TOOL_NAME } from '../../src/agent/orchestrator/runtime/nodes/entryAnswer';
+import { compileAgentRegistry } from '../../src/agent/orchestrator/registry';
 import type { AgentModels } from '../../src/types/agent';
-import { createOrchestratorGraph, buildOrchestratorRunInput } from '../../src/agent/createAgentRuntime';
+import {
+  createOrchestratorGraph,
+  buildOrchestratorRunInput,
+  ORCHESTRATOR_RECURSION_LIMIT,
+} from '../../src/agent/createAgentRuntime';
 import { buildReviewSpec } from '../../src/agent/orchestrator/review/reviewSpec';
 import { randomUUID } from 'node:crypto';
 import {
   mainConversationMessages,
 } from '../../src/agent/messages/index';
-import {
-  getMessageHandoffSource,
-} from '../../src/agent/orchestrator/delegation';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -88,9 +92,19 @@ function compactError(error: unknown): string {
   return String(error).slice(0, 800);
 }
 
-function createRouteModel(): AgentModels['act'] {
+function createRouteModel(goal: string): AgentModels['act'] {
   return {
     invoke: async () => new AIMessage('任务已完成。'),
+    bindTools: () => ({
+      invoke: async () => new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'tool-review-eval-plan-request',
+          name: PLAN_REQUEST_TOOL_NAME,
+          args: { goal },
+        }],
+      }),
+    }),
   } as unknown as AgentModels['act'];
 }
 
@@ -166,13 +180,6 @@ function readLastText(messages: BaseMessage[]): string {
   return typeof content === 'string' ? content : '';
 }
 
-function findHandoffText(messages: BaseMessage[]): string {
-  const handoff = mainConversationMessages(messages).find((message) =>
-    Boolean(getMessageHandoffSource(message)));
-  const content = handoff?.content;
-  return typeof content === 'string' ? content : '';
-}
-
 async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> {
   let toolRunCount = 0;
   const reviewedTool = tool(async ({ command }: { command: string }) => {
@@ -209,7 +216,16 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     }],
   })];
 
-  const routeModel = createRouteModel();
+  const capability = defineCapability({
+    name: 'general',
+    description: 'Execute the reviewed tool rejection eval task.',
+    uses: ['eval_general'],
+    instructions: defineInstructionDocument({
+      content: 'Use the requested reviewed tool and respond to rejection feedback.',
+    }),
+  });
+  const registry = compileAgentRegistry({ capabilities: [capability], toolkits });
+  const routeModel = createRouteModel(input.userMessage);
   const subagentModel = new ToolReviewRejectSubagentModel(
     input.reviewedTool,
     input.firstToolCall,
@@ -223,13 +239,12 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
       subagent: subagentModel,
     },
     checkpoint: new MemorySaver(),
-    runSupervisorRunner: {
+    runSupervisorRunner: withScriptedDelegation({
       async invoke(supervisorInput) {
         return supervisorInput.mode === 'boundary'
           ? { completed: true, reason: 'Current task delivery is evidenced.',
             action: 'review_current',
-            reply: '已完成。',
-            remainingPlan: [],
+            reply: input.subagentFinalResponse,
           }
           : {
             action: 'execute_plan',
@@ -240,22 +255,15 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
 
           };
       },
-    },
+    }),
   });
   const recorder = createSubagentInputRecorder();
   const config = {
     callbacks: recorder.callbacks,
+    recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
     configurable: {
       thread_id: `eval-tool-review-reject-${Date.now()}-${randomUUID()}`,
-      capabilities: [defineCapability({
-        name: 'general',
-        description: 'Execute the reviewed tool rejection eval task.',
-        uses: ['eval_general'],
-        instructions: defineInstructionDocument({
-          content: 'Use the requested reviewed tool and respond to rejection feedback.',
-        }),
-      })],
-      toolkits,
+      registry,
     },
   };
 
@@ -296,6 +304,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     messages?: BaseMessage[];
+    sessionDelegationResults?: Array<{ text: string }>;
     sessionToolAuthorizations?: { records?: unknown[] };
   };
   const messages = Array.isArray(finalState.messages)
@@ -305,12 +314,14 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const rejectedToolResultSeenBySubagent = resumedSubagentInput.some((message) =>
     ToolMessage.isInstance(message)
     && message.tool_call_id === input.firstToolCall.id);
-  const handoffText = findHandoffText(messages);
+  const handoffText = finalState.sessionDelegationResults?.at(-1)?.text ?? '';
 
   return {
     interrupted: true,
     firstReviewId,
-    finalInterrupt: Boolean(finalState.__interrupt__),
+    finalInterrupt: Array.isArray(finalState.__interrupt__)
+      ? finalState.__interrupt__.length > 0
+      : Boolean(finalState.__interrupt__),
     toolRunCount,
     rejectedToolResultSeenBySubagent,
     handoffPresent: Boolean(handoffText),
@@ -430,12 +441,14 @@ async function main() {
   console.log(`Cases: ${cases.length}\n`);
 
   const rows: EvalRow[] = [];
+  let uploadFailures = 0;
   for (const testCase of cases) {
     const started = performance.now();
+    let row: EvalRow;
     try {
       const output = await target(testCase.input);
       const scores = runEvaluators(output, testCase.expected);
-      const row = {
+      row = {
         id: testCase.id,
         name: testCase.name,
         suite: testCase.suite,
@@ -445,11 +458,8 @@ async function main() {
         scores,
         output,
       };
-      await writeLangfuseResult({ runtime, runName, testCase, row });
-      rows.push(row);
-      console.log(`[${row.ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${row.durationMs}ms)`);
     } catch (error) {
-      const row = {
+      row = {
         id: testCase.id,
         name: testCase.name,
         suite: testCase.suite,
@@ -460,15 +470,21 @@ async function main() {
         output: {},
         error: compactError(error),
       };
+    }
+    rows.push(row);
+    console.log(`[${row.error ? 'ERROR' : row.ok ? 'PASS' : 'FAIL'}] ${testCase.name} (${row.durationMs}ms)${row.error ? `: ${row.error}` : ''}`);
+    try {
       await writeLangfuseResult({ runtime, runName, testCase, row });
-      rows.push(row);
-      console.log(`[ERROR] ${testCase.name} (${row.durationMs}ms): ${row.error}`);
+    } catch (error) {
+      uploadFailures += 1;
+      console.log(`[UPLOAD ERROR] ${testCase.name}: ${compactError(error)}`);
     }
   }
 
   printSummary(rows);
+  console.log(`Uploads: ${rows.length - uploadFailures}/${rows.length} succeeded`);
   await runtime.shutdown();
-  if (rows.some((row) => !row.ok)) {
+  if (rows.some((row) => !row.ok) || uploadFailures > 0) {
     process.exitCode = 1;
   }
 }

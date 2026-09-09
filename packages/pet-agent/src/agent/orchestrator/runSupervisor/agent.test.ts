@@ -32,9 +32,56 @@ import {
 } from '../../messages';
 
 function commandOnly(value: unknown) {
-  const { capabilityDisclosure: _disclosure, ...result } = value as Record<string, unknown>;
+  const { capabilityDisclosure: _disclosure, messages: _messages, ...result } = value as Record<string, unknown>;
   return result;
 }
+
+test('delegation yields the actual model call without a fabricated tool result', async () => {
+  const catalog = createTestCatalog({ general: 'Execute work.' });
+  const pending = { delegationId: 'd-real', runId: 'run-test', capability: 'general', task: 'Execute work.' };
+  const model = new ScriptedSupervisorModel([{ toolCalls: [{
+    id: 'real-call', name: 'delegate_capability', args: { capability: pending.capability, task: pending.task },
+  }] }]);
+  const input = { ...supervisorInput(catalog), pendingDelegation: pending };
+  const result = await createRunSupervisorAgent({ model }).invoke(input);
+  assert.equal(result.action, 'delegate_capability');
+  if (result.action !== 'delegate_capability') throw new Error('Expected delegation');
+  assert.equal(result.toolCallId, 'real-call');
+  assert.equal(result.delegationId, pending.delegationId);
+  assert.equal(result.messages.at(-1)?.getType(), 'ai');
+  assert.equal(result.messages.some((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'real-call'), false);
+});
+
+test('delegation tool is exposed only while a validated task is pending', async () => {
+  const catalog = createTestCatalog({ general: 'Execute work.' });
+  const withoutPending = new ScriptedSupervisorModel([{ content: 'Need a task first.' }]);
+  await createRunSupervisorAgent({ model: withoutPending }).invoke(supervisorInput(catalog));
+  assert.equal(withoutPending.boundToolNames.includes('delegate_capability'), false);
+
+  const pending = { delegationId: 'd', runId: 'run-test', capability: 'general', task: 'Execute work.' };
+  const withPending = new ScriptedSupervisorModel([{ toolCalls: [{
+    id: 'call', name: 'delegate_capability', args: { capability: pending.capability, task: pending.task },
+  }] }]);
+  await createRunSupervisorAgent({ model: withPending }).invoke({
+    ...supervisorInput(catalog), pendingDelegation: pending,
+  });
+  assert.equal(withPending.boundToolNames.includes('delegate_capability'), true);
+});
+
+test('delegation rejects changed scope and mixed tool batches before handing off', async () => {
+  const catalog = createTestCatalog({ general: 'Execute work.' });
+  const pending = { delegationId: 'd', runId: 'run-test', capability: 'general', task: 'Execute work.' };
+  for (const calls of [
+    [{ id: 'wrong-task', name: 'delegate_capability', args: { capability: 'general', task: 'Different work.' } }],
+    [{ id: 'delegate', name: 'delegate_capability', args: { capability: 'general', task: pending.task } },
+      { id: 'other', name: 'capability_details', args: { names: ['general'] } }],
+  ]) {
+    const model = new ScriptedSupervisorModel([{ toolCalls: calls }]);
+    await assert.rejects(createRunSupervisorAgent({ model }).invoke({ ...supervisorInput(catalog), pendingDelegation: pending }),
+      /validated task|only tool call/);
+    assert.equal(model.invocations.length, 1);
+  }
+});
 
 type ScriptedToolCall = {
   id?: string;
@@ -841,7 +888,10 @@ test('boundary projects the current lane announce into the standard model-visibl
 
   const invocationText = model.invocations[0]?.map(readMessageText).join('\n') ?? '';
   assert.match(invocationText, /<supervision_boundary_event role="task_boundary" source="orchestrator_state">/);
-  assert.match(invocationText, /announce_message_id="announce-current"/);
+  const projectedEvidence = model.invocations[0]?.find((message) => message.id === 'announce:announce-current');
+  assert.ok(projectedEvidence && HumanMessage.isInstance(projectedEvidence));
+  assert.equal(JSON.parse(projectedEvidence.text).announceMessageId, 'announce-current');
+  assert.equal(JSON.parse(projectedEvidence.text).result, currentAnnounce.text);
   assert.doesNotMatch(invocationText, /completion_reason=/);
   assert.match(invocationText, /Inspect repository dependencies\./);
   assert.match(invocationText, /dependency evidence is missing/);

@@ -9,6 +9,7 @@ import { DelegationAnnounceMessage, getMessageHandoffSource } from '../../delega
 import { compileAgentRegistry } from '../../registry';
 import { buildRunStateReset, OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { RunSupervisorInput, RunSupervisorResult } from '../../runSupervisor/runner';
+import { withScriptedDelegation } from '../../runSupervisor/testing';
 import { createRunSupervisorSession, snapshotRunTaskContinuation } from '../../runSupervisor/session';
 import { buildRunSupervisorInput } from '../../runSupervisor/input';
 import { applyActiveDelegationTransition } from '../activeDelegationTransition';
@@ -55,7 +56,7 @@ function harness(decide: (input: RunSupervisorInput) => RunSupervisorResult, che
   execute: (state: OrchestratorStateType) => void = () => {}) {
   return new StateGraph(OrchestratorState)
     .addNode('pauseGate', pauseGate)
-    .addNode('runSupervisor', createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (input) => decide(input) } }), { ends: ['capability', 'answer'] })
+    .addNode('runSupervisor', createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async (input) => decide(input) }) }), { ends: ['capability', 'answer', 'runSupervisor'] })
     .addNode('capability', (state) => { execute(state); return {}; })
     .addNode('answer', createAnswerNode({ models }))
     .addEdge(START, 'pauseGate')
@@ -113,7 +114,7 @@ test('empty continue keeps the saved pending plan and bypasses Supervisor', asyn
   const paused = await graph.invoke(pausedState(), config);
   const result = await graph.invoke(new Command({ resume: { [pauseInterruptId(paused)]: { action: 'continue' } } }), config);
   assert.equal(result.taskActiveDelegation?.id, 'd1');
-  assert.deepEqual(result.taskRunContinuation?.remainingPlan, tail);
+  assert.deepEqual(result.runSupervisorSession?.plan, tail);
 });
 
 test('a clarification preserves pending work and repeated pause inputs have independent identities', async () => {
@@ -164,6 +165,6 @@ test('root rejects execution-driven adjustments and unknown or changed continuat
   const update = accepted.update as Partial<OrchestratorStateType>;
   const applied = { ...fresh, ...update, messages: messagesStateReducer(fresh.messages, update.messages ?? []) };
   const input = buildRunSupervisorInput({ nodeInput: applied, catalog: { registryDigest: 'c', capabilityNames: ['general'], entries: [] }, supervisorSession: applied.runSupervisorSession! }).input;
-  assert.ok(input.inputId.startsWith('announce:'));
+  assert.ok(input.inputId.startsWith('dispatch:'));
   await assert.rejects(node(adjustment('continue'))(applied, config), /fresh user input/);
 });

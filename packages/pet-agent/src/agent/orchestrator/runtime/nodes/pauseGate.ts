@@ -31,6 +31,6 @@ export function afterPauseGate(state: OrchestratorStateType) {
   if (state.runSupervisorUserMessageId && state.taskActiveDelegation && !state.runRuntimeFailure) return 'runSupervisor';
   return state.runNextDelegation
     && state.runNextDelegation.id === state.taskActiveDelegation?.id
-    ? 'capability'
+    ? 'runSupervisor'
     : 'answer';
 }

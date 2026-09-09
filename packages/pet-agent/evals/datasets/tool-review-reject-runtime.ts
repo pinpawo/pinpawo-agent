@@ -45,7 +45,7 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
     },
     expected: {
       expectedInterrupted: true,
-      expectedFinalInterrupt: false,
+      expectedFinalInterrupt: true,
       expectedToolRunCount: 0,
       expectedRejectedToolResultSeenBySubagent: false,
       expectedHandoffPresent: false,

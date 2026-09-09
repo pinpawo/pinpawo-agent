@@ -307,7 +307,9 @@ test('Entry Answer receives an accepted delegation result as execution data, not
   assert.ok(projected);
   assert.notEqual(projected, announce);
   assert.notEqual(projected.content, announce.content);
-  assert.equal(projected._getType(), 'ai');
+  assert.equal(projected._getType(), 'human');
+  assert.equal(JSON.parse(projected.text).result, announce.text);
+  assert.equal(JSON.parse(projected.text).authority, 'none');
   assert.doesNotMatch(String(projected.content), /<artifacts>/);
 });
 

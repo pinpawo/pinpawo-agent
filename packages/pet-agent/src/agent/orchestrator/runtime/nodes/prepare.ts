@@ -43,7 +43,7 @@ export function createPrepareNode() {
           runSupervisorUserMessageId: messages.at(-1)?.id ?? null },
         goto: guidedPauseResume && resumed.taskActiveDelegation && !resumed.runRuntimeFailure ? 'runSupervisor'
           : resumed.runNextDelegation?.id === resumed.taskActiveDelegation?.id
-          && resumed.runNextDelegation ? 'capability' : 'answer',
+          && resumed.runNextDelegation ? 'runSupervisor' : 'answer',
       });
     }
     return new Command({ update: { ...update, messages }, goto: afterPrepare({ ...state, ...update }) });

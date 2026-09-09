@@ -34,7 +34,7 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
     expected: {
       expectedTaskTerms: [
         ['调查', 'auth', '结构', '风险'],
-        ['auth', '重构', 'token validation', '循环依赖'],
+        ['auth', '重构', '调查结论'],
       ],
       expectedPlannedObjectiveTerms: [
         ['auth', '调查'],
@@ -44,7 +44,7 @@ const cases: AgentEvalCase<MultiTaskFlowInput, MultiTaskFlowExpected>[] = [
       expectedCapabilityNames: ['explore', 'code_modify'],
       expectedFinalMode: 'answer',
       expectedResultTerms: ['token validation', '循环依赖', '测试通过'],
-      reason: 'Exploration and implementation form separate execution boundaries because the handoff determines the implementation task.',
+      reason: 'Exploration and implementation form separate execution boundaries; the stable implementation task consumes the exploration delivery as evidence.',
     },
     metadata: {
       difficulty: 'hard',

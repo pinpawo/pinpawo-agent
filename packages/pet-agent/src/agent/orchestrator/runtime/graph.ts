@@ -62,7 +62,7 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       ends: ['runSupervisor'],
     })
     .addNode('runSupervisor', runSupervisor, {
-      ends: ['answer', 'capability', 'throwRunFailure'],
+      ends: ['answer', 'capability', 'runSupervisor', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('supervisorBoundaryIterationGuard', supervisorBoundaryIterationGuard)

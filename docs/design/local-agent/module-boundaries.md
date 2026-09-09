@@ -167,8 +167,12 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 | updateState() | abort settlement 和 compact 都在使用；保留必要能力 |
 | getRawState() | 保持内部方法，供读取和 settlement 使用 |
 | streamEvents() / readThreadState() | 保留执行与查询能力 |
-| settleAbortedRun() | 保留 Runtime 收尾能力，由 agent 执行入口内部调用；返回 PendingInterrupt 或 null，见第四节 |
-| buildResumeCommand() | 删除公开方法；结构化 resume 请求在执行入口的 LangGraph 适配边界转成 Command |
+| settleAbortedRun() | 移除 graph service 的公开包装；agent 执行入口在取消收尾时内部调用 pet-agent 的结算能力，返回 PendingInterrupt 或 null |
+| buildResumeCommand() | 删除公开方法；执行入口接收 { interruptId, value }，在内部的 LangGraph 适配边界转换成 Command |
+
+pet-agent 内部保留 settleAbortedRun 名称，表示取消后的结算；上述两个方法都不再
+作为 graph service 的公开入口。统一的是对外数据契约与执行入口，不合并取消结算
+和用户回复这两个不同动作，详见第四节。
 
 公开接口按消费者需求收窄。删除 run() 不会自动消除重复装配：streamEvents 当前也
 接收完整 setup 并创建 graph；装配与复用由第二节的依赖契约解决。

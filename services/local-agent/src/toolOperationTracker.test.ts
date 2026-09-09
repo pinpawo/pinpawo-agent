@@ -2,6 +2,32 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createOperationRegistry } from './events/operationRegistry';
 import { ToolOperationTracker } from './toolOperationTracker';
+import { shellOperationMetadata } from './toolkits/local/shellTools';
+
+test('run_shell events without repeated input retain the summary without warnings', (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  for (const terminal of ['on_tool_end', 'on_tool_error'] as const) {
+    const tracker = new ToolOperationTracker('req-1');
+    const identity = {
+      name: 'run_shell', toolCallId: 'call-1', operation: shellOperationMetadata.run_shell,
+    };
+    tracker.accept({
+      ...identity, event: 'on_tool_start', input: { command: 'pwd', cwd: '/repo' },
+    });
+    const updated = tracker.accept({ ...identity, event: 'on_tool_event', data: '/repo' });
+    const ended = tracker.accept({
+      ...identity, event: terminal,
+      ...(terminal === 'on_tool_end' ? { output: '/repo' } : { error: 'command failed' }),
+    });
+    assert.equal(updated.phase, 'updated');
+    assert.equal(ended.phase, terminal === 'on_tool_end' ? 'completed' : 'failed');
+    for (const event of [updated, ended]) {
+      assert.equal(event.operation.summary, 'pwd');
+      assert.equal(event.operation.target, '/repo');
+    }
+  }
+  assert.equal(warn.mock.callCount(), 0);
+});
 
 test('ToolOperationTracker assigns stable synthetic ids when toolCallId is missing', () => {
   const tracker = new ToolOperationTracker('req-1');

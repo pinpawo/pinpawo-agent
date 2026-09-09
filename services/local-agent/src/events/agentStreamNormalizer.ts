@@ -119,7 +119,8 @@ function summarizeInput(
   input: unknown,
   toolName: string,
 ): OperationSummary | null | undefined {
-  if (!summarize) return undefined;
+  // Output/update/terminal events need not repeat the tool's input.
+  if (!summarize || input === undefined) return undefined;
   try {
     const record = typeof input === 'string' ? readJsonRecord(input) : null;
     if (record) {

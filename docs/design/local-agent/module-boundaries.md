@@ -1,7 +1,7 @@
-# local-agent 模块边界（2026-09-09 draft）
+# local-agent 模块边界（2026-09-10 draft）
 
 跟踪 issue：#790。取代 #337，收编 #434。
-基线：`c37a41a8`。
+实现核对基线：`08fd75fe`。本文为待实施设计；目标行为不代表当前实现已完成。
 
 ## 目标
 
@@ -10,33 +10,15 @@
 删死代码、移动目录是达成它的步骤，不是目标本身。`run/` 是否存在、顶层剩几个
 文件、公开方法是不是恰好两个，都不适合作为验收标准。
 
-## 问题
+## 问题与范围
 
-`services/local-agent` 有 113 个生产文件、21,366 行，其中 **75 个平铺在顶层**。
-它们之间没有边界，可以自由互相 import，`serverTypes.ts` 被 11 个文件依赖，
-事实上成了公共总线。这是"改一个字段要动一长串文件"的根因。
+当前执行编排、会话操作和协议应答混在 handler 中，多个消费者接收完整 ServerDeps，
+即使实际只需要其中少数字段。配置被展开后沿调用链传递，模块间缺少明确的依赖方向。
+改名和移动目录只能改善可读性；本次重构同时收窄依赖契约、集中执行职责，并删除
+被替换的旧路径。
 
-但**移动目录本身解决不了它**。真正要改的是依赖契约：现在每个消费者都声明需要
-完整的 `ServerDeps`（28 处签名收全量，只有 2 处用 `Pick`，而实际读取的中位数
-是 1–2 个字段），所以字段一变就波及全部 13 个消费文件。目录切分只是让这件事
-看得见，不会自动缩小影响面。
-
-## 为什么改名不够
-
-最近六个 PR（#778 #779 #780 #782 #783 #784）净减 3,075 行，但 `ServerDeps`
-**仍是 11 个字段，一个没少**。它们全是横向替换：
-
-```
-actor_id → petId → pet_id
-PetLocalConfig → PetConfig
-localServerHandlers → serverHandlers
-```
-
-更能说明问题的是 `runtime.ts:132`——刚把 `PetConfig` 读进来，转手就拍平成散
-字段塞进 `ServerDeps`，于是下游 23 处读 `deps.petId`，只有 3 处读
-`getPetConfig()`。等于当场把要修的问题又造了一遍。
-
----
+范围包括 local-agent 的装配、执行、协议和会话边界，以及 #434 的 git toolkit
+目录整理。interrupt/resume 的领域语义继续由 pet-agent 拥有；不新增运行状态体系。
 
 ## 一、目标结构
 
@@ -63,26 +45,17 @@ wire → agent.execute(request, { signal, emit }) → pet-agent
 装配和一次 invoke 的编排共同完成执行，生命周期差异用模块内部的函数和参数表达。
 **保留 `run` 作为一次执行的概念**；出现独立消费者或稳定契约后，再考虑拆模块。
 
-### `ServerPeer` 是识别信号，不是归属判据
+### Handler 按职责拆分
 
-`chatSessionAdapter`（600 行）、`agentChannel`、`agentGraphService` 对
-`ServerPeer` **零依赖** —— 它们只接受 `emitEvent` / `emitToolEvent` 回调，完全
-不知道事件最终走 WebSocket、stdio 还是内存。**这个性质要保住**：它意味着同一套
-执行编排可以给任何入口用。
+chatSessionAdapter、agentChannel、agentGraphService 当前不依赖 ServerPeer。
+其中 turn 编排通过事件回调输出；迁移后继续保持执行代码不感知具体传输。
 
-但"引用了 peer"只能识别传输耦合，**不能直接决定整个文件的归属**。
-`serverChatHandler` 就是反例：它有 29 处 peer/协议引用，却有 **43 处执行生命
-周期引用**（inflight 排队、AbortController、`settleAbortedRun` 收尾、过期请求
-判断、异常处理）。整体划进 `wire/` 会把更重的那半也带走，`agent/` 只收到一个
-adapter，真正的 run 职责仍散在外面。
+serverChatHandler 同时包含协议应答和执行生命周期管理，需要拆分：
 
-**这里要拆职责，不是整体搬迁**：
-- 协议应答、事件发送 → `wire/`
-- 排队、取消、收尾、过期判断 → `agent/`
+- 协议应答、事件发送归 wire。
+- 排队、取消、收尾、过期判断归 agent。
 
-### `serverHandlers.ts`（795 行）要拆
-
-按操作职责拆分，不把整个协议 handler 搬进业务模块：
+serverHandlers 同样按操作职责拆分：
 
 | 职责 | 归属 |
 |---|---|
@@ -119,14 +92,13 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 
 ### 其他两处归属
 
-- `localServerTransportApi.ts` 是 **52 行纯 re-export 的包出口**，不进任何模块，
-  与 `hostRuntime.ts` 并列在顶层。
+- `localServerTransportApi.ts` 是 re-export 包出口，与 `hostRuntime.ts` 并列在顶层。
 - `residentPetAgentSessionTransport.ts` 名字里有 transport，实际解析
   `/agent-session/pets/<id>` 路由 → `wire/`。
 
 ---
 
-## 二、依赖契约（真正缩小影响面的那一步）
+## 二、依赖契约
 
 目录切分不会自动缩小字段变更影响面。**长期持有对象不意味着它的内容不变**：
 
@@ -156,38 +128,31 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 消费者声明自身需要的字段或能力接口；优先复用已有类型，不为每个函数新增一层服务。
 Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 
-### Graph 复用：优先采用简单方案
+### Graph 复用
 
-优先尝试在同一 Host 内复用构建配置一致的 compiled graph，构建依赖变化时再创建。
-先采用当前配置对应的单份实例，不预设全局缓存、多版本缓存或新的生命周期管理框架。
-若实际需要同时持有不同构建配置，再根据调用场景决定最小持有范围。
+**先集中执行所有权，再在该所有者内复用构建配置一致的 compiled graph；构建依赖
+变化时替换实例。** 默认只持有当前构建配置对应的一份实例，不引入全局缓存、
+多版本缓存或通用失效框架。若调用场景确实需要多份实例，再明确最小持有范围。
 
-实现前区分三个问题：
+以下实现事实决定复用边界：
 
-1. 节点闭包捕获的模型、context window、checkpointer 等属于构建依赖；变化后必须
-   替换 graph，或明确改为调用时注入。不能只按 threadId 判定是否可复用。
-2. registry 装配包含绑定 threadId 的 artifact discovery toolkit；graph 复用不能
-   让 registry、消息、resume、signal 等调用数据跨会话串用。
-3. graph 并非天然无可变数据：[runTermination](../../../packages/pet-agent/src/agent/orchestrator/runtime/runTermination.ts)
-   的 pendingErrors Map 要验证失败、取消和关闭后的清理，以及不同执行之间的隔离。
+| 当前实现 | 复用规则 |
+|---|---|
+| compactContext、runSupervisor、answer、capability 节点创建时捕获 config；compile 绑定 checkpointer | 明确捕获的构建依赖；模型、context window、checkpointer 等变化时替换 graph，或显式改为调用时注入 |
+| registry 装配加入绑定 threadId 的 artifact discovery toolkit | registry 的会话绑定独立处理，不能因复用 graph 而复用错误 thread 的工具 |
+| runTermination 的 pendingErrors Map 由 onNodeError 写入、throwRunFailure 删除 | 验证并处理取消/中断跳过删除的路径，保证长期复用时的清理和执行隔离 |
 
-正在运行的执行及其 abort 收尾继续持有原实例；配置更新后的新执行使用对应新实例。
-若复用需要复杂的失效缓存或大幅改写节点，允许暂时保留每次构建并记录具体原因。
-**判断依据是实现简单、配置正确、状态隔离，不以 compile 次数作为架构验收指标。**
+来源：[graph.ts](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)、
+[agentRegistryPreparation.ts](../../../services/local-agent/src/agentRegistryPreparation.ts)、
+[runTermination.ts](../../../packages/pet-agent/src/agent/orchestrator/runtime/runTermination.ts)。
 
-三个问题都已核实成立，实现前必须逐一处理：
+每次获准执行先取得配置快照，再选择或创建匹配的 graph。消息、resume、signal 等
+仍按调用传入。执行及其 abort 收尾持有原实例；替换只影响后续执行，不修改活跃实例。
+旧实例在不再被执行引用后释放，Host 持有的共享服务按 Host 生命周期管理。
 
-1. 闭包确实捕获构建依赖 —— `createCompactContextNode({ config })`、
-   `createRunSupervisorNode(config)`、`createAnswerNode(config)`、
-   `createCapabilityNode({ config })` 四处，加上 `checkpointer: config.checkpoint`。
-   模型或 context window 一变就必须换实例。
-2. registry 绑定 threadId 的 artifact discovery toolkit 仍在装配内。
-3. `runTermination` 的 `pendingErrors` Map 由 `onNodeError` 写入、
-   `throwRunFailure` 删除。取消或中断时后者可能不执行，条目就留在闭包里。
-   每次构建时这无害；复用则会跨执行泄漏。
-
-因此复用需要失效缓存加跨执行状态隔离验证。建议等执行所有权先集中——那时构建
-依赖的变化点收敛了，失效条件才好定义。
+复用需要明确的实例替换条件和状态清理规则，不必预设缓存系统。若实施证明复用需要
+复杂缓存或大幅改写节点，可暂时保留每次构建，并在本文记录具体阻碍与采用的方案。
+以实现简单、配置正确和状态隔离为准，不以 compile 次数作为验收指标。
 
 ---
 
@@ -225,28 +190,24 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 | checkpoint 读写协议 | LangGraph BaseCheckpointSaver |
 | 文件存储、写锁、GC | local-agent FileSaver |
 
-hasPendingContinuation 已不是基线里的方法名。剩余 acceptsResume 等框架适配先收在
-agent 内部，不泄漏到 wire；若要变成 Runtime 公共语义接口，需按 interrupt 设计
+剩余 acceptsResume 等框架适配先收在 agent 内部，不泄漏到 wire；若要变成 Runtime 公共语义接口，需按 interrupt 设计
 单独确认契约，不能靠搬目录或引用 #772 宣称已经解决。
 
 ---
 
-### 目录切分的已知障碍
+## 五、实施顺序
 
-批量改写 import 时**不能按 basename 建立"文件 → 新目录"映射**：basename 在这个
-包里不唯一。`modelProfiles.ts` 同时存在于 `src/` 和 `src/testing/`，
-`toolkitInventory.ts` 同时存在于 `src/toolkits/` 和 `src/testing/`，`index.ts`
-每个 capability 目录下都有一份。按 basename 匹配会把 `./modelProfiles` 解析成
-`./testing/modelProfiles`。
+本次计划一个 PR 落地，按下列顺序组织提交；每个范围完成替换时删除对应旧路径：
 
-正确做法是逐 import 解析：从该 import 语句**所在目录**出发解析出被引用文件的
-真实路径，再按那个文件的新位置重算相对路径。
+1. 明确操作准入、thread 执行、resident 调度的所有者，收窄依赖契约，确定配置生效时点。
+2. 拆分 handler，将执行与收尾接入统一入口，保留不同协调范围的既有行为。
+3. 在执行所有者内部落实 graph 实例替换与清理规则，再启用复用。
+4. 完成目录移动与 import 更新，删除死方法/函数，同批完成 #434 的 git toolkit 目录整理。
 
-## 五、做法
-
-按同一范围完成替换并删除旧入口，避免新旧协调或依赖表达长期并存。
-本次计划一个 PR 落地；提交可按依赖契约、职责迁移、机械移动组织，便于审查。
-同批处理 #434：gitTools 从 toolkits/local 拆出独立目录，不扩展其行为。
+目录迁移时，按 import 所在目录解析被引用文件的真实路径，再根据文件的新位置
+重算相对路径。不能仅用 basename 建立映射：modelProfiles.ts、toolkitInventory.ts
+和 index.ts 在不同目录存在同名文件，可能被错误替换为 testing 或其他模块的文件。
+机械移动不扩展工具行为，源码引用链接随文件移动一并更新。
 
 ## 六、验收
 

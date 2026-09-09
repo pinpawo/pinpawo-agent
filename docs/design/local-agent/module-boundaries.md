@@ -1,7 +1,7 @@
 # local-agent 模块边界（2026-09-10 draft）
 
 跟踪 issue：#790。取代 #337，收编 #434。
-实现核对基线：`08fd75fe`。本文为待实施设计；目标行为不代表当前实现已完成。
+实现核对基线：`09b8dc5e`。本文为待实施设计；目标行为不代表当前实现已完成。
 
 ## 目标
 
@@ -167,15 +167,88 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 | updateState() | abort settlement 和 compact 都在使用；保留必要能力 |
 | getRawState() | 保持内部方法，供读取和 settlement 使用 |
 | streamEvents() / readThreadState() | 保留执行与查询能力 |
-| settleAbortedRun() | 保留，Runtime 决定结算语义，Host 负责调用和发布结果 |
-| buildResumeCommand() | 保留必要的 LangGraph Command 适配，是否内联由调用边界决定 |
+| settleAbortedRun() | 保留 Runtime 收尾能力，由 agent 执行入口内部调用；返回 PendingInterrupt 或 null，见第四节 |
+| buildResumeCommand() | 删除公开方法；结构化 resume 请求在执行入口的 LangGraph 适配边界转成 Command |
 
 公开接口按消费者需求收窄。删除 run() 不会自动消除重复装配：streamEvents 当前也
 接收完整 setup 并创建 graph；装配与复用由第二节的依赖契约解决。
 
 ---
 
-## 四、interrupt 语义与 checkpoint 适配
+## 四、interrupt 契约与 checkpoint 适配
+
+### 对外统一数据契约
+
+目标是复用 pet-agent 已有的 interrupt domain，收窄 Host 需要理解的概念。
+取消执行与回复 interrupt 是不同阶段的动作，不合并成一个操作，也不新增统一控制器。
+
+用户回复在 Host 内保持结构化，到执行入口的 LangGraph 适配边界才转为 Command：
+
+```ts
+type InterruptResume = {
+  interruptId: string;
+  value: unknown;
+};
+
+// 执行入口内部的框架适配；不是 handler 的输入格式。
+new Command({ resume: { [input.interruptId]: input.value } });
+```
+
+这个类型表达已有协议中的 id/value，不另造协议；优先复用已有合适的契约类型。
+requestId、session 身份仍由外层请求携带，Host 保留 session/id 校验及过期请求处理。
+review 与 pause 都经同一入口传递，Host 不解读 value；具体回复解析由 pet-agent
+的 AgentInterrupt.resume(value) 负责。删除 handler 提前构造 id→value map、
+turn 请求中把整个 resume 声明为 unknown、再调用公开 buildResumeCommand 的中间链。
+
+### 取消结算复用 PendingInterrupt
+
+当前 pet-agent 的 AbortSettlement 使用 paused / finished 两种状态。其中 paused
+也可能携带已存在的 human_review，finished 仅表示没有待处理 interrupt，不能表示
+任务成功完成。目标将这个窄接口收敛为：
+
+```ts
+settleAbortedRun(graph): Promise<PendingInterrupt | null>
+```
+
+- 返回 PendingInterrupt：已有或新产生的 interrupt，agent 统一报告 waiting，并沿
+  interrupt.requested 链路发布；不区分 review 来源还是 abort 来源。
+- 返回 null：取消收尾后没有 pending interrupt，被取消的执行报告 interrupted。
+- 收尾失败：抛错，进入执行入口的失败处理；不能捕获后伪装成 null 或正常 interrupted。
+
+该返回值只属于取消结算接口，不替代一般执行的 completed / waiting / interrupted /
+failed 结果。正常执行读到 interrupt 也使用同一 PendingInterrupt 结构：
+
+```text
+正常执行 ───────────────────→ PendingInterrupt → waiting
+取消执行 → Runtime 收尾 ────→ PendingInterrupt → waiting
+                        └──→ null             → interrupted
+用户回复 → { interruptId, value } → Runtime 恢复执行
+```
+
+取消信号发出后先等待原执行停止和流结算，再用其原配置及原 graph 完成收尾；收尾不
+继承已中止的 signal，也不抢先启动后继执行。若取消到达前已产生 interrupt，保留
+它的 id 和 payload，不擅自 resolve 或另造 pause。
+
+### 区分用户 resume 与内部 checkpoint 推进
+
+AbortSettlementGraph 当前的 resume() 回调实际调用 invoke(null)，用于推进到暂停
+边界，不是用户按 interruptId 回复。将该内部回调命名为 continueFromCheckpoint，
+保留 Runtime 对 checkpoint 更新和挂起位置的控制；它不调用 AgentInterrupt.resume。
+
+AgentInterrupt 继续只负责各 kind 的 interaction 与回复解析，不增加取消、排队或
+checkpoint 存储职责。执行入口统一调用和发布结果，底层 settlement 与 Command
+适配仍各自实现，不为统一命名再套一层服务。
+
+本节是跨 pet-agent / local-agent 的小范围契约调整。落地时同步更新 Runtime 导出、
+普通对话与 resident dispatch 消费者及测试，删除旧 AbortSettlement 状态分支和公开
+buildResumeCommand，不保留兼容别名。相应更新
+[interrupt 设计](../agent-runtime/interrupt.md)，使公共契约与本节一致。
+
+来源：[settleAbortedRun.ts](../../../packages/pet-agent/src/agent/orchestrator/interrupt/settleAbortedRun.ts)、
+[AgentInterrupt](../../../packages/pet-agent/src/agent/orchestrator/interrupt/agentInterrupt.ts)、
+[chatSessionAdapter.ts](../../../services/local-agent/src/chatSessionAdapter.ts)。
+
+### 已有语义与剩余适配
 
 #772 是 interrupt domain 的相关设计，不代表所有运行结局与快照适配都已完成。
 基线中应区分已迁移的语义、仍需判断归属的适配和死代码：
@@ -200,7 +273,8 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 本次计划一个 PR 落地，按下列顺序组织提交；每个范围完成替换时删除对应旧路径：
 
 1. 明确操作准入、thread 执行、resident 调度的所有者，收窄依赖契约，确定配置生效时点。
-2. 拆分 handler，将执行与收尾接入统一入口，保留不同协调范围的既有行为。
+2. 拆分 handler，将执行与收尾接入统一入口；同步落实第四节的 resume/settlement 契约，
+   删除旧状态分支，保留不同协调范围的既有行为。
 3. 在执行所有者内部落实 graph 实例替换与清理规则，再启用复用。
 4. 完成目录移动与 import 更新，删除死方法/函数，同批完成 #434 的 git toolkit 目录整理。
 
@@ -226,7 +300,11 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 - [ ] 更新配置影响下一次获准执行；活跃执行与 abort 收尾使用原配置
 - [ ] 普通对话和 resident dispatch 都经过既定准入与执行路径，终结事件不重复发布
 - [ ] 客户端断连只取消其拥有的执行；Host 关闭停止准入、取消并等待收尾后释放资源
-- [ ] interrupt 通知、按 id resume、abort 后 pause/interrupted 的既有语义保持
+- [ ] review/pause 的回复都以 id/value 进入执行入口，Host 不解读 value；错误 session/id 仍被拒绝
+- [ ] 正常执行和取消结算产生的 PendingInterrupt 经同一通知链发布；取消前已有 interrupt 保持原 id
+- [ ] 无待处理 interrupt 的取消报告 interrupted；settlement 抛错走失败路径，不被吞成 null
+- [ ] 内部 checkpoint 推进不消耗用户 resume value，也不重新执行被取消的模型/工具工作
+- [ ] 普通对话与 resident dispatch 同步删除旧 paused/finished 结算分支，interrupt 设计与实现契约一致
 - [ ] 若复用 graph：模型/构建配置变化生效，跨 thread 不串消息或工具绑定，失败/取消后无残留执行状态
 - [ ] 文档、类型检查及受影响的执行/会话/resident 行为测试通过
 

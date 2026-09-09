@@ -1,6 +1,6 @@
 import {
   projectHumanReviewRequest,
-  type AbortSettlement,
+  type PendingInterrupt,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import { loadAgentContext } from './contextLoader';
@@ -215,7 +215,7 @@ export class ServerChatHandler {
     await this.runChatRequest(peer, {
       kind: 'resume',
       requestId: msg.requestId,
-      resume: { [msg.interruptId]: msg.value },
+      resume: { interruptId: msg.interruptId, value: msg.value },
     }, deps, { type: 'chat_request' });
   }
 
@@ -295,22 +295,17 @@ export class ServerChatHandler {
      * applies and how; the Host only asks and reports what came back.
      */
     const settleInterrupted = async (): Promise<ChatRunOutcome> => {
-      let settled: AbortSettlement = { status: 'finished' };
-      try {
-        const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
-        settled = await this.graphService.settleAbortedRun(setup);
-      } catch (settleError) {
-        console.warn(
-          '[local-server] failed to settle an aborted run:',
-          settleError instanceof Error ? settleError.message : settleError,
-        );
-      }
-      if (settled.status === 'paused') {
+      // A settlement that fails leaves the thread in an unknown state, so it
+      // takes the failure path rather than being reported as a clean
+      // interruption. The caller decides how that failure is surfaced.
+      const setup = this.tuiSessions.buildChatSetup(deps, await this.loadContext(deps.petId), threadId);
+      const settled = await this.graphService.settleAbortedRun(setup);
+      if (settled) {
         this.inflightRequests.finish(peer, inflight, 'interrupted');
         this.publishRuntimeEvent(peer, {
           type: 'interrupt.requested',
           requestId,
-          pendingInterrupt: projectPendingInterrupt(settled.pendingInterrupt),
+          pendingInterrupt: projectPendingInterrupt(settled),
         });
         this.inflightRequests.clear(peer, inflight);
         await this.tuiSessions.refreshActiveSessionSummary(deps);
@@ -334,6 +329,50 @@ export class ServerChatHandler {
         });
       }
       this.inflightRequests.clear(peer, inflight);
+    };
+
+    /**
+     * The one failure path for this request: a run that threw, and a
+     * cancellation whose settlement could not complete. Both leave work in an
+     * unknown state, so neither is reported as a clean interruption.
+     */
+    const reportFailure = async (
+      err: unknown,
+      isStillCurrent: boolean,
+    ): Promise<ChatRunOutcome> => {
+      this.inflightRequests.finish(peer, inflight, 'failed', err);
+      this.inflightRequests.clear(peer, inflight);
+      recordAgentRunActivity('error', requestId, 5_000);
+      console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
+      const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
+      if (recoveredFromToolProtocolError) {
+        try {
+          await this.tuiSessions.resetSession(deps.petId, {
+            deletePrevious: true,
+          });
+          console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
+        } catch (resetError) {
+          console.warn(
+            '[local-server] failed to reset TUI chat session after tool protocol error:',
+            resetError instanceof Error ? resetError.message : resetError,
+          );
+        }
+      }
+      const failure = classifyAgentRunFailure(err);
+      if (isStillCurrent) {
+        const message = err instanceof Error ? err.message : 'internal error';
+        this.publishRuntimeEvent(peer, {
+          type: 'error',
+          requestId,
+          message: recoveredFromToolProtocolError
+            ? `${message}\n\n已重置本地 TUI 会话，下一条消息会从新的后端会话继续。`
+            : failure.kind === 'fatal'
+              ? describeFatalAgentRunFailure(failure)
+              : message,
+          ...(failure.kind === 'fatal' ? { code: 'agent_unavailable' } : {}),
+        });
+      }
+      return failure.kind === 'fatal' ? 'fatal_failed' : 'failed';
     };
 
     try {
@@ -411,47 +450,22 @@ export class ServerChatHandler {
       console.log(`[local-server] message.completed sent requestId=${requestId} reply="${result.reply.slice(0, 100)}"`);
       return 'completed';
     } catch (err) {
-      const isStillCurrent = isCurrent();
       const aborted = controller.signal.aborted
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[local-server] chat interrupted requestId=${requestId}`);
         recordAgentRunActivity('interrupted', requestId, 2_500);
-        return await settleInterrupted();
-      }
-      this.inflightRequests.finish(peer, inflight, 'failed', err);
-      this.inflightRequests.clear(peer, inflight);
-      recordAgentRunActivity('error', requestId, 5_000);
-      console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
-      const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
-      if (recoveredFromToolProtocolError) {
         try {
-          await this.tuiSessions.resetSession(deps.petId, {
-            deletePrevious: true,
-          });
-          console.warn(`[local-server] reset TUI chat session after tool protocol error requestId=${requestId}`);
-        } catch (resetError) {
-          console.warn(
-            '[local-server] failed to reset TUI chat session after tool protocol error:',
-            resetError instanceof Error ? resetError.message : resetError,
+          return await settleInterrupted();
+        } catch (settleError) {
+          console.error(
+            '[local-server] failed to settle an aborted run:',
+            settleError instanceof Error ? (settleError.stack ?? settleError.message) : settleError,
           );
+          return await reportFailure(settleError, isCurrent());
         }
       }
-      const failure = classifyAgentRunFailure(err);
-      if (isStillCurrent) {
-        const message = err instanceof Error ? err.message : 'internal error';
-        this.publishRuntimeEvent(peer, {
-          type: 'error',
-          requestId,
-          message: recoveredFromToolProtocolError
-            ? `${message}\n\n已重置本地 TUI 会话，下一条消息会从新的后端会话继续。`
-            : failure.kind === 'fatal'
-              ? describeFatalAgentRunFailure(failure)
-              : message,
-          ...(failure.kind === 'fatal' ? { code: 'agent_unavailable' } : {}),
-        });
-      }
-      return failure.kind === 'fatal' ? 'fatal_failed' : 'failed';
+      return await reportFailure(err, isCurrent());
     } finally {
       invocation.settle();
     }
@@ -479,7 +493,7 @@ export class ServerChatHandler {
       run: (route, resume, source) => this.runChatRequest(peer, {
         kind: 'resume',
         requestId: msg.requestId,
-        resume,
+        resume: { interruptId: route.interruptId, value: resume },
       }, deps, source),
     });
   }

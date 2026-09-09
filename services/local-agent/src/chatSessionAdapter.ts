@@ -15,6 +15,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type {
+  InterruptResume,
   LocalAgentGraphEventStream,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
@@ -57,7 +58,7 @@ export type AgentSessionTurnRequest =
       message: string;
       attachments?: AgentLocalAttachment[];
     }
-  | { kind: 'resume'; requestId: string; resume: unknown };
+  | { kind: 'resume'; requestId: string; resume: InterruptResume };
 
 export type AgentSessionTurnOptions = {
   request: AgentSessionTurnRequest;
@@ -338,9 +339,9 @@ export async function runAgentSessionTurn(
     throw new Error(STALE_RESUME_MESSAGE);
   }
 
-  const graphInput = isResumeRequest
-    ? graphService.buildResumeCommand(request.resume)
-    : undefined;
+  // The reply stays structured all the way down; the LangGraph `Command` is
+  // built inside the graph service's adapter boundary.
+  const resume = request.kind === 'resume' ? request.resume : undefined;
   if (!isResumeRequest) {
     const userMessage = options.prepareUserMessage
       ? await options.prepareUserMessage()
@@ -371,7 +372,7 @@ export async function runAgentSessionTurn(
   emitCurrentPlan(initialThreadState.currentPlan ?? null);
   let run: LocalAgentGraphEventStream | null = null;
   try {
-    run = await graphService.streamEvents(setup, graphInput);
+    run = await graphService.streamEvents(setup, resume);
     const toolReader = new NamespacedProtocolToolEventReader();
     for await (const chatEvent of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) {
       if (!isCurrent()) {

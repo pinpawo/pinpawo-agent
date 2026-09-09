@@ -22,6 +22,7 @@ import type {
 } from '../../../local-agent/src/agentChannel';
 import {
   LocalAgentGraphService,
+  type InterruptResume,
   type LocalAgentGraphEventStream,
   type LocalAgentGraphThreadState,
 } from '../../../local-agent/src/agentGraphService';
@@ -68,9 +69,9 @@ export function createProductionToolkitHostGraphService() {
     extends LocalAgentGraphService {
     override async streamEvents(
       setup: AgentChannelSetup,
-      inputOverride?: unknown,
+      resume?: InterruptResume,
     ): Promise<LocalAgentGraphEventStream> {
-      return super.streamEvents(buildFixture(setup).setup, inputOverride);
+      return super.streamEvents(buildFixture(setup).setup, resume);
     }
 
     override async readThreadState(

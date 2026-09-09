@@ -372,6 +372,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       pendingInterrupt: null,
       currentPlan: null,
     }),
+    // The cancelled dispatch leaves nothing to continue, so it reports a
+    // plain interruption.
+    settleAbortedRun: async () => null,
   };
   const host = await createResidentPetHost({
     petId: 'pet-events',
@@ -710,11 +713,8 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
     settleAbortedRun: async () => {
       settleCalls += 1;
       return {
-        status: 'paused' as const,
-        pendingInterrupt: {
-          interruptId: 'interrupt-pause',
-          payload: { kind: 'pause_task' as const },
-        },
+        interruptId: 'interrupt-pause',
+        payload: { kind: 'pause_task' as const },
       };
     },
   };

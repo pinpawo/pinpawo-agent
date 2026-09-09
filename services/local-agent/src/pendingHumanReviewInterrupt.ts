@@ -111,25 +111,22 @@ export function validateHumanReviewResponses(
   return decisions;
 }
 
-export function buildHumanReviewResume(
-  route: PendingHumanReviewInterruptRoute,
-  decisions: ReviewResponse[],
-) {
-  return { [route.interruptId]: { decisions } };
+/**
+ * The review kind's own resume value. The interrupt id is not folded in here:
+ * it travels on the route, and the id-keyed LangGraph shape is built once, at
+ * the graph service's adapter boundary.
+ */
+export function buildHumanReviewResumeValue(decisions: ReviewResponse[]) {
+  return { decisions };
 }
 
-export function buildHumanReviewCancelResume(
-  route: PendingHumanReviewInterruptRoute,
-) {
-  const control = {
-    action: 'interrupt_run',
-  } as const;
-  return { [route.interruptId]: control };
+export function buildHumanReviewCancelResumeValue() {
+  return { action: 'interrupt_run' } as const;
 }
 
-export type HumanReviewResume =
-  | ReturnType<typeof buildHumanReviewResume>
-  | ReturnType<typeof buildHumanReviewCancelResume>;
+export type HumanReviewResumeValue =
+  | ReturnType<typeof buildHumanReviewResumeValue>
+  | ReturnType<typeof buildHumanReviewCancelResumeValue>;
 
 /** What the person decided, for logging. Not a message type. */
 export type HumanReviewResolutionSource =
@@ -161,7 +158,7 @@ type HumanReviewResolutionOptions<TRoute extends ResolvableHumanReviewRoute> = {
   isConnected: () => boolean;
   run: (
     route: TRoute,
-    resume: HumanReviewResume,
+    resume: HumanReviewResumeValue,
     source: HumanReviewResolutionSource,
   ) => Promise<unknown>;
 };
@@ -202,7 +199,7 @@ export async function resolvePendingHumanReviewInterrupt<
     });
     return;
   }
-  let resume: HumanReviewResume;
+  let resume: HumanReviewResumeValue;
   let source: HumanReviewResolutionSource;
   if ('decisions' in requested) {
     let decisions: ReviewResponse[];
@@ -226,7 +223,7 @@ export async function resolvePendingHumanReviewInterrupt<
     if (options.acceptRoute && !(await options.acceptRoute(route, message))) {
       return;
     }
-    resume = buildHumanReviewResume(route, decisions);
+    resume = buildHumanReviewResumeValue(decisions);
     const finalDecision = decisions.at(-1)!;
     source = {
       type: 'review_decision',
@@ -243,7 +240,7 @@ export async function resolvePendingHumanReviewInterrupt<
       options.emitClosed();
       return;
     }
-    resume = buildHumanReviewCancelResume(route);
+    resume = buildHumanReviewCancelResumeValue();
     source = {
       type: 'review_cancel',
       interactionId: firstReview.id,

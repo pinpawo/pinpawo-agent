@@ -8,6 +8,7 @@ import type {
   AgentChannelSetup,
 } from '../../../local-agent/src/agentChannel';
 import type {
+  InterruptResume,
   LocalAgentGraphService,
 } from '../../../local-agent/src/agentGraphService';
 
@@ -80,31 +81,26 @@ export function createHostGraphFixture() {
           pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
       };
     },
-    buildResumeCommand(resume: unknown) {
-      return { fixtureResume: resume };
-    },
-    streamEvents(setup: AgentChannelSetup, inputOverride?: unknown) {
+    streamEvents(setup: AgentChannelSetup, resume?: InterruptResume) {
       streams += 1;
       const threadKey = readThreadKey(setup);
-      const fixtureResume = readFixtureResume(inputOverride);
-      if (fixtureResume) {
+      if (resume) {
         const pendingInterrupt = pendingInterrupts.get(threadKey);
         assert.ok(pendingInterrupt, 'expected a pending review before graph resume');
-        reviewResumes.push(fixtureResume);
-        pendingInterrupts.delete(threadKey);
-        if (isInterruptRunResume(
-          fixtureResume,
+        assert.equal(
+          resume.interruptId,
           pendingInterrupt.interruptId,
-        )) {
+          'a resume must name the interrupt it answers',
+        );
+        reviewResumes.push({ [resume.interruptId]: resume.value });
+        pendingInterrupts.delete(threadKey);
+        if (isInterruptRunResume(resume.value)) {
           suspendedReviews.set(threadKey, pendingInterrupt);
           return checkpointStream(
             messagesByThread.get(threadKey) ?? [],
           );
         }
-        const selectedOptionId = readSelectedOptionId(
-          fixtureResume,
-          pendingInterrupt.interruptId,
-        );
+        const selectedOptionId = readSelectedOptionId(resume.value);
         const reply = selectedOptionId === 'approve'
           ? REVIEW_APPROVED_REPLY
           : REVIEW_REJECTED_REPLY;
@@ -308,21 +304,7 @@ function assistantReplyStream(
   })();
 }
 
-function readFixtureResume(input: unknown) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    return null;
-  }
-  const resume = (input as { fixtureResume?: unknown }).fixtureResume;
-  return resume && typeof resume === 'object' && !Array.isArray(resume)
-    ? resume as Record<string, unknown>
-    : null;
-}
-
-function readSelectedOptionId(
-  resume: Record<string, unknown>,
-  interruptId: string,
-) {
-  const resolution = resume[interruptId];
+function readSelectedOptionId(resolution: unknown) {
   assert.ok(resolution && typeof resolution === 'object');
   const decisions = (resolution as { decisions?: unknown }).decisions;
   assert.ok(Array.isArray(decisions));
@@ -336,11 +318,7 @@ function readSelectedOptionId(
   return selectedOptionId;
 }
 
-function isInterruptRunResume(
-  resume: Record<string, unknown>,
-  interruptId: string,
-) {
-  const resolution = resume[interruptId];
+function isInterruptRunResume(resolution: unknown) {
   return Boolean(
     resolution
     && typeof resolution === 'object'

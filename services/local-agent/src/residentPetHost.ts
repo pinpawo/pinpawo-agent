@@ -8,7 +8,6 @@ import {
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
 import {
-  type AbortSettlement,
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
@@ -690,22 +689,17 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             announce?: boolean;
           }) => {
             finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-            let settled: AbortSettlement = { status: 'finished' };
-            if (params.setup) {
-              try {
-                settled = await graphService.settleAbortedRun(params.setup);
-              } catch (settleError) {
-                console.warn(
-                  '[resident-pet] failed to settle an aborted dispatch:',
-                  settleError instanceof Error ? settleError.message : settleError,
-                );
-              }
-            }
-            if (settled.status === 'paused') {
+            // A settlement that fails leaves the thread in an unknown state,
+            // so it takes the dispatch's failure path instead of being
+            // reported as a clean interruption.
+            const settled = params.setup
+              ? await graphService.settleAbortedRun(params.setup)
+              : null;
+            if (settled) {
               publishRuntimeEvent({
                 type: 'interrupt.requested',
                 requestId,
-                pendingInterrupt: projectPendingInterrupt(settled.pendingInterrupt),
+                pendingInterrupt: projectPendingInterrupt(settled),
               });
               publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
@@ -766,15 +760,26 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             finishInflightOperations(run, 'completed', publishRuntimeEvent);
             publishDispatchLifecycle({ dispatchId, request, requestId, state: 'completed' });
           } catch (error) {
+            let failure = error;
             if (run.controller.signal.aborted || isAbortError(error)) {
-              await settleInterruptedDispatch({
-                setup: abortedSetup,
-                announce: activeRun !== null,
-              });
-              return;
+              try {
+                await settleInterruptedDispatch({
+                  setup: abortedSetup,
+                  announce: activeRun !== null,
+                });
+                return;
+              } catch (settleError) {
+                console.error(
+                  '[resident-pet] failed to settle an aborted dispatch:',
+                  settleError instanceof Error
+                    ? (settleError.stack ?? settleError.message)
+                    : settleError,
+                );
+                failure = settleError;
+              }
             }
-            finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
-            const message = error instanceof Error ? error.message : 'internal error';
+            finishInflightOperations(run, 'failed', publishRuntimeEvent, failure);
+            const message = failure instanceof Error ? failure.message : 'internal error';
             if (activeRun) {
               publishRuntimeEvent({
                 type: 'error',
@@ -789,7 +794,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               state: 'failed',
               error: message,
             });
-            throw error;
+            throw failure;
           } finally {
             if (activeHostRuns.get(requestId) === run.controller) {
               activeHostRuns.delete(requestId);

@@ -136,7 +136,9 @@ test('replacement request waits for the previous thread invocation to settle', a
   });
   let replacementStarted = false;
   const handler = new ServerChatHandler({
-    graphService: {} as never,
+    // The superseded run settles with nothing to continue, so it reports a
+    // plain interruption.
+    graphService: { settleAbortedRun: async () => null } as never,
     tuiSessions: {
       getChatThreadId: () => 'thread-x',
       buildChatSetup: () => ({
@@ -419,7 +421,8 @@ test('a review decision resume consumes matching canonical review route once', a
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         decisions: [{
           reviewId: 'review-current',
           selectedOptionId: 'approve',
@@ -495,7 +498,8 @@ test('a review decision resume keeps single-review review as batch resume shape'
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         decisions: [{ reviewId: 'review-current', selectedOptionId: 'approve' }],
       },
     },
@@ -555,7 +559,8 @@ test('a review decision resume recovers missing route from active checkpoint rev
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         decisions: [{
           reviewId: 'review-current',
           selectedOptionId: 'approve',
@@ -697,7 +702,8 @@ test('a review cancel resume resumes pending review with run interruption contro
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         action: 'interrupt_run',
       },
     },
@@ -778,7 +784,8 @@ test('a review cancel resume recovers missing route from active checkpoint revie
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         action: 'interrupt_run',
       },
     },
@@ -836,7 +843,8 @@ test('a review cancel resume interrupts an approve-only pending review', async (
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         action: 'interrupt_run',
       },
     },
@@ -903,7 +911,8 @@ test('a review decision resume forwards canonical selected option without resolv
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         decisions: [{
           reviewId: 'review-current',
           selectedOptionId: 'respond',
@@ -1030,7 +1039,8 @@ test('a review decision resume forwards effect-bearing options without local aut
     kind: 'resume',
     requestId: 'req-1',
     resume: {
-      'interrupt-1': {
+      interruptId: 'interrupt-1',
+      value: {
         decisions: [{
           reviewId: 'review-current',
           selectedOptionId: 'approve-and-authorize-thread',
@@ -1120,11 +1130,8 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
       settleAbortedRun: async () => {
         settleCalls += 1;
         return {
-          status: 'paused' as const,
-          pendingInterrupt: {
-            interruptId: 'interrupt-pause',
-            payload: { kind: 'pause_task' as const },
-          },
+          interruptId: 'interrupt-pause',
+          payload: { kind: 'pause_task' as const },
         };
       },
     } as never,
@@ -1164,7 +1171,7 @@ test('an aborted run with nothing to continue still reports an interruption', as
   const fakePeer = createFakePeer(sent);
   const handler = new ServerChatHandler({
     graphService: {
-      settleAbortedRun: async () => ({ status: 'finished' as const }),
+      settleAbortedRun: async () => null,
     } as never,
     tuiSessions: {
       getActiveSessionId: () => 'sess-active',

@@ -38,7 +38,6 @@ export {
   UnknownInterruptPayloadError,
 } from './orchestrator/interrupt';
 export type {
-  AbortSettlement,
   AbortSettlementGraph,
   PauseTaskInterruptPayload,
   PendingInterrupt,

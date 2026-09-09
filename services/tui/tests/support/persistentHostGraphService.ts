@@ -21,6 +21,7 @@ import type {
   AgentChannelSetup,
 } from '../../../local-agent/src/agentChannel';
 import type {
+  InterruptResume,
   LocalAgentGraphEventStream,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
@@ -111,10 +112,12 @@ export function createPersistentHostGraphService() {
   return {
     async streamEvents(
       setup: AgentChannelSetup,
-      inputOverride?: unknown,
+      resume?: InterruptResume,
     ) {
       const stream = await graphFor(setup).streamEvents(
-        inputOverride ?? { messages: setup.input.messages },
+        resume
+          ? new Command({ resume: { [resume.interruptId]: resume.value } })
+          : { messages: setup.input.messages },
         {
           version: 'v3',
           signal: setup.input.signal,
@@ -145,9 +148,6 @@ export function createPersistentHostGraphService() {
         acceptsResume: acceptsResume(snapshot),
         currentPlan: null,
       };
-    },
-    buildResumeCommand(resume: unknown) {
-      return new Command({ resume });
     },
   } as unknown as LocalAgentGraphService;
 }

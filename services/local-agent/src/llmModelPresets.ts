@@ -197,7 +197,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.deepseek.com',
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
-    structuredOutputMethod: 'functionCalling',
+    structuredOutputMethod: 'jsonMode',
     inputModalities: ['text'],
     thinkingControl: 'thinking_type',
     aliases: [
@@ -219,7 +219,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.deepseek.com',
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
-    structuredOutputMethod: 'functionCalling',
+    structuredOutputMethod: 'jsonMode',
     inputModalities: ['text'],
     thinkingControl: 'thinking_type',
     aliases: [
@@ -238,7 +238,7 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     baseUrl: 'https://api.deepseek.com',
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
-    structuredOutputMethod: 'functionCalling',
+    structuredOutputMethod: 'jsonMode',
     inputModalities: ['text', 'image'],
     thinkingControl: 'thinking_type',
     aliases: [

@@ -263,13 +263,13 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     });
   }
 
-  for (const model of ['deepseek-v4-pro', 'deepseek-v4-flash']) {
+  for (const model of ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']) {
     assert.deepEqual(buildDecisionStructuredOutput({
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
       model,
     }), {
-      method: 'functionCalling',
+      method: 'jsonMode',
       autoRepair: { maxRetries: 1 },
     });
   }
@@ -345,7 +345,7 @@ test('buildLocalChatAgentInput passes global review policy mode to graph input',
     mode: 'auto_authorization',
     safetyLevel: 'relaxed',
     structuredOutput: {
-      method: 'functionCalling',
+      method: 'jsonMode',
       autoRepair: { maxRetries: 2 },
     },
   });

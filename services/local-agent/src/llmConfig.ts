@@ -44,12 +44,23 @@ function findMatchingSourcePreset(
     : undefined;
 }
 
-function withPresetInputModalities(
+function withPresetCompatibility(
   profile: ReturnType<typeof resolveModelProfile>,
 ) {
   const preset = findMatchingSourcePreset(profile);
+  // Older DeepSeek presets persisted forced function calling. The runtime now
+  // uses provider-default thinking, which rejects a named tool_choice.
+  const migrateDeepSeekStructuredOutput = preset?.provider === 'deepseek'
+    && new URL(profile.baseUrl).hostname === 'api.deepseek.com'
+    && profile.structuredOutputMethod === 'functionCalling';
   return preset
-    ? { ...profile, inputModalities: preset.inputModalities }
+    ? {
+        ...profile,
+        inputModalities: preset.inputModalities,
+        ...(migrateDeepSeekStructuredOutput
+          ? { structuredOutputMethod: 'jsonMode' as const }
+          : {}),
+      }
     : profile;
 }
 
@@ -85,7 +96,7 @@ export function createLocalModelProfileRegistry(options: {
     defaultProfileId,
     resolve: (profileId = defaultProfileId) => {
       const profile = resolveModelProfile(options.snapshot, profileId);
-      const effectiveProfile = withPresetInputModalities(profile);
+      const effectiveProfile = withPresetCompatibility(profile);
       const preset = profile.sourcePreset
         ? findLlmModelPresetByKey(profile.sourcePreset)
         : undefined;
@@ -99,8 +110,8 @@ export function createLocalModelProfileRegistry(options: {
         modelProfileId: profile.id,
         modelProfileFingerprint: fingerprint,
         inputModalities: effectiveProfile.inputModalities,
-        ...(profile.structuredOutputMethod
-          ? { structuredOutputMethod: profile.structuredOutputMethod }
+        ...(effectiveProfile.structuredOutputMethod
+          ? { structuredOutputMethod: effectiveProfile.structuredOutputMethod }
           : {}),
         ...(maxOutputTokens
           ? { maxOutputTokens }
@@ -111,7 +122,7 @@ export function createLocalModelProfileRegistry(options: {
     },
     listAvailable: () => Object.freeze(
       Object.values(options.snapshot.profiles)
-        .map(withPresetInputModalities)
+        .map(withPresetCompatibility)
         .map(summarizeModelProfile),
     ),
   });

@@ -16,16 +16,16 @@ import {
   type ReviewSpec,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
-import { buildLocalChatAgentInput } from './agentChannel';
 import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
+import {
+  assertChatSetupPrerequisites,
+  buildChatSetup,
+} from './agent/buildChatSetup';
 import { LocalAgentGraphService } from './agentGraphService';
 import { readFinalMessageText } from './agentStreamEvents';
 import { loadAgentContext } from './contextLoader';
 import { FileSaver } from './fileSaver';
-import {
-  getLocalServerToolkitInventory,
-  type ServerDeps,
-} from './serverTypes';
+import type { ServerDeps } from './serverTypes';
 import {
   createAdmittedLocalChatHumanMessage,
   createLocalChatHumanMessage,
@@ -188,46 +188,36 @@ export class ServerTuiSessionService {
     return next;
   }
 
+  /**
+   * Resolve which session an execution runs in, then hand assembly to agent.
+   *
+   * Session's part is identity only — thread, selected model, start time.
+   * Assembling the graph belongs to agent, which is why the work below lives
+   * in agent/buildChatSetup rather than here.
+   */
   buildChatSetup(
     deps: ServerDeps,
     ctx: Awaited<ReturnType<typeof loadAgentContext>>,
     threadId = this.getChatThreadId(deps.petId),
     modelProfileIdOverride?: string,
   ) {
-    if (!deps.capabilityArtifactStore) {
-      throw new Error(
-        'TUI chat requires a capability artifact store bound to the current runtime',
-      );
-    }
+    // Checked before resolving the session, because resolving it can create
+    // and persist one: failing after that would leave a session behind for a
+    // run that never started.
+    assertChatSetupPrerequisites(deps);
     const session = Object.values(this.state.sessions)
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.petId);
-    const modelProfileId = modelProfileIdOverride ?? session.modelProfileId;
-    const llmConfig = deps.modelProfiles.resolve(modelProfileId);
-    // Compatibility is enforced where the transcript is readable: model
-    // selection checks the checkpoint, and image attachments are refused at
-    // admission. Building the graph is synchronous, so it does not re-check
-    // against a stored copy that could disagree with the transcript.
-    const toolkitInventory = getLocalServerToolkitInventory(deps);
-    return buildLocalChatAgentInput({
+    return buildChatSetup({
+      deps,
       context: ctx,
-      userMessage: '',
-      llmConfig,
-      hostConfig: deps,
-      toolkits: [...toolkitInventory.effectiveToolkits],
-      toolkitInventoryEntries: toolkitInventory.entries,
-      toolkitRuntimeManager: deps.toolkitRuntimeManager,
+      session: {
+        threadId,
+        modelProfileId: modelProfileIdOverride ?? session.modelProfileId,
+        startedAt: session.createdAt,
+      },
+      checkpointer: this.checkpointer,
       reportCapabilityDiagnostics: this.reportCapabilityDiagnostics,
-      capabilities: deps.capabilityCatalog.getSnapshot().capabilities,
-      ...(deps.defaultCapabilityName !== undefined
-        ? { defaultCapabilityName: deps.defaultCapabilityName }
-        : {}),
-      ...(deps.petDocument ? { petDocument: deps.petDocument } : {}),
-      threadId,
-      interfaceKind: 'tui',
-      checkpoint: this.checkpointer,
-      capabilityArtifactStore: deps.capabilityArtifactStore,
-      sessionStartedAt: session.createdAt,
     });
   }
 

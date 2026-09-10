@@ -1,8 +1,8 @@
 # local-agent domain 定义（2026-09-10 draft）
 
 关联：#790。核对基线：`badde03a`。
-本文定义 local-agent 的 domain 切分。准入归属是它的推论，见
-[准入归属](./admission-scopes.md)。
+本文定义 local-agent 的 domain 切分，并在 §三 给出它的两个推论：
+准入归属，以及据此排出的实施顺序。
 
 ## 术语
 
@@ -318,14 +318,125 @@ Studio
 
 ---
 
-## 三、未决
+## 三、推论：准入归属
+
+> 这一节曾是独立的 `admission-scopes.md`。实施完成后并回来 ——
+> 它的分量本就该是 domain 的一个推论章节，而不是并列的一篇：
+> 真实代码改动只有「删三处恒假条件 + 抽一个 85 行的 `SessionAdmission`」。
+
+**准入（admission）**：「这个操作现在准不准跑」的裁决。分**时机准入**
+（有执行在跑吗）与**输入准入**（这个模型收得下这个输入吗，已定归 agent，见 §一.7）。
+
+### 规则
+
+**一个操作的准入，归它所修改状态的那个 domain。** 由此直接得出两条：
+
+- **Conversation 不裁决准入** —— 它管的是 UI 交互 state，是投影而非权威数据源。
+  所以只读查询免检是对的。
+- **Config 不裁决准入** —— 它只拥有读取/校验/持久化，**生效时点归 agent**。
+  所以 `onRuntimeConfigUpdate` 不检查活跃执行也是对的。
+
+### 每个操作的归属
+
+| 操作 | 改哪个 domain 的状态 | 准入归属 |
+|---|---|---|
+| chat / interrupt resume、compact | agent（一次执行） | **agent** |
+| session new / resume、model select | Session（会话指针 / 模型覆盖值） | **Session** |
+| resident dispatch | 不改 local-agent 的状态 | **gate**（Agent 可用即可派活） |
+| runtime config update | Config（只写配置） | 无 |
+| snapshot / list / model list | Conversation（只读投影） | 无 |
+| run interrupt | 不改状态，须穿透 | 无 |
+| 断连清理 | wire（连接自身） | wire |
+
+**没有 `process` 层。** `activeChatOperations` 与 `sessionTransition` 是
+`createLocalServerHandlers` 的闭包局部变量，而 Studio 对每个 Pet 各调一次
+`createResidentPetHost` —— 它们是 **Host 级**的，多 Pet 时进程内没有共享准入状态。
+
+### 现状核对（实施前的事实基线）
+
+#### 6 个协调器的实际归属
+
+| 协调器 | 实际范围 | 该归谁 |
+|---|---|---|
+| `ServerSessionCommandQueue` | 一个 peer 连接 | **撤销**（错层，§二.2） |
+| `activeChatOperations` | **一个 Host**（闭包局部，非进程） | agent 的执行准入 |
+| `sessionTransition` | **一个 Host**（同上） | Session |
+| `ThreadInvocationCoordinator` | 一个 thread | **保留**，已是 agent 级且语义正确 |
+| `ResidentPetCoordinator` | 一个 Pet | **gate（Agent 可用状态）**，是 `PetDispatchPort` 的职责；其中的对话入队要拆走 |
+| `InflightRequestController` | 一个 peer，且只认 WS | agent（须覆盖 dispatch） |
+
+#### 三个入口面
+
+| 入口面 | 现状 |
+|---|---|
+| WebSocket（13 个 handler） | 基准 |
+| stdio | 复用**同一组** `peerHandlers` ✅ |
+| HTTP（2 条路由） | 仅运维面 `/health` `/runtime`；三条对话能力残留路由已删 ✅ |
+| resident dispatch | 直接进 `dispatchQueue`，不进 `InflightRequestController` |
+
+#### resident 模式的 4 层叠加
+
+```
+peer message
+  └─ coordinator.enqueueConversation      ← Pet 级
+       └─ local peerHandler
+            └─ sessionCommands.enqueue    ← peer 级
+                 └─ 等 sessionTransition  ← Host 级
+                      └─ 检查 activeChatOperations  ← Host 级
+```
+
+根因是 Host 身份模糊（domains §一.1），不是协调本身写错了。
+
+#### 两层豁免规则不一致
+
+| handler | local 层 | resident 层 |
+|---|---|---|
+| `onRunInterrupt` | 旁路 | 旁路（一致） |
+| `onSessionSnapshotGet` | `sessionCommands` | **旁路** |
+| `onNewSession` | 旁路 | **入队** |
+
+---
+
+### 实施顺序（已全部落地）
+
+按依赖而非工作量排序。**三次方向性错误都是动手后才发现前提不成立** ——
+详细推导见各阶段的 commit message。
+
+| 阶段 | 内容 | 提交 |
+|---|---|---|
+| 0 | 按 domain 归位（transcript / attachment / 三个投影） | `89981a64` `35796df6` |
+| 1 | `buildChatSetup` 归 agent | `1955ece8` |
+| 2 | Session 准入有了所有者（`SessionAdmission`） | `314b2293` |
+| 3 | 对话移出 dispatch 队列 | `0562e671` |
+| 4 | 删掉 HTTP 上重实现对话能力的残留路由 | `a6815988` |
+| 5 | `ServerDeps` 拆成 domain 窄契约 | `23394d4c` |
+
+三次更正，都记录在对应提交里：
+
+| 原计划 | 实际 | 提交 |
+|---|---|---|
+| 阶段 2 = resident 解包 | 它依赖准入归位，顺序反了 | `d03adbfa` |
+| 需要「执行级准入」接管对话↔dispatch 互斥 | **伪命题**（见 §一.3） | `1ed755e2` |
+| HTTP 改为适配 13 个 handler | HTTP 承载的是运维面 | `a6815988` |
+
+### 尚未收敛的
+
+- **agent 的生命周期仍在两处重复**（`serverChatHandler` 与 `residentPetHost`）
+  —— §一.2 表格里的第二个 ❌，是下一轮的主体。
+- **`serverHandlers` 尚未按 domain 拆开** —— 它要拆到四个 domain，
+  与上一条一起做。
+- 未建 `session/` 与 `config/` 目录：阶段 5 拆的是 Config 的**契约**，不是目录。
+
+---
+
+## 四、未决
 
 - [ ] 输入准入（attachment）与切模型准入合并到 agent 后的具体形态
 - [ ] 各 domain 的窄契约怎么写（`ServerDeps` 拆解后的替代物）
 - [ ] Studio 级共享服务与 Host 级引用的边界怎么表达
-- [x] 准入归属如何由本文推导 → 见 [准入归属](./admission-scopes.md)（7 条分叉全部可判定）
+- [x] 准入归属如何由本文推导 → **见 §三**（7 条分叉全部可判定）
 
-## 四、已决速查
+## 五、已决速查
 
 | # | 结论 |
 |---|---|

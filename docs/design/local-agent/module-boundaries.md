@@ -98,7 +98,7 @@ serverHandlers 同样按操作职责拆分：
   （[httpHandlers.ts](../../../services/local-agent/src/httpHandlers.ts)）完全不经过
   `sessionCommands`，只受 `activeChatOperations` / `sessionTransition` 约束。
   跨 peer 以及 HTTP 与 WebSocket 并发时的准入归属，是本节收敛时要明确的真实边界。
-  （已在 [准入归属](./admission-scopes.md) 定案：`sessionCommands` 整层是错层，
+  （已在 [domain 定义](./domains.md) §三 定案：`sessionCommands` 整层是错层，
   建会话/切模型改的是 Session 的状态而非连接的状态，准入应归 Session，与传输无关。）
 
 核对这一节时发现，本节反复用到的「范围」从未被定义，6 个协调器各自隐含了不同的
@@ -108,7 +108,7 @@ serverHandlers 同样按操作职责拆分：
 scope 是它的推论。
 
 - domain 定义与证据：[local-agent domain 定义](./domains.md)
-- 准入归属与现状核对：[准入归属](./admission-scopes.md)
+- 准入归属与现状核对：[domain 定义](./domains.md) §三（它是 domain 的推论）
 
 本节的收敛以这两篇定稿为前提。
 

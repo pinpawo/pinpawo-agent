@@ -225,6 +225,12 @@ HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。
 
 拆成各 domain 的窄契约。6 个消费者一个字段都不读、纯传递，可直接去掉参数。
 
+**一条已知线索**：`ServerDeps.capabilityArtifactStore` 声明为可选（`?`），
+但 `residentPetHost` 的生产路径上它是必填（`CapabilityArtifactStore`，无 `?`）。
+**类型比现实宽**，于是下游写了 2 处防御性检查
+（`assertChatSetupPrerequisites` 及其调用点）。agent 的窄契约里把它声明为必填，
+这些检查连同为它保留的顺序保护都可以删除。
+
 **放最后**：它是前面各步的**自然结果**，而不是前提。提前做会与阶段 1-3 的
 归属调整反复冲突。
 

@@ -7,12 +7,12 @@ import {
 } from '@pinpawo/agent-session';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { ensureLocalServerAuthToken } from './localServerAuth';
+import { ensureLocalServerAuthToken } from './auth';
 import {
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
-} from './localServerAuth';
-import type { ServerTransport } from './localServerTransport';
+} from './auth';
+import type { ServerTransport } from './transport';
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,

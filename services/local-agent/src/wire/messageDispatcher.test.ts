@@ -4,9 +4,9 @@ import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
   type ServerTransportHandlers,
-} from './localServerMessageDispatcher';
-import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { ServerPeer } from './localServerPeer';
+} from './messageDispatcher';
+import type { LocalAgentServerMessage } from './protocol';
+import type { ServerPeer } from './peer';
 
 function createFakePeer(sent: LocalAgentServerMessage[]): ServerPeer {
   return {

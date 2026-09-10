@@ -1,4 +1,4 @@
-import type { ServerPeer } from './wire/localServerPeer';
+import type { ServerPeer } from './wire/peer';
 
 /**
  * Preserve wire arrival order for checkpoint-backed session commands without

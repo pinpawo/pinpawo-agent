@@ -7,7 +7,7 @@ import {
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-import type { InterruptResumeMessage } from './wire/localAgentProtocol';
+import type { InterruptResumeMessage } from './wire/protocol';
 
 /**
  * The review kind's resume values. `decisions` answers the reviews; `cancel`

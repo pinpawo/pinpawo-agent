@@ -27,7 +27,7 @@ import { createLocalServerHandlers, type ServerHandlerOptions } from './serverHa
 import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
-} from './wire/localServerMessageDispatcher';
+} from './wire/messageDispatcher';
 import { ServerTuiSessionService, type TuiSessionCheckpointer } from './serverTuiSessions';
 import {
   createLocalServerRuntimeDepsStore,

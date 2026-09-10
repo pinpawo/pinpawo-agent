@@ -13,9 +13,9 @@ import {
   type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
-} from './localAgentProtocol';
-import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
-import type { ServerWireHandlers } from './localServerWire';
+} from './protocol';
+import { sendLocalServerPeerEvent, type ServerPeer } from './peer';
+import type { ServerWireHandlers } from './framing';
 
 type MaybePromise<T> = T | Promise<T>;
 export type ServerLogError = (message: string, error: unknown) => void;
@@ -219,7 +219,7 @@ export function createLocalAgentWireHandlers(
   handlers: ServerTransportHandlers,
   logError: ServerLogError = handlers.logError ?? defaultLocalServerLogError,
   logWarn: ServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
-): ServerWireHandlers<import('./localAgentProtocol').LocalAgentServerMessage> {
+): ServerWireHandlers<import('./protocol').LocalAgentServerMessage> {
   return {
     onMessage: (peer, data) => dispatchLocalServerMessage(
       peer,

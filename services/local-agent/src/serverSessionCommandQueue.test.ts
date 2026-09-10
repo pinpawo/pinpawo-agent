@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { LocalAgentServerMessage } from './wire/localAgentProtocol';
-import type { ServerPeer } from './wire/localServerPeer';
+import type { LocalAgentServerMessage } from './wire/protocol';
+import type { ServerPeer } from './wire/peer';
 import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
 
 function createPeer(): ServerPeer {

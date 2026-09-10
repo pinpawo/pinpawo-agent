@@ -93,8 +93,14 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 ### 其他两处归属
 
 - `localServerTransportApi.ts` 是 re-export 包出口，与 `hostRuntime.ts` 并列在顶层。
+  已落地为 `wire/index.ts`；tsup entry key 保持不变，`pinpawo/local-server-transport`
+  子路径与产物文件名不受影响。
 - `residentPetAgentSessionTransport.ts` 名字里有 transport，实际解析
-  `/agent-session/pets/<id>` 路由 → `wire/`。
+  `/agent-session/pets/<id>` 路由 → `wire/`。已落地为 `wire/agentSessionRoute.ts`。
+- 迁入 `wire/` 时一并去掉历史 `local` 前缀（`localAgentProtocol` → `protocol`、
+  `localServerPeer` → `peer` 等）。`toolkits/local/` 的 `local` 是「本机工具」的
+  真实语义，不在此列，保留。导出符号名（`sendLocalServerPeerEvent` 等）是跨包
+  公开 API，单独处理。
 
 ---
 

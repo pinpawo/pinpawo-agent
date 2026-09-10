@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readAgentActivityHealthFields } from './operationActivityState';
-import { isAuthorizedLocalServerRequest } from './wire/localServerAuth';
+import { isAuthorizedLocalServerRequest } from './wire/auth';
 import type { ServerDeps } from './serverTypes';
 import { buildLocalHttpRuntimeProjection } from './configProjection';
 

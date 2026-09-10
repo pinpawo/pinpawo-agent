@@ -6,7 +6,7 @@ import { WebSocket } from 'ws';
 import {
   readResidentPetIdFromAgentSessionPath,
   startResidentPetAgentSessionTransport,
-} from './residentPetAgentSessionTransport';
+} from './agentSessionRoute';
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,

@@ -12,10 +12,10 @@ import type {
 } from '@pinpawo/agent-session';
 import type {
   LocalAgentSessionServerMessage,
-} from './wire/localAgentProtocol';
+} from './wire/protocol';
 import { handleLocalHttpRequest } from './httpHandlers';
-import { sendLocalServerPeerEvent, type ServerPeer } from './wire/localServerPeer';
-import type { LocalServerPeerHandlers } from './wire/localServerMessageDispatcher';
+import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
+import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
 import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
 import { ServerChatHandler } from './serverChatHandler';
 import type {

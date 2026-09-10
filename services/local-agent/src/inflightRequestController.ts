@@ -1,4 +1,4 @@
-import type { LocalAgentControlServerMessage } from './wire/localAgentProtocol';
+import type { LocalAgentControlServerMessage } from './wire/protocol';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
   createInflightOperationRun,

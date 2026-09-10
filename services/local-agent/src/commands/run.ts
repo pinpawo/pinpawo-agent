@@ -5,7 +5,7 @@ import { applyRuntimeWorkdir } from '../runtimeWorkdir';
 import { logStartupConfig } from '../startupConfigLog';
 import {
   redirectConsoleToStdioDiagnostics,
-} from '../wire/localServerStdioTransport';
+} from '../wire/stdioTransport';
 import { startLocalStdioServer } from '../chatStdioServer';
 import type { ServerMode } from '../serverMode';
 

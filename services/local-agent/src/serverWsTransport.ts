@@ -3,20 +3,20 @@ import { WebSocket, WebSocketServer } from 'ws';
 import {
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
-} from './wire/localServerAuth';
+} from './wire/auth';
 import {
   createLocalAgentWireHandlers,
   defaultLocalServerLogError,
   type ServerLogError,
   type ServerTransportHandlers,
-} from './wire/localServerMessageDispatcher';
-import type { ServerPeer } from './wire/localServerPeer';
+} from './wire/messageDispatcher';
+import type { ServerPeer } from './wire/peer';
 import {
   defaultLocalServerWireLogError,
   runLocalServerWireHandler,
   type ServerWireHandlers,
   type ServerWirePeer,
-} from './wire/localServerWire';
+} from './wire/framing';
 
 export type ServerWsTransportOptions = {
   authToken: string;

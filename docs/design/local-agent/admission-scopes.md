@@ -209,7 +209,28 @@ serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 
 
 `admitConversationHandlers` 只有**一个调用点**（residentPetHost.ts:599）。
 
-**顺序更正（实施时发现）**：本阶段原排在准入归位之前，是错的。
+**前置仍未满足（第二次核对）**：阶段 2 装的 `SessionAdmission` **不能**接管
+本阶段需要的互斥，原因是两件事被混为一谈了：
+
+| 准入层级 | 谁拥有 | 现状 |
+|---|---|---|
+| Session 级（建会话/切模型/compact/resume） | Session | ✅ 阶段 2 已装 `SessionAdmission` |
+| thread 级（同 thread 替换请求） | agent | ✅ 已有 `ThreadInvocationCoordinator` |
+| **执行级（同一时刻只跑一个执行）** | **agent** | ❌ **缺失** —— 目前只由 `coordinator.drain()` 提供 |
+
+按 domains §一.3，dispatch 与对话是**同一个 Execution**，所以「对话 ↔ dispatch
+互斥」是**执行级**的，不是 Session 级的。
+
+而且它必须 **Host 级共享**：`SessionAdmission` 是 `createLocalServerHandlers`
+的闭包局部变量（serverHandlers.ts:132），`residentPetHost` 对它**零引用**；
+dispatch 直接调 `sessions.buildChatSetup` + `runAgentTurn`，**不经过**
+`afterSessionCommands`，因此根本到不了那个闸门。
+
+**所以本阶段前面还需要插入一步**：建立 Host 级共享的执行准入（对话与 dispatch
+共用），接管 `drain()` 现在提供的互斥、对话优先与 closing 拒绝；之后
+resident 的对话包装才真正成为重复层。
+
+**顺序更正（第一次核对）**：本阶段原排在准入归位之前，是错的。
 `ResidentPetCoordinator` 的对话队列并非「与 local 层重复的一层」——
 它承担着 local 层**根本没有的**职责：
 
@@ -227,9 +248,11 @@ serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 
 所以必须**先做准入归位**，让 agent 级准入接管「对话 ↔ dispatch 互斥」，
 之后 resident 的对话队列才真正成为重复层，可以安全拆除。
 
-`queuedConversations` 是发布契约，拆除时需要确认它的替代来源。
+`queuedConversations` 已核对：它在 `studioContract.ts` 里声明并被填充，但
+**没有任何生产消费者**读它（scheduler 插件只用 `StudioDispatchQueue['state']`）。
+拆队列时该字段可以保留形状，由新的执行准入提供数值。
 
-前置：阶段 2。
+前置：阶段 2 **及**上述执行准入。
 
 ### 阶段 4：HTTP 能力面对齐（解决 #1 的根）
 
@@ -256,7 +279,8 @@ HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。
 0.1 ─┐
 0.2 ─┼─（互不依赖，可并行）
 0.3 ─┘
-      └─→ 1 buildChatSetup → 2 准入归位 → 3 resident 解包 → 4 HTTP 对齐 → 5 ServerDeps 拆解
+      └─→ 1 buildChatSetup → 2 Session 准入 → 2.5 执行准入(Host 级) → 3 resident 解包
+                                                    → 4 HTTP 对齐 → 5 ServerDeps 拆解
 ```
 
 ### 每阶段的验证

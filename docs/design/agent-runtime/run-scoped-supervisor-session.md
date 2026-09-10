@@ -1,609 +1,238 @@
-# Run-scoped Supervisor session
+# Root、Supervisor 与 Capability 的状态与交接
 
-Status: working design. The following run-scoped tool-handoff contract describes
-the current implementation; the older rationale below is historical where it
-describes Announce-only evidence or discarding working messages after each decision.
+状态：重构草案，待实现验证，尚未据此修改生产运行时代码。
+更新于 2026-09-11；实现基线为已合并的 [PR #795](https://github.com/pinpawo/pinpawo-agent/pull/795)。
 
-## Current ownership and lifetime
+## 核心结构
 
-Root owns the session: canonical user conversation, durable execution evidence,
-artifacts, authorization generation, task continuation, and the checkpointer.
-Supervisor owns only the current run's working state: plan, capability disclosure,
-model/tool transcript, consumed user-input identity, and pending delegation call.
-Persistence through Root's checkpointer does not make that state session-scoped.
-The historical field name `runSupervisorSession` denotes this run-scoped state.
+Root 承载会话、整体执行流程和 checkpoint。Supervisor 在这个流程中负责规划、验收和
+调度，工作上下文是 run-scope。Capability executor 独立负责具体执行。
 
-Resuming the same interrupted run retains Supervisor state. A new run seeds a
-fresh Supervisor from Root facts and explicit continuation, never from the prior
-Supervisor transcript or pending call. Ordinary final replies clear the run's
-working state; unfinished goal, active delegation and remaining plan survive as
-Root continuation facts. Review interrupts preserve the pending call; explicit
-task pauses and settled cancellations close it with a paused result. Continuing
-such a task issues a new call, retaining the same delegation identity if appropriate.
+**Supervisor 内部保留控制调用及确认；交给 Root 的是实际 delegation 调用，Root 保存并执行，
+再写入对应结果。两边各自有完整消息，不增加一份中间 proposal 状态。**
 
-Only working conversation and tool messages persist within the run. Per-invocation
-goal/catalog/disclosure frames are rebuilt, not appended to the saved transcript.
-Legacy Announce checkpoints remain readable as non-assistant data projections;
-the model adapter no longer emits assistant XML or invents past tool calls for them.
+| 部分 | 职责 |
+| --- | --- |
+| Root | 保存状态与消息，落实调度更新，执行节点路由，管理入口、checkpoint、暂停、失败和回复发布 |
+| Entry Answer | 非原生恢复运行的入口，结合用户输入与已有状态，回答、发起规划或继续工作 |
+| Supervisor | 使用 createAgent，依据整体状态决定计划、验收和后续执行；不在内部执行 Capability |
+| Capability 工具执行 | 对 Root 表现为一次 `delegate_capability` tool call，由 `capability` 节点承载执行；工具内部复用独立 executor，不验收自身结果、不决定下一任务 |
 
-Capability executor retains briefing, scoped history selection, Toolkit lifecycle,
-createAgent-based execution, finalize, and delivery extraction. It does not create
-Supervisor ToolMessages, mutate Root state, or accept tasks.
+工具调用是对外边界，executor 是内部实现：一次调用内部仍完成
+briefing → Toolkit 绑定 → createAgent 执行 → finalize → 交付，再返回对应 ToolMessage。
+这些步骤不是 Root 上的多次工具调用，也不需要因工具化拆掉原 executor 封装。
 
-## Current call and result contract
+<a id="current-ownership-and-lifetime"></a>
 
-Supervisor uses planning/review controls to establish or advance a validated task,
-then emits a real `delegate_capability({ capability, task })` tool call. A narrow
-graph-visible adapter validates that call against the pending task and dispatches
-the executor. The committed result completes the same `tool_call_id` in the run's
-working history. Planning acknowledgments are not execution evidence; calls are
-never fabricated after execution and new deliveries are not assistant XML.
+## 状态：只保存必要事实
 
-The graph-visible execution boundary is deliberate: the installed runtime's
-child-in-tool regression test loses inner live model events. The delegation tool
-uses LangGraph's parent Command to yield to its runtime adapter, retaining the
-model-emitted message. Capability remains a node-level child. There is one
-execution path, not both inline execution and graph dispatch. Deterministic Root
-edges commit validated effects and schedule the pending operation; they neither
-choose tasks nor accept results. Execution is currently serial.
-
-Keeping planning/review controls separate from delegation adds one Supervisor
-model turn per execution attempt. This is an explicit tradeoff of preserving the
-existing validated plan/acceptance boundary while requiring a real execution call;
-it is not represented as a latency optimization.
-
-Executor returns `{ status, scope, delivery, privateMessages, artifacts,
-toolAuthorizations }`. Root stores delivery records in `sessionDelegationResults`,
-independently of user-facing messages. Supervisor receives current-run execution
-results in matching ToolMessages, not duplicate Announce inputs. A fresh run receives
-Root evidence as data without invented historical tool calls. Acceptance updates
-task state and retires private history, without rewriting the original delivery.
-
-The registry, workdir, review authority and execution identities remain runtime
-inputs; model arguments cannot supply them. Same-run fresh guidance is consumed
-once; clearing its queued message ID must not reopen the original run input.
-
-## Validation and exclusions
-
-Behavioral tests cover actual model call/result correlation, no new Announce in
-main, run lifetime isolation within one persistent Root session, native Root stream
-visibility, and graph restart before execution or after committed delivery.
-Existing review/pause/abort, multi-attempt, scope, Toolkit, and authorization tests
-remain part of the regression suite. Model decision quality still requires live
-model evaluation; scripted model tests establish structural behavior only.
-
-Local validation: 494 pet-agent tests passed, including the real createAgent-based
-handoff/restart fixtures. Pet-agent and eval typechecks and local-agent typecheck
-passed. Local-agent's eight sandbox-dependent failures passed when their five
-files were rerun with local port/process access (33 tests). Live-model evaluation
-passed Supervisor details (7/7), Boundary decisions (8/8 across the initial run
-and focused reruns), plan adjustment (4/4), and the pending delegation tool call
-(1/1). Deterministic multi-task and review-rejection flows both passed locally
-(1/1 each); their Langfuse uploads were unavailable because the configured local
-endpoint at `localhost:3000` could not be reached.
-
-## Remaining boundary work
-
-The current Root graph still stores Supervisor working state and schedules its
-plan, dispatch and review invocations. Moving this loop into a run-scoped
-Supervisor subgraph is a follow-up; the independent Capability executor remains
-responsible for briefing, Toolkit binding and createAgent execution. Root should
-retain session facts and provide checkpoint storage without interpreting each
-pending tool call. Historical snapshot normalization should move to a loading
-boundary instead of weakening the runtime state type. Session delivery retention
-and compaction also need an explicit policy. Existing short-flow tests do not
-establish that a full 25-attempt run reaches its soft guard before the graph's
-hard recursion limit; that boundary needs dedicated validation.
-
-Parallel scheduling, resource arbitration and concurrent authorization merging
-are outside this change. Root session persistence is not moved to Supervisor;
-Entry Answer remains the user-facing entry gate.
-
-## Historical design rationale
-
-The dated sections below record the prior proposal-only/Announce protocol. They
-are not an alternative current execution path. The contract above supersedes their
-message-storage and per-invocation-history rules.
-
-## Plan adjustment follow-up (2026-09-09)
-
-Pause resumes with new text enter Supervisor before work. The Boundary-only
-`adjust_plan` control applies a user-requested goal and pending-plan change,
-choosing continuation of the active delegation or replacement with a new one.
-A root-owned pending HumanMessage id opens this control for one decision, including
-mid-run interrupt resumes. See [the interaction protocol](delegation-boundary-protocol.md#user-directed-plan-adjustment-2026-09-09)
-for the current contract; it supersedes older active-task replacement restrictions
-in this draft. Existing pause snapshots and review interrupt resolution remain.
-
-## Capability details (2026-09-08)
-
-The manifest describes the available Capability set and supports planning directly.
-Supervisor arranges the goal from main messages, the manifest and already provided
-information. `capability_details({ names })` optionally supplies full documents for
-exact manifest names when specific responsibilities, constraints or usage details
-are needed. Calling this tool is not a prerequisite for `submit_plan`; root still
-validates every selected name against the immutable registry.
-
-The result distinguishes newly supplied `documents`, `alreadyDisclosed` names and
-`unknownNames`. It never performs substring search or suggests keyword expansion.
-Already supplied documents are not read or repeated. Disclosure state keeps only registry identity and disclosed names. Empty-round
-counters, open/closed flags and model/tool-call observations are removed.
-The document byte budget remains. Supervisor has no elapsed-time limit and
-continues to honor caller cancellation; no separate sufficiency judge or new planning
-stage is added. Disclosure stays stable during execution Boundaries, as before.
-
-## Goal
-
-Define how the Run Supervisor uses current root context on each orchestration
-loop. At Entry it plans how to achieve the goal; at Boundary it decides whether
-to accept the delegation's work and advance or have that delegation improve it.
-Root owns execution and canonical state changes.
-
-This document owns Supervisor session lifetime, semantic memory, context, and
-replay. The [Supervisor–Root Interaction Protocol](delegation-boundary-protocol.md)
-owns per-loop inputs, decisions, return values, root effects, and failure exit.
-Capability exit and Announce eligibility serve that interaction. Those policies
-are not duplicated here.
-
-The Supervisor owns:
-
-- initial formation of the executable Capability plan;
-- checking Capability results against the goal and established task, then
-  accepting and progressing or requesting improvement;
-- directly asking the user for missing prerequisites or proposed plan changes,
-  applying revisions only after confirmation through the existing commands.
-
-The deterministic root Orchestrator remains the only component that mutates
-canonical messages, delegation lifecycle, and root graph state. The Supervisor
-observes canonical facts and returns a proposal or a natural reply; its private
-invocation state does not mutate root directly.
-
-`entry` and `boundary` remain valid decision modes. The design changes the
-lifetime and ownership of their data: a Supervisor session lives for one root run,
-while each Boundary reads current result messages from root main history.
-
-## Problem
-
-The previous design persisted Supervisor Human, AI, search Tool, and command Tool
-messages in the root `messages` channel under a trace-scoped lane. That made
-Supervisor execution history survive multiple runs and forced every consumer to
-decide which Supervisor messages to select, replay, compact, invalidate, or remove.
-
-Excluding those messages from later model calls avoids self-reinforcement, but
-leaves an incoherent intermediate shape: Supervisor provider messages are
-persisted even though they are not Supervisor working memory.
-
-The domain needs state. It does not need to turn root conversation messages into
-the storage format for that state.
-
-## Decision
-
-The Run Supervisor is a stateful domain component scoped to one `runId`.
-
-- A new run creates a clean Supervisor session.
-- Entry initializes the session while reading a clean main-conversation projection.
-- Boundary reuses the session and reads main with current task associations.
-- Every invocation projects root's current main messages again, including result
-  evidence already published before acceptance; private executor history is absent.
-- Supervisor delivers at most one control proposal per invocation; root
-  validates and materializes its related effects in one transition.
-- Supervisor prompt messages never enter canonical root `messages`.
-- The next run does not inherit the previous run's Supervisor provider messages,
-  search attempts, command calls, or command replay cache.
-
-Supervisor statefulness is semantic. Raw provider messages are not the source of
-truth for the plan, current task, disclosure state, or idempotency.
-
-## Independent axes
-
-Decision mode and data lifetime are independent.
-
-### Decision mode
-
-| Mode | Purpose |
-|---|---|
-| `entry` | Read the current goal and root context; decide how to achieve it or what user input is needed. |
-| `boundary` | Read updated root context and current delegation evidence; accept and advance, request improvement of the same delegation, or reply. |
-
-Goal, the committed plan, and prepared Capability disclosure are `RUN-STABLE`.
-Evidence and progress are dynamic. A shrinking remaining tail reflects execution
-of the same plan, not permission to add, remove, or reorder tasks. If a task cannot
-meet the goal within that plan, Supervisor asks the user before revising it.
-
-### Data lifetime
-
-| Scope | Owner | Examples |
-|---|---|---|
-| conversation/goal | root | main conversation, Delegation Announces including unaccepted results |
-| run | Supervisor session and root typed state | goal, plan, Capability disclosure |
-| invocation | Supervisor adapter | current main projection and task association, system projection, bound tools |
-| delegation | Capability subagent | private execution messages; returned outputs are published by root |
-
-No message tag or lane changes one scope into another. Projection may expose
-data across a boundary, but it does not transfer ownership or mutate the source.
-
-## Clean main conversation
-
-The Supervisor starts from the centralized `queryAgentMessages(...).main()` view:
-
-- every lane-tagged message is excluded;
-- delegation briefings never enter canonical messages;
-- normal result outputs are published as `DelegationAnnounceMessage` values in
-  main before acceptance, including partial results;
-- provider projection happens after selection and never writes back to state.
-
-Supervisor inputs, intermediate model outputs, search results, and control-tool
-messages remain private. The final natural reply alone is projected to main by
-the terminal node. Capability results enter main independently through root
-publication; presence in main does not establish task success.
-
-## Supervisor session state
-
-The exact storage type may evolve, but its semantic shape is:
+Root 用 `runSupervisorState` 保存当前 run 的 Supervisor 业务状态，只表达目标、计划和
+必要任务进度。以下是职责示意，不是已实现类型：
 
 ```ts
-type RunSupervisorSessionState = {
-  runId: string;
-
-  plan: CapabilityPlanTask[];
-  capabilityDisclosure: CapabilityDisclosureState;
+type RunSupervisorState = {
+  goal: string | null;
+  plan: SupervisorPlan; // 计划及必要任务进度
 };
 ```
 
-The session can be a dedicated root state channel or a private Supervisor subgraph
-state. A dedicated state value is preferred over a lane in root `messages`.
+不另设 `activeDelegation`、`proposal`、`pendingCall`、`nextAttempt`、`lastOutcome`
+或嵌套 `run` 容器。调用参数与已有事实能够推导的信息，不重复放进 state。
 
-There is one plan source of truth. In the target state shape,
-`RunSupervisorSessionState.plan` replaces or directly owns the value currently exposed
-as `runCapabilityPlan`; the two must not coexist as independently writable
-copies. The normalized goal remains the root-owned `runUserRequest` and is read
-by Supervisor rather than copied into another authoritative field.
+删除独立 active delegation 不等于删除执行身份和进度。现有计划只是待执行列表，
+落地时需让计划及执行记录能明确表达正在处理哪项、哪些已交付、哪些已验收。
+delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不形成另一份当前任务容器。
 
-The existing `plan` field stores remaining execution work. Its tail advances
-after acceptance, while task content, scope, and order remain fixed without user
-confirmation. This semantic distinction needs no second immutable-plan store or
-new progress protocol or revision counter.
+| 信息 | 保存与生命周期 |
+| --- | --- |
+| 目标、计划、任务进度 | Root 的 `runSupervisorState` 保存，Supervisor 决策；保存后的状态可供后续运行参考 |
+| Supervisor 工作消息 | 使用 Root 消息存储并保持工作归属；每个新 run 重置工作视图，不继承上轮工作现场 |
+| delegation 调用及结果 | Root 消息与 checkpoint 保存，作为实际执行记录 |
+| Capability 私有消息 | 继续留在原私有 lane 和 delegation/run 作用域 |
+| runId、traceId、预算、输入消费 | 复用 Root 必要运行字段；新 run 初始化，原生 interrupt 恢复时保留，不再复制一个 `runSupervisorState.run` |
+| 交付、产物、授权、运行出口 | 复用已有事实与资源存储；授权按当前 generation 校验，不由模型任意修改 |
 
-Tool-effect replay remains runtime-owned. This implementation removes the old
-last-command cache and uses committed graph checkpoints and pending-node replay.
-There is no per-tool effect ledger or Supervisor message lane.
+### runSupervisorState 与 snapshot
 
-### State that remains root-owned
+snapshot 不是另一个对象或状态字段，而是 **已保存的 Supervisor 业务状态在后续读取时的称呼**。
+Entry Answer 从保存的 `runSupervisorState` 了解计划进度，从 Root 的可见消息和交付记录获取结果上下文。
+不复制一份计划，不引入“候选/采用”协议，也不保存上一轮 Supervisor 实例。
+`run` 前缀表达状态属于一次 Supervisor 运行；checkpoint 可保留其历史值供参考，
+不代表新 run 自动恢复上一轮 Supervisor 的工作现场。
 
-Root continues to own execution lifecycle facts:
+新 run 重置的是 Supervisor 工作现场，不是删除作为后续参考的计划与执行事实。
+旧工作消息可以物理保留在原作用域，但不再作为本轮 Supervisor 工作历史自动载入；
+重置工作视图不要求清空 Root 全部消息。
 
-```text
-runUserRequest
-taskActiveDelegation
-runDelegationSummaries
-runSupervisorReply
-```
+## 入口与恢复
 
-Supervisor session state cannot directly create a delegation, accept an announce,
-clear a Capability lane, or write a user-visible response. The runner returns an
-existing typed command or `{ reply }`; root alone applies the result.
+**原生 interrupt 按原生机制恢复；其他情况一律先经过 Entry Answer。**
 
-## Session lifecycle
+| 入口 | 处理 |
+| --- | --- |
+| 原生 interrupt | 恢复原 checkpoint、run、delegation 与调用现场，不重置工作上下文和预算 |
+| 其他运行 | 新 run，经 Entry Answer；参考保存的业务状态与可见结果，不自动重放旧调用或恢复旧执行实例 |
 
-```text
-new root run
-  -> initialize clean Supervisor session
-  -> Entry decision
-  -> Capability execution
-  -> typed Boundary input + Boundary decision
-  -> Capability execution / terminal route
-  -> root run ends
-  -> discard Supervisor session
-```
+Entry Answer 保留现有 `plan_request` 发起规划，新增 `continue` 表达继续未完成工作：
 
-A later run always creates another Supervisor session. If a run stops with work
-that may be resumed, root persists a separate task-continuation snapshot rather
-than preserving the old Supervisor session. An explicit resume seeds a new session
-from canonical facts such as the active delegation, remaining plan, accepted
-Announces, and normalized goal. It does not resume the previous Supervisor working
-history, search attempts, or command replay cache.
+- `plan_request` → Supervisor Entry mode。
+- `continue` → Supervisor Boundary mode，根据已有进度验收、调整或推进。
 
-A `pause_task` is a real LangGraph interrupt at root `pauseGate`, including
-settled caller aborts and review-origin pauses. Empty continue resumes the pending
-delegation directly. Guidance is appended to main with its own message id and
-queued in `runSupervisorUserMessageId`, then routed to Boundary before execution.
-The legacy `resume_active` request over this explicit pause follows the same rule.
-Prepare and pauseGate preserve old task state and the continuation plan until
-Supervisor decides whether to continue, adjust, replace, or ask for clarification.
-Each path selects exactly one destination. A successful Supervisor result consumes
-the queued message id, so a later Announce does not repeat the adjustment.
+`continue` 不是原生 resume，也不是 snapshot 采用工具。Entry Answer 可以直接回复，
+无需因为有旧计划就进入 Supervisor；直接回复不抹掉已有业务进度。
 
-The TUI treats only an authoritative `pause_task` interrupt as paused. A normal
-Supervisor question with an unfinished projected plan remains ordinary chat;
-the next text reply uses the existing `resume_active` transition. Esc may still
-select `supersede_active` for the next message. An unfinished plan alone does
-not enable empty-Enter pause recovery or create an interrupt.
+Boundary 不以独立 active delegation 非空作为前提。例如 A 已验收、B 尚未执行，
+等待用户后正常结束，新 run 可以经 Entry Answer 进入 Boundary 安排 B，
+不复活 A、不重复验收 A，也不重交整份计划。
+保留 Entry/Boundary 职责，但要调整依赖旧字段的工具 schema 与校验。
 
-Terminal Supervisor, Capability, and Answer exceptions follow the same lifetime
-rule. Root first checkpoints a continuation snapshot for resumable work and
-clears the run-scoped Supervisor session, then rethrows the failure. An exception
-must not leave a previous run's session available to a later invocation.
+task 是计划任务，delegation 是具体执行实例。同一 run 内可以对同一 delegation 做多次 attempt；
+非原生新 run 若继续处理该任务，产生本轮执行实例，不自动续读旧 delegation 私有历史。
+旧消息留在原 lane，不放宽现有精确作用域查询。
 
-Recovery availability does not mean automatic recovery. Architecture, protocol,
-and unhandled execution failures stop the run and surface to the user, who decides
-whether to continue or start again. Tool operation errors handled under their
-existing contract may instead return to the LLM calling that tool. No Supervisor
-session is started merely to repair an architecture failure.
+入口不由 AIMessage/ToolMessage 是否存在或是否配对决定。原生 interrupt 可发生在不同位置；
+非原生取消或失败不能冒充原生恢复，也不自动重跑可能已产生副作用的执行。
 
-Capabilities referenced by a resumed active task or remaining plan may be
-materialized into the new run's initial disclosure. Previous search attempts and
-empty-search counters are not inherited merely because the trace is unchanged.
+## 消息交接：内部控制与 Root 执行
 
-## Entry invocation
+### 工具职责
 
-Entry reads the clean main conversation and adds an Entry frame containing the
-normalized goal, the compact Capability routing manifest, and any Capability
-documents already disclosed by continuation state. The conversation
-remains root-owned; later Supervisor invocations project the current clean view
-again rather than persisting a Supervisor-owned copy.
+三个控制工具保留在 Supervisor 内部，均可导向同一 Capability 执行过程：
 
-Conceptual model input:
+| 工具 | 调度含义 |
+| --- | --- |
+| `submit_plan` | 提交计划，选择第一项执行 |
+| `review_current` | 根据整体进度验收、继续当前任务或推进下一项；没有待验收任务时不虚构旧任务的完成判断 |
+| `adjust_plan` | 保留已完成进度，调整后续安排，选择当前应执行项 |
+| `capability_details` | 内部查询，正常返回查询结果并继续 createAgent 循环，不交给 Root 执行 |
+
+无工作可执行、需要提问或结束时，落实相应计划/进度并走已有回复出口，
+不为了统一形状创建空的 delegation 调用。
+
+### 调用形状
 
 ```text
-SystemMessage(Supervisor entry objective and context semantics)
-MainConversationMessages(clean canonical projection)
-SupervisorEntryFrame(
-  goal,
-  routingManifest,
-disclosedCapabilities
-)
+Supervisor 内部
+  AIMessage：submit_plan / review_current / adjust_plan，调用 C
+  ToolMessage：提交/交接确认，关联 C
+
+  内部工具或退出适配完成确定性转换
+  handoff：AIMessage(delegate_capability，调用 D，执行参数)
+
+Root
+  保存调用 D 与必要业务更新，checkpoint
+  capability 节点执行工具调用 D → 工具内部的独立 executor
+  ToolMessage：实际执行结果，关联 D
+  → Supervisor 正常判断下一步，或进入暂停/失败等出口
 ```
 
-Entry has no active delegation or announce attempts.
+这里的 proposal 是调度决定及其交接含义，**交给 Root 的载体就是 delegation AIMessage**，
+不是 `runSupervisorState.proposal`。Root 不先存一份 proposal、再切节点取出并重新拼调用。
 
-On continuation without an active delegation, Entry also receives the existing
-remaining plan and follows it unless root's user context confirms a change.
-New session initialization alone does not authorize a new plan.
+控制调用 C 保留原始参数和提交确认。派生调用 D 使用独立调用 ID，携带执行所需参数，
+保留来源动作、控制调用及 delegation/run 关联；不覆盖 C，也不增加一轮模型派发。
+计划变更随本次交接落实到业务状态，不另外保存“待处理计划”或临时交接容器。
 
-If Supervisor asks before any plan or delegation exists, keep the question in
-main and process the answer through ordinary `entryAnswer`. It resolves the goal
-from that conversation before handing execution to Supervisor. No continuation
-snapshot or suspended planning state is needed for this case.
+Supervisor 工作上下文与 Root 执行消息各自完整。配对仅表达“结果属于哪次调用”及
+工具消息协议完整性，不负责调度、验收或恢复，不扩展为两套调用状态机。
+C 的确认不是执行成功，D 的结果也不是任务验收通过。
 
-The resulting plan-commit command initializes the run plan. Provider-facing
-Human/AI/Tool messages produced while making that decision remain inside the
-invocation or run-private observability stream; they do not become root history.
+### 退出与执行边界
 
-## Boundary reads main messages
+优先保留现有内部工具的确认 ToolMessage 与 `returnDirect` 退出方式；
+结束一次 Supervisor invoke 不等于结束业务 run。
+调整的是交接输出：工具或退出适配直接形成 delegation 调用消息，
+不通过持久化 proposal slot 或额外模型调用中转。
 
-Main is the sole conversation and execution-evidence input for Supervisor.
-Root publishes each normal Capability result as an existing
-`DelegationAnnounceMessage` before invoking Boundary, even if the task is only
-partly complete. Supervisor never queries the Capability private message scope.
+`Command.PARENT` 是可用的框架交接方式，但不是必须新增的层次。
+具体退出接入需用确定性测试验证；不重新引入 `onHandoff` 回调加中间状态，
+不新增外部 `supervisor_tools` ToolNode，也不把 executor 搬入 Supervisor 工具内部。
 
-Goal, the established plan, and current delegation association remain typed
-root state. They identify what is being evaluated; result bodies exist only in
-main. The model projection reuses existing `delegationId`, `runId`, and
-`announceMessageId` attributes and message order to associate attempts. No new
-message identity, separate result list, or duplicate result body is needed.
+Root 接纳交接时校验调用与任务、能力、运行身份的一致性，一起提交必要业务更新和执行消息，
+再进入现有 `capability` 节点。执行完成时一起提交结果消息与执行事实；
+原生恢复不重新派发已经提交的调用。框架 checkpoint 不保证外部副作用恰好一次，
+仍需保留已有审核、拒绝、取消和错误处理。
 
-Publication does not accept the task. Prior and latest attempts remain ordered
-execution evidence in main; Supervisor may need several of them to judge the
-task. Acceptance updates root-owned task metadata and lifecycle without moving
-or publishing those messages again. Intermediate Capability Human/AI/Tool
-messages remain private.
+### lane 归属不变
 
-User input on continuation is also main-conversation evidence. Retain the active
-delegation, private history, Announces, and remaining plan when appending that
-HumanMessage, then invoke Boundary before further execution. Input arrival does
-not accept, terminate, replace, or clear the delegation. Supervisor interprets
-the user's requested adjustment and uses `adjust_plan` to update the goal and
-pending tasks, continuing or replacing the active delegation as appropriate. This path needs no new Announce; without any result evidence it may guide or
-clarify work, but cannot accept the task. Automatic execution failure without a
-deliverable still stops instead of invoking Supervisor.
+| 消息 | 可见范围 |
+| --- | --- |
+| 用户消息、主会话回复 | 原主会话 |
+| delegation 调用与结果 | 替代原来交给主会话的 Announce，作为主会话执行记录；来源 Capability 用 metadata 表示 |
+| Capability 内部执行消息 | 原 `capability:*` 私有 lane，不随结果一起公开 |
+| Supervisor 内部控制、确认及查询消息 | Supervisor 工作上下文，不因迁入 Root 就变成主会话消息 |
 
-Both modes receive canonical main messages. Boundary receives only the active
-association and plan as additional root state. There is no private result query,
-separate result body, or third mode. New HumanMessages carry the existing run id
-metadata, so a user supplement can be distinguished from checkpoint history.
+当前 Supervisor 工作消息尚在独立数组里，
+[现有查询器](../../../packages/pet-agent/src/agent/messages/query.ts)只识别主会话与 Capability lane。
+迁入 Root 时补充工作归属标记与选择支持即可，不重定义现有归属、不扩大私有历史可见范围。
 
-## Provider contract audit
+每组调用与结果一起选入模型上下文。失败遗留的半组消息沿用
+[工具协议安全过滤](../../../packages/pet-agent/src/agent/messages/protocol.ts)处理输入；
+不删除原 checkpoint 事实、不补造成功结果，也不据此改变入口。
 
-Supervisor behavior depends on the complete provider-visible contract, not prompt
-text alone. Before changing Supervisor policy or investigating a model regression,
-render the production contract without calling a model:
+## 现有字段与实现如何收敛
 
-```sh
-npm run supervisor:context-audit
-```
+以下为目标处置，不表示生产代码已修改。必要信息迁移及读写接入完成后再删除旧字段。
 
-The command uses the production system/input builders, main-message projection,
-tool descriptions, and argument schemas for both modes. Review the output in one
-fixed order:
+| 当前结构 | 处置 |
+| --- | --- |
+| `taskActiveDelegation` | 删除独立容器；必要任务进度归入计划，执行身份/交付引用由调用与事实记录表达 |
+| `taskRunContinuation` | 删除；snapshot 就是保存的业务状态，不另设生命周期 |
+| `runSupervisorSession.plan` | 归入 `runSupervisorState.plan`，不保留两份计划 |
+| `runSupervisorSession.messages` | 迁入 Root 消息存储，保持工作归属并按新 run 重置工作视图 |
+| `runSupervisorSession.pendingCall` | 删除；实际执行消息与 checkpoint 表达调用现场 |
+| `supervisorCommand` / 草案中的 `proposal` 字段 | 不再作为持久交接槽；内部控制消息及 handoff AIMessage 表达决定 |
+| `runNextDelegation` / 草案中的 `nextAttempt` | 收敛到本次调用参数与必要业务事实，删除可推导的重复状态 |
+| 草案中的 `lastOutcome`、嵌套 `run` | 不引入；复用原消息、运行身份、预算及出口 |
+| 模型侧第四个 `delegate_capability` 工具与派发回跳 | 移除额外模型轮次；保留执行调用/结果契约，由 Supervisor 退出边界派生调用 |
+| 非原生 `resume_active` 入口旁路 | 删除；经 Entry Answer 的 `continue` 进入正常调度 |
+| 进度投影、回复/错误出口、暂停、授权与产物字段 | 保留必要语义与唯一来源，不顺带重做 Host、资源存储或错误系统 |
 
-1. **Goal:** each mode has one clear decision objective.
-2. **Evidence:** accepted history, current announce evidence, and established
-   remaining tasks have distinct meanings; plan items are not completion evidence.
-3. **Actions:** the provider sees only command actions valid for that mode, with
-   mutually exclusive effects and complete coverage of valid Boundary states.
-4. **Arguments:** schemas describe the command payload rather than adding a
-   second decision policy.
-5. **Scope:** private executor history is absent; main contains accepted and
-   unaccepted result facts, distinguished by existing root-owned metadata.
-6. **Runtime:** code validates typed identity and shape; it does not infer semantic
-   completion from announce prose.
+实现基线仍使用 proposal slot、独立工作消息、pending call 和额外 delegation 模型轮次。
+主要接入位置：
+[调度工具](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/commandTools.ts)、
+[Supervisor agent](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.ts)、
+[Root 适配](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts)、
+[Capability 节点](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts)、
+[状态定义](../../../packages/pet-agent/src/agent/orchestrator/state.ts)。
 
-The system message owns decision policy. Tool descriptions state tool effect and
-eligibility concisely; argument descriptions state serialized data semantics.
-Static audit is a reasoning aid, not a prose snapshot test. Validate changes with
-behavior tests and targeted model evals.
+## LangChain 参考
 
-## Successive Boundaries
+2026-09-11 查阅的官方 TypeScript 文档与源码。以下是参考方法，不是本仓库已通过验证的证据；
+上游源码链接为 main，接入时需核对安装版本。
 
-Assume Entry submits `[T1, T2, T3]`.
+| 参考 | 借鉴内容与边界 |
+| --- | --- |
+| [Handoffs：Multiple agent subgraphs](https://docs.langchain.com/oss/javascript/langchain/multi-agent/handoffs#multiple-agent-subgraphs) | 使用 `Command.PARENT` 和配对确认传递控制权；借鉴交接语义与上下文选择，不照搬其路由状态 |
+| [Supervisor handoff.ts](https://github.com/langchain-ai/langgraphjs/blob/main/libs/langgraph-supervisor/src/handoff.ts) | `createHandoffBackMessages()` 由程序生成工具调用/结果，说明交接记录不必再经模型生成；该 helper 属内部用途，不直接依赖 |
+| [Deep Agents subagents.ts](https://github.com/langchain-ai/deepagentsjs/blob/main/libs/deepagents/src/middleware/subagents.ts) | `task` 工具 invoke subagent 并用 ToolMessage 返回交付；借鉴结果边界，不照搬其工具内执行拓扑 |
 
-At the first Boundary:
+官方交接确认只表示控制转移，不能当作我们的 Capability 执行结果。
+没有现成组件直接完成本项目三个控制工具到 delegation 调用的业务转换；
+在现有 Supervisor 边界适配即可，不引入整套 `createSupervisor` 或新的交接框架。
 
-```text
-active = T1
-main includes unaccepted A1 for T1
-remaining = [T2, T3]
-```
+## 验证与范围
 
-If Supervisor proposes acceptance and execution of `[T2, T3]` in one decision,
-root records acceptance for A1 already in main, creates T2, and keeps `[T3]` as the future
-tail in one transition. Acceptance with a reply instead dispatches nothing.
-The second Boundary receives:
+落地时验证以下行为，不通过比较提示词字面文本来验收：
 
-```text
-clean main conversation includes accepted A1
-active = T2
-main also includes unaccepted A2 for T2
-remaining = [T3]
-```
+- 两组消息分别正确配对，原始控制调用不被改写；Root 直接接收执行调用，无额外模型派发轮次。
+- 新 run 重置 Supervisor 工作视图，但 Entry Answer 仍能参考业务状态和主会话结果；
+  原生 interrupt 保留原身份、预算与调用现场。
+- A 已验收、B 待执行时能够继续或调整，不依赖独立 active delegation，不重复验收或提交计划。
+- 主会话执行记录、Supervisor 工作消息、Capability 私有消息的可见边界正确，
+  不自动继承旧 run 私有现场，不生成 Announce XML。
+- 交接提交、执行前后 checkpoint、审核拒绝、暂停、取消、失败及无执行分支正确；
+  不丢已提交进度、不重放已提交调用、不恢复旧授权。
+- executor 的 briefing、Toolkit 生命周期、交付与验收分离、产物身份和原生流式输出保持正常；
+  检查模型轮数、attempt 预算和图步数，避免额外路由耗尽递归限制。
+- 旧会话可读；旧拓扑挂起运行明确报告不兼容，不静默迁移或重跑副作用。
 
-This consumes the existing plan in order. Replacing `[T2, T3]` with different
-tasks, dropping T3, or reordering the tail requires asking the user first; a
-normal continuation or a new result alone does not authorize it.
+[先前 Root ToolNode 实验](../../../packages/pet-agent/evals/experiments/delegation-root-node.test.ts)
+曾在脚本模型下 9/9 通过，但不是本稿当前交接、lane 接入及工作视图重置的验证。
+沿用[调用与恢复测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/handoff.test.ts)
+及现有流程 eval 补齐验证，不以历史通过结果代替当前验收。
 
-If Supervisor chooses `review_current(completed=false)`, root preserves the exact delegation id,
-task, private execution history, and saved future plan. The review tool has no
-plan parameter. User-directed changes use `adjust_plan`, which commits the new
-pending plan and continuation/replacement together. The next normal result is
-appended to main under that delegation's existing identity. Supervisor reads all
-attempts in chronology and does not assume the latest is cumulative.
-
-Root checks compaction only at new-run entry, using the existing 75% watermark
-after generation reserves. No root compaction or per-Announce clipping occurs
-inside the execution loop. Compaction retains recent messages and all original
-Announces for the current unfinished delegation, including attempts outside the
-recent suffix. Match them through existing Announce identity metadata and active
-task state; other old history can compact normally, including on continuation.
-There is no need to defer the entire compaction step or add protection state or a
-second result store. Protection matches the existing Announce payload identities. Subagent-private context
-maintenance remains separate.
-
-## Commands and idempotency
-
-The [Supervisor–Root Interaction Protocol](delegation-boundary-protocol.md#one-return-boundary-two-successful-outputs)
-owns the single-proposal interaction and natural-text terminal interface. The root `runSupervisor` node invokes the internal agent using the main-message
-projection; the agent returns a proposal or reply to that node.
-Exploration can involve multiple tool calls. A control tool records the proposal
-in invocation-local `supervisorCommand` and ends through `returnDirect`; natural
-text ends through ordinary model routing. Both return through the same runner
-interface. The adapter validates the full response before tools execute, and root
-validates the returned proposal before applying its effects.
-
-`supervisorCommand` is a single invocation's output slot, not session memory or
-an acceptance fact. Its acknowledgement ToolMessage stays private and is never
-parsed as command transport. Tool implementations return `Command({ update })`;
-there are no middleware exit controls or JSON transport round trips.
-
-The root graph commits the complete transition before routing to execution or
-terminal cleanup. Resuming a completed checkpoint does not rerun Supervisor or
-repeat dispatch. A fresh invocation makes a fresh decision; external tool effects
-remain subject to their existing replay and idempotency rules.
-
-A natural final reply is passed to the terminal node without implying acceptance
-or dispatch. A proposal that both accepts and replies must carry both effects in
-one transition; `review_current(completed=true)` accepts the current task. Omitted `reply` advances
-the established plan; supplied `reply` ends the run and preserves the tail. The terminal
-node emits supplied text once and saves unfinished work through the existing
-continuation snapshot. This ends the root run, not a suspended inner invocation;
-it does not create an `interrupt`. Intermediate provider messages remain private.
-When the text asks the user a question, the work's continuation entry must route
-the answer back to the same goal and saved work, using existing resume semantics.
-The answer becomes root main context; no Supervisor wait state or approval tool
-is added. A unified Finalizer node will replace the current finalization exit
-after Supervisor optimization; that design is deferred.
-The old missing-command terminal category is removed; empty or invalid
-output uses the existing node-error cleanup and rethrow path.
-
-## Capability disclosure
-
-Capability disclosure stores the effective registry digest and disclosed names,
-not prompt history or search accounting. The deterministic routing manifest uses
-authored Capability descriptions and compiled Toolkit metadata from an immutable
-in-memory catalog. Exact-name `capability_details` reads return complete documents;
-there is no disk snapshot, search backend, or model-generated manifest cache.
-
-Entry and the first Boundary after new user input may disclose details under the
-existing middleware policy. Execution Boundaries reuse prepared disclosure. The
-user's answer may support an explicit plan adjustment; receiving input or creating
-a session alone does not authorize changes. Pause/resume routing is tracked
-separately in [issue #785](https://github.com/pinpawo/pinpawo-agent/issues/785).
-
-Document byte limits are per invocation and include injected prior disclosure.
-Supervisor has no elapsed-time deadline and propagates caller cancellation.
-
-## Observability and recovery
-
-LangSmith or equivalent tracing owns raw Supervisor prompts, model outputs, detail
-calls, and command tool calls. Root conversation checkpointing must not double
-as the audit log.
-
-Checkpoint recovery persists semantic session state only for the active run.
-Recovery of the same run can replay a structured command or continue from typed
-state. Starting another run resets the private Supervisor session even when the
-user goal retains the same `traceId`.
-
-## Non-goals
-
-- Moving plan ownership back to Answer or Capability subagents.
-- Redesigning Answer as the Run Finalizer in the same migration.
-- Removing `entry | boundary` modes.
-- Letting code infer task completion from announce prose.
-- Treating Capability stop reasons as Supervisor input or acceptance policy.
-- Exposing private Capability Human/AI/Tool messages to Supervisor.
-- Giving Supervisor direct authority to mutate root messages or delegation state.
-- Persisting Supervisor raw provider messages across runs.
-
-## Migration
-
-1. Add a run-scoped Supervisor session state and reset it with `runId`.
-2. Make its plan the single authoritative replacement for `runCapabilityPlan`;
-   use a separate continuation snapshot only when a later run may resume work.
-3. Keep disclosure in the session and verify runtime replay for a single proposal.
-4. Publish normal result Announces into main before Boundary; remove separate
-   result extraction and acceptance-time movement, retaining existing identities.
-5. Stop returning Supervisor message updates to root `messages`.
-6. Remove Supervisor-lane selection, stale-lane cleanup, and ToolMessage command
-   parsing from the agent boundary.
-7. Keep raw invocation details in tracing only.
-8. Delete the transitional Supervisor-lane implementation after lifecycle and
-   recovery evals pass.
-9. Apply the Boundary Protocol's native `returnDirect` simplification without
-   changing the session schema or introducing another reply/finish command.
-
-## Acceptance criteria
-
-- Entry and Boundary remain the only Supervisor modes.
-- One root run owns exactly one Supervisor session.
-- Supervisor plan state has exactly one authoritative storage location.
-- Plan tasks and prepared disclosure stay stable during execution; normal
-  progression changes only the remaining tail, and revisions require user consent.
-- Supervisor asks the user directly; answering through continuation retains the
-  goal and unfinished work without manufacturing an interrupt.
-- Without a plan or delegation, answers use ordinary `entryAnswer`; with an
-  active delegation, new user input enters main and reaches Supervisor before
-  execution, retaining task ownership and forbidding acceptance without evidence.
-- A new run cannot observe the previous run's Supervisor working history or search
-  counters.
-- Main conversation contains no raw Supervisor transcript; only its final reply
-  is projected through the terminal node.
-- Boundary identifies current task results from main using existing identities,
-  without private result extraction, duplicate result input, or state mutation.
-- First and successive Boundaries preserve active task and remaining-plan
-  identity according to the selected command.
-- Recovery of a committed proposal does not repeat acceptance or dispatch.
-- `review_current(completed=false)` retains prior result messages in main and appends the next
-  attempt without assuming cumulative output.
-- Review preserves future tasks; adjust_plan alone changes pending work in a
-  user-guided Boundary decision.
-- Root compaction runs only at new-run entry and retains recent messages plus all
-  original Announces for the current unfinished delegation, even outside the
-  recent suffix; other old history remains eligible for compaction.
-- Boundary Announces expose result evidence without Capability stop reasons.
-- Supervisor tracing remains complete after raw provider messages are removed from root
-  checkpoint messages.
-
-Tool responsibilities: `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Review accepts no plan parameter; user-directed changes use adjust_plan. Root applies these effects inside its existing `runSupervisor` node.
-
-Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
-
-The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Boundary has one review_current tool: completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.
+本次不新增并行调度、独立存储、快照采用协议或外部工具节点层，不涉及已暂停的 macOS companion。
+[旧交接协议及用户流程图](delegation-boundary-protocol.zh-CN.md)保留历史参考角色，
+[合并时设计](https://github.com/pinpawo/pinpawo-agent/blob/b8b43353969aa3c4dd9e87db620f79a5b3dd6cca/docs/design/agent-runtime/run-scoped-supervisor-session.md)
+记录 #795 基线；当前重构方向以本文为准。

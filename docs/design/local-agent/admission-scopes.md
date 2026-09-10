@@ -164,3 +164,81 @@ peer message
 - [ ] 同一状态变更不存在「一条路径全检查、另一条零检查」（#7）
 - [ ] 只读/只写配置的免检有代码注释说明理由（#6）
 - [ ] dispatch 与对话经同一执行入口，终结事件不重复发布（#5）
+
+---
+
+## 七、实施顺序
+
+按**依赖**排序，不按工作量。前三步互不依赖、可独立验证；后三步有严格前后序。
+
+### 阶段 0：无依赖的归位（可独立落地，纯移动）
+
+| # | 动作 | 影响面 | 风险 |
+|---|---|---|---|
+| 0.1 | `serverTuiSessions.ts:81-170` 的 5 个 transcript 函数移入 Conversation | 生产代码**零外部引用**；`serverTuiSessions.test.ts` 有 4 个直接测试，随之移走 | 极低 |
+| 0.2 | `chatAttachments.ts` 拆分：显示留 Conversation，消息构造归 agent | 2 个引用者 | 低 |
+| 0.3 | `imageAttachments.ts` 移入 agent（输入准入） | 2 个引用者 | 低 |
+
+这三步不改行为，也不依赖任何准入决定。**先做它们**，让后续的结构改动在更干净的
+基础上进行。
+
+### 阶段 1：`buildChatSetup` 归 agent（前置于阶段 2/3）
+
+`buildChatSetup` 有 5 个生产调用点（residentPetHost×2、serverChatHandler×2、
+serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 服务读。
+
+**为什么必须先做**：它现在挂在 Session 服务上，是 Session 与 agent 纠缠的主结点。
+不解开它，阶段 3 的「Session 拥有准入」无法与「agent 拥有执行」分离。
+
+### 阶段 2：resident 不再包一层（解决 #2 #3）
+
+`admitConversationHandlers` 只有**一个调用点**（residentPetHost.ts:599）。
+
+但 `ResidentPetCoordinator` **不能一并删除** —— 它还拥有 dispatch 提交、
+队列快照、Host 关闭（residentPetHost.ts:614/641/664/672）。**只拆对话包装**，
+保留其 dispatch 与生命周期职责。
+
+前置：阶段 1（否则 Host 与 Session 的边界仍然含糊）。
+
+### 阶段 3：准入归位（解决 #1 #4 #6 #7）
+
+撤销 `sessionCommands` 整层（10 处调用，全在 `serverHandlers.ts` 内，
+无外部引用），准入改由状态所有者裁决：
+
+- Session 级：session new/resume、model select、`onNewSession`
+- agent 级：chat/resume、compact、dispatch
+- 无准入：只读查询、config 更新、run interrupt
+
+**撤销前必须确认**：`sessionCommands` 现在还兼做「同 peer 内命令串行」，
+撤销后要由 Session 级准入覆盖等价保证 —— 且它本来就拦不住跨 peer，
+所以新方案严格更强，不是更弱。
+
+前置：阶段 2（两层协调还在时，撤内层会让外层语义更含糊）。
+
+### 阶段 4：HTTP 能力面对齐（解决 #1 的根）
+
+HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。
+
+前置：阶段 3（准入归位后，HTTP 才有「同一处裁决」可接）。
+
+### 阶段 5：`ServerDeps` 拆解
+
+拆成各 domain 的窄契约。6 个消费者一个字段都不读、纯传递，可直接去掉参数。
+
+**放最后**：它是前面各步的**自然结果**，而不是前提。提前做会与阶段 1-3 的
+归属调整反复冲突。
+
+### 依赖图
+
+```
+0.1 ─┐
+0.2 ─┼─（互不依赖，可并行）
+0.3 ─┘
+      └─→ 1 buildChatSetup → 2 resident 解包 → 3 准入归位 → 4 HTTP 对齐 → 5 ServerDeps 拆解
+```
+
+### 每阶段的验证
+
+阶段 0-1 靠现有测试（1709 个）保证零回归。
+阶段 2-4 需补行为测试，对应 §六 验收项：多 peer 并发的 Session 级互斥、
+同一操作经不同传输准入一致、dispatch 与对话终结事件不重复。

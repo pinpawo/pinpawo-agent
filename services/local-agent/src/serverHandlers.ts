@@ -125,6 +125,11 @@ export function createLocalServerHandlers(
   });
   const sessionCommands = new ServerSessionCommandQueue();
   // Actor-wide admission: session transitions and chat operations never overlap.
+  //
+  // This counter is the single admission signal. It is raised in
+  // `afterSessionCommands` *around* the whole chat turn, so it already spans
+  // every inflight run the turn registers inside itself; asking the inflight
+  // registry as well would add a condition that can never be true on its own.
   let activeChatOperations = 0;
   let sessionTransition: Promise<void> | null = null;
   const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
@@ -418,7 +423,7 @@ export function createLocalServerHandlers(
     while (sessionTransition) {
       await sessionTransition;
     }
-    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+    if (activeChatOperations > 0) {
       throw Object.assign(
         new Error('cannot create a session while a run is active'),
         { code: 'session_new_conflict' },
@@ -464,7 +469,7 @@ export function createLocalServerHandlers(
     // their invocation owners until graph output settles. Keep that brief
     // settlement window in this actor-wide admission check so a session switch
     // cannot race the old thread's final checkpoint write.
-    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+    if (activeChatOperations > 0) {
       throw Object.assign(
         new Error('cannot resume a session while a run is active'),
         { code: 'session_resume_conflict' },
@@ -507,7 +512,7 @@ export function createLocalServerHandlers(
     while (sessionTransition) {
       await sessionTransition;
     }
-    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
+    if (activeChatOperations > 0) {
       throw new Error('cannot compact context while a session run is active');
     }
 

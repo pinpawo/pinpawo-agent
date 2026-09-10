@@ -43,10 +43,6 @@ export class InflightRequestController<TKey> {
     return [...(this.requests.get(key) ?? [])].at(-1) ?? null;
   }
 
-  hasActiveRequest() {
-    return [...this.requests.values()].some((runs) => runs.size > 0);
-  }
-
   start(
     key: TKey,
     requestId: string,

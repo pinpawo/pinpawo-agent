@@ -4,6 +4,14 @@
 本文定义 local-agent 的 domain 切分。[准入分层](./admission-scopes.md) 的 scope
 是本文的**推论**，待本文定稿后据此重写。
 
+## 术语
+
+- **准入（admission）**：「这个操作现在准不准跑」的裁决。例如
+  `if (activeChatOperations > 0) { 拒绝切模型 }`。分两类：
+  **时机准入**（有执行在跑吗）与**输入准入**（这个输入这个模型收得下吗）。
+- **domain 的状态**：这个 domain 独占拥有、且**别人只能通过它修改**的数据。
+  判据是「谁能改」，不是「谁能读」。
+
 ## 为什么需要这一篇
 
 module-boundaries §一 用两种方式划分：**目录结构**（wire/agent/conversation/config）
@@ -30,13 +38,16 @@ module-boundaries §一 用两种方式划分：**目录结构**（wire/agent/co
 
 | domain | 是什么 | 拥有什么 |
 |---|---|---|
-| **Host** | 一个进程内的 Pet 宿主 | 长期服务、生命周期 |
+| **Host** | **一个 Pet** 的宿主 | Pet 身份、生命周期；**持有**（非拥有）长期服务的引用 |
 | **Session** | 会话身份 | `sessionId` ↔ `threadId` 绑定、模型覆盖值 |
 | **agent**（Execution） | 一次执行 | setup、invoke、准入、取消收尾 |
 | **Conversation** | 为 TUI/前端交互提供 state 管理 | UI 交互 state 与其投影 |
 | **Config** | 配置来源 | 读取、校验、持久化、**默认值** |
 
 **wire 不是 domain**，是传输适配层（不拥有状态）。
+
+多 Pet 时由 **Studio 持有多个 Host** 并拥有共享服务实例（见 §一.8）；
+local 模式是「只有一个 Host」的退化形态。
 
 `toolkits/` `commands/` `capabilities/` 已存在，不在本次讨论范围。
 
@@ -134,6 +145,64 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 所以分叉 #1（HTTP 绕过 `sessionCommands`）不是独立 bug，而是这个违规的**症状**：
 自建路由的传输，自然也自建了「经过哪些协调」。
 
+### 7. attachment 是输入准入，由模型能力决定
+
+之前把 `imageAttachments.ts` 判给 agent、把 `chatAttachments.ts` 判为「需拆」，
+**这个判断不完整**。核对 `createUserMessage`（serverTuiSessions.ts:318）后：
+
+```ts
+const profile = deps.modelProfiles.resolve(session.modelProfileId);
+const admitted = await this.imageAdmission.admit(attachments, {
+  allowImages: (profile.inputModalities ?? ['text']).includes('image'),
+});
+```
+
+`allowImages` 来自**模型档案的 `inputModalities`** —— 这不是 UI 的事，
+是「**这个模型收不收图**」。所以：
+
+| 内容 | 归属 | 理由 |
+|---|---|---|
+| 尺寸/数量/MIME 上限、`ImageAdmissionError` | **agent** | 输入准入，由模型能力决定 |
+| `createLocalChatHumanMessage` / `createAdmittedLocalChatHumanMessage` | **agent** | 构造执行输入 |
+| `readLocalChatDisplayText` / `formatLocalChatModelText` | **Conversation** | 纯显示 |
+
+**对 agent 而言 attachment 就是 messages 的一部分**，不是独立概念 ——
+这正是它该归 agent 的原因。TUI 侧只负责把用户选的文件递进来。
+
+**两端其实是同一条规则**：`requiredInputModalities` 从 transcript 读回
+（serverTuiSessions.ts:392），用于**切模型时拒绝不兼容的模型**
+（已有图片的会话不能切到纯文本模型）。所以「附件准入」与「切模型准入」
+是同一条模型能力约束的两端，现在却分散在两处 —— 这就是「怎么合」的含义：
+**同一条规则应当只有一个所有者（agent），而不是入口一处、切换一处各写一遍。**
+
+### 8. 多 Pet 由 Studio 组织，Host 不感知彼此
+
+`petId` **是 Host 的属性，不需要独立的 Pet domain** —— 核对 multi-Pet 的实际
+组织方式（`packages/studio/src/host/buildStudio.ts:169-228`）后确认：
+
+```
+Studio
+ ├─ residentPets: Map<petId, ResidentPetHost>   ← 多 Pet 在这一层
+ ├─ 共享注入：modelProfiles、toolkitInventory、toolkitRuntimeManager、
+ │            capabilityArtifactStore、checkpointer(同一个 FileSaver)、
+ │            runtimeConfig、globalReviewPolicyMode
+ └─ 每 Pet 独有：petId、petName、modelProfileId、defaultCapabilityName、
+                 petDocument、capabilities、sessionStatePath、adoptThreadId
+```
+
+三条推论：
+
+1. **Host = 一个 Pet 的宿主**，`petId` 是它的身份属性。多 Pet 是
+   **Studio 持有多个 Host**，Host 之间互不感知。local 模式就是「只有一个 Host」
+   的退化形态 —— 与 §一.1 一致。
+2. **Host 长期服务大多是 Studio 级共享的**，不是 Pet 独有。连 `checkpointer`
+   都是同一个 `FileSaver`，靠 `threadId` 隔离（`adoptThreadId` 形如
+   `studio:<studioId>:pet:<petId>`）。所以「Host 拥有服务」要改成
+   **Host 持有引用，Studio 拥有实例**。
+3. **Config 的默认值层是 Studio 级的**（`input.modelProfiles` 全 Pet 共享，
+   `petConfig.modelProfileId` 是 Pet 级覆盖）—— 与 §一.5 的两层模型同构，
+   只是多了一层：**Config 默认 → Pet 覆盖 → Session 覆盖**。
+
 ---
 
 ## 二、支撑证据
@@ -155,9 +224,9 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 
 | 模块 | 行数 | 是 UI 交互 state 吗 | 归属 |
 |---|---|---|---|
-| `imageAttachments.ts` | 195 | ❌ 大小/数量/MIME **上限校验是准入规则** | **agent**（附件准入） |
+| `imageAttachments.ts` | 195 | ❌ 上限校验是**输入准入**，由模型 `inputModalities` 决定 | **agent**（见 §一.7） |
 | `currentPlanProjection.ts` | 148 | ✅ 投影 `AgentPlan`（UI 视图类型） | Conversation |
-| `chatAttachments.ts` | 136 | ⚠️ 混：显示文本是 UI，消息构造是执行输入 | **需拆** |
+| `chatAttachments.ts` | 136 | ⚠️ 混：显示文本是 UI，消息构造是执行输入 | **需拆**（见 §一.7） |
 | `agentSessionSnapshot.ts` | 133 | ✅ 组装 `AgentSessionSnapshot` | Conversation |
 | `pendingInterruptProjection.ts` | 21 | ✅ 投影给界面的待确认状态 | Conversation |
 | `serverTuiSessions.ts:81-170` | 90 | ✅ `title`/`messageCount` 是列表 UI 要的 | Conversation（**现错放在 session 文件里**） |
@@ -174,7 +243,27 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 
 ### 现在混在一起的东西
 
-**`ServerDeps`**（serverTypes.ts，11 个字段）：
+**`ServerDeps`**（serverTypes.ts，11 个字段）—— **可以取消**。
+
+核对每个消费者实际读了哪些字段：
+
+| 消费者 | 实际读的字段 |
+|---|---|
+| `serverTuiSessions.ts` | 7 个（`capabilityArtifactStore`、`capabilityCatalog`、`defaultCapabilityName`、`modelProfiles`、`petDocument`、`petId`、`toolkitRuntimeManager`） |
+| `configProjection.ts` | 5 个 |
+| `residentPetHost.ts` | 3 个 |
+| `httpHandlers.ts` | 2 个（`petId`、`petName`） |
+| `serverHandlers.ts` | 2 个 |
+| `agentSessionSnapshot.ts`、`serverChatHandler.ts` | 1 个 |
+| `chatStdioServer`、`server`、`runtime`、`run`、`modelProfiles`、`runtimeOperationRegistry` | **0 个（只传递）** |
+
+**大多数消费者只读 1-3 个字段，6 个消费者一个都不读、纯粹在传递。**
+唯一读得多的 `serverTuiSessions` 那 7 个字段，正是 `buildChatSetup` 需要的 ——
+而 `buildChatSetup` 已定归 agent（§一.2）。
+
+所以 `ServerDeps` 不是一个契约，是**为了少写参数而攒的传递包**。按 domain
+拆成各自的窄契约后它自然消失，符合 module-boundaries §二
+「消费者声明自身需要的字段」和「Host 的完整组装类型不成为模块公共总线」。
 
 | 字段 | 实际是什么 | 归属 |
 |---|---|---|
@@ -196,12 +285,9 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 
 ## 三、未决
 
-- [ ] `chatAttachments.ts` 怎么拆（`readLocalChatDisplayText`/`formatLocalChatModelText` 归 Conversation，
-      `createLocalChatHumanMessage`/`createAdmittedLocalChatHumanMessage` 归 agent）
-- [ ] `imageAttachments.ts` 移到 agent 后，附件准入与执行准入怎么合
-- [ ] `ServerDeps` 按 domain 拆成哪几个契约
-- [ ] 每个 domain 拥有哪些状态，谁能改（写成契约类型）
-- [ ] Pet 身份（`petId`）是 Host 的属性，还是独立的 Pet domain
+- [ ] 输入准入（attachment）与切模型准入合并到 agent 后的具体形态
+- [ ] 各 domain 的窄契约怎么写（`ServerDeps` 拆解后的替代物）
+- [ ] Studio 级共享服务与 Host 级引用的边界怎么表达
 - [ ] 准入 scope 如何由本文推导（[admission-scopes](./admission-scopes.md) 据此重写）
 
 ## 四、已决速查
@@ -214,3 +300,5 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 | 4 | Conversation = UI 交互 state 管理，主体在 `@pinpawo/agent-session` |
 | 5 | `modelProfileId`：Session 覆盖 / Config 默认 |
 | 6 | wire 不是 domain；适配传输，能力必须统一 |
+| 7 | attachment 是输入准入（由模型能力决定），整体归 agent；只有显示文本归 Conversation |
+| 8 | 多 Pet 由 Studio 持有多个 Host；`petId` 是 Host 属性，无需独立 Pet domain |

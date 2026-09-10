@@ -177,8 +177,49 @@ Session 覆盖优先。现状 `TuiSessionRecord.modelProfileId` 与
 | 消费者遍布 `agentGraphService`、`chatSessionAdapter`、`serverChatHandler`、`residentPetHost`、`serverHandlers` —— 不专属 Session | 附件校验（imageAttachments）像准入规则，可能属 agent |
 | 真正的消息在 checkpoint，与会话记录**已经分开存** | |
 
-**仍待定**：它是独立 domain，还是 Session/agent 共用的一组投影工具？
-但可以确定的是 —— **它不属于 Session 专有**，因为它的消费者一半在 agent 和 wire。
+### D 的边界定义（已定）
+
+**Conversation = 为 TUI / 前端交互提供 state 管理的部分。它管理的 state，
+都是围绕实际 UI 交互的。**
+
+这条把 D 从「对话内容」收紧成一条可检验的判据：**凡不是 UI 交互 state 的，
+就不属于 Conversation。**
+
+核对下来，这个 domain **已经有一个包了** —— `@pinpawo/agent-session`（约 3000 行，
+消费者正是 `services/local-agent` 与 `services/tui`）：
+
+| 模块 | 行数 | 角色 |
+|---|---|---|
+| `protocol.ts` | 1062 | 客户端协议消息 |
+| `project.ts` | 755 | **`reduceSession` / `applySessionSnapshot` —— state reducer** |
+| `parser.ts` | 608 | 解析 |
+| `domain.ts` | 160 | `AgentSession`、`AgentRunView`、`AgentPlan`、`AgentTimelineEntry` 等 **UI 视图类型** |
+| `events.ts` / `timeline.ts` / `snapshot.ts` / `review.ts` | ~350 | 事件、时间线、快照、review 视图 |
+
+`buildLocalAgentSessionSnapshot` 组装的正是 `AgentSessionSnapshot`，
+且显式带入 `activeRun`（注释写明「Live local transport state; never inferred
+from checkpoint plan data」）—— 这不是 transcript 的投影，
+**是给界面看的当前状态**。
+
+所以 local-agent 里那 720 行的定位随之明确：
+
+| 模块 | 是 UI 交互 state 吗 | 归属 |
+|---|---|---|
+| `agentSessionSnapshot.ts` | ✅ 组装 `AgentSessionSnapshot` | **Conversation** |
+| `currentPlanProjection.ts` | ✅ 投影 `AgentPlan`（UI 视图类型） | **Conversation** |
+| `pendingInterruptProjection.ts` | ✅ 投影给界面的待确认状态 | **Conversation** |
+| `chatAttachments.ts` | ⚠️ 读显示文本是 UI；构造用户消息是执行输入 | **需拆**：显示归 Conversation，消息构造归 agent |
+| `imageAttachments.ts` | ❌ 大小/数量/MIME **上限校验是准入规则** | **agent**（附件准入） |
+| `serverTuiSessions.ts:81-170` | ✅ `title`/`messageCount` 是列表 UI 要的 | **Conversation**（现在错放在 session 文件里） |
+
+两条推论：
+
+1. **Conversation 不是 Session 的视图，也不是共用工具集，而是一个已存在的
+   domain** —— 它的类型与 reducer 都在 `@pinpawo/agent-session`，
+   local-agent 这边只是**宿主侧的投影与组装**。
+2. **`imageAttachments.ts` 应当移出。** 附件的大小/数量/MIME 上限是「这次执行
+   能否接受这个输入」的准入判断，不是 UI state。它现在混在 Conversation 里，
+   是按「和聊天有关」而非按 domain 归的类。
 
 ### E. Config（配置）
 
@@ -228,6 +269,9 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 
 ## 四、定稿后需要回答
 
+- [x] Conversation 的边界 → **为 TUI/前端交互提供 state 管理**；类型与 reducer 已在 `@pinpawo/agent-session`
+- [ ] `chatAttachments.ts` 怎么拆（显示文本 vs 消息构造）
+- [ ] `imageAttachments.ts` 移到 agent 后，附件准入与执行准入怎么合
 - [ ] 每个 domain 拥有哪些状态，谁能改
 - [x] `buildChatSetup` 归谁 → **agent**（见「已定」；现在错挂在 Session 上）
 - [ ] `ServerDeps` 按 domain 拆成哪几个契约

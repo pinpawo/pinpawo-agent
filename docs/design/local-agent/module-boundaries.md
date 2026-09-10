@@ -100,9 +100,15 @@ serverHandlers 同样按操作职责拆分：
   跨 peer 以及 HTTP 与 WebSocket 并发时的准入归属，是本节收敛时要明确的真实边界。
 
 核对这一节时发现，本节反复用到的「范围」从未被定义，6 个协调器各自隐含了不同的
-scope（peer / 进程 / thread / Pet），这才是本节难以收敛的根因。scope 的枚举、
-每个操作的归属、以及传输面与准入的关系，另见
-[准入分层与 Host domain](./admission-scopes.md)。本节的收敛以那一篇定稿为前提。
+scope（peer / 进程 / thread / Pet），这才是本节难以收敛的根因。更进一步，代码里连「一次执行」
+与「一个会话」都还没分开（`buildChatSetup` 挂在 session 服务上却在装配执行，
+`ServerDeps` 平铺了身份/配置源/长期服务/存储适配器），所以先要定 domain，
+scope 是它的推论。
+
+- domain 候选与证据：[local-agent domain 候选](./domains.md)
+- 现状核对与 scope 草案：[准入分层](./admission-scopes.md)
+
+本节的收敛以这两篇定稿为前提。
 
 wire 保留连接与请求的路由关系，把断连转换成取消对应执行的调用；agent 只接收
 不透明的请求/所有者标识或 AbortSignal，不读取 ServerPeer。Host 关闭时停止接收

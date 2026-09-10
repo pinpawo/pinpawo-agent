@@ -105,7 +105,7 @@ scope（peer / 进程 / thread / Pet），这才是本节难以收敛的根因�
 `ServerDeps` 平铺了身份/配置源/长期服务/存储适配器），所以先要定 domain，
 scope 是它的推论。
 
-- domain 候选与证据：[local-agent domain 候选](./domains.md)
+- domain 定义与证据：[local-agent domain 定义](./domains.md)
 - 现状核对与 scope 草案：[准入分层](./admission-scopes.md)
 
 本节的收敛以这两篇定稿为前提。

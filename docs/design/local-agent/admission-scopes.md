@@ -6,7 +6,7 @@
 > **顺序更正**：本文的 §二 scope 枚举是「同一把锁的粒度层级」，属于机制，
 > 不是 domain 定义。正确顺序是先定 domain（有哪些概念、谁拥有什么），
 > scope 应作为其**推论**。domain 候选与证据见
-> [local-agent domain 候选](./domains.md)；那一篇定稿后，本文 §二～§四 需据此重写。
+> [local-agent domain 定义](./domains.md)；本文 §二～§三 需据此重写。
 > 本文 §一 的**现状核对**（6 个协调器、3 个入口面、7 条分叉）仍然有效。
 
 ## 为什么需要这一篇
@@ -18,7 +18,7 @@ module-boundaries §一 写了「同一范围的准入和终结只能有一个�
 
 | # | 分叉 | 现状 |
 |---|---|---|
-| 1 | 同一个 `resumeSession`：WS 经 `sessionCommands`，HTTP 不经 | 真缺口；已归因为「HTTP 自建能力面」的症状，见 [domains §二 F](./domains.md) |
+| 1 | 同一个 `resumeSession`：WS 经 `sessionCommands`，HTTP 不经 | 真缺口；已归因为「HTTP 自建能力面」的症状，见 [domains §一 6](./domains.md) |
 | 2 | resident 模式下 4 层协调叠加 | §一 明确要消除 |
 | 3 | local 与 resident 两层豁免规则不一致 | 各定各的 |
 | 4 | `sessionCommands` per-peer，`activeChatOperations` 全局 | 粒度不匹配 |
@@ -173,7 +173,7 @@ peer message
 
 WebSocket / HTTP / stdio / resident dispatch 是 **4 个传输**，不是 4 套准入。
 
-**规则：wire 适配不同传输，但能力必须统一**（见 [domains §二 F](./domains.md)）。
+**规则：wire 适配不同传输，但能力必须统一**（见 [domains §一 6](./domains.md)）。
 传输只把请求变成「操作 + 身份」，准入一律由所有者裁决。
 
 现状：stdio 复用同一组 `peerHandlers`，天然合规；**HTTP 手写 5 条路由，是唯一

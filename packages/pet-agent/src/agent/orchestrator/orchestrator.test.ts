@@ -133,11 +133,12 @@ import {
   type RunSupervisorResult,
   type RunSupervisorRunner,
 } from './runSupervisor/runner';
+import { withScriptedDelegation } from './runSupervisor/testing';
 import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
 
 function plannerMessageContextText(input: RunSupervisorInput | null | undefined) {
-  return input?.messages.map(readMessageText).join('\n') ?? '';
+  return [...(input?.messages.map(readMessageText) ?? []), ...(input?.deliveries?.map((delivery) => delivery.text) ?? [])].join('\n');
 }
 
 function capability(
@@ -197,7 +198,7 @@ function createOrchestratorGraph(
       answer: entryPlanningAnswerModel,
     },
     runSupervisorRunner:
-      config.runSupervisorRunner ?? createQueuedPlannerRunner(config.models.act),
+      withScriptedDelegation(config.runSupervisorRunner ?? createQueuedPlannerRunner(config.models.act)),
   });
   const withRegistry = (options: {
     configurable?: Record<string, unknown>;
@@ -561,19 +562,19 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.match(announces(supervisorInputs[1])[0]?.result ?? '', /issue #269 需求点/);
   assert.equal(announces(supervisorInputs[1]).length, 1);
   const secondBoundaryInput = supervisorInputs[2];
-  const acceptedFirstTaskAnnounce = secondBoundaryInput?.messages.find((message) =>
-    getMessageHandoffSource(message)?.delegationId
+  const acceptedFirstTaskAnnounce = secondBoundaryInput?.deliveries?.find((delivery) =>
+    delivery.scope.delegationId
       === supervisorInputs[1]?.activeDelegation?.delegationId);
   assert.ok(acceptedFirstTaskAnnounce);
   assert.equal(announces(secondBoundaryInput).length, 1);
   assert.notEqual(
     announces(secondBoundaryInput)[0]?.messageId,
-    getMessageHandoffSource(acceptedFirstTaskAnnounce)?.announceMessageId,
+    acceptedFirstTaskAnnounce.id,
   );
   assert.ok(announces(supervisorInputs[1]).at(-1)?.messageId);
   assert.equal(
     supervisorInputs[1]?.inputId,
-    `announce:${supervisorInputs[1]?.activeDelegation?.delegationId}:${announces(supervisorInputs[1]).at(-1)?.messageId}`,
+    `result:${supervisorInputs[1]?.activeDelegation?.delegationId}:${announces(supervisorInputs[1]).at(-1)?.messageId}`,
   );
   assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
   assert.equal(state.runSupervisorSession, null);
@@ -584,8 +585,8 @@ test('execution boundary routes through runSupervisor before the next task', asy
     readMessageText(message).includes('<supervision_boundary_event')), false);
   assert.equal(answerMessages.length, 0);
   const handoffs = state.messages.filter((message) => getMessageHandoffSource(message));
-  assert.equal(handoffs.length, 2);
-  assert.ok(handoffs.every((message) => getDelegationAnnounce(message)));
+  assert.equal(handoffs.length, 0);
+  assert.equal(state.sessionDelegationResults?.length, 2);
 
 });
 
@@ -4046,32 +4047,18 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
     runId: string;
+    sessionDelegationResults: NonNullable<OrchestratorStateType['sessionDelegationResults']>;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  // After the resumed tool approval, the Supervisor boundary finishes the task.
-  // The result is handed off into the main queue and the private messages is
-  // cleared, so continuation state is no longer inferred from a stale announce.
-  const handoffCopy = mainConversationMessages(finalState.messages)
-    .find((message) => getMessageHandoffSource(message)?.task === 'run shell');
-  assert.ok(handoffCopy, JSON.stringify(finalState.messages.map((message) => ({
-    type: message._getType(),
-    content: message.content,
-    meta: getAgentMessageMetadata(message),
-  }))));
-  const handoffSource = getMessageHandoffSource(handoffCopy);
-  assert.equal(handoffSource?.handoffFrom, 'capability:general');
-  assert.ok(handoffSource?.delegationId);
-  assert.equal(handoffSource?.task, 'run shell');
-  assert.ok(handoffSource?.announceMessageId);
-  assert.match(String(handoffCopy.content), /ran git status/);
-  assert.deepEqual(readLatestAnnounce(finalState.messages, {
-    lane: handoffSource?.handoffFrom ?? 'capability:general',
-    runId: handoffSource?.runId ?? finalState.runId,
-    delegationId: handoffSource?.delegationId ?? '',
-  }), getDelegationAnnounce(handoffCopy));
+  const delivery = finalState.sessionDelegationResults.find((value) => value.task === 'run shell');
+  assert.ok(delivery);
+  assert.equal(delivery.scope.lane, 'capability:general');
+  assert.ok(delivery.scope.delegationId);
+  assert.match(delivery.text, /ran git status/);
+  assert.equal(finalState.messages.some(getDelegationAnnounce), false);
 });
 
 test('toolkit review rejection records terminal tool results and retains the delegation', async () => {
@@ -4446,7 +4433,8 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 0);
   assert.equal(finalState.runNextDelegation, null);
   assert.equal(finalState.taskActiveDelegation?.status, 'pending');
-  assert.equal(finalState.runSupervisorSession, null);
+  assert.ok(finalState.runSupervisorSession?.runId);
+  assert.equal(finalState.runSupervisorSession?.pendingCall, null);
   assert.equal(
     finalState.taskRunContinuation?.activeDelegationId,
     finalState.taskActiveDelegation?.id,
@@ -4487,6 +4475,7 @@ test('toolkit review run interruption retains the delegation without another mod
   ) as {
     messages: BaseMessage[];
     taskActiveDelegation: TaskActiveDelegation | null;
+    sessionDelegationResults: NonNullable<OrchestratorStateType['sessionDelegationResults']>;
   };
 
   assert.equal(routeCallCount, 4);
@@ -4497,9 +4486,8 @@ test('toolkit review run interruption retains the delegation without another mod
     continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
     false,
   );
-  const resumedHandoff = mainConversationMessages(continuedState.messages)
-    .map((message) => getMessageHandoffSource(message))
-    .find((source) => source?.delegationId === retainedDelegationId);
+  const resumedHandoff = continuedState.sessionDelegationResults?.find((delivery) =>
+    delivery.scope.delegationId === retainedDelegationId);
   assert.ok(resumedHandoff);
   assert.equal(continuedState.taskActiveDelegation, null);
 });
@@ -5113,8 +5101,9 @@ test('Supervisor boundary accepts each announce attempt once', async () => {
       const source = getMessageHandoffSource(message);
       return source?.delegationId === activeDelegation.id;
     });
-  assert.equal(handoffCopies.length, 3);
-  assert.equal(new Set(handoffCopies.map((message) => message.id)).size, 3);
+  assert.equal(handoffCopies.length, 1, 'only the legacy record remains in main');
+  assert.equal(state.sessionDelegationResults?.length, 2);
+  assert.equal(new Set(state.sessionDelegationResults?.map((delivery) => delivery.id)).size, 2);
 });
 
 test('private reconciliation materializes one typed lane announce', () => {
@@ -6040,7 +6029,7 @@ test('fresh-turn active delegation transitions are explicit for pending and awai
     assert.equal(resumedState.runNextDelegation?.id, activeDelegation.id);
     assert.equal(resumedState.runNextDelegation?.mode, 'continue');
     assert.equal(resumedState.runNextDelegation?.contextSummary, '按我刚补充的方向继续');
-    assert.equal(afterContextPrep(resumedState), 'capability');
+    assert.equal(afterContextPrep(resumedState), 'runSupervisor');
     assert.equal(resumedState.messages.some(isDelegationBriefingMessage), false);
   }
 });
@@ -6281,7 +6270,7 @@ test('explicit resume reuses checkpointed delegation identity and ToolMessages',
   assert.notEqual(announces(supervisorInputs[1]).at(-1)?.messageId, 'prior-resume-announce');
   assert.equal(
     supervisorInputs[1]?.inputId,
-    `announce:${activeDelegation.id}:${announces(supervisorInputs[1]).at(-1)?.messageId}`,
+    `result:${activeDelegation.id}:${announces(supervisorInputs[1]).at(-1)?.messageId}`,
   );
   const resumedInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
@@ -6451,9 +6440,10 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   }) as OrchestratorStateType;
 
   // Completed delegation lanes are cleared without copying per-task plans into
-  // the private lane. The main history retains one accepted announce per task.
+  // the private lane. Root keeps evidence outside the user-facing conversation.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 2);
+  assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 0);
+  assert.equal(state.sessionDelegationResults?.length, 2);
 
   // Each selected subagent receives one complete invocation-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
@@ -6568,7 +6558,7 @@ test('review_current projects a continuation briefing without rewriting the task
   const secondInput = recorder.subagentInputs[1];
   assert.match(String(secondInput.at(-1)?.content), /^<delegation_briefing[^>]*mode="continue">/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
-  assert.match(secondInputText, /<delegation_announce version="1" role="data" authority="none">/);
+  assert.equal(secondInput.some(getDelegationAnnounce), false);
   assert.match(secondInputText, /已尝试关闭 issue。/);
 });
 
@@ -6690,11 +6680,13 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
 
 function announces(input: RunSupervisorInput | undefined) {
   const active = input?.activeDelegation;
-  return (input?.messages ?? []).flatMap((message) => {
+  return [...(input?.messages ?? []).flatMap((message) => {
     const value = getDelegationAnnounce(message);
     return value && active && value.delegationId === active.delegationId && value.runId === active.runId
       ? [{ messageId: value.announceMessageId, result: value.result }] : [];
-  });
+  }), ...(input?.deliveries ?? []).filter((delivery) => active
+    && delivery.scope.delegationId === active.delegationId && delivery.scope.runId === active.runId)
+    .map((delivery) => ({ messageId: delivery.id, result: delivery.text }))];
 }
 test('a review-origin task pause consults Supervisor on guided continue by id', async () => {
   let runCount = 0;
@@ -7053,7 +7045,7 @@ test('afterPauseGate re-enters the capability only for its matching resumable de
     runNextDelegation: { id: 'd-1' },
     taskActiveDelegation: { id: 'd-1' },
   } as unknown as OrchestratorStateType;
-  assert.equal(afterPauseGate(matching), 'capability');
+  assert.equal(afterPauseGate(matching), 'runSupervisor');
 
   // A non-resumable delegation leaves runNextDelegation null (checkpoint_incompatible).
   const unresumable = {

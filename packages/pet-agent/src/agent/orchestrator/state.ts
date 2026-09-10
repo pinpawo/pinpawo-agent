@@ -3,6 +3,7 @@ import { setAgentMessageMetadata } from '../messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
+import { mergeDelegationDeliveries, type DelegationDelivery } from './delegation/delivery';
 import type {
   CapabilityMessageLane,
   RunNextDelegation,
@@ -41,6 +42,10 @@ export type OrchestratorTerminalErrorState = {
 };
 
 const orchestratorStateChannels = {
+  sessionDelegationResults: Annotation<DelegationDelivery[]>({
+    reducer: mergeDelegationDeliveries,
+    default: () => [],
+  }),
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
     default: () => [],
@@ -126,7 +131,11 @@ export const ORCHESTRATOR_STATE_CHANNEL_NAMES = Object.keys(orchestratorStateCha
 
 export const OrchestratorState = Annotation.Root(orchestratorStateChannels);
 
-export type OrchestratorStateType = typeof OrchestratorState.State;
+// Older snapshots may omit the newly introduced evidence channel. Graph hydration
+// supplies its default; adapters also accept partial historical snapshots.
+export type OrchestratorStateType = Omit<typeof OrchestratorState.State, 'sessionDelegationResults'> & {
+  sessionDelegationResults?: DelegationDelivery[];
+};
 
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,

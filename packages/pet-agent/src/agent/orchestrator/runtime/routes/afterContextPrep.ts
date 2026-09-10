@@ -15,7 +15,7 @@ export function afterContextPrep(state: OrchestratorStateType) {
     && state.taskActiveDelegation?.status === 'pending'
     && state.runNextDelegation?.id === state.taskActiveDelegation.id
   ) {
-    return 'capability';
+    return 'runSupervisor';
   }
   if (state.runActiveDelegationTransition === 'resume_active' && state.taskRunContinuation
     && !state.taskActiveDelegation) return 'runSupervisor';

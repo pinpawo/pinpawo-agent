@@ -2,6 +2,8 @@
 
 状态：issue #755 的设计草案，按 2026-09-06 讨论的方向整体重写。本文描述目标设计；实现进度见文末。
 
+当前工具交接与持久化契约见文末 Capability 调用边界及 [run 状态契约](run-scoped-supervisor-session.md#current-ownership-and-lifetime)。前文 Announce/main-only 描述与 PR #791 流程图保留为历史背景，不代表另一条现行执行路径。
+
 [English version](delegation-boundary-protocol.md)。中英文描述同一套设计。文件路径沿用原名，避免已有链接失效。
 
 ## 用户输入驱动的计划调整（2026-09-09）
@@ -376,43 +378,40 @@ executeCapability({
 
 `runnableConfig.configurable.thread_id` 和 `runnableConfig.context.workdir` 是执行身份与目录的唯一来源，不在上下文外层重复传递。选中的历史消息必须已有非空稳定 ID；executor 在执行前校验，不给调用方的原始消息补写 ID。Root 正常持久化的历史已经满足此条件。
 
-当前返回值仍为 `{ status, scope, handoff, artifacts, toolAuthorizations }`，其中 `handoff` 含私有消息更新和 Announce，输出协议未随输入整理改变。接入工具调用时，拟将交付正文与私有消息更新分开返回，由外部适配层包装为 ToolMessage；工具 call id 不属于 executor 的任务输入。
+当前返回值为 `{ status, scope, delivery, privateMessages, artifacts, toolAuthorizations }`。交付记录与私有消息更新独立；executor 不生成主对话 Announce，也不构造 Supervisor ToolMessage。工具 call id 由外部适配层关联，不属于 executor 的任务输入。
 
 ### 当前调用方式
 
 ```text
-Supervisor：提交计划 / 验收决定
-  → Root：根据决定派发
-    → capability 节点
-      → Capability executor
-      ← handoff
-    → Root：应用消息与状态更新
-  → Supervisor：从 main 中的 Announce 读取结果
+Supervisor：提交计划 / 验收决定，确定待执行任务
+  → Supervisor：真实 delegate_capability tool call
+    → Root 工具适配层：校验调用并提交 pending call
+      → capability 节点 → Capability executor
+      ← delivery / privateMessages / artifacts / authorizations
+    → Root：提交执行事实，闭合原 tool_call_id 的 ToolMessage
+  → Supervisor：读取本 run 的工具结果并继续判断
 ```
 
-当前由 Root 串行调度。结果沿用类型化 Announce，发送给模型时仍投影为 assistant XML。此次模块抽取没有改变这个协议，也没有将 Capability 实现搬入 Supervisor。
+当前只有这条串行执行路径。Capability 保留图节点边界，避免直接嵌入工具时已知的内层流事件可见性问题。规划和验收控制不再隐式执行 Capability，真正执行必须有模型发出的委派工具调用；适配层不补造调用、不返回占位执行结果。
 
-### 目标调用方式（尚未实现）
+### 持久化边界
 
 ```text
-Supervisor：真实 delegate_task tool call
-  → Root / 委派工具适配层：校验并调用
-    → 同一个 Capability executor
-    ← handoff
-  → 提交执行状态，返回对应 tool_call_id 的 ToolMessage
-  → Supervisor：读取工具结果，验收或决定下一次调用
+Root session：主对话、执行事实、产物、授权、任务续接
+  Supervisor run：当前计划、披露状态、工具历史、pending call
+    Capability delegation：私有执行历史和具体任务
 ```
 
-改变的是 executor 外面的请求与返回协议，不是里面的执行过程。Supervisor 只负责委派决定，不负责 briefing、Toolkit 生命周期或创建 Capability subagent；Root 保留校验及状态提交职责。适配层最终接在现有图路由还是 createAgent 工具执行入口，需要结合中断和流事件验证确定，但不能形成两套执行路径。
+Supervisor 的状态按 run 持久化，不是按整个 session 持久化。`runSupervisorSession` 是历史字段名，其值严格归属于 `runId`。同 run 中断恢复保留调用现场；新 run 只从 Root 的正式事实与 continuation 初始化，不继承旧 Supervisor 工作历史。Root 拥有物理 checkpointer 不改变这条逻辑所有权边界。
 
-| 边界 | 当前 | 目标 |
+| 边界 | 旧协议 | 当前协议 |
 | --- | --- | --- |
 | 执行请求 | Root 根据计划或验收决定隐式派发 | Supervisor 发出真实委派工具调用 |
 | 执行封装 | Capability executor | 同一个独立 executor |
 | 返回模型 | Announce → assistant XML | 原委派调用对应的 ToolMessage |
 | 验收与执行 | 验收决定可触发自动推进/续跑 | 验收与下一次委派调用分离 |
 
-每次执行结果必须关联原始调用，不能补造历史调用；结果返回不等于验收通过。暂停和授权恢复必须区分“本次调用未结束”与“后续新调用继续任务”，不能在未闭合的工具历史上继续请求模型。私有轨迹留在 Capability 上下文，main 只接收交付物及必要执行事实。
+每次执行结果必须关联原始调用；结果返回不等于验收通过。审核 interrupt 保留 pending call，恢复同一次调用；任务 pause 或已收敛的取消返回 paused 工具结果，后续继续发起新调用。执行事实保存在 Root 的 `sessionDelegationResults`，不混入 main 对话；验收不再依赖重写交付消息。更早章节中的 Announce/main-only 描述属于旧协议，以本节及 [run 状态契约](run-scoped-supervisor-session.md#current-ownership-and-lifetime) 为准。
 
 ### 并行调用边界
 

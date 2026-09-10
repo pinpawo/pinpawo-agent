@@ -101,10 +101,10 @@ test('executor scopes history and returns an unapplied handoff without persistin
   } });
   const result = await execute({ ...request, history: messages }, { ...hostContext(), runnableConfig: config });
   assert.equal(result.status, 'returned');
-  assert.equal(result.handoff.announce?.delegationId, 'd1');
-  assert.equal(result.handoff.announce?.result, 'Delivered');
-  assert.equal(result.handoff.messages.some(isDelegationBriefingMessage), false);
-  assert.equal(result.handoff.messages.filter(getDelegationAnnounce).length, 1);
+  assert.equal(result.delivery?.scope.delegationId, 'd1');
+  assert.equal(result.delivery?.text, 'Delivered');
+  assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
+  assert.equal(result.privateMessages.filter(getDelegationAnnounce).length, 0);
   assert.deepEqual(messages.map((message) => message.toDict()), before);
 });
 
@@ -119,9 +119,9 @@ test('continuation retains its private scope and returns only this attempt as a 
     ...request, history: [...request.history, prior],
     delegation: { ...request.delegation, mode: 'continue', guidance: 'Verify the document.' },
   }, hostContext());
-  assert.equal(result.handoff.announce?.task, request.delegation.task);
-  assert.equal(result.handoff.announce?.result, 'Second attempt');
-  assert.equal(result.handoff.messages.some(({ id }) => id === 'prior'), false);
+  assert.equal(result.delivery?.task, request.delegation.task);
+  assert.equal(result.delivery?.text, 'Second attempt');
+  assert.equal(result.privateMessages.some(({ id }) => id === 'prior'), false);
   assert.deepEqual(result.scope, messageScope(request));
 });
 
@@ -144,7 +144,7 @@ test('finalize can replace delivery and merge artifacts after runtime release', 
       run.artifacts?.push(ref);
       return deliver(run);
     } })(request, hostContext());
-    assert.equal(result.handoff.announce?.result, 'Finalized delivery');
+    assert.equal(result.delivery?.text, 'Finalized delivery');
     assert.deepEqual(result.artifacts, [ref]);
   } finally {
     await manager.stop();
@@ -177,8 +177,8 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
       } else {
         const result = await execute(request, hostContext());
         assert.equal(result.status, outcome);
-        assert.equal(result.handoff.announce, null);
-        assert.ok(result.handoff.messages.some(({ id }) => id === 'partial'));
+        assert.equal(result.delivery, null);
+        assert.ok(result.privateMessages.some(({ id }) => id === 'partial'));
         assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
       }
       assert.equal(finalized, outcome === 'missing_deliverable');
@@ -226,8 +226,8 @@ test('overlapping calls keep contexts, bindings, artifacts and authorizations se
     assert.notStrictEqual(a.toolAuthorizations, grants);
     assert.deepEqual(b.toolAuthorizations, []);
     for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
-      assert.equal(result.handoff.announce?.delegationId, id);
-      const privateMessage = result.handoff.messages.find((message) => !getDelegationAnnounce(message));
+      assert.equal(result.delivery?.scope.delegationId, id);
+      const privateMessage = result.privateMessages.find((message) => !getDelegationAnnounce(message));
       assert.equal(getAgentMessageMetadata(privateMessage!).delegationId, id);
       assert.equal(events.filter((event) => event === `release:${id}`).length, 1);
     }
@@ -247,8 +247,8 @@ test('default executor still invokes the existing createAgent-based subagent wra
     models: { act: new FakeToolCallingModel({ toolCalls: [[]] }) },
   })(input(), hostContext());
   assert.equal(result.status, 'returned');
-  assert.ok(result.handoff.announce?.result);
-  assert.equal(result.handoff.messages.some(isDelegationBriefingMessage), false);
+  assert.ok(result.delivery?.text);
+  assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
 });
 
 test('runtime bindings, real tools and finalize share the host config identity', async () => {
@@ -302,7 +302,7 @@ test('real subagent execution accepts frozen history with stable IDs without cha
   const result = await execute({ ...input(), history: Object.freeze([message]) }, hostContext());
   assert.equal(result.status, 'returned');
   assert.deepEqual(message.toDict(), before);
-  assert.equal(result.handoff.messages.some(({ id }) => id === 'frozen-user'), false);
+  assert.equal(result.privateMessages.some(({ id }) => id === 'frozen-user'), false);
 });
 
 for (const id of [undefined, '', '   ']) {

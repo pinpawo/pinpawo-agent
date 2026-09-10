@@ -96,7 +96,7 @@ export type OrchestratorConfig = {
   /**
    * Typed seam for the framework-internal Run Supervisor. Production
    * defaults to createRunSupervisorAgent(); graph tests may inject a
-   * scripted runner without simulating its private tool messages.
+   * scripted runner with an explicit delegation-call fixture.
    */
   runSupervisorRunner?: RunSupervisorRunner;
   /**

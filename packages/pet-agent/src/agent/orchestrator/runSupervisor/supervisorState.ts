@@ -2,6 +2,7 @@ import { ReducedValue, StateSchema } from '@langchain/langgraph';
 import { z as z4 } from 'zod/v4';
 import type { RunSupervisorInput } from './runner';
 import type { SupervisorCommand } from './protocol';
+import type { BaseMessage } from '@langchain/core/messages';
 
 /** Private invocation state used by the Supervisor model and command-tool middleware. */
 export const supervisorInvocationStateSchema = z4.object({
@@ -18,6 +19,7 @@ export const supervisorDisclosureStateSchema = new StateSchema({
 });
 
 export type SupervisorInvocationState = {
+  messages: BaseMessage[];
   currentInput: RunSupervisorInput;
   supervisorCommand: SupervisorCommand | null;
   disclosedCapabilityNames: string[];

@@ -3,7 +3,8 @@ import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
 import { observeAgentMessageSelection, queryAgentMessages } from '../../messages';
-import { materializeDelegation, readLatestAnnounce, reconcileDelegationPrivateMessages } from '../delegation';
+import { materializeDelegation, reconcileDelegationPrivateMessages } from '../delegation';
+import { readMessageText } from '../utils';
 import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
 import { buildSubagentExecutionContext, collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
 import { emitRuntimeEventToStreamWriter } from '../../../utils/streamWriterEvents';
@@ -226,17 +227,24 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
         delegationId: scope.delegationId,
         task: delegation.task,
         announceMessageId,
+        publishAnnounce: false,
       },
       canonicalSelection.messages,
     );
-    const delegationAnnounce = readLatestAnnounce(laneOutputMessages, scope);
-    return {
-      status: pausedSubagentState ? 'paused' : delegationAnnounce ? 'returned' : 'missing_deliverable',
+    const deliveredMessage = announceMessageId
+      ? laneOutputMessages.find((message) => message.id === announceMessageId)
+      : null;
+    const delivery = deliveredMessage ? {
+      id: `delivery:${scope.runId}:${scope.delegationId}:${announceMessageId}`,
       scope,
-      handoff: {
-        messages: laneOutputMessages,
-        announce: delegationAnnounce,
-      },
+      task: delegation.task,
+      text: readMessageText(deliveredMessage),
+    } : null;
+    return {
+      status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
+      scope,
+      delivery,
+      privateMessages: laneOutputMessages,
       artifacts: resultArtifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };

@@ -67,6 +67,8 @@ export function buildRunSupervisorInput(params: {
         runId: state.runId,
         userRequest: state.runUserRequest,
         messages: mainSelection.messages,
+        deliveries: isSupervisorDispatch(nodeInput) ? [] : (nodeInput.sessionDelegationResults ?? [])
+          .filter((delivery) => delivery.scope.traceId === state.traceId),
         activeDelegation: null,
         remainingPlan: supervisorSession.plan,
         catalog,
@@ -90,6 +92,12 @@ export function buildRunSupervisorInput(params: {
     runId: activeDelegation.runId,
     delegationId: activeDelegation.id,
   };
+  const deliveries = (state.sessionDelegationResults ?? []).filter((delivery) =>
+    delivery.scope.traceId === state.traceId);
+  const currentDeliveries = deliveries.filter((delivery) =>
+    delivery.scope.delegationId === activeScope.delegationId
+    && delivery.scope.runId === activeScope.runId
+    && delivery.scope.lane === activeScope.lane);
   const mainSelection = queryAgentMessages(state.messages.filter((message) =>
     getAgentMessageMetadata(message).traceId === state.traceId)).main().select();
   const latestAnnounce = mainSelection.messages.flatMap((message) => {
@@ -103,10 +111,19 @@ export function buildRunSupervisorInput(params: {
   const resumedUserMessage = state.runSupervisorUserMessageId
     ? mainSelection.messages.find((message) => message.id === state.runSupervisorUserMessageId
       && message._getType() === 'human') : undefined;
-  const freshTurn = Boolean(resumedUserMessage) || state.runActiveDelegationTransition === 'resume_active'
-    && state.runIterationCount === 0
-    && hasRunHumanMessage(mainSelection.messages, state.runId);
-  if (!latestAnnounce && !freshTurn) throw new Error('Boundary Supervisor requires typed result evidence or fresh user input.');
+  const userInputId = `human:${resumedUserMessage?.id ?? state.runId}`;
+  const freshTurn = resumedUserMessage
+    ? supervisorSession.handledUserInputId !== userInputId
+    : !supervisorSession.handledUserInputId
+      && state.runActiveDelegationTransition === 'resume_active'
+      && state.runIterationCount === 0
+      && hasRunHumanMessage(mainSelection.messages, state.runId);
+  const pendingDelegation = state.runNextDelegation && !freshTurn
+    ? { delegationId: activeDelegation.id, runId: activeDelegation.runId, capability, task: state.runNextDelegation.task }
+    : null;
+  if (!currentDeliveries.length && !latestAnnounce && !freshTurn && !pendingDelegation) {
+    throw new Error('Boundary Supervisor requires typed result evidence or fresh user input.');
+  }
   const supervisorState = supervisorRuntimeStateFromRoot(state);
   return {
     state: supervisorState,
@@ -119,9 +136,11 @@ export function buildRunSupervisorInput(params: {
     ],
     input: {
       mode: 'boundary',
-      inputId: freshTurn
+      pendingDelegation,
+      deliveries,
+      inputId: pendingDelegation ? `dispatch:${activeDelegation.id}:${state.runIterationCount}` : freshTurn
         ? `human:${resumedUserMessage?.id ?? state.runId}`
-        : `announce:${activeDelegation.id}:${latestAnnounce!.announceMessageId}`,
+        : `result:${activeDelegation.id}:${currentDeliveries.at(-1)?.id ?? latestAnnounce!.announceMessageId}`,
       traceId: state.traceId,
       runId: state.runId,
       userRequest: supervisorState.runUserRequest,

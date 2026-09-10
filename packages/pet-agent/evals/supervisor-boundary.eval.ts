@@ -36,6 +36,7 @@ const supervisor = createRunSupervisorAgent({ model: subject.model });
 const publicationPlan = [{ capability: 'general', task: 'Publish the prepared release notes after the user selects a destination.' }];
 const cases: Array<{ name: string; goal: string; task?: string; evidence?: string;
   remaining?: Array<{ capability: string; task: string }>;
+  pendingDispatch?: boolean;
   supplement?: string;
   checkFollowUp?: (result: RunSupervisorResult) => void;
   check: (result: RunSupervisorResult) => void }> = [
@@ -47,6 +48,15 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     task: 'Fix the bug and run the test suite.', evidence: 'The patch is saved. Tests have not been run. Test tools are available; no user input or permission is needed.',
     check: (result) => { assert.equal(result.action, 'review_current');
       if (result.action === 'review_current') { assert.equal(result.completed, false); assert.ok(result.reason.trim()); } } },
+  { name: 'dispatch-pending-capability', goal: 'Fix the bug and confirm the tests pass.',
+    task: 'Fix the bug and run the test suite.', pendingDispatch: true,
+    check: (result) => {
+      assert.equal(result.action, 'delegate_capability');
+      if (result.action === 'delegate_capability') {
+        assert.equal(result.delegationId, 'd1');
+        assert.ok(result.toolCallId.trim());
+      }
+    } },
   { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
     task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
     remaining: [{ capability: 'general', task: 'Fix the identified off-by-one check and run the regression suite.' }],
@@ -92,11 +102,13 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     supplement: 'Publish RELEASE.md as the GitHub release notes for pinpawo/example tag v1.2.3. I authorize publication; no further confirmation is needed.',
     check: (result) => { assert.equal(result.action, undefined); assert.ok(result.reply?.trim()); },
     checkFollowUp: (result) => {
-      assert.equal(result.action, 'review_current');
-      if (result.action === 'review_current') {
-        assert.equal(result.completed, false, 'User input is not publication evidence.');
-        assert.ok(result.reason.trim()); assert.equal(result.reply, undefined);
-        assert.equal('remainingPlan' in result, false);
+      assert.equal(result.action, 'adjust_plan');
+      if (result.action === 'adjust_plan') {
+        assert.equal(result.currentDelegation, 'continue');
+        assert.equal(result.tasks.length, 1);
+        assert.equal(result.tasks[0].capability, 'general');
+        assert.match(result.tasks[0].task, /pinpawo\/example/);
+        assert.match(result.tasks[0].task, /v1\.2\.3/);
       }
     } },
   { name: 'entry-asks-for-user-owned-choice', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.',
@@ -122,6 +134,10 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
   };
   const input: RunSupervisorInput = scenario.task ? {
     ...base, mode: 'boundary', activeDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'general', task: scenario.task },
+    ...(scenario.pendingDispatch ? {
+      inputId: `dispatch:d1:0`,
+      pendingDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'general', task: scenario.task },
+    } : {}),
     messages: [...base.messages, ...(scenario.evidence ? [{ messageId: 'a1', result: scenario.evidence }] : []).map((attempt) => new DelegationAnnounceMessage({
       id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'd1', runId: scenario.name, task: scenario.task!, announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],

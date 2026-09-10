@@ -2,6 +2,8 @@
 
 Status: working design for issue #755, fully rewritten around the direction discussed on 2026-09-06. This document describes the target design; implementation status is recorded at the end.
 
+The current tool-handoff and lifetime contract is in [Capability invocation](#capability-subagent-invocation-boundary) and [run-scoped state](run-scoped-supervisor-session.md#current-ownership-and-lifetime). Earlier Announce/main-only descriptions and PR #791 diagrams are historical context, not a second active protocol.
+
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 
 ## User-directed plan adjustment (2026-09-09)
@@ -455,43 +457,40 @@ Host review settings do not belong to task data. The executor renders the briefi
 
 `runnableConfig.configurable.thread_id` and `runnableConfig.context.workdir` are the sole sources of execution identity and directory, not duplicated in outer context fields. Selected history messages must already have nonblank stable IDs; the executor validates before execution rather than assigning IDs to caller-owned messages. Normal Root-persisted history already satisfies this requirement.
 
-The output remains `{ status, scope, handoff, artifacts, toolAuthorizations }`; handoff still contains private message updates and Announce evidence. Input cleanup does not change that output protocol. For tool integration, delivery text and private updates should become separate outputs, with ToolMessage construction and call-id matching owned by the external adapter.
+The output is `{ status, scope, delivery, privateMessages, artifacts, toolAuthorizations }`. Delivery records and private history updates are separate. The executor creates neither main Announces nor Supervisor ToolMessages; call-id correlation belongs to the external adapter.
 
 ### Current invocation
 
 ```text
-Supervisor: submit plan / review decision
-  → Root: dispatch according to the decision
-    → capability node
-      → Capability executor
-      ← handoff
-    → Root: apply message and state updates
-  → Supervisor: consume Announce evidence from main
+Supervisor: submit plan / review decision, establish pending task
+  → Supervisor: real delegate_capability tool call
+    → Root adapter: validate and commit pending call
+      → capability node → Capability executor
+      ← delivery / privateMessages / artifacts / authorizations
+    → Root: commit facts and complete the original tool_call_id
+  → Supervisor: read current-run tool result and decide
 ```
 
-Root currently schedules serially. Typed Announce results still become assistant XML at the model boundary. Extracting the executor changed neither that protocol nor Capability ownership.
+This is the single serial execution path. Capability retains a graph-node boundary to preserve native streaming. Planning/review no longer implicitly executes Capability: execution requires the real delegation call, never an invented call or placeholder execution result.
 
-### Target invocation (not implemented)
+### Persistence boundary
 
 ```text
-Supervisor: real delegate_task tool call
-  → Root / delegation-tool adapter: validate and invoke
-    → the same Capability executor
-    ← handoff
-  → commit execution state and return the matching ToolMessage
-  → Supervisor: read the result, review or decide the next call
+Root session: conversation, execution facts, artifacts, authority, continuation
+  Supervisor run: plan, disclosure, tool history, pending call
+    Capability delegation: private execution history and task
 ```
 
-Only the request/return protocol outside the executor changes. Supervisor decides what to delegate; it does not build briefings, manage Toolkit lifecycles or construct Capability subagents. Root retains validation and state application. Whether the adapter attaches through existing graph routing or createAgent tool execution requires interrupt and streaming verification; there must not be two executable paths.
+Supervisor state persists for a run, not for the entire session. The historical `runSupervisorSession` field is strictly owned by its `runId`. Same-run interrupt recovery retains the working transcript; a fresh run seeds from Root facts and continuation without inheriting the old transcript. Root owns the physical checkpointer, which does not change logical state ownership. Capability construction and execution remain inside the independent executor.
 
-| Boundary | Current | Target |
+| Boundary | Prior protocol | Current protocol |
 | --- | --- | --- |
 | Request | Root implicitly dispatches from plan/review decisions | Supervisor issues a real delegation tool call |
 | Execution | Independent Capability executor | The same executor |
 | Model-visible return | Announce → assistant XML | ToolMessage answering the actual call |
 | Acceptance vs. execution | Review may automatically advance/continue | Review and the next delegation call are separate |
 
-Results must answer actual calls, not invented historical calls. A returned result is not acceptance. Pause and authorization handling must distinguish an unfinished call from a later continuation call, and never invoke a model with incomplete tool history. Private traces stay inside Capability context; main receives deliveries and necessary execution facts.
+Results answer actual calls; a returned result is not acceptance. Review interrupts retain the pending call. Task pauses and settled cancellation close it with a paused result; later continuation makes a new call. Root keeps evidence in `sessionDelegationResults`, outside main messages, and acceptance does not rewrite delivery messages. See the [run state contract](run-scoped-supervisor-session.md#current-ownership-and-lifetime).
 
 ### Parallel invocation boundary
 

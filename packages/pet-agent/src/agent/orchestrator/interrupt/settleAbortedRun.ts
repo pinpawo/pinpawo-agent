@@ -4,6 +4,7 @@ import type { OrchestratorStateType } from '../state';
 import type { TaskActiveDelegation } from '../types';
 import { pauseTaskInterrupt } from './pauseTaskInterrupt';
 import { readPendingInterrupt, type PendingInterrupt } from './readPendingInterrupt';
+import { completeDelegationToolCall } from '../runtime/delegationToolResult';
 
 /**
  * The minimum a graph runtime must offer to settle an aborted invocation.
@@ -109,6 +110,7 @@ export async function settleAbortedRun(
   // exactly as the capability boundary does when a Review resolution pauses,
   // or the tasks queued after this delegation are lost on continue.
   const values = readValues(snapshot);
+  const supervisorSession = values?.runSupervisorSession as OrchestratorStateType['runSupervisorSession'];
   const taskRunContinuation = (values?.taskRunContinuation as
     OrchestratorStateType['taskRunContinuation'] | undefined)
     ?? snapshotRunTaskContinuation({
@@ -129,6 +131,9 @@ export async function settleAbortedRun(
       goto: PAUSE_GATE_NODE,
       update: {
         runTerminalError: null,
+        ...(supervisorSession ? { runSupervisorSession: completeDelegationToolCall(supervisorSession, {
+          status: 'paused', delivery: null, reason: 'Execution was cancelled; committed work may be incomplete.',
+        }) } : {}),
         taskRunContinuation,
         taskPauseInterrupt: pauseTaskInterrupt.interaction(),
       },

@@ -5,7 +5,8 @@ import type { AgentModels } from '../../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../../types/artifact';
 import type { ModelInputModality, ToolkitReviewCapabilities } from '../../../types/toolkit';
 import type { DelegationMessageScope } from '../../messages';
-import type { DelegationAnnounceData, DelegationSpec } from '../delegation';
+import type { DelegationSpec } from '../delegation';
+import type { DelegationDelivery } from '../delegation/delivery';
 import type { CompiledCapability } from '../registry';
 import type { GlobalReviewPolicy } from '../review/globalReviewPolicy';
 import type { ToolAuthorizationRecord } from '../review/reviewAuthorizations';
@@ -58,11 +59,9 @@ export type CapabilityExecutionOptions = {
 export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
   readonly scope: DelegationMessageScope & { readonly traceId: string };
-  /** Unapplied per-execution message patch, not a replacement conversation. */
-  readonly handoff: {
-    readonly messages: BaseMessage[];
-    readonly announce: DelegationAnnounceData | null;
-  };
+  readonly delivery: DelegationDelivery | null;
+  /** Unapplied private-history patch; contains no main Announce or ToolMessage. */
+  readonly privateMessages: BaseMessage[];
   readonly artifacts: CapabilityArtifactRef[];
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */
   readonly toolAuthorizations: ToolAuthorizationRecord[];

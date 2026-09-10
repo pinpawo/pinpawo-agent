@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { AIMessage, RemoveMessage } from '@langchain/core/messages';
+import { delegationToolSchema } from '../../runSupervisor/delegationTool';
 import { Command } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
@@ -34,6 +36,7 @@ import type {
 } from '../../types';
 import {
   observeAgentMessageSelection,
+  isMessageInDelegationScope,
 } from '../../../messages';
 import {
   buildSubagentHandoff,
@@ -97,7 +100,14 @@ function buildDelegationHandoffUpdate(
   state: OrchestratorStateType,
   activeDelegation: TaskActiveDelegation,
 ) {
-  const messages = buildSubagentHandoff({
+  const deliveries = (state.sessionDelegationResults ?? []).filter((delivery) =>
+    delivery.scope.delegationId === activeDelegation.id
+    && delivery.scope.runId === activeDelegation.runId
+    && delivery.scope.lane === activeDelegation.lane);
+  const messages = deliveries.length > 0 ? state.messages.flatMap((message) =>
+    isMessageInDelegationScope(message, {
+      lane: activeDelegation.lane, runId: activeDelegation.runId, delegationId: activeDelegation.id,
+    }) && message.id ? [new RemoveMessage({ id: message.id })] : []) : buildSubagentHandoff({
     taskAccepted: true,
     messages: state.messages,
     lane: activeDelegation.lane,
@@ -227,6 +237,9 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       catalog,
       supervisorSession,
     });
+    if (supervisorSession.pendingCall) {
+      throw new Error('Cannot invoke Supervisor while a delegation tool call is pending.');
+    }
     for (const selection of messageSelections) {
       observeAgentMessageSelection(
         selection.location,
@@ -249,8 +262,41 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
         current: supervisorSession,
         plan,
         capabilityDisclosure: updatedCapabilityDisclosure,
+        messages: result.messages,
+        handledUserInputId: input.inputId.startsWith('human:') ? input.inputId : undefined,
       }),
     });
+    if (result.action === 'delegate_capability') {
+      if (isSupervisorDispatch(nodeInput) || !input.pendingDelegation
+        || nodeInput.runNextDelegation?.id !== result.delegationId
+        || supervisorSession.pendingCall) {
+        throw new Error('Supervisor delegation call has no matching pending task.');
+      }
+      const callMessage = result.messages.at(-1);
+      const call = callMessage && AIMessage.isInstance(callMessage) ? callMessage.tool_calls?.[0] : null;
+      if (call) delegationToolSchema.parse(call.args);
+      if (!result.toolCallId || call?.id !== result.toolCallId
+        || call.name !== 'delegate_capability' || !AIMessage.isInstance(callMessage) || callMessage.tool_calls?.length !== 1
+        || call.args.capability !== input.pendingDelegation.capability
+        || call.args.task !== input.pendingDelegation.task) {
+        throw new Error('Supervisor delegation must carry its actual validated model tool call.');
+      }
+      if (supervisorSession.messages?.some((message) => AIMessage.isInstance(message)
+        && message.tool_calls?.some((previous) => previous.id === result.toolCallId))) {
+        throw new Error('Delegation tool call id was already used in this run.');
+      }
+      return new Command({
+        update: {
+          ...includeSupervisorSession({}, supervisorSession.plan),
+          runSupervisorSession: updateRunSupervisorSession({
+            current: supervisorSession, plan: supervisorSession.plan,
+            capabilityDisclosure: updatedCapabilityDisclosure, messages: result.messages,
+            pendingCall: { id: result.toolCallId, name: 'delegate_capability', delegationId: result.delegationId },
+          }),
+        },
+        goto: 'capability',
+      });
+    }
     if (isRunSupervisorReplyResult(result)) {
       if (typeof result.reply !== 'string' || !result.reply.trim()) {
         throw new Error('Supervisor returned an empty final reply.');
@@ -261,7 +307,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       });
     }
     // Injectable runners cross the same root trust boundary as the production adapter.
-    const { capabilityDisclosure: _disclosure, ...proposal } = result;
+    const { capabilityDisclosure: _disclosure, messages: _messages, ...proposal } = result;
     const command = parseSupervisorCommand(proposal, {
       mode: input.mode,
       hasNewUserInput: input.inputId.startsWith('human:'),
@@ -287,7 +333,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
           });
       return new Command({
         update: { ...includeSupervisorSession(update, remainingPlan), runUserRequest: command.goal },
-        goto: 'capability',
+        goto: 'runSupervisor',
       });
     }
 
@@ -305,7 +351,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
           activeDelegation: rootState.taskActiveDelegation!,
           feedback: command.reason,
         }), proposedPlan),
-        goto: 'capability',
+        goto: 'runSupervisor',
       });
     }
     const handoff = command.action === 'review_current'
@@ -325,7 +371,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     });
     return new Command({
       update: includeSupervisorSession({ ...handoff, ...next }, remainingPlan),
-      goto: 'capability',
+      goto: 'runSupervisor',
     });
   };
 }

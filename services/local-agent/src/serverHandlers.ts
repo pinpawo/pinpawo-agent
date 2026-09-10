@@ -17,6 +17,7 @@ import { handleLocalHttpRequest } from './httpHandlers';
 import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
 import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
 import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
+import { SessionAdmission } from './sessionAdmission';
 import { ServerChatHandler } from './serverChatHandler';
 import type {
   AgentSessionTurnOptions,
@@ -123,15 +124,12 @@ export function createLocalServerHandlers(
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runAgentTurn ? { runAgentTurn: options.runAgentTurn } : {}),
   });
+  // Ordering a connection's own messages stays with wire; admitting a change
+  // to session state belongs to Session. Keeping them apart is the point:
+  // one Pet can hold several peers, so per-connection ordering cannot admit
+  // a session transition on its own.
   const sessionCommands = new ServerSessionCommandQueue();
-  // Actor-wide admission: session transitions and chat operations never overlap.
-  //
-  // This counter is the single admission signal. It is raised in
-  // `afterSessionCommands` *around* the whole chat turn, so it already spans
-  // every inflight run the turn registers inside itself; asking the inflight
-  // registry as well would add a condition that can never be true on its own.
-  let activeChatOperations = 0;
-  let sessionTransition: Promise<void> | null = null;
+  const sessionAdmission = new SessionAdmission();
   const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
 
   const loadSnapshot = async (peer?: ServerPeer) => {
@@ -284,24 +282,7 @@ export function createLocalServerHandlers(
       sessionId: string;
       modelProfileId: string;
     },
-  ) => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    if (activeChatOperations > 0) {
-      sendModelSelectionError(
-        peer,
-        message,
-        'run_active',
-        'cannot switch models while a session run is active',
-      );
-      return;
-    }
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
-    });
-    sessionTransition = currentTransition;
+  ) => sessionAdmission.transact(async () => {
     let selectionCommitted = false;
     try {
       const requestDeps = runtimeDeps.get();
@@ -411,151 +392,106 @@ export function createLocalServerHandlers(
         'selection_failed',
         error instanceof Error ? error.message : 'model selection failed',
       );
-    } finally {
-      if (sessionTransition === currentTransition) {
-        sessionTransition = null;
-      }
-      releaseSessionTransition();
     }
-  };
+  }, () => {
+    sendModelSelectionError(
+      peer,
+      message,
+      'run_active',
+      'cannot switch models while a session run is active',
+    );
+  });
 
-  const createSession = async () => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    if (activeChatOperations > 0) {
-      throw Object.assign(
-        new Error('cannot create a session while a run is active'),
-        { code: 'session_new_conflict' },
-      );
-    }
+  const createSession = () => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.createNewSession(requestDeps.petId);
+    return {
+      session: projectChatSessionSummary({
+        ...session,
+        active: true,
+      }),
+      snapshot: buildLocalAgentSessionSnapshot({
+        sessionId: session.id,
+        kind: 'chat',
+        messages: [],
+        deps: requestDeps,
+        modelProfileId: session.modelProfileId,
+        requiredInputModalities: session.requiredInputModalities,
+        sessionTokenUsage: null,
+        pendingInterrupt: null,
+        currentPlan: null,
+      }),
+    };
+  }, () => {
+    throw Object.assign(
+      new Error('cannot create a session while a run is active'),
+      { code: 'session_new_conflict' },
+    );
+  });
 
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
+  // Disconnect aborts active runs but deliberately leaves ownership with their
+  // invocation owners until graph output settles. That brief settlement window
+  // still counts as an active run here, so a session switch cannot race the
+  // old thread's final checkpoint write.
+  const resumeSession = (sessionId: string) => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const result = await tuiSessions.resumeSession(requestDeps, sessionId);
+    const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
+      requestDeps,
+      result.pendingInterrupt,
+    );
+    return {
+      session: projectChatSessionSummary(result.session),
+      snapshot: buildLocalAgentSessionSnapshot({
+        sessionId: result.session.id,
+        kind: 'chat',
+        messages: result.messages,
+        deps: requestDeps,
+        modelProfileId: result.session.modelProfileId,
+        requiredInputModalities: result.session.requiredInputModalities,
+        sessionTokenUsage: result.sessionTokenUsage,
+        pendingInterrupt,
+        currentPlan: result.currentPlan,
+      }),
+    };
+  }, () => {
+    throw Object.assign(
+      new Error('cannot resume a session while a run is active'),
+      { code: 'session_resume_conflict' },
+    );
+  });
+
+  const compactSession = (sessionId: string) => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.getSession(requestDeps.petId, sessionId);
+    if (!session) {
+      throw new Error('session not found');
+    }
+    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+    if (activeSession.id !== session.id) {
+      throw new Error('context compaction requires the active session');
+    }
+    const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
+    const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
+    const state = await chatGraphService.readThreadState(setup);
+    if (state.pendingInterrupt) {
+      throw new Error('cannot compact context while human review is pending');
+    }
+    const result = await compactOrchestratorMessages({
+      messages: state.messages,
+      model: setup.graphConfig.models.observe ?? setup.graphConfig.models.act,
     });
-    sessionTransition = currentTransition;
-    try {
-      const requestDeps = runtimeDeps.get();
-      const session = tuiSessions.createNewSession(requestDeps.petId);
-      return {
-        session: projectChatSessionSummary({
-          ...session,
-          active: true,
-        }),
-        snapshot: buildLocalAgentSessionSnapshot({
-          sessionId: session.id,
-          kind: 'chat',
-          messages: [],
-          deps: requestDeps,
-          modelProfileId: session.modelProfileId,
-          requiredInputModalities: session.requiredInputModalities,
-          sessionTokenUsage: null,
-          pendingInterrupt: null,
-          currentPlan: null,
-        }),
-      };
-    } finally {
-      sessionTransition = null;
-      releaseSessionTransition();
+    if (result.compacted) {
+      await chatGraphService.updateState(setup, { messages: result.messages });
+      await tuiSessions.refreshActiveSessionSummary(requestDeps);
     }
-  };
-
-  const resumeSession = async (sessionId: string) => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    // Disconnect aborts active runs but deliberately leaves ownership with
-    // their invocation owners until graph output settles. Keep that brief
-    // settlement window in this actor-wide admission check so a session switch
-    // cannot race the old thread's final checkpoint write.
-    if (activeChatOperations > 0) {
-      throw Object.assign(
-        new Error('cannot resume a session while a run is active'),
-        { code: 'session_resume_conflict' },
-      );
-    }
-
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
-    });
-    sessionTransition = currentTransition;
-    try {
-      const requestDeps = runtimeDeps.get();
-      const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-      const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
-        requestDeps,
-        result.pendingInterrupt,
-      );
-      return {
-        session: projectChatSessionSummary(result.session),
-        snapshot: buildLocalAgentSessionSnapshot({
-          sessionId: result.session.id,
-          kind: 'chat',
-          messages: result.messages,
-          deps: requestDeps,
-          modelProfileId: result.session.modelProfileId,
-          requiredInputModalities: result.session.requiredInputModalities,
-          sessionTokenUsage: result.sessionTokenUsage,
-          pendingInterrupt,
-          currentPlan: result.currentPlan,
-        }),
-      };
-    } finally {
-      sessionTransition = null;
-      releaseSessionTransition();
-    }
-  };
-
-  const compactSession = async (sessionId: string) => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    if (activeChatOperations > 0) {
-      throw new Error('cannot compact context while a session run is active');
-    }
-
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
-    });
-    sessionTransition = currentTransition;
-    try {
-      const requestDeps = runtimeDeps.get();
-      const session = tuiSessions.getSession(requestDeps.petId, sessionId);
-      if (!session) {
-        throw new Error('session not found');
-      }
-      const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
-      if (activeSession.id !== session.id) {
-        throw new Error('context compaction requires the active session');
-      }
-      const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
-      const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
-      const state = await chatGraphService.readThreadState(setup);
-      if (state.pendingInterrupt) {
-        throw new Error('cannot compact context while human review is pending');
-      }
-      const result = await compactOrchestratorMessages({
-        messages: state.messages,
-        model: setup.graphConfig.models.observe ?? setup.graphConfig.models.act,
-      });
-      if (result.compacted) {
-        await chatGraphService.updateState(setup, { messages: result.messages });
-        await tuiSessions.refreshActiveSessionSummary(requestDeps);
-      }
-      return {
-        compacted: result.compacted,
-        snapshot: await loadSnapshot(),
-      };
-    } finally {
-      if (sessionTransition === currentTransition) {
-        sessionTransition = null;
-      }
-      releaseSessionTransition();
-    }
-  };
+    return {
+      compacted: result.compacted,
+      snapshot: await loadSnapshot(),
+    };
+  }, () => {
+    throw new Error('cannot compact context while a session run is active');
+  });
 
   const respondToSessionRequest = async (
     peer: ServerPeer,
@@ -580,27 +516,29 @@ export function createLocalServerHandlers(
     requestId: string,
     admit: () => Promise<void>,
   ) => {
+    // Two different things, deliberately separate: wire keeps this
+    // connection's own messages in arrival order, and Session admits the run.
     await sessionCommands.waitForIdle(peer);
-    while (sessionTransition) {
-      await sessionTransition;
-    }
     if (!peer.isConnected()) {
       return;
     }
-    const activeRun: ActiveChatRun = {
-      requestId,
-      startedAt: Date.now(),
-    };
-    activeChatRuns.set(peer, activeRun);
-    activeChatOperations += 1;
-    try {
-      await admit();
-    } finally {
-      activeChatOperations -= 1;
-      if (activeChatRuns.get(peer) === activeRun) {
-        activeChatRuns.delete(peer);
+    await sessionAdmission.runInSession(async () => {
+      if (!peer.isConnected()) {
+        return;
       }
-    }
+      const activeRun: ActiveChatRun = {
+        requestId,
+        startedAt: Date.now(),
+      };
+      activeChatRuns.set(peer, activeRun);
+      try {
+        await admit();
+      } finally {
+        if (activeChatRuns.get(peer) === activeRun) {
+          activeChatRuns.delete(peer);
+        }
+      }
+    });
   };
 
   const peerHandlers: LocalServerPeerHandlers = {

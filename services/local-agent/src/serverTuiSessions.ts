@@ -18,7 +18,6 @@ import {
 } from '@pinpawo/pet-agent';
 import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import {
-  assertChatSetupPrerequisites,
   buildChatSetup,
 } from './agent/buildChatSetup';
 import { LocalAgentGraphService } from './agentGraphService';
@@ -201,10 +200,6 @@ export class ServerTuiSessionService {
     threadId = this.getChatThreadId(deps.petId),
     modelProfileIdOverride?: string,
   ) {
-    // Checked before resolving the session, because resolving it can create
-    // and persist one: failing after that would leave a session behind for a
-    // run that never started.
-    assertChatSetupPrerequisites(deps);
     const session = Object.values(this.state.sessions)
       .find((candidate) => candidate.threadId === threadId)
       ?? this.getActiveSession(deps.petId);

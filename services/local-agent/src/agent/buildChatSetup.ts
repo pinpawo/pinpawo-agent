@@ -4,7 +4,7 @@ import type { loadAgentContext } from '../contextLoader';
 import { createCapabilityDiagnosticReporter } from '../agentRegistryPreparation';
 import {
   getLocalServerToolkitInventory,
-  type ServerDeps,
+  type ChatSetupDeps,
 } from '../serverTypes';
 
 /**
@@ -23,7 +23,7 @@ export type ChatSetupSession = {
 };
 
 export type BuildChatSetupOptions = {
-  deps: ServerDeps;
+  deps: ChatSetupDeps;
   context: Awaited<ReturnType<typeof loadAgentContext>>;
   session: ChatSetupSession;
   checkpointer: BaseCheckpointSaver;
@@ -31,29 +31,11 @@ export type BuildChatSetupOptions = {
 };
 
 /**
- * What an execution needs from the Host before a session is resolved.
- *
- * Callers that resolve a session first must run this beforehand: resolving
- * can create and persist a session, so failing afterwards would leave one
- * behind for a run that never started.
- */
-export function assertChatSetupPrerequisites(
-  deps: Pick<ServerDeps, 'capabilityArtifactStore'>,
-): asserts deps is typeof deps & { capabilityArtifactStore: NonNullable<ServerDeps['capabilityArtifactStore']> } {
-  if (!deps.capabilityArtifactStore) {
-    throw new Error(
-      'TUI chat requires a capability artifact store bound to the current runtime',
-    );
-  }
-}
-
-/**
  * Build one execution's input from a resolved session identity plus the
  * Host's services.
  */
 export function buildChatSetup(options: BuildChatSetupOptions) {
   const { deps, session } = options;
-  assertChatSetupPrerequisites(deps);
   const llmConfig = deps.modelProfiles.resolve(session.modelProfileId);
   // Compatibility is enforced where the transcript is readable: model
   // selection checks the checkpoint, and image attachments are refused at

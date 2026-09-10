@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './wire/auth';
-import type { ServerDeps } from './serverTypes';
+import type { PetIdentityDeps, RuntimeProjectionDeps } from './serverTypes';
 import { buildLocalHttpRuntimeProjection } from './configProjection';
 
 /**
@@ -16,7 +16,7 @@ type LocalHttpHandlerOptions = {
 export function handleLocalHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  deps: ServerDeps,
+  deps: PetIdentityDeps & RuntimeProjectionDeps,
   options: LocalHttpHandlerOptions,
 ) {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);

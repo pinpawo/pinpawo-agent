@@ -277,11 +277,21 @@ dispatch 是 **Studio 的调度概念**，不是 local-agent 的 domain；local-
 
 拆成各 domain 的窄契约。6 个消费者一个字段都不读、纯传递，可直接去掉参数。
 
-**一条已知线索**：`ServerDeps.capabilityArtifactStore` 声明为可选（`?`），
-但 `residentPetHost` 的生产路径上它是必填（`CapabilityArtifactStore`，无 `?`）。
-**类型比现实宽**，于是下游写了 2 处防御性检查
-（`assertChatSetupPrerequisites` 及其调用点）。agent 的窄契约里把它声明为必填，
-这些检查连同为它保留的顺序保护都可以删除。
+**已落地**：
+
+- 新增三个按 domain 命名的窄契约（`serverTypes.ts`）：`PetIdentityDeps`（Host）、
+  `RuntimeProjectionDeps`（Config）、`ChatSetupDeps`（agent）。消费者声明自己
+  读什么，依赖方向出现在签名里而不是靠共享一个包隐含。
+- `ServerDeps.capabilityArtifactStore` 由可选改为**必填** —— 类型此前比现实宽，
+  于是下游写了 2 处防御性检查。核对确认**每个构造点都提供了它**，只有测试夹具
+  没给（已在共享 helper 里补一个 inert store）。
+- `assertChatSetupPrerequisites` 及其顺序保护一并删除。原来的运行时抛错测试
+  改成断言**类型边界**（`@ts-expect-error`）—— 保证从「跑起来才报错」
+  变成「编译期就不通过」，更早也更强。
+
+`ServerDeps` 本身保留：它是 Host 的**完整组装类型**，组合入口仍然需要它。
+变的是**下游不再整包接收** —— 这正是 module-boundaries §二
+「Host 的完整组装类型不成为模块公共总线」的要求。
 
 **放最后**：它是前面各步的**自然结果**，而不是前提。提前做会与阶段 1-3 的
 归属调整反复冲突。

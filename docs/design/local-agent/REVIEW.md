@@ -14,7 +14,7 @@
 | 2. setup 与 invoke 都归 agent | `660a8095` | `1955ece8` | 部分落地 |
 | 3. dispatch 是 Studio 概念，gate = Agent 可用 | `3ddcaad2` → **`1ed755e2` 修正** | 阶段 3 | **已落地** |
 | 4. Conversation = UI 交互 state | `badde03a` | `89981a64` | 部分落地 |
-| 5. `modelProfileId`：Session 覆盖 / Config 默认 | `3ddcaad2` | — | **仅文档** |
+| 5. `modelProfileId`：Session 覆盖 / Config 默认 | `3ddcaad2` | 阶段 5（窄契约） | 部分落地 |
 | 6. wire 不是 domain，能力必须统一 | `660a8095` | `885610e6` `37c2227a` + 阶段 4 | **已落地** |
 | 7. attachment 是输入准入，归 agent | `9296881e` | `89981a64` | 已落地 |
 | 8. 多 Pet 由 Studio 持有多个 Host | `9296881e` | — | **仅文档** |
@@ -35,9 +35,9 @@ git show 1955ece8
   `agent/buildChatSetup.ts`；Session 服务保留同名方法做**身份解析**后委托。
 - **暴露的事实**：装配真正需要的会话信息只有 3 个值 —— 显式成了 `ChatSetupSession`
   类型（`threadId` / `modelProfileId` / `startedAt`）。
-- **要看的点**：`assertChatSetupPrerequisites` 的顺序保护。
-  它保的是「artifact store 缺失时不要先建一个会话再抛错」，
-  但**生产路径走不到**（`residentPetHost` 里该字段是必填）。留着还是删掉是你的判断。
+- **阶段 5 已解决**：`assertChatSetupPrerequisites` 与那处顺序保护都删掉了。
+  `ServerDeps.capabilityArtifactStore` 改为必填后，缺失它**编译就不通过**，
+  不必再在运行时检查。
 - **未完成**：生命周期/取消/收尾仍在 `serverChatHandler` 与 `residentPetHost`
   **两处重复**，这是 domains §一.2 表格里的第二个 ❌。
 

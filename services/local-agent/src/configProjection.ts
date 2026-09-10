@@ -6,7 +6,7 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type { ServerDeps } from './serverTypes';
+import type { RuntimeProjectionDeps } from './serverTypes';
 import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 import { resolveLlmGenerationReserveTokens } from './llmModelPresets';
@@ -32,7 +32,7 @@ export type RuntimeProjection = {
 };
 
 export function buildLocalRuntimeProjection(
-  deps: ServerDeps,
+  deps: RuntimeProjectionDeps,
   modelProfileId = deps.modelProfiles.defaultProfileId,
 ): RuntimeProjection {
   const runtimeConfig = deps.runtimeConfig;
@@ -90,7 +90,7 @@ export function buildLocalRuntimeProjection(
   };
 }
 
-export function buildLocalHttpRuntimeProjection(deps: ServerDeps) {
+export function buildLocalHttpRuntimeProjection(deps: RuntimeProjectionDeps) {
   const runtime = buildLocalRuntimeProjection(deps);
   return {
     local_agent_version: readLocalAgentPackageVersion(),

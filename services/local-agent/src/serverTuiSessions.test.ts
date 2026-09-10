@@ -19,7 +19,7 @@ import {
   type TuiSessionCheckpointer,
 } from './serverTuiSessions';
 import { createLocalChatHumanMessage } from './agent/chatMessageInput';
-import { createLocalServerRuntimeDepsStore } from './serverTypes';
+import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
 import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
 import {
   createTestModelProfiles,
@@ -174,28 +174,22 @@ test('ServerTuiSessionService injects active session createdAt into runtime envi
   assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-tui-workdir');
 });
 
-test('ServerTuiSessionService rejects chat setup without a thread-scoped artifact store', () => {
-  const service = new ServerTuiSessionService({
-    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-session-test'),
-    state: createEmptyTuiSessionState(),
-    saveState: () => {},
-    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
-  });
+test('chat setup requires an artifact store at the type boundary', () => {
+  // This used to be a runtime throw. ServerDeps now declares
+  // capabilityArtifactStore required, so a Host that forgets one does not
+  // compile — the check moved from a thrown Error to the contract, which
+  // catches it earlier and cannot be reached in production anyway.
+  const deps = {
+    serverMode: 'chat' as const,
+    petId: 'pet-a',
+    ...createTestModelServerDeps(),
+    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-artifact-store'),
+  };
+  assert.ok(deps.capabilityArtifactStore, 'the contract supplies a store');
 
-  assert.throws(
-    () => service.buildChatSetup({
-      serverMode: 'chat',
-      petId: 'pet-a',
-      ...createTestModelServerDeps(),
-      runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-missing-artifact-store'),
-    }, {
-      pet: {
-        id: 'pet-a',
-        name: 'Paw',
-      },
-    }),
-    /requires a capability artifact store/,
-  );
+  // @ts-expect-error capabilityArtifactStore is required by ServerDeps.
+  const missing: ServerDeps = { ...deps, capabilityArtifactStore: undefined };
+  assert.equal(missing.capabilityArtifactStore, undefined);
 });
 
 test('runtime config updates reach the next chat setup through the normalized deps store', () => {

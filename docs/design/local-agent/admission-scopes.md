@@ -1,111 +1,144 @@
-# local-agent 准入分层与 Host domain（2026-09-10 draft）
+# local-agent 准入归属（2026-09-10 draft）
 
 关联：#790（module-boundaries §一「执行协调的范围与所有者」）。
-核对基线：`f17b2e9a`。本文为**待定稿设计**，不代表当前实现。
+核对基线：`9296881e`。本文为**待定稿设计**，不代表当前实现。
 
-> **顺序更正**：本文的 §二 scope 枚举是「同一把锁的粒度层级」，属于机制，
-> 不是 domain 定义。正确顺序是先定 domain（有哪些概念、谁拥有什么），
-> scope 应作为其**推论**。domain 候选与证据见
-> [local-agent domain 定义](./domains.md)；本文 §二～§三 需据此重写。
-> 本文 §一 的**现状核对**（6 个协调器、3 个入口面、7 条分叉）仍然有效。
+**前置**：[local-agent domain 定义](./domains.md)。本文的准入归属是那一篇的
+**推论** —— 不再自立一套 scope 层级，而是问「这个操作改的是**哪个 domain 的
+状态**」，由该 domain 裁决。
 
-## 为什么需要这一篇
+## 术语
 
-module-boundaries §一 写了「同一范围的准入和终结只能有一个权威所有者」，但
-**「范围（scope）」从未被定义**。它被当作不言自明，于是每个协调器各自猜了一个。
+**准入（admission）**：「这个操作现在准不准跑」的裁决。分两类：
 
-核对代码后发现 7 个分叉。它们看起来是 7 个独立问题，实际是同一处缺失暴露 7 次：
+- **时机准入**：有执行在跑吗？（`if (activeChatOperations > 0) 拒绝`）
+- **输入准入**：这个输入这个模型收得下吗？（attachment 的 `inputModalities` 校验）
 
-| # | 分叉 | 现状 |
-|---|---|---|
-| 1 | 同一个 `resumeSession`：WS 经 `sessionCommands`，HTTP 不经 | 真缺口；已归因为「HTTP 自建能力面」的症状，见 [domains §一 6](./domains.md) |
-| 2 | resident 模式下 4 层协调叠加 | §一 明确要消除 |
-| 3 | local 与 resident 两层豁免规则不一致 | 各定各的 |
-| 4 | `sessionCommands` per-peer，`activeChatOperations` 全局 | 粒度不匹配 |
-| 5 | resident dispatch 不进 `InflightRequestController` | 同一问题答案不一 |
-| 6 | 只读查询不检查活跃执行 | 疑似有意，但未写明 |
-| 7 | `onNewSession` 与 `onSessionNew` 都调 `createNewSession`，前者零协调、后者穿 4 层 | 疑似遗漏 |
-
-关键在于：**这 7 条没有一条能靠「目标目录结构」或「handler 职责表」判定。**
-两种划分回答的都是「这段代码属于哪个模块」，而这 7 条问的是另一个问题：
-
-> **这次准入的作用域是谁？谁有权拒绝？**
-
-所以缺的不是目录，是 **scope 这个 domain**。
+本文只谈时机准入；输入准入已定归 agent（domains §一.7）。
 
 ---
 
-## 一、现状：6 个协调器，6 种 scope
+## 一、准入归属规则
 
-没有一处写下过自己的 scope，以下是从实现反推：
+**规则：一个操作的准入，归它所修改状态的那个 domain。**
 
-| 协调器 | 实际 scope | 位置 |
+domain 已定五个（domains §一），其中三个拥有可变状态，因而可以裁决准入：
+
+| domain | 拥有的状态 | 能裁决准入吗 |
 |---|---|---|
-| `ServerSessionCommandQueue` | **一个 peer 连接**（按 peer 存 tail） | serverSessionCommandQueue.ts |
-| `activeChatOperations` | **整个进程**（单计数） | serverHandlers.ts |
-| `sessionTransition` | **整个进程**（单 Promise） | serverHandlers.ts |
-| `ThreadInvocationCoordinator` | **一个 thread** | threadInvocationCoordinator.ts |
-| `ResidentPetCoordinator` | **一个 Pet**（普通数组队列） | residentPetHost.ts |
-| `InflightRequestController` | **一个 peer**，且只认 WS 来的 | inflightRequestController.ts |
+| **Host** | Pet 身份、生命周期 | ✅ Host 级 |
+| **Session** | `sessionId`↔`threadId` 绑定、模型覆盖值 | ✅ Session 级 |
+| **agent** | 一次执行的生命周期 | ✅ 执行级 |
+| **Conversation** | UI 交互 state（**投影，非权威**） | ❌ 只读投影 |
+| **Config** | 配置的读取/校验/持久化 | ❌ 见下 |
 
-分叉 #4 就是这张表的直接后果：`sessionCommands` 是 peer 级，
-`activeChatOperations` 是进程级，二者串联使用却从未对齐粒度。
+两条推论，都由 domain 直接得出：
+
+- **Conversation 不裁决准入。** 它管理的是 UI 交互 state，是投影而非权威数据源
+  —— 这直接判定了分叉 #6：**只读查询不参与准入是对的**，因为它们读的是投影。
+  但理由要写进代码，否则收敛时会被误改。
+- **Config 不裁决准入。** 它只拥有「读取/校验/持久化」，**生效时点归 agent**
+  （module-boundaries §二「配置更新成功后影响下一次获准执行」）。所以
+  `onRuntimeConfigUpdate` 不检查活跃执行是对的 —— 它只写配置，不影响在跑的执行。
+
+### 只有三层，没有 `process`
+
+上一版提过 `process` scope，**是错的**。核对后：`activeChatOperations` 与
+`sessionTransition` 是 `createLocalServerHandlers` 的**闭包局部变量**
+（serverHandlers.ts:133-134），而 Studio 对**每个 Pet 各调一次**
+`createResidentPetHost`（buildStudio.ts:194）→ 各建一份 handlers → 各有一份计数器。
+
+**所以它们是 Host 级的，不是进程级的。** 多 Pet 时进程内没有任何共享的准入状态，
+`process` 这一层不存在。
+
+---
+
+## 二、每个操作的准入归属
+
+| 操作 | 改哪个 domain 的状态 | 准入归属 | 现状 |
+|---|---|---|---|
+| chat / interrupt resume | agent（一次执行） | **agent** | ⚠️ 现由 Host 级计数代管 |
+| compact | agent（一个 thread 的 checkpoint） | **agent** | ❌ 现走 Host 级 |
+| session new / resume | Session（当前会话指针） | **Session** | ❌ 现 peer 级排队 + Host 级检查 |
+| `onNewSession` | Session（同上） | **Session** | ❌ 零协调（#7） |
+| model select | Session（模型覆盖值） | **Session** | ❌ 现 peer 级排队 + Host 级检查 |
+| resident dispatch | agent（一次执行） | **agent** | ⚠️ 现 Host 级队列 |
+| runtime config update | Config（只写配置） | **无** | ✅ 现已不检查 |
+| snapshot / list / model list | Conversation（只读投影） | **无** | ✅ 现已不检查 |
+| run interrupt | 不改状态，**须穿透** | **无** | ✅ 已旁路 |
+| 断连清理 | wire（连接自身） | **wire** | ✅ 已在 `onClose` |
+
+三条由此确定：
+
+1. **`onNewSession` 与 `onSessionNew` 必须同归 Session**（#7 解决）——
+   它们改同一份状态，不能一条全检查、一条零检查。
+2. **`sessionCommands`（peer 级）整层是错层**（#1 #4 解决）。建会话/切模型改的是
+   **Session 的状态**，不是连接的状态；按 peer 串行既不必要也不充分 ——
+   一个 Pet 可挂多个 peer（`peers: Set<AgentSessionPeer>`），peer 级串行
+   拦不住另一个 peer 的并发。**这才是 #4 是正确性问题的原因。**
+3. **HTTP 绕过不是独立缺口**（#1）。准入归 Session 之后，
+   `resumeSession` 无论从 WS 还是 HTTP 进来都走同一处裁决 ——
+   与传输无关（domains §一.6：wire 适配传输，能力必须统一）。
+
+### wire 的准入例外
+
+wire 只拥有**连接自身**的生命周期。断连时取消该连接拥有的执行，属于 wire；
+但它**不得**裁决任何改变共享状态的操作 —— 那是上面三个 domain 的事。
+
+---
+
+## 三、这样能消掉几条分叉
+
+| # | 分叉 | 由什么解决 |
+|---|---|---|
+| 1 | HTTP 绕过 `sessionCommands` | 准入归 Session，与传输无关（§二.3） |
+| 2 | resident 4 层叠加 | Host 只有一种（domains §一.1），不再包一层 |
+| 3 | 两层豁免规则不一致 | 同上；只有一层就无所谓一致 |
+| 4 | peer 级 vs Host 级粒度不匹配 | `sessionCommands` 整层撤销（§二.2） |
+| 5 | dispatch 不进 `InflightRequestController` | dispatch 是同一个 Execution（domains §一.3），走同一入口 |
+| 6 | 只读查询不检查活跃执行 | Conversation 是投影，不裁决准入（§一） |
+| 7 | `onNewSession` 零协调 | 与 `onSessionNew` 同归 Session（§二.1） |
+
+**7 条全部可判定**，且没有一条需要新的机制 —— 都是「谁拥有这个状态」的直接推论。
+
+---
+
+## 四、现状核对（事实基线，仍然有效）
+
+### 6 个协调器的实际归属
+
+| 协调器 | 实际范围 | 该归谁 |
+|---|---|---|
+| `ServerSessionCommandQueue` | 一个 peer 连接 | **撤销**（错层，§二.2） |
+| `activeChatOperations` | **一个 Host**（闭包局部，非进程） | agent 的执行准入 |
+| `sessionTransition` | **一个 Host**（同上） | Session |
+| `ThreadInvocationCoordinator` | 一个 thread | **保留**，已是 agent 级且语义正确 |
+| `ResidentPetCoordinator` | 一个 Pet | Host / agent（dispatch 与对话竞争同一执行入口） |
+| `InflightRequestController` | 一个 peer，且只认 WS | agent（须覆盖 dispatch） |
 
 ### 三个入口面
 
-| 入口面 | 经过的协调 |
+| 入口面 | 现状 |
 |---|---|
-| **WebSocket peer**（13 个 handler） | 见下表分组 |
-| **HTTP**（5 条路由） | `/sessions/resume` 复用 `resumeSession`，但**不经 `sessionCommands`** |
-| **resident dispatch**（非 peer） | 直接进 `dispatchQueue`，不进 `InflightRequestController` |
+| WebSocket（13 个 handler） | 基准 |
+| stdio | 复用**同一组** `peerHandlers` ✅ |
+| HTTP（5 条路由） | 自建路由，`/sessions/resume` 不经 `sessionCommands` ❌ |
+| resident dispatch | 直接进 `dispatchQueue`，不进 `InflightRequestController` |
 
-WebSocket 的 13 个 handler 按经过的层分 4 组：
-
-| 组 | handler | 经过 |
-|---|---|---|
-| A 对话执行 | `onChatRequest`、`onInterruptResume` | `afterSessionCommands` → 计入 `activeChatOperations` |
-| B 会话/配置变更 | `onSessionNew`、`onSessionResume`、`onSessionCompact`、`onModelSelect` | `sessionCommands` → 等 transition → 检查活跃执行 → 持有 transition |
-| C 只读查询 | `onRuntimeConfigUpdate`、`onSessionSnapshotGet`、`onSessionList`、`onModelList` | 只 `sessionCommands`，**不检查活跃执行** |
-| D 完全旁路 | `onRunInterrupt`、`onNewSession`、`onClose` | 无 |
-
-D 组旁路**只有一部分是有意的**：`onRunInterrupt` 必须穿透队列打断正在跑的执行，
-排在队尾就失去意义。
-
-但 `onNewSession` 不同（#7）。它与 B 组的 `onSessionNew` 调用**同一个**
-`tuiSessions.createNewSession`：
-
-| 入口 | 等 transition | 拒绝活跃执行 | 持有 transition |
-|---|---|---|---|
-| `onSessionNew`（B 组） | ✅ | ✅ | ✅ |
-| `onNewSession`（D 组） | ❌ | ❌ | ❌ |
-
-同一个状态变更，一条路径全检查、另一条零检查。这更像遗漏而非设计，
-定 scope 时需要一并裁决。
-
-### Host 身份是模糊的（#2 #3 的根）
-
-`createLocalServerHandlers` 有 3 个宿主：
-
-```
-server.ts          (WebSocket)  → 终端 Host
-chatStdioServer.ts (stdio)      → 终端 Host
-residentPetHost.ts              → 再包一层
-```
-
-`admitConversationHandlers` **包裹**了 local 的 peerHandlers，于是 resident 模式下：
+### resident 模式的 4 层叠加
 
 ```
 peer message
-  └─ coordinator.enqueueConversation      ← 外层队列（Pet 级）
+  └─ coordinator.enqueueConversation      ← Pet 级
        └─ local peerHandler
-            └─ sessionCommands.enqueue    ← 内层队列（peer 级）
-                 └─ 等 sessionTransition  ← 进程级锁
-                      └─ 检查 activeChatOperations  ← 进程级计数
+            └─ sessionCommands.enqueue    ← peer 级
+                 └─ 等 sessionTransition  ← Host 级
+                      └─ 检查 activeChatOperations  ← Host 级
 ```
 
-**一个 `onSessionNew` 穿过 4 层协调。**
+根因是 Host 身份模糊（domains §一.1），不是协调本身写错了。
 
-两层的豁免规则还不一致：
+### 两层豁免规则不一致
 
 | handler | local 层 | resident 层 |
 |---|---|---|
@@ -113,90 +146,21 @@ peer message
 | `onSessionSnapshotGet` | `sessionCommands` | **旁路** |
 | `onNewSession` | 旁路 | **入队** |
 
-根因：**`serverHandlers` 既是「local 模式的完整 Host」，又是「resident 模式的
-一个内层组件」。它不知道自己是哪个身份，于是两边各自补协调。**
-
-### 一个 Pet 可挂多个 peer
-
-`residentPetHost.ts` 的 `peers: Set<AgentSessionPeer>` 说明多 peer 是真实场景。
-因此 peer 级与 Pet 级的粒度不匹配（#4）**是正确性问题，不只是整洁性问题**。
-
----
-
-## 二、待定：scope 枚举
-
-建议定义为 4 层，由外到内：
-
-| scope | 含义 | 谁拥有 |
-|---|---|---|
-| `process` | 整个 local-agent 进程 | 组合入口 |
-| `pet` | 一个 resident Pet / 一个 Chat Host | Host |
-| `session` | 一个会话（thread） | agent |
-| `connection` | 一个客户端连接 | wire |
-
-**核心规则（待确认）：**
-
-1. 一个操作只声明**一个**准入 scope，由该 scope 的所有者裁决。
-2. 准入不叠加：内层不得对已由外层裁决过的同一 scope 再排一次队。
-3. `connection` scope **只用于连接自身的生命周期**（断连、清理），
-   不用于任何会改变共享状态的操作。
-
-规则 3 若成立，`sessionCommands` 现在承担的 B 组排队就是**错层**——
-建会话/切模型改的是 Pet 级共享状态，却按 peer 串行。
-这同时解释了 #1：HTTP 绕过 `sessionCommands` 不是有人忘了，
-而是从未定义过「resume 的准入 scope 是 peer 还是 pet」。
-
----
-
-## 三、待定：每个操作归哪个 scope
-
-以下是**候选归属**，需要逐条确认：
-
-| 操作 | 候选 scope | 理由 | 现状是否一致 |
-|---|---|---|---|
-| chat / interrupt resume | `session` | 改的是一个 thread 的状态 | ❌ 现在是进程级计数 |
-| session new / resume | `pet` | 改 Pet 的当前会话 | ❌ 现在 peer 级排队 + 进程级检查 |
-| model select | `pet` | 改 Pet 的会话记录 | ❌ 同上 |
-| compact | `session` | 只动一个 thread 的 checkpoint | ❌ 同上 |
-| runtime config update | `pet` | 改 Pet 级策略 | ⚠️ 现在不检查活跃执行 |
-| snapshot / list / model list | **无**（只读） | 不改共享状态 | ⚠️ 有意但未写明（#6） |
-| run interrupt | **无**（须穿透） | 打断正在跑的执行 | ✅ 已旁路 |
-| `onNewSession` | `pet`（同 session new） | 改 Pet 的当前会话 | ❌ 现在零协调（#7） |
-| resident dispatch | `pet` | 与对话竞争同一 Pet | ✅ 已是 Pet 级 |
-
-判定 #6 的规则建议：**只读操作不参与准入，但必须读到一致快照**；
-它免检的理由要写在代码注释里，否则收敛时容易被误改。
-
----
-
-## 四、已定：传输面统一能力，不拥有准入
-
-WebSocket / HTTP / stdio / resident dispatch 是 **4 个传输**，不是 4 套准入。
-
-**规则：wire 适配不同传输，但能力必须统一**（见 [domains §一 6](./domains.md)）。
-传输只把请求变成「操作 + 身份」，准入一律由所有者裁决。
-
-现状：stdio 复用同一组 `peerHandlers`，天然合规；**HTTP 手写 5 条路由，是唯一
-重新实现能力面的传输**。#1 因此不是独立缺口，而是这个违规的症状 ——
-HTTP 自建路由，自然也自建了「经过哪些协调」。
-
 ---
 
 ## 五、这一版不做的
 
-- 不引入全局队列。不同 scope 保留各自的协调器，只是**每个 scope 恰好一个**。
-- 不改 `ThreadInvocationCoordinator` 的语义（它已经是 session 级，且是对的）。
-- 不动 `onRunInterrupt` 的穿透豁免（它是有意的）。`onNewSession` 的零协调
-  另论，见 #7。
-- 不预设最终类型/类结构；先定 scope 归属，再谈代码组织。
+- 不引入全局队列。每个 domain 保留自己的协调器，只是**每个恰好一个所有者**。
+- 不改 `ThreadInvocationCoordinator`（已是 agent 级且正确）。
+- 不动 `onRunInterrupt` 的穿透豁免（有意的）。
+- 不预设最终类型/类结构；先定归属，再谈代码组织。
 
-## 六、验收（待补）
+## 六、验收
 
-定稿后需要能回答：
-
-- [ ] 任一操作，能说出它的准入 scope 和裁决者
+- [ ] 任一操作，能说出它改哪个 domain 的状态、由谁裁决准入
 - [ ] 同一操作经不同传输进来，准入结果一致
-- [ ] resident 模式下不存在同 scope 的重复入队
-- [ ] local 与 resident 的豁免规则一致，或差异有明确理由
-- [ ] 多 peer 挂同一 Pet 时，Pet 级操作正确互斥
+- [ ] 不存在同一 domain 的重复入队（resident 4 层消除）
+- [ ] 多 peer 挂同一 Pet 时，Session 级操作正确互斥
 - [ ] 同一状态变更不存在「一条路径全检查、另一条零检查」（#7）
+- [ ] 只读/只写配置的免检有代码注释说明理由（#6）
+- [ ] dispatch 与对话经同一执行入口，终结事件不重复发布（#5）

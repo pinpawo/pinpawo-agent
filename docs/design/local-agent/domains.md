@@ -1,8 +1,8 @@
 # local-agent domain 定义（2026-09-10 draft）
 
 关联：#790。核对基线：`badde03a`。
-本文定义 local-agent 的 domain 切分。[准入分层](./admission-scopes.md) 的 scope
-是本文的**推论**，待本文定稿后据此重写。
+本文定义 local-agent 的 domain 切分。准入归属是它的推论，见
+[准入归属](./admission-scopes.md)。
 
 ## 术语
 
@@ -288,7 +288,7 @@ Studio
 - [ ] 输入准入（attachment）与切模型准入合并到 agent 后的具体形态
 - [ ] 各 domain 的窄契约怎么写（`ServerDeps` 拆解后的替代物）
 - [ ] Studio 级共享服务与 Host 级引用的边界怎么表达
-- [ ] 准入 scope 如何由本文推导（[admission-scopes](./admission-scopes.md) 据此重写）
+- [x] 准入归属如何由本文推导 → 见 [准入归属](./admission-scopes.md)（7 条分叉全部可判定）
 
 ## 四、已决速查
 

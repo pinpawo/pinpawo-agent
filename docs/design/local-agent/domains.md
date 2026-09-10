@@ -154,17 +154,31 @@ domain**；local-agent 这边的约 720 行只是**宿主侧的投影与组装**
 这比「传输面不拥有准入」更强：不只是不许拥有准入，而是**每个传输都必须暴露
 同一组能力**。核对现状：
 
-| 传输 | 能力面 | 是否合规 |
+**但这条规则只约束「对话能力面」，不约束运维面。** 实施阶段 4 时核对发现，
+HTTP 承载的其实是两种不同的东西：
+
+| 路由 | 属于 | 真实消费者 |
+|---|---|---|
+| `/health` | **运维面**（进程是否活着） | macOS 伴侣 `StatusPoller` |
+| `/runtime` | **运维面**（装的哪个版本） | TUI `localHostMetadata` |
+| ~~`/snapshot`~~ ~~`/sessions`~~ ~~`/sessions/resume`~~ | 对话能力面 | **零消费者**（已删） |
+
+运维面回答的是「进程」的问题，不是「对话」的问题，它本就不该出现在
+`peerHandlers` 里，也不该被这条规则要求去「统一」。
+
+真正违规的是后三条：它们把 snapshot / list / resume 在 HTTP 上**重新实现**了
+一遍。TUI 早已改走 WebSocket 的 `session.snapshot.get` / `session.list` /
+`session.resume`（`TuiLocalServerClient` 已不存在），macOS 伴侣只用 `/health`，
+所以这三条**全仓零消费者**。
+
+| 传输 | 对话能力面 | 是否合规 |
 |---|---|---|
 | WebSocket | 13 个 handler | 基准 |
 | **stdio** | 复用**同一个** `peerHandlers` | ✅ 天然一致 |
-| **HTTP** | 自己手写 5 条路由 | ❌ 自成子集 |
+| **HTTP** | 不承载对话能力（已删三条残留） | ✅ 运维面独立 |
 
-stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandlers)`）。
-**HTTP 是唯一重新实现了能力面、而不是适配它的传输。**
-
-所以分叉 #1（HTTP 绕过 `sessionCommands`）不是独立 bug，而是这个违规的**症状**：
-自建路由的传输，自然也自建了「经过哪些协调」。
+所以分叉 #1（HTTP 绕过 `sessionCommands`）的根不是「HTTP 该去适配 13 个
+handler」，而是**它本不该有那三条路由**。删掉即消解。
 
 ### 7. attachment 是输入准入，由模型能力决定
 

@@ -4,14 +4,13 @@ import { isAuthorizedLocalServerRequest } from './wire/auth';
 import type { ServerDeps } from './serverTypes';
 import { buildLocalHttpRuntimeProjection } from './configProjection';
 
+/**
+ * HTTP carries the operational surface only: is this process alive, and which
+ * build is it. Conversation capability is the WebSocket/stdio handler set —
+ * see [wire 能力统一](../../../docs/design/local-agent/domains.md) §一.6.
+ */
 type LocalHttpHandlerOptions = {
   authToken: string;
-  loadSnapshot: () => Promise<unknown>;
-  listSessions: () => Promise<unknown[]>;
-  resumeSession: (sessionId: string) => Promise<{
-    session: unknown;
-    snapshot: unknown;
-  }>;
 };
 
 export function handleLocalHttpRequest(
@@ -39,51 +38,6 @@ export function handleLocalHttpRequest(
 
   if (pathname === '/runtime') {
     writeJson(res, 200, buildLocalHttpRuntimeProjection(deps));
-    return true;
-  }
-
-
-  if (pathname === '/snapshot') {
-    options.loadSnapshot().then((snapshot) => {
-      writeJson(res, 200, snapshot);
-    }).catch((err) => {
-      writeJson(res, 500, {
-        error: err instanceof Error ? err.message : 'snapshot load failed',
-      });
-    });
-    return true;
-  }
-
-  if (pathname === '/sessions') {
-    options.listSessions().then((sessions) => {
-      writeJson(res, 200, { sessions });
-    }).catch((err) => {
-      writeJson(res, 500, {
-        error: err instanceof Error ? err.message : 'sessions load failed',
-      });
-    });
-    return true;
-  }
-
-  if (pathname === '/sessions/resume') {
-    const sessionId = url.searchParams.get('sessionId')?.trim();
-    if (!sessionId) {
-      writeJson(res, 400, { error: 'sessionId is required' });
-      return true;
-    }
-    options.resumeSession(sessionId).then((result) => {
-      writeJson(res, 200, result);
-    }).catch((err) => {
-      const statusCode = err
-        && typeof err === 'object'
-        && 'code' in err
-        && err.code === 'session_resume_conflict'
-        ? 409
-        : 404;
-      writeJson(res, statusCode, {
-        error: err instanceof Error ? err.message : 'session resume failed',
-      });
-    });
     return true;
   }
 

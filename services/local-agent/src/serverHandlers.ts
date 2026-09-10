@@ -716,12 +716,7 @@ export function createLocalServerHandlers(
     close: () => {},
     handleHttpRequest: (req, res, authToken) => {
       const requestDeps = runtimeDeps.get();
-      return handleLocalHttpRequest(req, res, requestDeps, {
-        authToken,
-        loadSnapshot,
-        listSessions,
-        resumeSession,
-      });
+      return handleLocalHttpRequest(req, res, requestDeps, { authToken });
     },
   };
 }

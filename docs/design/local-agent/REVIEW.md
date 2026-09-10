@@ -15,7 +15,7 @@
 | 3. dispatch 是 Studio 概念，gate = Agent 可用 | `3ddcaad2` → **`1ed755e2` 修正** | 阶段 3 | **已落地** |
 | 4. Conversation = UI 交互 state | `badde03a` | `89981a64` | 部分落地 |
 | 5. `modelProfileId`：Session 覆盖 / Config 默认 | `3ddcaad2` | — | **仅文档** |
-| 6. wire 不是 domain，能力必须统一 | `660a8095` | `885610e6` `37c2227a` | 目录落地，能力统一未做 |
+| 6. wire 不是 domain，能力必须统一 | `660a8095` | `885610e6` `37c2227a` + 阶段 4 | **已落地** |
 | 7. attachment 是输入准入，归 agent | `9296881e` | `89981a64` | 已落地 |
 | 8. 多 Pet 由 Studio 持有多个 Host | `9296881e` | — | **仅文档** |
 
@@ -79,8 +79,9 @@ git show 37c2227a --stat -M   # 去掉 local 前缀
   发布子路径 `pinpawo/local-server-transport` 与产物文件名不受影响（构建验证过）。
 - **顺带修的**：3 个 tsconfig 路径映射指向了搬走前的旧路径
   （`plugins/studio-http`、`plugins/kanban`、`tests/studio-e2e`）。
-- **未完成**：「能力必须统一」这条规则**没落地** —— HTTP 仍是自建的 5 条路由，
-  是唯一重新实现能力面的传输（阶段 4）。
+- **阶段 4 已补完**：删掉 HTTP 上重新实现对话能力的三条残留路由
+  （`/snapshot`、`/sessions`、`/sessions/resume`，全仓零消费者）。
+  `/health` `/runtime` 保留 —— 它们是**运维面**，不在「能力统一」规则内。
 
 ---
 

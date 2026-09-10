@@ -122,7 +122,7 @@ wire 只拥有**连接自身**的生命周期。断连时取消该连接拥有�
 |---|---|
 | WebSocket（13 个 handler） | 基准 |
 | stdio | 复用**同一组** `peerHandlers` ✅ |
-| HTTP（5 条路由） | 自建路由，`/sessions/resume` 不经 `sessionCommands` ❌ |
+| HTTP（2 条路由） | 仅运维面 `/health` `/runtime`；三条对话能力残留路由已删 ✅ |
 | resident dispatch | 直接进 `dispatchQueue`，不进 `InflightRequestController` |
 
 ### resident 模式的 4 层叠加
@@ -257,9 +257,21 @@ dispatch 是 **Studio 的调度概念**，不是 local-agent 的 domain；local-
 
 ### 阶段 4：HTTP 能力面对齐（解决 #1 的根）
 
-HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。
+**方向更正（实施时发现）**：原计划写的是「HTTP 改为适配同一组能力，与 stdio
+一致」，**这是错的**。HTTP 承载的是**运维面**（`/health` 给 macOS 伴侣探活、
+`/runtime` 给 TUI 读版本），它回答的是「进程」的问题而非「对话」的问题，
+本就不该出现在 `peerHandlers` 里。
 
-前置：阶段 3（准入归位后，HTTP 才有「同一处裁决」可接）。
+真正违规的是另外三条：`/snapshot`、`/sessions`、`/sessions/resume` 把对话能力
+在 HTTP 上重新实现了一遍，且**全仓零消费者** —— TUI 早已改走 WebSocket 的
+`session.*` 命令（`TuiLocalServerClient` 已不存在），macOS 伴侣只用 `/health`。
+
+**已落地**：删除这三条路由及其测试，`LocalHttpHandlerOptions` 收窄为只剩
+`authToken`。`docs/wiki/concepts/local-agent-transport-boundary.md` 里
+「HTTP endpoints ... used by the TUI today」的说法已经过时（该文按 CLAUDE.md
+规则不在本次改动范围，留待 ingest 时更新）。
+
+前置：阶段 3。
 
 ### 阶段 5：`ServerDeps` 拆解
 

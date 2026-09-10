@@ -146,8 +146,9 @@ function defaultLogError(message: string, error: unknown): void {
 
 /** One non-preemptive graph admission point shared by conversation and dispatch. */
 export class ResidentPetCoordinator {
-  private readonly conversationQueue: QueuedOperation[] = [];
   private readonly dispatchQueue: QueuedOperation[] = [];
+  /** Conversations currently holding the gate busy; they never enter a queue. */
+  private conversations = 0;
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
@@ -172,7 +173,10 @@ export class ResidentPetCoordinator {
     return {
       state: this.state,
       activeOperation: this.activeOperation,
-      queuedConversations: this.conversationQueue.length,
+      // Conversations hold the gate but never queue, so this is the count of
+      // conversations currently holding it. Kept because StudioDispatchQueue
+      // publishes the field.
+      queuedConversations: this.conversations,
       queuedDispatches: this.dispatchQueue.length,
     };
   }
@@ -187,12 +191,64 @@ export class ResidentPetCoordinator {
     return () => this.queueListeners.delete(listener);
   }
 
-  enqueueConversation<T>(operation: () => Promise<T>): Promise<T> {
-    return this.enqueue('conversation', operation);
+  /**
+   * Run a conversation operation while holding the gate busy.
+   *
+   * Conversation does not join the dispatch queue. dispatch is Studio's
+   * scheduling concept and this coordinator is the gate that answers "can
+   * this Agent take new work"; conversation is not a competitor for that
+   * gate, it is one of the reasons the Agent becomes busy. Conversation has
+   * its own admission (SessionAdmission) and thread-level coordination
+   * (ThreadInvocationCoordinator), so queueing it here would be a second,
+   * unrelated queue.
+   *
+   * The gate is still held for the operation's duration and refreshed after
+   * it settles, so a dispatch cannot start mid-conversation and a pending
+   * interrupt raised by the conversation leaves the gate `waiting`.
+   */
+  async holdForConversation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing) {
+      throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    }
+    // The hold is claimed synchronously, before waiting out an active
+    // dispatch. A queued dispatch reads Session state when it starts, so a
+    // session switch already in flight has to land first — waiting before
+    // claiming would let that dispatch drain against the old thread.
+    this.conversations += 1;
+    try {
+      while (this.active) {
+        await this.active;
+      }
+    } catch {
+      // The active operation's own caller owns its failure.
+    }
+    this.setState('busy');
+    this.publishQueueSnapshot();
+    let value: T;
+    try {
+      value = await operation();
+    } finally {
+      this.conversations -= 1;
+      if (this.conversations === 0) {
+        this.publishQueueSnapshot();
+      }
+    }
+    // Awaited, not fire-and-forget: callers rely on the gate being settled by
+    // the time the operation resolves, the way the queue's own run() refreshed
+    // before resolving. A failed refresh leaves the gate `blocked` and is
+    // logged rather than failing the conversation, which already succeeded.
+    if (this.conversations === 0) {
+      try {
+        await this.refreshState();
+      } catch (error) {
+        this.logError('[resident-pet] failed to refresh state after a conversation:', error);
+      }
+    }
+    return value;
   }
 
   enqueueDispatch<T>(operation: () => Promise<T>): Promise<T> {
-    return this.enqueue('dispatch', operation);
+    return this.enqueue(operation);
   }
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
@@ -200,7 +256,7 @@ export class ResidentPetCoordinator {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    void this.enqueue('dispatch', operation).catch((error) => {
+    void this.enqueue(operation).catch((error) => {
       if (error instanceof ResidentPetOperationCancelledError) return;
       this.logError('[resident-pet] dispatch execution failed:', error);
     });
@@ -237,36 +293,32 @@ export class ResidentPetCoordinator {
   async close(): Promise<void> {
     if (!this.closing) {
       this.closing = true;
-      this.cancelQueue(this.conversationQueue);
       this.cancelQueue(this.dispatchQueue);
     }
     await Promise.all([this.active, this.refreshing]);
   }
 
-  private enqueue<T>(
-    kind: QueuedOperation['kind'],
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     if (this.closing) {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
     return new Promise<T>((resolve, reject) => {
-      const entry: QueuedOperation = {
-        kind,
+      this.dispatchQueue.push({
+        kind: 'dispatch',
         run: operation,
         resolve: (value) => resolve(value as T),
         reject,
-      };
-      (kind === 'conversation' ? this.conversationQueue : this.dispatchQueue).push(entry);
+      });
       this.publishQueueSnapshot();
       this.drain();
     });
   }
 
   private drain(): void {
-    if (this.active || this.refreshing || this.closing) return;
-    const entry = this.conversationQueue.shift()
-      ?? (this.state === 'open' ? this.dispatchQueue.shift() : undefined);
+    // A conversation holding the gate keeps dispatch waiting, same as an
+    // active dispatch does.
+    if (this.active || this.refreshing || this.closing || this.conversations > 0) return;
+    const entry = this.state === 'open' ? this.dispatchQueue.shift() : undefined;
     if (!entry) return;
     this.activeOperation = entry.kind;
     const active = Promise.resolve().then(() => this.run(entry));
@@ -436,14 +488,18 @@ function admitConversationHandlers(
     finish: (run: ResidentActiveRun) => void;
   },
 ): LocalServerPeerHandlers {
+  // Conversation no longer enters the dispatch queue; it holds the gate for
+  // its duration so a dispatch cannot start mid-conversation. Its own
+  // admission and ordering live in the local layer (SessionAdmission,
+  // ServerSessionCommandQueue, ThreadInvocationCoordinator).
   const admit = <TMessage>(
     handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
-  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.enqueueConversation(
+  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.holdForConversation(
     () => Promise.resolve(handler(peer, message)),
   );
   const admitRun = <TMessage extends { requestId: string }>(
     handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
-  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.enqueueConversation(
+  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.holdForConversation(
     async () => {
       const activeRun = activeRuns.begin(message.requestId);
       try {

@@ -12,7 +12,7 @@
 |---|---|---|---|
 | 1. Host 只有一种，local 是退化形态 | `a1e7335a` | — | **仅文档**，代码未动 |
 | 2. setup 与 invoke 都归 agent | `660a8095` | `1955ece8` | 部分落地 |
-| 3. dispatch 是 Studio 概念，gate = Agent 可用 | `3ddcaad2` → **`1ed755e2` 修正** | — | **仅文档** |
+| 3. dispatch 是 Studio 概念，gate = Agent 可用 | `3ddcaad2` → **`1ed755e2` 修正** | 阶段 3 | **已落地** |
 | 4. Conversation = UI 交互 state | `badde03a` | `89981a64` | 部分落地 |
 | 5. `modelProfileId`：Session 覆盖 / Config 默认 | `3ddcaad2` | — | **仅文档** |
 | 6. wire 不是 domain，能力必须统一 | `660a8095` | `885610e6` `37c2227a` | 目录落地，能力统一未做 |

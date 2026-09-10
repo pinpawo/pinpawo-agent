@@ -43,7 +43,7 @@ async function waitFor(predicate: () => boolean, message: string): Promise<void>
   throw new Error(message);
 }
 
-test('Coordinator keeps the active operation non-preemptive then drains conversation first', async () => {
+test('Coordinator keeps the active operation non-preemptive and holds dispatch behind conversation', async () => {
   let settledState: PetDispatchState = 'open';
   const coordinator = new ResidentPetCoordinator({
     readSettledState: () => settledState,
@@ -63,13 +63,17 @@ test('Coordinator keeps the active operation non-preemptive then drains conversa
   const secondDispatch = coordinator.enqueueDispatch(async () => {
     events.push('dispatch-2');
   });
-  const firstConversation = coordinator.enqueueConversation(async () => {
+  // Conversation no longer queues: it waits out the active dispatch, then
+  // holds the gate itself.
+  const firstConversation = coordinator.holdForConversation(async () => {
     events.push('conversation-1');
   });
-  const secondConversation = coordinator.enqueueConversation(async () => {
+  const secondConversation = coordinator.holdForConversation(async () => {
     events.push('conversation-2');
   });
 
+  // Conversations claim their hold synchronously, so both already count as
+  // holding the gate even though the active dispatch has not released it.
   assert.deepEqual(coordinator.getQueueSnapshot(), {
     state: 'busy',
     activeOperation: 'dispatch',
@@ -84,13 +88,14 @@ test('Coordinator keeps the active operation non-preemptive then drains conversa
     firstConversation,
     secondConversation,
   ]);
-  assert.deepEqual(events, [
-    'dispatch-1:start',
-    'dispatch-1:end',
-    'conversation-1',
-    'conversation-2',
-    'dispatch-2',
-  ]);
+  // The queued dispatch runs only after both conversations release the gate.
+  assert.equal(events[0], 'dispatch-1:start');
+  assert.equal(events[1], 'dispatch-1:end');
+  assert.equal(events.at(-1), 'dispatch-2');
+  assert.deepEqual(
+    [...events.slice(2, -1)].sort(),
+    ['conversation-1', 'conversation-2'],
+  );
 });
 
 test('state listeners cannot reenter admission while an operation is becoming active', async () => {
@@ -104,7 +109,7 @@ test('state listeners cannot reenter admission while an operation is becoming ac
   let queuedFromListener: Promise<void> | undefined;
   coordinator.onStateChange((state) => {
     if (state !== 'busy' || queuedFromListener) return;
-    queuedFromListener = coordinator.enqueueConversation(async () => {
+    queuedFromListener = coordinator.holdForConversation(async () => {
       events.push('conversation');
     });
   });
@@ -139,7 +144,7 @@ test('waiting state holds dispatch while conversation can reopen the gate', asyn
   await Promise.resolve();
   assert.equal(events.length, 0);
 
-  await coordinator.enqueueConversation(async () => {
+  await coordinator.holdForConversation(async () => {
     events.push('conversation');
     settledState = 'open';
   });
@@ -183,7 +188,7 @@ test('a queued dispatch reads the active conversation thread only when it starts
   const second = coordinator.enqueueDispatch(async () => {
     observedThreads.push(activeThread);
   });
-  const switchConversation = coordinator.enqueueConversation(async () => {
+  const switchConversation = coordinator.holdForConversation(async () => {
     activeThread = 'thread-new';
   });
 
@@ -220,7 +225,7 @@ test('Coordinator close cancels queued work and waits for the active operation',
   await Promise.all([active, closed]);
   assert.equal(closeSettled, true);
   await assert.rejects(
-    coordinator.enqueueConversation(async () => undefined),
+    coordinator.holdForConversation(async () => undefined),
     /cancelled/i,
   );
 });

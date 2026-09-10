@@ -241,6 +241,20 @@ dispatch 是 **Studio 的调度概念**，不是 local-agent 的 domain；local-
 
 前置：阶段 2。
 
+**已落地**：`enqueueConversation` 改为 `holdForConversation` —— 对话不再入队，
+只在执行期间持有 gate 并在结束后刷新。`conversationQueue` 已删除，
+`coordinator` 回归为纯 dispatch gate。
+
+实施中发现并保住的两条行为：
+
+1. **gate 刷新必须 await。** 契约是「`handle()` 返回时 gate 状态已结算」——
+   旧队列的 `run()` 在 resolve 前刷新，fire-and-forget 会破坏它
+   （e2e 测试 `two resident Pets isolate waiting checkpoints` 抓到）。
+2. **对话的 hold 必须同步认领。** 排队中的 dispatch 在**启动时**读 Session 状态，
+   所以已在途的会话切换必须先落地；先等待再认领会让该 dispatch
+   顶着旧 thread 跑掉（测试 `a queued dispatch reads the active conversation
+   thread only when it starts` 抓到）。
+
 ### 阶段 4：HTTP 能力面对齐（解决 #1 的根）
 
 HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。

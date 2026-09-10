@@ -115,33 +115,70 @@ module-boundaries §二 已经指出这三类的所有权规则不同（长期�
 | 支持 | 反对/存疑 |
 |---|---|
 | `TuiSessionRecord` 已经是独立存储，且**不含消息** | 与 Conversation 是否该合并？（见 D） |
-| `activeSessionIds` 是 Pet 级的「当前会话」指针 | `modelProfileId` 属于会话还是配置？现在存在会话记录里 |
+| `activeSessionIds` 是 Pet 级的「当前会话」指针 | （已定：见下，Session 覆盖 / Config 默认） |
 | 「同一会话内可切模型」是 module-boundaries §二 已确认的规则 | |
+
+**已定：`modelProfileId` 分两个层面，是覆盖与默认的关系。**
+
+| 层面 | 归属 | 含义 |
+|---|---|---|
+| 当前 session 配置的 model profile | **Session** | 该会话选中的模型，可在会话内切换 |
+| 外部 config 指定的默认值 | **Config** | 没有会话覆盖时用哪个 |
+
+不是二选一 —— Session 存**覆盖值**，Config 提供**默认值**，读取时
+Session 覆盖优先。现状 `TuiSessionRecord.modelProfileId` 与
+`ServerTuiSessionService` 的 `defaultModelProfileId` 已经是这个形状，
+只是两层关系没有被写下来。
 
 ### C. Execution（一次执行）
 
 **是什么**：一次 invoke 的生命周期 —— 输入、配置快照、AbortSignal、收尾。
 
+**已定：resident dispatch 不是第二种 Execution。** 它是在标准 Host 之上长出来的
+**更下游的子集** —— 同一个 Execution 概念，只是触发者不是 peer 而是调度。
+因此它必须走同一个执行入口与收尾路径，不再复制一套生命周期
+（这正是 module-boundaries §一 对 residentPetHost 的要求）。
+
 | 支持 | 反对/存疑 |
 |---|---|
 | `AgentChannelSetup` 已经是「一次执行的完整输入」这一形状 | 它现在由 session 服务的 `buildChatSetup` 组装，归属含糊 |
-| module-boundaries §二 明确「同次执行及其收尾使用同一份配置」 | resident dispatch 与 chat 是同一个 Execution 概念，还是两种？ |
+| module-boundaries §二 明确「同次执行及其收尾使用同一份配置」 | （已定：resident dispatch 是标准 Host 的下游子集，同一个 Execution） |
 | `ThreadInvocationCoordinator` 已是 thread 级、且语义正确 | |
 | 取消结算（`settleAbortedRun`）只对一次执行有意义 | |
 
 ### D. Conversation（对话内容）
 
-**是什么**：消息、历史、投影（`currentPlan`、token 用量、pending interrupt）。
+**是什么**：把 checkpoint 里的 transcript 变成人能看的东西 —— 解码、投影、
+汇总、以及反方向的用户消息构造。
+
+**覆盖面核查**（约 720 行，5 个独立模块 + 1 段错放的代码）：
+
+| 模块 | 行数 | 做什么 |
+|---|---|---|
+| `imageAttachments.ts` | 195 | 图片附件的类型、大小/数量上限、MIME 校验 |
+| `currentPlanProjection.ts` | 148 | 从 state 投影 `currentPlan`，并判等 |
+| `chatAttachments.ts` | 136 | 构造用户消息、读显示文本、格式化模型文本 |
+| `agentSessionSnapshot.ts` | 133 | 组装给客户端的会话快照与 runtime 视图 |
+| `pendingInterruptProjection.ts` | 21 | 投影 pending interrupt |
+| **`serverTuiSessions.ts:81-170`** | **90** | **transcript 解码/汇总，错放在 session 文件里** |
+
+最后一行是关键证据。那 5 个函数
+（`readTuiCheckpointMessages`、`readTuiCheckpointInputModalities`、
+`readTuiCheckpointTokenUsage`、`readTuiCheckpointMessageSource`、
+`summarizeTuiCheckpointMessages`）**参数只有 `BaseMessage[]`，
+对 session 状态零依赖** —— 纯 transcript 函数，只是恰好住在 session 文件里。
+`summarizeTuiCheckpointMessages` 更是 `title`/`messageCount` 的来源，
+也就是说 Session 记录里那两个字段，是 Conversation 算出来交给它的。
 
 | 支持 | 反对/存疑 |
 |---|---|
-| 真正的消息在 checkpoint 里，与会话记录**已经分开存** | 它有独立行为吗，还是只是 checkpoint 的投影？ |
-| module-boundaries §一 的目标结构里 `conversation/` 是独立目录 | 若只是读投影，也许属于 Session 的一个视图，不构成 domain |
-| 投影逻辑（`projectCurrentPlan`、`readSessionCheckpointMessages`）已成组 | |
+| 约 720 行，5 个模块已自然成组 | 大部分是**读投影**，写只有「构造用户消息」一条 |
+| `serverTuiSessions.ts:81-170` 只吃 transcript，零 session 依赖 | 投影的消费者遍布 agent/wire，可能只是共享工具而非 domain |
+| 消费者遍布 `agentGraphService`、`chatSessionAdapter`、`serverChatHandler`、`residentPetHost`、`serverHandlers` —— 不专属 Session | 附件校验（imageAttachments）像准入规则，可能属 agent |
+| 真正的消息在 checkpoint，与会话记录**已经分开存** | |
 
-补充：既然已定「Session 只提供身份、agent 负责装配执行」，Conversation 的问题
-收窄为——**读投影（消息、plan、token 用量）是 Session 的视图，还是独立 domain？**
-它不参与装配，所以与 agent 无关；争点只在 Session 内部。
+**仍待定**：它是独立 domain，还是 Session/agent 共用的一组投影工具？
+但可以确定的是 —— **它不属于 Session 专有**，因为它的消费者一半在 agent 和 wire。
 
 ### E. Config（配置）
 
@@ -194,6 +231,6 @@ stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandler
 - [ ] 每个 domain 拥有哪些状态，谁能改
 - [x] `buildChatSetup` 归谁 → **agent**（见「已定」；现在错挂在 Session 上）
 - [ ] `ServerDeps` 按 domain 拆成哪几个契约
-- [ ] resident dispatch 与 chat 是不是同一个 Execution
-- [ ] `modelProfileId` 属于 Session 还是 Config
+- [x] resident dispatch 与 chat 是不是同一个 Execution → **是**，dispatch 是下游子集
+- [x] `modelProfileId` 属于 Session 还是 Config → **两层**：Session 覆盖，Config 默认
 - [ ] 准入 scope 如何由 domain 推导（[admission-scopes](./admission-scopes.md) 据此重写）

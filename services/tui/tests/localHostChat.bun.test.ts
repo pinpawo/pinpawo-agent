@@ -26,7 +26,7 @@ import {
 } from '../../local-agent/src/contextLoader';
 import {
   readLocalChatDisplayText,
-} from '../../local-agent/src/chatAttachments';
+} from '../../local-agent/src/agent/chatMessageInput';
 import {
   createLocalServerHandlers,
 } from '../../local-agent/src/serverHandlers';

@@ -7,9 +7,12 @@ import { stampAgentMessageCreatedAt } from '@pinpawo/pet-agent';
 import type {
   AdmittedLocalAttachment,
   AdmittedLocalImageAttachment,
-} from './imageAttachments';
+} from './attachmentAdmission';
+import { DISPLAY_TEXT_METADATA_KEY } from '../conversation/chatDisplayText';
 
-const DISPLAY_TEXT_METADATA_KEY = 'localChatDisplayText';
+// Reading the display text back is Conversation's job; re-exported so existing
+// importers keep working while the domains settle.
+export { readLocalChatDisplayText } from '../conversation/chatDisplayText';
 
 export function createLocalChatHumanMessage(
   message: string,
@@ -87,15 +90,6 @@ export function createAdmittedLocalChatHumanMessage(
     },
   });
   return stampAgentMessageCreatedAt(humanMessage);
-}
-
-export function readLocalChatDisplayText(message: BaseMessage) {
-  const pinpawo = message.additional_kwargs?.pinpawo;
-  if (!pinpawo || typeof pinpawo !== 'object') return null;
-  const displayText = (pinpawo as Record<string, unknown>)[DISPLAY_TEXT_METADATA_KEY];
-  return typeof displayText === 'string' && displayText.trim()
-    ? displayText
-    : null;
 }
 
 export function formatLocalChatModelText(

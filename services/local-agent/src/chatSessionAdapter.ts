@@ -34,7 +34,7 @@ import {
   type RootProtocolEvent,
 } from './events/rootStreamEventAdapter';
 import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
-import { createLocalChatHumanMessage } from './chatAttachments';
+import { createLocalChatHumanMessage } from './agent/chatMessageInput';
 import {
   currentPlansEqual,
   projectCurrentPlan,

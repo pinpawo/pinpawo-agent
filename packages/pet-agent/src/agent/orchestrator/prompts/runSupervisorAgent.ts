@@ -59,27 +59,8 @@ function buildCapabilityRoutingManifest(
   ].join('\n');
 }
 
-function buildSupervisionBoundary(input: Extract<RunSupervisorInput, { mode: 'boundary' }>) {
-  const activeDelegation = [
-    `  <active_delegation delegation_id="${escapeXmlAttribute(input.activeDelegation.delegationId)}" capability="${escapeXmlAttribute(input.activeDelegation.capability)}" run_id="${escapeXmlAttribute(input.activeDelegation.runId)}">`,
-    indentXmlBlock(xmlTextBlock('task', input.activeDelegation.task), 4),
-    '  </active_delegation>',
-  ];
-  const remainingPlan = input.remainingPlan.length > 0 ? [
-    '  <prior_remaining_plan role="plan" source="supervisor_session" status="stable_until_user_confirmation">',
-    ...input.remainingPlan.map((task) => indentXmlBlock(xmlTextBlock(
-      'task',
-      task.task,
-      ` capability="${escapeXmlAttribute(task.capability)}"`,
-    ), 4)),
-    '  </prior_remaining_plan>',
-  ] : ['  <prior_remaining_plan role="plan" source="supervisor_session" status="stable_until_user_confirmation" />'];
-  return [
-    '<supervision_boundary_event role="task_boundary" source="orchestrator_state">',
-    ...activeDelegation,
-    ...remainingPlan,
-    '</supervision_boundary_event>',
-  ].join('\n');
+function buildSupervisionBoundary(input: RunSupervisorInput) {
+  return xmlTextBlock('supervisor_plan', JSON.stringify(input.state));
 }
 
 export function buildRunSupervisorAgentSystemPrompt(
@@ -98,7 +79,7 @@ export function buildRunSupervisorAgentInput(
   const userRequest = buildRunUserRequestContext(input.userRequest);
   const routingContext = buildCapabilityRoutingManifest(routingManifest);
   const capabilityContext = buildCapabilityContext(disclosedCapabilities);
-  const remainingPlan = xmlTextBlock('remaining_plan', JSON.stringify(input.remainingPlan));
+  const remainingPlan = xmlTextBlock('remaining_plan', JSON.stringify(input.state.plan));
   const turnContext = xmlTextBlock('invocation', input.inputId.startsWith('human:')
     ? input.mode === 'boundary'
       ? 'Fresh user input: interpret it before any execution. If it explicitly requests or confirms a change, use adjust_plan to update the goal and pending work, choosing whether to continue or replace the active delegation. Do not ask again for an adjustment the user already requested.'

@@ -1,9 +1,7 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
-import type { RunnableConfig } from '@langchain/core/runnables';
 import { agentRuntimeContextSchema } from '../../../runtime/context';
 import {
   OrchestratorState,
-  type OrchestratorStateType,
 } from '../state';
 import type {
   OrchestratorConfig,
@@ -23,7 +21,6 @@ import {
   createCompactContextNode,
   createPrepareNode,
 } from './nodes/prepare';
-import { afterContextPrep } from './routes/afterContextPrep';
 import { afterCapability } from './routes/afterCapability';
 import { afterPauseGate, pauseGate } from './nodes/pauseGate';
 import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
@@ -49,20 +46,20 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   });
-  // Graph-visible anchor shared by resume and post-execution paths. Its
+  // Graph-visible anchor for post-execution budget checking. Its
   // conditional edge owns deterministic guard evaluation and telemetry only;
   // it must not grow state updates or user-facing output.
   const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare, { ends: ['capability', 'answer', 'compactContext', 'runSupervisor'] })
+    .addNode('prepare', prepare, { ends: ['answer', 'compactContext'] })
     .addNode('compactContext', compactContext)
     .addNode('captureUserRequest', captureRunUserRequest)
     .addNode('entryAnswer', entryAnswer, {
       ends: ['runSupervisor'],
     })
     .addNode('runSupervisor', runSupervisor, {
-      ends: ['answer', 'capability', 'runSupervisor', 'throwRunFailure'],
+      ends: ['answer', 'capability', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('supervisorBoundaryIterationGuard', supervisorBoundaryIterationGuard)
@@ -71,20 +68,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       errorHandler: runTermination.onNodeError,
     })
     .addNode('capability', capabilityNode, {
-      ends: ['throwRunFailure'],
+      ends: ['throwRunFailure', 'answer'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addNode('pauseGate', pauseGate)
     .addEdge(START, 'prepare')
-    // Run entry uses explicit task lifecycle state. Lane announces remain
-    // message/context storage and are not the normal control-flow signal.
-    .addConditionalEdges('compactContext', afterContextPrep, {
-      supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
-      captureUserRequest: 'captureUserRequest',
-      runSupervisor: 'runSupervisor',
-      capability: 'capability',
-    })
+    // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
+    .addEdge('compactContext', 'captureUserRequest')
     .addEdge('captureUserRequest', 'entryAnswer')
     .addConditionalEdges('supervisorBoundaryIterationGuard', afterSupervisorBoundaryIterationGuard, {
       answer: 'answer',
@@ -98,8 +89,6 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
     })
     .addConditionalEdges('pauseGate', afterPauseGate, {
       runSupervisor: 'runSupervisor',
-      capability: 'capability',
-      answer: 'answer',
     });
 
   return graph.compile({

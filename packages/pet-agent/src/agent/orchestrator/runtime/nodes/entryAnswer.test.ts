@@ -9,7 +9,12 @@ import type { RunSupervisorInput } from '../../runSupervisor/runner';
 import { buildOrchestratorRunInput } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import { createOrchestratorGraph } from '../graph';
+import { createOrchestratorGraph as createRuntimeGraph } from '../graph';
+import { withScriptedDelegation, type ScriptedSupervisorRunner } from '../../runSupervisor/testing';
+
+function createOrchestratorGraph(config: Omit<OrchestratorConfig, 'runSupervisorRunner'> & { runSupervisorRunner?: ScriptedSupervisorRunner }) {
+  return createRuntimeGraph({ ...config, runSupervisorRunner: config.runSupervisorRunner ? withScriptedDelegation(config.runSupervisorRunner) : undefined });
+}
 import { captureRunUserRequest, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import {
@@ -77,43 +82,17 @@ function invokeConfig() {
   };
 }
 
-test('entry capture clears any stale Supervisor session', () => {
+test('entry capture resolves the fresh request without clearing saved business progress', () => {
   const input = {
-    ...buildOrchestratorRunInput(
-      [new HumanMessage('开始一个新的任务。')],
-      { activeDelegationTransition: 'resume_active', traceId: 'new-trace' },
-    ),
-    taskActiveDelegation: null,
-    runSupervisorSession: {} as never,
+    ...buildOrchestratorRunInput([new HumanMessage('继续。')], { traceId: 'new-trace' }),
+    runSupervisorState: { goal: '完成两项工作', plan: [
+      { id: 'a', capability: 'general', task: 'First', status: 'completed' },
+      { id: 'b', capability: 'general', task: 'Second', status: 'pending' },
+    ] },
   } as unknown as OrchestratorStateType;
-  const update = captureRunUserRequest(input);
-
-  assert.equal(update.runSupervisorSession, null);
-  assert.equal(update.taskRunContinuation, null);
-});
-
-test('entry capture does not retain a prior active delegation Supervisor session', () => {
-  const input = {
-    ...buildOrchestratorRunInput(
-      [new HumanMessage('继续。')],
-      { activeDelegationTransition: 'resume_active', traceId: 'active-trace' },
-    ),
-    taskActiveDelegation: {
-      id: 'active-delegation',
-      lane: 'capability:general',
-      task: '继续当前任务。',
-      contextSummary: null,
-      runId: 'previous-run',
-      traceId: 'active-trace',
-      status: 'awaiting_decision',
-      resultPreview: null,
-      userRequest: '完成当前任务。',
-    },
-    runSupervisorSession: {} as never,
-  } as unknown as OrchestratorStateType;
-  const update = captureRunUserRequest(input);
-
-  assert.equal(update.runSupervisorSession, null);
+  assert.deepEqual(captureRunUserRequest(input), { runUserRequest: '继续。' });
+  assert.equal(input.runSupervisorState.plan[0].status, 'completed');
+  assert.equal(input.runSupervisorState.plan[1].status, 'pending');
 });
 
 test('Entry Answer returns an ordinary reply without invoking Supervisor', async () => {
@@ -129,7 +108,7 @@ test('Entry Answer returns an ordinary reply without invoking Supervisor', async
         };
       },
     },
-  } as OrchestratorConfig);
+  });
 
   const result = await graph.invoke(
     buildOrchestratorRunInput([new HumanMessage('这个方案还有更好的选择吗？')]),

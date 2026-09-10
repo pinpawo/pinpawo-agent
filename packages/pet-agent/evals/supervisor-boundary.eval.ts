@@ -10,7 +10,9 @@ import { defineInstructionDocument } from '../src/types/capability.ts';
 import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
-import { createRunSupervisorSession } from '../src/agent/orchestrator/runSupervisor/session.ts';
+import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from './supervisor-fixtures';
+import { acceptSupervisorMessageHandoff } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
+import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input';
 import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
@@ -38,8 +40,8 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
   remaining?: Array<{ capability: string; task: string }>;
   pendingDispatch?: boolean;
   supplement?: string;
-  checkFollowUp?: (result: RunSupervisorResult) => void;
-  check: (result: RunSupervisorResult) => void }> = [
+  checkFollowUp?: (result: SupervisorDecision) => void;
+  check: (result: SupervisorDecision) => void }> = [
   { name: 'entry-execution', goal: 'Inspect the repository and fix the failing unit test.', check: (result) => {
     assert.equal(result.action, 'execute_plan');
     if (result.action === 'execute_plan') { assert.ok(result.tasks.length > 0); }
@@ -50,12 +52,8 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       if (result.action === 'review_current') { assert.equal(result.completed, false); assert.ok(result.reason.trim()); } } },
   { name: 'dispatch-pending-capability', goal: 'Fix the bug and confirm the tests pass.',
     task: 'Fix the bug and run the test suite.', pendingDispatch: true,
-    check: (result) => {
-      assert.equal(result.action, 'delegate_capability');
-      if (result.action === 'delegate_capability') {
-        assert.equal(result.delegationId, 'd1');
-        assert.ok(result.toolCallId.trim());
-      }
+    check: (result) => { assert.equal(result.action, 'review_current');
+      if (result.action === 'review_current') assert.equal(result.reply, undefined);
     } },
   { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
     task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
@@ -83,14 +81,14 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       }
     },
     checkFollowUp: (result) => {
-      if (result.action === 'execute_plan') {
+      if (result.action === 'adjust_plan') {
         assert.equal(result.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
         assert.equal(result.tasks[0].capability, 'general');
         assert.match(result.tasks[0].task, /publish|发布/i);
       } else {
         assert.equal(result.action, 'review_current');
         if (result.action === 'review_current') {
-          assert.equal(result.completed, true);
+          assert.notEqual(result.completed, false);
           assert.equal(result.reply, undefined, 'Proceed now that the destination is supplied.');
           assert.equal('remainingPlan' in result, false);
         }
@@ -100,7 +98,13 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     task: 'Publish the release notes after the user selects the destination.',
     evidence: 'RELEASE.md is ready. No publication has occurred: only the user can choose the destination.',
     supplement: 'Publish RELEASE.md as the GitHub release notes for pinpawo/example tag v1.2.3. I authorize publication; no further confirmation is needed.',
-    check: (result) => { assert.equal(result.action, undefined); assert.ok(result.reply?.trim()); },
+    check: (result) => {
+      assert.ok(result.reply?.trim());
+      if (result.action !== undefined) {
+        assert.equal(result.action, 'review_current');
+        if (result.action === 'review_current') assert.equal(result.completed, undefined);
+      }
+    },
     checkFollowUp: (result) => {
       assert.equal(result.action, 'adjust_plan');
       if (result.action === 'adjust_plan') {
@@ -115,7 +119,13 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     check: (result) => { assert.equal(result.action, undefined); assert.ok(result.reply?.trim()); } },
   { name: 'boundary-without-evidence-asks-user', goal: 'Publish release notes to a destination I will choose.',
     task: 'Publish the release notes to the user-selected destination.',
-    check: (result) => { assert.equal(result.action, undefined); assert.ok(result.reply?.trim()); } },
+    check: (result) => {
+      assert.ok(result.reply?.trim());
+      if (result.action !== undefined) {
+        assert.equal(result.action, 'review_current');
+        if (result.action === 'review_current') assert.equal(result.completed, undefined);
+      }
+    } },
   { name: 'accept-and-finish', goal: 'Fix the bug and confirm the tests pass.', task: 'Fix the bug and run the test suite.',
     evidence: 'The bug is fixed. The regression test and the full test suite passed: 42 tests, zero failures. No requested work remains.',
     check: (result) => {
@@ -126,52 +136,51 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
 const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? []);
 assert.ok(selected.size === 0 || [...selected].every((name) => cases.some((scenario) => scenario.name === name)), 'Unknown EVAL_CASES entry.');
 for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
-  const base = {
-    inputId: scenario.task && !scenario.evidence ? `human:${scenario.name}` : scenario.name, traceId: scenario.name, runId: scenario.name, userRequest: scenario.goal,
-    messages: [new HumanMessage(scenario.goal)], remainingPlan: scenario.remaining ?? [], catalog,
-    capabilityDisclosure: disclosure,
-    supervisorSession: createRunSupervisorSession({ runId: scenario.name, plan: scenario.remaining ?? [], capabilityDisclosure: disclosure }),
-  };
-  const input: RunSupervisorInput = scenario.task ? {
-    ...base, mode: 'boundary', activeDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'general', task: scenario.task },
-    ...(scenario.pendingDispatch ? {
-      inputId: `dispatch:d1:0`,
-      pendingDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'general', task: scenario.task },
-    } : {}),
-    messages: [...base.messages, ...(scenario.evidence ? [{ messageId: 'a1', result: scenario.evidence }] : []).map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'd1', runId: scenario.name, task: scenario.task!, announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
-    }))],
-
-  } : { ...base, mode: 'entry', activeDelegation: null,  };
-  let result: RunSupervisorResult | undefined;
-  let followUp: RunSupervisorResult | undefined;
+  const input: RunSupervisorInput = { ...supervisorFixture({ catalog, runId: scenario.name, goal: scenario.goal,
+    task: scenario.task, evidence: scenario.evidence, remaining: scenario.remaining,
+    freshUserInput: Boolean(scenario.task && !scenario.evidence && !scenario.pendingDispatch),
+  }), capabilityDisclosure: disclosure };
+  let result: SupervisorDecision | undefined;
+  let followUp: SupervisorDecision | undefined;
   try {
-    result = await supervisor.invoke(input);
+    const actual = await supervisor.invoke(input);
+    result = readSupervisorDecision(actual);
     scenario.check(result);
+    if (['boundary-without-evidence-asks-user', 'unfinished-task-asks-then-continues'].includes(scenario.name)
+      && actual.reply === undefined) {
+      const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+      assert.deepEqual(accepted.runSupervisorState, input.state);
+      assert.equal(accepted.messages.length, 2, 'A question must not dispatch execution.');
+    }
     if (scenario.supplement) {
       assert.ok('reply' in result && result.reply?.trim(), 'A question must precede the user supplement.');
-      const accepted = result.action === 'review_current' && result.completed;
-      const remainingPlan = input.remainingPlan;
-      const resumed = {
-        ...input, runId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`, remainingPlan,
-        messages: [...input.messages, new AIMessage(result.reply!), new HumanMessage(scenario.supplement)],
-        supervisorSession: createRunSupervisorSession({ runId: `${scenario.name}:resume`, plan: remainingPlan, capabilityDisclosure: result.capabilityDisclosure ?? disclosure }),
+      const saved = actual.reply !== undefined ? input.state
+        : acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages).runSupervisorState;
+      const resumed: RunSupervisorInput = {
+        ...input, state: saved, mode: 'boundary',
+        runId: `${scenario.name}:resume`, traceId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,
+        messages: [...input.messages, ...actual.messages, new AIMessage(result.reply!), new HumanMessage(scenario.supplement)],
+        capabilityDisclosure: createCapabilityDisclosureState({ catalog }),
       };
-      followUp = await supervisor.invoke(accepted
-        ? { ...resumed, mode: 'entry', activeDelegation: null }
-        : { ...resumed, mode: 'boundary', activeDelegation: input.activeDelegation! });
+      followUp = readSupervisorDecision(await supervisor.invoke(resumed));
       scenario.checkFollowUp!(followUp);
     }
     console.log(JSON.stringify({ case: scenario.name, passed: true, decision: decision(result), followUp: decision(followUp) }));
   } catch (error) {
     failures += 1;
-    console.log(JSON.stringify({ case: scenario.name, passed: false, error: error instanceof assert.AssertionError ? error.message : error instanceof Error ? error.name : 'UnknownError', decision: decision(result), followUp: decision(followUp) }));
+    // Only surface known local validation messages, never raw provider errors.
+    const runtimeError = error instanceof Error && [
+      'Ask directly', 'Review must', 'Supervisor called', 'No planned work',
+      'Accepting a task', 'Plan adjustment', 'Supervisor control',
+    ].some((prefix) => error.message.startsWith(prefix)) ? error.message : undefined;
+    console.log(JSON.stringify({ case: scenario.name, passed: false, runtimeError,
+      error: error instanceof assert.AssertionError ? error.message : error instanceof Error ? error.name : 'UnknownError',
+      decision: decision(result), followUp: decision(followUp) }));
   }
 }
 process.exitCode = failures ? 1 : 0;
 
-function decision(result: RunSupervisorResult | undefined) {
+function decision(result: SupervisorDecision | undefined) {
   if (!result) return undefined;
-  const { capabilityDisclosure: _disclosure, ...proposal } = result;
-  return proposal;
+  return result;
 }

@@ -294,19 +294,12 @@ test('runAgentSessionTurn replaces the current plan from root values and clears 
       return (async function* () {
         yield protocolEvent('values', {
           messages: finalMessages,
-          taskActiveDelegation: {
-            id: 'delegation-1',
-            lane: 'capability:explore',
-            task: 'Inspect code',
-          },
-          runDelegationSummaries: [{
-            id: 'delegation-1',
-            lane: 'capability:explore',
-            task: 'Inspect code',
-            status: 'progress',
-          }],
-          runSupervisorSession: {
-            plan: [{ capability: 'browser', task: 'Verify result' }],
+          runSupervisorState: {
+            goal: 'Inspect and verify',
+            plan: [
+              { id: 'task-1', capability: 'explore', task: 'Inspect code', status: 'executing' },
+              { id: 'task-2', capability: 'browser', task: 'Verify result', status: 'pending' },
+            ],
           },
         });
       })();
@@ -330,13 +323,13 @@ test('runAgentSessionTurn replaces the current plan from root values and clears 
     plan: {
       items: [
         {
-          id: 'delegation-1',
+          id: 'task-1',
           capability: 'explore',
           task: 'Inspect code',
           status: 'active',
         },
         {
-          id: 'pending:browser:0',
+          id: 'task-2',
           capability: 'browser',
           task: 'Verify result',
           status: 'pending',

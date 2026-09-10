@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -28,6 +28,44 @@ function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: 
 function longMessage(index: number) {
   return new HumanMessage(`message-${index} ${'x'.repeat(3200)}`);
 }
+
+test('compaction retains unfinished execution pairs and private lanes without exposing them to the summary', async () => {
+  const call = new AIMessage({ content: '', tool_calls: [{
+    id: 'execution-1', name: 'delegate_capability', args: { execution: { taskId: 'task-1' } },
+  }] });
+  const result = new ToolMessage({ tool_call_id: 'execution-1', content: 'unaccepted evidence' });
+  const privateMessage = setAgentMessageMetadata(new HumanMessage('private executor context'), {
+    lane: 'capability:general', runId: 'old-run', delegationId: 'old-delegation',
+  });
+  const workMessage = setAgentMessageMetadata(new AIMessage('private supervisor context'), {
+    lane: 'supervisor', runId: 'old-run',
+  });
+  let summarized = '';
+  const compacted = await compactOrchestratorMessages({
+    messages: [new HumanMessage('old request'), call, result, privateMessage, workMessage, new HumanMessage('latest')],
+    model: fakeSummaryModel('summary', (messages) => { summarized = JSON.stringify(messages); }),
+    options: { keepMessages: 1, preserveExecutionTaskIds: ['task-1'] },
+  });
+  assert.equal(compacted.compacted, true);
+  for (const message of [call, result, privateMessage, workMessage]) assert.ok(compacted.messages.includes(message));
+  assert.ok(!summarized.includes('unaccepted evidence'));
+  assert.ok(!summarized.includes('private executor context'));
+  assert.ok(!summarized.includes('private supervisor context'));
+});
+
+test('compaction includes completed main tool results in the summary input', async () => {
+  let summarized = '';
+  const call = new AIMessage({ content: '', tool_calls: [{ id: 'done', name: 'delegate_capability', args: {} }] });
+  const result = new ToolMessage({ tool_call_id: 'done', name: 'delegate_capability', content: 'deployed revision abc123' });
+  const compacted = await compactOrchestratorMessages({
+    messages: [call, result, new HumanMessage('next request')],
+    model: fakeSummaryModel('summary', (messages) => { summarized = JSON.stringify(messages); }),
+    options: { keepMessages: 1 },
+  });
+  assert.ok(summarized.includes('deployed revision abc123'));
+  assert.ok(!compacted.messages.includes(call));
+  assert.ok(!compacted.messages.includes(result));
+});
 
 function usageMessage(content: string, inputTokens: number) {
   return new AIMessage({

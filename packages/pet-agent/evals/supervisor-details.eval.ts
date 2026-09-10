@@ -9,7 +9,7 @@ import { defineInstructionDocument } from '../src/types/capability.ts';
 import { DelegationAnnounceMessage } from '../src/agent/orchestrator/delegation/index.ts';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
-import { createRunSupervisorSession } from '../src/agent/orchestrator/runSupervisor/session.ts';
+import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from './supervisor-fixtures';
 import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
@@ -84,17 +84,11 @@ for (const scenario of selected) for (let repeat = 1; repeat <= repeats; repeat+
   const supervisor = createRunSupervisorAgent({ model: subject.model });
   const trace = createSupervisorDetailsDiagnostics();
   const disclosure = { ...createCapabilityDisclosureState({ catalog }), disclosedCapabilityNames: scenario.disclosed };
-  const base = { inputId: scenario.name, traceId: scenario.name, runId: scenario.name, userRequest: scenario.goal,
-    messages: [new HumanMessage(scenario.goal)], remainingPlan: [], catalog, capabilityDisclosure: disclosure,
-    supervisorSession: createRunSupervisorSession({ runId: scenario.name, capabilityDisclosure: disclosure }),
-  };
-  const input: RunSupervisorInput = scenario.evidence ? { ...base, mode: 'boundary',
-    activeDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'repository', task: scenario.goal },
-    messages: [...base.messages, new DelegationAnnounceMessage({ id: 'announce:a1', sourceLane: 'capability:repository',
-      delegationId: 'd1', runId: scenario.name, task: scenario.goal, announceMessageId: 'a1', result: scenario.evidence, createdAt: '2026-09-08T00:00:00Z' })],
-  } : { ...base, mode: 'entry', activeDelegation: null };
-  let decision: RunSupervisorResult | undefined; let error;
-  try { decision = await supervisor.invoke(input, { callbacks: trace.callbacks }); }
+  const input: RunSupervisorInput = { ...supervisorFixture({ catalog, runId: scenario.name, goal: scenario.goal,
+    task: scenario.evidence ? scenario.goal : undefined, capability: 'repository', evidence: scenario.evidence }),
+    capabilityDisclosure: disclosure };
+  let decision: SupervisorDecision | undefined; let error;
+  try { decision = readSupervisorDecision(await supervisor.invoke(input, { callbacks: trace.callbacks })); }
   catch (caught) { error = { name: caught instanceof Error ? caught.name : 'UnknownError' }; }
   const diagnostics = trace.read();
   const behaviorPassed = scenario.expected === 'plan'

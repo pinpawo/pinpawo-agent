@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { Command, type NodeError } from '@langchain/langgraph';
-import { snapshotRunTaskContinuation } from '../runSupervisor/session';
 import type { RunSupervisorDispatch } from '../runSupervisor/runner';
 import type {
   OrchestratorStateType,
@@ -10,8 +9,8 @@ import type {
 type FailureNodeInput = OrchestratorStateType | RunSupervisorDispatch;
 
 function rootState(input: FailureNodeInput): OrchestratorStateType {
-  return 'supervisorState' in input
-    ? input.supervisorState as OrchestratorStateType
+  return 'root' in input
+    ? input.root
     : input;
 }
 
@@ -72,21 +71,13 @@ export function createRunTerminationHandlers() {
   return {
     onNodeError(input: FailureNodeInput, nodeError: NodeError) {
       const state = rootState(input);
+      if (readStringProperty(nodeError.error, 'code') === 'checkpoint_incompatible') {
+        return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' as const }, goto: 'answer' });
+      }
       const terminalError = serializeTerminalError(nodeError);
       pendingErrors.set(terminalError.id, nodeError.error);
       return new Command({
         update: {
-          runNextDelegation: null,
-          runSupervisorSession: null,
-          runSupervisorUserMessageId: null,
-          taskRunContinuation: state.taskRunContinuation
-            ?? snapshotRunTaskContinuation({
-          traceId: state.traceId,
-          userRequest: state.runUserRequest,
-              activeDelegation: state.taskActiveDelegation ?? null,
-              supervisorSession: state.runSupervisorSession ?? null,
-            }),
-          runIterationCount: 0,
           runSupervisorReply: null,
           runRuntimeFailure: null,
           runTerminalError: terminalError,

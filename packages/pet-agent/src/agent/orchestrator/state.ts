@@ -6,10 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { mergeDelegationDeliveries, type DelegationDelivery } from './delegation/delivery';
 import type {
   CapabilityMessageLane,
-  RunNextDelegation,
-  RunDelegationSummary,
-  TaskActiveDelegation,
-  ActiveDelegationTransition,
   UserRequest,
 } from './types';
 import type { CapabilityArtifactRef } from '../../types/artifact';
@@ -21,11 +17,9 @@ import {
 import type {
   OrchestratorRuntimeFailure,
 } from './runSupervisor/protocol';
-import type {
-  RunSupervisorSessionState,
-  RunTaskContinuation,
-} from './runSupervisor/session';
 import type { PauseTaskInterruptPayload } from './interrupt/pauseTaskInterrupt';
+import type { RunSupervisorState } from './runSupervisor/state';
+import type { CapabilityDisclosureState } from './runSupervisor/capabilityDisclosure';
 
 export type SessionToolAuthorizationState = {
   generation: string;
@@ -42,6 +36,14 @@ export type OrchestratorTerminalErrorState = {
 };
 
 const orchestratorStateChannels = {
+  runSupervisorState: Annotation<RunSupervisorState>({
+    reducer: (_prev, next) => next,
+    default: () => ({ goal: null, plan: [] }),
+  }),
+  runCapabilityDisclosure: Annotation<CapabilityDisclosureState | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   sessionDelegationResults: Annotation<DelegationDelivery[]>({
     reducer: mergeDelegationDeliveries,
     default: () => [],
@@ -50,17 +52,9 @@ const orchestratorStateChannels = {
     reducer: messagesStateReducer,
     default: () => [],
   }),
-  runNextDelegation: Annotation<RunNextDelegation | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
   // A pause resume can add user input within the same run, after iteration zero.
   // Consume this message identity in the next Supervisor decision only.
   runSupervisorUserMessageId: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runSupervisorSession: Annotation<RunSupervisorSessionState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -70,18 +64,6 @@ const orchestratorStateChannels = {
   }),
   sessionCapabilityArtifacts: Annotation<CapabilityArtifactRef[]>({
     reducer: (prev, next) => mergeCapabilityArtifactRefs(prev, next),
-    default: () => [],
-  }),
-  taskActiveDelegation: Annotation<TaskActiveDelegation | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  taskRunContinuation: Annotation<RunTaskContinuation | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  runDelegationSummaries: Annotation<RunDelegationSummary[]>({
-    reducer: (_prev, next) => next,
     default: () => [],
   }),
   runIterationCount: Annotation<number>({
@@ -99,10 +81,6 @@ const orchestratorStateChannels = {
   runTerminalError: Annotation<OrchestratorTerminalErrorState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
-  }),
-  runActiveDelegationTransition: Annotation<ActiveDelegationTransition>({
-    reducer: (_prev, next) => next,
-    default: () => 'supersede_active',
   }),
   taskPauseInterrupt: Annotation<PauseTaskInterruptPayload | null>({
     reducer: (_prev, next) => next,
@@ -139,23 +117,19 @@ export type OrchestratorStateType = Omit<typeof OrchestratorState.State, 'sessio
 
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
-  | 'runNextDelegation'
-  | 'runSupervisorSession'
+  | 'runCapabilityDisclosure'
   | 'runSupervisorUserMessageId'
   | 'runUserRequest'
-  | 'runDelegationSummaries'
   | 'runIterationCount'
   | 'runSupervisorReply'
   | 'runRuntimeFailure'
   | 'runTerminalError'
-  | 'runActiveDelegationTransition'
   | 'taskPauseInterrupt'
   | 'runId'
   | 'traceId'
 >;
 
 export type BuildOrchestratorRunOptions = {
-  activeDelegationTransition?: ActiveDelegationTransition;
   /** Stable user-task identity. A fresh task receives a new value by default. */
   traceId?: string;
 };
@@ -164,17 +138,13 @@ export function buildRunStateReset(
   options: BuildOrchestratorRunOptions = {},
 ): OrchestratorRunState {
   return {
-    runNextDelegation: null,
-    runSupervisorSession: null,
+    runCapabilityDisclosure: null,
     runSupervisorUserMessageId: null,
     runUserRequest: null,
-    runDelegationSummaries: [],
     runIterationCount: 0,
     runSupervisorReply: null,
     runRuntimeFailure: null,
     runTerminalError: null,
-    runActiveDelegationTransition:
-      options.activeDelegationTransition ?? 'supersede_active',
     taskPauseInterrupt: null,
     runId: randomUUID().slice(0, 8),
     traceId: options.traceId ?? randomUUID(),
@@ -189,19 +159,6 @@ export function buildOrchestratorRunInput(
   messages = messages.map((message) => message._getType() === 'human'
     ? setAgentMessageMetadata(new HumanMessage({ ...message, content: message.content }), { runId: reset.runId })
     : message);
-  if (options.activeDelegationTransition === 'resume_active') {
-    // Preserve an interrupted prior run's session until prepare can extract
-    // only its canonical plan into a fresh-run continuation seed.
-    const {
-      runSupervisorSession: _priorRunSupervisorSession,
-      taskPauseInterrupt: _priorTaskPauseInterrupt,
-      ...resumeReset
-    } = reset;
-    return {
-      messages,
-      ...resumeReset,
-    };
-  }
   return {
     messages,
     ...reset,

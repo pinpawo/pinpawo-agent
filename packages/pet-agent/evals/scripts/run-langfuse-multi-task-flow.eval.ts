@@ -1,4 +1,4 @@
-import { AIMessage, AIMessageChunk, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -14,7 +14,7 @@ import {
 } from '../../src/types/capability.ts';
 import { defineToolkit } from '../../src/types/toolkit.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
-import type { RunSupervisorRunner } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
+import type { ScriptedSupervisorRunner as RunSupervisorRunner } from '../../src/agent/orchestrator/runSupervisor/testing.ts';
 import { withScriptedDelegation } from '../../src/agent/orchestrator/runSupervisor/testing.ts';
 import { PLAN_REQUEST_TOOL_NAME } from '../../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
@@ -129,9 +129,10 @@ function buildScriptedSupervisorRunner() {
         };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
-        (input.deliveries ?? []).map((delivery) => delivery.text).join('\n'),
+        input.messages.filter((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability')
+          .map((message) => String(message.content)).join('\n'),
       );
-      const objective = input.remainingPlan[0]?.task ?? '';
+      const objective = input.state.plan.find((task) => task.status === 'pending')?.task ?? '';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return { completed: true, reason: 'Current task delivery is evidenced.',

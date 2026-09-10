@@ -1,7 +1,6 @@
 import { AIMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { setAgentMessageMetadata, stampAgentMessageCreatedAt } from '../../../messages';
-import { snapshotRunTaskContinuation } from '../../runSupervisor/session';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
@@ -20,17 +19,6 @@ export function createAnswerNode(config: OrchestratorConfig) {
     if (!reply?.trim()) throw new Error('Terminal node requires a supplied reply or runtime stop.');
     return {
       messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(new AIMessage(reply)), { traceId: state.traceId })],
-      ...(incompatible ? { taskActiveDelegation: null } : {}),
-      runNextDelegation: null,
-      runSupervisorSession: null,
-      runSupervisorUserMessageId: null,
-      taskRunContinuation: incompatible ? null : snapshotRunTaskContinuation({
-        activeDelegation: state.taskActiveDelegation,
-        supervisorSession: state.runSupervisorSession,
-        userRequest: state.runUserRequest,
-        traceId: state.traceId,
-      }),
-      runIterationCount: 0,
       runSupervisorReply: null,
       runRuntimeFailure: null,
       runTerminalError: null,

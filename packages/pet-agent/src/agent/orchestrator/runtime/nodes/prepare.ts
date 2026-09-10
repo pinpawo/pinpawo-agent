@@ -13,7 +13,6 @@ import { buildRunStateReset } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
-import { applyActiveDelegationTransition } from '../activeDelegationTransition';
 import { afterPrepare } from '../routes/afterPrepare';
 
 export function createPrepareNode() {
@@ -25,27 +24,10 @@ export function createPrepareNode() {
     }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
     const freshMessages = state.messages.filter((message) => HumanMessage.isInstance(message)
       && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId);
-    const guidedPauseResume = Boolean(state.taskPauseInterrupt
-      && state.runActiveDelegationTransition === 'resume_active' && freshMessages.length > 0);
-    const update = outcome.kind === 'derive'
-      ? buildRunStateReset() : applyActiveDelegationTransition(state, { deferExecution: guidedPauseResume });
+    const update: Partial<OrchestratorStateType> = outcome.kind === 'derive' ? buildRunStateReset() : {};
     const traceId = update.traceId ?? state.traceId;
-    // Resolve resume identity before stamping the fresh user supplement. Never
-    // retag older conversation turns or Capability-private messages.
-    const messages = freshMessages
-      .map((message) => setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
-    if (state.taskPauseInterrupt && state.runActiveDelegationTransition === 'resume_active') {
-      // A legacy continue request over a real pause mirrors pauseGate resume:
-      // consult Supervisor when a new user message accompanies the resume.
-      const resumed = { ...state, ...update };
-      return new Command({
-        update: { ...update, messages, taskPauseInterrupt: null,
-          runSupervisorUserMessageId: messages.at(-1)?.id ?? null },
-        goto: guidedPauseResume && resumed.taskActiveDelegation && !resumed.runRuntimeFailure ? 'runSupervisor'
-          : resumed.runNextDelegation?.id === resumed.taskActiveDelegation?.id
-          && resumed.runNextDelegation ? 'runSupervisor' : 'answer',
-      });
-    }
+    const messages = freshMessages.map((message) =>
+      setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
     return new Command({ update: { ...update, messages }, goto: afterPrepare({ ...state, ...update }) });
   };
 }
@@ -70,11 +52,8 @@ export function createCompactContextNode(params: {
       model: params.config.models.observe ?? params.config.models.act,
       options: {
         traceId: state.traceId,
-        ...(state.taskActiveDelegation ? { preserveAnnouncesFor: {
-          lane: state.taskActiveDelegation.lane,
-          runId: state.taskActiveDelegation.runId,
-          delegationId: state.taskActiveDelegation.id,
-        } } : {}),
+        preserveExecutionTaskIds: state.runSupervisorState.plan
+          .filter((task) => task.status !== 'completed' && task.status !== 'superseded').map((task) => task.id),
       },
       runnableConfig,
     });

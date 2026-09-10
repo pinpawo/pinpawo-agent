@@ -2,14 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentModels } from '../../../../types/agent';
 import { buildRunStateReset, type OrchestratorStateType } from '../../state';
-import { createRunSupervisorSession } from '../../runSupervisor/session';
 import { createAnswerNode } from './answer';
 import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
 const models = { act: { invoke: () => { throw new Error('Terminal must not invoke a model'); } } } as unknown as AgentModels;
 function state(patch: Partial<OrchestratorStateType> = {}): OrchestratorStateType {
-  return { ...buildRunStateReset(), messages: [], sessionCapabilityArtifacts: [], taskActiveDelegation: null,
-    taskRunContinuation: null, sessionToolAuthorizations: { generation: '', records: [] }, ...patch };
+  return { ...buildRunStateReset(), messages: [], sessionCapabilityArtifacts: [], runSupervisorState: { goal: null, plan: [] }, sessionToolAuthorizations: { generation: '', records: [] }, ...patch };
 }
 
 test('terminal delivers supplied text intact, once, and clears invocation state without a model', async () => {
@@ -18,22 +16,17 @@ test('terminal delivers supplied text intact, once, and clears invocation state 
   assert.equal(result.messages.length, 1);
   assert.equal(result.messages[0].text, reply);
   assert.equal(result.runSupervisorReply, null);
-  assert.equal(result.runSupervisorSession, null);
-  assert.equal(result.taskRunContinuation, null);
+  assert.equal('runSupervisorState' in result, false);
+  assert.equal('taskRunContinuation' in result, false);
 });
 
 test('terminal preserves a remaining plan after accepting the active task', async () => {
   const plan = [{ capability: 'general', task: 'Publish after the user chooses a target.' }];
   const result = await createAnswerNode({ models })(state({
     runUserRequest: 'Prepare and publish.', traceId: 'task-1', runSupervisorReply: 'Choose a target.',
-    runSupervisorSession: createRunSupervisorSession({ runId: 'run-1', plan, capabilityDisclosure: {
-      registryDigest: 'registry', disclosedCapabilityNames: ['general'],
-
-    } }),
+    runSupervisorState: { goal: 'Prepare and publish.', plan: plan.map((task) => ({ ...task, id: 'future', status: 'pending' })) },
   }));
-  assert.deepEqual(result.taskRunContinuation, {
-    traceId: 'task-1', userRequest: 'Prepare and publish.', activeDelegationId: null, remainingPlan: plan,
-  });
+  assert.equal('runSupervisorState' in result, false, 'answer must not overwrite saved progress');
 });
 
 test('terminal does not fabricate a reply for a missing proposal and empty text', async () => {
@@ -43,5 +36,5 @@ test('terminal does not fabricate a reply for a missing proposal and empty text'
 test('root iteration stop is rendered deterministically', async () => {
   const result = await createAnswerNode({ models })(state({ runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }));
   assert.equal(result.messages.length, 1);
-  assert.equal(result.runIterationCount, 0);
+  assert.equal('runIterationCount' in result, false, 'budget is reset only at fresh run entry');
 });

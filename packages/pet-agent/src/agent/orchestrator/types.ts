@@ -15,49 +15,8 @@ import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '.
 import type { CapabilityMessageLane } from '../messages';
 
 export type { CapabilityMessageLane };
-export type DelegationStatus = 'pending' | 'progress' | 'completed' | 'superseded';
-
-export type ActiveDelegationTransition = 'supersede_active' | 'resume_active';
-
-export type RunDelegationSummary = {
-  id: string;
-  lane: CapabilityMessageLane;
-  task: string;
-  status: DelegationStatus;
-  resultPreview: string | null;
-};
-
-export type RunNextDelegation = {
-  id: string;
-  lane: CapabilityMessageLane;
-  mode: 'initial' | 'continue';
-  task: string;
-  contextSummary: string | null;
-};
-
-export type CapabilityPlanTask = {
-  /** Planned capability boundary that has not started yet. */
-  capability: string;
-  task: string;
-};
-
 /** Current user goal, including an explicitly requested Supervisor adjustment. */
 export type UserRequest = string;
-
-export type TaskActiveDelegation = {
-  id: string;
-  lane: CapabilityMessageLane;
-  task: string;
-  contextSummary: string | null;
-  /** Scope shared by this delegation's private messages across resume runs. */
-  runId: string;
-  /** Stable user-task identity across fresh runs that resume this delegation. */
-  traceId: string;
-  status: 'pending' | 'awaiting_decision';
-  resultPreview: string | null;
-  /** Snapshot used to restore runUserRequest when this delegation is resumed. */
-  userRequest: UserRequest;
-};
 
 export type DecisionMode = 'answer' | 'capability';
 

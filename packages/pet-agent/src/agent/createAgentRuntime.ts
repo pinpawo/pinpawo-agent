@@ -1,5 +1,4 @@
 export type {
-  ActiveDelegationTransition,
   OrchestratorConfig,
   OrchestratorInvokeOptions,
   OrchestrationDecisionStructuredOutputConfig,
@@ -11,10 +10,7 @@ export type {
   RunSupervisorResult,
   RunSupervisorRunner,
 } from './orchestrator/runSupervisor/runner';
-export type {
-  RunSupervisorSessionState,
-  RunTaskContinuation,
-} from './orchestrator/runSupervisor/session';
+export type { RunSupervisorState, SupervisorPlanTask } from './orchestrator/runSupervisor/state';
 export { buildOrchestratorRunInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
 export {

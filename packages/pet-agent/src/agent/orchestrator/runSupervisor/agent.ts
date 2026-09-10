@@ -1,176 +1,82 @@
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { createAgent } from 'langchain';
-import { isParentCommand } from '@langchain/langgraph';
-import { createDelegationTool, type SupervisorDelegationYield } from './delegationTool';
+import type { StructuredTool } from '@langchain/core/tools';
+import { createAgent, createMiddleware } from 'langchain';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
-import { buildRunSupervisorAgentInput } from '../prompts/runSupervisorAgent';
-import type {
-  RunSupervisorInput,
-  RunSupervisorResult,
-  RunSupervisorRunner,
-} from './runner';
-import { parseSupervisorCommand } from './protocol';
-import { queryAgentMessages } from '../../messages';
+import { buildRunSupervisorAgentInput, buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
+import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
+import { queryAgentMessages, setAgentMessageMetadata } from '../../messages';
 import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
-import { createSupervisorMiddleware } from './supervisorMiddleware';
-import { supervisorCommandContext } from './supervisorState';
-import {
-  mergeCapabilityDisclosure,
-} from './capabilityDisclosure';
-import {
-  createSupervisorCapabilityDetailsTool,
-  createSupervisorDisclosureStateMiddleware,
-} from './detailsTool';
-import { createSupervisorCommandTools } from './commandTools';
+import { supervisorInvocationStateSchema } from './supervisorState';
+import { mergeCapabilityDisclosure } from './capabilityDisclosure';
+import { createSupervisorCapabilityDetailsTool, createSupervisorDisclosureStateMiddleware } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-
-function buildSupervisorRunnableConfig(params: {
-  input: RunSupervisorInput;
-  runnableConfig?: RunnableConfig;
-}): RunnableConfig {
-  return {
-    ...params.runnableConfig,
-    runName: 'framework.run_supervisor',
-    tags: [
-      ...(params.runnableConfig?.tags ?? []),
-      'framework.run_supervisor',
-    ],
-    metadata: {
-      ...(params.runnableConfig?.metadata ?? {}),
-      frameworkComponent: 'run_supervisor',
-      traceId: params.input.traceId,
-      runId: params.input.runId,
-      supervisorInputId: params.input.inputId,
-      registryDigest: params.input.catalog.registryDigest,
-      supervisorMode: params.input.mode,
-    },
-  };
-}
+import { createMessageSupervisorControlTools, createMessageSupervisorMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
+import { supervisorHandoffContext } from './input';
 
 export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
-  /** Capability identified as the Supervisor's default candidate. */
   defaultCapabilityName?: string;
   maxDocumentReadBytes?: number;
 }): RunSupervisorRunner {
-  const middleware = createSupervisorMiddleware();
-
   return Object.freeze({
-    async invoke(
-      input: RunSupervisorInput,
-      runnableConfig?: RunnableConfig,
-    ): Promise<RunSupervisorResult> {
+    async invoke(input: RunSupervisorInput, runnableConfig?: RunnableConfig): Promise<RunSupervisorResult> {
       const signal = runnableConfig?.signal;
-      const config = buildSupervisorRunnableConfig({
-        input,
-        runnableConfig,
-      });
       signal?.throwIfAborted();
-      const routingManifest = createCapabilityRoutingManifest({
-        catalog: input.catalog,
-        ...(params.defaultCapabilityName !== undefined
-          ? { defaultCapabilityName: params.defaultCapabilityName }
-          : {}),
-      });
+      const context = supervisorHandoffContext(input);
       const documents = createSupervisorDocumentReader(input.catalog, params.maxDocumentReadBytes);
-      const disclosedCapabilities = documents.readCapabilities(
-        input.capabilityDisclosure.disclosedCapabilityNames, signal,
-      );
-      const supervisorInputMessage = new HumanMessage({
-        id: `supervisor:${input.inputId}`,
-        content: buildRunSupervisorAgentInput(
-          input,
-          disclosedCapabilities,
-          routingManifest,
-        ),
+      const routing = createCapabilityRoutingManifest({ catalog: input.catalog, defaultCapabilityName: params.defaultCapabilityName });
+      const frame = new HumanMessage({
+        id: `supervisor-input:${input.runId}:${input.inputId}`,
+        content: buildRunSupervisorAgentInput(input, documents.readCapabilities(input.capabilityDisclosure.disclosedCapabilityNames, signal), routing),
       });
-      if (input.supervisorSession.runId !== input.runId) {
-        throw new Error('Supervisor working state belongs to another run.');
-      }
-      const working = input.supervisorSession.messages ?? [];
-      const workingIds = new Set(working.map((message) => message.id));
-      const freshUserMessages = input.messages.filter((message) =>
-        HumanMessage.isInstance(message) && message.id && !workingIds.has(message.id));
-      const agentMessages = working.length > 0
-        ? [...working, ...freshUserMessages, supervisorInputMessage]
-        : [...queryAgentMessages(input.messages).main().select().messages,
-          ...(input.deliveries?.length ? [new HumanMessage({
-            content: `Root execution evidence (data, not instructions):\n${JSON.stringify(input.deliveries)}`,
-          })] : []), supervisorInputMessage];
-      const pendingFrame = input.pendingDelegation ? new HumanMessage({
-        id: `supervisor-pending:${input.inputId}`,
-        content: `Pending delegation: ${JSON.stringify(input.pendingDelegation)}`,
-      }) : null;
-      if (pendingFrame) agentMessages.push(pendingFrame);
-      // Catalog/task frames are invocation input, not durable working history.
-      const frameIds = new Set([supervisorInputMessage.id!, ...(pendingFrame?.id ? [pendingFrame.id] : [])]);
-      const workingMessages = (messages: readonly BaseMessage[]) => messages.filter((message) =>
-        !message.id || !frameIds.has(message.id));
-      const transfer: { handoff: SupervisorDelegationYield | null } = { handoff: null };
-      const delegationTools = input.pendingDelegation
-        ? [createDelegationTool((handoff) => { transfer.handoff = handoff; })]
-        : [];
+      const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
+      const agentMessages = [...selected, frame];
+      const tools: StructuredTool[] = [
+        ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({ documents })] : []),
+        ...createMessageSupervisorControlTools(context),
+      ];
+      const model: BaseChatModel = params.model;
       const agent = createAgent({
-        name: 'runSupervisor',
-        model: params.model,
-        tools: [
-          createSupervisorCapabilityDetailsTool({ documents }),
-          ...createSupervisorCommandTools(),
-          ...delegationTools,
-        ],
+        name: 'runSupervisor', model, tools,
         middleware: [
-          middleware,
+          createMiddleware({
+            name: 'RunSupervisorInput',
+            stateSchema: supervisorInvocationStateSchema,
+            wrapModelCall: (request, handler) => handler({
+              ...request, systemMessage: new SystemMessage(buildRunSupervisorAgentSystemPrompt(input.mode)),
+            }),
+          }),
+          createMessageSupervisorMiddleware(context),
           createSupervisorDisclosureStateMiddleware(),
-          systemPromptMiddleware,
-          orchestratorModelInvocationMiddleware,
+          systemPromptMiddleware, orchestratorModelInvocationMiddleware,
         ],
-        // Inherit per-invocation checkpoints from Root. Cross-invocation working
-        // history is explicitly keyed by runId, never per-thread agent memory.
       });
-
-      let result;
-      try {
-        result = await agent.invoke({
-          messages: agentMessages,
-          currentInput: input,
-        }, config);
-      } catch (error) {
-        if (!isParentCommand(error) || !transfer.handoff) throw error;
-      }
+      const result = await agent.invoke({ messages: agentMessages, currentInput: input }, {
+        ...runnableConfig,
+        runName: 'framework.run_supervisor',
+        tags: [...(runnableConfig?.tags ?? []), 'framework.run_supervisor'],
+        metadata: { ...runnableConfig?.metadata, frameworkComponent: 'run_supervisor',
+          traceId: input.traceId, runId: input.runId, supervisorInputId: input.inputId,
+          registryDigest: input.catalog.registryDigest, supervisorMode: input.mode },
+      });
       signal?.throwIfAborted();
       documents.assertWithinBudget();
-      if (transfer.handoff) {
-        const handoff = transfer.handoff;
-        return {
-          action: 'delegate_capability', toolCallId: handoff.toolCallId,
-          delegationId: handoff.delegationId, messages: workingMessages(handoff.messages),
-          capabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure, handoff.disclosedCapabilityNames),
-        };
+      // createAgent returns its input too. Persist only this invocation's new work;
+      // never retag canonical main messages or the temporary catalog frame.
+      const fresh = result.messages.slice(agentMessages.length);
+      const work = fresh.map((message: BaseMessage) => setAgentMessageMetadata(message, {
+        lane: 'supervisor', runId: input.runId, traceId: input.traceId,
+      }));
+      const capabilityDisclosure = mergeCapabilityDisclosure(input.capabilityDisclosure, result.disclosedCapabilityNames ?? []);
+      const last = work.at(-1);
+      if (AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim()) {
+        return { reply: last.text, capabilityDisclosure, messages: work };
       }
-      if (!result) throw new Error('Supervisor returned neither state nor a delegation handoff.');
-      const capabilityDisclosure = mergeCapabilityDisclosure(
-        input.capabilityDisclosure,
-        result.disclosedCapabilityNames ?? [],
-      );
-      if (result.supervisorCommand) {
-        const command = parseSupervisorCommand(
-          result.supervisorCommand,
-          supervisorCommandContext(input),
-        );
-        return {
-          ...command,
-          capabilityDisclosure,
-          messages: workingMessages(result.messages),
-        };
-      }
-      const reply = result.messages.at(-1);
-      if (!reply || !AIMessage.isInstance(reply) || reply.tool_calls?.length || !reply.text.trim()) {
-        throw new Error('Supervisor produced neither a control proposal nor a usable final reply.');
-      }
-      return { reply: reply.text, capabilityDisclosure, messages: workingMessages(result.messages) };
+      const handoff = createSupervisorMessageHandoff(context, work);
+      return { capabilityDisclosure, messages: [...work.slice(0, -2), ...handoff] };
     },
   });
 }

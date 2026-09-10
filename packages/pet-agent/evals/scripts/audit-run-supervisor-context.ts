@@ -20,8 +20,9 @@ import type {
 import {
   createCapabilityRoutingManifest,
 } from '../../src/agent/orchestrator/runSupervisor/routingManifest.ts';
-import { createRunSupervisorSession } from '../../src/agent/orchestrator/runSupervisor/session.ts';
-import { createSupervisorCommandTools } from '../../src/agent/orchestrator/runSupervisor/commandTools.ts';
+import { supervisorFixture } from '../supervisor-fixtures';
+import { supervisorHandoffContext } from '../../src/agent/orchestrator/runSupervisor/input';
+import { createMessageSupervisorControlTools } from '../../src/agent/orchestrator/runSupervisor/messageHandoff';
 import {
   DelegationAnnounceMessage,
 } from '../../src/agent/orchestrator/delegation/index.ts';
@@ -91,61 +92,12 @@ setAgentMessageMetadata(privateLaneMessage, {
 });
 
 function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
-  const messages: BaseMessage[] = mode === 'entry'
-    ? [userMessage, privateLaneMessage]
-    : [userMessage, acceptedAnnounce, privateLaneMessage];
-  const remainingPlan = mode === 'boundary' ? [{
-    capability: 'general',
-    task: 'Report the verified result to the user.',
-  }] : [];
-  const supervisorSession = createRunSupervisorSession({
-    runId: 'audit-run',
-    plan: remainingPlan,
-    capabilityDisclosure: disclosure,
+  const fixture = supervisorFixture({ catalog, runId: 'audit-run', goal: userRequest,
+    task: mode === 'boundary' ? 'Implement and verify the identified change.' : undefined,
+    capability: 'repository', evidence: mode === 'boundary' ? 'The change is implemented and focused tests pass.' : undefined,
+    remaining: mode === 'boundary' ? [{ capability: 'general', task: 'Report the verified result to the user.' }] : [],
   });
-  if (mode === 'entry') {
-    return {
-      mode,
-      inputId: 'audit-entry',
-      traceId: 'audit-trace',
-      runId: 'audit-run',
-      userRequest,
-      messages,
-      activeDelegation: null,
-
-      remainingPlan,
-      catalog,
-      capabilityDisclosure: disclosure,
-      supervisorSession,
-    };
-  }
-  return {
-    mode,
-    inputId: 'audit-boundary',
-    traceId: 'audit-trace',
-    runId: 'audit-run',
-    userRequest,
-    messages: [...messages, ...[{
-      messageId: 'audit-active-result-1',
-      result: 'Implementation started, but verification has not run yet.',
-    }, {
-      messageId: 'audit-active-result-2',
-      result: 'The change is implemented and focused tests pass.',
-    }].map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:repository' as const, delegationId: 'audit-active-delegation', runId: 'audit-active-run', task: 'Implement and verify the identified change.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
-    }))],
-    activeDelegation: {
-      delegationId: 'audit-active-delegation',
-      runId: 'audit-active-run',
-      capability: 'repository',
-      task: 'Implement and verify the identified change.',
-    },
-
-    remainingPlan,
-    catalog,
-    capabilityDisclosure: disclosure,
-    supervisorSession,
-  };
+  return { ...fixture, capabilityDisclosure: disclosure, messages: [...fixture.messages, privateLaneMessage] };
 }
 
 function messageText(message: BaseMessage) {
@@ -181,7 +133,7 @@ async function renderMode(mode: RunSupervisorMode) {
   const mainSelection = queryAgentMessages(input.messages).main().select();
   const projectedMessages = await captureProviderHistory(mainSelection.messages);
   const detailsTool = createSupervisorCapabilityDetailsTool({ documents: createSupervisorDocumentReader(catalog) });
-  const tools = [...(mode === 'entry' ? [detailsTool] : []), ...createSupervisorCommandTools(mode)];
+  const tools = [...(mode === 'entry' ? [detailsTool] : []), ...createMessageSupervisorControlTools(supervisorHandoffContext(input))];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);
   console.log('\n### SYSTEM');

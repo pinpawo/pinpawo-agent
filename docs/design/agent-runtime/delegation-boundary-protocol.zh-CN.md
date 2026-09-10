@@ -1,8 +1,8 @@
 # Supervisor 与 root 交互协议
 
-状态：issue #755 的设计草案，按 2026-09-06 讨论的方向整体重写。本文描述目标设计；实现进度见文末。
+状态：issue #755 的历史设计与实现记录，原稿按 2026-09-06 讨论重写。本文不再描述当前重构目标；原有实现记录保留在文末。
 
-当前工具交接与持久化契约见文末 Capability 调用边界及 [run 状态契约](run-scoped-supervisor-session.md#current-ownership-and-lifetime)。前文 Announce/main-only 描述与 PR #791 流程图保留为历史背景，不代表另一条现行执行路径。
+当前重构方向以 [Root 与 Supervisor 状态边界](run-scoped-supervisor-session.md) 为准：原生 interrupt 按原生恢复，其他运行一律经过 Entry Answer；Supervisor snapshot 是执行上下文，不另设采用协议。文末 Capability 调用边界记录 #795 基线；旧提案、直接恢复、Announce/main-only 描述及 PR #791 流程图均不能覆盖新草案。
 
 [English version](delegation-boundary-protocol.md)。中英文描述同一套设计。文件路径沿用原名，避免已有链接失效。
 

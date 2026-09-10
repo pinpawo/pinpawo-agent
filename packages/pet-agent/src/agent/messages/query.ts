@@ -3,6 +3,7 @@ import {
   delegationMessageScopesEqual,
   getAgentMessageDelegationScope,
   getAgentMessageLane,
+  getAgentMessageRunId,
   isCapabilityMessageLane,
   type DelegationMessageScope,
 } from './metadata';
@@ -10,6 +11,7 @@ import {
 export type AgentMessageSelectionExclusionReason =
   | 'main_not_selected'
   | 'delegation_not_selected'
+  | 'supervisor_not_selected'
   | 'scope_mismatch'
   | 'unsupported_lane';
 
@@ -30,6 +32,8 @@ export type AgentMessageSelection = {
 export type AgentMessageQuery = {
   /** Include the untagged main conversation. */
   main(): AgentMessageQuery;
+  /** Include only the Supervisor working messages owned by this business run. */
+  supervisor(runId: string): AgentMessageQuery;
   /** Include the private messages for one exact delegation scope. */
   delegation(scope: DelegationMessageScope): AgentMessageQuery;
   /** Append invocation-only messages after the selected canonical history. */
@@ -41,6 +45,7 @@ export type AgentMessageQuery = {
 type AgentMessageQueryState = {
   includeMain: boolean;
   delegationScopes: readonly DelegationMessageScope[];
+  supervisorRunIds: readonly string[];
   appendedMessages: readonly BaseMessage[];
 };
 
@@ -68,6 +73,11 @@ function createQuery(
         delegationScopes: [...state.delegationScopes, { ...scope }],
       });
     },
+    supervisor(runId: string) {
+      if (!runId.trim()) throw new Error('Supervisor message selection requires a run id.');
+      return createQuery(canonicalMessages, state.supervisorRunIds.includes(runId)
+        ? state : { ...state, supervisorRunIds: [...state.supervisorRunIds, runId] });
+    },
     append(...messages: readonly BaseMessage[]) {
       return messages.length === 0
         ? createQuery(canonicalMessages, state)
@@ -94,6 +104,17 @@ function createQuery(
           return;
         }
 
+        if (lane === 'supervisor') {
+          const runId = getAgentMessageRunId(message);
+          if (!runId) throw new Error(`Supervisor message ${messageId} is missing its run id.`);
+          if (state.supervisorRunIds.includes(runId)) {
+            messages.push(message);
+            selectedMessageIds.push(messageId);
+          } else {
+            excluded.push({ messageId, reason: state.supervisorRunIds.length ? 'scope_mismatch' : 'supervisor_not_selected' });
+          }
+          return;
+        }
         if (!isCapabilityMessageLane(lane)) {
           excluded.push({ messageId, reason: 'unsupported_lane' });
           return;
@@ -142,6 +163,7 @@ export function queryAgentMessages(
   return createQuery(snapshot, {
     includeMain: false,
     delegationScopes: [],
+    supervisorRunIds: [],
     appendedMessages: [],
   });
 }

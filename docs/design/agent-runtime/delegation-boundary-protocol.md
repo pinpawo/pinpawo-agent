@@ -1,8 +1,8 @@
 # Supervisor–Root Interaction Protocol
 
-Status: working design for issue #755, fully rewritten around the direction discussed on 2026-09-06. This document describes the target design; implementation status is recorded at the end.
+Status: historical design and implementation notes for issue #755, originally rewritten around the discussion on 2026-09-06. This is not the current refactoring target; implementation notes remain at the end.
 
-The current tool-handoff and lifetime contract is in [Capability invocation](#capability-subagent-invocation-boundary) and [run-scoped state](run-scoped-supervisor-session.md#current-ownership-and-lifetime). Earlier Announce/main-only descriptions and PR #791 diagrams are historical context, not a second active protocol.
+The current refactoring direction is in [Root and Supervisor state boundaries](run-scoped-supervisor-session.md). Native interrupts use native resume; all other runs enter through Entry Answer. Supervisor snapshots provide execution context, not a separate adoption protocol. The Capability invocation section below records the #795 baseline; earlier proposal, direct-resume, Announce/main-only descriptions and PR #791 diagrams must not override the new draft.
 
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 

@@ -21,7 +21,6 @@ import {
 } from './runtime/guards/decisionEvents';
 import { setAgentMessageMetadata } from '../messages';
 import type { OrchestratorStateType } from './state';
-import type { TaskActiveDelegation } from './types';
 
 function baseState(over: Partial<OrchestratorStateType> = {}): OrchestratorStateType {
   return {
@@ -44,18 +43,6 @@ function usageMessage(content: string, inputTokens: number) {
     },
   });
 }
-
-const activeDelegation: TaskActiveDelegation = {
-  id: 'd1',
-  lane: 'capability:general',
-  task: '做点事',
-  contextSummary: null,
-  runId: 'run-1',
-  traceId: 'trace-1',
-  status: 'awaiting_decision',
-  resultPreview: null,
-  userRequest: '做点事',
-};
 
 test('run state reset guard derives a reset only when the run id is missing', () => {
   const proceed = evaluateGuard(runStateResetGuard, {
@@ -189,7 +176,7 @@ test('guard routes push decision records onto the LangGraph custom stream writer
 
   const route = createAfterSupervisorBoundaryIterationGuard();
   route(baseState({
-    taskActiveDelegation: activeDelegation,
+
     runIterationCount: ORCHESTRATOR_MAX_ITERATIONS,
   }), runnableConfig);
 
@@ -221,7 +208,7 @@ test('guard decision emitter is a no-op without a runnable config', () => {
 
 test('run iteration limit guard routes through answer at the resolved limit', () => {
   const state = baseState({
-    taskActiveDelegation: activeDelegation,
+
     runIterationCount: 5,
   });
 
@@ -243,7 +230,7 @@ test('run iteration limit guard routes through answer at the resolved limit', ()
 
 test('legacy invocation overrides cannot change the internal run iteration limit', () => {
   const route = createAfterSupervisorBoundaryIterationGuard();
-  const state = baseState({ taskActiveDelegation: activeDelegation });
+  const state = baseState({  });
   assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS - 1 }, {
     configurable: { maxRunIterations: 1 },
   }), 'runSupervisor');

@@ -1,7 +1,7 @@
 # 本分支 review 指南：按 domain 概念组织
 
-分支：`claude/local-agent-module-boundaries-0a8310`（20 个提交，相对 `main`）
-生成于：`1ed755e2`
+分支：`claude/local-agent-module-boundaries-0a8310`（25 个提交，相对 `main`）
+更新至：`23394d4c`（§七 五个阶段已全部落地）
 
 提交是按**时间顺序**攒的，不是按 domain 组织的。本文按**领域概念**重排，
 让每条结论的「定义 → 落地 → 修正」可以连起来看。
@@ -10,20 +10,34 @@
 
 | domain 结论（domains.md §四） | 定义提交 | 落地提交 | 状态 |
 |---|---|---|---|
-| 1. Host 只有一种，local 是退化形态 | `a1e7335a` | — | **仅文档**，代码未动 |
-| 2. setup 与 invoke 都归 agent | `660a8095` | `1955ece8` | 部分落地 |
-| 3. dispatch 是 Studio 概念，gate = Agent 可用 | `3ddcaad2` → **`1ed755e2` 修正** | 阶段 3 | **已落地** |
-| 4. Conversation = UI 交互 state | `badde03a` | `89981a64` | 部分落地 |
-| 5. `modelProfileId`：Session 覆盖 / Config 默认 | `3ddcaad2` | 阶段 5（窄契约） | 部分落地 |
-| 6. wire 不是 domain，能力必须统一 | `660a8095` | `885610e6` `37c2227a` + 阶段 4 | **已落地** |
-| 7. attachment 是输入准入，归 agent | `9296881e` | `89981a64` | 已落地 |
+| 1. Host 只有一种，local 是退化形态 | `a1e7335a` | — | **仅文档** |
+| 2. setup 与 invoke 都归 agent | `660a8095` | `1955ece8` | **部分**：装配已归位，生命周期仍两处重复 |
+| 3. dispatch 是 Studio 概念，gate = Agent 可用 | `3ddcaad2` → **`1ed755e2` 修正** | `0562e671` | ✅ 已落地 |
+| 4. Conversation = UI 交互 state | `badde03a` | `89981a64` `35796df6` | ✅ 已落地 |
+| 5. `modelProfileId`：Session 覆盖 / Config 默认 | `3ddcaad2` | `23394d4c` | **部分**：窄契约已分离 Config 层，三层默认链未实现 |
+| 6. wire 不是 domain，能力必须统一 | `660a8095` | `885610e6` `37c2227a` `a6815988` | ✅ 已落地 |
+| 7. attachment 是输入准入，归 agent | `9296881e` | `89981a64` | ✅ 已落地 |
 | 8. 多 Pet 由 Studio 持有多个 Host | `9296881e` | — | **仅文档** |
 
-**8 条里只有 4 条动了代码**，其余是定义。这是刻意的：先把概念定清楚，再动结构。
+**8 条里 6 条动了代码**（4 条完全落地、2 条部分）。剩下 2 条是纯定义 ——
+先把概念定清楚再动结构，是刻意的。
+
+### §七 实施阶段
+
+| 阶段 | 内容 | 提交 |
+|---|---|---|
+| 0 | 按 domain 归位（transcript / attachment / 三个投影） | `89981a64` `35796df6` |
+| 1 | `buildChatSetup` 归 agent | `1955ece8` |
+| 2 | Session 准入有了所有者 | `314b2293` |
+| 3 | 对话移出 dispatch 队列 | `0562e671` |
+| 4 | 删掉 HTTP 上重实现对话能力的残留路由 | `a6815988` |
+| 5 | `ServerDeps` 拆成 domain 窄契约 | `23394d4c` |
+
+**7 条分叉全部消解。**
 
 ---
 
-## 一、有代码落地的四条
+## 一、有代码落地的六条
 
 ### 结论 2：setup 与 invoke 都归 agent
 
@@ -136,20 +150,21 @@ git show 5c645087 --stat -M
 
 ---
 
-## 三、只有定义、尚未落地的四条
+## 三、只有定义、尚未落地的两条
 
-这四条是**纯概念**，代码一行没动。review 时看文档即可：
+这两条是**纯概念**，代码一行没动。review 时看文档即可：
 
-| 结论 | 看哪里 |
-|---|---|
-| 1. Host 只有一种 | `domains.md` §一.1 |
-| 3. dispatch 是 Studio 概念 | `domains.md` §一.3（**已被 `1ed755e2` 修正过**） |
-| 5. `modelProfileId` 两层 | `domains.md` §一.5 |
-| 8. 多 Pet 由 Studio 组织 | `domains.md` §一.8 |
+| 结论 | 看哪里 | 为什么没做 |
+|---|---|---|
+| 1. Host 只有一种 | `domains.md` §一.1 | `serverHandlers` 要拆到四个 domain，是下一轮的主体 |
+| 8. 多 Pet 由 Studio 组织 | `domains.md` §一.8 | 改动面在 `packages/studio`，不在本次范围 |
+
+结论 3 与 5 原本也在此列，实施中已分别由 `0562e671`（阶段 3）和
+`23394d4c`（阶段 5）落地。
 
 ---
 
-## 四、我判断失误并自我修正的四处
+## 四、我判断失误并自我修正的六处
 
 如果你想看推导出错的轨迹，这几个提交的 message 写得比较完整：
 
@@ -159,9 +174,15 @@ git show 5c645087 --stat -M
 | `d03adbfa` | 阶段 2/3 顺序反了 —— resident 解包依赖准入归位 | 实施时自查 |
 | `678e5e84` | 以为阶段 2 满足了阶段 3 的前置，实际 Session 准入 ≠ 执行准入 | 实施时自查 |
 | **`1ed755e2`** | **把 dispatch 当成 local-agent 需要协调的一等公民** | **你纠正** |
+| `35796df6` | 阶段 0 漏搬三个归属已定的投影模块 | **你 review 时问「外面还有一大堆文件」** |
+| `a6815988` | 以为 HTTP 该去适配 13 个 handler，实际它承载的是运维面 | 实施时自查 |
 
-最后一条是根本性的：dispatch 是 Studio 的调度概念，Host 只提供「Agent 可用」
-gate，gate 与会话无关。这让我之前发明的「阶段 2.5 执行准入」整个撤销。
+`1ed755e2` 那条是根本性的：dispatch 是 Studio 的调度概念，Host 只提供
+「Agent 可用」gate，gate 与会话无关。这让我之前发明的「阶段 2.5 执行准入」
+整个撤销。
+
+三条方向性错误（`d03adbfa`、`1ed755e2`、`a6815988`）有个共同模式：
+**我在没查清消费者/调用链之前就按计划推进**。后两条都是动手后才发现前提不成立。
 
 ---
 
@@ -187,8 +208,13 @@ git diff main..HEAD -- services | grep -E "^[-+]" | grep -v "^[-+][-+]" | grep -
 
 ## 六、验证基线
 
-全程保持：**14 个 workspace、632 测试、0 失败**，typecheck 全绿，build 通过。
-测试数从 627 增至 632（新增 5 个 `sessionAdmission` 测试）。
+全程保持：**14 个 workspace、0 失败**，typecheck 全绿，build 通过。
+
+测试数 627 → **629**：新增 5 个 `sessionAdmission` 测试；阶段 4 删掉 3 个
+HTTP 路由测试、合并为 1 个；阶段 5 把 1 个运行时抛错测试改成类型边界断言。
+
+⚠️ **本仓需要 Node >= 24。** Node 18 下整套测试会以 `crypto is not defined`
+大面积失败（本轮踩过两次），那是环境不是代码。
 
 ---
 
@@ -198,18 +224,21 @@ git diff main..HEAD -- services | grep -E "^[-+]" | grep -v "^[-+][-+]" | grep -
 
 | domain | 顶层数 | 原因 |
 |---|---|---|
-| **agent** | ~18 | 阶段 1 只搬了 `buildChatSetup`；`chatSessionAdapter`、`agentGraphService` 等要等生命周期收敛（现仍在两处重复） |
-| **Config** | ~17 | 结论 5 **仅文档**，代码未动 |
-| **Host** | ~11 | 结论 1 **仅文档**；`residentPetHost` 要等阶段 3 |
-| **Session** | 3 | 未建 `session/` 目录 |
-| **wire** | 4 | `httpHandlers` / `server` 等要等阶段 4 |
+| **agent** | 18 | 阶段 1 只搬了 `buildChatSetup`；`chatSessionAdapter`、`agentGraphService` 等要等生命周期收敛（现仍在两处重复） |
+| **Config** | 17 | 阶段 5 只拆了**契约**，未建 `config/` 目录 |
+| **Host** | 11 | 结论 1 **仅文档**；`residentPetHost` 的拆分是下一轮主体 |
+| **Session** | 4 | 未建 `session/` 目录 |
+| **wire** | 4 | `httpHandlers` / `server` 等是**组装侧**，不是协议解析 |
 | 组装/入口 | ~9 | `index` / `cli` / `serverTypes` / `runtime` **本来就该在顶层** |
 
 三个原因：
 
-1. **等后续阶段（约 40 个）** —— 有意留的。`serverHandlers` 要拆到四个 domain，
-   而拆法取决于阶段 3-5；提前搬会与后续改动反复冲突，
-   这和把 `ServerDeps` 拆解放在最后一阶段是同一个理由。
-2. **结论只有定义、未落地（约 28 个）** —— Config 与 Host 两个 domain 的代码一行没动。
-3. **本来就该在顶层（约 9 个）** —— domains.md 说的「Host 的完整组装类型留在
-   组合入口」。**终态顶层大约是 10 个，不是 0 个。**
+1. **归属已定、目录未建（约 21 个）** —— Config 与 Session。阶段 5 拆了 Config
+   的**契约**（`RuntimeProjectionDeps`），但没建 `config/` 目录；建目录是纯移动，
+   留给下一轮一次做完更省事。
+2. **等下一轮的结构收敛（约 29 个）** —— agent 的生命周期仍在
+   `serverChatHandler` 与 `residentPetHost` 两处重复（结论 2 的未完成部分），
+   `serverHandlers` 要拆到四个 domain。这两件事一起做，提前搬会反复冲突。
+3. **本来就该在顶层（9 个）** —— `index` / `cli` / `runtime` / `serverTypes` 等。
+   domains.md 说的「Host 的完整组装类型留在组合入口」。
+   **终态顶层大约是 10 个，不是 0 个。**

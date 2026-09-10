@@ -157,6 +157,10 @@ C 的确认不是执行成功，D 的结果也不是任务验收通过。
 当前使用 createAgent invoke 返回后的确定性交接适配；不引入 `onHandoff` 回调加中间状态，
 不新增外部 `supervisor_tools` ToolNode，也不把 executor 搬入 Supervisor 工具内部。
 
+调用适配不将整份输入重复写入 createAgent state；只读参数绑定在本次调用中，
+系统提示词使用原生 `systemPrompt` 配置。内部仅保留详情读取所需的名称集合 reducer，
+每次由 Root 的已披露记录初始化；调用结束后将结果合并回 Root。
+
 Root 接纳交接时校验调用与任务、能力、运行身份的一致性，一起提交必要业务更新和执行消息，
 再进入现有 `capability` 节点。执行完成时一起提交结果消息与执行事实；
 原生恢复不重新派发已经提交的调用。框架 checkpoint 不保证外部副作用恰好一次，
@@ -251,7 +255,7 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 
 | 验证 | 结果 |
 | --- | --- |
-| pet-agent 全量单元与集成测试 | 486 / 486 通过，包含真实 createAgent、生产 Root 图和 executor 的脚本模型测试 |
+| pet-agent 全量单元与集成测试 | 487 / 487 通过，包含真实 createAgent、生产 Root 图和 executor 的脚本模型测试，以及连续 invoke 的详情读取隔离 |
 | pet-agent 源码与 eval 类型检查、本地端类型检查 | 通过 |
 | 本地端全量测试 | 620 通过、5 跳过；端口及子进程测试在沙箱外执行 |
 | 最后一次 Host 适配回归 | 35 / 35 通过，覆盖图服务、会话计划事件和进度投影 |

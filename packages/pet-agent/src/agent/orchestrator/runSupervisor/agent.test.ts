@@ -1850,6 +1850,34 @@ test('details uses exact manifest names and distinguishes new, known, and unknow
   assert.deepEqual(second.unknownNames, []);
 });
 
+test('detail reads start from this invocation disclosure without inheriting another invocation state', async () => {
+  const firstCatalog = createTestCatalog({ general: 'General work.', explore: 'Inspect evidence.' });
+  const secondCatalog = createTestCatalog({ general: 'Updated general work.' });
+  const details = (id: string) => ({
+    toolCalls: [{ id, name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['general', 'explore'] } }],
+  });
+  const model = new ScriptedSupervisorModel([
+    details('first-details'), { content: 'First answer.' },
+    details('second-details'), { content: 'Second answer.' },
+  ]);
+  const runner = createRunSupervisorAgent({ model });
+  const firstBase = supervisorInput(firstCatalog);
+  const firstInput = { ...firstBase, capabilityDisclosure: {
+    ...firstBase.capabilityDisclosure, disclosedCapabilityNames: ['general'],
+  } };
+  const first = await runner.invoke(firstInput);
+  const second = await runner.invoke(supervisorInput(secondCatalog));
+  assert.deepEqual(firstInput.capabilityDisclosure.disclosedCapabilityNames, ['general']);
+  assert.deepEqual(first.capabilityDisclosure.disclosedCapabilityNames, ['general', 'explore']);
+  assert.deepEqual(second.capabilityDisclosure.disclosedCapabilityNames, ['general']);
+  const read = (index: number, id: string) => JSON.parse(String(model.invocations[index].find((message) =>
+    ToolMessage.isInstance(message) && message.tool_call_id === id)?.content));
+  assert.deepEqual(read(1, 'first-details').alreadyDisclosed, ['general']);
+  assert.deepEqual(read(3, 'second-details').alreadyDisclosed, []);
+  assert.deepEqual(read(3, 'second-details').unknownNames, ['explore']);
+});
+
 test('repeated empty detail reads do not close disclosure and parallel names merge without loss', async (t) => {
   const catalog = createTestCatalog({
     general: capabilityDocument({ name: 'general', description: 'General work.', instructions: 'Handle work.' }),

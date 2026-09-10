@@ -132,7 +132,9 @@ async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
   const projectedMessages = await captureProviderHistory(mainSelection.messages);
-  const detailsTool = createSupervisorCapabilityDetailsTool({ documents: createSupervisorDocumentReader(catalog) });
+  const detailsTool = createSupervisorCapabilityDetailsTool({
+    documents: createSupervisorDocumentReader(catalog), capabilityNames: catalog.capabilityNames,
+  });
   const tools = [...(mode === 'entry' ? [detailsTool] : []), ...createMessageSupervisorControlTools(supervisorHandoffContext(input))];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);

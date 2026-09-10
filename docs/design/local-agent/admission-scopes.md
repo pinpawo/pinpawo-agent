@@ -62,7 +62,7 @@ domain 已定五个（domains §一），其中三个拥有可变状态，因而
 | session new / resume | Session（当前会话指针） | **Session** | ❌ 现 peer 级排队 + Host 级检查 |
 | `onNewSession` | Session（同上） | **Session** | ❌ 零协调（#7） |
 | model select | Session（模型覆盖值） | **Session** | ❌ 现 peer 级排队 + Host 级检查 |
-| resident dispatch | agent（一次执行） | **agent** | ⚠️ 现 Host 级队列 |
+| resident dispatch | 不改 local-agent 的 domain 状态 | **gate**（Agent 可用即可派活） | ✅ 已由 coordinator 提供 |
 | runtime config update | Config（只写配置） | **无** | ✅ 现已不检查 |
 | snapshot / list / model list | Conversation（只读投影） | **无** | ✅ 现已不检查 |
 | run interrupt | 不改状态，**须穿透** | **无** | ✅ 已旁路 |
@@ -95,7 +95,7 @@ wire 只拥有**连接自身**的生命周期。断连时取消该连接拥有�
 | 2 | resident 4 层叠加 | Host 只有一种（domains §一.1），不再包一层 |
 | 3 | 两层豁免规则不一致 | 同上；只有一层就无所谓一致 |
 | 4 | peer 级 vs Host 级粒度不匹配 | `sessionCommands` 整层撤销（§二.2） |
-| 5 | dispatch 不进 `InflightRequestController` | dispatch 是同一个 Execution（domains §一.3），走同一入口 |
+| 5 | dispatch 不进 `InflightRequestController` | dispatch 触发的是同一种 Execution，走同一执行入口与收尾；但 dispatch 本身是 Studio 概念，不与对话互斥（domains §一.3） |
 | 6 | 只读查询不检查活跃执行 | Conversation 是投影，不裁决准入（§一） |
 | 7 | `onNewSession` 零协调 | 与 `onSessionNew` 同归 Session（§二.1） |
 
@@ -113,7 +113,7 @@ wire 只拥有**连接自身**的生命周期。断连时取消该连接拥有�
 | `activeChatOperations` | **一个 Host**（闭包局部，非进程） | agent 的执行准入 |
 | `sessionTransition` | **一个 Host**（同上） | Session |
 | `ThreadInvocationCoordinator` | 一个 thread | **保留**，已是 agent 级且语义正确 |
-| `ResidentPetCoordinator` | 一个 Pet | Host / agent（dispatch 与对话竞争同一执行入口） |
+| `ResidentPetCoordinator` | 一个 Pet | **gate（Agent 可用状态）**，是 `PetDispatchPort` 的职责；其中的对话入队要拆走 |
 | `InflightRequestController` | 一个 peer，且只认 WS | agent（须覆盖 dispatch） |
 
 ### 三个入口面
@@ -209,50 +209,37 @@ serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 
 
 `admitConversationHandlers` 只有**一个调用点**（residentPetHost.ts:599）。
 
-**前置仍未满足（第二次核对）**：阶段 2 装的 `SessionAdmission` **不能**接管
-本阶段需要的互斥，原因是两件事被混为一谈了：
+**两次误判的更正（第三次核对）**：前两版把 `coordinator` 当成「对话与 dispatch
+的互斥器」，并据此推导需要一层「执行级准入」来接管它。**这个前提是错的。**
 
-| 准入层级 | 谁拥有 | 现状 |
+dispatch 是 **Studio 的调度概念**，不是 local-agent 的 domain；local-agent 只
+向上暴露一道 gate，而 gate 表达的是 **Agent 可用状态**（`pendingInterrupt` →
+`waiting`），与会话无关。详见 [domains §一.3](./domains.md)。
+
+**所以对话与 dispatch 不需要互斥**：对话不是竞争者，对话是让 Agent 变忙的
+原因之一。之前拟插入的「阶段 2.5 执行准入」是为一个伪命题设计的，已撤销。
+
+本阶段真正要回答的是：`coordinator` 现在把两件不同的事塞在同一个队列里 ——
+
+| `coordinator` 现在做的 | 属于什么 | 拆解后 |
 |---|---|---|
-| Session 级（建会话/切模型/compact/resume） | Session | ✅ 阶段 2 已装 `SessionAdmission` |
-| thread 级（同 thread 替换请求） | agent | ✅ 已有 `ThreadInvocationCoordinator` |
-| **执行级（同一时刻只跑一个执行）** | **agent** | ❌ **缺失** —— 目前只由 `coordinator.drain()` 提供 |
+| 维护 `open/busy/waiting/blocked` 并对外发布 | **gate（Agent 可用状态）** | 保留，这是 `PetDispatchPort` 的职责 |
+| dispatch 排队与 closing 拒绝 | **gate** | 保留 |
+| **把对话也塞进同一队列**（`enqueueConversation`） | 对话准入 | **这才是要拆的** |
 
-按 domains §一.3，dispatch 与对话是**同一个 Execution**，所以「对话 ↔ dispatch
-互斥」是**执行级**的，不是 Session 级的。
+对话已有自己的准入（阶段 2 的 `SessionAdmission`）与 thread 级协调
+（`ThreadInvocationCoordinator`），不需要再排一次 Studio 的调度队列。
+拆掉 `admitConversationHandlers` 后，对话走 local 层的准入，
+`coordinator` 回归为纯粹的 dispatch gate。
 
-而且它必须 **Host 级共享**：`SessionAdmission` 是 `createLocalServerHandlers`
-的闭包局部变量（serverHandlers.ts:132），`residentPetHost` 对它**零引用**；
-dispatch 直接调 `sessions.buildChatSetup` + `runAgentTurn`，**不经过**
-`afterSessionCommands`，因此根本到不了那个闸门。
-
-**所以本阶段前面还需要插入一步**：建立 Host 级共享的执行准入（对话与 dispatch
-共用），接管 `drain()` 现在提供的互斥、对话优先与 closing 拒绝；之后
-resident 的对话包装才真正成为重复层。
-
-**顺序更正（第一次核对）**：本阶段原排在准入归位之前，是错的。
-`ResidentPetCoordinator` 的对话队列并非「与 local 层重复的一层」——
-它承担着 local 层**根本没有的**职责：
-
-| 职责 | local 层 | 说明 |
-|---|---|---|
-| 对话 ↔ dispatch 互斥 | ❌ 无 | `drain()` 保证同一时刻只跑一个 |
-| 对话优先于 dispatch | ❌ 无 | `conversationQueue.shift() ?? dispatchQueue.shift()` |
-| closing 时拒绝新工作 | ❌ 无 | `ResidentPetOperationCancelledError` |
-| 队列深度快照 | ❌ 无 | `queuedConversations` 在 `studioContract.ts`，**是发布契约** |
-
-`drain()` 把「互斥」和「入队」实现在同一机制里：对话与 dispatch 竞争同一个
-`this.active` 槽位。**拆掉对话入队，互斥就没了**——而按 domains §一.3
-（dispatch 与对话是同一个 Execution），这个互斥恰恰是该保留的。
-
-所以必须**先做准入归位**，让 agent 级准入接管「对话 ↔ dispatch 互斥」，
-之后 resident 的对话队列才真正成为重复层，可以安全拆除。
+**仍需确认**：对话结束后 gate 状态如何刷新（现在靠 `drain()` 之后的
+`readSettledState()`）。这是拆除时唯一需要接续的行为。
 
 `queuedConversations` 已核对：它在 `studioContract.ts` 里声明并被填充，但
 **没有任何生产消费者**读它（scheduler 插件只用 `StudioDispatchQueue['state']`）。
-拆队列时该字段可以保留形状，由新的执行准入提供数值。
+拆队列时该字段可以保留形状或归零。
 
-前置：阶段 2 **及**上述执行准入。
+前置：阶段 2。
 
 ### 阶段 4：HTTP 能力面对齐（解决 #1 的根）
 
@@ -279,8 +266,7 @@ HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。
 0.1 ─┐
 0.2 ─┼─（互不依赖，可并行）
 0.3 ─┘
-      └─→ 1 buildChatSetup → 2 Session 准入 → 2.5 执行准入(Host 级) → 3 resident 解包
-                                                    → 4 HTTP 对齐 → 5 ServerDeps 拆解
+      └─→ 1 buildChatSetup → 2 Session 准入 → 3 resident 解包 → 4 HTTP 对齐 → 5 ServerDeps 拆解
 ```
 
 ### 每阶段的验证

@@ -82,13 +82,34 @@ resident 不再包一层；`server.ts` / `chatStdioServer.ts` 直接用同一个
 **推论：Session 只提供身份，agent 拿身份去装配执行。Session 不需要知道
 graph 长什么样。**
 
-### 3. resident dispatch 不是第二种 Execution
+### 3. dispatch 是 Studio 的概念；Host 只提供「Agent 可用」这道 gate
 
-它是在标准 Host 之上长出来的**更下游的子集** —— 同一个 Execution 概念，
-只是触发者不是 peer 而是调度。
+dispatch **不是 local-agent 的 domain**。它由 Studio 插件（kanban / scheduler /
+trigger）发起，是更下游的调度概念。local-agent 这一层只向上暴露一道 gate。
 
-**因此它必须走同一个执行入口与收尾路径，不再复制一套生命周期**
-（这正是 module-boundaries §一 对 `residentPetHost` 的要求）。
+**gate 与会话无关，它表达的是 Agent 的可用状态。** 现有实现说得很清楚
+（residentPetHost.ts:532）：
+
+```ts
+const readSettledState = async () => {
+  if (state.pendingInterrupt) return 'waiting';  // 在等人回复 → 不可用
+  return 'open';                                  // 可用
+};
+```
+
+`open | busy | waiting | blocked` 回答的是「**这个 Agent 现在能不能接新活**」。
+`waiting` 的成因是有 pending interrupt 在等人，与 session 状态无关。
+
+这与既有设计一致：[resident Pet Host ports](../agent-runtime/resident-pet-host-ports.md)
+已把 `ResidentPetHost` 定义为**两个不对称的 port** —— `dispatch`（给 Studio）
+与 `interaction`（对话），并明确不为对话另建同构的 `PetConversationPort`。
+
+**因此「对话 ↔ dispatch 互斥」是个伪命题。** 对话不是 dispatch 的竞争者，
+对话是**让 Agent 变忙的原因之一**；gate 要表达的只是忙/等人时别再派活进来。
+
+dispatch 触发的确实是一次普通 Execution（走同一个执行入口与收尾路径），
+但**不能由此推出 local-agent 需要一层「执行级互斥」**——那是把 Studio 的调度
+概念误当成了本层需要协调的一等公民。
 
 ### 4. Conversation = UI 交互 state 管理
 
@@ -296,7 +317,7 @@ Studio
 |---|---|
 | 1 | Host 只有一种，local 是退化形态 |
 | 2 | setup 与 invoke 都归 agent，不放 Session |
-| 3 | resident dispatch 是下游子集，同一个 Execution |
+| 3 | dispatch 是 Studio 概念；Host 只提供「Agent 可用」gate，与会话无关 |
 | 4 | Conversation = UI 交互 state 管理，主体在 `@pinpawo/agent-session` |
 | 5 | `modelProfileId`：Session 覆盖 / Config 默认 |
 | 6 | wire 不是 domain；适配传输，能力必须统一 |

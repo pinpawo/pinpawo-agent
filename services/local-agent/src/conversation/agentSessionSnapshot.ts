@@ -9,14 +9,14 @@ import type {
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import type { PauseTaskInterruptPayload } from '@pinpawo/pet-agent';
-import type { PendingInterruptSnapshot } from './serverChatHandler';
-import type { ServerDeps } from './serverTypes';
-import type { TuiCheckpointMessage } from './serverTuiSessions';
-import { buildLocalRuntimeProjection } from './configProjection';
+import type { PendingInterruptSnapshot } from '../serverChatHandler';
+import type { ServerDeps } from '../serverTypes';
+import type { TuiCheckpointMessage } from '../serverTuiSessions';
+import { buildLocalRuntimeProjection } from '../configProjection';
 import {
   missingInputModalities,
   supportsInputModalities,
-} from './modelProfiles';
+} from '../modelProfiles';
 
 export function buildLocalAgentSessionSnapshot(params: {
   sessionId: string;

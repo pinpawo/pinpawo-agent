@@ -16,7 +16,7 @@ import {
 
 import type { AgentChannelSetup } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
-import { projectPendingInterrupt } from './pendingInterruptProjection';
+import { projectPendingInterrupt } from './conversation/pendingInterruptProjection';
 import {
   runAgentSessionTurn,
   type AgentSessionTurnOptions,

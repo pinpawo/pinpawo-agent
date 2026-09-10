@@ -53,8 +53,14 @@ git show 89981a64
 |---|---|---|
 | `conversation/transcriptProjection.ts` | Conversation | 5 个函数只吃 `BaseMessage[]`，零 session 依赖 |
 | `conversation/chatDisplayText.ts` | Conversation | 读回给界面看的文本 |
+| `conversation/agentSessionSnapshot.ts` | Conversation | 组装 `AgentSessionSnapshot` |
+| `conversation/currentPlanProjection.ts` | Conversation | 投影 `AgentPlan` |
+| `conversation/pendingInterruptProjection.ts` | Conversation | 投影待确认状态 |
 | `agent/chatMessageInput.ts` | agent | 构造模型输入 |
 | `agent/attachmentAdmission.ts` | agent | 上限校验由模型 `inputModalities` 决定 |
+
+后三个是 review 时发现**阶段 0 漏搬的** —— domains.md §二 早已判给 Conversation，
+但当时只搬了 transcript 与 attachment 那批。已补齐。
 
 - **唯一的行为性改动**：`DISPLAY_TEXT_METADATA_KEY` 加了 `export`
   （写入方在 agent、读取方在 Conversation，必须共享）。
@@ -182,3 +188,27 @@ git diff main..HEAD -- services | grep -E "^[-+]" | grep -v "^[-+][-+]" | grep -
 
 全程保持：**14 个 workspace、632 测试、0 失败**，typecheck 全绿，build 通过。
 测试数从 627 增至 632（新增 5 个 `sessionAdmission` 测试）。
+
+---
+
+## 七、为什么顶层还剩 63 个文件
+
+这是 review 中被问到的问题，值得写清楚。按 domain 归类，顶层剩余文件分三类：
+
+| domain | 顶层数 | 原因 |
+|---|---|---|
+| **agent** | ~18 | 阶段 1 只搬了 `buildChatSetup`；`chatSessionAdapter`、`agentGraphService` 等要等生命周期收敛（现仍在两处重复） |
+| **Config** | ~17 | 结论 5 **仅文档**，代码未动 |
+| **Host** | ~11 | 结论 1 **仅文档**；`residentPetHost` 要等阶段 3 |
+| **Session** | 3 | 未建 `session/` 目录 |
+| **wire** | 4 | `httpHandlers` / `server` 等要等阶段 4 |
+| 组装/入口 | ~9 | `index` / `cli` / `serverTypes` / `runtime` **本来就该在顶层** |
+
+三个原因：
+
+1. **等后续阶段（约 40 个）** —— 有意留的。`serverHandlers` 要拆到四个 domain，
+   而拆法取决于阶段 3-5；提前搬会与后续改动反复冲突，
+   这和把 `ServerDeps` 拆解放在最后一阶段是同一个理由。
+2. **结论只有定义、未落地（约 28 个）** —— Config 与 Host 两个 domain 的代码一行没动。
+3. **本来就该在顶层（约 9 个）** —— domains.md 说的「Host 的完整组装类型留在
+   组合入口」。**终态顶层大约是 10 个，不是 0 个。**

@@ -10,7 +10,7 @@ import {
   type RunInterruptMessage,
 } from './wire/protocol';
 import { recordAgentRunActivity } from './operationActivityState';
-import { projectPendingInterrupt } from './pendingInterruptProjection';
+import { projectPendingInterrupt } from './conversation/pendingInterruptProjection';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';

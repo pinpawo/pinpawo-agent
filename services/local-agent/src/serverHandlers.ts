@@ -3,7 +3,7 @@ import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
-import { buildLocalAgentSessionSnapshot } from './agentSessionSnapshot';
+import { buildLocalAgentSessionSnapshot } from './conversation/agentSessionSnapshot';
 import type {
   AgentModelProfileSummary,
   AgentRuntimeEvent,

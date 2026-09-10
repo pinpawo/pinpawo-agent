@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseAgentSessionSnapshot } from '@pinpawo/agent-session';
 import { buildLocalAgentSessionSnapshot } from './agentSessionSnapshot';
-import type { ServerDeps } from './serverTypes';
-import { createTestModelServerDeps } from './testing/modelProfiles';
+import type { ServerDeps } from '../serverTypes';
+import { createTestModelServerDeps } from '../testing/modelProfiles';
 
 test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot', () => {
   const snapshot = buildLocalAgentSessionSnapshot({

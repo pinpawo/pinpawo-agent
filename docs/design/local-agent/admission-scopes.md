@@ -182,7 +182,7 @@ peer message
 这三步不改行为，也不依赖任何准入决定。**先做它们**，让后续的结构改动在更干净的
 基础上进行。
 
-### 阶段 1：`buildChatSetup` 归 agent（前置于阶段 2/3）
+### 阶段 1：`buildChatSetup` 归 agent（前置于阶段 2）
 
 `buildChatSetup` 有 5 个生产调用点（residentPetHost×2、serverChatHandler×2、
 serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 服务读。
@@ -190,17 +190,7 @@ serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 
 **为什么必须先做**：它现在挂在 Session 服务上，是 Session 与 agent 纠缠的主结点。
 不解开它，阶段 3 的「Session 拥有准入」无法与「agent 拥有执行」分离。
 
-### 阶段 2：resident 不再包一层（解决 #2 #3）
-
-`admitConversationHandlers` 只有**一个调用点**（residentPetHost.ts:599）。
-
-但 `ResidentPetCoordinator` **不能一并删除** —— 它还拥有 dispatch 提交、
-队列快照、Host 关闭（residentPetHost.ts:614/641/664/672）。**只拆对话包装**，
-保留其 dispatch 与生命周期职责。
-
-前置：阶段 1（否则 Host 与 Session 的边界仍然含糊）。
-
-### 阶段 3：准入归位（解决 #1 #4 #6 #7）
+### 阶段 2：准入归位（解决 #1 #4 #6 #7）
 
 撤销 `sessionCommands` 整层（10 处调用，全在 `serverHandlers.ts` 内，
 无外部引用），准入改由状态所有者裁决：
@@ -213,7 +203,33 @@ serverHandlers×1）。它只需 `threadId` + `modelProfileId`，其余从 Host 
 撤销后要由 Session 级准入覆盖等价保证 —— 且它本来就拦不住跨 peer，
 所以新方案严格更强，不是更弱。
 
-前置：阶段 2（两层协调还在时，撤内层会让外层语义更含糊）。
+前置：阶段 1。
+
+### 阶段 3：resident 不再包一层（解决 #2 #3）
+
+`admitConversationHandlers` 只有**一个调用点**（residentPetHost.ts:599）。
+
+**顺序更正（实施时发现）**：本阶段原排在准入归位之前，是错的。
+`ResidentPetCoordinator` 的对话队列并非「与 local 层重复的一层」——
+它承担着 local 层**根本没有的**职责：
+
+| 职责 | local 层 | 说明 |
+|---|---|---|
+| 对话 ↔ dispatch 互斥 | ❌ 无 | `drain()` 保证同一时刻只跑一个 |
+| 对话优先于 dispatch | ❌ 无 | `conversationQueue.shift() ?? dispatchQueue.shift()` |
+| closing 时拒绝新工作 | ❌ 无 | `ResidentPetOperationCancelledError` |
+| 队列深度快照 | ❌ 无 | `queuedConversations` 在 `studioContract.ts`，**是发布契约** |
+
+`drain()` 把「互斥」和「入队」实现在同一机制里：对话与 dispatch 竞争同一个
+`this.active` 槽位。**拆掉对话入队，互斥就没了**——而按 domains §一.3
+（dispatch 与对话是同一个 Execution），这个互斥恰恰是该保留的。
+
+所以必须**先做准入归位**，让 agent 级准入接管「对话 ↔ dispatch 互斥」，
+之后 resident 的对话队列才真正成为重复层，可以安全拆除。
+
+`queuedConversations` 是发布契约，拆除时需要确认它的替代来源。
+
+前置：阶段 2。
 
 ### 阶段 4：HTTP 能力面对齐（解决 #1 的根）
 
@@ -240,7 +256,7 @@ HTTP 从手写 5 条路由改为**适配同一组能力**，与 stdio 一致。
 0.1 ─┐
 0.2 ─┼─（互不依赖，可并行）
 0.3 ─┘
-      └─→ 1 buildChatSetup → 2 resident 解包 → 3 准入归位 → 4 HTTP 对齐 → 5 ServerDeps 拆解
+      └─→ 1 buildChatSetup → 2 准入归位 → 3 resident 解包 → 4 HTTP 对齐 → 5 ServerDeps 拆解
 ```
 
 ### 每阶段的验证

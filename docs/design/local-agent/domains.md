@@ -21,6 +21,30 @@
 
 **连「一次执行」和「一个会话」是不是同一个东西都没定义过，谈锁多大是空的。**
 
+## 已定：setup 与 invoke 都归 agent
+
+原本就有 agent 这一层 —— `agentChannel.ts`。它现在只剩两样东西：
+`AgentChannelSetup` 类型和 `buildLocalChatAgentInput`（纯装配，不读任何服务）。
+真正的 setup→invoke 链路却散在 5 个文件：
+
+| 环节 | 现在在哪 | 归属 |
+|---|---|---|
+| `AgentChannelSetup` 类型 | `agentChannel.ts` | agent ✅ |
+| `buildLocalChatAgentInput`（纯装配） | `agentChannel.ts` | agent ✅ |
+| `buildChatSetup`（读服务 + 装配） | **`serverTuiSessions.ts`** | agent ❌ **错层** |
+| `streamEvents` / `settleAbortedRun` | `agentGraphService.ts` | agent ✅ |
+| 一次 turn 的编排 | `chatSessionAdapter.ts` | agent ✅ |
+| 生命周期 / 取消 / 收尾 | `serverChatHandler.ts` **和** `residentPetHost.ts` | agent ❌ **两处重复** |
+
+**规则：setup 和 invoke 都属于 agent，一个都不放在 Session 上。**
+
+`buildChatSetup` 是唯一走错层的装配点：它挂在 session 服务上，却在读
+`modelProfiles`、`toolkitInventory`、`capabilityArtifactStore`、`checkpointer`。
+它真正需要的会话信息只有两项：`threadId` 和 `modelProfileId`。
+
+推论：**Session 只提供身份，agent 拿身份去装配执行。Session 不需要知道
+graph 长什么样。** 这同时解答了 §二 D 的存疑（见下）。
+
 ## 已定：Host 只有一种
 
 `serverHandlers` 现在既是「local 模式的完整 Host」，又是「resident 模式的内层
@@ -115,6 +139,10 @@ module-boundaries §二 已经指出这三类的所有权规则不同（长期�
 | module-boundaries §一 的目标结构里 `conversation/` 是独立目录 | 若只是读投影，也许属于 Session 的一个视图，不构成 domain |
 | 投影逻辑（`projectCurrentPlan`、`readSessionCheckpointMessages`）已成组 | |
 
+补充：既然已定「Session 只提供身份、agent 负责装配执行」，Conversation 的问题
+收窄为——**读投影（消息、plan、token 用量）是 Session 的视图，还是独立 domain？**
+它不参与装配，所以与 agent 无关；争点只在 Session 内部。
+
 ### E. Config（配置）
 
 **是什么**：模型档案、review 策略、runtime 配置。
@@ -125,14 +153,26 @@ module-boundaries §二 已经指出这三类的所有权规则不同（长期�
 | `updateReviewPolicy` 有「何时生效」的规则 | 那就说明 Config 只拥有「读取/校验/持久化」，生效时点归 Execution |
 | §二「配置生效规则」已写了快照语义 | |
 
-### F. Transport / wire
+### F. Transport / wire —— **已定：不是 domain，是适配层 + 一条规则**
 
-**是什么**：协议解析、鉴权、路由、事件发送。
+**是什么**：协议解析、鉴权、路由、事件发送。它不拥有任何状态。
 
-| 支持 | 反对/存疑 |
-|---|---|
-| 已落地为 `wire/`，且对 ServerPeer 的依赖是单向的 | 是 domain，还是仅是适配层？ |
-| WS / HTTP / stdio / dispatch 是 4 个传输，行为应当一致 | 若它不拥有任何状态，也许不算 domain |
+**规则：wire 适配不同传输，但能力必须统一。**
+
+这条比「传输面不拥有准入」更强：不只是不许拥有准入，而是**每个传输都必须
+暴露同一组能力**。按此核对现状：
+
+| 传输 | 能力面 | 是否合规 |
+|---|---|---|
+| WebSocket | 13 个 handler | 基准 |
+| **stdio** | 复用**同一个** `peerHandlers` | ✅ 天然一致 |
+| **HTTP** | 自己手写 5 条路由 | ❌ 自成子集 |
+
+stdio 的做法是对的（`attachLocalServerStdioTransport(handlers.peerHandlers)`
+直接接同一组能力）。**HTTP 是唯一重新实现了能力面、而不是适配它的传输。**
+
+所以分叉 #1（HTTP 绕过 `sessionCommands`）不是一条独立的 bug，而是这个违规的
+**症状**：HTTP 自己手写路由，自然也自己决定经过哪些协调。
 
 ---
 
@@ -144,14 +184,15 @@ module-boundaries §二 已经指出这三类的所有权规则不同（长期�
 | **四分** | Host / Session / Conversation / Execution | Session 只管身份与生命周期，Conversation 管内容 |
 | **五分** | 四分 + Config 独立 | 与 module-boundaries §一 的目录结构最接近 |
 
-`wire` 在三种方案里都不算 domain，而是**传输适配层**（不拥有状态）。
+`wire` 在三种方案里都不算 domain，而是**传输适配层**（不拥有状态），
+并受「能力必须统一」这条规则约束。
 
 ---
 
 ## 四、定稿后需要回答
 
 - [ ] 每个 domain 拥有哪些状态，谁能改
-- [ ] `buildChatSetup` 归谁（现在挂在 Session 上，装的是 Execution）
+- [x] `buildChatSetup` 归谁 → **agent**（见「已定」；现在错挂在 Session 上）
 - [ ] `ServerDeps` 按 domain 拆成哪几个契约
 - [ ] resident dispatch 与 chat 是不是同一个 Execution
 - [ ] `modelProfileId` 属于 Session 还是 Config

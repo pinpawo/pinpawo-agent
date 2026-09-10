@@ -18,7 +18,7 @@ module-boundaries §一 写了「同一范围的准入和终结只能有一个�
 
 | # | 分叉 | 现状 |
 |---|---|---|
-| 1 | 同一个 `resumeSession`：WS 经 `sessionCommands`，HTTP 不经 | 真缺口 |
+| 1 | 同一个 `resumeSession`：WS 经 `sessionCommands`，HTTP 不经 | 真缺口；已归因为「HTTP 自建能力面」的症状，见 [domains §二 F](./domains.md) |
 | 2 | resident 模式下 4 层协调叠加 | §一 明确要消除 |
 | 3 | local 与 resident 两层豁免规则不一致 | 各定各的 |
 | 4 | `sessionCommands` per-peer，`activeChatOperations` 全局 | 粒度不匹配 |
@@ -169,15 +169,16 @@ peer message
 
 ---
 
-## 四、待定：传输面与 scope 无关
+## 四、已定：传输面统一能力，不拥有准入
 
 WebSocket / HTTP / stdio / resident dispatch 是 **4 个传输**，不是 4 套准入。
 
-**规则（待确认）：传输面只负责把请求变成「操作 + scope 标识」，
-准入一律由该 scope 的所有者裁决。**
+**规则：wire 适配不同传输，但能力必须统一**（见 [domains §二 F](./domains.md)）。
+传输只把请求变成「操作 + 身份」，准入一律由所有者裁决。
 
-这条若成立，#1 自然消失：HTTP 与 WS 的 `resumeSession` 走同一个 pet 级准入，
-不再取决于走哪个传输进来。
+现状：stdio 复用同一组 `peerHandlers`，天然合规；**HTTP 手写 5 条路由，是唯一
+重新实现能力面的传输**。#1 因此不是独立缺口，而是这个违规的症状 ——
+HTTP 自建路由，自然也自建了「经过哪些协调」。
 
 ---
 

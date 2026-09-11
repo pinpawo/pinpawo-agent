@@ -1,13 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readAgentActivityHealthFields } from './operationActivityState';
 import { isAuthorizedLocalServerRequest } from './wire/auth';
 import type { PetIdentityDeps, RuntimeProjectionDeps } from './serverTypes';
 import { buildLocalHttpRuntimeProjection } from './configProjection';
 
 /**
- * HTTP carries the operational surface only: is this process alive, and which
- * build is it. Conversation capability is the WebSocket/stdio handler set —
- * see [wire 能力统一](../../../docs/design/local-agent/domains.md) §一.6.
+ * HTTP carries one operational read: which build this process is running.
+ * Conversation capability is the WebSocket/stdio handler set — see
+ * [wire 能力统一](../../../docs/design/local-agent/domains.md) §一.6.
  */
 type LocalHttpHandlerOptions = {
   authToken: string;
@@ -23,16 +22,6 @@ export function handleLocalHttpRequest(
   const pathname = url.pathname;
   if (!isAuthorizedLocalServerRequest(req, options.authToken)) {
     writeJson(res, 401, { error: 'unauthorized' });
-    return true;
-  }
-
-  if (pathname === '/health') {
-    writeJson(res, 200, {
-      status: 'ok',
-      pet_id: deps.petId,
-      pet_name: deps.petName,
-      ...readAgentActivityHealthFields(),
-    });
     return true;
   }
 

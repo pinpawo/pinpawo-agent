@@ -16,7 +16,6 @@ import type {
 import { handleLocalHttpRequest } from './httpHandlers';
 import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
 import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
-import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
 import { SessionAdmission } from './sessionAdmission';
 import { ServerChatHandler } from './serverChatHandler';
 import type {
@@ -124,12 +123,23 @@ export function createLocalServerHandlers(
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runAgentTurn ? { runAgentTurn: options.runAgentTurn } : {}),
   });
-  // Ordering a connection's own messages stays with wire; admitting a change
-  // to session state belongs to Session. Keeping them apart is the point:
-  // one Pet can hold several peers, so per-connection ordering cannot admit
-  // a session transition on its own.
-  const sessionCommands = new ServerSessionCommandQueue();
   const sessionAdmission = new SessionAdmission();
+  /**
+   * Session-scoped commands run one at a time.
+   *
+   * A transport delivers messages in order but does not await each handler
+   * (both WebSocket and stdio call onMessage with `void`), so two commands
+   * from the same client can otherwise overlap. State-changing commands are
+   * already serialized by SessionAdmission; this keeps the read-only ones
+   * ordered with respect to them, so a snapshot cannot be taken halfway
+   * through a session switch.
+   */
+  let sessionCommandTail: Promise<void> = Promise.resolve();
+  const runSessionCommand = (command: () => Promise<void>): Promise<void> => {
+    const next = sessionCommandTail.then(command, command);
+    sessionCommandTail = next.then(() => undefined, () => undefined);
+    return next;
+  };
   const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
 
   const loadSnapshot = async (peer?: ServerPeer) => {
@@ -516,9 +526,8 @@ export function createLocalServerHandlers(
     requestId: string,
     admit: () => Promise<void>,
   ) => {
-    // Two different things, deliberately separate: wire keeps this
-    // connection's own messages in arrival order, and Session admits the run.
-    await sessionCommands.waitForIdle(peer);
+    // A chat turn waits for queued session commands, then Session admits it.
+    await sessionCommandTail;
     if (!peer.isConnected()) {
       return;
     }
@@ -577,8 +586,7 @@ export function createLocalServerHandlers(
       tuiSessions.createNewSession(petId);
       console.log(`[local-server] new session created for pet ${petId}`);
     },
-    onRuntimeConfigUpdate: (client, message) => sessionCommands.enqueue(
-      client,
+    onRuntimeConfigUpdate: (client, message) => runSessionCommand(
       async () => {
         try {
           const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
@@ -612,8 +620,7 @@ export function createLocalServerHandlers(
         }
       },
     ),
-    onSessionSnapshotGet: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionSnapshotGet: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -625,8 +632,7 @@ export function createLocalServerHandlers(
         }),
       ),
     ),
-    onSessionList: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -638,8 +644,7 @@ export function createLocalServerHandlers(
         }),
       ),
     ),
-    onSessionNew: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionNew: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -651,8 +656,7 @@ export function createLocalServerHandlers(
         }),
       ),
     ),
-    onSessionResume: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionResume: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -666,8 +670,7 @@ export function createLocalServerHandlers(
         },
       ),
     ),
-    onSessionCompact: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionCompact: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -679,8 +682,7 @@ export function createLocalServerHandlers(
         }),
       ),
     ),
-    onModelList: (client, message) => sessionCommands.enqueue(
-      client,
+    onModelList: (client, message) => runSessionCommand(
       async () => {
         try {
           client.send({
@@ -700,12 +702,10 @@ export function createLocalServerHandlers(
         }
       },
     ),
-    onModelSelect: (client, message) => sessionCommands.enqueue(
-      client,
+    onModelSelect: (client, message) => runSessionCommand(
       () => selectModelProfile(client, message),
     ),
     onClose: (client) => {
-      sessionCommands.clear(client);
       activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
     },

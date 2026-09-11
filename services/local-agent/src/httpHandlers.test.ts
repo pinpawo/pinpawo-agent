@@ -42,7 +42,7 @@ test('handleLocalHttpRequest exposes no conversation capability routes', () => {
   // HTTP carries the operational surface only. Conversation capability lives
   // in the WebSocket/stdio handler set, which the TUI uses via session.list /
   // session.snapshot.get / session.resume.
-  for (const pathname of ['/history', '/snapshot', '/sessions', '/sessions/resume']) {
+  for (const pathname of ['/health', '/history', '/snapshot', '/sessions', '/sessions/resume']) {
     assert.equal(
       handleLocalHttpRequest(makeReq(pathname, 'Bearer secret'), makeRes(), {} as ServerDeps, {
         authToken: 'secret',
@@ -57,66 +57,20 @@ test('handleLocalHttpRequest rejects requests without a valid local token', asyn
   const deps = {} as ServerDeps;
   const options = {
     authToken: 'secret',
-    loadSnapshot: async () => {
-      throw new Error('not called');
-    },
-    listSessions: async () => {
-      throw new Error('not called');
-    },
   };
 
   const missingRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health'), missingRes, deps, options), true);
+  assert.equal(handleLocalHttpRequest(makeReq('/runtime'), missingRes, deps, options), true);
   assert.equal(missingRes.statusCode, 401);
   assert.deepEqual(JSON.parse(missingRes.body), { error: 'unauthorized' });
 
   const wrongRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer wrong'), wrongRes, deps, options), true);
+  assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer wrong'), wrongRes, deps, options), true);
   assert.equal(wrongRes.statusCode, 401);
 
-  const okRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
-    petId: 'pet-a',
-    petName: 'Pet A',
-  } as ServerDeps, options), true);
-  assert.equal(okRes.statusCode, 200);
-  const health = JSON.parse(okRes.body) as Record<string, unknown>;
-  assert.equal(health.pet_id, 'pet-a');
-  assert.equal(health.pet_name, 'Pet A');
-});
-
-test('handleLocalHttpRequest exposes active operation health fields', async () => {
-  clearAgentRunActivity();
-  recordOperationActivity({
-    type: 'operation',
-    requestId: 'req-1',
-    phase: 'started',
-    operation: {
-      kind: 'bash.read_file',
-      title: '读文件',
-      target: 'README.md',
-      summary: 'read',
-    },
-  });
-
-  const res = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), res, {
-    petId: 'pet-a',
-    petName: '羊',
-  } as ServerDeps, {
-    authToken: 'secret',
-  }), true);
-
-  assert.equal(res.statusCode, 200);
-  const payload = JSON.parse(res.body);
-  assert.equal(payload.active_operation_kind, 'bash.read_file');
-  assert.equal(payload.active_operation_title, '读文件');
-  assert.equal(payload.active_operation_target, 'README.md');
-  assert.equal(payload.active_operation_summary, 'read');
-  assert.equal(payload.active_operation_phase, 'started');
-  assert.equal(payload.agent_run_phase, 'using_tool');
-
-  clearAgentRunActivity('req-1');
+  // Authorization is decided before the route body runs, so the rejected
+  // cases need no deps. A valid token reaching a real projection is covered
+  // by the runtime-endpoint test below.
 });
 
 test('Capability HTTP routes are not part of the local server contract', () => {

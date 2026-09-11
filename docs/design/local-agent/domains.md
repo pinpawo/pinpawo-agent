@@ -146,6 +146,13 @@ Studio 从不 `interaction.connect` —— 它订阅的是回调。所以「只�
 拒绝以协议错误 `interaction_busy` 返回，而不是断开 socket —— 客户端要能
 区分「已被占用」和「连不上」。
 
+**推论：per-peer 的命令队列不再需要。** `ServerSessionCommandQueue` 按 peer
+存 tail，为的是多客户端各自保序；只剩一个交互连接后这层没有意义。但**不能
+直接删掉了事** —— 传输层按序投递却不 await handler（WS 与 stdio 都是
+`void onMessage(...)`），同一客户端连发两条命令仍会重叠。所以它收敛为一条
+**Host 级的命令链**：变更类命令本就由 `SessionAdmission` 串行，这条链保证
+只读查询与它们有序，快照不会取在会话切换中间。
+
 ### 4. Conversation = UI 交互 state 管理
 
 **Conversation 是为 TUI / 前端交互提供 state 管理的部分。它管理的 state，
@@ -194,8 +201,8 @@ HTTP 承载的其实是两种不同的东西：
 
 | 路由 | 属于 | 真实消费者 |
 |---|---|---|
-| `/health` | **运维面**（进程是否活着） | macOS 伴侣 `StatusPoller` |
 | `/runtime` | **运维面**（装的哪个版本） | TUI `localHostMetadata` |
+| ~~`/health`~~ | 运维面（存活探针） | 唯一消费者是已停止维护的 macOS 伴侣（已删） |
 | ~~`/snapshot`~~ ~~`/sessions`~~ ~~`/sessions/resume`~~ | 对话能力面 | **零消费者**（已删） |
 
 运维面回答的是「进程」的问题，不是「对话」的问题，它本就不该出现在

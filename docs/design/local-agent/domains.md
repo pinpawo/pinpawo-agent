@@ -146,12 +146,29 @@ Studio 从不 `interaction.connect` —— 它订阅的是回调。所以「只�
 拒绝以协议错误 `interaction_busy` 返回，而不是断开 socket —— 客户端要能
 区分「已被占用」和「连不上」。
 
-**推论：per-peer 的命令队列不再需要。** `ServerSessionCommandQueue` 按 peer
-存 tail，为的是多客户端各自保序；只剩一个交互连接后这层没有意义。但**不能
-直接删掉了事** —— 传输层按序投递却不 await handler（WS 与 stdio 都是
-`void onMessage(...)`），同一客户端连发两条命令仍会重叠。所以它收敛为一条
-**Host 级的命令链**：变更类命令本就由 `SessionAdmission` 串行，这条链保证
-只读查询与它们有序，快照不会取在会话切换中间。
+**推论：命令队列从 per-peer 收敛为 Host 级。** 原 `ServerSessionCommandQueue`
+按 peer 存 tail，为的是多客户端各自保序；只剩一个交互连接后这层没有意义。
+
+但**队列本身要保留** —— 传输层按序投递却不 await handler（WS 与 stdio 都是
+`void onMessage(...)`），同一客户端连发两条命令仍会重叠。
+
+### command 与 message 是两回事
+
+这条区分此前在代码里被名字模糊了，值得写明：
+
+| 概念 | 内容 | 谁串行 |
+|---|---|---|
+| **command** | TUI 的斜杠命令：`/new` `/resume` `/compact` `/model` `/policy` `/refresh`，以及各自开场的列举（`session.list` / `model.list`） | `SessionCommandQueue` |
+| **message** | human message：`chat_request`、`interrupt.resume` | 不入队；等队列排空后由 `SessionAdmission` 准入 |
+
+8 个服务端 handler 与 TUI 的 command registry 一一对应，**没有一个是独立的
+查询** —— `session.list` 是 `/resume` 的第一步，`model.list` 是 `/model` 的
+第一步。
+
+改动前这两个概念被名字混在一起：`ServerSessionCommandQueue` 听起来像只管
+command（实际也确实只管 command，但按 peer 分了没必要的组），而处理 human
+message 的函数叫 `afterSessionCommands`，读起来像是「command 之后的步骤」。
+现在分别是 `SessionCommandQueue` 与 `admitHumanMessage`。
 
 ### 4. Conversation = UI 交互 state 管理
 

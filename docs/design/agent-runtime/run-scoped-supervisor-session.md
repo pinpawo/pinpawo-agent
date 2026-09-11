@@ -25,6 +25,13 @@ Root 承载会话、整体执行流程和 checkpoint。Supervisor 在这个流�
 briefing → Toolkit 绑定 → createAgent 执行 → finalize → 交付，再返回对应 ToolMessage。
 这些步骤不是 Root 上的多次工具调用，也不需要因工具化拆掉原 executor 封装。
 
+Subagent 返回本次执行的 `output` 文本（无交付时为 `null`）、私有消息和产物；
+finalize 可以直接替换 `output`，不必向私有历史追加一条消息再通过消息 ID 查找交付。
+executor 将 output 包装为交付事实，由 Root 写入配对的 ToolMessage；交付引用与
+私有消息 ID 不耦合。不再生成 Announce，不保留 `announceMessageId` 交付选择接口。
+Subagent 只从本次新增的有效回复提取 output，不能把旧回复、工具调用或预算停止提示
+当作本次交付；是否完成任务仍由 Supervisor 验收。
+
 <a id="current-ownership-and-lifetime"></a>
 
 ## 状态：只保存必要事实
@@ -214,6 +221,12 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 [查询器](../../../packages/pet-agent/src/agent/messages/query.ts)按本轮 runId 精确选择工作历史，
 与主会话执行记录共同组成 Supervisor 模型上下文；不扩大 Capability 私有历史可见范围。
 压缩主会话时保留未完成计划任务的实际调用及结果，也保留原私有 lane 记录。
+
+交付、验收和 run 结束均不主动清空 Capability lane。留存记录不会扩大模型可见范围：
+同一 run 的同一 delegation 可继续读取，其他 delegation 和新 run 仍按精确作用域隔离。
+Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执行重新带回已压缩的旧上下文；
+这不是交付后的整 lane 删除。长期留存会增加 checkpoint 存储、序列化及扫描成本，
+若后续需要清理，应另定历史保留策略，不混入交付协议。
 
 每组调用与结果一起选入模型上下文。失败遗留的半组消息沿用
 [工具协议安全过滤](../../../packages/pet-agent/src/agent/messages/protocol.ts)处理输入；

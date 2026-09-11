@@ -92,10 +92,10 @@ for (const scenario of selected) for (let repeat = 1; repeat <= repeats; repeat+
   catch (caught) { error = { name: caught instanceof Error ? caught.name : 'UnknownError' }; }
   const diagnostics = trace.read();
   const behaviorPassed = scenario.expected === 'plan'
-    ? decision?.action === 'execute_plan' && scenario.required!.every((name) => decision.tasks.some((task) => task.capability === name))
-    : scenario.expected === 'reply' ? decision?.action === undefined && Boolean(decision?.reply?.trim())
-    : decision?.action === 'review_current' && decision.completed === (scenario.expected === 'accept')
-      && (scenario.expected === 'accept' ? Boolean(decision.reply?.trim()) : !decision.reply);
+    ? decision?.name === 'submit_plan' && scenario.required!.every((name) => decision.args.tasks.some((task) => task.capability === name))
+    : scenario.expected === 'reply' ? decision?.name === undefined && Boolean(decision?.reply?.trim())
+    : decision?.name === 'review_current' && decision.args.completed === (scenario.expected === 'accept')
+      && (scenario.expected === 'accept' ? Boolean(decision.args.reply?.trim()) : !decision.args.reply);
   const disclosureBudgetPassed = (scenario.name !== 'entry-requested-details' || diagnostics.detailCalls === 1) && diagnostics.detailCalls <= scenario.maxCalls && diagnostics.repeatedQueries === 0;
   const result = { case: scenario.name, mode: input.mode, repeat, passed: !error && behaviorPassed && disclosureBudgetPassed,
     behaviorPassed, disclosureBudgetPassed, maxDetailCalls: scenario.maxCalls,

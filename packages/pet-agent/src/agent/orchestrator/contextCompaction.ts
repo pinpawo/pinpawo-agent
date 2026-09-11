@@ -22,11 +22,6 @@ export type ContextCompactionOptions = {
   keepMessages?: number;
   /** Keep the current logical task summary separate from older conversations. */
   traceId?: string;
-  preserveAnnouncesFor?: {
-    lane: string;
-    runId: string;
-    delegationId: string;
-  };
 };
 
 export type ContextCompactionResult = {
@@ -63,7 +58,6 @@ export function createContextCompactionMessage(
 function selectMessagesToKeep(
   messages: BaseMessage[],
   keepMessages: number,
-  preserveAnnouncesFor: ContextCompactionOptions['preserveAnnouncesFor'],
   preserveExecutionTaskIds: readonly string[] = [],
 ): BaseMessage[] {
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
@@ -79,11 +73,7 @@ function selectMessagesToKeep(
     if (getAgentMessageMetadata(message).lane) return true;
     if (AIMessage.isInstance(message) && message.tool_calls?.some((call) => call.id && preservedCalls.has(call.id))) return true;
     if (ToolMessage.isInstance(message) && preservedCalls.has(message.tool_call_id)) return true;
-    const announce = getDelegationAnnounce(message);
-    return Boolean(preserveAnnouncesFor && announce
-      && announce.sourceLane === preserveAnnouncesFor.lane
-      && announce.runId === preserveAnnouncesFor.runId
-      && announce.delegationId === preserveAnnouncesFor.delegationId);
+    return false;
   });
   const safeMain = new Set(toolProtocolSafeMessages(selected.filter((message) => !getAgentMessageMetadata(message).lane)));
   return selected.filter((message) => getAgentMessageMetadata(message).lane || safeMain.has(message)
@@ -173,7 +163,6 @@ export async function compactOrchestratorMessages(params: {
   const keptMessages = selectMessagesToKeep(
     messages,
     keepMessages,
-    params.options?.preserveAnnouncesFor,
     params.options?.preserveExecutionTaskIds,
   );
   const keptMessageRefs = new Set(keptMessages);

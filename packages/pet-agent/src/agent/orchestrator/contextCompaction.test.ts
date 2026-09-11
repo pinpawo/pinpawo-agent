@@ -261,11 +261,6 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
     model: fakeSummaryModel('summary'),
     options: {
       keepMessages: 1,
-      preserveAnnouncesFor: {
-        lane: 'capability:general',
-        runId: 'run-1',
-        delegationId: 'delegation-1',
-      },
     },
   });
 
@@ -351,41 +346,41 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
 });
 
 test('aggressive compaction keeps all main attempts of unfinished work and summarizes other scopes', async () => {
-  const attempt = (id: string, runId: string) => new DelegationAnnounceMessage({
-    id, sourceLane: 'capability:general', delegationId: 'active', runId, announceMessageId: id,
-    task: 'Verify work.', result: `Evidence ${id}`, createdAt: '2026-09-05T00:00:00Z',
-  });
-  const first = attempt('first', 'previous-run');
-  const second = attempt('second', 'previous-run');
-  const other = attempt('other', 'older-run');
+  const attempt = (id: string, taskId: string) => [
+    new AIMessage({ tool_calls: [{ id, name: 'delegate_capability', args: { execution: { taskId } } }], content: '' }),
+    new ToolMessage({ tool_call_id: id, content: `Evidence ${id}` }),
+  ];
+  const first = attempt('first', 'active');
+  const second = attempt('second', 'active');
+  const other = attempt('other', 'completed');
   let summaryInput = '';
   const recent = new HumanMessage('Continue verification.');
   const result = await compactOrchestratorMessages({
-    messages: [first, other, ...Array.from({ length: 12 }, (_, i) => longMessage(i)), second, recent],
+    messages: [...first, ...other, ...Array.from({ length: 12 }, (_, i) => longMessage(i)), ...second, recent],
     model: fakeSummaryModel('Summary of other work.', (messages) => { summaryInput = String((messages.at(-1) as BaseMessage | undefined)?.content); }),
-    options: { keepMessages: 1, preserveAnnouncesFor: { lane: 'capability:general', runId: 'previous-run', delegationId: 'active' } },
+    options: { keepMessages: 1, preserveExecutionTaskIds: ['active'] },
   });
-  assert.deepEqual(result.messages.slice(2), [first, second, recent]);
-  assert.equal(summaryInput.includes(first.text), false);
-  assert.equal(summaryInput.includes(second.text), false);
-  assert.equal(summaryInput.includes(other.text), true);
+  assert.deepEqual(result.messages.slice(2), [...first, ...second, recent]);
+  assert.equal(summaryInput.includes('Evidence first'), false);
+  assert.equal(summaryInput.includes('Evidence second'), false);
+  assert.equal(summaryInput.includes('Evidence other'), true);
 });
 
 test('compaction separates current-task evidence from older history and folds each summary on resume', async () => {
   const task = (message: BaseMessage) => setAgentMessageMetadata(message, { traceId: 'current-goal' });
-  const evidence = task(new DelegationAnnounceMessage({
-    id: 'active-evidence', sourceLane: 'capability:general', runId: 'previous-run', delegationId: 'active',
-    announceMessageId: 'active-evidence', task: 'Verify changes.', result: 'KEEP_VERBATIM', createdAt: '2026-09-05T00:00:00Z',
-  }));
+  const call = task(new AIMessage({ content: '', tool_calls: [{
+    id: 'active-evidence', name: 'delegate_capability', args: { execution: { taskId: 'active' } },
+  }] }));
+  const evidence = task(new ToolMessage({ tool_call_id: 'active-evidence', content: 'KEEP_VERBATIM' }));
   const requests: string[] = [];
   const model = { invoke: async (messages: BaseMessage[]) => {
     const text = String(messages.at(-1)?.content); requests.push(text);
     return new AIMessage(text.includes('CURRENT_TASK_FACT') ? 'CURRENT_TASK_FACT summary' : 'UNRELATED_TASK_FACT summary');
   } } as unknown as BaseChatModel;
   const options = { traceId: 'current-goal', keepMessages: 1,
-    preserveAnnouncesFor: { lane: 'capability:general', runId: 'previous-run', delegationId: 'active' } };
+    preserveExecutionTaskIds: ['active'] };
   let messages: BaseMessage[] = [new HumanMessage('UNRELATED_TASK_FACT'), task(new HumanMessage('CURRENT_TASK_FACT')),
-    evidence, task(new HumanMessage('Continue.'))];
+    call, evidence, task(new HumanMessage('Continue.'))];
   for (let round = 0; round < 2; round += 1) {
     const result = await compactOrchestratorMessages({ messages, model, options });
     messages = result.messages.slice(1);

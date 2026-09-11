@@ -34,7 +34,8 @@ export type CapabilityFinalizeContext = {
 
 export type CapabilityFinalizeResult = {
   messages?: BaseMessage[];
-  announceMessageId?: string | null;
+  /** Replace the tool output directly; null explicitly means no deliverable. */
+  output?: string | null;
   artifactRefs?: CapabilityArtifactRef[];
 };
 

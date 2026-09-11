@@ -6,7 +6,7 @@
  * with the behavior shipped by the Plugin instead of duplicating them in an
  * agent-runtime eval fixture.
  */
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   createSubagent,
   parseCapabilityDocument,
@@ -43,33 +43,12 @@ function readDefaultProfileId(): string {
   return defaultProfileId.trim();
 }
 
-function readMessageText(message: BaseMessage): string {
-  if (typeof message.content === 'string') return message.content;
-  return message.content.flatMap((block) => {
-    if (typeof block === 'string') return [block];
-    if (block && typeof block === 'object' && 'text' in block && typeof block.text === 'string') {
-      return [block.text];
-    }
-    return [];
-  }).join('');
-}
-
 function countToolCalls(messages: BaseMessage[]) {
   const calls = messages.flatMap((message) => readMessageToolCalls(message));
   return {
     calls,
     count: (name: string) => calls.filter((call) => call.name === name).length,
   };
-}
-
-function findFinalResponse(messages: BaseMessage[]): BaseMessage | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (AIMessage.isInstance(message) && readMessageToolCalls(message).length === 0) {
-      return message;
-    }
-  }
-  return undefined;
 }
 
 async function main() {
@@ -111,13 +90,12 @@ async function main() {
     ];
     for (const [index, request] of turns.entries()) {
       const result = await invoke([...history, new HumanMessage(request)]);
-      const finalMessage = findFinalResponse(result.messages);
       const calls = countToolCalls(result.messages.slice(history.length));
       const snapshot = await service.readSnapshot();
       console.log(`Turn ${index + 1}: ${request}`);
       console.log(`Tool calls: ${calls.calls.map(({ name }) => name).join(' -> ') || '(none)'}`);
-      console.log(`Response: ${finalMessage ? readMessageText(finalMessage) : '(empty)'}`);
-      if (!result.announceMessageId || !finalMessage || !readMessageText(finalMessage).trim()) {
+      console.log(`Response: ${result.output ?? '(empty)'}`);
+      if (!result.output?.trim()) {
         throw new Error(`Turn ${index + 1}: missing natural final response.`);
       }
       if (index < 2) {

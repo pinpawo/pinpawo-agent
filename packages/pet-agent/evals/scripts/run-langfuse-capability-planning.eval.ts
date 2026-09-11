@@ -70,17 +70,18 @@ function supervisorOutput(
   actual: RunSupervisorResult,
 ): CapabilityPlanningEvalOutput {
   const result = readSupervisorDecision(actual);
-  if ((result.action === undefined) || result.action !== 'execute_plan') {
+  if (result.name !== 'submit_plan') {
     return {
-      result: (result.action === undefined) ? 'reply' : result.action,
+      result: result.name ?? 'reply',
       nextTask: null, capabilityName: null,
-      ...(!(result.action === undefined) && result.action === 'review_current'
-        ? { completed: result.completed, reason: result.reason } : {}),
+      ...(result.name === 'review_current'
+        ? { completed: result.args.completed, reason: result.args.reason } : {}),
       remainingPlan: [],
     };
   }
-  const [nextTask, ...remainingPlan] = result.tasks;
-  return { result: result.action, nextTask: nextTask.task, capabilityName: nextTask.capability,
+  const [nextTask, ...remainingPlan] = result.args.tasks;
+  // Keep the existing dataset's outcome label; the control protocol is submit_plan.
+  return { result: 'execute_plan', nextTask: nextTask.task, capabilityName: nextTask.capability,
     remainingPlan: remainingPlan.map((task) => ({ ...task })) };
 }
 

@@ -108,7 +108,7 @@ function readMessageText(message: BaseMessage): string {
     .join('');
 }
 
-function findLatestDeliverableMessageId(
+function readInvocationOutput(
   messages: BaseMessage[],
   inputMessageIds: ReadonlySet<string>,
 ): string | null {
@@ -119,7 +119,7 @@ function findLatestDeliverableMessageId(
     if (readSubagentGuardStopReason(message)) continue;
     if (messageHasToolCalls(message)) continue;
     if (!readMessageText(message).trim()) continue;
-    return message.id ?? null;
+    return readMessageText(message);
   }
   return null;
 }
@@ -342,6 +342,5 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     artifacts,
   });
 
-  const announceMessageId = findLatestDeliverableMessageId(latestMessages, inputMessageIds);
-  return { messages: latestMessages, artifacts, announceMessageId };
+  return { messages: latestMessages, artifacts, output: readInvocationOutput(latestMessages, inputMessageIds) };
 }

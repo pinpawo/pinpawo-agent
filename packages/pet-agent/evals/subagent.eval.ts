@@ -381,7 +381,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   });
 
   return {
-    has_deliverable: result.announceMessageId !== null,
+    has_deliverable: result.output !== null,
     final_text: readFinalText(result.messages),
     called_tools: runtime.calls.map((call) => call.name),
     call_count: runtime.calls.length,

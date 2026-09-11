@@ -91,5 +91,6 @@ export type SubagentRunInput = SubagentInputState & {
 export type SubagentResult = {
   messages: BaseMessage[];
   artifacts: CapabilityArtifactRef[];
-  announceMessageId: string | null;
+  /** This invocation's textual output for the parent tool result, not a history-message reference. */
+  output: string | null;
 };

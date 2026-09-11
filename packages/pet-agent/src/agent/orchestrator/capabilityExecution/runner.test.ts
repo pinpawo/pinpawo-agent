@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, RemoveMessage } from '@langchain/core/messages';
+import { messagesStateReducer } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
@@ -9,7 +10,7 @@ import type { CapabilityArtifactRef } from '../../../types/artifact';
 import { defineInstructionDocument, type CapabilityLifecycle } from '../../../types/capability';
 import { defineToolkit, type AgentToolkit } from '../../../types/toolkit';
 import type { SubagentRunInput } from '../../../types/subagent';
-import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
+import { getAgentMessageMetadata, queryAgentMessages, setAgentMessageMetadata } from '../../messages';
 import { isDelegationBriefingMessage } from '../delegation/briefing';
 import { getDelegationAnnounce } from '../delegation';
 import { PauseTaskInterruptSignal } from '../interrupt/pauseTaskInterrupt';
@@ -56,7 +57,7 @@ function messageScope(request: CapabilityExecutionInput) {
 
 function deliver(run: SubagentRunInput, text = 'Delivered') {
   const message = new AIMessage({ id: `result:${run.runtimeContext?.executionScope?.delegationId}`, content: text });
-  return { messages: [...run.messages, message], artifacts: run.artifacts ?? [], announceMessageId: message.id! };
+  return { messages: [...run.messages, message], artifacts: run.artifacts ?? [], output: message.text };
 }
 
 function artifact(id: string): CapabilityArtifactRef {
@@ -105,6 +106,7 @@ test('executor scopes history and returns an unapplied handoff without persistin
   assert.equal(result.delivery?.text, 'Delivered');
   assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
   assert.equal(result.privateMessages.filter(getDelegationAnnounce).length, 0);
+  assert.equal(result.privateMessages.some((message) => message instanceof RemoveMessage), false);
   assert.deepEqual(messages.map((message) => message.toDict()), before);
 });
 
@@ -125,6 +127,41 @@ test('continuation retains its private scope and returns only this attempt as a 
   assert.deepEqual(result.scope, messageScope(request));
 });
 
+test('retained capability history is private to the exact delegation and run after delivery', async () => {
+  const request = input();
+  const result = await createCapabilityExecutor({ models, runSubagent: async (run) => deliver(run) })(request, hostContext());
+  const stored = messagesStateReducer([...request.history], result.privateMessages);
+  assert.equal(stored.length, request.history.length + 1);
+  assert.deepEqual(queryAgentMessages(stored).main().select().messages, request.history);
+  assert.equal(queryAgentMessages(stored).delegation(messageScope(request)).select().messages[0]?.text, 'Delivered');
+  assert.deepEqual(queryAgentMessages(stored).delegation({ ...messageScope(request), delegationId: 'd2' }).select().messages, []);
+  assert.deepEqual(queryAgentMessages(stored).delegation({ ...messageScope(request), runId: 'r2' }).select().messages, []);
+});
+
+test('executor returns explicit output without requiring a matching private message', async () => {
+  const execute = createCapabilityExecutor({ models, runSubagent: async (run) => ({
+    messages: run.messages, artifacts: [], output: 'Final output independent of private history.',
+  }) });
+  const first = await execute(input(), hostContext());
+  const second = await execute(input(), hostContext());
+  assert.equal(first.status, 'returned');
+  assert.equal(first.delivery?.text, 'Final output independent of private history.');
+  assert.deepEqual(first.privateMessages, []);
+  assert.notEqual(first.delivery?.id, second.delivery?.id);
+});
+
+for (const output of [null, '', '  ']) {
+  test(`finalize can clear a delivery (${JSON.stringify(output)}) without deleting private history`, async () => {
+    const result = await createCapabilityExecutor({ models, runSubagent: async (run) => deliver(run) })(
+      input('d1', [], { finalize: () => ({ output }) }), hostContext(),
+    );
+    assert.equal(result.status, 'missing_deliverable');
+    assert.equal(result.delivery, null);
+    assert.equal(result.privateMessages.length, 1);
+    assert.equal(result.privateMessages[0].text, 'Delivered');
+  });
+}
+
 test('finalize can replace delivery and merge artifacts after runtime release', async () => {
   const events: string[] = [];
   const toolkit = runtimeToolkit(events);
@@ -135,8 +172,8 @@ test('finalize can replace delivery and merge artifacts after runtime release', 
     assert.deepEqual(events, ['resolve:d1', 'release:d1']);
     assert.equal(context.delegationId, 'd1');
     context.recordCapabilityArtifact?.(ref);
-    const message = new AIMessage({ id: 'finalized', content: 'Finalized delivery' });
-    return { messages: [...result.messages, message], announceMessageId: message.id, artifactRefs: [ref] };
+    assert.equal(result.output, 'Delivered');
+    return { output: 'Finalized delivery', artifactRefs: [ref] };
   } });
   try {
     const result = await createCapabilityExecutor({ models, toolkitRuntimeManager: manager, runSubagent: async (run) => {
@@ -169,7 +206,7 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
       }
       const messages = [...run.messages, new AIMessage({ id: 'partial', content: 'Partial work' })];
       if (outcome === 'paused') throw new PauseTaskInterruptSignal({ kind: 'pause_task' }, { messages, artifacts: [artifact('d1')] });
-      return { messages, artifacts: [], announceMessageId: null };
+      return { messages, artifacts: [], output: null };
     } });
     try {
       if (outcome === 'error' || outcome === 'aborted') {

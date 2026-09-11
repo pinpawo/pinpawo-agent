@@ -9,7 +9,6 @@ import {
 } from '../../messages';
 import {
   getDelegationAnnounce,
-  getMessageHandoffSource,
 } from '.';
 
 test('initial delegation materializes one model-only briefing with the stable goal', () => {
@@ -88,5 +87,4 @@ test('briefing is invocation input and never becomes lane routing truth', () => 
   assert.equal(getAgentMessageMetadata(briefing).source, 'delegation_briefing');
   assert.equal(getAgentMessageLane(briefing), null);
   assert.equal(getDelegationAnnounce(briefing), null);
-  assert.equal(getMessageHandoffSource(briefing), null);
 });

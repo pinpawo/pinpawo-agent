@@ -1,7 +1,5 @@
-import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactKind, CapabilityArtifactRef } from '../../../types/artifact';
 import { filterCapabilityArtifacts } from '../capabilityArtifacts';
-import type { CapabilityMessageLane } from '../types';
 import { clipForPrompt } from '../utils';
 
 export const MAX_HANDED_OFF_ANNOUNCE_ARTIFACT_REFS = 5;
@@ -47,12 +45,6 @@ type HandOffFooterArtifactRef = Omit<
 > & {
   kind?: CapabilityArtifactKind;
 };
-export type HandoffMessageSource = {
-  handoffFrom: CapabilityMessageLane;
-  delegationId: string;
-  runId: string;
-};
-export type HandoffSourceResolver = (message: BaseMessage) => HandoffMessageSource | null;
 
 function serializeArtifactFooterRefs(refs: HandOffFooterArtifactRef[]) {
   return refs
@@ -137,32 +129,4 @@ export function buildHandoffArtifactRefs(
       delegationId: artifact.delegationId,
       runId: artifact.runId,
     }));
-}
-
-export function findLatestHandoffCopyForDelegation(
-  messages: BaseMessage[],
-  delegationId: string,
-  handoffFrom: CapabilityMessageLane,
-  runId: string,
-  readHandoffSource: HandoffSourceResolver,
-): AIMessage | null {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (!message || message._getType() !== 'ai') {
-      continue;
-    }
-    const source = readHandoffSource(message);
-    if (!source) {
-      continue;
-    }
-    if (
-      source.delegationId !== delegationId
-      || source.handoffFrom !== handoffFrom
-      || source.runId !== runId
-    ) {
-      continue;
-    }
-    return message as AIMessage;
-  }
-  return null;
 }

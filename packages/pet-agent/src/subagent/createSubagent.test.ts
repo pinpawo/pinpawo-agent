@@ -295,7 +295,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
   });
 
   assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.equal(result.announceMessageId, result.messages.at(-1)?.id);
+  assert.equal(result.output, result.messages.at(-1)?.text);
   const summary = result.messages.find(
     (message) => message.additional_kwargs?.lc_source === 'summarization',
   );
@@ -527,7 +527,7 @@ test('createSubagent ignores a stop marker that arrives in the input history', a
   });
 
   assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.equal(result.announceMessageId, result.messages.at(-1)?.id);
+  assert.equal(result.output, result.messages.at(-1)?.text);
   // The final message is the fresh model answer, not the stale marker.
   assert.equal(readSubagentGuardStopReason(result.messages.at(-1) as BaseMessage), null);
 });
@@ -565,14 +565,14 @@ test('createSubagent default iteration budget is a soft model-call guard', async
   });
 
   assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.equal(result.announceMessageId, progress.id);
+  assert.equal(result.output, progress.text);
   assert.ok(
     model.callCount > 20,
     `expected the raised default budget to allow many model calls, got ${model.callCount}`,
   );
 });
 
-test('createSubagent reports no announce when a limited run has no AI text deliverable', async () => {
+test('createSubagent reports no output when a limited run has no AI text deliverable', async () => {
   const noop = tool(async () => 'x', {
     name: 'noop',
     description: 'no-op',
@@ -585,12 +585,12 @@ test('createSubagent reports no announce when a limited run has no AI text deliv
     promptSections: [],
     messages: [
       new HumanMessage('go'),
-      new AIMessage('上一轮的交付不能充当本轮 announce。'),
+      new AIMessage('上一轮的交付不能充当本轮交付。'),
       new HumanMessage('continue'),
     ],
     maxIterations: 1,
   });
 
   assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.equal(result.announceMessageId, null);
+  assert.equal(result.output, null);
 });

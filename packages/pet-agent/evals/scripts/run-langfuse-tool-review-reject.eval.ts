@@ -243,17 +243,20 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
     runSupervisorRunner: withScriptedDelegation({
       async invoke(supervisorInput) {
         return supervisorInput.mode === 'boundary'
-          ? { completed: true, reason: 'Current task delivery is evidenced.',
-            action: 'review_current',
-            reply: input.subagentFinalResponse,
+          ? {
+            name: 'review_current', args: {
+              completed: true,
+              reason: 'Current task delivery is evidenced.',
+              reply: input.subagentFinalResponse
+            }
           }
           : {
-            action: 'execute_plan',
-            tasks: [{
-            capability: 'general',
-            task: input.delegatedTask,
-          }],
-
+            name: 'submit_plan', args: {
+              tasks: [{
+                capability: 'general',
+                task: input.delegatedTask,
+              }]
+            }
           };
       },
     }),

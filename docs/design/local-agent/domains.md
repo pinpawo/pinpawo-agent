@@ -165,6 +165,18 @@ Studio 从不 `interaction.connect` —— 它订阅的是回调。所以「只�
 查询** —— `session.list` 是 `/resume` 的第一步，`model.list` 是 `/model` 的
 第一步。
 
+**规则：执行期间拒绝一切 command。** 每个 command 要么改变执行正在写入的
+对象（`/new` `/resume` `/model` `/compact` `/policy`），要么报告执行仍在
+产生的状态（`/refresh` —— 它的设计目的正是**执行停止后**刷新 UI）。
+执行中放行任何一个，都是在一个即将变化的会话上动作。
+
+**服务端是权威，客户端只做反馈。** 规则放在命令队列的入口，新增 command
+无法绕过；TUI 同时不再在执行期间弹出 command 面板，但那是 UX，不是强制 ——
+stdio 派生进程同样是客户端。
+
+核对后发现此前**两层都不完整**：TUI 只有 `/policy` `/resume` `/refresh`
+有守卫，服务端只有 4 个走 `transact`。现在服务端 8 个全覆盖。
+
 改动前这两个概念被名字混在一起：`ServerSessionCommandQueue` 听起来像只管
 command（实际也确实只管 command，但按 peer 分了没必要的组），而处理 human
 message 的函数叫 `afterSessionCommands`，读起来像是「command 之后的步骤」。

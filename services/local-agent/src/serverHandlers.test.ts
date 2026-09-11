@@ -549,18 +549,28 @@ test('model selection is rejected while the active session is running', async ()
     });
     await started.promise;
 
+    // Commands are refused while a run holds the session — /refresh included,
+    // since its purpose is to re-read the UI once a run settles.
     await handlers.peerHandlers.onSessionSnapshotGet(peer, {
       type: 'session.snapshot.get',
       requestId: 'snapshot-running',
     });
-    const runningSnapshot = sent.find((message) => (
-      message.type === 'session.snapshot.result'
-      && message.requestId === 'snapshot-running'
-    ));
-    assert.equal(runningSnapshot?.type, 'session.snapshot.result');
-    if (runningSnapshot?.type !== 'session.snapshot.result') return;
-    assert.equal(runningSnapshot.snapshot.session.activeRun?.requestId, 'chat-running');
-    assert.equal(runningSnapshot.snapshot.session.activeRun?.state, 'running');
+    await handlers.peerHandlers.onSessionList(peer, {
+      type: 'session.list',
+      requestId: 'list-running',
+    });
+    const refusals = sent.filter((message) => (
+      message.type === 'session.error'
+      && ['snapshot-running', 'list-running'].includes(message.requestId)
+    )) as Array<{ requestId: string; message: string }>;
+    assert.deepEqual(
+      refusals.map((message) => message.requestId).sort(),
+      ['list-running', 'snapshot-running'],
+      'every command is refused, not only the state-changing ones',
+    );
+    for (const refusal of refusals) {
+      assert.match(refusal.message, /wait for the current response/);
+    }
 
     await handlers.peerHandlers.onModelSelect(peer, {
       type: 'model.select',
@@ -627,7 +637,11 @@ test('completion snapshot does not reintroduce a settled active run', async () =
       message: 'finish',
     });
     await refreshStarted.promise;
+    releaseRefresh.resolve();
+    await running;
 
+    // Snapshot after the run settles: commands are refused while one is in
+    // flight, and /refresh exists precisely to re-read the UI once it ends.
     await handlers.peerHandlers.onSessionSnapshotGet(peer, {
       type: 'session.snapshot.get',
       requestId: 'snapshot-settled',
@@ -639,9 +653,6 @@ test('completion snapshot does not reintroduce a settled active run', async () =
     assert.equal(snapshot?.type, 'session.snapshot.result');
     if (snapshot?.type !== 'session.snapshot.result') return;
     assert.equal(snapshot.snapshot.session.activeRun, null);
-
-    releaseRefresh.resolve();
-    await running;
   } finally {
     releaseRefresh.resolve();
     handlers.close();

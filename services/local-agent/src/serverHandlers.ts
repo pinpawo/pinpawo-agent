@@ -70,6 +70,9 @@ type SessionSummarySource = Pick<
   'id' | 'title' | 'messageCount' | 'createdAt' | 'updatedAt' | 'active'
 >;
 
+/** Shown whenever a command is refused because a run holds the session. */
+const RUN_IN_FLIGHT_MESSAGE = 'wait for the current response to finish';
+
 type ActiveChatRun = {
   requestId: string;
   startedAt: number;
@@ -126,6 +129,41 @@ export function createLocalServerHandlers(
   });
   const sessionAdmission = new SessionAdmission();
   const sessionCommands = new SessionCommandQueue();
+  /**
+   * Commands are refused while a run is in flight.
+   *
+   * Every command either changes what the run is writing to (`/new`,
+   * `/resume`, `/model`, `/compact`, `/policy`) or reports state the run is
+   * still producing (`/refresh`, whose purpose is to re-read the UI *after* a
+   * run settles). Admitting any of them mid-run means acting on a session
+   * that is about to change under the caller.
+   *
+   * The rule lives at this boundary so a new command cannot be added without
+   * it, and on the server because that is the only place the invariant can be
+   * held — a client blocking its command panel is feedback, not enforcement.
+   */
+  const runSessionCommand = (
+    command: () => Promise<void>,
+    refuse: () => void,
+  ) => sessionCommands.enqueue(async () => {
+    if (sessionAdmission.hasActiveRun()) {
+      refuse();
+      return;
+    }
+    await command();
+  });
+  const refuseSessionCommand = (
+    peer: ServerPeer,
+    requestId: string,
+    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
+  ) => () => {
+    peer.send({
+      type: 'session.error',
+      requestId,
+      operation,
+      message: RUN_IN_FLIGHT_MESSAGE,
+    });
+  };
   const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
 
   const loadSnapshot = async (peer?: ServerPeer) => {
@@ -581,7 +619,7 @@ export function createLocalServerHandlers(
       tuiSessions.createNewSession(petId);
       console.log(`[local-server] new session created for pet ${petId}`);
     },
-    onRuntimeConfigUpdate: (client, message) => sessionCommands.enqueue(
+    onRuntimeConfigUpdate: (client, message) => runSessionCommand(
       async () => {
         try {
           const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
@@ -614,8 +652,16 @@ export function createLocalServerHandlers(
           });
         }
       },
+      () => {
+        if (!message.requestId) return;
+        client.send({
+          type: 'runtime_config.error',
+          requestId: message.requestId,
+          message: RUN_IN_FLIGHT_MESSAGE,
+        });
+      },
     ),
-    onSessionSnapshotGet: (client, message) => sessionCommands.enqueue(
+    onSessionSnapshotGet: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -626,8 +672,9 @@ export function createLocalServerHandlers(
           snapshot: await loadSnapshot(client),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'snapshot'),
     ),
-    onSessionList: (client, message) => sessionCommands.enqueue(
+    onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -638,8 +685,9 @@ export function createLocalServerHandlers(
           sessions: await listSessions(),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'list'),
     ),
-    onSessionNew: (client, message) => sessionCommands.enqueue(
+    onSessionNew: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -650,8 +698,9 @@ export function createLocalServerHandlers(
           ...await createSession(),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'new'),
     ),
-    onSessionResume: (client, message) => sessionCommands.enqueue(
+    onSessionResume: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -664,8 +713,9 @@ export function createLocalServerHandlers(
           };
         },
       ),
+      refuseSessionCommand(client, message.requestId, 'resume'),
     ),
-    onSessionCompact: (client, message) => sessionCommands.enqueue(
+    onSessionCompact: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -676,8 +726,9 @@ export function createLocalServerHandlers(
           ...await compactSession(message.sessionId),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'compact'),
     ),
-    onModelList: (client, message) => sessionCommands.enqueue(
+    onModelList: (client, message) => runSessionCommand(
       async () => {
         try {
           client.send({
@@ -696,9 +747,11 @@ export function createLocalServerHandlers(
           );
         }
       },
+      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
     ),
-    onModelSelect: (client, message) => sessionCommands.enqueue(
+    onModelSelect: (client, message) => runSessionCommand(
       () => selectModelProfile(client, message),
+      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
     ),
     onClose: (client) => {
       activeChatRuns.delete(client);

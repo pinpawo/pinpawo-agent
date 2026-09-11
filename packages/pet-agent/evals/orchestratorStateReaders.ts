@@ -1,6 +1,6 @@
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state';
 import { currentSupervisorTask, runSupervisorStateSchema } from '../src/agent/orchestrator/runSupervisor/state';
-import { executionsForTask } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
+import { executionsForTask } from '../src/agent/orchestrator/executionMessages';
 import { readCapabilityCall } from '../src/agent/orchestrator/runtime/delegationToolResult';
 
 export type EvalOrchestratorStateSnapshot = Partial<OrchestratorStateType> & Record<string, unknown>;
@@ -29,11 +29,10 @@ export function readRunDelegationSummaries(result: EvalOrchestratorStateSnapshot
     const latest = executionsForTask({ messages: result.messages ?? [] }, task.id)
       .filter(({ metadata }) => metadata.runId === result.runId).at(-1);
     if (!latest) return [];
-    const delivery = result.sessionDelegationResults?.filter((delivery) => delivery.scope.delegationId === latest.execution.delegationId
-      && delivery.scope.runId === result.runId).at(-1);
+    const delivery = latest.result?.delivery;
     return [{ id: latest.execution.delegationId, lane: `capability:${task.capability}` as const, task: task.task,
       status: task.status === 'completed' ? 'completed' as const : task.status === 'superseded' ? 'superseded' as const
-        : task.status === 'returned' ? 'progress' as const : 'pending' as const,
+        : latest.result?.status === 'returned' ? 'progress' as const : 'pending' as const,
       resultPreview: delivery?.text ?? null }];
   });
 }
@@ -45,7 +44,7 @@ export function readTaskActiveDelegation(result: EvalOrchestratorStateSnapshot) 
   if (!latest) return null;
   return { id: latest.execution.delegationId, lane: `capability:${task.capability}` as const,
     task: task.task, contextSummary: latest.execution.guidance, runId: String(latest.metadata.runId),
-    traceId: String(latest.metadata.traceId), status: task.status === 'returned' ? 'awaiting_decision' : 'pending',
+    traceId: String(latest.metadata.traceId), status: latest.result?.status === 'returned' ? 'awaiting_decision' : 'pending',
     resultPreview: null, userRequest: parsed.success ? parsed.data.goal ?? '' : '' };
 }
 export function hasObservedDelegation(result: EvalOrchestratorStateSnapshot): boolean {

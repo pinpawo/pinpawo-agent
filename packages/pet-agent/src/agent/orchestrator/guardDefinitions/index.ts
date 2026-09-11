@@ -2,7 +2,6 @@ export {
   ORCHESTRATOR_GUARD_NAME,
   ORCHESTRATOR_GUARD_POSITION,
   type ContextCompactionWatermarkGuardConfig,
-  type EmptyGuardConfig,
   type OrchestratorGuardName,
   type OrchestratorGuardPosition,
   type RunIterationLimitGuardConfig,
@@ -17,8 +16,3 @@ export {
   runIterationLimitGuard,
   type RunIterationLimitGuardState,
 } from './runIterationLimitGuard';
-export {
-  RUN_STATE_RESET_REQUIRED,
-  runStateResetGuard,
-  type RunStateResetGuardState,
-} from './runStateResetGuard';

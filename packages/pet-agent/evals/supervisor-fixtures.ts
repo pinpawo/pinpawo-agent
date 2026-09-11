@@ -36,7 +36,7 @@ export function supervisorFixture(params: {
     runId: params.runId, traceId: params.runId, userRequest: params.goal, messages,
     catalog: params.catalog, capabilityDisclosure: createCapabilityDisclosureState({ catalog: params.catalog }),
     state: { goal: params.goal, plan: [
-      ...(params.task ? [{ id: 'current', task: params.task, capability, status: params.evidence ? 'returned' as const : 'pending' as const }] : []),
+      ...(params.task ? [{ id: 'current', task: params.task, capability, status: 'pending' as const }] : []),
       ...(params.remaining ?? []).map((task, i) => ({ ...task, id: `next:${i}`, status: 'pending' as const })),
     ] },
   };
@@ -51,7 +51,7 @@ export function supervisorFixture(params: {
       },
     }] }), metadata),
     setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id, content: JSON.stringify({
-      status: 'returned', delivery: { id: `delivery:${id}`, text: params.evidence,
+      status: 'returned', delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
         scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } },
     }) }), metadata),
   ] };

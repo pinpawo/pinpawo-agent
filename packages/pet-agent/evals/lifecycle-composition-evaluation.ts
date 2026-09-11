@@ -48,7 +48,6 @@ export function evaluateLifecycleCompositionInvariants(params: {
     | 'messages'
     | 'runSupervisorState'
     | 'runIterationCount'
-    | 'runSupervisorReply'
   >;
   assistantMessageCount: number;
   executorCallCount: number;
@@ -63,8 +62,8 @@ export function evaluateLifecycleCompositionInvariants(params: {
     (message: BaseMessage) => getAgentMessageLane(message) !== null,
   );
   const current = currentSupervisorTask(state.runSupervisorState);
-  const cleanCheckpoint = current === null && state.runSupervisorReply === null;
-  const resumableCheckpoint = current !== null && state.runSupervisorReply === null;
+  const cleanCheckpoint = current === null;
+  const resumableCheckpoint = current !== null;
   const checkpointStateMatches = params.expectedCheckpointState === 'clean' ? cleanCheckpoint : resumableCheckpoint;
   // Older private scopes may remain physically stored. Isolation means every
   // private record retains its owner, not that old execution history is erased.
@@ -82,7 +81,6 @@ export function evaluateLifecycleCompositionInvariants(params: {
         expected: params.expectedCheckpointState,
         runSupervisorState: state.runSupervisorState,
         runIterationCount: state.runIterationCount,
-        runSupervisorReply: state.runSupervisorReply,
       }),
     },
     {

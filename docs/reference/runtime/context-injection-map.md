@@ -1,5 +1,10 @@
 # Context Injection Map
 
+> 2026-09-11：本文部分上下文描述仍保留旧 Announce / active delegation 设计，
+> 不作为当前状态与交接契约。当前实现及待审查设计以
+> [Root、Supervisor 与 Capability 的状态与交接](../../design/agent-runtime/run-scoped-supervisor-session.md)
+> 为准；下方图与终端回复来源已同步本轮节点清理。
+
 > Scope: every model-invoking node in the orchestrator graph, and exactly what
 > enters its context window.
 > Audience: written to be read by an LLM working on this repo. Each node section
@@ -54,12 +59,12 @@ without publishing the result again. Section 5 distinguishes these input paths.
 
 ```
 START
-  └─> prepare ──────────────> compactContext ──┬─> captureUserRequest ─> entryAnswer
-                                               ├─> supervisorBoundaryIterationGuard
-                                               └─> capability
-      entryAnswer ─(plan_request)─> runSupervisor ─┬─> capability
-                                                       └─> answer (current finalizer)
-      capability ─────> supervisorBoundaryIterationGuard ─> runSupervisor
+  └─> prepare ─> compactContext ─> captureUserRequest ─> entryAnswer
+      entryAnswer ─(plan_request / continue)─> runSupervisor ─┬─> capability
+                                                            └─> answer ─> END
+      entryAnswer ─(direct reply)─> END
+      capability ─(result)─> runSupervisor
+      capability ─(paused)─> pauseGate ─(native resume)─> runSupervisor
 ```
 
 Model-invoking nodes: **entryAnswer**, **runSupervisor**, **capability**
@@ -247,7 +252,8 @@ Continuation uses the same shape with `mode="continue"` and optional
 
 ## 7. Current node: answer
 
-The terminal node `runtime/nodes/answer.ts` emits `runSupervisorReply` exactly
+The terminal node `runtime/nodes/answer.ts` reads the committed current-run
+Supervisor reply from its messages and emits it exactly
 once and clears run-scoped state. It does not invoke a model. Root iteration
 limits and incompatible checkpoints have deterministic notices. An empty reply
 without a runtime stop is a protocol error, not a request for a fallback answer.

@@ -22,8 +22,7 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterCapability } from './routes/afterCapability';
-import { afterPauseGate, pauseGate } from './nodes/pauseGate';
-import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
+import { pauseGate } from './nodes/pauseGate';
 import { createRunTerminationHandlers } from './runTermination';
 
 // --- Graph builder ---
@@ -33,36 +32,29 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const afterSupervisorBoundaryIterationGuard =
-    createAfterSupervisorBoundaryIterationGuard();
   const runSupervisor = createRunSupervisorNode(config);
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
-  const resultAnswer = createAnswerNode(config);
+  const resultAnswer = createAnswerNode();
   const capabilityNode = createCapabilityNode({
     config,
-    onNodeError: runTermination.onNodeError,
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   });
-  // Graph-visible anchor for post-execution budget checking. Its
-  // conditional edge owns deterministic guard evaluation and telemetry only;
-  // it must not grow state updates or user-facing output.
-  const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare, { ends: ['answer', 'compactContext'] })
-    .addNode('compactContext', compactContext)
-    .addNode('captureUserRequest', captureRunUserRequest)
+    .addNode('prepare', prepare, { ends: ['answer', 'compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('compactContext', compactContext, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('captureUserRequest', captureRunUserRequest, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('entryAnswer', entryAnswer, {
-      ends: ['runSupervisor'],
+      ends: ['runSupervisor', 'answer', 'throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
     })
     .addNode('runSupervisor', runSupervisor, {
       ends: ['answer', 'capability', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
-    .addNode('supervisorBoundaryIterationGuard', supervisorBoundaryIterationGuard)
     .addNode('answer', resultAnswer, {
       ends: ['throwRunFailure'],
       errorHandler: runTermination.onNodeError,
@@ -72,24 +64,18 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       errorHandler: runTermination.onNodeError,
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
-    .addNode('pauseGate', pauseGate)
+    .addNode('pauseGate', pauseGate, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addEdge(START, 'prepare')
     // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
     .addEdge('compactContext', 'captureUserRequest')
     .addEdge('captureUserRequest', 'entryAnswer')
-    .addConditionalEdges('supervisorBoundaryIterationGuard', afterSupervisorBoundaryIterationGuard, {
-      answer: 'answer',
-      runSupervisor: 'runSupervisor',
-    })
     .addEdge('entryAnswer', END)
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
       pauseGate: 'pauseGate',
-      supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
-    })
-    .addConditionalEdges('pauseGate', afterPauseGate, {
       runSupervisor: 'runSupervisor',
-    });
+    })
+    .addEdge('pauseGate', 'runSupervisor');
 
   return graph.compile({
     checkpointer: config.checkpoint,

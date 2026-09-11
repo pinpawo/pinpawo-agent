@@ -1,3 +1,4 @@
+import { readDelegationDeliveries } from '../../src/agent/orchestrator/executionMessages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
@@ -304,7 +305,6 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const finalState = await resumedRun.output as {
     __interrupt__?: unknown;
     messages?: BaseMessage[];
-    sessionDelegationResults?: Array<{ text: string }>;
     sessionToolAuthorizations?: { records?: unknown[] };
   };
   const messages = Array.isArray(finalState.messages)
@@ -314,7 +314,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
   const rejectedToolResultSeenBySubagent = resumedSubagentInput.some((message) =>
     ToolMessage.isInstance(message)
     && message.tool_call_id === input.firstToolCall.id);
-  const handoffText = finalState.sessionDelegationResults?.at(-1)?.text ?? '';
+  const handoffText = readDelegationDeliveries(messages).at(-1)?.text ?? '';
 
   return {
     interrupted: true,

@@ -171,7 +171,6 @@ results cross boundaries and private control detail does not:
 
 | Guard | Position | Verb | Details |
 | --- | --- | --- | --- |
-| `run_state_reset` | `orchestrator.prepare` | `derive` | — |
 | `context_compaction_watermark` | `orchestrator.context_compaction` | `maintain` | `latestInputTokens`, `watermarkTokens`, `mainMessageCount`, `keepMessages` |
 | `run_iteration_limit` | `orchestrator.supervisor_boundary_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
 | `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
@@ -179,6 +178,12 @@ results cross boundaries and private control detail does not:
 Subagent context summarization uses LangChain middleware and is not a custom
 guard. Capability discovery and delegation acceptance likewise have no guard
 definitions in the current implementation.
+
+Fresh-run initialization now belongs exclusively to `buildOrchestratorRunInput`;
+`prepare` validates the supplied identity and current-run user message instead of
+deriving a reset. The run iteration guard executes at the `runSupervisor` entrance
+for both execution returns and native pause resumes. Its telemetry position is
+unchanged; there is no separate empty budget node.
 
 ## What There Is No More
 

@@ -6,6 +6,71 @@
 
 [English version](delegation-boundary-protocol.md)。中英文描述同一套设计。文件路径沿用原名，避免已有链接失效。
 
+## 流程总览
+
+以下两图对应 [PR #791](https://github.com/pinpawo/pinpawo-agent/pull/791) 合并后的实现。Entry 和 Boundary 是同一个 Supervisor 的两种调用场景。Supervisor 负责判断，root 保存状态并落实决定，Capability 执行具体任务。
+
+![Supervisor 在 Agent 中的位置：用户提供目标，Supervisor 规划、验收与调整，root 保存状态并落实决策，Capabilities 执行任务。](assets/supervisor-position.png)
+
+职责概念图，具体路由见以下流程图。[图像生成提示词](assets/supervisor-position.prompt.md)。
+
+### 整体执行流程
+
+```mermaid
+flowchart TD
+    U["用户请求"] --> EA["entryAnswer<br/>理解请求、确定目标"]
+    EA -->|"直接回答或需要澄清"| OUT["回复用户"]
+    EA -->|"需要执行：plan_request"| SE["Supervisor · Entry<br/>制定执行计划"]
+
+    SE -->|"submit_plan"| D["root 保存计划<br/>取出第一项或下一项"]
+    SE -->|"缺少必要信息"| OUT
+    D --> C["Capability 执行当前 delegation"]
+    C -->|"正常交付"| M["Announce 写入 main<br/>记录执行证据"]
+    M --> SB["Supervisor · Boundary<br/>依据目标和当前 task 验收"]
+
+    SB -->|"review_current：未完成"| CONT["root 保留当前 delegation<br/>携带反馈继续"]
+    CONT --> C
+    SB -->|"review_current：已完成"| ACCEPT["root 验收当前 task"]
+    ACCEPT -->|"有后续任务，未要求回复"| D
+    ACCEPT -->|"带回复：收尾或暂留后续工作"| OUT
+
+    SB -->|"当前任务缺少用户信息"| ASK["询问用户<br/>保留未完成工作"]
+    ASK --> NEW["用户补充进入 main"]
+    NEW --> SB
+```
+
+Announce 是执行证据，写入 main 不等于验收。最后一项派发时，root 保存的剩余计划已经为空；验收时通过 `review_current(completed=true, reason, reply)` 收尾，不再要求模型回填计划。Supervisor 的普通询问结束本轮并保存未完成工作，用户补充后再进入对应入口；它不创建 pause interrupt。
+
+### 暂停恢复与计划调整
+
+```mermaid
+flowchart TD
+    C["delegation 执行中"] -->|"用户暂停／abort 经整理"| P["pauseGate<br/>保存进度并挂起"]
+    P --> RESUME{"用户恢复"}
+    RESUME -->|"仅继续，无补充"| C
+    RESUME -->|"带新输入"| M["补充写入 main<br/>保留旧 delegation 与计划"]
+    M --> S["Supervisor · Boundary<br/>先理解补充，再决定执行"]
+
+    S -->|"信息不足"| Q["回复询问<br/>保留未完成工作"]
+    Q -->|"用户补充"| M
+    S -->|"无需改计划"| REVIEW["review_current<br/>继续当前任务或验收推进"]
+    S -->|"需要调整"| ADJUST["adjust_plan<br/>更新目标与完整待执行计划"]
+    ADJUST --> CHOICE{"当前 delegation 如何处理？"}
+
+    CHOICE -->|"continue"| KEEP["保留身份与私有历史<br/>更新当前 task，保持 Capability"]
+    CHOICE -->|"replace"| REPLACE["保留旧记录，标记已替换<br/>创建新的 delegation"]
+    KEEP --> APPLY["root 原子提交决定"]
+    REPLACE --> APPLY
+    APPLY --> RUN["执行调整后的第一项任务"]
+    REVIEW --> NORMAL["进入正常执行／收尾流程"]
+```
+
+`adjust_plan` 仅在有新用户输入的 Boundary 开放；`review_current` 只验收或给出继续反馈。替换旧 delegation 不代表验收成功。工具 Review 的批准仍继续原工具调用，不经过图中的任务暂停恢复判断。
+
+这两图省略了上下文压缩、迭代上限和异常终止分支。Supervisor 读取当前逻辑任务的 main 对话与 Announce，以及 root 提供的目标、当前任务和剩余计划；Capability 的私有工具历史保留在各自 delegation 内。
+
+实现依据：[root graph](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)、[pauseGate](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/pauseGate.ts)、[Supervisor 决策落实](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts)、[控制协议](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/protocol.ts)。
+
 ## 用户输入驱动的计划调整（2026-09-09）
 
 暂停后带新输入的恢复先进入 Supervisor Boundary，再执行 Capability；空继续仍直接恢复，Review 审批仍沿原中断链处理。旧 resume_active 入口采用同一规则。

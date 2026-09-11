@@ -3,27 +3,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
 import { createMiddleware } from 'langchain';
-import { z } from 'zod';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
-import { controlSchema, supervisorControlSchemas, type SupervisorControl } from './protocol';
-export { supervisorControlSchemas, type SupervisorControl } from './protocol';
+import { executionsForTask } from '../executionMessages';
+import { capabilityHandoffSchema, controlSchema, supervisorControlSchemas, type SupervisorControl } from './protocol';
 import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState } from './state';
-
-
-const executionSchema = z.object({
-  taskId: z.string().min(1),
-  delegationId: z.string().min(1),
-  capability: z.string().min(1),
-  task: z.string().min(1),
-  mode: z.enum(['initial', 'continue']),
-  guidance: z.string().nullable(),
-}).strict();
-
-/** Root's actual tool input, not a second model-selected tool or a pending slot. */
-export const capabilityHandoffSchema = z.object({
-  control: controlSchema,
-  execution: executionSchema,
-}).strict();
+export { supervisorControlSchemas, type SupervisorControl } from './protocol';
 
 export type SupervisorHandoffContext = {
   state: RunSupervisorState;
@@ -85,39 +69,6 @@ function identity(kind: string, ...parts: string[]) {
   return `${kind}:${createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32)}`;
 }
 
-export function executionsForTask(context: Pick<SupervisorHandoffContext, 'messages'>, taskId: string) {
-  return context.messages.flatMap((message) => {
-    if (!AIMessage.isInstance(message) || getAgentMessageMetadata(message).lane) return [];
-    const metadata = getAgentMessageMetadata(message);
-    return (message.tool_calls ?? []).flatMap((call) => {
-      if (call.name !== 'delegate_capability') return [];
-      const parsed = capabilityHandoffSchema.safeParse(call.args);
-      return parsed.success && parsed.data.execution.taskId === taskId
-        ? [{ call, metadata, execution: parsed.data.execution }] : [];
-    });
-  });
-}
-
-function hasDelivery(context: SupervisorHandoffContext, taskId: string) {
-  const calls = executionsForTask(context, taskId);
-  return context.messages.some((message) => {
-    if (!ToolMessage.isInstance(message) || getAgentMessageMetadata(message).lane
-      || message.name !== 'delegate_capability') return false;
-    const execution = calls.find(({ call }) => call.id === message.tool_call_id);
-    if (!execution) return false;
-    if (typeof message.content !== 'string') return false;
-    try {
-      const result = JSON.parse(message.content);
-      return result.status === 'returned' && typeof result.delivery?.text === 'string'
-        && result.delivery.text.trim().length > 0
-        && result.delivery.scope?.runId === execution.metadata.runId
-        && result.delivery.scope?.traceId === execution.metadata.traceId
-        && result.delivery.scope?.delegationId === execution.execution.delegationId
-        && result.delivery.scope?.lane === `capability:${execution.execution.capability}`;
-    } catch { return false; }
-  });
-}
-
 /** One domain transition, used at the Supervisor exit and checked again at Root. */
 function resolveControl(context: SupervisorHandoffContext, control: SupervisorControl, controlCallId: string) {
   if (!context.runId || !context.traceId || !controlCallId) throw new Error('Handoff requires run and call identities.');
@@ -144,7 +95,7 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
       throw new Error('Continuing a task must keep its capability.');
     }
     const retained = (control.name === 'submit_plan' ? [] : state.plan).filter((task) => task.status === 'completed' || task.status === 'superseded'
-      || (task.status !== 'pending' && !(reuse && task.id === current?.id)))
+      || (executionsForTask(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
       .map((task) => task.status === 'completed' ? task : { ...task, status: 'superseded' as const });
     state = {
       goal: control.name === 'adjust_plan' ? control.args.goal : context.userRequest,
@@ -157,9 +108,10 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
     guidance = control.name === 'adjust_plan' ? control.args.reason : null;
   } else {
     const { completed, reason } = control.args;
+    const latestResult = current ? executionsForTask(context, current.id).at(-1)?.result : null;
     reply = control.args.reply ?? null;
     if (completed === true) {
-      if (!current || current.status !== 'returned' || !hasDelivery(context, current.id)) {
+      if (!current || !latestResult || latestResult.status !== 'returned' || !latestResult.delivery) {
         throw new Error('Accepting a task requires its returned delivery.');
       }
       state = updateSupervisorTask(state, current.id, 'completed');
@@ -167,7 +119,7 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
       if (!current) throw new Error('There is no task to continue.');
       if (reply) throw new Error('Ask directly instead of combining retry with a reply.');
       guidance = reason;
-    } else if (current?.status === 'returned' && !reply) {
+    } else if (latestResult?.status === 'returned' && !reply) {
       throw new Error('Review must decide whether the returned task is complete.');
     }
   }
@@ -181,7 +133,7 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
     throw new Error('Cannot dispatch again while the current execution has no result.');
   }
   return {
-    state: updateSupervisorTask(state, next.id, 'executing'),
+    state,
     execution: {
       taskId: next.id,
       delegationId: previous?.execution.delegationId ?? identity('delegation', context.runId, next.id),

@@ -6,6 +6,12 @@ The current refactoring direction is in [Root and Supervisor state boundaries](r
 
 [中文版本](delegation-boundary-protocol.zh-CN.md). Both versions describe the same design. Existing file paths are retained to preserve links.
 
+The [Chinese flow overview](delegation-boundary-protocol.zh-CN.md#流程总览) includes diagrams of the execution loop and pause/resume with plan adjustment, aligned with merged PR #791.
+
+![Supervisor plans, reviews and adjusts; root applies decisions and Capabilities execute tasks.](assets/supervisor-position.png)
+
+[Image generation prompt](assets/supervisor-position.prompt.md).
+
 ## User-directed plan adjustment (2026-09-09)
 
 A task pause with new user text resumes through Supervisor Boundary before any

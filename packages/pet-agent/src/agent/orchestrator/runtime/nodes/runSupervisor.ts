@@ -5,29 +5,27 @@ import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import { createRunSupervisorAgent } from '../../runSupervisor/agent';
 import { resolveCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
 import { acceptSupervisorMessageHandoff } from '../../runSupervisor/messageHandoff';
-import { buildRunSupervisorInput, isSupervisorDispatch, supervisorHandoffContext } from '../../runSupervisor/input';
-import type { RunSupervisorDispatch } from '../../runSupervisor/runner';
+import { buildRunSupervisorInput, readSupervisorMode, supervisorHandoffContext } from '../../runSupervisor/input';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { getAgentMessageMetadata } from '../../../messages';
-import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
+import { runIterationBudgetReached } from '../guards/runIterationBudget';
 
 export function createRunSupervisorNode(config: OrchestratorConfig) {
   const runner = config.runSupervisorRunner ?? createRunSupervisorAgent({
     model: config.models.act, defaultCapabilityName: config.defaultCapabilityName,
   });
-  return async (nodeInput: OrchestratorStateType | RunSupervisorDispatch, runnableConfig?: RunnableConfig) => {
-    const root = isSupervisorDispatch(nodeInput) ? nodeInput.root : nodeInput;
-    if (!isSupervisorDispatch(nodeInput) && !root.runSupervisorState.plan.length) {
+  return async (root: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
+    if (readSupervisorMode(root) === 'boundary' && !root.runSupervisorState.plan.length) {
       return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' }, goto: 'answer' });
     }
-    if (root.runIterationCount >= ORCHESTRATOR_MAX_ITERATIONS) return new Command({ goto: 'answer' });
+    if (runIterationBudgetReached(root, runnableConfig)) return new Command({ goto: 'answer' });
     const catalog = createCapabilityCatalog({
       registry: getInvokeRegistry(runnableConfig),
       allowedCapabilityNames: getInvokeOptions(runnableConfig).allowedCapabilityNames,
     });
-    const input = buildRunSupervisorInput({ nodeInput, catalog,
+    const input = buildRunSupervisorInput({ root, catalog,
       capabilityDisclosure: resolveCapabilityDisclosureState({ current: root.runCapabilityDisclosure, catalog }),
     });
     const result = await runner.invoke(input, runnableConfig);
@@ -45,21 +43,19 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
     const common = {
       runCapabilityDisclosure: result.capabilityDisclosure,
       runSupervisorUserMessageId: input.inputId.startsWith('human:') ? input.inputId : root.runSupervisorUserMessageId,
-      runUserRequest: input.userRequest,
     };
     if (result.reply !== undefined) {
       const last = result.messages.at(-1);
       if (!result.reply.trim() || !AIMessage.isInstance(last) || last.tool_calls?.length || last.text !== result.reply) {
         throw new Error('Supervisor final reply must match its actual final AIMessage.');
       }
-      return new Command({ update: { ...common, messages: result.messages, runSupervisorReply: result.reply }, goto: 'answer' });
+      return new Command({ update: { ...common, messages: result.messages }, goto: 'answer' });
     }
     const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
     return new Command({
       update: {
         ...common, runSupervisorState: accepted.runSupervisorState,
         messages: [...result.messages.slice(0, -accepted.messages.length), ...accepted.messages],
-        runSupervisorReply: accepted.reply,
       },
       goto: accepted.reply ? 'answer' : 'capability',
     });

@@ -125,7 +125,7 @@ import {
 import { withScriptedDelegation, type ScriptedSupervisorDecision as RunSupervisorResult,
   type ScriptedSupervisorRunner as RunSupervisorRunner } from './runSupervisor/testing';
 import { currentSupervisorTask } from './runSupervisor/state';
-import { executionsForTask } from './runSupervisor/messageHandoff';
+import { executionsForTask, readCapabilityExecutions, readDelegationDeliveries } from './executionMessages';
 import type { DelegationDelivery } from './delegation/delivery';
 
 function currentExecution(input: RunSupervisorInput | undefined) {
@@ -189,7 +189,7 @@ function createOrchestratorGraph(
           invoke: async (messages: BaseMessage[]) => new AIMessage({
             content: '',
             tool_calls: [{
-              id: 'test-plan-request',
+              id: `test-plan-request:${randomUUID()}`,
               name: PLAN_REQUEST_TOOL_NAME,
               args: { goal: readLatestHumanText(messages) },
             }],
@@ -310,7 +310,7 @@ function createQueuedPlannerRunner(
       );
       if (input.mode === 'boundary') {
         return { action: 'review_current', completed: true, reason: 'Current task delivery is evidenced.',
-          ...(input.state.plan.filter((task) => task.status === 'pending').length === 0 ? { reply: '已完成。' } : {}) };
+          ...(input.state.plan.filter((task) => task.status === 'pending').length === 1 ? { reply: '已完成。' } : {}) };
       }
       return {
         action: 'execute_plan',
@@ -560,7 +560,7 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.equal(answerMessages.length, 0);
   const handoffs = state.messages.filter((message) => getMessageHandoffSource(message));
   assert.equal(handoffs.length, 0);
-  assert.equal(state.sessionDelegationResults?.length, 2);
+  assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
 });
 
@@ -671,6 +671,9 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
   assert.equal(supervisorInputs.length, 3);
   assert.deepEqual(supervisorInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
   assert.deepEqual(supervisorInputs[1]?.state.plan.filter((task) => task.status === 'pending').map(({ capability, task }) => ({ capability, task })), [{
+    capability: 'explore',
+    task: '读取 issue #269 并提炼需求点。',
+  }, {
     capability: 'explore',
     task: '检索本地实现与 git log。',
   }]);
@@ -783,7 +786,7 @@ test('Entry Supervisor routes its structured user question through Answer withou
   assert.doesNotMatch(answerInputText, /<awaiting_user_input_context>/);
   assert.equal(currentSupervisorTask(state.runSupervisorState), null);
   assert.equal('runNextDelegation' in state, false);
-  assert.equal(state.runSupervisorReply, null);
+  assert.equal('runSupervisorReply' in state, false);
 });
 
 test('Supervisor non-commit routes to Answer without inventing a General delegation', async () => {
@@ -3124,7 +3127,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
         if (routeCallCount === 2) {
           return scriptedSupervisorCapability('general');
         }
-        return goalDoneDecision();
+        return { outcome: 'user_input_required', question: 'Execution returned no deliverable; please check the tool output.' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3186,14 +3189,13 @@ test('toolkit review policy records authorization through orchestrator runtime t
   const resumedRun = await graph.streamEvents(new Command({
     resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
   }), { version: 'v3', ...config });
-  await assert.rejects(async () => {
   for await (const event of resumedRun) {
     if (event.method === 'custom') {
       runtimeEvents.push(event.params.data);
     }
   }
-    await resumedRun.output;
-  }, /produced no new deliverable/);
+  const output = await resumedRun.output;
+  assert.equal(readCapabilityExecutions(output.messages).at(-1)?.result?.status, 'missing_deliverable');
   const finalState = (await graph.getState(config)).values as {
     __interrupt__?: unknown;
     sessionToolAuthorizations: {
@@ -3343,13 +3345,12 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
     runId: string;
-    sessionDelegationResults: NonNullable<OrchestratorStateType['sessionDelegationResults']>;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  const delivery = finalState.sessionDelegationResults.find((value) => value.task === 'run shell');
+  const delivery = readDelegationDeliveries(finalState.messages).find((value) => value.task === 'run shell');
   assert.ok(delivery);
   assert.equal(delivery.scope.lane, 'capability:general');
   assert.ok(delivery.scope.delegationId);
@@ -3524,7 +3525,6 @@ test('toolkit review rejection records terminal tool results and retains the del
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
     runId: string;
-    taskPauseInterrupt: { kind: 'pause_task' } | null;
   };
 
   assert.equal(finalState.__interrupt__?.[0]?.value?.kind, 'pause_task', 'a task pause suspends the run as a real interrupt');
@@ -3537,7 +3537,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     .find((message) => Boolean(getMessageHandoffSource(message)));
   assert.equal(handoffCopy, undefined);
   assert.equal(currentSupervisorTask(finalState.runSupervisorState)?.status, 'pending');
-  assert.deepEqual(finalState.taskPauseInterrupt, { kind: 'pause_task' });
+  assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.status, 'paused');
 
   const task = currentSupervisorTask(finalState.runSupervisorState);
   assert.ok(task);
@@ -3770,7 +3770,6 @@ test('toolkit review run interruption retains the delegation without another mod
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
     runId: string;
-    sessionDelegationResults: NonNullable<OrchestratorStateType['sessionDelegationResults']>;
   };
 
   assert.equal(routeCallCount, 4);
@@ -3778,10 +3777,11 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
-    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)
+      && getAgentMessageMetadata(message).lane === 'capability:general'),
     false,
   );
-  const resumedHandoff = continuedState.sessionDelegationResults?.find((delivery) =>
+  const resumedHandoff = readDelegationDeliveries(continuedState.messages).find((delivery) =>
     delivery.scope.delegationId === retainedDelegationId);
   assert.ok(resumedHandoff);
   assert.equal(currentSupervisorTask(continuedState.runSupervisorState), null);
@@ -3831,7 +3831,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
         if (routeCallCount === 2) {
           return scriptedSupervisorCapability('general');
         }
-        return goalDoneDecision();
+        return { outcome: 'user_input_required', question: 'Execution returned no deliverable; please check the tool output.' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3901,12 +3901,11 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   const resumedRun = await graph.streamEvents(new Command({
     resume: interruptId ? { [interruptId]: batchResume } : batchResume,
   }), { version: 'v3', ...config });
-  await assert.rejects(async () => {
   for await (const _event of resumedRun) {
     // Drain the root stream so the final output is materialized.
   }
-    await resumedRun.output;
-  }, /produced no new deliverable/);
+  const output = await resumedRun.output;
+  assert.equal(readCapabilityExecutions(output.messages).at(-1)?.result?.status, 'missing_deliverable');
   const finalState = (await graph.getState(config)).values as {
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
@@ -4092,7 +4091,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
   }), /missing.*message id/);
 });
 
-test('execution without a deliverable preserves ownership and never enters Supervisor Boundary', async () => {
+test('execution without a deliverable returns an error result to Supervisor without accepting the task', async () => {
   const checkpoint = new MemorySaver();
   let boundaries = 0;
   const graph = createOrchestratorGraph({
@@ -4100,14 +4099,18 @@ test('execution without a deliverable preserves ownership and never enters Super
       subagent: new FakeListChatModel({ responses: [''], sleep: 0 }) },
     checkpoint,
     runSupervisorRunner: { invoke: async (input) => {
-      if (input.mode === 'boundary') { boundaries += 1; throw new Error('Empty Boundary'); }
+      if (input.mode === 'boundary') {
+        boundaries += 1;
+        assert.equal(readCapabilityExecutions(input.messages).at(-1)?.result?.status, 'missing_deliverable');
+        return { reply: 'No new deliverable was produced.' };
+      }
       return { action: 'execute_plan',  tasks: [{ capability: 'general', task: 'Inspect files.' }] };
     } },
   });
   const config = { configurable: { thread_id: 'no-deliverable', capabilities: [capability('general', 'Inspect files.')] } };
-  await assert.rejects(graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect files.')]), config), /produced no new deliverable/);
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect files.')]), config);
   const saved = (await graph.getState(config)).values as OrchestratorStateType;
-  assert.equal(boundaries, 0);
+  assert.equal(boundaries, 1);
   assert.equal(currentSupervisorTask(saved.runSupervisorState)?.status, 'pending');
   assert.equal('taskRunContinuation' in saved, false);
   assert.equal('runSupervisorSession' in saved, false);
@@ -4715,7 +4718,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   await graph.updateState(config, {
     messages: oldMessages,
     runSupervisorState: { goal: oldDelegation.userRequest, plan: [{
-      id: 'old-task', capability: 'general', task: oldDelegation.task, status: 'returned',
+      id: 'old-task', capability: 'general', task: oldDelegation.task, status: 'pending',
     }] },
     runId: oldDelegation.runId,
   });
@@ -4812,7 +4815,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   // the private lane. Root keeps evidence outside the user-facing conversation.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
   assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 0);
-  assert.equal(state.sessionDelegationResults?.length, 2);
+  assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
   // Each selected subagent receives one complete invocation-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
@@ -4972,7 +4975,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
     bindTools() { return this; }
     async _generate(messages: BaseMessage[]) {
       modelsSeen.push(messages.filter(SystemMessage.isInstance).map(m => m.text).join('\n'));
-      const message = messages.some(ToolMessage.isInstance)
+      const message = messages.some((message) => ToolMessage.isInstance(message) && message.name === 'inspect_context')
         ? new AIMessage('inspected')
         : new AIMessage({ content: '', tool_calls: [{ id: randomUUID(), name: 'inspect_context', args: {} }] });
       return { generations: [{ message, text: message.text }] };
@@ -5134,7 +5137,7 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
   const pausedState = await graph.getState(config);
   assert.equal(pausedState.next?.[0], 'pauseGate');
   assert.equal(currentSupervisorTask(pausedState.values.runSupervisorState)?.status, 'pending');
-  assert.deepEqual(pausedState.values.taskPauseInterrupt, { kind: 'pause_task' }, 'state committed before suspension');
+  assert.equal(readCapabilityExecutions(pausedState.values.messages).at(-1)?.result?.status, 'paused', 'result committed before suspension');
   assert.equal(runCount, 0);
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
@@ -5146,7 +5149,7 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
   assert.equal(routeCallCount, 3, 'guidance must reach Supervisor before continuing');
   assert.equal(runCount, 0);
   const continuedState = await graph.getState(config);
-  assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
+  assert.equal(readCapabilityExecutions(continuedState.values.messages).at(-1)?.result, null, 'continued call awaits its own result');
   const guidance = (continuedState.values.messages as BaseMessage[]).find((message) =>
     HumanMessage.isInstance(message) && message.text === 'Skip git status; inspect recent commits.');
   assert.ok(guidance);
@@ -5198,7 +5201,7 @@ for (const continuePlan of [false, true]) {
       { ...config, signal: controller.signal }));
     const cancelled = await graph.getState(config);
     assert.equal(toolRuns, 1);
-    assert.equal(cancelled.values.runSupervisorState.plan[0].status, 'executing');
+    assert.equal(cancelled.values.runSupervisorState.plan[0].status, 'pending');
     assert.deepEqual(await settleAbortedRun({
       getState: () => graph.getState(config),
     }), { status: 'finished' });

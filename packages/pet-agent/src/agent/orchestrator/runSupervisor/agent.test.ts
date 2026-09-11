@@ -313,12 +313,11 @@ function supervisorInput(
       },
     }] }), metadata));
     messages.push(setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: callId,
-      content: JSON.stringify({ status: 'returned', delivery: { text: report.result, scope: {
+      content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
         runId: report.runId, traceId: input.traceId, delegationId: report.delegationId, lane: report.sourceLane,
       } } }),
     }), metadata));
   }
-  if (reports.length && plan[0]) Object.assign(plan[0], { status: 'returned' });
   const boundaryNames = plan.map((task) => task.capability).filter((name) => catalog.capabilityNames.includes(name));
   return { ...input, messages,
     state: overrides.state ?? { goal: input.userRequest, plan },

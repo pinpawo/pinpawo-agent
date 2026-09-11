@@ -7,16 +7,18 @@ import { tool, type StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { Annotation, Command, END, MemorySaver, START, StateGraph, interrupt, messagesStateReducer } from '@langchain/langgraph';
 import { createAgent } from 'langchain';
-import { getAgentMessageMetadata, queryAgentMessages } from '../../messages';
-import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState } from './state';
+import { getAgentMessageMetadata, setAgentMessageMetadata, queryAgentMessages } from '../../messages';
+import { currentSupervisorTask, type RunSupervisorState } from './state';
 import {
   acceptSupervisorMessageHandoff,
-  capabilityHandoffSchema,
   createMessageSupervisorControlTools,
   createMessageSupervisorMiddleware,
   createSupervisorMessageHandoff,
   type SupervisorHandoffContext,
 } from './messageHandoff';
+
+import { capabilityHandoffSchema } from './protocol';
+import { executionsForTask } from '../executionMessages';
 
 const taskA = { capability: 'general', task: 'Inspect A.' };
 const taskB = { capability: 'general', task: 'Inspect B.' };
@@ -31,21 +33,20 @@ function context(overrides: Partial<SupervisorHandoffContext> = {}): SupervisorH
 function resultFor(dispatch: AIMessage) {
   const { execution } = capabilityHandoffSchema.parse(dispatch.tool_calls![0].args);
   const metadata = getAgentMessageMetadata(dispatch);
-  return new ToolMessage({ id: `result:${dispatch.id}`, name: 'delegate_capability',
+  return setAgentMessageMetadata(new ToolMessage({ id: `result:${dispatch.id}`, name: 'delegate_capability',
     tool_call_id: dispatch.tool_calls![0].id!,
-    content: JSON.stringify({ status: 'returned', delivery: { text: 'Verified execution evidence.', scope: {
+    content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${dispatch.id}`, task: execution.task, text: 'Verified execution evidence.', scope: {
       runId: metadata.runId, traceId: metadata.traceId, delegationId: execution.delegationId,
       lane: `capability:${execution.capability}`,
     } }, artifacts: [] }),
-  });
+  }), metadata);
 }
 function returned(firstContext = context(), tasks = [taskA, taskB]) {
   const handoff = createSupervisorMessageHandoff(firstContext, control('submit_plan', { tasks }));
   const accepted = acceptSupervisorMessageHandoff(firstContext, handoff);
   const dispatch = handoff.at(-1) as AIMessage;
-  const taskId = capabilityHandoffSchema.parse(dispatch.tool_calls![0].args).execution.taskId;
   return {
-    ...firstContext, state: updateSupervisorTask(accepted.runSupervisorState, taskId, 'returned'),
+    ...firstContext, state: accepted.runSupervisorState,
     messages: [...firstContext.messages, ...handoff, resultFor(dispatch)], mode: 'boundary' as const,
   };
 }
@@ -58,7 +59,7 @@ test('handoff is two independent call pairs, with no proposal or pending state',
   const accepted = acceptSupervisorMessageHandoff(input, handoff);
   assert.deepEqual(Object.keys(accepted.runSupervisorState).sort(), ['goal', 'plan']);
   assert.equal(accepted.runSupervisorState.plan.length, 2);
-  assert.equal(accepted.runSupervisorState.plan[0].status, 'executing');
+  assert.equal(accepted.runSupervisorState.plan[0].status, 'pending');
   assert.equal(accepted.runSupervisorState.plan[1].status, 'pending');
   assert.equal(JSON.stringify(internal), original, 'the model transcript must not be rewritten');
   const dispatch = handoff.at(-1) as AIMessage;
@@ -101,6 +102,48 @@ test('a review question can defer acceptance without dispatching or changing ret
   assert.throws(() => createSupervisorMessageHandoff(input, control('review_current', {
     reason: 'No decision and no reply.',
   }, 'missing-decision')), /must decide/);
+});
+
+test('a failed retry cannot be accepted using an older successful delivery', () => {
+  const first = returned();
+  const retry = createSupervisorMessageHandoff(first,
+    control('review_current', { completed: false, reason: 'Verify missing evidence.' }, 'retry-failed'));
+  const dispatch = retry.at(-1) as AIMessage;
+  for (const status of ['missing_deliverable', 'paused']) {
+    const result = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability',
+      tool_call_id: dispatch.tool_calls![0].id!, status: status === 'missing_deliverable' ? 'error' : 'success',
+      content: JSON.stringify({ status, delivery: null, artifacts: [] }),
+    }), getAgentMessageMetadata(dispatch));
+    const input = { ...first, messages: [...first.messages, ...retry, result] };
+    assert.equal(executionsForTask(input, first.state.plan[0].id).at(-1)?.result?.status, status);
+    assert.throws(() => createSupervisorMessageHandoff(input,
+      control('review_current', { completed: true, reason: 'Old evidence is enough.', reply: 'Done.' }, 'accept-failed')), /returned delivery/);
+    assert.equal(createSupervisorMessageHandoff(input,
+      control('review_current', { completed: false, reason: 'Try producing a new deliverable.' }, 'retry-again')).length, 3);
+  }
+});
+
+test('acceptance ignores private, mismatched, malformed and error results', () => {
+  const first = returned();
+  const original = first.messages.at(-1) as ToolMessage;
+  for (const mutation of [
+    (message: ToolMessage) => setAgentMessageMetadata(message, { lane: 'capability:general' }),
+    (message: ToolMessage) => setAgentMessageMetadata(message, { runId: 'other-run' }),
+    (message: ToolMessage) => { message.tool_call_id = 'other-call'; },
+    (message: ToolMessage) => { message.status = 'error'; },
+    (message: ToolMessage) => { message.content = '{invalid'; },
+    (message: ToolMessage) => {
+      const result = JSON.parse(message.text);
+      result.delivery.scope.delegationId = 'other-delegation';
+      message.content = JSON.stringify(result);
+    },
+  ]) {
+    const message = new ToolMessage({ ...original });
+    mutation(message);
+    const input = { ...first, messages: [...first.messages.slice(0, -1), message] };
+    assert.throws(() => createSupervisorMessageHandoff(input,
+      control('review_current', { completed: true, reason: 'Verify result.', reply: 'Done.' }, 'bad-evidence')), /returned delivery/);
+  }
 });
 
 test('same-run retries keep execution scope; new runs never inherit the old delegation instance', () => {
@@ -161,6 +204,17 @@ test('plan adjustment preserves completed work and validates fresh user input', 
   assert.equal(revised.runSupervisorState.goal, 'New agreed goal');
   assert.equal(revised.runSupervisorState.plan[0].status, 'completed');
   assert.equal(currentSupervisorTask(revised.runSupervisorState)?.task, 'Inspect revised B.');
+});
+
+test('replacing executed but unaccepted work preserves it as superseded, not pending', () => {
+  const input = returned();
+  const handoff = createSupervisorMessageHandoff(input, control('adjust_plan', {
+    goal: 'Changed goal', reason: 'User replaced the work.', currentDelegation: 'replace', tasks: [taskB],
+  }, 'replace-executed'));
+  const accepted = acceptSupervisorMessageHandoff(input, handoff);
+  assert.deepEqual(accepted.runSupervisorState.plan.map(({ status }) => status), ['superseded', 'pending']);
+  assert.equal(accepted.runSupervisorState.plan[0].id, input.state.plan[0].id);
+  assert.notEqual(accepted.runSupervisorState.plan[1].id, input.state.plan[1].id);
 });
 
 class OneControlModel extends BaseChatModel {
@@ -238,11 +292,9 @@ test('real createAgent exits with a complete control pair and Root resumes its e
       })
       .addNode('capability', (state) => {
         const dispatch = state.messages.at(-1) as AIMessage;
-        const execution = capabilityHandoffSchema.parse(dispatch.tool_calls![0].args).execution;
         interrupt('Approve this execution');
         executed += 1;
-        return { messages: [resultFor(dispatch)],
-          runSupervisorState: updateSupervisorTask(state.runSupervisorState, execution.taskId, 'returned') };
+        return { messages: [resultFor(dispatch)] };
       })
       .addEdge(START, 'supervisor').addEdge('supervisor', 'capability').addEdge('capability', END)
       .compile({ checkpointer: saver });
@@ -257,5 +309,5 @@ test('real createAgent exits with a complete control pair and Root resumes its e
   assert.equal(executed, 1);
   assert.equal(model.invocations, 1);
   assert.equal((resumed.messages.at(-1) as ToolMessage).tool_call_id, callId);
-  assert.equal(currentSupervisorTask(resumed.runSupervisorState)?.status, 'returned');
+  assert.equal(currentSupervisorTask(resumed.runSupervisorState)?.status, 'pending');
 });

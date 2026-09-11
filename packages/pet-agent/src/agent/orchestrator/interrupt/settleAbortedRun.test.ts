@@ -21,7 +21,7 @@ function graphOf(snapshots: unknown[]) {
   };
 }
 
-const pendingDelegation = { values: { runSupervisorState: { goal: 'Work', plan: [{ id: 'task', capability: 'general', task: 'Work', status: 'executing' }] } } };
+const pendingDelegation = { values: { runSupervisorState: { goal: 'Work', plan: [{ id: 'task', capability: 'general', task: 'Work', status: 'pending' }] } } };
 
 test('settleAbortedRun reports an interrupt that was already pending', async () => {
   const { graph, calls } = graphOf([{

@@ -10,9 +10,10 @@ import { buildRunStateReset, OrchestratorState, type OrchestratorStateType } fro
 import type { RunSupervisorInput } from '../../runSupervisor/runner';
 import { withScriptedDelegation, type ScriptedSupervisorDecision } from '../../runSupervisor/testing';
 import { createRunSupervisorNode } from './runSupervisor';
-import { pauseGate, afterPauseGate } from './pauseGate';
+import { pauseGate } from './pauseGate';
 import { createAnswerNode } from './answer';
 import { readCapabilityCall, capabilityResultMessage } from '../delegationToolResult';
+import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
 const models = { act: {} } as AgentModels;
 const registry = compileAgentRegistry({ toolkits: [], capabilities: ['general', 'writer'].map((name) => ({
@@ -26,7 +27,6 @@ function pausedState(): OrchestratorStateType {
       { id: 'task1', capability: 'general', task: 'Inspect the old project.', status: 'pending' },
       { id: 'task2', capability: 'writer', task: 'Publish the old result.', status: 'pending' },
     ] },
-    taskPauseInterrupt: { kind: 'pause_task' },
     messages: [setAgentMessageMetadata(new HumanMessage({ id: 'original', content: 'Inspect the old project and publish.' }), { traceId: 't1', runId: 'r1' })],
     sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
   };
@@ -51,11 +51,11 @@ function harness(decide: (input: RunSupervisorInput) => ScriptedSupervisorDecisi
     .addNode('capability', (state) => {
       execute(state);
       const call = readCapabilityCall(state);
-      return { messages: [capabilityResultMessage(state, call, { status: 'paused', delivery: null })] };
+      return { messages: [capabilityResultMessage(state, call, { status: 'paused', delivery: null, artifacts: [] })] };
     })
-    .addNode('answer', createAnswerNode({ models }))
+    .addNode('answer', createAnswerNode())
     .addEdge(START, 'pauseGate')
-    .addConditionalEdges('pauseGate', afterPauseGate, { runSupervisor: 'runSupervisor' })
+    .addEdge('pauseGate', 'runSupervisor')
     .addEdge('capability', END).addEdge('answer', END).compile({ checkpointer });
 }
 
@@ -96,7 +96,7 @@ test('empty native continue still lets Supervisor determine the next call from t
   const paused = await graph.invoke(pausedState(), config);
   const result = await graph.invoke(new Command({ resume: { [pauseInterruptId(paused)]: { action: 'continue' } } }), config);
   assert.equal(decisions, 1);
-  assert.equal(result.runSupervisorState.plan[0].status, 'executing');
+  assert.equal(result.runSupervisorState.plan[0].status, 'pending');
 });
 
 test('clarification preserves pending work; each native guidance message has an independent consumption identity', async () => {
@@ -108,7 +108,7 @@ test('clarification preserves pending work; each native guidance message has an 
     const paused = await graph.invoke(current, config);
     const result = await graph.invoke(new Command({ resume: { [pauseInterruptId(paused)]: { action: 'continue', guidance: 'Change project.' } } }), config);
     assert.deepEqual(result.runSupervisorState, current.runSupervisorState);
-    current = { ...result, taskPauseInterrupt: { kind: 'pause_task' } };
+    current = result;
   }
   assert.equal(new Set(ids).size, 2);
 });
@@ -137,4 +137,17 @@ test('execution alone cannot authorize plan adjustment; fresh guidance still can
     tasks: [{ capability: 'writer', task: 'Write.' }] } })(fresh, config), /keep its capability/);
   await assert.rejects(node({ name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'replace',
     tasks: [{ capability: 'unknown', task: 'Write.' }] } })(fresh, config), /outside/);
+});
+
+test('native pause resume shares the execution budget and cannot dispatch beyond it', async () => {
+  let decisions = 0;
+  const graph = harness(() => { decisions++; throw new Error('Budget must stop before model invocation'); });
+  const input = { ...pausedState(), runIterationCount: ORCHESTRATOR_MAX_ITERATIONS };
+  const config = { configurable: { thread_id: 'paused-at-budget', registry } };
+  const paused = await graph.invoke(input, config);
+  const output = await graph.invoke(new Command({ resume: { [pauseInterruptId(paused)]: { action: 'continue' } } }), config);
+  assert.equal(decisions, 0);
+  assert.equal(output.runId, input.runId);
+  assert.equal(output.runIterationCount, input.runIterationCount);
+  assert.deepEqual(output.runSupervisorState, input.runSupervisorState);
 });

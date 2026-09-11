@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { Command, messagesStateReducer } from '@langchain/langgraph';
 import type { AgentModels } from '../../../../types/agent';
 import { defineInstructionDocument } from '../../../../types/capability';
@@ -15,7 +15,6 @@ import { createCapabilityDisclosureState } from '../../runSupervisor/capabilityD
 import { withScriptedDelegation, scriptedSupervisorResult } from '../../runSupervisor/testing';
 import type { SupervisorControl } from '../../runSupervisor/messageHandoff';
 import { readCapabilityCall, capabilityResultMessage } from '../delegationToolResult';
-import { updateSupervisorTask } from '../../runSupervisor/state';
 
 const models = { act: { invoke: () => { throw new Error('Unexpected model call'); } } } as unknown as AgentModels;
 const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
@@ -27,8 +26,11 @@ const tasks = [{ capability: 'general', task: 'Prepare the document.' }, { capab
 function state(): OrchestratorStateType {
   return { ...buildRunStateReset(), runId: 'r1', traceId: 't1', runUserRequest: 'Prepare and publish.',
     runSupervisorState: { goal: null, plan: [] },
-    messages: [setAgentMessageMetadata(new HumanMessage({ id: 'human', content: 'Prepare and publish.' }), { runId: 'r1', traceId: 't1' })],
-    sessionDelegationResults: [], sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
+    messages: [new HumanMessage({ id: 'human', content: 'Prepare and publish.' }),
+      new AIMessage({ content: '', tool_calls: [{ id: 'entry', name: 'plan_request', args: { goal: 'Prepare and publish.' } }] }),
+      new ToolMessage({ name: 'plan_request', tool_call_id: 'entry', content: 'Handed off.' }),
+    ].map((message) => setAgentMessageMetadata(message, { runId: 'r1', traceId: 't1' })),
+    sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
   };
 }
 function node(decision: SupervisorControl | { reply: string }) {
@@ -40,21 +42,20 @@ function apply(input: OrchestratorStateType, command: Command): OrchestratorStat
 }
 async function delivered() {
   const initial = state();
-  const planned = apply(initial, await node({ name: 'submit_plan', args: { tasks } })({ mode: 'entry', root: initial }, options));
+  const planned = apply(initial, await node({ name: 'submit_plan', args: { tasks } })(initial, options));
   const call = readCapabilityCall(planned);
-  const delivery = { text: 'Draft saved; publication has not run.', scope: {
-    lane: 'capability:general', runId: planned.runId, traceId: planned.traceId, delegationId: call.delegationId,
+  const delivery = { id: 'delivery', task: call.task, text: 'Draft saved; publication has not run.', scope: {
+    lane: 'capability:general' as const, runId: planned.runId, traceId: planned.traceId, delegationId: call.delegationId,
   } };
-  return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery })],
-    runSupervisorState: updateSupervisorTask(planned.runSupervisorState, call.taskId, 'returned') };
+  return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery, artifacts: [] })] };
 }
 
 test('control handoff goes straight to Capability with separate main and work records', async () => {
   const input = state();
-  const command = await node({ name: 'submit_plan', args: { tasks } })({ mode: 'entry', root: input }, options);
+  const command = await node({ name: 'submit_plan', args: { tasks } })(input, options);
   const next = apply(input, command);
   assert.deepEqual(command.goto, ['capability']);
-  assert.equal(next.runSupervisorState.plan[0].status, 'executing');
+  assert.equal(next.runSupervisorState.plan[0].status, 'pending');
   assert.equal(readCapabilityCall(next).task, tasks[0].task);
   assert.equal(queryAgentMessages(next.messages).supervisor(next.runId).select().messages.length, 2);
   for (const key of ['proposal', 'pendingCall', 'nextAttempt', 'activeDelegation', 'messages', 'run']) {
@@ -67,7 +68,7 @@ test('review accepts only current task and dispatches the next without another S
   const command = await node({ name: 'review_current', args: { completed: true, reason: 'Draft verified.' } })(input, options);
   const next = apply(input, command);
   assert.deepEqual(command.goto, ['capability']);
-  assert.deepEqual(next.runSupervisorState.plan.map((task) => task.status), ['completed', 'executing']);
+  assert.deepEqual(next.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
   assert.equal(readCapabilityCall(next).task, tasks[1].task);
   assert.ok(next.messages.includes(input.messages.at(-1)!));
 });
@@ -86,12 +87,12 @@ test('accepted A and pending B survive an answer and new run without a continuat
   const input = await delivered();
   const accepted = apply(input, await node({ name: 'review_current', args: { completed: true,
     reason: 'Draft verified.', reply: 'Choose a destination.' } })(input, options));
-  const terminal = await createAnswerNode({ models })(accepted, options);
+  const terminal = await createAnswerNode()(accepted);
   const resumed = { ...accepted, ...terminal, messages: messagesStateReducer(accepted.messages, terminal.messages),
     ...buildRunStateReset() };
   assert.deepEqual(resumed.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
   const next = apply(resumed, await node({ name: 'review_current', args: { reason: 'Proceed with publication.' } })(
-    { mode: 'boundary', root: { ...resumed, runUserRequest: 'Publish now.' } }, options));
+    { ...resumed, runUserRequest: 'Publish now.' }, options));
   assert.equal(readCapabilityCall(next).task, tasks[1].task);
   assert.equal(readCapabilityCall(next).mode, 'initial');
 });
@@ -100,7 +101,7 @@ test('natural question does not accept the returned task or erase its results', 
   const input = await delivered();
   const next = apply(input, await node({ reply: 'Which destination?' })(input, options));
   assert.deepEqual(next.runSupervisorState, input.runSupervisorState);
-  assert.equal(next.runSupervisorReply, 'Which destination?');
+  assert.equal((await createAnswerNode()(next)).messages[0].text, 'Which destination?');
 });
 
 test('new user input is consumed once, including guidance added within a native resumed run', async () => {
@@ -109,7 +110,7 @@ test('new user input is consumed once, including guidance added within a native 
     { runId: input.runId, traceId: input.traceId });
   input.messages.push(guidance);
   const catalog = createCapabilityCatalog({ registry });
-  const build = (root: OrchestratorStateType) => buildRunSupervisorInput({ nodeInput: root, catalog,
+  const build = (root: OrchestratorStateType) => buildRunSupervisorInput({ root, catalog,
     capabilityDisclosure: createCapabilityDisclosureState({ catalog }) });
   assert.equal(build(input).inputId, 'human:guidance');
   assert.ok(!build({ ...input, runSupervisorUserMessageId: 'human:guidance' }).inputId.startsWith('human:'));
@@ -123,13 +124,13 @@ test('Root rejects changed handoff arguments and decisions without actual intern
     dispatch.tool_calls![0].args.execution.task = 'Tampered task.';
     return result;
   } } });
-  await assert.rejects(runner({ mode: 'entry', root: input }, options), /does not match/);
+  await assert.rejects(runner(input, options), /does not match/);
   await assert.rejects(node({ name: 'submit_plan', args: { tasks: [{ capability: 'missing', task: 'Do it.' }] } })(
-    { mode: 'entry', root: input }, options), /outside/);
+    input, options), /outside/);
 });
 
 test('accepting a pending task without returned evidence is rejected', async () => {
   const input = state();
-  const pending = apply(input, await node({ name: 'submit_plan', args: { tasks } })({ mode: 'entry', root: input }, options));
+  const pending = apply(input, await node({ name: 'submit_plan', args: { tasks } })(input, options));
   await assert.rejects(node({ name: 'review_current', args: { completed: true, reason: 'No evidence.' } })(pending, options), /returned delivery/);
 });

@@ -1,3 +1,4 @@
+import { readDelegationDeliveries, readCapabilityExecutions } from '../executionMessages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
@@ -59,7 +60,7 @@ test('real control handoff returns evidence to main and retains separate Supervi
   assert.equal(boundary.filter((message) => message.text.includes('Repository inspection evidence.')).length, 1);
   assert.equal(output.messages.some(getDelegationAnnounce), false);
   assert.equal(output.messages.some((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability'), true);
-  assert.equal(output.sessionDelegationResults.length, 1);
+  assert.equal(readDelegationDeliveries(output.messages).length, 1);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');
   assert.equal(output.messages.at(-1)?.text, 'Inspection complete.');
 });
@@ -86,7 +87,7 @@ test('restart after dispatch restores pending call without repeating the plannin
   assert.equal(executor.inputs.length, 1);
 });
 
-test('fresh run preserves Root session facts but never inherits Supervisor tool history', async () => {
+test('fresh run preserves Root facts without inheriting Supervisor work or deduplicating reused Entry call IDs', async () => {
   const checkpointer = new MemorySaver();
   const first = setup(checkpointer);
   const options = { configurable: { thread_id: 'session-two-runs', registry } };
@@ -94,7 +95,9 @@ test('fresh run preserves Root session facts but never inherits Supervisor tool 
   const second = setup(checkpointer);
   const secondOutput = await second.graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), options);
   assert.notEqual(secondOutput.runId, firstOutput.runId);
-  assert.equal(secondOutput.sessionDelegationResults.length, 2);
+  assert.equal(readDelegationDeliveries(secondOutput.messages).length, 2);
+  assert.equal(secondOutput.messages.filter((message) => ToolMessage.isInstance(message)
+    && message.name === 'plan_request' && message.tool_call_id === 'entry-call').length, 2);
   assert.ok(second.supervisor.inputs[0].some((message) => message.text === 'Inspection complete.'));
   assert.equal(second.supervisor.inputs[0].some((message) => getAgentMessageMetadata(message).lane === 'supervisor'
     && getAgentMessageMetadata(message).runId === firstOutput.runId), false);
@@ -111,7 +114,7 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   const options = { configurable: { thread_id: 'unfinished-new-run', registry } };
   const first = await createOrchestratorGraph({ ...config, models: { ...config.models, act: firstSupervisor } })
     .invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), options);
-  assert.equal(first.runSupervisorState.plan[0].status, 'returned');
+  assert.equal(first.runSupervisorState.plan[0].status, 'pending');
   const nextSupervisor = new ScriptedModel([new AIMessage({ content: 'I have the earlier evidence and your new guidance.' })]);
   const second = await createOrchestratorGraph({ ...config, models: { ...config.models, act: nextSupervisor, answer: new ScriptedModel([call('continue', {}, 'continue-entry')]) } })
     .invoke(buildOrchestratorRunInput([new HumanMessage('Check compatibility next.')]), options);
@@ -143,8 +146,8 @@ test('Entry continue executes unfinished work in a fresh private scope', async (
   const second = await createOrchestratorGraph({ ...config, models: {
     act: nextSupervisor, subagent: executor, answer: new ScriptedModel([call('continue', {}, 'entry-continue')]),
   } }).invoke(buildOrchestratorRunInput([new HumanMessage('Continue with verification.')]), options);
-  const before = first.sessionDelegationResults[0].scope;
-  const after = second.sessionDelegationResults.at(-1)!.scope;
+  const before = readDelegationDeliveries(first.messages)[0].scope;
+  const after = readDelegationDeliveries(second.messages).at(-1)!.scope;
   assert.notEqual(after.runId, before.runId);
   assert.notEqual(after.delegationId, before.delegationId);
   assert.equal(second.runSupervisorState.plan[0].id, first.runSupervisorState.plan[0].id);
@@ -177,10 +180,10 @@ test('committed result survives restart without repeating Capability execution',
   const { graph, config, supervisor, executor } = setup();
   const options = { configurable: { thread_id: 'completed-call-handoff', registry } };
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
-    ...options, interruptBefore: ['supervisorBoundaryIterationGuard'],
+    ...options, interruptAfter: ['capability'],
   });
   const checkpoint = await graph.getState(options);
-  assert.equal(checkpoint.values.runSupervisorState.plan[0].status, 'returned');
+  assert.equal(checkpoint.values.runSupervisorState.plan[0].status, 'pending');
   assert.ok(checkpoint.values.messages.some((message: BaseMessage) =>
     ToolMessage.isInstance(message) && message.name === 'delegate_capability'));
   assert.equal(executor.inputs.length, 1);
@@ -219,7 +222,7 @@ test('Capability interrupt resumes the same pending tool call through a rebuilt 
   const output = await createOrchestratorGraph(graphConfig).invoke(new Command({ resume: 'approved' }), options);
   assert.equal(effects, 1);
   assert.equal(supervisor.inputs.length, 2);
-  assert.equal(output.sessionDelegationResults.length, 1);
+  assert.equal(readDelegationDeliveries(output.messages).length, 1);
   assert.equal(supervisor.inputs[1].filter((message) => ToolMessage.isInstance(message)
     && message.name === 'delegate_capability').length, 1);
 });
@@ -243,6 +246,106 @@ test('multiple attempts keep both actual main tool results in one run', async ()
   assert.equal(new Set(results.map((message) => message.tool_call_id)).size, 2);
   assert.deepEqual(results.map((message) => JSON.parse(message.text).delivery.text),
     ['First attempt evidence.', 'Second attempt evidence.']);
-  assert.equal(new Set(output.sessionDelegationResults.map((delivery) => delivery.scope.delegationId)).size, 1);
+  assert.equal(new Set(readDelegationDeliveries(output.messages).map((delivery) => delivery.scope.delegationId)).size, 1);
   assert.equal(output.messages.some(getDelegationAnnounce), false);
+});
+
+test('missing delivery checkpoints an error result, leaves the plan untouched and lets Supervisor retry', async () => {
+  const { config } = setup();
+  const supervisor = new ScriptedModel([
+    call('submit_plan', { tasks: [task] }, 'plan-missing'),
+    call('review_current', { completed: false, reason: 'Produce the missing inspection report.' }, 'retry-missing'),
+    call('review_current', { completed: true, reason: 'New report verified.', reply: 'Done.' }, 'accept-retry'),
+  ]);
+  const executor = new ScriptedModel([new AIMessage(''), new AIMessage('Fresh inspection evidence.')]);
+  const graph = createOrchestratorGraph({ ...config, models: { ...config.models, act: supervisor, subagent: executor } });
+  const options = { configurable: { thread_id: 'missing-delivery-retry', registry } };
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+    ...options, interruptBefore: ['capability'],
+  });
+  const dispatched = await graph.getState(options);
+  await graph.invoke(null, { ...options, interruptBefore: ['runSupervisor'] });
+  const failed = await graph.getState(options);
+  assert.deepEqual(failed.values.runSupervisorState, dispatched.values.runSupervisorState);
+  assert.equal(failed.values.runIterationCount, 1);
+  assert.equal(failed.values.runTerminalError, null);
+  assert.equal('sessionDelegationResults' in failed.values, false);
+  assert.equal('taskPauseInterrupt' in failed.values, false);
+  const failedMessage = failed.values.messages.at(-1) as ToolMessage;
+  assert.equal(failedMessage.status, 'error');
+  assert.equal(failedMessage.tool_call_id, readCapabilityCall(dispatched.values).id);
+  assert.equal(readCapabilityExecutions(failed.values.messages).at(-1)?.result?.status, 'missing_deliverable');
+  const output = await graph.invoke(null, options);
+  const executions = readCapabilityExecutions(output.messages);
+  assert.deepEqual(executions.map(({ result }) => result?.status), ['missing_deliverable', 'returned']);
+  assert.notEqual(executions[0].call.id, executions[1].call.id);
+  assert.equal(executions[0].execution.delegationId, executions[1].execution.delegationId);
+  assert.equal(output.runSupervisorState.plan[0].status, 'completed');
+  assert.equal(output.runIterationCount, 2);
+  assert.equal(executor.inputs.length, 2);
+});
+
+test('Entry handoff checkpoints one canonical state and Supervisor reads it after restart', async () => {
+  const { graph, config, supervisor } = setup();
+  const options = { configurable: { thread_id: 'entry-canonical-state', registry } };
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+    ...options, interruptBefore: ['runSupervisor'],
+  });
+  const saved = await graph.getState(options);
+  const main = queryAgentMessages(saved.values.messages).main().select().messages;
+  const confirmation = main.at(-1) as ToolMessage;
+  assert.equal(confirmation.name, 'plan_request');
+  assert.equal(confirmation.tool_call_id, (main.at(-2) as AIMessage).tool_calls![0].id);
+  assert.equal(supervisor.inputs.length, 0);
+  const output = await createOrchestratorGraph(config).invoke(null, options);
+  assert.equal(output.runSupervisorState.goal, saved.values.runUserRequest);
+  assert.equal(output.runId, saved.values.runId);
+  assert.equal(supervisor.inputs[0].some((message) => message.id === confirmation.id), true);
+});
+
+test('checkpointed Supervisor reply publishes once after restart without a reply state slot', async () => {
+  const { graph, config, supervisor, executor } = setup();
+  const options = { configurable: { thread_id: 'reply-from-messages', registry } };
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), { ...options, interruptBefore: ['answer'] });
+  const saved = await graph.getState(options);
+  assert.equal('runSupervisorReply' in saved.values, false);
+  const output = await createOrchestratorGraph(config).invoke(null, options);
+  assert.equal(supervisor.inputs.length, 2);
+  assert.equal(executor.inputs.length, 1);
+  const replies = queryAgentMessages(output.messages).main().select().messages.filter((message) => message.text === 'Inspection complete.');
+  assert.equal(replies.length, 1);
+  assert.equal(getAgentMessageMetadata(replies[0]).runId, output.runId);
+});
+
+test('Entry and preparation failures use the same checkpointed error exit as execution', async () => {
+  for (const failedNode of ['entryAnswer', 'prepare']) {
+    const { config } = setup();
+    const graph = createOrchestratorGraph({ ...config, models: { ...config.models, answer: new ScriptedModel([]) } });
+    const options = { configurable: { thread_id: `node-failure:${failedNode}`, registry } };
+    const input = failedNode === 'prepare' ? { messages: [new HumanMessage('Uninitialized')] }
+      : buildOrchestratorRunInput([new HumanMessage(task.task)]);
+    await assert.rejects(graph.invoke(input, options), /initialized|Unexpected extra model invocation/);
+    const saved = await graph.getState(options);
+    assert.equal(saved.values.runTerminalError?.node, failedNode);
+    assert.deepEqual(saved.next, ['throwRunFailure']);
+    assert.equal(saved.values.runSupervisorState.plan.length, 0);
+  }
+});
+
+test('Entry announcement repair can continue the saved plan instead of replacing it', async () => {
+  const { graph, config } = setup();
+  const options = { configurable: { thread_id: 'repair-entry-continue', registry } };
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), { ...options, interruptAfter: ['capability'] });
+  const saved = await graph.getState(options);
+  const executor = new ScriptedModel([]);
+  const entry = new ScriptedModel([new AIMessage('我现在处理剩余任务。'), call('continue', {}, 'entry-repair-continue')]);
+  const supervisor = new ScriptedModel([
+    call('review_current', { completed: true, reason: 'Previous evidence verified.', reply: 'Done.' }, 'accept-old-evidence'),
+  ]);
+  const output = await createOrchestratorGraph({ ...config, models: { act: supervisor, answer: entry, subagent: executor } })
+    .invoke(buildOrchestratorRunInput([new HumanMessage('Continue.')]), options);
+  assert.equal(entry.inputs.length, 2);
+  assert.equal(executor.inputs.length, 0);
+  assert.equal(output.runSupervisorState.plan[0].id, saved.values.runSupervisorState.plan[0].id);
+  assert.equal(output.runSupervisorState.plan[0].status, 'completed');
 });

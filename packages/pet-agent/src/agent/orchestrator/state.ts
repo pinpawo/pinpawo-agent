@@ -3,7 +3,6 @@ import { setAgentMessageMetadata } from '../messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import { randomUUID } from 'node:crypto';
-import { mergeDelegationDeliveries, type DelegationDelivery } from './delegation/delivery';
 import type {
   CapabilityMessageLane,
   UserRequest,
@@ -17,7 +16,6 @@ import {
 import type {
   OrchestratorRuntimeFailure,
 } from './runSupervisor/protocol';
-import type { PauseTaskInterruptPayload } from './interrupt/pauseTaskInterrupt';
 import type { RunSupervisorState } from './runSupervisor/state';
 import type { CapabilityDisclosureState } from './runSupervisor/capabilityDisclosure';
 
@@ -44,10 +42,6 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => null,
   }),
-  sessionDelegationResults: Annotation<DelegationDelivery[]>({
-    reducer: mergeDelegationDeliveries,
-    default: () => [],
-  }),
   messages: Annotation<BaseMessage[]>({
     reducer: messagesStateReducer,
     default: () => [],
@@ -70,19 +64,11 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runSupervisorReply: Annotation<string | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
   runRuntimeFailure: Annotation<OrchestratorRuntimeFailure | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
   runTerminalError: Annotation<OrchestratorTerminalErrorState | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
-  taskPauseInterrupt: Annotation<PauseTaskInterruptPayload | null>({
     reducer: (_prev, next) => next,
     default: () => null,
   }),
@@ -109,11 +95,7 @@ export const ORCHESTRATOR_STATE_CHANNEL_NAMES = Object.keys(orchestratorStateCha
 
 export const OrchestratorState = Annotation.Root(orchestratorStateChannels);
 
-// Older snapshots may omit the newly introduced evidence channel. Graph hydration
-// supplies its default; adapters also accept partial historical snapshots.
-export type OrchestratorStateType = Omit<typeof OrchestratorState.State, 'sessionDelegationResults'> & {
-  sessionDelegationResults?: DelegationDelivery[];
-};
+export type OrchestratorStateType = typeof OrchestratorState.State;
 
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
@@ -121,10 +103,8 @@ export type OrchestratorRunState = Pick<
   | 'runSupervisorUserMessageId'
   | 'runUserRequest'
   | 'runIterationCount'
-  | 'runSupervisorReply'
   | 'runRuntimeFailure'
   | 'runTerminalError'
-  | 'taskPauseInterrupt'
   | 'runId'
   | 'traceId'
 >;
@@ -142,10 +122,8 @@ export function buildRunStateReset(
     runSupervisorUserMessageId: null,
     runUserRequest: null,
     runIterationCount: 0,
-    runSupervisorReply: null,
     runRuntimeFailure: null,
     runTerminalError: null,
-    taskPauseInterrupt: null,
     runId: randomUUID().slice(0, 8),
     traceId: options.traceId ?? randomUUID(),
   };

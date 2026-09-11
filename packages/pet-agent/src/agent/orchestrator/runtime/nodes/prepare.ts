@@ -7,9 +7,7 @@ import { compactOrchestratorMessages } from '../../contextCompaction';
 import {
   contextCompactionWatermarkGuard,
   ORCHESTRATOR_GUARD_POSITION,
-  runStateResetGuard,
 } from '../../guardDefinitions';
-import { buildRunStateReset } from '../../state';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
@@ -17,18 +15,16 @@ import { afterPrepare } from '../routes/afterPrepare';
 
 export function createPrepareNode() {
   return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    const outcome = evaluateGuard(runStateResetGuard, {
-      state,
-      config: {},
-      position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
-    }, { emit: guardDecisionEmitter(runnableConfig), runId: state.runId });
+    if (!state.runId || !state.traceId) {
+      throw new Error('Fresh runs must be initialized with buildOrchestratorRunInput.');
+    }
     const freshMessages = state.messages.filter((message) => HumanMessage.isInstance(message)
       && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId);
-    const update: Partial<OrchestratorStateType> = outcome.kind === 'derive' ? buildRunStateReset() : {};
-    const traceId = update.traceId ?? state.traceId;
+    if (!freshMessages.length) throw new Error('Fresh run requires a HumanMessage bound to its runId.');
+    const traceId = state.traceId;
     const messages = freshMessages.map((message) =>
       setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
-    return new Command({ update: { ...update, messages }, goto: afterPrepare({ ...state, ...update }) });
+    return new Command({ update: { messages }, goto: afterPrepare(state) });
   };
 }
 

@@ -43,9 +43,18 @@ type RunSupervisorState = {
 或嵌套 `run` 容器。调用参数与已有事实能够推导的信息，不重复放进 state。
 
 删除独立 active delegation 不等于删除执行身份和进度。计划任务使用稳定 ID，以及
-`pending / executing / returned / completed / superseded` 进度，明确待执行、执行中、
-已交付、已验收或被替换。当前任务由计划中首个未完成且未被替换的任务确定。
+`pending / completed / superseded` 业务进度，明确尚未验收、已验收或被替换。
+执行中、已返回和执行失败从该任务最新的实际工具调用及结果推导，不写回计划。
+当前任务由计划中首个未完成且未被替换的任务确定。
 delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不形成另一份当前任务容器。
+
+Capability 节点只提交私有消息、Root ToolMessage，以及产物索引、授权记录、执行计数等
+程序拥有的运行事实；不更新 `runSupervisorState`。交付只保存在配对的 ToolMessage，
+删除重复的 `sessionDelegationResults`。验收必须依据当前任务最近一次执行的有效交付，
+不能在重试失败后回退到旧成功结果。无新交付以 `missing_deliverable` 错误 ToolMessage
+返回 Supervisor，由其决定补做或回复；真正的运行异常仍走框架错误出口。
+暂停路由读取本轮最新执行结果的 `paused`，不另存 Root `taskPauseInterrupt` 标志；
+原生 interrupt 及 Capability 内部暂停机制不变。
 
 | 信息 | 保存与生命周期 |
 | --- | --- |
@@ -54,7 +63,7 @@ delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不�
 | delegation 调用及结果 | Root 消息与 checkpoint 保存，作为实际执行记录 |
 | Capability 私有消息 | 继续留在原私有 lane 和 delegation/run 作用域 |
 | runId、traceId、预算、输入消费 | 复用 Root 必要运行字段；新 run 初始化，原生 interrupt 恢复时保留，不再复制一个 `runSupervisorState.run` |
-| 交付、产物、授权、运行出口 | 复用已有事实与资源存储；授权按当前 generation 校验，不由模型任意修改 |
+| 交付、产物、授权、运行出口 | 交付保存在工具结果中；产物索引、授权与运行出口复用必要字段，授权按当前 generation 校验，不由模型任意修改 |
 
 ### runSupervisorState 与 snapshot
 
@@ -69,6 +78,19 @@ Entry Answer 从保存的 `runSupervisorState` 了解计划进度，从 Root 的
 重置工作视图不要求清空 Root 全部消息。
 
 ## 入口与恢复
+
+新 run 仅由 `buildOrchestratorRunInput` 初始化并绑定用户消息；`prepare` 校验身份，
+不再补造另一份 run。Entry 将路由调用与确认提交到 Root 后直接进入 Supervisor，
+不通过 `Send` 复制整份 Root state。Supervisor 从本轮最新主会话工具消息识别
+`plan_request`（Entry）或其他执行边界（Boundary），原生恢复读取原 checkpoint。
+Entry ToolNode 仅执行当前路由调用；旧 run 的 ToolMessage 不参与本次工具去重，
+避免 provider 复用调用 ID 时把新请求误判为已执行。实际调用与确认仍配对保存在 Root。
+
+执行预算统一在 Supervisor 调用前检查，普通执行返回和暂停恢复共用该检查点，
+不再增加空的预算节点。Answer 仍独立发布主会话回复，从本轮 Supervisor 已保存的
+自然回复或 `review_current.reply` 读取正文，不另存 `runSupervisorReply`。
+入口、压缩、执行和暂停节点的普通异常统一记录 Root 终止错误；原生 interrupt
+和取消不转换成普通失败。回复消息统一标记 runId 与 traceId。
 
 **原生 interrupt 按原生机制恢复；其他情况一律先经过 Entry Answer。**
 
@@ -196,6 +218,12 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 | `runSupervisorSession.plan` | 归入 `runSupervisorState.plan`，不保留两份计划 |
 | `runSupervisorSession.messages` | 迁入 Root 消息存储，保持工作归属并按新 run 重置工作视图 |
 | `runSupervisorSession.pendingCall` | 删除；实际执行消息与 checkpoint 表达调用现场 |
+| 计划中的 `executing` / `returned` | 删除；计划只记录验收/替换决定，执行进度读取最新工具调用及结果；Host 仍可投影为 active |
+| `sessionDelegationResults` | 删除重复交付存储；从 Root 的实际配对 ToolMessage 读取 |
+| Root 的 `taskPauseInterrupt` | 删除重复路由标志；读取本轮工具结果的 paused，原生暂停节点与 Capability 内部暂停协议保留 |
+| `RunSupervisorDispatch.root` | 删除整份状态副本；Entry 将路由消息提交 Root 后直接跳转，Supervisor 读取统一 Root state |
+| `runSupervisorReply` | 删除正文中转槽；Answer 从本轮已提交的 Supervisor 消息发布回复 |
+| `prepare` 的 reset 兜底、空预算节点 | 删除；新 run 统一由输入 builder 初始化，预算在 Supervisor 入口统一检查 |
 | `supervisorCommand` / 草案中的 `proposal` 字段 | 不再作为持久交接槽；内部控制消息及 handoff AIMessage 表达决定 |
 | `runNextDelegation` / 草案中的 `nextAttempt` | 收敛到本次调用参数与必要业务事实，删除可推导的重复状态 |
 | 草案中的 `lastOutcome`、嵌套 `run` | 不引入；复用原消息、运行身份、预算及出口 |
@@ -242,6 +270,8 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
   不丢已提交进度、不重放已提交调用、不恢复旧授权。
 - executor 的 briefing、Toolkit 生命周期、交付与验收分离、产物身份和原生流式输出保持正常；
   检查模型轮数、attempt 预算和图步数，避免额外路由耗尽递归限制。
+- Capability 返回不改业务计划；缺失交付返回错误 ToolMessage 后可由 Supervisor 重试，
+  最新失败不能被旧成功结果掩盖，授权与产物事实仍独立提交。
 - 旧会话可读；旧拓扑挂起运行明确报告不兼容，不静默迁移或重跑副作用。
 
 [新的消息交接测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/messageHandoff.test.ts)
@@ -255,11 +285,11 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 
 | 验证 | 结果 |
 | --- | --- |
-| pet-agent 全量单元与集成测试 | 487 / 487 通过，包含真实 createAgent、生产 Root 图和 executor 的脚本模型测试，以及连续 invoke 的详情读取隔离 |
+| pet-agent 全量单元与集成测试 | 498 / 498 通过，包含真实 createAgent、生产 Root 图、无交付重试、最新结果验收、Entry 交接/调用 ID 隔离、消息回复发布、统一错误出口与原生恢复预算测试 |
 | pet-agent 源码与 eval 类型检查、本地端类型检查 | 通过 |
 | 本地端全量测试 | 620 通过、5 跳过；端口及子进程测试在沙箱外执行 |
-| 最后一次 Host 适配回归 | 35 / 35 通过，覆盖图服务、会话计划事件和进度投影 |
-| 默认模型 `qwen3.8-max` 决策 eval | Boundary 9、计划调整 4、详情查询 7 个场景均取得通过结果；包含失败场景修正后的定向复跑，不是单次零失败运行 |
+| Host 计划投影与事件 | 纳入本次本地端全量测试，执行进度从消息推导，保留 completed/pending/active 展示语义 |
+| 前一轮默认模型 `qwen3.8-max` 决策 eval | Boundary 9、计划调整 4、详情查询 7 个场景均取得通过结果；包含失败场景修正后的定向复跑，不是单次零失败运行；本次状态清理未重跑真实模型 eval |
 
 真实模型 eval 只使用合成任务和执行证据，不执行业务工具，关闭远程 tracing。
 它验证调度语义，不替代生产图的 checkpoint、授权或副作用测试。

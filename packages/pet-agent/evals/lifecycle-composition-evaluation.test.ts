@@ -40,7 +40,6 @@ test('lifecycle composition pass requires semantic goals and mechanical invarian
       messages: [new AIMessage('done')],
       runSupervisorState: { goal: null, plan: [] },
       runIterationCount: 0,
-      runSupervisorReply: null,
     },
     assistantMessageCount: 1,
     executorCallCount: 1,
@@ -70,7 +69,6 @@ test('lifecycle composition cannot pass an exactly-once case without an executor
       messages: [new AIMessage('looks complete')],
       runSupervisorState: { goal: null, plan: [] },
       runIterationCount: 0,
-      runSupervisorReply: null,
     },
     assistantMessageCount: 1,
     executorCallCount: 0,
@@ -107,10 +105,9 @@ test('lifecycle composition accepts an isolated resumable checkpoint for require
     finalState: {
       messages: [retainedAnnounce],
       runSupervisorState: { goal: 'check staging deployment', plan: [{
-        id: 'task-1', capability: 'workspace_analysis', task: 'check staging deployment', status: 'returned',
+        id: 'task-1', capability: 'workspace_analysis', task: 'check staging deployment', status: 'pending',
       }] },
       runIterationCount: 0,
-      runSupervisorReply: null,
     },
     assistantMessageCount: 1,
     executorCallCount: 1,

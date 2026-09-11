@@ -2,16 +2,9 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { CapabilityCatalog } from './capabilityCatalog';
 import type { CapabilityDisclosureState } from './capabilityDisclosure';
-import type { OrchestratorStateType } from '../state';
 import type { RunSupervisorState } from './state';
 
 export type RunSupervisorMode = 'entry' | 'boundary';
-
-/** Invocation routing, not a persisted proposal or another owner of Root state. */
-export type RunSupervisorDispatch = {
-  mode: RunSupervisorMode;
-  root: OrchestratorStateType;
-};
 
 export type RunSupervisorInput = {
   readonly mode: RunSupervisorMode;

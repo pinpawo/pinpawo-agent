@@ -124,7 +124,7 @@ test('Entry Answer returns an ordinary reply without invoking Supervisor', async
   );
 });
 
-test('plan_request routes to Supervisor without persisting control messages', async () => {
+test('plan_request commits its routing pair to Root before Supervisor reads it', async () => {
   const scripted = entryAnswerModel('plan');
   const supervisorInputs: RunSupervisorInput[] = [];
   const graph = createOrchestratorGraph({
@@ -149,11 +149,11 @@ test('plan_request routes to Supervisor without persisting control messages', as
   assert.equal(supervisorInputs[0]?.userRequest, request);
   assert.equal(supervisorInputs[0]?.messages.some((message) => message.content === request), true);
   assert.equal(result.runUserRequest, request);
-  assert.equal(result.messages.some((message) => ToolMessage.isInstance(message)), false);
+  assert.equal(result.messages.some((message) => ToolMessage.isInstance(message) && message.name === PLAN_REQUEST_TOOL_NAME), true);
   assert.equal(result.messages.some((message) => (
     AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === PLAN_REQUEST_TOOL_NAME)
-  )), false);
+  )), true);
   assert.equal(result.messages.at(-1)?.content, '当前没有可用的 Capability。');
 });
 

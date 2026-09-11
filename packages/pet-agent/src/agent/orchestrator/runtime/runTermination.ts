@@ -1,18 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Command, type NodeError } from '@langchain/langgraph';
-import type { RunSupervisorDispatch } from '../runSupervisor/runner';
 import type {
   OrchestratorStateType,
   OrchestratorTerminalErrorState,
 } from '../state';
-
-type FailureNodeInput = OrchestratorStateType | RunSupervisorDispatch;
-
-function rootState(input: FailureNodeInput): OrchestratorStateType {
-  return 'root' in input
-    ? input.root
-    : input;
-}
 
 function readStringProperty(error: Error, property: string): string | null {
   const value = (error as unknown as Record<string, unknown>)[property];
@@ -69,8 +60,7 @@ export function createRunTerminationHandlers() {
   const pendingErrors = new Map<string, Error>();
 
   return {
-    onNodeError(input: FailureNodeInput, nodeError: NodeError) {
-      const state = rootState(input);
+    onNodeError(_state: OrchestratorStateType, nodeError: NodeError) {
       if (readStringProperty(nodeError.error, 'code') === 'checkpoint_incompatible') {
         return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' as const }, goto: 'answer' });
       }
@@ -78,7 +68,6 @@ export function createRunTerminationHandlers() {
       pendingErrors.set(terminalError.id, nodeError.error);
       return new Command({
         update: {
-          runSupervisorReply: null,
           runRuntimeFailure: null,
           runTerminalError: terminalError,
         },

@@ -12,9 +12,5 @@ export async function pauseGate(state: OrchestratorStateType) {
     new HumanMessage({ id: randomUUID(), content: resumed.guidance }),
     { traceId: state.traceId, runId: state.runId },
   ) : null;
-  return { ...(guidance ? { messages: [guidance] } : {}), taskPauseInterrupt: null };
-}
-
-export function afterPauseGate(_state: OrchestratorStateType) {
-  return 'runSupervisor' as const;
+  return guidance ? { messages: [guidance] } : {};
 }

@@ -8,6 +8,7 @@ import { basename, resolve } from 'node:path';
 import {
   compileAgentRegistry,
   defineInstructionDocument,
+  readCapabilityExecutions,
   ReviewPolicies,
   type AgentCapability,
   type AgentModels,
@@ -15,6 +16,7 @@ import {
   type RunSupervisorRunner,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
+import { scriptedSupervisorResult } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import type {
   AgentChannelSetup,
 } from '../../../local-agent/src/agentChannel';
@@ -209,25 +211,34 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   const runSupervisorRunner: RunSupervisorRunner = {
     async invoke(input) {
       if (input.mode === 'boundary') {
-        return { completed: true, reason: 'Current task delivery is evidenced.',
-          action: 'review_current',
-          remainingPlan: [],
-          reply: input.userRequest.includes(ATTACHMENT_TOOL_INPUT) ? ATTACHMENT_TOOL_REPLY : GUARDED_HOST_REPLY,
-        };
+        const latest = readCapabilityExecutions(input.messages)
+          .filter(({ metadata }) => metadata.runId === input.runId).at(-1);
+        if (latest?.result?.status === 'paused') {
+          return scriptedSupervisorResult(input, {
+            name: 'review_current',
+            args: { completed: false, reason: 'Resume the paused fixture action after user guidance.' },
+          });
+        }
+        return scriptedSupervisorResult(input, {
+          name: 'review_current',
+          args: {
+            completed: true, reason: 'Current task delivery is evidenced.',
+            reply: input.userRequest.includes(ATTACHMENT_TOOL_INPUT) ? ATTACHMENT_TOOL_REPLY : GUARDED_HOST_REPLY,
+          },
+        });
       }
       const readsAttachment = input.userRequest.includes(ATTACHMENT_TOOL_INPUT);
-      return {
-        action: 'execute_plan',
-
-        tasks: [
-          {
+      return scriptedSupervisorResult(input, {
+        name: 'submit_plan',
+        args: {
+          tasks: [{
             capability: 'general',
             task: readsAttachment
-            ? 'read the selected attachment'
-            : 'write the guarded fixture',
-          },
-        ],
-      };
+              ? 'read the selected attachment'
+              : 'write the guarded fixture',
+          }],
+        },
+      });
     },
   };
   const subagentModel = new ProductionToolkitToolCallingModel();

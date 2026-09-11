@@ -111,21 +111,24 @@ function buildScriptedSupervisorRunner() {
         plannedObjectives.push(objective);
         selectedCapabilityNames.push('explore');
         return {
-          action: 'execute_plan',
-          tasks: [{
-            capability: 'explore',
-            task: objective,
-          }, {
-            capability: 'code_modify',
-            task: '根据调查结论重构 auth 模块',
-          }],
-
+          name: 'submit_plan', args: {
+            tasks: [{
+              capability: 'explore',
+              task: objective,
+            }, {
+              capability: 'code_modify',
+              task: '根据调查结论重构 auth 模块',
+            }]
+          }
         };
       }
       if (supervisorDecisionCount > 2) {
-        return { completed: true, reason: 'Current task delivery is evidenced.',
-          action: 'review_current',
-          reply: 'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
+        return {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            reply: 'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。'
+          }
         };
       }
       secondTaskSawHandoff = /循环依赖|token validation/.test(
@@ -135,9 +138,11 @@ function buildScriptedSupervisorRunner() {
       const objective = input.state.plan.find((task) => task.status === 'pending')?.task ?? '';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
-      return { completed: true, reason: 'Current task delivery is evidenced.',
-        action: 'review_current',
-
+      return {
+        name: 'review_current', args: {
+          completed: true,
+          reason: 'Current task delivery is evidenced.'
+        }
       };
     },
   };

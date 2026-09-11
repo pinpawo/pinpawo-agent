@@ -211,7 +211,7 @@ test('validateCapabilityPlugin accepts an entry that only exports lifecycle.fina
   await fs.writeFile(path.join(capabilityDir, 'index.js'), `
 export const lifecycle = {
   finalize(result) {
-    return { announceMessageId: result.announceMessageId };
+    return { output: result.output };
   },
 };
 `, 'utf8');

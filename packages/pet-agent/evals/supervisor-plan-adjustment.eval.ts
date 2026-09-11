@@ -51,20 +51,21 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     const result = readSupervisorDecision(actual);
     console.log(JSON.stringify({ case: scenario.name, decision: result }));
     if (scenario.name === 'entry') {
-      assert.equal(result.action, 'execute_plan');
-      if (result.action === 'execute_plan') {
-        assert.ok(result.tasks.length > 0);
-        assert.equal(result.tasks[0].capability, 'writer');
+      assert.equal(result.name, 'submit_plan');
+      if (result.name === 'submit_plan') {
+        assert.ok(result.args.tasks.length > 0);
+        assert.equal(result.args.tasks[0].capability, 'writer');
       }
     } else if (scenario.strategy) {
-      assert.equal(result.action, 'adjust_plan');
-      if (result.action === 'adjust_plan') {
-        assert.equal(result.currentDelegation, scenario.strategy);
-        assert.equal(result.tasks[0].capability, scenario.capability);
-        assert.ok(result.tasks.length > 0);
+      assert.equal(result.name, 'adjust_plan');
+      if (result.name === 'adjust_plan') {
+        assert.equal(result.args.currentDelegation, scenario.strategy);
+        assert.equal(result.args.tasks[0].capability, scenario.capability);
+        assert.ok(result.args.tasks.length > 0);
       }
     } else {
-      assert.ok(result.reply?.trim());
+      const reply = result.name === undefined ? result.reply : result.name === 'review_current' ? result.args.reply : undefined;
+      assert.ok(reply?.trim());
       // Asking may use a direct answer or a no-execution review reply. The
       // observable contract is unchanged work and no Capability dispatch.
       if (actual.reply === undefined) {

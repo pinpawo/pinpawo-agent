@@ -1,6 +1,7 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { CapabilityMessageLane } from '../../messages';
 
+// Legacy checkpoint reader and fixture format. Live execution uses delegate_capability ToolMessages.
 export const DELEGATION_ANNOUNCE_META_KEY = 'delegationAnnounce';
 export const DELEGATION_ANNOUNCE_VERSION = 3;
 

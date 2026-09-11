@@ -51,19 +51,14 @@ import {
   getAgentMessageMetadata,
   mainConversationMessages,
   queryAgentMessages,
-  readAgentMessageCreatedAt,
+  reconcileDelegationMessages,
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
   toolProtocolSafeMessages,
 } from '../messages';
 import {
   DelegationAnnounceMessage,
-  buildSubagentHandoff,
   getDelegationAnnounce,
-  getMessageHandoffSource,
-  readLatestAnnounce,
-  selectDelegationAnnounceMessage,
-  reconcileDelegationPrivateMessages,
   isDelegationBriefingMessage,
   materializeDelegation,
 } from './delegation';
@@ -72,7 +67,6 @@ import {
   createContextCompactionMessage,
   isContextCompactionMessage,
 } from './contextCompaction';
-import { findLatestHandoffCopyForDelegation } from './artifacts/handoff';
 
 function isTypedDelegationAnnounce(message: BaseMessage) {
   return getDelegationAnnounce(message) !== null;
@@ -269,9 +263,12 @@ function createQueuedPlannerRunner(
       }
       if (input.mode === 'boundary' && typeof planning.outcome === 'string') {
         if (planning.outcome === 'goal_done') {
-          return { completed: true, reason: 'Current task delivery is evidenced.',
-            action: 'review_current',
-            reply: '已完成。',
+          return {
+            name: 'review_current', args: {
+              completed: true,
+              reason: 'Current task delivery is evidenced.',
+              reply: '已完成。'
+            }
           };
         }
         if (planning.outcome === 'user_input_required') {
@@ -284,9 +281,12 @@ function createQueuedPlannerRunner(
         if (planning.outcome === 'continue') {
           const active = currentExecution(input);
           if (!active) throw new Error('scripted continue requires active delegation');
-          return { completed: false, reason: typeof planning.gap_note === 'string' && planning.gap_note.trim()
-              ? planning.gap_note : 'Complete the missing current-task work.',
-            action: 'review_current',
+          return {
+            name: 'review_current', args: {
+              completed: false,
+              reason: typeof planning.gap_note === 'string' && planning.gap_note.trim()
+                ? planning.gap_note : 'Complete the missing current-task work.'
+            }
           };
         }
         if (planning.outcome !== 'task_done') {
@@ -309,21 +309,27 @@ function createQueuedPlannerRunner(
         (await nextStructuredValue()).capabilityName ?? '',
       );
       if (input.mode === 'boundary') {
-        return { action: 'review_current', completed: true, reason: 'Current task delivery is evidenced.',
-          ...(input.state.plan.filter((task) => task.status === 'pending').length === 1 ? { reply: '已完成。' } : {}) };
+        return {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            ...(input.state.plan.filter((task) => task.status === 'pending').length === 1 ? { reply: '已完成。' } : {})
+          }
+        };
       }
       return {
-        action: 'execute_plan',
-        tasks: [
-          {
-            capability: capabilityName,
-            task: String(nextTask.task ?? ''),
-          },
-          ...remainingTasks.map((task) => ({
-            capability: String(task.capability ?? ''),
-            task: String(task.task ?? ''),
-          })),
-        ],
+        name: 'submit_plan', args: {
+          tasks: [
+            {
+              capability: capabilityName,
+              task: String(nextTask.task ?? ''),
+            },
+            ...remainingTasks.map((task) => ({
+              capability: String(task.capability ?? ''),
+              task: String(task.task ?? ''),
+            })),
+          ]
+        }
       } as RunSupervisorResult;
     },
   };
@@ -465,28 +471,29 @@ test('execution boundary routes through runSupervisor before the next task', asy
       supervisorInputs.push(input);
       if (supervisorInputs.length === 1) {
         return {
-          action: 'execute_plan',
-          tasks: [{
-            capability: 'explore',
-            task: '读取 issue #269 并提炼需求点。',
-          }, { capability: 'explore', task: '检索本地实现与 git log，判断需求点是否已覆盖。' }],
-          capabilityDisclosure: {
-            ...input.capabilityDisclosure,
-            disclosedCapabilityNames: ['explore'],
-
-          },
-
+          capabilityDisclosure: { ...input.capabilityDisclosure, disclosedCapabilityNames: ['explore'] },
+          name: 'submit_plan', args: {
+            tasks: [{
+              capability: 'explore',
+              task: '读取 issue #269 并提炼需求点。',
+            }, { capability: 'explore', task: '检索本地实现与 git log，判断需求点是否已覆盖。' }]
+          }
         };
       }
       if (supervisorInputs.length === 3) {
-        return { completed: true, reason: 'Current task delivery is evidenced.',
-          action: 'review_current',
-          reply: '已完成。',
+        return {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            reply: '已完成。'
+          }
         };
       }
-      return { completed: true, reason: 'Current task delivery is evidenced.',
-        action: 'review_current',
-
+      return {
+        name: 'review_current', args: {
+          completed: true,
+          reason: 'Current task delivery is evidenced.'
+        }
       };
     },
   };
@@ -558,7 +565,7 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.equal(state.messages.some((message) =>
     readMessageText(message).includes('<supervision_boundary_event')), false);
   assert.equal(answerMessages.length, 0);
-  const handoffs = state.messages.filter((message) => getMessageHandoffSource(message));
+  const handoffs = state.messages.filter((message) => getDelegationAnnounce(message));
   assert.equal(handoffs.length, 0);
   assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
@@ -573,8 +580,14 @@ test('a completed single-task goal is accepted by the boundary Supervisor', asyn
     async invoke(input) {
       supervisorInputs.push(input);
       return input.mode === 'entry'
-        ? { action: 'execute_plan',  tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] }
-        : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: '已完成。', };
+        ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] } }
+        : {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            reply: '已完成。'
+          }
+        };
     },
   };
   const graph = createOrchestratorGraph({
@@ -620,26 +633,31 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
       supervisorInputs.push(input);
       if (input.mode === 'entry') {
         return {
-          action: 'execute_plan',
-          tasks: [{
-            capability: 'explore',
-            task: '读取 issue #269 并提炼需求点。',
-          }, {
-            capability: 'explore',
-            task: '检索本地实现与 git log。',
-          }],
-
+          name: 'submit_plan', args: {
+            tasks: [{
+              capability: 'explore',
+              task: '读取 issue #269 并提炼需求点。',
+            }, {
+              capability: 'explore',
+              task: '检索本地实现与 git log。',
+            }]
+          }
         };
       }
       if (supervisorInputs.length === 3) {
-        return { completed: true, reason: 'Current task delivery is evidenced.',
-          action: 'review_current',
-          reply: '已完成。',
+        return {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            reply: '已完成。'
+          }
         };
       }
-      return { completed: true, reason: 'Current task delivery is evidenced.',
-        action: 'review_current',
-
+      return {
+        name: 'review_current', args: {
+          completed: true,
+          reason: 'Current task delivery is evidenced.'
+        }
       };
     },
   };
@@ -713,9 +731,12 @@ test('Supervisor return routes bounded facts through the answer node', async () 
     runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
-          return { completed: true, reason: 'Current task delivery is evidenced.',
-            action: 'review_current',
-            reply: '已完成。',
+          return {
+            name: 'review_current', args: {
+              completed: true,
+              reason: 'Current task delivery is evidenced.',
+              reply: '已完成。'
+            }
           };
         }
         return {
@@ -962,12 +983,12 @@ test('Run Supervisor materializer rejects selections outside the catalog', async
       async invoke(input) {
         assert.equal(input.mode, 'entry');
         return {
-          action: 'execute_plan',
-          tasks: [{
-            capability: 'not_registered',
-            task: '读取 src/index.ts。',
-          }],
-
+          name: 'submit_plan', args: {
+            tasks: [{
+              capability: 'not_registered',
+              task: '读取 src/index.ts。',
+            }]
+          }
         };
       },
     },
@@ -1001,18 +1022,21 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
     runSupervisorRunner: {
       async invoke(input) {
         if (input.mode === 'boundary') {
-          return { completed: true, reason: 'Current task delivery is evidenced.',
-            action: 'review_current',
-            reply: '已完成。',
+          return {
+            name: 'review_current', args: {
+              completed: true,
+              reason: 'Current task delivery is evidenced.',
+              reply: '已完成。'
+            }
           };
         }
         return {
-          action: 'execute_plan',
-          tasks: [{
-            capability: 'general',
-            task: '检查 src/index.ts 并整理其公开接口。',
-          }],
-
+          name: 'submit_plan', args: {
+            tasks: [{
+              capability: 'general',
+              task: '检查 src/index.ts 并整理其公开接口。',
+            }]
+          }
         };
       },
     },
@@ -3534,7 +3558,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
   const handoffCopy = mainConversationMessages(finalState.messages)
-    .find((message) => Boolean(getMessageHandoffSource(message)));
+    .find((message) => Boolean(getDelegationAnnounce(message)));
   assert.equal(handoffCopy, undefined);
   assert.equal(currentSupervisorTask(finalState.runSupervisorState)?.status, 'pending');
   assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.status, 'paused');
@@ -3735,7 +3759,7 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal('runSupervisorSession' in finalState, false);
   assert.equal(
     mainConversationMessages(finalState.messages)
-      .some((message) => Boolean(getMessageHandoffSource(message))),
+      .some((message) => Boolean(getDelegationAnnounce(message))),
     false,
   );
 
@@ -3916,100 +3940,6 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   assert.equal(reviewCount, 4);
 });
 
-test('buildSubagentHandoff copies the announce into main and wipes the whole delegation lane', () => {
-  const userAsk = new HumanMessage('帮我查一下公开资料');
-  const intermediate = new AIMessage('正在抓取页面…');
-  intermediate.id = 'm-intermediate';
-  setAgentMessageMetadata(intermediate, { lane: 'capability:explore', runId: 't1', delegationId: 'd1' });
-  const announce = createMainAnnounce({
-    id: 'm-announce',
-    lane: 'capability:explore',
-    runId: 't1',
-    delegationId: 'd1',
-    task: '查动态',
-    result: '已查到热门动态：A、B、C。FULL_ANNOUNCE_MARKER',
-  });
-  // A different delegation in the same lane must be untouched.
-  const otherDelegation = new AIMessage('另一个 delegation 的中间消息');
-  otherDelegation.id = 'm-other';
-  setAgentMessageMetadata(otherDelegation, { lane: 'capability:explore', runId: 't1', delegationId: 'd2' });
-
-  const messages = [userAsk, intermediate, announce, otherDelegation];
-  const update = buildSubagentHandoff({
-    taskAccepted: true,
-    messages,
-    lane: 'capability:explore',
-    runId: 't1',
-    delegationId: 'd1',
-  });
-  assert.ok(update, 'handoff update should be produced for a completed delegation');
-
-  const removed = update.filter((m) => m instanceof RemoveMessage).map((m) => m.id);
-  // d1's announce + intermediate are removed; d2 and the user message are not.
-  assert.deepEqual(new Set(removed), new Set(['m-intermediate']));
-
-  const copies = update.filter((m) => !(m instanceof RemoveMessage));
-  assert.equal(copies.length, 1);
-  const copy = copies[0];
-  // The copy carries the full announce text, lives in main (no lane), and keeps
-  // only minimal provenance.
-  assert.match(String(copy.content), /FULL_ANNOUNCE_MARKER/);
-  assert.equal(getAgentMessageLane(copy), null);
-  assert.match(readAgentMessageCreatedAt(copy) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
-  assert.deepEqual(getMessageHandoffSource(copy), {
-    taskAccepted: true,
-    handoffFrom: 'capability:explore',
-    delegationId: 'd1',
-    runId: 't1',
-    task: '查动态',
-    announceMessageId: 'm-announce',
-  });
-});
-
-test('handoff idempotency is scoped by delegation lane and run id', () => {
-  const oldCopy = new DelegationAnnounceMessage({
-    id: 'stored-old-announce',
-    sourceLane: 'capability:general',
-    delegationId: 'same-delegation',
-    runId: 'run-old',
-    task: 'same task',
-    announceMessageId: 'announce-old',
-    result: 'old run result',
-    createdAt: '2026-08-23T00:00:00.000Z',
-  });
-  const currentCopy = new DelegationAnnounceMessage({
-    id: 'stored-current-announce',
-    sourceLane: 'capability:general',
-    delegationId: 'same-delegation',
-    runId: 'run-current',
-    task: 'same task',
-    announceMessageId: 'announce-current',
-    result: 'current run result',
-    createdAt: '2026-08-23T00:00:00.000Z',
-  });
-
-  assert.equal(
-    findLatestHandoffCopyForDelegation(
-      [oldCopy, currentCopy],
-      'same-delegation',
-      'capability:general',
-      'run-current',
-      getMessageHandoffSource,
-    ),
-    currentCopy,
-  );
-  assert.equal(
-    findLatestHandoffCopyForDelegation(
-      [oldCopy, currentCopy],
-      'same-delegation',
-      'capability:general',
-      'run-missing',
-      getMessageHandoffSource,
-    ),
-    null,
-  );
-});
-
 test('old handoff metadata is not treated as an accepted delegation result', () => {
   const oldCopy = new AIMessage('旧 handoff 文本');
   setAgentMessageMetadata(oldCopy, {
@@ -4022,73 +3952,7 @@ test('old handoff metadata is not treated as an accepted delegation result', () 
   });
 
   assert.equal(getDelegationAnnounce(oldCopy), null);
-  assert.equal(getMessageHandoffSource(oldCopy), null);
-});
-
-test('buildSubagentHandoff retains only announce identity and result', () => {
-  const userAsk = new HumanMessage('请帮我做一次探索');
-  const announce = createMainAnnounce({
-    id: 'm-announce-2',
-    lane: 'capability:explore',
-    runId: 'run-1',
-    delegationId: 'd-announce',
-    task: '探索任务',
-    result: '已整理好探索结果。',
-  });
-  const update = buildSubagentHandoff({
-    taskAccepted: true,
-    messages: [userAsk, announce],
-    lane: 'capability:explore',
-    runId: 'run-1',
-    delegationId: 'd-announce',
-  });
-  assert.ok(update);
-  const copy = update.find((message) => message instanceof AIMessage && message.id === 'm-announce-2') as AIMessage;
-  const typed = getDelegationAnnounce(copy);
-  assert.ok(typed);
-  assert.equal(String(copy.content), '已整理好探索结果。');
-  assert.equal('artifactRefs' in typed, false);
-  const source = getMessageHandoffSource(copy);
-  assert.deepEqual(source, {
-    taskAccepted: true,
-    handoffFrom: 'capability:explore',
-    delegationId: 'd-announce',
-    runId: 'run-1',
-    task: '探索任务',
-    announceMessageId: 'm-announce-2',
-  });
-});
-
-test('buildSubagentHandoff returns null when the delegation has no announce text', () => {
-  const intermediate = new AIMessage('只有中间步骤，没有结论');
-  intermediate.id = 'm1';
-  setAgentMessageMetadata(intermediate, { lane: 'capability:general', runId: 't1', delegationId: 'd1' });
-  const update = buildSubagentHandoff({
-    taskAccepted: true,
-    messages: [new HumanMessage('做点事'), intermediate],
-    lane: 'capability:general',
-    runId: 't1',
-    delegationId: 'd1',
-  });
-  assert.equal(update, null);
-});
-
-test('buildSubagentHandoff rejects an announce without a message id', () => {
-  const announce = createMainAnnounce({
-    lane: 'capability:general',
-    runId: 't1',
-    delegationId: 'd1',
-    result: '完成结果',
-  });
-
-  announce.id = undefined;
-  assert.throws(() => buildSubagentHandoff({
-    taskAccepted: true,
-    messages: [announce],
-    lane: 'capability:general',
-    runId: 't1',
-    delegationId: 'd1',
-  }), /missing.*message id/);
+  assert.equal(getDelegationAnnounce(oldCopy), null);
 });
 
 test('execution without a deliverable returns an error result to Supervisor without accepting the task', async () => {
@@ -4104,7 +3968,7 @@ test('execution without a deliverable returns an error result to Supervisor with
         assert.equal(readCapabilityExecutions(input.messages).at(-1)?.result?.status, 'missing_deliverable');
         return { reply: 'No new deliverable was produced.' };
       }
-      return { action: 'execute_plan',  tasks: [{ capability: 'general', task: 'Inspect files.' }] };
+      return { name: 'submit_plan', args: { tasks: [{ capability: 'general', task: 'Inspect files.' }] } };
     } },
   });
   const config = { configurable: { thread_id: 'no-deliverable', capabilities: [capability('general', 'Inspect files.')] } };
@@ -4115,46 +3979,6 @@ test('execution without a deliverable returns an error result to Supervisor with
   assert.equal('taskRunContinuation' in saved, false);
   assert.equal('runSupervisorSession' in saved, false);
   assert.equal(saved.messages.some((message) => getDelegationAnnounce(message)), false);
-});
-
-
-
-
-test('private reconciliation materializes one typed lane announce', () => {
-  const messages = [
-    new HumanMessage('帮我查一下公开资料'),
-    new AIMessage({ id: 'task-1-announce', content: '已查到热门动态。' }),
-  ];
-
-  const tagged = reconcileDelegationPrivateMessages(messages, [messages[0]], 'capability:general', 'turn-1', {
-    delegationId: 'task-1',
-    task: '查公开资料',
-    announceMessageId: 'task-1-announce',
-  });
-
-  assert.equal(tagged.length, 2);
-  // The runtime-selected deliverable becomes the typed announce (neutral, no verdict).
-  assert.equal(isTypedDelegationAnnounce(tagged[1] as BaseMessage), true);
-  assert.equal(getAgentMessageDelegationId(messages[1]), 'task-1');
-  assert.deepEqual(mainConversationMessages(messages).map((message) => message.content), ['帮我查一下公开资料']);
-  assert.deepEqual(selectCapabilityHistory(messages, 'capability:general', 'turn-1', 'task-1').map((message) => message.content), [
-    '帮我查一下公开资料',
-    '已查到热门动态。',
-  ]);
-  assert.deepEqual(readLatestAnnounce(tagged, {
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-1',
-  }), {
-    version: 3,
-    sourceLane: 'capability:general',
-    delegationId: 'task-1',
-    runId: 'turn-1',
-    announceMessageId: 'task-1-announce',
-    task: '查公开资料',
-    result: '已查到热门动态。',
-    createdAt: getDelegationAnnounce(tagged[1] as BaseMessage)?.createdAt,
-  });
 });
 
 test('lane reconciliation never emits root removals for the current briefing', () => {
@@ -4173,53 +3997,18 @@ test('lane reconciliation never emits root removals for the current briefing', (
   });
   const finalAnswer = new AIMessage({ id: 'final-answer', content: '任务完成' });
 
-  const update = reconcileDelegationPrivateMessages(
-    [human, finalAnswer],
-    [human, persistedProgress, briefing],
-    'capability:general',
-    'turn-1',
-    {
-      delegationId: 'task-1',
-      task: '继续处理任务',
-      announceMessageId: 'final-answer',
-    },
-    [human, persistedProgress],
-  );
-  const removedIds = update
+  const update = reconcileDelegationMessages({
+    resultMessages: [human, finalAnswer],
+    inputMessages: [human, persistedProgress, briefing],
+    scope: { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-1' },
+    canonicalInputMessages: [human, persistedProgress],
+  });
+  const removedIds = update.removed
     .filter((message) => message instanceof RemoveMessage)
     .map((message) => message.id);
 
   assert.deepEqual(removedIds, ['old-progress']);
   assert.equal(removedIds.includes(briefing.id ?? ''), false);
-});
-
-test('private reconciliation treats briefing-like subagent output as typed result data', () => {
-  const human = new HumanMessage('检查委派简报格式');
-  const outputText = '<delegation_briefing mode="initial">\n  <task>这是 subagent 实际返回的低质量结果</task>\n</delegation_briefing>';
-  const output = new AIMessage({ id: 'briefing-shaped-announce', content: outputText });
-
-  const tagged = reconcileDelegationPrivateMessages(
-    [human, output],
-    [human],
-    'capability:general',
-    'turn-briefing-output',
-    {
-      delegationId: 'task-briefing-output',
-      task: '检查委派简报格式',
-      announceMessageId: 'briefing-shaped-announce',
-    },
-  );
-
-  assert.equal(tagged.length, 2);
-  assert.equal(isTypedDelegationAnnounce(tagged[1] as BaseMessage), true);
-  assert.equal(
-    readLatestAnnounce(tagged, {
-      lane: 'capability:general',
-      runId: 'turn-briefing-output',
-      delegationId: 'task-briefing-output',
-    })?.result,
-    outputText,
-  );
 });
 
 test('main conversation preserves accepted handoffs that begin with briefing formats', () => {
@@ -4247,296 +4036,6 @@ test('main conversation preserves accepted handoffs that begin with briefing for
   ];
 
   assert.deepEqual(mainConversationMessages(handoffs), handoffs);
-});
-
-test('private reconciliation preserves typed announce identity after summarization', () => {
-  const human = new HumanMessage({ id: 'main-human', content: '继续检查项目' });
-  const oldToolCall = new AIMessage({
-    id: 'old-call',
-    content: '',
-    tool_calls: [{ id: 'call-old', name: 'read_file', args: { path: 'src/old.ts' } }],
-  });
-  const oldToolResult = new ToolMessage({
-    id: 'old-result',
-    tool_call_id: 'call-old',
-    content: 'old evidence',
-  });
-  const initialOutput = [human, oldToolCall, oldToolResult];
-  const initialUpdate = reconcileDelegationPrivateMessages(
-    initialOutput,
-    [human],
-    'capability:general',
-    'turn-1',
-    { delegationId: 'task-summary', task: '检查项目' },
-  );
-  const stateBeforeSummary = messagesStateReducer([human], initialUpdate);
-  const continuationInput = selectCapabilityHistory(
-    stateBeforeSummary,
-    'capability:general',
-    'turn-1',
-    'task-summary',
-  );
-  const contextSummary = new HumanMessage({
-    id: 'context-summary',
-    content: 'Earlier subagent context summary:\n\n已检查 src/old.ts。',
-    additional_kwargs: { lc_source: 'summarization' },
-  });
-  const finalAnswer = new AIMessage({ id: 'final-answer', content: '检查完成。' });
-
-  const summarizedUpdate = reconcileDelegationPrivateMessages(
-    [contextSummary, finalAnswer],
-    continuationInput,
-    'capability:general',
-    'turn-1',
-    {
-      delegationId: 'task-summary',
-      task: '检查项目',
-      announceMessageId: 'final-answer',
-    },
-  );
-  const stateAfterSummary = messagesStateReducer(stateBeforeSummary, summarizedUpdate);
-
-  assert.equal(stateAfterSummary.some((message) => message.id === 'main-human'), true);
-  assert.equal(stateAfterSummary.some((message) => message.id === 'old-call'), false);
-  assert.equal(stateAfterSummary.some((message) => message.id === 'old-result'), false);
-  assert.equal(getAgentMessageLane(contextSummary), 'capability:general');
-  assert.equal(getAgentMessageDelegationId(contextSummary), 'task-summary');
-  assert.equal(isTypedDelegationAnnounce(
-    stateAfterSummary.find((message) => message.id === 'delegation-announce:turn-1:task-summary:final-answer') as BaseMessage,
-  ), true);
-  assert.deepEqual(
-    selectCapabilityHistory(stateAfterSummary, 'capability:general', 'turn-1', 'task-summary').map((message) => message.id),
-    ['main-human', 'context-summary', 'final-answer', 'delegation-announce:turn-1:task-summary:final-answer'],
-  );
-});
-
-test('private reconciliation materializes the typed announce regardless of stop reason', () => {
-  const messages = [
-    new HumanMessage('读取文件并运行 lint'),
-    new AIMessage({ id: 'task-2-progress', content: '文件读取完成，lint 还没跑。' }),
-  ];
-
-  // limit_reached is just a stop reason; the selected deliverable still becomes
-  // an Announce without adding a completed/progress verdict.
-  const tagged = reconcileDelegationPrivateMessages(messages, [messages[0]], 'capability:general', 'turn-1', {
-    delegationId: 'task-2',
-    task: '读取文件并运行 lint',
-    announceMessageId: 'task-2-progress',
-  });
-
-  const typedProgress = tagged[1] as BaseMessage;
-  assert.equal(isTypedDelegationAnnounce(typedProgress), true);
-  assert.deepEqual(readLatestAnnounce(tagged, {
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-2',
-  }), {
-    version: 3,
-    sourceLane: 'capability:general',
-    delegationId: 'task-2',
-    runId: 'turn-1',
-    announceMessageId: 'task-2-progress',
-    task: '读取文件并运行 lint',
-    result: '文件读取完成，lint 还没跑。',
-    createdAt: getDelegationAnnounce(typedProgress)?.createdAt,
-  });
-  assert.equal(selectDelegationAnnounceMessage(tagged, {
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-2',
-    announceMessageId: 'task-2-progress',
-  }), typedProgress);
-  assert.equal(selectDelegationAnnounceMessage(tagged, {
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-2',
-    announceMessageId: 'another-message',
-  }), null);
-});
-
-
-
-
-test('handoff copies the announce into main and wipes the private messages', () => {
-  const human = new HumanMessage('检查项目并汇报');
-  const toolCall = new AIMessage({
-    content: '先读取 package.json。',
-    tool_calls: [{ id: 'call-read', name: 'read_file', args: { path: 'package.json' } }],
-  });
-  const toolResult = new ToolMessage({
-    content: '{"scripts":{"test":"node --test"}}',
-    tool_call_id: 'call-read',
-  });
-  const note = new AIMessage('已经确认测试脚本。');
-  const announce = new AIMessage({
-    id: 'task-complete-announce',
-    content: '检查完成，测试脚本是 node --test。',
-  });
-  const outputMessages = [human, toolCall, toolResult, note, announce];
-
-  const tagged = reconcileDelegationPrivateMessages(
-    outputMessages,
-    [human],
-    'capability:general',
-    'turn-1',
-    {
-    delegationId: 'task-complete',
-    task: '检查项目并汇报',
-    announceMessageId: 'task-complete-announce',
-  });
-  const stateWithLane = messagesStateReducer([human], tagged);
-
-  const handoff = buildSubagentHandoff({
-    taskAccepted: true,
-    messages: stateWithLane,
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-complete',
-  });
-  assert.ok(handoff);
-  const stateMessages = messagesStateReducer(stateWithLane, handoff);
-
-  // The private messages is gone; only the user message and a main-queue copy of
-  // the announce remain.
-  assert.deepEqual(stateMessages.map((message) => message.content), [
-    '检查项目并汇报',
-    '检查完成，测试脚本是 node --test。',
-  ]);
-  // The copy is a first-class main message (no lane) with handoff provenance.
-  assert.equal(getAgentMessageLane(stateMessages[1]), null);
-  assert.deepEqual(getMessageHandoffSource(stateMessages[1]), {
-    taskAccepted: true,
-    handoffFrom: 'capability:general',
-    delegationId: 'task-complete',
-    runId: 'turn-1',
-    task: '检查项目并汇报',
-    announceMessageId: 'task-complete-announce',
-  });
-  // No lane-tagged messages for this delegation remain.
-  assert.equal(stateMessages.filter(
-    (message) => getAgentMessageLane(message) === 'capability:general',
-  ).length, 0);
-});
-
-test('handoff after a resumed delegation wipes the whole delegation lane including old progress', () => {
-  const human = new HumanMessage('处理所有分片');
-  const oldToolCall = new AIMessage({
-    content: '处理第一个分片。',
-    tool_calls: [{ id: 'call-old', name: 'process_next_chunk', args: { source: 'items.csv' } }],
-  });
-  const oldToolResult = new ToolMessage({
-    content: '第一个分片完成，还有剩余。',
-    tool_call_id: 'call-old',
-  });
-  const oldProgress = new AIMessage({ id: 'task-resume-progress', content: '已处理第一个分片，尚未完成。' });
-  const previousRun = [human, oldToolCall, oldToolResult, oldProgress];
-  // First (interrupted) run keeps its whole lane in place — no handoff yet.
-  const previousUpdate = reconcileDelegationPrivateMessages(
-    previousRun,
-    [human],
-    'capability:general',
-    'turn-1',
-    {
-    delegationId: 'task-resume',
-    task: '处理所有分片',
-    announceMessageId: 'task-resume-progress',
-  });
-  const stateWithProgress = messagesStateReducer([human], previousUpdate);
-  assert.equal(
-    selectCapabilityHistory(stateWithProgress, 'capability:general', 'turn-1', 'task-resume').length,
-    5,
-  );
-
-  // Continuation (same delegationId) completes naturally.
-  const finalNote = new AIMessage('继续处理剩余分片。');
-  const completedAnnounce = new AIMessage({
-    id: 'task-resume-complete',
-    content: '全部分片已处理完成，共 120 条。',
-  });
-  const continuationInput = selectCapabilityHistory(
-    stateWithProgress,
-    'capability:general',
-    'turn-1',
-    'task-resume',
-  );
-  const continuationOutput = [
-    ...continuationInput,
-    finalNote,
-    completedAnnounce,
-  ];
-  const taggedContinuation = reconcileDelegationPrivateMessages(
-    continuationOutput,
-    continuationInput,
-    'capability:general',
-    'turn-1',
-    {
-      delegationId: 'task-resume',
-      task: '处理所有分片',
-      announceMessageId: 'task-resume-complete',
-    },
-  );
-  const stateBeforeHandoff = messagesStateReducer(stateWithProgress, taggedContinuation);
-
-  const handoff = buildSubagentHandoff({
-    taskAccepted: true,
-    messages: stateBeforeHandoff,
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-resume',
-  });
-  assert.ok(handoff);
-  const finalState = messagesStateReducer(stateBeforeHandoff, handoff);
-
-  // The entire delegation lane (old progress + continuation messages) is gone;
-  // only the user message and the main-queue copy of the final announce remain.
-  assert.equal(finalState.filter(
-    (message) => getAgentMessageLane(message) === 'capability:general',
-  ).length, 0);
-  assert.deepEqual(mainConversationMessages(finalState).map((m) => m.content), [
-    '处理所有分片',
-    '已处理第一个分片，尚未完成。',
-    '全部分片已处理完成，共 120 条。',
-  ]);
-});
-
-test('lane messages drop unanswered tool calls from interrupted subagent history', () => {
-  const human = new HumanMessage('归档 Downloads');
-  const completeToolCall = new AIMessage({
-    content: '先检查目标目录。',
-    tool_calls: [{ id: 'call-1', name: 'stat_path', args: { path: '/tmp' } }],
-  });
-  const toolResult = new ToolMessage({
-    content: '{"ok":true}',
-    tool_call_id: 'call-1',
-  });
-  const unansweredToolCall = new AIMessage({
-    content: '继续移动文件。',
-    tool_calls: [{ id: 'call-2', name: 'move_path', args: { source: 'a', destination: 'b' } }],
-  });
-  const messages = [human, completeToolCall, toolResult, unansweredToolCall];
-
-  const tagged = reconcileDelegationPrivateMessages(
-    messages,
-    [human],
-    'capability:general',
-    'turn-1',
-    {
-    delegationId: 'task-3',
-    task: '归档 Downloads',
-  });
-  const stateMessages = [human, ...tagged];
-
-  assert.deepEqual(stateMessages.map((message) => message.content), [
-    '归档 Downloads',
-    '先检查目标目录。',
-    '{"ok":true}',
-  ]);
-  assert.equal(isTypedDelegationAnnounce(toolResult), false);
-  assert.equal(readLatestAnnounce(stateMessages, {
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-3',
-  }), null);
 });
 
 test('lane messages sanitize checkpoint history with dangling tool calls', () => {
@@ -4570,10 +4069,10 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
   const task1Answer = new AIMessage({ id: 'task-1-answer', content: '目录已整理完成。' });
   const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
 
-  reconcileDelegationPrivateMessages(messages, [human], 'capability:general', 'turn-1', {
-    delegationId: 'task-1',
-    task: '整理仓库',
-    announceMessageId: 'task-1-answer',
+  reconcileDelegationMessages({
+    resultMessages: messages,
+    inputMessages: [human],
+    scope: { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-1' },
   });
 
   // 同 turn 同 lane 的新 task：看不到上一个 task 的 private messages，只剩主对话。
@@ -4814,7 +4313,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   // Completed delegation lanes are cleared without copying per-task plans into
   // the private lane. Root keeps evidence outside the user-facing conversation.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 0);
+  assert.equal(state.messages.filter((message) => getDelegationAnnounce(message)).length, 0);
   assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
   // Each selected subagent receives one complete invocation-scoped briefing.
@@ -4944,8 +4443,14 @@ test('Capability node inherits root system context into its executor without sec
     runSupervisorRunner: {
       async invoke(input) {
         return input.mode === 'entry'
-          ? { action: 'execute_plan', tasks: [{ capability: 'explore', task: 'Inspect the request.' }] }
-          : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Done.' };
+          ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', task: 'Inspect the request.' }] } }
+          : {
+            name: 'review_current', args: {
+              completed: true,
+              reason: 'Current task delivery is evidenced.',
+              reply: 'Done.'
+            }
+          };
       },
     },
   });
@@ -5009,8 +4514,14 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
     models: { act: answer, subagent: new Executor({}) }, toolkitRuntimeManager,
     runSupervisorRunner: { async invoke(input) {
       return input.mode === 'entry'
-        ? { action: 'execute_plan', tasks: [{ capability: 'inspect', task: 'Inspect context.' }] }
-        : { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', reply: 'Done.' };
+        ? { name: 'submit_plan', args: { tasks: [{ capability: 'inspect', task: 'Inspect context.' }] } }
+        : {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            reply: 'Done.'
+          }
+        };
     } },
   });
   const cases = Array.from({ length: 3 }, () => ({
@@ -5188,9 +4699,13 @@ for (const continuePlan of [false, true]) {
       checkpoint: new MemorySaver(),
       runSupervisorRunner: withScriptedDelegation({ invoke: async (input) => {
         supervisorCalls++;
-        if (supervisorCalls === 1) return { name: 'submit_plan', args: { tasks: [
-          { capability: 'general', task: 'Inspect.' }, { capability: 'general', task: 'Report.' },
-        ] } };
+        if(supervisorCalls === 1) return {
+          name: 'submit_plan', args: {
+            tasks: [
+              { capability: 'general', task: 'Inspect.' }, { capability: 'general', task: 'Report.' },
+            ]
+          }
+        };
         assert.equal(input.mode, 'boundary');
         assert.deepEqual(input.state.plan.map((task) => task.task), ['Inspect.', 'Report.']);
         return { reply: 'The previous execution was cancelled; please clarify the remaining work.' };

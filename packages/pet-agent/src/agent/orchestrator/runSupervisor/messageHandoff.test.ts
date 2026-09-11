@@ -156,10 +156,12 @@ test('same-run retries keep execution scope; new runs never inherit the old dele
   const sameExecution = capabilityHandoffSchema.parse(same.tool_calls![0].args).execution;
   assert.equal(sameExecution.delegationId, oldExecution.delegationId);
   assert.equal(sameExecution.mode, 'continue');
+  assert.equal(sameExecution.guidance, 'Check the missing detail.');
   const fresh = createSupervisorMessageHandoff({ ...first, runId: 'r2' }, retry).at(-1) as AIMessage;
   const freshExecution = capabilityHandoffSchema.parse(fresh.tool_calls![0].args).execution;
   assert.notEqual(freshExecution.delegationId, oldExecution.delegationId);
   assert.equal(freshExecution.mode, 'initial');
+  assert.equal(freshExecution.guidance, sameExecution.guidance);
   assert.notEqual(fresh.tool_calls![0].id, same.tool_calls![0].id);
   assert.equal(queryAgentMessages(first.messages).supervisor('r2').select().messages.length, 0);
 });
@@ -212,6 +214,8 @@ test('replacing executed but unaccepted work preserves it as superseded, not pen
     goal: 'Changed goal', reason: 'User replaced the work.', currentDelegation: 'replace', tasks: [taskB],
   }, 'replace-executed'));
   const accepted = acceptSupervisorMessageHandoff(input, handoff);
+  const dispatch = handoff.at(-1) as AIMessage;
+  assert.equal(capabilityHandoffSchema.parse(dispatch.tool_calls![0].args).execution.guidance, 'User replaced the work.');
   assert.deepEqual(accepted.runSupervisorState.plan.map(({ status }) => status), ['superseded', 'pending']);
   assert.equal(accepted.runSupervisorState.plan[0].id, input.state.plan[0].id);
   assert.notEqual(accepted.runSupervisorState.plan[1].id, input.state.plan[1].id);

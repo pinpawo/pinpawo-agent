@@ -43,26 +43,26 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
   checkFollowUp?: (result: SupervisorDecision) => void;
   check: (result: SupervisorDecision) => void }> = [
   { name: 'entry-execution', goal: 'Inspect the repository and fix the failing unit test.', check: (result) => {
-    assert.equal(result.action, 'execute_plan');
-    if (result.action === 'execute_plan') { assert.ok(result.tasks.length > 0); }
+    assert.equal(result.name, 'submit_plan');
+    if (result.name === 'submit_plan') { assert.ok(result.args.tasks.length > 0); }
   } },
   { name: 'continue-missing-verification', goal: 'Fix the bug and confirm the tests pass.',
     task: 'Fix the bug and run the test suite.', evidence: 'The patch is saved. Tests have not been run. Test tools are available; no user input or permission is needed.',
-    check: (result) => { assert.equal(result.action, 'review_current');
-      if (result.action === 'review_current') { assert.equal(result.completed, false); assert.ok(result.reason.trim()); } } },
+    check: (result) => { assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') { assert.equal(result.args.completed, false); assert.ok(result.args.reason.trim()); } } },
   { name: 'dispatch-pending-capability', goal: 'Fix the bug and confirm the tests pass.',
     task: 'Fix the bug and run the test suite.', pendingDispatch: true,
-    check: (result) => { assert.equal(result.action, 'review_current');
-      if (result.action === 'review_current') assert.equal(result.reply, undefined);
+    check: (result) => { assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') assert.equal(decisionReply(result), undefined);
     } },
   { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
     task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
     remaining: [{ capability: 'general', task: 'Fix the identified off-by-one check and run the regression suite.' }],
     check: (result) => {
-      assert.equal(result.action, 'review_current');
-      if (result.action === 'review_current') {
-        assert.equal(result.completed, true); assert.ok(result.reason.trim());
-        assert.equal(result.reply, undefined); assert.equal('remainingPlan' in result, false);
+      assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') {
+        assert.equal(result.args.completed, true); assert.ok(result.args.reason.trim());
+        assert.equal(decisionReply(result), undefined); assert.equal('remainingPlan' in result.args, false);
       }
     } },
   { name: 'completed-task-can-ask-before-or-after-acceptance', goal: 'Prepare the release notes and publish them to a destination I will select.',
@@ -70,27 +70,27 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     remaining: publicationPlan,
     supplement: 'Publish the prepared RELEASE.md as the GitHub release notes for pinpawo/example tag v1.2.3. I authorize publication; no further confirmation is needed.',
     check: (result) => {
-      assert.ok('reply' in result && result.reply?.trim(), 'Ask the user for the missing destination.');
-      if (result.action !== undefined) {
-        assert.equal(result.action, 'review_current');
-        if (result.action === 'review_current') {
-          assert.equal(result.completed, true);
-          assert.ok(result.reason.trim());
-          assert.equal('remainingPlan' in result, false);
+      assert.ok(decisionReply(result)?.trim(), 'Ask the user for the missing destination.');
+      if (result.name !== undefined) {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') {
+          assert.equal(result.args.completed, true);
+          assert.ok(result.args.reason.trim());
+          assert.equal('remainingPlan' in result.args, false);
         }
       }
     },
     checkFollowUp: (result) => {
-      if (result.action === 'adjust_plan') {
-        assert.equal(result.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
-        assert.equal(result.tasks[0].capability, 'general');
-        assert.match(result.tasks[0].task, /publish|发布/i);
+      if (result.name === 'adjust_plan') {
+        assert.equal(result.args.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
+        assert.equal(result.args.tasks[0].capability, 'general');
+        assert.match(result.args.tasks[0].task, /publish|发布/i);
       } else {
-        assert.equal(result.action, 'review_current');
-        if (result.action === 'review_current') {
-          assert.notEqual(result.completed, false);
-          assert.equal(result.reply, undefined, 'Proceed now that the destination is supplied.');
-          assert.equal('remainingPlan' in result, false);
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') {
+          assert.notEqual(result.args.completed, false);
+          assert.equal(decisionReply(result), undefined, 'Proceed now that the destination is supplied.');
+          assert.equal('remainingPlan' in result.args, false);
         }
       }
     } },
@@ -99,38 +99,38 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     evidence: 'RELEASE.md is ready. No publication has occurred: only the user can choose the destination.',
     supplement: 'Publish RELEASE.md as the GitHub release notes for pinpawo/example tag v1.2.3. I authorize publication; no further confirmation is needed.',
     check: (result) => {
-      assert.ok(result.reply?.trim());
-      if (result.action !== undefined) {
-        assert.equal(result.action, 'review_current');
-        if (result.action === 'review_current') assert.equal(result.completed, undefined);
+      assert.ok(decisionReply(result)?.trim());
+      if (result.name !== undefined) {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') assert.equal(result.args.completed, undefined);
       }
     },
     checkFollowUp: (result) => {
-      assert.equal(result.action, 'adjust_plan');
-      if (result.action === 'adjust_plan') {
-        assert.equal(result.currentDelegation, 'continue');
-        assert.equal(result.tasks.length, 1);
-        assert.equal(result.tasks[0].capability, 'general');
-        assert.match(result.tasks[0].task, /pinpawo\/example/);
-        assert.match(result.tasks[0].task, /v1\.2\.3/);
+      assert.equal(result.name, 'adjust_plan');
+      if (result.name === 'adjust_plan') {
+        assert.equal(result.args.currentDelegation, 'continue');
+        assert.equal(result.args.tasks.length, 1);
+        assert.equal(result.args.tasks[0].capability, 'general');
+        assert.match(result.args.tasks[0].task, /pinpawo\/example/);
+        assert.match(result.args.tasks[0].task, /v1\.2\.3/);
       }
     } },
   { name: 'entry-asks-for-user-owned-choice', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.',
-    check: (result) => { assert.equal(result.action, undefined); assert.ok(result.reply?.trim()); } },
+    check: (result) => { assert.equal(result.name, undefined); assert.ok(decisionReply(result)?.trim()); } },
   { name: 'boundary-without-evidence-asks-user', goal: 'Publish release notes to a destination I will choose.',
     task: 'Publish the release notes to the user-selected destination.',
     check: (result) => {
-      assert.ok(result.reply?.trim());
-      if (result.action !== undefined) {
-        assert.equal(result.action, 'review_current');
-        if (result.action === 'review_current') assert.equal(result.completed, undefined);
+      assert.ok(decisionReply(result)?.trim());
+      if (result.name !== undefined) {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') assert.equal(result.args.completed, undefined);
       }
     } },
   { name: 'accept-and-finish', goal: 'Fix the bug and confirm the tests pass.', task: 'Fix the bug and run the test suite.',
     evidence: 'The bug is fixed. The regression test and the full test suite passed: 42 tests, zero failures. No requested work remains.',
     check: (result) => {
-      assert.equal(result.action, 'review_current');
-      if (result.action === 'review_current') { assert.equal(result.completed, true); assert.ok(result.reason.trim()); assert.ok(result.reply?.trim()); assert.equal('remainingPlan' in result, false); }
+      assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') { assert.equal(result.args.completed, true); assert.ok(result.args.reason.trim()); assert.ok(decisionReply(result)?.trim()); assert.equal('remainingPlan' in result.args, false); }
     } },
 ];
 const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? []);
@@ -153,13 +153,13 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       assert.equal(accepted.messages.length, 2, 'A question must not dispatch execution.');
     }
     if (scenario.supplement) {
-      assert.ok('reply' in result && result.reply?.trim(), 'A question must precede the user supplement.');
+      assert.ok(decisionReply(result)?.trim(), 'A question must precede the user supplement.');
       const saved = actual.reply !== undefined ? input.state
         : acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages).runSupervisorState;
       const resumed: RunSupervisorInput = {
         ...input, state: saved, mode: 'boundary',
         runId: `${scenario.name}:resume`, traceId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,
-        messages: [...input.messages, ...actual.messages, new AIMessage(result.reply!), new HumanMessage(scenario.supplement)],
+        messages: [...input.messages, ...actual.messages, new AIMessage(decisionReply(result)!), new HumanMessage(scenario.supplement)],
         capabilityDisclosure: createCapabilityDisclosureState({ catalog }),
       };
       followUp = readSupervisorDecision(await supervisor.invoke(resumed));
@@ -183,4 +183,8 @@ process.exitCode = failures ? 1 : 0;
 function decision(result: SupervisorDecision | undefined) {
   if (!result) return undefined;
   return result;
+}
+
+function decisionReply(result: SupervisorDecision): string | undefined {
+  return result.name === undefined ? result.reply : result.name === 'review_current' ? result.args.reply : undefined;
 }

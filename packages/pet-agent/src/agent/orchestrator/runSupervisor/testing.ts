@@ -5,22 +5,11 @@ import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } fro
 import { createSupervisorMessageHandoff, type SupervisorControl } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 import { setAgentMessageMetadata } from '../../messages';
-import { controlSchema, type SupervisorControl as Control } from './protocol';
-
-type SupervisorCommand =
-  | ({ action: 'execute_plan' } & Extract<Control, { name: 'submit_plan' }>['args'])
-  | ({ action: 'review_current' } & Extract<Control, { name: 'review_current' }>['args'])
-  | ({ action: 'adjust_plan' } & Extract<Control, { name: 'adjust_plan' }>['args']);
-
-export function readScriptedCommand(value: unknown): SupervisorCommand {
-  const control = controlSchema.parse(value);
-  if (control.name === 'submit_plan') return { action: 'execute_plan', ...control.args };
-  if (control.name === 'review_current') return { action: 'review_current', ...control.args };
-  return { action: 'adjust_plan', ...control.args };
-}
 
 /** Compact fixture notation only; the runtime seam always receives messages. */
-export type ScriptedSupervisorDecision = SupervisorControl | SupervisorCommand | { reply: string };
+export type ScriptedSupervisorDecision = (SupervisorControl | { reply: string }) & {
+  capabilityDisclosure?: RunSupervisorInput['capabilityDisclosure'];
+};
 export type ScriptedSupervisorRunner = {
   invoke(input: RunSupervisorInput, config?: RunnableConfig): Promise<ScriptedSupervisorDecision>;
 };
@@ -44,15 +33,8 @@ export function scriptedSupervisorResult(input: RunSupervisorInput,
 
 export function withScriptedDelegation(runner: ScriptedSupervisorRunner): RunSupervisorRunner {
   return { invoke: async (input, config) => {
-    const raw = await runner.invoke(input, config);
-    const { capabilityDisclosure, ...decision } = raw as ScriptedSupervisorDecision & {
-      capabilityDisclosure?: RunSupervisorInput['capabilityDisclosure'];
-    };
-    if ('action' in decision) {
-      const { action, ...args } = decision;
-      const result = scriptedSupervisorResult(input, { name: action === 'execute_plan' ? 'submit_plan' : action, args } as SupervisorControl);
-      return { ...result, capabilityDisclosure: capabilityDisclosure ?? result.capabilityDisclosure };
-    }
-    return scriptedSupervisorResult(input, decision);
+    const decision = await runner.invoke(input, config);
+    const result = scriptedSupervisorResult(input, decision);
+    return { ...result, capabilityDisclosure: decision.capabilityDisclosure ?? result.capabilityDisclosure };
   } };
 }

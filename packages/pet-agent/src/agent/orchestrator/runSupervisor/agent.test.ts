@@ -25,7 +25,7 @@ import type { CapabilityCatalog } from './capabilityCatalog';
 import { createRunSupervisorAgent } from './agent';
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
-import { readScriptedCommand } from './testing';
+import { controlSchema } from './protocol';
 type SupervisorDelegationInput = { delegationId: string; runId: string; capability: string; task: string };
 type CapabilityPlanTask = { capability: string; task: string };
 import {
@@ -40,7 +40,7 @@ function commandOnly(value: unknown) {
     && message.tool_calls?.some((call) => ['submit_plan', 'review_current', 'adjust_plan'].includes(call.name))).at(-1) as AIMessage;
   const call = request?.tool_calls?.[0];
   assert.ok(call, 'Expected the original internal control call');
-  return readScriptedCommand({ name: call.name, args: call.args });
+  return controlSchema.parse({ name: call.name, args: call.args });
 }
 
 // Actual call derivation, exclusivity and duplicate settlement are tested in
@@ -366,7 +366,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     toolCalls: [{
       id: 'done-a',
       name: 'review_current',
-      args: { completed: true, reason: 'Current task delivery is evidenced.',  reply: '已完成。' },
+      args: { completed: true, reason: 'Current task delivery is evidenced.', reply: '已完成。' },
     }],
   }, { content: '当前没有可用的 Capability。' }, { content: '当前没有可用的 Capability。' }]);
   const supervisor = createRunSupervisorAgent({ model });
@@ -420,20 +420,19 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   });
 
   const entryState = await graph.invoke({ input: entryA }, config);
-  assert.deepEqual(commandOnly(entryState.command), {
-    action: 'execute_plan',
-    tasks: [{ capability: 'general', task: 'Complete trace A.' }],
-
-  });
+  assert.deepEqual(commandOnly(entryState.command), { name: 'submit_plan', args: { tasks: [{ capability: 'general', task: 'Complete trace A.' }] } });
   assert.match(model.invocations[0]?.map(readMessageText).join('\n') ?? '', /PRIOR_MAIN_CONVERSATION/);
   const boundaryInput = {
     ...boundaryA,
     messages: [...entryA.messages, ...boundaryA.messages],
   };
   const boundaryState = await graph.invoke({ input: boundaryInput }, config);
-  assert.deepEqual(commandOnly(boundaryState.command), { completed: true, reason: 'Current task delivery is evidenced.',
-    action: 'review_current',
-    reply: '已完成。',
+  assert.deepEqual(commandOnly(boundaryState.command), {
+    name: 'review_current', args: {
+      completed: true,
+      reason: 'Current task delivery is evidenced.',
+      reply: '已完成。'
+    }
   });
   assert.equal(model.invocations.length, 2);
   assert.match(
@@ -447,9 +446,12 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   const completedBoundaryInput = boundaryInput;
 
   const duplicateState = await graph.invoke(null, config);
-  assert.deepEqual(commandOnly(duplicateState.command), { completed: true, reason: 'Current task delivery is evidenced.',
-    action: 'review_current',
-    reply: '已完成。',
+  assert.deepEqual(commandOnly(duplicateState.command), {
+    name: 'review_current', args: {
+      completed: true,
+      reason: 'Current task delivery is evidenced.',
+      reply: '已完成。'
+    }
   });
   assert.equal(model.invocations.length, 2, 'a completed checkpoint has no pending Supervisor node');
 
@@ -463,9 +465,12 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     .addEdge('supervisor', END)
     .compile({ checkpointer });
   const restartedState = await restartedGraph.invoke(null, config);
-  assert.deepEqual(commandOnly(restartedState.command), { completed: true, reason: 'Current task delivery is evidenced.',
-    action: 'review_current',
-    reply: '已完成。',
+  assert.deepEqual(commandOnly(restartedState.command), {
+    name: 'review_current', args: {
+      completed: true,
+      reason: 'Current task delivery is evidenced.',
+      reply: '已完成。'
+    }
   });
   assert.equal(restartedModel.invocations.length, 0, 'a rebuilt Supervisor must replay the persisted command');
 
@@ -570,15 +575,15 @@ test('Supervisor Agent explores Capability documents and returns a compact order
     ['explore'],
   );
   assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: [{
-      capability: 'explore',
-      task: 'Research the repository.',
-    }, {
-      capability: 'general',
-      task: 'Prepare the review from the findings.',
-    }],
-
+    name: 'submit_plan', args: {
+      tasks: [{
+        capability: 'explore',
+        task: 'Research the repository.',
+      }, {
+        capability: 'general',
+        task: 'Prepare the review from the findings.',
+      }]
+    }
   });
   assert.deepEqual(result.capabilityDisclosure?.disclosedCapabilityNames, [
     'explore',
@@ -623,12 +628,12 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal(model.structuredOutputToolNames.has('advance'), false);
   assert.equal(model.boundToolNames.includes('report_unavailable'), false);
   const decision = commandOnly(result);
-  assert.ok('tasks' in decision);
+  assert.ok('name' in decision && decision.name === 'submit_plan');
   assert.equal(
-    'tasks' in decision ? decision.tasks[0]?.task : null,
+    decision.args.tasks[0]?.task,
     'Inspect issue #473 and report the Supervisor Agent constraints.',
   );
-  assert.equal('tasks' in decision ? decision.tasks.length : 0, 1);
+  assert.equal(decision.args.tasks.length, 1);
 });
 
 test('Supervisor accepts a detailed task beyond the legacy 500-character limit', async (t) => {
@@ -656,12 +661,12 @@ test('Supervisor accepts a detailed task beyond the legacy 500-character limit',
     .invoke(supervisorInput(catalog));
 
   assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: [{
-      capability: 'general',
-      task: detailedTask,
-    }],
-
+    name: 'submit_plan', args: {
+      tasks: [{
+        capability: 'general',
+        task: detailedTask,
+      }]
+    }
   });
 });
 
@@ -694,8 +699,8 @@ test('Supervisor accepts consecutive tasks from one Capability when the model ke
     .invoke(supervisorInput(catalog));
 
   const decision = commandOnly(result);
-  assert.ok('tasks' in decision);
-  assert.deepEqual('tasks' in decision ? decision.tasks : [], [{
+  assert.ok('name' in decision && decision.name === 'submit_plan');
+  assert.deepEqual(decision.args.tasks, [{
     capability: 'general',
     task: 'Inspect the failing release and identify the exact package boundary.',
   }, {
@@ -731,12 +736,12 @@ test('Supervisor receives General routing metadata without preloading its docume
   );
 
   assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: [{
-      capability: 'general',
-      task: 'Inspect and organize the requested Downloads directory.',
-    }],
-
+    name: 'submit_plan', args: {
+      tasks: [{
+        capability: 'general',
+        task: 'Inspect and organize the requested Downloads directory.',
+      }]
+    }
   });
   // Dynamic Capability documents are projected into the invocation Human
   // message; the stable system prompt contains no catalog content.
@@ -898,12 +903,12 @@ test('Supervisor identifies the configured default without preloading its docume
   }));
 
   assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: [{
-      capability: 'kanban_planning',
-      task: 'Create a task plan on the board.',
-    }],
-
+    name: 'submit_plan', args: {
+      tasks: [{
+        capability: 'kanban_planning',
+        task: 'Create a task plan on the board.',
+      }]
+    }
   });
   const supervisorInputMessage = model.invocations[0]?.find(
     (message) => message instanceof HumanMessage,
@@ -957,12 +962,12 @@ test('an explicit second details discloses a specific Capability after a miss', 
   );
 
   assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: [{
-      capability: 'explore',
-      task: 'Inspect the auth module structure and risks.',
-    }],
-
+    name: 'submit_plan', args: {
+      tasks: [{
+        capability: 'explore',
+        task: 'Inspect the auth module structure and risks.',
+      }]
+    }
   });
   const detailsResults = [...new Map(
     model.invocations.flat().filter(
@@ -1171,8 +1176,11 @@ test('a Boundary details does not redisclose its seeded active General', async (
     }),
   );
 
-  assert.deepEqual(commandOnly(result), { completed: false, reason: 'Complete the missing current-task work.',
-    action: 'review_current',
+  assert.deepEqual(commandOnly(result), {
+    name: 'review_current', args: {
+      completed: false,
+      reason: 'Complete the missing current-task work.'
+    }
   });
   const detailsResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
@@ -1237,11 +1245,7 @@ test('a submitted plan submits once without a final ordinary-text reply', async 
     supervisorInput(catalog),
   );
 
-  assert.deepEqual(commandOnly(result), {
-    action: 'execute_plan',
-    tasks: submittedTasks,
-
-  });
+  assert.deepEqual(commandOnly(result), { name: 'submit_plan', args: { tasks: submittedTasks } });
   assert.equal(model.invocations.length, 1);
 });
 
@@ -1393,9 +1397,11 @@ test('review rejects a plan mutation before discovery or dispatch', async (t) =>
     }),
   });
   const model = new ScriptedSupervisorModel([{
-    toolCalls: [{ name: 'review_current', args: {
-      completed: true, reason: 'Current task verified.', reply: 'Done.', remainingPlan: [],
-    } }],
+    toolCalls: [{
+      name: 'review_current', args: {
+        completed: true, reason: 'Current task verified.', reply: 'Done.', remainingPlan: [],
+      }
+    }],
   }]);
   const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
@@ -1429,9 +1435,14 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
       instructions: 'Complete the requested work.',
     }),
   });
-  const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: 'adjust-new-work', name: 'adjust_plan',
-    args: { goal: 'Update the README.', reason: 'User requested the update.', currentDelegation: 'replace',
-      tasks: [{ capability: 'general', task: 'Update the README section for issue #587.' }] } }] }]);
+  const model = new ScriptedSupervisorModel([{
+    toolCalls: [{
+      id: 'adjust-new-work', name: 'adjust_plan',
+      args: {
+        goal: 'Update the README.', reason: 'User requested the update.', currentDelegation: 'replace',
+        tasks: [{ capability: 'general', task: 'Update the README section for issue #587.' }]
+      }
+    }] }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
@@ -1451,8 +1462,8 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
   );
 
   const decision = commandOnly(result);
-  assert.ok('action' in decision && decision.action === 'adjust_plan');
-  assert.equal(decision.tasks[0].capability, 'general');
+  assert.ok('name' in decision && decision.name === 'adjust_plan');
+  assert.equal(decision.args.tasks[0].capability, 'general');
 });
 
 test('boundary Supervisor continues without replacing the active task', async (t) => {
@@ -1492,8 +1503,11 @@ test('boundary Supervisor continues without replacing the active task', async (t
     }),
   );
 
-  assert.deepEqual(commandOnly(result), { completed: false, reason: 'Complete the missing current-task work.',
-    action: 'review_current',
+  assert.deepEqual(commandOnly(result), {
+    name: 'review_current', args: {
+      completed: false,
+      reason: 'Complete the missing current-task work.'
+    }
   });
   assert.equal(model.invocations.length, 1);
 });
@@ -1596,7 +1610,12 @@ test('boundary Supervisor exposes only boundary command actions', async (t) => {
     }),
   );
 
-  assert.deepEqual(commandOnly(result), { completed: true, reason: 'Current task delivery is evidenced.',  action: 'review_current', });
+  assert.deepEqual(commandOnly(result), {
+    name: 'review_current', args: {
+      completed: true,
+      reason: 'Current task delivery is evidenced.'
+    }
+  });
   assert.equal(model.invocations.length, 1);
   assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('review_current'), true);
@@ -1800,9 +1819,11 @@ test('multiple controls and mixed discovery/control responses run no tools or fo
   const catalog = createTestCatalog({ general: capabilityDocument({
     name: 'general', description: 'Execute work.', instructions: 'Execute work.',
   }) });
-  const proposal = { id: 'plan', name: 'submit_plan', args: {
-    tasks: [{ capability: 'general', task: 'Execute work.' }],
-  } };
+  const proposal = {
+    id: 'plan', name: 'submit_plan', args: {
+      tasks: [{ capability: 'general', task: 'Execute work.' }],
+    }
+  };
   for (const toolCalls of [
     [proposal, { ...proposal, id: 'second' }],
     [{ id: 'details', name: 'capability_details', args: { names: ['general'] } }, proposal],
@@ -1922,7 +1943,7 @@ test('adjust_plan is a single proposal available only at a user-guided Boundary'
     });
     const invocation = createRunSupervisorAgent({ model }).invoke(input);
     if (scenario === 'user') {
-      assert.deepEqual(commandOnly(await invocation), { action: 'adjust_plan', ...args });
+      assert.deepEqual(commandOnly(await invocation), { name: 'adjust_plan', args: { ...args } });
     } else {
       await assert.rejects(invocation, /tool unavailable in this invocation/);
     }

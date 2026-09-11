@@ -1,10 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
-import { observeAgentMessageSelection, queryAgentMessages } from '../../messages';
-import { materializeDelegation, reconcileDelegationPrivateMessages } from '../delegation';
-import { readMessageText } from '../utils';
+import { observeAgentMessageSelection, queryAgentMessages, reconcileDelegationMessages } from '../../messages';
+import { materializeDelegation } from '../delegation';
 import { toolProtocolMiddleware } from '../modelInvocation';
 import { buildSubagentExecutionContext, collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
 import { emitRuntimeEventToStreamWriter } from '../../../utils/streamWriterEvents';
@@ -204,8 +204,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       result = {
         ...result,
         ...(finalized?.messages ? { messages: finalized.messages } : {}),
-        ...(finalized?.announceMessageId !== undefined
-          ? { announceMessageId: finalized.announceMessageId }
+        ...(finalized?.output !== undefined
+          ? { output: finalized.output }
           : {}),
         artifacts: [...artifactsById.values()],
       };
@@ -216,35 +216,24 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     }
     const resultMessages = pausedSubagentState?.messages ?? result!.messages;
     const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
-    const announceMessageId = result?.announceMessageId ?? null;
-    const laneOutputMessages = reconcileDelegationPrivateMessages(
+    const reconciled = reconcileDelegationMessages({
       resultMessages,
-      subagentInput.messages,
-      scope.lane,
-      scope.runId,
-      {
-        traceId: scope.traceId,
-        delegationId: scope.delegationId,
-        task: delegation.task,
-        announceMessageId,
-        publishAnnounce: false,
-      },
-      canonicalSelection.messages,
-    );
-    const deliveredMessage = announceMessageId
-      ? laneOutputMessages.find((message) => message.id === announceMessageId)
-      : null;
-    const delivery = deliveredMessage ? {
-      id: `delivery:${scope.runId}:${scope.delegationId}:${announceMessageId}`,
+      inputMessages: subagentInput.messages,
+      canonicalInputMessages: canonicalSelection.messages,
+      scope,
+    });
+    const output = result?.output ?? null;
+    const delivery = output?.trim() ? {
+      id: `delivery:${scope.runId}:${scope.delegationId}:${randomUUID()}`,
       scope,
       task: delegation.task,
-      text: readMessageText(deliveredMessage),
+      text: output,
     } : null;
     return {
       status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
       scope,
       delivery,
-      privateMessages: laneOutputMessages,
+      privateMessages: [...reconciled.removed, ...reconciled.added],
       artifacts: resultArtifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };

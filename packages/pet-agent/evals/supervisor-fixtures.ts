@@ -1,19 +1,18 @@
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner';
 import { supervisorControlSchemas } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
+import { controlSchema } from '../src/agent/orchestrator/runSupervisor/protocol';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure';
 import { setAgentMessageMetadata } from '../src/agent/messages';
 
 /** Read the original model decision, not the programmatically derived execution call. */
 export function readSupervisorDecision(result: RunSupervisorResult) {
-  if (result.reply !== undefined) return { reply: result.reply, action: undefined };
+  if (result.reply !== undefined) return { reply: result.reply, name: undefined };
   const message = result.messages.filter((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => Object.hasOwn(supervisorControlSchemas, call.name))).at(-1) as AIMessage | undefined;
   const call = message?.tool_calls?.[0];
   if (!call) throw new Error('Evaluation result has no internal control decision.');
-  if (call.name === 'submit_plan') return { action: 'execute_plan' as const, ...supervisorControlSchemas.submit_plan.parse(call.args) };
-  if (call.name === 'review_current') return { action: 'review_current' as const, ...supervisorControlSchemas.review_current.parse(call.args) };
-  return { action: 'adjust_plan' as const, ...supervisorControlSchemas.adjust_plan.parse(call.args) };
+  return controlSchema.parse({ name: call.name, args: call.args });
 }
 export type SupervisorDecision = ReturnType<typeof readSupervisorDecision>;
 

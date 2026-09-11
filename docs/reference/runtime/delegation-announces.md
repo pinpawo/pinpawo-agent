@@ -2,7 +2,7 @@
 
 > **Status: current implementation reference.** Payload version 3 carries
 > execution output and provenance only. The cross-layer contract is defined by the
-> [Supervisor–Root Interaction Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
+> [Supervisor–Root Interaction Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
 > Results are published directly into main before acceptance, using existing identity fields.
 
 A delegated Capability result is stored as a typed
@@ -102,6 +102,6 @@ result store is needed.
   Announce contract.
 
 This page owns the currently implemented serialized payload. The cross-layer interaction and migration are documented in the
-[Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
+[Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
 
 Main Announces also carry root-owned `pinpawo.traceId` alongside the existing payload, without changing Announce identity or adding a payload field. It associates evidence with the logical task across resumed runs. Boundary selects current-task main messages using this metadata; acceptance preserves it. Root compaction retains separate current-task and older-history summaries, stamping only the current summary with traceId, while preserving all unfinished Announce attempts verbatim.

@@ -11,10 +11,8 @@ contracts in [reference/](../reference/index.md).
 
 ## Agent runtime
 
-- [Supervisor–Root Interaction Protocol](agent-runtime/delegation-boundary-protocol.md) —
-  per-loop decisions, returns, and root effects for issue #755;
-  [中文版本](agent-runtime/delegation-boundary-protocol.zh-CN.md)
-- [Run-scoped Supervisor session](agent-runtime/run-scoped-supervisor-session.md)
+- [Root、Supervisor 与 Capability 的状态与交接](agent-runtime/run-scoped-supervisor-session.md) —
+  当前状态边界、工具消息交接与恢复设计
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery
 - [Capability / Toolkit composition](agent-runtime/toolkit-composition.md) and

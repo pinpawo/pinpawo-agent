@@ -208,7 +208,7 @@ Browser、bash、git 都是普通 Toolkit：
    不存在 direct host tools、capability-private tools 或与 Toolkit 平级的
    LocalTools。Run Supervisor 的框架内部 control action 不属于扩展 inventory，
    不应为了形式统一伪装成 Host Toolkit；具体 command contract 由
-   [Delegation Boundary Protocol](agent-runtime/delegation-boundary-protocol.md)
+   [Root、Supervisor 与 Capability 的状态与交接](agent-runtime/run-scoped-supervisor-session.md)
    统一定义。
 4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 review/authorization
    context。Tool 的 path、cwd、command 等参数由模型决定并保持原样；不得为了

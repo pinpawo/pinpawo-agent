@@ -17,7 +17,7 @@
 
 The Capability-to-Supervisor error boundary is tracked by issue #755 and
 the
-[Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
+[Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
 
 ## Capability compatibility
 

@@ -128,7 +128,7 @@ contract is defined by
 [`run-scoped-supervisor-session.md`](../../design/agent-runtime/run-scoped-supervisor-session.md).
 Capability exit, Boundary entry, and the target command convergence are defined
 by the
-[`delegation-boundary-protocol.md`](../../design/agent-runtime/delegation-boundary-protocol.md)
+[`delegation-boundary-protocol.md` (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md)
 draft for issue #755. The implementation uses the single-proposal surface below.
 The lifetime and tool-scope table includes the 2026-09-06 target clarification:
 the committed plan and prepared disclosure stay stable during execution, and

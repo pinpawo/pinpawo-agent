@@ -1924,7 +1924,7 @@ test('adjust_plan is a single proposal available only at a user-guided Boundary'
     if (scenario === 'user') {
       assert.deepEqual(commandOnly(await invocation), { action: 'adjust_plan', ...args });
     } else {
-      await assert.rejects(invocation, /invalid in this mode|fresh user input/);
+      await assert.rejects(invocation, /tool unavailable in this invocation/);
     }
     assert.equal(model.boundToolNames.includes('adjust_plan'), scenario === 'user');
     assert.equal(model.invocations.length, 1);

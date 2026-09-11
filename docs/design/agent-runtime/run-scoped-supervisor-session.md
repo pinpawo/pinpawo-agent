@@ -188,6 +188,19 @@ Root 接纳交接时校验调用与任务、能力、运行身份的一致性，
 原生恢复不重新派发已经提交的调用。框架 checkpoint 不保证外部副作用恰好一次，
 仍需保留已有审核、拒绝、取消和错误处理。
 
+### Middleware 的边界
+
+`SupervisorControlValidation` 只在工具执行前检查响应格式、当前可用工具、控制调用
+独占性和参数 schema，不计算计划更新。内部控制工具只确认收到调用并通过
+`returnDirect` 结束 createAgent；确认不表示 Root 已接受该业务决定。
+完整业务校验与状态推导只发生在两个边界：Supervisor 生成 handoff 时，以及 Root
+接收 handoff 时。每个边界只计算一次，复用该结果装配消息或提交状态；不新增中转状态。
+
+`ToolProtocol` 只整理模型输入中的工具调用配对，不改写 Root 或私有历史，也不处理
+Announce。历史 Announce 的数据投影仅保留在 Entry Answer 和 Supervisor 读取 Root
+历史的位置；当前 Capability 执行使用真实工具消息对，不加载这层旧消息转换。
+详情披露状态、公共 system prompt、Capability 的压缩／轮数限制／工具审批职责不变。
+
 ### lane 归属不变
 
 | 消息 | 可见范围 |
@@ -298,6 +311,6 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 验收，允许自然回复和等价的控制工具回复，不通过限定某一种表达形式来判定成败。
 
 本次不新增并行调度、独立存储、快照采用协议或外部工具节点层，不涉及已暂停的 macOS companion。
-[旧交接协议及用户流程图](delegation-boundary-protocol.zh-CN.md)保留历史参考角色，
+旧交接协议已从当前文档中移除，历史内容可通过 Git 查看。
 [合并时设计](https://github.com/pinpawo/pinpawo-agent/blob/b8b43353969aa3c4dd9e87db620f79a5b3dd6cca/docs/design/agent-runtime/run-scoped-supervisor-session.md)
 记录 #795 基线；当前重构方向以本文为准。

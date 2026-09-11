@@ -321,7 +321,7 @@ is insufficient: a normal limit-reached or user-input-required result may
 preserve work for continuation, and a normal Supervisor question may end its
 run while preserving work, without creating `PauseTaskInterrupt` or an
 `interrupted` event. That interaction is defined by the
-[Supervisor–Root protocol](delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+[Supervisor–Root protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
 A finished task must not project `PauseTaskInterrupt`.
 
 ## Replay-safe Review policy
@@ -498,7 +498,7 @@ union. Review and task pause must not be represented by result metadata; their
 propagation is Runtime-private interrupt control flow between `createSubagent`
 and the capability node. Removal of the remaining cross-layer
 `completionReason` contract is owned separately by the
-[Delegation Boundary Protocol](delegation-boundary-protocol.md) and issue #755.
+[Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md) and issue #755.
 
 ## Running Esc
 

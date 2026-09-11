@@ -5,7 +5,7 @@ import type { SubagentRunInput } from '../../../types/subagent';
 import { observeAgentMessageSelection, queryAgentMessages } from '../../messages';
 import { materializeDelegation, reconcileDelegationPrivateMessages } from '../delegation';
 import { readMessageText } from '../utils';
-import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
+import { toolProtocolMiddleware } from '../modelInvocation';
 import { buildSubagentExecutionContext, collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
 import { emitRuntimeEventToStreamWriter } from '../../../utils/streamWriterEvents';
 import { createToolAuthorizationRecorder } from '../runtime/authorization';
@@ -154,7 +154,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
         generationReserveTokens: subagentGenerationReserveTokens,
         middleware: [
           ...usedResolvedToolkitExecution.middleware,
-          orchestratorModelInvocationMiddleware,
+          toolProtocolMiddleware,
         ],
         runtimeContext: {
           executionScope: {

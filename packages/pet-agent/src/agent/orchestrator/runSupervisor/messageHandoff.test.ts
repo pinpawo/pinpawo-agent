@@ -12,7 +12,7 @@ import { currentSupervisorTask, type RunSupervisorState } from './state';
 import {
   acceptSupervisorMessageHandoff,
   createMessageSupervisorControlTools,
-  createMessageSupervisorMiddleware,
+  createSupervisorControlValidationMiddleware,
   createSupervisorMessageHandoff,
   type SupervisorHandoffContext,
 } from './messageHandoff';
@@ -229,7 +229,7 @@ class OneControlModel extends BaseChatModel {
 }
 
 test('unavailable model tools fail before an extra model loop or tool execution', async () => {
-  for (const name of ['delegate_capability', 'unknown_tool', 'capability_details']) {
+  for (const name of ['delegate_capability', 'unknown_tool', 'capability_details', 'submit_plan', 'adjust_plan']) {
     class UnavailableModel extends OneControlModel {
       async _generate(): Promise<ChatResult> {
         this.invocations++;
@@ -240,10 +240,24 @@ test('unavailable model tools fail before an extra model loop or tool execution'
     const input = context({ mode: 'boundary', hasNewUserInput: false });
     const model = new UnavailableModel({});
     const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
-      middleware: [createMessageSupervisorMiddleware(input)] });
+      middleware: [createSupervisorControlValidationMiddleware(input)] });
     await assert.rejects(agent.invoke({ messages: [new HumanMessage('Continue.')] }), /unavailable/);
     assert.equal(model.invocations, 1);
   }
+});
+
+test('internal confirmation does not accept an invalid business decision; handoff rejects it without mutating Root', async () => {
+  const input = context({ allowedCapabilityNames: [] });
+  const before = JSON.stringify(input);
+  const model = new OneControlModel({});
+  const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
+    middleware: [createSupervisorControlValidationMiddleware(input)] });
+  const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
+  assert.ok(ToolMessage.isInstance(result.messages.at(-1)));
+  assert.equal(model.invocations, 1);
+  assert.throws(() => createSupervisorMessageHandoff(input, result.messages), /outside the current catalog/);
+  assert.throws(() => acceptSupervisorMessageHandoff(input, result.messages), /outside the current catalog/);
+  assert.equal(JSON.stringify(input), before);
 });
 
 test('mixed model control and discovery calls are rejected before either tool executes', async () => {
@@ -264,7 +278,7 @@ test('mixed model control and discovery calls are rejected before either tool ex
   const model: BaseChatModel = new MixedModel({});
   const tools: StructuredTool[] = [...createMessageSupervisorControlTools(input), query];
   const agent = createAgent({ model, tools,
-    middleware: [createMessageSupervisorMiddleware(input)] });
+    middleware: [createSupervisorControlValidationMiddleware(input)] });
   await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }), /only tool call/);
   assert.equal(queries, 0);
 });
@@ -283,7 +297,7 @@ test('real createAgent exits with a complete control pair and Root resumes its e
       .addNode('supervisor', async (state) => {
         const input = context({ state: state.runSupervisorState, messages: state.messages });
         const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
-          middleware: [createMessageSupervisorMiddleware(input)] });
+          middleware: [createSupervisorControlValidationMiddleware(input)] });
         const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
         assert.equal(result.messages.length, 3);
         assert.deepEqual(Object.keys(result).sort(), ['messages'], 'no supervisorCommand or handoff slot');

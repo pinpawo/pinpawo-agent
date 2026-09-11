@@ -7,13 +7,14 @@ import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentInput, buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
 import { queryAgentMessages, setAgentMessageMetadata } from '../../messages';
-import { orchestratorModelInvocationMiddleware } from '../modelInvocation';
+import { toolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 import { createSupervisorCapabilityDetailsTool, createSupervisorDisclosureStateMiddleware } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-import { createMessageSupervisorControlTools, createMessageSupervisorMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
+import { createMessageSupervisorControlTools, createSupervisorControlValidationMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
+import { projectDelegationAnnouncesForModel } from '../delegation';
 
 export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
@@ -38,7 +39,8 @@ export function createRunSupervisorAgent(params: {
         content: buildRunSupervisorAgentInput(input, disclosedDocuments, routing),
       });
       const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
-      const agentMessages = [...selected, frame];
+      // Legacy reports exist only in Root history, not in Capability private work.
+      const agentMessages = [...projectDelegationAnnouncesForModel(selected), frame];
       const tools: StructuredTool[] = [
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,
@@ -51,10 +53,10 @@ export function createRunSupervisorAgent(params: {
         tools,
         systemPrompt: buildRunSupervisorAgentSystemPrompt(input.mode),
         middleware: [
-          createMessageSupervisorMiddleware(context),
+          createSupervisorControlValidationMiddleware(context),
           createSupervisorDisclosureStateMiddleware(),
           systemPromptMiddleware,
-          orchestratorModelInvocationMiddleware,
+          toolProtocolMiddleware,
         ],
       });
       const result = await agent.invoke({

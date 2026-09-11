@@ -14,22 +14,16 @@ type InvokableMessageModel<TOutput extends BaseMessage> = {
   ): Promise<TOutput>;
 };
 
-function providerMessages(messages: readonly BaseMessage[]): BaseMessage[] {
-  return toolProtocolSafeMessages(
-    projectDelegationAnnouncesForModel(messages),
-  );
-}
-
-/** Delegation projection and tool protocol repair have no prompt ownership. */
-export const orchestratorModelInvocationMiddleware = createMiddleware({
-  name: 'OrchestratorModelInvocation',
+/** Filter incomplete tool pairs only in model input, never in canonical state. */
+export const toolProtocolMiddleware = createMiddleware({
+  name: 'ToolProtocol',
   wrapModelCall: (request, handler) => handler({
     ...request,
-    messages: providerMessages(request.messages),
+    messages: toolProtocolSafeMessages(request.messages),
   }),
 });
 
-/** Invoke a direct model with independently owned system and Agent messages. */
+/** Root's direct Entry model also reads legacy checkpoint evidence. */
 export function invokeOrchestratorModel<TOutput extends BaseMessage>(
   model: InvokableMessageModel<TOutput>,
   input: {
@@ -40,6 +34,6 @@ export function invokeOrchestratorModel<TOutput extends BaseMessage>(
 ) {
   return model.invoke([
     composeSystemPrompt(input.systemMessage, getAgentRuntimeContext(runnableConfig)),
-    ...providerMessages(input.messages),
+    ...toolProtocolSafeMessages(projectDelegationAnnouncesForModel(input.messages)),
   ], runnableConfig);
 }

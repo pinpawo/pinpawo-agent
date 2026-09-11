@@ -125,7 +125,7 @@ local paused mode: Enter sends `resume_active`, while a second Esc leaves that
 mode and makes the following submission `supersede_active`. This local mode is
 not projected, persisted, or used to infer delegation availability.
 
-Under the [Supervisor interaction target](../../design/agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly),
+Under the [Supervisor interaction target (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly),
 normal questions with saved work also expose continuation without an interrupted
 event. Append the user's answer or explicit plan adjustment to main while keeping
 the active delegation, then invoke Supervisor before execution. Receiving that

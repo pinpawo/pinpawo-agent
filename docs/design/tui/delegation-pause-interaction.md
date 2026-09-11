@@ -2,7 +2,7 @@
 
 Updated integration, 2026-09-08: explicit pauses retain their interrupt
 behavior. Ordinary Supervisor questions use normal replies and existing work
-continuation, following the [Supervisor–Root Interaction Protocol](../agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
+continuation, following the [Supervisor–Root Interaction Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly).
 Ordinary text replies now use `resume_active` when the projected current plan has
 unfinished work; Esc explicitly selects a new task. Empty Enter remains reserved
 for an explicit pause.

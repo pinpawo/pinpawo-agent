@@ -1,77 +1,25 @@
 import type { AgentPlan } from '@pinpawo/agent-session';
+import { readCapabilityExecutions } from '@pinpawo/pet-agent';
 
-type DelegationSummary = {
-  id: string;
-  lane: string;
-  task: string;
-  status: 'pending' | 'progress' | 'completed';
-};
-
-type ActiveDelegation = {
-  id: string;
-  lane: string;
-  task: string;
-};
-
-type RemainingPlanTask = {
-  capability: string;
-  task: string;
-};
-
-/**
- * Converts the authoritative orchestration state into the shared session
- * contract. The TUI never receives, parses, or infers a plan from synthetic
- * messages or delegation briefing content.
- */
+/** Project business progress directly; execution messages are not another plan. */
 export function projectCurrentPlan(state: unknown): AgentPlan | null {
-  const record = asRecord(state);
-  const active = readActiveDelegation(record?.taskActiveDelegation);
-  const summaries = readDelegationSummaries(record?.runDelegationSummaries);
-  const supervisorSession = asRecord(record?.runSupervisorSession);
-  const continuation = asRecord(record?.taskRunContinuation);
-  const remaining = readRemainingPlan(
-    supervisorSession?.plan ?? continuation?.remainingPlan,
-  );
-
-  // A missing active delegation only means no step is running right now — the
-  // plan itself survives between delegations, so it must not be cleared.
-  if (!active && summaries.length === 0 && remaining.length === 0) {
-    return null;
-  }
-
-  const activeInSummaries = active !== null
-    && summaries.some((summary) => summary.id === active.id);
-  const completedOrPending = summaries.map((summary) => ({
-    id: summary.id,
-    capability: capabilityFromLane(summary.lane),
-    task: summary.task,
-    status: summary.id === active?.id
-      ? 'active' as const
-      : summary.status === 'completed'
-        ? 'completed' as const
-        : 'pending' as const,
-  }));
-
-  if (active && !activeInSummaries) {
-    completedOrPending.push({
-      id: active.id,
-      capability: capabilityFromLane(active.lane),
-      task: active.task,
-      status: 'active',
-    });
-  }
-
-  return {
-    items: [
-      ...completedOrPending,
-      ...remaining.map((item, index) => ({
-        id: `pending:${item.capability}:${index}`,
-        capability: item.capability,
-        task: item.task,
-        status: 'pending' as const,
-      })),
-    ],
-  };
+  const root = asRecord(state);
+  const supervisor = asRecord(root?.runSupervisorState);
+  if (!Array.isArray(supervisor?.plan)) return null;
+  const executions = readCapabilityExecutions(Array.isArray(root?.messages) ? root.messages : []);
+  const items = supervisor.plan.flatMap((value) => {
+    const item = asRecord(value);
+    const id = readIdentifier(item?.id);
+    const capability = readDisplayText(item?.capability);
+    const task = readDisplayText(item?.task);
+    const status = item?.status;
+    if (!id || !capability || !task || !['pending', 'completed'].includes(String(status))) return [];
+    return [{ id, capability, task,
+      status: status === 'completed' ? 'completed' as const
+        : executions.some(({ execution }) => execution.taskId === id && execution.capability === capability)
+          ? 'active' as const : 'pending' as const }];
+  });
+  return items.length ? { items } : null;
 }
 
 export function currentPlansEqual(
@@ -88,49 +36,6 @@ export function currentPlansEqual(
       && item.task === other.task
       && item.status === other.status;
   });
-}
-
-function readActiveDelegation(value: unknown): ActiveDelegation | null {
-  const record = asRecord(value);
-  if (!record) return null;
-  const id = readIdentifier(record.id);
-  const lane = readIdentifier(record.lane);
-  const task = readDisplayText(record.task);
-  return id && lane && task ? { id, lane, task } : null;
-}
-
-function readDelegationSummaries(value: unknown): DelegationSummary[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    const record = asRecord(entry);
-    const id = readIdentifier(record?.id);
-    const lane = readIdentifier(record?.lane);
-    const task = readDisplayText(record?.task);
-    const status = record?.status;
-    if (
-      !id
-      || !lane
-      || !task
-      || (status !== 'pending' && status !== 'progress' && status !== 'completed')
-    ) {
-      return [];
-    }
-    return [{ id, lane, task, status }];
-  });
-}
-
-function readRemainingPlan(value: unknown): RemainingPlanTask[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    const record = asRecord(entry);
-    const capability = readDisplayText(record?.capability);
-    const task = readDisplayText(record?.task);
-    return capability && task ? [{ capability, task }] : [];
-  });
-}
-
-function capabilityFromLane(lane: string) {
-  return lane.startsWith('capability:') ? lane.slice('capability:'.length) : lane;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -1,3 +1,5 @@
+export { readCapabilityExecutions } from './agent/orchestrator/executionMessages';
+
 export type {
   AgentModels,
 } from './types/agent';
@@ -126,7 +128,6 @@ export {
   validateUniqueToolkitNames,
 } from './agent/createAgentRuntime';
 export type {
-  ActiveDelegationTransition,
   PauseTaskInterruptPayload,
   AbortSettlement,
   AbortSettlementGraph,
@@ -137,8 +138,8 @@ export type {
   RunSupervisorMode,
   RunSupervisorResult,
   RunSupervisorRunner,
-  RunSupervisorSessionState,
-  RunTaskContinuation,
+  RunSupervisorState,
+  SupervisorPlanTask,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';

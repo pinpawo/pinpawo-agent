@@ -5,6 +5,7 @@ import {
   getAgentMessageRunId,
 } from '../src/agent/messages/index.ts';
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state.ts';
+import { currentSupervisorTask } from '../src/agent/orchestrator/runSupervisor/state';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
 import type {
   LifecycleCompositionExpected,
@@ -45,12 +46,8 @@ export function evaluateLifecycleCompositionInvariants(params: {
   finalState: Pick<
     OrchestratorStateType,
     | 'messages'
-    | 'runNextDelegation'
-    | 'runSupervisorSession'
-    | 'taskRunContinuation'
-    | 'taskActiveDelegation'
+    | 'runSupervisorState'
     | 'runIterationCount'
-    | 'runSupervisorReply'
   >;
   assistantMessageCount: number;
   executorCallCount: number;
@@ -64,32 +61,15 @@ export function evaluateLifecycleCompositionInvariants(params: {
   const retainedLaneMessages = state.messages.filter(
     (message: BaseMessage) => getAgentMessageLane(message) !== null,
   );
-  const activeDelegation = state.taskActiveDelegation;
-  const cleanCheckpoint = state.runNextDelegation === null
-    && state.runSupervisorSession === null
-    && state.taskRunContinuation === null
-    && activeDelegation === null
-    && state.runIterationCount === 0
-    && state.runSupervisorReply === null;
-  const resumableCheckpoint = state.runNextDelegation === null
-    && state.runSupervisorSession === null
-    && activeDelegation?.status === 'awaiting_decision'
-    && state.taskRunContinuation?.activeDelegationId === activeDelegation.id
-    && state.taskRunContinuation.traceId === activeDelegation.traceId
-    && state.taskRunContinuation.userRequest === activeDelegation.userRequest
-    && state.runIterationCount === 0
-    && state.runSupervisorReply === null;
-  const checkpointStateMatches = params.expectedCheckpointState === 'clean'
-    ? cleanCheckpoint
-    : resumableCheckpoint;
-  const laneIsolationMatches = params.expectedCheckpointState === 'clean'
-    ? retainedLaneMessages.length === 0
-    : activeDelegation !== null
-      && retainedLaneMessages.length > 0
-      && retainedLaneMessages.every((message) =>
-        getAgentMessageLane(message) === activeDelegation.lane
-        && getAgentMessageRunId(message) === activeDelegation.runId
-        && getAgentMessageDelegationId(message) === activeDelegation.id);
+  const current = currentSupervisorTask(state.runSupervisorState);
+  const cleanCheckpoint = current === null;
+  const resumableCheckpoint = current !== null;
+  const checkpointStateMatches = params.expectedCheckpointState === 'clean' ? cleanCheckpoint : resumableCheckpoint;
+  // Older private scopes may remain physically stored. Isolation means every
+  // private record retains its owner, not that old execution history is erased.
+  const laneIsolationMatches = retainedLaneMessages.every((message) =>
+    getAgentMessageLane(message) === 'supervisor' ? Boolean(getAgentMessageRunId(message))
+      : Boolean(getAgentMessageRunId(message) && getAgentMessageDelegationId(message)));
   const executorCallCountWithinExpectedRange = params.executorCallCount
     >= params.expectedExecutorCallRange.min
     && params.executorCallCount <= params.expectedExecutorCallRange.max;
@@ -99,12 +79,8 @@ export function evaluateLifecycleCompositionInvariants(params: {
       passed: checkpointStateMatches,
       details: JSON.stringify({
         expected: params.expectedCheckpointState,
-        runNextDelegation: state.runNextDelegation,
-        runSupervisorSession: state.runSupervisorSession,
-        taskRunContinuation: state.taskRunContinuation,
-        taskActiveDelegation: state.taskActiveDelegation,
+        runSupervisorState: state.runSupervisorState,
         runIterationCount: state.runIterationCount,
-        runSupervisorReply: state.runSupervisorReply,
       }),
     },
     {

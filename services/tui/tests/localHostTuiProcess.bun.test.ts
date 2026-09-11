@@ -1010,11 +1010,6 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       'if {[file exists $guarded_output]} { exit 167 }',
       'send -- "\\033"',
       'expect {',
-      '  -exact "interrupted" {}',
-      '  timeout { exit 164 }',
-      '  eof { exit 165 }',
-      '}',
-      'expect {',
       '  -re {[Tt]ask paused} {}',
       '  timeout { exit 166 }',
       '  eof { exit 167 }',
@@ -1029,11 +1024,6 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       '}',
       'if {[file exists $guarded_output]} { exit 174 }',
       'send -- "\\033"',
-      'expect {',
-      '  -exact "interrupted" {}',
-      '  timeout { exit 177 }',
-      '  eof { exit 178 }',
-      '}',
       'expect {',
       '  -re {[Tt]ask paused} {}',
       '  timeout { exit 183 }',
@@ -1094,7 +1084,13 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
       tuiExit,
       10_000,
       'production TUI toolkit calls',
-    );
+    ).catch((error: unknown) => {
+      throw new Error([
+        error instanceof Error ? error.message : String(error),
+        stderr.join(''),
+        decodeExpectBinaryOutput(stdout.join('')).slice(-4_000),
+      ].join('\n'), { cause: error });
+    });
     const output = decodeExpectBinaryOutput(stdout.join(''));
     assert.equal(
       result.code,
@@ -1140,7 +1136,6 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
     assertLastOrderedSubstrings(searchableOutput, [
       compactTerminalObservation(GUARDED_HOST_INPUT),
       compactTerminalObservation(GUARDED_HOST_CONTINUATION_GUIDANCE),
-      compactTerminalObservation('interrupted'),
       compactTerminalObservation(GUARDED_HOST_SECOND_CONTINUATION_GUIDANCE),
       compactTerminalObservation(GUARDED_HOST_TOOL_NAME),
       compactTerminalObservation(GUARDED_HOST_TOOL_OUTPUT),

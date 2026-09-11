@@ -1,4 +1,4 @@
-import { DelegationAnnounceMessage } from '../delegation';
+import { DelegationAnnounceMessage, getDelegationAnnounce } from '../delegation';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
@@ -25,64 +25,26 @@ import type { CapabilityCatalog } from './capabilityCatalog';
 import { createRunSupervisorAgent } from './agent';
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
-import { createRunSupervisorSession } from './session';
+import { readScriptedCommand } from './testing';
+type SupervisorDelegationInput = { delegationId: string; runId: string; capability: string; task: string };
+type CapabilityPlanTask = { capability: string; task: string };
 import {
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
 } from '../../messages';
 
 function commandOnly(value: unknown) {
-  const { capabilityDisclosure: _disclosure, messages: _messages, ...result } = value as Record<string, unknown>;
-  return result;
+  const result = value as { reply?: string; messages: BaseMessage[] };
+  if (result.reply !== undefined) return { reply: result.reply };
+  const request = result.messages.filter((message) => AIMessage.isInstance(message)
+    && message.tool_calls?.some((call) => ['submit_plan', 'review_current', 'adjust_plan'].includes(call.name))).at(-1) as AIMessage;
+  const call = request?.tool_calls?.[0];
+  assert.ok(call, 'Expected the original internal control call');
+  return readScriptedCommand({ name: call.name, args: call.args });
 }
 
-test('delegation yields the actual model call without a fabricated tool result', async () => {
-  const catalog = createTestCatalog({ general: 'Execute work.' });
-  const pending = { delegationId: 'd-real', runId: 'run-test', capability: 'general', task: 'Execute work.' };
-  const model = new ScriptedSupervisorModel([{ toolCalls: [{
-    id: 'real-call', name: 'delegate_capability', args: { capability: pending.capability, task: pending.task },
-  }] }]);
-  const input = { ...supervisorInput(catalog), pendingDelegation: pending };
-  const result = await createRunSupervisorAgent({ model }).invoke(input);
-  assert.equal(result.action, 'delegate_capability');
-  if (result.action !== 'delegate_capability') throw new Error('Expected delegation');
-  assert.equal(result.toolCallId, 'real-call');
-  assert.equal(result.delegationId, pending.delegationId);
-  assert.equal(result.messages.at(-1)?.getType(), 'ai');
-  assert.equal(result.messages.some((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'real-call'), false);
-});
-
-test('delegation tool is exposed only while a validated task is pending', async () => {
-  const catalog = createTestCatalog({ general: 'Execute work.' });
-  const withoutPending = new ScriptedSupervisorModel([{ content: 'Need a task first.' }]);
-  await createRunSupervisorAgent({ model: withoutPending }).invoke(supervisorInput(catalog));
-  assert.equal(withoutPending.boundToolNames.includes('delegate_capability'), false);
-
-  const pending = { delegationId: 'd', runId: 'run-test', capability: 'general', task: 'Execute work.' };
-  const withPending = new ScriptedSupervisorModel([{ toolCalls: [{
-    id: 'call', name: 'delegate_capability', args: { capability: pending.capability, task: pending.task },
-  }] }]);
-  await createRunSupervisorAgent({ model: withPending }).invoke({
-    ...supervisorInput(catalog), pendingDelegation: pending,
-  });
-  assert.equal(withPending.boundToolNames.includes('delegate_capability'), true);
-});
-
-test('delegation rejects changed scope and mixed tool batches before handing off', async () => {
-  const catalog = createTestCatalog({ general: 'Execute work.' });
-  const pending = { delegationId: 'd', runId: 'run-test', capability: 'general', task: 'Execute work.' };
-  for (const calls of [
-    [{ id: 'wrong-task', name: 'delegate_capability', args: { capability: 'general', task: 'Different work.' } }],
-    [{ id: 'delegate', name: 'delegate_capability', args: { capability: 'general', task: pending.task } },
-      { id: 'other', name: 'capability_details', args: { names: ['general'] } }],
-  ]) {
-    const model = new ScriptedSupervisorModel([{ toolCalls: calls }]);
-    await assert.rejects(createRunSupervisorAgent({ model }).invoke({ ...supervisorInput(catalog), pendingDelegation: pending }),
-      /validated task|only tool call/);
-    assert.equal(model.invocations.length, 1);
-  }
-});
-
+// Actual call derivation, exclusivity and duplicate settlement are tested in
+// messageHandoff.test.ts and the production graph's handoff.test.ts.
 type ScriptedToolCall = {
   id?: string;
   name: string;
@@ -318,53 +280,49 @@ function capabilityDocument(params: {
 
 function supervisorInput(
   catalog: CapabilityCatalog,
-  overrides: Partial<RunSupervisorInput> = {},
+  overrides: Partial<RunSupervisorInput> & {
+    currentTask?: SupervisorDelegationInput | null;
+    remainingPlan?: CapabilityPlanTask[];
+  } = {},
 ): RunSupervisorInput {
-  const base = {
-    inputId: 'trace_started:trace-test',
-    traceId: 'trace-test',
-    runId: 'run-test',
-    userRequest: 'Research the repository and then prepare a review.',
-    messages: [],
-    activeDelegation: null,
-
-    remainingPlan: [],
-    catalog,
-    capabilityDisclosure: createCapabilityDisclosureState({
-      catalog,
-
-    }),
+  const input: RunSupervisorInput = {
+    mode: 'entry', inputId: 'trace_started:trace-test', traceId: 'trace-test', runId: 'run-test',
+    userRequest: 'Research the repository and then prepare a review.', messages: [],
+    state: { goal: null, plan: [] }, catalog,
+    capabilityDisclosure: createCapabilityDisclosureState({ catalog }), ...overrides,
   };
-  const input = overrides.mode === 'boundary' ? {
-      ...base,
-
-      ...overrides,
-      mode: 'boundary',
-    } as RunSupervisorInput : {
-    ...base,
-    mode: 'entry',
-    ...overrides,
-  } as RunSupervisorInput;
-  const boundaryNames = input.mode === 'boundary' ? [
-    input.activeDelegation.capability,
-    ...input.remainingPlan.map(({ capability }) => capability),
-  ] : [];
-  const capabilityDisclosure = overrides.capabilityDisclosure
-    ?? {
-      ...input.capabilityDisclosure,
-      disclosedCapabilityNames: [...new Set([
-        ...input.capabilityDisclosure.disclosedCapabilityNames,
-        ...boundaryNames.filter((name) => catalog.capabilityNames.includes(name)),
-      ])],
-    };
-  return {
-    ...input,
-    capabilityDisclosure,
-    supervisorSession: overrides.supervisorSession ?? createRunSupervisorSession({
-      runId: input.runId,
-      plan: input.remainingPlan,
-      capabilityDisclosure,
-    }),
+  const current = overrides.currentTask;
+  const plan = [...(current ? [{ id: current.delegationId, capability: current.capability,
+    task: current.task, status: 'pending' as const }] : []),
+    ...(overrides.remainingPlan ?? []).map((task, i) => ({ ...task, id: `future:${i}`, status: 'pending' as const }))];
+  // Historical scenario fixtures supply reports; represent their evidence as
+  // the new actual call/result pair before invoking the production adapter.
+  const reports = input.messages.flatMap((message) => {
+    const report = getDelegationAnnounce(message);
+    return report && current && report.delegationId === current.delegationId ? [report] : [];
+  });
+  const messages = [...input.messages.filter((message) => !getDelegationAnnounce(message))];
+  for (const [i, report] of reports.entries()) {
+    const callId = `fixture:${report.delegationId}:${i}`;
+    const metadata = { runId: report.runId, traceId: input.traceId };
+    messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
+      id: callId, name: 'delegate_capability', type: 'tool_call', args: {
+        control: { name: 'submit_plan', args: { tasks: [{ capability: current!.capability, task: current!.task }] } },
+        execution: { taskId: current!.delegationId, delegationId: current!.delegationId,
+          capability: current!.capability, task: current!.task, mode: 'initial', guidance: null },
+      },
+    }] }), metadata));
+    messages.push(setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: callId,
+      content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
+        runId: report.runId, traceId: input.traceId, delegationId: report.delegationId, lane: report.sourceLane,
+      } } }),
+    }), metadata));
+  }
+  const boundaryNames = plan.map((task) => task.capability).filter((name) => catalog.capabilityNames.includes(name));
+  return { ...input, messages,
+    state: overrides.state ?? { goal: input.userRequest, plan },
+    capabilityDisclosure: overrides.capabilityDisclosure ?? { ...input.capabilityDisclosure,
+      disclosedCapabilityNames: [...new Set([...input.capabilityDisclosure.disclosedCapabilityNames, ...boundaryNames])] },
   };
 }
 
@@ -446,7 +404,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     traceId: 'trace-a',
     runId: 'run-a2',
     userRequest: entryA.userRequest,
-    activeDelegation: {
+    currentTask: {
       delegationId: 'delegation-a',
       runId: 'run-a',
       capability: 'general',
@@ -486,16 +444,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     model.invocations[1]?.map(readMessageText).join('\n') ?? '',
     /Trace A execution is complete/,
   );
-  const boundaryCommand = commandOnly(boundaryState.command) as {
-    action: 'goal_done';
-    tasks: [];
-  };
-  const completedBoundaryInput = {
-    ...boundaryInput,
-    supervisorSession: {
-      ...boundaryInput.supervisorSession,
-    },
-  };
+  const completedBoundaryInput = boundaryInput;
 
   const duplicateState = await graph.invoke(null, config);
   assert.deepEqual(commandOnly(duplicateState.command), { completed: true, reason: 'Current task delivery is evidenced.',
@@ -673,12 +622,13 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.ok(model.structuredOutputToolNames.has('plan'));
   assert.equal(model.structuredOutputToolNames.has('advance'), false);
   assert.equal(model.boundToolNames.includes('report_unavailable'), false);
-  assert.ok('tasks' in result);
+  const decision = commandOnly(result);
+  assert.ok('tasks' in decision);
   assert.equal(
-    'tasks' in result ? result.tasks[0]?.task : null,
+    'tasks' in decision ? decision.tasks[0]?.task : null,
     'Inspect issue #473 and report the Supervisor Agent constraints.',
   );
-  assert.equal('tasks' in result ? result.tasks.length : 0, 1);
+  assert.equal('tasks' in decision ? decision.tasks.length : 0, 1);
 });
 
 test('Supervisor accepts a detailed task beyond the legacy 500-character limit', async (t) => {
@@ -743,8 +693,9 @@ test('Supervisor accepts consecutive tasks from one Capability when the model ke
   const result = await createRunSupervisorAgent({ model })
     .invoke(supervisorInput(catalog));
 
-  assert.ok('tasks' in result);
-  assert.deepEqual('tasks' in result ? result.tasks : [], [{
+  const decision = commandOnly(result);
+  assert.ok('tasks' in decision);
+  assert.deepEqual('tasks' in decision ? decision.tasks : [], [{
     capability: 'general',
     task: 'Inspect the failing release and identify the exact package boundary.',
   }, {
@@ -862,7 +813,7 @@ test('boundary projects the current lane announce into the standard model-visibl
   await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-current',
         runId: 'run-current',
         capability: 'explore',
@@ -887,11 +838,9 @@ test('boundary projects the current lane announce into the standard model-visibl
   );
 
   const invocationText = model.invocations[0]?.map(readMessageText).join('\n') ?? '';
-  assert.match(invocationText, /<supervision_boundary_event role="task_boundary" source="orchestrator_state">/);
-  const projectedEvidence = model.invocations[0]?.find((message) => message.id === 'announce:announce-current');
-  assert.ok(projectedEvidence && HumanMessage.isInstance(projectedEvidence));
-  assert.equal(JSON.parse(projectedEvidence.text).announceMessageId, 'announce-current');
-  assert.equal(JSON.parse(projectedEvidence.text).result, currentAnnounce.text);
+  const projectedEvidence = model.invocations[0]?.find((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability');
+  assert.ok(projectedEvidence && ToolMessage.isInstance(projectedEvidence));
+  assert.equal(JSON.parse(projectedEvidence.text).delivery.text, currentAnnounce.text);
   assert.doesNotMatch(invocationText, /completion_reason=/);
   assert.match(invocationText, /Inspect repository dependencies\./);
   assert.match(invocationText, /dependency evidence is missing/);
@@ -910,7 +859,7 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.ok(boundaryInput instanceof HumanMessage);
   assert.match(readMessageText(boundaryInput), /<run_user_request[^>]*>/);
   assert.match(readMessageText(boundaryInput), /<capability_context[^>]*>/);
-  assert.match(readMessageText(boundaryInput), /<supervision_boundary[^>]*>/);
+  assert.ok(readMessageText(boundaryInput).includes('Implement the verified dependency changes.'));
 });
 
 test('Supervisor identifies the configured default without preloading its document', async (t) => {
@@ -1097,7 +1046,7 @@ test('a boundary details does not redisclose its active Capability', async (t) =
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary', inputId: 'human:run-test',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-1',
         runId: 'run-1',
         capability: 'explore',
@@ -1149,23 +1098,13 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
   const model = new ScriptedSupervisorModel([
     { toolCalls: [details('boundary-miss', ['issue status'])] },
     { toolCalls: [details('boundary-exact', ['document_writer'])] },
-    {
-      structuredOutput: {
-        kind: 'advance',
-        args: {
-          tasks: [{
-            capability: 'document_writer',
-            task: 'Update the README with the accepted issue status.',
-          }],
-        },
-      },
-    },
+    { content: 'The document writer is available.' },
   ]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary', inputId: 'human:run-test',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-1',
         runId: 'run-1',
         capability: 'explore',
@@ -1175,10 +1114,7 @@ test('a boundary can disclose a non-active Capability after a miss', async (t) =
     }),
   );
 
-  assert.deepEqual(commandOnly(result), { completed: true, reason: 'Current task delivery is evidenced.',
-    action: 'review_current',
-
-  });
+  assert.deepEqual(commandOnly(result), { reply: 'The document writer is available.' });
   const firstSearchResult = model.invocations[1]?.find((message) =>
     ToolMessage.isInstance(message)
     && message.tool_call_id === 'boundary-miss');
@@ -1225,7 +1161,7 @@ test('a Boundary details does not redisclose its seeded active General', async (
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary', inputId: 'human:run-test',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-general',
         runId: 'run-general',
         capability: 'general',
@@ -1466,7 +1402,7 @@ test('review rejects a plan mutation before discovery or dispatch', async (t) =>
   await assert.rejects(createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-1',
         runId: 'run-1',
         capability: 'explore',
@@ -1493,22 +1429,14 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
       instructions: 'Complete the requested work.',
     }),
   });
-  const model = new ScriptedSupervisorModel([{
-    structuredOutput: {
-      kind: 'advance',
-      args: {
-        tasks: [{
-          capability: 'general',
-          task: 'Update the README section for issue #587.',
-        }],
-      },
-    },
-  }]);
+  const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: 'adjust-new-work', name: 'adjust_plan',
+    args: { goal: 'Update the README.', reason: 'User requested the update.', currentDelegation: 'replace',
+      tasks: [{ capability: 'general', task: 'Update the README section for issue #587.' }] } }] }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
-      mode: 'boundary',
-      activeDelegation: {
+      mode: 'boundary', inputId: 'human:update-readme',
+      currentTask: {
         delegationId: 'delegation-1',
         runId: 'run-1',
         capability: 'explore',
@@ -1522,12 +1450,9 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
     }),
   );
 
-  // An empty remaining plan is not by itself a terminal state: the latest
-  // result may still require follow-up work.
-  assert.deepEqual(commandOnly(result), { completed: true, reason: 'Current task delivery is evidenced.',
-    action: 'review_current',
-
-  });
+  const decision = commandOnly(result);
+  assert.ok('action' in decision && decision.action === 'adjust_plan');
+  assert.equal(decision.tasks[0].capability, 'general');
 });
 
 test('boundary Supervisor continues without replacing the active task', async (t) => {
@@ -1554,7 +1479,7 @@ test('boundary Supervisor continues without replacing the active task', async (t
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-1',
         runId: 'run-1',
         capability: 'explore',
@@ -1608,7 +1533,7 @@ test('boundary Supervisor can stop for user confirmation with a structured quest
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary',
-      activeDelegation: {
+      currentTask: {
         delegationId: 'delegation-review-662',
         runId: 'run-review-662',
         capability: 'general',
@@ -1655,8 +1580,8 @@ test('boundary Supervisor exposes only boundary command actions', async (t) => {
 
   const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
-      mode: 'boundary',
-      activeDelegation: {
+      mode: 'boundary', remainingPlan: tasks,
+      currentTask: {
         delegationId: 'delegation-1',
         runId: 'run-1',
         capability: 'explore',
@@ -1780,7 +1705,7 @@ test('boundary natural text leaves acceptance to the root control protocol', asy
   const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog, {
     mode: 'boundary',
     userRequest: 'Finish the remaining request.',
-    activeDelegation: {
+    currentTask: {
       delegationId: 'delegation-1',
       runId: 'run-1',
       capability: 'explore',
@@ -1841,7 +1766,7 @@ test('Supervisor Agent rejects an already cancelled invocation before calling th
 });
 
 test('one Supervisor runner reads each invocation context in entry and boundary modes', async (t) => {
-  const catalog = createTestCatalog({});
+  const catalog = createTestCatalog({ explore: 'Execute repository exploration.' });
   const model = new ScriptedSupervisorModel([
     { content: 'No execution available.' },
     { toolCalls: [{ id: 'continue', name: 'review_current', args: { completed: false, reason: 'Complete the missing current-task work.', } }] },
@@ -1858,9 +1783,9 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
   const config = { tags: [], context: { systemPromptSections: second } };
   await runner.invoke(supervisorInput(catalog, {
     mode: 'boundary', inputId: 'boundary-context-test',
-    activeDelegation: { delegationId: 'context-child', runId: 'run-test', capability: 'general', task: 'Continue.' },
+    currentTask: { delegationId: 'context-child', runId: 'run-test', capability: 'explore', task: 'Continue.' },
     messages: [...[], ...[{ messageId: 'context-announce', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'context-child', runId: 'run-test', task: 'Continue.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'context-child', runId: 'run-test', task: 'Continue.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
 
   }), config);
@@ -1892,7 +1817,7 @@ test('multiple controls and mixed discovery/control responses run no tools or fo
 test('empty final output follows the protocol error path without a fallback reply', async (t) => {
   const catalog = createTestCatalog({});
   const model = new ScriptedSupervisorModel([{ content: ' ' }]);
-  await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /neither a control proposal/);
+  await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /completed exclusive control call/);
   assert.equal(model.invocations.length, 1);
 });
 
@@ -1922,6 +1847,34 @@ test('details uses exact manifest names and distinguishes new, known, and unknow
   assert.deepEqual(second.documents, []);
   assert.deepEqual(second.alreadyDisclosed, ['explore', 'general']);
   assert.deepEqual(second.unknownNames, []);
+});
+
+test('detail reads start from this invocation disclosure without inheriting another invocation state', async () => {
+  const firstCatalog = createTestCatalog({ general: 'General work.', explore: 'Inspect evidence.' });
+  const secondCatalog = createTestCatalog({ general: 'Updated general work.' });
+  const details = (id: string) => ({
+    toolCalls: [{ id, name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
+      args: { names: ['general', 'explore'] } }],
+  });
+  const model = new ScriptedSupervisorModel([
+    details('first-details'), { content: 'First answer.' },
+    details('second-details'), { content: 'Second answer.' },
+  ]);
+  const runner = createRunSupervisorAgent({ model });
+  const firstBase = supervisorInput(firstCatalog);
+  const firstInput = { ...firstBase, capabilityDisclosure: {
+    ...firstBase.capabilityDisclosure, disclosedCapabilityNames: ['general'],
+  } };
+  const first = await runner.invoke(firstInput);
+  const second = await runner.invoke(supervisorInput(secondCatalog));
+  assert.deepEqual(firstInput.capabilityDisclosure.disclosedCapabilityNames, ['general']);
+  assert.deepEqual(first.capabilityDisclosure.disclosedCapabilityNames, ['general', 'explore']);
+  assert.deepEqual(second.capabilityDisclosure.disclosedCapabilityNames, ['general']);
+  const read = (index: number, id: string) => JSON.parse(String(model.invocations[index].find((message) =>
+    ToolMessage.isInstance(message) && message.tool_call_id === id)?.content));
+  assert.deepEqual(read(1, 'first-details').alreadyDisclosed, ['general']);
+  assert.deepEqual(read(3, 'second-details').alreadyDisclosed, []);
+  assert.deepEqual(read(3, 'second-details').unknownNames, ['explore']);
 });
 
 test('repeated empty detail reads do not close disclosure and parallel names merge without loss', async (t) => {
@@ -1961,9 +1914,9 @@ test('adjust_plan is a single proposal available only at a user-guided Boundary'
   };
   const activeDelegation = { delegationId: 'd1', runId: 'run-test', capability: 'general', task: 'Publish the old repository.' };
   for (const scenario of ['entry', 'execution', 'user'] as const) {
-    const model = new ScriptedSupervisorModel([{ toolCalls: [{ name: 'adjust_plan', args }] }]);
+    const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: `adjust-${scenario}`, name: 'adjust_plan', args }] }]);
     const input = supervisorInput(catalog, scenario === 'entry' ? {} : {
-      mode: 'boundary', activeDelegation,
+      mode: 'boundary', currentTask: activeDelegation,
       inputId: scenario === 'user' ? 'human:correction' : 'announce:d1:a1',
       messages: [new HumanMessage('Use the corrected repository; cancel publication and write a private report.')],
     });
@@ -1971,7 +1924,7 @@ test('adjust_plan is a single proposal available only at a user-guided Boundary'
     if (scenario === 'user') {
       assert.deepEqual(commandOnly(await invocation), { action: 'adjust_plan', ...args });
     } else {
-      await assert.rejects(invocation, /invalid in this mode/);
+      await assert.rejects(invocation, /tool unavailable in this invocation/);
     }
     assert.equal(model.boundToolNames.includes('adjust_plan'), scenario === 'user');
     assert.equal(model.invocations.length, 1);

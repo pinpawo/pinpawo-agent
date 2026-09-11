@@ -9,7 +9,6 @@ import {
 import { compileAgentRegistry } from './orchestrator/registry';
 import type { CompiledAgentRegistry } from './orchestrator/registry';
 import type { GlobalReviewPolicy } from './orchestrator/review/globalReviewPolicy';
-import type { ActiveDelegationTransition } from './orchestrator/types';
 import {
   buildOrchestratorRunInput,
   ORCHESTRATOR_RECURSION_LIMIT,

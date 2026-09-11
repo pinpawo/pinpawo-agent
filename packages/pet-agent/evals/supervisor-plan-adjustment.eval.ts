@@ -8,7 +8,9 @@ import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
-import { createRunSupervisorSession } from '../src/agent/orchestrator/runSupervisor/session.ts';
+import { acceptSupervisorMessageHandoff } from '../src/agent/orchestrator/runSupervisor/messageHandoff.ts';
+import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input.ts';
+import { supervisorFixture, readSupervisorDecision } from './supervisor-fixtures';
 import type { RunSupervisorInput } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 
@@ -40,16 +42,13 @@ assert.ok([...selected].every((name) => cases.some((scenario) => scenario.name =
 for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
   const userRequest = scenario.goal ?? goal;
   const remainingPlan = scenario.name === 'entry' ? [] : [{ capability: 'general', task: 'Publish the findings.' }];
-  const input: RunSupervisorInput = {
-    mode: 'boundary', inputId: `human:${scenario.name}`, runId: scenario.name, traceId: scenario.name,
-    userRequest, messages: [new HumanMessage(userRequest), new HumanMessage(scenario.guidance)],
-    activeDelegation: { delegationId: 'd1', runId: scenario.name, capability: 'general', task: 'Inspect the example/old repository.' },
-    remainingPlan, catalog, capabilityDisclosure: disclosure,
-    supervisorSession: createRunSupervisorSession({ runId: scenario.name, plan: remainingPlan, capabilityDisclosure: disclosure }),
-  };
+  const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest, freshUserInput: true,
+    task: scenario.name === 'entry' ? undefined : 'Inspect the example/old repository.', remaining: remainingPlan });
+  const input: RunSupervisorInput = { ...fixture, capabilityDisclosure: disclosure,
+    messages: [...fixture.messages, new HumanMessage(scenario.guidance)] };
   try {
-    const { capabilityDisclosure: _disclosure, ...result } = await supervisor.invoke(scenario.name === 'entry'
-      ? { ...input, mode: 'entry', activeDelegation: null, remainingPlan: [] } : input);
+    const actual = await supervisor.invoke(input);
+    const result = readSupervisorDecision(actual);
     console.log(JSON.stringify({ case: scenario.name, decision: result }));
     if (scenario.name === 'entry') {
       assert.equal(result.action, 'execute_plan');
@@ -65,8 +64,15 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
         assert.ok(result.tasks.length > 0);
       }
     } else {
-      assert.equal(result.action, undefined);
       assert.ok(result.reply?.trim());
+      // Asking may use a direct answer or a no-execution review reply. The
+      // observable contract is unchanged work and no Capability dispatch.
+      if (actual.reply === undefined) {
+        const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+        assert.deepEqual(accepted.runSupervisorState, input.state);
+        assert.ok(accepted.reply?.trim());
+        assert.equal(accepted.messages.length, 2);
+      }
     }
     console.log(JSON.stringify({ case: scenario.name, passed: true }));
   } catch (error) {

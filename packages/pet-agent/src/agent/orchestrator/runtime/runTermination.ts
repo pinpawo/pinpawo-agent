@@ -1,19 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Command, type NodeError } from '@langchain/langgraph';
-import { snapshotRunTaskContinuation } from '../runSupervisor/session';
-import type { RunSupervisorDispatch } from '../runSupervisor/runner';
 import type {
   OrchestratorStateType,
   OrchestratorTerminalErrorState,
 } from '../state';
-
-type FailureNodeInput = OrchestratorStateType | RunSupervisorDispatch;
-
-function rootState(input: FailureNodeInput): OrchestratorStateType {
-  return 'supervisorState' in input
-    ? input.supervisorState as OrchestratorStateType
-    : input;
-}
 
 function readStringProperty(error: Error, property: string): string | null {
   const value = (error as unknown as Record<string, unknown>)[property];
@@ -70,24 +60,14 @@ export function createRunTerminationHandlers() {
   const pendingErrors = new Map<string, Error>();
 
   return {
-    onNodeError(input: FailureNodeInput, nodeError: NodeError) {
-      const state = rootState(input);
+    onNodeError(_state: OrchestratorStateType, nodeError: NodeError) {
+      if (readStringProperty(nodeError.error, 'code') === 'checkpoint_incompatible') {
+        return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' as const }, goto: 'answer' });
+      }
       const terminalError = serializeTerminalError(nodeError);
       pendingErrors.set(terminalError.id, nodeError.error);
       return new Command({
         update: {
-          runNextDelegation: null,
-          runSupervisorSession: null,
-          runSupervisorUserMessageId: null,
-          taskRunContinuation: state.taskRunContinuation
-            ?? snapshotRunTaskContinuation({
-          traceId: state.traceId,
-          userRequest: state.runUserRequest,
-              activeDelegation: state.taskActiveDelegation ?? null,
-              supervisorSession: state.runSupervisorSession ?? null,
-            }),
-          runIterationCount: 0,
-          runSupervisorReply: null,
           runRuntimeFailure: null,
           runTerminalError: terminalError,
         },

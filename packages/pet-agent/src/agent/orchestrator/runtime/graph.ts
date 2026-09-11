@@ -1,9 +1,7 @@
 import { StateGraph, START, END } from '@langchain/langgraph';
-import type { RunnableConfig } from '@langchain/core/runnables';
 import { agentRuntimeContextSchema } from '../../../runtime/context';
 import {
   OrchestratorState,
-  type OrchestratorStateType,
 } from '../state';
 import type {
   OrchestratorConfig,
@@ -23,10 +21,8 @@ import {
   createCompactContextNode,
   createPrepareNode,
 } from './nodes/prepare';
-import { afterContextPrep } from './routes/afterContextPrep';
 import { afterCapability } from './routes/afterCapability';
-import { afterPauseGate, pauseGate } from './nodes/pauseGate';
-import { createAfterSupervisorBoundaryIterationGuard } from './routes/afterSupervisorBoundaryIterationGuard';
+import { pauseGate } from './nodes/pauseGate';
 import { createRunTerminationHandlers } from './runTermination';
 
 // --- Graph builder ---
@@ -36,71 +32,50 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const afterSupervisorBoundaryIterationGuard =
-    createAfterSupervisorBoundaryIterationGuard();
   const runSupervisor = createRunSupervisorNode(config);
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
-  const resultAnswer = createAnswerNode(config);
+  const resultAnswer = createAnswerNode();
   const capabilityNode = createCapabilityNode({
     config,
-    onNodeError: runTermination.onNodeError,
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
   });
-  // Graph-visible anchor shared by resume and post-execution paths. Its
-  // conditional edge owns deterministic guard evaluation and telemetry only;
-  // it must not grow state updates or user-facing output.
-  const supervisorBoundaryIterationGuard = () => ({});
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare, { ends: ['capability', 'answer', 'compactContext', 'runSupervisor'] })
-    .addNode('compactContext', compactContext)
-    .addNode('captureUserRequest', captureRunUserRequest)
+    .addNode('prepare', prepare, { ends: ['answer', 'compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('compactContext', compactContext, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('captureUserRequest', captureRunUserRequest, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('entryAnswer', entryAnswer, {
-      ends: ['runSupervisor'],
-    })
-    .addNode('runSupervisor', runSupervisor, {
-      ends: ['answer', 'capability', 'runSupervisor', 'throwRunFailure'],
+      ends: ['runSupervisor', 'answer', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
-    .addNode('supervisorBoundaryIterationGuard', supervisorBoundaryIterationGuard)
+    .addNode('runSupervisor', runSupervisor, {
+      ends: ['answer', 'capability', 'throwRunFailure'],
+      errorHandler: runTermination.onNodeError,
+    })
     .addNode('answer', resultAnswer, {
       ends: ['throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('capability', capabilityNode, {
-      ends: ['throwRunFailure'],
+      ends: ['throwRunFailure', 'answer'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
-    .addNode('pauseGate', pauseGate)
+    .addNode('pauseGate', pauseGate, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addEdge(START, 'prepare')
-    // Run entry uses explicit task lifecycle state. Lane announces remain
-    // message/context storage and are not the normal control-flow signal.
-    .addConditionalEdges('compactContext', afterContextPrep, {
-      supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
-      captureUserRequest: 'captureUserRequest',
-      runSupervisor: 'runSupervisor',
-      capability: 'capability',
-    })
+    // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
+    .addEdge('compactContext', 'captureUserRequest')
     .addEdge('captureUserRequest', 'entryAnswer')
-    .addConditionalEdges('supervisorBoundaryIterationGuard', afterSupervisorBoundaryIterationGuard, {
-      answer: 'answer',
-      runSupervisor: 'runSupervisor',
-    })
     .addEdge('entryAnswer', END)
     .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
       pauseGate: 'pauseGate',
-      supervisorBoundaryIterationGuard: 'supervisorBoundaryIterationGuard',
-    })
-    .addConditionalEdges('pauseGate', afterPauseGate, {
       runSupervisor: 'runSupervisor',
-      capability: 'capability',
-      answer: 'answer',
-    });
+    })
+    .addEdge('pauseGate', 'runSupervisor');
 
   return graph.compile({
     checkpointer: config.checkpoint,

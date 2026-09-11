@@ -1,377 +1,63 @@
-import { randomUUID } from 'node:crypto';
-import { AIMessage, RemoveMessage } from '@langchain/core/messages';
-import { delegationToolSchema } from '../../runSupervisor/delegationTool';
+import { AIMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
-import {
-  createRunSupervisorAgent,
-} from '../../runSupervisor/agent';
+import { createRunSupervisorAgent } from '../../runSupervisor/agent';
 import { resolveCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
-import {
-  createRunSupervisorSession,
-  updateRunSupervisorSession,
-  type RunSupervisorSessionState,
-} from '../../runSupervisor/session';
-import {
-  type RunSupervisorDispatch,
-  type RunSupervisorRuntimeState,
-  type RunSupervisorRunner,
-  isRunSupervisorReplyResult,
-} from '../../runSupervisor/runner';
-import {
-  parseSupervisorCommand,
-} from '../../runSupervisor/protocol';
-import {
-  appendRunDelegationSummary,
-  resumeRunDelegationSummary,
-} from '../../delegations';
+import { acceptSupervisorMessageHandoff } from '../../runSupervisor/messageHandoff';
+import { buildRunSupervisorInput, readSupervisorMode, supervisorHandoffContext } from '../../runSupervisor/input';
 import type { OrchestratorStateType } from '../../state';
-import type {
-  CapabilityPlanTask,
-  CapabilityMessageLane,
-  OrchestratorConfig,
-  RunNextDelegation,
-  TaskActiveDelegation,
-} from '../../types';
-import {
-  observeAgentMessageSelection,
-  isMessageInDelegationScope,
-} from '../../../messages';
-import {
-  buildSubagentHandoff,
-} from '../../delegation';
-import {
-  buildRunSupervisorInput,
-  isSupervisorDispatch,
-  supervisorRuntimeStateFromRoot,
-} from '../../runSupervisor/input';
-import {
-  getInvokeOptions,
-  getInvokeRegistry,
-} from '../config';
-import {
-  createTaskActiveDelegation,
-  readCapabilityNameFromLane,
-} from '../decisions/delegationLifecycle';
-
-function materializeNextDelegation(params: {
-  state: RunSupervisorRuntimeState;
-  nextTask: CapabilityPlanTask;
-  allowedCapabilityNames: readonly string[];
-}) {
-  const { state, nextTask, allowedCapabilityNames } = params;
-  if (!state.runUserRequest) {
-    throw new Error('Run Supervisor requires runUserRequest before materializing a delegation.');
-  }
-  if (!allowedCapabilityNames.includes(nextTask.capability)) {
-    throw new Error(
-      `Run Supervisor selected "${nextTask.capability}" outside the immutable catalog.`,
-    );
-  }
-  const lane: CapabilityMessageLane = `capability:${nextTask.capability}`;
-  const runNextDelegation: RunNextDelegation = {
-    id: randomUUID().slice(0, 8),
-    lane,
-    mode: 'initial',
-    task: nextTask.task,
-    contextSummary: null,
-  };
-  const taskActiveDelegation = createTaskActiveDelegation(
-    runNextDelegation,
-    state.runId,
-    state.runUserRequest,
-    state.traceId,
-  );
-  return {
-    runNextDelegation,
-    taskActiveDelegation,
-    taskRunContinuation: null,
-    runDelegationSummaries: appendRunDelegationSummary(
-      state.runDelegationSummaries,
-      runNextDelegation,
-    ),
-    runSupervisorReply: null,
-    runRuntimeFailure: null,
-  };
-}
-
-function buildDelegationHandoffUpdate(
-  state: OrchestratorStateType,
-  activeDelegation: TaskActiveDelegation,
-) {
-  const deliveries = (state.sessionDelegationResults ?? []).filter((delivery) =>
-    delivery.scope.delegationId === activeDelegation.id
-    && delivery.scope.runId === activeDelegation.runId
-    && delivery.scope.lane === activeDelegation.lane);
-  const messages = deliveries.length > 0 ? state.messages.flatMap((message) =>
-    isMessageInDelegationScope(message, {
-      lane: activeDelegation.lane, runId: activeDelegation.runId, delegationId: activeDelegation.id,
-    }) && message.id ? [new RemoveMessage({ id: message.id })] : []) : buildSubagentHandoff({
-    taskAccepted: true,
-    messages: state.messages,
-    lane: activeDelegation.lane,
-    runId: activeDelegation.runId,
-    delegationId: activeDelegation.id,
-  });
-  if (!messages) {
-    throw new Error('Cannot hand off a delegation without result evidence.');
-  }
-  return {
-    messages,
-    runNextDelegation: null,
-    taskActiveDelegation: null,
-    runDelegationSummaries: state.runDelegationSummaries.map((delegation) =>
-      delegation.id === activeDelegation.id
-        ? { ...delegation, status: 'completed' as const }
-        : delegation),
-    runSupervisorReply: null,
-    runRuntimeFailure: null,
-  };
-}
-
-function buildContinueCurrentUpdate(params: {
-  state: OrchestratorStateType;
-  activeDelegation: TaskActiveDelegation;
-  feedback?: string;
-}) {
-  const { state, activeDelegation } = params;
-  const runNextDelegation: RunNextDelegation = {
-    id: activeDelegation.id,
-    lane: activeDelegation.lane,
-    mode: 'continue',
-    task: activeDelegation.task,
-    contextSummary: params.feedback ?? null,
-  };
-  return {
-    runNextDelegation,
-    taskActiveDelegation: {
-      ...activeDelegation,
-      contextSummary: null,
-      status: 'pending' as const,
-      resultPreview: null,
-    },
-    runDelegationSummaries: resumeRunDelegationSummary(
-      state.runDelegationSummaries,
-      runNextDelegation,
-    ),
-    runSupervisorReply: null,
-    runRuntimeFailure: null,
-  };
-}
-
-function createDefaultSupervisorRunner(config: OrchestratorConfig): RunSupervisorRunner {
-  return createRunSupervisorAgent({
-    model: config.models.act,
-    ...(config.defaultCapabilityName !== undefined
-      ? { defaultCapabilityName: config.defaultCapabilityName }
-      : {}),
-  });
-}
+import type { OrchestratorConfig } from '../../types';
+import { getInvokeOptions, getInvokeRegistry } from '../config';
+import { getAgentMessageMetadata } from '../../../messages';
+import { runIterationBudgetReached } from '../guards/runIterationBudget';
 
 export function createRunSupervisorNode(config: OrchestratorConfig) {
-  const runner = config.runSupervisorRunner ?? createDefaultSupervisorRunner(config);
-
-  return async function runSupervisorNode(
-    nodeInput: OrchestratorStateType | RunSupervisorDispatch,
-    runnableConfig?: RunnableConfig,
-  ) {
-    const registry = getInvokeRegistry(runnableConfig);
-    const allowedCapabilityNames = getInvokeOptions(runnableConfig).allowedCapabilityNames;
+  const runner = config.runSupervisorRunner ?? createRunSupervisorAgent({
+    model: config.models.act, defaultCapabilityName: config.defaultCapabilityName,
+  });
+  return async (root: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
+    if (readSupervisorMode(root) === 'boundary' && !root.runSupervisorState.plan.length) {
+      return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' }, goto: 'answer' });
+    }
+    if (runIterationBudgetReached(root, runnableConfig)) return new Command({ goto: 'answer' });
     const catalog = createCapabilityCatalog({
-      registry,
-      ...(allowedCapabilityNames ? { allowedCapabilityNames } : {}),
+      registry: getInvokeRegistry(runnableConfig),
+      allowedCapabilityNames: getInvokeOptions(runnableConfig).allowedCapabilityNames,
     });
-    const state = isSupervisorDispatch(nodeInput)
-      ? nodeInput.supervisorState
-      : supervisorRuntimeStateFromRoot(nodeInput);
-    const existingSession = state.runSupervisorSession?.runId === state.runId
-      ? state.runSupervisorSession
-      : null;
-    const continuation = !isSupervisorDispatch(nodeInput)
-      && nodeInput.taskRunContinuation?.activeDelegationId === (nodeInput.taskActiveDelegation?.id ?? null)
-      ? nodeInput.taskRunContinuation : null;
-    const isExplicitResume = !isSupervisorDispatch(nodeInput)
-      && nodeInput.runActiveDelegationTransition === 'resume_active';
-    if (!isSupervisorDispatch(nodeInput)
-      && !existingSession
-      && !continuation
-      && !isExplicitResume) {
-      return new Command({
-        update: {
-          runNextDelegation: null,
-          runSupervisorSession: null,
-          runSupervisorReply: null,
-          runRuntimeFailure: 'checkpoint_incompatible' as const,
-        },
-        goto: 'answer',
-      });
-    }
-    const resumedCapabilityNames = !existingSession && !isSupervisorDispatch(nodeInput)
-      ? [
-          ...(nodeInput.taskActiveDelegation
-            ? [readCapabilityNameFromLane(nodeInput.taskActiveDelegation.lane) ?? '']
-            : []),
-          ...(continuation?.remainingPlan.map((task) => task.capability) ?? []),
-        ].filter(Boolean)
-      : [];
-    const capabilityDisclosure = resolveCapabilityDisclosureState({
-      current: existingSession?.capabilityDisclosure ?? null,
-      catalog,
-      ...(resumedCapabilityNames.length > 0
-        ? { seedCapabilityNames: resumedCapabilityNames }
-        : {}),
+    const input = buildRunSupervisorInput({ root, catalog,
+      capabilityDisclosure: resolveCapabilityDisclosureState({ current: root.runCapabilityDisclosure, catalog }),
     });
-    const supervisorSession: RunSupervisorSessionState = existingSession
-      ? {
-          ...existingSession,
-          capabilityDisclosure,
-        }
-      : createRunSupervisorSession({
-          runId: state.runId,
-          plan: continuation?.remainingPlan ?? [],
-          capabilityDisclosure,
-        });
-    const { input, messageSelections } = buildRunSupervisorInput({
-      nodeInput,
-      catalog,
-      supervisorSession,
-    });
-    if (supervisorSession.pendingCall) {
-      throw new Error('Cannot invoke Supervisor while a delegation tool call is pending.');
-    }
-    for (const selection of messageSelections) {
-      observeAgentMessageSelection(
-        selection.location,
-        selection.diagnostics,
-        runnableConfig,
-      );
-    }
     const result = await runner.invoke(input, runnableConfig);
-    const updatedCapabilityDisclosure = result.capabilityDisclosure
-      ?? input.capabilityDisclosure;
-    const includeSupervisorSession = <T extends object>(
-      update: T,
-      plan: readonly CapabilityPlanTask[],
-    ) => ({
-      ...update,
-      ...(input.mode === 'entry' ? { runUserRequest: state.runUserRequest } : {}),
-      taskRunContinuation: null,
-      runSupervisorUserMessageId: null,
-      runSupervisorSession: updateRunSupervisorSession({
-        current: supervisorSession,
-        plan,
-        capabilityDisclosure: updatedCapabilityDisclosure,
-        messages: result.messages,
-        handledUserInputId: input.inputId.startsWith('human:') ? input.inputId : undefined,
-      }),
-    });
-    if (result.action === 'delegate_capability') {
-      if (isSupervisorDispatch(nodeInput) || !input.pendingDelegation
-        || nodeInput.runNextDelegation?.id !== result.delegationId
-        || supervisorSession.pendingCall) {
-        throw new Error('Supervisor delegation call has no matching pending task.');
+    if (result.capabilityDisclosure.registryDigest !== catalog.registryDigest
+      || result.capabilityDisclosure.disclosedCapabilityNames.some((name) => !catalog.capabilityNames.includes(name))) {
+      throw new Error('Supervisor disclosure does not match the current catalog.');
+    }
+    const lastMessage = result.messages.at(-1);
+    const working = AIMessage.isInstance(lastMessage) && lastMessage.tool_calls?.[0]?.name === 'delegate_capability'
+      ? result.messages.slice(0, -1) : result.messages;
+    if (working.some((message) => {
+      const metadata = getAgentMessageMetadata(message);
+      return metadata.lane !== 'supervisor' || metadata.runId !== root.runId || metadata.traceId !== root.traceId;
+    })) throw new Error('Supervisor work messages must belong to the current run.');
+    const common = {
+      runCapabilityDisclosure: result.capabilityDisclosure,
+      runSupervisorUserMessageId: input.inputId.startsWith('human:') ? input.inputId : root.runSupervisorUserMessageId,
+    };
+    if (result.reply !== undefined) {
+      const last = result.messages.at(-1);
+      if (!result.reply.trim() || !AIMessage.isInstance(last) || last.tool_calls?.length || last.text !== result.reply) {
+        throw new Error('Supervisor final reply must match its actual final AIMessage.');
       }
-      const callMessage = result.messages.at(-1);
-      const call = callMessage && AIMessage.isInstance(callMessage) ? callMessage.tool_calls?.[0] : null;
-      if (call) delegationToolSchema.parse(call.args);
-      if (!result.toolCallId || call?.id !== result.toolCallId
-        || call.name !== 'delegate_capability' || !AIMessage.isInstance(callMessage) || callMessage.tool_calls?.length !== 1
-        || call.args.capability !== input.pendingDelegation.capability
-        || call.args.task !== input.pendingDelegation.task) {
-        throw new Error('Supervisor delegation must carry its actual validated model tool call.');
-      }
-      if (supervisorSession.messages?.some((message) => AIMessage.isInstance(message)
-        && message.tool_calls?.some((previous) => previous.id === result.toolCallId))) {
-        throw new Error('Delegation tool call id was already used in this run.');
-      }
-      return new Command({
-        update: {
-          ...includeSupervisorSession({}, supervisorSession.plan),
-          runSupervisorSession: updateRunSupervisorSession({
-            current: supervisorSession, plan: supervisorSession.plan,
-            capabilityDisclosure: updatedCapabilityDisclosure, messages: result.messages,
-            pendingCall: { id: result.toolCallId, name: 'delegate_capability', delegationId: result.delegationId },
-          }),
-        },
-        goto: 'capability',
-      });
+      return new Command({ update: { ...common, messages: result.messages }, goto: 'answer' });
     }
-    if (isRunSupervisorReplyResult(result)) {
-      if (typeof result.reply !== 'string' || !result.reply.trim()) {
-        throw new Error('Supervisor returned an empty final reply.');
-      }
-      return new Command({
-        update: includeSupervisorSession({ runNextDelegation: null, runSupervisorReply: result.reply }, supervisorSession.plan),
-        goto: 'answer',
-      });
-    }
-    // Injectable runners cross the same root trust boundary as the production adapter.
-    const { capabilityDisclosure: _disclosure, messages: _messages, ...proposal } = result;
-    const command = parseSupervisorCommand(proposal, {
-      mode: input.mode,
-      hasNewUserInput: input.inputId.startsWith('human:'),
-      activeDelegation: input.activeDelegation,
-      allowedCapabilityNames: catalog.capabilityNames,
-    });
-    const rootState = nodeInput as OrchestratorStateType;
-    if (command.action === 'adjust_plan') {
-      const [first, ...remainingPlan] = command.tasks;
-      const activeDelegation = rootState.taskActiveDelegation!;
-      const adjustedState = { ...state, runUserRequest: command.goal };
-      const update = command.currentDelegation === 'continue'
-        ? buildContinueCurrentUpdate({
-            state: { ...rootState, runUserRequest: command.goal },
-            activeDelegation: { ...activeDelegation, task: first.task, userRequest: command.goal },
-            feedback: command.reason,
-          })
-        : materializeNextDelegation({
-            state: { ...adjustedState, runDelegationSummaries: state.runDelegationSummaries.map((delegation) =>
-              delegation.id === activeDelegation.id ? { ...delegation, status: 'superseded' as const } : delegation) },
-            nextTask: first,
-            allowedCapabilityNames: catalog.capabilityNames,
-          });
-      return new Command({
-        update: { ...includeSupervisorSession(update, remainingPlan), runUserRequest: command.goal },
-        goto: 'runSupervisor',
-      });
-    }
-
-    const proposedPlan = command.action === 'execute_plan' ? command.tasks
-      : supervisorSession.plan;
-    const canChangePlan = (input.mode === 'entry' && supervisorSession.plan.length === 0)
-      || input.inputId.startsWith('human:');
-    if (command.action === 'execute_plan' && !canChangePlan && JSON.stringify(proposedPlan) !== JSON.stringify(supervisorSession.plan)) {
-      throw new Error('Execution plan changes require fresh user confirmation.');
-    }
-    if (command.action === 'review_current' && !command.completed) {
-      return new Command({
-        update: includeSupervisorSession(buildContinueCurrentUpdate({
-          state: rootState,
-          activeDelegation: rootState.taskActiveDelegation!,
-          feedback: command.reason,
-        }), proposedPlan),
-        goto: 'runSupervisor',
-      });
-    }
-    const handoff = command.action === 'review_current'
-      ? buildDelegationHandoffUpdate(rootState, rootState.taskActiveDelegation!) : null;
-    if (command.action === 'review_current' && command.reply) {
-      return new Command({
-        update: includeSupervisorSession({ ...handoff, runSupervisorReply: command.reply }, proposedPlan),
-        goto: 'answer',
-      });
-    }
-    const [nextTask, ...remainingPlan] = proposedPlan;
-    if (!nextTask) throw new Error('A completed review requires a final reply when no planned work remains.');
-    const next = materializeNextDelegation({
-      state: { ...state, ...(handoff ? { runDelegationSummaries: handoff.runDelegationSummaries } : {}) },
-      nextTask,
-      allowedCapabilityNames: catalog.capabilityNames,
-    });
+    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
     return new Command({
-      update: includeSupervisorSession({ ...handoff, ...next }, remainingPlan),
-      goto: 'runSupervisor',
+      update: {
+        ...common, runSupervisorState: accepted.runSupervisorState,
+        messages: [...result.messages.slice(0, -accepted.messages.length), ...accepted.messages],
+      },
+      goto: accepted.reply ? 'answer' : 'capability',
     });
   };
 }

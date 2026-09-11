@@ -38,12 +38,8 @@ test('lifecycle composition pass requires semantic goals and mechanical invarian
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {
       messages: [new AIMessage('done')],
-      runNextDelegation: null,
-      runSupervisorSession: null,
-      taskRunContinuation: null,
-      taskActiveDelegation: null,
+      runSupervisorState: { goal: null, plan: [] },
       runIterationCount: 0,
-      runSupervisorReply: null,
     },
     assistantMessageCount: 1,
     executorCallCount: 1,
@@ -71,12 +67,8 @@ test('lifecycle composition cannot pass an exactly-once case without an executor
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {
       messages: [new AIMessage('looks complete')],
-      runNextDelegation: null,
-      runSupervisorSession: null,
-      taskRunContinuation: null,
-      taskActiveDelegation: null,
+      runSupervisorState: { goal: null, plan: [] },
       runIterationCount: 0,
-      runSupervisorReply: null,
     },
     assistantMessageCount: 1,
     executorCallCount: 0,
@@ -112,27 +104,10 @@ test('lifecycle composition accepts an isolated resumable checkpoint for require
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {
       messages: [retainedAnnounce],
-      runNextDelegation: null,
-      runSupervisorSession: null,
-      taskRunContinuation: {
-        traceId: 'trace-1',
-        userRequest: 'check staging deployment',
-        activeDelegationId: 'delegation-1',
-        remainingPlan: [],
-      },
-      taskActiveDelegation: {
-        id: 'delegation-1',
-        lane: 'capability:workspace_analysis',
-        task: 'check staging deployment',
-        contextSummary: null,
-        runId: 'delegation-run-1',
-        traceId: 'trace-1',
-        status: 'awaiting_decision',
-        resultPreview: 'need staging address and credentials',
-        userRequest: 'check staging deployment',
-      },
+      runSupervisorState: { goal: 'check staging deployment', plan: [{
+        id: 'task-1', capability: 'workspace_analysis', task: 'check staging deployment', status: 'pending',
+      }] },
       runIterationCount: 0,
-      runSupervisorReply: null,
     },
     assistantMessageCount: 1,
     executorCallCount: 1,

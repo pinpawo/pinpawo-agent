@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import type { BaseMessage } from '@langchain/core/messages';
+import { ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type {
   AgentInputModality,
@@ -8,6 +8,7 @@ import type {
 } from '@pinpawo/agent-session';
 import {
   readAgentMessageCreatedAt,
+  readCapabilityExecutions,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   mainConversationMessages,
@@ -79,7 +80,18 @@ export type TuiSessionCheckpointer = BaseCheckpointSaver & Pick<FileSaver, 'dele
 type TuiSessionGraphService = Pick<LocalAgentGraphService, 'readThreadState'>;
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
+  const deliveries = new Map(readCapabilityExecutions(messages).flatMap(({ call, metadata, result }) =>
+    result?.delivery ? [[call.id!, { metadata, delivery: result.delivery }] as const] : []));
   return messages.flatMap((message) => {
+    if (ToolMessage.isInstance(message)) {
+      const execution = deliveries.get(message.tool_call_id);
+      const metadata = message.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
+      if (!execution || !metadata || metadata.lane || message.name !== 'delegate_capability'
+        || metadata.runId !== execution.metadata.runId || metadata.traceId !== execution.metadata.traceId) return [];
+      const createdAt = readAgentMessageCreatedAt(message);
+      return [{ role: 'subagent' as const, requestId: execution.delivery.scope.runId,
+        text: execution.delivery.text, ...(createdAt ? { createdAt } : {}) }];
+    }
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);

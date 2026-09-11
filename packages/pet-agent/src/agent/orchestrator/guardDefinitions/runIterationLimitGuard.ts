@@ -14,7 +14,7 @@ import {
 export const RUN_ITERATION_LIMIT_REACHED = 'run_iteration_limit_reached';
 
 export type RunIterationLimitGuardState =
-  Pick<OrchestratorStateType, 'taskActiveDelegation' | 'runIterationCount'>;
+  Pick<OrchestratorStateType, 'runIterationCount'>;
 
 export const runIterationLimitGuard = defineGuard<
   RunIterationLimitGuardState,
@@ -24,9 +24,6 @@ export const runIterationLimitGuard = defineGuard<
   name: ORCHESTRATOR_GUARD_NAME.RUN_ITERATION_LIMIT,
   positions: [ORCHESTRATOR_GUARD_POSITION.SUPERVISOR_BOUNDARY_ITERATION],
   check: ({ config, state }) => {
-    if (!state.taskActiveDelegation) {
-      return guardProceed();
-    }
     return state.runIterationCount >= config.runIterationLimit
       ? guardStop(RUN_ITERATION_LIMIT_REACHED, {
         runIterationCount: state.runIterationCount,

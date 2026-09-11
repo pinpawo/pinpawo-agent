@@ -7,7 +7,7 @@
 The guard language remains canonical. Issue #755 changes only how a subagent
 stop is exposed across the Capability Boundary: guard reasons remain internal
 diagnostics and do not become Announce or Supervisor fields. See the
-[Delegation Boundary Protocol](../../design/agent-runtime/delegation-boundary-protocol.md).
+[Delegation Boundary Protocol (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md).
 
 ## What A Guard Is
 
@@ -171,7 +171,6 @@ results cross boundaries and private control detail does not:
 
 | Guard | Position | Verb | Details |
 | --- | --- | --- | --- |
-| `run_state_reset` | `orchestrator.prepare` | `derive` | — |
 | `context_compaction_watermark` | `orchestrator.context_compaction` | `maintain` | `latestInputTokens`, `watermarkTokens`, `mainMessageCount`, `keepMessages` |
 | `run_iteration_limit` | `orchestrator.supervisor_boundary_iteration` | `stop` | `runIterationCount`, `runIterationLimit` |
 | `iteration_limit` | `subagent.before_model_iteration` | `stop` | `iterationCount`, `maxIterations` |
@@ -179,6 +178,12 @@ results cross boundaries and private control detail does not:
 Subagent context summarization uses LangChain middleware and is not a custom
 guard. Capability discovery and delegation acceptance likewise have no guard
 definitions in the current implementation.
+
+Fresh-run initialization now belongs exclusively to `buildOrchestratorRunInput`;
+`prepare` validates the supplied identity and current-run user message instead of
+deriving a reset. The run iteration guard executes at the `runSupervisor` entrance
+for both execution returns and native pause resumes. Its telemetry position is
+unchanged; there is no separate empty budget node.
 
 ## What There Is No More
 
@@ -220,7 +225,7 @@ the rule proceeds.
 Root evaluates this maintenance rule only at new-run entry; the execution loop
 does not return to compaction. The 0.75 ratio applies after generation reserves,
 leaving about 25% of usable input capacity for new context. Under the
-[main-message evidence design](../../design/agent-runtime/delegation-boundary-protocol.md#check-compaction-only-when-a-new-run-starts),
+[main-message evidence design (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md#check-compaction-only-when-a-new-run-starts),
 the compaction effect retains recent messages and all original Announces for the
 current unfinished delegation, including attempts outside the recent suffix.
 Those retention rules already exist; matching main Announces through their

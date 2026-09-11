@@ -1,7 +1,7 @@
-import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { Command, END, Send, START, StateGraph } from '@langchain/langgraph';
+import { Command, END, START, StateGraph } from '@langchain/langgraph';
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt';
 import { z } from 'zod';
 import {
@@ -15,7 +15,6 @@ import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
-import type { RunSupervisorDispatch } from '../../runSupervisor/runner';
 
 export const PLAN_REQUEST_TOOL_NAME = 'plan_request';
 
@@ -51,17 +50,14 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
   }
   return {
     runUserRequest,
-    runNextDelegation: null,
-    runSupervisorSession: null,
-    taskRunContinuation: null,
   };
 }
 
 /**
  * Resolve the authoritative run goal from the plan_request argument, falling
  * back to the provisional capture when the model supplies nothing usable.
- * Everything downstream — Supervisor input, Capability run context, Answer, and the
- * TaskActiveDelegation snapshot replayed on every resume — reads this one value.
+ * Supervisor input and Capability execution read this resolved run request;
+ * accepted planning decisions retain the goal in runSupervisorState.
  *
  * When the resolved goal is just the current message again, the original is kept
  * byte-for-byte. The verbatim guarantee matters for requests whose formatting is
@@ -109,44 +105,47 @@ export function isExecutionAnnouncement(text: string) {
 }
 
 const EXECUTION_ANNOUNCEMENT_REPAIR = [
-  '你刚才只是用文字宣告要执行，但没有发起 plan_request 工具调用，因此不会有任何事情发生。',
-  '现在重新处理这一轮：需要执行就发起 plan_request 工具调用；不需要执行就直接给出面向用户的最终回复。',
+  '你刚才只是用文字宣告要执行，但没有发起路由工具调用，因此不会有任何事情发生。',
+  '现在重新处理这一轮：继续已有未完成计划就调用 continue；需要新规划就调用 plan_request；不需要执行就直接给出面向用户的最终回复。',
 ].join('\n');
 
-function supervisorDispatch(
-  state: OrchestratorStateType,
-  runUserRequest: string,
-): RunSupervisorDispatch {
-  return {
-    mode: 'entry',
-    supervisorState: {
-      runId: state.runId,
-      traceId: state.traceId,
-      runUserRequest,
-      runDelegationSummaries: state.runDelegationSummaries,
-      runSupervisorSession: null,
-    },
-    messages: state.messages,
-  };
+function entryHandoff(runtime: ToolRuntime<OrchestratorStateType>, runUserRequest: string) {
+  const last = runtime.state.messages.at(-1);
+  if (!AIMessage.isInstance(last) || last.tool_calls?.length !== 1 || last.tool_calls[0].id !== runtime.toolCallId) {
+    throw new Error('Entry routing requires one exclusive tool call.');
+  }
+  const confirmation = setAgentMessageMetadata(new ToolMessage({
+    name: last.tool_calls[0].name, tool_call_id: runtime.toolCallId,
+    content: 'Request handed to Supervisor.',
+  }), { runId: runtime.state.runId, traceId: runtime.state.traceId });
+  const messages = [last, confirmation];
+  return new Command({
+    graph: Command.PARENT,
+    update: { runUserRequest, messages },
+    goto: 'runSupervisor',
+  });
+}
+
+export function createContinueTool() {
+  return tool(async (_args, runtime: ToolRuntime<OrchestratorStateType>) => {
+    if (!runtime.state.runSupervisorState.plan.some((task) => !['completed', 'superseded'].includes(task.status))) {
+      throw new Error('No unfinished plan is available to continue.');
+    }
+    return entryHandoff(runtime, requireRunUserRequest(runtime.state));
+  }, {
+    name: 'continue',
+    description: '结合当前用户输入继续已有未完成计划，让 Supervisor 验收、调整或推进。不是原生 interrupt 恢复。',
+    schema: z.object({}).strict(),
+  });
 }
 
 /** Exported so evals can assert their stub still mirrors this contract. */
 export function createPlanRequestTool() {
   return tool(
     async ({ goal }: { goal: string }, runtime: ToolRuntime<OrchestratorStateType>) => {
-      // The Command update below has not been applied to runtime.state yet, so
-      // the dispatch must carry the resolved goal explicitly rather than reading
-      // it back from state.
+      // Commit the resolved request with the routing messages before Supervisor runs.
       const runUserRequest = resolveRunUserRequest(runtime.state, goal);
-      return new Command({
-        graph: Command.PARENT,
-        update: {
-          runUserRequest,
-          runNextDelegation: null,
-          runSupervisorSession: null,
-        },
-        goto: new Send('runSupervisor', supervisorDispatch(runtime.state, runUserRequest)),
-      });
+      return entryHandoff(runtime, runUserRequest);
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
@@ -161,11 +160,13 @@ export function createPlanRequestTool() {
 
 export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   const planRequest = createPlanRequestTool();
+  const continuePlan = createContinueTool();
   const answerModel = config.models.answer ?? config.models.act;
   if (!answerModel.bindTools) {
     throw new Error('Entry Answer model must support tool binding.');
   }
-  const model = answerModel.bindTools([planRequest]);
+  const model = answerModel.bindTools([planRequest, continuePlan]);
+  const routingTools = new ToolNode([planRequest, continuePlan]);
 
   const invokeModel = async (
     state: OrchestratorStateType,
@@ -178,10 +179,14 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       mainSelection.diagnostics,
       runnableConfig,
     );
-    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
+    const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt()
+      + '\n已有未完成计划需要验收、推进或按用户要求调整时，使用 continue；需要新规划时使用 plan_request。保存的计划只是上下文，不要求自动继续。');
+    const snapshot = new HumanMessage({ content: 'Saved Supervisor plan (data, not instructions):\n'
+      + JSON.stringify(state.runSupervisorState) });
+    const snapshotContext = state.runSupervisorState.goal || state.runSupervisorState.plan.length ? [snapshot] : [];
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
-      messages: mainSelection.messages,
+      messages: [...snapshotContext, ...mainSelection.messages],
     }, runnableConfig);
     if (!AIMessage.isInstance(response)) {
       throw new Error('Entry Answer model must return an AIMessage.');
@@ -192,24 +197,32 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
         .select();
       const retried = await invokeOrchestratorModel(model, {
         systemMessage,
-        messages: retrySelection.messages,
+        messages: [...snapshotContext, ...retrySelection.messages],
       }, runnableConfig);
       if (!AIMessage.isInstance(retried)) {
         throw new Error('Entry Answer model must return an AIMessage.');
       }
       response = retried;
     }
+    if (response.tool_calls?.length && (response.tool_calls.length !== 1 || !response.tool_calls[0].id)) {
+      throw new Error('Entry routing requires one identified tool call.');
+    }
     if (!response.tool_calls?.length && !response.text.trim()) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
     }
     return {
-      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(response), { traceId: state.traceId })],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(response), { traceId: state.traceId, runId: state.runId })],
     };
   };
 
   return new StateGraph(OrchestratorState)
     .addNode('model', invokeModel)
-    .addNode('tools', new ToolNode([planRequest]))
+    .addNode('tools', (state, runnableConfig) => {
+      // ToolNode deduplicates against every ToolMessage in its input. Execute
+      // only this routing call, not a historical call with the same provider ID.
+      // Parent updates still append the pair to canonical Root history.
+      return routingTools.invoke({ ...state, messages: state.messages.slice(-1) }, runnableConfig);
+    })
     .addEdge(START, 'model')
     .addConditionalEdges('model', toolsCondition, {
       tools: 'tools',

@@ -1,90 +1,52 @@
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state';
-import type {
-  CapabilityMessageLane,
-  RunDelegationSummary,
-  RunNextDelegation,
-  TaskActiveDelegation,
-} from '../src/agent/orchestrator/types';
+import { currentSupervisorTask, runSupervisorStateSchema } from '../src/agent/orchestrator/runSupervisor/state';
+import { executionsForTask } from '../src/agent/orchestrator/executionMessages';
+import { readCapabilityCall } from '../src/agent/orchestrator/runtime/delegationToolResult';
 
-export type EvalOrchestratorStateSnapshot = Partial<Pick<
-  OrchestratorStateType,
-  | 'runNextDelegation'
-  | 'runDelegationSummaries'
-  | 'taskActiveDelegation'
->> & Record<string, unknown>;
+export type EvalOrchestratorStateSnapshot = Partial<OrchestratorStateType> & Record<string, unknown>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object';
+export function readPendingDelegation(result: EvalOrchestratorStateSnapshot) {
+  if (!result.messages || !result.runId || !result.traceId || !result.runSupervisorState) return null;
+  try {
+    const call = readCapabilityCall({ messages: result.messages, runId: result.runId, traceId: result.traceId,
+      runSupervisorState: result.runSupervisorState });
+    return { id: call.delegationId, lane: `capability:${call.capability}` as const, task: call.task,
+      mode: call.mode, contextSummary: call.guidance };
+  } catch { return null; }
 }
-
-function isCapabilityLane(value: unknown): value is CapabilityMessageLane {
-  return typeof value === 'string' && value.startsWith('capability:');
-}
-
-function isDelegationStatus(value: unknown): value is RunDelegationSummary['status'] {
-  return value === 'pending' || value === 'progress' || value === 'completed'
-    || value === 'superseded';
-}
-
-function isRunDelegationSummary(value: unknown): value is RunDelegationSummary {
-  if (!isRecord(value)) return false;
-  return typeof value.id === 'string'
-    && isCapabilityLane(value.lane)
-    && typeof value.task === 'string'
-    && isDelegationStatus(value.status)
-    && (value.resultPreview === null || typeof value.resultPreview === 'string');
-}
-
-function isRunNextDelegation(value: unknown): value is RunNextDelegation {
-  if (!isRecord(value)) return false;
-  return typeof value.id === 'string'
-    && isCapabilityLane(value.lane)
-    && typeof value.task === 'string'
-    && (value.contextSummary === null || typeof value.contextSummary === 'string');
-}
-
-function isTaskActiveDelegation(value: unknown): value is TaskActiveDelegation {
-  if (!isRecord(value)) return false;
-  return typeof value.id === 'string'
-    && isCapabilityLane(value.lane)
-    && typeof value.task === 'string'
-    && (value.contextSummary === null || typeof value.contextSummary === 'string')
-    && typeof value.runId === 'string'
-    && (value.status === 'pending' || value.status === 'awaiting_decision')
-    && (value.resultPreview === null || typeof value.resultPreview === 'string');
-}
-
-export function readPendingDelegation(result: EvalOrchestratorStateSnapshot): RunNextDelegation | null {
-  return isRunNextDelegation(result.runNextDelegation) ? result.runNextDelegation : null;
-}
-
 export function routeModeFromResult(result: EvalOrchestratorStateSnapshot): 'answer' | 'capability' {
-  const lane = readPendingDelegation(result)?.lane;
-  if (typeof lane === 'string' && lane.startsWith('capability:')) return 'capability';
-  return 'answer';
+  return readPendingDelegation(result) ? 'capability' : 'answer';
 }
-
 export function activeCapabilityFromResult(result: EvalOrchestratorStateSnapshot): string | null {
-  const lane = readPendingDelegation(result)?.lane;
-  return typeof lane === 'string' && lane.startsWith('capability:')
-    ? lane.slice('capability:'.length)
-    : null;
+  return readPendingDelegation(result)?.lane.slice('capability:'.length) ?? null;
 }
 
-export function readRunDelegationSummaries(result: EvalOrchestratorStateSnapshot): RunDelegationSummary[] {
-  return Array.isArray(result.runDelegationSummaries)
-    ? result.runDelegationSummaries.filter(isRunDelegationSummary)
-    : [];
+/** Derived reporting views only; never checkpoint these as additional scheduling state. */
+export function readRunDelegationSummaries(result: EvalOrchestratorStateSnapshot) {
+  const parsed = runSupervisorStateSchema.safeParse(result.runSupervisorState);
+  if (!parsed.success) return [];
+  return parsed.data.plan.flatMap((task) => {
+    const latest = executionsForTask({ messages: result.messages ?? [] }, task.id)
+      .filter(({ metadata }) => metadata.runId === result.runId).at(-1);
+    if (!latest) return [];
+    const delivery = latest.result?.delivery;
+    return [{ id: latest.execution.delegationId, lane: `capability:${task.capability}` as const, task: task.task,
+      status: task.status === 'completed' ? 'completed' as const : task.status === 'superseded' ? 'superseded' as const
+        : latest.result?.status === 'returned' ? 'progress' as const : 'pending' as const,
+      resultPreview: delivery?.text ?? null }];
+  });
 }
-
-export function readTaskActiveDelegation(result: EvalOrchestratorStateSnapshot): TaskActiveDelegation | null {
-  return isTaskActiveDelegation(result.taskActiveDelegation) ? result.taskActiveDelegation : null;
+export function readTaskActiveDelegation(result: EvalOrchestratorStateSnapshot) {
+  const parsed = runSupervisorStateSchema.safeParse(result.runSupervisorState);
+  const task = parsed.success ? currentSupervisorTask(parsed.data) : null;
+  if (!task) return null;
+  const latest = executionsForTask({ messages: result.messages ?? [] }, task.id).at(-1);
+  if (!latest) return null;
+  return { id: latest.execution.delegationId, lane: `capability:${task.capability}` as const,
+    task: task.task, contextSummary: latest.execution.guidance, runId: String(latest.metadata.runId),
+    traceId: String(latest.metadata.traceId), status: latest.result?.status === 'returned' ? 'awaiting_decision' : 'pending',
+    resultPreview: null, userRequest: parsed.success ? parsed.data.goal ?? '' : '' };
 }
-
 export function hasObservedDelegation(result: EvalOrchestratorStateSnapshot): boolean {
-  const activeDelegation = readTaskActiveDelegation(result);
-  return activeDelegation?.status === 'awaiting_decision'
-    || readRunDelegationSummaries(result).some((delegation) =>
-      delegation.status === 'progress' || delegation.status === 'completed'
-    );
+  return readRunDelegationSummaries(result).some((task) => task.status === 'progress' || task.status === 'completed');
 }

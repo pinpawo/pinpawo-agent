@@ -12,7 +12,7 @@ import { createAgent, createMiddleware } from 'langchain';
 import { DelegationAnnounceMessage } from './delegation';
 import {
   invokeOrchestratorModel,
-  orchestratorModelInvocationMiddleware,
+  toolProtocolMiddleware,
 } from './modelInvocation';
 
 class RecordingModel extends BaseChatModel {
@@ -98,7 +98,11 @@ test('direct invocation repairs invalid tool protocol before the model call', as
 });
 
 test('Agent invocation applies after earlier middleware without mutating state', async () => {
-  const accepted = acceptedAnnounce();
+  const call = new AIMessage({ id: 'call', content: '',
+    tool_calls: [{ name: 'delegate_capability', args: {}, id: 'execution' }] });
+  const delivery = new ToolMessage({ id: 'delivery', name: 'delegate_capability',
+    tool_call_id: 'execution', content: 'Execution evidence' });
+  const orphan = new ToolMessage({ id: 'orphan', tool_call_id: 'missing', content: 'orphan' });
   const invocationInput = new HumanMessage({
     id: 'invocation-only',
     content: 'CURRENT_INVOCATION_INPUT',
@@ -107,7 +111,7 @@ test('Agent invocation applies after earlier middleware without mutating state',
     name: 'AppendInvocationInput',
     wrapModelCall: (request, handler) => handler({
       ...request,
-      messages: [...request.messages, invocationInput],
+      messages: [...request.messages, invocationInput, orphan],
     }),
   });
   const model = new RecordingModel({});
@@ -116,21 +120,20 @@ test('Agent invocation applies after earlier middleware without mutating state',
     tools: [],
     middleware: [
       appendInvocationInput,
-      orchestratorModelInvocationMiddleware,
+      toolProtocolMiddleware,
     ],
   });
 
   const result = await agent.invoke({
-    messages: [new HumanMessage('继续。'), accepted],
+    messages: [new HumanMessage('继续。'), call, delivery],
   });
 
   const invoked = model.invocations[0] ?? [];
-  const projected = invoked.find((message) => message.id === accepted.id);
-  assert.ok(projected);
-  assert.notEqual(projected, accepted);
-  assert.ok(HumanMessage.isInstance(projected));
-  assert.equal(JSON.parse(projected.text).result, accepted.text);
+  assert.equal(invoked.find((message) => message.id === call.id), call);
+  assert.equal(invoked.find((message) => message.id === delivery.id), delivery);
+  assert.equal(invoked.includes(orphan), false);
   assert.equal(invoked.at(-1), invocationInput);
-  assert.equal(result.messages.includes(accepted), true);
+  assert.equal(result.messages.includes(call), true);
+  assert.equal(result.messages.includes(delivery), true);
   assert.equal(result.messages.includes(invocationInput), false);
 });

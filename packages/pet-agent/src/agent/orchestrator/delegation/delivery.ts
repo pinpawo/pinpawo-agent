@@ -7,12 +7,3 @@ export type DelegationDelivery = {
   readonly task: string;
   readonly text: string;
 };
-
-export function mergeDelegationDeliveries(
-  previous: readonly DelegationDelivery[],
-  updates: readonly DelegationDelivery[],
-): DelegationDelivery[] {
-  const byId = new Map(previous.map((delivery) => [delivery.id, delivery]));
-  for (const delivery of updates) byId.set(delivery.id, delivery);
-  return [...byId.values()];
-}

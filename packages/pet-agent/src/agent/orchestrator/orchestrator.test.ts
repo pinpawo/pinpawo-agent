@@ -69,11 +69,6 @@ import {
 } from './delegation';
 import { RemoveMessage } from '@langchain/core/messages';
 import {
-  appendRunDelegationSummary,
-  resumeRunDelegationSummary,
-  updateRunDelegationSummaryResult,
-} from './delegations';
-import {
   createContextCompactionMessage,
   isContextCompactionMessage,
 } from './contextCompaction';
@@ -119,26 +114,40 @@ function selectCapabilityHistory(
       .messages,
   );
 }
-import type { RunDelegationSummary, TaskActiveDelegation } from './types';
 import type { SubagentRuntimeContext } from '../../types/subagent';
 import {
   ORCHESTRATOR_STATE_CHANNEL_NAMES,
   type OrchestratorStateType,
 } from './state';
-import { applyActiveDelegationTransition } from './runtime/activeDelegationTransition';
-import { afterContextPrep } from './runtime/routes/afterContextPrep';
-import { afterPauseGate } from './runtime/nodes/pauseGate';
 import {
   type RunSupervisorInput,
-  type RunSupervisorResult,
-  type RunSupervisorRunner,
 } from './runSupervisor/runner';
-import { withScriptedDelegation } from './runSupervisor/testing';
+import { withScriptedDelegation, type ScriptedSupervisorDecision as RunSupervisorResult,
+  type ScriptedSupervisorRunner as RunSupervisorRunner } from './runSupervisor/testing';
+import { currentSupervisorTask } from './runSupervisor/state';
+import { executionsForTask, readCapabilityExecutions, readDelegationDeliveries } from './executionMessages';
+import type { DelegationDelivery } from './delegation/delivery';
+
+function currentExecution(input: RunSupervisorInput | undefined) {
+  if (!input) return null;
+  const task = currentSupervisorTask(input.state);
+  if (!task) return null;
+  const latest = executionsForTask(input, task.id).at(-1);
+  return latest ? { ...latest.execution, runId: String(latest.metadata.runId) } : null;
+}
+function executionDeliveries(input: RunSupervisorInput | undefined): DelegationDelivery[] {
+  return (input?.messages ?? []).flatMap((message) => {
+    if (!ToolMessage.isInstance(message) || message.name !== 'delegate_capability') return [];
+    const result = JSON.parse(message.text);
+    return result.delivery ? [result.delivery as DelegationDelivery] : [];
+  });
+}
+
 import { readMessageText } from './utils';
 import { PLAN_REQUEST_TOOL_NAME } from './runtime/nodes/entryAnswer';
 
 function plannerMessageContextText(input: RunSupervisorInput | null | undefined) {
-  return [...(input?.messages.map(readMessageText) ?? []), ...(input?.deliveries?.map((delivery) => delivery.text) ?? [])].join('\n');
+  return [...(input?.messages.map(readMessageText) ?? []), ...executionDeliveries(input ?? undefined).map((delivery) => delivery.text)].join('\n');
 }
 
 function capability(
@@ -167,7 +176,7 @@ function readLatestHumanText(messages: BaseMessage[]): string {
 }
 
 function createOrchestratorGraph(
-  config: Parameters<typeof createRuntimeOrchestratorGraph>[0],
+  config: Omit<Parameters<typeof createRuntimeOrchestratorGraph>[0], 'runSupervisorRunner'> & { runSupervisorRunner?: RunSupervisorRunner },
 ): ReturnType<typeof createRuntimeOrchestratorGraph> {
   const resultAnswerModel = config.models.answer ?? config.models.act;
   const entryPlanningAnswerModel = new Proxy(resultAnswerModel, {
@@ -180,7 +189,7 @@ function createOrchestratorGraph(
           invoke: async (messages: BaseMessage[]) => new AIMessage({
             content: '',
             tool_calls: [{
-              id: 'test-plan-request',
+              id: `test-plan-request:${randomUUID()}`,
               name: PLAN_REQUEST_TOOL_NAME,
               args: { goal: readLatestHumanText(messages) },
             }],
@@ -215,41 +224,7 @@ function createOrchestratorGraph(
       },
     };
   };
-  const withCurrentPlannerCheckpoint = (input: unknown) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
-    const state = input as Record<string, unknown>;
-    if (!state.taskActiveDelegation
-      || state.runSupervisorSession) {
-      return input;
-    }
-    // Direct boundary fixtures represent checkpoints created by the current
-    // schema. A deliberately null field remains available to test the breaking
-    // old-checkpoint boundary.
-    return {
-      ...state,
-      taskRunContinuation: state.taskRunContinuation ?? {
-        traceId: (state.taskActiveDelegation as TaskActiveDelegation).traceId,
-        userRequest: (state.taskActiveDelegation as TaskActiveDelegation).userRequest,
-        activeDelegationId: (state.taskActiveDelegation as TaskActiveDelegation).id,
-        remainingPlan: [],
-      },
-      runSupervisorSession: {
-        runId: state.runId,
-        revision: 0,
-        plan: state.taskRunContinuation
-          && typeof state.taskRunContinuation === 'object'
-          && !Array.isArray(state.taskRunContinuation)
-          && Array.isArray((state.taskRunContinuation as Record<string, unknown>).remainingPlan)
-          ? (state.taskRunContinuation as Record<string, unknown>).remainingPlan
-          : [],
-        capabilityDisclosure: {
-          registryDigest: 'test-fixture-registry-generation',
-          disclosedCapabilityNames: [],
-
-        },
-      },
-    };
-  };
+  const withCurrentPlannerCheckpoint = (input: unknown) => input;
   return new Proxy(graph, {
     get(target, property, receiver) {
       if (property === 'invoke' || property === 'streamEvents') {
@@ -307,7 +282,7 @@ function createQueuedPlannerRunner(
           };
         }
         if (planning.outcome === 'continue') {
-          const active = input.activeDelegation;
+          const active = currentExecution(input);
           if (!active) throw new Error('scripted continue requires active delegation');
           return { completed: false, reason: typeof planning.gap_note === 'string' && planning.gap_note.trim()
               ? planning.gap_note : 'Complete the missing current-task work.',
@@ -335,7 +310,7 @@ function createQueuedPlannerRunner(
       );
       if (input.mode === 'boundary') {
         return { action: 'review_current', completed: true, reason: 'Current task delivery is evidenced.',
-          ...(input.remainingPlan.length === 0 ? { reply: '已完成。' } : {}) };
+          ...(input.state.plan.filter((task) => task.status === 'pending').length === 1 ? { reply: '已完成。' } : {}) };
       }
       return {
         action: 'execute_plan',
@@ -419,9 +394,9 @@ test('orchestrator state channels encode lifecycle prefixes in their names', () 
 
   assert.deepEqual(invalidChannels, []);
   assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runPendingFinalReply'), false);
-  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runSupervisorSession'), true);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runSupervisorState'), true);
   assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityPlan'), false);
-  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityDisclosure'), false);
+  assert.equal(ORCHESTRATOR_STATE_CHANNEL_NAMES.includes('runCapabilityDisclosure'), true);
 });
 
 test('run identity is fresh while task trace identity can be supplied by the caller', () => {
@@ -430,13 +405,12 @@ test('run identity is fresh while task trace identity can be supplied by the cal
   });
   const resumed = buildOrchestratorRunInput([new HumanMessage('resume')], {
     traceId: first.traceId,
-    activeDelegationTransition: 'resume_active',
   });
 
   assert.equal(first.traceId, 'task-trace-1');
   assert.equal(resumed.traceId, first.traceId);
   assert.notEqual(resumed.runId, first.runId);
-  assert.equal('runSupervisorSession' in first ? first.runSupervisorSession : undefined, null);
+  assert.equal('runSupervisorState' in first, false, 'fresh run reset preserves saved plan');
   assert.equal('runSupervisorSession' in resumed, false);
 });
 
@@ -558,13 +532,13 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.deepEqual(supervisorInputs[2]?.capabilityDisclosure, boundaryPlannerInput?.capabilityDisclosure);
   assert.equal(entryPlannerInput?.userRequest, '看 issue #269，再查本地实现，最后总结。');
   assert.deepEqual(boundaryPlannerInput?.userRequest, entryPlannerInput?.userRequest);
-  assert.equal(supervisorInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
+  assert.equal(currentExecution(supervisorInputs[1])?.task, '读取 issue #269 并提炼需求点。');
   assert.match(announces(supervisorInputs[1])[0]?.result ?? '', /issue #269 需求点/);
   assert.equal(announces(supervisorInputs[1]).length, 1);
   const secondBoundaryInput = supervisorInputs[2];
-  const acceptedFirstTaskAnnounce = secondBoundaryInput?.deliveries?.find((delivery) =>
+  const acceptedFirstTaskAnnounce = executionDeliveries(secondBoundaryInput).find((delivery) =>
     delivery.scope.delegationId
-      === supervisorInputs[1]?.activeDelegation?.delegationId);
+      === currentExecution(supervisorInputs[1])?.delegationId);
   assert.ok(acceptedFirstTaskAnnounce);
   assert.equal(announces(secondBoundaryInput).length, 1);
   assert.notEqual(
@@ -574,19 +548,19 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.ok(announces(supervisorInputs[1]).at(-1)?.messageId);
   assert.equal(
     supervisorInputs[1]?.inputId,
-    `result:${supervisorInputs[1]?.activeDelegation?.delegationId}:${announces(supervisorInputs[1]).at(-1)?.messageId}`,
+    `boundary:${supervisorInputs[1].runId}:1`,
   );
-  assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runSupervisorSession, null);
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.taskRunContinuation, null);
+  assert.deepEqual(state.runSupervisorState.plan.map((item) => item.status), ['completed', 'completed']);
+  assert.equal('runSupervisorSession' in state, false);
+  assert.equal('runNextDelegation' in state, false);
+  assert.equal(currentSupervisorTask(state.runSupervisorState), null);
+  assert.equal('taskRunContinuation' in state, false);
   assert.equal(state.messages.some((message) =>
     readMessageText(message).includes('<supervision_boundary_event')), false);
   assert.equal(answerMessages.length, 0);
   const handoffs = state.messages.filter((message) => getMessageHandoffSource(message));
   assert.equal(handoffs.length, 0);
-  assert.equal(state.sessionDelegationResults?.length, 2);
+  assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
 });
 
@@ -628,8 +602,8 @@ test('a completed single-task goal is accepted by the boundary Supervisor', asyn
   assert.equal(supervisorInputs.length, 2);
   assert.equal(supervisorInputs[0]?.mode, 'entry');
   assert.equal(supervisorInputs[1]?.mode, 'boundary');
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runSupervisorSession, null);
+  assert.equal('runNextDelegation' in state, false);
+  assert.equal('runSupervisorSession' in state, false);
 });
 
 test('Supervisor boundary returns to runSupervisor until the remaining goal is complete', async () => {
@@ -696,11 +670,14 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
 
   assert.equal(supervisorInputs.length, 3);
   assert.deepEqual(supervisorInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
-  assert.deepEqual(supervisorInputs[1]?.remainingPlan, [{
+  assert.deepEqual(supervisorInputs[1]?.state.plan.filter((task) => task.status === 'pending').map(({ capability, task }) => ({ capability, task })), [{
+    capability: 'explore',
+    task: '读取 issue #269 并提炼需求点。',
+  }, {
     capability: 'explore',
     task: '检索本地实现与 git log。',
   }]);
-  assert.equal(supervisorInputs[1]?.activeDelegation?.task, '读取 issue #269 并提炼需求点。');
+  assert.equal(currentExecution(supervisorInputs[1])?.task, '读取 issue #269 并提炼需求点。');
   assert.match(announces(supervisorInputs[1])[0]?.result ?? '', /issue #269 需求点：需要检查本地实现/);
   assert.doesNotMatch(plannerMessageContextText(supervisorInputs[1]), /announce truncated for Supervisor context/);
   assert.match(announces(supervisorInputs[1])[0]?.result ?? '', /完整 handoff 末尾约束：必须检查兼容性/);
@@ -709,10 +686,10 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
     String(state.messages.at(-1)?.content ?? ''),
     '已完成。',
   );
-  assert.deepEqual(state.runDelegationSummaries.map((item) => item.status), ['completed', 'completed']);
-  assert.equal(state.runSupervisorSession, null);
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.taskActiveDelegation, null);
+  assert.deepEqual(state.runSupervisorState.plan.map((item) => item.status), ['completed', 'completed']);
+  assert.equal('runSupervisorSession' in state, false);
+  assert.equal('runNextDelegation' in state, false);
+  assert.equal(currentSupervisorTask(state.runSupervisorState), null);
 });
 
 test('Supervisor return routes bounded facts through the answer node', async () => {
@@ -761,8 +738,8 @@ test('Supervisor return routes bounded facts through the answer node', async () 
   assert.equal(mainConversationMessages(state.messages).at(-1)?.text, '当前没有可用的 Capability。');
   assert.doesNotMatch(answerInvocationText, /The compiled Capability registry is empty/);
   assert.equal(answerInvocationText, '');
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.taskActiveDelegation, null);
+  assert.equal('runNextDelegation' in state, false);
+  assert.equal(currentSupervisorTask(state.runSupervisorState), null);
 });
 
 test('Entry Supervisor routes its structured user question through Answer without an active delegation', async () => {
@@ -807,9 +784,9 @@ test('Entry Supervisor routes its structured user question through Answer withou
   assert.equal(answerInvocationText, '');
   assert.equal(state.messages.at(-1)?.text, question);
   assert.doesNotMatch(answerInputText, /<awaiting_user_input_context>/);
-  assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.runSupervisorReply, null);
+  assert.equal(currentSupervisorTask(state.runSupervisorState), null);
+  assert.equal('runNextDelegation' in state, false);
+  assert.equal('runSupervisorReply' in state, false);
 });
 
 test('Supervisor non-commit routes to Answer without inventing a General delegation', async () => {
@@ -853,230 +830,13 @@ test('Supervisor non-commit routes to Answer without inventing a General delegat
   assert.equal(plannerCalls, 1);
   assert.equal(mainConversationMessages(state.messages).at(-1)?.text, '需要补充信息。');
   assert.equal(answerInvocationText, '');
-  assert.equal(state.runNextDelegation, null);
-  assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.runDelegationSummaries.length, 0);
+  assert.equal('runNextDelegation' in state, false);
+  assert.equal(currentSupervisorTask(state.runSupervisorState), null);
+  assert.equal(state.runSupervisorState.plan.length, 0);
 });
 
-test('Supervisor boundary non-commit preserves the active delegation and remaining plan', async () => {
-  let supervisorInput: RunSupervisorInput | null = null;
-  let answerInvocationText = '';
-  const model = {
-    invoke: async (messages: BaseMessage[]) => {
-      answerInvocationText = messages.map(readMessageText).join('\n');
-      return new AIMessage('规划没有形成下一步提交，当前任务和后续计划保持不变。');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    runSupervisorRunner: {
-      async invoke(input) {
-        supervisorInput = input;
-        return {
-          reply: '需要补充信息。',
-        };
-      },
-    },
-  });
-  const remainingPlan = [{
-    capability: 'release',
-    task: '发布已经验证的改动。',
-  }];
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('继续当前任务'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  } as OrchestratorStateType;
-  input.runDelegationSummaries = [{
-    id: 'active-1',
-    lane: 'capability:general',
-    task: '验证当前改动。',
-    status: 'progress',
-    resultPreview: '验证尚未形成可接受的边界决定。',
-  }];
-  input.taskActiveDelegation = {
-    id: 'active-1',
-    lane: 'capability:general',
-    task: '验证当前改动。',
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: '验证尚未形成可接受的边界决定。',
-    userRequest: '验证当前改动，然后发布。',
-  };
-  input.taskRunContinuation = {
-    traceId: input.taskActiveDelegation.traceId,
-    userRequest: input.taskActiveDelegation.userRequest,
-    activeDelegationId: input.taskActiveDelegation.id,
-    remainingPlan,
-  };
 
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'supervisor-boundary-non-commit-preserves-plan',
-      capabilities: [
-        capability('general', 'General-purpose capability.'),
-        capability('release', '发布已经验证的改动。'),
-      ],
-      toolkits: [],
-    },
-  }) as OrchestratorStateType;
 
-  const observedPlannerInput = supervisorInput as RunSupervisorInput | null;
-  assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.deepEqual(observedPlannerInput?.remainingPlan, remainingPlan);
-  assert.equal(answerInvocationText, '');
-  assert.equal(state.taskActiveDelegation?.id, 'active-1');
-  assert.deepEqual(state.taskRunContinuation?.remainingPlan, remainingPlan);
-  assert.equal(state.runNextDelegation, null);
-});
-
-test('Supervisor final text enters main once without accepting the unfinished task', async () => {
-  let answerInvocationText = '';
-  const plannerAnswer = [
-    '网络检查已经完成：en1 已获取 IP，外网连通正常。',
-    '完整诊断证据。'.repeat(100),
-    'Handoff 根因是 Manatee/CDP circle failure -5403。',
-  ].join('');
-  const model = {
-    invoke: async (messages: BaseMessage[]) => {
-      answerInvocationText = messages.map(readMessageText).join('\n');
-      return new AIMessage('网络正常；Handoff 根因是 Manatee/CDP -5403。');
-    },
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      observe: model,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    runSupervisorRunner: {
-      async invoke() {
-        return {
-          reply: plannerAnswer,
-        };
-      },
-    },
-  });
-  const remainingPlan = [{
-    capability: 'release',
-    task: '发布已经验证的改动。',
-  }];
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('重新检查网络并核对 Handoff。'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  } as OrchestratorStateType;
-  input.runDelegationSummaries = [{
-    id: 'active-network-check',
-    lane: 'capability:general',
-    task: '重新检查网络并核对 Handoff。',
-    status: 'progress',
-    resultPreview: '网络检查已完成。',
-  }];
-  input.taskActiveDelegation = {
-    id: 'active-network-check',
-    lane: 'capability:general',
-    task: '重新检查网络并核对 Handoff。',
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: '网络检查已完成。',
-    userRequest: '重新检查网络并核对 Handoff。',
-  };
-  input.taskRunContinuation = {
-    traceId: input.taskActiveDelegation.traceId,
-    userRequest: input.taskActiveDelegation.userRequest,
-    activeDelegationId: input.taskActiveDelegation.id,
-    remainingPlan,
-  };
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'supervisor-boundary-direct-answer-fallback',
-      capabilities: [
-        capability('general', 'General-purpose capability.'),
-        capability('release', '发布已经验证的改动。'),
-      ],
-      toolkits: [],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(answerInvocationText, '');
-  assert.equal(answerInvocationText.includes(plannerAnswer), false);
-  assert.equal(state.messages.filter((message) => readMessageText(message) === plannerAnswer).length, 1);
-  assert.equal(state.taskActiveDelegation?.id, 'active-network-check');
-  assert.deepEqual(state.taskRunContinuation?.remainingPlan, remainingPlan);
-});
-
-test('user supplement without result evidence enters Supervisor before executing', async () => {
-  let plannerCalls = 0;
-  let observedSessionRunId: string | null = null;
-  const model = {
-    invoke: async () => new AIMessage('must not run'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: { act: model, subagent: new FakeListChatModel({ responses: ['New execution evidence'], sleep: 0 }) },
-    runSupervisorRunner: {
-      async invoke(supervisorInput) {
-        plannerCalls += 1;
-        if (plannerCalls === 1) {
-          assert.equal(announces(supervisorInput).length, 0);
-          return { completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' };
-        }
-        observedSessionRunId = supervisorInput.supervisorSession.runId;
-        return { completed: true, reason: 'Current task delivery is evidenced.',
-          action: 'review_current',
-          reply: '已完成。',
-        };
-      },
-    },
-  });
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('继续旧任务'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
-  input.taskActiveDelegation = {
-    id: 'legacy-active',
-    lane: 'capability:general',
-    task: '继续旧任务',
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: '旧版本结果',
-    userRequest: '继续旧任务',
-  };
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'legacy-supervisor-disclosure-checkpoint',
-      capabilities: [capability('general', 'General-purpose capability.')],
-      toolkits: [],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(plannerCalls, 2);
-  assert.equal(observedSessionRunId, input.runId);
-  assert.equal(state.runRuntimeFailure, null);
-  assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.runSupervisorSession, null);
-});
 
 test('capability supervisor reports an empty compiled registry without inventing General', async () => {
   let supervisorMode: RunSupervisorInput['mode'] | null = null;
@@ -1224,7 +984,7 @@ test('Run Supervisor materializer rejects selections outside the catalog', async
         },
       },
     ),
-    /outside the immutable catalog/,
+    /outside the current catalog/,
   );
 });
 
@@ -1270,382 +1030,14 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
   ) as OrchestratorStateType;
 
   assert.equal(
-    state.runDelegationSummaries[0]?.task,
+    state.runSupervisorState.plan[0]?.task,
     '检查 src/index.ts 并整理其公开接口。',
   );
 });
 
-test('a completed subagent announce reaches the decision, then Answer summarizes the result', async () => {
-  let supervisorInput: RunSupervisorInput | null = null;
-  let answerModelInvocations = 0;
-  let answerInput: BaseMessage[] = [];
-  const model = {
-    invoke: async (messages: BaseMessage[]) => {
-      answerModelInvocations += 1;
-      answerInput = messages;
-      return new AIMessage('文件读取和 lint 检查已完成，lint 已通过。');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({ invoke: async () => goalDoneDecision() }),
-  } as unknown as AgentModels['act'];
 
-  const graph = createOrchestratorGraph({
-    models: {
-      act: model,
-      decision: new FakeListChatModel({ responses: ['直接回答当前请求。'], sleep: 0 }),
-      observe: model,
-    },
-    runSupervisorRunner: {
-      async invoke(input) {
-        supervisorInput = input;
-        return { completed: true, reason: 'Current task delivery is evidenced.',
-          action: 'review_current',
-          reply: '已完成。',
-        };
-      },
-    },
-  });
-  const currentAnnounceText = [
-    '文件读取完成，lint 已通过。',
-    'A'.repeat(1400),
-    'END_OF_FULL_SUBAGENT_RESULT',
-  ].join('\n\n');
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('读取文件并运行 lint'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
-  const currentAnnounce = createMainAnnounce({
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: 'task-1',
-    task: '读取文件并运行 lint',
-    result: currentAnnounceText,
-  });
-  input.messages.push(setAgentMessageMetadata(currentAnnounce, { traceId: input.traceId }));
-  input.runDelegationSummaries = [{
-    id: 'task-1',
-    lane: 'capability:general',
-    task: '读取文件并运行 lint',
-    status: 'progress',
-    resultPreview: currentAnnounceText,
-  }];
-  input.taskActiveDelegation = {
-    id: 'task-1',
-    lane: 'capability:general',
-    task: '读取文件并运行 lint',
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: currentAnnounceText,
-    userRequest: '读取文件并运行 lint。',
-  };
 
-  const result = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'test-delegation-outcome',
-      capabilities: [capability('content_writer', '生成通用内容草稿。')],
-      tools: [],
-    },
-  });
 
-  const observedPlannerInput = supervisorInput as RunSupervisorInput | null;
-  assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.match(announces(observedPlannerInput)[0]?.result ?? '', /文件读取完成，lint 已通过/);
-  assert.match(announces(observedPlannerInput)[0]?.result ?? '', /END_OF_FULL_SUBAGENT_RESULT/);
-  assert.equal(answerModelInvocations, 0);
-  assert.equal(result.messages.at(-1)?.content, '已完成。');
-  assert.deepEqual(answerInput, []);
-  assert.equal(
-    result.messages.some((message) => String(message.content).includes('END_OF_FULL_SUBAGENT_RESULT')),
-    true,
-  );
-});
-
-test('delegation goal_done summarizes and preserves the handed-off result', async () => {
-  let answerModelInvocations = 0;
-  let answerInput: BaseMessage[] = [];
-  const announceMarker = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
-  const routeModel = {
-    invoke: async (messages: BaseMessage[]) => {
-      answerModelInvocations += 1;
-      answerInput = messages;
-      return new AIMessage('Vibe Coding 模型排行榜已整理：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => goalDoneDecision(),
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel },
-  });
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('帮我列一个目前 vibecoding 的模型排行榜。'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
-  const announceText = 'Vibe Coding 模型排行榜：1. Claude Sonnet 4；2. GPT-5；3. Gemini 2.5 Pro。';
-  const announceMessage = createMainAnnounce({
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: 'task-1',
-    task: '搜索并整理 vibecoding 模型排行榜。',
-    result: announceText,
-  });
-  input.messages.push(announceMessage);
-  input.runDelegationSummaries = [{
-    id: 'task-1',
-    lane: 'capability:general',
-    task: '搜索并整理 vibecoding 模型排行榜。',
-    status: 'completed',
-    resultPreview: announceText,
-  }];
-  input.taskActiveDelegation = {
-    id: 'task-1',
-    lane: 'capability:general',
-    task: '搜索并整理 vibecoding 模型排行榜。',
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: announceText,
-    userRequest: '列出目前 Vibe Coding 的模型排行榜。',
-  };
-
-  const result = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'delegation-outcome-leak-fallback',
-      capabilities: [],
-      toolkits: [],
-    },
-  });
-  const finalMessageText = String(result.messages.at(-1)?.content ?? '');
-
-  assert.equal(answerModelInvocations, 0);
-  assert.equal(
-    finalMessageText,
-    '已完成。',
-  );
-  assert.deepEqual(answerInput, []);
-  assert.equal(
-    result.messages.some((message) => String(message.content).includes(announceMarker)),
-    true,
-  );
-});
-
-test('user_input_required returns control without claiming delegation completion', async () => {
-  let answerMessages: BaseMessage[] = [];
-  const routeModel = {
-    invoke: async (messages: unknown[]) => {
-      answerMessages = messages as BaseMessage[];
-      return new AIMessage('报告已经准备好，但还没有发送。请选择发送到邮件还是项目群。');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => userInputRequiredDecision(),
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel },
-  });
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('根据我的选择，把已经完成的报告发送到邮件或项目群。'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  } as OrchestratorStateType;
-  const task = '确认发送渠道并发送已经完成的报告';
-  const announceText = '报告已经完成，但用户尚未选择邮件或项目群，当前无法继续发送。';
-  const announceMessage = createMainAnnounce({
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: 'task-user-choice',
-    task,
-    result: announceText,
-  });
-  input.messages.push(
-    ...interruptedLaneMessages({
-      delegationId: 'task-user-choice',
-      runId: input.runId,
-    }),
-    announceMessage,
-  );
-  input.runDelegationSummaries = [{
-    id: 'task-user-choice',
-    lane: 'capability:general',
-    task,
-    status: 'progress',
-    resultPreview: announceText,
-  }];
-  input.taskActiveDelegation = {
-    id: 'task-user-choice',
-    lane: 'capability:general',
-    task,
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: announceText,
-    userRequest: '根据用户选择发送已经完成的报告。',
-  };
-  input.sessionCapabilityArtifacts = [{
-    id: 'artifact-awaiting-user-choice',
-    threadId: 'delegation-outcome-user-input-required',
-    capabilityId: 'general',
-    delegationId: 'task-user-choice',
-    runId: input.runId,
-    kind: 'report',
-    mimeType: 'text/markdown',
-    uri: 'capability-artifact://thread/user-choice/report',
-    title: '待发送报告',
-    preview: '报告已生成，等待选择发送渠道。',
-    sizeBytes: 42,
-    createdAt: '2026-07-28T00:00:00.000Z',
-  }];
-
-  const result = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'delegation-outcome-user-input-required',
-      capabilities: [],
-      toolkits: [],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(
-    result.messages.at(-1)?.content,
-    '请选择将报告发送到邮件还是项目群？',
-  );
-  assert.deepEqual(answerMessages, []);
-  assert.equal(result.runDelegationSummaries[0]?.status, 'progress');
-  assert.equal(result.taskActiveDelegation?.id, 'task-user-choice');
-  assert.equal(result.taskActiveDelegation?.status, 'awaiting_decision');
-  assert.equal(
-    selectCapabilityHistory(
-      result.messages,
-      'capability:general',
-      input.runId,
-      'task-user-choice',
-    ).some((message) => message instanceof ToolMessage),
-    true,
-  );
-  assert.equal(
-    result.messages.some((message) =>
-      getMessageHandoffSource(message)?.delegationId === 'task-user-choice'
-        && getMessageHandoffSource(message)?.taskAccepted === true),
-    false,
-  );
-  assert.equal(
-    mainConversationMessages(result.messages).some((message) =>
-      String(message.content).includes('capability-artifact://thread/user-choice/report')),
-    false,
-  );
-});
-
-test('capability errors retain the active delegation and lane without a handoff', async () => {
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'task-capability-error',
-    lane: 'capability:general',
-    task: '继续处理会失败的 delegated task',
-    contextSummary: null,
-    runId: 'run-capability-error',
-    traceId: 'trace-capability-error',
-    status: 'pending',
-    resultPreview: null,
-    userRequest: '继续处理当前 delegated task，并保留失败状态。',
-  };
-  const messages = interruptedLaneMessages({
-    delegationId: activeDelegation.id,
-    runId: activeDelegation.runId,
-  });
-  const failingCapability: AgentCapability = {
-    ...capability('general', 'General-purpose capability.'),
-    lifecycle: {
-      finalize: () => {
-        throw new Error('capability finalize failed');
-      },
-    },
-  };
-  const graph = createOrchestratorGraph({
-    models: {
-      act: new FakeListChatModel({ responses: ['unused'], sleep: 0 }),
-      subagent: new FakeListChatModel({
-        responses: ['执行产生了结果，但 finalize 随后失败。'],
-        sleep: 0,
-      }),
-    },
-    runSupervisorRunner: { invoke: async () => ({ completed: false, reason: 'Complete the missing current-task work.',  action: 'review_current' }) },
-    checkpoint: new MemorySaver(),
-  });
-  const config = {
-    configurable: {
-      thread_id: 'delegation-capability-error',
-      capabilities: [failingCapability],
-      toolkits: [],
-    },
-  };
-  await graph.updateState(config, {
-    messages,
-    runId: activeDelegation.runId,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: [{
-      id: activeDelegation.id,
-      lane: activeDelegation.lane,
-      task: activeDelegation.task,
-      status: 'progress',
-      resultPreview: null,
-    }],
-  });
-
-  await assert.rejects(
-    graph.invoke(
-      buildOrchestratorRunInput(
-        [new HumanMessage('继续执行')],
-        { activeDelegationTransition: 'resume_active' },
-      ),
-      config,
-    ),
-    /capability finalize failed/,
-  );
-
-  const checkpoint = await graph.getState(config);
-  const checkpointState = checkpoint.values as OrchestratorStateType;
-  assert.equal(checkpointState.taskActiveDelegation?.id, activeDelegation.id);
-  assert.equal(
-    checkpointState.taskActiveDelegation?.runId,
-    activeDelegation.runId,
-  );
-  assert.equal(
-    selectCapabilityHistory(
-      checkpointState.messages,
-      activeDelegation.lane,
-      activeDelegation.runId,
-      activeDelegation.id,
-    ).some((message) => message instanceof ToolMessage),
-    true,
-  );
-  assert.equal(
-    checkpointState.messages.some((message) => getMessageHandoffSource(message)),
-    false,
-  );
-  assert.equal(checkpointState.runSupervisorSession, null);
-  assert.equal(
-    checkpointState.taskRunContinuation?.activeDelegationId,
-    activeDelegation.id,
-  );
-  assert.equal(checkpointState.runIterationCount, 0);
-  assert.equal(checkpointState.runTerminalError?.node, 'capability');
-  assert.equal(checkpointState.runTerminalError?.message, 'capability finalize failed');
-});
 
 test('supervisor errors checkpoint run-scoped cleanup before they are rethrown', async () => {
   const graph = createOrchestratorGraph({
@@ -1676,104 +1068,11 @@ test('supervisor errors checkpoint run-scoped cleanup before they are rethrown',
 
   const checkpoint = await graph.getState(config);
   const state = checkpoint.values as OrchestratorStateType;
-  assert.equal(state.runSupervisorSession, null);
-  assert.equal(state.taskRunContinuation, null);
+  assert.equal('runSupervisorSession' in state, false);
+  assert.equal('taskRunContinuation' in state, false);
   assert.equal(state.runTerminalError?.node, 'runSupervisor');
 });
 
-test('limit-reached progress announce lets model choose the same capability delegation', async () => {
-  let capabilityRunCount = 0;
-  let plannerCallCount = 0;
-  let supervisorInput: RunSupervisorInput | null = null;
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      // delegation_outcome keeps using the active capability lane as its
-      // continuation candidate; no run-entry search is needed here.
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({ invoke: async () => goalDoneDecision() }),
-  } as unknown as AgentModels['act'];
-  const inspectCapability: AgentCapability = {
-    name: 'inspect_repo',
-    description: 'Inspect repository.',
-    uses: [],
-    instructions: defineInstructionDocument({
-      content: 'Inspect the repository.',
-    }),
-    lifecycle: {
-      finalize: () => {
-        capabilityRunCount += 1;
-      },
-    },
-  };
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-    runSupervisorRunner: {
-      async invoke(input) {
-        plannerCallCount += 1;
-        supervisorInput = input;
-        return { completed: false, reason: 'Complete the missing current-task work.',
-          action: 'review_current',
-        };
-      },
-    },
-  });
-  const input = {
-    ...buildOrchestratorRunInput([
-      new HumanMessage('先调查仓库，再修复注册链路。'),
-      new AIMessage('先从仓库调查开始。'),
-      new HumanMessage('继续'),
-    ], { activeDelegationTransition: 'resume_active' }),
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-  };
-  input.runIterationCount = ORCHESTRATOR_MAX_ITERATIONS - 1;
-  const progressAnnounce = createMainAnnounce({
-    lane: 'capability:inspect_repo',
-    runId: input.runId,
-    delegationId: 'task-limit',
-    task: '调查仓库 capability 注册链路。',
-    result: '(no matches)',
-  });
-  input.messages.push(setAgentMessageMetadata(progressAnnounce, { traceId: input.traceId }));
-  input.runDelegationSummaries = [{
-    id: 'task-limit',
-    lane: 'capability:inspect_repo',
-    task: '调查仓库 capability 注册链路。',
-    status: 'progress',
-    resultPreview: '(no matches)',
-  }];
-  input.taskActiveDelegation = {
-    id: 'task-limit',
-    lane: 'capability:inspect_repo',
-    task: '调查仓库 capability 注册链路。',
-    contextSummary: null,
-    runId: input.runId,
-    traceId: input.traceId,
-    status: 'awaiting_decision',
-    resultPreview: '(no matches)',
-    userRequest: '先调查仓库，再修复注册链路。',
-  };
-
-  await graph.invoke(input, {
-    configurable: {
-      thread_id: 'limit-progress-auto-resume',
-      capabilities: [inspectCapability],
-      toolkits: [],
-    },
-  });
-
-  assert.equal(capabilityRunCount, 1);
-  assert.equal(plannerCallCount, 1);
-  const observedPlannerInput = supervisorInput as RunSupervisorInput | null;
-  assert.equal(observedPlannerInput?.activeDelegation?.capability, 'inspect_repo');
-  assert.equal(Object.hasOwn(announces(observedPlannerInput).at(-1) ?? {}, 'completionReason'), false);
-  assert.match(plannerMessageContextText(observedPlannerInput), /继续/);
-});
 
 test('toolkits compose tools and instructions for capability runtimes', async () => {
   const browserOpen = mockTool('browser_open');
@@ -3828,7 +3127,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
         if (routeCallCount === 2) {
           return scriptedSupervisorCapability('general');
         }
-        return goalDoneDecision();
+        return { outcome: 'user_input_required', question: 'Execution returned no deliverable; please check the tool output.' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -3890,14 +3189,13 @@ test('toolkit review policy records authorization through orchestrator runtime t
   const resumedRun = await graph.streamEvents(new Command({
     resume: interruptId ? { [interruptId]: reviewResume } : reviewResume,
   }), { version: 'v3', ...config });
-  await assert.rejects(async () => {
   for await (const event of resumedRun) {
     if (event.method === 'custom') {
       runtimeEvents.push(event.params.data);
     }
   }
-    await resumedRun.output;
-  }, /produced no new deliverable/);
+  const output = await resumedRun.output;
+  assert.equal(readCapabilityExecutions(output.messages).at(-1)?.result?.status, 'missing_deliverable');
   const finalState = (await graph.getState(config)).values as {
     __interrupt__?: unknown;
     sessionToolAuthorizations: {
@@ -4047,13 +3345,12 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
     runId: string;
-    sessionDelegationResults: NonNullable<OrchestratorStateType['sessionDelegationResults']>;
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.equal(reviewCount, 2);
   assert.equal(runCount, 1);
-  const delivery = finalState.sessionDelegationResults.find((value) => value.task === 'run shell');
+  const delivery = readDelegationDeliveries(finalState.messages).find((value) => value.task === 'run shell');
   assert.ok(delivery);
   assert.equal(delivery.scope.lane, 'capability:general');
   assert.ok(delivery.scope.delegationId);
@@ -4226,8 +3523,8 @@ test('toolkit review rejection records terminal tool results and retains the del
   } as {
     __interrupt__?: Array<{ id?: string; value?: { kind?: string } }>;
     messages: BaseMessage[];
-    taskActiveDelegation: TaskActiveDelegation | null;
-    taskPauseInterrupt: { kind: 'pause_task' } | null;
+    runSupervisorState: OrchestratorStateType['runSupervisorState'];
+    runId: string;
   };
 
   assert.equal(finalState.__interrupt__?.[0]?.value?.kind, 'pause_task', 'a task pause suspends the run as a real interrupt');
@@ -4239,10 +3536,14 @@ test('toolkit review rejection records terminal tool results and retains the del
   const handoffCopy = mainConversationMessages(finalState.messages)
     .find((message) => Boolean(getMessageHandoffSource(message)));
   assert.equal(handoffCopy, undefined);
-  assert.equal(finalState.taskActiveDelegation?.status, 'pending');
-  assert.deepEqual(finalState.taskPauseInterrupt, { kind: 'pause_task' });
+  assert.equal(currentSupervisorTask(finalState.runSupervisorState)?.status, 'pending');
+  assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.status, 'paused');
 
-  const activeDelegation = finalState.taskActiveDelegation;
+  const task = currentSupervisorTask(finalState.runSupervisorState);
+  assert.ok(task);
+  const previous = executionsForTask(finalState, task.id).at(-1);
+  assert.ok(previous);
+  const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
   const retainedLane = selectCapabilityHistory(
     finalState.messages,
@@ -4255,7 +3556,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     true,
   );
   const rejectedToolResults = retainedLane
-    .filter((message): message is ToolMessage => ToolMessage.isInstance(message))
+    .filter((message): message is ToolMessage => ToolMessage.isInstance(message) && getAgentMessageLane(message) !== null)
     .map((message) => JSON.parse(String(message.content)) as {
       source?: string;
       skipped?: boolean;
@@ -4295,7 +3596,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   assert.equal(autoReviewCount, 2, 'a later capability review must run auto-review normally');
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
-    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message) && getAgentMessageLane(message) !== null),
     true,
   );
   assert.equal(
@@ -4419,10 +3720,8 @@ test('toolkit review run interruption retains the delegation without another mod
   } as {
     __interrupt__?: Array<{ id?: string; value?: { kind?: string } }>;
     messages: BaseMessage[];
-    runNextDelegation: unknown;
-    runSupervisorSession: OrchestratorStateType['runSupervisorSession'];
-    taskActiveDelegation: TaskActiveDelegation | null;
-    taskRunContinuation: OrchestratorStateType['taskRunContinuation'];
+    runSupervisorState: OrchestratorStateType['runSupervisorState'];
+    runId: string;
   };
 
   assert.equal(finalState.__interrupt__?.[0]?.value?.kind, 'pause_task', 'a task pause suspends the run as a real interrupt');
@@ -4431,22 +3730,20 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
   assert.equal(finalizeCallCount, 0);
-  assert.equal(finalState.runNextDelegation, null);
-  assert.equal(finalState.taskActiveDelegation?.status, 'pending');
-  assert.ok(finalState.runSupervisorSession?.runId);
-  assert.equal(finalState.runSupervisorSession?.pendingCall, null);
-  assert.equal(
-    finalState.taskRunContinuation?.activeDelegationId,
-    finalState.taskActiveDelegation?.id,
-  );
-  assert.deepEqual(finalState.taskRunContinuation?.remainingPlan, []);
+  assert.equal(currentSupervisorTask(finalState.runSupervisorState)?.status, 'pending');
+  assert.equal('runNextDelegation' in finalState, false);
+  assert.equal('runSupervisorSession' in finalState, false);
   assert.equal(
     mainConversationMessages(finalState.messages)
       .some((message) => Boolean(getMessageHandoffSource(message))),
     false,
   );
 
-  const activeDelegation = finalState.taskActiveDelegation;
+  const task = currentSupervisorTask(finalState.runSupervisorState);
+  assert.ok(task);
+  const previous = executionsForTask(finalState, task.id).at(-1);
+  assert.ok(previous);
+  const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
   const retainedLane = selectCapabilityHistory(
     finalState.messages,
@@ -4467,15 +3764,12 @@ test('toolkit review run interruption retains the delegation without another mod
 
   const retainedDelegationId = activeDelegation.id;
   const continuedState = await graph.invoke(
-    buildOrchestratorRunInput(
-      [new HumanMessage('continue the suspended delegation')],
-      { activeDelegationTransition: 'resume_active' },
-    ),
+    new Command({ resume: { [finalState.__interrupt__![0].id!]: { action: 'continue' } } }),
     config,
   ) as {
     messages: BaseMessage[];
-    taskActiveDelegation: TaskActiveDelegation | null;
-    sessionDelegationResults: NonNullable<OrchestratorStateType['sessionDelegationResults']>;
+    runSupervisorState: OrchestratorStateType['runSupervisorState'];
+    runId: string;
   };
 
   assert.equal(routeCallCount, 4);
@@ -4483,13 +3777,14 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal(finalizeCallCount, 1);
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
-    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)),
+    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)
+      && getAgentMessageMetadata(message).lane === 'capability:general'),
     false,
   );
-  const resumedHandoff = continuedState.sessionDelegationResults?.find((delivery) =>
+  const resumedHandoff = readDelegationDeliveries(continuedState.messages).find((delivery) =>
     delivery.scope.delegationId === retainedDelegationId);
   assert.ok(resumedHandoff);
-  assert.equal(continuedState.taskActiveDelegation, null);
+  assert.equal(currentSupervisorTask(continuedState.runSupervisorState), null);
 });
 
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {
@@ -4536,7 +3831,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
         if (routeCallCount === 2) {
           return scriptedSupervisorCapability('general');
         }
-        return goalDoneDecision();
+        return { outcome: 'user_input_required', question: 'Execution returned no deliverable; please check the tool output.' };
       },
     }),
   } as unknown as AgentModels['act'];
@@ -4606,12 +3901,11 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   const resumedRun = await graph.streamEvents(new Command({
     resume: interruptId ? { [interruptId]: batchResume } : batchResume,
   }), { version: 'v3', ...config });
-  await assert.rejects(async () => {
   for await (const _event of resumedRun) {
     // Drain the root stream so the final output is materialized.
   }
-    await resumedRun.output;
-  }, /produced no new deliverable/);
+  const output = await resumedRun.output;
+  assert.equal(readCapabilityExecutions(output.messages).at(-1)?.result?.status, 'missing_deliverable');
   const finalState = (await graph.getState(config)).values as {
     __interrupt__?: unknown;
     messages: Array<AIMessage | HumanMessage | ToolMessage>;
@@ -4797,7 +4091,7 @@ test('buildSubagentHandoff rejects an announce without a message id', () => {
   }), /missing.*message id/);
 });
 
-test('execution without a deliverable preserves ownership and never enters Supervisor Boundary', async () => {
+test('execution without a deliverable returns an error result to Supervisor without accepting the task', async () => {
   const checkpoint = new MemorySaver();
   let boundaries = 0;
   const graph = createOrchestratorGraph({
@@ -4805,306 +4099,26 @@ test('execution without a deliverable preserves ownership and never enters Super
       subagent: new FakeListChatModel({ responses: [''], sleep: 0 }) },
     checkpoint,
     runSupervisorRunner: { invoke: async (input) => {
-      if (input.mode === 'boundary') { boundaries += 1; throw new Error('Empty Boundary'); }
+      if (input.mode === 'boundary') {
+        boundaries += 1;
+        assert.equal(readCapabilityExecutions(input.messages).at(-1)?.result?.status, 'missing_deliverable');
+        return { reply: 'No new deliverable was produced.' };
+      }
       return { action: 'execute_plan',  tasks: [{ capability: 'general', task: 'Inspect files.' }] };
     } },
   });
   const config = { configurable: { thread_id: 'no-deliverable', capabilities: [capability('general', 'Inspect files.')] } };
-  await assert.rejects(graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect files.')]), config), /produced no new deliverable/);
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect files.')]), config);
   const saved = (await graph.getState(config)).values as OrchestratorStateType;
-  assert.equal(boundaries, 0);
-  assert.equal(saved.taskActiveDelegation?.status, 'pending');
-  assert.equal(saved.taskRunContinuation?.activeDelegationId, saved.taskActiveDelegation?.id);
-  assert.equal(saved.runSupervisorSession, null);
+  assert.equal(boundaries, 1);
+  assert.equal(currentSupervisorTask(saved.runSupervisorState)?.status, 'pending');
+  assert.equal('taskRunContinuation' in saved, false);
+  assert.equal('runSupervisorSession' in saved, false);
   assert.equal(saved.messages.some((message) => getDelegationAnnounce(message)), false);
 });
 
-test('Supervisor review_current action can re-enter main and finalize handoff', async () => {
-  const announceText = '已完成第一批抓取，接下来继续。';
-  let routeCallCount = 0;
-  const routeModel = {
-    invoke: async () => new AIMessage(''),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        return routeCallCount === 1
-          ? continueDecision('保留当前发现并往下推进。')
-          : goalDoneDecision();
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-      subagent: new FakeToolCallingModel({ toolCalls: [[]] }),
-    },
-  });
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'active-continue',
-    lane: 'capability:general',
-    task: '批量梳理仓库问题',
-    contextSummary: '已完成部分。',
-    runId: 'run-continue',
-    traceId: 'trace-continue',
-    status: 'awaiting_decision',
-    resultPreview: '已完成第一批抓取，剩余待查。',
-    userRequest: '继续批量梳理仓库问题。',
-  };
-  const inputBase = buildOrchestratorRunInput(
-    [new HumanMessage('继续处理仓库')],
-    { activeDelegationTransition: 'resume_active' },
-  );
-  activeDelegation.runId = inputBase.runId;
-  const input = {
-    ...inputBase,
-    taskActiveDelegation: activeDelegation,
-  };
-  input.runDelegationSummaries = [{
-    id: activeDelegation.id,
-    lane: activeDelegation.lane,
-    task: activeDelegation.task,
-    status: 'progress',
-    resultPreview: activeDelegation.resultPreview,
-  }];
 
-  const previousAnnounce = createMainAnnounce({
-    id: 'm-prev-announce',
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: announceText,
-  });
-  input.messages.push(previousAnnounce);
 
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'delegation-continue-copy-preserve-lane',
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      toolkits: [{
-        name: 'local',
-        description: 'local tools',
-        tools: toolDefinitions(mockTool('run_shell')),
-      }],
-    },
-  }) as OrchestratorStateType;
-
-  const handoffSource = mainConversationMessages(state.messages)
-    .map((message) => getMessageHandoffSource(message))
-    .find((source) => source?.delegationId === activeDelegation.id);
-  assert.ok(handoffSource);
-  assert.equal(handoffSource.handoffFrom, 'capability:general');
-  assert.equal(handoffSource.runId, input.runId);
-  assert.equal(handoffSource.task, '批量梳理仓库问题');
-  // Final handoff on answer should clear private messages for finished continuation.
-  assert.equal(queryAgentMessages(state.messages).delegation({
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: activeDelegation.id,
-  }).select().messages.filter(isTypedDelegationAnnounce).length, 0);
-});
-
-test('Supervisor continuation path rechecks run iteration guard before next decision', async () => {
-  let routeCallCount = 0;
-  const routeModel = {
-    invoke: async () => new AIMessage('主流程循环已达到上限。'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        return routeCallCount === 1
-          ? continueDecision('已经执行了一段进度，继续执行下一段。')
-          : goalDoneDecision();
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-      subagent: new FakeListChatModel({ responses: ['已完成一段子任务。'], sleep: 0 }),
-    },
-  });
-
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'active-limit-inline',
-    lane: 'capability:general',
-    task: '执行长流程任务',
-    contextSummary: '持续进行。',
-    runId: 'run-continue-limit',
-    traceId: 'trace-continue-limit',
-    status: 'awaiting_decision',
-    resultPreview: '进度已完成前段。',
-    userRequest: '继续执行长流程任务。',
-  };
-  const inputBase = buildOrchestratorRunInput(
-    [new HumanMessage('继续执行任务')],
-    { activeDelegationTransition: 'resume_active' },
-  );
-  activeDelegation.runId = inputBase.runId;
-  const input = {
-    ...inputBase,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: [{
-      id: activeDelegation.id,
-      lane: activeDelegation.lane,
-      task: activeDelegation.task,
-      status: 'progress',
-      resultPreview: activeDelegation.resultPreview,
-    }] as RunDelegationSummary[],
-  };
-  input.runIterationCount = ORCHESTRATOR_MAX_ITERATIONS - 1;
-
-  const announce = createMainAnnounce({
-    id: 'm-limit-announce',
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: '进度已完成前段。',
-  });
-  input.messages.push(setAgentMessageMetadata(announce, { traceId: activeDelegation.traceId }));
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'delegation-outcome-to-iteration-guard',
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      toolkits: [{
-        name: 'local',
-        description: 'local tools',
-        tools: toolDefinitions(mockTool('run_shell')),
-      }],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(routeCallCount, 1);
-  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
-  assert.equal(state.runIterationCount, 0);
-  const finalText = String(state.messages.at(-1)?.content ?? '');
-  assert.match(finalText, /主流程循环已达到上限/);
-});
-
-test('Supervisor boundary accepts each announce attempt once', async () => {
-  let routeCallCount = 0;
-  const supervisorInputs: RunSupervisorInput[] = [];
-  const routeModel = {
-    invoke: async () => new AIMessage(''),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-      subagent: new FakeListChatModel({
-        responses: ['进度更新：已完成一部分，继续保留。', '进度更新：已完成一部分，继续保留。'],
-        sleep: 0,
-      }),
-    },
-    runSupervisorRunner: {
-      async invoke(supervisorInput) {
-        routeCallCount += 1;
-        supervisorInputs.push(supervisorInput);
-        return routeCallCount <= 2
-          ? { completed: false, reason: 'Complete the missing current-task work.',
-            action: 'review_current',
-          }
-          : { completed: true, reason: 'Current task delivery is evidenced.',
-            action: 'review_current',
-            reply: '已完成。',
-          };
-      },
-    },
-  });
-
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'active-dup-copy',
-    lane: 'capability:general',
-    task: '处理大型清单',
-    contextSummary: '尚未完成。',
-    runId: 'run-dup-copy',
-    traceId: 'trace-dup-copy',
-    status: 'awaiting_decision',
-    resultPreview: '进度更新：已完成一部分，继续保留。',
-    userRequest: '继续处理大型清单。',
-  };
-  const inputBase = buildOrchestratorRunInput(
-    [new HumanMessage('继续清单处理')],
-    { activeDelegationTransition: 'resume_active' },
-  );
-  activeDelegation.runId = inputBase.runId;
-  const input = {
-    ...inputBase,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: [{
-      id: activeDelegation.id,
-      lane: activeDelegation.lane,
-      task: activeDelegation.task,
-      status: 'progress',
-      resultPreview: activeDelegation.resultPreview,
-    }] as RunDelegationSummary[],
-  };
-  const initialAnnounce = createMainAnnounce({
-    id: 'm-dup-copy',
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: '进度更新：已完成一部分，继续保留。',
-  });
-  input.messages.push(setAgentMessageMetadata(initialAnnounce, { traceId: activeDelegation.traceId }));
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'delegation-outcome-no-duplicate-handoff',
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      toolkits: [{
-        name: 'local',
-        description: 'local tools',
-        tools: toolDefinitions(mockTool('run_shell')),
-      }],
-    },
-  }) as OrchestratorStateType;
-
-  assert.equal(routeCallCount, 3);
-  assert.deepEqual(
-    supervisorInputs.map((supervisorInput) =>
-      announces(supervisorInput).map((announce) => announce.messageId)),
-    [
-      ['m-dup-copy'],
-      ['m-dup-copy', announces(supervisorInputs[1]).at(-1)?.messageId],
-      [
-        'm-dup-copy',
-        announces(supervisorInputs[1]).at(-1)?.messageId,
-        announces(supervisorInputs[2]).at(-1)?.messageId,
-      ],
-    ],
-  );
-  assert.equal(new Set(supervisorInputs.map((supervisorInput) =>
-    supervisorInput.supervisorSession.runId)).size, 1);
-  for (const supervisorInput of supervisorInputs) {
-    assert.equal(supervisorInput.messages.some(isTypedDelegationAnnounce), true);
-    assert.equal(
-      announces(supervisorInput).at(-1)?.messageId,
-      announces(supervisorInput).at(-1)?.messageId,
-    );
-  }
-  const handoffCopies = mainConversationMessages(state.messages)
-    .filter((message) => {
-      const source = getMessageHandoffSource(message);
-      return source?.delegationId === activeDelegation.id;
-    });
-  assert.equal(handoffCopies.length, 1, 'only the legacy record remains in main');
-  assert.equal(state.sessionDelegationResults?.length, 2);
-  assert.equal(new Set(state.sessionDelegationResults?.map((delivery) => delivery.id)).size, 2);
-});
 
 test('private reconciliation materializes one typed lane announce', () => {
   const messages = [
@@ -5340,271 +4354,8 @@ test('private reconciliation materializes the typed announce regardless of stop 
   }), null);
 });
 
-test('limit-reached subagent announce reaches the Supervisor boundary input', async () => {
-  const baseInput = buildOrchestratorRunInput(
-    [new HumanMessage('继续探查 repo')],
-    { activeDelegationTransition: 'resume_active' },
-  );
-  const progress = new AIMessage({
-    id: 'limit-chain-progress',
-    content: '已完成依赖检查，剩余源码还需要继续探查。',
-  });
-  let progressInjected = false;
-  const progressMiddleware = createMiddleware({
-    name: 'LimitChainProgressProbe',
-    beforeModel: () => {
-      if (progressInjected) return;
-      progressInjected = true;
-      return { messages: [progress] };
-    },
-  });
-  const noop = tool(async () => 'ok', {
-    name: 'noop',
-    description: 'no-op',
-    schema: z.object({}),
-  });
-  const result = await createSubagent({
-    model: new FakeToolCallingModel({
-      toolCalls: [[{ id: 'limit-chain-call', name: 'noop', args: {} }]],
-    }),
-    tools: [noop],
-    middleware: [progressMiddleware],
-    promptSections: [],
-    messages: baseInput.messages,
-    maxIterations: 1,
-  });
 
-  assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
-  assert.equal(result.announceMessageId, progress.id);
-  const delegationId = 'limit-chain-delegation';
-  const tagged = reconcileDelegationPrivateMessages(
-    result.messages,
-    baseInput.messages,
-    'capability:general',
-    baseInput.runId,
-    {
-      delegationId,
-      task: '继续探查 repo',
-      traceId: baseInput.traceId,
-      announceMessageId: result.announceMessageId,
-    },
-  );
-  const messages = messagesStateReducer(baseInput.messages, tagged);
-  const taggedProgress = messages.find((message) => getDelegationAnnounce(message)?.announceMessageId === progress.id);
-  assert.ok(taggedProgress);
-  assert.equal(isTypedDelegationAnnounce(taggedProgress), true);
-  assert.equal(Object.hasOwn(getDelegationAnnounce(taggedProgress) ?? {}, 'completionReason'), false);
 
-  let supervisorInput: RunSupervisorInput | null = null;
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({ invoke: async () => goalDoneDecision() }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel, observe: routeModel },
-    runSupervisorRunner: {
-      async invoke(input) {
-        supervisorInput = input;
-        return {
-          reply: '是否继续探查当前仓库？',
-        };
-      },
-    },
-  });
-  const activeDelegation: TaskActiveDelegation = {
-    id: delegationId,
-    lane: 'capability:general',
-    task: '继续探查 repo',
-    contextSummary: null,
-    runId: baseInput.runId,
-    traceId: baseInput.traceId,
-    status: 'awaiting_decision',
-    resultPreview: String(progress.content),
-    userRequest: '继续探查 repo。',
-  };
-
-  await graph.invoke({
-    ...baseInput,
-    messages,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: [{
-      id: delegationId,
-      lane: 'capability:general',
-      task: activeDelegation.task,
-      status: 'progress',
-      resultPreview: activeDelegation.resultPreview,
-    }],
-  }, {
-    configurable: {
-      thread_id: 'limit-chain-outcome-input',
-      capabilities: [],
-      toolkits: [],
-    },
-  });
-
-  const observedPlannerInput = supervisorInput as RunSupervisorInput | null;
-  assert.equal(observedPlannerInput?.mode, 'boundary');
-  assert.equal(Object.hasOwn(announces(observedPlannerInput).at(-1) ?? {}, 'completionReason'), false);
-  assert.match(
-    announces(observedPlannerInput)[0]?.result ?? '',
-    /已完成依赖检查，剩余源码还需要继续探查。/,
-  );
-});
-
-test('root honors acceptance without inferring completeness from result prose', async () => {
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => goalDoneDecision(),
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-    },
-  });
-  const baseInput = buildOrchestratorRunInput(
-    [new HumanMessage('继续')],
-    { activeDelegationTransition: 'resume_active' },
-  );
-
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'limit-active',
-    lane: 'capability:general',
-    task: '继续探查 repo',
-    contextSummary: null,
-    runId: baseInput.runId,
-    traceId: baseInput.traceId,
-    status: 'awaiting_decision',
-    resultPreview: '上一轮还没结束。',
-    userRequest: '继续探查 repo。',
-  };
-  const input = {
-    ...baseInput,
-    taskActiveDelegation: activeDelegation,
-    runDelegationSummaries: [{
-      id: activeDelegation.id,
-      lane: activeDelegation.lane,
-      task: activeDelegation.task,
-      status: 'progress' as const,
-      resultPreview: activeDelegation.resultPreview,
-    }],
-  };
-  const partialAnnounce = createMainAnnounce({
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: '已跑到一半，继续需要更多时间。',
-  });
-
-  input.messages.push(partialAnnounce);
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'limit-announce-no-handoff',
-      capabilities: [],
-      toolkits: [{
-        name: 'local',
-        description: 'local tools',
-        tools: toolDefinitions(mockTool('run_shell')),
-      }],
-  } }) as OrchestratorStateType;
-
-  const handoffMessages = mainConversationMessages(state.messages)
-    .filter((message) => getMessageHandoffSource(message)?.handoffFrom);
-  assert.equal(handoffMessages.length, 1);
-  assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.runDelegationSummaries[0]?.status, 'completed');
-  assert.equal(state.messages.some((message) => getAgentMessageLane(message)), false);
-});
-
-test('Supervisor boundary uses a unified run-iteration guard before invoking decision', async () => {
-  let answerMessages: BaseMessage[] = [];
-  const routeModel = {
-    invoke: async (messages: unknown[]) => {
-      answerMessages = messages as BaseMessage[];
-      return new AIMessage('主流程循环已达到上限，当前任务仍可续跑。');
-    },
-    bindTools: () => ({
-      invoke: async () => new AIMessage(''),
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        assert.fail('delegation decision should not run after run-iteration limit');
-      },
-    }),
-  } as unknown as AgentModels['act'];
-
-  const graph = createOrchestratorGraph({
-    models: {
-      act: routeModel,
-      observe: routeModel,
-    },
-  });
-  const baseInput = buildOrchestratorRunInput(
-    [new HumanMessage('继续')],
-    { activeDelegationTransition: 'resume_active' },
-  );
-  const input = {
-    ...baseInput,
-    taskActiveDelegation: null as TaskActiveDelegation | null,
-    runDelegationSummaries: [] as RunDelegationSummary[],
-  };
-  input.runIterationCount = ORCHESTRATOR_MAX_ITERATIONS;
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'limit-iter',
-    lane: 'capability:general',
-    task: '持续执行大规模迁移',
-    contextSummary: '最近卡住',
-    runId: baseInput.runId,
-    traceId: baseInput.traceId,
-    status: 'awaiting_decision',
-    resultPreview: '处理到一半。',
-    userRequest: '完成大规模迁移。',
-  };
-  const partialAnnounce = createMainAnnounce({
-    lane: 'capability:general',
-    runId: input.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: '继续迁移，已完成 50%。',
-  });
-
-  input.messages.push(partialAnnounce);
-  input.taskActiveDelegation = activeDelegation;
-  input.runDelegationSummaries = [{
-    id: activeDelegation.id,
-    lane: activeDelegation.lane,
-    task: activeDelegation.task,
-    status: 'progress' as const,
-    resultPreview: activeDelegation.resultPreview,
-  }];
-
-  const state = await graph.invoke(input, {
-    configurable: {
-      thread_id: 'unified-run-iteration-limit',
-      capabilities: [],
-      toolkits: [{
-        name: 'local',
-        description: 'local tools',
-        tools: toolDefinitions(mockTool('run_shell')),
-      }],
-    },
-  }) as OrchestratorStateType;
-
-  assert.deepEqual(answerMessages, []);
-  assert.equal(state.messages.at(-1)?.content?.toString().includes('主流程循环已达到上限'), true);
-  assert.equal(state.runIterationCount, 0);
-  assert.equal(state.taskActiveDelegation?.id, activeDelegation.id);
-});
 
 test('handoff copies the announce into main and wipes the private messages', () => {
   const human = new HumanMessage('检查项目并汇报');
@@ -5850,51 +4601,6 @@ test('lane messages reject lane history without a delegationId', () => {
   );
 });
 
-test('delegation helpers keep new same-lane tasks separate and resume by explicit id', () => {
-  const delegations: RunDelegationSummary[] = [
-    {
-      id: 'task-1',
-      lane: 'capability:general',
-      task: '读取文件',
-      status: 'progress',
-      resultPreview: '已读取部分文件',
-    },
-  ];
-
-  const appended = appendRunDelegationSummary(delegations, {
-    id: 'task-2',
-    lane: 'capability:general',
-    mode: 'initial',
-    task: '运行 lint',
-    contextSummary: '这是同一 lane 的新任务。',
-  });
-
-  assert.deepEqual(appended.map((item) => item.id), ['task-1', 'task-2']);
-  assert.equal(appended[0].task, '读取文件');
-  assert.equal(appended[0].status, 'progress');
-  assert.equal(appended[1].task, '运行 lint');
-  assert.equal(appended[1].status, 'pending');
-
-  const resumed = resumeRunDelegationSummary(appended, {
-    id: 'task-1',
-    lane: 'capability:general',
-    mode: 'continue',
-    task: '读取文件',
-    contextSummary: '继续原任务。',
-  });
-  assert.equal(resumed[0].status, 'pending');
-  assert.equal(resumed[0].resultPreview, null);
-  assert.equal(resumed[1].status, 'pending');
-  assert.equal(resumed[1].task, '运行 lint');
-
-  const completed = updateRunDelegationSummaryResult(resumed, 'task-1', {
-    status: 'completed',
-    resultPreview: '任务完成',
-  });
-  assert.equal(completed[0].status, 'completed');
-  assert.equal(completed[0].resultPreview, '任务完成');
-});
-
 /**
  * Record the exact message arrays the subagent chat model receives. The fake
  * decision models are plain objects (not runnables), so handleChatModelStart
@@ -5942,128 +4648,10 @@ function interruptedLaneMessages(params: {
   return [toolCall, toolResult];
 }
 
-test('fresh-turn active delegation transitions are explicit for pending and awaiting states', () => {
-  const noActiveDelegation = {
-    ...buildOrchestratorRunInput(
-      [new HumanMessage('没有挂起任务时继续')],
-      { activeDelegationTransition: 'resume_active' },
-    ),
-    taskActiveDelegation: null,
-  } as OrchestratorStateType;
-  assert.deepEqual(
-    applyActiveDelegationTransition(noActiveDelegation),
-    { taskRunContinuation: null },
-  );
 
-  for (const status of ['pending', 'awaiting_decision'] as const) {
-    const activeDelegation: TaskActiveDelegation = {
-      id: `old-${status}`,
-      lane: 'capability:general',
-      task: `旧的 ${status} 任务`,
-      contextSummary: '旧任务上下文。',
-      runId: `old-run-${status}`,
-      traceId: `old-trace-${status}`,
-      status,
-      resultPreview: status === 'awaiting_decision' ? '旧进度。' : null,
-      userRequest: '完成旧的仓库检查。\n\n保留原任务目标。',
-    };
-    const oldLaneMessages = interruptedLaneMessages({
-      delegationId: activeDelegation.id,
-      runId: activeDelegation.runId,
-    });
-    const supersedeState = {
-      ...buildOrchestratorRunInput([new HumanMessage('开始全新的请求')]),
-      messages: oldLaneMessages,
-      taskActiveDelegation: activeDelegation,
-    } as OrchestratorStateType;
-    const supersedeUpdate = applyActiveDelegationTransition(supersedeState);
-
-    assert.equal(supersedeUpdate.taskActiveDelegation, null);
-    assert.equal(supersedeUpdate.messages, undefined);
-    assert.deepEqual(supersedeState.messages, oldLaneMessages);
-
-    const resumeState = {
-      ...supersedeState,
-      ...buildOrchestratorRunInput(
-        [new HumanMessage('按我刚补充的方向继续')],
-        { activeDelegationTransition: 'resume_active' },
-      ),
-      messages: [...oldLaneMessages, new HumanMessage('按我刚补充的方向继续')],
-      taskActiveDelegation: activeDelegation,
-    } as OrchestratorStateType;
-    const resumeUpdate = applyActiveDelegationTransition(resumeState);
-    assert.deepEqual(resumeUpdate.runUserRequest, activeDelegation.userRequest);
-    assert.notEqual(resumeState.runId, activeDelegation.runId);
-    const resumedState = {
-      ...resumeState,
-      ...resumeUpdate,
-      messages: messagesStateReducer(
-        resumeState.messages,
-        resumeUpdate.messages ?? [],
-      ),
-    } as OrchestratorStateType;
-
-    assert.equal(resumedState.taskActiveDelegation?.id, activeDelegation.id);
-    assert.equal(
-      resumedState.taskActiveDelegation?.runId,
-      activeDelegation.runId,
-    );
-    assert.equal(
-      selectCapabilityHistory(
-        resumedState.messages,
-        activeDelegation.lane,
-        activeDelegation.runId,
-        activeDelegation.id,
-      ).some((message) => message instanceof ToolMessage),
-      true,
-    );
-    assert.equal(
-      selectCapabilityHistory(
-        resumedState.messages,
-        activeDelegation.lane,
-        resumeState.runId,
-        activeDelegation.id,
-      ).some((message) => message instanceof ToolMessage),
-      false,
-    );
-    assert.equal(resumedState.runNextDelegation?.id, activeDelegation.id);
-    assert.equal(resumedState.runNextDelegation?.mode, 'continue');
-    assert.equal(resumedState.runNextDelegation?.contextSummary, '按我刚补充的方向继续');
-    assert.equal(afterContextPrep(resumedState), 'runSupervisor');
-    assert.equal(resumedState.messages.some(isDelegationBriefingMessage), false);
-  }
-});
-
-test('resume rejects a delegation without the current trace identity', () => {
-  const legacyDelegation = {
-    id: 'legacy-without-trace',
-    lane: 'capability:general',
-    task: '继续旧任务',
-    contextSummary: null,
-    runId: 'legacy-delegation-run',
-    status: 'pending',
-    resultPreview: null,
-    userRequest: '继续旧任务。',
-  } as unknown as TaskActiveDelegation;
-  const state = {
-    ...buildOrchestratorRunInput(
-      [new HumanMessage('继续')],
-      { activeDelegationTransition: 'resume_active' },
-    ),
-    taskActiveDelegation: legacyDelegation,
-  } as OrchestratorStateType;
-
-  assert.deepEqual(applyActiveDelegationTransition(state), {
-    runNextDelegation: null,
-    runSupervisorSession: null,
-    taskRunContinuation: null,
-    runRuntimeFailure: 'checkpoint_incompatible',
-    runSupervisorReply: null,
-  });
-});
 
 test('fresh delegated request supersedes checkpointed work without deleting its lane', async () => {
-  const oldDelegation: TaskActiveDelegation = {
+  const oldDelegation = {
     id: 'old-awaiting-delegation',
     lane: 'capability:general',
     task: '旧任务：检查历史 review 状态',
@@ -6129,7 +4717,9 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   };
   await graph.updateState(config, {
     messages: oldMessages,
-    taskActiveDelegation: oldDelegation,
+    runSupervisorState: { goal: oldDelegation.userRequest, plan: [{
+      id: 'old-task', capability: 'general', task: oldDelegation.task, status: 'pending',
+    }] },
     runId: oldDelegation.runId,
   });
 
@@ -6155,7 +4745,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   assert.equal(
     selectCapabilityHistory(
       state.messages,
-      oldDelegation.lane,
+      'capability:general',
       oldDelegation.runId,
       oldDelegation.id,
     ).some((message) => message instanceof ToolMessage),
@@ -6163,225 +4753,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   );
 });
 
-test('explicit resume reuses checkpointed delegation identity and ToolMessages', async () => {
-  const activeDelegation: TaskActiveDelegation = {
-    id: 'resume-pending-delegation',
-    lane: 'capability:general',
-    task: '继续原来的仓库检查',
-    contextSummary: '已经完成第一步。',
-    runId: 'resume-pending-run',
-    traceId: 'resume-pending-trace',
-    status: 'awaiting_decision',
-    resultPreview: '第一步完成后，需要用户确认检查方向。',
-    userRequest: '完成原来的仓库检查并报告结果。\n\n用户要求重点检查最新修改。',
-  };
-  const oldMessages: BaseMessage[] = interruptedLaneMessages({
-    delegationId: activeDelegation.id,
-    runId: activeDelegation.runId,
-  });
-  const priorAnnounce = createMainAnnounce({
-    id: 'prior-resume-announce',
-    lane: activeDelegation.lane,
-    runId: activeDelegation.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: activeDelegation.resultPreview ?? '',
-  });
-  oldMessages.push(setAgentMessageMetadata(priorAnnounce, { traceId: activeDelegation.traceId }));
-  const supervisorInputs: RunSupervisorInput[] = [];
-  let executedDelegation: { delegationId: string; runId: string } | null = null;
-  const actModel = {
-    invoke: async () => new AIMessage('原任务继续完成。'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({ invoke: async () => goalDoneDecision() }),
-  } as unknown as AgentModels['act'];
-  const resumedCapability: AgentCapability = {
-    ...capability('general', 'General-purpose capability.'),
-    lifecycle: {
-      finalize: (_result, context) => {
-        executedDelegation = {
-          delegationId: context.delegationId,
-          runId: context.runId,
-        };
-      },
-    },
-  };
-  const recorder = createSubagentInputRecorder();
-  const graph = createOrchestratorGraph({
-    models: {
-      act: actModel,
-      observe: actModel,
-      subagent: new FakeListChatModel({
-        responses: ['继续执行后的交付结果。'],
-        sleep: 0,
-      }),
-    },
-    checkpoint: new MemorySaver(),
-    runSupervisorRunner: {
-      async invoke(input) {
-        supervisorInputs.push(input);
-        return supervisorInputs.length === 1
-          ? { completed: false, reason: 'Complete the missing current-task work.',
-            action: 'review_current',
-          }
-          : { completed: true, reason: 'Current task delivery is evidenced.',
-            action: 'review_current',
-            reply: '已完成。',
-          };
-      },
-    },
-  });
-  const config = {
-    configurable: {
-      thread_id: 'explicit-resume-checkpointed-pending',
-      capabilities: [resumedCapability],
-      toolkits: [],
-    },
-    callbacks: recorder.callbacks,
-  };
-  await graph.updateState(config, {
-    messages: oldMessages,
-    taskActiveDelegation: activeDelegation,
-    runId: activeDelegation.runId,
-  });
 
-  const state = await graph.invoke(
-    buildOrchestratorRunInput(
-      [new HumanMessage('继续，并优先检查最新修改')],
-      { activeDelegationTransition: 'resume_active' },
-    ),
-    config,
-  ) as OrchestratorStateType;
-
-  assert.equal(supervisorInputs.length, 2);
-  assert.deepEqual(executedDelegation, {
-    delegationId: activeDelegation.id,
-    runId: activeDelegation.runId,
-  });
-  assert.deepEqual(state.runUserRequest, activeDelegation.userRequest);
-  assert.notEqual(state.runId, activeDelegation.runId);
-  assert.equal(state.traceId, activeDelegation.traceId);
-  assert.equal(supervisorInputs[0]?.traceId, activeDelegation.traceId);
-  assert.equal(supervisorInputs[0]?.activeDelegation?.delegationId, activeDelegation.id);
-  assert.match(plannerMessageContextText(supervisorInputs[0]), /优先检查最新修改/);
-  assert.match(announces(supervisorInputs[0])[0]?.result ?? '', /需要用户确认检查方向/);
-  assert.equal(announces(supervisorInputs[0]).at(-1)?.messageId, 'prior-resume-announce');
-  assert.ok(announces(supervisorInputs[1]).at(-1)?.messageId);
-  assert.notEqual(announces(supervisorInputs[1]).at(-1)?.messageId, 'prior-resume-announce');
-  assert.equal(
-    supervisorInputs[1]?.inputId,
-    `result:${activeDelegation.id}:${announces(supervisorInputs[1]).at(-1)?.messageId}`,
-  );
-  const resumedInput = recorder.subagentInputs.at(-1) ?? [];
-  assert.equal(
-    resumedInput.some((message) =>
-      message instanceof ToolMessage
-      && message.content === 'OLD_DELEGATION_TOOL_RESULT'),
-    true,
-  );
-  const resumedBriefing = resumedInput.filter(isDelegationBriefingMessage).at(-1);
-  assert.ok(resumedBriefing);
-  assert.match(
-    String(resumedBriefing.content),
-    /<run_user_request role="goal_context"[\s\S]*完成原来的仓库检查并报告结果。[\s\S]*用户要求重点检查最新修改。[\s\S]*<\/run_user_request>/,
-  );
-  assert.equal(
-    getAgentMessageRunId(resumedBriefing),
-    null,
-  );
-  assert.equal(
-    resumedInput
-      .filter((message) => getAgentMessageLane(message) === activeDelegation.lane)
-      .every((message) =>
-        getAgentMessageRunId(message) === activeDelegation.runId),
-    true,
-  );
-  assert.match(
-    resumedInput.map((message) => String(message.content)).join('\n'),
-    /继续，并优先检查最新修改/,
-  );
-});
-
-test('legacy object UserRequest checkpoint returns a fixed incompatibility reply without models', async () => {
-  const activeDelegation = {
-    id: 'legacy-resume-delegation',
-    lane: 'capability:general',
-    task: '完成旧 checkpoint 中的仓库检查',
-    contextSummary: '旧 checkpoint 没有 runUserRequest。',
-    runId: 'legacy-resume-run',
-    traceId: 'legacy-resume-trace',
-    status: 'awaiting_decision',
-    resultPreview: '仓库检查已经完成。',
-    userRequest: {
-      objective: '完成旧 checkpoint 中的仓库检查。',
-      context: '旧版结构化目标。',
-    },
-  } as unknown as TaskActiveDelegation;
-  const priorAnnounce = createMainAnnounce({
-    lane: activeDelegation.lane,
-    runId: activeDelegation.runId,
-    delegationId: activeDelegation.id,
-    task: activeDelegation.task,
-    result: activeDelegation.resultPreview ?? '',
-  });
-  let modelInvocations = 0;
-  const actModel = {
-    invoke: async () => {
-      modelInvocations += 1;
-      throw new Error('incompatible checkpoint must not invoke a model');
-    },
-    bindTools: () => ({
-      invoke: async () => {
-        throw new Error('legacy checkpoint recovery must not invoke the Supervisor model');
-      },
-    }),
-    withStructuredOutput: () => ({
-      invoke: async () => taskDoneDecision('旧 checkpoint 中的任务已完成。'),
-    }),
-  } as unknown as AgentModels['act'];
-  const graph = createRuntimeOrchestratorGraph({
-    models: {
-      act: actModel,
-      observe: actModel,
-      subagent: new FakeListChatModel({ responses: [], sleep: 0 }),
-    },
-    checkpoint: new MemorySaver(),
-  });
-  const config = {
-    configurable: {
-      thread_id: 'legacy-resume-without-user-goal',
-      capabilities: [capability('general', 'General-purpose capability.')],
-      toolkits: [],
-      registry: compileAgentRegistry({
-        capabilities: [capability('general', 'General-purpose capability.')],
-        toolkits: [],
-      }),
-    },
-  };
-  await graph.updateState(config, {
-    messages: [priorAnnounce],
-    taskActiveDelegation: activeDelegation,
-    runId: activeDelegation.runId,
-  });
-
-  const state = await graph.invoke(
-    buildOrchestratorRunInput(
-      [new HumanMessage('继续完成剩余工作')],
-      { activeDelegationTransition: 'resume_active' },
-    ),
-    config,
-  ) as OrchestratorStateType;
-
-  assert.equal(state.taskActiveDelegation, null);
-  assert.equal(state.runSupervisorReply, null);
-  assert.equal(state.runRuntimeFailure, null);
-  assert.equal(state.runUserRequest, null);
-  assert.equal(
-    String(state.messages.at(-1)?.content ?? ''),
-    '这个任务由旧版本创建，当前版本无法继续。请重新发起或重述任务。',
-  );
-  assert.equal(modelInvocations, 0);
-});
 
 test('delegation briefing stays invocation-scoped across sequential tasks', async () => {
   let structuredCallCount = 0;
@@ -6443,7 +4815,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   // the private lane. Root keeps evidence outside the user-facing conversation.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
   assert.equal(state.messages.filter((message) => getMessageHandoffSource(message)).length, 0);
-  assert.equal(state.sessionDelegationResults?.length, 2);
+  assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
   // Each selected subagent receives one complete invocation-scoped briefing.
   assert.equal(recorder.subagentInputs.length, 2);
@@ -6603,7 +4975,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
     bindTools() { return this; }
     async _generate(messages: BaseMessage[]) {
       modelsSeen.push(messages.filter(SystemMessage.isInstance).map(m => m.text).join('\n'));
-      const message = messages.some(ToolMessage.isInstance)
+      const message = messages.some((message) => ToolMessage.isInstance(message) && message.name === 'inspect_context')
         ? new AIMessage('inspected')
         : new AIMessage({ content: '', tool_calls: [{ id: randomUUID(), name: 'inspect_context', args: {} }] });
       return { generations: [{ message, text: message.text }] };
@@ -6679,12 +5051,12 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
 });
 
 function announces(input: RunSupervisorInput | undefined) {
-  const active = input?.activeDelegation;
+  const active = currentExecution(input);
   return [...(input?.messages ?? []).flatMap((message) => {
     const value = getDelegationAnnounce(message);
     return value && active && value.delegationId === active.delegationId && value.runId === active.runId
       ? [{ messageId: value.announceMessageId, result: value.result }] : [];
-  }), ...(input?.deliveries ?? []).filter((delivery) => active
+  }), ...(executionDeliveries(input)).filter((delivery) => active
     && delivery.scope.delegationId === active.delegationId && delivery.scope.runId === active.runId)
     .map((delivery) => ({ messageId: delivery.id, result: delivery.text }))];
 }
@@ -6764,8 +5136,8 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
   assert.ok(pauseId, 'pause interrupt must carry an id');
   const pausedState = await graph.getState(config);
   assert.equal(pausedState.next?.[0], 'pauseGate');
-  assert.equal(pausedState.values.taskActiveDelegation?.status, 'pending');
-  assert.deepEqual(pausedState.values.taskPauseInterrupt, { kind: 'pause_task' }, 'state committed before suspension');
+  assert.equal(currentSupervisorTask(pausedState.values.runSupervisorState)?.status, 'pending');
+  assert.equal(readCapabilityExecutions(pausedState.values.messages).at(-1)?.result?.status, 'paused', 'result committed before suspension');
   assert.equal(runCount, 0);
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
@@ -6777,286 +5149,67 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
   assert.equal(routeCallCount, 3, 'guidance must reach Supervisor before continuing');
   assert.equal(runCount, 0);
   const continuedState = await graph.getState(config);
-  assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
+  assert.equal(readCapabilityExecutions(continuedState.values.messages).at(-1)?.result, null, 'continued call awaits its own result');
   const guidance = (continuedState.values.messages as BaseMessage[]).find((message) =>
     HumanMessage.isInstance(message) && message.text === 'Skip git status; inspect recent commits.');
   assert.ok(guidance);
   assert.equal(getAgentMessageMetadata(guidance).traceId, continuedState.values.traceId);
   assert.equal(getAgentMessageRunId(guidance), continuedState.values.runId);
-  assert.equal(continuedState.values.taskActiveDelegation?.id, pausedState.values.taskActiveDelegation?.id);
+  assert.equal(currentSupervisorTask(continuedState.values.runSupervisorState)?.id, currentSupervisorTask(pausedState.values.runSupervisorState)?.id);
 });
 
-for (const guided of [false, true]) {
-  test(`an aborted delegation settles into a pause and resumes ${guided ? 'through Supervisor' : 'directly'}`, async () => {
-    // Replacement 3: Esc during a delegation stops the run at the failure node
-    // with no interrupt, so nothing above the Runtime has an id to continue.
-    // settleAbortedRun turns that boundary into the same pause a Review
-    // rejection produces, without repeating the work already committed.
+for (const continuePlan of [false, true]) {
+  test(`cancelled work stays factual and the next run enters Entry before ${continuePlan ? 'continuing' : 'answering'}`, async () => {
     let toolRuns = 0;
+    let entryCalls = 0;
+    let supervisorCalls = 0;
     const controller = new AbortController();
     const rawTool = tool(async () => {
-      toolRuns += 1;
-      // Esc arrives while the delegation is running its tool.
+      toolRuns++;
       controller.abort();
-      await new Promise((resolve, reject) => {
-        const timer = setTimeout(resolve, 5_000);
-        controller.signal.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-        }, { once: true });
-      });
-      return 'never reached';
-    }, {
-      name: 'run_shell',
-      description: 'run shell',
-      schema: z.object({ command: z.string() }),
+      throw Object.assign(new Error('Execution cancelled.'), { name: 'AbortError' });
+    }, { name: 'run_shell', description: 'Run shell.', schema: z.object({}) });
+    const registry = compileAgentRegistry({
+      toolkits: [{ name: 'local', description: 'Local tools.', tools: [{ tool: rawTool }] }],
+      capabilities: [capability('general', 'General work.', ['local'])],
     });
-    const toolkits: AgentToolkit[] = [{
-      name: 'local',
-      description: 'local tools',
-      tools: [{ tool: rawTool, operation: {} }],
-    }];
-    let routeCallCount = 0;
-    const routeModel = {
-      invoke: async () => new AIMessage('answered'),
-      bindTools: () => ({ invoke: async () => new AIMessage('') }),
-      withStructuredOutput: () => ({
-        invoke: async () => {
-          routeCallCount += 1;
-          if (routeCallCount === 1) {
-            // Two tasks: the second must survive the cancellation.
-            return scriptedPlannerTask('run shell', [
-              { capability: 'general', task: 'summarise the result' },
-            ]);
-          }
-          if (routeCallCount === 2) return scriptedSupervisorCapability('general');
-          // The continued run advances the queued task rather than proposing a
-          // new plan, which the boundary only accepts from fresh user input.
-          return { outcome: 'continue', gap_note: null };
-        },
-      }),
-    } as unknown as AgentModels['act'];
-    const subagentModel = new FakeToolCallingModel({
-      toolCalls: [
-        [{ id: 'call-aborted', name: 'run_shell', args: { command: 'git status' } }],
-        [],
-        [],
-      ],
-    });
-    const fallbackRunner = createQueuedPlannerRunner(routeModel);
-    let guidedDecisions = 0;
-    const graph = createOrchestratorGraph({
-      models: { act: routeModel, observe: routeModel, subagent: subagentModel },
+    const entry = { bindTools: () => ({ invoke: async () => {
+      entryCalls++;
+      if (entryCalls > 1 && !continuePlan) return new AIMessage('No further execution requested.');
+      return new AIMessage({ content: '', tool_calls: [{
+        id: `entry-${entryCalls}`, name: entryCalls === 1 ? 'plan_request' : 'continue',
+        args: entryCalls === 1 ? { goal: 'Inspect and report.' } : {},
+      }] });
+    } }) } as unknown as AgentModels['act'];
+    const graph = createRuntimeOrchestratorGraph({
+      models: { act: entry, answer: entry, subagent: new FakeToolCallingModel({
+        toolCalls: [[{ id: 'cancelled-tool', name: 'run_shell', args: {} }]],
+      }) },
       checkpoint: new MemorySaver(),
-      runSupervisorRunner: {
-        invoke: async (input, runnableConfig) => {
-          if (guided && input.mode === 'boundary' && input.inputId.startsWith('human:')) {
-            guidedDecisions++;
-            assert.equal(input.messages.at(-1)?.text, 'Inspect the correct project and keep the report private.');
-            assert.deepEqual(input.remainingPlan, [{ capability: 'general', task: 'summarise the result' }]);
-            return {
-              action: 'adjust_plan', currentDelegation: 'continue',
-              goal: 'Inspect the correct project and keep the report private.',
-              reason: 'The user corrected the project and report scope.',
-              tasks: [{ capability: 'general', task: 'Inspect the correct project.' },
-                { capability: 'general', task: 'Write the private report.' }],
-            };
-          }
-          return fallbackRunner.invoke(input, runnableConfig);
-        },
-      },
+      runSupervisorRunner: withScriptedDelegation({ invoke: async (input) => {
+        supervisorCalls++;
+        if (supervisorCalls === 1) return { name: 'submit_plan', args: { tasks: [
+          { capability: 'general', task: 'Inspect.' }, { capability: 'general', task: 'Report.' },
+        ] } };
+        assert.equal(input.mode, 'boundary');
+        assert.deepEqual(input.state.plan.map((task) => task.task), ['Inspect.', 'Report.']);
+        return { reply: 'The previous execution was cancelled; please clarify the remaining work.' };
+      } }),
     });
-    const config = {
-      configurable: {
-        thread_id: 'abort-settles-into-pause',
-        capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-        toolkits,
-      },
-    };
-
-    await assert.rejects(
-      graph.invoke(
-        buildOrchestratorRunInput([new HumanMessage('run git status')]),
-        { ...config, signal: controller.signal },
-      ),
-    );
-    assert.equal(toolRuns, 1, 'the delegation was running when it was cancelled');
-
-    // The cancelled run holds unfinished work but raises no interrupt, so there
-    // is nothing for an interface to continue by id.
-    const abortedState = await graph.getState(config);
-    assert.deepEqual(
-      abortedState.tasks.flatMap((task) => task.interrupts ?? []),
-      [],
-      'an abort raises no interrupt of its own',
-    );
-    assert.equal(abortedState.values.taskActiveDelegation?.status, 'pending');
-
-    const settled = await settleAbortedRun({
+    const config = { configurable: { thread_id: `cancel-${continuePlan}`, registry } };
+    await assert.rejects(graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect and report.')]),
+      { ...config, signal: controller.signal }));
+    const cancelled = await graph.getState(config);
+    assert.equal(toolRuns, 1);
+    assert.equal(cancelled.values.runSupervisorState.plan[0].status, 'pending');
+    assert.deepEqual(await settleAbortedRun({
       getState: () => graph.getState(config),
-      updateState: (values, asNode) => graph.updateState(config, values, asNode),
-      resume: () => graph.invoke(null, config),
-    });
-
-    assert.equal(settled.status, 'paused');
-    assert.equal(
-      settled.status === 'paused' ? settled.pendingInterrupt.payload.kind : null,
-      'pause_task',
-      'an aborted delegation becomes the same kind a Review rejection produces',
-    );
-    assert.ok(
-      settled.status === 'paused' && settled.pendingInterrupt.interruptId,
-      'the pause carries an id the interface can continue by',
-    );
-    const settledState = await graph.getState(config);
-    assert.equal(settledState.next?.[0], 'pauseGate');
-    // Reaching the pause repeats no work and consults no model.
-    assert.equal(toolRuns, 1, 'settling must not re-run the delegation');
-    assert.equal(routeCallCount, 2, 'settling must not call the planner or supervisor');
-    // The Supervisor's remaining plan is task-scoped now, so continuing can
-    // still reach the tasks queued behind the cancelled one.
-    assert.deepEqual(
-      settledState.values.taskRunContinuation?.remainingPlan?.map(
-        (task: { task: string }) => task.task,
-      ),
-      ['summarise the result'],
-      'the remaining plan survives the cancellation',
-    );
-
-    // Continue by id: the delegation is re-entered directly, carrying the queued
-    // task with it. Without the snapshot taken while settling, the continued run
-    // would resume against an empty plan.
-    const pauseId = settled.status === 'paused' ? settled.pendingInterrupt.interruptId : '';
-    if (guided) {
-      await graph.invoke(new Command({ resume: { [pauseId]: {
-        action: 'continue', guidance: 'Inspect the correct project and keep the report private.',
-      } } }), { ...config, interruptBefore: ['capability'] });
-      const adjusted = await graph.getState(config);
-      assert.equal(guidedDecisions, 1);
-      assert.equal(toolRuns, 1, 'new input is judged before any resumed work');
-      assert.equal(adjusted.next[0], 'capability');
-      assert.equal(adjusted.values.taskActiveDelegation.id, settledState.values.taskActiveDelegation.id);
-      assert.equal(adjusted.values.runNextDelegation.task, 'Inspect the correct project.');
-      assert.deepEqual(adjusted.values.runSupervisorSession.plan, [{ capability: 'general', task: 'Write the private report.' }]);
-      assert.equal(adjusted.values.runSupervisorUserMessageId, null);
-      return;
-    }
-
-    await graph.invoke(
-      new Command({ resume: { [pauseId]: { action: 'continue' } } }),
-      config,
-    ).catch(() => undefined);
-    const continuedState = await graph.getState(config);
-    assert.equal(continuedState.values.taskPauseInterrupt, null, 'pause cleared on continue');
-    assert.equal(
-      continuedState.values.runNextDelegation?.id
-        ?? continuedState.values.taskActiveDelegation?.id,
-      settledState.values.taskActiveDelegation?.id,
-      'continuing re-enters the same delegation',
-    );
-    // Only Supervisor boundary calls: the planner is not consulted again, so the
-    // continued run works from the plan the settlement preserved.
-    assert.ok(routeCallCount > 2, 'the continued run reached its Supervisor boundary');
+    }), { status: 'finished' });
+    const next = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('What remains?')]), config);
+    assert.equal(entryCalls, 2);
+    assert.equal(supervisorCalls, continuePlan ? 2 : 1);
+    assert.equal(toolRuns, 1);
+    assert.notEqual(next.runId, cancelled.values.runId);
+    assert.deepEqual(next.runSupervisorState, cancelled.values.runSupervisorState);
   });
 }
-
-test('a legacy resume_active turn over a pending task pause still re-enters the delegation', async () => {
-  // Transition compatibility: the Host keeps sending resume_active turns until
-  // it continues by interrupt id. A new turn must supersede the pending pause
-  // interrupt and re-enter the delegation, not error or re-plan.
-  let runCount = 0;
-  const rawTool = tool(async ({ command }: { command: string }) => {
-    runCount += 1;
-    return `ran ${command}`;
-  }, { name: 'run_shell', description: 'run shell', schema: z.object({ command: z.string() }) });
-  const toolkits: AgentToolkit[] = [{
-    name: 'local',
-    description: 'local tools',
-    tools: [reviewedTool(rawTool, {
-      request: () => buildReviewSpec({
-        view: { kind: 'plain', body: 'Approve shell?' },
-        options: [
-          { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
-          { id: 'reject', label: 'Reject', decision: { type: 'reject', message: 'no' } },
-        ],
-      }),
-    })],
-  }];
-  let routeCallCount = 0;
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        if (routeCallCount === 1) return scriptedPlannerTask('run shell');
-        if (routeCallCount === 2) return scriptedSupervisorCapability('general');
-        if (routeCallCount === 3) return continueDecision('Apply the new user guidance before continuing.');
-        return goalDoneDecision();
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const subagentModel = new FakeToolCallingModel({
-    toolCalls: [
-      [{ id: 'call-first', name: 'run_shell', args: { command: 'git status' } }],
-      [{ id: 'call-after-continue', name: 'run_shell', args: { command: 'git log -1' } }],
-      [],
-    ],
-  });
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    checkpoint: new MemorySaver(),
-  });
-  const recorder = createSubagentInputRecorder();
-  const config = {
-    callbacks: recorder.callbacks,
-    configurable: {
-      thread_id: 'legacy-resume-active-over-pause',
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      toolkits,
-      reviewCapabilities: { humanReview: true, sessionAuthorization: false },
-      globalReviewPolicy: { mode: 'custom', resolve: () => ({ type: 'require_authorization' as const }) },
-    },
-  };
-  type Out = { __interrupt__?: Array<{ id?: string; value?: { kind?: string } }> };
-
-  const reviewed = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('run git status')]), config) as Out;
-  const reviewId = reviewed.__interrupt__?.[0]?.id;
-  assert.ok(reviewId);
-  const paused = await graph.invoke(new Command({
-    resume: { [reviewId]: { decisions: [{ reviewId: 'tool-review:run_shell:call-first', selectedOptionId: 'reject' }] } },
-  }), config) as Out;
-  assert.equal(paused.__interrupt__?.[0]?.value?.kind, 'pause_task');
-
-  const continued = await graph.invoke(
-    buildOrchestratorRunInput([new HumanMessage('go on')], { activeDelegationTransition: 'resume_active' }),
-    config,
-  ) as Out;
-  assert.equal(continued.__interrupt__?.[0]?.value?.kind, 'review_batch', 'the delegation is re-entered');
-  assert.equal(recorder.subagentInputs.length, 2);
-  assert.equal(routeCallCount, 3, 'a legacy resume with user input consults Supervisor first');
-  assert.equal(runCount, 0);
-  const state = await graph.getState(config);
-  assert.equal(state.values.taskPauseInterrupt, null, 'prepare clears the pause on a fresh turn');
-});
-
-test('afterPauseGate re-enters the capability only for its matching resumable delegation', () => {
-  const matching = {
-    runNextDelegation: { id: 'd-1' },
-    taskActiveDelegation: { id: 'd-1' },
-  } as unknown as OrchestratorStateType;
-  assert.equal(afterPauseGate(matching), 'runSupervisor');
-
-  // A non-resumable delegation leaves runNextDelegation null (checkpoint_incompatible).
-  const unresumable = {
-    runNextDelegation: null,
-    taskActiveDelegation: { id: 'd-1' },
-  } as unknown as OrchestratorStateType;
-  assert.equal(afterPauseGate(unresumable), 'answer');
-
-  const mismatched = {
-    runNextDelegation: { id: 'd-2' },
-    taskActiveDelegation: { id: 'd-1' },
-  } as unknown as OrchestratorStateType;
-  assert.equal(afterPauseGate(mismatched), 'answer');
-});

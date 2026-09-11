@@ -21,7 +21,7 @@ function graphOf(snapshots: unknown[]) {
   };
 }
 
-const pendingDelegation = { values: { taskActiveDelegation: { status: 'pending' } } };
+const pendingDelegation = { values: { runSupervisorState: { goal: 'Work', plan: [{ id: 'task', capability: 'general', task: 'Work', status: 'pending' }] } } };
 
 test('settleAbortedRun reports an interrupt that was already pending', async () => {
   const { graph, calls } = graphOf([{
@@ -67,29 +67,12 @@ test('settleAbortedRun does not pause a delegation awaiting its Supervisor bound
   assert.deepEqual(calls, []);
 });
 
-test('settleAbortedRun writes through the node the abort left pending', async () => {
-  const { graph, calls } = graphOf([
-    { ...pendingDelegation, next: ['throwRunFailure'], tasks: [] },
-    { ...pendingDelegation, next: ['pauseGate'], tasks: [] },
-    {
-      ...pendingDelegation,
-      next: ['pauseGate'],
-      tasks: [{ interrupts: [{ id: 'interrupt-pause', value: { kind: 'pause_task' } }] }],
-    },
-  ]);
-
-  const settled = await settleAbortedRun(graph);
-
-  assert.equal(settled.status, 'paused');
-  assert.equal(
-    settled.status === 'paused' ? settled.pendingInterrupt.interruptId : null,
-    'interrupt-pause',
-  );
-  // Written as the pending node, so its task is satisfied rather than repeated.
-  assert.deepEqual(calls, [
-    { kind: 'updateState', asNode: 'throwRunFailure' },
-    { kind: 'resume' },
-  ]);
+test('settleAbortedRun does not turn cancelled execution into a synthetic native interrupt', async () => {
+  for (const pending of ['capability', 'throwRunFailure']) {
+    const { graph, calls } = graphOf([{ ...pendingDelegation, next: [pending], tasks: [] }]);
+    assert.deepEqual(await settleAbortedRun(graph), { status: 'finished' });
+    assert.deepEqual(calls, [], 'only a future user run may determine whether work continues');
+  }
 });
 
 test('settleAbortedRun reports finished when the thread raises no interrupt', async () => {

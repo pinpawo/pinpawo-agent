@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { setAgentMessageDelegationScope, setAgentMessageMetadata } from './metadata';
 import { queryAgentMessages } from './query';
 
@@ -106,4 +106,31 @@ test('query rejects a capability lane message with an incomplete scope', () => {
     () => queryAgentMessages([invalid]).delegation(scope).select(),
     /missing delegationId or another part of its complete scope/,
   );
+});
+
+test('Supervisor working history is run-scoped without changing main or Capability ownership', () => {
+  const main = new HumanMessage({ id: 'user', content: 'request' });
+  const control = setAgentMessageMetadata(new AIMessage({ id: 'control', content: '',
+    tool_calls: [{ id: 'c1', name: 'submit_plan', args: {} }],
+  }), { lane: 'supervisor', runId: 'run-1' });
+  const confirmation = setAgentMessageMetadata(new ToolMessage({ id: 'confirmation',
+    content: 'submitted', tool_call_id: 'c1', name: 'submit_plan',
+  }), { lane: 'supervisor', runId: 'run-1' });
+  const nextRun = setAgentMessageMetadata(new AIMessage({ id: 'next-run', content: 'working' }),
+    { lane: 'supervisor', runId: 'run-2' });
+  const privateMessage = setAgentMessageDelegationScope(new AIMessage({ id: 'private', content: 'private' }), scope);
+  const canonical = [main, control, confirmation, privateMessage, nextRun];
+  const query = queryAgentMessages(canonical);
+  assert.deepEqual(query.main().select().messages, [main]);
+  assert.deepEqual(query.main().delegation(scope).select().messages, [main, privateMessage]);
+  assert.deepEqual(query.main().supervisor('run-1').select().messages, [main, control, confirmation]);
+  assert.deepEqual(query.main().supervisor('run-2').select().messages, [main, nextRun]);
+  assert.deepEqual(query.select().messages, []);
+  assert.equal(canonical.length, 5, 'resetting the work view must not delete canonical history');
+  assert.throws(() => query.supervisor(''), /run id/);
+});
+
+test('Supervisor messages cannot fall back to main when their run identity is missing', () => {
+  const message = setAgentMessageMetadata(new AIMessage({ content: 'private' }), { lane: 'supervisor' });
+  assert.throws(() => queryAgentMessages([message]).main().select(), /missing its run id/);
 });

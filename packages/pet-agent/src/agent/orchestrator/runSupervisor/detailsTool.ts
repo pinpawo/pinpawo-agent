@@ -1,33 +1,25 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
-import { Command } from '@langchain/langgraph';
+import { z as z4 } from 'zod/v4';
+import { Command, ReducedValue, StateSchema } from '@langchain/langgraph';
 import { createMiddleware } from 'langchain';
 import type { SupervisorDocumentReader } from './capabilityDocuments';
-import {
-  mergeCapabilityDisclosure,
-} from './capabilityDisclosure';
-import {
-  currentSupervisorInput,
-  type SupervisorInvocationState,
-  supervisorDisclosureStateSchema,
-} from './supervisorState';
 
 export const RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME = 'capability_details';
 
 /** Exact-name disclosure; all state changes still use the existing parallel-safe reducer. */
 export function createSupervisorCapabilityDetailsTool(params: {
   documents: SupervisorDocumentReader;
+  capabilityNames: readonly string[];
 }) {
-  return tool(async ({ names }, runtime: ToolRuntime<SupervisorInvocationState>) => {
-    const input = currentSupervisorInput(runtime.state);
+  return tool(async ({ names }, runtime: ToolRuntime<{ disclosedCapabilityNames: string[] }>) => {
     const disclosedNames = runtime.state.disclosedCapabilityNames ?? [];
-    const prior = mergeCapabilityDisclosure(input.capabilityDisclosure, disclosedNames);
     const requested = [...new Set(names)];
-    const alreadyDisclosed = requested.filter((name) => prior.disclosedCapabilityNames.includes(name));
-    const unknownNames = requested.filter((name) => !input.catalog.capabilityNames.includes(name));
-    const pending = requested.filter((name) => input.catalog.capabilityNames.includes(name)
-      && !prior.disclosedCapabilityNames.includes(name));
+    const alreadyDisclosed = requested.filter((name) => disclosedNames.includes(name));
+    const unknownNames = requested.filter((name) => !params.capabilityNames.includes(name));
+    const pending = requested.filter((name) => params.capabilityNames.includes(name)
+      && !disclosedNames.includes(name));
     const documents = params.documents.readCapabilities(pending, runtime.signal);
     const newNames = documents.map(({ capabilityName }) => capabilityName);
     const content = JSON.stringify({
@@ -47,10 +39,15 @@ export function createSupervisorCapabilityDetailsTool(params: {
   });
 }
 
-/** Registers the reducer-backed state channel used by capability_details. */
+/** Only mutable detail-read state lives in createAgent; parallel reads merge names. */
 export function createSupervisorDisclosureStateMiddleware() {
   return createMiddleware({
     name: 'RunSupervisorDisclosureState',
-    stateSchema: supervisorDisclosureStateSchema,
+    stateSchema: new StateSchema({
+      disclosedCapabilityNames: new ReducedValue(z4.array(z4.string()).default([]) as never, {
+        inputSchema: z4.array(z4.string()).default([]) as never,
+        reducer: (current: string[], next: string[]) => [...new Set([...current, ...next])],
+      }),
+    }),
   });
 }

@@ -7,13 +7,11 @@ import { ORCHESTRATOR_MAX_ITERATIONS } from './runtime/constants';
 import {
   contextCompactionWatermarkGuard,
   ORCHESTRATOR_GUARD_POSITION,
-  RUN_STATE_RESET_REQUIRED,
   runIterationLimitGuard,
-  runStateResetGuard,
 } from './guardDefinitions';
 import {
-  createAfterSupervisorBoundaryIterationGuard,
-} from './runtime/routes/afterSupervisorBoundaryIterationGuard';
+  runIterationBudgetReached,
+} from './runtime/guards/runIterationBudget';
 import {
   GUARD_DECISION_EVENT,
   guardDecisionEmitter,
@@ -21,14 +19,11 @@ import {
 } from './runtime/guards/decisionEvents';
 import { setAgentMessageMetadata } from '../messages';
 import type { OrchestratorStateType } from './state';
-import type { TaskActiveDelegation } from './types';
 
 function baseState(over: Partial<OrchestratorStateType> = {}): OrchestratorStateType {
   return {
     messages: [],
-    runDelegationSummaries: [],
     runIterationCount: 0,
-    taskActiveDelegation: null,
     runId: 'run-1',
     ...over,
   } as unknown as OrchestratorStateType;
@@ -44,35 +39,6 @@ function usageMessage(content: string, inputTokens: number) {
     },
   });
 }
-
-const activeDelegation: TaskActiveDelegation = {
-  id: 'd1',
-  lane: 'capability:general',
-  task: '做点事',
-  contextSummary: null,
-  runId: 'run-1',
-  traceId: 'trace-1',
-  status: 'awaiting_decision',
-  resultPreview: null,
-  userRequest: '做点事',
-};
-
-test('run state reset guard derives a reset only when the run id is missing', () => {
-  const proceed = evaluateGuard(runStateResetGuard, {
-    state: baseState(),
-    config: {},
-    position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
-  });
-  assert.equal(proceed.kind, 'proceed');
-
-  const derive = evaluateGuard(runStateResetGuard, {
-    state: baseState({ runId: undefined }),
-    config: {},
-    position: ORCHESTRATOR_GUARD_POSITION.PREPARE,
-  });
-  assert.equal(derive.kind, 'derive');
-  assert.equal(derive.kind === 'derive' && derive.reason, RUN_STATE_RESET_REQUIRED);
-});
 
 test('context compaction watermark guard uses main conversation provider usage only', () => {
   const noisyToolResult = new ToolMessage({
@@ -183,13 +149,13 @@ test('guard routes push decision records onto the LangGraph custom stream writer
   const chunks: unknown[] = [];
   const runnableConfig = {
     writer: (chunk: unknown) => chunks.push(chunk),
-  } as Parameters<ReturnType<typeof createAfterSupervisorBoundaryIterationGuard>>[1] & {
+  } as Parameters<typeof runIterationBudgetReached>[1] & {
     writer: (chunk: unknown) => void;
   };
 
-  const route = createAfterSupervisorBoundaryIterationGuard();
+  const route = runIterationBudgetReached;
   route(baseState({
-    taskActiveDelegation: activeDelegation,
+
     runIterationCount: ORCHESTRATOR_MAX_ITERATIONS,
   }), runnableConfig);
 
@@ -221,7 +187,7 @@ test('guard decision emitter is a no-op without a runnable config', () => {
 
 test('run iteration limit guard routes through answer at the resolved limit', () => {
   const state = baseState({
-    taskActiveDelegation: activeDelegation,
+
     runIterationCount: 5,
   });
 
@@ -236,18 +202,18 @@ test('run iteration limit guard routes through answer at the resolved limit', ()
     runIterationLimit: 5,
   });
 
-  const route = createAfterSupervisorBoundaryIterationGuard();
-  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }), 'answer');
-  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS - 1 }), 'runSupervisor');
+  const route = runIterationBudgetReached;
+  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }), true);
+  assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS - 1 }), false);
 });
 
 test('legacy invocation overrides cannot change the internal run iteration limit', () => {
-  const route = createAfterSupervisorBoundaryIterationGuard();
-  const state = baseState({ taskActiveDelegation: activeDelegation });
+  const route = runIterationBudgetReached;
+  const state = baseState({  });
   assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS - 1 }, {
     configurable: { maxRunIterations: 1 },
-  }), 'runSupervisor');
+  }), false);
   assert.equal(route({ ...state, runIterationCount: ORCHESTRATOR_MAX_ITERATIONS }, {
     configurable: { maxRunIterations: ORCHESTRATOR_MAX_ITERATIONS + 100 },
-  }), 'answer');
+  }), true);
 });

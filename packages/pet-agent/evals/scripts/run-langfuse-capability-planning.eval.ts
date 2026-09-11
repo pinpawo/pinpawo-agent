@@ -4,13 +4,12 @@ import { z } from 'zod';
 import { createRunSupervisorAgent } from '../../src/agent/orchestrator/runSupervisor/agent.ts';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import {
-  isRunSupervisorReplyResult,
   type RunSupervisorInput,
   type RunSupervisorResult,
 } from '../../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createCapabilityCatalog } from '../../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { compileAgentRegistry } from '../../src/agent/orchestrator/registry.ts';
-import { createRunSupervisorSession } from '../../src/agent/orchestrator/runSupervisor/session.ts';
+import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from '../supervisor-fixtures';
 import {
   defineCapability,
   defineInstructionDocument,
@@ -68,13 +67,14 @@ function capabilityFromRegistryEntry(entry: string): AgentCapability {
 }
 
 function supervisorOutput(
-  result: RunSupervisorResult,
+  actual: RunSupervisorResult,
 ): CapabilityPlanningEvalOutput {
-  if (isRunSupervisorReplyResult(result) || result.action !== 'execute_plan') {
+  const result = readSupervisorDecision(actual);
+  if ((result.action === undefined) || result.action !== 'execute_plan') {
     return {
-      result: isRunSupervisorReplyResult(result) ? 'reply' : result.action,
+      result: (result.action === undefined) ? 'reply' : result.action,
       nextTask: null, capabilityName: null,
-      ...(!isRunSupervisorReplyResult(result) && result.action === 'review_current'
+      ...(!(result.action === undefined) && result.action === 'review_current'
         ? { completed: result.completed, reason: result.reason } : {}),
       remainingPlan: [],
     };
@@ -85,7 +85,7 @@ function supervisorOutput(
 }
 
 function supervisorDiagnostics(result: RunSupervisorResult, searchDiagnostics: CapabilityDetailsDiagnostics) {
-  return { ...searchDiagnostics, supervisorStatus: isRunSupervisorReplyResult(result) ? 'reply' : 'proposed' };
+  return { ...searchDiagnostics, supervisorStatus: result.reply !== undefined ? 'reply' : 'proposed' };
 }
 
 function splitList(value: string | undefined): string[] {
@@ -173,52 +173,11 @@ async function main() {
           ])],
         };
         const activeTask = testCase.input.activeTask ?? 'Evaluate the current task.';
-        const supervisorInputBase = {
-          inputId: `${testCase.input.mode}:${testCase.id}`,
-          traceId: `eval:${testCase.id}`,
-          runId: `eval:${testCase.id}`,
-          userRequest: testCase.input.userRequest,
-          messages: buildCapabilityPlanningHistoryMessages(testCase.input),
-          remainingPlan: testCase.input.remainingPlan ?? [],
-          catalog,
-          capabilityDisclosure,
-          supervisorSession: createRunSupervisorSession({
-            runId: `eval:${testCase.id}`,
-            plan: testCase.input.remainingPlan ?? [],
-            capabilityDisclosure,
-          }),
-        };
-        const latestAnnounce = testCase.input.latestAnnounce;
-        const announceData = latestAnnounce === undefined
-          ? null
-          : {
-            messageId: 'eval-announce',
-            result: latestAnnounce,
-          };
-        if (testCase.input.mode === 'boundary' && !announceData) {
-          throw new Error('Boundary eval requires execution evidence.');
-        }
-        const supervisorInput: RunSupervisorInput = testCase.input.mode === 'boundary'
-          ? {
-              ...supervisorInputBase,
-              mode: 'boundary',
-              activeDelegation: {
-                delegationId: 'eval-delegation',
-                runId: `eval:${testCase.id}`,
-                capability: activeCapability,
-                task: activeTask,
-              },
-              messages: [...supervisorInputBase.messages, ...(announceData ? [announceData] : []).map((attempt) => new DelegationAnnounceMessage({
-                id: 'announce:' + attempt.messageId, sourceLane: `capability:${activeCapability}` as const, delegationId: 'eval-delegation', runId: `eval:${testCase.id}`, task: activeTask, announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
-              }))],
-
-            }
-          : {
-              ...supervisorInputBase,
-              mode: 'entry',
-              activeDelegation: null,
-
-            };
+        const fixture = supervisorFixture({ catalog, runId: `eval:${testCase.id}`, goal: testCase.input.userRequest,
+          task: testCase.input.mode === 'boundary' ? activeTask : undefined, capability: activeCapability,
+          evidence: testCase.input.latestAnnounce, remaining: testCase.input.remainingPlan });
+        const supervisorInput: RunSupervisorInput = { ...fixture, capabilityDisclosure,
+          messages: [...buildCapabilityPlanningHistoryMessages(testCase.input), ...fixture.messages.slice(1)] };
         const searchDiagnostics = createCapabilityDetailsDiagnosticsCollector();
         const result = await createRunSupervisorAgent({
           model: modelConfig.model,

@@ -417,7 +417,7 @@ Studio
 
 | 协调器 | 实际范围 | 该归谁 |
 |---|---|---|
-| `ServerSessionCommandQueue` | 一个 peer 连接 | **撤销**（错层，§二.2） |
+| `ServerSessionCommandQueue` | 一个 peer 连接 | 收敛为 Host 级的 `SessionCommandQueue`（§一.3b） |
 | `activeChatOperations` | **一个 Host**（闭包局部，非进程） | agent 的执行准入 |
 | `sessionTransition` | **一个 Host**（同上） | Session |
 | `ThreadInvocationCoordinator` | 一个 thread | **保留**，已是 agent 级且语义正确 |
@@ -430,7 +430,7 @@ Studio
 |---|---|
 | WebSocket（13 个 handler） | 基准 |
 | stdio | 复用**同一组** `peerHandlers` ✅ |
-| HTTP（2 条路由） | 仅运维面 `/health` `/runtime`；三条对话能力残留路由已删 ✅ |
+| HTTP（1 条路由） | 仅 `/runtime`；三条对话能力残留路由与 `/health` 均已删 ✅ |
 | resident dispatch | 直接进 `dispatchQueue`，不进 `InflightRequestController` |
 
 #### resident 模式的 4 层叠加

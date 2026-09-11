@@ -1,7 +1,7 @@
 # 本分支 review 指南：按 domain 概念组织
 
-分支：`claude/local-agent-module-boundaries-0a8310`（25 个提交，相对 `main`）
-更新至：`23394d4c`（§七 五个阶段已全部落地）
+分支：`claude/local-agent-module-boundaries-0a8310`（30 个提交，相对 `main`）
+更新至：`da8822bb`
 
 提交是按**时间顺序**攒的，不是按 domain 组织的。本文按**领域概念**重排，
 让每条结论的「定义 → 落地 → 修正」可以连起来看。
@@ -34,6 +34,20 @@
 | 5 | `ServerDeps` 拆成 domain 窄契约 | `23394d4c` |
 
 **7 条分叉全部消解。**
+
+### review 过程中定下的新结论
+
+§七 五个阶段完成后，review 又推出一条 domain 结论并落地：
+
+| 结论 | 提交 |
+|---|---|
+| **3b. 一个 Host 只接一个交互连接**（dispatch 与观察各走各的路径） | `00e6f4e4` |
+| 随之：命令队列收敛为 Host 级、`/health` 随其消费者删除 | `9c940fc4` |
+| 随之：`SessionCommandQueue` / `admitHumanMessage` 正名 —— command 与 message 是两回事 | `da8822bb` |
+
+这条是 review 中问出来的：dispatch 的初衷就是「任意塞消息，Host 自己决定何时
+处理」，那么直接交互本就该独占。代码里早有这个假设（`activeRun` 是 Host 级单值），
+只是从没在连接入口强制。
 
 ---
 
@@ -95,7 +109,8 @@ git show 37c2227a --stat -M   # 去掉 local 前缀
   （`plugins/studio-http`、`plugins/kanban`、`tests/studio-e2e`）。
 - **阶段 4 已补完**：删掉 HTTP 上重新实现对话能力的三条残留路由
   （`/snapshot`、`/sessions`、`/sessions/resume`，全仓零消费者）。
-  `/health` `/runtime` 保留 —— 它们是**运维面**，不在「能力统一」规则内。
+  运维面不在「能力统一」规则内；其中 `/health` 随其唯一消费者（已停止维护的
+  macOS 伴侣）一并删除，HTTP 现在只剩 `/runtime`。
 
 ---
 
@@ -210,8 +225,10 @@ git diff main..HEAD -- services | grep -E "^[-+]" | grep -v "^[-+][-+]" | grep -
 
 全程保持：**14 个 workspace、0 失败**，typecheck 全绿，build 通过。
 
-测试数 627 → **629**：新增 5 个 `sessionAdmission` 测试；阶段 4 删掉 3 个
-HTTP 路由测试、合并为 1 个；阶段 5 把 1 个运行时抛错测试改成类型边界断言。
+测试数 627 → **631**：新增 5 个 `sessionAdmission`、2 个连接准入、3 个
+`SessionCommandQueue` 测试；阶段 4 删掉 3 个 HTTP 路由测试合并为 1 个；
+阶段 5 把 1 个运行时抛错测试改成类型边界断言；`/health` 删除后移除 1 个
+health 字段测试。
 
 ⚠️ **本仓需要 Node >= 24。** Node 18 下整套测试会以 `crypto is not defined`
 大面积失败（本轮踩过两次），那是环境不是代码。

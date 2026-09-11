@@ -93,24 +93,18 @@ Runtime    AgentInterrupt.resume(value)                                     pars
   one task; a resolution that leads to another kind unwinds to that kind's own
   node rather than interrupting again in place. This is why a review
   rejection ends the subagent and lets `pauseGate` raise the pause.
-- `pause_task` from an aborted invocation applies only when the abort left
-  unfinished task work. An abort with nothing to continue, such as during a
-  root answer stream with no delegation, is an `interrupted` run and not a
-  pause. Where the Runtime raises an abort-origin pause and how it re-enters
-  are Runtime-private. The constraint this domain imposes is only that the
-  result is a `pause_task` interrupt with an id in `interrupts[]`, so the rest
-  of the chain is unchanged.
-- Cancellation settlement returns the domain's own type:
-  `settleAbortedRun(graph): Promise<PendingInterrupt | null>`. A returned
-  interrupt — pre-existing or newly raised — is reported as `waiting` and
-  published on the `interrupt.requested` chain, with no distinction between a
-  review-origin and an abort-origin pause; `null` means the cancelled run
-  reports `interrupted`. A settlement that throws takes the caller's failure
-  path: it is never caught and reported as `null` or as a clean interruption.
-- The internal progression settlement uses to reach the pause boundary is
-  `continueFromCheckpoint()`, not a resume. It carries no value and never
-  reaches `AgentInterrupt.resume`, which stays responsible only for each
-  kind's interaction and reply parsing.
+- **Cancellation is not an interrupt.** An aborted invocation raises nothing of
+  its own: committed facts are left intact and the next user run enters Entry
+  Answer. An unreturned execution is never turned into a synthetic resumable
+  success — settling only *reads*.
+- Cancellation settlement therefore returns the domain's own type:
+  `settleAbortedRun(graph): Promise<PendingInterrupt | null>`, where `graph`
+  offers `getState` alone. A returned interrupt is one that was **already**
+  pending when the abort landed; it is reported as `waiting` and published on
+  the `interrupt.requested` chain like any other. `null` means the cancelled
+  run reports `interrupted`. A settlement that throws takes the caller's
+  failure path: it is never caught and reported as `null` or as a clean
+  interruption.
 
 ### Host
 

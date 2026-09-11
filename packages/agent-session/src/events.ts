@@ -140,7 +140,11 @@ export type AgentErrorCode =
   // The agent could not run at all (model quota exhausted, auth rejected).
   // The invocation terminates; checkpoint state remains authoritative for any
   // pending interrupt and is reconciled separately.
-  | 'agent_unavailable';
+  | 'agent_unavailable'
+  // A second interactive client tried to attach. One Host serves one Pet and
+  // its session state is single-valued, so interaction is exclusive;
+  // additional input belongs in dispatch, which queues behind the gate.
+  | 'interaction_busy';
 
 export type AgentErrorEvent = {
   type: 'error';

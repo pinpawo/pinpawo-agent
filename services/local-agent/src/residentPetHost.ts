@@ -133,6 +133,18 @@ type QueuedOperation = {
   reject: (error: unknown) => void;
 };
 
+/** A second interactive client tried to attach to a Host that already has one. */
+export class ResidentPetInteractionBusyError extends Error {
+  readonly code = 'interaction_busy';
+
+  constructor(
+    message = 'This Pet already has an interactive client. Use dispatch for additional input.',
+  ) {
+    super(message);
+    this.name = 'ResidentPetInteractionBusyError';
+  }
+}
+
 export class ResidentPetOperationCancelledError extends Error {
   constructor(message = 'Resident Pet operation was cancelled before it started.') {
     super(message);
@@ -444,7 +456,14 @@ type ResidentPetRuntimeContext = {
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;
-  peers: Set<AgentSessionPeer>;
+  /**
+   * The one interactive client, or null. A Host serves one Pet whose session
+   * state is single-valued, so interaction is exclusive; everything else
+   * reaches the Pet through dispatch, which queues behind the availability
+   * gate. Studio observes through the PetDispatchPort callbacks and never
+   * attaches here.
+   */
+  interactivePeer: { current: AgentSessionPeer | null };
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
@@ -596,7 +615,7 @@ export async function createResidentPetRuntime(
     return 'open';
   };
   const coordinator = new ResidentPetCoordinator({ readSettledState });
-  const peers = new Set<AgentSessionPeer>();
+  const interactivePeer: { current: AgentSessionPeer | null } = { current: null };
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
   const activeHostRuns = new Map<string, AbortController>();
   let activeRun: ResidentActiveRun | null = null;
@@ -618,13 +637,12 @@ export async function createResidentPetRuntime(
   };
   const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
     const message = buildAgentEventEnvelope(event);
-    for (const peer of peers) {
-      if (!peer.isConnected()) continue;
-      try {
-        peer.send(message);
-      } catch (error) {
-        defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
-      }
+    const peer = interactivePeer.current;
+    if (!peer || !peer.isConnected()) return;
+    try {
+      peer.send(message);
+    } catch (error) {
+      defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
     }
   };
   const publishDispatchLifecycle = (event: PetDispatchLifecycleEvent) => {
@@ -665,8 +683,9 @@ export async function createResidentPetRuntime(
   const close = () => {
     closing ??= (async () => {
       for (const controller of activeHostRuns.values()) controller.abort();
-      await Promise.allSettled([...peers].map((peer) => peerHandlers.onClose(peer)));
-      peers.clear();
+      const peer = interactivePeer.current;
+      interactivePeer.current = null;
+      if (peer) await peerHandlers.onClose(peer);
       await coordinator.close();
       localHandlers.close();
     })();
@@ -683,7 +702,7 @@ export async function createResidentPetRuntime(
     coordinator,
     localHandlers,
     peerHandlers,
-    peers,
+    interactivePeer,
     publishRuntimeEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
@@ -872,14 +891,23 @@ export function createResidentPetInteraction(
   runtime: ResidentPetRuntime,
 ): ResidentPetInteraction {
   const context = readResidentPetRuntimeContext(runtime);
-  const { peerHandlers, peers } = context;
+  const { peerHandlers, interactivePeer } = context;
   const interaction: ResidentPetInteraction = {
     connect: (peer) => {
       if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
-      peers.add(peer);
+      // One interactive connection per Host. Everything else reaches a Pet
+      // through dispatch, which is queued behind the availability gate — that
+      // is what dispatch is for. Two interactive clients would instead race
+      // over shared session state (the active session pointer is per-Pet), and
+      // the runtime already assumes a single interaction elsewhere: activeRun
+      // is one value per Host and throws on a second.
+      if (interactivePeer.current?.isConnected()) {
+        throw new ResidentPetInteractionBusyError();
+      }
+      interactivePeer.current = peer;
     },
     handle: async (peer, message) => {
-      if (context.isClosing() || !peers.has(peer)) {
+      if (context.isClosing() || interactivePeer.current !== peer) {
         throw new Error('Agent Session peer is not connected to this resident Pet.');
       }
       if (message.type === 'ping') {
@@ -889,7 +917,8 @@ export function createResidentPetInteraction(
       await dispatchLocalServerMessage(peer, JSON.stringify(message), peerHandlers);
     },
     disconnect: async (peer) => {
-      if (!peers.delete(peer)) return;
+      if (interactivePeer.current !== peer) return;
+      interactivePeer.current = null;
       await peerHandlers.onClose(peer);
     },
     close: context.close,

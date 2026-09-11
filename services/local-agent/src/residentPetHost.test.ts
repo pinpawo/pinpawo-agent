@@ -366,7 +366,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
   }
 });
 
-test('dispatch and conversation publish the same Agent Session event stream to observers', async () => {
+test('dispatch and conversation publish the same Agent Session event stream', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-events-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(root);
   const blockingTurnStarted = deferred();
@@ -430,12 +430,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     },
   });
   const sourceMessages: unknown[] = [];
-  const observerMessages: unknown[] = [];
   const lifecycleEvents: Array<{ state: string; dispatchId: string; error?: string }> = [];
   const source = peer(sourceMessages);
-  const observer = peer(observerMessages);
   await host.interaction.connect(source);
-  await host.interaction.connect(observer);
   const stopLifecycleObservation = host.resident.dispatch.onDispatchLifecycle((event) => {
     lifecycleEvents.push({
       state: event.state,
@@ -452,12 +449,12 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       host.resident.dispatch.dispatch({ request: 'from host', dispatchId: 'studio-dispatch-1' });
     });
     await waitFor(
-      () => observerMessages.some((message) => (
+      () => sourceMessages.some((message) => (
         (message as { event?: { type?: string } }).event?.type === 'message.completed'
       )),
       'resident dispatch did not publish its completed message event',
     );
-    for (const messages of [sourceMessages, observerMessages]) {
+    for (const messages of [sourceMessages]) {
       const events = messages.flatMap((message) => (
         (message as { type?: string }).type === 'event'
           ? [(message as { event: { type: string; initiator?: string } }).event]
@@ -497,13 +494,12 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     });
 
     sourceMessages.length = 0;
-    observerMessages.length = 0;
     await host.interaction.handle(source, {
       type: 'chat_request',
       requestId: 'client-run-1',
       message: 'from client',
     });
-    for (const messages of [sourceMessages, observerMessages]) {
+    for (const messages of [sourceMessages]) {
       const events = messages.flatMap((message) => (
         (message as { type?: string }).type === 'event'
           ? [(message as { event: { type: string; initiator?: string } }).event]
@@ -518,26 +514,19 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     }
 
     sourceMessages.length = 0;
-    observerMessages.length = 0;
     host.resident.dispatch.dispatch({
       request: 'blocking host turn',
     });
     await blockingTurnStarted.promise;
-    const startedEnvelope = observerMessages.find((message) => (
+    const startedEnvelope = sourceMessages.find((message) => (
       (message as { type?: string; event?: { type?: string } }).event?.type === 'run.started'
     )) as { requestId?: string } | undefined;
     assert.ok(startedEnvelope?.requestId);
-    await host.interaction.handle(observer, {
+    await host.interaction.handle(source, {
       type: 'run.interrupt',
       requestId: startedEnvelope.requestId,
     });
-    await waitFor(
-      () => observerMessages.some((message) => (
-        (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
-      )),
-      'interrupted resident dispatch did not publish its runtime event',
-    );
-    assert.ok(observerMessages.some((message) => (
+    assert.ok(sourceMessages.some((message) => (
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
     )));
   } finally {

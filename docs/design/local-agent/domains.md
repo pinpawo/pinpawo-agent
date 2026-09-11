@@ -111,6 +111,41 @@ dispatch 触发的确实是一次普通 Execution（走同一个执行入口与�
 但**不能由此推出 local-agent 需要一层「执行级互斥」**——那是把 Studio 的调度
 概念误当成了本层需要协调的一等公民。
 
+### 3b. 一个 Host 只接一个交互连接
+
+**Host 同时只接受一个交互连接。** 其余输入走 dispatch —— 由 Host 自己决定
+何时处理，这正是 gate 的用途（§一.3）。
+
+理由不是并发控制的偏好，而是**状态形状**：一个 Host 服务一个 Pet，而 Pet 的
+会话状态是**单值**的（`activeSessionIds` 按 petId 存一个「当前会话」）。
+两个交互客户端会直接竞争它 —— 一个正在跑，另一个把当前会话换掉，
+那次执行的 checkpoint 就写到了别处。
+
+运行时其实**早就假设了单交互**，只是从没在入口强制：
+
+| 既有痕迹 | 说明 |
+|---|---|
+| `activeRun` 是 Host 级单值 | 第二个执行直接抛 `already has active run` |
+| `ThreadInvocationCoordinator` | 同 thread 的替换请求取消前驱 |
+
+**三条路径是分开的，不该混谈：**
+
+| 路径 | 接口 | 谁用 |
+|---|---|---|
+| 交互 | `interaction.connect/handle` | TUI（或任一直接交互 client），**独占** |
+| dispatch | `PetDispatchPort.dispatch()` | Studio 插件，排在 gate 后面 |
+| 观察 | `onDispatchLifecycle` / `onQueueChange` / `onStateChange`（**回调订阅**） | Studio，**不占交互名额** |
+
+Studio 从不 `interaction.connect` —— 它订阅的是回调。所以「只能连一个」
+不影响 Studio 的观察面。
+
+**推论：`publishRuntimeEvent` 不再广播。** 事件发给那一个交互连接；
+`peers: Set` 收敛为 `interactivePeer`。此前的多 peer 广播是「支持多客户端并存」
+的遗留，与本条冲突。
+
+拒绝以协议错误 `interaction_busy` 返回，而不是断开 socket —— 客户端要能
+区分「已被占用」和「连不上」。
+
 ### 4. Conversation = UI 交互 state 管理
 
 **Conversation 是为 TUI / 前端交互提供 state 管理的部分。它管理的 state，
@@ -443,6 +478,7 @@ peer message
 | 1 | Host 只有一种，local 是退化形态 |
 | 2 | setup 与 invoke 都归 agent，不放 Session |
 | 3 | dispatch 是 Studio 概念；Host 只提供「Agent 可用」gate，与会话无关 |
+| 3b | 一个 Host 只接一个交互连接；dispatch 与观察各走各的路径 |
 | 4 | Conversation = UI 交互 state 管理，主体在 `@pinpawo/agent-session` |
 | 5 | `modelProfileId`：Session 覆盖 / Config 默认 |
 | 6 | wire 不是 domain；适配传输，能力必须统一 |

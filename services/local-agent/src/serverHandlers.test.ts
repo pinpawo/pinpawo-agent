@@ -12,6 +12,7 @@ import test from 'node:test';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import type { LocalAgentGraphService } from './agentGraphService';
+import { ActiveRunRegister } from './agent/activeRunRegister';
 import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
 import type { LocalAgentServerMessage } from './wire/protocol';
 import type { ServerPeer } from './wire/peer';
@@ -589,6 +590,58 @@ test('model selection is rejected while the active session is running', async ()
     await running;
   } finally {
     release.resolve();
+    handlers.close();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test('a run claims the register for the whole admitted turn', async () => {
+  const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-run-register-'));
+  const sent: LocalAgentServerMessage[] = [];
+  const peer = createPeer(sent);
+  const turnStarted = deferred<void>();
+  const releaseTurn = deferred<void>();
+  const activeRuns = new ActiveRunRegister();
+  const graphService = {
+    readThreadState: async () => ({ messages: [], pendingInterrupt: null }),
+  } as unknown as LocalAgentGraphService;
+  const handlers = createLocalServerHandlers({
+    serverMode: 'chat',
+    petId: 'pet-a',
+    runtimeConfig: buildLocalAgentRuntimeConfig(workdir),
+    ...createTestModelServerDeps(),
+    capabilityArtifactStore: testArtifactStore,
+  }, {
+    chatGraphService: graphService,
+    loadContext: loadTestContext,
+    activeRuns,
+    runAgentTurn: async () => {
+      turnStarted.resolve();
+      await releaseTurn.promise;
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+
+  try {
+    assert.equal(activeRuns.read(), null);
+    const running = handlers.peerHandlers.onChatRequest(peer, {
+      type: 'chat_request',
+      requestId: 'chat-running',
+      message: 'hold',
+    });
+    await turnStarted.promise;
+
+    // The register is what a snapshot reads to tell a reconnecting client a
+    // run is live: the checkpoint cannot, since the run has not written one.
+    // A resident Host shares this same register with its dispatch queue.
+    assert.equal(activeRuns.read()?.requestId, 'chat-running');
+    assert.equal(activeRuns.read()?.state, 'running');
+
+    releaseTurn.resolve();
+    await running;
+    assert.equal(activeRuns.read(), null);
+  } finally {
+    releaseTurn.resolve();
     handlers.close();
     rmSync(workdir, { recursive: true, force: true });
   }

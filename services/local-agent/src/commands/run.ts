@@ -1,13 +1,13 @@
 import { AgentHost } from '../runtime';
 import { startLocalServer } from '../server';
-import { getConfig } from '../config';
-import { applyRuntimeWorkdir } from '../runtimeWorkdir';
-import { logStartupConfig } from '../startupConfigLog';
+import { getConfig } from '../config/config';
+import { applyRuntimeWorkdir } from '../config/runtimeWorkdir';
+import { logStartupConfig } from '../config/startupConfigLog';
 import {
   redirectConsoleToStdioDiagnostics,
 } from '../wire/stdioTransport';
 import { startLocalStdioServer } from '../chatStdioServer';
-import type { ServerMode } from '../serverMode';
+import type { ServerMode } from '../config/serverMode';
 
 export type RunAgentOptions = {
   workdir?: string;

@@ -1,4 +1,4 @@
-import type { PetConfig } from './petConfig';
+import type { PetConfig } from './config/petConfig';
 
 /**
  * Chat runs exactly one Pet. Multi-Pet identity belongs to Studio (#638), which

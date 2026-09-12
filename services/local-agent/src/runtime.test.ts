@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { DEFAULT_CHAT_PET } from './defaultPet';
 import { loadChatPetConfig } from './runtime';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
 
 async function withWorkdir(run: (workdir: string) => Promise<void>): Promise<void> {
   const workdir = mkdtempSync(path.join(tmpdir(), 'pinpawo-chat-pet-'));

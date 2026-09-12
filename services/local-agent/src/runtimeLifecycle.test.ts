@@ -8,9 +8,9 @@ import test from 'node:test';
 import {
   getConfig,
   setConfig,
-} from './config';
+} from './config/config';
 import { AgentHost } from './runtime';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
 
 test('requestStop ends runForever promptly', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-runtime-stop-'));

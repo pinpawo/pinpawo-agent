@@ -29,7 +29,7 @@ import { loadPlugins } from './pluginLoader';
 import {
   buildLocalModelProfileRegistry,
   type LocalModelProfileRegistry,
-} from './llmConfig';
+} from './config/llmConfig';
 import { loadStoredConfig, saveStoredConfig } from './storage';
 import {
   createHostBaselineCapabilities,
@@ -38,9 +38,9 @@ import { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import {
   findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
-} from './runtimeConfig';
-import { getConfig } from './config';
-import { resolveHostExecutionConfig, type HostExecutionConfig } from './hostExecutionConfig';
+} from './config/runtimeConfig';
+import { getConfig } from './config/config';
+import { resolveHostExecutionConfig, type HostExecutionConfig } from './config/hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
 import {
   createBashToolkit,

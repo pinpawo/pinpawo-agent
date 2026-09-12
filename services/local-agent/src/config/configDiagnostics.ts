@@ -7,8 +7,8 @@ import {
   ModelProfileConfigError,
   resolveModelProfile,
 } from './modelProfiles';
-import type { StoredConfig } from './storage';
-import { configPath } from './storage';
+import type { StoredConfig } from '../storage';
+import { configPath } from '../storage';
 
 export type SetupCheckStatus = 'ok' | 'missing' | 'warning';
 

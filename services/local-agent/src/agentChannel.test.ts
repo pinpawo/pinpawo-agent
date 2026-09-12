@@ -1,12 +1,12 @@
-import { resolveHostExecutionConfig } from './hostExecutionConfig';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { resolveHostExecutionConfig } from './config/hostExecutionConfig';
+import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { getConfig, setConfig } from './config';
-import { resolveUserDir } from './runtimeConfig';
+import { getConfig, setConfig } from './config/config';
+import { resolveUserDir } from './config/runtimeConfig';
 import { randomUUID } from 'node:crypto';
 
 import { tool } from '@langchain/core/tools';

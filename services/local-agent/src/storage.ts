@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import type { StoredModelProfilesV1 } from './modelProfiles';
+import type { StoredModelProfilesV1 } from './config/modelProfiles';
 
 const CONFIG_PATH = resolve(homedir(), '.pinpawo', 'config.json');
 

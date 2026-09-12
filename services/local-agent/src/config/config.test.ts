@@ -6,8 +6,8 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 const CONFIG_IMPORT_PATH = process.cwd().endsWith('services/local-agent')
-  ? './src/config.ts'
-  : './services/local-agent/src/config.ts';
+  ? './src/config/config.ts'
+  : './services/local-agent/src/config/config.ts';
 
 function storedModelConfig(): Record<string, unknown> {
   return {

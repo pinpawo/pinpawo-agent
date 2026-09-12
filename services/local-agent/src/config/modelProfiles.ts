@@ -7,7 +7,7 @@ import {
   inferLlmStructuredOutputMethod,
   type LlmModelPreset,
 } from './llmModelPresets';
-import type { StoredConfig } from './storage';
+import type { StoredConfig } from '../storage';
 
 export const MODEL_PROFILES_VERSION = 1 as const;
 export const LEGACY_DEFAULT_MODEL_PROFILE_ID = 'legacy-default';

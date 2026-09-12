@@ -7,7 +7,7 @@ import test from 'node:test';
 import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
 import { FileSaver } from './fileSaver';
-import type { LocalAgentRuntimeConfig } from './runtimeConfig';
+import type { LocalAgentRuntimeConfig } from './config/runtimeConfig';
 
 function buildTestConfig(root: string): LocalAgentRuntimeConfig {
   return {

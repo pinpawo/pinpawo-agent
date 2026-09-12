@@ -28,15 +28,15 @@ import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
 } from './wire/messageDispatcher';
-import { ServerTuiSessionService, type TuiSessionCheckpointer } from './serverTuiSessions';
+import { ServerTuiSessionService, type TuiSessionCheckpointer } from './session/serverTuiSessions';
 import {
   createLocalServerRuntimeDepsStore,
   type ServerDeps,
   type ServerRuntimeDepsStore,
 } from './serverTypes';
-import type { HostExecutionConfig } from './hostExecutionConfig';
+import type { HostExecutionConfig } from './config/hostExecutionConfig';
 import type { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
-import type { LocalModelProfileRegistry } from './llmConfig';
+import type { LocalModelProfileRegistry } from './config/llmConfig';
 import {
   configureInflightOperationRegistry,
   createInflightOperationRun,

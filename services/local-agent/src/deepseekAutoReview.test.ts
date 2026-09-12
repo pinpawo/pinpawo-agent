@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildLocalAgentModels } from './agentModels';
 import { buildDecisionStructuredOutput } from './agentChannel';
-import { createLocalModelProfileRegistry } from './llmConfig';
-import { buildModelProfileRegistry } from './modelProfiles';
+import { createLocalModelProfileRegistry } from './config/llmConfig';
+import { buildModelProfileRegistry } from './config/modelProfiles';
 import { resolveGlobalReviewBatchPolicy } from '../../../packages/pet-agent/src/agent/orchestrator/review/globalReviewPolicy';
 import { buildReviewSpec } from '../../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec';
 

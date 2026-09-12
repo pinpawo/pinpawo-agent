@@ -16,22 +16,22 @@ import {
   type ReviewSpec,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
-import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
+import { createCapabilityDiagnosticReporter } from '../agentRegistryPreparation';
 import {
   buildChatSetup,
-} from './agent/buildChatSetup';
-import { LocalAgentGraphService } from './agentGraphService';
-import { readFinalMessageText } from './agentStreamEvents';
-import { loadAgentContext } from './contextLoader';
-import { FileSaver } from './fileSaver';
-import type { ServerDeps } from './serverTypes';
+} from '../agent/buildChatSetup';
+import { LocalAgentGraphService } from '../agentGraphService';
+import { readFinalMessageText } from '../agentStreamEvents';
+import { loadAgentContext } from '../contextLoader';
+import { FileSaver } from '../fileSaver';
+import type { ServerDeps } from '../serverTypes';
 import {
   createAdmittedLocalChatHumanMessage,
   createLocalChatHumanMessage,
   readLocalChatDisplayText,
-} from './agent/chatMessageInput';
-import { ImageAttachmentAdmission } from './agent/attachmentAdmission';
-import type { LocalAgentRuntimeConfig } from './runtimeConfig';
+} from '../agent/chatMessageInput';
+import { ImageAttachmentAdmission } from '../agent/attachmentAdmission';
+import type { LocalAgentRuntimeConfig } from '../config/runtimeConfig';
 import {
   createTuiSession,
   createTuiSessionForThread,
@@ -53,7 +53,7 @@ import {
   readTuiCheckpointTokenUsage,
   summarizeTuiCheckpointMessages,
   type TuiCheckpointMessage,
-} from './conversation/transcriptProjection';
+} from '../conversation/transcriptProjection';
 
 // Transcript projection belongs to Conversation; re-exported here so existing
 // importers of this module keep working while the domains settle.
@@ -63,7 +63,7 @@ export {
   readTuiCheckpointTokenUsage,
   summarizeTuiCheckpointMessages,
   type TuiCheckpointMessage,
-} from './conversation/transcriptProjection';
+} from '../conversation/transcriptProjection';
 
 export type ActivePendingInterrupt = PendingInterrupt & {
   sessionId: string;

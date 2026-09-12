@@ -7,7 +7,7 @@ import {
   resolveModelProfile,
   type ModelProfileRegistrySnapshot,
 } from './modelProfiles';
-import { loadStoredConfig } from './storage';
+import { loadStoredConfig } from '../storage';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   type BuiltinGlobalReviewPolicyMode,

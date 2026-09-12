@@ -39,25 +39,25 @@ export type {
 } from './hostCapabilityCatalog';
 export { FileSaver } from './fileSaver';
 export { HostCapabilityAssembly } from './hostCapabilityAssembly';
-export { loadPetDocumentFile } from './petDocument';
+export { loadPetDocumentFile } from './config/petDocument';
 export type {
   HostCapabilityAssemblyInitOptions,
   HostCapabilityAssemblyOptions,
 } from './hostCapabilityAssembly';
 export type { LoadedCapability, LoadedUserCapability } from './capabilityLoader';
-export type { LocalModelProfileRegistry } from './llmConfig';
+export type { LocalModelProfileRegistry } from './config/llmConfig';
 export {
   buildLocalAgentRuntimeConfig,
   resolveHostCheckpointPath,
-} from './runtimeConfig';
-export type { LocalAgentRuntimeConfig } from './runtimeConfig';
+} from './config/runtimeConfig';
+export type { LocalAgentRuntimeConfig } from './config/runtimeConfig';
 export type {
   HostToolkitInventoryStore,
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
 
-export { resolveHostExecutionConfig } from './hostExecutionConfig';
-export type { HostExecutionConfig } from './hostExecutionConfig';
+export { resolveHostExecutionConfig } from './config/hostExecutionConfig';
+export type { HostExecutionConfig } from './config/hostExecutionConfig';
 
 export {
   loadPetConfigs,
@@ -66,6 +66,6 @@ export {
   PET_DOCUMENT_FILE_NAME,
   resolvePetCapabilityDirectory,
   resolvePetDocumentPath,
-} from './petConfig';
-export type { PetConfig } from './petConfig';
+} from './config/petConfig';
+export type { PetConfig } from './config/petConfig';
 export { isSafePetPathSegment } from './petId';

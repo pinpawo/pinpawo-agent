@@ -9,7 +9,7 @@ import {
 } from '../../../local-agent/src/server';
 import {
   buildLocalAgentRuntimeConfig,
-} from '../../../local-agent/src/runtimeConfig';
+} from '../../../local-agent/src/config/runtimeConfig';
 import {
   createTestModelServerDeps,
 } from '../../../local-agent/src/testing/modelProfiles';

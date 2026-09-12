@@ -2,7 +2,7 @@ import {
   buildSetupGuide,
   formatSetupGuide,
   loadSetupEnvironment,
-} from '../configDiagnostics';
+} from '../config/configDiagnostics';
 import { loadStoredConfig } from '../storage';
 
 export async function runSetupGuide(options: { workdir?: string } = {}): Promise<void> {

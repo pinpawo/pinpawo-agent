@@ -33,7 +33,6 @@ import {
   adaptRootStream,
   type RootProtocolEvent,
 } from './events/rootStreamEventAdapter';
-import { clearAgentRunActivity, recordAgentRunActivity } from './operationActivityState';
 import { createLocalChatHumanMessage } from './agent/chatMessageInput';
 import {
   currentPlansEqual,
@@ -105,7 +104,6 @@ function emitInterruptRequested(params: {
   emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
   const { interruptId, payload } = params.pendingInterrupt;
-  recordAgentRunActivity('waiting_human', params.requestId);
   params.emitEvent({
     type: 'interrupt.requested',
     requestId: params.requestId,
@@ -383,7 +381,6 @@ export async function runAgentSessionTurn(
         case 'assistant.delta': {
           streamedReply += chatEvent.text;
           streamedReplyMessageId = chatEvent.messageId || streamedReplyMessageId;
-          recordAgentRunActivity('streaming', requestId);
           emitEvent({
             type: 'message.delta',
             requestId,
@@ -494,7 +491,6 @@ export async function runAgentSessionTurn(
       role: 'assistant',
       text: reply,
     });
-    clearAgentRunActivity(requestId);
     return { status: 'completed', reply };
   } finally {
     await waitForGraphRunSettlement(run);
@@ -541,7 +537,6 @@ export async function runAgentSessionTurn(
     text: finalReply,
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
-  clearAgentRunActivity(requestId);
 
   return { status: 'completed', reply: finalReply };
 }

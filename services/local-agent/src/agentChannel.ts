@@ -17,10 +17,10 @@ import {
   buildLocalAgentModels,
   resolveLlmGenerationReserveTokens,
 } from './agentModels';
-import type { AgentLlmConfig } from './agentConfig';
+import type { AgentLlmConfig } from './config/agentConfig';
 import type { AgentContext } from './contextLoader';
-import type { HostExecutionConfig } from './hostExecutionConfig';
-import { buildRuntimeEnvironmentSummary } from './runtimeEnvironment';
+import type { HostExecutionConfig } from './config/hostExecutionConfig';
+import { buildRuntimeEnvironmentSummary } from './config/runtimeEnvironment';
 import {
   buildLocalAgentInterfaceContext,
   type AgentInterfaceContext,
@@ -28,7 +28,7 @@ import {
 } from './chatInterface';
 import {
   inferLlmStructuredOutputMethod,
-} from './llmModelPresets';
+} from './config/llmModelPresets';
 import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { getConfig, setConfig } from '../config';
+import { getConfig, setConfig } from '../config/config';
 import { buildRunAgentRuntimeConfig } from './run';
 
 test('buildRunAgentRuntimeConfig applies explicit workdir to runtime config and global config fallback', () => {

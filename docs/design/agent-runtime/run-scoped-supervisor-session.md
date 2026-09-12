@@ -1,7 +1,8 @@
 # Root、Supervisor 与 Capability 的状态与交接
 
 状态：已接入运行图；本文为待 review 的工作设计稿，未落实的调整单列在“遗留项”。
-更新于 2026-09-12；本次核对基于已合并的 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)。
+更新于 2026-09-13；实现来源为 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)
+及 [PR #799](https://github.com/pinpawo/pinpawo-agent/pull/799) 的提示职责与自主调整改动。
 
 Root 状态、Entry `continue`、Supervisor 消息交接、Capability 执行及 Host 计划投影已统一接入。
 不再保留独立 active delegation、continuation、pending call 或下一次执行临时槽。
@@ -255,34 +256,9 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 [工具协议安全过滤](../../../packages/pet-agent/src/agent/messages/protocol.ts)处理输入；
 不删除原 checkpoint 事实、不补造成功结果，也不据此改变入口。
 
-## 已完成迁移索引（非待开发清单）
+## 实现入口
 
-以下字段已完成读写迁移。旧类型或 Announce 解析若仍用于历史读取、测试和报告，
-不代表它们仍是运行状态通道。
 
-| 当前结构 | 处置 |
-| --- | --- |
-| `taskActiveDelegation` | 删除独立容器；必要任务进度归入计划，执行身份/交付引用由调用与事实记录表达 |
-| `taskRunContinuation` | 删除；snapshot 就是保存的业务状态，不另设生命周期 |
-| `runSupervisorSession.plan` | 归入 `runSupervisorState.plan`，不保留两份计划 |
-| `runSupervisorSession.messages` | 迁入 Root 消息存储，保持工作归属并按新 run 重置工作视图 |
-| `runSupervisorSession.pendingCall` | 删除；实际执行消息与 checkpoint 表达调用现场 |
-| 计划中的 `executing` / `returned` | 删除；计划只记录验收/替换决定，执行进度读取最新工具调用及结果；Host 仍可投影为 active |
-| `sessionDelegationResults` | 删除重复交付存储；从 Root 的实际配对 ToolMessage 读取 |
-| Root 的 `taskPauseInterrupt` | 删除重复路由标志；读取本轮工具结果的 paused，原生暂停节点与 Capability 内部暂停协议保留 |
-| `RunSupervisorDispatch.root` | 删除整份状态副本；Entry 将路由消息提交 Root 后直接跳转，Supervisor 读取统一 Root state |
-| `runSupervisorReply` | 删除正文中转槽；Answer 从本轮已提交的 Supervisor 消息发布回复 |
-| `prepare` 的 reset 兜底、空预算节点 | 删除；新 run 统一由输入 builder 初始化，预算在 Supervisor 入口统一检查 |
-| `supervisorCommand` / 草案中的 `proposal` 字段 | 不再作为持久交接槽；内部控制消息及 handoff AIMessage 表达决定 |
-| `runNextDelegation` / 草案中的 `nextAttempt` | 收敛到本次调用参数与必要业务事实，删除可推导的重复状态 |
-| 草案中的 `lastOutcome`、嵌套 `run` | 不引入；复用原消息、运行身份、预算及出口 |
-| 模型侧第四个 `delegate_capability` 工具与派发回跳 | 移除额外模型轮次；保留执行调用/结果契约，由 Supervisor 退出边界派生调用 |
-| 非原生 `resume_active` 入口旁路 | 删除；经 Entry Answer 的 `continue` 进入正常调度 |
-| 进度投影、回复/错误出口、暂停、授权与产物字段 | 保留必要语义与唯一来源，不顺带重做 Host、资源存储或错误系统 |
-
-#795 基线使用 proposal slot、独立工作消息、pending call 和额外 delegation 模型轮次；
-当前从刚完成的内部工具消息对读取决定，派生实际调用，由 Root 校验并与计划更新一起提交。
-主要接入位置：
 [控制协议](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/protocol.ts)、
 [消息交接](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/messageHandoff.ts)、
 [Supervisor agent](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.ts)、
@@ -330,26 +306,13 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 原生 interrupt、执行前后 checkpoint、跨 run 的 Entry `continue` 和工作 lane 隔离。
 脚本模型测试不等同于真实模型 eval；两者的验证结果分别记录。
 
-### 历史验证记录（2026-09-11，不代表当前分支的复验结果）
+真实模型 eval 使用合成任务和执行证据，不执行业务工具，关闭远程 tracing。
+它验证调度语义，不替代 checkpoint、授权或副作用测试。提问用例按“不派发、不改计划”
+验收，允许自然回复和等价的控制工具回复，不限定某一种表达形式。
 
-| 验证 | 结果 |
-| --- | --- |
-| pet-agent 全量单元与集成测试 | 498 / 498 通过，包含真实 createAgent、生产 Root 图、无交付重试、最新结果验收、Entry 交接/调用 ID 隔离、消息回复发布、统一错误出口与原生恢复预算测试 |
-| pet-agent 源码与 eval 类型检查、本地端类型检查 | 通过 |
-| 本地端全量测试 | 620 通过、5 跳过；端口及子进程测试在沙箱外执行 |
-| Host 计划投影与事件 | 纳入本次本地端全量测试，执行进度从消息推导，保留 completed/pending/active 展示语义 |
-| 前一轮默认模型 `qwen3.8-max` 决策 eval | Boundary 9、计划调整 4、详情查询 7 个场景均取得通过结果；包含失败场景修正后的定向复跑，不是单次零失败运行；本次状态清理未重跑真实模型 eval |
-
-真实模型 eval 只使用合成任务和执行证据，不执行业务工具，关闭远程 tracing。
-它验证调度语义，不替代生产图的 checkpoint、授权或副作用测试。
-本轮发现并修正了 `reply` 被误当成进度通知、详情读取被误当成执行前置步骤，
-以及“暂缓验收并提问”被校验错误拦截的问题。提问用例按“不派发、不改计划”
-验收，允许自然回复和等价的控制工具回复，不通过限定某一种表达形式来判定成败。
-
-本次不新增并行调度、独立存储、快照采用协议或外部工具节点层，不涉及已暂停的 macOS companion。
-旧交接协议已从当前文档中移除，历史内容可通过 Git 查看。
-[合并时设计](https://github.com/pinpawo/pinpawo-agent/blob/b8b43353969aa3c4dd9e87db620f79a5b3dd6cca/docs/design/agent-runtime/run-scoped-supervisor-session.md)
-记录 #795 基线；当前重构方向以本文为准。
+本文不设计并行调度、独立存储、快照采用协议或额外外部工具节点层。
+已完成迁移清单、旧协议和阶段性测试结果不再内嵌，见
+[历史版本](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/run-scoped-supervisor-session.md)。
 
 ## 遗留项（2026-09-12 核对）
 
@@ -363,5 +326,4 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 
 历史 Announce 读取、工具协议输入过滤和 Capability 私有消息留存不是待删除的运行状态。
 它们分别承担旧会话读取、模型输入配对安全和隔离历史保存；是否淘汰历史兼容或缩短
-留存周期应单独决定，不混入 Supervisor 调度重构。本文的迁移表和历史验证记录也不应
-被当作当前待办或本次测试结果。
+留存周期应单独决定，不混入 Supervisor 调度重构。

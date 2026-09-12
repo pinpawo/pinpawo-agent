@@ -10,9 +10,7 @@
 本文是 `packages/pet-agent` 对 Capability / Toolkit V2 的公共契约说明。
 Host、Agent、Capability、Toolkit 之间的 accepted ownership 与跨 Host 装配约束见
 [领域关系设计](../../design/host-agent-capability-toolkit.md)。
-设计理由与组合边界见
-[Toolkit Composition Design](../../design/agent-runtime/toolkit-composition.md)，
-目录插件格式见
+工具审核策略与恢复见[Review 设计](../../design/agent-runtime/review.md)，目录插件格式见
 [Capability 目录协议](capability-directory.md)。
 
 ## 1. 核心模型
@@ -32,6 +30,11 @@ ToolDefinition
 
 Capability 不继承或调用另一个 Capability。多个场景需要复用工具能力时，
 通过 `uses` 组合 Toolkit；多个 Capability 的先后关系由 orchestrator 编排。
+
+组合只复用工具能力，不继承其他 Capability 的 instructions、权限或结果生命周期。
+Toolkit instructions 描述工具族的使用方式，Capability instructions 描述任务约束和
+结果要求；具体任务通过 delegation briefing 传入。Toolkit 不拥有业务交付生命周期。
+这样避免修改一个 Capability 时隐式改变其他 Capability 的提示或权限。
 
 ## 2. Capability
 
@@ -62,7 +65,7 @@ type InstructionDocument = {
 - `instructions`：一个非空 Markdown 文档；digest 由
   `defineInstructionDocument()` 生成并校验。
 - `lifecycle.finalize`：可选的确定性收尾 hook，用于整理已有执行结果、
-  调整 announce 或持久化 artifact。
+  调整本次 output 或持久化 artifact。
 
 `uses` 可以是空数组，此时 Capability 是 instructions-only，但仍然通过同一
 subagent 执行路径运行。V2 没有 optional Toolkit 依赖：声明在 `uses` 中就表示

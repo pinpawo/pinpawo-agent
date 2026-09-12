@@ -54,7 +54,7 @@ surfaces. It is reference material: for the system model and architecture, read
 Some API behavior is motivated by detailed design records. They explain why a
 boundary exists but do not override a current contract:
 
-- [Toolkit composition design](../../design/agent-runtime/toolkit-composition.md)
+- [Capability / Toolkit contract](../extensions/capability-toolkit.md)
 - [Studio independent Host runtime](../../design/studio/independent-host-runtime.md)
 - [Capability Artifact Store design](../artifacts/store.md)
 - [Documentation index](../../index.md) for the full design-record catalog

@@ -56,6 +56,25 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 [组合设计历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-composition.md)
 及 [HITL 初稿历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-hitl-policy.md)。
 
+## Auto review 校准（2026-09-13）
+
+模型按整批具体动作评分，程序仍按 strict ≤ 2、relaxed ≤ 9 放行；10 分、模型失败或
+证据预算不足转人工。默认等级、已有授权匹配和原始工具硬限制不变。
+
+- 全局提示定义风险边界；Toolkit guidance 只补充操作语义，不因 shell、网络或目录外
+  路径本身增加风险。范围明确、可恢复的开发编辑、已有项目的依赖安装、构建和测试可自动评估。
+- 系统/敏感路径、提权、未知远程脚本、强推、发布部署和大范围破坏仍需人工。
+  Git 普通指定 issue 或未合并 PR 的关闭可自动评估；批量关闭、删除、合并和管理权限仍需人工。
+- 审核输入完整保留工具参数，含命令尾部、路径及 patch/body；不以摘要替换原始输入。
+  各动作共享 6,000 字符预算，总输入上限 8,000 字符，最多 32 个动作。完整证据超限或
+  无法序列化时直接转人工，不裁掉部分动作或危险载荷后放行。说明性摘要可缩短并标明截断。
+- 非敏感开发路径不局限于 workdir，但 current_task 仍只是模型产生的相关性线索，不能
+  充当用户授权或覆盖风险证据。普通凭证认证使用不等于读取或泄露凭证。
+
+验证分别覆盖误拦截和危险漏放；合成风险场景只提交审核模型，不执行其中的命令。
+生产提示和 Toolkit guidance 由 [auto-review eval](../../../packages/pet-agent/evals/auto-review-risk.eval.ts)
+直接加载，单元测试验证证据完整性和程序阈值，不以提示词字面匹配代替语义验证。
+
 ## Decisions
 
 Pet Runtime has two concrete interrupt concepts:

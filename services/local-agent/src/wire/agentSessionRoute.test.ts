@@ -6,11 +6,11 @@ import { WebSocket } from 'ws';
 import {
   readResidentPetIdFromAgentSessionPath,
   startResidentPetAgentSessionTransport,
-} from './residentPetAgentSessionTransport';
+} from './agentSessionRoute';
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,
-} from './residentPetHost';
+} from '../residentPetHost';
 
 function connect(url: string, token: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {

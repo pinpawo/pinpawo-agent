@@ -44,8 +44,47 @@ export type ServerDeps = HostExecutionConfig & {
   defaultCapabilityName?: string;
   /** Host-loaded root document shared by every model role of this resident Pet. */
   petDocument?: PetDocument;
-  capabilityArtifactStore?: CapabilityArtifactStore;
+  /**
+   * Required: every production Host supplies one, and an execution cannot be
+   * assembled without it. It was optional here while consumers re-checked it
+   * at runtime; the type now says what the code always assumed.
+   */
+  capabilityArtifactStore: CapabilityArtifactStore;
 };
+
+/**
+ * Narrow contracts, one per domain.
+ *
+ * `ServerDeps` is the Host's full assembly. It is not a bus: a consumer
+ * declares the fields it actually reads, per module-boundaries §二
+ * 「消费者声明自身需要的字段」. These aliases give those declarations a name
+ * so the dependency direction is visible in signatures rather than implied by
+ * a shared bag.
+ */
+
+/** Pet identity. Owned by Host (domains §一.1, §一.8). */
+export type PetIdentityDeps = Pick<ServerDeps, 'petId' | 'petName'>;
+
+/** What a runtime-config projection reads. Owned by Config (domains §一.5). */
+export type RuntimeProjectionDeps =
+  & Pick<ServerDeps, 'serverMode' | 'modelProfiles'>
+  & HostExecutionConfig;
+
+/**
+ * Everything assembling one execution needs beyond the session's own identity.
+ */
+export type ChatSetupDeps =
+  & Pick<
+    ServerDeps,
+    | 'modelProfiles'
+    | 'capabilityCatalog'
+    | 'toolkitInventory'
+    | 'toolkitRuntimeManager'
+    | 'defaultCapabilityName'
+    | 'petDocument'
+  >
+  & HostExecutionConfig
+  & Pick<ServerDeps, 'capabilityArtifactStore'>;
 
 export type ServerRuntimeDepsStore = Readonly<{
   get: () => Readonly<ServerDeps>;

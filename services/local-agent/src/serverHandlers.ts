@@ -3,7 +3,7 @@ import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './agentConfig';
 import { LocalAgentGraphService } from './agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
-import { buildLocalAgentSessionSnapshot } from './agentSessionSnapshot';
+import { buildLocalAgentSessionSnapshot } from './conversation/agentSessionSnapshot';
 import type {
   AgentModelProfileSummary,
   AgentRuntimeEvent,
@@ -12,11 +12,12 @@ import type {
 } from '@pinpawo/agent-session';
 import type {
   LocalAgentSessionServerMessage,
-} from './localAgentProtocol';
+} from './wire/protocol';
 import { handleLocalHttpRequest } from './httpHandlers';
-import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
-import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
-import { ServerSessionCommandQueue } from './serverSessionCommandQueue';
+import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
+import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
+import { SessionAdmission } from './sessionAdmission';
+import { SessionCommandQueue } from './sessionCommandQueue';
 import { ServerChatHandler } from './serverChatHandler';
 import type {
   AgentSessionTurnOptions,
@@ -68,6 +69,9 @@ type SessionSummarySource = Pick<
   AgentSessionSummary,
   'id' | 'title' | 'messageCount' | 'createdAt' | 'updatedAt' | 'active'
 >;
+
+/** Shown whenever a command is refused because a run holds the session. */
+const RUN_IN_FLIGHT_MESSAGE = 'wait for the current response to finish';
 
 type ActiveChatRun = {
   requestId: string;
@@ -123,10 +127,43 @@ export function createLocalServerHandlers(
     ...(options.loadContext ? { loadContext: options.loadContext } : {}),
     ...(options.runAgentTurn ? { runAgentTurn: options.runAgentTurn } : {}),
   });
-  const sessionCommands = new ServerSessionCommandQueue();
-  // Actor-wide admission: session transitions and chat operations never overlap.
-  let activeChatOperations = 0;
-  let sessionTransition: Promise<void> | null = null;
+  const sessionAdmission = new SessionAdmission();
+  const sessionCommands = new SessionCommandQueue();
+  /**
+   * Commands are refused while a run is in flight.
+   *
+   * Every command either changes what the run is writing to (`/new`,
+   * `/resume`, `/model`, `/compact`, `/policy`) or reports state the run is
+   * still producing (`/refresh`, whose purpose is to re-read the UI *after* a
+   * run settles). Admitting any of them mid-run means acting on a session
+   * that is about to change under the caller.
+   *
+   * The rule lives at this boundary so a new command cannot be added without
+   * it, and on the server because that is the only place the invariant can be
+   * held — a client blocking its command panel is feedback, not enforcement.
+   */
+  const runSessionCommand = (
+    command: () => Promise<void>,
+    refuse: () => void,
+  ) => sessionCommands.enqueue(async () => {
+    if (sessionAdmission.hasActiveRun()) {
+      refuse();
+      return;
+    }
+    await command();
+  });
+  const refuseSessionCommand = (
+    peer: ServerPeer,
+    requestId: string,
+    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
+  ) => () => {
+    peer.send({
+      type: 'session.error',
+      requestId,
+      operation,
+      message: RUN_IN_FLIGHT_MESSAGE,
+    });
+  };
   const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
 
   const loadSnapshot = async (peer?: ServerPeer) => {
@@ -279,24 +316,7 @@ export function createLocalServerHandlers(
       sessionId: string;
       modelProfileId: string;
     },
-  ) => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    if (activeChatOperations > 0) {
-      sendModelSelectionError(
-        peer,
-        message,
-        'run_active',
-        'cannot switch models while a session run is active',
-      );
-      return;
-    }
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
-    });
-    sessionTransition = currentTransition;
+  ) => sessionAdmission.transact(async () => {
     let selectionCommitted = false;
     try {
       const requestDeps = runtimeDeps.get();
@@ -406,151 +426,106 @@ export function createLocalServerHandlers(
         'selection_failed',
         error instanceof Error ? error.message : 'model selection failed',
       );
-    } finally {
-      if (sessionTransition === currentTransition) {
-        sessionTransition = null;
-      }
-      releaseSessionTransition();
     }
-  };
+  }, () => {
+    sendModelSelectionError(
+      peer,
+      message,
+      'run_active',
+      'cannot switch models while a session run is active',
+    );
+  });
 
-  const createSession = async () => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
-      throw Object.assign(
-        new Error('cannot create a session while a run is active'),
-        { code: 'session_new_conflict' },
-      );
-    }
+  const createSession = () => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.createNewSession(requestDeps.petId);
+    return {
+      session: projectChatSessionSummary({
+        ...session,
+        active: true,
+      }),
+      snapshot: buildLocalAgentSessionSnapshot({
+        sessionId: session.id,
+        kind: 'chat',
+        messages: [],
+        deps: requestDeps,
+        modelProfileId: session.modelProfileId,
+        requiredInputModalities: session.requiredInputModalities,
+        sessionTokenUsage: null,
+        pendingInterrupt: null,
+        currentPlan: null,
+      }),
+    };
+  }, () => {
+    throw Object.assign(
+      new Error('cannot create a session while a run is active'),
+      { code: 'session_new_conflict' },
+    );
+  });
 
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
+  // Disconnect aborts active runs but deliberately leaves ownership with their
+  // invocation owners until graph output settles. That brief settlement window
+  // still counts as an active run here, so a session switch cannot race the
+  // old thread's final checkpoint write.
+  const resumeSession = (sessionId: string) => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const result = await tuiSessions.resumeSession(requestDeps, sessionId);
+    const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
+      requestDeps,
+      result.pendingInterrupt,
+    );
+    return {
+      session: projectChatSessionSummary(result.session),
+      snapshot: buildLocalAgentSessionSnapshot({
+        sessionId: result.session.id,
+        kind: 'chat',
+        messages: result.messages,
+        deps: requestDeps,
+        modelProfileId: result.session.modelProfileId,
+        requiredInputModalities: result.session.requiredInputModalities,
+        sessionTokenUsage: result.sessionTokenUsage,
+        pendingInterrupt,
+        currentPlan: result.currentPlan,
+      }),
+    };
+  }, () => {
+    throw Object.assign(
+      new Error('cannot resume a session while a run is active'),
+      { code: 'session_resume_conflict' },
+    );
+  });
+
+  const compactSession = (sessionId: string) => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.getSession(requestDeps.petId, sessionId);
+    if (!session) {
+      throw new Error('session not found');
+    }
+    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+    if (activeSession.id !== session.id) {
+      throw new Error('context compaction requires the active session');
+    }
+    const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
+    const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
+    const state = await chatGraphService.readThreadState(setup);
+    if (state.pendingInterrupt) {
+      throw new Error('cannot compact context while human review is pending');
+    }
+    const result = await compactOrchestratorMessages({
+      messages: state.messages,
+      model: setup.graphConfig.models.observe ?? setup.graphConfig.models.act,
     });
-    sessionTransition = currentTransition;
-    try {
-      const requestDeps = runtimeDeps.get();
-      const session = tuiSessions.createNewSession(requestDeps.petId);
-      return {
-        session: projectChatSessionSummary({
-          ...session,
-          active: true,
-        }),
-        snapshot: buildLocalAgentSessionSnapshot({
-          sessionId: session.id,
-          kind: 'chat',
-          messages: [],
-          deps: requestDeps,
-          modelProfileId: session.modelProfileId,
-          requiredInputModalities: session.requiredInputModalities,
-          sessionTokenUsage: null,
-          pendingInterrupt: null,
-          currentPlan: null,
-        }),
-      };
-    } finally {
-      sessionTransition = null;
-      releaseSessionTransition();
+    if (result.compacted) {
+      await chatGraphService.updateState(setup, { messages: result.messages });
+      await tuiSessions.refreshActiveSessionSummary(requestDeps);
     }
-  };
-
-  const resumeSession = async (sessionId: string) => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    // Disconnect aborts active runs but deliberately leaves ownership with
-    // their invocation owners until graph output settles. Keep that brief
-    // settlement window in this actor-wide admission check so a session switch
-    // cannot race the old thread's final checkpoint write.
-    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
-      throw Object.assign(
-        new Error('cannot resume a session while a run is active'),
-        { code: 'session_resume_conflict' },
-      );
-    }
-
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
-    });
-    sessionTransition = currentTransition;
-    try {
-      const requestDeps = runtimeDeps.get();
-      const result = await tuiSessions.resumeSession(requestDeps, sessionId);
-      const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
-        requestDeps,
-        result.pendingInterrupt,
-      );
-      return {
-        session: projectChatSessionSummary(result.session),
-        snapshot: buildLocalAgentSessionSnapshot({
-          sessionId: result.session.id,
-          kind: 'chat',
-          messages: result.messages,
-          deps: requestDeps,
-          modelProfileId: result.session.modelProfileId,
-          requiredInputModalities: result.session.requiredInputModalities,
-          sessionTokenUsage: result.sessionTokenUsage,
-          pendingInterrupt,
-          currentPlan: result.currentPlan,
-        }),
-      };
-    } finally {
-      sessionTransition = null;
-      releaseSessionTransition();
-    }
-  };
-
-  const compactSession = async (sessionId: string) => {
-    while (sessionTransition) {
-      await sessionTransition;
-    }
-    if (activeChatOperations > 0 || inflightRequests.hasActiveRequest()) {
-      throw new Error('cannot compact context while a session run is active');
-    }
-
-    let releaseSessionTransition!: () => void;
-    const currentTransition = new Promise<void>((resolve) => {
-      releaseSessionTransition = resolve;
-    });
-    sessionTransition = currentTransition;
-    try {
-      const requestDeps = runtimeDeps.get();
-      const session = tuiSessions.getSession(requestDeps.petId, sessionId);
-      if (!session) {
-        throw new Error('session not found');
-      }
-      const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
-      if (activeSession.id !== session.id) {
-        throw new Error('context compaction requires the active session');
-      }
-      const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
-      const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
-      const state = await chatGraphService.readThreadState(setup);
-      if (state.pendingInterrupt) {
-        throw new Error('cannot compact context while human review is pending');
-      }
-      const result = await compactOrchestratorMessages({
-        messages: state.messages,
-        model: setup.graphConfig.models.observe ?? setup.graphConfig.models.act,
-      });
-      if (result.compacted) {
-        await chatGraphService.updateState(setup, { messages: result.messages });
-        await tuiSessions.refreshActiveSessionSummary(requestDeps);
-      }
-      return {
-        compacted: result.compacted,
-        snapshot: await loadSnapshot(),
-      };
-    } finally {
-      if (sessionTransition === currentTransition) {
-        sessionTransition = null;
-      }
-      releaseSessionTransition();
-    }
-  };
+    return {
+      compacted: result.compacted,
+      snapshot: await loadSnapshot(),
+    };
+  }, () => {
+    throw new Error('cannot compact context while a session run is active');
+  });
 
   const respondToSessionRequest = async (
     peer: ServerPeer,
@@ -570,37 +545,47 @@ export function createLocalServerHandlers(
     }
   };
 
-  const afterSessionCommands = async (
+  /**
+   * Admit one human message — a chat request, or a reply to a pending
+   * interrupt.
+   *
+   * A message is not a command: it does not queue with `/new`, `/compact` and
+   * the rest. It waits for queued commands to drain so it runs against
+   * settled session state, then Session admits it for the duration of the run.
+   */
+  const admitHumanMessage = async (
     peer: ServerPeer,
     requestId: string,
     admit: () => Promise<void>,
   ) => {
-    await sessionCommands.waitForIdle(peer);
-    while (sessionTransition) {
-      await sessionTransition;
-    }
+    // A human message is not a command: it waits for queued commands to
+    // drain, then Session admits it.
+    await sessionCommands.waitForIdle();
     if (!peer.isConnected()) {
       return;
     }
-    const activeRun: ActiveChatRun = {
-      requestId,
-      startedAt: Date.now(),
-    };
-    activeChatRuns.set(peer, activeRun);
-    activeChatOperations += 1;
-    try {
-      await admit();
-    } finally {
-      activeChatOperations -= 1;
-      if (activeChatRuns.get(peer) === activeRun) {
-        activeChatRuns.delete(peer);
+    await sessionAdmission.runInSession(async () => {
+      if (!peer.isConnected()) {
+        return;
       }
-    }
+      const activeRun: ActiveChatRun = {
+        requestId,
+        startedAt: Date.now(),
+      };
+      activeChatRuns.set(peer, activeRun);
+      try {
+        await admit();
+      } finally {
+        if (activeChatRuns.get(peer) === activeRun) {
+          activeChatRuns.delete(peer);
+        }
+      }
+    });
   };
 
   const peerHandlers: LocalServerPeerHandlers = {
     onChatRequest: (client, message) => {
-      return afterSessionCommands(
+      return admitHumanMessage(
         client,
         message.requestId,
         () => chatHandler.handleChatRequest(
@@ -610,7 +595,7 @@ export function createLocalServerHandlers(
         ),
       );
     },
-    onInterruptResume: (client, message) => afterSessionCommands(
+    onInterruptResume: (client, message) => admitHumanMessage(
       client,
       message.requestId,
       () => chatHandler.handleInterruptResume(
@@ -634,8 +619,7 @@ export function createLocalServerHandlers(
       tuiSessions.createNewSession(petId);
       console.log(`[local-server] new session created for pet ${petId}`);
     },
-    onRuntimeConfigUpdate: (client, message) => sessionCommands.enqueue(
-      client,
+    onRuntimeConfigUpdate: (client, message) => runSessionCommand(
       async () => {
         try {
           const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
@@ -668,9 +652,16 @@ export function createLocalServerHandlers(
           });
         }
       },
+      () => {
+        if (!message.requestId) return;
+        client.send({
+          type: 'runtime_config.error',
+          requestId: message.requestId,
+          message: RUN_IN_FLIGHT_MESSAGE,
+        });
+      },
     ),
-    onSessionSnapshotGet: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionSnapshotGet: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -681,9 +672,9 @@ export function createLocalServerHandlers(
           snapshot: await loadSnapshot(client),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'snapshot'),
     ),
-    onSessionList: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -694,9 +685,9 @@ export function createLocalServerHandlers(
           sessions: await listSessions(),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'list'),
     ),
-    onSessionNew: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionNew: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -707,9 +698,9 @@ export function createLocalServerHandlers(
           ...await createSession(),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'new'),
     ),
-    onSessionResume: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionResume: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -722,9 +713,9 @@ export function createLocalServerHandlers(
           };
         },
       ),
+      refuseSessionCommand(client, message.requestId, 'resume'),
     ),
-    onSessionCompact: (client, message) => sessionCommands.enqueue(
-      client,
+    onSessionCompact: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
         client,
         message.requestId,
@@ -735,9 +726,9 @@ export function createLocalServerHandlers(
           ...await compactSession(message.sessionId),
         }),
       ),
+      refuseSessionCommand(client, message.requestId, 'compact'),
     ),
-    onModelList: (client, message) => sessionCommands.enqueue(
-      client,
+    onModelList: (client, message) => runSessionCommand(
       async () => {
         try {
           client.send({
@@ -756,13 +747,13 @@ export function createLocalServerHandlers(
           );
         }
       },
+      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
     ),
-    onModelSelect: (client, message) => sessionCommands.enqueue(
-      client,
+    onModelSelect: (client, message) => runSessionCommand(
       () => selectModelProfile(client, message),
+      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
     ),
     onClose: (client) => {
-      sessionCommands.clear(client);
       activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
     },
@@ -773,12 +764,7 @@ export function createLocalServerHandlers(
     close: () => {},
     handleHttpRequest: (req, res, authToken) => {
       const requestDeps = runtimeDeps.get();
-      return handleLocalHttpRequest(req, res, requestDeps, {
-        authToken,
-        loadSnapshot,
-        listSessions,
-        resumeSession,
-      });
+      return handleLocalHttpRequest(req, res, requestDeps, { authToken });
     },
   };
 }

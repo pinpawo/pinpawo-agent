@@ -129,7 +129,6 @@ export {
 } from './agent/createAgentRuntime';
 export type {
   PauseTaskInterruptPayload,
-  AbortSettlement,
   AbortSettlementGraph,
   PendingInterrupt,
   PendingInterruptInputPolicy,

@@ -4717,9 +4717,9 @@ for (const continuePlan of [false, true]) {
     const cancelled = await graph.getState(config);
     assert.equal(toolRuns, 1);
     assert.equal(cancelled.values.runSupervisorState.plan[0].status, 'pending');
-    assert.deepEqual(await settleAbortedRun({
+    assert.equal(await settleAbortedRun({
       getState: () => graph.getState(config),
-    }), { status: 'finished' });
+    }), null);
     const next = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('What remains?')]), config);
     assert.equal(entryCalls, 2);
     assert.equal(supervisorCalls, continuePlan ? 2 : 1);

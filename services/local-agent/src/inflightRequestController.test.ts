@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { emitInflightToolEvent } from './inflightOperationRun';
 import { InflightRequestController } from './inflightRequestController';
-import type { LocalAgentControlServerMessage } from './localAgentProtocol';
+import type { LocalAgentControlServerMessage } from './wire/protocol';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 
 function createTestController() {
@@ -93,14 +93,13 @@ test('InflightRequestController routes interrupts by requestId', () => {
   assert.equal(second.controller.signal.aborted, false);
 });
 
-test('InflightRequestController reports active requests across keys', () => {
+test('InflightRequestController keeps runs isolated per key', () => {
   const { controller } = createTestController();
-  assert.equal(controller.hasActiveRequest(), false);
 
   const run = controller.start('peer-1', 'req-1');
-  assert.equal(controller.hasActiveRequest(), true);
+  assert.equal(controller.get('peer-1'), run);
   assert.equal(controller.get('peer-2'), null);
 
   controller.clear('peer-1', run);
-  assert.equal(controller.hasActiveRequest(), false);
+  assert.equal(controller.get('peer-1'), null);
 });

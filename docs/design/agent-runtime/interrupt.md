@@ -93,16 +93,18 @@ Runtime    AgentInterrupt.resume(value)                                     pars
   one task; a resolution that leads to another kind unwinds to that kind's own
   node rather than interrupting again in place. This is why a review
   rejection ends the subagent and lets `pauseGate` raise the pause.
-- `pause_task` from an aborted invocation is the open design point of #754.
-  It applies only when the abort left unfinished task work. An abort with
-  nothing to continue, such as during a root answer stream with no
-  delegation, is an `interrupted` run and not a pause. Where the Runtime
-  raises an abort-origin pause and how it re-enters are Runtime-private and
-  may not be `pauseGate`, since no delegation may exist. The constraint this
-  domain imposes is only that the result is a `pause_task` interrupt with an
-  id in `interrupts[]`, so the rest of the chain is unchanged. Until that
-  lands, an aborted run with retained work is not continuable, and interfaces
-  must not pretend it is.
+- **Cancellation is not an interrupt.** An aborted invocation raises nothing of
+  its own: committed facts are left intact and the next user run enters Entry
+  Answer. An unreturned execution is never turned into a synthetic resumable
+  success — settling only *reads*.
+- Cancellation settlement therefore returns the domain's own type:
+  `settleAbortedRun(graph): Promise<PendingInterrupt | null>`, where `graph`
+  offers `getState` alone. A returned interrupt is one that was **already**
+  pending when the abort landed; it is reported as `waiting` and published on
+  the `interrupt.requested` chain like any other. `null` means the cancelled
+  run reports `interrupted`. A settlement that throws takes the caller's
+  failure path: it is never caught and reported as `null` or as a clean
+  interruption.
 
 ### Host
 
@@ -174,7 +176,7 @@ Snapshot projection:
 |---|---|---|---|
 | Host read | any kind by id | only `human_review`; other kinds return `null` | `services/local-agent/src/agentGraphService.ts` `projectPendingInterrupt` |
 | Host read | no second source | `pauseTaskInterrupt` channel + `hasPendingContinuation` | `agentGraphService.ts`, `residentPetHost.ts` `readSettledState` |
-| Host settle | `waiting` | `waiting_human` for review; `paused` reported as `interrupted` | `chatSessionAdapter.ts`, `localServerChatHandler.ts` |
+| Host settle | `waiting` | done: settlement returns `PendingInterrupt \| null`, reported as `waiting` / `interrupted` | `agentGraphService.ts`, `serverChatHandler.ts`, `residentPetHost.ts` |
 | Host resume | one entry | `handleHumanReviewResponse`, `handleReviewCancel`, `handleRunInterrupt` review branch, `handleChatRequest` transition | `localServerChatHandler.ts` |
 | Event | `interrupt.requested` | `human_review.requested`; pause has no event | `packages/agent-session/src/events.ts` |
 | Projection | `{ interruptId, payload }` | review has id, pause does not; `readHumanReviewPendingInterrupt` narrowing | `packages/agent-session/src/review.ts` |
@@ -244,6 +246,9 @@ rather than adding a pause-only notice.
 
 - A `human_review` and a `pause_task` interrupt project through the same Host
   function with an id, and resume through the same client message.
+- A person's reply travels the Host as `{ interruptId, value }` and is turned
+  into a LangGraph `Command` only at the graph service's adapter boundary. No
+  handler builds an id-keyed resume map, and the Host does not read `value`.
 - An unknown interrupt payload fails loudly at the Host, never silently
   reports "no interrupt".
 - A pause is visible to a reconnecting client with its id, from the snapshot

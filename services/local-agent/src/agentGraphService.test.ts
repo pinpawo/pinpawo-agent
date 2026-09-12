@@ -6,7 +6,7 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { MemorySaver, interrupt } from '@langchain/langgraph';
 import { buildOrchestratorRunInput, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
-import { buildAgentGraphConfigurable, LocalAgentGraphService } from './agentGraphService';
+import { buildAgentGraphConfigurable, LocalAgentGraphService, type InterruptResume } from './agentGraphService';
 import { scriptedSupervisorResult } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 
 function setup(
@@ -48,7 +48,22 @@ test('interactive graph sessions use interface-provided review capabilities', ()
   });
 });
 
-test('graphs take current common context through run, invokeState and root stream entry points', async () => {
+/**
+ * Drive one run to completion through the service's public entry point.
+ * `run()` and `invokeState()` are gone, so every execution assertion below
+ * goes through the same root stream production uses.
+ */
+async function runToCompletion(
+  service: LocalAgentGraphService,
+  setup: AgentChannelSetup,
+  resume?: InterruptResume,
+) {
+  const stream = await service.streamEvents(setup, resume);
+  for await (const _event of stream) { /* Consume the root stream. */ }
+  await stream.output;
+}
+
+test('graphs take current common context through the root stream entry point', async () => {
   const seen: BaseMessage[][] = [];
   class Model extends BaseChatModel {
     _llmType() { return 'local-context-recorder'; }
@@ -69,13 +84,7 @@ test('graphs take current common context through run, invokeState and root strea
       graphConfig: { models: { act: model } },
       input: { messages: [new HumanMessage('hello')], context: { systemPromptSections: [{ id: 'host:pet', content: token }] } },
     };
-    if (index === 0) await service.run(input);
-    else if (index === 1) await service.invokeState(input);
-    else {
-      const stream = await service.streamEvents(input);
-      for await (const _event of stream) { /* Consume the root stream. */ }
-      await stream.output;
-    }
+    await runToCompletion(service, input);
     assert.equal(seen.length, index + 1);
     assert.equal(seen[index][0].text.split(token).length - 1, 1);
     for (const other of tokens.filter(value => value !== token)) assert.equal(seen[index][0].text.includes(other), false);
@@ -107,7 +116,7 @@ test('all invocation entry points preserve scope, trace identity and current met
   const graphConfig = { models: { act: model }, runSupervisorRunner: runner };
   const service = new LocalAgentGraphService();
   const graph = createOrchestratorGraph(graphConfig);
-  for (const path of ['core', 'run', 'invokeState', 'streamEvents']) {
+  for (const path of ['core', 'streamEvents']) {
     for (const allowedCapabilityNames of [['first'], []]) {
       const traceId = randomUUID();
       const workdir = `/workspace/${randomUUID()}`;
@@ -117,17 +126,11 @@ test('all invocation entry points preserve scope, trace identity and current met
           context: { workdir }, signal: new AbortController().signal, globalReviewPolicy: { mode: 'full_access' } },
       };
       if (path === 'core') await runAgent(graph, input.input, { registry, reviewCapabilities: { humanReview: false, sessionAuthorization: true } });
-      else if (path === 'run') await service.run(input);
-      else if (path === 'invokeState') await service.invokeState(input);
-      else {
-        const stream = await service.streamEvents(input);
-        for await (const _event of stream) { /* Consume the production stream. */ }
-        await stream.output;
-      }
+      else await runToCompletion(service, input);
       assert.deepEqual(seen.at(-1), { traceId, capabilities: allowedCapabilityNames, workdir }, path);
     }
   }
-  assert.equal(seen.length, 8);
+  assert.equal(seen.length, 4);
 });
 
 test('local stream resume refreshes invocation metadata while preserving the checkpoint task', async () => {
@@ -156,12 +159,27 @@ test('local stream resume refreshes invocation metadata while preserving the che
     input: { messages: [new HumanMessage('inspect')], threadId: randomUUID(), traceId,
       allowedCapabilityNames: [], context: { workdir: workdirs[0] } },
   };
-  await service.invokeState(input);
+  const initial = await service.streamEvents(input);
+  for await (const _event of initial) { /* Reach the interrupt. */ }
+  await initial.output;
   assert.equal(seen.length, 1);
   const resumed: AgentChannelSetup = { ...input,
     input: { ...input.input, traceId: randomUUID(), context: { workdir: workdirs[1] } },
   };
-  const stream = await service.streamEvents(resumed, service.buildResumeCommand(true));
+  // This fixture raises a payload the Runtime deliberately cannot decode, so
+  // the id is read from the checkpoint rather than through readThreadState.
+  const graph = createOrchestratorGraph(input.graphConfig);
+  const snapshot = await graph.getState({
+    configurable: buildAgentGraphConfigurable(input),
+  });
+  const interruptId = snapshot.tasks.flatMap(
+    (task) => task.interrupts ?? [],
+  )[0]?.id ?? '';
+  assert.ok(interruptId, 'the fixture must leave an interrupt to resume');
+  const stream = await service.streamEvents(resumed, {
+    interruptId,
+    value: true,
+  });
   for await (const _event of stream) { /* Resume through the production streaming path. */ }
   await stream.output;
   assert.deepEqual(seen, [
@@ -170,7 +188,9 @@ test('local stream resume refreshes invocation metadata while preserving the che
   ]);
 });
 
-test('explicit null input continues the checkpoint task through both execution paths', async () => {
+test('a settlement with nothing to continue leaves the committed task alone', async () => {
+  // An abort that left no pending delegation is not a pause: settling reports
+  // no interrupt and must not advance the thread on its own.
   const seen: BaseMessage[][] = [];
   class Model extends BaseChatModel {
     _llmType() { return 'checkpoint-continuation'; }
@@ -182,29 +202,21 @@ test('explicit null input continues the checkpoint task through both execution p
     }
   }
   const service = new LocalAgentGraphService();
-  for (const path of ['stream', 'invoke']) {
-    const input: AgentChannelSetup = {
-      registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
-      graphConfig: { models: { act: new Model({}) }, checkpoint: new MemorySaver() },
-      input: { threadId: randomUUID(), messages: [new HumanMessage('unused new input')] },
-    };
-    await service.updateState(input, buildOrchestratorRunInput([
-      new HumanMessage('checkpointed request'),
-    ]), 'captureUserRequest');
-    assert.equal((await service.readThreadState(input)).acceptsResume, true);
-    if (path === 'stream') {
-      const stream = await service.streamEvents(input, null);
-      for await (const _event of stream) { /* Consume the resumed task. */ }
-      await stream.output;
-    } else {
-      await service.invokeState(input, null);
-    }
-    const state = await service.readThreadState(input);
-    assert.equal(state.messages.at(-1)?.text, 'continued');
-    assert.ok(seen.at(-1)?.some(message => message.text === 'checkpointed request'));
-    assert.equal(seen.at(-1)?.some(message => message.text === 'unused new input'), false);
-    assert.equal(state.acceptsResume, false);
-  }
+  const input: AgentChannelSetup = {
+    registry: compileAgentRegistry({ capabilities: [], toolkits: [] }),
+    graphConfig: { models: { act: new Model({}) }, checkpoint: new MemorySaver() },
+    input: { threadId: randomUUID(), messages: [new HumanMessage('unused new input')] },
+  };
+  await service.updateState(input, buildOrchestratorRunInput([
+    new HumanMessage('checkpointed request'),
+  ]), 'captureUserRequest');
+  assert.equal((await service.readThreadState(input)).acceptsResume, true);
+
+  assert.equal(await service.settleAbortedRun(input), null);
+
+  // The committed task is still there to continue, and no model ran.
+  assert.deepEqual(seen, []);
+  assert.equal((await service.readThreadState(input)).acceptsResume, true);
 });
 
 test('graph execution uses replacement models and checkpoint adapters for the same thread', async () => {
@@ -226,18 +238,21 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
     graphConfig: { models: { act: new Model('first') }, checkpoint: firstCheckpoint },
     input: { threadId: randomUUID(), messages: [new HumanMessage('first request')] },
   };
-  assert.equal((await service.run(input)).reply, 'first');
+  await runToCompletion(service, input);
+  assert.equal((await service.readThreadState(input)).messages.at(-1)?.text, 'first');
 
   input.graphConfig.models = { act: new Model('replacement') };
   input.input.messages = [new HumanMessage('second request')];
-  const continued = await service.run(input);
-  assert.equal(continued.reply, 'replacement');
+  await runToCompletion(service, input);
+  const continued = await service.readThreadState(input);
+  assert.equal(continued.messages.at(-1)?.text, 'replacement');
   assert.ok(continued.messages.some(message => message.text === 'first request'));
 
   input.graphConfig.checkpoint = secondCheckpoint;
   input.input.messages = [new HumanMessage('separate store')];
-  const isolated = await service.run(input);
-  assert.equal(isolated.reply, 'replacement');
+  await runToCompletion(service, input);
+  const isolated = await service.readThreadState(input);
+  assert.equal(isolated.messages.at(-1)?.text, 'replacement');
   assert.equal(isolated.messages.some(message => message.text === 'first request'), false);
   assert.equal(isolated.messages.some(message => message.text === 'second request'), false);
 

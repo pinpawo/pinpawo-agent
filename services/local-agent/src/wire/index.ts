@@ -8,45 +8,45 @@
 export {
   startLocalServerTransport,
   startLocalServerWireTransport,
-} from './localServerTransport';
+} from './transport';
 export type {
   ServerTransport,
   ServerTransportOptions,
-} from './localServerTransport';
+} from './transport';
 export {
   attachLocalServerStdioTransport,
   attachLocalServerWireStdioTransport,
   redirectConsoleToStdioDiagnostics,
-} from './localServerStdioTransport';
+} from './stdioTransport';
 export type {
   ServerStdioTransport,
   ServerWireStdioTransport,
   ServerStdioTransportOptions,
-} from './localServerStdioTransport';
+} from './stdioTransport';
 export type {
   ServerWireHandlers,
   ServerWireLogError,
   ServerWireLogWarn,
   ServerWirePeer,
-} from './localServerWire';
+} from './framing';
 export type {
   ServerLogError,
   ServerLogWarn,
   LocalServerPeerHandlers,
   ServerTransportHandlers,
-} from './localServerMessageDispatcher';
-export type { ServerPeer } from './localServerPeer';
-export { sendLocalServerPeerEvent } from './localServerPeer';
-export type { LocalAgentServerMessage } from './localAgentProtocol';
+} from './messageDispatcher';
+export type { ServerPeer } from './peer';
+export { sendLocalServerPeerEvent } from './peer';
+export type { LocalAgentServerMessage } from './protocol';
 export {
   ensureLocalServerAuthToken,
   readLocalServerAuthToken,
-} from './localServerAuth';
+} from './auth';
 export {
   readResidentPetIdFromAgentSessionPath,
   RESIDENT_PET_AGENT_SESSION_ROUTE_PREFIX,
   startResidentPetAgentSessionTransport,
-} from './residentPetAgentSessionTransport';
+} from './agentSessionRoute';
 export type {
   ResidentPetAgentSessionTransportOptions,
-} from './residentPetAgentSessionTransport';
+} from './agentSessionRoute';

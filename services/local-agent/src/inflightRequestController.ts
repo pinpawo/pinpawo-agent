@@ -1,4 +1,4 @@
-import type { LocalAgentControlServerMessage } from './localAgentProtocol';
+import type { LocalAgentControlServerMessage } from './wire/protocol';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
   createInflightOperationRun,
@@ -41,10 +41,6 @@ export class InflightRequestController<TKey> {
 
   get(key: TKey) {
     return [...(this.requests.get(key) ?? [])].at(-1) ?? null;
-  }
-
-  hasActiveRequest() {
-    return [...this.requests.values()].some((runs) => runs.size > 0);
   }
 
   start(

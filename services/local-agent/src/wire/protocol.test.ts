@@ -5,7 +5,7 @@ import {
   parseLocalAgentServerMessage,
   sendLocalAgentEvent,
   sendLocalAgentMessage,
-} from './localAgentProtocol';
+} from './protocol';
 import {
   createAgentSessionSnapshot,
   type AgentSession,

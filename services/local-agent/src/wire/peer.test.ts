@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   sendLocalServerPeerEvent,
   type ServerPeer,
-} from './localServerPeer';
+} from './peer';
 
 test('local server peers preserve trusted event payloads by default', () => {
   const sent: unknown[] = [];

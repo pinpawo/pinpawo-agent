@@ -4,10 +4,8 @@ import {
   buildAgentRunnableConfig,
   readPendingInterrupt,
   settleAbortedRun,
-  type AgentRunResult,
   type OrchestratorGraph,
   type OrchestratorStateType,
-  type AbortSettlement,
   type PendingInterrupt,
 } from '@pinpawo/pet-agent';
 import type { BaseMessage } from '@langchain/core/messages';
@@ -15,7 +13,7 @@ import { Command, type GraphRunStream } from '@langchain/langgraph';
 import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
 import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
-import { projectCurrentPlan } from './currentPlanProjection';
+import { projectCurrentPlan } from './conversation/currentPlanProjection';
 import { createLangfuseCallbacks } from './langfuseTracing';
 
 const HEADLESS_REVIEW_CAPABILITIES = {
@@ -48,6 +46,17 @@ function buildAgentGraphRunConfig(setup: AgentChannelSetup) {
 export function buildAgentGraphConfigurable(setup: AgentChannelSetup) {
   return buildAgentGraphRunConfig(setup).configurable;
 }
+
+/**
+ * A person's reply to a pending interrupt, in the Host's own terms. The
+ * interrupt's kind owns what `value` means; the Host neither reads nor
+ * builds it, and the LangGraph `Command` is built at the adapter boundary
+ * inside this service.
+ */
+export type InterruptResume = {
+  interruptId: string;
+  value: unknown;
+};
 
 export type LocalAgentGraphThreadState = {
   messages: BaseMessage[];
@@ -97,33 +106,17 @@ function readSnapshotValues(snapshot: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function readGraphInterrupt(snapshot: unknown): { id: string; value: Record<string, unknown> } | null {
-  const tasks = Array.isArray((snapshot as { tasks?: unknown } | null)?.tasks)
-    ? (snapshot as { tasks: unknown[] }).tasks
-    : [];
-  for (const task of tasks) {
-    if (!task || typeof task !== 'object') continue;
-    const interrupts = Array.isArray((task as { interrupts?: unknown }).interrupts)
-      ? (task as { interrupts: unknown[] }).interrupts
-      : [];
-    const first = interrupts[0];
-    if (first && typeof first === 'object' && 'value' in first && first.value && typeof first.value === 'object') {
-      const interrupt = first as { id?: unknown; value: unknown };
-      if (typeof interrupt.id !== 'string' || !interrupt.id) return null;
-      return { id: interrupt.id, value: interrupt.value as Record<string, unknown> };
-    }
-  }
-  return null;
+/**
+ * The LangGraph adaptation of a person's reply. Keeping it here means no
+ * caller above this service constructs an id-keyed resume map or a `Command`.
+ */
+function buildResumeCommand(resume: InterruptResume) {
+  return new Command({
+    resume: { [resume.interruptId]: resume.value },
+  });
 }
 
 export class LocalAgentGraphService {
-  async run(setup: AgentChannelSetup): Promise<AgentRunResult> {
-    const state = await this.invokeState(setup);
-    const messages = state.messages ?? [];
-    const content = messages.at(-1)?.content;
-    return { messages, reply: typeof content === 'string' ? content.trim() : '' };
-  }
-
   /**
    * Root streamEvents(v3) consumption — the production path since #322
    * Phase 4 replaced the legacy `graph.stream(['messages','values','custom'])`
@@ -133,7 +126,7 @@ export class LocalAgentGraphService {
    */
   async streamEvents(
     setup: AgentChannelSetup,
-    inputOverride?: unknown,
+    resume?: InterruptResume,
   ): Promise<LocalAgentGraphEventStream> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     const callbacks = createLangfuseCallbacks({
@@ -144,9 +137,9 @@ export class LocalAgentGraphService {
       },
     });
     return await graph.streamEvents(
-      (inputOverride === undefined
+      (resume === undefined
         ? buildOrchestratorRunInput(setup.input.messages, setup.input)
-        : inputOverride) as Parameters<OrchestratorGraph['streamEvents']>[0],
+        : buildResumeCommand(resume)) as Parameters<OrchestratorGraph['streamEvents']>[0],
       {
         version: 'v3',
         ...buildAgentGraphRunConfig(setup),
@@ -155,7 +148,7 @@ export class LocalAgentGraphService {
     ) as LocalAgentGraphEventStream;
   }
 
-  async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
+  private async invokeState(setup: AgentChannelSetup, inputOverride?: unknown): Promise<OrchestratorStateType> {
     const graph = createOrchestratorGraph(setup.graphConfig);
     return await graph.invoke(
       inputOverride === undefined
@@ -202,7 +195,7 @@ export class LocalAgentGraphService {
    * Report any real interrupt already checkpointed when cancellation settled.
    * Never rewrite the checkpoint or execute another graph step here.
    */
-  settleAbortedRun(setup: AgentChannelSetup): Promise<AbortSettlement> {
+  settleAbortedRun(setup: AgentChannelSetup): Promise<PendingInterrupt | null> {
     // Reading the settled checkpoint must not inherit the cancelled signal.
     const { signal: _abortedSignal, ...settlementInput } = setup.input;
     const settlementSetup: AgentChannelSetup = {
@@ -211,12 +204,6 @@ export class LocalAgentGraphService {
     };
     return settleAbortedRun({
       getState: () => this.getRawState(settlementSetup),
-    });
-  }
-
-  buildResumeCommand(resume: unknown) {
-    return new Command({
-      resume,
     });
   }
 }

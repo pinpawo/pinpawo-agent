@@ -82,6 +82,36 @@ serverHandlers 同样按操作职责拆分：
 不同范围可以保留不同协调器，不强行合成一个全局队列。同一范围的准入和终结只能
 有一个权威所有者；避免内外层重复入队、互相等待或双重发布终结事件。
 
+#### 已核对的现状（实施前的事实基线）
+
+- **准入判据只有一个信号。** 四处操作（模型切换、建会话、恢复会话、compact）
+  现在都只看 `activeChatOperations`。它在 `afterSessionCommands` 里*包裹整轮对话*
+  地加减，已经覆盖该轮内部注册的所有 inflight run，因此
+  `|| inflightRequests.hasActiveRequest()` 是恒假的冗余项，已随本次核对删除
+  （`hasActiveRequest()` 一并移除，它没有其他生产调用者）。收敛准入时不要
+  重新引入第二个信号。
+- **`InflightRequestController` 看不到 resident dispatch。** residentPetHost 直接
+  用 `createInflightOperationRun`，从不注册进该 controller。判断“是否有活跃执行”
+  时不能只问它。
+- **待处理：串行保证是 per-peer 的，且 HTTP 绕过它。** `ServerSessionCommandQueue`
+  按 peer 存 tail，只保证单 peer 内串行；而 HTTP 入口的 `resumeSession`
+  （[httpHandlers.ts](../../../services/local-agent/src/httpHandlers.ts)）完全不经过
+  `sessionCommands`，只受 `activeChatOperations` / `sessionTransition` 约束。
+  跨 peer 以及 HTTP 与 WebSocket 并发时的准入归属，是本节收敛时要明确的真实边界。
+  （已在 [domain 定义](./domains.md) §三 定案：`sessionCommands` 整层是错层，
+  建会话/切模型改的是 Session 的状态而非连接的状态，准入应归 Session，与传输无关。）
+
+核对这一节时发现，本节反复用到的「范围」从未被定义，6 个协调器各自隐含了不同的
+范围（peer / Host / thread / Pet），这才是本节难以收敛的根因。更进一步，代码里连「一次执行」
+与「一个会话」都还没分开（`buildChatSetup` 挂在 session 服务上却在装配执行，
+`ServerDeps` 平铺了身份/配置源/长期服务/存储适配器），所以先要定 domain，
+scope 是它的推论。
+
+- domain 定义与证据：[local-agent domain 定义](./domains.md)
+- 准入归属与现状核对：[domain 定义](./domains.md) §三（它是 domain 的推论）
+
+本节的收敛以这两篇定稿为前提。
+
 wire 保留连接与请求的路由关系，把断连转换成取消对应执行的调用；agent 只接收
 不透明的请求/所有者标识或 AbortSignal，不读取 ServerPeer。Host 关闭时停止接收
 新工作、取消活跃执行、等待收尾，再释放资源。普通对话与 resident dispatch 都要
@@ -93,8 +123,14 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 ### 其他两处归属
 
 - `localServerTransportApi.ts` 是 re-export 包出口，与 `hostRuntime.ts` 并列在顶层。
+  已落地为 `wire/index.ts`；tsup entry key 保持不变，`pinpawo/local-server-transport`
+  子路径与产物文件名不受影响。
 - `residentPetAgentSessionTransport.ts` 名字里有 transport，实际解析
-  `/agent-session/pets/<id>` 路由 → `wire/`。
+  `/agent-session/pets/<id>` 路由 → `wire/`。已落地为 `wire/agentSessionRoute.ts`。
+- 迁入 `wire/` 时一并去掉历史 `local` 前缀（`localAgentProtocol` → `protocol`、
+  `localServerPeer` → `peer` 等）。`toolkits/local/` 的 `local` 是「本机工具」的
+  真实语义，不在此列，保留。导出符号名（`sendLocalServerPeerEvent` 等）是跨包
+  公开 API，单独处理。
 
 ---
 

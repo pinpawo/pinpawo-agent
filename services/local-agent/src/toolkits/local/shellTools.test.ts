@@ -12,8 +12,8 @@ import {
   runShellTool,
   shellOperationMetadata,
   truncateShellOutput,
-} from './toolkits/local/shellTools';
-import { createBashToolkit } from './toolkits/local';
+} from './shellTools';
+import { createBashToolkit } from './index';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

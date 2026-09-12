@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit } from './toolkits/local';
-import { runJqProcess, runJqQuery } from './toolkits/local/jsonTools';
+import { createBashToolkit } from './index';
+import { runJqProcess, runJqQuery } from './jsonTools';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

@@ -30,7 +30,6 @@
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { Command } from '@langchain/langgraph';
 import {
   applyReviewEffects,
   buildReviewSpec,
@@ -241,11 +240,8 @@ function createFakeGraphService(params: {
         : threadStateClean();
       return state.messages;
     },
-    buildResumeCommand(resume: unknown) {
-      return new Command({ resume });
-    },
-    async *streamEvents(_setup: unknown, inputOverride?: unknown) {
-      if (!inputOverride) {
+    async *streamEvents(_setup: unknown, resume?: unknown) {
+      if (!resume) {
         // First (non-resume) turn: agent raises an interrupt.
         const payload = buildShellReviewInterrupt(params.pendingShellCommand);
         interruptEmitted = true;
@@ -285,8 +281,7 @@ function createFakeGraphService(params: {
         params: { namespace: [], data: { messages: [aiMessage] } },
       };
     },
-    invokeState() { throw new Error('not used'); },
-    run() { throw new Error('not used'); },
+    settleAbortedRun() { throw new Error('not used'); },
     invokeStructuredResult() { throw new Error('not used'); },
   };
 }
@@ -373,7 +368,7 @@ async function target(inputs: ExampleInputs): Promise<Record<string, unknown>> {
     request: {
       kind: 'resume',
       requestId: FAKE_REQUEST_ID,
-      resume: inputs.resume,
+      resume: { interruptId: 'interrupt-1', value: inputs.resume },
     },
     setup: buildFakeSetup(),
     graphService: fakeGraph as never,

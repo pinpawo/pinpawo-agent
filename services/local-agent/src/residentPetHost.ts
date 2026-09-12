@@ -8,7 +8,6 @@ import {
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
 import {
-  type AbortSettlement,
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
@@ -17,7 +16,7 @@ import {
 
 import type { AgentChannelSetup } from './agentChannel';
 import { LocalAgentGraphService } from './agentGraphService';
-import { projectPendingInterrupt } from './pendingInterruptProjection';
+import { projectPendingInterrupt } from './conversation/pendingInterruptProjection';
 import {
   runAgentSessionTurn,
   type AgentSessionTurnOptions,
@@ -28,7 +27,7 @@ import { createLocalServerHandlers, type ServerHandlerOptions } from './serverHa
 import {
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
-} from './localServerMessageDispatcher';
+} from './wire/messageDispatcher';
 import { ServerTuiSessionService, type TuiSessionCheckpointer } from './serverTuiSessions';
 import {
   createLocalServerRuntimeDepsStore,
@@ -134,6 +133,18 @@ type QueuedOperation = {
   reject: (error: unknown) => void;
 };
 
+/** A second interactive client tried to attach to a Host that already has one. */
+export class ResidentPetInteractionBusyError extends Error {
+  readonly code = 'interaction_busy';
+
+  constructor(
+    message = 'This Pet already has an interactive client. Use dispatch for additional input.',
+  ) {
+    super(message);
+    this.name = 'ResidentPetInteractionBusyError';
+  }
+}
+
 export class ResidentPetOperationCancelledError extends Error {
   constructor(message = 'Resident Pet operation was cancelled before it started.') {
     super(message);
@@ -147,8 +158,9 @@ function defaultLogError(message: string, error: unknown): void {
 
 /** One non-preemptive graph admission point shared by conversation and dispatch. */
 export class ResidentPetCoordinator {
-  private readonly conversationQueue: QueuedOperation[] = [];
   private readonly dispatchQueue: QueuedOperation[] = [];
+  /** Conversations currently holding the gate busy; they never enter a queue. */
+  private conversations = 0;
   private readonly listeners = new Set<(state: PetDispatchState) => void>();
   private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
   private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
@@ -173,7 +185,10 @@ export class ResidentPetCoordinator {
     return {
       state: this.state,
       activeOperation: this.activeOperation,
-      queuedConversations: this.conversationQueue.length,
+      // Conversations hold the gate but never queue, so this is the count of
+      // conversations currently holding it. Kept because StudioDispatchQueue
+      // publishes the field.
+      queuedConversations: this.conversations,
       queuedDispatches: this.dispatchQueue.length,
     };
   }
@@ -188,12 +203,64 @@ export class ResidentPetCoordinator {
     return () => this.queueListeners.delete(listener);
   }
 
-  enqueueConversation<T>(operation: () => Promise<T>): Promise<T> {
-    return this.enqueue('conversation', operation);
+  /**
+   * Run a conversation operation while holding the gate busy.
+   *
+   * Conversation does not join the dispatch queue. dispatch is Studio's
+   * scheduling concept and this coordinator is the gate that answers "can
+   * this Agent take new work"; conversation is not a competitor for that
+   * gate, it is one of the reasons the Agent becomes busy. Conversation has
+   * its own admission (SessionAdmission) and thread-level coordination
+   * (ThreadInvocationCoordinator), so queueing it here would be a second,
+   * unrelated queue.
+   *
+   * The gate is still held for the operation's duration and refreshed after
+   * it settles, so a dispatch cannot start mid-conversation and a pending
+   * interrupt raised by the conversation leaves the gate `waiting`.
+   */
+  async holdForConversation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closing) {
+      throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
+    }
+    // The hold is claimed synchronously, before waiting out an active
+    // dispatch. A queued dispatch reads Session state when it starts, so a
+    // session switch already in flight has to land first — waiting before
+    // claiming would let that dispatch drain against the old thread.
+    this.conversations += 1;
+    try {
+      while (this.active) {
+        await this.active;
+      }
+    } catch {
+      // The active operation's own caller owns its failure.
+    }
+    this.setState('busy');
+    this.publishQueueSnapshot();
+    let value: T;
+    try {
+      value = await operation();
+    } finally {
+      this.conversations -= 1;
+      if (this.conversations === 0) {
+        this.publishQueueSnapshot();
+      }
+    }
+    // Awaited, not fire-and-forget: callers rely on the gate being settled by
+    // the time the operation resolves, the way the queue's own run() refreshed
+    // before resolving. A failed refresh leaves the gate `blocked` and is
+    // logged rather than failing the conversation, which already succeeded.
+    if (this.conversations === 0) {
+      try {
+        await this.refreshState();
+      } catch (error) {
+        this.logError('[resident-pet] failed to refresh state after a conversation:', error);
+      }
+    }
+    return value;
   }
 
   enqueueDispatch<T>(operation: () => Promise<T>): Promise<T> {
-    return this.enqueue('dispatch', operation);
+    return this.enqueue(operation);
   }
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
@@ -201,7 +268,7 @@ export class ResidentPetCoordinator {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    void this.enqueue('dispatch', operation).catch((error) => {
+    void this.enqueue(operation).catch((error) => {
       if (error instanceof ResidentPetOperationCancelledError) return;
       this.logError('[resident-pet] dispatch execution failed:', error);
     });
@@ -238,36 +305,32 @@ export class ResidentPetCoordinator {
   async close(): Promise<void> {
     if (!this.closing) {
       this.closing = true;
-      this.cancelQueue(this.conversationQueue);
       this.cancelQueue(this.dispatchQueue);
     }
     await Promise.all([this.active, this.refreshing]);
   }
 
-  private enqueue<T>(
-    kind: QueuedOperation['kind'],
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     if (this.closing) {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
     return new Promise<T>((resolve, reject) => {
-      const entry: QueuedOperation = {
-        kind,
+      this.dispatchQueue.push({
+        kind: 'dispatch',
         run: operation,
         resolve: (value) => resolve(value as T),
         reject,
-      };
-      (kind === 'conversation' ? this.conversationQueue : this.dispatchQueue).push(entry);
+      });
       this.publishQueueSnapshot();
       this.drain();
     });
   }
 
   private drain(): void {
-    if (this.active || this.refreshing || this.closing) return;
-    const entry = this.conversationQueue.shift()
-      ?? (this.state === 'open' ? this.dispatchQueue.shift() : undefined);
+    // A conversation holding the gate keeps dispatch waiting, same as an
+    // active dispatch does.
+    if (this.active || this.refreshing || this.closing || this.conversations > 0) return;
+    const entry = this.state === 'open' ? this.dispatchQueue.shift() : undefined;
     if (!entry) return;
     this.activeOperation = entry.kind;
     const active = Promise.resolve().then(() => this.run(entry));
@@ -393,7 +456,14 @@ type ResidentPetRuntimeContext = {
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;
-  peers: Set<AgentSessionPeer>;
+  /**
+   * The one interactive client, or null. A Host serves one Pet whose session
+   * state is single-valued, so interaction is exclusive; everything else
+   * reaches the Pet through dispatch, which queues behind the availability
+   * gate. Studio observes through the PetDispatchPort callbacks and never
+   * attaches here.
+   */
+  interactivePeer: { current: AgentSessionPeer | null };
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
@@ -437,14 +507,18 @@ function admitConversationHandlers(
     finish: (run: ResidentActiveRun) => void;
   },
 ): LocalServerPeerHandlers {
+  // Conversation no longer enters the dispatch queue; it holds the gate for
+  // its duration so a dispatch cannot start mid-conversation. Its own
+  // admission and ordering live in the local layer (SessionAdmission,
+  // ServerSessionCommandQueue, ThreadInvocationCoordinator).
   const admit = <TMessage>(
     handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
-  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.enqueueConversation(
+  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.holdForConversation(
     () => Promise.resolve(handler(peer, message)),
   );
   const admitRun = <TMessage extends { requestId: string }>(
     handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
-  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.enqueueConversation(
+  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.holdForConversation(
     async () => {
       const activeRun = activeRuns.begin(message.requestId);
       try {
@@ -541,7 +615,7 @@ export async function createResidentPetRuntime(
     return 'open';
   };
   const coordinator = new ResidentPetCoordinator({ readSettledState });
-  const peers = new Set<AgentSessionPeer>();
+  const interactivePeer: { current: AgentSessionPeer | null } = { current: null };
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
   const activeHostRuns = new Map<string, AbortController>();
   let activeRun: ResidentActiveRun | null = null;
@@ -563,13 +637,12 @@ export async function createResidentPetRuntime(
   };
   const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
     const message = buildAgentEventEnvelope(event);
-    for (const peer of peers) {
-      if (!peer.isConnected()) continue;
-      try {
-        peer.send(message);
-      } catch (error) {
-        defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
-      }
+    const peer = interactivePeer.current;
+    if (!peer || !peer.isConnected()) return;
+    try {
+      peer.send(message);
+    } catch (error) {
+      defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
     }
   };
   const publishDispatchLifecycle = (event: PetDispatchLifecycleEvent) => {
@@ -610,8 +683,9 @@ export async function createResidentPetRuntime(
   const close = () => {
     closing ??= (async () => {
       for (const controller of activeHostRuns.values()) controller.abort();
-      await Promise.allSettled([...peers].map((peer) => peerHandlers.onClose(peer)));
-      peers.clear();
+      const peer = interactivePeer.current;
+      interactivePeer.current = null;
+      if (peer) await peerHandlers.onClose(peer);
       await coordinator.close();
       localHandlers.close();
     })();
@@ -628,7 +702,7 @@ export async function createResidentPetRuntime(
     coordinator,
     localHandlers,
     peerHandlers,
-    peers,
+    interactivePeer,
     publishRuntimeEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
@@ -690,22 +764,17 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             announce?: boolean;
           }) => {
             finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-            let settled: AbortSettlement = { status: 'finished' };
-            if (params.setup) {
-              try {
-                settled = await graphService.settleAbortedRun(params.setup);
-              } catch (settleError) {
-                console.warn(
-                  '[resident-pet] failed to settle an aborted dispatch:',
-                  settleError instanceof Error ? settleError.message : settleError,
-                );
-              }
-            }
-            if (settled.status === 'paused') {
+            // A settlement that fails leaves the thread in an unknown state,
+            // so it takes the dispatch's failure path instead of being
+            // reported as a clean interruption.
+            const settled = params.setup
+              ? await graphService.settleAbortedRun(params.setup)
+              : null;
+            if (settled) {
               publishRuntimeEvent({
                 type: 'interrupt.requested',
                 requestId,
-                pendingInterrupt: projectPendingInterrupt(settled.pendingInterrupt),
+                pendingInterrupt: projectPendingInterrupt(settled),
               });
               publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
@@ -766,15 +835,26 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             finishInflightOperations(run, 'completed', publishRuntimeEvent);
             publishDispatchLifecycle({ dispatchId, request, requestId, state: 'completed' });
           } catch (error) {
+            let failure = error;
             if (run.controller.signal.aborted || isAbortError(error)) {
-              await settleInterruptedDispatch({
-                setup: abortedSetup,
-                announce: activeRun !== null,
-              });
-              return;
+              try {
+                await settleInterruptedDispatch({
+                  setup: abortedSetup,
+                  announce: activeRun !== null,
+                });
+                return;
+              } catch (settleError) {
+                console.error(
+                  '[resident-pet] failed to settle an aborted dispatch:',
+                  settleError instanceof Error
+                    ? (settleError.stack ?? settleError.message)
+                    : settleError,
+                );
+                failure = settleError;
+              }
             }
-            finishInflightOperations(run, 'failed', publishRuntimeEvent, error);
-            const message = error instanceof Error ? error.message : 'internal error';
+            finishInflightOperations(run, 'failed', publishRuntimeEvent, failure);
+            const message = failure instanceof Error ? failure.message : 'internal error';
             if (activeRun) {
               publishRuntimeEvent({
                 type: 'error',
@@ -789,7 +869,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               state: 'failed',
               error: message,
             });
-            throw error;
+            throw failure;
           } finally {
             if (activeHostRuns.get(requestId) === run.controller) {
               activeHostRuns.delete(requestId);
@@ -811,14 +891,23 @@ export function createResidentPetInteraction(
   runtime: ResidentPetRuntime,
 ): ResidentPetInteraction {
   const context = readResidentPetRuntimeContext(runtime);
-  const { peerHandlers, peers } = context;
+  const { peerHandlers, interactivePeer } = context;
   const interaction: ResidentPetInteraction = {
     connect: (peer) => {
       if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
-      peers.add(peer);
+      // One interactive connection per Host. Everything else reaches a Pet
+      // through dispatch, which is queued behind the availability gate — that
+      // is what dispatch is for. Two interactive clients would instead race
+      // over shared session state (the active session pointer is per-Pet), and
+      // the runtime already assumes a single interaction elsewhere: activeRun
+      // is one value per Host and throws on a second.
+      if (interactivePeer.current?.isConnected()) {
+        throw new ResidentPetInteractionBusyError();
+      }
+      interactivePeer.current = peer;
     },
     handle: async (peer, message) => {
-      if (context.isClosing() || !peers.has(peer)) {
+      if (context.isClosing() || interactivePeer.current !== peer) {
         throw new Error('Agent Session peer is not connected to this resident Pet.');
       }
       if (message.type === 'ping') {
@@ -828,7 +917,8 @@ export function createResidentPetInteraction(
       await dispatchLocalServerMessage(peer, JSON.stringify(message), peerHandlers);
     },
     disconnect: async (peer) => {
-      if (!peers.delete(peer)) return;
+      if (interactivePeer.current !== peer) return;
+      interactivePeer.current = null;
       await peerHandlers.onClose(peer);
     },
     close: context.close,

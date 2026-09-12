@@ -1,3 +1,4 @@
+import { buildAgentEventEnvelope } from '@pinpawo/agent-session';
 import {
   parseLocalAgentClientMessage,
   readLocalAgentClientMessageEnvelope,
@@ -13,9 +14,9 @@ import {
   type SessionNewMessage,
   type SessionResumeMessage,
   type SessionSnapshotGetMessage,
-} from './localAgentProtocol';
-import { sendLocalServerPeerEvent, type ServerPeer } from './localServerPeer';
-import type { ServerWireHandlers } from './localServerWire';
+} from './protocol';
+import { sendLocalServerPeerEvent, type ServerPeer } from './peer';
+import type { ServerWireHandlers } from './framing';
 
 type MaybePromise<T> = T | Promise<T>;
 export type ServerLogError = (message: string, error: unknown) => void;
@@ -215,20 +216,45 @@ export function dispatchLocalServerMessage(
   return Promise.resolve();
 }
 
+/**
+ * Adapt the Host's handlers onto a wire transport, admitting one interactive
+ * connection at a time.
+ *
+ * A Host serves one Pet, and a Pet's session state — which session is current,
+ * which model it uses — is single-valued. A second interactive client would
+ * race the first over it. Additional input belongs in dispatch instead, which
+ * queues behind the availability gate; that is what dispatch is for.
+ *
+ * The refusal is a protocol error rather than a dropped socket, so a client
+ * can tell "already in use" from "server unreachable".
+ */
 export function createLocalAgentWireHandlers(
   handlers: ServerTransportHandlers,
   logError: ServerLogError = handlers.logError ?? defaultLocalServerLogError,
   logWarn: ServerLogWarn = handlers.logWarn ?? defaultLocalServerLogWarn,
-): ServerWireHandlers<import('./localAgentProtocol').LocalAgentServerMessage> {
+): ServerWireHandlers<import('./protocol').LocalAgentServerMessage> {
+  let interactive: ServerPeer | null = null;
   return {
-    onMessage: (peer, data) => dispatchLocalServerMessage(
-      peer,
-      data,
-      handlers,
-      logError,
-      logWarn,
-    ),
-    onClose: handlers.onClose,
+    onMessage: (peer, data) => {
+      if (interactive && interactive !== peer && interactive.isConnected()) {
+        peer.send(buildAgentEventEnvelope({
+          type: 'error',
+          requestId: '',
+          message: 'This Agent already has an interactive client.',
+          code: 'interaction_busy',
+        }));
+        logWarn('[local-server] refused a second interactive client');
+        return Promise.resolve();
+      }
+      interactive = peer;
+      return dispatchLocalServerMessage(peer, data, handlers, logError, logWarn);
+    },
+    onClose: (peer) => {
+      if (interactive === peer) {
+        interactive = null;
+      }
+      return handlers.onClose?.(peer);
+    },
     log: handlers.log,
     logError,
     logWarn,

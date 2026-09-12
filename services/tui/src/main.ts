@@ -822,7 +822,11 @@ function syncComposerInputOverlays() {
   commandOverlay = syncCommandPalette(commandOverlay, {
     text: composer.plainText,
     cursorOffset: composer.cursorOffset,
+    // Commands are refused by the server while a run holds the session, so
+    // the palette does not offer them. The refusal is still authoritative;
+    // this only keeps the UI from proposing something that cannot succeed.
     enabled: attachments.length === 0
+      && !controller.getState().session.activeRun
       && !terminalHandoffOpen
       && sessionPicker.phase === 'closed'
       && policyPicker.phase === 'closed'
@@ -1635,6 +1639,10 @@ function handleCommandOverlayAction(action: CommandOverlayAction) {
 
 function openCommandHelpUi() {
   if (terminalHandoffOpen) return;
+  if (controller.getState().session.activeRun) {
+    showErrorNotice('wait for the current response to finish');
+    return;
+  }
   commandOverlay = openCommandHelp();
   closeFileMentionOverlay();
   composer.blur();

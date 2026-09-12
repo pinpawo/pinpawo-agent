@@ -26,14 +26,14 @@ import {
 } from '../../local-agent/src/contextLoader';
 import {
   readLocalChatDisplayText,
-} from '../../local-agent/src/chatAttachments';
+} from '../../local-agent/src/agent/chatMessageInput';
 import {
   createLocalServerHandlers,
 } from '../../local-agent/src/serverHandlers';
 import { createLocalServerRuntimeDepsStore } from '../../local-agent/src/serverTypes';
 import type {
   LocalServerPeerHandlers,
-} from '../../local-agent/src/localServerMessageDispatcher';
+} from '../../local-agent/src/wire/messageDispatcher';
 import {
   attachLocalServerWebSocketTransport,
 } from '../../local-agent/src/serverWsTransport';

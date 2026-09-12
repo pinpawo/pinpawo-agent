@@ -6,11 +6,11 @@ import {
   type ServerLogError,
   type ServerLogWarn,
   type ServerTransportHandlers,
-} from './localServerMessageDispatcher';
+} from './messageDispatcher';
 import type {
   ServerWireHandlers,
   ServerWirePeer,
-} from './localServerWire';
+} from './framing';
 
 const DEFAULT_MAX_PENDING_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_INPUT_LINE_BYTES = 8 * 1024 * 1024;
@@ -30,7 +30,7 @@ export type ServerWireStdioTransport<TMessage extends object> = {
 };
 
 export type ServerStdioTransport = ServerWireStdioTransport<
-  import('./localAgentProtocol').LocalAgentServerMessage
+  import('./protocol').LocalAgentServerMessage
 >;
 
 function writeDiagnostic(stream: Writable, message: string) {

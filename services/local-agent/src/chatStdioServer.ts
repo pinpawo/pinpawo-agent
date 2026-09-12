@@ -3,7 +3,7 @@ import { createLocalServerHandlers } from './serverHandlers';
 import {
   attachLocalServerStdioTransport,
   type ServerStdioTransportOptions,
-} from './localServerStdioTransport';
+} from './wire/stdioTransport';
 import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
 
 export function startLocalStdioServer(

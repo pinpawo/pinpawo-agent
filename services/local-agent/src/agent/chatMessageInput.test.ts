@@ -7,7 +7,7 @@ import {
   createLocalChatHumanMessage,
   formatLocalChatModelText,
   readLocalChatDisplayText,
-} from './chatAttachments';
+} from './chatMessageInput';
 
 const attachments: AgentLocalAttachment[] = [{
   id: 'attachment-1',

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
-import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { LocalServerPeerHandlers } from './localServerMessageDispatcher';
-import type { ServerPeer } from './localServerPeer';
+import type { LocalAgentServerMessage } from './protocol';
+import type { LocalServerPeerHandlers } from './messageDispatcher';
+import type { ServerPeer } from './peer';
 import {
   attachLocalServerStdioTransport,
   redirectConsoleToStdioDiagnostics,
-} from './localServerStdioTransport';
+} from './stdioTransport';
 
 function createHandlers(
   overrides: Partial<LocalServerPeerHandlers> = {},

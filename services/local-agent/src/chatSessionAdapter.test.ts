@@ -669,7 +669,10 @@ test('runAgentSessionTurn projects review interrupts to public interaction contr
 test('runAgentSessionTurn resumes explicit response after state update clears interrupt payload', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const streamInputs: unknown[] = [];
-  const resume = { reviewId: 'review-1', selectedOptionId: 'approve' };
+  const resume = {
+    interruptId: 'interrupt-1',
+    value: { reviewId: 'review-1', selectedOptionId: 'approve' },
+  };
   const finalMessages = [new AIMessage('approved')];
   const setup = {
     graphConfig: {},
@@ -686,12 +689,9 @@ test('runAgentSessionTurn resumes explicit response after state update clears in
         ? { messages: [], pendingInterrupt: null, acceptsResume: true }
         : { messages: finalMessages, pendingInterrupt: null, acceptsResume: false };
     },
-    buildResumeCommand(value: unknown) {
-      return { kind: 'resume-command', value };
-    },
-    streamEvents(_setup: AgentChannelSetup, inputOverride?: unknown) {
+    streamEvents(_setup: AgentChannelSetup, resume?: unknown) {
       return (async function* () {
-        streamInputs.push(inputOverride);
+        streamInputs.push(resume);
         yield protocolEvent('values', { messages: finalMessages });
       })();
     },
@@ -713,10 +713,7 @@ test('runAgentSessionTurn resumes explicit response after state update clears in
   });
 
   assert.deepEqual(result, { status: 'completed', reply: 'approved' });
-  assert.deepEqual(streamInputs, [{
-    kind: 'resume-command',
-    value: resume,
-  }]);
+  assert.deepEqual(streamInputs, [resume]);
   assert.deepEqual(setup.input.messages, []);
   assert.equal(
     emittedEvents.some((event) => event.type === 'interrupt.requested'),
@@ -757,9 +754,6 @@ test('runAgentSessionTurn reports waiting_human when a resume raises a new revie
         acceptsResume: true,
         };
     },
-    buildResumeCommand(value: unknown) {
-      return value;
-    },
     streamEvents() {
       return (async function* () {
         yield protocolEvent('values', {
@@ -773,7 +767,7 @@ test('runAgentSessionTurn reports waiting_human when a resume raises a new revie
   };
 
   const result = await runAgentSessionTurn({
-    request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
+    request: { kind: 'resume', requestId: 'req-1', resume: { interruptId: 'interrupt-1', value: { approved: true } } },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,
@@ -807,9 +801,6 @@ test('runAgentSessionTurn rejects when graph execution fails during a resume', a
         acceptsResume: true,
       };
     },
-    buildResumeCommand(value: unknown) {
-      return value;
-    },
     streamEvents() {
       return (async function* () {
         throw new Error('resume failed');
@@ -821,7 +812,7 @@ test('runAgentSessionTurn rejects when graph execution fails during a resume', a
 
   await assert.rejects(
     runAgentSessionTurn({
-      request: { kind: 'resume', requestId: 'req-1', resume: { approved: true } },
+      request: { kind: 'resume', requestId: 'req-1', resume: { interruptId: 'interrupt-1', value: { approved: true } } },
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
       isCurrent: () => true,
@@ -893,9 +884,6 @@ test('runAgentSessionTurn rejects stale resume with user-facing message', async 
     async readThreadState() {
       return { messages: [], pendingInterrupt: null, acceptsResume: false };
     },
-    buildResumeCommand() {
-      throw new Error('should not build resume command');
-    },
     streamEvents() {
       throw new Error('should not stream');
     },
@@ -906,7 +894,10 @@ test('runAgentSessionTurn rejects stale resume with user-facing message', async 
       request: {
         kind: 'resume',
         requestId: 'req-1',
-        resume: { reviewId: 'review-1', selectedOptionId: 'approve' },
+        resume: {
+          interruptId: 'interrupt-1',
+          value: { reviewId: 'review-1', selectedOptionId: 'approve' },
+        },
       },
       setup,
       graphService: graphService as unknown as LocalAgentGraphService,
@@ -955,12 +946,9 @@ test('runAgentSessionTurn does not map pending review free text to review respon
         acceptsResume: true,
       };
     },
-    buildResumeCommand(value: unknown) {
-      throw new Error(`should not build resume command: ${String(value)}`);
-    },
-    streamEvents(_setup: AgentChannelSetup, inputOverride?: unknown) {
+    streamEvents(_setup: AgentChannelSetup, resume?: unknown) {
       return (async function* () {
-        streamInputs.push(inputOverride);
+        streamInputs.push(resume);
         yield protocolEvent('values', { messages: finalMessages });
       })();
     },
@@ -1301,9 +1289,6 @@ test('runAgentSessionTurn reports a task pause without turning its bookkeeping i
           acceptsResume: true,
         };
     },
-    buildResumeCommand(value: unknown) {
-      return value;
-    },
     streamEvents() {
       return (async function* () {})();
     },
@@ -1313,7 +1298,10 @@ test('runAgentSessionTurn reports a task pause without turning its bookkeeping i
     request: {
       kind: 'resume',
       requestId: 'req-1',
-      resume: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
+      resume: {
+        interruptId: 'interrupt-1',
+        value: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
+      },
     },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
@@ -1349,9 +1337,6 @@ test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt
         acceptsResume: true,
       };
     },
-    buildResumeCommand(value: unknown) {
-      return value;
-    },
     streamEvents() {
       return (async function* () {
         yield protocolEvent('values', {
@@ -1362,7 +1347,7 @@ test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt
   };
 
   assert.deepEqual(await runAgentSessionTurn({
-    request: { kind: 'resume', requestId: 'req-1', resume: { action: 'cancel' } },
+    request: { kind: 'resume', requestId: 'req-1', resume: { interruptId: 'interrupt-1', value: { action: 'cancel' } } },
     setup,
     graphService: graphService as unknown as LocalAgentGraphService,
     isCurrent: () => true,

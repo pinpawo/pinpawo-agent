@@ -8,13 +8,13 @@ import {
   type ServerResponse,
 } from 'node:http';
 import type { WebSocketServer } from 'ws';
-import { ensureLocalServerAuthToken } from './localServerAuth';
+import { ensureLocalServerAuthToken } from './auth';
 import {
   createLocalAgentWireHandlers,
   type ServerTransportHandlers,
-} from './localServerMessageDispatcher';
-import { attachLocalServerWireWebSocketTransport } from './serverWsTransport';
-import type { ServerWireHandlers } from './localServerWire';
+} from './messageDispatcher';
+import { attachLocalServerWireWebSocketTransport } from '../serverWsTransport';
+import type { ServerWireHandlers } from './framing';
 
 export type ServerTransport = {
   port: number;

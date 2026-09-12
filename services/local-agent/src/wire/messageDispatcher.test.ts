@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createLocalAgentWireHandlers,
   dispatchLocalServerMessage,
   type LocalServerPeerHandlers,
   type ServerTransportHandlers,
-} from './localServerMessageDispatcher';
-import type { LocalAgentServerMessage } from './localAgentProtocol';
-import type { ServerPeer } from './localServerPeer';
+} from './messageDispatcher';
+import type { LocalAgentServerMessage } from './protocol';
+import type { ServerPeer } from './peer';
 
 function createFakePeer(sent: LocalAgentServerMessage[]): ServerPeer {
   return {
@@ -240,3 +241,71 @@ async function assertEventually(assertion: () => void) {
   }
   throw lastError;
 }
+
+test('wire handlers admit one interactive client and refuse the next', async () => {
+  const firstSent: LocalAgentServerMessage[] = [];
+  const secondSent: LocalAgentServerMessage[] = [];
+  const first = createFakePeer(firstSent);
+  const second = createFakePeer(secondSent);
+  const seen: string[] = [];
+  const warnings: string[] = [];
+  const wire = createLocalAgentWireHandlers(
+    {
+      onChatRequest: (_peer: ServerPeer, message: { requestId: string }) => {
+        seen.push(message.requestId);
+      },
+    } as unknown as ServerTransportHandlers,
+    () => {},
+    (message) => warnings.push(message),
+  );
+
+  const chat = (requestId: string) => JSON.stringify({
+    type: 'chat_request', requestId, message: 'hi',
+  });
+
+  await wire.onMessage(first, chat('req-1'));
+  await wire.onMessage(second, chat('req-2'));
+
+  // The first client holds the interaction; the second is told why, by code,
+  // rather than having its socket dropped.
+  assert.deepEqual(seen, ['req-1']);
+  assert.equal(warnings.length, 1);
+  const refusal = secondSent.at(-1) as { type: string; event?: { code?: string } };
+  assert.equal(refusal.type, 'event');
+  assert.equal(refusal.event?.code, 'interaction_busy');
+
+  // The first client keeps working.
+  await wire.onMessage(first, chat('req-3'));
+  assert.deepEqual(seen, ['req-1', 'req-3']);
+});
+
+test('the interactive slot is released when its client disconnects', async () => {
+  const sent: LocalAgentServerMessage[] = [];
+  const first = createFakePeer(sent);
+  const second = createFakePeer(sent);
+  const seen: string[] = [];
+  const closed: ServerPeer[] = [];
+  const wire = createLocalAgentWireHandlers(
+    {
+      onChatRequest: (_peer: ServerPeer, message: { requestId: string }) => {
+        seen.push(message.requestId);
+      },
+      onClose: (peer: ServerPeer) => {
+        closed.push(peer);
+      },
+    } as unknown as ServerTransportHandlers,
+    () => {},
+    () => {},
+  );
+
+  const chat = (requestId: string) => JSON.stringify({
+    type: 'chat_request', requestId, message: 'hi',
+  });
+
+  await wire.onMessage(first, chat('req-1'));
+  await wire.onClose?.(first);
+  await wire.onMessage(second, chat('req-2'));
+
+  assert.deepEqual(closed, [first]);
+  assert.deepEqual(seen, ['req-1', 'req-2'], 'the next client takes the slot');
+});

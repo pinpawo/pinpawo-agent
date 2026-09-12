@@ -6,8 +6,8 @@ import {
   httpFetchTool,
   inferFilename,
   sanitizeFilename,
-} from './toolkits/local/networkTools';
-import { createBashToolkit } from './toolkits/local';
+} from './networkTools';
+import { createBashToolkit } from './index';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

@@ -1,9 +1,9 @@
 import {
   buildLocalAgentEventEnvelope,
   type LocalAgentServerMessage,
-} from './localAgentProtocol';
+} from './protocol';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
-import type { ServerWirePeer } from './localServerWire';
+import type { ServerWirePeer } from './framing';
 
 /**
  * One client connected to the local-agent server.

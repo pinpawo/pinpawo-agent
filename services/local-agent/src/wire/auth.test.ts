@@ -5,7 +5,7 @@ import {
   buildLocalServerAuthHeaders,
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
-} from './localServerAuth';
+} from './auth';
 
 function makeReq(options: {
   url?: string;

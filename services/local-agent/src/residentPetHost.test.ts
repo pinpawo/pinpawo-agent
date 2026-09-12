@@ -43,7 +43,7 @@ async function waitFor(predicate: () => boolean, message: string): Promise<void>
   throw new Error(message);
 }
 
-test('Coordinator keeps the active operation non-preemptive then drains conversation first', async () => {
+test('Coordinator keeps the active operation non-preemptive and holds dispatch behind conversation', async () => {
   let settledState: PetDispatchState = 'open';
   const coordinator = new ResidentPetCoordinator({
     readSettledState: () => settledState,
@@ -63,13 +63,17 @@ test('Coordinator keeps the active operation non-preemptive then drains conversa
   const secondDispatch = coordinator.enqueueDispatch(async () => {
     events.push('dispatch-2');
   });
-  const firstConversation = coordinator.enqueueConversation(async () => {
+  // Conversation no longer queues: it waits out the active dispatch, then
+  // holds the gate itself.
+  const firstConversation = coordinator.holdForConversation(async () => {
     events.push('conversation-1');
   });
-  const secondConversation = coordinator.enqueueConversation(async () => {
+  const secondConversation = coordinator.holdForConversation(async () => {
     events.push('conversation-2');
   });
 
+  // Conversations claim their hold synchronously, so both already count as
+  // holding the gate even though the active dispatch has not released it.
   assert.deepEqual(coordinator.getQueueSnapshot(), {
     state: 'busy',
     activeOperation: 'dispatch',
@@ -84,13 +88,14 @@ test('Coordinator keeps the active operation non-preemptive then drains conversa
     firstConversation,
     secondConversation,
   ]);
-  assert.deepEqual(events, [
-    'dispatch-1:start',
-    'dispatch-1:end',
-    'conversation-1',
-    'conversation-2',
-    'dispatch-2',
-  ]);
+  // The queued dispatch runs only after both conversations release the gate.
+  assert.equal(events[0], 'dispatch-1:start');
+  assert.equal(events[1], 'dispatch-1:end');
+  assert.equal(events.at(-1), 'dispatch-2');
+  assert.deepEqual(
+    [...events.slice(2, -1)].sort(),
+    ['conversation-1', 'conversation-2'],
+  );
 });
 
 test('state listeners cannot reenter admission while an operation is becoming active', async () => {
@@ -104,7 +109,7 @@ test('state listeners cannot reenter admission while an operation is becoming ac
   let queuedFromListener: Promise<void> | undefined;
   coordinator.onStateChange((state) => {
     if (state !== 'busy' || queuedFromListener) return;
-    queuedFromListener = coordinator.enqueueConversation(async () => {
+    queuedFromListener = coordinator.holdForConversation(async () => {
       events.push('conversation');
     });
   });
@@ -139,7 +144,7 @@ test('waiting state holds dispatch while conversation can reopen the gate', asyn
   await Promise.resolve();
   assert.equal(events.length, 0);
 
-  await coordinator.enqueueConversation(async () => {
+  await coordinator.holdForConversation(async () => {
     events.push('conversation');
     settledState = 'open';
   });
@@ -183,7 +188,7 @@ test('a queued dispatch reads the active conversation thread only when it starts
   const second = coordinator.enqueueDispatch(async () => {
     observedThreads.push(activeThread);
   });
-  const switchConversation = coordinator.enqueueConversation(async () => {
+  const switchConversation = coordinator.holdForConversation(async () => {
     activeThread = 'thread-new';
   });
 
@@ -220,7 +225,7 @@ test('Coordinator close cancels queued work and waits for the active operation',
   await Promise.all([active, closed]);
   assert.equal(closeSettled, true);
   await assert.rejects(
-    coordinator.enqueueConversation(async () => undefined),
+    coordinator.holdForConversation(async () => undefined),
     /cancelled/i,
   );
 });
@@ -361,7 +366,7 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
   }
 });
 
-test('dispatch and conversation publish the same Agent Session event stream to observers', async () => {
+test('dispatch and conversation publish the same Agent Session event stream', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-events-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(root);
   const blockingTurnStarted = deferred();
@@ -372,6 +377,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       pendingInterrupt: null,
       currentPlan: null,
     }),
+    // The cancelled dispatch leaves nothing to continue, so it reports a
+    // plain interruption.
+    settleAbortedRun: async () => null,
   };
   const host = await createResidentPetHost({
     petId: 'pet-events',
@@ -422,12 +430,9 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     },
   });
   const sourceMessages: unknown[] = [];
-  const observerMessages: unknown[] = [];
   const lifecycleEvents: Array<{ state: string; dispatchId: string; error?: string }> = [];
   const source = peer(sourceMessages);
-  const observer = peer(observerMessages);
   await host.interaction.connect(source);
-  await host.interaction.connect(observer);
   const stopLifecycleObservation = host.resident.dispatch.onDispatchLifecycle((event) => {
     lifecycleEvents.push({
       state: event.state,
@@ -444,12 +449,12 @@ test('dispatch and conversation publish the same Agent Session event stream to o
       host.resident.dispatch.dispatch({ request: 'from host', dispatchId: 'studio-dispatch-1' });
     });
     await waitFor(
-      () => observerMessages.some((message) => (
+      () => sourceMessages.some((message) => (
         (message as { event?: { type?: string } }).event?.type === 'message.completed'
       )),
       'resident dispatch did not publish its completed message event',
     );
-    for (const messages of [sourceMessages, observerMessages]) {
+    for (const messages of [sourceMessages]) {
       const events = messages.flatMap((message) => (
         (message as { type?: string }).type === 'event'
           ? [(message as { event: { type: string; initiator?: string } }).event]
@@ -489,13 +494,12 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     });
 
     sourceMessages.length = 0;
-    observerMessages.length = 0;
     await host.interaction.handle(source, {
       type: 'chat_request',
       requestId: 'client-run-1',
       message: 'from client',
     });
-    for (const messages of [sourceMessages, observerMessages]) {
+    for (const messages of [sourceMessages]) {
       const events = messages.flatMap((message) => (
         (message as { type?: string }).type === 'event'
           ? [(message as { event: { type: string; initiator?: string } }).event]
@@ -510,26 +514,19 @@ test('dispatch and conversation publish the same Agent Session event stream to o
     }
 
     sourceMessages.length = 0;
-    observerMessages.length = 0;
     host.resident.dispatch.dispatch({
       request: 'blocking host turn',
     });
     await blockingTurnStarted.promise;
-    const startedEnvelope = observerMessages.find((message) => (
+    const startedEnvelope = sourceMessages.find((message) => (
       (message as { type?: string; event?: { type?: string } }).event?.type === 'run.started'
     )) as { requestId?: string } | undefined;
     assert.ok(startedEnvelope?.requestId);
-    await host.interaction.handle(observer, {
+    await host.interaction.handle(source, {
       type: 'run.interrupt',
       requestId: startedEnvelope.requestId,
     });
-    await waitFor(
-      () => observerMessages.some((message) => (
-        (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
-      )),
-      'interrupted resident dispatch did not publish its runtime event',
-    );
-    assert.ok(observerMessages.some((message) => (
+    assert.ok(sourceMessages.some((message) => (
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
     )));
   } finally {
@@ -710,11 +707,8 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
     settleAbortedRun: async () => {
       settleCalls += 1;
       return {
-        status: 'paused' as const,
-        pendingInterrupt: {
-          interruptId: 'interrupt-pause',
-          payload: { kind: 'pause_task' as const },
-        },
+        interruptId: 'interrupt-pause',
+        payload: { kind: 'pause_task' as const },
       };
     },
   };

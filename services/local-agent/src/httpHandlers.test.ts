@@ -38,226 +38,45 @@ function makeRes() {
   return res as unknown as ServerResponse & typeof res;
 }
 
-test('handleLocalHttpRequest serves TUI sessions list and resume endpoints', async () => {
-  const deps = {} as ServerDeps;
-  const listRes = makeRes();
-
-  assert.equal(handleLocalHttpRequest(makeReq('/sessions', 'Bearer secret'), listRes, deps, {
-    authToken: 'secret',
-    loadSnapshot: async () => ({}),
-    listSessions: async () => [{
-      id: 'pet-a:one',
-      title: 'first',
-      messageCount: 2,
-      createdAt: '2026-06-01T01:00:00.000Z',
-      updatedAt: '2026-06-01T01:01:00.000Z',
-      active: true,
-    }],
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
-  }), true);
-
-  await Promise.resolve();
-  assert.equal(listRes.statusCode, 200);
-  assert.deepEqual(JSON.parse(listRes.body), {
-    sessions: [{
-      id: 'pet-a:one',
-      title: 'first',
-      messageCount: 2,
-      createdAt: '2026-06-01T01:00:00.000Z',
-      updatedAt: '2026-06-01T01:01:00.000Z',
-      active: true,
-    }],
-  });
-
-  const resumeRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/sessions/resume?sessionId=pet-a%3Aone', 'Bearer secret'), resumeRes, deps, {
-    authToken: 'secret',
-    loadSnapshot: async () => ({}),
-    listSessions: async () => [],
-    resumeSession: async (sessionId) => ({
-      session: { id: sessionId, title: 'first' },
-      snapshot: { version: 4 },
-    }),
-  }), true);
-
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(resumeRes.statusCode, 200);
-  assert.deepEqual(JSON.parse(resumeRes.body), {
-    session: { id: 'pet-a:one', title: 'first' },
-    snapshot: { version: 4 },
-  });
-});
-
-test('handleLocalHttpRequest reports an active-run resume conflict', async () => {
-  const res = makeRes();
-  handleLocalHttpRequest(
-    makeReq('/sessions/resume?sessionId=pet-a%3Aone', 'Bearer secret'),
-    res,
-    {} as ServerDeps,
-    {
-      authToken: 'secret',
-      loadSnapshot: async () => ({}),
-      listSessions: async () => [],
-      resumeSession: async () => {
-        throw Object.assign(new Error('cannot resume a session while a run is active'), {
-          code: 'session_resume_conflict',
-        });
-      },
-    },
-  );
-
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(res.statusCode, 409);
-  assert.deepEqual(JSON.parse(res.body), {
-    error: 'cannot resume a session while a run is active',
-  });
-});
-
-test('handleLocalHttpRequest serves TUI snapshot endpoint', async () => {
-  const deps = {} as ServerDeps;
-  const snapshotRes = makeRes();
-
-  assert.equal(handleLocalHttpRequest(makeReq('/snapshot', 'Bearer secret'), snapshotRes, deps, {
-    authToken: 'secret',
-    loadSnapshot: async () => ({
-      version: 4,
-      session: {
-        sessionId: 'chat:pet-a',
-        kind: 'chat',
-        timeline: [{
-          id: 'message:0:user',
-          type: 'message',
-          role: 'user',
-          text: 'hello',
-          status: 'completed',
-        }],
-        activeRun: null,
-        pendingInterrupt: null,
-      },
-    }),
-    listSessions: async () => [],
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
-  }), true);
-
-  await Promise.resolve();
-  assert.equal(snapshotRes.statusCode, 200);
-  assert.deepEqual(JSON.parse(snapshotRes.body), {
-    version: 4,
-    session: {
-      sessionId: 'chat:pet-a',
-      kind: 'chat',
-      timeline: [{
-        id: 'message:0:user',
-        type: 'message',
-        role: 'user',
-        text: 'hello',
-        status: 'completed',
-      }],
-      activeRun: null,
-      pendingInterrupt: null,
-    },
-  });
-});
-
-test('handleLocalHttpRequest does not expose the removed history endpoint', () => {
-  const res = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/history', 'Bearer secret'), res, {} as ServerDeps, {
-    authToken: 'secret',
-    loadSnapshot: async () => ({}),
-    listSessions: async () => [],
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
-  }), false);
+test('handleLocalHttpRequest exposes no conversation capability routes', () => {
+  // HTTP carries the operational surface only. Conversation capability lives
+  // in the WebSocket/stdio handler set, which the TUI uses via session.list /
+  // session.snapshot.get / session.resume.
+  for (const pathname of ['/health', '/history', '/snapshot', '/sessions', '/sessions/resume']) {
+    assert.equal(
+      handleLocalHttpRequest(makeReq(pathname, 'Bearer secret'), makeRes(), {} as ServerDeps, {
+        authToken: 'secret',
+      }),
+      false,
+      `${pathname} must not be served over HTTP`,
+    );
+  }
 });
 
 test('handleLocalHttpRequest rejects requests without a valid local token', async () => {
   const deps = {} as ServerDeps;
   const options = {
     authToken: 'secret',
-    loadSnapshot: async () => {
-      throw new Error('not called');
-    },
-    listSessions: async () => {
-      throw new Error('not called');
-    },
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
   };
 
   const missingRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health'), missingRes, deps, options), true);
+  assert.equal(handleLocalHttpRequest(makeReq('/runtime'), missingRes, deps, options), true);
   assert.equal(missingRes.statusCode, 401);
   assert.deepEqual(JSON.parse(missingRes.body), { error: 'unauthorized' });
 
   const wrongRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer wrong'), wrongRes, deps, options), true);
+  assert.equal(handleLocalHttpRequest(makeReq('/runtime', 'Bearer wrong'), wrongRes, deps, options), true);
   assert.equal(wrongRes.statusCode, 401);
 
-  const okRes = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), okRes, {
-    petId: 'pet-a',
-    petName: 'Pet A',
-  } as ServerDeps, options), true);
-  assert.equal(okRes.statusCode, 200);
-  const health = JSON.parse(okRes.body) as Record<string, unknown>;
-  assert.equal(health.pet_id, 'pet-a');
-  assert.equal(health.pet_name, 'Pet A');
-});
-
-test('handleLocalHttpRequest exposes active operation health fields', async () => {
-  clearAgentRunActivity();
-  recordOperationActivity({
-    type: 'operation',
-    requestId: 'req-1',
-    phase: 'started',
-    operation: {
-      kind: 'bash.read_file',
-      title: '读文件',
-      target: 'README.md',
-      summary: 'read',
-    },
-  });
-
-  const res = makeRes();
-  assert.equal(handleLocalHttpRequest(makeReq('/health', 'Bearer secret'), res, {
-    petId: 'pet-a',
-    petName: '羊',
-  } as ServerDeps, {
-    authToken: 'secret',
-    loadSnapshot: async () => ({}),
-    listSessions: async () => [],
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
-  }), true);
-
-  assert.equal(res.statusCode, 200);
-  const payload = JSON.parse(res.body);
-  assert.equal(payload.active_operation_kind, 'bash.read_file');
-  assert.equal(payload.active_operation_title, '读文件');
-  assert.equal(payload.active_operation_target, 'README.md');
-  assert.equal(payload.active_operation_summary, 'read');
-  assert.equal(payload.active_operation_phase, 'started');
-  assert.equal(payload.agent_run_phase, 'using_tool');
-
-  clearAgentRunActivity('req-1');
+  // Authorization is decided before the route body runs, so the rejected
+  // cases need no deps. A valid token reaching a real projection is covered
+  // by the runtime-endpoint test below.
 });
 
 test('Capability HTTP routes are not part of the local server contract', () => {
   const deps = {} as ServerDeps;
   const options = {
     authToken: 'secret',
-    loadSnapshot: async () => ({}),
-    listSessions: async () => [],
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
   };
 
   assert.equal(handleLocalHttpRequest(
@@ -299,11 +118,6 @@ test('handleLocalHttpRequest keeps Studio paths out of the Chat runtime endpoint
     },
   } as ServerDeps, {
     authToken: 'secret',
-    loadSnapshot: async () => ({}),
-    listSessions: async () => [],
-    resumeSession: async () => {
-      throw new Error('not called');
-    },
   }), true);
 
   assert.equal(res.statusCode, 200);

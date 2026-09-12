@@ -550,12 +550,22 @@ test('model selection is rejected while the active session is running', async ()
     });
     await started.promise;
 
-    // Commands are refused while a run holds the session — /refresh included,
-    // since its purpose is to re-read the UI once a run settles.
+    // A snapshot is an observation, so a run does not refuse it: a client
+    // attaching mid-run learns the run is live only from here, since no
+    // checkpoint has been written yet.
     await handlers.peerHandlers.onSessionSnapshotGet(peer, {
       type: 'session.snapshot.get',
       requestId: 'snapshot-running',
     });
+    const snapshot = sent.find((message) => (
+      message.type === 'session.snapshot.result'
+      && message.requestId === 'snapshot-running'
+    ));
+    assert.equal(snapshot?.type, 'session.snapshot.result');
+    if (snapshot?.type !== 'session.snapshot.result') return;
+    assert.equal(snapshot.snapshot.session.activeRun?.requestId, 'chat-running');
+
+    // Commands are refused while a run holds the session.
     await handlers.peerHandlers.onSessionList(peer, {
       type: 'session.list',
       requestId: 'list-running',
@@ -566,8 +576,8 @@ test('model selection is rejected while the active session is running', async ()
     )) as Array<{ requestId: string; message: string }>;
     assert.deepEqual(
       refusals.map((message) => message.requestId).sort(),
-      ['list-running', 'snapshot-running'],
-      'every command is refused, not only the state-changing ones',
+      ['list-running'],
+      'commands are refused; an observation is not',
     );
     for (const refusal of refusals) {
       assert.match(refusal.message, /wait for the current response/);
@@ -636,6 +646,20 @@ test('a run claims the register for the whole admitted turn', async () => {
     // A resident Host shares this same register with its dispatch queue.
     assert.equal(activeRuns.read()?.requestId, 'chat-running');
     assert.equal(activeRuns.read()?.state, 'running');
+
+    // And that is what reaches the client: one register, one reported run.
+    await handlers.peerHandlers.onSessionSnapshotGet(peer, {
+      type: 'session.snapshot.get',
+      requestId: 'snapshot-running',
+    });
+    const snapshot = sent.find((message) => (
+      message.type === 'session.snapshot.result'
+      && message.requestId === 'snapshot-running'
+    ));
+    assert.equal(snapshot?.type, 'session.snapshot.result');
+    if (snapshot?.type !== 'session.snapshot.result') return;
+    assert.equal(snapshot.snapshot.session.activeRun?.requestId, 'chat-running');
+    assert.equal(snapshot.snapshot.session.activeRun?.state, 'running');
 
     releaseTurn.resolve();
     await running;

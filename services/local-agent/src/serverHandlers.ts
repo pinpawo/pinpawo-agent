@@ -157,7 +157,8 @@ export function createLocalServerHandlers(
   const refuseSessionCommand = (
     peer: ServerPeer,
     requestId: string,
-    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
+    // Not 'snapshot': an observation is never refused.
+    operation: 'list' | 'new' | 'resume' | 'compact',
   ) => () => {
     peer.send({
       type: 'session.error',
@@ -646,18 +647,31 @@ export function createLocalServerHandlers(
         });
       },
     ),
-    onSessionSnapshotGet: (client, message) => runSessionCommand(
-      () => respondToSessionRequest(
-        client,
-        message.requestId,
-        'snapshot',
-        async () => ({
-          type: 'session.snapshot.result',
-          requestId: message.requestId,
-          snapshot: await loadSnapshot(client),
-        }),
-      ),
-      refuseSessionCommand(client, message.requestId, 'snapshot'),
+    /**
+     * A snapshot is an observation, not a command.
+     *
+     * It changes nothing a run is writing to, so it does not queue with
+     * `/new`, `/model` and the rest, and it is not refused mid-run. A client
+     * attaching or reconnecting has no state of its own: the snapshot is the
+     * only way it learns a run is live, since the run has not written a
+     * checkpoint yet. Refusing it there would leave a reconnecting TUI unable
+     * to tell a working Agent from an idle one.
+     *
+     * `/refresh` reaches the same handler, and re-reading half-finished state
+     * is not what a user wants mid-run — but that is a question of what the
+     * client offers, which the TUI already handles by closing its command
+     * palette during a run. Serving the live state is not harmful; refusing
+     * an attach is.
+     */
+    onSessionSnapshotGet: (client, message) => respondToSessionRequest(
+      client,
+      message.requestId,
+      'snapshot',
+      async () => ({
+        type: 'session.snapshot.result',
+        requestId: message.requestId,
+        snapshot: await loadSnapshot(client),
+      }),
     ),
     onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(

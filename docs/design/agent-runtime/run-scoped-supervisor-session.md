@@ -1,7 +1,7 @@
 # Root、Supervisor 与 Capability 的状态与交接
 
-状态：已接入运行图并完成下述验证；本文为待 review 的工作设计稿。
-更新于 2026-09-11；实现基线为已合并的 [PR #795](https://github.com/pinpawo/pinpawo-agent/pull/795)。
+状态：已接入运行图；本文为待 review 的工作设计稿，未落实的调整单列在“遗留项”。
+更新于 2026-09-12；本次核对基于已合并的 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)。
 
 Root 状态、Entry `continue`、Supervisor 消息交接、Capability 执行及 Host 计划投影已统一接入。
 不再保留独立 active delegation、continuation、pending call 或下一次执行临时槽。
@@ -10,6 +10,11 @@ Root 状态、Entry `continue`、Supervisor 消息交接、Capability 执行及 
 
 Root 承载会话、整体执行流程和 checkpoint。Supervisor 在这个流程中负责规划、验收和
 调度，工作上下文是 run-scope。Capability executor 独立负责具体执行。
+
+设计方向是让模型决定如何完成任务，让程序维护权限、消息协议、状态提交和恢复等
+执行约束。Supervisor 在任务执行返回后检查方向与结果，不接管 executor 内每一次
+工具选择；executor 可以在任务和授权范围内自主探索。保持这一边界，不以增加
+持久子代理、调度状态或模型回跳作为优化目标。
 
 **Supervisor 内部保留控制调用及确认；交给 Root 的是实际 delegation 调用，Root 保存并执行，
 再写入对应结果。两边各自有完整消息，不增加一份中间 proposal 状态。**
@@ -106,7 +111,7 @@ Entry ToolNode 仅执行当前路由调用；旧 run 的 ToolMessage 不参与�
 | 原生 interrupt | 恢复原 checkpoint、run、delegation 与调用现场，不重置工作上下文和预算 |
 | 其他运行 | 新 run，经 Entry Answer；参考保存的业务状态与可见结果，不自动重放旧调用或恢复旧执行实例 |
 
-Entry Answer 保留现有 `plan_request` 发起规划，新增 `continue` 表达继续未完成工作：
+Entry Answer 使用 `plan_request` 发起规划，使用 `continue` 表达继续未完成工作：
 
 - `plan_request` → Supervisor Entry mode。
 - `continue` → Supervisor Boundary mode，根据已有进度验收、调整或推进。
@@ -139,6 +144,12 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 | `adjust_plan` | 保留已完成进度，调整后续安排，选择当前应执行项 |
 | `capability_details` | 内部查询，正常返回查询结果并继续 createAgent 循环，不交给 Root 执行 |
 
+Boundary 始终提供 `adjust_plan`，允许 Supervisor 基于执行证据调整原目标内的任务安排。
+没有新用户输入时，工具参数必须原样保留当前 goal；Supervisor 退出及 Root 接收均校验
+这一条件。有新输入不等于用户已授权改变目标，模型仍须依据用户明确要求或确认判断。
+任务文字是否扩大目标由模型按系统约束判断，字符串相等校验不能证明语义上没有扩大范围；
+实际工具授权仍由原执行审核机制约束，不因调整计划而放宽。
+
 无工作可执行、需要提问或结束时，落实相应计划/进度并走已有回复出口，
 不为了统一形状创建空的 delegation 调用。
 
@@ -154,7 +165,7 @@ Supervisor 内部
   AIMessage：submit_plan / review_current / adjust_plan，调用 C
   ToolMessage：提交/交接确认，关联 C
 
-  内部工具或退出适配完成确定性转换
+  Supervisor invoke 返回后的退出适配完成确定性转换
   handoff：AIMessage(delegate_capability，调用 D，执行参数)
 
 Root
@@ -179,7 +190,7 @@ C 的确认不是执行成功，D 的结果也不是任务验收通过。
 
 内部工具使用确认 ToolMessage 与 `returnDirect` 退出；
 结束一次 Supervisor invoke 不等于结束业务 run。
-调整的是交接输出：工具或退出适配直接形成 delegation 调用消息，
+退出适配直接形成 delegation 调用消息，
 不通过持久化 proposal slot 或额外模型调用中转。
 
 `Command.PARENT` 是可用的框架交接方式，但不是必须新增的层次。
@@ -194,6 +205,18 @@ Root 接纳交接时校验调用与任务、能力、运行身份的一致性，
 再进入现有 `capability` 节点。执行完成时一起提交结果消息与执行事实；
 原生恢复不重新派发已经提交的调用。框架 checkpoint 不保证外部副作用恰好一次，
 仍需保留已有审核、拒绝、取消和错误处理。
+
+### 提示职责
+
+System prompt 负责角色、目标、权限和决策原则；工具描述负责调用时机和效果；
+参数描述负责字段含义及组合约束；工具结果以事实和字段解释为主，不重复规划指令。
+停止执行、验收与交付分离等关键边界可简短重申，不维护多套完整工具使用说明。
+
+Entry 的基础提示统一描述 `plan_request` / `continue` / 直接回复，节点不再追加
+另一套路由规则。`goal` 的填写细节保留在参数描述中，不再声称 Supervisor 看不到
+主会话。执行证据说明使用实际工具消息及旧历史投影，不把 XML Announce 当作当前协议。
+Supervisor 的验收原则保留在 system prompt，`completed` / `reply` 的组合约束及
+`currentDelegation` 的继续/替换含义放在参数描述中；此整理不改变调度校验或授权规则。
 
 ### Middleware 的边界
 
@@ -232,7 +255,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 [工具协议安全过滤](../../../packages/pet-agent/src/agent/messages/protocol.ts)处理输入；
 不删除原 checkpoint 事实、不补造成功结果，也不据此改变入口。
 
-## 现有字段与实现如何收敛
+## 已完成迁移索引（非待开发清单）
 
 以下字段已完成读写迁移。旧类型或 Announce 解析若仍用于历史读取、测试和报告，
 不代表它们仍是运行状态通道。
@@ -307,7 +330,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 原生 interrupt、执行前后 checkpoint、跨 run 的 Entry `continue` 和工作 lane 隔离。
 脚本模型测试不等同于真实模型 eval；两者的验证结果分别记录。
 
-### 本次验证记录（2026-09-11）
+### 历史验证记录（2026-09-11，不代表当前分支的复验结果）
 
 | 验证 | 结果 |
 | --- | --- |
@@ -327,3 +350,18 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 旧交接协议已从当前文档中移除，历史内容可通过 Git 查看。
 [合并时设计](https://github.com/pinpawo/pinpawo-agent/blob/b8b43353969aa3c4dd9e87db620f79a5b3dd6cca/docs/design/agent-runtime/run-scoped-supervisor-session.md)
 记录 #795 基线；当前重构方向以本文为准。
+
+## 遗留项（2026-09-12 核对）
+
+以下是当前实现与上述简化方向的差距，不表示这些行为已修改。
+
+| 项目 | 当前事实与整理方向 |
+| --- | --- |
+| 上下文标签不准确 | [输入构造](../../../packages/pet-agent/src/agent/orchestrator/prompts/runSupervisorAgent.ts)的 `remaining_plan` 实际传入整份计划，含 completed/superseded。应明确它是完整计划，而不是再增加一份过滤后的持久状态。 |
+| Review 框架兼容代码 | [Toolkit Review](../../../packages/pet-agent/src/agent/orchestrator/toolkitReviewMiddleware.ts)为 #749 / langgraphjs#2667 读取私有 scratchpad，避免嵌套 interrupt 恢复时重复全局审核。删除前需在实际安装版本上复现并验证原生恢复；不能仅因标记 temporary 就删除。 |
+| 已废弃授权类型仍在使用 | [globalReviewPolicy.ts](../../../packages/pet-agent/src/agent/orchestrator/review/globalReviewPolicy.ts)仍导出 `BuiltinGlobalReviewPolicyMode` 别名，local-agent 有实际消费者。可逐步改用 agent-contracts 的 `ToolAuthorizationMode`，不能只删除 pet-agent 导出。 |
+
+历史 Announce 读取、工具协议输入过滤和 Capability 私有消息留存不是待删除的运行状态。
+它们分别承担旧会话读取、模型输入配对安全和隔离历史保存；是否淘汰历史兼容或缩短
+留存周期应单独决定，不混入 Supervisor 调度重构。本文的迁移表和历史验证记录也不应
+被当作当前待办或本次测试结果。

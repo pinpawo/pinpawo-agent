@@ -84,7 +84,7 @@ export function buildRunSupervisorAgentInput(
     ? input.mode === 'boundary'
       ? 'Fresh user input: interpret it before any execution. If it explicitly requests or confirms a change, use adjust_plan to update the goal and pending work, choosing whether to continue or replace the active delegation. Do not ask again for an adjustment the user already requested.'
       : 'Fresh user input: interpret it before submitting the execution plan. Preserve established requirements unless the user requests or confirms a change.'
-    : 'Keep the established goal and plan. Ask the user before changing them.');
+    : 'Keep the established goal and authorization scope. Adjust pending work when execution evidence warrants it; preserve the goal verbatim. Ask the user if a goal or scope change is needed.');
   return input.mode === 'entry'
     ? RUN_SUPERVISOR_ENTRY_INPUT_PROMPT.render({
         userRequest,

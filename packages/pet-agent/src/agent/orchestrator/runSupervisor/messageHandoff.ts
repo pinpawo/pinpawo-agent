@@ -23,7 +23,7 @@ export type SupervisorHandoffContext = {
 
 function availableControlNames(context: SupervisorHandoffContext): readonly SupervisorControl['name'][] {
   return context.mode === 'entry' ? ['submit_plan'] as const
-    : context.hasNewUserInput ? ['review_current', 'adjust_plan'] as const : ['review_current'] as const;
+    : ['review_current', 'adjust_plan'] as const;
 }
 
 /** Acknowledge receipt only; business validation and dispatch happen at the exit. */
@@ -34,8 +34,8 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
     name,
     schema: supervisorControlSchemas[name],
     description: name === 'submit_plan' ? '提交计划并交接第一项执行。必须独占本次工具响应。'
-      : name === 'adjust_plan' ? '按用户要求调整未完成计划，保留已完成进度并交接当前任务执行。必须独占本次工具响应。'
-      : '根据计划与执行结果验收、继续或推进；已返回任务继续调度需明确 completed。填写 reply 则停止执行并回复，可暂缓验收。必须独占本次工具响应。',
+      : name === 'adjust_plan' ? '根据执行证据或用户要求调整未完成计划，保留已完成进度并交接当前任务执行。必须独占本次工具响应。'
+      : '验收当前任务、继续补做或推进计划。填写 reply 则停止执行并回复。必须独占本次工具响应。',
     returnDirect: true,
   }));
 }
@@ -77,8 +77,9 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
   if (context.mode === 'entry' ? control.name !== 'submit_plan' : control.name === 'submit_plan') {
     throw new Error('Supervisor control is invalid in this mode.');
   }
-  if (control.name === 'adjust_plan' && !context.hasNewUserInput) {
-    throw new Error('Plan adjustment requires fresh user input.');
+  if (control.name === 'adjust_plan' && !context.hasNewUserInput
+    && control.args.goal !== (context.state.goal ?? context.userRequest)) {
+    throw new Error('Changing the goal requires fresh user input.');
   }
   let state: RunSupervisorState = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);

@@ -6,6 +6,10 @@
 > 日期：2026-06-16
 > 关联：issue #133
 
+> 本文保留 preset 的设计背景和目标 API，不作为当前审核执行协议。
+> 当前实现由 `ToolkitReviewMiddleware.afterModel` 审核调用，而非逐工具 wrapper；
+> 执行、拒绝和原生恢复语义见 [review.md](review.md)。
+
 ## 1. 核心原则
 
 `ReviewPolicy` 的重点不是“review 内容怎么写”，而是“这个 tool call 是否需要 HITL”。

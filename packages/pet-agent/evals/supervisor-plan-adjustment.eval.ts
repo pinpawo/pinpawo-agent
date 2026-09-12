@@ -29,6 +29,8 @@ const disclosure = { ...createCapabilityDisclosureState({ catalog }), disclosedC
 const supervisor = createRunSupervisorAgent({ model: subject.model });
 const goal = 'Inspect the example/old repository and publish the findings.';
 const cases = [
+  { name: 'autonomous', goal: '检查仓库迁移并交付内部报告，不发布。', guidance: '', strategy: 'replace', capability: 'writer',
+    evidence: '仓库迁移检查已完成：配置迁移完成，42 项回归通过，线上压测尚未做。原计划后续错误地安排了再次调查相同仓库和对外发布；没有发布授权。内部报告尚未撰写，应依据现有检查证据交付，避免重复调查。' },
   { name: 'entry',
     goal: '根据已提供的迁移检查结果撰写中文内部报告，以 Markdown 正文交付。已确认：配置文件迁移完成；42 项回归测试全部通过；尚未进行线上压测。报告包含迁移结论、验证证据及待验证风险，明确区分已验证和未验证事项。',
     guidance: '检查结果已经完整提供，不需要再调查仓库。请开始撰写内部报告，仅在当前对话交付正文，不涉及保存文件或发布。' },
@@ -42,10 +44,11 @@ assert.ok([...selected].every((name) => cases.some((scenario) => scenario.name =
 for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
   const userRequest = scenario.goal ?? goal;
   const remainingPlan = scenario.name === 'entry' ? [] : [{ capability: 'general', task: 'Publish the findings.' }];
-  const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest, freshUserInput: true,
+  const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest, freshUserInput: scenario.name !== 'autonomous',
+    evidence: scenario.evidence,
     task: scenario.name === 'entry' ? undefined : 'Inspect the example/old repository.', remaining: remainingPlan });
   const input: RunSupervisorInput = { ...fixture, capabilityDisclosure: disclosure,
-    messages: [...fixture.messages, new HumanMessage(scenario.guidance)] };
+    messages: scenario.guidance ? [...fixture.messages, new HumanMessage(scenario.guidance)] : fixture.messages };
   try {
     const actual = await supervisor.invoke(input);
     const result = readSupervisorDecision(actual);
@@ -59,6 +62,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     } else if (scenario.strategy) {
       assert.equal(result.name, 'adjust_plan');
       if (result.name === 'adjust_plan') {
+        if (scenario.name === 'autonomous') assert.equal(result.args.goal, userRequest);
         assert.equal(result.args.currentDelegation, scenario.strategy);
         assert.equal(result.args.tasks[0].capability, scenario.capability);
         assert.ok(result.args.tasks.length > 0);

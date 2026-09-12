@@ -5,7 +5,6 @@ import type {
   AgentOperationPhase,
 } from '@pinpawo/agent-session';
 import type { OperationRegistry } from './events/operationRegistry';
-import { recordOperationActivity } from './operationActivityState';
 import { ToolOperationTracker } from './toolOperationTracker';
 
 export type InflightOperationRun = {
@@ -57,7 +56,6 @@ export function emitInflightOperationEvent(
   event: AgentOperationEvent,
   emit: EmitOperationEvent,
 ) {
-  recordOperationActivity(event);
   emit(event);
 }
 

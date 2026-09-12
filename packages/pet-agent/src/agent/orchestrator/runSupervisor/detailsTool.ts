@@ -26,7 +26,7 @@ export function createSupervisorCapabilityDetailsTool(params: {
       documents,
       alreadyDisclosed,
       unknownNames,
-      guidance: 'documents contains newly provided details. alreadyDisclosed names already have their details in context; no reread is needed. unknownNames are not in the manifest; use exact manifest names. Arrange the plan from the manifest and available information.',
+      guidance: 'documents contains new details; alreadyDisclosed lists names whose details are already in context; unknownNames lists names absent from the manifest.',
     });
     return new Command({ update: {
       messages: [new ToolMessage({ content, name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, tool_call_id: runtime.toolCallId })],
@@ -34,7 +34,7 @@ export function createSupervisorCapabilityDetailsTool(params: {
     } });
   }, {
     name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
-    description: '按 manifest 中的完整名称获取 Capability 详情。只做精确名称匹配，不搜索；已披露的名称不重复返回文档。仅在需要进一步了解能力职责时调用。',
+    description: '按 manifest 中的完整名称获取 Capability 详情，只做精确匹配，不搜索。返回新文档、已披露名称和未知名称；已披露的文档不重复返回。',
     schema: z.object({ names: z.array(z.string().trim().min(1).max(200)).min(1) }).strict(),
   });
 }

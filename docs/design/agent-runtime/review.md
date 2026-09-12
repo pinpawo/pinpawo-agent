@@ -5,7 +5,7 @@
 > Related: issues #133, #675, #684, #721, #747, and #749; PR #682
 > Domain: [Interrupt Domain](interrupt.md) owns the chain from Runtime to
 > interface; this document owns the semantics of each kind.
-> Policy selection: [Toolkit HITL policy](toolkit-hitl-policy.md)
+> Policy selection: see “工具审核策略” below.
 > Host boundary: [Resident Pet Host ports](resident-pet-host-ports.md)
 
 ## Purpose
@@ -28,8 +28,33 @@ This document defines:
 - continuation behavior;
 - ownership across interfaces, Host, Pet Runtime, and LangGraph.
 
-The policy that decides whether an action requires Review remains separate in
-[Toolkit HITL policy](toolkit-hitl-policy.md).
+The policy that decides whether an action requires Review is separate from the
+execution and resume protocol below.
+
+## 工具审核策略
+
+当前配置入口是 `ToolDefinition.review`，不是独立的 `toolReview` 映射。
+Tool 负责参数和硬性执行校验；operation metadata 描述调用，不决定授权；
+review policy 决定是否需要审核。[Toolkit 绑定](../../../packages/pet-agent/src/agent/orchestrator/subagentDispatch.ts)
+保留原始工具并收集 review bindings，由 `ToolkitReviewMiddleware.afterModel` 在执行前审核，
+不为每个工具增加执行 wrapper。
+
+[ReviewPolicies](../../../packages/pet-agent/src/agent/orchestrator/review/reviewPolicies.ts)
+提供 `localMutation`、`commandExecution`、`externalAccess` 和 `requireHitl`；
+这些 preset 都要求审核，默认在 Host 不支持 human review 时阻止执行，默认不启用授权复用。
+`never()` 返回无需审核，`custom()` 接受自定义策略；preset 不负责按命令名称推断安全性。
+Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow'` 显式选择无审核时放行，
+不能将其当作默认降级行为。
+
+审核内容来自 operation 摘要或输入，标准操作为 approve、reject、respond。
+只有配置了授权 matcher 且 Host 支持 session authorization 时才提供授权复用选项。
+`exact` / `url_origin` 的匹配及 generation 约束见
+[授权契约](../../reference/runtime/authorization-matcher.md)。
+全局审核策略与具体批准、拒绝、暂停、恢复的语义以下文为准。
+
+已移除的组合设计和 HITL 初稿仅作为历史依据，见
+[组合设计历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-composition.md)
+及 [HITL 初稿历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-hitl-policy.md)。
 
 ## Decisions
 

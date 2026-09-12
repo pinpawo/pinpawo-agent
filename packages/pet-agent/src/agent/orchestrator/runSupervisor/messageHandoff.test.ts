@@ -193,7 +193,7 @@ test('handoff rejects unexecuted, mixed, mismatched, unavailable and replayed ca
     control('review_current', { completed: true, reason: 'Unsubstantiated claim.', reply: 'Done.' })), /delivery/);
 });
 
-test('plan adjustment preserves completed work and validates fresh user input', () => {
+test('plan adjustment preserves completed work and requires fresh input only for a changed goal', () => {
   const input = returned();
   const completed = acceptSupervisorMessageHandoff(input, createSupervisorMessageHandoff(input,
     control('review_current', { completed: true, reason: 'Verified.', reply: 'Awaiting choice.' }, 'accept')));
@@ -206,6 +206,24 @@ test('plan adjustment preserves completed work and validates fresh user input', 
   assert.equal(revised.runSupervisorState.goal, 'New agreed goal');
   assert.equal(revised.runSupervisorState.plan[0].status, 'completed');
   assert.equal(currentSupervisorTask(revised.runSupervisorState)?.task, 'Inspect revised B.');
+});
+
+test('execution-driven adjustment preserves the goal and completed work at both handoff boundaries', () => {
+  const input = returned();
+  const completed = acceptSupervisorMessageHandoff(input, createSupervisorMessageHandoff(input,
+    control('review_current', { completed: true, reason: 'Verified.', reply: 'Paused.' }, 'accept')));
+  const next = { ...input, state: completed.runSupervisorState, hasNewUserInput: false };
+  for (const currentDelegation of ['continue', 'replace']) {
+    const pair = control('adjust_plan', { goal: next.state.goal, reason: 'Evidence requires a different inspection order.',
+      currentDelegation, tasks: [{ ...taskB, task: 'Inspect B using the evidence from A.' }],
+    }, `autonomous-${currentDelegation}`);
+    const handoff = createSupervisorMessageHandoff(next, pair);
+    const revised = acceptSupervisorMessageHandoff(next, handoff);
+    assert.equal(revised.runSupervisorState.goal, next.state.goal);
+    assert.equal(revised.runSupervisorState.plan[0].status, 'completed');
+    assert.equal(currentSupervisorTask(revised.runSupervisorState)?.task, 'Inspect B using the evidence from A.');
+    assert.throws(() => acceptSupervisorMessageHandoff({ ...next, state: { ...next.state, goal: 'Another goal' } }, handoff), /fresh user/);
+  }
 });
 
 test('replacing executed but unaccepted work preserves it as superseded, not pending', () => {
@@ -233,7 +251,7 @@ class OneControlModel extends BaseChatModel {
 }
 
 test('unavailable model tools fail before an extra model loop or tool execution', async () => {
-  for (const name of ['delegate_capability', 'unknown_tool', 'capability_details', 'submit_plan', 'adjust_plan']) {
+  for (const name of ['delegate_capability', 'unknown_tool', 'capability_details', 'submit_plan']) {
     class UnavailableModel extends OneControlModel {
       async _generate(): Promise<ChatResult> {
         this.invocations++;

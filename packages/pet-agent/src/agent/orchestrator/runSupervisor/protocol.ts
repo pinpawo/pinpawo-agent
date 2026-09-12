@@ -13,14 +13,14 @@ export const controlSchema = z.discriminatedUnion('name', [
   }).strict() }).strict(),
   z.object({ name: z.literal('review_current'), args: z.object({
     // Omit when starting pending work or replying without an acceptance decision.
-    completed: z.boolean().optional().describe('true：依据当前任务最新工具结果中的有效交付验收；false：立即委派执行器补齐它能自行完成的工作，不是等待用户。暂不验收、需要用户信息时省略 completed 并填写 reply，保留当前进度且不执行；也可直接自然语言提问。当前任务尚无执行结果时可省略 completed 直接推进。'),
+    completed: z.boolean().optional().describe('true：验收当前任务最新结果中的有效交付；false：立即委派补做，不能与 reply 同用。已有交付且继续调度时必须填写；尚无执行结果时可省略以开始执行。暂缓验收并回复时省略，保持进度。'),
     reason: z.string().trim().min(1).max(2_000).describe('验收依据或继续执行时需要补齐的具体工作。'),
-    reply: z.string().trim().min(1).optional().describe('仅在本轮停止执行、向用户交付最终答复或等待必要输入时填写。填写后不会执行任何后续任务。要继续当前任务或执行下一项必须省略；不得填写“即将执行”的进度通知；不能与 completed=false 同用。'),
+    reply: z.string().trim().min(1).optional().describe('停止本轮执行时给用户的最终答复或必要问题，不是“即将执行”的进度通知。继续执行时必须省略。'),
   }).strict() }).strict(),
   z.object({ name: z.literal('adjust_plan'), args: z.object({
-    goal: z.string().trim().min(1).max(4_000),
-    reason: z.string().trim().min(1).max(2_000),
-    currentDelegation: z.enum(['continue', 'replace']),
+    goal: z.string().trim().min(1).max(4_000).describe('没有新用户输入时必须原样保留当前 goal；只有用户明确要求或确认改变目标时才更新。'),
+    reason: z.string().trim().min(1).max(2_000).describe('调整依据：具体执行证据或用户要求，以及为何需要改变后续安排。'),
+    currentDelegation: z.enum(['continue', 'replace']).describe('continue：保留当前执行上下文，可修改 task 但必须保持 Capability；replace：更换 Capability 或丢弃旧执行上下文。替换不代表旧任务完成。'),
     tasks: z.array(supervisorTaskSchema).min(1).max(24),
   }).strict() }).strict(),
 ]);

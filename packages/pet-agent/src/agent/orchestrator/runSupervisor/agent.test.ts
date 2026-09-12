@@ -1925,7 +1925,7 @@ test('repeated empty detail reads do not close disclosure and parallel names mer
   assert.deepEqual(payload.alreadyDisclosed, ['general', 'explore']);
 });
 
-test('adjust_plan is a single proposal available only at a user-guided Boundary', async () => {
+test('adjust_plan is available at every Boundary but changing the goal requires user input', async () => {
   const catalog = createTestCatalog({ general: 'Repository execution.', writer: 'Write reports.' });
   const args = {
     goal: 'Inspect the corrected repository and prepare a private report.',
@@ -1934,20 +1934,24 @@ test('adjust_plan is a single proposal available only at a user-guided Boundary'
     tasks: [{ capability: 'writer', task: 'Prepare a private report from the corrected repository.' }],
   };
   const activeDelegation = { delegationId: 'd1', runId: 'run-test', capability: 'general', task: 'Publish the old repository.' };
-  for (const scenario of ['entry', 'execution', 'user'] as const) {
-    const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: `adjust-${scenario}`, name: 'adjust_plan', args }] }]);
+  for (const scenario of ['entry', 'execution', 'user', 'autonomous'] as const) {
     const input = supervisorInput(catalog, scenario === 'entry' ? {} : {
       mode: 'boundary', currentTask: activeDelegation,
       inputId: scenario === 'user' ? 'human:correction' : 'announce:d1:a1',
       messages: [new HumanMessage('Use the corrected repository; cancel publication and write a private report.')],
     });
+    const invocationArgs = scenario === 'autonomous' ? { ...args, goal: input.state.goal ?? input.userRequest,
+      reason: 'Execution evidence requires a revised method.', tasks: [{ capability: 'general', task: activeDelegation.task }] } : args;
+    const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: `adjust-${scenario}`, name: 'adjust_plan', args: invocationArgs }] }]);
     const invocation = createRunSupervisorAgent({ model }).invoke(input);
-    if (scenario === 'user') {
-      assert.deepEqual(commandOnly(await invocation), { name: 'adjust_plan', args: { ...args } });
+    if (scenario === 'user' || scenario === 'autonomous') {
+      assert.deepEqual(commandOnly(await invocation), { name: 'adjust_plan', args: invocationArgs });
+    } else if (scenario === 'execution') {
+      await assert.rejects(invocation, /Changing the goal requires fresh user input/);
     } else {
       await assert.rejects(invocation, /tool unavailable in this invocation/);
     }
-    assert.equal(model.boundToolNames.includes('adjust_plan'), scenario === 'user');
+    assert.equal(model.boundToolNames.includes('adjust_plan'), scenario !== 'entry');
     assert.equal(model.invocations.length, 1);
   }
 });

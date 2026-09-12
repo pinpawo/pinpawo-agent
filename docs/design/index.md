@@ -15,8 +15,8 @@ contracts in [reference/](../reference/index.md).
   当前状态边界、工具消息交接与恢复设计
 - [Capability routing manifest](agent-runtime/capability-routing-manifest.md) —
   draft vocabulary bridge for progressive Capability discovery
-- [Capability / Toolkit composition](agent-runtime/toolkit-composition.md) and
-  [Toolkit HITL policy](agent-runtime/toolkit-hitl-policy.md)
+- [Review and interrupt semantics](agent-runtime/review.md) — 工具审核策略、执行与恢复
+- Capability / Toolkit 的组合规则见[公共契约](../reference/extensions/capability-toolkit.md)。
 
 ## Local host and interfaces
 

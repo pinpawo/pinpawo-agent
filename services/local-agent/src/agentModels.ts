@@ -1,12 +1,12 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
-import type { AgentLlmConfig } from './agentConfig';
+import type { AgentLlmConfig } from './config/agentConfig';
 import { ChatOpenAI } from '@langchain/openai';
 import {
   requiresLlmStreaming,
   resolveLlmGenerationReserveTokens,
-} from './llmModelPresets';
+} from './config/llmModelPresets';
 
-export { resolveLlmGenerationReserveTokens } from './llmModelPresets';
+export { resolveLlmGenerationReserveTokens } from './config/llmModelPresets';
 
 export function buildLocalAgentModels(
   llmConfig: AgentLlmConfig,

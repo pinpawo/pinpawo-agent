@@ -4,7 +4,7 @@ import { setConfig } from './config';
 import {
   loadStoredConfig,
   saveStoredConfig,
-} from './storage';
+} from '../storage';
 
 /**
  * Persist the process-wide review policy at the host boundary. Independent

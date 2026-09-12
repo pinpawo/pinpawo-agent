@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { registerCapabilityCommand } from './commands/capability';
 import type { InitCommandOptions } from './commands/init';
 import { readLocalAgentPackageVersion } from './packageVersion';
-import type { ServerMode } from './serverMode';
+import type { ServerMode } from './config/serverMode';
 
 type LocalAgentCliHandlers = {
   runAgent?: (opts: { workdir?: string; stdio: boolean; mode: ServerMode }) => Promise<void> | void;

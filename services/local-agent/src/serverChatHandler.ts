@@ -9,7 +9,6 @@ import {
   type InterruptResumeMessage,
   type RunInterruptMessage,
 } from './wire/protocol';
-import { recordAgentRunActivity } from './operationActivityState';
 import { projectPendingInterrupt } from './conversation/pendingInterruptProjection';
 import {
   type StreamToolsPayload,
@@ -29,7 +28,7 @@ import { LocalAgentGraphService } from './agentGraphService';
 import {
   ServerTuiSessionService,
   type ActivePendingInterrupt,
-} from './serverTuiSessions';
+} from './session/serverTuiSessions';
 import type { ServerDeps } from './serverTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import {
@@ -342,7 +341,6 @@ export class ServerChatHandler {
     ): Promise<ChatRunOutcome> => {
       this.inflightRequests.finish(peer, inflight, 'failed', err);
       this.inflightRequests.clear(peer, inflight);
-      recordAgentRunActivity('error', requestId, 5_000);
       console.error('[local-server] chat error:', err instanceof Error ? (err.stack ?? err.message) : err);
       const recoveredFromToolProtocolError = isToolProtocolHistoryError(err);
       if (recoveredFromToolProtocolError) {
@@ -390,7 +388,6 @@ export class ServerChatHandler {
           : {}),
       });
       runStarted = true;
-      recordAgentRunActivity('thinking', requestId);
       const ctx = await this.loadContext(deps.petId);
       if (!isCurrent()) {
         finalizeInterrupted();
@@ -454,7 +451,6 @@ export class ServerChatHandler {
         || (err instanceof Error && err.name === 'AbortError');
       if (aborted) {
         console.warn(`[local-server] chat interrupted requestId=${requestId}`);
-        recordAgentRunActivity('interrupted', requestId, 2_500);
         try {
           return await settleInterrupted();
         } catch (settleError) {

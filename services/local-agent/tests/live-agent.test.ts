@@ -11,7 +11,7 @@ import {
   petDocumentSystemPromptSection,
 } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
-import type { AgentLlmConfig } from '../src/agentConfig';
+import type { AgentLlmConfig } from '../src/config/agentConfig';
 import { loadStoredConfig } from '../src/storage';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

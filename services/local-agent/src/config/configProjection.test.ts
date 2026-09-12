@@ -7,10 +7,10 @@ import {
   buildLocalHttpRuntimeProjection,
   buildLocalRuntimeProjection,
 } from './configProjection';
-import { readLocalAgentPackageVersion } from './packageVersion';
-import type { ServerDeps } from './serverTypes';
+import { readLocalAgentPackageVersion } from '../packageVersion';
+import type { ServerDeps } from '../serverTypes';
 import { buildLocalAgentRuntimeConfig, buildWorkspaceRuntimeConfig } from './runtimeConfig';
-import { createTestModelServerDeps } from './testing/modelProfiles';
+import { createTestModelServerDeps } from '../testing/modelProfiles';
 
 function createDeps(workdir: string): ServerDeps {
   return {

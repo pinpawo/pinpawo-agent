@@ -15,7 +15,7 @@ import type { LocalAgentGraphService } from './agentGraphService';
 import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
 import type { LocalAgentServerMessage } from './wire/protocol';
 import type { ServerPeer } from './wire/peer';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
 import {
   createTestModelProfileRegistry,
   createTestModelServerDeps,

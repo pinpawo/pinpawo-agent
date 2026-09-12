@@ -7,9 +7,9 @@ import type {
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
 import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
-import type { LocalModelProfileRegistry } from './llmConfig';
-import type { HostExecutionConfig } from './hostExecutionConfig';
-import type { ServerMode } from './serverMode';
+import type { LocalModelProfileRegistry } from './config/llmConfig';
+import type { HostExecutionConfig } from './config/hostExecutionConfig';
+import type { ServerMode } from './config/serverMode';
 import {
   type HostToolkitInventorySnapshot,
   HostToolkitInventoryStore,

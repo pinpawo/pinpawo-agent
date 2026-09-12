@@ -4,12 +4,12 @@ import { HostCapabilityAssembly } from './hostCapabilityAssembly';
 import {
   buildLocalAgentRuntimeConfig,
   type LocalAgentRuntimeConfig,
-} from './runtimeConfig';
+} from './config/runtimeConfig';
 import type { ServerDeps } from './serverTypes';
 import { DEFAULT_CHAT_PET } from './defaultPet';
-import { loadPetConfigs, type PetConfig } from './petConfig';
-import { loadPetDocumentFile, resolveChatPetDocumentPath } from './petDocument';
-import { DEFAULT_SERVER_MODE, type ServerMode } from './serverMode';
+import { loadPetConfigs, type PetConfig } from './config/petConfig';
+import { loadPetDocumentFile, resolveChatPetDocumentPath } from './config/petDocument';
+import { DEFAULT_SERVER_MODE, type ServerMode } from './config/serverMode';
 
 /**
  * Chat Host — assembles capability supply via {@link HostCapabilityAssembly}

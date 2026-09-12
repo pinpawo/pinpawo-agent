@@ -21,7 +21,7 @@ import {
   type PetDispatchState,
 } from './residentPetHost';
 import { FileSaver } from './fileSaver';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
 import { createTestModelProfiles } from './testing/modelProfiles';
 import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
 

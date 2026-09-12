@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { handleLocalHttpRequest } from './httpHandlers';
 import type { ServerDeps } from './serverTypes';
-import { clearAgentRunActivity, recordOperationActivity } from './operationActivityState';
 import { readLocalAgentPackageVersion } from './packageVersion';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 

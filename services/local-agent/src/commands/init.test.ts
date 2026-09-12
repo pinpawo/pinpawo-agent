@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { validateCapabilityPlugin } from '../capabilityLoader';
-import { buildModelProfileRegistry, resolveModelProfile } from '../modelProfiles';
+import { buildModelProfileRegistry, resolveModelProfile } from '../config/modelProfiles';
 import { scaffoldQuickInstall } from './init';
 
 test('scaffoldQuickInstall creates a stored model profile, env template, and valid example capability', async () => {

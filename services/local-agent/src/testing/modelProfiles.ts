@@ -7,15 +7,15 @@ import {
   type BuiltinGlobalReviewPolicyMode,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
-import type { AgentLlmConfig } from '../agentConfig';
-import type { HostExecutionConfig } from '../hostExecutionConfig';
-import { createLocalModelProfileRegistry } from '../llmConfig';
+import type { AgentLlmConfig } from '../config/agentConfig';
+import type { HostExecutionConfig } from '../config/hostExecutionConfig';
+import { createLocalModelProfileRegistry } from '../config/llmConfig';
 import {
   buildModelProfileRegistry,
   createModelProfile,
   MODEL_PROFILES_VERSION,
   type ModelProfileV1,
-} from '../modelProfiles';
+} from '../config/modelProfiles';
 import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 import type { CapabilityCatalogReader } from '../serverTypes';
 import type { CapabilityCatalogSnapshot } from '../hostCapabilityCatalog';

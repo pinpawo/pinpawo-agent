@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { createSubagent } from '@pinpawo/pet-agent';
 import { buildLocalAgentModels } from '../src/agentModels';
-import { buildLocalModelProfileRegistry } from '../src/llmConfig';
+import { buildLocalModelProfileRegistry } from '../src/config/llmConfig';
 import { parsePatch } from '../src/toolkits/local/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
 

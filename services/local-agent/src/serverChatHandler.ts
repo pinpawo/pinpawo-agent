@@ -29,7 +29,7 @@ import { LocalAgentGraphService } from './agentGraphService';
 import {
   ServerTuiSessionService,
   type ActivePendingInterrupt,
-} from './serverTuiSessions';
+} from './session/serverTuiSessions';
 import type { ServerDeps } from './serverTypes';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 import {

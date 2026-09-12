@@ -5,8 +5,8 @@ import {
 import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
-import { readLocalAgentPackageVersion } from './packageVersion';
-import type { RuntimeProjectionDeps } from './serverTypes';
+import { readLocalAgentPackageVersion } from '../packageVersion';
+import type { RuntimeProjectionDeps } from '../serverTypes';
 import type { ServerMode } from './serverMode';
 import type { ModelInputModality } from './modelProfiles';
 import { resolveLlmGenerationReserveTokens } from './llmModelPresets';

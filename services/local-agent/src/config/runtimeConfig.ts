@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
-import { loadStoredConfig, type StoredConfig } from './storage';
+import { loadStoredConfig, type StoredConfig } from '../storage';
 
 export type AgentWorkspaceConfig = Readonly<{
   id: string;

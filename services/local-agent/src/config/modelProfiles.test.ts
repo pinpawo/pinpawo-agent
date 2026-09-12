@@ -18,7 +18,7 @@ import {
   summarizeModelProfile,
   writeDefaultModelProfile,
 } from './modelProfiles';
-import type { StoredConfig } from './storage';
+import type { StoredConfig } from '../storage';
 import { createLocalModelProfileRegistry } from './llmConfig';
 
 function storedProfile(overrides: Record<string, unknown> = {}) {

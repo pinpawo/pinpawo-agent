@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
-import { buildTuiChatThreadId } from './chatInterface';
+import { buildTuiChatThreadId } from '../chatInterface';
 
 export const DEFAULT_TUI_SESSION_STATE_PATH = resolve(homedir(), '.pinpawo', 'tui-sessions.json');
 

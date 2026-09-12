@@ -8,7 +8,7 @@ import {
   type PetDocument,
 } from '@pinpawo/pet-agent';
 import { loadPetDocumentFile } from './petDocument';
-import { isSafePetPathSegment } from './petId';
+import { isSafePetPathSegment } from '../petId';
 
 export type PetConfig = {
   petId: string;

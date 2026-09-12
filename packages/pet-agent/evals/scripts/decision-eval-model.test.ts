@@ -7,7 +7,7 @@ import {
   buildModelProfileRegistry,
   fingerprintModelProfile,
   resolveModelProfile,
-} from '../../../../services/local-agent/src/modelProfiles.ts';
+} from '../../../../services/local-agent/src/config/modelProfiles.ts';
 import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 

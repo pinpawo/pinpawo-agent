@@ -10,7 +10,7 @@ import {
   startLocalServer,
   type ServerDeps,
 } from './server';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
 import { createTestModelServerDeps } from './testing/modelProfiles';
 
 test('local server close is idempotent and releases its listening port', async () => {

@@ -8,7 +8,7 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import test from 'node:test';
-import { setAgentMessageMetadata } from '../../../packages/pet-agent/src/agent/messages';
+import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
   ServerTuiSessionService,
@@ -18,14 +18,14 @@ import {
   summarizeTuiCheckpointMessages,
   type TuiSessionCheckpointer,
 } from './serverTuiSessions';
-import { createLocalChatHumanMessage } from './agent/chatMessageInput';
-import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
-import { buildLocalAgentRuntimeConfig } from './runtimeConfig';
+import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
+import { createLocalServerRuntimeDepsStore, type ServerDeps } from '../serverTypes';
+import { buildLocalAgentRuntimeConfig } from '../config/runtimeConfig';
 import {
   createTestModelProfiles,
   createTestModelServerDeps,
-} from './testing/modelProfiles';
-import { HostToolkitInventoryStore } from './toolkits/toolkitInventory';
+} from '../testing/modelProfiles';
+import { HostToolkitInventoryStore } from '../toolkits/toolkitInventory';
 
 const TEST_MODEL_PROFILE_ID = 'test-profile';
 

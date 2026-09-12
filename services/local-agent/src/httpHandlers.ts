@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isAuthorizedLocalServerRequest } from './wire/auth';
 import type { PetIdentityDeps, RuntimeProjectionDeps } from './serverTypes';
-import { buildLocalHttpRuntimeProjection } from './configProjection';
+import { buildLocalHttpRuntimeProjection } from './config/configProjection';
 
 /**
  * HTTP carries one operational read: which build this process is running.

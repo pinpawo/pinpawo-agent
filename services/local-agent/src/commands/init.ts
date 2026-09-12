@@ -5,11 +5,11 @@ import {
   createModelProfile,
   MODEL_PROFILES_VERSION,
   type ModelProfileV1,
-} from '../modelProfiles';
+} from '../config/modelProfiles';
 import {
   findLlmModelPresetByKey,
   inferLlmModelPreset,
-} from '../llmModelPresets';
+} from '../config/llmModelPresets';
 
 export type InitCommandOptions = {
   dir?: string;

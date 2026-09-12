@@ -7,9 +7,9 @@ import { buildLocalAgentSessionSnapshot } from './conversation/agentSessionSnaps
 import type {
   AgentModelProfileSummary,
   AgentRuntimeEvent,
-  AgentRunView,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
+import { ActiveRunRegister } from './agent/activeRunRegister';
 import type {
   LocalAgentSessionServerMessage,
 } from './wire/protocol';
@@ -61,8 +61,15 @@ export type ServerHandlerOptions = {
   publishRuntimeEvent?: (origin: ServerPeer, event: AgentRuntimeEvent) => void;
   /** Optional Host-owned run control used by resident headless inputs. */
   interruptHostRun?: (requestId: string) => boolean;
-  /** Resident-wide live run projection used by observing peers and startup snapshots. */
-  readActiveRun?: () => Extract<AgentRunView, { state: 'running' }> | null;
+  /**
+   * The Host's run register, shared when the Host also dispatches.
+   *
+   * A resident Host runs turns from two sources — this handler's conversation
+   * and its own dispatch queue — and both must claim the same register, or a
+   * snapshot cannot say which run is live. Left unset (the local CLI), the
+   * handler owns a register of its own.
+   */
+  activeRuns?: ActiveRunRegister;
 };
 
 type SessionSummarySource = Pick<
@@ -72,11 +79,6 @@ type SessionSummarySource = Pick<
 
 /** Shown whenever a command is refused because a run holds the session. */
 const RUN_IN_FLIGHT_MESSAGE = 'wait for the current response to finish';
-
-type ActiveChatRun = {
-  requestId: string;
-  startedAt: number;
-};
 
 function projectChatSessionSummary(session: SessionSummarySource): AgentSessionSummary {
   return {
@@ -164,7 +166,7 @@ export function createLocalServerHandlers(
       message: RUN_IN_FLIGHT_MESSAGE,
     });
   };
-  const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
+  const activeRuns = options.activeRuns ?? new ActiveRunRegister();
 
   const loadSnapshot = async (peer?: ServerPeer) => {
     const requestDeps = runtimeDeps.get();
@@ -173,18 +175,7 @@ export function createLocalServerHandlers(
       requestDeps,
       checkpoint.pendingInterrupt,
     );
-    const residentActiveRun = options.readActiveRun?.() ?? null;
-    const active = peer ? activeChatRuns.get(peer) : null;
-    const inflight = peer ? inflightRequests.get(peer) : null;
-    const activeRun: Extract<AgentRunView, { state: 'running' }> | null = residentActiveRun
-      ?? (active && inflight?.requestId === active.requestId
-        ? {
-            requestId: active.requestId,
-            state: 'running',
-            activity: 'thinking',
-            startedAt: active.startedAt,
-          }
-        : null);
+    const activeRun = activeRuns.read();
     return buildLocalAgentSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',
@@ -568,17 +559,11 @@ export function createLocalServerHandlers(
       if (!peer.isConnected()) {
         return;
       }
-      const activeRun: ActiveChatRun = {
-        requestId,
-        startedAt: Date.now(),
-      };
-      activeChatRuns.set(peer, activeRun);
+      const activeRun = activeRuns.begin(requestId);
       try {
         await admit();
       } finally {
-        if (activeChatRuns.get(peer) === activeRun) {
-          activeChatRuns.delete(peer);
-        }
+        activeRuns.finish(activeRun);
       }
     });
   };
@@ -754,7 +739,6 @@ export function createLocalServerHandlers(
       () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
     ),
     onClose: (client) => {
-      activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
     },
   };

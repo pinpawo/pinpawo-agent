@@ -60,7 +60,7 @@ test('readTuiCheckpointMessages restores paired Capability deliveries without ex
   const metadata = { runId: 'run-1', traceId: 'trace-1' };
   const call = setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id: 'dispatch-1', name: 'delegate_capability', args: {
-      control: { name: 'submit_plan', args: { tasks: [{ capability: 'general', task: execution.task }] } },
+      control: { name: 'execute_current', args: {} },
       execution,
     },
   }] }), metadata);

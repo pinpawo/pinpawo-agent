@@ -56,7 +56,7 @@ export function supervisorFixture(params: {
   return { ...input, messages: [...messages,
     setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id, name: 'delegate_capability', type: 'tool_call', args: {
-        control: { name: 'submit_plan', args: { tasks: [{ capability, task: params.task }] } },
+        control: { name: 'execute_current', args: {} },
         execution: { taskId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, mode: 'initial', guidance: null },
       },
     }] }), metadata),

@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
-import { END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
+import { AIMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../../messages';
-import { buildRunStateReset, OrchestratorState, type OrchestratorStateType } from '../../state';
-import { createOrchestratorGraph } from '../graph';
-import type { AgentModels } from '../../../../types/agent';
+import { buildRunStateReset, type OrchestratorStateType } from '../../state';
 import { createAnswerNode } from './answer';
 import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
@@ -54,53 +51,4 @@ test('terminal never republishes another run reply and stamps both identities on
     createdAt: getAgentMessageMetadata(result.messages[0]).createdAt,
     runId: previous.runId, traceId: previous.traceId,
   });
-});
-
-function legacyReplyState() {
-  const saved = state({ runSupervisorState: { goal: 'Inspect.', plan: [
-    { id: 'task', capability: 'general', task: 'Inspect.', status: 'completed' },
-  ] } });
-  saved.messages = [
-    new AIMessage({ content: '', tool_calls: [{ id: 'review', name: 'review_current', args: {
-      completed: true, reason: 'Inspection verified.', reply: 'Inspection complete.',
-    } }] }),
-    new ToolMessage({ name: 'review_current', tool_call_id: 'review', content: 'Control decision submitted.' }),
-  ].map((message) => setAgentMessageMetadata(message, { lane: 'supervisor', runId: saved.runId, traceId: saved.traceId }));
-  return saved;
-}
-
-test('a pre-upgrade checkpoint waiting at answer resumes without rerunning the model or Capability', async () => {
-  const checkpointer = new MemorySaver();
-  const saved = legacyReplyState();
-  // Reproduce the previous runtime's committed control pair and pending answer node.
-  const previousGraph = new StateGraph(OrchestratorState)
-    .addNode('runSupervisor', () => saved)
-    .addNode('answer', () => { throw new Error('Pause before publishing.'); })
-    .addEdge(START, 'runSupervisor').addEdge('runSupervisor', 'answer').addEdge('answer', END)
-    .compile({ checkpointer });
-  const options = { configurable: { thread_id: 'legacy-answer-restart' } };
-  await previousGraph.invoke({}, { ...options, interruptBefore: ['answer'] });
-  assert.deepEqual((await previousGraph.getState(options)).next, ['answer']);
-  const models = { act: { bindTools() { return this; }, invoke: () => { throw new Error('Must not rerun models'); } } } as unknown as AgentModels;
-  const graph = createOrchestratorGraph({ models, checkpoint: checkpointer });
-  const output = await graph.invoke(null, options);
-  assert.equal(output.messages.at(-1)?.text, 'Inspection complete.');
-  assert.deepEqual(output.runSupervisorState, saved.runSupervisorState);
-  const resumedAgain = await graph.invoke(null, options);
-  assert.equal(resumedAgain.messages.filter((message) => !getAgentMessageMetadata(message).lane
-    && message.text === 'Inspection complete.').length, 1);
-});
-
-test('legacy replies require a successful matching control pair from the current run', async () => {
-  for (const mutation of [
-    (saved: OrchestratorStateType) => { saved.runId = 'another-run'; },
-    (saved: OrchestratorStateType) => { saved.traceId = 'another-trace'; },
-    (saved: OrchestratorStateType) => { (saved.messages[1] as ToolMessage).status = 'error'; },
-    (saved: OrchestratorStateType) => { (saved.messages[1] as ToolMessage).tool_call_id = 'another-call'; },
-    (saved: OrchestratorStateType) => { saved.messages.pop(); },
-  ]) {
-    const saved = legacyReplyState();
-    mutation(saved);
-    await assert.rejects(createAnswerNode()(saved), /requires a supplied reply/);
-  }
 });

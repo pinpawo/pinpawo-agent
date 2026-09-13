@@ -55,3 +55,28 @@ Studio SSE 重建领域状态。
 管理 API 使用 HTTP Plugin 的 Studio Bearer 与 Origin/CORS 边界。Console 不把 token
 写入 URL；第一版只保存在当前浏览器 session。Trigger 的外部接收凭证属于 Trigger 领域，
 不复用 Studio Bearer。
+
+## E2E observation repair (2026-09-14 draft)
+
+The Console owns one SSE connection per selected Host/credential. Resource
+refresh and successful POSTs do not restart it. Establish observation before
+allowing dispatch, refresh domain snapshots after subscribing, and keep reading
+events while those requests run. Transient failures reconnect with bounded
+backoff; authentication failures require updated credentials. Reconnect is not
+replay: unfinished activity rows become observation-unknown until another
+lifecycle fact arrives. Known terminal facts remain visible. Explicit reconnect
+to the same URL retains the current browser view; selecting another Host clears
+its activity. This is not durable history or proof of a restarted Host's identity.
+
+`completed` means the invocation ended, not that the requested business goal was
+achieved. Replies, clarification and approvals belong to the Pet session. The
+current HTTP `/pets` and lifecycle payloads do not expose pending interrupts or
+Agent Session connection descriptors. Agent Session `session.snapshot.get` does
+contain `pendingInterrupt`, but the existing WebSocket requires Bearer headers
+and its own allowed Origin, and admits a single interactive client. Console must
+not probe it as an extra observer or move credentials into URLs. This repair
+therefore provides waiting/result guidance to the Pet TUI using the Host startup
+connection instructions; direct interrupt rendering and approval remain deferred.
+
+Verification covers receipt/lifecycle ordering, loss of observation, fragmented
+SSE frames, transient retry, authentication failure and abort without reconnect.

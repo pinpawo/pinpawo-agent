@@ -8,9 +8,11 @@ import React, {
 } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, type DispatchRecord } from './dispatchActivity';
+import { observeStudioEvents } from './studioEvents';
 
 type Page = 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
-type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
+type ConnectionState = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
   taskId: string; assigneeId?: string; title: string; detail: string;
@@ -54,18 +56,6 @@ type HistoryEvent = {
   sequence: number; eventType: string; occurredAt: string; note?: string;
   taskId?: string; scheduleId?: string; deliveryId?: string; triggerId?: string; status?: string;
 };
-type LiveEvent = { type: string; source: string; occurredAt: string; payload?: unknown };
-type DispatchState = 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
-type DispatchRecord = {
-  invocationId: string;
-  petId: string;
-  request: string;
-  producer: string;
-  state: DispatchState;
-  updatedAt: string;
-  source: 'admission_receipt' | 'lifecycle';
-  error?: string;
-};
 type ProjectDocumentSummary = {
   path: string; title: string; size: number; modifiedAt: string;
 };
@@ -106,72 +96,13 @@ function noticeDetail(notice: Notice): string {
 
 function connectionErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (/\/pets failed \(401\)/.test(message)) {
+  if (/failed \(401\)/.test(message)) {
     return 'Authentication failed. Check the Studio bearer token.';
   }
   if (/Failed to fetch|NetworkError|fetch failed|Load failed/i.test(message)) {
     return 'Studio Host is unreachable. Check the URL and confirm the Host is running.';
   }
   return message;
-}
-
-function dispatchRecordFromEvent(event: LiveEvent): DispatchRecord | null {
-  const source = event.source === 'studio' && event.type === 'dispatch.accepted'
-    ? 'admission_receipt'
-    : event.source === 'resident-pet' && /^dispatch\.(queued|running|waiting|completed|interrupted|failed)$/.test(event.type)
-      ? 'lifecycle'
-      : null;
-  const state = source === 'admission_receipt'
-    ? 'queued'
-    : source === 'lifecycle'
-      ? event.type.slice('dispatch.'.length) as DispatchState
-      : null;
-  if (!source || !state
-    || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
-    return null;
-  }
-  const payload = event.payload as Record<string, unknown>;
-  if (typeof payload.invocationId !== 'string' || typeof payload.petId !== 'string'
-    || typeof payload.request !== 'string') {
-    return null;
-  }
-  return {
-    invocationId: payload.invocationId,
-    petId: payload.petId,
-    request: payload.request,
-    producer: typeof payload.producer === 'string' ? payload.producer : 'resident-pet',
-    state,
-    updatedAt: event.occurredAt,
-    source,
-    ...(typeof payload.error === 'string' && payload.error.trim()
-      ? { error: payload.error }
-      : {}),
-  };
-}
-
-function appendDispatchRecord(records: DispatchRecord[], record: DispatchRecord): DispatchRecord[] {
-  const existingIndex = records.findIndex(({ invocationId }) => invocationId === record.invocationId);
-  if (existingIndex < 0) return [...records.slice(-199), record];
-  const existing = records[existingIndex];
-  if (!existing) return records;
-  // Studio's receipt can arrive after the resident runtime has already emitted
-  // running or terminal lifecycle. It only establishes the initial queued row;
-  // merge its source attribution without regressing the execution observation.
-  if (record.source === 'admission_receipt' && existing.state !== 'queued') {
-    const next = [...records];
-    next[existingIndex] = {
-      ...existing,
-      producer: record.producer,
-    };
-    return next;
-  }
-  const next = [...records];
-  next[existingIndex] = {
-    ...existing,
-    ...record,
-    producer: record.source === 'lifecycle' ? existing.producer : record.producer,
-  };
-  return next;
 }
 
 function canRetryDispatch(dispatch: DispatchRecord): boolean {
@@ -210,6 +141,8 @@ export function App() {
   const [dispatchTask, setDispatchTask] = useState<Task | null>(null);
   const [dispatchSubmitting, setDispatchSubmitting] = useState(false);
   const dispatchSubmittingRef = useRef(false);
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined);
+  const observationEpoch = useRef(0);
   const [retryingInvocationId, setRetryingInvocationId] = useState('');
   const [retryingDeliveryId, setRetryingDeliveryId] = useState('');
   const [schedulePet, setSchedulePet] = useState('');
@@ -217,6 +150,7 @@ export function App() {
   const [scheduleRunAt, setScheduleRunAt] = useState('');
 
   const normalizedUrl = useMemo(() => baseUrl.trim().replace(/\/$/, ''), [baseUrl]);
+  const activeHost = useRef(normalizedUrl);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const taskAssignmentTargets = useMemo(() => {
     const routingRules = triggers.value?.triggers.filter((trigger) => (
@@ -253,10 +187,11 @@ export function App() {
         read<{ events: HistoryEvent[] }>('/scheduler/events').catch(() => ({ value: null, unavailable: true })),
         read<{ events: HistoryEvent[] }>('/triggers/events').catch(() => ({ value: null, unavailable: true })),
       ]);
+      if (abort.signal.aborted) return;
       const nextPets = petResponse.value?.pets ?? [];
       setPets(nextPets);
-      setDispatchPet((current) => current || nextPets[0]?.petId || '');
-      setSchedulePet((current) => current || nextPets[0]?.petId || '');
+      setDispatchPet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
+      setSchedulePet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
       setTasks({ ...kanban, value: kanban.value?.tasks ?? null });
       setRelationships(kanban.value?.relationships ?? []);
       setSchedules({ ...scheduler, value: scheduler.value?.schedules ?? null });
@@ -271,56 +206,52 @@ export function App() {
       setKanbanHistory(kanbanEvents.value?.events ?? []);
       setSchedulerHistory(schedulerEvents.value?.events ?? []);
       setTriggerHistory(triggerEvents.value?.events ?? []);
-      setConnectionState('connected');
-      setConnectionError('');
-      setConnectionModalOpen(false);
-      setNotice('Connected.');
     };
-    const run = async () => {
-      try {
-        await refresh();
-        while (!abort.signal.aborted) {
-          const response = await fetch(`${normalizedUrl}/events`, { headers, signal: abort.signal });
-          if (!response.ok || !response.body) throw new Error(`SSE failed (${response.status.toString()}).`);
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let pending = '';
-          while (!abort.signal.aborted) {
-            const chunk = await reader.read();
-            if (chunk.done) throw new Error('SSE connection closed.');
-            pending += decoder.decode(chunk.value, { stream: true });
-            let boundary = pending.indexOf('\n\n');
-            while (boundary >= 0) {
-              const block = pending.slice(0, boundary);
-              pending = pending.slice(boundary + 2);
-              const data = block.split('\n').find((line) => line.startsWith('data:'))?.slice(5).trim();
-              if (data) {
-                const event = JSON.parse(data) as LiveEvent;
-                const dispatchRecord = dispatchRecordFromEvent(event);
-                if (dispatchRecord) {
-                  setDispatches((current) => appendDispatchRecord(current, dispatchRecord));
-                }
-                if (event.source === 'kanban' || event.source === 'scheduler'
-                  || event.source === 'notice' || event.source === 'trigger') {
-                  await refresh();
-                }
-              }
-              boundary = pending.indexOf('\n\n');
-            }
-          }
+    // Refreshing domain snapshots must never replace the live observation stream.
+    let refreshPending: Promise<void> | undefined;
+    let refreshAgain = false;
+    const refreshResources = () => {
+      refreshAgain = true;
+      if (!refreshPending) refreshPending = (async () => {
+        while (refreshAgain && !abort.signal.aborted) {
+          refreshAgain = false;
+          await refresh();
         }
-      } catch (error) {
-        if (!abort.signal.aborted) {
-          const message = connectionErrorMessage(error);
-          setConnectionState('error');
-          setConnectionError(message);
-          setConnectionModalOpen(true);
-          setNotice(message);
-        }
-      }
+      })().finally(() => { refreshPending = undefined; });
+      return refreshPending;
     };
-    void run();
-    return () => abort.abort();
+    refreshRef.current = refreshResources;
+    const refreshInBackground = () => {
+      void refreshResources().catch((error) => {
+        if (!abort.signal.aborted) setNotice(connectionErrorMessage(error));
+      });
+    };
+    void observeStudioEvents({
+      url: `${normalizedUrl}/events`, headers, signal: abort.signal,
+      onConnected: () => {
+        setConnectionState('connected');
+        setConnectionError('');
+        setConnectionModalOpen(false);
+        setNotice('Connected. Activity missed while disconnected remains unknown.');
+        refreshInBackground();
+      },
+      onDisconnected: (error, retrying) => {
+        observationEpoch.current++;
+        setDispatches(markObservationLost);
+        setConnectionState(retrying ? 'reconnecting' : 'error');
+        setConnectionError(connectionErrorMessage(error));
+        if (!retrying) setConnectionModalOpen(true);
+      },
+      onEvent: (event) => {
+        const record = dispatchRecordFromEvent(event);
+        if (record) setDispatches((current) => appendDispatchRecord(current, record));
+        if (['kanban', 'scheduler', 'notice', 'trigger'].includes(event.source)) refreshInBackground();
+      },
+    });
+    return () => {
+      abort.abort();
+      refreshRef.current = async () => undefined;
+    };
   }, [connectionKey, headers, normalizedUrl, token]);
 
   const connect = (event: FormEvent) => {
@@ -343,11 +274,28 @@ export function App() {
       return;
     }
     const nextToken = connectionTokenDraft.trim();
+    observationEpoch.current++;
+    activeHost.current = nextUrl;
+    if (nextUrl !== normalizedUrl) {
+      setPets([]);
+      setTasks(empty());
+      setRelationships([]);
+      setSchedules(empty());
+      setNotices(empty());
+      setTriggers(empty());
+      setKnowledge(empty());
+      setSelectedDocument(null);
+      setKanbanHistory([]);
+      setSchedulerHistory([]);
+      setTriggerHistory([]);
+      setDispatchTask(null);
+      setDispatchGoal('');
+    }
     sessionStorage.setItem('studio.url', nextUrl);
     sessionStorage.setItem('studio.token', nextToken);
     setBaseUrl(nextUrl);
     setToken(nextToken);
-    setDispatches([]);
+    setDispatches((current) => nextUrl === normalizedUrl ? markObservationLost(current) : []);
     setConnectionState('connecting');
     setConnectionError('');
     setConnectionKey((current) => current + 1);
@@ -361,8 +309,9 @@ export function App() {
       body: JSON.stringify(body),
     });
     const value = await response.json().catch(() => null) as ({ error?: string } & T) | null;
+    if (activeHost.current !== normalizedUrl) throw new Error('Request belongs to the previous Studio Host. Check that Host for its outcome.');
     if (!response.ok) throw new Error(value?.error ?? `${path} failed (${response.status.toString()}).`);
-    setConnectionKey((current) => current + 1);
+    void refreshRef.current().catch((error) => setNotice(connectionErrorMessage(error)));
     return value as T;
   };
 
@@ -442,7 +391,7 @@ export function App() {
 
   const submitDispatch = (event: FormEvent) => {
     event.preventDefault();
-    if (dispatchSubmittingRef.current) return;
+    if (dispatchSubmittingRef.current || connectionState !== 'connected') return;
     const request = dispatchGoal.trim();
     if (!dispatchPet || (!dispatchTask && !request)) {
       setNotice(dispatchTask ? 'Assignment requires a Pet.' : 'Dispatch requires a Pet and a message.');
@@ -470,6 +419,7 @@ export function App() {
       });
       return;
     }
+    const submittedEpoch = observationEpoch.current;
     void post<{ petId: string; invocationId: string }>('/dispatch', {
       petId: dispatchPet,
       request,
@@ -484,6 +434,7 @@ export function App() {
         state: 'queued',
         updatedAt: new Date().toISOString(),
         source: 'admission_receipt',
+        observationLost: submittedEpoch !== observationEpoch.current,
       }));
       setNotice(`Dispatch accepted for ${receipt.petId}.`);
     }).catch((error) => setNotice(connectionErrorMessage(error))).finally(() => {
@@ -499,8 +450,9 @@ export function App() {
   };
 
   const retryDispatch = (dispatch: DispatchRecord) => {
-    if (!canRetryDispatch(dispatch)) return;
+    if (!canRetryDispatch(dispatch) || connectionState !== 'connected') return;
     setRetryingInvocationId(dispatch.invocationId);
+    const submittedEpoch = observationEpoch.current;
     void post<{ petId: string; invocationId: string }>('/dispatch', {
       petId: dispatch.petId,
       request: dispatch.request,
@@ -513,6 +465,7 @@ export function App() {
         state: 'queued',
         updatedAt: new Date().toISOString(),
         source: 'admission_receipt',
+        observationLost: submittedEpoch !== observationEpoch.current,
       }));
       setNotice(`Retry accepted for ${receipt.petId}.`);
     }).catch((error) => setNotice(connectionErrorMessage(error))).finally(() => {
@@ -679,9 +632,12 @@ export function App() {
           {!dispatchTask && <div className="drawer-activity">
             <div className="section-title"><span>RECENT ACTIVITY</span><b>{dispatches.length}</b></div>
             {dispatches.length > 0 ? dispatches.slice(-6).reverse().map((dispatch) => <div className="dispatch-activity" key={dispatch.invocationId}>
-              <em className={dispatch.state}>{dispatch.state}</em>
+              <em className={dispatch.observationLost ? 'unknown' : dispatch.state}>{dispatch.observationLost ? 'status unknown' : dispatch.state === 'completed' ? 'invocation ended' : dispatch.state}</em>
               <strong>{dispatch.request}</strong>
-              <span>{dispatch.petId}{dispatch.error ? ` · ${dispatch.error}` : ''}{dispatch.state === 'failed' && canRetryDispatch(dispatch) && <button className="inline-action" disabled={retryingInvocationId === dispatch.invocationId} onClick={() => retryDispatch(dispatch)} type="button">retry</button>}</span>
+              {dispatch.observationLost && <small>Observation interrupted. Last seen: {dispatch.state}. Check this Pet’s session for its current state.</small>}
+              {!dispatch.observationLost && dispatch.state === 'completed' && <small>Check the Pet session for its reply and Kanban for task completion.</small>}
+              {!dispatch.observationLost && dispatch.state === 'waiting' && <small>Interaction needed. Use the Pet TUI connection command from the Host startup output with Pet {dispatch.petId}. Review details and approval are available there.</small>}
+              <span>{dispatch.petId}{dispatch.error ? ` · ${dispatch.error}` : ''}{dispatch.state === 'failed' && canRetryDispatch(dispatch) && <button className="inline-action" disabled={connectionState !== 'connected' || retryingInvocationId === dispatch.invocationId} onClick={() => retryDispatch(dispatch)} type="button">retry</button>}</span>
             </div>) : <div className="compact-empty">No dispatch activity in this Console session.</div>}
           </div>}
         </aside>

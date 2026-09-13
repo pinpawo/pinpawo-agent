@@ -1,4 +1,4 @@
-import type { ReviewEffect } from './reviewSpec';
+import type { ReviewEffect } from '../types/reviewSpec';
 import {
   readToolAuthorizationMatcher,
   toolAuthorizationMatcherKey,

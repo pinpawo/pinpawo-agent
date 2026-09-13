@@ -1,5 +1,5 @@
 import type { UserRequest } from '../types';
-import { indentXmlBlock, xmlTextBlock } from './shared';
+import { indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
 
 export function buildRunUserRequestContext(userRequest: UserRequest | null): string {
   if (!userRequest) return '<run_user_request missing="true" />';

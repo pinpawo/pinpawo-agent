@@ -1,7 +1,7 @@
 import { HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { randomUUID } from 'node:crypto';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
-import { indentXmlBlock, xmlTextBlock } from '../prompts/shared';
+import { indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
 import type { UserRequest } from '../types';
 
 /**

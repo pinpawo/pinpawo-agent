@@ -4,4 +4,4 @@ export {
 } from '@pinpawo/agent-contracts';
 export {
   isReviewSpecValue,
-} from './agent/orchestrator/review/reviewSpecValidation';
+} from './types/reviewSpecValidation';

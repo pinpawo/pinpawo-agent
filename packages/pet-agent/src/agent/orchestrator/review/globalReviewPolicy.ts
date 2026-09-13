@@ -1,18 +1,12 @@
-import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
-import { z } from 'zod';
+import { type BaseMessage } from '@langchain/core/messages';
 import {
   DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
   type ToolAuthorizationMode,
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 import type { AgentModels } from '../../../types/agent';
-import type { StructuredOutputOptions } from '../../../utils/structuredOutput';
-import { invokeStructuredOutput } from '../../../utils/structuredOutput';
-import {
-  buildAutoReviewPrompt,
-  buildAutoReviewSystemPrompt,
-} from '../prompts/autoReview';
-import type { ReviewSpec } from './reviewSpec';
+import { createAutoReviewer } from '../../../autoReview/autoReviewer';
+import type { AutoReviewAction, AutoReviewStructuredOutputConfig } from '../../../autoReview/types';
 
 export const GLOBAL_REVIEW_POLICY_MODE = {
   REQUIRE_AUTHORIZATION: 'require_authorization',
@@ -35,22 +29,11 @@ export const GLOBAL_REVIEW_POLICY_RUNTIME_EVENT = {
 export type BuiltinGlobalReviewPolicyMode = ToolAuthorizationMode;
 export type GlobalReviewPolicyMode = BuiltinGlobalReviewPolicyMode | typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM;
 
-export type GlobalReviewPolicyStructuredOutputConfig = Omit<StructuredOutputOptions, 'name'>;
+export type GlobalReviewPolicyStructuredOutputConfig = AutoReviewStructuredOutputConfig;
 
 export type GlobalReviewPolicyResolution =
   | { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION; reason?: string }
   | { type: typeof GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE; reason: string };
-
-type ToolReviewOperationMetadata = {
-  title?: string;
-  summarizeInput?: (input: unknown) => ToolReviewOperationSummary | null;
-};
-
-type ToolReviewOperationSummary = {
-  target?: string;
-  summary?: string;
-  details?: Record<string, unknown>;
-};
 
 type GlobalReviewRuntimeContext = {
   /** Non-authoritative relevance hint; it may only make auto review more conservative. */
@@ -59,31 +42,17 @@ type GlobalReviewRuntimeContext = {
   workdir?: string | null;
 };
 
-type ToolkitAutoReviewContext = {
-  allow: string;
-  ask: string;
-};
-
-export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & {
+export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & AutoReviewAction & {
   models: AgentModels;
   /** Custom policy context only; built-in auto authorization never forwards messages to its model. */
   messages: BaseMessage[];
-  toolkitName: string;
-  toolName: string;
-  input: unknown;
-  operation?: ToolReviewOperationMetadata;
-  autoReviewContext?: ToolkitAutoReviewContext;
-  review: ReviewSpec;
 };
 
 export type GlobalReviewPolicyResolver = (
   ctx: GlobalReviewPolicyContext
 ) => GlobalReviewPolicyResolution | Promise<GlobalReviewPolicyResolution>;
 
-export type GlobalReviewPolicyBatchItem = Omit<
-  GlobalReviewPolicyContext,
-  'models' | 'messages' | keyof GlobalReviewRuntimeContext
->;
+export type GlobalReviewPolicyBatchItem = AutoReviewAction;
 
 export type GlobalReviewPolicyBatchContext = GlobalReviewRuntimeContext & {
   models: AgentModels;
@@ -119,24 +88,9 @@ export type ResolveGlobalReviewBatchPolicyOptions = GlobalReviewPolicyBatchConte
   policy?: GlobalReviewPolicy;
 };
 
-const AUTO_REVIEW_RESULT_SCHEMA = z.object({
-  riskScore: z.number().int().min(0).max(10).describe(
-    'Risk from 0 to 10. Scores 0-2 pass strict review, 3-9 require relaxed review, and 10 always requires human review.',
-  ),
-  reason: z.string().optional().default('').describe(
-    'A concise explanation grounded in the concrete action facts and authorization policy.',
-  ),
-});
-
 const DEFAULT_AUTO_REVIEW_REASON = 'Auto authorization did not approve this tool-call batch.';
 const STRICT_AUTO_REVIEW_MAX_RISK_SCORE = 2;
 const RELAXED_AUTO_REVIEW_MAX_RISK_SCORE = 9;
-
-export type AutoReviewRiskAssessment = z.infer<typeof AUTO_REVIEW_RESULT_SCHEMA>;
-
-export type AutoReviewRiskAssessmentResult =
-  | { complete: false }
-  | { complete: true; assessment: AutoReviewRiskAssessment };
 
 function normalizeReason(reason: string | undefined, fallback: string) {
   const trimmed = reason?.trim();
@@ -144,44 +98,6 @@ function normalizeReason(reason: string | undefined, fallback: string) {
   return trimmed.length <= 500
     ? trimmed
     : `${trimmed.slice(0, 500)}\n[truncated ${trimmed.length - 500} chars]`;
-}
-
-/** Runs the production auto-review prompt and returns its raw risk assessment. */
-export async function assessAutoReviewRisk(options: {
-  model: AgentModels['act'];
-  reviews: GlobalReviewPolicyBatchItem[];
-  task?: string | null;
-  workdir?: string | null;
-  structuredOutput?: GlobalReviewPolicyStructuredOutputConfig;
-}): Promise<AutoReviewRiskAssessmentResult> {
-  const prompt = buildAutoReviewPrompt({
-    task: options.task,
-    workdir: options.workdir,
-    reviews: options.reviews,
-  });
-  if (!prompt.complete) return { complete: false };
-
-  const assessment = await invokeStructuredOutput({
-    model: options.model,
-    schema: AUTO_REVIEW_RESULT_SCHEMA,
-    options: {
-      name: 'global_review_policy_auto_assessment',
-      autoRepair: true,
-      ...options.structuredOutput,
-    },
-    messages: [
-      new SystemMessage(buildAutoReviewSystemPrompt(
-        options.reviews,
-        options.structuredOutput?.method,
-      )),
-      new HumanMessage(prompt.text),
-    ],
-    // The auto-review risk assessment is private, not delegated-agent progress.
-    // Do not inherit the root stream callbacks that project model messages.
-    runnableConfig: { callbacks: [] },
-  });
-
-  return { complete: true, assessment };
 }
 
 async function resolveAutoAuthorization(
@@ -198,12 +114,10 @@ async function resolveAutoAuthorization(
     const safetyLevel = options.policy?.mode === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
       ? options.policy.safetyLevel ?? DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL
       : DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL;
-    const result = await assessAutoReviewRisk({
-      model,
+    const result = await createAutoReviewer({ model, structuredOutput }).assess({
       reviews: options.reviews,
       task: options.task,
       workdir: options.workdir,
-      structuredOutput,
     });
     if (!result.complete) {
       return {

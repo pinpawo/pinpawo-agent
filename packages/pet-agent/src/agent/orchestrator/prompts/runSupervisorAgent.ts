@@ -8,7 +8,7 @@ import {
   RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT,
 } from './templates/runSupervisorAgent.prompt';
 import { buildRunUserRequestContext } from './context';
-import { indentXmlBlock, xmlTextBlock } from './shared';
+import { indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
 
 function escapeXmlAttribute(value: string) {
   return value

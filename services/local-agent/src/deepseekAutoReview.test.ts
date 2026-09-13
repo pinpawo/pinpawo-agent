@@ -5,7 +5,7 @@ import { buildDecisionStructuredOutput } from './agentChannel';
 import { createLocalModelProfileRegistry } from './config/llmConfig';
 import { buildModelProfileRegistry } from './config/modelProfiles';
 import { resolveGlobalReviewBatchPolicy } from '../../../packages/pet-agent/src/agent/orchestrator/review/globalReviewPolicy';
-import { buildReviewSpec } from '../../../packages/pet-agent/src/agent/orchestrator/review/reviewSpec';
+import { buildReviewSpec } from '../../../packages/pet-agent/src/types/reviewSpec';
 
 function registry(model: string, sourcePreset?: string, baseUrl = 'https://api.deepseek.com') {
   return createLocalModelProfileRegistry({

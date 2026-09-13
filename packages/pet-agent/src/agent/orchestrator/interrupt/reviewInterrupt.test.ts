@@ -10,7 +10,7 @@ import {
   StateGraph,
 } from '@langchain/langgraph';
 import { ReviewInterrupt, type ReviewInterruptReview } from './reviewInterrupt';
-import { buildReviewSpec, type HumanReviewInterruptPayload } from '../review/reviewSpec';
+import { buildReviewSpec, type HumanReviewInterruptPayload } from '../../../types/reviewSpec';
 
 const toolCalls: ToolCall[] = [
   { id: 'call-1', name: 'run_shell', args: { command: 'git status' }, type: 'tool_call' },

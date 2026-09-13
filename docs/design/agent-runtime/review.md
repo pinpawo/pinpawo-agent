@@ -39,7 +39,7 @@ review policy 决定是否需要审核。[Toolkit 绑定](../../../packages/pet-
 保留原始工具并收集 review bindings，由 `ToolkitReviewMiddleware.afterModel` 在执行前审核，
 不为每个工具增加执行 wrapper。
 
-[ReviewPolicies](../../../packages/pet-agent/src/agent/orchestrator/review/reviewPolicies.ts)
+[ReviewPolicies](../../../packages/pet-agent/src/autoReview/reviewPolicies.ts)
 提供 `localMutation`、`commandExecution`、`externalAccess` 和 `requireHitl`；
 这些 preset 都要求审核，默认在 Host 不支持 human review 时阻止执行，默认不启用授权复用。
 `never()` 返回无需审核，`custom()` 接受自定义策略；preset 不负责按命令名称推断安全性。
@@ -57,6 +57,30 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 及 [HITL 初稿历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-hitl-policy.md)。
 
 ## Auto review 校准（2026-09-13）
+
+### 独立领域边界（2026-09-14 工作设计）
+
+`packages/pet-agent/src/autoReview` 承载审核规则与自动评估，不依赖 orchestrator、
+Root state、Capability、Toolkit runtime 或 interrupt。Toolkit 引用领域定义并提供
+具体工具的规则；orchestrator 只适配动作、选择模式/模型、调用评估，并落实执行或人工交互。
+
+| 内容 | 所属与职责 |
+| --- | --- |
+| ToolReviewPolicy、授权策略、ToolkitReviewGuidance | 静态定义；其中可包含运行时调用的纯规则函数，不持有执行现场 |
+| ReviewPolicyPresets | policy 的定义工厂；保留 ReviewPolicies 公共名称作为同一对象的兼容出口，不另建决策层 |
+| AuthorizationMatcher、授权记录 | 领域值与纯匹配/记录变换；存储、generation 生命周期仍由调用方负责 |
+| AutoReviewer | 动态模型评估器，只接收本次审核事实并返回风险评估，不读 session、不发 interrupt、不创建 grant |
+| ReviewSpec（共享 types 契约） | 规则产生的人工交互描述数据；Toolkit、审核及 interrupt 共同引用，不属于 AutoReviewer 的评估结果 |
+| ToolkitReviewMiddleware、globalReviewPolicy adapter | orchestrator 集成层，保留模式路由、授权提交和 interrupt/执行控制 |
+
+`exact` 精确匹配规范化 subject，不承诺完整 input 相同；`url_origin` 匹配协议、主机与
+有效端口，不匹配任意子域或 URL 前缀。LLM 不构造 matcher。本次提取保留匹配、grant
+复用、整批确定性判断及评分阈值行为；“模型批准可否复用自定义 subject”和混合批次
+重复评估仍是后续语义调整项，不借目录迁移悄悄改变授权范围。
+
+模型评估输入不再以 GlobalReviewPolicyContext 或 AgentModels 为领域契约；adapter
+提供动作事实和选定模型。模型评分是结果数据，模式路由与 grant 保存不是 AutoReviewer
+的职责。公共 import 保持可用，仓库内部直接引用新位置，不保留旧目录转发文件。
 
 模型按整批具体动作评分，程序仍按 strict ≤ 2、relaxed ≤ 9 放行；10 分、模型失败或
 证据预算不足转人工。默认等级、已有授权匹配和原始工具硬限制不变。

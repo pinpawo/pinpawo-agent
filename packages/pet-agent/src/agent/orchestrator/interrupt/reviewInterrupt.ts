@@ -10,8 +10,8 @@ import {
   applyReviewEffects,
   ReviewEffectApplicationError,
   type ToolAuthorizationRecord,
-} from '../review/reviewAuthorizations';
-import type { ToolAuthorizationMatcher } from '../review/authorizationMatchers';
+} from '../../../autoReview/reviewAuthorizations';
+import type { ToolAuthorizationMatcher } from '../../../autoReview/authorizationMatchers';
 import {
   isHumanReviewCancelResume,
   resolveHumanReviewBatchResume,
@@ -22,7 +22,7 @@ import {
   type HumanReviewBatchInterruptPayload,
   type HumanReviewInterruptPayload,
   type ReviewResponseResolution,
-} from '../review/reviewSpec';
+} from '../../../types/reviewSpec';
 import type { AgentInterrupt } from './agentInterrupt';
 import {
   PAUSE_TASK_INTERRUPT_STATE_KEY,

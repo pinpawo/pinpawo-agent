@@ -264,27 +264,27 @@ export {
   toolAuthorizationMatchersEqual,
   toolAuthorizationRecordKey,
   urlOriginAuthorization,
-} from './agent/orchestrator/review/reviewAuthorizations';
+} from './autoReview/reviewAuthorizations';
 export type {
   ApplyReviewEffectsOptions,
   ReviewEffectApplicationErrorCode,
   ToolAuthorizationMatcher,
   ToolAuthorizationRecord,
   ToolAuthorizationSource,
-} from './agent/orchestrator/review/reviewAuthorizations';
+} from './autoReview/reviewAuthorizations';
 export {
   AuthorizationPolicies,
   buildStandardReviewOptions,
   ReviewPolicies,
   reviewPolicies,
-} from './agent/orchestrator/review/reviewPolicies';
+} from './autoReview/reviewPolicies';
 export type {
   AuthorizationMode,
   ExactAuthorizationPolicyOptions,
   ExactAuthorizationSubjectBuilder,
   HitlPresetOptions,
   ReviewUnavailableBehavior,
-} from './agent/orchestrator/review/reviewPolicies';
+} from './autoReview/reviewPolicies';
 export type {
   ResolveGlobalReviewPolicyOptions,
   BuiltinGlobalReviewPolicyMode,
@@ -310,7 +310,7 @@ export {
   projectHumanReviewRequest,
   reviewViewToText,
   toInternalReviewResponse,
-} from './agent/orchestrator/review/reviewSpec';
+} from './types/reviewSpec';
 export type {
   BuildReviewSpecParams,
   PendingReviewAction,
@@ -328,7 +328,7 @@ export type {
   HumanReviewBatchInterruptPayload,
   HumanReviewInterrupt,
   HumanReviewInterruptPayload,
-} from './agent/orchestrator/review/reviewSpec';
+} from './types/reviewSpec';
 export {
   messageHasToolCalls,
   readMessageToolCallIds,
@@ -369,3 +369,6 @@ export {
 } from './agent/orchestrator/runtime/guards/decisionEvents';
 export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
+export { createAutoReviewer } from './autoReview';
+export { ReviewPolicyPresets } from './autoReview';
+export type { AutoReviewer, AutoReviewInput, AutoReviewAction, AutoReviewResult, ReviewAssessment } from './autoReview';

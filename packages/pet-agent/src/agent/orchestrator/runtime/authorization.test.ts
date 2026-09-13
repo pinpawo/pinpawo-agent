@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   exactAuthorization,
   type ToolAuthorizationRecord,
-} from '../review/reviewAuthorizations';
+} from '../../../autoReview/reviewAuthorizations';
 import { createToolAuthorizationRecorder } from './authorization';
 
 function authorization(

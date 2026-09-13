@@ -35,15 +35,15 @@ import {
   collectToolkitOperations,
   resolveToolkitExecution,
 } from './subagentDispatch';
-import { buildReviewSpec } from './review/reviewSpec';
+import { buildReviewSpec } from '../../types/reviewSpec';
 import {
   exactAuthorization,
   type ToolAuthorizationRecord,
-} from './review/reviewAuthorizations';
+} from '../../autoReview/reviewAuthorizations';
 import {
   AuthorizationPolicies,
   ReviewPolicies,
-} from './review/reviewPolicies';
+} from '../../autoReview/reviewPolicies';
 import {
   getAgentMessageDelegationId,
   getAgentMessageLane,

@@ -9,7 +9,7 @@ import {
   readToolAuthorizationMatcher,
   ReviewEffectApplicationError,
   urlOriginAuthorization,
-} from './review/reviewAuthorizations';
+} from '../../autoReview/reviewAuthorizations';
 
 test('exactAuthorization recursively canonicalizes objects while preserving array order', () => {
   const first = exactAuthorization({

@@ -78,7 +78,7 @@ deferred and this reference does not prescribe its future model usage.
 ## 3. Shared building blocks
 
 These are assembled by several nodes. Defined in
-`agent/orchestrator/prompts/shared.ts` and `prompts/context.ts`.
+`prompts/xml.ts` and `prompts/context.ts`.
 
 | Block | Class | Built by | Notes |
 |---|---|---|---|

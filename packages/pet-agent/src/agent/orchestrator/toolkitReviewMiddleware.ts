@@ -20,16 +20,16 @@ import {
   ReviewEffectApplicationError,
   toolAuthorizationRecordKey,
   type ToolAuthorizationRecord,
-} from './review/reviewAuthorizations';
-import type { ToolAuthorizationMatcher } from './review/authorizationMatchers';
+} from '../../autoReview/reviewAuthorizations';
+import type { ToolAuthorizationMatcher } from '../../autoReview/authorizationMatchers';
 import {
   reviewViewToText,
-} from './review/reviewSpec';
+} from '../../types/reviewSpec';
 import type {
   PendingReviewAction,
   ReviewSpec,
   HumanReviewInterruptPayload,
-} from './review/reviewSpec';
+} from '../../types/reviewSpec';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RESOLUTION,

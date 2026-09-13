@@ -5,7 +5,7 @@ import {
   resolveHumanReviewBatchResponse,
   ReviewResponseResolutionError,
 } from './reviewResponseResolver';
-import type { ReviewResolutionContext, ReviewBatchResponse, ReviewSpec } from './reviewSpec';
+import type { ReviewResolutionContext, ReviewBatchResponse, ReviewSpec } from '../../../types/reviewSpec';
 
 function reviewSpec(id: string): ReviewSpec {
   return {

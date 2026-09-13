@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { HumanMessage } from '@langchain/core/messages';
 import test from 'node:test';
 import type { AgentModels } from '../../../types/agent';
-import { buildAutoReviewPrompt } from '../prompts/autoReview';
-import { buildReviewSpec } from './reviewSpec';
+import { buildAutoReviewPrompt } from '../../../autoReview/prompts/input';
+import { buildReviewSpec } from '../../../types/reviewSpec';
 import {
   GLOBAL_REVIEW_POLICY_RESOLUTION,
   resolveGlobalReviewBatchPolicy,

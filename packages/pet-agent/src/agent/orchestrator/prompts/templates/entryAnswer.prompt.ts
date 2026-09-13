@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`你负责处理主对话中最后一条用户请求，并决定这一轮如何回应。
 

@@ -2,7 +2,7 @@ import {
   mergeToolAuthorizations,
   readToolAuthorizationRecord,
   type ToolAuthorizationRecord,
-} from '../review/reviewAuthorizations';
+} from '../../../autoReview/reviewAuthorizations';
 
 export function createToolAuthorizationRecorder(current: ToolAuthorizationRecord[]) {
   const active = mergeToolAuthorizations([], current);

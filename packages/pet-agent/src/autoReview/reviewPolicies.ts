@@ -5,7 +5,7 @@ import type {
   ToolReviewBlock,
   ToolReviewContext,
   ToolReviewPolicy,
-} from '../../../types/toolkit';
+} from './policy';
 import {
   exactAuthorization,
   markAuthorizationPolicyGeneration,
@@ -16,7 +16,7 @@ import {
   buildReviewSpec,
   type ReviewOption,
   type ReviewView,
-} from './reviewSpec';
+} from '../types/reviewSpec';
 
 export type ReviewUnavailableBehavior = 'block' | 'allow';
 export type AuthorizationMode = 'exact' | 'url_origin';
@@ -254,7 +254,7 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
   };
 }
 
-export const ReviewPolicies = {
+export const ReviewPolicyPresets = {
   localMutation(options: HitlPresetOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
@@ -299,4 +299,6 @@ export const ReviewPolicies = {
   },
 };
 
-export const reviewPolicies = ReviewPolicies;
+// Public compatibility names refer to the same factory object, not extra policy layers.
+export const ReviewPolicies = ReviewPolicyPresets;
+export const reviewPolicies = ReviewPolicyPresets;

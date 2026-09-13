@@ -1,11 +1,11 @@
-import type { GlobalReviewPolicyBatchItem } from '../review/globalReviewPolicy';
-import type { StructuredOutputMethod } from '../../../utils/structuredOutput';
-import { reviewViewToText } from '../review/reviewSpec';
-import { promptBlock, xmlTextBlock } from './shared';
+import type { AutoReviewAction } from '../types';
+import type { StructuredOutputMethod } from '../../utils/structuredOutput';
+import { reviewViewToText } from '../../types/reviewSpec';
+import { promptBlock, xmlTextBlock } from '../../prompts/xml';
 import {
   AUTO_REVIEW_INPUT_PROMPT,
   AUTO_REVIEW_SYSTEM_PROMPT,
-} from './templates/autoReview.prompt';
+} from './templates';
 
 const MAX_PROMPT_CHARS = 8_000;
 const MAX_ACTIONS_CHARS = 6_000;
@@ -18,7 +18,7 @@ function clipText(value: string, limit: number) {
     : `${value.slice(0, limit)}\n[truncated ${value.length - limit} chars]`;
 }
 
-function readOperationSummary(item: GlobalReviewPolicyBatchItem) {
+function readOperationSummary(item: AutoReviewAction) {
   try {
     return item.operation?.summarizeInput?.(item.input) ?? null;
   } catch {
@@ -27,7 +27,7 @@ function readOperationSummary(item: GlobalReviewPolicyBatchItem) {
 }
 
 /** Preserve executable inputs in full; never authorize a clipped command or hidden payload. */
-function formatAutoReviewItems(items: GlobalReviewPolicyBatchItem[]) {
+function formatAutoReviewItems(items: AutoReviewAction[]) {
   if (items.length > MAX_REVIEW_ACTIONS) return { text: '', complete: false };
   const actions: string[] = [];
   for (const [index, item] of items.entries()) {
@@ -53,8 +53,8 @@ function formatAutoReviewItems(items: GlobalReviewPolicyBatchItem[]) {
   return { text: actions.join('\n\n') || '(no actions)', complete: true };
 }
 
-function formatToolkitAutoReviewPolicies(items: GlobalReviewPolicyBatchItem[]) {
-  const policies = new Map<string, NonNullable<GlobalReviewPolicyBatchItem['autoReviewContext']>>();
+function formatToolkitAutoReviewPolicies(items: AutoReviewAction[]) {
+  const policies = new Map<string, NonNullable<AutoReviewAction['autoReviewContext']>>();
 
   for (const item of items) {
     if (item.autoReviewContext && !policies.has(item.toolkitName)) {
@@ -95,7 +95,7 @@ function buildAutoReviewOutputInstruction(method?: StructuredOutputMethod) {
 }
 
 export function buildAutoReviewSystemPrompt(
-  reviews: GlobalReviewPolicyBatchItem[] = [],
+  reviews: AutoReviewAction[] = [],
   method?: StructuredOutputMethod,
 ) {
   return AUTO_REVIEW_SYSTEM_PROMPT.render({
@@ -107,7 +107,7 @@ export function buildAutoReviewSystemPrompt(
 export function buildAutoReviewPrompt(params: {
   task?: string | null;
   workdir?: string | null;
-  reviews: GlobalReviewPolicyBatchItem[];
+  reviews: AutoReviewAction[];
 }) {
   const actions = formatAutoReviewItems(params.reviews);
   if (!actions.complete) {

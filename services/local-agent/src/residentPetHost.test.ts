@@ -17,6 +17,7 @@ import {
 import {
   createResidentPetHost,
   ResidentPetCoordinator,
+  ResidentPetInteractionBusyError,
   type AgentSessionPeer,
   type PetDispatchState,
 } from './residentPetHost';
@@ -791,5 +792,67 @@ test('a task pause holds dispatch as waiting through the same interrupt any kind
     assert.equal(pet.resident.dispatch.getQueueSnapshot().state, 'waiting');
   } finally {
     await pet.close();
+  }
+});
+
+test('a refused connection cannot release the interactive client it was refused for', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-refused-'));
+  const runtimeConfig = buildLocalAgentRuntimeConfig(root);
+  const graphService = {
+    readThreadState: async () => ({
+      messages: [],
+      pendingInterrupt: null,
+      currentPlan: null,
+    }),
+    settleAbortedRun: async () => null,
+  };
+  const host = await createResidentPetHost({
+    petId: 'pet-refused',
+    petName: 'pet-refused',
+    modelProfiles: createTestModelProfiles(),
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-refused-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async () => ({ status: 'completed', reply: 'done' }),
+  });
+
+  try {
+    const holderMessages: unknown[] = [];
+    const holder = peer(holderMessages);
+    await host.interaction.connect(holder);
+
+    const refused = peer([]);
+    assert.throws(
+      () => host.interaction.connect(refused),
+      ResidentPetInteractionBusyError,
+    );
+
+    // The refused socket still closes, and its close runs disconnect. Only the
+    // peer that holds the interaction may release it — otherwise the client
+    // that got there first is silently detached by the one that was turned
+    // away, and its next message is rejected as "not connected".
+    await host.interaction.disconnect(refused);
+
+    await host.interaction.handle(holder, {
+      type: 'session.snapshot.get',
+      requestId: 'still-connected',
+    });
+    assert.ok(holderMessages.some((message) => (
+      (message as { type?: string }).type === 'session.snapshot.result'
+    )));
+
+    // The holder still owns the release.
+    await host.interaction.disconnect(holder);
+    const next = peer([]);
+    host.interaction.connect(next);
+    await host.interaction.disconnect(next);
+  } finally {
+    await host.close();
   }
 });

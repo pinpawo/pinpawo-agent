@@ -75,7 +75,7 @@ function buildTools(service: KanbanTaskService): {
     return `tasks:\n${tasks}\n\nrelationships:\n${relationships}`;
   }, {
     name: 'kanban_task_list',
-    description: '读取当前 Kanban task 图，返回状态、已选执行目标、任务关联、详情与已有结果。',
+    description: '查看 Kanban 任务的状态、执行者、关联任务、详情和已有结果。',
     schema: z.object({}),
   });
   const addTask = tool(async (input) => {
@@ -87,11 +87,11 @@ function buildTools(service: KanbanTaskService): {
     return `added ${mutation.task.taskId}`;
   }, {
     name: 'kanban_task_add',
-    description: '登记一个尚未分配执行者的完整交付 task。一次调用只创建一个 task；可直接关联已有 task，但关联不阻止分配或执行。任务由用户在 Kanban 中选择执行目标后才会派发。',
+    description: '创建一个待分配的任务，写清要交付的结果。每次创建一个任务，可关联已有任务；关联仅方便查看相关工作。用户选择执行者后，任务才会交给对方处理。',
     schema: z.object({
       title: z.string().max(160).describe('看板列表中识别完整交付主题的简短标题'),
       detail: z.string().describe('完整任务详情：目标、完成标准、必要上下文与应保留的证据'),
-      relatedTaskIds: z.array(z.string()).optional().describe('与此 task 有直接上下文关联的已有 taskId；不代表执行前置条件'),
+      relatedTaskIds: z.array(z.string()).optional().describe('相关任务的 taskId；关联不限定执行顺序'),
     }),
   });
   const linkTasks = tool(async (input) => {
@@ -99,7 +99,7 @@ function buildTools(service: KanbanTaskService): {
     return `related ${input.sourceTaskId} -- ${input.targetTaskId}`;
   }, {
     name: 'kanban_task_link',
-    description: '为两个已有 task 添加直接的上下文关联。关联仅用于浏览任务图，不会阻止分配或执行。',
+    description: '关联两个已有任务，方便查看相关工作。关联不限定任务的执行顺序。',
     schema: z.object({
       sourceTaskId: z.string().describe('关联的一方 taskId，顺序无关'),
       targetTaskId: z.string().describe('关联的另一方 taskId'),
@@ -110,7 +110,7 @@ function buildTools(service: KanbanTaskService): {
     return `unlinked ${input.sourceTaskId} -- ${input.targetTaskId}`;
   }, {
     name: 'kanban_task_unlink',
-    description: '移除两个 task 之间的直接关联，不影响任何 task 本身。',
+    description: '取消两个任务之间的关联，保留任务本身。',
     schema: z.object({
       sourceTaskId: z.string().describe('关联的一方 taskId，顺序无关'),
       targetTaskId: z.string().describe('关联的另一方 taskId'),
@@ -121,8 +121,8 @@ function buildTools(service: KanbanTaskService): {
     return `deleted ${input.taskId}`;
   }, {
     name: 'kanban_task_remove',
-    description: '删除错误或不再需要的 task。仅删除该 task、它的关联和历史记录；不会删除关联的其他 task。',
-    schema: z.object({ taskId: z.string().describe('要删除的 Kanban taskId') }),
+    description: '删除错误或不再需要的任务，包括它的关联和历史记录；保留关联的其他任务。',
+    schema: z.object({ taskId: z.string().describe('要删除的任务标识 taskId') }),
   });
   const startTask = tool(async (input) => {
     const task = await service.getTask(input.taskId);
@@ -132,8 +132,8 @@ function buildTools(service: KanbanTaskService): {
     return `started ${task.taskId}`;
   }, {
     name: 'kanban_task_start',
-    description: '接收到已分配的 task 后，执行者以 taskId 明确记录实际开始。',
-    schema: z.object({ taskId: z.string().describe('派发请求中给出的 Kanban taskId') }),
+    description: '开始处理已分配的任务时，用 taskId 记录开始状态。',
+    schema: z.object({ taskId: z.string().describe('任务请求中给出的 taskId') }),
   });
   const completeTask = tool(async (input) => {
     const task = await service.getTask(input.taskId);
@@ -143,8 +143,8 @@ function buildTools(service: KanbanTaskService): {
     return `completed ${task.taskId}`;
   }, {
     name: 'kanban_task_complete',
-    description: '由已开始 task 的执行者按 taskId 提交完成状态和结果摘要。',
-    schema: z.object({ taskId: z.string().describe('派发请求中的 Kanban taskId'), result: z.string().describe('完成结果或产出摘要') }),
+    description: '提交已开始任务的完成状态和结果摘要，用 taskId 指定任务。',
+    schema: z.object({ taskId: z.string().describe('任务请求中给出的 taskId'), result: z.string().describe('完成结果或产出摘要') }),
   });
   const blockTask = tool(async (input) => {
     const task = await service.getTask(input.taskId);
@@ -154,8 +154,8 @@ function buildTools(service: KanbanTaskService): {
     return `blocked ${task.taskId}`;
   }, {
     name: 'kanban_task_block',
-    description: '由已分配或已开始 task 的执行者按 taskId 提交阻塞状态与原因。',
-    schema: z.object({ taskId: z.string().describe('派发请求中的 Kanban taskId'), reason: z.string().describe('阻塞原因') }),
+    description: '任务无法继续时，用 taskId 记录阻塞状态和具体原因。',
+    schema: z.object({ taskId: z.string().describe('任务请求中给出的 taskId'), reason: z.string().describe('阻塞原因') }),
   });
   return { listTasks, addTask, linkTasks, unlinkTasks, removeTask, startTask, completeTask, blockTask };
 }
@@ -170,22 +170,22 @@ function toolkit(name: string, description: string, tools: readonly NamedStructu
 
 export function createKanbanToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_TOOLKIT_NAME, '共享 task 领域接口：维护任务图并提交执行生命周期。用户分配与 Studio 路由不属于此 Toolkit。', [tools.listTasks, tools.addTask, tools.linkTasks, tools.unlinkTasks, tools.removeTask, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务图', '新增任务', '关联任务', '取消关联', '删除任务', '开始任务', '完成任务', '阻塞任务']);
+  return toolkit(KANBAN_TOOLKIT_NAME, '查看和维护 Kanban 任务及其关联，记录开始、完成或阻塞状态。任务由用户分配。', [tools.listTasks, tools.addTask, tools.linkTasks, tools.unlinkTasks, tools.removeTask, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务图', '新增任务', '关联任务', '取消关联', '删除任务', '开始任务', '完成任务', '阻塞任务']);
 }
 
 export function createKanbanPlanningToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_PLANNING_TOOLKIT_NAME, 'task 规划接口：查看并维护共享 task 图。它不选择执行者，也不派发工作。', [tools.listTasks, tools.addTask, tools.linkTasks, tools.unlinkTasks, tools.removeTask], ['查看任务图', '新增任务', '关联任务', '取消关联', '删除任务']);
+  return toolkit(KANBAN_PLANNING_TOOLKIT_NAME, '查看、创建和维护 Kanban 任务；任务由用户分配执行者。', [tools.listTasks, tools.addTask, tools.linkTasks, tools.unlinkTasks, tools.removeTask], ['查看任务图', '新增任务', '关联任务', '取消关联', '删除任务']);
 }
 
 export function createKanbanExecutionToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_EXECUTION_TOOLKIT_NAME, 'task 执行回报接口：执行者对已分配 task 记录开始、完成或阻塞。', [tools.listTasks, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务', '开始任务', '完成任务', '阻塞任务']);
+  return toolkit(KANBAN_EXECUTION_TOOLKIT_NAME, '查看已分配的任务，记录开始、完成或阻塞状态。', [tools.listTasks, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务', '开始任务', '完成任务', '阻塞任务']);
 }
 
 export function createKanbanObservationToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_OBSERVATION_TOOLKIT_NAME, '只读 task 观察接口：读取当前 task 图、执行状态与结果。', [tools.listTasks], ['查看任务图']);
+  return toolkit(KANBAN_OBSERVATION_TOOLKIT_NAME, '只读查看 Kanban 任务、状态、关联和结果。', [tools.listTasks], ['查看任务图']);
 }
 
 export type CreateKanbanPluginOptions = {

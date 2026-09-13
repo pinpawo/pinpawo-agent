@@ -8,7 +8,7 @@ export function petDocumentSystemPromptSection(document: PetDocument): SystemPro
     owner: 'pet',
     content: [
       '<pet_document role="root_context" source="PET.md" scope="pet">',
-      'This is the Pet\'s canonical authored root document. Apply it within the framework\'s lifecycle, tool, and security contracts.',
+      'This document defines your role and working instructions. Follow it within the available tools and applicable safety requirements.',
       '<document format="markdown">',
       '<![CDATA[',
       content,

@@ -104,7 +104,7 @@ export function createArtifactDiscoveryToolkit(params: {
 }): AgentToolkit {
   return defineToolkit({
     name: ARTIFACT_DISCOVERY_TOOLKIT_NAME,
-    description: '只读列出并读取当前 thread 的 capability artifacts。',
+    description: '查看当前会话中已保存的产物。',
     tools: createToolDefinitions(createArtifactDiscoveryTools(params), {
       [ARTIFACT_DISCOVERY_LIST_TOOL_NAME]: {
         title: '列出历史产物',
@@ -125,8 +125,8 @@ const bashToolkitInstructions = [
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
   '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看本次执行启动的后台命令。不要因为超时就重复执行同一命令。',
-  '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
-  '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
+  '常规 git 操作使用专用 Git 工具；不要用 run_shell 包装这些常规 git 操作。',
+  '执行高风险 shell 命令时应遵循人类审批要求，不要绕过审批。',
   '修改文件前先读取现状；修改后优先用 validate_structured_file、grep_search 或 run_shell 做必要验证。',
 ];
 

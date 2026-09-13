@@ -12,6 +12,7 @@ import type {
 } from '../../types/toolkit';
 import type { AgentModels } from '../../types/agent';
 import type { SubagentRuntimeEvent } from '../../types/subagent';
+import { canReuseAutoReviewAuthorization } from '../../autoReview/authorizationReuse';
 import {
   buildToolAuthorizationRecord,
   findToolAuthorization,
@@ -366,8 +367,8 @@ async function recordToolAuthorizations(
 
 /**
  * Auto review owns only the concrete batch it inspected. Reuse that approval
- * for exact matching arguments in the same checkpointed session, but never
- * widen it to a shell wildcard, URL domain, or toolkit-defined broad matcher.
+ * only for an explicitly enabled exact subject in the same checkpointed session;
+ * broader matcher types cannot inherit an automatic approval.
  */
 async function buildAutoReviewSessionAuthorizations(params: {
   ctx: ToolkitReviewRuntimeContext;
@@ -382,7 +383,8 @@ async function buildAutoReviewSessionAuthorizations(params: {
   }
 
   return params.reviews.flatMap((review) =>
-    review.authorizationMatcher?.type === 'exact'
+    canReuseAutoReviewAuthorization(review.reviewPolicy.authorization, review.authorizationMatcher)
+      && review.authorizationMatcher
       ? [buildToolAuthorizationRecord({
           toolName: review.toolName,
           matcher: review.authorizationMatcher,
@@ -525,7 +527,9 @@ async function prepareToolkitToolReview(params: {
   const activeAuthorization = authorizationMatcher
     && reviewCapabilities?.sessionAuthorization === true
     ? findToolAuthorization({
-      authorizations: toolAuthorizationsForGlobalPolicy(ctx) ?? [],
+      authorizations: (toolAuthorizationsForGlobalPolicy(ctx) ?? []).filter(record =>
+        record.source !== 'auto_review'
+        || canReuseAutoReviewAuthorization(binding.reviewPolicy.authorization, authorizationMatcher)),
       toolName: binding.toolName,
       candidateMatcher: authorizationMatcher,
     })
@@ -603,6 +607,10 @@ async function prepareToolkitToolReview(params: {
       reviewPolicy: binding.reviewPolicy,
       authorizationMatcher,
       autoReviewContext: binding.toolkit.reviewGuidance,
+      ...(authorizationMatcher ? { authorization: {
+        matcherType: authorizationMatcher.type,
+        reuseAutoReview: canReuseAutoReviewAuthorization(binding.reviewPolicy.authorization, authorizationMatcher),
+      } } : {}),
       review: reviewPayload.review,
       reviewPayload,
     },
@@ -782,14 +790,14 @@ async function reviewToolkitToolCalls(params: {
   }
 
   const hasPendingResume = hasPendingReviewInterruptResume();
-  const deterministicallyAutoAuthorized = !hasPendingResume
-    && await canAutoAuthorizeCompleteBatch({
+  const unresolvedReviews = hasPendingResume ? prepared.reviews
+    : await selectUnresolvedReviews({
       ctx: params.ctx,
       reviews: prepared.reviews,
     });
   const policyResolution = hasPendingResume
     ? { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION } as const
-    : deterministicallyAutoAuthorized
+    : unresolvedReviews.length === 0
       ? {
           type: GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE,
           reason: 'Every action passed its deterministic toolkit auto-authorization policy.',
@@ -800,13 +808,13 @@ async function reviewToolkitToolCalls(params: {
           messages: params.ctx.messages,
           task: params.ctx.reviewContext?.task,
           workdir: params.ctx.reviewContext?.workdir,
-          reviews: prepared.reviews,
+          reviews: unresolvedReviews,
         });
 
   if (policyResolution.type === GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
     const sessionAuthorizations = await buildAutoReviewSessionAuthorizations({
       ctx: params.ctx,
-      reviews: prepared.reviews,
+      reviews: unresolvedReviews,
     });
     // AUTO_AUTHORIZED is already the user-facing event for this decision.
     // The chat adapter treats auto_review record diagnostics as non-visible.
@@ -820,7 +828,7 @@ async function reviewToolkitToolCalls(params: {
   }
 
   if (!runtimeCanCollectHumanReview(params.ctx)) {
-    const [firstReview] = prepared.reviews;
+    const [firstReview] = unresolvedReviews;
     return buildPolicyCancellationResult({
       messages: params.messages,
       reviewedMessage: params.reviewedMessage,
@@ -839,7 +847,7 @@ async function reviewToolkitToolCalls(params: {
   });
 }
 
-async function canAutoAuthorizeCompleteBatch(params: {
+async function selectUnresolvedReviews(params: {
   ctx: ToolkitReviewRuntimeContext;
   reviews: PreparedToolkitReview[];
 }) {
@@ -847,12 +855,16 @@ async function canAutoAuthorizeCompleteBatch(params: {
     params.ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
     || params.reviews.length === 0
   ) {
-    return false;
+    return params.reviews;
   }
 
+  const unresolved: PreparedToolkitReview[] = [];
   for (const review of params.reviews) {
     const authorize = review.reviewPolicy.authorization?.authorize;
-    if (!authorize) return false;
+    if (!authorize) {
+      unresolved.push(review);
+      continue;
+    }
     try {
       const authorized = await authorize({
         toolkitName: review.toolkitName,
@@ -861,12 +873,12 @@ async function canAutoAuthorizeCompleteBatch(params: {
         operation: review.operation,
         workdir: params.ctx.reviewContext?.workdir ?? null,
       });
-      if (!authorized) return false;
+      if (!authorized) unresolved.push(review);
     } catch {
-      return false;
+      unresolved.push(review);
     }
   }
-  return true;
+  return unresolved;
 }
 
 function buildAllowedToolkitReviewResult(

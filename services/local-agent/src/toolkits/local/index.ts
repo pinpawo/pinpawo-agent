@@ -210,6 +210,8 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     run_shell: ReviewPolicies.commandExecution({
       authorization: AuthorizationPolicies.exact({
+        // Timeout does not change the command/cwd authorization scope.
+        reuseAutoReview: true,
         subject: ({ input }) => normalizeShellAuthorizationInput(input),
       }),
     }),

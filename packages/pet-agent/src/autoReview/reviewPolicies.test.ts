@@ -135,10 +135,7 @@ test('externalAccess can opt into URL origin authorization', async () => {
   const authorizeOption = review && 'schemaVersion' in review
     ? review.options.find((option) => option.id === 'approve-and-authorize-thread')
     : null;
-  assert.equal(
-    authorizeOption?.description,
-    'Approve this action and authorize the same URL domain in this thread.',
-  );
+  assert.deepEqual(authorizeOption?.effects, [{ type: 'graph.authorize_tool_action', scope: 'thread' }]);
 });
 
 test('a null matcher does not expose approve-and-authorize', async () => {

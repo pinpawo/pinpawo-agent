@@ -209,6 +209,15 @@ test('authorization generation ignores display metadata', () => {
   );
 });
 
+test('authorization generation includes automatic grant reuse policy', () => {
+  const build = (reuseAutoReview: boolean) => compileAgentRegistry({
+    toolkits: [defineToolkit({ name: 'local', description: 'Local', tools: [{
+      tool: mockTool('write'), review: ReviewPolicies.localMutation({ authorization: AuthorizationPolicies.exact({ reuseAutoReview }) }),
+    }] })], capabilities: [capability('general', ['local'])],
+  });
+  assert.notEqual(build(true).authorizationGeneration, build(false).authorizationGeneration);
+});
+
 test('authorization generation includes deterministic authorization policy', () => {
   const buildRegistry = (allow: boolean) => compileAgentRegistry({
     toolkits: [defineToolkit({

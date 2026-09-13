@@ -74,6 +74,7 @@ function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
               matcher: readAuthorizationPolicyGeneration(authorization)
                 ?? functionSource(authorization.buildMatcher),
               authorize: functionSource(authorization.authorize),
+              reuseAutoReview: authorization.reuseAutoReview === true,
             },
           }]
         : [];

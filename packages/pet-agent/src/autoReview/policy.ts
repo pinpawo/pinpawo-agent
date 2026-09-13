@@ -58,6 +58,7 @@ export type ToolAuthorizationPolicy =
         ctx: ToolAutoAuthorizationContext,
       ) => boolean | Promise<boolean>;
       buildMatcher?: never;
+      reuseAutoReview?: never;
     }
   | {
       authorize?: never;
@@ -65,6 +66,10 @@ export type ToolAuthorizationPolicy =
       buildMatcher: (
         ctx: ToolAuthorizationContext,
       ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+      /** Opt in only when matching subjects preserve the risk-relevant effects.
+       * False/omitted permits human grants only. Runtime also requires exact.
+       */
+      reuseAutoReview?: boolean;
     };
 
 export type ToolReviewBlock = {

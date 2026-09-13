@@ -2254,9 +2254,10 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal((runtimeEvents[0] as { name?: unknown } | undefined)?.name, 'global_review_policy_auto_authorized');
 });
 
-test('global auto policy bypasses the model only for a deterministic complete batch', async () => {
+test('global auto policy sends only unresolved actions to the model and executes the batch atomically', async () => {
   let callCount = 0;
   let autoReviewCount = 0;
+  let riskScore = 10;
   const sessionAuthorizations: ToolAuthorizationRecord[] = [];
   const runtimeEvents: unknown[] = [];
   const rawTool = tool(async ({ path }: { path: string }) => {
@@ -2289,11 +2290,14 @@ test('global auto policy bypasses the model only for a deterministic complete ba
   }];
   const autoModel = {
     withStructuredOutput: () => ({
-      invoke: async () => {
+      invoke: async (messages: BaseMessage[]) => {
         autoReviewCount += 1;
+        const facts = String(messages[1].content);
+        assert.ok(facts.includes('other_mutation'));
+        assert.ok(!facts.includes('another change'));
         return {
-          riskScore: 10,
-          reason: 'The model should not be called for this deterministic batch.',
+          riskScore,
+          reason: 'Assess only the unresolved mutation.',
         };
       },
     }),
@@ -2342,6 +2346,12 @@ test('global auto policy bypasses the model only for a deterministic complete ba
   }]);
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 1);
+  riskScore = 1;
+  await runToolkitToolCall(resources, [{
+    id: 'allowed-mixed-patch', name: 'apply_patch', args: { path: 'notes.md', patch: 'another change' },
+  }, { id: 'allowed-other', name: 'other_mutation', args: {} }]);
+  assert.equal(callCount, 2);
+  assert.equal(autoReviewCount, 2);
 });
 
 test('global review policy reuses an exact auto authorization in the same session', async () => {
@@ -2486,6 +2496,52 @@ test('global review policy reuses an exact auto authorization in the same sessio
   assert.equal(callCount, 4);
 });
 
+test('projected exact authorization requires opt-in for automatic grant writes and hits', async () => {
+  for (const reuseAutoReview of [false, true]) {
+    for (const source of [undefined, 'auto_review', 'human'] as const) {
+      let executions = 0;
+      let assessments = 0;
+      const authorizations: ToolAuthorizationRecord[] = source ? [{
+        toolName: 'inspect', matcher: exactAuthorization({ path: 'notes.md' }), source,
+        createdAt: new Date().toISOString(),
+      }] : [];
+      const rawTool = tool(async () => { executions += 1; return 'inspected'; }, {
+        name: 'inspect', description: 'inspect a file',
+        schema: z.object({ path: z.string(), timeout: z.number() }),
+      });
+      const resources = await resolveToolkitExecution([{
+        name: 'local', description: 'local tools',
+        tools: [reviewedTool(rawTool, ReviewPolicies.requireHitl({
+          authorization: AuthorizationPolicies.exact({
+            subject: ({ input }) => ({ path: (input as { path: string }).path }),
+            reuseAutoReview,
+          }),
+        }))],
+      }], ['local'], {
+        models: { act: {
+          withStructuredOutput: () => ({ invoke: async () => {
+            assessments += 1;
+            return { riskScore: 1, reason: 'Scoped inspection.' };
+          } }),
+        } as unknown as AgentModels['act'] },
+        messages: [],
+        reviewCapabilities: { humanReview: false, sessionAuthorization: true },
+        globalReviewPolicy: { mode: 'auto_authorization' },
+        toolAuthorizations: authorizations,
+        recordToolAuthorizations: (records) => { authorizations.push(...records); },
+      });
+      for (const timeout of [100, 200]) {
+        await runToolkitToolCall(resources, {
+          id: `inspect-${timeout}`, name: 'inspect', args: { path: 'notes.md', timeout },
+        });
+      }
+      assert.equal(executions, 2);
+      assert.equal(assessments, source === 'human' ? 0 : reuseAutoReview ? (source ? 0 : 1) : 2);
+      assert.equal(authorizations.length, source ? 1 : reuseAutoReview ? 1 : 0);
+    }
+  }
+});
+
 test('exact auto authorization survives graph rebuild but expires on registry reload', async () => {
   let runCount = 0;
   let routeCallCount = 0;
@@ -2627,6 +2683,7 @@ test('exact auto authorization survives graph rebuild but expires on registry re
       rawTool,
       ReviewPolicies.commandExecution({
         authorization: AuthorizationPolicies.exact({
+          reuseAutoReview: true,
           subject: ({ input }) => input,
         }),
       }),

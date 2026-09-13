@@ -10,6 +10,11 @@ export type AutoReviewAction = {
   operation?: ToolOperationMetadata;
   autoReviewContext?: ToolkitReviewGuidance;
   review: ReviewSpec;
+  /** Candidate policy metadata, not an existing grant or instruction to approve. */
+  authorization?: {
+    matcherType: 'exact' | 'url_origin';
+    reuseAutoReview: boolean;
+  };
 };
 
 export type AutoReviewInput = {

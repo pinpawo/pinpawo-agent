@@ -85,6 +85,91 @@ test('Agent Session route selects one resident Pet for the whole connection', as
   }
 });
 
+test('a busy Pet refuses the extra connection without taking down the Host', async () => {
+  const handled: string[] = [];
+  const held = interaction('pet-a', handled);
+  let connections = 0;
+  // The Host admits one interactive connection per Pet and refuses the rest.
+  // connect() signals that synchronously, which must reach the refusing
+  // socket and stop there — not escape the 'connection' handler, where
+  // nothing catches it and Node exits the whole Host.
+  const busy: ResidentPetInteraction = {
+    ...held,
+    connect: (peer: AgentSessionPeer) => {
+      connections += 1;
+      if (connections > 1) throw new Error('This Pet already has an interactive client.');
+      return held.connect(peer);
+    },
+  };
+  const transport = await startResidentPetAgentSessionTransport(0, new Map([
+    ['pet-a', busy],
+  ]), {
+    authToken: 'test-token',
+    log: () => undefined,
+    logError: () => undefined,
+  });
+
+  try {
+    const first = await connect(
+      `ws://127.0.0.1:${transport.port}/agent-session/pets/pet-a`,
+      'test-token',
+    );
+    const second = await connect(
+      `ws://127.0.0.1:${transport.port}/agent-session/pets/pet-a`,
+      'test-token',
+    );
+    try {
+      const refused = await new Promise<number>((resolve, reject) => {
+        second.once('close', (code) => resolve(code));
+        second.once('error', reject);
+      });
+      assert.equal(refused, 1011);
+
+      // The Host, and the connection that got there first, are still serving.
+      const pong = waitForMessage(first);
+      first.send(JSON.stringify({ type: 'ping' }));
+      assert.deepEqual(await pong, { type: 'pong' });
+      assert.deepEqual(handled, ['pet-a:ping']);
+    } finally {
+      first.close();
+      second.close();
+    }
+  } finally {
+    transport.close();
+    await transport.closed;
+  }
+});
+
+test('an async connect rejection refuses the connection the same way', async () => {
+  const handled: string[] = [];
+  const held = interaction('pet-a', handled);
+  const transport = await startResidentPetAgentSessionTransport(0, new Map([
+    ['pet-a', {
+      ...held,
+      connect: () => Promise.reject(new Error('interaction unavailable')),
+    } as ResidentPetInteraction],
+  ]), {
+    authToken: 'test-token',
+    log: () => undefined,
+    logError: () => undefined,
+  });
+
+  try {
+    const ws = await connect(
+      `ws://127.0.0.1:${transport.port}/agent-session/pets/pet-a`,
+      'test-token',
+    );
+    const closed = await new Promise<number>((resolve, reject) => {
+      ws.once('close', (code) => resolve(code));
+      ws.once('error', reject);
+    });
+    assert.equal(closed, 1011);
+  } finally {
+    transport.close();
+    await transport.closed;
+  }
+});
+
 test('Agent Session route rejects unknown Pets before WebSocket binding', async () => {
   const transport = await startResidentPetAgentSessionTransport(0, new Map(), {
     authToken: 'test-token',

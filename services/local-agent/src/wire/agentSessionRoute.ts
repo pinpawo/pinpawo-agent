@@ -72,7 +72,16 @@ function attachConnection(
       return;
     }
     const peer = createPeer(ws);
-    const connected = Promise.resolve(interaction.connect(peer));
+    // connect() refuses an extra client by throwing, and it throws
+    // synchronously. `Promise.resolve(interaction.connect(peer))` evaluates
+    // the call first, so a synchronous throw escapes this 'connection'
+    // handler — an EventEmitter callback nothing catches — and takes the
+    // whole Host down with it, every other Pet included. Calling it inside
+    // the executor routes both failure modes into `connected`, where the
+    // rejection handler below closes just the socket that was refused.
+    const connected = new Promise<void>((resolve) => {
+      resolve(interaction.connect(peer));
+    });
     ws.on('message', (data) => {
       void connected.then(async () => {
         const raw = data.toString();

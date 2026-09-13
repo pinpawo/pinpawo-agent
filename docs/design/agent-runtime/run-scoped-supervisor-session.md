@@ -180,6 +180,8 @@ Root:      验证控制记录，提交计划 + 消息
 在 Supervisor invoke 返回前发生取消或异常，不提交部分内存状态，也不会执行 Capability。
 Root 提交后沿用现有 checkpoint / Capability interrupt 恢复，不重放已提交的执行副作用。
 保留历史 delegation 参数读取能力；新写入只由明确执行调用产生。
+旧版本若已提交含 reply 的 review 消息对并停在 answer 前，恢复时只读取该 run 已提交的
+回复并发布，不重新调用模型或 Capability；旧 reply 字段不再对新模型调用开放。
 
 ### 提示与校验
 

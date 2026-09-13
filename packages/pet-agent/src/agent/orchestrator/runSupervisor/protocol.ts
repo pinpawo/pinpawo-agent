@@ -44,9 +44,10 @@ const executionSchema = z.object({
 }).strict();
 
 // Read compatibility for historical delegation records; never exposed as a model tool.
-const legacyReviewSchema = z.object({ name: z.literal('review_current'), args: z.object({
-  completed: z.boolean().optional(), reason: z.string(), reply: z.string().optional(),
-}) });
+export const legacyReviewSchema = z.object({ name: z.literal('review_current'), args: z.object({
+  completed: z.boolean().optional(), reason: z.string().trim().min(1).max(2_000),
+  reply: z.string().trim().min(1).optional(),
+}).strict() }).strict();
 
 /** Root's actual tool input, not a second model-selected tool or a pending slot. */
 export const capabilityHandoffSchema = z.object({

@@ -11,7 +11,7 @@ import {
 } from '../messages';
 import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
 import { readMessageText } from './utils';
-import { xmlTextBlock } from './prompts/shared';
+import { xmlTextBlock } from '../../prompts/xml';
 
 const DEFAULT_KEEP_MESSAGES = 10;
 export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';

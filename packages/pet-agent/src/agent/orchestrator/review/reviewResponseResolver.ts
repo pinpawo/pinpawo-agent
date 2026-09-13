@@ -5,7 +5,7 @@ import type {
   ReviewResponse,
   ReviewResponseResolution,
   ReviewResolutionContext,
-} from './reviewSpec';
+} from '../../../types/reviewSpec';
 
 export type ReviewResponseResolutionErrorCode =
   | 'stale_review'

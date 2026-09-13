@@ -1,4 +1,4 @@
-import { definePromptTemplate } from '../template';
+import { definePromptTemplate } from '../../../../prompts/template';
 
 export const RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是 root 的 Supervisor，当前处于 Entry。根据用户目标和 main messages，选择合适的 Capability，形成可逐项验收的简短计划。
 

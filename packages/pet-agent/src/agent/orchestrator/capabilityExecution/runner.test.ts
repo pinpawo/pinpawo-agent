@@ -15,7 +15,7 @@ import { isDelegationBriefingMessage } from '../delegation/briefing';
 import { getDelegationAnnounce } from '../delegation';
 import { PauseTaskInterruptSignal } from '../interrupt/pauseTaskInterrupt';
 import { compileAgentRegistry } from '../registry';
-import { exactAuthorization } from '../review/reviewAuthorizations';
+import { exactAuthorization } from '../../../autoReview/reviewAuthorizations';
 import { ToolkitRuntimeManager } from '../toolkitRuntime';
 import { createCapabilityExecutor, type CapabilityExecutionContext, type CapabilityExecutionInput } from './index';
 

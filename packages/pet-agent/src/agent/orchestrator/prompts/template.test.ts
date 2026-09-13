@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { definePromptTemplate } from './template';
+import { definePromptTemplate } from '../../../prompts/template';
 
 test('prompt templates validate their declared variables at definition time', () => {
   assert.throws(() => definePromptTemplate<{ value: string }>(

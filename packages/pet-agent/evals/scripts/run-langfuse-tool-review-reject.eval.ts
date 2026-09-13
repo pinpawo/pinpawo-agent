@@ -13,7 +13,7 @@ import {
   buildOrchestratorRunInput,
   ORCHESTRATOR_RECURSION_LIMIT,
 } from '../../src/agent/createAgentRuntime';
-import { buildReviewSpec } from '../../src/agent/orchestrator/review/reviewSpec';
+import { buildReviewSpec } from '../../src/types/reviewSpec';
 import { randomUUID } from 'node:crypto';
 import {
   mainConversationMessages,

@@ -12,9 +12,9 @@ import {
   projectHumanReviewRequest,
   reviewViewToText,
   toInternalReviewResponse,
-} from './review/reviewSpec';
+} from '../../types/reviewSpec';
 import { HUMAN_REVIEW_REQUEST_SCHEMA_VERSION } from '@pinpawo/agent-contracts';
-import type { ReviewResolutionContext } from './review/reviewSpec';
+import type { ReviewResolutionContext } from '../../types/reviewSpec';
 
 function samplePendingReview(): ReviewResolutionContext {
   return {

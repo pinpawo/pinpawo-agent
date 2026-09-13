@@ -14,7 +14,7 @@ import {
 import {
   markAuthorizationPolicyGeneration,
   readAuthorizationPolicyGeneration,
-} from './review/authorizationMatchers';
+} from '../../autoReview/authorizationMatchers';
 
 export type ExecutorCompilationIssue =
   | {

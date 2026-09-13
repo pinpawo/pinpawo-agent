@@ -2,7 +2,7 @@ import {
   isHumanReviewBatchInterruptPayload,
   isHumanReviewInterruptPayload,
   type ReviewSpec,
-} from '../review/reviewSpec';
+} from '../../../types/reviewSpec';
 import {
   isPauseTaskInterruptPayload,
   PAUSE_TASK_INTERRUPT_KIND,

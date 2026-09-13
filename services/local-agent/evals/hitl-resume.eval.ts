@@ -18,7 +18,7 @@
  * SUT seams:
  *   - services/local-agent/src/chatSessionAdapter.ts (runAgentSessionTurn)
  *   - services/local-agent/src/localServerChatHandler.ts (review route guard)
- *   - packages/pet-agent/src/agent/orchestrator/review/reviewAuthorizations.ts
+ *   - packages/pet-agent/src/autoReview/reviewAuthorizations.ts
  *
  * Model is not invoked: examples use a hand-built fake graph that yields the
  * exact v3 protocol events runAgentSessionTurn reads — the interrupt shape

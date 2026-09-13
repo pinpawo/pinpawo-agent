@@ -12,7 +12,7 @@ import { mergeCapabilityArtifactRefs } from './capabilityArtifacts';
 import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
-} from './review/reviewAuthorizations';
+} from '../../autoReview/reviewAuthorizations';
 import type {
   OrchestratorRuntimeFailure,
 } from './runSupervisor/protocol';

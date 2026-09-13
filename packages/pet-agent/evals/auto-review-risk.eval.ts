@@ -15,8 +15,8 @@
  * Run:
  *   AUTO_REVIEW_EVAL_MODEL_PROFILE_ID=qwen-max npm run eval:auto-review-risk
  */
-import { buildReviewSpec } from '../src/agent/orchestrator/review/reviewSpec.ts';
-import { assessAutoReviewRisk } from '../src/agent/orchestrator/review/globalReviewPolicy.ts';
+import { buildReviewSpec } from '../src/types/reviewSpec.ts';
+import { assessAutoReviewRisk } from '../src/autoReview/autoReviewer.ts';
 import { createBashToolkit } from '../../../services/local-agent/src/toolkits/local/index.ts';
 import { shellOperationMetadata } from '../../../services/local-agent/src/toolkits/local/shellTools.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';

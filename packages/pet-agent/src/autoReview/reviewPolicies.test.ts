@@ -3,7 +3,7 @@ import test from 'node:test';
 import type {
   ToolAuthorizationContext,
   ToolReviewContext,
-} from '../../../types/toolkit';
+} from './policy';
 import {
   AuthorizationPolicies,
   ReviewPolicies,

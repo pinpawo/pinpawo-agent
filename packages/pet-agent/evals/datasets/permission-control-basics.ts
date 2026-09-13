@@ -1,5 +1,5 @@
 import { AgentEvalCase, AgentEvalDataset } from './types.ts';
-import { exactAuthorization } from '../../src/agent/orchestrator/review/authorizationMatchers.ts';
+import { exactAuthorization } from '../../src/autoReview/authorizationMatchers.ts';
 
 type PermissionControlInput = {
   userMessage: string;

@@ -11,7 +11,7 @@ import { compileAgentRegistry } from './registry';
 import {
   AuthorizationPolicies,
   ReviewPolicies,
-} from './review/reviewPolicies';
+} from '../../autoReview/reviewPolicies';
 
 function mockTool(name: string, description = `${name} tool`) {
   return tool(async () => 'ok', {

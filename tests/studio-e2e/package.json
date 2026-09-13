@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
+    "eval:studio-planner-flow": "node --env-file-if-exists=../../packages/pet-agent/.env --import tsx/esm src/studioPlannerFlow.eval.ts",
     "eval:studio-planning": "node --env-file-if-exists=../../packages/pet-agent/.env --import tsx/esm src/studioPlanning.eval.ts"
   },
   "devDependencies": {

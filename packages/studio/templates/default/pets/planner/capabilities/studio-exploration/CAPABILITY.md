@@ -1,7 +1,8 @@
 ---
 name: studio_exploration
-description: 只读探索项目、Git 与 GitHub 事实，为任务规划交付充分、可追溯的证据。
+description: 只读查询 Studio Pet 名录并探索项目、Git 与 GitHub 事实，向规划交付证据摘要；不创建文件或执行实现、审阅、Wiki 写入。
 uses:
+  - studio-context
   - project-inspection
 version: 1
 ---

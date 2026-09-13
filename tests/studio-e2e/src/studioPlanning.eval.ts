@@ -22,6 +22,8 @@ import { resolve } from 'node:path';
 
 import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
 
+import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
+
 const CAPABILITY_PATH = resolve(
   import.meta.dirname,
   '../../../packages/studio/templates/default/pets/planner/capabilities/studio-planning/CAPABILITY.md',
@@ -69,6 +71,7 @@ async function main() {
       model: subject.model,
       tools: [
         ...kanbanToolkit.tools.map(({ tool: declaredTool }) => declaredTool),
+        ...createStudioContextToolkit(() => ['planner', 'executor', 'reviewer', 'wiki'].map((petId) => ({ petId, name: petId }))).tools.map(({ tool }) => tool),
       ],
       promptSections: [{
         id: 'pet:planner',
@@ -100,7 +103,7 @@ async function main() {
       }
       if (index < 2) {
         if (snapshot.tasks.length !== 0 || snapshot.lastEventSequence !== 0
-          || calls.calls.some(({ name }) => name !== 'kanban_task_list')) {
+          || calls.calls.some(({ name }) => !['kanban_task_list', 'studio_pet_list'].includes(name))) {
           throw new Error(`Turn ${index + 1}: mutated Kanban before confirmation.`);
         }
       } else {

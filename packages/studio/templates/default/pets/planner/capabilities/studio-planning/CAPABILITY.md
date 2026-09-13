@@ -1,7 +1,8 @@
 ---
 name: studio_planning
-description: 根据用户目标，创建清楚、具体的 task。
+description: 在 Kanban 创建和维护待用户分配的任务，包含完成标准与交接信息；可查询 Studio Pet 名录，不执行代码、审阅或 Wiki 文件写入。
 uses:
+  - studio-context
   - kanban-planning
 version: 1
 ---

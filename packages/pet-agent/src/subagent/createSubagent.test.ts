@@ -300,6 +300,7 @@ test('createSubagent summarizes persisted history from contextWindowTokens', asy
     (message) => message.additional_kwargs?.lc_source === 'summarization',
   );
   assert.ok(summary);
+  assert.match(String(summary.content), /Earlier subagent context summary:/);
   assert.match(String(summary.content), /preserved summary with src\/a\.ts/);
   assert.equal(result.messages.some((message) => message.content === oldContext), false);
 });

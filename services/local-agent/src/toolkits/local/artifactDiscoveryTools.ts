@@ -40,10 +40,10 @@ export function createArtifactDiscoveryTools(params: {
     },
     {
       name: ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-      description: '列出当前会话中已保存的产物，包含可供读取的地址。',
+      description: '列出当前 thread 的 capability artifact refs；当前没有 artifacts 时返回空结果。',
       schema: z.object({
-        capabilityId: z.string().min(1).optional().describe('按产物列表中的 capabilityId 筛选来源'),
-        kind: z.string().min(1).optional().describe('按产物类型筛选'),
+        capabilityId: z.string().min(1).optional().describe('只返回指定 Capability 写入的 artifacts'),
+        kind: z.string().min(1).optional().describe('只返回指定 kind 的 artifacts'),
         limit: z.number().int().min(1).max(100).optional().describe('最多返回多少条，默认 20'),
       }),
     },
@@ -64,9 +64,9 @@ export function createArtifactDiscoveryTools(params: {
     },
     {
       name: ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-      description: '读取当前会话中已保存产物的信息和文本内容。',
+      description: '通过 artifact URI 读取当前 thread 内的 artifact ref 和可读文本内容。',
       schema: z.object({
-        uri: z.string().min(1).describe('artifact_list 返回的产物地址 uri'),
+        uri: z.string().min(1).describe('artifact_list 返回的 capability-artifact URI'),
         maxBytes: z.number().int().min(1).max(64_000).optional()
           .describe('最多读取的文本字节数，默认 64000'),
       }),

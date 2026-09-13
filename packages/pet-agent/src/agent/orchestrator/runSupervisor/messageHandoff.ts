@@ -38,7 +38,7 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
     description: name === 'submit_plan' ? '建立计划并返回计划事实，由你继续决定下一步。'
       : name === 'adjust_plan' ? '调整计划并返回更新后的事实，由你继续决定下一步。'
       : name === 'review_current' ? '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。'
-      : '执行当前计划中的任务，收到结果后由你检查并决定下一步。',
+      : '执行当前计划项，将控制权交给 Capability；返回交付后由你继续判断。',
     returnDirect: name === 'execute_current',
   }));
 }

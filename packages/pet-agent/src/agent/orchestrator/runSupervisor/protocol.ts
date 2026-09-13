@@ -4,7 +4,7 @@ export type OrchestratorRuntimeFailure = 'checkpoint_incompatible';
 
 export const supervisorTaskSchema = z.object({
   capability: z.string().trim().min(1).max(200),
-  task: z.string().trim().min(1).max(2_000).describe('一个可独立验收的交付结果，写清任务范围。仅因依赖前项结果或需要不同能力负责才拆分。'),
+  task: z.string().trim().min(1).max(2_000).describe('一个可独立验收的交付结果，明确本 task 的范围。仅因依赖前项结果或需要不同 Capability 负责才拆分。'),
 }).strict();
 
 export const controlSchema = z.discriminatedUnion('name', [
@@ -18,7 +18,7 @@ export const controlSchema = z.discriminatedUnion('name', [
   z.object({ name: z.literal('adjust_plan'), args: z.object({
     goal: z.string().trim().min(1).max(4_000).describe('没有新用户输入时必须原样保留当前 goal；只有用户明确要求或确认改变目标时才更新。'),
     reason: z.string().trim().min(1).max(2_000).describe('调整依据：具体执行证据或用户要求，以及为何需要改变后续安排。'),
-    currentDelegation: z.enum(['continue', 'replace']).describe('continue：沿用当前工作记录，可修改任务描述但保持所选能力；replace：更换能力或重新开始。替换不代表旧任务完成。'),
+    currentDelegation: z.enum(['continue', 'replace']).describe('continue：保留当前执行上下文，可修改 task 但必须保持 Capability；replace：更换 Capability 或丢弃旧执行上下文。替换不代表旧任务完成。'),
     tasks: z.array(supervisorTaskSchema).min(1).max(24),
   }).strict() }).strict(),
   z.object({ name: z.literal('execute_current'), args: z.object({

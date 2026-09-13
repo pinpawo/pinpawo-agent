@@ -134,7 +134,7 @@ export function createContinueTool() {
     return entryHandoff(runtime, requireRunUserRequest(runtime.state));
   }, {
     name: 'continue',
-    description: '结合用户的新消息继续已有未完成计划，检查结果、调整安排或推进工作。此工具不能代替处理等待中的审批或补充信息。',
+    description: '结合当前用户输入继续已有未完成计划，让 Supervisor 验收、调整或推进。不是原生 interrupt 恢复。',
     schema: z.object({}).strict(),
   });
 }
@@ -149,7 +149,7 @@ export function createPlanRequestTool() {
     },
     {
       name: PLAN_REQUEST_TOOL_NAME,
-      description: '为当前请求建立新的执行计划。接续已有未完成计划时使用 continue。',
+      description: '需要为当前请求新建执行计划时，将目标交给 Supervisor 规划。接续已有未完成计划使用 continue。',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
           .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),

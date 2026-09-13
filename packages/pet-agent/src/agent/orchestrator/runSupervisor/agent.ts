@@ -45,7 +45,7 @@ export function createRunSupervisorAgent(params: {
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,
         })] : []),
-        ...createMessageSupervisorControlTools(context),
+        ...createMessageSupervisorControlTools(context, agentMessages.length),
       ];
       const agent = createAgent({
         name: 'runSupervisor',
@@ -88,10 +88,14 @@ export function createRunSupervisorAgent(params: {
       const capabilityDisclosure = mergeCapabilityDisclosure(input.capabilityDisclosure, result.disclosedCapabilityNames ?? []);
       const last = work.at(-1);
       if (AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim()) {
-        return { reply: last.text, capabilityDisclosure, messages: work };
+        return { reply: last.text, capabilityDisclosure, messages: createSupervisorMessageHandoff(context, work) };
       }
       const handoff = createSupervisorMessageHandoff(context, work);
-      return { capabilityDisclosure, messages: [...work.slice(0, -2), ...handoff] };
+      const dispatch = handoff.at(-1);
+      if (!AIMessage.isInstance(dispatch) || dispatch.tool_calls?.[0]?.name !== 'delegate_capability') {
+        throw new Error('Supervisor must reply or explicitly request execution.');
+      }
+      return { capabilityDisclosure, messages: handoff };
     },
   };
 }

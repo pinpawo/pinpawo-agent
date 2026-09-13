@@ -16,13 +16,32 @@ import { readCapabilityCall } from '../runtime/delegationToolResult';
 
 class ScriptedModel extends BaseChatModel {
   readonly inputs: BaseMessage[][] = [];
+  readonly modelTurns: BaseMessage[][] = [];
   private index = 0;
-  constructor(private readonly responses: AIMessage[]) { super({}); }
+  private readonly responses: AIMessage[];
+  private readonly continuations = new Set<AIMessage>();
+  constructor(responses: AIMessage[]) {
+    super({});
+    // Existing scenarios describe a decision plus its chosen next action.
+    // Expand that notation into actual separate model turns.
+    this.responses = responses.flatMap((message) => {
+      const control = message.tool_calls?.[0];
+      if (!control || !['submit_plan', 'adjust_plan', 'review_current'].includes(control.name)) return [message];
+      const { reply, ...args } = control.args;
+      const followUp = reply ? new AIMessage(String(reply)) : call('execute_current', {
+        ...(args.completed !== true && typeof args.reason === 'string' ? { guidance: args.reason } : {}),
+      }, `${control.id}:execute`);
+      this.continuations.add(followUp);
+      if (control.name === 'review_current' && args.completed === undefined) return [followUp];
+      return [call(control.name, args, control.id!), followUp];
+    });
+  }
   _llmType() { return 'handoff-scripted'; }
   bindTools() { return this; }
   async _generate(messages: BaseMessage[]) {
-    this.inputs.push(messages);
+    this.modelTurns.push([...messages]);
     const message = this.responses[this.index++];
+    if (message && !this.continuations.has(message)) this.inputs.push(messages);
     if (!message) throw new Error('Unexpected extra model invocation');
     return { generations: [{ message, text: message.text }] };
   }
@@ -53,6 +72,9 @@ test('real control handoff returns evidence to main and retains separate Supervi
   });
   assert.equal(executor.inputs.length, 1);
   assert.equal(supervisor.inputs.length, 2);
+  assert.equal(supervisor.modelTurns.length, 4, 'plan → execute → review → natural reply');
+  assert.equal(queryAgentMessages(output.messages).main().select().messages.filter((message) => AIMessage.isInstance(message)
+    && !message.tool_calls?.length && message.text === 'Inspection complete.').length, 1);
   const boundary = supervisor.inputs[1];
   const result = boundary.find((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability');
   assert.ok(result);

@@ -33,7 +33,7 @@ function state(): OrchestratorStateType {
     sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
   };
 }
-function node(decision: SupervisorControl | { reply: string }) {
+function node(decision: import('../../runSupervisor/testing').ScriptedSupervisorDecision) {
   return createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async () => decision }) });
 }
 function apply(input: OrchestratorStateType, command: Command): OrchestratorStateType {
@@ -57,7 +57,7 @@ test('control handoff goes straight to Capability with separate main and work re
   assert.deepEqual(command.goto, ['capability']);
   assert.equal(next.runSupervisorState.plan[0].status, 'pending');
   assert.equal(readCapabilityCall(next).task, tasks[0].task);
-  assert.equal(queryAgentMessages(next.messages).supervisor(next.runId).select().messages.length, 2);
+  assert.equal(queryAgentMessages(next.messages).supervisor(next.runId).select().messages.length, 4);
   for (const key of ['proposal', 'pendingCall', 'nextAttempt', 'activeDelegation', 'messages', 'run']) {
     assert.equal(key in next.runSupervisorState, false);
   }

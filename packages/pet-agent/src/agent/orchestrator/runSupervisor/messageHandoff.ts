@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
@@ -21,28 +21,29 @@ export type SupervisorHandoffContext = {
   messages: readonly BaseMessage[];
 };
 
-function availableControlNames(context: SupervisorHandoffContext): readonly SupervisorControl['name'][] {
-  return context.mode === 'entry' ? ['submit_plan'] as const
-    : ['review_current', 'adjust_plan'] as const;
-}
+const controlNames = ['submit_plan', 'review_current', 'adjust_plan', 'execute_current'] as const;
 
-/** Acknowledge receipt only; business validation and dispatch happen at the exit. */
-export function createMessageSupervisorControlTools(context: SupervisorHandoffContext): StructuredTool[] {
-  return availableControlNames(context).map((name) => tool(async (_args, runtime: ToolRuntime) => {
-    return new ToolMessage({ name, tool_call_id: runtime.toolCallId, content: 'Control decision submitted.' });
+/** Plan/review tools return facts to the model. Only explicit execution yields to Root. */
+export function createMessageSupervisorControlTools(context: SupervisorHandoffContext, messageOffset = 0): StructuredTool[] {
+  return controlNames.map((name) => tool(async (args, runtime: ToolRuntime) => {
+    const messages = (((runtime.state ?? {}) as { messages?: BaseMessage[] }).messages ?? []).slice(messageOffset);
+    const current = resolveTranscript(context, messages, true);
+    const control = controlSchema.parse({ name, args });
+    const resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!);
+    return new ToolMessage({ name, tool_call_id: runtime.toolCallId,
+      content: JSON.stringify({ plan: resolved.state, execution: resolved.execution }) });
   }, {
     name,
     schema: supervisorControlSchemas[name],
-    description: name === 'submit_plan' ? '提交计划并交接第一项执行。必须独占本次工具响应。'
-      : name === 'adjust_plan' ? '根据执行证据或用户要求调整未完成计划，保留已完成进度并交接当前任务执行。必须独占本次工具响应。'
-      : '验收当前任务、继续补做或推进计划。填写 reply 则停止执行并回复。必须独占本次工具响应。',
-    returnDirect: true,
+    description: name === 'submit_plan' ? '建立计划并返回计划事实，由你继续决定下一步。'
+      : name === 'adjust_plan' ? '调整计划并返回更新后的事实，由你继续决定下一步。'
+      : name === 'review_current' ? '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。'
+      : '执行当前计划项，将控制权交给 Capability；返回交付后由你继续判断。',
+    returnDirect: name === 'execute_current',
   }));
 }
 
-/** Validate the tool envelope before execution; do not compute the plan transition here. */
 export function createSupervisorControlValidationMiddleware(context: SupervisorHandoffContext) {
-  const allowedControls: readonly string[] = availableControlNames(context);
   return createMiddleware({
     name: 'SupervisorControlValidation',
     wrapModelCall: async (request, handler) => {
@@ -51,7 +52,7 @@ export function createSupervisorControlValidationMiddleware(context: SupervisorH
         throw new Error('Supervisor must produce a valid AIMessage.');
       }
       const calls = response.tool_calls ?? [];
-      if (calls.some((call) => !allowedControls.includes(call.name)
+      if (calls.some((call) => !Object.hasOwn(supervisorControlSchemas, call.name)
         && !(call.name === 'capability_details' && (context.mode === 'entry' || context.hasNewUserInput)))) {
         throw new Error('Supervisor called a tool unavailable in this invocation.');
       }
@@ -74,17 +75,12 @@ function identity(kind: string, ...parts: string[]) {
 /** One domain transition, used at the Supervisor exit and checked again at Root. */
 function resolveControl(context: SupervisorHandoffContext, control: SupervisorControl, controlCallId: string) {
   if (!context.runId || !context.traceId || !controlCallId) throw new Error('Handoff requires run and call identities.');
-  if (context.mode === 'entry' ? control.name !== 'submit_plan' : control.name === 'submit_plan') {
-    throw new Error('Supervisor control is invalid in this mode.');
-  }
   if (control.name === 'adjust_plan' && !context.hasNewUserInput
     && control.args.goal !== (context.state.goal ?? context.userRequest)) {
     throw new Error('Changing the goal requires fresh user input.');
   }
   let state: RunSupervisorState = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
-  let guidance: string | null = null;
-  let reply: string | null = null;
   if (control.name === 'submit_plan' || control.name === 'adjust_plan') {
     const tasks = control.args.tasks;
     if (tasks.some((task) => !context.allowedCapabilityNames.includes(task.capability))) {
@@ -108,27 +104,20 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
         status: 'pending' as const,
       }))],
     };
-    guidance = control.name === 'adjust_plan' ? control.args.reason : null;
-  } else {
-    const { completed, reason } = control.args;
+  } else if (control.name === 'review_current') {
     const latestResult = current ? executionsForTask(context, current.id).at(-1)?.result : null;
-    reply = control.args.reply ?? null;
-    if (completed === true) {
-      if (!current || !latestResult || latestResult.status !== 'returned' || !latestResult.delivery) {
+    if (!current) throw new Error('There is no task to review.');
+    if (control.args.completed) {
+      if (!latestResult || latestResult.status !== 'returned' || !latestResult.delivery) {
         throw new Error('Accepting a task requires its returned delivery.');
       }
       state = updateSupervisorTask(state, current.id, 'completed');
-    } else if (completed === false) {
-      if (!current) throw new Error('There is no task to continue.');
-      if (reply) throw new Error('Ask directly instead of combining retry with a reply.');
-      guidance = reason;
-    } else if (latestResult?.status === 'returned' && !reply) {
-      throw new Error('Review must decide whether the returned task is complete.');
     }
   }
+  if (control.name !== 'execute_current') return { state, execution: null };
   const next = currentSupervisorTask(state);
-  if (reply) return { state, execution: null, reply };
-  if (!next) throw new Error('No planned work remains; a final reply is required.');
+  if (!next) throw new Error('There is no planned task to execute.');
+  const guidance = control.args.guidance ?? null;
   if (!context.allowedCapabilityNames.includes(next.capability)) throw new Error('Capability is no longer available.');
   const previous = executionsForTask(context, next.id).filter(({ metadata }) => metadata.runId === context.runId).at(-1);
   if (previous && !context.messages.some((message) => ToolMessage.isInstance(message)
@@ -145,46 +134,83 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
       mode: previous ? 'continue' as const : 'initial' as const,
       guidance,
     },
-    reply: null,
   };
 }
 
-function completedControl(messages: readonly BaseMessage[]) {
-  const confirmation = messages.at(-1);
-  const request = messages.at(-2);
-  if (!ToolMessage.isInstance(confirmation) || !AIMessage.isInstance(request)
-    || confirmation.status === 'error' || request.invalid_tool_calls?.length || request.tool_calls?.length !== 1) {
-    throw new Error('Supervisor handoff requires a completed exclusive control call.');
+/** Fold this invocation's successful control pairs; Root remains the commit owner. */
+function resolveTranscript(context: SupervisorHandoffContext, messages: readonly BaseMessage[], allowPending = false) {
+  let state = context.state;
+  let execution: ReturnType<typeof resolveControl>['execution'] = null;
+  let executionCall: { id: string; control: SupervisorControl } | null = null;
+  const seen = new Set<string>();
+  for (let index = 0; index < messages.length; index++) {
+    const result = messages[index];
+    if (AIMessage.isInstance(result) && result.tool_calls?.some((call) => Object.hasOwn(supervisorControlSchemas, call.name))) {
+      if (result.tool_calls.length !== 1) throw new Error('Supervisor handoff requires an exclusive control call.');
+      const confirmation = messages[index + 1];
+      if (ToolMessage.isInstance(confirmation)) {
+        const call = result.tool_calls[0];
+        if (call.name !== confirmation.name || call.id !== confirmation.tool_call_id) {
+          throw new Error('Supervisor control confirmation does not match its call.');
+        }
+      } else if (!(allowPending && index === messages.length - 1)) {
+        throw new Error('Supervisor handoff requires a completed exclusive control call.');
+      }
+    }
+    if (!ToolMessage.isInstance(result) || !Object.hasOwn(supervisorControlSchemas, result.name ?? '')) continue;
+    const request = messages[index - 1];
+    if (!AIMessage.isInstance(request) || request.invalid_tool_calls?.length || request.tool_calls?.length !== 1) {
+      throw new Error('Supervisor handoff requires an exclusive control call.');
+    }
+    const call = request.tool_calls[0];
+    if (!call.id || call.id !== result.tool_call_id || call.name !== result.name) {
+      throw new Error('Supervisor control confirmation does not match its call.');
+    }
+    if (seen.has(call.id) || context.messages.some((message) => AIMessage.isInstance(message)
+      && getAgentMessageMetadata(message).lane === 'supervisor'
+      && getAgentMessageMetadata(message).runId === context.runId
+      && message.tool_calls?.some((previous) => previous.id === call.id))) {
+      throw new Error('Supervisor control call was already accepted.');
+    }
+    seen.add(call.id);
+    if (result.status === 'error') continue;
+    if (executionCall) throw new Error('Supervisor must yield after requesting execution.');
+    const control = controlSchema.parse({ name: call.name, args: call.args });
+    const resolved = resolveControl({ ...context, state }, control, call.id);
+    state = resolved.state;
+    execution = resolved.execution;
+    if (execution) executionCall = { id: call.id, control };
   }
-  const call = request.tool_calls[0];
-  if (!call.id || confirmation.tool_call_id !== call.id || confirmation.name !== call.name) {
-    throw new Error('Supervisor control confirmation does not match its call.');
-  }
-  return { request, confirmation, call, control: controlSchema.parse({ name: call.name, args: call.args }) };
+  return { state, execution, executionCall };
 }
 
-/** No proposal state: derive the Root AIMessage from the executed internal tool pair. */
+/** Keep all internal decisions; only an explicit execute call derives a Root tool call. */
 export function createSupervisorMessageHandoff(context: SupervisorHandoffContext, internalMessages: readonly BaseMessage[]) {
-  return resolveMessageHandoff(context, completedControl(internalMessages)).messages;
+  return assembleHandoff(context, internalMessages, resolveTranscript(context, internalMessages));
 }
 
-/** Compute a transition once per boundary; message assembly reuses that result. */
-function resolveMessageHandoff(context: SupervisorHandoffContext, completed: ReturnType<typeof completedControl>) {
-  const { request, confirmation, call, control } = completed;
-  const resolved = resolveControl(context, control, call.id!);
-  const working = [new AIMessage({ ...request }), new ToolMessage({ ...confirmation })].map((message) =>
-    setAgentMessageMetadata(message, { lane: 'supervisor', runId: context.runId, traceId: context.traceId }));
-  working[0].id = identity('control', context.runId, call.id!);
-  working[1].id = identity('confirmation', context.runId, call.id!);
-  if (!resolved.execution) return { ...resolved, messages: working };
-  const id = identity('execute', context.runId, call.id!);
+function assembleHandoff(context: SupervisorHandoffContext, internalMessages: readonly BaseMessage[],
+  resolved: ReturnType<typeof resolveTranscript>) {
+  const working = internalMessages.map((message) => {
+    const copy = AIMessage.isInstance(message) ? new AIMessage({ ...message })
+      : ToolMessage.isInstance(message) ? new ToolMessage({ ...message }) : message;
+    const call = AIMessage.isInstance(message) ? message.tool_calls?.[0] : undefined;
+    copy.id = call?.id && Object.hasOwn(supervisorControlSchemas, call.name)
+      ? identity('control', context.runId, call.id)
+      : ToolMessage.isInstance(message) && Object.hasOwn(supervisorControlSchemas, message.name ?? '')
+        ? identity('confirmation', context.runId, message.tool_call_id)
+        : message.id ?? `supervisor-work:${randomUUID()}`;
+    return setAgentMessageMetadata(copy, { lane: 'supervisor', runId: context.runId, traceId: context.traceId });
+  });
+  if (!resolved.execution || !resolved.executionCall) return working;
+  const { id: callId, control } = resolved.executionCall;
+  const id = identity('execute', context.runId, callId);
   const dispatch = setAgentMessageMetadata(new AIMessage({ id, content: '', tool_calls: [{
     id, name: 'delegate_capability', args: { control, execution: resolved.execution }, type: 'tool_call',
-  }] }), { runId: context.runId, traceId: context.traceId, sourceControlCallId: call.id, runtimeGenerated: true });
-  return { ...resolved, messages: [...working, dispatch] };
+  }] }), { runId: context.runId, traceId: context.traceId, sourceControlCallId: callId, runtimeGenerated: true });
+  return [...working, dispatch];
 }
 
-/** Root accepts the handoff message itself; it never persists a proposal/pending slot. */
 export function acceptSupervisorMessageHandoff(context: SupervisorHandoffContext, messages: readonly BaseMessage[]) {
   const last = messages.at(-1);
   const hasDispatch = AIMessage.isInstance(last) && last.tool_calls?.[0]?.name === 'delegate_capability';
@@ -192,27 +218,20 @@ export function acceptSupervisorMessageHandoff(context: SupervisorHandoffContext
     throw new Error('Capability handoff was already accepted.');
   }
   const internal = hasDispatch ? messages.slice(0, -1) : messages;
-  const completed = completedControl(internal);
-  const { call } = completed;
-  if (context.messages.some((message) => AIMessage.isInstance(message)
-    && getAgentMessageMetadata(message).lane === 'supervisor'
-    && getAgentMessageMetadata(message).runId === context.runId
-    && message.tool_calls?.some((previous) => previous.id === call.id))) {
-    throw new Error('Supervisor control call was already accepted.');
-  }
-  const resolved = resolveMessageHandoff(context, completed);
-  const expected = resolved.messages;
+  const resolved = resolveTranscript(context, internal);
+  const expected = assembleHandoff(context, internal, resolved);
   if (hasDispatch) {
     const dispatch = last as AIMessage;
     const expectedDispatch = expected.at(-1) as AIMessage;
     capabilityHandoffSchema.parse(dispatch.tool_calls![0].args);
-    if (!isDeepStrictEqual(dispatch.tool_calls, expectedDispatch.tool_calls)
+    if (!resolved.execution || !isDeepStrictEqual(dispatch.tool_calls, expectedDispatch.tool_calls)
       || dispatch.id !== expectedDispatch.id
       || !isDeepStrictEqual(getAgentMessageMetadata(dispatch), getAgentMessageMetadata(expectedDispatch))) {
       throw new Error('Capability handoff does not match the executed control decision.');
     }
-  } else if (expected.length !== 2) {
+  } else if (resolved.execution) {
     throw new Error('Supervisor omitted the execution call from its handoff.');
   }
-  return { runSupervisorState: resolved.state, messages: expected, reply: resolved.reply };
+  const reply = AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim() ? last.text : null;
+  return { runSupervisorState: resolved.state, messages: expected, reply };
 }

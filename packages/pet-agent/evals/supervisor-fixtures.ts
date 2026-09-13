@@ -7,12 +7,23 @@ import { setAgentMessageMetadata } from '../src/agent/messages';
 
 /** Read the original model decision, not the programmatically derived execution call. */
 export function readSupervisorDecision(result: RunSupervisorResult) {
-  if (result.reply !== undefined) return { reply: result.reply, name: undefined };
   const message = result.messages.filter((message) => AIMessage.isInstance(message)
-    && message.tool_calls?.some((call) => Object.hasOwn(supervisorControlSchemas, call.name))).at(-1) as AIMessage | undefined;
+    && message.tool_calls?.some((call) => Object.hasOwn(supervisorControlSchemas, call.name) && call.name !== 'execute_current')).at(-1) as AIMessage | undefined;
   const call = message?.tool_calls?.[0];
-  if (!call) throw new Error('Evaluation result has no internal control decision.');
-  return controlSchema.parse({ name: call.name, args: call.args });
+  if (!call) {
+    if (result.reply !== undefined) return { reply: result.reply, name: undefined };
+    // A resumed pending task can be executed without another plan/review decision.
+    const execute = result.messages.flatMap((message) => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
+      .find((call) => call.name === 'execute_current');
+    if (execute) {
+      const control = controlSchema.parse({ name: execute.name, args: execute.args });
+      if (control.name === 'execute_current') return control;
+    }
+    throw new Error('Evaluation result has no internal control decision.');
+  }
+  const control = controlSchema.parse({ name: call.name, args: call.args });
+  // Evaluation projection only: the reply comes from the final AIMessage, never review args.
+  return control.name === 'review_current' ? { ...control, args: { ...control.args, reply: result.reply } } : control;
 }
 export type SupervisorDecision = ReturnType<typeof readSupervisorDecision>;
 

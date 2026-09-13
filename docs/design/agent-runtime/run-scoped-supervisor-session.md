@@ -101,7 +101,7 @@ Entry ToolNode 仅执行当前路由调用；旧 run 的 ToolMessage 不参与�
 
 执行预算统一在 Supervisor 调用前检查，普通执行返回和暂停恢复共用该检查点，
 不再增加空的预算节点。Answer 仍独立发布主会话回复，从本轮 Supervisor 已保存的
-自然回复或 `review_current.reply` 读取正文，不另存 `runSupervisorReply`。
+自然回复读取正文，不另存 `runSupervisorReply`。
 入口、压缩、执行和暂停节点的普通异常统一记录 Root 终止错误；原生 interrupt
 和取消不转换成普通失败。回复消息统一标记 runId 与 traceId。
 
@@ -136,101 +136,65 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 
 ### 工具职责
 
-三个控制工具保留在 Supervisor 内部，均可导向同一 Capability 执行过程：
+本次调整依据 [Studio E2E #803](https://github.com/pinpawo/pinpawo-agent/issues/803)：
+验收与下一步行动分离，由 Supervisor 模型在工具结果返回后继续决定。
 
-| 工具 | 调度含义 |
+| 工具 | 含义与返回 |
 | --- | --- |
-| `submit_plan` | 提交计划，选择第一项执行 |
-| `review_current` | 根据整体进度验收、继续当前任务或推进下一项；没有待验收任务时不虚构旧任务的完成判断 |
-| `adjust_plan` | 保留已完成进度，调整后续安排，选择当前应执行项 |
-| `capability_details` | 内部查询，正常返回查询结果并继续 createAgent 循环，不交给 Root 执行 |
+| `submit_plan` | 建立计划，返回计划事实；不派发执行 |
+| `review_current` | 验收当前交付或记录需要补做，返回更新后的计划；不要求 reply，不派发执行 |
+| `adjust_plan` | 调整未完成计划并保留已完成进度，返回计划事实；不派发执行 |
+| `execute_current` | 模型明确决定执行当前计划项，可带补做指导；只在这里交接给 Root |
+| `capability_details` | 返回能力详情，继续模型循环 |
 
-Boundary 始终提供 `adjust_plan`，允许 Supervisor 基于执行证据调整原目标内的任务安排。
-没有新用户输入时，工具参数必须原样保留当前 goal；Supervisor 退出及 Root 接收均校验
-这一条件。有新输入不等于用户已授权改变目标，模型仍须依据用户明确要求或确认判断。
-任务文字是否扩大目标由模型按系统约束判断，字符串相等校验不能证明语义上没有扩大范围；
-实际工具授权仍由原执行审核机制约束，不因调整计划而放宽。
+计划/验收工具不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
+自然回复。只在执行工具处使用 `returnDirect` 作为已有 Root Capability 节点的交接边界。
+没有待执行任务不构成失败，也不自动生成答案；Supervisor 通过普通 AIMessage 回复。
 
-无工作可执行、需要提问或结束时，落实相应计划/进度并走已有回复出口，
-不为了统一形状创建空的 delegation 调用。
+### 工具状态与 Root 提交
 
-`review_current` 的 `reply` 是本轮停止执行并回复的出口，不是进度通知：
-继续当前任务或推进下一项时省略它；填写后不产生 delegation 调用。
-需要用户信息、暂不验收时可省略 `completed` 并填写 `reply`，计划进度保持不变；
-也可直接自然回复。已交付任务在不回复、准备继续调度时必须明确完成判断。
+每次 Supervisor invoke 从 Root 的计划与执行事实开始。内部工具按本次已完成的控制调用
+顺序推导当前计划，在 ToolMessage 中返回计划事实供模型决策。工具不直接修改外部资源，
+不创建独立的持久 Supervisor state/proposal/nextExecution 槽。
 
-### 调用形状
+invoke 结束时，Root 验证并按顺序应用本次已完成的控制调用。无论模型最终选择执行还是
+自然回复，都提交计划更新与完整工作消息。执行参数只从明确的 `execute_current` 调用推导，
+生成独立 ID 的 `delegate_capability` 主会话调用；Capability 仍在 Root 节点执行。
 
 ```text
-Supervisor 内部
-  AIMessage：submit_plan / review_current / adjust_plan，调用 C
-  ToolMessage：提交/交接确认，关联 C
-
-  Supervisor invoke 返回后的退出适配完成确定性转换
-  handoff：AIMessage(delegate_capability，调用 D，执行参数)
-
-Root
-  保存调用 D 与必要业务更新，checkpoint
-  capability 节点执行工具调用 D → 工具内部的独立 executor
-  ToolMessage：实际执行结果，关联 D
-  → Supervisor 正常判断下一步，或进入暂停/失败等出口
+Supervisor: review_current → ToolMessage(更新后的计划)
+          → 模型继续判断
+          → 自然回复，或调整计划后继续判断，或 execute_current
+Root:      验证控制记录，提交计划 + 消息
+          → answer，或执行明确交接的 Capability
 ```
 
-这里的 proposal 是调度决定及其交接含义，**交给 Root 的载体就是 delegation AIMessage**，
-不是 `runSupervisorState.proposal`。Root 不先存一份 proposal、再切节点取出并重新拼调用。
+业务更新只能从匹配、成功的控制工具消息推导；不接受模型伪造的执行身份或 ToolMessage。
+工具执行时和 Root 接收时复用同一纯转换函数。每条控制 ID 在本 run 只接纳一次。
+非法能力、无交付验收、未返回的重复执行等仍属于状态一致性检查；下一步做什么由模型决定。
+单次模型响应中的控制调用保持顺序明确，避免并行修改同一计划。
 
-控制调用 C 保留原始参数和提交确认。派生调用 D 使用独立调用 ID，携带执行所需参数，
-保留来源动作、控制调用及 delegation/run 关联；不覆盖 C，也不增加一轮模型派发。
-计划变更随本次交接落实到业务状态，不另外保存“待处理计划”或临时交接容器。
+### 生命周期与恢复
 
-Supervisor 工作上下文与 Root 执行消息各自完整。配对仅表达“结果属于哪次调用”及
-工具消息协议完整性，不负责调度、验收或恢复，不扩展为两套调用状态机。
-C 的确认不是执行成功，D 的结果也不是任务验收通过。
+计划事实仍只有 goal/plan；执行身份与结果仍保存在 Root 工具消息对。
+在 Supervisor invoke 返回前发生取消或异常，不提交部分内存状态，也不会执行 Capability。
+Root 提交后沿用现有 checkpoint / Capability interrupt 恢复，不重放已提交的执行副作用。
+保留历史 delegation 参数读取能力；新写入只由明确执行调用产生。
+旧版本若已提交含 reply 的 review 消息对并停在 answer 前，恢复时只读取该 run 已提交的
+回复并发布，不重新调用模型或 Capability；旧 reply 字段不再对新模型调用开放。
 
-### 退出与执行边界
+### 提示与校验
 
-内部工具使用确认 ToolMessage 与 `returnDirect` 退出；
-结束一次 Supervisor invoke 不等于结束业务 run。
-退出适配直接形成 delegation 调用消息，
-不通过持久化 proposal slot 或额外模型调用中转。
+System prompt 表达目标、权限、验收原则；工具说明表达各自效果。删除“review 同时选择
+后续执行或提供 reply”的耦合约定。不增加“最后一项必须提供 reply”的例外校验。
+Middleware 检查调用协议与 schema；工具返回真实状态，供下一轮模型判断。
 
-`Command.PARENT` 是可用的框架交接方式，但不是必须新增的层次。
-当前使用 createAgent invoke 返回后的确定性交接适配；不引入 `onHandoff` 回调加中间状态，
-不新增外部 `supervisor_tools` ToolNode，也不把 executor 搬入 Supervisor 工具内部。
+### 验收
 
-调用适配不将整份输入重复写入 createAgent state；只读参数绑定在本次调用中，
-系统提示词使用原生 `systemPrompt` 配置。内部仅保留详情读取所需的名称集合 reducer，
-每次由 Root 的已披露记录初始化；调用结束后将结果合并回 Root。
-
-Root 接纳交接时校验调用与任务、能力、运行身份的一致性，一起提交必要业务更新和执行消息，
-再进入现有 `capability` 节点。执行完成时一起提交结果消息与执行事实；
-原生恢复不重新派发已经提交的调用。框架 checkpoint 不保证外部副作用恰好一次，
-仍需保留已有审核、拒绝、取消和错误处理。
-
-### 提示职责
-
-System prompt 负责角色、目标、权限和决策原则；工具描述负责调用时机和效果；
-参数描述负责字段含义及组合约束；工具结果以事实和字段解释为主，不重复规划指令。
-停止执行、验收与交付分离等关键边界可简短重申，不维护多套完整工具使用说明。
-
-Entry 的基础提示统一描述 `plan_request` / `continue` / 直接回复，节点不再追加
-另一套路由规则。`goal` 的填写细节保留在参数描述中，不再声称 Supervisor 看不到
-主会话。执行证据说明使用实际工具消息及旧历史投影，不把 XML Announce 当作当前协议。
-Supervisor 的验收原则保留在 system prompt，`completed` / `reply` 的组合约束及
-`currentDelegation` 的继续/替换含义放在参数描述中；此整理不改变调度校验或授权规则。
-
-### Middleware 的边界
-
-`SupervisorControlValidation` 只在工具执行前检查响应格式、当前可用工具、控制调用
-独占性和参数 schema，不计算计划更新。内部控制工具只确认收到调用并通过
-`returnDirect` 结束 createAgent；确认不表示 Root 已接受该业务决定。
-完整业务校验与状态推导只发生在两个边界：Supervisor 生成 handoff 时，以及 Root
-接收 handoff 时。每个边界只计算一次，复用该结果装配消息或提交状态；不新增中转状态。
-
-`ToolProtocol` 只整理模型输入中的工具调用配对，不改写 Root 或私有历史，也不处理
-Announce。历史 Announce 的数据投影仅保留在 Entry Answer 和 Supervisor 读取 Root
-历史的位置；当前 Capability 执行使用真实工具消息对，不加载这层旧消息转换。
-详情披露状态、公共 system prompt、Capability 的压缩／轮数限制／工具审批职责不变。
+- review 最后一项后模型自然回复：计划完成、一个最终主会话回复、Capability 不再执行。
+- submit/adjust/review 后均能再次调用模型；仅 execute_current 产生 delegation。
+- review 后继续执行、调整后执行、仍有 pending 任务时提问，均保持正确状态。
+- 多次工具调用的状态一致，Root 防篡改/去重与原生恢复保持有效。
 
 ### lane 归属不变
 
@@ -278,14 +242,14 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 | [Deep Agents subagents.ts](https://github.com/langchain-ai/deepagentsjs/blob/main/libs/deepagents/src/middleware/subagents.ts) | `task` 工具 invoke subagent 并用 ToolMessage 返回交付；借鉴结果边界，不照搬其工具内执行拓扑 |
 
 官方交接确认只表示控制转移，不能当作我们的 Capability 执行结果。
-没有现成组件直接完成本项目三个控制工具到 delegation 调用的业务转换；
+没有现成组件直接完成本项目计划验收与显式 execution 到 delegation 调用的业务转换；
 在现有 Supervisor 边界适配即可，不引入整套 `createSupervisor` 或新的交接框架。
 
 ## 验证与范围
 
 验证以下行为，不通过比较提示词字面文本来验收：
 
-- 两组消息分别正确配对，原始控制调用不被改写；Root 直接接收执行调用，无额外模型派发轮次。
+- 两组消息分别正确配对，原始控制调用不被改写；Root 直接接收执行调用，无额外 Root 模型派发轮次。
 - 新 run 重置 Supervisor 工作视图，但 Entry Answer 仍能参考业务状态和主会话结果；
   原生 interrupt 保留原身份、预算与调用现场。
 - A 已验收、B 待执行时能够继续或调整，不依赖独立 active delegation，不重复验收或提交计划。
@@ -302,13 +266,13 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 [新的消息交接测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/messageHandoff.test.ts)
 覆盖控制校验、两组配对和计划推进；
 [生产图调用与恢复测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/handoff.test.ts)
-使用真实 createAgent、Root 图与 Capability executor，覆盖无额外模型派发、
+使用真实 createAgent、Root 图与 Capability executor，覆盖显式执行后的直接交接、
 原生 interrupt、执行前后 checkpoint、跨 run 的 Entry `continue` 和工作 lane 隔离。
 脚本模型测试不等同于真实模型 eval；两者的验证结果分别记录。
 
 真实模型 eval 使用合成任务和执行证据，不执行业务工具，关闭远程 tracing。
 它验证调度语义，不替代 checkpoint、授权或副作用测试。提问用例按“不派发、不改计划”
-验收，允许自然回复和等价的控制工具回复，不限定某一种表达形式。
+验收，使用自然回复，允许提问前记录不改变计划的验收判断。
 
 本文不设计并行调度、独立存储、快照采用协议或额外外部工具节点层。
 已完成迁移清单、旧协议和阶段性测试结果不再内嵌，见

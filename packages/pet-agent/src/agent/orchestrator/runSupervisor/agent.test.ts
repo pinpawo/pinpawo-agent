@@ -35,12 +35,13 @@ import {
 
 function commandOnly(value: unknown) {
   const result = value as { reply?: string; messages: BaseMessage[] };
-  if (result.reply !== undefined) return { reply: result.reply };
   const request = result.messages.filter((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => ['submit_plan', 'review_current', 'adjust_plan'].includes(call.name))).at(-1) as AIMessage;
   const call = request?.tool_calls?.[0];
-  assert.ok(call, 'Expected the original internal control call');
-  return controlSchema.parse({ name: call.name, args: call.args });
+  if (!call) return { reply: result.reply };
+  const parsed = controlSchema.parse({ name: call.name, args: call.args });
+  return parsed.name === 'review_current' && result.reply !== undefined
+    ? { ...parsed, args: { ...parsed.args, reply: result.reply } } : parsed;
 }
 
 // Actual call derivation, exclusivity and duplicate settlement are tested in
@@ -94,6 +95,7 @@ class ScriptedSupervisorModel extends BaseChatModel {
   readonly structuredOutputPlanLimits: number[] = [];
   readonly structuredOutputCapabilityEnums: string[][] = [];
   #responseIndex = 0;
+  #followUp: AIMessage | undefined;
 
   constructor(
     private readonly responses: ReadonlyArray<{
@@ -186,6 +188,11 @@ class ScriptedSupervisorModel extends BaseChatModel {
   }
 
   async _generate(messages: BaseMessage[]) {
+    if (this.#followUp) {
+      const message = this.#followUp;
+      this.#followUp = undefined;
+      return { generations: [{ message, text: message.text }] };
+    }
     this.invocations.push([...messages]);
     const response = this.responses[this.#responseIndex] ?? { content: 'done' };
     this.#responseIndex += 1;
@@ -201,9 +208,25 @@ class ScriptedSupervisorModel extends BaseChatModel {
               ? { completed: true, reason: 'Current task delivery is evidenced.' } : response.structuredOutput.args,
         }]
       : undefined;
+    // Expand legacy scenario notation into explicit model decisions, not runtime behavior.
+    const calls = (response.toolCalls ?? structuredToolCall)?.map((call) => ({ ...call, args: { ...call.args } }));
+    const control = calls?.length === 1 ? calls[0] : undefined;
+    if (control && ['submit_plan', 'adjust_plan', 'review_current'].includes(control.name)) {
+      const reply = control.args.reply;
+      delete control.args.reply;
+      this.#followUp = reply ? new AIMessage(String(reply)) : new AIMessage({ content: '', tool_calls: [{
+        id: `${control.id}:execute`, name: 'execute_current', args: {
+          ...(control.args.completed !== true && typeof control.args.reason === 'string' ? { guidance: control.args.reason } : {}),
+        }, type: 'tool_call',
+      }] });
+      if (control.name === 'review_current' && control.args.completed === undefined) {
+        const message = this.#followUp; this.#followUp = undefined;
+        return { generations: [{ message, text: message.text }] };
+      }
+    }
     const message = new AIMessage({
       content: response.content ?? '',
-      tool_calls: (response.toolCalls ?? structuredToolCall)?.map((call) => ({
+      tool_calls: calls?.map((call) => ({
         ...call,
         type: 'tool_call' as const,
       })),
@@ -536,16 +559,16 @@ test('Supervisor Agent explores Capability documents and returns a compact order
   ]);
   assert.equal(model.boundToolNameHistory[0]?.includes('request_user_input'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), true);
-  assert.equal(model.boundToolNameHistory[0]?.includes('review_current'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('review_current'), true);
   assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
   assert.equal(model.boundToolNameHistory[0]?.includes('complete_goal'), false);
   assert.equal(model.boundToolNameHistory[1]?.includes(
     RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
   ), true);
   assert.equal(model.boundToolNameHistory[1]?.includes('request_user_input'), false);
-  assert.equal(model.structuredOutputToolNames.size, 1);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.equal(model.structuredOutputToolNames.has('advance'), false);
+  assert.equal(model.structuredOutputToolNames.has('advance'), true);
   assert.equal(model.boundToolNames.includes('report_unavailable'), false);
   assert.deepEqual(model.structuredOutputSchemaReferences, []);
   assert.deepEqual(model.structuredOutputPlanLimits, [24]);
@@ -623,9 +646,9 @@ test('entry mode forms one executable task after Capability exploration', async 
     .invoke(supervisorInput(catalog));
 
   assert.equal(model.invocations.length, 2);
-  assert.equal(model.structuredOutputToolNames.size, 1);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.ok(model.structuredOutputToolNames.has('plan'));
-  assert.equal(model.structuredOutputToolNames.has('advance'), false);
+  assert.equal(model.structuredOutputToolNames.has('advance'), true);
   assert.equal(model.boundToolNames.includes('report_unavailable'), false);
   const decision = commandOnly(result);
   assert.ok('name' in decision && decision.name === 'submit_plan');
@@ -1374,9 +1397,9 @@ test('an empty catalog can return truthful facts to Answer', async (t) => {
     supervisorInput(catalog),
   );
 
-  assert.equal(model.structuredOutputToolNames.size, 1);
+  assert.equal(model.structuredOutputToolNames.size, 2);
   assert.equal(model.structuredOutputToolNames.has('plan'), true);
-  assert.equal(model.structuredOutputToolNames.has('advance'), false);
+  assert.equal(model.structuredOutputToolNames.has('advance'), true);
   assert.equal(model.boundToolNames.includes('report_unavailable'), false);
   assert.deepEqual(commandOnly(result), {
     reply: '当前没有可用的 Capability。',
@@ -1568,7 +1591,7 @@ test('boundary Supervisor can stop for user confirmation with a structured quest
   assert.equal(model.invocations.length, 1);
 });
 
-test('boundary Supervisor exposes only boundary command actions', async (t) => {
+test('boundary Supervisor exposes plan, review, adjustment and execution tools', async (t) => {
   const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
@@ -1617,7 +1640,7 @@ test('boundary Supervisor exposes only boundary command actions', async (t) => {
     }
   });
   assert.equal(model.invocations.length, 1);
-  assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), false);
+  assert.equal(model.boundToolNameHistory[0]?.includes('submit_plan'), true);
   assert.equal(model.boundToolNameHistory[0]?.includes('review_current'), true);
   assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
 });
@@ -1838,7 +1861,7 @@ test('multiple controls and mixed discovery/control responses run no tools or fo
 test('empty final output follows the protocol error path without a fallback reply', async (t) => {
   const catalog = createTestCatalog({});
   const model = new ScriptedSupervisorModel([{ content: ' ' }]);
-  await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /completed exclusive control call/);
+  await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /must reply or explicitly request execution/);
   assert.equal(model.invocations.length, 1);
 });
 
@@ -1949,9 +1972,9 @@ test('adjust_plan is available at every Boundary but changing the goal requires 
     } else if (scenario === 'execution') {
       await assert.rejects(invocation, /Changing the goal requires fresh user input/);
     } else {
-      await assert.rejects(invocation, /tool unavailable in this invocation/);
+      await assert.rejects(invocation, /Changing the goal requires fresh user input/);
     }
-    assert.equal(model.boundToolNames.includes('adjust_plan'), scenario !== 'entry');
+    assert.equal(model.boundToolNames.includes('adjust_plan'), true);
     assert.equal(model.invocations.length, 1);
   }
 });

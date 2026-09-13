@@ -81,7 +81,7 @@ for (const strategy of ['continue', 'replace'] as const) {
     assert.equal(result.runSupervisorState.goal, 'Inspect the correct project; prepare a private report.');
     assert.deepEqual(result.runSupervisorState.plan.map((task) => task.task), ['Work on the corrected project.', 'Prepare the private report.']);
     assert.equal(result.runSupervisorState.plan[0].id === 'task1', strategy === 'continue');
-    assert.equal(queryAgentMessages(result.messages).supervisor(result.runId).select().messages.length, 2);
+    assert.equal(queryAgentMessages(result.messages).supervisor(result.runId).select().messages.length, 4);
   });
 }
 

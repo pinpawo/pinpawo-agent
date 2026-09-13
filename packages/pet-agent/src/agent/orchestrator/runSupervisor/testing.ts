@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
 import { createSupervisorMessageHandoff, type SupervisorControl } from './messageHandoff';
@@ -7,7 +7,7 @@ import { supervisorHandoffContext } from './input';
 import { setAgentMessageMetadata } from '../../messages';
 
 /** Compact fixture notation only; the runtime seam always receives messages. */
-export type ScriptedSupervisorDecision = (SupervisorControl | { reply: string }) & {
+export type ScriptedSupervisorDecision = (SupervisorControl | { name: 'review_current'; args: { completed?: boolean; reason: string; reply?: string } } | { reply: string }) & {
   capabilityDisclosure?: RunSupervisorInput['capabilityDisclosure'];
 };
 export type ScriptedSupervisorRunner = {
@@ -16,19 +16,31 @@ export type ScriptedSupervisorRunner = {
 
 /** Script fixtures still exercise the same message handoff as the production agent. */
 export function scriptedSupervisorResult(input: RunSupervisorInput,
-  decision: SupervisorControl | { reply: string }): RunSupervisorResult {
+  decision: ScriptedSupervisorDecision): RunSupervisorResult {
   const id = `scripted:${randomUUID()}`;
-  if ('reply' in decision) {
-    return { reply: decision.reply, capabilityDisclosure: input.capabilityDisclosure,
-      messages: [setAgentMessageMetadata(new AIMessage({ id, content: decision.reply }),
-        { lane: 'supervisor', runId: input.runId, traceId: input.traceId })] };
+  const messages: BaseMessage[] = [];
+  const call = (control: SupervisorControl) => {
+    const callId = `${id}:${messages.length}`;
+    messages.push(new AIMessage({ content: '', tool_calls: [{ id: callId, name: control.name, args: control.args, type: 'tool_call' }] }),
+      new ToolMessage({ name: control.name, tool_call_id: callId, content: 'Scenario tool result.' }));
+  };
+  let reply: string | undefined;
+  if ('reply' in decision) reply = decision.reply;
+  else if (decision.name === 'review_current') {
+    if (decision.args.completed !== undefined) call({ name: 'review_current', args: {
+      completed: decision.args.completed, reason: decision.args.reason,
+    } });
+    reply = 'reply' in decision.args ? decision.args.reply : undefined;
+    if (!reply) call({ name: 'execute_current', args: decision.args.completed ? {} : { guidance: decision.args.reason } });
+  } else {
+    call(decision);
+    if (decision.name !== 'execute_current') call({ name: 'execute_current', args: {
+      ...(decision.name === 'adjust_plan' ? { guidance: decision.args.reason } : {}),
+    } });
   }
-  return { capabilityDisclosure: input.capabilityDisclosure, messages: createSupervisorMessageHandoff(
-    supervisorHandoffContext(input), [
-      new AIMessage({ content: '', tool_calls: [{ id, name: decision.name, args: decision.args, type: 'tool_call' }] }),
-      new ToolMessage({ name: decision.name, tool_call_id: id, content: 'Control decision submitted.' }),
-    ],
-  ) };
+  if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));
+  return { capabilityDisclosure: input.capabilityDisclosure, ...(reply !== undefined ? { reply } : {}),
+    messages: createSupervisorMessageHandoff(supervisorHandoffContext(input), messages) };
 }
 
 export function withScriptedDelegation(runner: ScriptedSupervisorRunner): RunSupervisorRunner {

@@ -52,8 +52,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       if (result.name === 'review_current') { assert.equal(result.args.completed, false); assert.ok(result.args.reason.trim()); } } },
   { name: 'dispatch-pending-capability', goal: 'Fix the bug and confirm the tests pass.',
     task: 'Fix the bug and run the test suite.', pendingDispatch: true,
-    check: (result) => { assert.equal(result.name, 'review_current');
-      if (result.name === 'review_current') assert.equal(decisionReply(result), undefined);
+    check: (result) => { assert.equal(result.name, 'execute_current');
     } },
   { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
     task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
@@ -85,7 +84,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
         assert.equal(result.args.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
         assert.equal(result.args.tasks[0].capability, 'general');
         assert.match(result.args.tasks[0].task, /publish|发布/i);
-      } else {
+      } else if (result.name !== 'execute_current') {
         assert.equal(result.name, 'review_current');
         if (result.name === 'review_current') {
           assert.notEqual(result.args.completed, false);
@@ -102,7 +101,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       assert.ok(decisionReply(result)?.trim());
       if (result.name !== undefined) {
         assert.equal(result.name, 'review_current');
-        if (result.name === 'review_current') assert.equal(result.args.completed, undefined);
+        if (result.name === 'review_current') assert.equal(result.args.completed, false);
       }
     },
     checkFollowUp: (result) => {
@@ -123,7 +122,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       assert.ok(decisionReply(result)?.trim());
       if (result.name !== undefined) {
         assert.equal(result.name, 'review_current');
-        if (result.name === 'review_current') assert.equal(result.args.completed, undefined);
+        if (result.name === 'review_current') assert.equal(result.args.completed, false);
       }
     } },
   { name: 'accept-and-finish', goal: 'Fix the bug and confirm the tests pass.', task: 'Fix the bug and run the test suite.',
@@ -146,16 +145,23 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     const actual = await supervisor.invoke(input);
     result = readSupervisorDecision(actual);
     scenario.check(result);
+    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+    const dispatched = accepted.messages.some((message) => AIMessage.isInstance(message)
+      && message.tool_calls?.some((call) => call.name === 'delegate_capability'));
+    assert.equal(dispatched, !decisionReply(result), 'Only the explicit execution branch dispatches a Capability.');
+    if (scenario.name === 'accept-and-finish') {
+      assert.ok(accepted.runSupervisorState.plan.every((task) => task.status === 'completed'));
+    }
     if (['boundary-without-evidence-asks-user', 'unfinished-task-asks-then-continues'].includes(scenario.name)
-      && actual.reply === undefined) {
+      && actual.reply !== undefined) {
       const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
       assert.deepEqual(accepted.runSupervisorState, input.state);
-      assert.equal(accepted.messages.length, 2, 'A question must not dispatch execution.');
+      assert.ok(!accepted.messages.some((message) => AIMessage.isInstance(message)
+        && message.tool_calls?.some((call) => call.name === 'delegate_capability')), 'A question must not dispatch execution.');
     }
     if (scenario.supplement) {
       assert.ok(decisionReply(result)?.trim(), 'A question must precede the user supplement.');
-      const saved = actual.reply !== undefined ? input.state
-        : acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages).runSupervisorState;
+      const saved = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages).runSupervisorState;
       const resumed: RunSupervisorInput = {
         ...input, state: saved, mode: 'boundary',
         runId: `${scenario.name}:resume`, traceId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,

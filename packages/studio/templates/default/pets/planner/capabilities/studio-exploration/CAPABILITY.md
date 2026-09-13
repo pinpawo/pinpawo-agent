@@ -1,6 +1,6 @@
 ---
 name: studio_exploration
-description: 只读查询 Studio Pet 名录并探索项目、Git 与 GitHub 事实，向规划交付证据摘要；不创建文件或执行实现、审阅、Wiki 写入。
+description: 只读探索项目、Git 与 GitHub，查询 Studio 中的 Pet，为任务规划提供有来源的事实摘要。
 uses:
   - studio-context
   - project-inspection
@@ -16,4 +16,4 @@ version: 1
 - 探索结果区分事实、推断与仍待确认的信息，并说明这些信息如何影响后续 task 规划。
 - 已有上下文足以支持规划时，直接复用已有事实；需要补充时，以最小范围完成必要探索。
 
-本 Capability 的交付物是供 `studio_planning` 使用的事实与证据摘要。
+交付可用于任务规划的事实与证据摘要。

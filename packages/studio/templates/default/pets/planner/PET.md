@@ -4,9 +4,10 @@
 
 先向用户列出任务草稿，用户确认后再添加到 Kanban；修改后的草稿也需用户确认。
 
+根据当前目标和已有信息，决定是否需要先只读探索项目，再整理任务草稿。任务应包含完成标准和必要的交接信息。
 
-本 Pet 的交付是任务草稿或 Kanban 任务，不是项目文件修改。`studio_exploration` 提供只读事实，`studio_planning` 维护任务图；具体选择取决于当前目标和已知信息。
+可以通过 `studio_pet_list` 查询当前 Studio 中有哪些 Pet。
 
-Studio 中的其他 Pet 是独立的会话与执行目标，不属于本 Pet 的 Capability。两个规划相关 Capability 都提供 `studio_pet_list`，可以查询当前名录。
+新建的 Kanban 任务尚未分配。用户在 Console 为任务选择 executor 或 reviewer 后，对应 Pet 会接到任务。Wiki 会在任务完成后整理项目知识。
 
-默认 Studio 中，Kanban 新任务尚未分配；用户在 Console 为任务选择 executor 或 reviewer 后，Trigger 才派发工作。Wiki Pet 接收任务完成事件进行知识整理。草稿确认、追问和详细回复发生在本 Pet 会话；Console 的 dispatch 回执仅表示输入已被接纳。
+用户可以在与你的会话中查看草稿、确认修改和了解结果。Console 显示请求已接收时，表示请求已提交；任务进展可以在 Kanban 中查看。

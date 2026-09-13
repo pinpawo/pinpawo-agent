@@ -27,9 +27,12 @@ export type ExactAuthorizationSubjectBuilder = (
 
 export type ExactAuthorizationPolicyOptions = {
   subject?: ExactAuthorizationSubjectBuilder;
+  /** Defaults to true for full input, false for a custom subject. */
+  reuseAutoReview?: boolean;
 };
 
 export type HitlPresetOptions = {
+  canAutoApprove?: ToolReviewPolicy['canAutoApprove'];
   authorization?: AuthorizationMode | ToolAuthorizationPolicy;
   unavailable?: ReviewUnavailableBehavior;
 };
@@ -135,7 +138,7 @@ export function buildStandardReviewOptions(params: {
       id: 'approve-and-authorize-thread',
       label: 'Approve and authorize',
       description: params.authorizeDescription
-        ?? 'Approve this action and authorize exact matching arguments in this thread.',
+        ?? 'Approve this action and authorize the same tool-defined input identity in this thread.',
       decision: { type: 'approve' as const },
       effects: [{
         type: 'graph.authorize_tool_action' as const,
@@ -165,14 +168,15 @@ export function buildStandardReviewOptions(params: {
 
 function authorizationDescription(matcher: ToolAuthorizationMatcher) {
   if (matcher.type === 'url_origin') {
-    return 'Approve this action and authorize the same URL domain in this thread.';
+    return 'Approve this action and authorize the same URL scheme, host and effective port in this thread.';
   }
-  return 'Approve this action and authorize exact matching arguments in this thread.';
+  return 'Approve this action and authorize the same tool-defined input identity in this thread.';
 }
 
 export const AuthorizationPolicies = {
   exact(options: ExactAuthorizationPolicyOptions = {}): ToolAuthorizationPolicy {
     const policy: ToolAuthorizationPolicy = {
+      reuseAutoReview: options.reuseAutoReview ?? !options.subject,
       buildMatcher: async (ctx) => {
         const subject = options.subject
           ? await options.subject(ctx)
@@ -223,6 +227,7 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
   const unavailable = options.unavailable ?? options.defaultUnavailable;
 
   return {
+    ...(options.canAutoApprove ? { canAutoApprove: options.canAutoApprove } : {}),
     request: (ctx) => {
       if (!options.requiresHitl) {
         return null;

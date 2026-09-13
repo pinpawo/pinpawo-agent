@@ -41,6 +41,7 @@ function formatAutoReviewItems(items: AutoReviewAction[]) {
     const summary = readOperationSummary(item);
     actions.push([
       `Action ${index + 1}: ${item.toolkitName}.${item.toolName}`,
+      item.authorization ? `Candidate authorization (not a grant): ${JSON.stringify(item.authorization)}` : null,
       item.operation?.title ? `Title: ${item.operation.title}` : null,
       summary?.target ? `Target: ${summary.target}` : null,
       // Summaries aid interpretation but cannot replace or hide the actual input.

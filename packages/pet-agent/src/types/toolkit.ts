@@ -305,16 +305,20 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
       );
     }
     if (definition.review) {
+      assertOptionalFunction(`Toolkit "${toolkit.name}" tool "${toolName}" review.canAutoApprove`, definition.review.canAutoApprove);
       const authorization = definition.review.authorization;
       if (authorization !== undefined) {
         const owner = `Toolkit "${toolkit.name}" tool "${toolName}" review.authorization`;
-        if (typeof authorization !== 'object' || Array.isArray(authorization)) {
-          throw new Error(`${owner} must define authorize() or buildMatcher()`);
+        if (!authorization || typeof authorization !== 'object' || Array.isArray(authorization)) {
+          throw new Error(`${owner} must define buildMatcher()`);
         }
-        assertOptionalFunction(`${owner}.authorize`, authorization.authorize);
         assertOptionalFunction(`${owner}.buildMatcher`, authorization.buildMatcher);
-        if (Boolean(authorization.authorize) === Boolean(authorization.buildMatcher)) {
-          throw new Error(`${owner} must define exactly one of authorize() or buildMatcher()`);
+        if (authorization.reuseAutoReview !== undefined
+          && (typeof authorization.reuseAutoReview !== 'boolean' || !authorization.buildMatcher)) {
+          throw new Error(`${owner}.reuseAutoReview requires a matcher policy and a boolean value`);
+        }
+        if (!authorization.buildMatcher) {
+          throw new Error(`${owner} must define buildMatcher()`);
         }
       }
     }

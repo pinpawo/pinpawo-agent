@@ -41,31 +41,17 @@ export type ToolAutoAuthorizationContext = ToolAuthorizationContext & {
   workdir: string | null;
 };
 
-/**
- * One tool chooses exactly one authorization strategy:
- * deterministic authorization of each current call, or reusable session
- * authorization through a matcher. The strategies are intentionally
- * mutually exclusive so a session hit can never bypass a current-call check.
- */
-export type ToolAuthorizationPolicy =
-  | {
-      /**
-       * Deterministically authorize the current call from trusted runtime facts.
-       * `true` grants this call; `false` defers to the remaining review flow and
-       * does not reject the call.
-       */
-      authorize: (
-        ctx: ToolAutoAuthorizationContext,
-      ) => boolean | Promise<boolean>;
-      buildMatcher?: never;
-    }
-  | {
-      authorize?: never;
-      /** Build the identity used to reuse a prior authorization in this session. */
-      buildMatcher: (
-        ctx: ToolAuthorizationContext,
-      ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
-    };
+/** Reusable session authorization, independent of current-call approval. */
+export type ToolAuthorizationPolicy = {
+  /** Build the identity used to reuse a prior authorization in this session. */
+  buildMatcher: (
+    ctx: ToolAuthorizationContext,
+  ) => ToolAuthorizationMatcher | null | Promise<ToolAuthorizationMatcher | null>;
+  /** Opt in only when matching subjects preserve the risk-relevant effects.
+   * False/omitted permits human grants only. Runtime also requires exact.
+   */
+  reuseAutoReview?: boolean;
+};
 
 export type ToolReviewBlock = {
   type: 'block';
@@ -75,6 +61,10 @@ export type ToolReviewBlock = {
 export type ToolReviewResult = ReviewSpec | ToolReviewBlock | null;
 
 export type ToolReviewPolicy = {
+  /** Auto-mode quick approval: true approves; false/errors defer, never reject.
+   * Must be side-effect free. Not a mandatory validation or an approval event.
+   */
+  canAutoApprove?: (ctx: ToolAutoAuthorizationContext) => boolean | Promise<boolean>;
   /**
    * Produce the review requirement for one tool call.
    *

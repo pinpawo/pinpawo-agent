@@ -152,20 +152,17 @@ test('toolkit registration rejects malformed static contract fields', () => {
 
   assert.throws(
     () => validateToolkitDefinition({
-      name: 'ambiguous_authorization',
-      description: 'Authorization strategies must be mutually exclusive.',
+      name: 'invalid_quick_approval',
+      description: 'Quick approval must be callable.',
       tools: [{
         tool: alphaTool,
         review: {
           request: () => null,
-          authorization: {
-            authorize: () => true,
-            buildMatcher: () => null,
-          },
+          canAutoApprove: true,
         },
       }],
     } as never),
-    /must define exactly one of authorize\(\) or buildMatcher\(\)/,
+    /review\.canAutoApprove must be a function/,
   );
 
   assert.throws(
@@ -180,7 +177,7 @@ test('toolkit registration rejects malformed static contract fields', () => {
         },
       }],
     } as never),
-    /must define exactly one of authorize\(\) or buildMatcher\(\)/,
+    /must define buildMatcher\(\)/,
   );
 });
 

@@ -52,52 +52,20 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 [授权契约](../../reference/runtime/authorization-matcher.md)。
 全局审核策略与具体批准、拒绝、暂停、恢复的语义以下文为准。
 
-已移除的组合设计和 HITL 初稿仅作为历史依据，见
-[组合设计历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-composition.md)
-及 [HITL 初稿历史](https://github.com/pinpawo/pinpawo-agent/blob/c6f55ee196f00849fe8b9565eaa5bb4aaa6444cf/docs/design/agent-runtime/toolkit-hitl-policy.md)。
+## Auto review 领域边界
 
-## Auto review 校准（2026-09-13）
+[autoReview](../../../packages/pet-agent/src/autoReview/index.ts) 承载静态 policy、
+preset、matcher 和动态 AutoReviewer，不依赖 orchestrator 或 interrupt。
+Toolkit 提供具体工具规则；AutoReviewer 只评估当前动作，不读 session、不创建授权。
+orchestrator 负责模式选择、授权持久化与执行/人工交互；ReviewSpec 属于共享 types。
 
-### 独立领域边界（2026-09-14 工作设计）
+授权范围、自动复用条件和混合批次筛选只在
+[授权契约](../../reference/runtime/authorization-matcher.md) 定义，不在本文重复。
 
-`packages/pet-agent/src/autoReview` 承载审核规则与自动评估，不依赖 orchestrator、
-Root state、Capability、Toolkit runtime 或 interrupt。Toolkit 引用领域定义并提供
-具体工具的规则；orchestrator 只适配动作、选择模式/模型、调用评估，并落实执行或人工交互。
-
-| 内容 | 所属与职责 |
-| --- | --- |
-| ToolReviewPolicy、授权策略、ToolkitReviewGuidance | 静态定义；其中可包含运行时调用的纯规则函数，不持有执行现场 |
-| ReviewPolicyPresets | policy 的定义工厂；保留 ReviewPolicies 公共名称作为同一对象的兼容出口，不另建决策层 |
-| AuthorizationMatcher、授权记录 | 领域值与纯匹配/记录变换；存储、generation 生命周期仍由调用方负责 |
-| AutoReviewer | 动态模型评估器，只接收本次审核事实并返回风险评估，不读 session、不发 interrupt、不创建 grant |
-| ReviewSpec（共享 types 契约） | 规则产生的人工交互描述数据；Toolkit、审核及 interrupt 共同引用，不属于 AutoReviewer 的评估结果 |
-| ToolkitReviewMiddleware、globalReviewPolicy adapter | orchestrator 集成层，保留模式路由、授权提交和 interrupt/执行控制 |
-
-`exact` 精确匹配规范化 subject，不承诺完整 input 相同；`url_origin` 匹配协议、主机与
-有效端口，不匹配任意子域或 URL 前缀。LLM 不构造 matcher。本次提取保留匹配、grant
-复用、整批确定性判断及评分阈值行为；“模型批准可否复用自定义 subject”和混合批次
-重复评估仍是后续语义调整项，不借目录迁移悄悄改变授权范围。
-
-模型评估输入不再以 GlobalReviewPolicyContext 或 AgentModels 为领域契约；adapter
-提供动作事实和选定模型。模型评分是结果数据，模式路由与 grant 保存不是 AutoReviewer
-的职责。公共 import 保持可用，仓库内部直接引用新位置，不保留旧目录转发文件。
-
-模型按整批具体动作评分，程序仍按 strict ≤ 2、relaxed ≤ 9 放行；10 分、模型失败或
-证据预算不足转人工。默认等级、已有授权匹配和原始工具硬限制不变。
-
-- 全局提示定义风险边界；Toolkit guidance 只补充操作语义，不因 shell、网络或目录外
-  路径本身增加风险。范围明确、可恢复的开发编辑、已有项目的依赖安装、构建和测试可自动评估。
-- 系统/敏感路径、提权、未知远程脚本、强推、发布部署和大范围破坏仍需人工。
-  Git 普通指定 issue 或未合并 PR 的关闭可自动评估；批量关闭、删除、合并和管理权限仍需人工。
-- 审核输入完整保留工具参数，含命令尾部、路径及 patch/body；不以摘要替换原始输入。
-  各动作共享 6,000 字符预算，总输入上限 8,000 字符，最多 32 个动作。完整证据超限或
-  无法序列化时直接转人工，不裁掉部分动作或危险载荷后放行。说明性摘要可缩短并标明截断。
-- 非敏感开发路径不局限于 workdir，但 current_task 仍只是模型产生的相关性线索，不能
-  充当用户授权或覆盖风险证据。普通凭证认证使用不等于读取或泄露凭证。
-
-验证分别覆盖误拦截和危险漏放；合成风险场景只提交审核模型，不执行其中的命令。
-生产提示和 Toolkit guidance 由 [auto-review eval](../../../packages/pet-agent/evals/auto-review-risk.eval.ts)
-直接加载，单元测试验证证据完整性和程序阈值，不以提示词字面匹配代替语义验证。
+模型对待评估动作评分，程序按 strict ≤ 2、relaxed ≤ 9 放行。
+模型失败、10 分或完整证据超出预算时转人工，不裁掉执行参数后放行。
+具体风险边界见[系统提示](../../../packages/pet-agent/src/autoReview/prompts/templates.ts)，
+由 [auto-review eval](../../../packages/pet-agent/evals/auto-review-risk.eval.ts) 验证。
 
 ## Decisions
 
@@ -174,24 +142,6 @@ Runtime state.
 
 ### Code organization
 
-Interrupt behavior has its own Runtime directory:
-
-```text
-packages/pet-agent/src/agent/orchestrator/
-├── interrupt/
-│   ├── agentInterrupt.ts
-│   ├── reviewInterrupt.ts
-│   ├── pauseTaskInterrupt.ts
-│   └── index.ts
-├── review/
-│   ├── globalReviewPolicy.ts
-│   ├── reviewAuthorizations.ts
-│   ├── reviewPolicies.ts
-│   ├── reviewResponseResolver.ts
-│   └── reviewSpec.ts
-└── toolkitReviewMiddleware.ts
-```
-
 The boundary is deliberate:
 
 - `interrupt/agentInterrupt.ts` owns the internal behavior contract;
@@ -201,8 +151,9 @@ The boundary is deliberate:
 - `interrupt/pauseTaskInterrupt.ts` owns paused-task materialization,
   propagation across the child invocation boundary, its payload guard,
   state schema, interaction, and continue behavior;
-- `review/` owns pure Review policy, specification, authorization, decision
-  parsing, and message-construction helpers used by `ReviewInterrupt`;
+- `autoReview/` owns pure tool policy, matcher and authorization record logic;
+  shared `types/` owns ReviewSpec; `review/` owns decision parsing and
+  message-construction helpers used by `ReviewInterrupt`;
 - `toolkitReviewMiddleware.ts` connects the LangChain `afterModel` hook to the
   `ReviewInterrupt` adapter. It must not inspect raw Review decisions or
   independently branch on Approve, Respond, Reject, or Cancel;
@@ -235,10 +186,6 @@ type ReviewInterruptCommand =
   | { decisions: ReviewResponseData[] }
   | { action: 'cancel' };
 ```
-
-The current `{ action: 'interrupt_run' }` value may remain as a migration alias
-for Review cancellation. New code should call it `cancel`; it closes the Review
-without pretending that the user made a rejection decision.
 
 The Host resumes the exact LangGraph interrupt ID and namespace that it
 observed. `ReviewInterrupt` validates the resume value and resolves its business
@@ -635,72 +582,6 @@ LangGraph owns:
 
 Pet Runtime and Host use LangGraph APIs. Review and pause handling are
 checkpointer-transparent.
-
-## Compatibility with the current implementation
-
-The first implementation is centered in `packages/pet-agent`. It does not
-require a new Agent Session lifecycle field.
-
-| Current implementation | Target design |
-| --- | --- |
-| `afterModel` calls `interrupt(reviewPayload)` | `afterModel` raises `ReviewInterrupt` |
-| `resolveHumanToolkitReviews` and response helpers | `ReviewInterrupt` validation and resolution |
-| `hasPendingReviewInterruptResume()` and Pregel scratchpad inspection | temporary #749 compatibility; later replace with `task()` in the same middleware |
-| `{ action: 'interrupt_run' }` | migration alias for Review `{ action: 'cancel' }` |
-| `resumeModel`, `rollbackAction`, `pauseTask` booleans | explicit four-way `ReviewInterruptResolution` |
-| `toolkitReviewPausePending` | removed |
-| `afterAgent` calls `interrupt(null)` | centralized `PauseTaskInterrupt` materialization |
-| child `completionReason: 'interrupted'` | Runtime-private `PauseTaskInterruptPayload` control flow |
-| capability detects interruption policy itself | capability delegates child-boundary handling to `PauseTaskInterrupt` |
-| running Esc only aborts an invocation | cancellation followed by `PauseTaskInterrupt` projection when work remains |
-
-`createSubagent` still owns child execution. The capability remains responsible
-for reconciling committed child messages. It delegates pause propagation to
-`PauseTaskInterrupt`; the root run no longer ends at that boundary but suspends
-on `pauseGate`.
-
-## Implementation sequence
-
-### Phase 1: Pet Runtime Review stop path
-
-1. Create `orchestrator/interrupt/` and introduce the runtime-local interrupt
-   behavior contract without changing Agent Session.
-2. Add `ReviewInterrupt` and `PauseTaskInterrupt` in that directory; keep
-   Review policy and message rules in `orchestrator/review/`.
-3. Encapsulate Review payload parsing and resolution in `ReviewInterrupt`.
-4. Keep one Review middleware and isolate the temporary Pregel resume guard
-   tracked by #749; replace it with `task()` after the upstream fix is released.
-5. Replace Review-result booleans with a discriminated transition.
-6. Remove `reviewRunControl.ts`, `toolkitReviewPausePending`, and any deferred
-   interrupt descriptor.
-7. Remove `completionReason: 'interrupted'`; let `PauseTaskInterrupt` own its
-   Runtime-private transport. Issue #755 separately removes stop reasons from
-   the normal `SubagentResult` and Announce contracts.
-8. Make the capability boundary call the stable `PauseTaskInterrupt` adapter
-   while retaining the unfinished active delegation and skipping Run Supervisor.
-
-### Phase 2: PauseTaskInterrupt and running Esc
-
-1. Connect running Esc to `PauseTaskInterrupt` as the behavior for stopped but
-   unfinished work.
-2. Route Esc through a semantic task-pause command and active
-   invocation cancellation.
-3. After settlement, use existing graph/Runtime state to decide whether the
-   canceled invocation left unfinished work, then materialize
-   `PauseTaskInterrupt`; do not project pause from resumability alone or add a
-   continuation boolean.
-4. Implement continue for both an unfinished graph node and a retained active
-   delegation. (Done for a retained delegation: `pauseGate` resumes it by
-   interrupt id. The unfinished-graph-node case belongs to running Esc.)
-5. Add optional guidance at the Runtime boundary. (Done: `pauseGate` turns
-   `guidance` into one Runtime-created message.)
-
-### Phase 3: Host and interface projection
-
-Superseded by the migration in [interrupt.md](interrupt.md), tracked by #772.
-The Host reads every kind through one decoder, projects one
-`pendingInterrupt` shape with an id, and resumes through one message; no
-migration aliases are kept.
 
 ## Required behavioral coverage
 

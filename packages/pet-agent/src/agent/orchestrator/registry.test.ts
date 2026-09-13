@@ -209,6 +209,15 @@ test('authorization generation ignores display metadata', () => {
   );
 });
 
+test('authorization generation includes automatic grant reuse policy', () => {
+  const build = (reuseAutoReview: boolean) => compileAgentRegistry({
+    toolkits: [defineToolkit({ name: 'local', description: 'Local', tools: [{
+      tool: mockTool('write'), review: ReviewPolicies.localMutation({ authorization: AuthorizationPolicies.exact({ reuseAutoReview }) }),
+    }] })], capabilities: [capability('general', ['local'])],
+  });
+  assert.notEqual(build(true).authorizationGeneration, build(false).authorizationGeneration);
+});
+
 test('authorization generation includes deterministic authorization policy', () => {
   const buildRegistry = (allow: boolean) => compileAgentRegistry({
     toolkits: [defineToolkit({
@@ -217,9 +226,7 @@ test('authorization generation includes deterministic authorization policy', () 
       tools: [{
         tool: mockTool('apply_patch'),
         review: ReviewPolicies.localMutation({
-          authorization: {
-            authorize: allow ? (() => true) : (() => false),
-          },
+          canAutoApprove: allow ? (() => true) : (() => false),
         }),
       }],
     })],
@@ -270,7 +277,7 @@ test('compiled registry snapshots authorization policy functions for its generat
   const authorize = () => true;
   const matcherReview = ReviewPolicies.commandExecution({ authorization: 'exact' });
   const authorizeReview = ReviewPolicies.localMutation({
-    authorization: { authorize },
+    canAutoApprove: authorize,
   });
   const originalBuilder = matcherReview.authorization?.buildMatcher;
   const registry = compileAgentRegistry({
@@ -286,12 +293,12 @@ test('compiled registry snapshots authorization policy functions for its generat
   });
 
   matcherReview.authorization!.buildMatcher = () => null;
-  authorizeReview.authorization!.authorize = () => false;
+  authorizeReview.canAutoApprove = () => false;
 
   const compiledMatcherReview = registry.toolkits[0]?.tools[0]?.review;
   const compiledAuthorizeReview = registry.toolkits[0]?.tools[1]?.review;
   assert.equal(compiledMatcherReview?.authorization?.buildMatcher, originalBuilder);
-  assert.equal(compiledAuthorizeReview?.authorization?.authorize, authorize);
+  assert.equal(compiledAuthorizeReview?.canAutoApprove, authorize);
   assert.ok(Object.isFrozen(compiledMatcherReview?.authorization));
-  assert.ok(Object.isFrozen(compiledAuthorizeReview?.authorization));
+  assert.ok(Object.isFrozen(compiledAuthorizeReview));
 });

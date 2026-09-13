@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { controlSchema } from './protocol';
+import { capabilityHandoffSchema, controlSchema } from './protocol';
 
 test('control schemas describe plan, review, adjustment and explicit execution without persisted dispatch state', () => {
   const tasks = [{ capability: 'general', task: 'Verify the change' }];
@@ -26,4 +26,17 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
     { name: 'execute_current', args: { guidance: ' ' } },
     { name: 'delegate_capability', args: {} },
   ]) assert.equal(controlSchema.safeParse(control).success, false);
+});
+
+test('Capability handoff requires an explicit execution decision', () => {
+  const execution = { taskId: 'task', delegationId: 'delegation', capability: 'general',
+    task: 'Verify the change', mode: 'initial', guidance: null };
+  assert.equal(capabilityHandoffSchema.safeParse({ control: { name: 'execute_current', args: {} }, execution }).success, true);
+  for (const control of [
+    { name: 'submit_plan', args: { tasks: [{ capability: 'general', task: execution.task }] } },
+    { name: 'review_current', args: { completed: true, reason: 'Verified' } },
+    { name: 'review_current', args: { reason: 'Verified', reply: 'Done' } },
+    { name: 'adjust_plan', args: { goal: execution.task, reason: 'Revised', currentDelegation: 'replace',
+      tasks: [{ capability: 'general', task: execution.task }] } },
+  ]) assert.equal(capabilityHandoffSchema.safeParse({ control, execution }).success, false);
 });

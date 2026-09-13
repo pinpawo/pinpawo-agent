@@ -6,7 +6,7 @@ import { currentPlansEqual, projectCurrentPlan } from './currentPlanProjection';
 function execution(taskId: string, capability: string, lane?: string) {
   return new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace', lane } },
     tool_calls: [{ id: `call:${taskId}`, name: 'delegate_capability', args: {
-      control: { name: 'submit_plan', args: { tasks: [{ capability, task: 'Work' }] } },
+      control: { name: 'execute_current', args: {} },
       execution: { taskId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial', guidance: null },
     } }] });
 }

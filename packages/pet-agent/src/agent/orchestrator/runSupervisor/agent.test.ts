@@ -330,7 +330,7 @@ function supervisorInput(
     const metadata = { runId: report.runId, traceId: input.traceId };
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id: callId, name: 'delegate_capability', type: 'tool_call', args: {
-        control: { name: 'submit_plan', args: { tasks: [{ capability: current!.capability, task: current!.task }] } },
+        control: { name: 'execute_current', args: {} },
         execution: { taskId: current!.delegationId, delegationId: current!.delegationId,
           capability: current!.capability, task: current!.task, mode: 'initial', guidance: null },
       },

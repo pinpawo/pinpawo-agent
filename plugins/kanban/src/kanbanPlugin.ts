@@ -24,6 +24,7 @@ import {
 export const KANBAN_TOOLKIT_NAME = 'kanban';
 export const KANBAN_PLANNING_TOOLKIT_NAME = 'kanban-planning';
 export const KANBAN_EXECUTION_TOOLKIT_NAME = 'kanban-execution';
+export const KANBAN_REPORTING_TOOLKIT_NAME = 'kanban-reporting';
 export const KANBAN_OBSERVATION_TOOLKIT_NAME = 'kanban-observation';
 
 function asError(error: unknown): Error {
@@ -180,7 +181,12 @@ export function createKanbanPlanningToolkit(service: KanbanTaskService): AgentTo
 
 export function createKanbanExecutionToolkit(service: KanbanTaskService): AgentToolkit {
   const tools = buildTools(service);
-  return toolkit(KANBAN_EXECUTION_TOOLKIT_NAME, 'task 执行回报接口：执行者对已分配 task 记录开始、完成或阻塞。', [tools.listTasks, tools.startTask, tools.completeTask, tools.blockTask], ['查看任务', '开始任务', '完成任务', '阻塞任务']);
+  return toolkit(KANBAN_EXECUTION_TOOLKIT_NAME, '查看任务要求与已有结果，记录已分配任务的实际开始。', [tools.listTasks, tools.startTask], ['查看任务', '开始任务']);
+}
+
+export function createKanbanReportingToolkit(service: KanbanTaskService): AgentToolkit {
+  const tools = buildTools(service);
+  return toolkit(KANBAN_REPORTING_TOOLKIT_NAME, '将已确认的交付结果或无法继续的原因反馈到看板。', [tools.listTasks, tools.completeTask, tools.blockTask], ['查看任务', '完成任务', '阻塞任务']);
 }
 
 export function createKanbanObservationToolkit(service: KanbanTaskService): AgentToolkit {
@@ -218,6 +224,7 @@ export function createKanbanPlugin(options: CreateKanbanPluginOptions = {}): Kan
     createKanbanToolkit(service),
     createKanbanPlanningToolkit(service),
     createKanbanExecutionToolkit(service),
+    createKanbanReportingToolkit(service),
     createKanbanObservationToolkit(service),
   ];
   let unsubscribe: (() => void) | undefined;

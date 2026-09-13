@@ -41,14 +41,18 @@ test('Kanban projects a user assignment but never dispatches a Studio Pet itself
   });
 });
 
-test('planning and execution toolkits expose separate task responsibilities', async () => {
+test('planning, execution and reporting toolkits expose separate task responsibilities', async () => {
   const plugin = createKanbanPlugin();
   const planning = plugin.toolkits.find(({ name }) => name === 'kanban-planning');
   const execution = plugin.toolkits.find(({ name }) => name === 'kanban-execution');
+  const reporting = plugin.toolkits.find(({ name }) => name === 'kanban-reporting');
   assert.deepEqual(planning?.tools.map(({ tool: value }) => value.name), [
     'kanban_task_list', 'kanban_task_add', 'kanban_task_link', 'kanban_task_unlink', 'kanban_task_remove',
   ]);
   assert.deepEqual(execution?.tools.map(({ tool: value }) => value.name), [
-    'kanban_task_list', 'kanban_task_start', 'kanban_task_complete', 'kanban_task_block',
+    'kanban_task_list', 'kanban_task_start',
+  ]);
+  assert.deepEqual(reporting?.tools.map(({ tool: value }) => value.name), [
+    'kanban_task_list', 'kanban_task_complete', 'kanban_task_block',
   ]);
 });

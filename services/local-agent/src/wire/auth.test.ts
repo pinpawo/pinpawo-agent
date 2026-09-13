@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   buildLocalServerAuthHeaders,
+  createLocalServerAuthToken,
+  ensureLocalServerAuthToken,
   isAllowedLocalServerOrigin,
   isAuthorizedLocalServerRequest,
+  readLocalServerAuthToken,
 } from './auth';
+
+function withTokenFile<T>(run: (path: string) => T): T {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-auth-'));
+  try {
+    return run(join(dir, 'local-server-token'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 function makeReq(options: {
   url?: string;
@@ -73,4 +88,38 @@ test('local server client auth helper formats bearer headers', () => {
     Authorization: 'Bearer secret',
   });
   assert.deepEqual(buildLocalServerAuthHeaders(null), {});
+});
+
+test('a second Host serves the token the first one published', () => {
+  withTokenFile((path) => {
+    // Hosts share this file by default, and it is how a Host tells the user
+    // which credential to present. Minting per start left the earlier Host
+    // serving a token nobody could look up.
+    const first = ensureLocalServerAuthToken(path);
+    const second = ensureLocalServerAuthToken(path);
+
+    assert.equal(second, first);
+    assert.equal(readLocalServerAuthToken(path), first);
+    assert.equal(
+      isAuthorizedLocalServerRequest(makeReq({ authorization: `Bearer ${first}` }), second),
+      true,
+    );
+  });
+});
+
+test('a restart keeps the credential the user already has', () => {
+  withTokenFile((path) => {
+    const before = ensureLocalServerAuthToken(path);
+    const after = ensureLocalServerAuthToken(path);
+    assert.equal(after, before);
+  });
+});
+
+test('a token file with surrounding whitespace is reused, not rotated', () => {
+  withTokenFile((path) => {
+    const token = createLocalServerAuthToken();
+    writeFileSync(path, `  ${token}\n\n`, 'utf-8');
+    assert.equal(ensureLocalServerAuthToken(path), token);
+    assert.equal(readFileSync(path, 'utf-8').trim(), token);
+  });
 });

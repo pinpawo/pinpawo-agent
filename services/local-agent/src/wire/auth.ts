@@ -21,7 +21,18 @@ export function writeLocalServerAuthToken(token: string, path = TOKEN_FILE) {
   }
 }
 
+/**
+ * The token this Host serves, minting one only when the file has none.
+ *
+ * Hosts share this file by default, and it is also how a Host tells the user
+ * which credential to present. Replacing it on every start made the file
+ * describe only the process that started last: an earlier Host kept serving
+ * a token nobody could look up, and every Console had to be given a new
+ * credential after any restart.
+ */
 export function ensureLocalServerAuthToken(path = TOKEN_FILE) {
+  const stored = readLocalServerAuthToken(path);
+  if (stored) return stored;
   const token = createLocalServerAuthToken();
   writeLocalServerAuthToken(token, path);
   return token;

@@ -2278,12 +2278,10 @@ test('global auto policy sends only unresolved actions to the model and executes
     description: 'local tools',
     tools: [
       reviewedTool(rawTool, ReviewPolicies.localMutation({
-        authorization: {
-          authorize: ({ input, workdir }) => (
-            workdir === '/repo'
-            && (input as { path?: unknown }).path === 'notes.md'
-          ),
-        },
+        canAutoApprove: ({ input, workdir }) => (
+          workdir === '/repo'
+          && (input as { path?: unknown }).path === 'notes.md'
+        ),
       })),
       reviewedTool(otherTool, ReviewPolicies.localMutation()),
     ],
@@ -2494,6 +2492,48 @@ test('global review policy reuses an exact auto authorization in the same sessio
     'ran git log -1',
   );
   assert.equal(callCount, 4);
+});
+
+test('quick approval coexists with matcher reuse and defers on false or error', async () => {
+  for (const outcome of ['approve', 'defer', 'error'] as const) {
+    let assessments = 0;
+    let quickChecks = 0;
+    let executions = 0;
+    const authorizations: ToolAuthorizationRecord[] = [];
+    const rawTool = tool(async () => { executions += 1; return 'done'; }, {
+      name: 'inspect', description: 'inspect a file', schema: z.object({ path: z.string() }),
+    });
+    const resources = await resolveToolkitExecution([{
+      name: 'local', description: 'local tools',
+      tools: [reviewedTool(rawTool, ReviewPolicies.requireHitl({
+        canAutoApprove: () => {
+          quickChecks += 1;
+          if (outcome === 'error') throw new Error('Cannot determine scope');
+          return outcome === 'approve';
+        },
+        authorization: 'exact',
+      }))],
+    }], ['local'], {
+      models: { act: {
+        withStructuredOutput: () => ({ invoke: async () => {
+          assessments += 1;
+          return { riskScore: 1, reason: 'Scoped inspection.' };
+        } }),
+      } as unknown as AgentModels['act'] },
+      messages: [],
+      reviewCapabilities: { humanReview: false, sessionAuthorization: true },
+      globalReviewPolicy: { mode: 'auto_authorization' },
+      toolAuthorizations: authorizations,
+      recordToolAuthorizations: (records) => { authorizations.push(...records); },
+    });
+    for (const id of ['first', 'second']) {
+      await runToolkitToolCall(resources, { id, name: 'inspect', args: { path: 'notes.md' } });
+    }
+    assert.equal(executions, 2);
+    assert.equal(assessments, outcome === 'approve' ? 0 : 1);
+    assert.equal(quickChecks, outcome === 'approve' ? 2 : 1);
+    assert.equal(authorizations.length, outcome === 'approve' ? 0 : 1);
+  }
 });
 
 test('projected exact authorization requires opt-in for automatic grant writes and hits', async () => {

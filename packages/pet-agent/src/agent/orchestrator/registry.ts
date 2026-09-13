@@ -67,14 +67,15 @@ function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
   const subject = toolkits.flatMap((toolkit) => {
     const tools = toolkit.tools.flatMap((definition) => {
       const authorization = definition.review?.authorization;
-      return authorization
+      const canAutoApprove = definition.review?.canAutoApprove;
+      return authorization || canAutoApprove
         ? [{
             name: definition.tool.name,
             authorization: {
-              matcher: readAuthorizationPolicyGeneration(authorization)
-                ?? functionSource(authorization.buildMatcher),
-              authorize: functionSource(authorization.authorize),
-              reuseAutoReview: authorization.reuseAutoReview === true,
+              matcher: authorization ? readAuthorizationPolicyGeneration(authorization)
+                ?? functionSource(authorization.buildMatcher) : null,
+              canAutoApprove: functionSource(canAutoApprove),
+              reuseAutoReview: authorization?.reuseAutoReview === true,
             },
           }]
         : [];

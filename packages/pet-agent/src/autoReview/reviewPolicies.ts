@@ -32,6 +32,7 @@ export type ExactAuthorizationPolicyOptions = {
 };
 
 export type HitlPresetOptions = {
+  canAutoApprove?: ToolReviewPolicy['canAutoApprove'];
   authorization?: AuthorizationMode | ToolAuthorizationPolicy;
   unavailable?: ReviewUnavailableBehavior;
 };
@@ -226,6 +227,7 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
   const unavailable = options.unavailable ?? options.defaultUnavailable;
 
   return {
+    ...(options.canAutoApprove ? { canAutoApprove: options.canAutoApprove } : {}),
     request: (ctx) => {
       if (!options.requiresHitl) {
         return null;

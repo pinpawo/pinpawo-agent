@@ -860,20 +860,20 @@ async function selectUnresolvedReviews(params: {
 
   const unresolved: PreparedToolkitReview[] = [];
   for (const review of params.reviews) {
-    const authorize = review.reviewPolicy.authorization?.authorize;
-    if (!authorize) {
+    const canAutoApprove = review.reviewPolicy.canAutoApprove;
+    if (!canAutoApprove) {
       unresolved.push(review);
       continue;
     }
     try {
-      const authorized = await authorize({
+      const authorized = await canAutoApprove({
         toolkitName: review.toolkitName,
         toolName: review.toolName,
         input: review.input,
         operation: review.operation,
         workdir: params.ctx.reviewContext?.workdir ?? null,
       });
-      if (!authorized) unresolved.push(review);
+      if (authorized !== true) unresolved.push(review);
     } catch {
       unresolved.push(review);
     }

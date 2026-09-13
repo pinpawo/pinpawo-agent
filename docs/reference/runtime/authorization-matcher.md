@@ -10,7 +10,7 @@ session authorization 只复用 toolkit 可信 policy 明确定义的同一调�
 
 ## 职责
 
-- `ToolAuthorizationPolicy.authorize()`：基于当前调用和可信 runtime facts，对当前调用做确定性授权；返回 `false` 只表示无法直接授权，不表示拒绝。
+- `ToolReviewPolicy.canAutoApprove()`：auto 模式下的直接放行规则；仅 `true` 批准当前调用，`false` 或抛错继续审核，不表示拒绝，也不建立复用授权。
 - `ToolAuthorizationPolicy.buildMatcher()`：从当前 tool input 计算唯一的 candidate matcher。
 - `ToolkitReviewMiddleware`：只计算一次 matcher，并依次负责命中检查、review 和持久化。
 - authorization store：只比较 `toolName + matcher`，不读取原始 args 或工具 schema。
@@ -36,16 +36,16 @@ matcher 是静态覆盖范围，不是批准结论。新增 matcher 类型时需
 
 1. middleware 调用 toolkit policy，得到 candidate matcher；失败时按 `null` 处理。
 2. 当前模式允许使用的 session grant 中，如存在相同 `toolName + matcher`，直接执行，不触发 review LLM。
-3. auto 模式下对未命中的调用分别执行 `authorize()`；只将未决调用交给 review LLM。全部确定性通过则跳过模型。整个批次仍一起放行或停止；人工回退展示完整待审核批次，原生 interrupt 恢复沿用原决策，不重新评分。
+3. auto 模式下对仍需审核的调用分别执行 `canAutoApprove()`；只将未决调用交给 review LLM。全部确定性通过则跳过模型。整个批次仍一起放行或停止；人工回退展示完整待审核批次，原生 interrupt 恢复沿用原决策，不重新评分。
 4. human 的 “approve and authorize” 保存已经计算的 matcher，source 为 `human`。
 5. `auto_authorization` 只对模型实际评估的调用，在 runtime 支持 session store、matcher 为 `exact` 且 policy 声明 `reuseAutoReview: true` 时保存，source 为 `auto_review`。读取 auto grant 时也检查该声明；人工 grant 不受该字段限制。
 6. 同 key 的 human grant 替换 auto grant；auto grant 不能覆盖 human grant。
 7. capability node 返回完整授权快照，checkpoint 跨 delegation、turn 和 graph rebuild 持久化。
 8. registry authorization generation 改变时，旧快照整体失效。
 
-authorization generation 只标识注册的可授权工具和 authorization policy，包括 `authorize()`、`buildMatcher()` 与 `reuseAutoReview`。函数源码 fallback 不捕获 closure state；如果闭包数据改变了授权或 subject 投影语义，policy 定义也必须同步升级。generation 不是工具实现或完整运行时代码的完整性证明。
+authorization generation 标识注册工具的 `canAutoApprove()`、`buildMatcher()` 与 `reuseAutoReview`。函数源码 fallback 不捕获 closure state；如果闭包数据改变了授权或 subject 投影语义，policy 定义也必须同步升级。generation 不是工具实现或完整运行时代码的完整性证明。
 
-`authorization` 可省略；声明时，`authorize()` 和 `buildMatcher()` 必须且只能选择一种。选择 `authorize()` 的工具会在每次调用时重新判断当前环境，不建立或复用 session grant；选择 `buildMatcher()` 的工具沿用 session matcher 流程，不同时运行 current-call callback。类型和 toolkit 注册校验都会拒绝同时提供或同时缺少这两个函数。`apply_patch` 选择前者。
+`canAutoApprove` 是 review policy 上可选的快捷规则，`authorization.buildMatcher` 独立负责授权复用，两者可共存。已有授权命中时无需运行快捷规则，因此它不是必须执行的安全校验；硬性限制应由工具保证。当前 `apply_patch` 只配置快捷规则，没有 matcher。
 
 `require_authorization` 不使用 auto grant，但不会删除它；human grant 在 require 和 auto 模式下均可使用。custom policy 默认也不使用 auto grant，只有显式设置 `reuseAutoAuthorizations: true` 才会复用。新 thread 使用独立 checkpoint state，不复用旧 grant。
 

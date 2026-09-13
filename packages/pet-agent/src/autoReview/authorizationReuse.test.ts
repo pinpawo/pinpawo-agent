@@ -12,7 +12,7 @@ test('automatic reuse requires exact scope and policy consent, not just an exact
   assert.equal(canReuseAutoReviewAuthorization(AuthorizationPolicies.exact({ reuseAutoReview: false }), matcher), false);
   assert.equal(canReuseAutoReviewAuthorization({ buildMatcher: () => matcher }, matcher), false);
   assert.equal(canReuseAutoReviewAuthorization({ buildMatcher: () => null, reuseAutoReview: true }, urlOriginAuthorization('https://example.com/a')), false);
-  assert.equal(canReuseAutoReviewAuthorization({ authorize: () => true }, matcher), false);
+  assert.equal(canReuseAutoReviewAuthorization(undefined, matcher), false);
 });
 
 test('exact matches projected identity; origin matches scheme host and effective port', async () => {

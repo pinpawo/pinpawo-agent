@@ -199,9 +199,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
   const reviews = {
     write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
     apply_patch: ReviewPolicies.localMutation({
-      authorization: {
-        authorize: authorizeApplyPatch,
-      },
+      canAutoApprove: authorizeApplyPatch,
     }),
     move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),

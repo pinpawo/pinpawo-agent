@@ -223,7 +223,7 @@ test('auto review deterministically authorizes safe apply_patch execution', asyn
   writeFileSync(outsidePath, 'before\n', 'utf-8');
 
   const policy = reviewPolicyFor('apply_patch');
-  const authorize = policy.authorization?.authorize;
+  const authorize = policy.canAutoApprove;
   assert.ok(authorize);
   assert.equal(policy.authorization?.buildMatcher, undefined);
   const patchInput = (path: string) => ({

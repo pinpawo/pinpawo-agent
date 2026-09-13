@@ -7,9 +7,9 @@ import { buildLocalAgentSessionSnapshot } from './conversation/agentSessionSnaps
 import type {
   AgentModelProfileSummary,
   AgentRuntimeEvent,
-  AgentRunView,
   AgentSessionSummary,
 } from '@pinpawo/agent-session';
+import { ActiveRunRegister } from './agent/activeRunRegister';
 import type {
   LocalAgentSessionServerMessage,
 } from './wire/protocol';
@@ -61,8 +61,15 @@ export type ServerHandlerOptions = {
   publishRuntimeEvent?: (origin: ServerPeer, event: AgentRuntimeEvent) => void;
   /** Optional Host-owned run control used by resident headless inputs. */
   interruptHostRun?: (requestId: string) => boolean;
-  /** Resident-wide live run projection used by observing peers and startup snapshots. */
-  readActiveRun?: () => Extract<AgentRunView, { state: 'running' }> | null;
+  /**
+   * The Host's run register, shared when the Host also dispatches.
+   *
+   * A resident Host runs turns from two sources — this handler's conversation
+   * and its own dispatch queue — and both must claim the same register, or a
+   * snapshot cannot say which run is live. Left unset (the local CLI), the
+   * handler owns a register of its own.
+   */
+  activeRuns?: ActiveRunRegister;
 };
 
 type SessionSummarySource = Pick<
@@ -72,11 +79,6 @@ type SessionSummarySource = Pick<
 
 /** Shown whenever a command is refused because a run holds the session. */
 const RUN_IN_FLIGHT_MESSAGE = 'wait for the current response to finish';
-
-type ActiveChatRun = {
-  requestId: string;
-  startedAt: number;
-};
 
 function projectChatSessionSummary(session: SessionSummarySource): AgentSessionSummary {
   return {
@@ -155,7 +157,8 @@ export function createLocalServerHandlers(
   const refuseSessionCommand = (
     peer: ServerPeer,
     requestId: string,
-    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
+    // Not 'snapshot': an observation is never refused.
+    operation: 'list' | 'new' | 'resume' | 'compact',
   ) => () => {
     peer.send({
       type: 'session.error',
@@ -164,7 +167,7 @@ export function createLocalServerHandlers(
       message: RUN_IN_FLIGHT_MESSAGE,
     });
   };
-  const activeChatRuns = new WeakMap<ServerPeer, ActiveChatRun>();
+  const activeRuns = options.activeRuns ?? new ActiveRunRegister();
 
   const loadSnapshot = async (peer?: ServerPeer) => {
     const requestDeps = runtimeDeps.get();
@@ -173,18 +176,7 @@ export function createLocalServerHandlers(
       requestDeps,
       checkpoint.pendingInterrupt,
     );
-    const residentActiveRun = options.readActiveRun?.() ?? null;
-    const active = peer ? activeChatRuns.get(peer) : null;
-    const inflight = peer ? inflightRequests.get(peer) : null;
-    const activeRun: Extract<AgentRunView, { state: 'running' }> | null = residentActiveRun
-      ?? (active && inflight?.requestId === active.requestId
-        ? {
-            requestId: active.requestId,
-            state: 'running',
-            activity: 'thinking',
-            startedAt: active.startedAt,
-          }
-        : null);
+    const activeRun = activeRuns.read();
     return buildLocalAgentSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',
@@ -568,17 +560,11 @@ export function createLocalServerHandlers(
       if (!peer.isConnected()) {
         return;
       }
-      const activeRun: ActiveChatRun = {
-        requestId,
-        startedAt: Date.now(),
-      };
-      activeChatRuns.set(peer, activeRun);
+      const activeRun = activeRuns.begin(requestId);
       try {
         await admit();
       } finally {
-        if (activeChatRuns.get(peer) === activeRun) {
-          activeChatRuns.delete(peer);
-        }
+        activeRuns.finish(activeRun);
       }
     });
   };
@@ -661,18 +647,31 @@ export function createLocalServerHandlers(
         });
       },
     ),
-    onSessionSnapshotGet: (client, message) => runSessionCommand(
-      () => respondToSessionRequest(
-        client,
-        message.requestId,
-        'snapshot',
-        async () => ({
-          type: 'session.snapshot.result',
-          requestId: message.requestId,
-          snapshot: await loadSnapshot(client),
-        }),
-      ),
-      refuseSessionCommand(client, message.requestId, 'snapshot'),
+    /**
+     * A snapshot is an observation, not a command.
+     *
+     * It changes nothing a run is writing to, so it does not queue with
+     * `/new`, `/model` and the rest, and it is not refused mid-run. A client
+     * attaching or reconnecting has no state of its own: the snapshot is the
+     * only way it learns a run is live, since the run has not written a
+     * checkpoint yet. Refusing it there would leave a reconnecting TUI unable
+     * to tell a working Agent from an idle one.
+     *
+     * `/refresh` reaches the same handler, and re-reading half-finished state
+     * is not what a user wants mid-run — but that is a question of what the
+     * client offers, which the TUI already handles by closing its command
+     * palette during a run. Serving the live state is not harmful; refusing
+     * an attach is.
+     */
+    onSessionSnapshotGet: (client, message) => respondToSessionRequest(
+      client,
+      message.requestId,
+      'snapshot',
+      async () => ({
+        type: 'session.snapshot.result',
+        requestId: message.requestId,
+        snapshot: await loadSnapshot(client),
+      }),
     ),
     onSessionList: (client, message) => runSessionCommand(
       () => respondToSessionRequest(
@@ -754,7 +753,6 @@ export function createLocalServerHandlers(
       () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
     ),
     onClose: (client) => {
-      activeChatRuns.delete(client);
       inflightRequests.abortAll(client);
     },
   };

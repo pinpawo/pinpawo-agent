@@ -3,10 +3,10 @@ import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 import {
   buildAgentEventEnvelope,
   type AgentClientMessage,
-  type AgentRunView,
   type AgentRuntimeEvent,
   type AgentServerMessage,
 } from '@pinpawo/agent-session';
+import { ActiveRunRegister, type ActiveRun } from './agent/activeRunRegister';
 import {
   type AgentCapability,
   type CapabilityArtifactStore,
@@ -468,13 +468,11 @@ type ResidentPetRuntimeContext = {
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
   activeHostRuns: Map<string, AbortController>;
-  beginActiveRun: (requestId: string) => ResidentActiveRun;
-  finishActiveRun: (run: ResidentActiveRun) => void;
+  /** Shared with the local handlers: conversation and dispatch claim one register. */
+  activeRuns: ActiveRunRegister;
   close: () => Promise<void>;
   isClosing: () => boolean;
 };
-
-type ResidentActiveRun = Extract<AgentRunView, { state: 'running' }>;
 
 const residentPetRuntimeContexts = new WeakMap<object, ResidentPetRuntimeContext>();
 
@@ -502,10 +500,6 @@ function isAbortError(error: unknown): boolean {
 function admitConversationHandlers(
   handlers: LocalServerPeerHandlers,
   coordinator: ResidentPetCoordinator,
-  activeRuns: {
-    begin: (requestId: string) => ResidentActiveRun;
-    finish: (run: ResidentActiveRun) => void;
-  },
 ): LocalServerPeerHandlers {
   // Conversation no longer enters the dispatch queue; it holds the gate for
   // its duration so a dispatch cannot start mid-conversation. Its own
@@ -516,21 +510,13 @@ function admitConversationHandlers(
   ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.holdForConversation(
     () => Promise.resolve(handler(peer, message)),
   );
-  const admitRun = <TMessage extends { requestId: string }>(
-    handler: (peer: AgentSessionPeer, message: TMessage) => MaybePromise<void>,
-  ) => (peer: AgentSessionPeer, message: TMessage) => coordinator.holdForConversation(
-    async () => {
-      const activeRun = activeRuns.begin(message.requestId);
-      try {
-        await handler(peer, message);
-      } finally {
-        activeRuns.finish(activeRun);
-      }
-    },
-  );
   return {
-    onChatRequest: admitRun(handlers.onChatRequest),
-    onInterruptResume: admitRun(handlers.onInterruptResume),
+    // A conversation turn holds the gate like any other conversation work.
+    // It claims the run register one layer down, in the local admission that
+    // starts the run — the gate hold also covers the queue wait before it,
+    // which is not yet a run.
+    onChatRequest: admit(handlers.onChatRequest),
+    onInterruptResume: admit(handlers.onInterruptResume),
     // These controls must reach the active conversation instead of waiting
     // behind it in the same queue.
     onRunInterrupt: handlers.onRunInterrupt,
@@ -618,23 +604,7 @@ export async function createResidentPetRuntime(
   const interactivePeer: { current: AgentSessionPeer | null } = { current: null };
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
   const activeHostRuns = new Map<string, AbortController>();
-  let activeRun: ResidentActiveRun | null = null;
-  const beginActiveRun = (requestId: string): ResidentActiveRun => {
-    if (activeRun) {
-      throw new Error(`Resident Pet already has active run "${activeRun.requestId}".`);
-    }
-    const next: ResidentActiveRun = {
-      requestId,
-      state: 'running',
-      activity: 'thinking',
-      startedAt: Date.now(),
-    };
-    activeRun = next;
-    return next;
-  };
-  const finishActiveRun = (run: ResidentActiveRun) => {
-    if (activeRun === run) activeRun = null;
-  };
+  const activeRuns = new ActiveRunRegister();
   const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
     const message = buildAgentEventEnvelope(event);
     const peer = interactivePeer.current;
@@ -662,7 +632,7 @@ export async function createResidentPetRuntime(
     loadContext,
     runAgentTurn,
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
-    readActiveRun: () => activeRun,
+    activeRuns,
     interruptHostRun: (requestId) => {
       const controller = activeHostRuns.get(requestId);
       if (!controller) return false;
@@ -670,10 +640,7 @@ export async function createResidentPetRuntime(
       return true;
     },
   });
-  const peerHandlers = admitConversationHandlers(localHandlers.peerHandlers, coordinator, {
-    begin: beginActiveRun,
-    finish: finishActiveRun,
-  });
+  const peerHandlers = admitConversationHandlers(localHandlers.peerHandlers, coordinator);
   let closing: Promise<void> | null = null;
 
   const runtime = Object.freeze({
@@ -707,8 +674,7 @@ export async function createResidentPetRuntime(
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
     activeHostRuns,
-    beginActiveRun,
-    finishActiveRun,
+    activeRuns,
     close,
     isClosing: () => closing !== null,
   };
@@ -731,8 +697,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
     activeHostRuns,
-    beginActiveRun,
-    finishActiveRun,
+    activeRuns,
   } = context;
 
   const dispatch: PetDispatchPort = {
@@ -753,7 +718,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           // caller's callbacks/run id.
           const requestId = `host-${randomUUID()}`;
           const run = createInflightOperationRun(requestId);
-          let activeRun: ResidentActiveRun | null = null;
+          let activeRun: ActiveRun | null = null;
           let abortedSetup: AgentChannelSetup | null = null;
           /**
            * A cancelled dispatch that left work behind becomes a task pause,
@@ -798,7 +763,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             );
             setup.input.signal = run.controller.signal;
             activeHostRuns.set(requestId, run.controller);
-            activeRun = beginActiveRun(requestId);
+            activeRun = activeRuns.begin(requestId);
             publishDispatchLifecycle({ dispatchId, request, requestId, state: 'running' });
             publishRuntimeEvent({
               type: 'run.started',
@@ -874,7 +839,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             if (activeHostRuns.get(requestId) === run.controller) {
               activeHostRuns.delete(requestId);
             }
-            if (activeRun) finishActiveRun(activeRun);
+            if (activeRun) activeRuns.finish(activeRun);
           }
         },
         true,
@@ -899,8 +864,8 @@ export function createResidentPetInteraction(
       // through dispatch, which is queued behind the availability gate — that
       // is what dispatch is for. Two interactive clients would instead race
       // over shared session state (the active session pointer is per-Pet), and
-      // the runtime already assumes a single interaction elsewhere: activeRun
-      // is one value per Host and throws on a second.
+      // the runtime already assumes a single interaction elsewhere: the run
+      // register is one value per Host and throws on a second claim.
       if (interactivePeer.current?.isConnected()) {
         throw new ResidentPetInteractionBusyError();
       }

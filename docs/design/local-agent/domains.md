@@ -165,10 +165,21 @@ Studio 从不 `interaction.connect` —— 它订阅的是回调。所以「只�
 查询** —— `session.list` 是 `/resume` 的第一步，`model.list` 是 `/model` 的
 第一步。
 
-**规则：执行期间拒绝一切 command。** 每个 command 要么改变执行正在写入的
-对象（`/new` `/resume` `/model` `/compact` `/policy`），要么报告执行仍在
-产生的状态（`/refresh` —— 它的设计目的正是**执行停止后**刷新 UI）。
-执行中放行任何一个，都是在一个即将变化的会话上动作。
+**规则：执行期间拒绝一切 command。** 每个 command 都改变执行正在写入的
+对象（`/new` `/resume` `/model` `/compact` `/policy`）。执行中放行任何一个，
+都是在一个即将变化的会话上动作。
+
+**但 snapshot 不是 command，是观测。** 它不改变任何执行正在写入的东西，
+所以既不进命令队列，执行期间也不拒绝。一个**刚接入或重连**的客户端自己没有
+状态，它得知「现在有 run 在跑」的唯一途径就是 snapshot —— 此时 run 还没写
+checkpoint，checkpoint 里没有这个事实。在这里拒绝，等于让重连的 TUI 分不清
+Agent 是在干活还是闲着。
+
+`/refresh` 走的是同一个 handler，而执行中读到半截状态确实不是用户想要的 ——
+但那是**客户端提供什么**的问题，不是服务端该不该回答的问题。TUI 已经在执行
+期间关掉 command 面板，`/refresh` 根本打不出来。给出实时状态不会造成伤害，
+拒绝接入才会。（TUI 那个守卫本身就依赖 `activeRun` 被如实报告，所以这两件事
+是同一件事的两面。）
 
 **服务端是权威，客户端只做反馈。** 规则放在命令队列的入口，新增 command
 无法绕过；TUI 同时不再在执行期间弹出 command 面板，但那是 UX，不是强制 ——
@@ -321,6 +332,16 @@ Studio
 |---|---|
 | `TuiSessionRecord`（tuiSessionRegistry.ts） | `id`、`petId`、`threadId`、`modelProfileId`、`title`、`messageCount`、时间戳 —— **身份与元数据** |
 | LangGraph checkpoint（`FileSaver`） | 真正的 `messages`、`pendingInterrupt`、`currentPlan` —— **执行状态** |
+| `ActiveRunRegister`（进程内存） | 当前在跑的 run —— **只在跑的时候为真，永不落盘** |
+
+**`ActiveRunRegister` 不能被持久化。**「运行中」之所以可信，正是因为它跟着
+Host 进程活：进程还在，`finally` 就一定释放；进程没了，这个断言也跟着没了，
+没人能读到一个不存在的 run。一旦落盘，这个性质就反过来 —— 一个被 kill 掉的
+Host 重启后会报告一个根本没人在执行的 run，而且无法与真的区分。
+
+对照之下 **interrupt 是要落盘的**，就在 checkpoint 里：它跨重启仍然为真，
+因为那份没做完的工作确实还在，可以恢复。两者不是同一种事实，不能用同一种
+方式保存。
 
 `messageCount`/`title` 是从 checkpoint 投影出来的缓存
 （`summarizeTuiCheckpointMessages`）。所以 Session 记录里那两个字段，

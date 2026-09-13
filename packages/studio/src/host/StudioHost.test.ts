@@ -252,7 +252,12 @@ test('StudioHost supplies Plugin Toolkits to the Host inventory before building 
   });
 
   await host.init();
-  assert.deepEqual(sources, [{
+  assert.equal(sources?.[0]?.id, 'studio-host:context');
+  assert.equal(sources?.[0]?.kind, 'host_builtin');
+  const directory = sources?.[0]?.definitions[0];
+  assert.equal(directory?.name, 'studio-context');
+  assert.deepEqual(JSON.parse(await directory!.tools[0]!.tool.invoke({}) as string), { pets: [] });
+  assert.deepEqual(sources?.slice(1), [{
     id: 'studio-plugin:layout',
     kind: 'plugin',
     definitions: [toolkit],

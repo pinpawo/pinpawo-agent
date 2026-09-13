@@ -76,8 +76,8 @@ test('shipped Pet Capabilities separate planning, execution, and Wiki observatio
       uses: capability.uses,
     })),
     [
-      { name: 'studio_exploration', uses: ['project-inspection'] },
-      { name: 'studio_planning', uses: ['kanban-planning'] },
+      { name: 'studio_exploration', uses: ['studio-context', 'project-inspection'] },
+      { name: 'studio_planning', uses: ['studio-context', 'kanban-planning'] },
     ],
   );
 

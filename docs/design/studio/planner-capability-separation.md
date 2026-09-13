@@ -1,78 +1,53 @@
 # Studio Planner Capability Separation
 
 > 状态：Draft
-> 更新：2026-09-02
+> 更新：2026-09-14
 
-## 1. 问题
+## 当前职责
 
-Kickstart 的 Planner Pet 当前用一个 `studio_planning` Capability 同时探索项目与维护
-Kanban task 图。该 Capability 组合完整的 `bash`、`git` 和 `kanban` Toolkit，因此模型在
-取得规划事实时也同时拥有文件修改、Shell、提交和推送能力。规划与交付只靠提示词区分，
-工具边界并未表达职责边界。
+Planner 的交付是任务草稿或共享 Kanban 任务，不是源文件实现、审阅或 Wiki 写入。
+Supervisor 根据当前输入和已有事实选择 Capability；不增加固定的探索、规划顺序。
 
-Kanban 当前还把 Studio 中全部 Pet 都作为候选执行者返回。Planner 因而可以创建分派给
-自己的 task，使规划请求再次进入 Planner，而不是进入交付 Pet。
+- `studio_exploration` 使用 Host 的只读 `project-inspection`，交付有来源的事实摘要。
+- `studio_planning` 使用 Kanban Plugin 的 `kanban-planning`，创建和维护任务图。
+- 两者可使用 Studio Host 提供的 `studio-context`，通过 `studio_pet_list` 查询实际
+  resident Pet 的标识与名称。这个列表不是本 Pet 的 Capability 列表，也不赋予跨 Pet 执行权限。
+- PET.md 保留现有的草稿确认流程，并说明默认模板的人工 assignment 和会话交接方式。
+  Capability 的 description 在 Supervisor 选择前就表达可交付内容与只读边界。
 
-## 2. 目标结构
+## 供给边界
 
-Planner Pet 持有两个独立 Capability：
+`studio-context` 属于 Studio Host 的装配层，和 local-agent 提供的项目只读工具同样通过
+Host inventory 供给，由 Capability.uses 选择。它在调用时读取当前 Studio registry，
+只返回 `petId/name`，不暴露配置凭据、其他 Pet 文档、工具、会话或 checkpoint。
 
-```text
-external request
-       │
-       ├─ facts sufficient ─────────────────┐
-       │                                    ▼
-       └─ studio_exploration ── handoff ── studio_planning
-                                               │
-                                               ▼
-                                      executor / reviewer tasks
-```
+Studio core 不增加工具、调度策略或状态存储；Kanban 不依赖 Pet 名录；也不把具体
+Plugin 的接口注入其他 Plugin。名录查询不推断 Pet 的业务职责或当前可接纳状态。
 
-- `studio_exploration` 读取项目、Git 和 GitHub 事实，交付规划所需证据；它只组合 Host
-  提供的只读 `project-inspection` Toolkit。
-- `studio_planning` 根据用户目标、已有 handoff 与一份 Kanban 快照建立最小 task 图；
-  它只组合 Kanban Plugin 提供的 `kanban-planning` 视图。该视图包含读取与创建 task，
-  不包含执行 Pet 使用的完成和阻塞工具。
-- `studio_execution` 与 `studio_review` 只组合 `kanban-execution` 视图。该视图包含 task
-  读取、完成和阻塞回报，不包含 assignee 选择与 task 创建。
-- Pet 内部 Capability Planner 根据当前输入决定直接规划，或先探索再规划。两段工作沿
-  现有 delegation、handoff 与 main-message 机制传递，不增加 Studio 专用状态。
+## 默认模板的执行交接
 
-## 3. Toolkit 边界
+Kanban 创建的 task 尚未分配执行者。用户在 Console 中选择 executor 或 reviewer，
+默认 Trigger 消费 `task.assigned` 后派发。Wiki 由默认 `task.done` Trigger 驱动。
+这些是默认模板的装配事实，不是通用 Studio 或 Kanban 的内建规则。任务关联只是上下文
+关联，不是自动执行依赖。旧草稿描述的 Planner 自行分配、依赖 claim 流程已不适用。
 
-`project-inspection` 是 local-agent Host 的内建只读 Toolkit。它复用现有文件、搜索、Git 与
-GitHub 查看工具，但不包含文件写入、补丁、下载、Shell、进程控制、暂存、提交、
-推送或远端资源创建工具。
+Console dispatch 是单向 admission。Planner 的自然回复可能是草稿、追问或交接，
+不等同于任务已经创建或项目目标完成。详细回复和确认通过 Planner 自己的会话进行。
 
-该 Toolkit 的价值是表达可执行权限，而不是新增第二套文件或 Git 实现。底层工具、工作目录
-绑定和 operation metadata 继续复用现有实现。
+## 验证
 
-## 4. Kanban 分派边界
+- Host 装配测试确认名录工具进入 inventory；只披露实际 registry 的公开字段。
+- 模型 eval 使用默认 PET.md/Capability 文档和生产 Kanban Toolkit，验证草稿、修改、确认。
+- 完整图 eval 使用真实 Supervisor、Capability 执行与自然回复，读取隔离的合成工作区，
+  验证探索证据、Pet 发现、确认后创建未分配任务且不修改项目文件。
+- 工具调用与任务快照作为行为证据，不用提示词字符串匹配验证模型行为。
 
-Kanban Plugin 接受可选的 `assignablePetIds` 配置。配置存在时：
+现有 workdir 的 PET.md/Capability 文档由用户维护；模板升级不覆盖已有文档。
 
-- assignee snapshot 只披露配置中的 Pet；
-- task 创建只接受配置中的 Pet；
-- Plugin 启动时校验每个 id 都属于当前 Studio。
+## Studio 配置文案检查（2026-09-14）
 
-Kickstart 配置只允许 `executor` 与 `reviewer` 接收 Kanban task。Planner 仍通过 Console、
-HTTP 或 Trigger 接收外部规划请求；Wiki 仍由 `task.done` Trigger 驱动。
+文案整理仅针对默认 Studio 的 Pet 说明与能力配置，使用目标、可用操作、所需输入和
+交付结果描述工作，减少不必要的内部术语。保留工具名称、参数名，以及 Git worktree、
+Kanban、PR 等实际工作对象，保证配置仍能准确指导工具调用与任务交接。
 
-Planner 直接登记产生最终结果的完整交付。需要独立质量判断的实现由一个 Executor task
-和一个依赖它的 Reviewer task 表达。Studio Kanban adapter claim 时排除已有 active task
-的 Pet，使同一 Pet 串行交付，不同 Pet 仍可并行。
-
-## 5. 验证
-
-- 装配测试确认 Planner 拥有两个 Capability，且工具集合互不越界。
-- Kanban 测试确认配置后的 assignee snapshot 与 task 创建均排除 Planner。
-- Kanban 测试确认执行 Toolkit 不含 task 创建，并且同一 assignee 不会同时 claim 多个 task。
-- Planner/Kanban 模型 eval 在候选事实中包含 Planner，并验证最终只创建 executor 与
-  reviewer task、依赖正确、没有 Shell 调用或自分派。
-
-## 6. 非目标
-
-- 不改变 Studio core、dispatch receipt、resident Pet 或 Agent Session 契约。
-- 不在 Studio 中引入新的计划状态或跨 Pet message contract。
-- 不把通用 Kanban Plugin 固定为“Planner 永远不可分派”；可分派集合由使用它的 Studio
-  配置决定。
+通用 orchestrator、执行与摘要提示词，以及 Kanban 和本地工具说明不在本次整理范围内。

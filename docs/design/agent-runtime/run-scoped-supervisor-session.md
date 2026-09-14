@@ -335,6 +335,7 @@ Host 继续隐藏 runSupervisor 原始模型流，从 root values 中识别当�
 不保留旧 answer checkpoint 的恢复入口。当前拓扑验证自然回复、保留 pending 的提问、执行交接、原生暂停恢复、预算停止及异常；已完成的 checkpoint 再次读取不重复执行模型或 Capability。
 
 Entry 直接注册 ToolNode。路由调用 ID 按 run 与当前模型轮次命名，避免历史及错误重试中重复 provider ID 被 ToolNode 去重；工具获得完整注入状态，不再手工裁剪 ToolNode 输入。
+Entry 始终提供 plan_request 与 continue，并向模型展示完整的当前计划状态，包括空计划。模型判断是否继续，continue 工具校验是否存在未完成任务；不在模型外按措辞强制路由，也不按计划状态隐藏工具。对讨论类追问，直接回答或交给 Supervisor 均可；无未完成计划时调用 continue 才是需要阻止的执行路径。
 
 ## Supervisor 单一委派交接（2026-09-14 实施草案）
 

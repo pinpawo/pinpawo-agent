@@ -1,3 +1,4 @@
+import { supervisorReply } from './testing';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
@@ -164,9 +165,9 @@ test('review then adjustment shares current state and clears feedback before nat
 
 test('a natural question commits the plan without dispatching it', async () => {
   const { result } = await probe(context(), [control('submit_plan', { tasks: [taskA] }, 'plan'), new AIMessage('Which destination?')]);
-  assert.equal(result.reply, 'Which destination?');
+  assert.equal(supervisorReply(result), 'Which destination?');
   assert.equal(result.runSupervisorState.plan[0].status, 'pending');
-  assert.equal(queryAgentMessages(result.messages).main().select().messages.length, 0);
+  assert.deepEqual(queryAgentMessages(result.messages).main().select().messages.map(m => m.text), ['Which destination?']);
 });
 
 test('correcting delegation arguments preserves the rejected delivery feedback', async () => {
@@ -179,4 +180,18 @@ test('correcting delegation arguments preserves the rejected delivery feedback',
   assert.equal(result.reviewFeedback, 'Verify missing evidence');
   const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', context().runId, 'invalid')) as ToolMessage;
   assert.equal(error.status, 'error');
+});
+
+
+test('final publication preserves structured model content and usage without a private reply copy', async () => {
+  const content = [{ type: 'text' as const, text: '  Choose a destination.  ' }];
+  const usage = { input_tokens: 12, output_tokens: 4, total_tokens: 16 };
+  const { result } = await probe(context(), [new AIMessage({ id: 'final-model', content, usage_metadata: usage })]);
+  assert.equal(result.messages.length, 1);
+  const message = result.messages[0] as AIMessage;
+  assert.deepEqual(message.content, content);
+  assert.deepEqual(message.usage_metadata, usage);
+  assert.equal(message.id, identity('supervisor-message', context().runId, 'final-model'));
+  assert.equal(queryAgentMessages(result.messages).main().select().messages[0], message);
+  assert.equal(queryAgentMessages(result.messages).supervisor(context().runId).select().messages.length, 0);
 });

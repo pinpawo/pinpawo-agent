@@ -1,3 +1,4 @@
+import { supervisorReply } from './testing';
 import { createDeliveryResult, readFixtureDelivery } from '../../../testing/capabilityDelivery';
 
 import assert from 'node:assert/strict';
@@ -40,10 +41,10 @@ function commandOnly(value: unknown) {
   const request = result.messages.filter((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => ['submit_plan', 'review_current', 'adjust_plan'].includes(call.name))).at(-1) as AIMessage;
   const call = request?.tool_calls?.[0];
-  if (!call) return { reply: result.reply };
+  if (!call) return { reply: supervisorReply(result) };
   const parsed = parseSupervisorControl({ name: call.name, args: call.args });
-  return parsed.name === 'review_current' && result.reply !== undefined
-    ? { ...parsed, args: { ...parsed.args, reply: result.reply } } : parsed;
+  return parsed.name === 'review_current' && supervisorReply(result) !== undefined
+    ? { ...parsed, args: { ...parsed.args, reply: supervisorReply(result) } } : parsed;
 }
 
 // Actual call derivation, exclusivity and duplicate settlement are tested in
@@ -1287,8 +1288,8 @@ test('Supervisor returns natural final text without a second generation', async 
     supervisorInput(catalog),
   );
 
-  assert.ok('reply' in result);
-  if (!('reply' in result)) assert.fail('expected a natural Supervisor reply');
+  assert.ok(supervisorReply(result));
+  assert.equal('reply' in result, false);
 
   assert.equal(model.invocations.length, 1);
   assert.equal('messageUpdates' in result, false);
@@ -1728,10 +1729,10 @@ test('Supervisor returns natural text without a control proposal', async (t) => 
   }]);
 
   const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
-  assert.ok('reply' in result);
-  if (!('reply' in result)) assert.fail('expected a natural Supervisor reply');
+  assert.ok(supervisorReply(result));
+  assert.equal('reply' in result, false);
 
-  assert.ok('reply' in result && typeof result.reply === 'string');
+  assert.ok(typeof supervisorReply(result) === 'string');
   assert.equal(model.invocations.length, 1);
   assert.equal('messageUpdates' in result, false);
 });
@@ -1759,10 +1760,10 @@ test('boundary natural text leaves acceptance to the root control protocol', asy
     },
   }));
 
-  assert.ok('reply' in result);
-  if (!('reply' in result)) assert.fail('expected a natural Supervisor reply');
+  assert.ok(supervisorReply(result));
+  assert.equal('reply' in result, false);
 
-  assert.ok('reply' in result && typeof result.reply === 'string');
+  assert.ok(typeof supervisorReply(result) === 'string');
   assert.equal('messageUpdates' in result, false);
 });
 

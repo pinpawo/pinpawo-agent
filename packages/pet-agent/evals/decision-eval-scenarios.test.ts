@@ -15,7 +15,7 @@ function textModel(output: string) {
 test('decision eval scenarios cover every canonical prompt distribution', () => {
   assert.deepEqual({
     entryAnswer: getDecisionEvalScenarios('entry_answer').length,
-  }, { entryAnswer: 6 });
+  }, { entryAnswer: 8 });
 });
 
 test('decision eval scenarios render complete production messages', () => {
@@ -85,5 +85,17 @@ test('decision eval scenarios invoke, parse, normalize, and score each target', 
     assert.ok(result.scores.every(({ evaluator }) => evaluator === 'deterministic'));
     assert.ok(result.verdict);
     assert.ok(result.shape);
+  }
+});
+
+
+test('Entry eval reports continue distinctly and requires an unfinished plan', async () => {
+  const response = new AIMessage({ content: '', tool_calls: [{ name: 'continue', id: 'continue', args: {} }] });
+  const model = { bindTools: () => ({ invoke: async () => response }) } as never;
+  for (const name of ['reference-resolution-adds-no-scope', 'saved-unfinished-plan-continues', 'finished-plan-requires-new-planning']) {
+    const scenario = getDecisionEvalScenarios().find(scenario => scenario.caseName === name)!;
+    const result = await scenario.run(model);
+    assert.equal(result.output.route, 'continue');
+    assert.equal(result.scores.every(score => score.score === 1), name === 'saved-unfinished-plan-continues');
   }
 });

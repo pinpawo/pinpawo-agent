@@ -244,7 +244,8 @@ test('Entry Answer receives normalized main conversation and excludes delegation
     new HumanMessage(currentRequest),
   ]), invokeConfig());
 
-  assert.deepEqual(entryMessages.slice(1).map((message) => message.content), [
+  assert.deepEqual(JSON.parse(entryMessages[1].text.split('\n').slice(1).join('\n')), { goal: null, plan: [] });
+  assert.deepEqual(entryMessages.slice(2).map((message) => message.content), [
     compaction.content,
     '之前我们在讨论 Entry 架构。',
     '可以将 Answer 放在 Supervisor 之前。',
@@ -382,3 +383,29 @@ test('root invocation context reaches direct Entry replies and final Answer with
     }
   }
 });
+
+
+for (const status of ['empty', 'completed', 'superseded'] as const) {
+  test(`Entry exposes the ${status} plan and rejects continue without handing off`, async () => {
+    const plan = { goal: status === 'empty' ? null : 'Plan the trip.', plan: status === 'empty' ? [] : [
+      { id: 'trip', capability: 'general', task: 'Plan the trip.', status },
+    ] };
+    let turns = 0;
+    const model = { bindTools: (tools: Array<{ name: string }>) => {
+      assert.deepEqual(tools.map(tool => tool.name), ['plan_request', 'continue']);
+      return { invoke: async (messages: BaseMessage[]) => {
+        assert.deepEqual(JSON.parse(messages[1].text.split('\n').slice(1).join('\n')), plan);
+        if (++turns === 1) return new AIMessage({ content: '', tool_calls: [{ name: 'continue', id: 'invalid-continue', args: {} }] });
+        assert.ok(messages.some(message => ToolMessage.isInstance(message) && message.name === 'continue' && message.status === 'error'));
+        return new AIMessage('请说明接下来要完成的目标。');
+      } };
+    } } as unknown as BaseChatModel;
+    const graph = createOrchestratorGraph({ models: { act: model, answer: model }, runSupervisorRunner: {
+      invoke: async () => { throw new Error('Invalid continue must not hand off to Supervisor.'); },
+    } });
+    const output = await graph.invoke({ ...buildOrchestratorRunInput([new HumanMessage('继续。')]), runSupervisorState: plan }, invokeConfig());
+    assert.equal(turns, 2);
+    assert.deepEqual(output.runSupervisorState, plan);
+    assert.equal(output.runIterationCount, 0);
+  });
+}

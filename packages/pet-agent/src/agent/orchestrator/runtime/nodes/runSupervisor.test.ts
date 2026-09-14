@@ -9,7 +9,6 @@ import { setAgentMessageMetadata, queryAgentMessages } from '../../../messages';
 import { compileAgentRegistry } from '../../registry';
 import { OrchestratorState, buildRunStateReset, type OrchestratorStateType } from '../../state';
 import { createRunSupervisorNode } from './runSupervisor';
-import { createAnswerNode } from './answer';
 import { buildRunSupervisorInput } from '../../runSupervisor/input';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import { createCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
@@ -37,12 +36,11 @@ function state(): OrchestratorStateType {
 function node(decision: import('../../runSupervisor/testing').ScriptedSupervisorDecision) {
   const supervisor = createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async () => decision }) });
   return async (input: OrchestratorStateType, config: typeof options) => {
-    let destination = '';
+    let destination: string = END;
     const graph = new StateGraph(OrchestratorState)
-      .addNode('runSupervisor', supervisor, { ends: ['capability', 'answer'] })
+      .addNode('runSupervisor', supervisor, { ends: ['capability', END] })
       .addNode('capability', () => { destination = 'capability'; return {}; })
-      .addNode('answer', () => { destination = 'answer'; return {}; })
-      .addEdge(START, 'runSupervisor').addEdge('capability', END).addEdge('answer', END).compile();
+      .addEdge(START, 'runSupervisor').addEdge('capability', END).compile();
     const result = await graph.invoke(input, config);
     return new Command({ goto: destination, update: result });
   };
@@ -98,9 +96,7 @@ test('accepted A and pending B survive an answer and new run without a continuat
   const input = await delivered();
   const accepted = apply(input, await node({ name: 'review_current', args: { completed: true,
     reason: 'Draft verified.', reply: 'Choose a destination.' } })(input, options));
-  const terminal = await createAnswerNode()(accepted);
-  const resumed = { ...accepted, ...terminal, messages: messagesStateReducer(accepted.messages, terminal.messages),
-    ...buildRunStateReset() };
+  const resumed = { ...accepted, ...buildRunStateReset() };
   assert.deepEqual(resumed.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
   const next = apply(resumed, await node({ name: 'review_current', args: { reason: 'Proceed with publication.' } })(
     { ...resumed, runUserRequest: 'Publish now.' }, options));
@@ -112,7 +108,7 @@ test('natural question does not accept the returned task or erase its results', 
   const input = await delivered();
   const next = apply(input, await node({ reply: 'Which destination?' })(input, options));
   assert.deepEqual(next.runSupervisorState, input.runSupervisorState);
-  assert.equal((await createAnswerNode()(next)).messages[0].text, 'Which destination?');
+  assert.equal(next.messages.at(-1)?.text, 'Which destination?');
 });
 
 test('new user input is consumed once, including guidance added within a native resumed run', async () => {

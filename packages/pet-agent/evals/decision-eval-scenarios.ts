@@ -1,9 +1,8 @@
+import type { RunSupervisorState } from '../src/agent/orchestrator/runSupervisor/state';
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { buildEntryAnswerSystemPrompt } from '../src/agent/orchestrator/prompts/answer.ts';
-import { PLAN_REQUEST_TOOL_NAME } from '../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
+import { PLAN_REQUEST_TOOL_NAME, createPlanRequestTool, createContinueTool, entryPlanMessage } from '../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
@@ -50,14 +49,15 @@ type EntryAnswerEvalCase = {
     role: 'user' | 'assistant';
     text: string;
   }[];
-  expectedRoute: 'answer' | 'plan_request';
+  expectedRoutes: readonly string[];
+  plan?: RunSupervisorState;
 };
 
 const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
   {
     name: 'direct-answer-arithmetic',
     messages: [{ role: 'user', text: '只回答这个问题：2 + 3 等于多少？' }],
-    expectedRoute: 'answer',
+    expectedRoutes: ['answer'],
   },
   {
     name: 'trace-pr-review-follow-up',
@@ -69,17 +69,17 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
       },
       { role: 'user', text: '你有什么更优的解决方案，或者想法么？' },
     ],
-    expectedRoute: 'answer',
+    expectedRoutes: ['answer', 'plan_request'],
   },
   {
     name: 'clarification-stays-in-answer',
     messages: [{ role: 'user', text: '把那个配置改一下。' }],
-    expectedRoute: 'answer',
+    expectedRoutes: ['answer'],
   },
   {
     name: 'repository-task-enters-supervisor',
     messages: [{ role: 'user', text: '读取仓库文件，修复当前 TypeScript 错误并运行测试。' }],
-    expectedRoute: 'plan_request',
+    expectedRoutes: ['plan_request'],
   },
   {
     // The current message states no goal on its own. plan_request must carry the
@@ -93,7 +93,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
       },
       { role: 'user', text: '嗯。开始吧' },
     ],
-    expectedRoute: 'plan_request',
+    expectedRoutes: ['plan_request'],
   },
   {
     // Resolving a reference must not become an invitation to invent scope: the
@@ -108,22 +108,32 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
       { role: 'assistant', text: '好的，我看一下。' },
       { role: 'user', text: '你自己 review 一下这个 pr' },
     ],
-    expectedRoute: 'plan_request',
+    expectedRoutes: ['plan_request'],
+  },
+  {
+    name: 'saved-unfinished-plan-continues',
+    messages: [{ role: 'user', text: '继续把周末的杭州旅行安排完成。' }],
+    plan: { goal: '安排周末的杭州旅行。', plan: [
+      { id: 'transport', capability: 'general', task: '整理往返交通安排。', status: 'pending' },
+    ] },
+    expectedRoutes: ['continue'],
+  },
+  {
+    name: 'finished-plan-requires-new-planning',
+    messages: [
+      { role: 'assistant', text: '杭州周末旅行的安排已经全部完成。' },
+      { role: 'user', text: '继续调整一下，把总预算控制在八百元以内。' },
+    ],
+    plan: { goal: '安排周末的杭州旅行。', plan: [
+      { id: 'itinerary', capability: 'general', task: '完成杭州周末行程。', status: 'completed' },
+    ] },
+    expectedRoutes: ['plan_request'],
   },
 ];
 
 
-// Mirrors createPlanRequestTool()'s contract in
-// runtime/nodes/entryAnswer.ts. The eval scores args.goal, so a stub without
-// that parameter makes every correct route look like a shape failure.
-const planRequest = tool(async () => '', {
-  name: PLAN_REQUEST_TOOL_NAME,
-  description: 'Hand the current user request to the Run Supervisor when satisfying it requires any tool, external capability, or task execution.',
-  schema: z.object({
-    goal: z.string().trim().min(1).max(2_000)
-      .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),
-  }).strict(),
-});
+// Bind production definitions so prompt/schema edits are evaluated immediately.
+const entryTools = [createPlanRequestTool(), createContinueTool()];
 
 function renderMessages(prompt: RenderedDecisionPrompt) {
   return [
@@ -138,9 +148,9 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
     const render = (): RenderedDecisionPrompt => ({
       system: buildEntryAnswerSystemPrompt(),
       input: '',
-      conversationMessages: testCase.messages.map((message) => message.role === 'user'
+      conversationMessages: [entryPlanMessage(testCase.plan ?? { goal: null, plan: [] }), ...testCase.messages.map((message) => message.role === 'user'
         ? new HumanMessage(message.text)
-        : new AIMessage(message.text)),
+        : new AIMessage(message.text))],
     });
     return {
       target: 'entry_answer',
@@ -149,13 +159,13 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
       datasetName: DATASET_NAME,
       caseId: `${DATASET_NAME}.${testCase.name}`,
       caseName: testCase.name,
-      expectedSummary: testCase.expectedRoute,
+      expectedSummary: testCase.expectedRoutes.join(' | '),
       render,
       async run(model, _method, config) {
         if (!model.bindTools) {
           throw new Error('Entry Answer eval model must support tool binding.');
         }
-        const response = await model.bindTools([planRequest]).invoke(
+        const response = await model.bindTools(entryTools).invoke(
           renderMessages(render()),
           config,
         );
@@ -165,15 +175,15 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
         const text = readMessageText(response).trim();
         const toolCalls = response.tool_calls ?? [];
         const planCalls = toolCalls.filter((call) => call.name === PLAN_REQUEST_TOOL_NAME);
-        const observedRoute = planCalls.length > 0 ? 'plan_request' : 'answer';
+        const observedRoute = toolCalls.length === 0 ? 'answer' : toolCalls.length === 1 ? toolCalls[0].name : 'invalid';
         const scores: DecisionContractScore[] = [{
           key: 'route_correct',
-          statement: `Route this request through ${testCase.expectedRoute}.`,
+          statement: `Route this request through ${testCase.expectedRoutes.join(' or ')}.`,
           evaluator: 'deterministic',
-          score: observedRoute === testCase.expectedRoute ? 1 : 0,
+          score: testCase.expectedRoutes.includes(observedRoute) ? 1 : 0,
           comment: `observed=${observedRoute}`,
         }];
-        if (testCase.expectedRoute === 'answer') {
+        if (observedRoute === 'answer') {
           scores.push({
             key: 'answer_present',
             statement: 'Return a non-empty user-facing answer or clarification question.',
@@ -181,9 +191,9 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
             score: text ? 1 : 0,
             comment: `characters=${text.length.toString()}`,
           });
-        } else {
+        } else if (observedRoute === 'plan_request') {
           const planGoal = planCalls[0]?.args?.goal;
-          const validPlanCall = planCalls.length === 1
+          const validPlanCall = toolCalls.length === 1 && planCalls.length === 1
             && typeof planGoal === 'string'
             && planGoal.trim().length > 0
             && text.length === 0;
@@ -194,6 +204,13 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
             score: validPlanCall ? 1 : 0,
             comment: `calls=${planCalls.length.toString()}`,
           });
+        }
+        if (observedRoute === 'continue') {
+          const hasPendingTask = testCase.plan?.plan.some(task => task.status === 'pending') ?? false;
+          scores.push({ key: 'continue_has_pending_task', statement: 'Continue only an existing unfinished plan.',
+            evaluator: 'deterministic', score: hasPendingTask ? 1 : 0, comment: `pending=${hasPendingTask}` });
+          scores.push({ key: 'continue_shape', statement: 'Call continue alone with no arguments or reply text.',
+            evaluator: 'deterministic', score: toolCalls.length === 1 && Object.keys(toolCalls[0].args).length === 0 && !text ? 1 : 0, comment: `calls=${toolCalls.length}` });
         }
         return {
           output: {

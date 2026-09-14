@@ -1,3 +1,4 @@
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { recoverCapabilityError } from '../runtime/capabilityError';
@@ -6,7 +7,7 @@ import { createRunSupervisorAgent } from './agent';
 import { OrchestratorState } from '../state';
 import { setAgentMessageMetadata } from '../../messages';
 import { randomUUID } from 'node:crypto';
-import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
 import { supervisorWorkMessages } from './messageHandoff';
@@ -37,8 +38,7 @@ export type ScriptedSupervisorRunner = {
 };
 
 /** Compact scenario shorthand; explicit sequence fixtures can choose every model step. */
-export function scriptedSupervisorResult(input: RunSupervisorInput,
-  decision: ScriptedSupervisorDecision): RunSupervisorResult {
+function scriptedSupervisorDecisions(decision: ScriptedSupervisorDecision) {
   const decisions: Array<ScriptedSupervisorControl | { reply: string }> = [];
   let reply: string | undefined;
   if ('reply' in decision) reply = decision.reply;
@@ -55,7 +55,11 @@ export function scriptedSupervisorResult(input: RunSupervisorInput,
     if (decision.name !== 'delegate_capability') decisions.push({ name: 'delegate_capability', args: {} });
   }
   if (reply !== undefined) decisions.push({ reply });
-  return scriptedSupervisorSequence(input, decisions);
+  return decisions;
+}
+
+export function scriptedSupervisorResult(input: RunSupervisorInput, decision: ScriptedSupervisorDecision): RunSupervisorResult {
+  return scriptedSupervisorSequence(input, scriptedSupervisorDecisions(decision));
 }
 
 /** Test-only decisions invoke the same transitions as tools; no transcript replay. */
@@ -91,11 +95,25 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
     messages: supervisorWorkMessages(supervisorHandoffContext(input), messages) };
 }
 
+/** Script only model outputs; real agent tools and parent handoff perform all state changes. */
 export function withScriptedDelegation(runner: ScriptedSupervisorRunner): RunSupervisorRunner {
   return { invoke: async (input, config) => {
     const decision = await runner.invoke(input, config);
-    const result = scriptedSupervisorResult(input, decision);
-    return { ...result, capabilityDisclosure: decision.capabilityDisclosure ?? result.capabilityDisclosure };
+    const responses = scriptedSupervisorDecisions(decision).map((step, index) => 'reply' in step
+      ? new AIMessageChunk(step.reply)
+      : new AIMessageChunk({ content: '', tool_calls: [{ id: `scripted:${randomUUID()}:${index}`, name: step.name, args: step.args }] }));
+    class ScriptedModel extends BaseChatModel {
+      _llmType() { return 'scripted-supervisor'; }
+      bindTools() { return this; }
+      async _generate(): Promise<never> { throw new Error('Scripted model uses explicit responses.'); }
+      async invoke() {
+        const response = responses.shift();
+        if (!response) throw new Error('Unexpected Supervisor model turn.');
+        return response;
+      }
+    }
+    return createRunSupervisorAgent({ model: new ScriptedModel({}) }).invoke({ ...input,
+      capabilityDisclosure: decision.capabilityDisclosure ?? input.capabilityDisclosure }, config);
   } };
 }
 

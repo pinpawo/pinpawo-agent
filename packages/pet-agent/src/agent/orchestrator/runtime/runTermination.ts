@@ -61,14 +61,10 @@ export function createRunTerminationHandlers() {
 
   return {
     onNodeError(_state: OrchestratorStateType, nodeError: NodeError) {
-      if (readStringProperty(nodeError.error, 'code') === 'checkpoint_incompatible') {
-        return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' as const }, goto: 'answer' });
-      }
       const terminalError = serializeTerminalError(nodeError);
       pendingErrors.set(terminalError.id, nodeError.error);
       return new Command({
         update: {
-          runRuntimeFailure: null,
           runTerminalError: terminalError,
         },
         goto: 'throwRunFailure',

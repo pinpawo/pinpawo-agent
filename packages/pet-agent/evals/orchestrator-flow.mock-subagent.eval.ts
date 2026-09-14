@@ -1,4 +1,5 @@
 // @ts-nocheck — eval script, types from langsmith barrel are incomplete
+import { readFixtureDelivery } from '../src/testing/capabilityDelivery';
 /**
  * LangSmith evaluation: orchestrator flow with mocked subagent.
  *
@@ -31,7 +32,7 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import { getDelegationAnnounce } from '../src/agent/orchestrator/delegation';
+
 import {
   readRunDelegationSummaries,
   readTaskActiveDelegation,
@@ -522,7 +523,7 @@ function extractResult(
   const lastMsg = visibleMessages.at(-1);
   const latestAnnounce = messages
     .flatMap((message) => {
-      const announce = getDelegationAnnounce(message);
+      const announce = readFixtureDelivery(message);
       return announce ? [announce] : [];
     })
     .at(-1);

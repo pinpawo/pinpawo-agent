@@ -1,4 +1,5 @@
-import { DelegationAnnounceMessage, getDelegationAnnounce } from '../delegation';
+import { createDeliveryResult, readFixtureDelivery } from '../../../testing/capabilityDelivery';
+
 import assert from 'node:assert/strict';
 import { readCapabilityExecutionCall } from '../executionMessages';
 import { createHash, randomUUID } from 'node:crypto';
@@ -320,10 +321,10 @@ function supervisorInput(
   // Historical scenario fixtures supply reports; represent their evidence as
   // the new actual call/result pair before invoking the production adapter.
   const reports = input.messages.flatMap((message) => {
-    const report = getDelegationAnnounce(message);
+    const report = readFixtureDelivery(message);
     return report && current && report.delegationId === current.delegationId ? [report] : [];
   });
-  const messages = [...input.messages.filter((message) => !getDelegationAnnounce(message))];
+  const messages = [...input.messages.filter((message) => !readFixtureDelivery(message))];
   for (const [i, report] of reports.entries()) {
     const callId = `fixture:${report.delegationId}:${i}`;
     const metadata = { runId: report.runId, traceId: input.traceId };
@@ -435,8 +436,8 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     messages: [...[], ...[{
       messageId: 'announce-a',
       result: 'Trace A execution is complete.',
-    }].map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'delegation-a', runId: 'run-a', task: 'Complete trace A.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    }].map((attempt) => createDeliveryResult({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'delegation-a', runId: 'run-a', task: 'Complete trace A.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
   });
 
@@ -853,8 +854,8 @@ test('boundary projects the current lane announce into the standard model-visibl
         currentMainContext,
         privateLaneMessage,
         currentAnnounce,
-      ], ...[{ messageId: 'announce-current', result: currentAnnounce.text }].map((attempt) => new DelegationAnnounceMessage({
-        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-current', runId: 'run-current', task: 'Inspect repository dependencies.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      ], ...[{ messageId: 'announce-current', result: currentAnnounce.text }].map((attempt) => createDeliveryResult({
+        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-current', runId: 'run-current', task: 'Inspect repository dependencies.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
       }))],
       remainingPlan: [{
         capability: 'general',
@@ -1438,8 +1439,8 @@ test('review rejects a plan mutation before discovery or dispatch', async (t) =>
         task: 'Research the repository.',
       },
 
-      messages: [...[new AIMessage(fullHandoff)], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Research the repository.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      messages: [...[new AIMessage(fullHandoff)], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => createDeliveryResult({
+        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Research the repository.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
       }))],
       remainingPlan: [{
         capability: 'general',
@@ -1480,8 +1481,8 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
         task: 'Read the issue #587 status.',
       },
 
-      messages: [...[new AIMessage('issue #587 is open; the README section is stale.')], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Read the issue #587 status.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      messages: [...[new AIMessage('issue #587 is open; the README section is stale.')], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => createDeliveryResult({
+        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Read the issue #587 status.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
       }))],
       remainingPlan: [],
     }),
@@ -1523,8 +1524,8 @@ test('boundary Supervisor continues without replacing the active task', async (t
         task: 'Inspect the repository.',
       },
 
-      messages: [...[new AIMessage('The dependency evidence is still incomplete.')], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Inspect the repository.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      messages: [...[new AIMessage('The dependency evidence is still incomplete.')], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => createDeliveryResult({
+        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Inspect the repository.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
       }))],
     }),
   );
@@ -1582,8 +1583,8 @@ test('boundary Supervisor can stop for user confirmation with a structured quest
 
       messages: [...[new AIMessage(
         'PR #662 does not exist. PR #663 may be related but is not the requested target.',
-      )], ...[{ messageId: 'announce-review-662', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-        id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'delegation-review-662', runId: 'run-review-662', task: 'Review PR #662.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      )], ...[{ messageId: 'announce-review-662', result: 'Current execution evidence.' }].map((attempt) => createDeliveryResult({
+        id: 'announce:' + attempt.messageId, sourceLane: 'capability:general' as const, delegationId: 'delegation-review-662', runId: 'run-review-662', task: 'Review PR #662.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
       }))],
     }),
   );
@@ -1630,8 +1631,8 @@ test('boundary Supervisor exposes plan, review, adjustment and execution tools',
 
       messages: [...[new AIMessage(
         'The investigation is complete and identifies the required change.',
-      )], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Inspect the repository.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+      )], ...[{ messageId: 'announce-1', result: 'Current execution evidence.' }].map((attempt) => createDeliveryResult({
+        id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'delegation-1', runId: 'run-1', task: 'Inspect the repository.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
       }))],
     }),
   );
@@ -1829,8 +1830,8 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
   await runner.invoke(supervisorInput(catalog, {
     mode: 'boundary', inputId: 'boundary-context-test',
     currentTask: { delegationId: 'context-child', runId: 'run-test', capability: 'explore', task: 'Continue.' },
-    messages: [...[], ...[{ messageId: 'context-announce', result: 'Current execution evidence.' }].map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'context-child', runId: 'run-test', task: 'Continue.', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    messages: [...[], ...[{ messageId: 'context-announce', result: 'Current execution evidence.' }].map((attempt) => createDeliveryResult({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:explore' as const, delegationId: 'context-child', runId: 'run-test', task: 'Continue.', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
 
   }), config);

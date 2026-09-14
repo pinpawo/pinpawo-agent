@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-export type OrchestratorRuntimeFailure = 'checkpoint_incompatible';
-
 export const supervisorTaskSchema = z.object({
   capability: z.string().trim().min(1).max(200),
   task: z.string().refine(text => text.trim().length > 0).describe('当前任务的完整执行说明与预期交付，运行时会原样注入委派。'),

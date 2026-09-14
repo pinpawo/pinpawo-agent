@@ -60,7 +60,7 @@ export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
   readonly scope: DelegationMessageScope & { readonly traceId: string };
   readonly delivery: DelegationDelivery | null;
-  /** Unapplied private-history patch; contains no main Announce or ToolMessage. */
+  /** Unapplied private-history patch; contains no main ToolMessage. */
   readonly privateMessages: BaseMessage[];
   readonly artifacts: CapabilityArtifactRef[];
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */

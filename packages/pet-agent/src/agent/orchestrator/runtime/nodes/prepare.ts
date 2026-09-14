@@ -11,7 +11,6 @@ import {
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { guardDecisionEmitter } from '../guards/decisionEvents';
-import { afterPrepare } from '../routes/afterPrepare';
 
 export function createPrepareNode() {
   return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
@@ -24,7 +23,7 @@ export function createPrepareNode() {
     const traceId = state.traceId;
     const messages = freshMessages.map((message) =>
       setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
-    return new Command({ update: { messages }, goto: afterPrepare(state) });
+    return new Command({ update: { messages }, goto: 'compactContext' });
   };
 }
 

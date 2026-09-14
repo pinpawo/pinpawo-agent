@@ -2,12 +2,12 @@ import { getAgentMessageMetadata } from '../../../messages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
-import { Command, messagesStateReducer } from '@langchain/langgraph';
+import { Command, messagesStateReducer, StateGraph, START, END } from '@langchain/langgraph';
 import type { AgentModels } from '../../../../types/agent';
 import { defineInstructionDocument } from '../../../../types/capability';
 import { setAgentMessageMetadata, queryAgentMessages } from '../../../messages';
 import { compileAgentRegistry } from '../../registry';
-import { buildRunStateReset, type OrchestratorStateType } from '../../state';
+import { OrchestratorState, buildRunStateReset, type OrchestratorStateType } from '../../state';
 import { createRunSupervisorNode } from './runSupervisor';
 import { createAnswerNode } from './answer';
 import { buildRunSupervisorInput } from '../../runSupervisor/input';
@@ -35,7 +35,17 @@ function state(): OrchestratorStateType {
   };
 }
 function node(decision: import('../../runSupervisor/testing').ScriptedSupervisorDecision) {
-  return createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async () => decision }) });
+  const supervisor = createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async () => decision }) });
+  return async (input: OrchestratorStateType, config: typeof options) => {
+    let destination = '';
+    const graph = new StateGraph(OrchestratorState)
+      .addNode('runSupervisor', supervisor, { ends: ['capability', 'answer'] })
+      .addNode('capability', () => { destination = 'capability'; return {}; })
+      .addNode('answer', () => { destination = 'answer'; return {}; })
+      .addEdge(START, 'runSupervisor').addEdge('capability', END).addEdge('answer', END).compile();
+    const result = await graph.invoke(input, config);
+    return new Command({ goto: destination, update: result });
+  };
 }
 function apply(input: OrchestratorStateType, command: Command): OrchestratorStateType {
   const update = command.update as Partial<OrchestratorStateType>;
@@ -117,16 +127,10 @@ test('new user input is consumed once, including guidance added within a native 
   assert.ok(!build({ ...input, runSupervisorUserMessageId: 'human:guidance' }).inputId.startsWith('human:'));
 });
 
-test('Root validates that a natural reply matches the actual AI message', async () => {
-  const input = state();
-  const runner = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (invocation) => ({
-    ...scriptedSupervisorResult(invocation, { reply: 'Actual reply' }), reply: 'Different reply',
-  }) } });
-  await assert.rejects(runner(input, options), /actual final AIMessage/);
-});
-
 test('accepting a pending task without returned evidence is rejected', async () => {
   const input = state();
   const pending = apply(input, await node({ name: 'submit_plan', args: { tasks } })(input, options));
-  await assert.rejects(node({ name: 'review_current', args: { completed: true, reason: 'No evidence.' } })(pending, options), /returned delivery/);
+  const next = apply(pending, await node({ name: 'review_current', args: { completed: true, reason: 'No evidence.', reply: 'Cannot accept yet.' } })(pending, options));
+  assert.deepEqual(next.runSupervisorState, pending.runSupervisorState);
+  assert.ok(next.messages.some(m => ToolMessage.isInstance(m) && m.name === 'review_current' && m.status === 'error'));
 });

@@ -10,7 +10,7 @@ import { createOrchestratorGraph } from '../runtime/graph';
 import { buildOrchestratorRunInput } from '../state';
 import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
-import { getDelegationAnnounce } from '../delegation';
+
 import { getAgentMessageMetadata, queryAgentMessages } from '../../messages';
 import { readCapabilityCall } from './testingExecution';
 
@@ -78,7 +78,6 @@ test('real control handoff returns evidence to main and retains separate Supervi
   assert.ok(result);
   assert.equal(JSON.parse(result.text).delivery.text, 'Repository inspection evidence.');
   assert.equal(boundary.filter((message) => message.text.includes('Repository inspection evidence.')).length, 1);
-  assert.equal(output.messages.some(getDelegationAnnounce), false);
   assert.equal(output.messages.some((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability'), true);
   assert.equal(readDelegationDeliveries(output.messages).length, 1);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');
@@ -269,7 +268,6 @@ test('multiple attempts keep both actual main tool results in one run', async ()
   assert.deepEqual(results.map((message) => JSON.parse(message.text).delivery.text),
     ['First attempt evidence.', 'Second attempt evidence.']);
   assert.equal(new Set(readDelegationDeliveries(output.messages).map((delivery) => delivery.scope.delegationId)).size, 1);
-  assert.equal(output.messages.some(getDelegationAnnounce), false);
 });
 
 test('missing delivery checkpoints an error result, leaves the plan untouched and lets Supervisor retry', async () => {

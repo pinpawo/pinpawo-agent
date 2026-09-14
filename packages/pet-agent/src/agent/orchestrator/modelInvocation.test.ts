@@ -1,3 +1,4 @@
+import { createDeliveryResult, withDeliveryCalls } from '../../testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -9,7 +10,7 @@ import {
 } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createAgent, createMiddleware } from 'langchain';
-import { DelegationAnnounceMessage } from './delegation';
+
 import {
   invokeOrchestratorModel,
   toolProtocolMiddleware,
@@ -34,12 +35,12 @@ class RecordingModel extends BaseChatModel {
 }
 
 function acceptedAnnounce() {
-  return new DelegationAnnounceMessage({
+  return createDeliveryResult({
     id: 'accepted-1',
     sourceLane: 'capability:explore',
     delegationId: 'delegation-accepted',
     runId: 'run-old',
-    announceMessageId: 'announce-old',
+    deliveryId: 'announce-old',
     task: '检查历史实现',
     result: '历史实现已检查。',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -53,20 +54,17 @@ test('direct invocation keeps system ownership separate and projects Agent messa
 
   await invokeOrchestratorModel(model, {
     systemMessage,
-    messages: [new HumanMessage('继续。'), accepted],
+    messages: withDeliveryCalls([new HumanMessage('继续。'), accepted]),
   });
 
   const invoked = model.invocations[0] ?? [];
   assert.equal(invoked[0], systemMessage);
   const projected = invoked.find((message) => message.id === accepted.id);
   assert.ok(projected);
-  assert.notEqual(projected, accepted);
-  assert.ok(HumanMessage.isInstance(projected));
-  assert.equal(JSON.parse(projected.text).result, accepted.text);
-  assert.equal(JSON.parse(projected.text).authority, 'none');
-  assert.equal(JSON.parse(projected.text).provenance, 'root_checkpoint');
-  assert.equal(JSON.parse(projected.text).evidenceType, 'capability_execution_report');
-  assert.equal(accepted.text, '历史实现已检查。');
+  assert.equal(projected, accepted);
+  assert.ok(ToolMessage.isInstance(projected));
+  assert.equal(JSON.parse(projected.text).delivery.text, '历史实现已检查。');
+
 });
 
 test('direct invocation repairs invalid tool protocol before the model call', async () => {

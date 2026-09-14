@@ -16,7 +16,7 @@ import {
   type RunSupervisorRunner,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { scriptedSupervisorResult } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+import { withScriptedDelegation } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import type {
   AgentChannelSetup,
 } from '../../../local-agent/src/agentChannel';
@@ -209,27 +209,27 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
       }),
     }),
   } as unknown as AgentModels['act'];
-  const runSupervisorRunner: RunSupervisorRunner = {
+  const runSupervisorRunner: RunSupervisorRunner = withScriptedDelegation({
     async invoke(input) {
       if (input.mode === 'boundary') {
         const latest = readCapabilityExecutions(input.messages)
           .filter(({ metadata }) => metadata.runId === input.runId).at(-1);
         if (latest?.result?.status === 'paused') {
-          return scriptedSupervisorResult(input, {
+          return {
             name: 'review_current',
             args: { completed: false, reason: 'Resume the paused fixture action after user guidance.' },
-          });
+          };
         }
-        return scriptedSupervisorResult(input, {
+        return {
           name: 'review_current',
           args: {
             completed: true, reason: 'Current task delivery is evidenced.',
             reply: input.userRequest.includes(ATTACHMENT_TOOL_INPUT) ? ATTACHMENT_TOOL_REPLY : GUARDED_HOST_REPLY,
           },
-        });
+        };
       }
       const readsAttachment = input.userRequest.includes(ATTACHMENT_TOOL_INPUT);
-      return scriptedSupervisorResult(input, {
+      return {
         name: 'submit_plan',
         args: {
           tasks: [{
@@ -239,9 +239,9 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
               : 'write the guarded fixture',
           }],
         },
-      });
+      };
     },
-  };
+  });
   const subagentModel = new ProductionToolkitToolCallingModel();
 
   return {

@@ -6,7 +6,7 @@ import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { defineInstructionDocument } from '../src/types/capability.ts';
-import { DelegationAnnounceMessage } from '../src/agent/orchestrator/delegation/index.ts';
+
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from './supervisor-fixtures';

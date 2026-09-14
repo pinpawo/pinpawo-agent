@@ -1,4 +1,5 @@
 // @ts-nocheck — eval script, types from langsmith barrel are incomplete
+import { createDeliveryResult, readFixtureDelivery, withDeliveryCalls } from '../src/testing/capabilityDelivery';
 /**
  * LangSmith evaluation: orchestrator route decision
  *
@@ -27,10 +28,7 @@ import {
   type AgentCapability,
 } from '../src/types/capability';
 import { defineToolkit } from '../src/types/toolkit';
-import {
-  DelegationAnnounceMessage,
-  getDelegationAnnounce,
-} from '../src/agent/orchestrator/delegation';
+
 import { setAgentMessageDelegationScope } from '../src/agent/messages';
 import {
   activeCapabilityFromResult,
@@ -55,13 +53,13 @@ function evalAnnounce(params: {
   result: string;
   accepted?: boolean;
 }) {
-  const announceMessageId = `announce:${params.runId}:${params.delegationId}`;
-  const message = new DelegationAnnounceMessage({
-    id: `${params.accepted ? 'accepted' : 'private'}:${announceMessageId}`,
+  const deliveryId = `announce:${params.runId}:${params.delegationId}`;
+  const message = createDeliveryResult({
+    id: `${params.accepted ? 'accepted' : 'private'}:${deliveryId}`,
     sourceLane: params.lane,
     runId: params.runId,
     delegationId: params.delegationId,
-    announceMessageId,
+    deliveryId: deliveryId,
     task: params.task,
     result: params.result,
     createdAt: '2026-08-31T00:00:00.000Z',
@@ -361,6 +359,7 @@ export async function target(
     : null;
 
   // Evaluate through task/search + route decision, but stop before executing subagents.
+  turnInput.messages = withDeliveryCalls(turnInput.messages);
   const result = await compiled.invoke(turnInput, {
     interruptBefore: ['capability'],
     configurable: {
@@ -384,7 +383,7 @@ function hasCurrentSubagentObservation(result: Record<string, unknown>): boolean
 function latestAnnounceFromResult(result: Record<string, unknown>) {
   const messages = Array.isArray(result.messages) ? result.messages : [];
   return messages.flatMap((message) => {
-    const announce = getDelegationAnnounce(message);
+    const announce = readFixtureDelivery(message);
     return announce ? [announce] : [];
   }).at(-1) ?? null;
 }

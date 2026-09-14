@@ -1,3 +1,4 @@
+import { readFixtureDelivery } from '../../../testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
@@ -7,9 +8,7 @@ import {
   getAgentMessageLane,
   getAgentMessageMetadata,
 } from '../../messages';
-import {
-  getDelegationAnnounce,
-} from '.';
+
 
 test('initial delegation materializes one model-only briefing with the stable goal', () => {
   const briefing = materializeDelegation({
@@ -69,5 +68,5 @@ test('briefing is invocation input and never becomes lane routing truth', () => 
 
   assert.equal(getAgentMessageMetadata(briefing).source, 'delegation_briefing');
   assert.equal(getAgentMessageLane(briefing), null);
-  assert.equal(getDelegationAnnounce(briefing), null);
+  assert.equal(readFixtureDelivery(briefing), null);
 });

@@ -247,3 +247,71 @@ runner 标记为 `supervisor-briefing-v1`，与先前 guidance 协议结果区�
 Capability 模型。首次和继续执行均不将临时 briefing HumanMessage 写入长期私有历史。
 用户暂停恢复输入的 guidance 是独立用户输入协议，保持不变。未重启既有真实 Studio
 业务会话；旧委派参数及旧 checkpoint 不做兼容迁移。
+
+## #819：从计划注入委派与轻量验收（2026-09-15）
+
+本轮用户确认的方向替代上一节的自由 briefing 参数：规划/调整先确定任务，模型通过
+`delegate_capability({})` 决定执行，运行时将当前任务、按执行顺序排列的计划以及本次
+review 的补做意见组装到同一条规范委派的 briefing 中。其他计划项只是执行背景。
+验收主要依据 Capability 返回结果；只有实质偏差、明显缺项或矛盾才要求补做，不增加
+逐项取证、额外核查工具或强制验收路由。
+
+#819 的确定性回归覆盖 A 已执行并验收后误验收 B 的序列：错误 ToolMessage 携带当前
+任务和计划，模型可以继续委派 B；A 的成功验收保留，A/B 各执行一次。可纠正的业务
+决策错误返回模型；协议完整性、取消与中断仍传播。Root 重算并核对注入正文，拒绝
+模型覆盖或交接后的篡改。格式化长任务内容、continue 补做意见与执行快照保持完整。
+
+DeepSeek Flash（本机 profile `deepseek-v4-flash`）合成评估：
+
+- 历史压力：0/300 组历史 × Entry/Boundary/恢复 Entry，各一次，共 6/6 成功交接。
+  300 组历史的 Entry 和 Boundary 各出现一次携带旧 briefing 参数的调用，反馈后自行
+  纠正；没有未知工具调用。不能据此声称模型已完全不受历史参数影响。
+- 收尾：11 个案例通过 9 个。新增轻微格式问题接受交付、明显缺项继续补做两例均通过。
+- 两个未通过案例保留：`verbal-submission-claim` 同时调用 review 和 adjust，触发现有
+  独占控制调用校验而终止；`e2e-review-delivery` 正确发现缺少看板提交，却继续委派
+  无提交能力的原 Capability。两者不认定为本轮已解决的问题。
+
+结果分别保存在 `/tmp/supervisor-plan-briefing-v2`（协议标记
+`supervisor-plan-briefing-v2`）和 `/tmp/supervisor-plan-closure-v2`。样本量小，不代表
+稳定成功率，也不能替代真实 Studio 业务 E2E。后续同步了 Capability 执行提示中残留
+的 essential_context/guidance 说明，使其解释新 briefing 的 task/plan/feedback；以上
+评估仅调用 Supervisor，不涉及执行方模型。
+
+完整仓库回归 1788 passed、5 skipped、0 failed，包含 Studio 跨包集成测试。本轮没有
+重启已有 Studio 业务会话；旧 checkpoint 不新增兼容迁移。以上历史评估章节保留原协议
+和当时结论，不应作为当前无参数模型工具的使用说明。
+
+### 运行时执行快照替代参数改写（2026-09-15）
+
+用户进一步确认使用 LangChain 的 ToolRuntime 注入执行上下文。工具从 runtime.state
+中的已确认控制消息推导计划并生成 briefing，随运行时 execution 快照交接 Root；不再
+将正文写入 AIMessage.tool_calls.args。当前模型调用、主会话历史调用均为 `{}`。
+Root 复用同一转换逻辑重算快照并校验，执行读取、压缩保留和 Host 投影改用新快照。
+不增加额外待提交状态，也不兼容先前将 briefing 放在模型参数中的 checkpoint。
+
+新的 DeepSeek Flash 历史压力样本仍为 0/300 组历史 × Entry/Boundary/恢复 Entry，
+各一次，共 6/6 成功，每次只有一个空参数委派，没有未知工具或参数纠正。结果存于
+`/tmp/supervisor-runtime-briefing-v3`；runner 后续标记为 `supervisor-runtime-briefing-v3`。
+这是新的小样本观察，不能据此推断所有历史干扰已消除。前述 9/11 收尾评估的两个
+失败保持开放，本次仅重跑历史压力，不将旧结果改写为新实现的收尾评估结果。
+
+### 重复评估与纠错修复（2026-09-15）
+
+提交 70f89ac7 的重复评估：历史压力 16/18 通过；收尾完成 29/33，其中 21 通过、6 例
+在等待模型时触发 240 秒上限，连续超时后停止剩余 4 例。严格评分的其余失败包括两例
+转交前项结论时多余调整计划、一例失败参数调用被计入重排，以及一次无效 AIMessage。
+历史压力中的 17 次实际委派均为空参数，没有未知工具。原始日志没有保存 invalid_tool_calls，
+不能确定那次无效消息的具体内容；本次为两个 runner 补充该字段，保留下一次失败证据。
+
+针对可恢复的无效 JSON：SDK 提供调用名称和 ID 时，保留原始参数进入工具错误回执
+路径，让模型自行修正，不执行失败调用。缺失身份、非 AIMessage 等协议错误仍传播。
+回归覆盖规划、委派、验收的 malformed JSON 自纠，以及持续错误触发原有 recursionLimit，
+没有 middleware 内部重试循环。下一执行方能读取前项交付的跨任务行为也有回归覆盖；
+提示明确该上下文来源，避免模型仅为转交结果而复制正文、调整计划。
+
+评分器将 adjustmentAttempts 与成功的 adjustments 分开。原始 e2e-review-delivery-0
+样本误传任务 id 后自行纠正，新评分器重放得到两次尝试、一次调整并通过；没有修改
+旧评估文件或把重评分冒充新模型运行。仍然将成功但多余的调整判为失败。
+
+本次完整仓库回归 1791 passed、5 skipped、0 failed，PetAgent 类型检查和完整 build
+通过。真实模型的提示改动效果需单独复测，不能由确定性回归推断。

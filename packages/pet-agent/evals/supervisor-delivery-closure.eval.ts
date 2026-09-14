@@ -3,7 +3,7 @@ import { buildRunSupervisorAgentSystemPrompt } from '../src/agent/orchestrator/p
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { supervisorDeliveryClosureDataset } from './datasets/supervisor-delivery-closure';
 import { closureInput, scoreClosure } from './supervisor-delivery-closure';
@@ -40,9 +40,9 @@ await Promise.all(Array.from({ length: Math.min(3, pending.length) }, async () =
         modelStarts.set(runId, Date.now());
         record({ event: 'model.start', runId, messageCount: messages[0]?.length, inputChars: JSON.stringify(messages).length });
       },
-      handleLLMEnd: (result: { generations: Array<Array<{ message?: { tool_calls?: Array<{ name: string; args: unknown }>; usage_metadata?: unknown }; generationInfo?: unknown }>> }, runId: string) => {
+      handleLLMEnd: (result: { generations: Array<Array<{ message?: { tool_calls?: Array<{ name: string; args: unknown }>; invalid_tool_calls?: unknown; usage_metadata?: unknown }; generationInfo?: unknown }>> }, runId: string) => {
         record({ event: 'model.end', runId, durationMs: Date.now() - (modelStarts.get(runId) ?? started),
-          generations: result.generations.flat().map(g => ({ toolCalls: g.message?.tool_calls, usage: g.message?.usage_metadata, info: g.generationInfo })) });
+          generations: result.generations.flat().map(g => ({ toolCalls: g.message?.tool_calls, invalidToolCalls: g.message?.invalid_tool_calls, usage: g.message?.usage_metadata, info: g.generationInfo })) });
       },
       handleLLMError: (error: Error, runId: string) => record({ event: 'model.error', runId, durationMs: Date.now() - (modelStarts.get(runId) ?? started), error: error.name }),
     }];

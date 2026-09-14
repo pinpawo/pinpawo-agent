@@ -10,7 +10,7 @@ import { DelegationAnnounceMessage } from '../src/agent/orchestrator/delegation/
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from './supervisor-fixtures';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing.ts';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 import { createSupervisorDetailsDiagnostics } from './supervisor-details-diagnostics.ts';

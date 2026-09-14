@@ -18,7 +18,7 @@ Root 承载会话、整体执行流程和 checkpoint。Supervisor 在这个流�
 持久子代理、调度状态或模型回跳作为优化目标。
 
 **Supervisor 保留计划与验收调用及其确认；委派由 Supervisor 的同一次 delegate_capability
-调用交给 Root 执行，Root 返回配对的实际结果。委派的局部确认不保留，不生成第二次调用，
+调用交给 Root 执行，Root 返回配对的实际结果。委派不生成局部确认，不生成第二次调用，
 也不增加中间 proposal 状态。**
 
 | 部分 | 职责 |
@@ -54,8 +54,8 @@ type RunSupervisorState = {
 ```
 
 不另设 `activeDelegation`、`proposal`、`pendingCall`、`nextAttempt`、`lastOutcome`
-或嵌套 `run` 容器。调用参数与已有事实能够推导的当前状态，不重复放进 state；派发时的任务与执行身份作为
-消息内部元数据保存，防止后续计划调整改变历史执行含义。
+或嵌套 `run` 容器。调用参数与已有事实能够推导的当前状态，不重复放进 state；实际执行的任务与执行身份作为
+返回 ToolMessage 的 artifact 保存，防止后续计划调整改变历史执行含义。
 
 删除独立 active delegation 不等于删除执行身份和进度。计划任务使用稳定 ID，以及
 `pending / completed / superseded` 业务进度，明确尚未验收、已验收或被替换。
@@ -138,6 +138,16 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 
 ### 工具职责
 
+四个控制工具分别定义在 submitPlanTool、reviewCurrentTool、adjustPlanTool 和
+delegateCapabilityTool 中，各自直接定义参数 schema、说明、回调和对应的业务函数，
+Supervisor 显式注册。工具直接执行自己的变更函数，不经过统一业务分支。
+
+三个计划工具通过 Command 直接更新本次 LangGraph state，并返回模型可读的计划事实；
+delegateCapabilityTool 是 Supervisor 和 Root 共享的同一个可执行工具。controlMiddleware
+通过 Command.PARENT 把计划与工作消息提交给 Root，Root 的 ToolNode 校验并执行原调用。
+ToolRuntime 注入当前 state，工具构造 briefing 并运行 Capability。messageHandoff 仅标注
+消息可见性与身份，不参与工具定义、参数搬运或执行协议。
+
 本次调整依据 [Studio E2E #803](https://github.com/pinpawo/pinpawo-agent/issues/803)：
 验收与下一步行动分离，由 Supervisor 模型在工具结果返回后继续决定。
 
@@ -146,56 +156,61 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 | `submit_plan` | 建立计划，返回计划事实；不派发执行 |
 | `review_current` | 验收当前交付或记录需要补做，返回更新后的计划；不要求 reply，不派发执行 |
 | `adjust_plan` | 调整未完成计划并保留已完成进度，返回计划事实；不派发执行 |
-| `delegate_capability` | 模型明确决定执行当前计划项，提供完整 briefing；只在这里交接给 Root |
+| `delegate_capability` | 模型无参数地决定执行当前计划项；运行时注入 briefing 并交接给 Root |
 | `capability_details` | 返回能力详情，继续模型循环 |
 
 控制工具均不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
-自然回复。只有 `delegate_capability` 的成功工具回执才结束 Supervisor 循环并交接给 Root；
-错误回执继续返回模型，不能因工具名称是执行工具而提前结束。
+自然回复。`delegate_capability` 通过 Command.PARENT 交接原调用，Root ToolNode 校验参数并注入执行上下文；
+参数错误返回 Supervisor 自纠，不启动 Capability。
 
-Supervisor 优先沿用适用的现有计划，非必要不重排。补做要求写入本次 briefing；只有新要求
+Supervisor 优先沿用适用的现有计划，非必要不重排。补做要求通过 `review_current(false)` 记录，随本次委派自动注入 briefing；只有新要求
 或具体证据表明原安排不适用、能力选错或存在遗漏时，才决定最小调整。`adjust_plan.tasks`
 只列剩余工作，运行时自动保留已完成事项。保留当前能力和交付身份使用 continue；replace
 不携带旧交付作为新任务的验收依据。这是模型职责与工具语义，不新增强制路由或重排次数限制。
 
-工具自身校验参数，`wrapToolCall` 仅把框架抛出的参数解析错误转换为匹配 call ID 的
+工具自身校验参数，`wrapToolCall` 把框架抛出的参数解析错误转换为匹配 call ID 的
 `status: error` ToolMessage，保留详细校验信息；不在 `afterModel` 重复校验或手动跳转。
+不改写模型响应，也不将 SDK 的 invalid_tool_calls 强转为可执行调用。非法 JSON 保持框架原有行为，
+本层不承诺自动恢复。计划变更或交接与其他工具混合调用时，整批返回错误回执，供模型逐个重试；
+只读详情查询仍可并行。
+连续错误由原有 recursionLimit 截断，不在 middleware 内另起无限重试循环。
 未知或本轮未提供的工具使用框架原生错误回执（含可用工具名），让模型沿正常工具循环
 在同轮修正。错误调用不执行工具、不提交计划或派发 Capability；成功调用仍按原有
-schema 与业务约束校验。纠错遵守调用方 recursionLimit，业务约束、取消、中断与协议
-完整性错误继续传播，不转换成可重试参数错误。
+schema 与业务约束校验。无交付验收、非法能力等可纠正的决策错误也返回错误回执和当前计划，
+让模型继续判断；成功的前序控制仍参与最终提交。纠错遵守调用方 recursionLimit，取消、
+中断、缺失执行身份与协议完整性错误继续传播。
 没有待执行任务不构成失败，也不自动生成答案；Supervisor 通过普通 AIMessage 回复。
 
 ### 工具状态与 Root 提交
 
-每次 Supervisor invoke 从 Root 的计划与执行事实开始。内部工具按本次已完成的控制调用
-顺序推导当前计划，在 ToolMessage 中返回计划事实供模型决策。工具不直接修改外部资源，
-不创建独立的持久 Supervisor state/proposal/nextExecution 槽。
+每次 Supervisor invoke 用 Root 计划初始化内部 runSupervisorState，reviewFeedback 从空值开始。
+内部工具读取最新 state 并通过 Command 更新它，在 ToolMessage 中返回计划事实供模型决策。
+这份 state 仅属于本次 invoke；不创建另一套持久会话、proposal 或 nextExecution 槽。
 
-invoke 结束时，Root 验证并按顺序应用本次已完成的控制调用。无论模型最终选择执行还是
+invoke 结束时，Root 接收工具更新后的最终计划 state，并验证交接身份。无论模型最终选择执行还是
 自然回复，都提交计划更新与工作消息。执行时将 Supervisor 的 `delegate_capability`
-请求交接为主会话记录，保留模型提供的 briefing 参数并规范化调用 ID；不创建第二条
+请求交接为主会话记录，保持空参数并规范化调用 ID；briefing 放入运行时执行快照，不创建第二条
 调用。执行快照写入内部元数据，Capability 仍在 Root 节点执行并返回实际结果。
 
 ```text
 Supervisor: review_current → ToolMessage(更新后的计划)
           → 模型继续判断
           → 自然回复，或调整计划后继续判断，或 delegate_capability
-Root:      验证控制记录，提交计划 + 消息
+Root:      校验交接身份，提交最终计划 + 消息
           → answer，或执行明确交接的 Capability
 ```
 
-业务更新只能从匹配、成功的控制工具消息推导；不接受模型伪造的执行身份或 ToolMessage。
-工具执行时和 Root 接收时复用同一纯转换函数。每条控制 ID 在本 run 只接纳一次。
+业务更新由独立工具写入 LangGraph state；模型不能直接提供计划状态或执行快照。
+工具通过 Command 更新本次调用的计划 state；Root 接收最终 state，不重放控制消息。委派调用 ID 在本 run 只接纳一次。
 非法能力、无交付验收、未返回的重复执行等仍属于状态一致性检查；下一步做什么由模型决定。
 单次模型响应中的控制调用保持顺序明确，避免并行修改同一计划。
 
 ### 生命周期与恢复
 
 计划事实仍只有 goal/plan；执行身份与结果仍保存在 Root 工具消息对。
-在 Supervisor invoke 返回前发生取消或异常，不提交部分内存状态，也不会执行 Capability。
+在自然回复或 Command.PARENT 提交前发生取消或异常，不提交部分内存状态，也不会执行 Capability。
 Root 提交后沿用现有 checkpoint / Capability interrupt 恢复，不重放已提交的执行副作用。
-delegation 交接只接受 execute_current 协议，回复只读取 Supervisor 的自然 AIMessage。
+delegation 交接只接受 delegate_capability 协议，回复只读取 Supervisor 的自然 AIMessage。
 不为旧 review.reply 或旧 delegation 参数增加兼容读取；协议变化不承诺恢复旧 checkpoint。
 当前协议内的原生 interrupt、checkpoint 恢复和执行去重继续保留。
 
@@ -208,9 +223,9 @@ Middleware 检查调用协议与 schema；工具返回真实状态，供下一�
 ### 验收
 
 - review 最后一项后模型自然回复：计划完成、一个最终主会话回复、Capability 不再执行。
-- submit/adjust/review 后均能再次调用模型；仅 execute_current 产生 delegation。
+- submit/adjust/review 后均能再次调用模型；仅 delegate_capability 产生 delegation。
 - review 后继续执行、调整后执行、仍有 pending 任务时提问，均保持正确状态。
-- 多次工具调用的状态一致，Root 防篡改/去重与原生恢复保持有效。
+- 多次工具调用的状态一致，Root 交接身份校验、去重与原生恢复保持有效。
 
 ### lane 归属不变
 
@@ -331,7 +346,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 
 提取无模型调用的回复发布函数，接收明确的回复文本和当前运行身份，返回主会话消息及必要的收尾更新。该函数不判断任务完成、不选择下一步、不重写模型文本、不引入独立 reply/pending 状态字段。
 
-Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`delegate_capability` 的成功回执结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
+Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`delegate_capability` 准备好执行请求后结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
 
 运行停止原因由程序单独格式化：迭代预算停止及 checkpoint 不兼容时，复用发布函数输出运行状态并结束；真正异常保持原来的失败通道。保留 Entry 的职责，必要时复用消息构造函数，但不在本次重构中改变 Entry 的决策或提示机制。
 
@@ -367,37 +382,75 @@ Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次�
 Supervisor 的 `delegate_capability`，由同一次模型工具调用交接 Root；不再生成第二次
 同义的 Root 工具调用，不保留旧工具别名或旧 checkpoint 参数兼容。
 
-模型参数仅保留必填 `briefing`：本次完整执行说明与必要上下文。Capability 与 task
-已经由当前计划决定，不让模型重复填写；taskId、delegationId、initial/continue 由运行时
-确定。briefing 遵循目标和计划，不取代 adjust_plan；由 Supervisor 组织足够清晰的执行说明。
+模型调用参数为 `{}`。规划和调整工具的 task 承载完整执行说明与预期交付，运行时
+从已确认计划组装 briefing。Capability、taskId、delegationId、initial/continue 同样由
+运行时确定，不让模型在委派时重新编写另一份任务。
 
 计划和验收工具仍返回事实供模型继续决策。delegate_capability 校验成功后结束本次
 Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再进入 Capability 节点。
-局部交接确认不进入长期历史；实际执行结果使用同一条已规范化的工具调用 id 返回。
+不生成局部成功回执；实际执行结果使用同一条已规范化的工具调用 id 返回。
 保留 run 范围的 id 规范化，避免不同 run 的模型 call id 复用碰撞。
 
 执行快照只存于规范委派消息的运行时元数据，包含任务身份、能力、当时任务内容、
-delegation 身份与执行模式；briefing 直接读取工具参数，不重复保存。主会话保留一组
-请求/实际结果，模型看到的历史参数与可调用 schema 完全一致。原始模型调用 id 作为
-来源关联保留。Root 仍从 Supervisor 决策序列重算计划和执行快照并校验交接，避免提交
-被改写、重复或未授权的执行；不增加另一份 pending/dispatch 状态。
+delegation 身份、执行模式与 briefing；执行正文只从此快照读取。主会话保留一组
+请求/实际结果，当前与历史调用参数均为 `{}`，不向模型工具参数注入内部数据。原始模型调用 id 作为
+来源关联保留。Root 接收 Supervisor 工具维护的最终计划，检查交接与当前任务、run 和调用身份一致，并拒绝重复交接；不重放决策序列。
 
 执行历史读取、暂停恢复和上下文压缩都从该元数据取快照，不能用现有计划反推旧任务。
-Host 的 readCapabilityExecutions 返回结构保持稳定，继续供计划进度和交付展示使用。
+Host 的 readCapabilityExecutions 读取实际已返回的执行；原生待执行调用结合当前计划投影活跃任务。
 回归覆盖单次派发、错误自纠、验收、continue/replace、新 run、重复调用 id、篡改、
 暂停恢复、压缩保留、Host 投影及 Studio 工作→反馈能力交接。旧协议 checkpoint 不迁移。
 
-### 委派正文统一为 briefing（2026-09-14）
+### 从计划注入 briefing（2026-09-15，替代模型编写正文）
 
-Supervisor 的模型参数改为 `{ briefing: string }`，必填且非空，使用普通文本或 Markdown
-组织本次执行要求、必要背景、已有成果引用及交付预期。briefing 是本次完整执行说明，
-不是计划任务的可选补充；不要求模型生成 XML，不再保留 guidance/essentialContext 别名。
-能力和任务仍由计划决定，整体目标与执行身份由运行时提供，不在模型参数中重复提交。
+模型只调用 `delegate_capability({})`，主会话保存的调用也保持空参数。工具通过 LangChain
+注入的 `ToolRuntime.state` 直接读取当前计划和本次 review feedback，并构建执行快照。快照中的 `briefing: string` 正文为
+格式化 JSON：按执行顺序排列的 `plan`（capability/task/status），以及本次
+Supervisor invoke 中 `review_current(false)` 的 `feedback`（若有）。其他计划项仅供
+上下文参考，本次只执行当前任务。当前任务正文只从执行输入的 task 字段读取，构造 Capability HumanMessage 时与 briefing 一起呈现，briefing 不再另存 task 副本。验收通过或重新规划后清除本次补做意见。
 
-不沿用旧 guidance 的 2000 字符上限；工具仅验证非空，实际输入/输出预算继续由模型与
-现有上下文窗口管理。首次执行和继续执行共享同一个 briefing 字段，mode 只负责执行
-生命周期。内部 HumanMessage 可以继续用 XML 分隔目标、计划任务和 briefing，正文
-必须无损传递和安全转义；不持久化这条临时输入，也不把正文解析为执行身份。
+Root ToolNode 中的工具直接从 state 构造 briefing；执行结果 artifact 留存这次使用的输入。不增加模型调用、第二条委派请求或独立的待提交状态。交接过程不改写
+AIMessage 的 args；模型输入与历史调用共享空参数 schema，briefing 属于内部执行快照。
+旧的自由 briefing 参数会返回参数错误供模型纠正。
 
-用户通过暂停恢复提供的 guidance 属于用户输入协议，先传给 Supervisor，再由模型组织
-本次 briefing；它不属于此次删除的委派工具参数，不改变该恢复协议。
+完整说明在 submit_plan/adjust_plan 时确定，因此 task 不再使用 2000 字符上限，保留
+首尾空白、缩进与换行，仅拒绝全空白内容。内部临时 HumanMessage 仍可用 XML 分隔
+目标、当前任务与 briefing，安全转义且不持久化到 Capability 私有历史。执行身份由运行时生成并保存在实际结果的 artifact 中，不从正文解析。用户暂停恢复 guidance 属于独立用户输入协议，保持不变。
+
+验收主要依赖 Capability 返回的结果。模型在存在实质偏差、明显缺项或自相矛盾时才
+要求补做；不因措辞、格式或一般性改进反复执行，不增加逐项取证工具或强制核查流程。
+运行时只保留任务归属等基本一致性检查，不代替模型判断交付质量。
+
+Capability 同时读取主会话中的前项实际交付，后续任务可以直接引用已有结果；无需仅为
+传递结果而将整段交付复制进 task 或调整计划。该可见性通过跨任务执行回归验证。
+
+## 移除控制消息重放（2026-09-15）
+
+Supervisor 的 submit_plan、adjust_plan 和 review_current 各自通过原生 Command 更新
+本次 createAgent 的 runSupervisorState 与 reviewFeedback，同时返回模型可读的计划事实。
+失败不更新 state，参数及业务错误作为 ToolMessage 返回模型纠正。删除 toolSession、
+messageOffset 和 controlTranscript；历史工具消息仅是上下文，不再作为状态变更日志重放。
+
+各工具独立定义 schema，不使用 controlSchema 或按工具名分发的统一执行协议。
+测试和 eval 的决策投影仅在 testing.ts 中复用工具 schema。
+
+## 原生工具执行替代手工委派协议（2026-09-15）
+
+Supervisor 与 Root 共享同一个 delegate_capability 工具对象。Supervisor 的 wrapToolCall
+只通过 Command.PARENT 将本次计划、工作消息和 reviewFeedback 交给 Root 的 capability
+节点；该节点使用原生 ToolNode 调用该工具，框架负责 schema 校验和 ToolRuntime 注入。
+工具从 Root state 读取任务与反馈，运行 Capability，并通过原生 Command 更新业务状态。
+不再将执行输入编码到 AIMessage metadata，不再由 Root 解析自定义调用协议。
+
+模型调用参数保持空对象；运行时注入使用 ToolRuntime.state。实际执行输入作为完成后的
+ToolMessage artifact 保存，用于验收、展示和历史审计，不作为下一次执行的输入协议。
+尚未返回的调用由 Root 当前计划与原生待执行 ToolNode 表示。工作消息的 lane/run 标注
+属于历史可见性；跨图控制权与调用配对由 LangGraph 负责。
+
+### Root 直接注册 ToolNode
+
+Root 的 capability 节点直接使用 `new ToolNode([delegateCapability], { handleToolErrors: false })`。
+删除外围手动 invoke、lg_tool_call 输入拼装和 callbacks 覆盖。委派调用写入 Root 时按 run
+规范化调用 ID，让原生 ToolNode 在完整历史中去重；参数与原模型消息保持不变，实际结果
+使用同一个规范化 ID 配对。可纠正参数或业务错误由节点 errorHandler 返回错误 ToolMessage
+并进入 Supervisor；其他异常继续走 Root 终止路径，原生 interrupt 由框架恢复。

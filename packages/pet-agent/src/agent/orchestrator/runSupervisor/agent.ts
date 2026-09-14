@@ -1,4 +1,9 @@
-import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
+import { createSupervisorControlValidationMiddleware } from './controlMiddleware';
+import { createSubmitPlanTool } from './submitPlanTool';
+import { createReviewCurrentTool } from './reviewCurrentTool';
+import { createAdjustPlanTool } from './adjustPlanTool';
+import { createDelegateCapabilityTool } from './delegateCapabilityTool';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
@@ -6,13 +11,13 @@ import { createAgent } from 'langchain';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentInput, buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { queryAgentMessages, setAgentMessageMetadata } from '../../messages';
+import { queryAgentMessages } from '../../messages';
 import { toolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
-import { createSupervisorCapabilityDetailsTool, createSupervisorDisclosureStateMiddleware } from './detailsTool';
+import { createSupervisorCapabilityDetailsTool } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-import { createMessageSupervisorControlTools, createSupervisorControlValidationMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
+import { supervisorWorkMessages } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 import { projectDelegationAnnouncesForModel } from '../delegation';
 
@@ -20,6 +25,7 @@ export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
   defaultCapabilityName?: string;
   maxDocumentReadBytes?: number;
+  delegateCapabilityTool?: StructuredTool;
 }): RunSupervisorRunner {
   return {
     async invoke(input: RunSupervisorInput, runnableConfig?: RunnableConfig): Promise<RunSupervisorResult> {
@@ -45,7 +51,10 @@ export function createRunSupervisorAgent(params: {
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,
         })] : []),
-        ...createMessageSupervisorControlTools(context, agentMessages.length),
+        createSubmitPlanTool(context),
+        createReviewCurrentTool(context),
+        createAdjustPlanTool(context),
+        params.delegateCapabilityTool ?? createDelegateCapabilityTool({ models: { act: params.model, subagent: params.model } }),
       ];
       const agent = createAgent({
         name: 'runSupervisor',
@@ -53,14 +62,15 @@ export function createRunSupervisorAgent(params: {
         tools,
         systemPrompt: buildRunSupervisorAgentSystemPrompt(input.mode),
         middleware: [
-          createSupervisorControlValidationMiddleware(),
-          createSupervisorDisclosureStateMiddleware(),
+          createSupervisorControlValidationMiddleware(input, agentMessages.length),
           systemPromptMiddleware,
           toolProtocolMiddleware,
         ],
       });
       const result = await agent.invoke({
         messages: agentMessages,
+        runSupervisorState: input.state,
+        reviewFeedback: input.reviewFeedback ?? null,
         disclosedCapabilityNames: [...input.capabilityDisclosure.disclosedCapabilityNames],
       }, {
         ...runnableConfig,
@@ -84,21 +94,14 @@ export function createRunSupervisorAgent(params: {
 
       // createAgent returns its input too. Persist only this invocation's new work;
       // never retag canonical main messages or the temporary catalog frame.
-      const fresh = result.messages.slice(agentMessages.length);
-      const work = fresh.map((message: BaseMessage) => setAgentMessageMetadata(message, {
-        lane: 'supervisor', runId: input.runId, traceId: input.traceId,
-      }));
+      const work = result.messages.slice(agentMessages.length);
       const capabilityDisclosure = mergeCapabilityDisclosure(input.capabilityDisclosure, result.disclosedCapabilityNames ?? []);
-      const last = work.at(-1);
+      const handoff = supervisorWorkMessages(context, work);
+      const last = handoff.at(-1);
       if (AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim()) {
-        return { reply: last.text, capabilityDisclosure, messages: createSupervisorMessageHandoff(context, work) };
+        return { runSupervisorState: result.runSupervisorState, reply: last.text, reviewFeedback: result.reviewFeedback, capabilityDisclosure, messages: handoff };
       }
-      const handoff = createSupervisorMessageHandoff(context, work);
-      const dispatch = handoff.at(-1);
-      if (!AIMessage.isInstance(dispatch) || dispatch.tool_calls?.[0]?.name !== 'delegate_capability') {
-        throw new Error('Supervisor must reply or explicitly request execution.');
-      }
-      return { capabilityDisclosure, messages: handoff };
+      throw new Error('Supervisor must reply or explicitly request execution.');
     },
   };
 }

@@ -11,7 +11,9 @@ import {
   readSubagentGenerationReserveTokens,
 } from './config';
 import { createAnswerNode } from './nodes/answer';
-import { createCapabilityNode } from './nodes/capability';
+import { createDelegateCapabilityTool } from '../runSupervisor/delegateCapabilityTool';
+import { ToolNode } from '@langchain/langgraph/prebuilt';
+import { recoverCapabilityError } from './capabilityError';
 import { createRunSupervisorNode } from './nodes/runSupervisor';
 import {
   captureRunUserRequest,
@@ -32,16 +34,14 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const runSupervisor = createRunSupervisorNode(config);
+  const delegateCapability = createDelegateCapabilityTool({
+    ...config, subagentContextWindowTokens, subagentGenerationReserveTokens,
+  });
+  const runSupervisor = createRunSupervisorNode(config, delegateCapability);
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
   const resultAnswer = createAnswerNode();
-  const capabilityNode = createCapabilityNode({
-    config,
-    subagentContextWindowTokens,
-    subagentGenerationReserveTokens,
-  });
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
     .addNode('prepare', prepare, { ends: ['answer', 'compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
@@ -59,9 +59,9 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       ends: ['throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
-    .addNode('capability', capabilityNode, {
-      ends: ['throwRunFailure', 'answer'],
-      errorHandler: runTermination.onNodeError,
+    .addNode('capability', new ToolNode<typeof OrchestratorState.State>([delegateCapability], { handleToolErrors: false }), {
+      ends: ['runSupervisor', 'throwRunFailure', 'answer'],
+      errorHandler: (state: typeof OrchestratorState.State, error) => recoverCapabilityError(state, error) ?? runTermination.onNodeError(state, error),
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
     .addNode('pauseGate', pauseGate, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })

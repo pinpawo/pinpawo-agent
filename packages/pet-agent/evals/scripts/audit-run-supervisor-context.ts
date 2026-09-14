@@ -1,3 +1,4 @@
+import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { createSupervisorCapabilityDetailsTool } from '../../src/agent/orchestrator/runSupervisor/detailsTool.ts';
 import {
   AIMessage,
@@ -22,7 +23,10 @@ import {
 } from '../../src/agent/orchestrator/runSupervisor/routingManifest.ts';
 import { supervisorFixture } from '../supervisor-fixtures';
 import { supervisorHandoffContext } from '../../src/agent/orchestrator/runSupervisor/input';
-import { createMessageSupervisorControlTools } from '../../src/agent/orchestrator/runSupervisor/messageHandoff';
+import { createSubmitPlanTool } from '../../src/agent/orchestrator/runSupervisor/submitPlanTool';
+import { createReviewCurrentTool } from '../../src/agent/orchestrator/runSupervisor/reviewCurrentTool';
+import { createAdjustPlanTool } from '../../src/agent/orchestrator/runSupervisor/adjustPlanTool';
+import { createDelegateCapabilityTool } from '../../src/agent/orchestrator/runSupervisor/delegateCapabilityTool';
 import {
   DelegationAnnounceMessage,
 } from '../../src/agent/orchestrator/delegation/index.ts';
@@ -128,6 +132,8 @@ async function captureProviderHistory(messages: readonly BaseMessage[]) {
   return invocation.slice(1);
 }
 
+const auditModel = new FakeListChatModel({ responses: ['audit'] });
+
 async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
@@ -135,7 +141,14 @@ async function renderMode(mode: RunSupervisorMode) {
   const detailsTool = createSupervisorCapabilityDetailsTool({
     documents: createSupervisorDocumentReader(catalog), capabilityNames: catalog.capabilityNames,
   });
-  const tools = [...(mode === 'entry' ? [detailsTool] : []), ...createMessageSupervisorControlTools(supervisorHandoffContext(input))];
+  const context = supervisorHandoffContext(input);
+  const tools = [
+    ...(mode === 'entry' ? [detailsTool] : []),
+    createSubmitPlanTool(context),
+    createReviewCurrentTool(context),
+    createAdjustPlanTool(context),
+    createDelegateCapabilityTool({ models: { act: auditModel, subagent: auditModel } }),
+  ];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);
   console.log('\n### SYSTEM');

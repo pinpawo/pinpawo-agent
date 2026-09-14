@@ -4,22 +4,19 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import { createRunSupervisorAgent } from '../../runSupervisor/agent';
 import { resolveCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
-import { acceptSupervisorMessageHandoff } from '../../runSupervisor/messageHandoff';
-import { buildRunSupervisorInput, readSupervisorMode, supervisorHandoffContext } from '../../runSupervisor/input';
+import type { StructuredTool } from '@langchain/core/tools';
+import { buildRunSupervisorInput } from '../../runSupervisor/input';
 import type { OrchestratorStateType } from '../../state';
 import type { OrchestratorConfig } from '../../types';
 import { getInvokeOptions, getInvokeRegistry } from '../config';
 import { getAgentMessageMetadata } from '../../../messages';
 import { runIterationBudgetReached } from '../guards/runIterationBudget';
 
-export function createRunSupervisorNode(config: OrchestratorConfig) {
+export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapabilityTool?: StructuredTool) {
   const runner = config.runSupervisorRunner ?? createRunSupervisorAgent({
-    model: config.models.act, defaultCapabilityName: config.defaultCapabilityName,
+    model: config.models.act, defaultCapabilityName: config.defaultCapabilityName, delegateCapabilityTool,
   });
   return async (root: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
-    if (readSupervisorMode(root) === 'boundary' && !root.runSupervisorState.plan.length) {
-      return new Command({ update: { runRuntimeFailure: 'checkpoint_incompatible' }, goto: 'answer' });
-    }
     if (runIterationBudgetReached(root, runnableConfig)) return new Command({ goto: 'answer' });
     const catalog = createCapabilityCatalog({
       registry: getInvokeRegistry(runnableConfig),
@@ -44,21 +41,18 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       runCapabilityDisclosure: result.capabilityDisclosure,
       runSupervisorUserMessageId: input.inputId.startsWith('human:') ? input.inputId : root.runSupervisorUserMessageId,
     };
-    if (result.reply !== undefined) {
-      const last = result.messages.at(-1);
-      if (!result.reply.trim() || !AIMessage.isInstance(last) || last.tool_calls?.length || last.text !== result.reply) {
-        throw new Error('Supervisor final reply must match its actual final AIMessage.');
-      }
-      const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
-      return new Command({ update: { ...common, runSupervisorState: accepted.runSupervisorState, messages: accepted.messages }, goto: 'answer' });
+    const accepted = { ...result, reply: result.reply ?? null };
+    if (result.reply !== undefined && (!result.reply.trim() || !AIMessage.isInstance(lastMessage)
+      || lastMessage.tool_calls?.length || result.reply !== lastMessage.text)) {
+      throw new Error('Supervisor final reply must match its actual final AIMessage.');
     }
-    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
     if (!accepted.reply && !(AIMessage.isInstance(lastMessage) && lastMessage.tool_calls?.[0]?.name === 'delegate_capability')) {
       throw new Error('Supervisor must reply or explicitly request execution.');
     }
     return new Command({
       update: {
         ...common, runSupervisorState: accepted.runSupervisorState,
+        runSupervisorReviewFeedback: result.reviewFeedback ?? null,
         messages: accepted.messages,
       },
       goto: accepted.reply ? 'answer' : 'capability',

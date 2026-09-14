@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { getAgentMessageMetadata } from '../messages';
-import { capabilityExecutionSnapshotSchema, supervisorControlSchemas } from './runSupervisor/protocol';
+import { capabilityExecutionSnapshotSchema } from './runSupervisor/protocol';
 
 const resultSchema = z.object({
   status: z.enum(['returned', 'paused', 'missing_deliverable']),
@@ -14,17 +14,13 @@ const resultSchema = z.object({
   }).nullable(),
 });
 
-/** Runtime-owned snapshot plus the Supervisor's public arguments. */
+/** Read native tool-call identity; execution data lives in the actual tool result artifact. */
 export function readCapabilityExecutionCall(message: BaseMessage) {
   if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1) return null;
   const metadata = getAgentMessageMetadata(message);
-  if (metadata.lane || !metadata.runId || !metadata.traceId || metadata.source !== 'supervisor') return null;
   const call = message.tool_calls[0];
-  if (call.name !== 'delegate_capability' || !call.id) return null;
-  const args = supervisorControlSchemas.delegate_capability.safeParse(call.args);
-  const snapshot = capabilityExecutionSnapshotSchema.safeParse(metadata.execution);
-  if (!args.success || !snapshot.success) return null;
-  return { call, metadata, execution: { ...snapshot.data, briefing: args.data.briefing } };
+  if (metadata.lane || !metadata.runId || !metadata.traceId || call.name !== 'delegate_capability' || !call.id) return null;
+  return { call, metadata };
 }
 
 /** A read-only view of actual Root tool pairs, never a second execution register. */
@@ -34,15 +30,18 @@ export function readCapabilityExecutions(messages: readonly unknown[]) {
     if (message && ToolMessage.isInstance(message as BaseMessage)
       && !getAgentMessageMetadata(message as BaseMessage).lane
       && (message as ToolMessage).name === 'delegate_capability') {
-      results.set((message as ToolMessage).tool_call_id, message as ToolMessage);
+      results.set(`${getAgentMessageMetadata(message as BaseMessage).runId}:${(message as ToolMessage).tool_call_id}`, message as ToolMessage);
     }
   }
   return messages.flatMap((value) => {
     if (!value || !AIMessage.isInstance(value as BaseMessage)) return [];
     const invocation = readCapabilityExecutionCall(value as AIMessage);
     if (!invocation) return [];
-    const { call, metadata, execution } = invocation;
-    const resultMessage = results.get(call.id!);
+    const { call, metadata } = invocation;
+    const resultMessage = results.get(`${metadata.runId}:${call.id}`);
+    const snapshot = capabilityExecutionSnapshotSchema.safeParse(resultMessage?.artifact);
+    if (!snapshot.success) return [];
+    const execution = snapshot.data;
     let result: z.infer<typeof resultSchema> | null = null;
     if (resultMessage && typeof resultMessage.content === 'string') {
       try {

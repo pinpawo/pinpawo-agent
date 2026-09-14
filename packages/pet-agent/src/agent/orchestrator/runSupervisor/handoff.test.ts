@@ -12,7 +12,7 @@ import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
 import { getDelegationAnnounce } from '../delegation';
 import { getAgentMessageMetadata, queryAgentMessages } from '../../messages';
-import { readCapabilityCall } from '../runtime/delegationToolResult';
+import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
   readonly inputs: BaseMessage[][] = [];
@@ -28,9 +28,7 @@ class ScriptedModel extends BaseChatModel {
       const control = message.tool_calls?.[0];
       if (!control || !['submit_plan', 'adjust_plan', 'review_current'].includes(control.name)) return [message];
       const { reply, ...args } = control.args;
-      const followUp = reply ? new AIMessage(String(reply)) : call('delegate_capability', {
-        briefing: typeof args.reason === 'string' ? args.reason : 'Execute the planned task and return evidence.',
-      }, `${control.id}:execute`);
+      const followUp = reply ? new AIMessage(String(reply)) : call('delegate_capability', {}, `${control.id}:execute`);
       this.continuations.add(followUp);
       if (control.name === 'review_current' && args.completed === undefined) return [followUp];
       return [call(control.name, args, control.id!), followUp];
@@ -118,6 +116,8 @@ test('fresh run preserves Root facts without inheriting Supervisor work or dedup
   const secondOutput = await second.graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), options);
   assert.notEqual(secondOutput.runId, firstOutput.runId);
   assert.equal(readDelegationDeliveries(secondOutput.messages).length, 2);
+  const executions = readCapabilityExecutions(secondOutput.messages);
+  assert.equal(new Set(executions.map(record => record.call.id)).size, 2, 'reused provider IDs remain distinct across runs');
   assert.equal(secondOutput.messages.filter((message) => ToolMessage.isInstance(message)
     && message.name === 'plan_request' && message.tool_call_id === 'entry-call').length, 2);
   assert.ok(second.supervisor.inputs[0].some((message) => message.text === 'Inspection complete.'));

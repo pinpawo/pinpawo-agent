@@ -14,8 +14,8 @@ import { buildRunSupervisorInput } from '../../runSupervisor/input';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import { createCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
 import { withScriptedDelegation, scriptedSupervisorResult } from '../../runSupervisor/testing';
-import type { SupervisorControl } from '../../runSupervisor/messageHandoff';
-import { readCapabilityCall, capabilityResultMessage } from '../delegationToolResult';
+import { readCapabilityCall } from '../../runSupervisor/testingExecution';
+import { capabilityResultMessage } from '../../runSupervisor/testing';
 
 const models = { act: { invoke: () => { throw new Error('Unexpected model call'); } } } as unknown as AgentModels;
 const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
@@ -79,9 +79,9 @@ test('retry derives same-run execution identity and carries feedback in the actu
   const command = await node({ name: 'review_current', args: { completed: false, reason: 'Verify the document.' } })(input, options);
   const call = readCapabilityCall(apply(input, command));
   const previous = input.messages.filter((m) => AIMessage.isInstance(m) && m.tool_calls?.[0]?.name === 'delegate_capability').at(-1) as AIMessage;
-  assert.equal(call.delegationId, (getAgentMessageMetadata(previous).execution as { delegationId: string }).delegationId);
+  assert.equal(call.delegationId, (input.messages.at(-1) as ToolMessage).artifact.delegationId);
   assert.equal(call.mode, 'continue');
-  assert.equal(call.briefing, 'Verify the document.');
+  assert.equal(JSON.parse(call.briefing).feedback, 'Verify the document.');
 });
 
 test('accepted A and pending B survive an answer and new run without a continuation object', async () => {
@@ -117,17 +117,12 @@ test('new user input is consumed once, including guidance added within a native 
   assert.ok(!build({ ...input, runSupervisorUserMessageId: 'human:guidance' }).inputId.startsWith('human:'));
 });
 
-test('Root rejects changed handoff arguments and decisions without actual internal confirmation', async () => {
+test('Root validates that a natural reply matches the actual AI message', async () => {
   const input = state();
-  const runner = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (invocation) => {
-    const result = scriptedSupervisorResult(invocation, { name: 'submit_plan', args: { tasks } });
-    const dispatch = result.messages.at(-1) as AIMessage;
-    (getAgentMessageMetadata(dispatch).execution as { task: string }).task = 'Tampered task.';
-    return result;
-  } } });
-  await assert.rejects(runner(input, options), /does not match/);
-  await assert.rejects(node({ name: 'submit_plan', args: { tasks: [{ capability: 'missing', task: 'Do it.' }] } })(
-    input, options), /outside/);
+  const runner = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (invocation) => ({
+    ...scriptedSupervisorResult(invocation, { reply: 'Actual reply' }), reply: 'Different reply',
+  }) } });
+  await assert.rejects(runner(input, options), /actual final AIMessage/);
 });
 
 test('accepting a pending task without returned evidence is rejected', async () => {

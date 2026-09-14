@@ -1,14 +1,14 @@
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner';
-import { supervisorControlSchemas } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
-import { controlSchema } from '../src/agent/orchestrator/runSupervisor/protocol';
+import { isSupervisorControlTool } from '../src/agent/orchestrator/runSupervisor/protocol';
+import { parseSupervisorControl } from '../src/agent/orchestrator/runSupervisor/testing';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure';
 import { setAgentMessageMetadata } from '../src/agent/messages';
 
 /** Read the original model decision, not the programmatically derived execution call. */
 export function readSupervisorDecision(result: RunSupervisorResult) {
   const message = result.messages.filter((message) => AIMessage.isInstance(message)
-    && message.tool_calls?.some((call) => Object.hasOwn(supervisorControlSchemas, call.name) && call.name !== 'delegate_capability')).at(-1) as AIMessage | undefined;
+    && message.tool_calls?.some((call) => isSupervisorControlTool(call.name) && call.name !== 'delegate_capability')).at(-1) as AIMessage | undefined;
   const call = message?.tool_calls?.[0];
   if (!call) {
     if (result.reply !== undefined) return { reply: result.reply, name: undefined };
@@ -16,12 +16,12 @@ export function readSupervisorDecision(result: RunSupervisorResult) {
     const execute = result.messages.flatMap((message) => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
       .find((call) => call.name === 'delegate_capability');
     if (execute) {
-      const control = controlSchema.parse({ name: execute.name, args: execute.args });
+      const control = parseSupervisorControl({ name: execute.name, args: execute.args });
       if (control.name === 'delegate_capability') return control;
     }
     throw new Error('Evaluation result has no internal control decision.');
   }
-  const control = controlSchema.parse({ name: call.name, args: call.args });
+  const control = parseSupervisorControl({ name: call.name, args: call.args });
   // Evaluation projection only: the reply comes from the final AIMessage, never review args.
   return control.name === 'review_current' ? { ...control, args: { ...control.args, reply: result.reply } } : control;
 }
@@ -55,11 +55,11 @@ export function supervisorFixture(params: {
   const metadata = { runId: params.runId, traceId: params.runId };
   return { ...input, messages: [...messages,
     setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
-      id, name: 'delegate_capability', type: 'tool_call', args: { briefing: params.task },
-    }] }), { ...metadata, source: 'supervisor', execution: {
-      taskId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, mode: 'initial',
-    } }),
-    setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id, content: JSON.stringify({
+      id, name: 'delegate_capability', type: 'tool_call', args: {},
+    }] }), { ...metadata, source: 'supervisor' }),
+    setAgentMessageMetadata(new ToolMessage({ artifact: {
+      taskId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, mode: 'initial', briefing: 'Execute the confirmed task.',
+    },  name: 'delegate_capability', tool_call_id: id, content: JSON.stringify({
       status: 'returned', delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
         scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } },
     }) }), metadata),

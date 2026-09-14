@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { scoreClosure } from './supervisor-delivery-closure';
 import { projectHistoryEvidence, toolHistoryInput, withoutToolScope, type HistoryVariant, type HistoryMode } from './supervisor-tool-history';
@@ -57,6 +57,7 @@ await Promise.all(Array.from({ length: 2 }, async () => {
           if (!this.bound) throw new Error('Model tools were not bound');
           const message = await this.bound.invoke(projected, { ...options, callbacks: [] });
           turn.calls = message.tool_calls ?? [];
+          turn.invalidCalls = message.invalid_tool_calls ?? [];
           turn.text = message.content;
           turn.usage = message.usage_metadata;
           return { generations: [{ message, text: message.text }] };
@@ -75,7 +76,7 @@ await Promise.all(Array.from({ length: 2 }, async () => {
     const calls = turns.flatMap(t => (t.calls ?? []) as Array<{ name: string }>);
     const allowed = new Set(['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability', ...(input.mode === 'entry' ? ['capability_details'] : [])]);
     const passed = !error && score?.passed === true && calls.every(c => allowed.has(c.name));
-    const row = { id, passed, protocol: 'supervisor-briefing-v1', ...spec, model: subject.metadata.model, profileFingerprint: subject.metadata.fingerprint, elapsedMs: Date.now() - started,
+    const row = { id, passed, protocol: 'supervisor-runtime-briefing-v3', ...spec, model: subject.metadata.model, profileFingerprint: subject.metadata.fingerprint, elapsedMs: Date.now() - started,
       firstCalls: turns[0]?.calls, illegalCalls: calls.filter(c => !allowed.has(c.name)),
       delegateCalls: calls.filter(c => c.name === 'delegate_capability').length, score, error, turns };
     rows.push(row);

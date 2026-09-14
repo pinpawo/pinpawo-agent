@@ -7,8 +7,7 @@ import { defineInstructionDocument } from '../src/types/capability.ts';
 import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
-import { acceptSupervisorMessageHandoff } from '../src/agent/orchestrator/runSupervisor/messageHandoff.ts';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing.ts';
 import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input.ts';
 import { supervisorFixture, readSupervisorDecision } from './supervisor-fixtures';
 import type { RunSupervisorInput } from '../src/agent/orchestrator/runSupervisor/runner.ts';
@@ -73,7 +72,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       // Asking may use a direct answer or a no-execution review reply. The
       // observable contract is unchanged work and no Capability dispatch.
       if (actual.reply === undefined) {
-        const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+        const accepted = actual;
         assert.deepEqual(accepted.runSupervisorState, input.state);
         assert.ok(accepted.reply?.trim());
         assert.equal(accepted.messages.length, 2);

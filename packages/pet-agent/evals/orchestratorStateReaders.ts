@@ -1,7 +1,7 @@
 import type { OrchestratorStateType } from '../src/agent/orchestrator/state';
 import { currentSupervisorTask, runSupervisorStateSchema } from '../src/agent/orchestrator/runSupervisor/state';
 import { executionsForTask } from '../src/agent/orchestrator/executionMessages';
-import { readCapabilityCall } from '../src/agent/orchestrator/runtime/delegationToolResult';
+import { readCapabilityCall } from '../src/agent/orchestrator/runSupervisor/testingExecution';
 
 export type EvalOrchestratorStateSnapshot = Partial<OrchestratorStateType> & Record<string, unknown>;
 

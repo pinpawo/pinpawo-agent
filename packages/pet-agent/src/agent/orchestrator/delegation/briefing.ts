@@ -7,7 +7,7 @@ import type { UserRequest } from '../types';
 /**
  * Delegation briefing — the downward counterpart of the (upward) subagent
  * handoff. Immediately before a Capability model call, the runtime projects the
- * stable user request, current plan task and Supervisor-authored briefing into
+ * stable user request, current plan task and plan-derived briefing into
  * one HumanMessage. The
  * projection is invocation-only: neither it nor a separate user-request context
  * message is persisted in canonical main or private-lane history.

@@ -94,7 +94,8 @@ test('reviewing the next unexecuted task returns feedback, retains accepted work
   assert.ok(historicalCalls.every(c => Object.keys(c.args).length === 0));
   assert.deepEqual(result.runSupervisorState.plan.map(t => t.status), ['completed', 'completed']);
   const briefing = JSON.parse(executions[1].execution.briefing);
-  assert.equal(briefing.task, tasks[1].task);
+  assert.equal(executions[1].execution.task, tasks[1].task);
+  assert.equal('task' in briefing, false);
   assert.deepEqual(briefing.plan, [{ ...tasks[0], status: 'completed' }, { ...tasks[1], status: 'pending' }]);
 });
 
@@ -197,7 +198,7 @@ test('copied internal handoff parameters are corrected before a single Superviso
   const executions = readCapabilityExecutions(result.messages);
   assert.equal(executions.length, 1);
   assert.equal(executor.inputs.length, 1);
-  assert.equal(JSON.parse(executions[0].execution.briefing).task, task.task);
+  assert.equal(executions[0].execution.task, task.task);
   const returnView = supervisor.inputs.at(-1)!;
   const actualResults = returnView.filter(m => ToolMessage.isInstance(m) && m.tool_call_id === executions[0].call.id);
   assert.equal(actualResults.length, 1);
@@ -230,6 +231,6 @@ test('model-written briefing is rejected and formatted plan content is injected 
   assert.ok(executor.inputs[0].some(m => m.text.includes(briefing)));
   const records = readCapabilityExecutions(result.messages);
   assert.equal(records.length, 1);
-  assert.equal(JSON.parse(records[0].execution.briefing).task, briefing);
+  assert.equal(records[0].execution.task, briefing);
   assert.equal(JSON.parse(records[0].execution.briefing).plan[0].task, briefing);
 });

@@ -1,10 +1,14 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { supervisorControlSchemas, type SupervisorControl } from './protocol';
-import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
-import { currentSupervisorTask } from './state';
 import { Command } from '@langchain/langgraph';
-import type { RunSupervisorState, SupervisorAgentState } from './state';
+import { z } from 'zod';
+import { supervisorTaskSchema } from './protocol';
+import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
+import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+
+export const submitPlanSchema = z.object({
+  tasks: z.array(supervisorTaskSchema).min(1).max(24),
+}).strict();
 
 export function createSubmitPlanTool(context: SupervisorHandoffContext) {
   return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
@@ -18,13 +22,13 @@ export function createSubmitPlanTool(context: SupervisorHandoffContext) {
     } });
   }, {
     name: 'submit_plan',
-    schema: supervisorControlSchemas.submit_plan,
+    schema: submitPlanSchema,
     verboseParsingErrors: true,
     description: '建立计划并返回计划事实，由你继续决定下一步。',
   });
 }
 
-type SubmitPlanArgs = Extract<SupervisorControl, { name: 'submit_plan' }>['args'];
+export type SubmitPlanArgs = z.infer<typeof submitPlanSchema>;
 
 export function submitPlan(
   context: SupervisorHandoffContext,

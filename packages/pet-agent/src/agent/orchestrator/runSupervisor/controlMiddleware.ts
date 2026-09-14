@@ -3,7 +3,8 @@ import { ToolInputParsingException } from '@langchain/core/tools';
 import { createMiddleware, ToolInvocationError } from 'langchain';
 import { currentSupervisorTask, supervisorAgentStateSchema } from './state';
 import { SupervisorDecisionError } from './controlContext';
-import { supervisorControlSchemas } from './protocol';
+import { isSupervisorControlTool } from './protocol';
+import { readCapabilityExecutionCall } from '../executionMessages';
 
 export function createSupervisorControlValidationMiddleware() {
   return createMiddleware({
@@ -33,8 +34,8 @@ export function createSupervisorControlValidationMiddleware() {
       canJumpTo: ['end'],
       hook: (state) => {
         const last = state.messages.at(-1);
-        // Failed execution requests must reach the model for correction too.
-        if (ToolMessage.isInstance(last) && last.name === 'delegate_capability' && last.status !== 'error') {
+        // Only the request stamped by the handoff tool ends this loop. Errors return to the model.
+        if (last && readCapabilityExecutionCall(last)) {
           return { jumpTo: 'end' as const };
         }
       },
@@ -57,7 +58,7 @@ export function createSupervisorControlValidationMiddleware() {
       // ToolNode returns unknown-tool errors with the available names. Do not
       // intercept those here: the model needs the normal tool feedback to retry.
       if (calls.some((call) => !call.id)) throw new Error('Supervisor tool call requires a tool call id.');
-      const controls = calls.filter((call) => Object.hasOwn(supervisorControlSchemas, call.name));
+      const controls = calls.filter((call) => isSupervisorControlTool(call.name));
       if (controls.length) {
         if (calls.length !== 1) throw new Error('Supervisor control must be the only tool call.');
       }

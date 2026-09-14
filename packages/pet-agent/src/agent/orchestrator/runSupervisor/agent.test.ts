@@ -26,7 +26,7 @@ import type { CapabilityCatalog } from './capabilityCatalog';
 import { createRunSupervisorAgent } from './agent';
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
-import { controlSchema } from './protocol';
+import { parseSupervisorControl } from './testing';
 type SupervisorDelegationInput = { delegationId: string; runId: string; capability: string; task: string };
 type CapabilityPlanTask = { capability: string; task: string };
 import {
@@ -40,7 +40,7 @@ function commandOnly(value: unknown) {
     && message.tool_calls?.some((call) => ['submit_plan', 'review_current', 'adjust_plan'].includes(call.name))).at(-1) as AIMessage;
   const call = request?.tool_calls?.[0];
   if (!call) return { reply: result.reply };
-  const parsed = controlSchema.parse({ name: call.name, args: call.args });
+  const parsed = parseSupervisorControl({ name: call.name, args: call.args });
   return parsed.name === 'review_current' && result.reply !== undefined
     ? { ...parsed, args: { ...parsed.args, reply: result.reply } } : parsed;
 }

@@ -1,28 +1,33 @@
-import { ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { supervisorControlSchemas } from './protocol';
+import { Command } from '@langchain/langgraph';
+import { z } from 'zod';
+import type { CapabilityExecutionInput } from './protocol';
+import { prepareCapabilityHandoff } from './messageHandoff';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
-import { currentSupervisorTask } from './state';
-import type { SupervisorAgentState } from './state';
+import { currentSupervisorTask, type SupervisorAgentState } from './state';
 import { executionsForTask } from '../executionMessages';
 import { getAgentMessageMetadata } from '../../messages';
 
+export const delegateCapabilitySchema = z.object({}).strict();
+
 export function createDelegateCapabilityTool(context: SupervisorHandoffContext) {
-  return tool((_args, runtime: ToolRuntime<SupervisorAgentState>) => {
+  return tool((_args, runtime: ToolRuntime<SupervisorAgentState & { messages: BaseMessage[] }>) => {
     const state = runtime.state.runSupervisorState;
-    const execution = delegateCapability({ ...context, state }, runtime.state.reviewFeedback ?? undefined);
-    return new ToolMessage({ name: 'delegate_capability', tool_call_id: runtime.toolCallId,
-      content: JSON.stringify({ plan: state, handoff: true }), artifact: execution,
-    });
+    const input = buildCapabilityExecutionInput({ ...context, state }, runtime.state.reviewFeedback ?? undefined);
+    const request = runtime.state.messages.at(-1);
+    if (!AIMessage.isInstance(request) || request.tool_calls?.length !== 1
+      || request.tool_calls[0].id !== runtime.toolCallId) throw new Error('Handoff requires its current AI tool call.');
+    return new Command({ update: { messages: [prepareCapabilityHandoff(context, request, input)] } });
   }, {
     name: 'delegate_capability',
-    schema: supervisorControlSchemas.delegate_capability,
+    schema: delegateCapabilitySchema,
     verboseParsingErrors: true,
     description: '执行当前计划项，将控制权交给 Capability。无需参数；运行时注入已确认的当前任务、按顺序排列的计划与本次补做意见。返回交付后由你继续判断。',
   });
 }
 
-export function delegateCapability(context: SupervisorHandoffContext, feedback?: string) {
+export function buildCapabilityExecutionInput(context: SupervisorHandoffContext, feedback?: string): CapabilityExecutionInput {
   const state = context.state;
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
@@ -39,7 +44,6 @@ export function delegateCapability(context: SupervisorHandoffContext, feedback?:
     task: next.task,
     mode: previous ? 'continue' as const : 'initial' as const,
     briefing: JSON.stringify({
-      task: next.task,
       plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
       ...(feedback ? { feedback } : {}),
     }, null, 2),

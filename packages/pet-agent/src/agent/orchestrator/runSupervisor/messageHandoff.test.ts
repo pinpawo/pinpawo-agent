@@ -2,7 +2,7 @@ import { createSupervisorControlValidationMiddleware } from './controlMiddleware
 import { submitPlan } from './submitPlanTool';
 import { reviewCurrent } from './reviewCurrentTool';
 import { adjustPlan } from './adjustPlanTool';
-import { delegateCapability } from './delegateCapabilityTool';
+import { buildCapabilityExecutionInput } from './delegateCapabilityTool';
 import type { SupervisorHandoffContext } from './controlContext';
 import { createSubmitPlanTool } from './submitPlanTool';
 import { createReviewCurrentTool } from './reviewCurrentTool';
@@ -22,6 +22,7 @@ import { currentSupervisorTask, type RunSupervisorState } from './state';
 import {
   acceptSupervisorMessageHandoff,
   createSupervisorMessageHandoff,
+  prepareCapabilityHandoff,
 } from './messageHandoff';
 
 import { executionsForTask, readCapabilityExecutionCall } from '../executionMessages';
@@ -29,7 +30,7 @@ import { executionsForTask, readCapabilityExecutionCall } from '../executionMess
 const taskA = { capability: 'general', task: 'Inspect A.' };
 const taskB = { capability: 'general', task: 'Inspect B.' };
 function control(name: string, args: Record<string, unknown>, id = 'control-1') {
-  return [new AIMessage({ content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] }),
+  return [new AIMessage({ id: `request:${id}`, content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] }),
     new ToolMessage({ content: 'submitted', name, tool_call_id: id })];
 }
 function context(overrides: Partial<SupervisorHandoffContext> = {}): SupervisorHandoffContext {
@@ -48,10 +49,10 @@ function resultFor(dispatch: AIMessage) {
   }), metadata);
 }
 function dispatchResult(input: SupervisorHandoffContext, callId = 'execute-first', feedback?: string) {
-  const decision = delegateCapability(input, feedback);
+  const decision = buildCapabilityExecutionInput(input, feedback);
   const pair = control('delegate_capability', {}, callId);
-  (pair[1] as ToolMessage).artifact = decision;
-  return { runSupervisorState: input.state, messages: createSupervisorMessageHandoff(input, pair) };
+  const request = prepareCapabilityHandoff(input, pair[0] as AIMessage, decision);
+  return { runSupervisorState: input.state, messages: createSupervisorMessageHandoff(input, [request]) };
 }
 function returned(firstContext = context(), tasks = [taskA, taskB]) {
   const state = submitPlan(firstContext, { tasks }, 'plan');
@@ -67,10 +68,10 @@ test('handoff commits explicit state without replaying historical control argume
   const state = submitPlan(input, { tasks: [taskA, taskB] }, 'plan');
   // Transcript content deliberately disagrees: only the tool-maintained state is authoritative.
   const stale = control('submit_plan', { tasks: [taskB] }, 'old-plan');
-  const decision = delegateCapability({ ...input, state });
+  const decision = buildCapabilityExecutionInput({ ...input, state });
   const pair = control('delegate_capability', {}, 'execute-first');
-  (pair[1] as ToolMessage).artifact = decision;
-  const internal = [...stale, ...pair];
+  const request = prepareCapabilityHandoff(input, pair[0] as AIMessage, decision);
+  const internal = [...stale, request];
   const original = JSON.stringify(internal);
   const messages = createSupervisorMessageHandoff(input, internal);
   const accepted = acceptSupervisorMessageHandoff(input, { messages, runSupervisorState: state });
@@ -81,7 +82,7 @@ test('handoff commits explicit state without replaying historical control argume
   assert.deepEqual(execution.call.args, {});
   assert.equal(execution.metadata.sourceToolCallId, 'execute-first');
   assert.deepEqual(JSON.parse(execution.execution.briefing), {
-    task: taskA.task, plan: [taskA, taskB].map(task => ({ ...task, status: 'pending' })),
+    plan: [taskA, taskB].map(task => ({ ...task, status: 'pending' })),
   });
   assert.equal(messages.length, 3);
   const main = queryAgentMessages([...messages, resultFor(dispatch)]).main().select().messages;
@@ -89,15 +90,19 @@ test('handoff commits explicit state without replaying historical control argume
   assert.equal((main[1] as ToolMessage).tool_call_id, execution.call.id);
 });
 
-test('handoff requires a successful matching receipt with a runtime snapshot', () => {
+test('handoff prepares execution inputs without producing a local result', () => {
   const input = returned();
-  const pair = control('delegate_capability', {}, 'next');
-  assert.throws(() => createSupervisorMessageHandoff(input, pair));
-  (pair[1] as ToolMessage).artifact = delegateCapability(input);
-  (pair[1] as ToolMessage).tool_call_id = 'wrong';
-  assert.throws(() => createSupervisorMessageHandoff(input, pair), /matching exclusive/);
-  (pair[1] as ToolMessage).status = 'error';
-  assert.equal(queryAgentMessages(createSupervisorMessageHandoff(input, pair)).main().select().messages.length, 0);
+  const request = control('delegate_capability', {}, 'next')[0] as AIMessage;
+  const before = JSON.stringify(request);
+  const prepared = prepareCapabilityHandoff(input, request, buildCapabilityExecutionInput(input));
+  assert.equal(JSON.stringify(request), before);
+  assert.equal(prepared.id, request.id, 'Command updates the same AI message');
+  assert.deepEqual(prepared.tool_calls, request.tool_calls);
+  assert.equal(readCapabilityExecutionCall(prepared)!.execution.task, taskA.task);
+  assert.equal('artifact' in prepared, false);
+  assert.throws(() => prepareCapabilityHandoff(input, new AIMessage('No tool call'), buildCapabilityExecutionInput(input)), /exclusive/);
+  const raw = createSupervisorMessageHandoff(input, [request]);
+  assert.equal(queryAgentMessages(raw).main().select().messages.length, 0, 'unprepared model request is not a handoff');
 });
 
 test('Root rejects mismatched execution identity, task, capability, arguments and duplicate handoff', () => {
@@ -145,22 +150,22 @@ test('acceptance uses the latest returned delivery and ignores mismatched or pri
     }), getAgentMessageMetadata(dispatch));
     const input = { ...first, messages: [...first.messages, ...retry.messages, failure] };
     assert.throws(() => reviewCurrent(input, { completed: true, reason: 'Old evidence' }), /returned delivery/);
-    assert.ok(delegateCapability(input));
+    assert.ok(buildCapabilityExecutionInput(input));
   }
 });
 
 test('same-run retries retain execution scope; new runs start a new delegation', () => {
   const input = returned();
   const before = readCapabilityExecutionCall(input.messages[0])!.execution;
-  const retry = delegateCapability(input, 'Missing evidence');
-  const fresh = delegateCapability({ ...input, runId: 'r2' }, 'Missing evidence');
+  const retry = buildCapabilityExecutionInput(input, 'Missing evidence');
+  const fresh = buildCapabilityExecutionInput({ ...input, runId: 'r2' }, 'Missing evidence');
   assert.equal(retry.mode, 'continue');
   assert.equal(retry.delegationId, before.delegationId);
   assert.equal(fresh.mode, 'initial');
   assert.notEqual(fresh.delegationId, before.delegationId);
   assert.equal(fresh.briefing, retry.briefing);
   assert.equal(JSON.parse(retry.briefing).feedback, 'Missing evidence');
-  assert.throws(() => delegateCapability({ ...input, messages: input.messages.slice(0, -1) }), /no result/);
+  assert.throws(() => buildCapabilityExecutionInput({ ...input, messages: input.messages.slice(0, -1) }), /no result/);
 });
 
 test('adjustment preserves completed work, supersedes replaced executions and checks goal changes', () => {
@@ -292,7 +297,7 @@ test('real createAgent continues after planning and exits only on explicit execu
         const agent = createAgent({ model, tools: toolsFor(input),
           middleware: [createSupervisorControlValidationMiddleware()] });
         const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')], runSupervisorState: input.state });
-        assert.equal(result.messages.length, 5);
+        assert.equal(result.messages.length, 4);
         assert.deepEqual(Object.keys(result).sort(), ['messages', 'reviewFeedback', 'runSupervisorState']);
         const accepted = acceptSupervisorMessageHandoff(input, { runSupervisorState: result.runSupervisorState, messages: createSupervisorMessageHandoff(input, result.messages.slice(1)) });
         return { messages: accepted.messages, runSupervisorState: accepted.runSupervisorState };
@@ -388,7 +393,7 @@ test('review, autonomous adjustment and explicit execution share updated facts i
   const dispatch = accepted.messages.at(-1) as AIMessage;
   const { execution } = readCapabilityExecutionCall(dispatch)!;
   assert.equal(execution.task, 'Inspect B using A evidence.');
-  assert.equal(JSON.parse(execution.briefing).task, 'Inspect B using A evidence.');
+  assert.equal(JSON.parse(execution.briefing).plan.at(-1).task, 'Inspect B using A evidence.');
   assert.deepEqual(accepted.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
   assert.equal(queryAgentMessages(accepted.messages).main().select().messages.length, 1);
 });

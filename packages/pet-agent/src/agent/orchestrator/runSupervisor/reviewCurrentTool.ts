@@ -1,11 +1,15 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { supervisorControlSchemas, type SupervisorControl } from './protocol';
-import { SupervisorDecisionError, type SupervisorHandoffContext } from './controlContext';
-import { currentSupervisorTask, updateSupervisorTask } from './state';
 import { Command } from '@langchain/langgraph';
-import type { RunSupervisorState, SupervisorAgentState } from './state';
+import { z } from 'zod';
+import { SupervisorDecisionError, type SupervisorHandoffContext } from './controlContext';
+import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForTask } from '../executionMessages';
+
+export const reviewCurrentSchema = z.object({
+  completed: z.boolean().describe('是否验收当前任务的最新交付。false 保留任务供后续补做；工具不触发执行。'),
+  reason: z.string().trim().min(1).max(2_000).describe('验收依据或尚需补齐的工作。'),
+}).strict();
 
 export function createReviewCurrentTool(context: SupervisorHandoffContext) {
   return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
@@ -19,13 +23,13 @@ export function createReviewCurrentTool(context: SupervisorHandoffContext) {
     } });
   }, {
     name: 'review_current',
-    schema: supervisorControlSchemas.review_current,
+    schema: reviewCurrentSchema,
     verboseParsingErrors: true,
     description: '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。',
   });
 }
 
-type ReviewCurrentArgs = Extract<SupervisorControl, { name: 'review_current' }>['args'];
+export type ReviewCurrentArgs = z.infer<typeof reviewCurrentSchema>;
 
 export function reviewCurrent(
   context: SupervisorHandoffContext,

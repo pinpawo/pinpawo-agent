@@ -4,12 +4,12 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { closureInput, scoreClosure } from './supervisor-delivery-closure';
 import { supervisorDeliveryClosureDataset } from './datasets/supervisor-delivery-closure';
 import { scriptedSupervisorSequence } from '../src/agent/orchestrator/runSupervisor/testing';
-import type { SupervisorControl } from '../src/agent/orchestrator/runSupervisor/protocol';
+import type { ScriptedSupervisorControl } from '../src/agent/orchestrator/runSupervisor/testing';
 
-const review: SupervisorControl = { name: 'review_current', args: { completed: true, reason: 'Review content is complete.' } };
-const delegate: SupervisorControl = { name: 'delegate_capability', args: {} };
+const review: ScriptedSupervisorControl = { name: 'review_current', args: { completed: true, reason: 'Review content is complete.' } };
+const delegate: ScriptedSupervisorControl = { name: 'delegate_capability', args: {} };
 const example = supervisorDeliveryClosureDataset.cases.find(c => c.name === 'review-text-is-not-submission')!;
-function adjustment(goal: string): SupervisorControl {
+function adjustment(goal: string): ScriptedSupervisorControl {
   return { name: 'adjust_plan', args: { goal, reason: 'Submission remains.', currentDelegation: 'replace',
     tasks: [{ capability: 'studio_reporting', task: 'Submit the complete review.' }] } };
 }

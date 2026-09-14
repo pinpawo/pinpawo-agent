@@ -139,11 +139,11 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 ### 工具职责
 
 四个控制工具分别定义在 submitPlanTool、reviewCurrentTool、adjustPlanTool 和
-delegateCapabilityTool 中，各自声明 schema、说明、回调和对应的纯状态变更函数，
+delegateCapabilityTool 中，各自直接定义参数 schema、说明、回调和对应的业务函数，
 Supervisor 显式注册。工具直接执行自己的变更函数，不经过统一业务分支。
 
 三个计划工具通过 Command 直接更新本次 LangGraph state，并返回模型可读的计划事实；
-delegateCapabilityTool 只读取计划、组装快照并返回本地交接回执。controlMiddleware
+delegateCapabilityTool 读取计划，组装执行输入，并通过 Command 将输入直接写入原 AI 委派请求的运行时 metadata。controlMiddleware
 声明内部状态 schema，处理调用格式、自纠与让出控制权。messageHandoff 只负责交接消息的整理、身份规范化
 和 Root 接收校验，不定义工具、不处理计划业务、不配置模型中间件。
 
@@ -161,7 +161,7 @@ delegateCapabilityTool 只读取计划、组装快照并返回本地交接回执
 | `capability_details` | 返回能力详情，继续模型循环 |
 
 控制工具均不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
-自然回复。只有 `delegate_capability` 的成功工具回执才结束 Supervisor 循环并交接给 Root；
+自然回复。只有 `delegate_capability` 为原请求准备好执行输入后才结束 Supervisor 循环并交接给 Root；
 错误回执继续返回模型，不能因工具名称是执行工具而提前结束。
 
 Supervisor 优先沿用适用的现有计划，非必要不重排。补做要求通过 `review_current(false)` 记录，随本次委派自动注入 briefing；只有新要求
@@ -346,7 +346,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 
 提取无模型调用的回复发布函数，接收明确的回复文本和当前运行身份，返回主会话消息及必要的收尾更新。该函数不判断任务完成、不选择下一步、不重写模型文本、不引入独立 reply/pending 状态字段。
 
-Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`delegate_capability` 的成功回执结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
+Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`delegate_capability` 准备好执行请求后结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
 
 运行停止原因由程序单独格式化：迭代预算停止及 checkpoint 不兼容时，复用发布函数输出运行状态并结束；真正异常保持原来的失败通道。保留 Entry 的职责，必要时复用消息构造函数，但不在本次重构中改变 Entry 的决策或提示机制。
 
@@ -388,7 +388,7 @@ Supervisor 的 `delegate_capability`，由同一次模型工具调用交接 Root
 
 计划和验收工具仍返回事实供模型继续决策。delegate_capability 校验成功后结束本次
 Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再进入 Capability 节点。
-局部交接确认不进入长期历史；实际执行结果使用同一条已规范化的工具调用 id 返回。
+不生成局部成功回执；实际执行结果使用同一条已规范化的工具调用 id 返回。
 保留 run 范围的 id 规范化，避免不同 run 的模型 call id 复用碰撞。
 
 执行快照只存于规范委派消息的运行时元数据，包含任务身份、能力、当时任务内容、
@@ -405,9 +405,9 @@ Host 的 readCapabilityExecutions 返回结构保持稳定，继续供计划进�
 
 模型只调用 `delegate_capability({})`，主会话保存的调用也保持空参数。工具通过 LangChain
 注入的 `ToolRuntime.state` 直接读取当前计划和本次 review feedback，并构建执行快照。快照中的 `briefing: string` 正文为
-格式化 JSON：当前 `task`、按执行顺序排列的 `plan`（capability/task/status），以及本次
+格式化 JSON：按执行顺序排列的 `plan`（capability/task/status），以及本次
 Supervisor invoke 中 `review_current(false)` 的 `feedback`（若有）。其他计划项仅供
-上下文参考，本次只执行当前任务。验收通过或重新规划后清除本次补做意见。
+上下文参考，本次只执行当前任务。当前任务正文只从执行输入的 task 字段读取，构造 Capability HumanMessage 时与 briefing 一起呈现，briefing 不再另存 task 副本。验收通过或重新规划后清除本次补做意见。
 
 工具维护的 state 确定计划、执行快照和 briefing；Root 信任运行时生成的快照，不从工作消息重算正文。不增加模型调用、第二条委派请求或独立的待提交状态。交接过程不改写
 AIMessage 的 args；模型输入与历史调用共享空参数 schema，briefing 属于内部执行快照。
@@ -432,11 +432,22 @@ Supervisor 的 submit_plan、adjust_plan 和 review_current 各自通过原生 C
 失败不更新 state，参数及业务错误作为 ToolMessage 返回模型纠正。删除 toolSession、
 messageOffset 和 controlTranscript；历史工具消息仅是上下文，不再作为状态变更日志重放。
 
-delegate_capability 读取当前 state，生成一次执行快照，放在本地工具回执 artifact 中。
-成功回执结束 Supervisor 循环；交接适配将原 AI 调用规范化为 Root 调用，把快照移到
-运行时 metadata 并移除本地回执。不会生成第二条模型调用，也不增加持久 dispatch 槽。
+delegate_capability 从当前 state 构建执行输入，通过 Command 更新原 AIMessage 的运行时 metadata，
+保留原消息 ID 与空参数。中间件识别已经准备好的请求后结束 Supervisor 循环；交接适配仅
+规范化 Root 调用身份。没有临时成功 ToolMessage、artifact 搬运、第二条调用或额外 dispatch 槽。
+真正的 ToolMessage 由 Root 在 Capability 执行返回后写入。
 
 Runner 明确返回最终 runSupervisorState 和新消息。Root 校验状态 schema、当前任务与
 执行身份、空参数和重复委派，不再验证或执行内部控制序列。Runner 是受信任的运行时
 组件，不是允许模型提交任意状态的接口。取消或失败时 Root 不提交部分状态；提交后的
 执行、原生暂停恢复与去重沿用 Root checkpoint。
+
+### 工具 schema 与交接输入整理
+
+删除 controlSchema 和 supervisorControlSchemas：各工具直接定义自己的 schema，
+不再包成 name/args 联合协议后按 options 下标拆回。运行时仅按工具名称识别需要串行执行的
+控制工具；测试和 eval 的统一决策投影仅在 testing.ts 中复用各工具 schema。
+
+模型参数继续是 delegate_capability({})；运行时执行输入包含 task、briefing 与执行身份。
+buildCapabilityExecutionInput 明确表示构造执行前输入，prepareCapabilityHandoff 将其附着
+到原请求。Capability 尚未运行时不生成成功结果。失败依然返回 ToolMessage 供模型纠正。

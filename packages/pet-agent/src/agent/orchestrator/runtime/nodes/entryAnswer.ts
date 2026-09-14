@@ -135,7 +135,7 @@ export function createContinueTool() {
     return entryHandoff(runtime, requireRunUserRequest(runtime.state));
   }, {
     name: 'continue',
-    description: '结合当前用户输入继续已有未完成计划，让 Supervisor 验收、调整或推进。不是原生 interrupt 恢复。',
+    description: '根据用户当前的要求，继续已有的未完成计划。',
     schema: z.object({}).strict(),
   });
 }

@@ -1,3 +1,7 @@
+import { createSubmitPlanTool } from './submitPlanTool';
+import { createReviewCurrentTool } from './reviewCurrentTool';
+import { createAdjustPlanTool } from './adjustPlanTool';
+import { createDelegateCapabilityTool } from './delegateCapabilityTool';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -12,7 +16,7 @@ import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 import { createSupervisorCapabilityDetailsTool, createSupervisorDisclosureStateMiddleware } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-import { createMessageSupervisorControlTools, createSupervisorControlValidationMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
+import { createSupervisorControlValidationMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 import { projectDelegationAnnouncesForModel } from '../delegation';
 
@@ -45,7 +49,10 @@ export function createRunSupervisorAgent(params: {
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,
         })] : []),
-        ...createMessageSupervisorControlTools(context, agentMessages.length),
+        createSubmitPlanTool(context, agentMessages.length),
+        createReviewCurrentTool(context, agentMessages.length),
+        createAdjustPlanTool(context, agentMessages.length),
+        createDelegateCapabilityTool(context, agentMessages.length),
       ];
       const agent = createAgent({
         name: 'runSupervisor',

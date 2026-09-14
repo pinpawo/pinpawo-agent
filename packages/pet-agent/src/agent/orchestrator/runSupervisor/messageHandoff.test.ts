@@ -1,3 +1,7 @@
+import { createSubmitPlanTool } from './submitPlanTool';
+import { createReviewCurrentTool } from './reviewCurrentTool';
+import { createAdjustPlanTool } from './adjustPlanTool';
+import { createDelegateCapabilityTool } from './delegateCapabilityTool';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
@@ -11,7 +15,6 @@ import { getAgentMessageMetadata, setAgentMessageMetadata, queryAgentMessages } 
 import { currentSupervisorTask, type RunSupervisorState } from './state';
 import {
   acceptSupervisorMessageHandoff,
-  createMessageSupervisorControlTools,
   createSupervisorControlValidationMiddleware,
   createSupervisorMessageHandoff,
   type SupervisorHandoffContext,
@@ -288,7 +291,7 @@ test('invalid business decisions return feedback without mutating Root', async (
       return new AIMessage('No capability is available.');
     },
   ]);
-  const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
+  const agent = createAgent({ model, tools: [createSubmitPlanTool(input), createReviewCurrentTool(input), createAdjustPlanTool(input), createDelegateCapabilityTool(input)],
     middleware: [createSupervisorControlValidationMiddleware()] });
   const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
   assert.equal(result.messages.at(-1)?.text, 'No capability is available.');
@@ -307,7 +310,7 @@ test('repeated malformed arguments stop at the graph recursion limit without dis
     }
   }
   const model = new InvalidModel({});
-  const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
+  const agent = createAgent({ model, tools: [createSubmitPlanTool(input), createReviewCurrentTool(input), createAdjustPlanTool(input), createDelegateCapabilityTool(input)],
     middleware: [createSupervisorControlValidationMiddleware()] });
   await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }, { recursionLimit: 6 }),
     /Recursion limit/i);
@@ -331,7 +334,7 @@ test('mixed model control and discovery calls are rejected before either tool ex
     name: 'capability_details', description: 'Read details', schema: z.object({}),
   });
   const model: BaseChatModel = new MixedModel({});
-  const tools: StructuredTool[] = [...createMessageSupervisorControlTools(input), query];
+  const tools: StructuredTool[] = [createSubmitPlanTool(input), createReviewCurrentTool(input), createAdjustPlanTool(input), createDelegateCapabilityTool(input), query];
   const agent = createAgent({ model, tools,
     middleware: [createSupervisorControlValidationMiddleware()] });
   await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }), /only tool call/);
@@ -351,7 +354,7 @@ test('real createAgent continues after planning and exits only on explicit execu
     return new StateGraph(rootState)
       .addNode('supervisor', async (state) => {
         const input = context({ state: state.runSupervisorState, messages: state.messages });
-        const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
+        const agent = createAgent({ model, tools: [createSubmitPlanTool(input), createReviewCurrentTool(input), createAdjustPlanTool(input), createDelegateCapabilityTool(input)],
           middleware: [createSupervisorControlValidationMiddleware()] });
         const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
         assert.equal(result.messages.length, 5);
@@ -402,7 +405,7 @@ function toolPlan(messages: BaseMessage[]) {
   return JSON.parse(result.text) as { plan: RunSupervisorState; execution: unknown };
 }
 async function decisionLoop(input: SupervisorHandoffContext, model: DecisionLoopModel) {
-  const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input, 1),
+  const agent = createAgent({ model, tools: [createSubmitPlanTool(input, 1), createReviewCurrentTool(input, 1), createAdjustPlanTool(input, 1), createDelegateCapabilityTool(input, 1)],
     middleware: [createSupervisorControlValidationMiddleware()] });
   const result = await agent.invoke({ messages: [new HumanMessage('Decide the next step.')] });
   return acceptSupervisorMessageHandoff(input, createSupervisorMessageHandoff(input, result.messages.slice(1)));

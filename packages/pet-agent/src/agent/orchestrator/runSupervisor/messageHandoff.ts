@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { tool, ToolInputParsingException, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
+import { ToolInputParsingException, type ToolRuntime } from '@langchain/core/tools';
 import { createMiddleware, ToolInvocationError } from 'langchain';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
 import { executionsForTask } from '../executionMessages';
@@ -21,36 +21,24 @@ export type SupervisorHandoffContext = {
   messages: readonly BaseMessage[];
 };
 
-const controlNames = ['submit_plan', 'review_current', 'adjust_plan', 'delegate_capability'] as const;
-
 /** A valid tool call whose requested transition is not available in the current plan. */
 class SupervisorDecisionError extends Error {}
 
-/** Plan/review tools return facts to the model. Only explicit execution yields to Root. */
-export function createMessageSupervisorControlTools(context: SupervisorHandoffContext, messageOffset = 0): StructuredTool[] {
-  return controlNames.map((name) => tool(async (args, runtime: ToolRuntime) => {
-    const messages = (((runtime.state ?? {}) as { messages?: BaseMessage[] }).messages ?? []).slice(messageOffset);
-    const current = resolveTranscript(context, messages, 'pending');
-    const control = controlSchema.parse({ name, args });
-    let resolved;
-    try {
-      resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!, current.feedback);
-    } catch (error) {
-      if (!(error instanceof SupervisorDecisionError)) throw error;
-      return new ToolMessage({ name, tool_call_id: runtime.toolCallId, status: 'error',
-        content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(current.state), plan: current.state }) });
-    }
-    return new ToolMessage({ name, tool_call_id: runtime.toolCallId,
-      content: JSON.stringify({ plan: resolved.state, ...(resolved.execution ? { handoff: true } : {}) }) });
-  }, {
-    name,
-    schema: supervisorControlSchemas[name],
-    verboseParsingErrors: true,
-    description: name === 'submit_plan' ? '建立计划并返回计划事实，由你继续决定下一步。'
-      : name === 'adjust_plan' ? '调整计划并返回更新后的事实，由你继续决定下一步。'
-      : name === 'review_current' ? '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。'
-      : '执行当前计划项，将控制权交给 Capability。无需参数；运行时注入已确认的当前任务、按顺序排列的计划与本次补做意见。返回交付后由你继续判断。',
-  }));
+/** Shared transaction boundary for independently defined Supervisor tools. */
+export function applySupervisorToolCall(context: SupervisorHandoffContext, messageOffset: number,
+  runtime: ToolRuntime, control: SupervisorControl): ToolMessage {
+  const messages = (((runtime.state ?? {}) as { messages?: BaseMessage[] }).messages ?? []).slice(messageOffset);
+  const current = resolveTranscript(context, messages, 'pending');
+  let resolved;
+  try {
+    resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!, current.feedback);
+  } catch (error) {
+    if (!(error instanceof SupervisorDecisionError)) throw error;
+    return new ToolMessage({ name: control.name, tool_call_id: runtime.toolCallId, status: 'error',
+      content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(current.state), plan: current.state }) });
+  }
+  return new ToolMessage({ name: control.name, tool_call_id: runtime.toolCallId,
+    content: JSON.stringify({ plan: resolved.state, ...(resolved.execution ? { handoff: true } : {}) }) });
 }
 
 export function createSupervisorControlValidationMiddleware() {

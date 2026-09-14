@@ -153,7 +153,7 @@ export function createPlanRequestTool() {
       description: '需要为当前请求新建执行计划时，将目标交给 Supervisor 规划。接续已有未完成计划使用 continue。',
       schema: z.object({
         goal: z.string().trim().min(1).max(MAX_PLAN_REQUEST_GOAL_CHARS)
-          .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),
+          .describe('用户当前希望达成的目标。结合对话上下文表达清楚，保留用户的要求，不自行扩展任务范围。'),
       }).strict(),
     },
   );

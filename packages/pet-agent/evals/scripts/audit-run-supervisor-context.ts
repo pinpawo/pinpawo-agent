@@ -1,4 +1,3 @@
-import { createSupervisorToolSession } from '../../src/agent/orchestrator/runSupervisor/toolSession';
 import { createSupervisorCapabilityDetailsTool } from '../../src/agent/orchestrator/runSupervisor/detailsTool.ts';
 import {
   AIMessage,
@@ -140,13 +139,12 @@ async function renderMode(mode: RunSupervisorMode) {
     documents: createSupervisorDocumentReader(catalog), capabilityNames: catalog.capabilityNames,
   });
   const context = supervisorHandoffContext(input);
-  const session = createSupervisorToolSession(context);
   const tools = [
     ...(mode === 'entry' ? [detailsTool] : []),
-    createSubmitPlanTool(session),
-    createReviewCurrentTool(session),
-    createAdjustPlanTool(session),
-    createDelegateCapabilityTool(session),
+    createSubmitPlanTool(context),
+    createReviewCurrentTool(context),
+    createAdjustPlanTool(context),
+    createDelegateCapabilityTool(context),
   ];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);

@@ -142,9 +142,9 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 delegateCapabilityTool 中，各自声明 schema、说明、回调和对应的纯状态变更函数，
 Supervisor 显式注册。工具直接执行自己的变更函数，不经过统一业务分支。
 
-toolSession 只负责读取本次已确认状态、调用工具提供的变更函数并返回成功/错误回执；
-controlTranscript 校验控制记录、按顺序复用各工具的纯变更函数；controlMiddleware
-处理调用格式、自纠与让出控制权。messageHandoff 只负责交接消息的整理、身份规范化
+三个计划工具通过 Command 直接更新本次 LangGraph state，并返回模型可读的计划事实；
+delegateCapabilityTool 只读取计划、组装快照并返回本地交接回执。controlMiddleware
+声明内部状态 schema，处理调用格式、自纠与让出控制权。messageHandoff 只负责交接消息的整理、身份规范化
 和 Root 接收校验，不定义工具、不处理计划业务、不配置模型中间件。
 
 这次职责拆分保留现有消息提交与恢复协议，只有 delegate_capability 发起 Root 执行交接。
@@ -183,11 +183,11 @@ schema 与业务约束校验。无交付验收、非法能力等可纠正的决�
 
 ### 工具状态与 Root 提交
 
-每次 Supervisor invoke 从 Root 的计划与执行事实开始。内部工具按本次已完成的控制调用
-顺序推导当前计划，在 ToolMessage 中返回计划事实供模型决策。工具不直接修改外部资源，
-不创建独立的持久 Supervisor state/proposal/nextExecution 槽。
+每次 Supervisor invoke 用 Root 计划初始化内部 runSupervisorState，reviewFeedback 从空值开始。
+内部工具读取最新 state 并通过 Command 更新它，在 ToolMessage 中返回计划事实供模型决策。
+这份 state 仅属于本次 invoke；不创建另一套持久会话、proposal 或 nextExecution 槽。
 
-invoke 结束时，Root 验证并按顺序应用本次已完成的控制调用。无论模型最终选择执行还是
+invoke 结束时，Root 接收工具更新后的最终计划 state，并验证交接身份。无论模型最终选择执行还是
 自然回复，都提交计划更新与工作消息。执行时将 Supervisor 的 `delegate_capability`
 请求交接为主会话记录，保持空参数并规范化调用 ID；briefing 放入运行时执行快照，不创建第二条
 调用。执行快照写入内部元数据，Capability 仍在 Root 节点执行并返回实际结果。
@@ -196,12 +196,12 @@ invoke 结束时，Root 验证并按顺序应用本次已完成的控制调用�
 Supervisor: review_current → ToolMessage(更新后的计划)
           → 模型继续判断
           → 自然回复，或调整计划后继续判断，或 delegate_capability
-Root:      验证控制记录，提交计划 + 消息
+Root:      校验交接身份，提交最终计划 + 消息
           → answer，或执行明确交接的 Capability
 ```
 
-业务更新只能从匹配、成功的控制工具消息推导；不接受模型伪造的执行身份或 ToolMessage。
-工具执行时和 Root 接收时复用同一纯转换函数。每条控制 ID 在本 run 只接纳一次。
+业务更新由独立工具写入 LangGraph state；模型不能直接提供计划状态或执行快照。
+工具通过 Command 更新本次调用的计划 state；Root 接收最终 state，不重放控制消息。委派调用 ID 在本 run 只接纳一次。
 非法能力、无交付验收、未返回的重复执行等仍属于状态一致性检查；下一步做什么由模型决定。
 单次模型响应中的控制调用保持顺序明确，避免并行修改同一计划。
 
@@ -225,7 +225,7 @@ Middleware 检查调用协议与 schema；工具返回真实状态，供下一�
 - review 最后一项后模型自然回复：计划完成、一个最终主会话回复、Capability 不再执行。
 - submit/adjust/review 后均能再次调用模型；仅 delegate_capability 产生 delegation。
 - review 后继续执行、调整后执行、仍有 pending 任务时提问，均保持正确状态。
-- 多次工具调用的状态一致，Root 防篡改/去重与原生恢复保持有效。
+- 多次工具调用的状态一致，Root 交接身份校验、去重与原生恢复保持有效。
 
 ### lane 归属不变
 
@@ -394,8 +394,7 @@ Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再�
 执行快照只存于规范委派消息的运行时元数据，包含任务身份、能力、当时任务内容、
 delegation 身份、执行模式与 briefing；执行正文只从此快照读取。主会话保留一组
 请求/实际结果，当前与历史调用参数均为 `{}`，不向模型工具参数注入内部数据。原始模型调用 id 作为
-来源关联保留。Root 仍从 Supervisor 决策序列重算计划和执行快照并校验交接，避免提交
-被改写、重复或未授权的执行；不增加另一份 pending/dispatch 状态。
+来源关联保留。Root 接收 Supervisor 工具维护的最终计划，检查交接与当前任务、run 和调用身份一致，并拒绝重复交接；不重放决策序列。
 
 执行历史读取、暂停恢复和上下文压缩都从该元数据取快照，不能用现有计划反推旧任务。
 Host 的 readCapabilityExecutions 返回结构保持稳定，继续供计划进度和交付展示使用。
@@ -405,14 +404,12 @@ Host 的 readCapabilityExecutions 返回结构保持稳定，继续供计划进�
 ### 从计划注入 briefing（2026-09-15，替代模型编写正文）
 
 模型只调用 `delegate_capability({})`，主会话保存的调用也保持空参数。工具通过 LangChain
-注入的 `ToolRuntime.state.messages` 读取本次已确认控制序列，结合 Root 输入推导当前
-计划并构建执行快照。快照中的 `briefing: string` 正文为
+注入的 `ToolRuntime.state` 直接读取当前计划和本次 review feedback，并构建执行快照。快照中的 `briefing: string` 正文为
 格式化 JSON：当前 `task`、按执行顺序排列的 `plan`（capability/task/status），以及本次
 Supervisor invoke 中 `review_current(false)` 的 `feedback`（若有）。其他计划项仅供
 上下文参考，本次只执行当前任务。验收通过或重新规划后清除本次补做意见。
 
-同一个控制序列确定计划、执行快照和 briefing；Root 重放校验时重新组装并比对正文，
-拒绝篡改。不增加模型调用、第二条委派请求或独立的待提交状态。交接过程不改写
+工具维护的 state 确定计划、执行快照和 briefing；Root 信任运行时生成的快照，不从工作消息重算正文。不增加模型调用、第二条委派请求或独立的待提交状态。交接过程不改写
 AIMessage 的 args；模型输入与历史调用共享空参数 schema，briefing 属于内部执行快照。
 旧的自由 briefing 参数会返回参数错误供模型纠正。
 
@@ -427,3 +424,19 @@ AIMessage 的 args；模型输入与历史调用共享空参数 schema，briefin
 
 Capability 同时读取主会话中的前项实际交付，后续任务可以直接引用已有结果；无需仅为
 传递结果而将整段交付复制进 task 或调整计划。该可见性通过跨任务执行回归验证。
+
+## 移除控制消息重放（2026-09-15）
+
+Supervisor 的 submit_plan、adjust_plan 和 review_current 各自通过原生 Command 更新
+本次 createAgent 的 runSupervisorState 与 reviewFeedback，同时返回模型可读的计划事实。
+失败不更新 state，参数及业务错误作为 ToolMessage 返回模型纠正。删除 toolSession、
+messageOffset 和 controlTranscript；历史工具消息仅是上下文，不再作为状态变更日志重放。
+
+delegate_capability 读取当前 state，生成一次执行快照，放在本地工具回执 artifact 中。
+成功回执结束 Supervisor 循环；交接适配将原 AI 调用规范化为 Root 调用，把快照移到
+运行时 metadata 并移除本地回执。不会生成第二条模型调用，也不增加持久 dispatch 槽。
+
+Runner 明确返回最终 runSupervisorState 和新消息。Root 校验状态 schema、当前任务与
+执行身份、空参数和重复委派，不再验证或执行内部控制序列。Runner 是受信任的运行时
+组件，不是允许模型提交任意状态的接口。取消或失败时 Root 不提交部分状态；提交后的
+执行、原生暂停恢复与去重沿用 Root checkpoint。

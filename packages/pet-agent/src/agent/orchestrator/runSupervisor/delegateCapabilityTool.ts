@@ -1,15 +1,20 @@
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { supervisorControlSchemas } from './protocol';
-import { SupervisorDecisionError, identity, type SupervisorHandoffContext, type SupervisorDecision } from './controlContext';
+import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask } from './state';
-import type { SupervisorToolSession } from './toolSession';
+import type { SupervisorAgentState } from './state';
 import { executionsForTask } from '../executionMessages';
 import { getAgentMessageMetadata } from '../../messages';
 
-export function createDelegateCapabilityTool(session: SupervisorToolSession) {
-  return tool((_args, runtime: ToolRuntime) =>
-    session(runtime, 'delegate_capability', (current, _callId, feedback) => delegateCapability(current, feedback)), {
+export function createDelegateCapabilityTool(context: SupervisorHandoffContext) {
+  return tool((_args, runtime: ToolRuntime<SupervisorAgentState>) => {
+    const state = runtime.state.runSupervisorState;
+    const execution = delegateCapability({ ...context, state }, runtime.state.reviewFeedback ?? undefined);
+    return new ToolMessage({ name: 'delegate_capability', tool_call_id: runtime.toolCallId,
+      content: JSON.stringify({ plan: state, handoff: true }), artifact: execution,
+    });
+  }, {
     name: 'delegate_capability',
     schema: supervisorControlSchemas.delegate_capability,
     verboseParsingErrors: true,
@@ -17,8 +22,8 @@ export function createDelegateCapabilityTool(session: SupervisorToolSession) {
   });
 }
 
-export function delegateCapability(context: SupervisorHandoffContext, feedback?: string): SupervisorDecision {
-  const state = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
+export function delegateCapability(context: SupervisorHandoffContext, feedback?: string) {
+  const state = context.state;
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
   if (!context.allowedCapabilityNames.includes(next.capability)) throw new SupervisorDecisionError('Capability is no longer available.');
@@ -28,18 +33,15 @@ export function delegateCapability(context: SupervisorHandoffContext, feedback?:
     throw new Error('Cannot dispatch again while the current execution has no result.');
   }
   return {
-    state,
-    execution: {
-      taskId: next.id,
-      delegationId: previous?.execution.delegationId ?? identity('delegation', context.runId, next.id),
-      capability: next.capability,
+    taskId: next.id,
+    delegationId: previous?.execution.delegationId ?? identity('delegation', context.runId, next.id),
+    capability: next.capability,
+    task: next.task,
+    mode: previous ? 'continue' as const : 'initial' as const,
+    briefing: JSON.stringify({
       task: next.task,
-      mode: previous ? 'continue' as const : 'initial' as const,
-      briefing: JSON.stringify({
-        task: next.task,
-        plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
-        ...(feedback ? { feedback } : {}),
-      }, null, 2),
-    },
+      plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
+      ...(feedback ? { feedback } : {}),
+    }, null, 2),
   };
 }

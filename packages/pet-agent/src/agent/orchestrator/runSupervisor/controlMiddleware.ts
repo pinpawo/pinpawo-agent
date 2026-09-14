@@ -1,11 +1,14 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { ToolInputParsingException } from '@langchain/core/tools';
 import { createMiddleware, ToolInvocationError } from 'langchain';
+import { currentSupervisorTask, supervisorAgentStateSchema } from './state';
+import { SupervisorDecisionError } from './controlContext';
 import { supervisorControlSchemas } from './protocol';
 
 export function createSupervisorControlValidationMiddleware() {
   return createMiddleware({
     name: 'SupervisorControlValidation',
+    stateSchema: supervisorAgentStateSchema,
     wrapToolCall: async (request, handler) => {
       // Preserve the SDK's unparsed JSON as failed input, never execute it.
       if (typeof request.toolCall.args === 'string') {
@@ -17,11 +20,12 @@ export function createSupervisorControlValidationMiddleware() {
       } catch (error) {
         // ToolNode validates arguments before invoking the tool body. Keep its
         // feedback, but mark failures explicitly so they cannot commit controls.
-        if (!(error instanceof ToolInvocationError)
-          || !(error.toolError instanceof ToolInputParsingException)) throw error;
+        const cause = error instanceof ToolInvocationError ? error.toolError : error;
+        if (!(cause instanceof ToolInputParsingException) && !(cause instanceof SupervisorDecisionError)) throw error;
+        const plan = cause instanceof SupervisorDecisionError ? request.state.runSupervisorState : null;
         return new ToolMessage({
           name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error',
-          content: error.toolError.message,
+          content: plan ? JSON.stringify({ error: cause.message, currentTask: currentSupervisorTask(plan), plan }) : cause.message,
         });
       }
     },

@@ -44,15 +44,10 @@ export function createRunSupervisorNode(config: OrchestratorConfig) {
       runCapabilityDisclosure: result.capabilityDisclosure,
       runSupervisorUserMessageId: input.inputId.startsWith('human:') ? input.inputId : root.runSupervisorUserMessageId,
     };
-    if (result.reply !== undefined) {
-      const last = result.messages.at(-1);
-      if (!result.reply.trim() || !AIMessage.isInstance(last) || last.tool_calls?.length || last.text !== result.reply) {
-        throw new Error('Supervisor final reply must match its actual final AIMessage.');
-      }
-      const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
-      return new Command({ update: { ...common, runSupervisorState: accepted.runSupervisorState, messages: accepted.messages }, goto: 'answer' });
+    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result);
+    if (result.reply !== undefined && (!result.reply.trim() || result.reply !== accepted.reply)) {
+      throw new Error('Supervisor final reply must match its actual final AIMessage.');
     }
-    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
     if (!accepted.reply && !(AIMessage.isInstance(lastMessage) && lastMessage.tool_calls?.[0]?.name === 'delegate_capability')) {
       throw new Error('Supervisor must reply or explicitly request execution.');
     }

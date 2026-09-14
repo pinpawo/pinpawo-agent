@@ -73,7 +73,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       // Asking may use a direct answer or a no-execution review reply. The
       // observable contract is unchanged work and no Capability dispatch.
       if (actual.reply === undefined) {
-        const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+        const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual);
         assert.deepEqual(accepted.runSupervisorState, input.state);
         assert.ok(accepted.reply?.trim());
         assert.equal(accepted.messages.length, 2);

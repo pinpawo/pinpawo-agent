@@ -1,13 +1,23 @@
+import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { supervisorControlSchemas, type SupervisorControl } from './protocol';
-import { SupervisorDecisionError, identity, type SupervisorHandoffContext, type SupervisorDecision } from './controlContext';
+import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask } from './state';
-import type { SupervisorToolSession } from './toolSession';
+import { Command } from '@langchain/langgraph';
+import type { RunSupervisorState, SupervisorAgentState } from './state';
 import { executionsForTask } from '../executionMessages';
 
-export function createAdjustPlanTool(session: SupervisorToolSession) {
-  return tool((args, runtime: ToolRuntime) =>
-    session(runtime, 'adjust_plan', (current, callId) => adjustPlan(current, args, callId)), {
+export function createAdjustPlanTool(context: SupervisorHandoffContext) {
+  return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
+    const state = adjustPlan({ ...context, state: runtime.state.runSupervisorState }, args, runtime.toolCallId);
+    return new Command({ update: {
+      runSupervisorState: state,
+      reviewFeedback: null,
+      messages: [new ToolMessage({ name: 'adjust_plan', tool_call_id: runtime.toolCallId,
+        content: JSON.stringify({ plan: state }),
+      })],
+    } });
+  }, {
     name: 'adjust_plan',
     schema: supervisorControlSchemas.adjust_plan,
     verboseParsingErrors: true,
@@ -21,7 +31,7 @@ export function adjustPlan(
   context: SupervisorHandoffContext,
   args: AdjustPlanArgs,
   callId: string,
-): SupervisorDecision {
+): RunSupervisorState {
   if (!context.hasNewUserInput && args.goal !== (context.state.goal ?? context.userRequest)) {
     throw new SupervisorDecisionError('Changing the goal requires fresh user input.');
   }
@@ -36,9 +46,9 @@ export function adjustPlan(
   const retained = context.state.plan.filter(task => task.status === 'completed' || task.status === 'superseded'
     || (executionsForTask(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
     .map(task => task.status === 'completed' ? task : { ...task, status: 'superseded' as const });
-  return { state: { goal: args.goal, plan: [...retained, ...args.tasks.map((task, index) => ({
+  return { goal: args.goal, plan: [...retained, ...args.tasks.map((task, index) => ({
     ...task,
     id: reuse && index === 0 && current ? current.id : identity('task', context.runId, callId, String(index)),
     status: 'pending' as const,
-  }))] }, execution: null };
+  }))] };
 }

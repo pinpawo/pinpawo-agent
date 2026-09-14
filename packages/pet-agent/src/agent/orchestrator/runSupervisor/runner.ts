@@ -20,6 +20,7 @@ export type RunSupervisorInput = {
 };
 
 export type RunSupervisorResult = {
+  readonly runSupervisorState: RunSupervisorState;
   /** New work records and, when executing, the Supervisor's request handed to Root. */
   readonly messages: readonly BaseMessage[];
   readonly reply?: string;

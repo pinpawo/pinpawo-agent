@@ -30,7 +30,7 @@ export function closureInput(example: ClosureExample, id: string): RunSupervisor
   ] : input.messages };
 }
 export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorResult, expected: ClosureExpected) {
-  const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
+  const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result);
   const dispatch = result.messages.map(readCapabilityExecutionCall).find(record => record !== null);
   const actual = dispatch ? dispatch.execution.capability === 'studio_reporting' ? 'report' : 'review' : result.reply?.trim() ? 'reply' : 'none';
   const adjustmentCalls = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan');

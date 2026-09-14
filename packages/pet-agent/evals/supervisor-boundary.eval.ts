@@ -145,7 +145,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     const actual = await supervisor.invoke(input);
     result = readSupervisorDecision(actual);
     scenario.check(result);
-    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual);
     const dispatched = accepted.messages.some((message) => AIMessage.isInstance(message)
       && message.tool_calls?.some((call) => call.name === 'delegate_capability'));
     assert.equal(dispatched, !decisionReply(result), 'Only the explicit execution branch dispatches a Capability.');
@@ -154,14 +154,14 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     }
     if (['boundary-without-evidence-asks-user', 'unfinished-task-asks-then-continues'].includes(scenario.name)
       && actual.reply !== undefined) {
-      const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages);
+      const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual);
       assert.deepEqual(accepted.runSupervisorState, input.state);
       assert.ok(!accepted.messages.some((message) => AIMessage.isInstance(message)
         && message.tool_calls?.some((call) => call.name === 'delegate_capability')), 'A question must not dispatch execution.');
     }
     if (scenario.supplement) {
       assert.ok(decisionReply(result)?.trim(), 'A question must precede the user supplement.');
-      const saved = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual.messages).runSupervisorState;
+      const saved = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual).runSupervisorState;
       const resumed: RunSupervisorInput = {
         ...input, state: saved, mode: 'boundary',
         runId: `${scenario.name}:resume`, traceId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,

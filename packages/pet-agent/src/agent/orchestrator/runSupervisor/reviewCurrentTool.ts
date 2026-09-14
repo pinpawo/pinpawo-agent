@@ -1,13 +1,23 @@
+import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { supervisorControlSchemas, type SupervisorControl } from './protocol';
-import { SupervisorDecisionError, type SupervisorHandoffContext, type SupervisorDecision } from './controlContext';
+import { SupervisorDecisionError, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask, updateSupervisorTask } from './state';
-import type { SupervisorToolSession } from './toolSession';
+import { Command } from '@langchain/langgraph';
+import type { RunSupervisorState, SupervisorAgentState } from './state';
 import { executionsForTask } from '../executionMessages';
 
-export function createReviewCurrentTool(session: SupervisorToolSession) {
-  return tool((args, runtime: ToolRuntime) =>
-    session(runtime, 'review_current', current => reviewCurrent(current, args)), {
+export function createReviewCurrentTool(context: SupervisorHandoffContext) {
+  return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
+    const state = reviewCurrent({ ...context, state: runtime.state.runSupervisorState }, args);
+    return new Command({ update: {
+      runSupervisorState: state,
+      reviewFeedback: args.completed ? null : args.reason,
+      messages: [new ToolMessage({ name: 'review_current', tool_call_id: runtime.toolCallId,
+        content: JSON.stringify({ plan: state }),
+      })],
+    } });
+  }, {
     name: 'review_current',
     schema: supervisorControlSchemas.review_current,
     verboseParsingErrors: true,
@@ -20,7 +30,7 @@ type ReviewCurrentArgs = Extract<SupervisorControl, { name: 'review_current' }>[
 export function reviewCurrent(
   context: SupervisorHandoffContext,
   args: ReviewCurrentArgs,
-): SupervisorDecision {
+): RunSupervisorState {
   let state: SupervisorHandoffContext['state'] = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');
@@ -31,5 +41,5 @@ export function reviewCurrent(
     }
     state = updateSupervisorTask(state, current.id, 'completed');
   }
-  return { state, execution: null };
+  return state;
 }

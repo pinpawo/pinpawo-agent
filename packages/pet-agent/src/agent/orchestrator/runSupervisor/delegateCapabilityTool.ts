@@ -6,7 +6,7 @@ import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask } from './state';
 import { executionsForTask } from '../executionMessages';
-import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
+import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
@@ -18,10 +18,6 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
   const executeCapability = createCapabilityExecutor(options);
   return tool(async (_args, runtime: ToolRuntime<OrchestratorStateType, Record<string, unknown>>) => {
     const state = runtime.state;
-    if (state.messages.some(message => ToolMessage.isInstance(message) && message.tool_call_id === runtime.toolCallId
-      && getAgentMessageMetadata(message).runId === state.runId && !getAgentMessageMetadata(message).lane)) {
-      throw new Error('Capability call already has a result.');
-    }
     const registry = getInvokeRegistry(runtime.config);
     const invokeOptions = getInvokeOptions(runtime.config);
     const userRequest = state.runSupervisorState.goal ?? state.runUserRequest;

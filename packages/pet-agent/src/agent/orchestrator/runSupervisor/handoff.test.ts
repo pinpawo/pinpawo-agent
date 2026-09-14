@@ -116,6 +116,8 @@ test('fresh run preserves Root facts without inheriting Supervisor work or dedup
   const secondOutput = await second.graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), options);
   assert.notEqual(secondOutput.runId, firstOutput.runId);
   assert.equal(readDelegationDeliveries(secondOutput.messages).length, 2);
+  const executions = readCapabilityExecutions(secondOutput.messages);
+  assert.equal(new Set(executions.map(record => record.call.id)).size, 2, 'reused provider IDs remain distinct across runs');
   assert.equal(secondOutput.messages.filter((message) => ToolMessage.isInstance(message)
     && message.name === 'plan_request' && message.tool_call_id === 'entry-call').length, 2);
   assert.ok(second.supervisor.inputs[0].some((message) => message.text === 'Inspection complete.'));

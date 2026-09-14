@@ -7,6 +7,7 @@ import { createOrchestratorGraph } from '../runtime/graph';
 import { buildOrchestratorRunInput } from '../state';
 import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
+import { identity } from './controlContext';
 import { readCapabilityExecutions } from '../executionMessages';
 
 class RecoveryModel extends BaseChatModel {
@@ -106,7 +107,7 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_ca
     const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
       configurable: { thread_id: `recover-${name}`, registry },
     });
-    const feedback = supervisor.inputs.flat().find((m) => ToolMessage.isInstance(m) && m.tool_call_id === 'bad');
+    const feedback = supervisor.inputs.flat().find((m) => ToolMessage.isInstance(m) && m.tool_call_id === (name === 'delegate_capability' ? identity('call', result.runId, 'bad') : 'bad'));
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
     assert.equal(feedback.name, name);
@@ -179,7 +180,7 @@ test('copied internal handoff parameters are corrected before a single Superviso
   const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
     configurable: { thread_id: 'copied-handoff', registry },
   });
-  const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'copied-history');
+  const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, 'copied-history'));
   assert.ok(ToolMessage.isInstance(feedback));
   assert.equal(feedback.status, 'error');
   const executions = readCapabilityExecutions(result.messages);
@@ -210,7 +211,7 @@ test('model-written briefing is rejected and formatted plan content is injected 
     configurable: { thread_id: 'required-briefing', registry },
   });
   for (const id of ['overridden', 'blank', 'legacy']) {
-    const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === id);
+    const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', result.runId, id));
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
   }

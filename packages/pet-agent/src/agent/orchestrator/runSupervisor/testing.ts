@@ -1,5 +1,6 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
-import { createCapabilityNode } from '../runtime/nodes/capability';
+import { ToolNode } from '@langchain/langgraph/prebuilt';
+import { recoverCapabilityError } from '../runtime/capabilityError';
 import { Command, StateGraph, START, END } from '@langchain/langgraph';
 import { createRunSupervisorAgent } from './agent';
 import { OrchestratorState } from '../state';
@@ -108,15 +109,22 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
       return new Command({ update: {} });
     }, { name: 'delegate_capability', description: 'Capture a valid execution decision without executing Capability.', schema: delegateCapabilitySchema });
     const graph = new StateGraph(OrchestratorState)
-      .addNode('supervisor', async (_state, runtime) => {
+      .addNode('runSupervisor', async (_state, runtime) => {
         const result = await runner.invoke({ ...input, state: _state.runSupervisorState, reviewFeedback: _state.runSupervisorReviewFeedback,
           messages: [...input.messages, ..._state.messages] }, runtime);
         return new Command({ update: { messages: result.messages, runSupervisorState: result.runSupervisorState,
           runCapabilityDisclosure: result.capabilityDisclosure, runSupervisorReviewFeedback: result.reviewFeedback ?? null }, goto: END });
       }, { ends: ['capability', END] })
-      .addNode('capability', createCapabilityNode(capture))
-      .addEdge(START, 'supervisor').addConditionalEdges('capability', state =>
-        ToolMessage.isInstance(state.messages.at(-1)) ? 'supervisor' : END, ['supervisor', END]).compile();
+      .addNode('capability', new ToolNode<typeof OrchestratorState.State>([capture], { handleToolErrors: false }), {
+        ends: ['runSupervisor'],
+        errorHandler: (state: typeof OrchestratorState.State, error) => {
+          const recovery = recoverCapabilityError(state, error);
+          if (recovery) return recovery;
+          throw error.error;
+        },
+      })
+      .addEdge(START, 'runSupervisor').addConditionalEdges('capability', state =>
+        ToolMessage.isInstance(state.messages.at(-1)) ? 'runSupervisor' : END, ['runSupervisor', END]).compile();
     const result = await graph.invoke({ runId: input.runId, traceId: input.traceId,
       runSupervisorState: input.state, runSupervisorReviewFeedback: input.reviewFeedback ?? null, runUserRequest: input.userRequest, runCapabilityDisclosure: input.capabilityDisclosure }, config);
     const last = result.messages.at(-1);

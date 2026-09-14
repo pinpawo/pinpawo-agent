@@ -446,3 +446,11 @@ Supervisor 与 Root 共享同一个 delegate_capability 工具对象。Superviso
 ToolMessage artifact 保存，用于验收、展示和历史审计，不作为下一次执行的输入协议。
 尚未返回的调用由 Root 当前计划与原生待执行 ToolNode 表示。工作消息的 lane/run 标注
 属于历史可见性；跨图控制权与调用配对由 LangGraph 负责。
+
+### Root 直接注册 ToolNode
+
+Root 的 capability 节点直接使用 `new ToolNode([delegateCapability], { handleToolErrors: false })`。
+删除外围手动 invoke、lg_tool_call 输入拼装和 callbacks 覆盖。委派调用写入 Root 时按 run
+规范化调用 ID，让原生 ToolNode 在完整历史中去重；参数与原模型消息保持不变，实际结果
+使用同一个规范化 ID 配对。可纠正参数或业务错误由节点 errorHandler 返回错误 ToolMessage
+并进入 Supervisor；其他异常继续走 Root 终止路径，原生 interrupt 由框架恢复。

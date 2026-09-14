@@ -7,7 +7,7 @@ import { submitPlan } from './submitPlanTool';
 import { reviewCurrent } from './reviewCurrentTool';
 import { adjustPlan } from './adjustPlanTool';
 import { buildCapabilityExecutionInput } from './delegateCapabilityTool';
-import type { SupervisorHandoffContext } from './controlContext';
+import { identity, type SupervisorHandoffContext } from './controlContext';
 import { supervisorWorkMessages } from './messageHandoff';
 import { readCapabilityExecutions } from '../executionMessages';
 import { createRunSupervisorProbe } from './testing';
@@ -102,10 +102,14 @@ test('adjustment preserves completed work, supersedes replaced executions and ch
   assert.equal(replaced.plan[0].id, input.state.plan[0].id);
 });
 
-test('work projection preserves native call IDs and args without encoding execution inputs', () => {
+test('work projection scopes delegation IDs per run without changing arguments or the original message', () => {
   const request = control('delegate_capability', {}, 'native-call');
   const projected = supervisorWorkMessages(context(), [request]);
-  assert.deepEqual((projected[0] as AIMessage).tool_calls, request.tool_calls);
+  const projectedCall = (projected[0] as AIMessage).tool_calls![0];
+  assert.equal(projectedCall.id, identity('call', context().runId, 'native-call'));
+  assert.deepEqual(projectedCall.args, request.tool_calls![0].args);
+  assert.equal(request.tool_calls![0].id, 'native-call');
+  assert.notEqual((supervisorWorkMessages(context({ runId: 'other' }), [request])[0] as AIMessage).tool_calls![0].id, projectedCall.id);
   assert.equal(getAgentMessageMetadata(projected[0]).execution, undefined);
   assert.equal(queryAgentMessages(projected).main().select().messages.length, 1);
 });
@@ -173,6 +177,6 @@ test('correcting delegation arguments preserves the rejected delivery feedback',
   ]);
   assert.equal(model.inputs.length, 3);
   assert.equal(result.reviewFeedback, 'Verify missing evidence');
-  const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'invalid') as ToolMessage;
+  const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', context().runId, 'invalid')) as ToolMessage;
   assert.equal(error.status, 'error');
 });

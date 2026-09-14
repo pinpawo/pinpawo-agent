@@ -216,7 +216,7 @@ class ScriptedSupervisorModel extends BaseChatModel {
       delete control.args.reply;
       this.#followUp = reply ? new AIMessage(String(reply)) : new AIMessage({ content: '', tool_calls: [{
         id: `${control.id}:execute`, name: 'delegate_capability', args: {
-          ...(control.args.completed !== true && typeof control.args.reason === 'string' ? { guidance: control.args.reason } : {}),
+          briefing: typeof control.args.reason === 'string' ? control.args.reason : 'Execute the planned task and return evidence.',
         }, type: 'tool_call',
       }] });
       if (control.name === 'review_current' && control.args.completed === undefined) {
@@ -329,7 +329,7 @@ function supervisorInput(
     const callId = `fixture:${report.delegationId}:${i}`;
     const metadata = { runId: report.runId, traceId: input.traceId };
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
-      id: callId, name: 'delegate_capability', type: 'tool_call', args: {},
+      id: callId, name: 'delegate_capability', type: 'tool_call', args: { briefing: 'Execute the current planned task and return evidence.' },
     }] }), { ...metadata, source: 'supervisor', execution: {
       taskId: current!.delegationId, delegationId: current!.delegationId,
       capability: current!.capability, task: current!.task, mode: 'initial',

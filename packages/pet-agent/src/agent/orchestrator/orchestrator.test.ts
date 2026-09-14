@@ -4090,7 +4090,7 @@ test('lane reconciliation never emits root removals for the current briefing', (
     mode: 'continue',
     userRequest: '完成任务',
     task: '继续处理任务',
-    guidance: null,
+    briefing: 'Complete the current task and return evidence.',
   });
   const finalAnswer = new AIMessage({ id: 'final-answer', content: '任务完成' });
 

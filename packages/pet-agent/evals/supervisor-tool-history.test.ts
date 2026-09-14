@@ -39,7 +39,7 @@ test('evidence projection preserves execution payloads, identity, metadata and c
 });
 
 test('projection leaves live invalid calls and error feedback intact for normal recovery', () => {
-  const call = new AIMessage({ content: '', tool_calls: [{ id: 'live', name: 'delegate_capability', args: {} }] });
+  const call = new AIMessage({ content: '', tool_calls: [{ id: 'live', name: 'delegate_capability', args: { briefing: 'Execute the current planned task and return evidence.' } }] });
   const error = new ToolMessage({ name: 'delegate_capability', tool_call_id: 'live', status: 'error', content: 'Unavailable tool' });
   const output = projectHistoryEvidence([call, error], new Set(['old']));
   assert.equal(output[0], call);

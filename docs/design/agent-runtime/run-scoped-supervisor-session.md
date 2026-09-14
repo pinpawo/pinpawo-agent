@@ -146,14 +146,14 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 | `submit_plan` | 建立计划，返回计划事实；不派发执行 |
 | `review_current` | 验收当前交付或记录需要补做，返回更新后的计划；不要求 reply，不派发执行 |
 | `adjust_plan` | 调整未完成计划并保留已完成进度，返回计划事实；不派发执行 |
-| `delegate_capability` | 模型明确决定执行当前计划项，可带补做指导；只在这里交接给 Root |
+| `delegate_capability` | 模型明确决定执行当前计划项，提供完整 briefing；只在这里交接给 Root |
 | `capability_details` | 返回能力详情，继续模型循环 |
 
 控制工具均不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
 自然回复。只有 `delegate_capability` 的成功工具回执才结束 Supervisor 循环并交接给 Root；
 错误回执继续返回模型，不能因工具名称是执行工具而提前结束。
 
-Supervisor 优先沿用适用的现有计划，非必要不重排。补做可使用执行 guidance；只有新要求
+Supervisor 优先沿用适用的现有计划，非必要不重排。补做要求写入本次 briefing；只有新要求
 或具体证据表明原安排不适用、能力选错或存在遗漏时，才决定最小调整。`adjust_plan.tasks`
 只列剩余工作，运行时自动保留已完成事项。保留当前能力和交付身份使用 continue；replace
 不携带旧交付作为新任务的验收依据。这是模型职责与工具语义，不新增强制路由或重排次数限制。
@@ -174,7 +174,7 @@ schema 与业务约束校验。纠错遵守调用方 recursionLimit，业务约�
 
 invoke 结束时，Root 验证并按顺序应用本次已完成的控制调用。无论模型最终选择执行还是
 自然回复，都提交计划更新与工作消息。执行时将 Supervisor 的 `delegate_capability`
-请求交接为主会话记录，保留模型提供的 guidance 参数并规范化调用 ID；不创建第二条
+请求交接为主会话记录，保留模型提供的 briefing 参数并规范化调用 ID；不创建第二条
 调用。执行快照写入内部元数据，Capability 仍在 Root 节点执行并返回实际结果。
 
 ```text
@@ -367,9 +367,9 @@ Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次�
 Supervisor 的 `delegate_capability`，由同一次模型工具调用交接 Root；不再生成第二次
 同义的 Root 工具调用，不保留旧工具别名或旧 checkpoint 参数兼容。
 
-模型参数仅保留可选 `guidance`：本次执行需要的补充上下文或补做要求。Capability 与 task
+模型参数仅保留必填 `briefing`：本次完整执行说明与必要上下文。Capability 与 task
 已经由当前计划决定，不让模型重复填写；taskId、delegationId、initial/continue 由运行时
-确定。guidance 不改变目标或计划，不取代 adjust_plan，也不强制每次重述完整任务。
+确定。briefing 遵循目标和计划，不取代 adjust_plan；由 Supervisor 组织足够清晰的执行说明。
 
 计划和验收工具仍返回事实供模型继续决策。delegate_capability 校验成功后结束本次
 Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再进入 Capability 节点。
@@ -377,7 +377,7 @@ Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再�
 保留 run 范围的 id 规范化，避免不同 run 的模型 call id 复用碰撞。
 
 执行快照只存于规范委派消息的运行时元数据，包含任务身份、能力、当时任务内容、
-delegation 身份与执行模式；guidance 直接读取工具参数，不重复保存。主会话保留一组
+delegation 身份与执行模式；briefing 直接读取工具参数，不重复保存。主会话保留一组
 请求/实际结果，模型看到的历史参数与可调用 schema 完全一致。原始模型调用 id 作为
 来源关联保留。Root 仍从 Supervisor 决策序列重算计划和执行快照并校验交接，避免提交
 被改写、重复或未授权的执行；不增加另一份 pending/dispatch 状态。
@@ -386,3 +386,18 @@ delegation 身份与执行模式；guidance 直接读取工具参数，不重复
 Host 的 readCapabilityExecutions 返回结构保持稳定，继续供计划进度和交付展示使用。
 回归覆盖单次派发、错误自纠、验收、continue/replace、新 run、重复调用 id、篡改、
 暂停恢复、压缩保留、Host 投影及 Studio 工作→反馈能力交接。旧协议 checkpoint 不迁移。
+
+### 委派正文统一为 briefing（2026-09-14）
+
+Supervisor 的模型参数改为 `{ briefing: string }`，必填且非空，使用普通文本或 Markdown
+组织本次执行要求、必要背景、已有成果引用及交付预期。briefing 是本次完整执行说明，
+不是计划任务的可选补充；不要求模型生成 XML，不再保留 guidance/essentialContext 别名。
+能力和任务仍由计划决定，整体目标与执行身份由运行时提供，不在模型参数中重复提交。
+
+不沿用旧 guidance 的 2000 字符上限；工具仅验证非空，实际输入/输出预算继续由模型与
+现有上下文窗口管理。首次执行和继续执行共享同一个 briefing 字段，mode 只负责执行
+生命周期。内部 HumanMessage 可以继续用 XML 分隔目标、计划任务和 briefing，正文
+必须无损传递和安全转义；不持久化这条临时输入，也不把正文解析为执行身份。
+
+用户通过暂停恢复提供的 guidance 属于用户输入协议，先传给 Supervisor，再由模型组织
+本次 briefing；它不属于此次删除的委派工具参数，不改变该恢复协议。

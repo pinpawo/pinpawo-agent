@@ -35,9 +35,9 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_ca
     const badArgs = name === 'submit_plan' ? { tasks: [{ ...task, taskId: 'kanban-task' }] }
       : name === 'adjust_plan' ? { goal: task.task, reason: 'Correct the plan.', currentDelegation: 'replace', tasks: [{ ...task, taskId: 'kanban-task' }] }
       : name === 'review_current' ? { completed: 'yes', reason: 'Evidence returned.' }
-      : { guidance: 123 };
+      : { briefing: 123 };
     const goodPlan = call('submit_plan', { tasks: [task] }, 'plan');
-    const execute = call('delegate_capability', {}, 'execute');
+    const execute = call('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute');
     const review = call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review');
     const bad = call(name, badArgs, 'bad');
     const responses = name === 'review_current' ? [goodPlan, execute, bad, review]
@@ -54,7 +54,7 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_ca
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
     assert.equal(feedback.name, name);
-    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'delegate_capability' ? 'guidance' : 'taskId'));
+    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'delegate_capability' ? 'briefing' : 'taskId'));
     assert.equal(executor.inputs.length, 1);
     assert.equal(readCapabilityExecutions(result.messages).length, 1);
     assert.equal(result.runSupervisorState.plan.length, 1);
@@ -84,7 +84,7 @@ for (const phase of ['entry', 'boundary']) {
     if (phase === 'entry' && name === 'capability_details') continue;
     test(`${phase}: ${name} is corrected in the same run with exactly one delegation`, async () => {
       const plan = call('submit_plan', { tasks: [task] }, 'plan');
-      const execute = call('delegate_capability', {}, 'execute');
+      const execute = call('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute');
       const review = call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review');
       const bad = call(name, {}, 'unknown');
       const responses = phase === 'entry' ? [bad, plan, execute, review] : [plan, execute, bad, review];
@@ -113,7 +113,7 @@ test('copied internal handoff parameters are corrected before a single Superviso
     call('submit_plan', { tasks: [task] }, 'plan'),
     call('delegate_capability', { control: { name: 'execute_current', args: {} },
       execution: { taskId: 'invented', capability: 'unauthorized' } }, 'copied-history'),
-    call('delegate_capability', { guidance: 'Verify the concrete implementation.' }, 'delegate'),
+    call('delegate_capability', { briefing: 'Verify the concrete implementation.' }, 'delegate'),
     call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review'),
     new AIMessage('Inspection complete.'),
   ]);
@@ -129,9 +129,39 @@ test('copied internal handoff parameters are corrected before a single Superviso
   const executions = readCapabilityExecutions(result.messages);
   assert.equal(executions.length, 1);
   assert.equal(executor.inputs.length, 1);
-  assert.deepEqual(executions[0].call.args, { guidance: 'Verify the concrete implementation.' });
+  assert.deepEqual(executions[0].call.args, { briefing: 'Verify the concrete implementation.' });
   const returnView = supervisor.inputs.at(-1)!;
   const actualResults = returnView.filter(m => ToolMessage.isInstance(m) && m.tool_call_id === executions[0].call.id);
   assert.equal(actualResults.length, 1);
   assert.ok(executor.inputs[0].some(m => m.text.includes('Verify the concrete implementation.')));
+});
+
+test('missing, blank and legacy briefing arguments recover without execution until a complete briefing is supplied', async () => {
+  const briefing = '  # Work request\n\n' + 'Keep this evidence and its formatting.\n'.repeat(100) + '\nReturn verified results.  ';
+  const supervisor = new RecoveryModel([
+    call('submit_plan', { tasks: [task] }, 'plan'),
+    call('delegate_capability', {}, 'missing'),
+    call('delegate_capability', { briefing: ' \n ' }, 'blank'),
+    call('delegate_capability', { guidance: 'Old optional argument.' }, 'legacy'),
+    call('delegate_capability', { briefing }, 'delegate'),
+    call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review'),
+    new AIMessage('Inspection complete.'),
+  ]);
+  const executor = new RecoveryModel([new AIMessage('Verified result.')]);
+  const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
+  const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+    configurable: { thread_id: 'required-briefing', registry },
+  });
+  for (const id of ['missing', 'blank', 'legacy']) {
+    const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === id);
+    assert.ok(ToolMessage.isInstance(feedback));
+    assert.equal(feedback.status, 'error');
+  }
+  assert.equal(executor.inputs.length, 1);
+  assert.ok(executor.inputs[0].some(m => m.text.includes(briefing)));
+  const records = readCapabilityExecutions(result.messages);
+  assert.equal(records.length, 1);
+  assert.deepEqual(records[0].call.args, { briefing });
+  assert.equal(records[0].execution.briefing, briefing);
 });

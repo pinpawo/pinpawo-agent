@@ -59,7 +59,7 @@ test('readTuiCheckpointMessages restores paired Capability deliveries without ex
     task: 'Inspect files', mode: 'initial' };
   const metadata = { runId: 'run-1', traceId: 'trace-1' };
   const call = setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
-    id: 'dispatch-1', name: 'delegate_capability', args: {},
+    id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current planned task and return evidence.' },
   }] }), { ...metadata, source: 'supervisor', execution });
   const result = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: 'dispatch-1',
     content: JSON.stringify({ status: 'returned', delivery: { id: 'delivery-1', task: execution.task,

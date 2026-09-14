@@ -24,7 +24,7 @@ export function readCapabilityExecutionCall(message: BaseMessage) {
   const args = supervisorControlSchemas.delegate_capability.safeParse(call.args);
   const snapshot = capabilityExecutionSnapshotSchema.safeParse(metadata.execution);
   if (!args.success || !snapshot.success) return null;
-  return { call, metadata, execution: { ...snapshot.data, guidance: args.data.guidance ?? null } };
+  return { call, metadata, execution: { ...snapshot.data, briefing: args.data.briefing } };
 }
 
 /** A read-only view of actual Root tool pairs, never a second execution register. */

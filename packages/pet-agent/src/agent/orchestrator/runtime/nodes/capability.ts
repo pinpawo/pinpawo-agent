@@ -31,9 +31,7 @@ export function createCapabilityNode(params: {
     const delegation = { id: call.delegationId, runId: state.runId, traceId: state.traceId, userRequest, task: call.task };
     const execution = await executeCapability({
       capability: compiledCapability,
-      delegation: call.mode === 'initial'
-        ? { ...delegation, mode: 'initial', essentialContext: call.guidance }
-        : { ...delegation, mode: 'continue', guidance: call.guidance },
+      delegation: { ...delegation, mode: call.mode, briefing: call.briefing },
       history: state.messages,
     }, {
       review: {

@@ -7,7 +7,8 @@ import type { UserRequest } from '../types';
 /**
  * Delegation briefing — the downward counterpart of the (upward) subagent
  * handoff. Immediately before a Capability model call, the runtime projects the
- * stable user request and the current task into one compact HumanMessage. The
+ * stable user request, current plan task and Supervisor-authored briefing into
+ * one HumanMessage. The
  * projection is invocation-only: neither it nor a separate user-request context
  * message is persisted in canonical main or private-lane history.
  *
@@ -22,21 +23,12 @@ import type { UserRequest } from '../types';
 
 export const DELEGATION_BRIEFING_SOURCE = 'delegation_briefing';
 
-type DelegationSpecBase = {
+export type DelegationSpec = {
   userRequest: UserRequest;
   task: string;
+  mode: 'initial' | 'continue';
+  briefing: string;
 };
-
-export type DelegationSpec = DelegationSpecBase & (
-  | {
-      mode: 'initial';
-      essentialContext: string | null;
-    }
-  | {
-      mode: 'continue';
-      guidance: string | null;
-    }
-);
 
 function stampBriefingMeta(message: HumanMessage) {
   message.id ??= randomUUID();
@@ -58,13 +50,8 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
       '</run_user_request>',
     ].join('\n'),
     xmlTextBlock('task', spec.task),
-    spec.mode === 'initial' && spec.essentialContext
-      ? xmlTextBlock('essential_context', spec.essentialContext)
-      : null,
-    spec.mode === 'continue' && spec.guidance
-      ? xmlTextBlock('guidance', spec.guidance)
-      : null,
-  ].filter((block): block is string => block !== null);
+    xmlTextBlock('briefing', spec.briefing),
+  ];
 
   return [
     `<delegation_briefing role="task_boundary" source="orchestrator" mode="${spec.mode}">`,

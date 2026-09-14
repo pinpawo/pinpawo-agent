@@ -22,7 +22,7 @@ export const controlSchema = z.discriminatedUnion('name', [
     tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的剩余工作。已完成事项由运行时保留，不重新提交；continue 时第一项对应保留身份与交付的当前任务。'),
   }).strict() }).strict(),
   z.object({ name: z.literal('delegate_capability'), args: z.object({
-    guidance: z.string().trim().min(1).max(2_000).optional().describe('当前计划任务在本次执行需要的补充上下文或补做要求；无需重述任务。省略表示按计划直接执行，不用于更换能力、任务或目标。'),
+    briefing: z.string().refine(text => text.trim().length > 0, 'briefing must contain non-whitespace text').describe('交给当前计划 Capability 的本次完整执行说明：说明执行要求、必要背景、已有成果或证据引用及预期交付。用普通文本或 Markdown 组织，无需 XML；遵循当前计划任务与用户目标，不重复填写能力或执行身份。'),
   }).strict() }).strict(),
 ]);
 

@@ -227,3 +227,23 @@ Entry、Boundary、恢复 Entry，每组重复 3 次，共 18 次 invocation、3
 完整仓库测试 1784 passed、5 skipped、0 failed，PetAgent（含 evals）及 Host 类型检查
 通过，完整 build 通过。Studio 跨包集成测试包含在仓库测试中；没有重启现有真实 Studio
 会话，也未用新协议重跑真实业务项目完整 UI E2E。旧 checkpoint 不做兼容迁移。
+
+## 必填 briefing 验证（2026-09-14）
+
+模型参数进一步收敛为 `{ briefing: string }`：由 Supervisor 编写本次完整执行说明，
+首次/继续执行共用一个字段，运行时继续提供计划任务和整体目标。工具不再接受空参数、
+空白正文或旧 guidance；不沿用 2000 字符上限，也不裁剪正文的首尾空白、缩进与换行。
+内部临时 HumanMessage 使用 XML 分隔正文，但模型工具参数无需 XML。
+
+DeepSeek V4.1 Flash 的新一轮评估仍覆盖 0/300 组历史、Entry/Boundary/恢复 Entry，
+各重复 3 次。共 18/18 正确交接、30 次模型响应，每例一次合法委派，没有未知工具或
+运行错误。样本正文包含本次执行要求、背景和交付预期；这里只判断合成场景下的交接
+正确性，不把它视为对所有 briefing 质量的评判。结果在 `/tmp/supervisor-required-briefing`，
+runner 标记为 `supervisor-briefing-v1`，与先前 guidance 协议结果区分。
+
+完整仓库测试 1787 passed、5 skipped、0 failed；PetAgent（含 evals）、Host 类型检查
+及完整 build 通过。新增真实 graph 回归验证缺失/空白/旧字段反馈给模型后自行纠正，
+成功前不执行工作；超过 2000 字符的格式化正文完整保留在唯一委派参数中，并传给
+Capability 模型。首次和继续执行均不将临时 briefing HumanMessage 写入长期私有历史。
+用户暂停恢复输入的 guidance 是独立用户输入协议，保持不变。未重启既有真实 Studio
+业务会话；旧委派参数及旧 checkpoint 不做兼容迁移。

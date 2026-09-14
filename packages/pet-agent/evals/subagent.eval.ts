@@ -342,21 +342,13 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
   const runtime = buildMockTools(inputs);
   const task = String(inputs.task ?? '');
   const mode = inputs.mode === 'continue' ? 'continue' : 'initial';
-  const briefing = materializeDelegation(mode === 'continue'
-    ? {
-        mode,
-        userRequest: String(inputs.user_request ?? task),
-        task,
-        guidance: typeof inputs.gap_note === 'string' ? inputs.gap_note : null,
-      }
-    : {
-        mode,
-        userRequest: String(inputs.user_request ?? task),
-        task,
-        essentialContext: typeof inputs.essential_context === 'string'
-          ? inputs.essential_context
-          : null,
-      });
+  const briefing = materializeDelegation({
+    mode,
+    userRequest: String(inputs.user_request ?? task),
+    task,
+    briefing: [task, mode === 'continue' ? inputs.gap_note : inputs.essential_context]
+      .filter(value => typeof value === 'string' && value.trim()).join('\n\n'),
+  });
   const mainContext = typeof inputs.main_context === 'string'
     ? inputs.main_context
     : `用户请求：${task}`;
@@ -367,7 +359,7 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
       mode: 'initial',
       userRequest: String(inputs.user_request ?? task),
       task: priorTask,
-      essentialContext: null,
+      briefing: priorTask,
     }));
     messages.push(new AIMessage(inputs.prior_progress));
   }

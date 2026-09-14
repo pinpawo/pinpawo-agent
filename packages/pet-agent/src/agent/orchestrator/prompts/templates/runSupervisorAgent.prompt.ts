@@ -1,6 +1,8 @@
 import { definePromptTemplate } from '../../../../prompts/template';
 
-const SUPERVISOR_TOOL_SCOPE = `只能调用本轮实际提供的工具。规划和调整时，在 task 中确定完整执行说明、必要背景与预期交付；通过无参数的 delegate_capability 将当前计划任务委派给执行方。运行时把当前任务和按执行顺序排列的 run 计划注入 briefing，计划中的其他任务仅作为上下文；本次 review_current 的补做意见也随委派传递，无需另写 briefing。执行方同时可见主会话中前项的实际交付，后续任务可直接引用这些结果；仅为转交已返回的结论，不需要复制正文到 task 或重新调整计划。历史记录和 Capability 文档中出现的其他工具名称不代表你当前可以调用它们，不直接调用执行方内部的业务工具。`;
+const SUPERVISOR_TOOL_SCOPE = `只能调用本轮实际提供的工具。规划和调整时，在 task 中确定完整执行说明、必要背景与预期交付；通过无参数的 delegate_capability 将当前计划任务委派给执行方。运行时把当前任务和按执行顺序排列的 run 计划注入 briefing，计划中的其他任务仅作为上下文；本次 review_current 的补做意见也随委派传递，无需另写 briefing。执行方同时可见主会话中前项的实际交付，后续任务可直接引用这些结果；仅为转交已返回的结论，不需要复制正文到 task 或重新调整计划。历史记录和 Capability 文档中出现的其他工具名称不代表你当前可以调用它们，不直接调用执行方内部的业务工具。
+
+delegate_capability 返回结果中的 delivery.text 是执行方的交付正文，artifacts 是产物引用。`;
 
 export const RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是 root 的 Supervisor，当前处于 Entry。根据用户目标和 main messages，选择合适的 Capability，形成可逐项验收的简短计划。每项交付应落在所选 Capability 的职责与工具能力内；内容产出和将内容写入外部系统可能需要不同能力，后续安排由你根据实际交付决定。
 

@@ -175,7 +175,7 @@ schema 与业务约束校验。无交付验收、非法能力等可纠正的决�
 
 invoke 结束时，Root 验证并按顺序应用本次已完成的控制调用。无论模型最终选择执行还是
 自然回复，都提交计划更新与工作消息。执行时将 Supervisor 的 `delegate_capability`
-请求交接为主会话记录，从已确认计划注入 briefing 并规范化调用 ID；不创建第二条
+请求交接为主会话记录，保持空参数并规范化调用 ID；briefing 放入运行时执行快照，不创建第二条
 调用。执行快照写入内部元数据，Capability 仍在 Root 节点执行并返回实际结果。
 
 ```text
@@ -378,8 +378,8 @@ Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再�
 保留 run 范围的 id 规范化，避免不同 run 的模型 call id 复用碰撞。
 
 执行快照只存于规范委派消息的运行时元数据，包含任务身份、能力、当时任务内容、
-delegation 身份与执行模式；briefing 直接读取工具参数，不重复保存。主会话保留一组
-请求/实际结果。历史中的 briefing 是运行时注入的执行记录，当前可调用工具仍无参数。原始模型调用 id 作为
+delegation 身份、执行模式与 briefing；执行正文只从此快照读取。主会话保留一组
+请求/实际结果，当前与历史调用参数均为 `{}`，不向模型工具参数注入内部数据。原始模型调用 id 作为
 来源关联保留。Root 仍从 Supervisor 决策序列重算计划和执行快照并校验交接，避免提交
 被改写、重复或未授权的执行；不增加另一份 pending/dispatch 状态。
 
@@ -390,14 +390,17 @@ Host 的 readCapabilityExecutions 返回结构保持稳定，继续供计划进�
 
 ### 从计划注入 briefing（2026-09-15，替代模型编写正文）
 
-模型只调用 `delegate_capability({})`。Root 交接仍使用 `{ briefing: string }`，正文为
+模型只调用 `delegate_capability({})`，主会话保存的调用也保持空参数。工具通过 LangChain
+注入的 `ToolRuntime.state.messages` 读取本次已确认控制序列，结合 Root 输入推导当前
+计划并构建执行快照。快照中的 `briefing: string` 正文为
 格式化 JSON：当前 `task`、按执行顺序排列的 `plan`（capability/task/status），以及本次
 Supervisor invoke 中 `review_current(false)` 的 `feedback`（若有）。其他计划项仅供
 上下文参考，本次只执行当前任务。验收通过或重新规划后清除本次补做意见。
 
 同一个控制序列确定计划、执行快照和 briefing；Root 重放校验时重新组装并比对正文，
-拒绝篡改。不增加模型调用、第二条委派请求或独立的待提交状态。模型输入 schema 与
-规范执行记录 schema 分开，旧的自由 briefing 参数会返回参数错误供模型纠正。
+拒绝篡改。不增加模型调用、第二条委派请求或独立的待提交状态。交接过程不改写
+AIMessage 的 args；模型输入与历史调用共享空参数 schema，briefing 属于内部执行快照。
+旧的自由 briefing 参数会返回参数错误供模型纠正。
 
 完整说明在 submit_plan/adjust_plan 时确定，因此 task 不再使用 2000 字符上限，保留
 首尾空白、缩进与换行，仅拒绝全空白内容。内部临时 HumanMessage 仍可用 XML 分隔

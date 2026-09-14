@@ -328,10 +328,10 @@ function supervisorInput(
     const callId = `fixture:${report.delegationId}:${i}`;
     const metadata = { runId: report.runId, traceId: input.traceId };
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
-      id: callId, name: 'delegate_capability', type: 'tool_call', args: { briefing: 'Execute the current planned task and return evidence.' },
+      id: callId, name: 'delegate_capability', type: 'tool_call', args: {},
     }] }), { ...metadata, source: 'supervisor', execution: {
       taskId: current!.delegationId, delegationId: current!.delegationId,
-      capability: current!.capability, task: current!.task, mode: 'initial',
+      capability: current!.capability, task: current!.task, mode: 'initial', briefing: 'Execute the confirmed task.',
     } }));
     messages.push(setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: callId,
       content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {

@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { getAgentMessageMetadata } from '../messages';
-import { capabilityExecutionSnapshotSchema, capabilityDelegationArgumentsSchema } from './runSupervisor/protocol';
+import { capabilityExecutionSnapshotSchema, supervisorControlSchemas } from './runSupervisor/protocol';
 
 const resultSchema = z.object({
   status: z.enum(['returned', 'paused', 'missing_deliverable']),
@@ -14,17 +14,17 @@ const resultSchema = z.object({
   }).nullable(),
 });
 
-/** Runtime-owned snapshot plus the Supervisor's public arguments. */
+/** Runtime-owned execution snapshot; model arguments remain empty. */
 export function readCapabilityExecutionCall(message: BaseMessage) {
   if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1) return null;
   const metadata = getAgentMessageMetadata(message);
   if (metadata.lane || !metadata.runId || !metadata.traceId || metadata.source !== 'supervisor') return null;
   const call = message.tool_calls[0];
   if (call.name !== 'delegate_capability' || !call.id) return null;
-  const args = capabilityDelegationArgumentsSchema.safeParse(call.args);
+  const args = supervisorControlSchemas.delegate_capability.safeParse(call.args);
   const snapshot = capabilityExecutionSnapshotSchema.safeParse(metadata.execution);
   if (!args.success || !snapshot.success) return null;
-  return { call, metadata, execution: { ...snapshot.data, briefing: args.data.briefing } };
+  return { call, metadata, execution: snapshot.data };
 }
 
 /** A read-only view of actual Root tool pairs, never a second execution register. */

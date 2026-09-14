@@ -24,11 +24,6 @@ export const controlSchema = z.discriminatedUnion('name', [
   z.object({ name: z.literal('delegate_capability'), args: z.object({}).strict() }).strict(),
 ]);
 
-/** Root's canonical call carries the briefing injected from confirmed plan facts. */
-export const capabilityDelegationArgumentsSchema = z.object({
-  briefing: z.string().refine(text => text.trim().length > 0),
-}).strict();
-
 export type SupervisorControl = z.infer<typeof controlSchema>;
 export const supervisorControlSchemas = {
   submit_plan: controlSchema.options[0].shape.args,
@@ -43,4 +38,5 @@ export const capabilityExecutionSnapshotSchema = z.object({
   capability: z.string().min(1),
   task: z.string().min(1),
   mode: z.enum(['initial', 'continue']),
+  briefing: z.string().refine(text => text.trim().length > 0),
 }).strict();

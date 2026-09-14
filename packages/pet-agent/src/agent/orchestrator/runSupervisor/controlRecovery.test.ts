@@ -56,6 +56,11 @@ test('reviewing the next unexecuted task returns feedback, retains accepted work
   const executions = readCapabilityExecutions(result.messages);
   assert.deepEqual(executions.map(e => e.execution.task), tasks.map(t => t.task));
   assert.equal(executor.inputs.length, 2);
+  assert.ok(executions.every(e => Object.keys(e.call.args).length === 0));
+  const historicalCalls = supervisor.inputs.at(-1)!.flatMap(m => AIMessage.isInstance(m)
+    ? (m.tool_calls ?? []).filter(c => c.name === 'delegate_capability') : []);
+  assert.equal(historicalCalls.length, 2);
+  assert.ok(historicalCalls.every(c => Object.keys(c.args).length === 0));
   assert.deepEqual(result.runSupervisorState.plan.map(t => t.status), ['completed', 'completed']);
   const briefing = JSON.parse(executions[1].execution.briefing);
   assert.equal(briefing.task, tasks[1].task);

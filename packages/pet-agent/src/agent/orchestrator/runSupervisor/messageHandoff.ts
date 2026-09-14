@@ -34,7 +34,7 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
     const control = controlSchema.parse({ name, args });
     let resolved;
     try {
-      resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!);
+      resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!, current.feedback);
     } catch (error) {
       if (!(error instanceof SupervisorDecisionError)) throw error;
       return new ToolMessage({ name, tool_call_id: runtime.toolCallId, status: 'error',
@@ -103,7 +103,7 @@ function identity(kind: string, ...parts: string[]) {
 }
 
 /** One domain transition, used at the Supervisor exit and checked again at Root. */
-function resolveControl(context: SupervisorHandoffContext, control: SupervisorControl, controlCallId: string) {
+function resolveControl(context: SupervisorHandoffContext, control: SupervisorControl, controlCallId: string, feedback?: string) {
   if (!context.runId || !context.traceId || !controlCallId) throw new Error('Handoff requires run and call identities.');
   if (control.name === 'adjust_plan' && !context.hasNewUserInput
     && control.args.goal !== (context.state.goal ?? context.userRequest)) {
@@ -161,6 +161,11 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
       capability: next.capability,
       task: next.task,
       mode: previous ? 'continue' as const : 'initial' as const,
+      briefing: JSON.stringify({
+        task: next.task,
+        plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
+        ...(feedback ? { feedback } : {}),
+      }, null, 2),
     },
   };
 }
@@ -208,9 +213,8 @@ function resolveTranscript(context: SupervisorHandoffContext, messages: readonly
     if (!canonical) index++;
     if (!canonical && ToolMessage.isInstance(confirmation) && confirmation.status === 'error') continue;
     if (executionCall) throw new Error('Supervisor must yield after requesting execution.');
-    // Root reconstructs injected arguments and checks equality before accepting the handoff.
-    const control = controlSchema.parse({ name: call.name, args: canonical ? {} : call.args });
-    const resolved = resolveControl({ ...context, state }, control, callId);
+    const control = controlSchema.parse({ name: call.name, args: call.args });
+    const resolved = resolveControl({ ...context, state }, control, callId, feedback);
     if (control.name === 'review_current') feedback = control.args.completed ? undefined : control.args.reason;
     if (control.name === 'submit_plan' || control.name === 'adjust_plan') feedback = undefined;
     state = resolved.state;
@@ -220,12 +224,7 @@ function resolveTranscript(context: SupervisorHandoffContext, messages: readonly
       executionCall = { id: callId, index: canonical ? index : index - 1 };
     }
   }
-  const briefing = execution ? JSON.stringify({
-    task: execution.task,
-    plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
-    ...(feedback ? { feedback } : {}),
-  }, null, 2) : null;
-  return { state, execution, executionCall, briefing };
+  return { state, execution, executionCall, feedback };
 }
 
 /** Promote the Supervisor's request; never fabricate a second execution call. */
@@ -244,7 +243,7 @@ function assembleHandoff(context: SupervisorHandoffContext, messages: readonly B
       const id = identity('delegate', context.runId, resolved.executionCall.id);
       copy.id = id;
       copy.content = '';
-      copy.tool_calls = [{ ...copy.tool_calls![0], id, args: { briefing: resolved.briefing! } }];
+      copy.tool_calls = [{ ...copy.tool_calls![0], id }];
       // The execution snapshot is internal data, not model-supplied tool arguments.
       copy.additional_kwargs = { ...copy.additional_kwargs, pinpawo: {
         runId: context.runId, traceId: context.traceId, source: 'supervisor',

@@ -280,3 +280,17 @@ DeepSeek Flash（本机 profile `deepseek-v4-flash`）合成评估：
 完整仓库回归 1788 passed、5 skipped、0 failed，包含 Studio 跨包集成测试。本轮没有
 重启已有 Studio 业务会话；旧 checkpoint 不新增兼容迁移。以上历史评估章节保留原协议
 和当时结论，不应作为当前无参数模型工具的使用说明。
+
+### 运行时执行快照替代参数改写（2026-09-15）
+
+用户进一步确认使用 LangChain 的 ToolRuntime 注入执行上下文。工具从 runtime.state
+中的已确认控制消息推导计划并生成 briefing，随运行时 execution 快照交接 Root；不再
+将正文写入 AIMessage.tool_calls.args。当前模型调用、主会话历史调用均为 `{}`。
+Root 复用同一转换逻辑重算快照并校验，执行读取、压缩保留和 Host 投影改用新快照。
+不增加额外待提交状态，也不兼容先前将 briefing 放在模型参数中的 checkpoint。
+
+新的 DeepSeek Flash 历史压力样本仍为 0/300 组历史 × Entry/Boundary/恢复 Entry，
+各一次，共 6/6 成功，每次只有一个空参数委派，没有未知工具或参数纠正。结果存于
+`/tmp/supervisor-runtime-briefing-v3`；runner 后续标记为 `supervisor-runtime-briefing-v3`。
+这是新的小样本观察，不能据此推断所有历史干扰已消除。前述 9/11 收尾评估的两个
+失败保持开放，本次仅重跑历史压力，不将旧结果改写为新实现的收尾评估结果。

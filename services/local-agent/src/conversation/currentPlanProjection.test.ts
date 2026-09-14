@@ -5,8 +5,8 @@ import { currentPlansEqual, projectCurrentPlan } from './currentPlanProjection';
 
 function execution(taskId: string, capability: string, lane?: string) {
   return new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace', lane,
-    source: 'supervisor', execution: { taskId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial' },
-  } }, tool_calls: [{ id: `call:${taskId}`, name: 'delegate_capability', args: { briefing: 'Execute the current planned task and return evidence.' } }] });
+    source: 'supervisor', execution: { taskId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial', briefing: 'Execute the confirmed task.' },
+  } }, tool_calls: [{ id: `call:${taskId}`, name: 'delegate_capability', args: {} }] });
 }
 
 test('projects business progress and derives active execution from Root messages', () => {

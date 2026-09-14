@@ -33,9 +33,9 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
 
 test('execution snapshot is internal and does not duplicate model arguments', () => {
   const snapshot = { taskId: 'task', delegationId: 'delegation', capability: 'general',
-    task: 'Verify the change', mode: 'initial' };
+    task: 'Verify the change', mode: 'initial', briefing: 'Verify the change' };
   assert.deepEqual(capabilityExecutionSnapshotSchema.parse(snapshot), snapshot);
-  assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, briefing: 'Duplicate' }).success, false);
+  assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, briefing: undefined }).success, false);
 });
 
 test('plan task accepts the complete formatted execution instructions without rewriting them', () => {

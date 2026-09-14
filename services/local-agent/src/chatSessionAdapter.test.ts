@@ -293,12 +293,10 @@ test('runAgentSessionTurn replaces the current plan from root values and clears 
     streamEvents() {
       return (async function* () {
         yield protocolEvent('values', {
-          messages: [new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace' } },
-            tool_calls: [{ id: 'execution-call', name: 'delegate_capability', args: {
-              control: { name: 'execute_current', args: {} },
-              execution: { taskId: 'task-1', delegationId: 'delegation', capability: 'explore',
-                task: 'Inspect code', mode: 'initial', guidance: null },
-            } }] }), ...finalMessages],
+          messages: [new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace',
+            source: 'supervisor', execution: { taskId: 'task-1', delegationId: 'delegation', capability: 'explore',
+              task: 'Inspect code', mode: 'initial' },
+          } }, tool_calls: [{ id: 'execution-call', name: 'delegate_capability', args: { briefing: 'Execute the current planned task and return evidence.' } }] }), ...finalMessages],
           runSupervisorState: {
             goal: 'Inspect and verify',
             plan: [

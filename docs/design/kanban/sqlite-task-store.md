@@ -327,12 +327,36 @@ Kanban Plugin 不读取 Pet registry、checkpoint、thread、Agent Session 或 e
 HTTP route 与 Toolkit 也必须复用同一个 `KanbanTaskService`。
 
 Studio adapter 提供职责分离的 Toolkit projection：`kanban-planning` 读取 task
-快照并创建最终交付，`kanban-execution` 读取已分派 task 并提交开始、完成或阻塞结果。通用
+快照并创建任务，`kanban-execution` 读取已分派 task 并记录开始，`kanban-reporting`
+读取任务并提交完成结果或阻塞原因。通用
 `kanban` Toolkit 继续作为完整领域接口存在，但示例 Planner 与执行 Pet 使用各自的最小
 projection，使可调用能力与 Pet 职责一致。
 
 同一执行目标的并发、排队和重试不属于 Kanban 领域策略。它们由 Trigger rule、Host 或未来的
 专用 worker scheduler 明确配置；Kanban 只保留用户 assignment 与执行者的领域回报。
+
+### 工作与反馈分离（设计草稿，2026-09-14）
+
+针对 #812 的提前完成问题，默认 Executor 与 Reviewer 各配置两个 Capability：原有的
+`studio_execution` / `studio_review` 负责工作和证据交付，新增 `studio_reporting`
+负责把最终结果反馈到看板。工作能力使用 bash、git、kanban-execution，看板工具只提供任务查询和
+开始记录；反馈能力只使用 kanban-reporting，不执行实现或审查工作。
+
+Pet 根据完成标准检查交付，自主决定继续工作、补充证据或选择反馈能力。反馈交接必须带
+原始 Kanban taskId 与最新完整结果，后续 Pet 仍通过 Kanban 读取结果。审查完成的反馈
+需要区分实现通过与需要修正。阻塞反馈同样由反馈能力负责，允许从 assigned 状态报告。
+
+这不是通用 orchestrator 的新路由或审批规则，也不让 Host 代替模型决定完成；task.done
+仍只在明确的完成工具调用后发布。默认 Capability 的工具边界避免在普通工作步骤中直接
+结束整个看板任务。模型选择反馈的时机仍需行为 eval 验证，不能仅以模板装配测试证明。
+
+本轮不引入已完成结果的修订 API 或 task.result_updated。完成后出现新证据时，当前工具
+无法改写 done 结果，反馈能力应如实报告差异；结果修订及下游版本同步作为后续设计问题。
+通用 kanban 完整工具集保留其用途，但不被默认执行、审查或反馈能力引用。
+
+已有工作目录需显式同步两份 PET.md、工作 Capability 和新增反馈 Capability，并重启
+Host；默认 init 不覆盖已有配置。自定义使用 kanban-execution 完成/阻塞的能力需将反馈
+职责迁到 kanban-reporting；不增加旧 checkpoint 兼容分支。
 
 ## 9. JSON snapshot 迁移
 

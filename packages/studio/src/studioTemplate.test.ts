@@ -129,11 +129,13 @@ test('shipped Pet Capabilities separate planning, execution, and Wiki observatio
     'wiki',
     'capabilities',
   ));
-  assert.deepEqual(executorCapabilities.map(({ capability }) => capability.uses), [
-    ['bash', 'git', 'kanban-execution'],
+  assert.deepEqual(executorCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
+    { name: 'studio_execution', uses: ['bash', 'git', 'kanban-execution'] },
+    { name: 'studio_reporting', uses: ['kanban-reporting'] },
   ]);
-  assert.deepEqual(reviewerCapabilities.map(({ capability }) => capability.uses), [
-    ['bash', 'git', 'kanban-execution'],
+  assert.deepEqual(reviewerCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
+    { name: 'studio_reporting', uses: ['kanban-reporting'] },
+    { name: 'studio_review', uses: ['bash', 'git', 'kanban-execution'] },
   ]);
   assert.deepEqual(wikiCapabilities.map(({ capability }) => capability.uses), [
     ['bash', 'git', 'kanban-observation'],

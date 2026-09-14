@@ -45,11 +45,14 @@ async function syncDataset(client: LangfuseClient, dataset: AgentEvalDataset<unk
 }
 
 async function main() {
+  const selectedName = process.env.AGENT_EVAL_DATASET;
+  const datasets = agentEvalDatasets.filter(dataset => !selectedName || dataset.name === selectedName);
+  if (!datasets.length) throw new Error('Unknown AGENT_EVAL_DATASET');
   const config = resolveLangfuseConfig();
   const client = createLangfuseClient(config);
   console.log(`Syncing Langfuse datasets to ${config.baseUrl}`);
   try {
-    for (const dataset of agentEvalDatasets) {
+    for (const dataset of datasets) {
       await syncDataset(client, dataset);
     }
   } finally {

@@ -11,7 +11,7 @@ export function readPendingDelegation(result: EvalOrchestratorStateSnapshot) {
     const call = readCapabilityCall({ messages: result.messages, runId: result.runId, traceId: result.traceId,
       runSupervisorState: result.runSupervisorState });
     return { id: call.delegationId, lane: `capability:${call.capability}` as const, task: call.task,
-      mode: call.mode, contextSummary: call.guidance };
+      mode: call.mode, contextSummary: call.briefing };
   } catch { return null; }
 }
 export function routeModeFromResult(result: EvalOrchestratorStateSnapshot): 'answer' | 'capability' {
@@ -43,7 +43,7 @@ export function readTaskActiveDelegation(result: EvalOrchestratorStateSnapshot) 
   const latest = executionsForTask({ messages: result.messages ?? [] }, task.id).at(-1);
   if (!latest) return null;
   return { id: latest.execution.delegationId, lane: `capability:${task.capability}` as const,
-    task: task.task, contextSummary: latest.execution.guidance, runId: String(latest.metadata.runId),
+    task: task.task, contextSummary: latest.execution.briefing, runId: String(latest.metadata.runId),
     traceId: String(latest.metadata.traceId), status: latest.result?.status === 'returned' ? 'awaiting_decision' : 'pending',
     resultPreview: null, userRequest: parsed.success ? parsed.data.goal ?? '' : '' };
 }

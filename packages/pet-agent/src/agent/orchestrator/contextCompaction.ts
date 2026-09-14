@@ -10,6 +10,7 @@ import {
   toolProtocolSafeMessages,
 } from '../messages';
 import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
+import { readCapabilityExecutionCall } from './executionMessages';
 import { readMessageText } from './utils';
 import { xmlTextBlock } from '../../prompts/xml';
 
@@ -62,10 +63,10 @@ function selectMessagesToKeep(
 ): BaseMessage[] {
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
   const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
-  const preservedCalls = new Set(candidates.flatMap((message) => AIMessage.isInstance(message)
-    && !getAgentMessageMetadata(message).lane ? (message.tool_calls ?? []).flatMap((call) =>
-      call.name === 'delegate_capability' && preserveExecutionTaskIds.includes(call.args.execution?.taskId)
-        && call.id ? [call.id] : []) : []));
+  const preservedCalls = new Set(candidates.flatMap(message => {
+    const invocation = readCapabilityExecutionCall(message);
+    return invocation && preserveExecutionTaskIds.includes(invocation.execution.taskId) ? [invocation.call.id!] : [];
+  }));
   // Preserve every attempt for the unfinished delegation, including main evidence.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;

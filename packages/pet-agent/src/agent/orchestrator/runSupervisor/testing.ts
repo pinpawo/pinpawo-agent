@@ -31,11 +31,17 @@ export function scriptedSupervisorResult(input: RunSupervisorInput,
       completed: decision.args.completed, reason: decision.args.reason,
     } });
     reply = 'reply' in decision.args ? decision.args.reply : undefined;
-    if (!reply) call({ name: 'execute_current', args: decision.args.completed ? {} : { guidance: decision.args.reason } });
+    if (!reply) {
+      const pending = input.state.plan.filter(task => task.status === 'pending');
+      const task = pending[decision.args.completed ? 1 : 0];
+      call({ name: 'delegate_capability', args: {
+        briefing: decision.args.completed === false ? decision.args.reason : task?.task ?? decision.args.reason,
+      } });
+    }
   } else {
     call(decision);
-    if (decision.name !== 'execute_current') call({ name: 'execute_current', args: {
-      ...(decision.name === 'adjust_plan' ? { guidance: decision.args.reason } : {}),
+    if (decision.name !== 'delegate_capability') call({ name: 'delegate_capability', args: {
+      briefing: decision.name === 'adjust_plan' ? decision.args.reason : decision.args.tasks[0].task,
     } });
   }
   if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));

@@ -74,7 +74,7 @@ function setup(responses: AIMessage[], review = false, useProductionExecutor = f
           capability: registry.capabilities[0],
           delegation: {
             id: 'delegation-1', runId: 'business-run-1', traceId: 'task-1', mode: 'initial',
-            userRequest: args.task, task: args.task, essentialContext: null,
+            userRequest: args.task, task: args.task, briefing: args.task,
           },
           history: [new HumanMessage({ id: 'executor-input', content: args.task })],
         }, { review: { authorizations: [] }, runnableConfig: config });

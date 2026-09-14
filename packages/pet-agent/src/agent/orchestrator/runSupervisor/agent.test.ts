@@ -215,8 +215,8 @@ class ScriptedSupervisorModel extends BaseChatModel {
       const reply = control.args.reply;
       delete control.args.reply;
       this.#followUp = reply ? new AIMessage(String(reply)) : new AIMessage({ content: '', tool_calls: [{
-        id: `${control.id}:execute`, name: 'execute_current', args: {
-          ...(control.args.completed !== true && typeof control.args.reason === 'string' ? { guidance: control.args.reason } : {}),
+        id: `${control.id}:execute`, name: 'delegate_capability', args: {
+          briefing: typeof control.args.reason === 'string' ? control.args.reason : 'Execute the planned task and return evidence.',
         }, type: 'tool_call',
       }] });
       if (control.name === 'review_current' && control.args.completed === undefined) {
@@ -329,12 +329,11 @@ function supervisorInput(
     const callId = `fixture:${report.delegationId}:${i}`;
     const metadata = { runId: report.runId, traceId: input.traceId };
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
-      id: callId, name: 'delegate_capability', type: 'tool_call', args: {
-        control: { name: 'execute_current', args: {} },
-        execution: { taskId: current!.delegationId, delegationId: current!.delegationId,
-          capability: current!.capability, task: current!.task, mode: 'initial', guidance: null },
-      },
-    }] }), metadata));
+      id: callId, name: 'delegate_capability', type: 'tool_call', args: { briefing: 'Execute the current planned task and return evidence.' },
+    }] }), { ...metadata, source: 'supervisor', execution: {
+      taskId: current!.delegationId, delegationId: current!.delegationId,
+      capability: current!.capability, task: current!.task, mode: 'initial',
+    } }));
     messages.push(setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: callId,
       content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
         runId: report.runId, traceId: input.traceId, delegationId: report.delegationId, lane: report.sourceLane,
@@ -1933,7 +1932,10 @@ test('repeated empty detail reads do not close disclosure and parallel names mer
     { toolCalls: [details('known-again', ['general', 'explore'])] },
     { structuredOutput: { kind: 'plan', args: submitArgs('explore') } },
   ]);
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog), {
+    // This scenario deliberately exercises eight model turns plus middleware nodes.
+    recursionLimit: 100,
+  });
   assert.deepEqual([...result.capabilityDisclosure!.disclosedCapabilityNames].sort(), ['explore', 'general']);
   assert.deepEqual(Object.keys(result.capabilityDisclosure!).sort(), ['disclosedCapabilityNames', 'registryDigest']);
   for (let i = 0; i < 4; i++) {

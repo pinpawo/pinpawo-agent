@@ -33,7 +33,7 @@ function input(id = 'd1', toolkits: AgentToolkit[] = [], lifecycle?: CapabilityL
     capability: registry.capabilities[0],
     delegation: {
       id, runId: 'r1', traceId: 't1',
-      mode: 'initial', userRequest: 'Prepare two documents.', task: `Prepare ${id}`, essentialContext: null,
+      mode: 'initial', userRequest: 'Prepare two documents.', task: `Prepare ${id}`, briefing: 'Execute the planned work and return evidence.',
     },
     history: [new HumanMessage({ id: 'user', content: 'Prepare two documents.' })],
   };
@@ -119,7 +119,7 @@ test('continuation retains its private scope and returns only this attempt as a 
   } });
   const result = await execute({
     ...request, history: [...request.history, prior],
-    delegation: { ...request.delegation, mode: 'continue', guidance: 'Verify the document.' },
+    delegation: { ...request.delegation, mode: 'continue', briefing: 'Verify the document.' },
   }, hostContext());
   assert.equal(result.delivery?.task, request.delegation.task);
   assert.equal(result.delivery?.text, 'Second attempt');
@@ -353,5 +353,22 @@ for (const id of [undefined, '', '   ']) {
     await assert.rejects(execute({ ...input(), history: [message] }, hostContext()), /history messages must have stable IDs/);
     assert.equal(message.id, id);
     assert.equal(executed, false);
+  });
+}
+
+for (const mode of ['initial', 'continue'] as const) {
+  test(`${mode} passes the complete formatted briefing to the model without persisting it`, async () => {
+    const request = input();
+    const briefing = '  # Current execution\n\n' + '- Preserve the supplied evidence.\n'.repeat(100) + '\nReturn a checked deliverable.  ';
+    const execute = createCapabilityExecutor({ models, runSubagent: async run => {
+      const briefings = run.messages.filter(isDelegationBriefingMessage);
+      assert.equal(briefings.length, 1);
+      assert.ok(briefings[0].text.includes(briefing));
+      assert.equal(run.runtimeContext?.executionScope?.delegationId, request.delegation.id);
+      return deliver(run);
+    } });
+    const result = await execute({ ...request, delegation: { ...request.delegation, mode, briefing } }, hostContext());
+    assert.equal(result.status, 'returned');
+    assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
   });
 }

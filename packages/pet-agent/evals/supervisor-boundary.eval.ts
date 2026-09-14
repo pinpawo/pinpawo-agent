@@ -52,7 +52,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       if (result.name === 'review_current') { assert.equal(result.args.completed, false); assert.ok(result.args.reason.trim()); } } },
   { name: 'dispatch-pending-capability', goal: 'Fix the bug and confirm the tests pass.',
     task: 'Fix the bug and run the test suite.', pendingDispatch: true,
-    check: (result) => { assert.equal(result.name, 'execute_current');
+    check: (result) => { assert.equal(result.name, 'delegate_capability');
     } },
   { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
     task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
@@ -84,7 +84,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
         assert.equal(result.args.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
         assert.equal(result.args.tasks[0].capability, 'general');
         assert.match(result.args.tasks[0].task, /publish|发布/i);
-      } else if (result.name !== 'execute_current') {
+      } else if (result.name !== 'delegate_capability') {
         assert.equal(result.name, 'review_current');
         if (result.name === 'review_current') {
           assert.notEqual(result.args.completed, false);

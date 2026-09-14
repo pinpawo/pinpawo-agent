@@ -30,18 +30,18 @@ const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   instructions: defineInstructionDocument({ content: 'Inspect and report evidence.' }),
 }] });
 
-for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'execute_current']) {
+for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability']) {
   test(`${name} schema error reaches the model and correction executes exactly once`, async () => {
     const badArgs = name === 'submit_plan' ? { tasks: [{ ...task, taskId: 'kanban-task' }] }
       : name === 'adjust_plan' ? { goal: task.task, reason: 'Correct the plan.', currentDelegation: 'replace', tasks: [{ ...task, taskId: 'kanban-task' }] }
       : name === 'review_current' ? { completed: 'yes', reason: 'Evidence returned.' }
       : { guidance: 123 };
     const goodPlan = call('submit_plan', { tasks: [task] }, 'plan');
-    const execute = call('execute_current', {}, 'execute');
+    const execute = call('delegate_capability', {}, 'execute');
     const review = call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review');
     const bad = call(name, badArgs, 'bad');
     const responses = name === 'review_current' ? [goodPlan, execute, bad, review]
-      : name === 'execute_current' ? [goodPlan, bad, execute, review]
+      : name === 'delegate_capability' ? [goodPlan, bad, execute, review]
       : [bad, goodPlan, execute, review];
     const supervisor = new RecoveryModel([...responses, new AIMessage('Inspection complete.')]);
     const executor = new RecoveryModel([new AIMessage('Repository evidence.')]);
@@ -54,7 +54,7 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'execute_cur
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
     assert.equal(feedback.name, name);
-    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'execute_current' ? 'guidance' : 'taskId'));
+    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'delegate_capability' ? 'guidance' : 'taskId'));
     assert.equal(executor.inputs.length, 1);
     assert.equal(readCapabilityExecutions(result.messages).length, 1);
     assert.equal(result.runSupervisorState.plan.length, 1);
@@ -79,12 +79,12 @@ for (const name of ['submit_plan', 'unknown_tool']) test(`repeated ${name} error
 });
 
 for (const phase of ['entry', 'boundary']) {
-  for (const name of ['unknown_tool', 'delegate_capability', 'capability_details']) {
+  for (const name of ['unknown_tool', 'capability_details']) {
     // capability_details is unavailable only at Boundary without new input.
     if (phase === 'entry' && name === 'capability_details') continue;
     test(`${phase}: ${name} is corrected in the same run with exactly one delegation`, async () => {
       const plan = call('submit_plan', { tasks: [task] }, 'plan');
-      const execute = call('execute_current', {}, 'execute');
+      const execute = call('delegate_capability', {}, 'execute');
       const review = call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review');
       const bad = call(name, {}, 'unknown');
       const responses = phase === 'entry' ? [bad, plan, execute, review] : [plan, execute, bad, review];
@@ -107,3 +107,31 @@ for (const phase of ['entry', 'boundary']) {
     });
   }
 }
+
+test('copied internal handoff parameters are corrected before a single Supervisor delegation', async () => {
+  const supervisor = new RecoveryModel([
+    call('submit_plan', { tasks: [task] }, 'plan'),
+    call('delegate_capability', { control: { name: 'execute_current', args: {} },
+      execution: { taskId: 'invented', capability: 'unauthorized' } }, 'copied-history'),
+    call('delegate_capability', { guidance: 'Verify the concrete implementation.' }, 'delegate'),
+    call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review'),
+    new AIMessage('Inspection complete.'),
+  ]);
+  const executor = new RecoveryModel([new AIMessage('Verified implementation evidence.')]);
+  const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
+  const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+    configurable: { thread_id: 'copied-handoff', registry },
+  });
+  const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'copied-history');
+  assert.ok(ToolMessage.isInstance(feedback));
+  assert.equal(feedback.status, 'error');
+  const executions = readCapabilityExecutions(result.messages);
+  assert.equal(executions.length, 1);
+  assert.equal(executor.inputs.length, 1);
+  assert.deepEqual(executions[0].call.args, { guidance: 'Verify the concrete implementation.' });
+  const returnView = supervisor.inputs.at(-1)!;
+  const actualResults = returnView.filter(m => ToolMessage.isInstance(m) && m.tool_call_id === executions[0].call.id);
+  assert.equal(actualResults.length, 1);
+  assert.ok(executor.inputs[0].some(m => m.text.includes('Verify the concrete implementation.')));
+});

@@ -5,7 +5,7 @@ import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor
 import { supervisorFixture } from './supervisor-fixtures';
 import { acceptSupervisorMessageHandoff } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
 import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input';
-import { capabilityHandoffSchema } from '../src/agent/orchestrator/runSupervisor/protocol';
+import { readCapabilityExecutionCall } from '../src/agent/orchestrator/executionMessages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner';
 import type { ClosureExample, ClosureExpected } from './datasets/supervisor-delivery-closure';
 
@@ -31,8 +31,7 @@ export function closureInput(example: ClosureExample, id: string): RunSupervisor
 }
 export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorResult, expected: ClosureExpected) {
   const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
-  const call = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).find(c => c.name === 'delegate_capability');
-  const dispatch = call ? capabilityHandoffSchema.parse(call.args) : undefined;
+  const dispatch = result.messages.map(readCapabilityExecutionCall).find(record => record !== null);
   const actual = dispatch ? dispatch.execution.capability === 'studio_reporting' ? 'report' : 'review' : result.reply?.trim() ? 'reply' : 'none';
   const adjustments = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan').length;
   const completed = input.state.plan.filter(t => t.status === 'completed');

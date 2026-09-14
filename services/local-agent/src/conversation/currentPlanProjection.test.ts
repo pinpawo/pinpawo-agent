@@ -4,11 +4,9 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { currentPlansEqual, projectCurrentPlan } from './currentPlanProjection';
 
 function execution(taskId: string, capability: string, lane?: string) {
-  return new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace', lane } },
-    tool_calls: [{ id: `call:${taskId}`, name: 'delegate_capability', args: {
-      control: { name: 'execute_current', args: {} },
-      execution: { taskId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial', guidance: null },
-    } }] });
+  return new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace', lane,
+    source: 'supervisor', execution: { taskId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial' },
+  } }, tool_calls: [{ id: `call:${taskId}`, name: 'delegate_capability', args: {} }] });
 }
 
 test('projects business progress and derives active execution from Root messages', () => {

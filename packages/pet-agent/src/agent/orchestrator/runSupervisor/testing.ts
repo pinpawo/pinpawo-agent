@@ -31,10 +31,10 @@ export function scriptedSupervisorResult(input: RunSupervisorInput,
       completed: decision.args.completed, reason: decision.args.reason,
     } });
     reply = 'reply' in decision.args ? decision.args.reply : undefined;
-    if (!reply) call({ name: 'execute_current', args: decision.args.completed ? {} : { guidance: decision.args.reason } });
+    if (!reply) call({ name: 'delegate_capability', args: decision.args.completed ? {} : { guidance: decision.args.reason } });
   } else {
     call(decision);
-    if (decision.name !== 'execute_current') call({ name: 'execute_current', args: {
+    if (decision.name !== 'delegate_capability') call({ name: 'delegate_capability', args: {
       ...(decision.name === 'adjust_plan' ? { guidance: decision.args.reason } : {}),
     } });
   }

@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
-import { capabilityHandoffSchema } from '../runSupervisor/protocol';
+import { readCapabilityExecutionCall } from '../executionMessages';
 import type { CapabilityExecutionResult } from '../capabilityExecution/types';
 import { currentSupervisorTask } from '../runSupervisor/state';
 
@@ -16,17 +16,19 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
     throw Object.assign(new Error('This checkpoint has no compatible Capability execution call.'), { code: 'checkpoint_incompatible' });
   }
   const call = message.tool_calls[0];
-  const args = capabilityHandoffSchema.parse(call.args);
+  const invocation = readCapabilityExecutionCall(message);
+  if (!invocation) throw Object.assign(new Error('This checkpoint has no compatible Capability execution call.'), { code: 'checkpoint_incompatible' });
+  const { execution } = invocation;
   const current = currentSupervisorTask(state.runSupervisorState);
-  if (!call.id || !current || current.id !== args.execution.taskId
-    || current.capability !== args.execution.capability || current.task !== args.execution.task) {
+  if (!call.id || !current || current.id !== execution.taskId
+    || current.capability !== execution.capability || current.task !== execution.task) {
     throw new Error('Capability call does not match the current plan task.');
   }
   if (state.messages.some((message) => ToolMessage.isInstance(message)
     && !getAgentMessageMetadata(message).lane && message.tool_call_id === call.id)) {
     throw new Error('Capability call already has a result.');
   }
-  return { id: call.id, ...args.execution };
+  return { id: call.id, ...execution };
 }
 
 export function capabilityResultMessage(state: Pick<OrchestratorStateType, 'runId' | 'traceId'>,

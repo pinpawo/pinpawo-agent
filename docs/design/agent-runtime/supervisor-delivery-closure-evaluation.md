@@ -202,3 +202,28 @@ HISTORY_COUNTS=300 HISTORY_MODES=entry,boundary,resume HISTORY_VARIANTS=baseline
 输入哈希、逐轮调用、token usage、耗时及最终交接评分。该次有效结果保存在本机
 `/tmp/supervisor-tool-history-v2`、`/tmp/supervisor-tool-history-300` 和
 `/tmp/supervisor-tool-history-resume`；启动时用于校验采集链路与夹具的无效试跑不计入表格。
+
+## 单一 Supervisor 委派协议验证（2026-09-14）
+
+根据用户确认，`delegate_capability` 现在是 Supervisor 发起的唯一执行请求，参数仅为
+`{ guidance?: string }`。Root 接收更新后的计划和同一请求，执行身份与当时任务内容存于
+消息内部元数据；删除 `execute_current` 和 `{ control, execution }` 工具参数包装。
+局部委派确认不持久化，Root 实际交付与规范化后的同一 call id 配对。设计见
+`run-scoped-supervisor-session.md` 的“Supervisor 单一委派交接”。
+
+之前 51 次历史压力结果对应提交 `c81f3cef` 的旧协议，不能解释为新协议结果。当前 runner
+已跟随新协议更新，`baseline` 只去掉当前工具范围说明，不恢复旧工具或旧参数；
+`delegateCalls` 统计合法的模型委派次数，`illegalCalls` 单独判断未提供工具。
+
+新协议使用 DeepSeek V4.1 Flash（`deepseek-flash`），在 0/300 组历史下分别运行
+Entry、Boundary、恢复 Entry，每组重复 3 次，共 18 次 invocation、30 次模型响应。
+18 次均正确交接，每次恰好一条模型 `delegate_capability` 调用，无未知工具或运行错误。
+保留原始合成输入和逐轮结果于 `/tmp/supervisor-single-delegation`。这验证了新契约在
+该批场景下可用，不说明先前工具名误用的根因已被证实或真实 Studio 稳定性已全部解决。
+
+确定性回归验证：错误参数包括旧包装不会触发派发，模型纠正后只执行一次；参数原样
+传给执行 briefing；主会话没有额外委派确认或第二条 Root 请求；任务调整不改写旧执行
+快照；重放、跨 run 调用 ID 复用、暂停恢复、压缩保留以及 Host 计划/交付投影保持正确。
+完整仓库测试 1784 passed、5 skipped、0 failed，PetAgent（含 evals）及 Host 类型检查
+通过，完整 build 通过。Studio 跨包集成测试包含在仓库测试中；没有重启现有真实 Studio
+会话，也未用新协议重跑真实业务项目完整 UI E2E。旧 checkpoint 不做兼容迁移。

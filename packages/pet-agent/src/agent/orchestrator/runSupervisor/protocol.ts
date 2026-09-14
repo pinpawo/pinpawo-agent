@@ -21,8 +21,8 @@ export const controlSchema = z.discriminatedUnion('name', [
     currentDelegation: z.enum(['continue', 'replace']).describe('continue：保留当前执行上下文，可修改 task 但必须保持 Capability；replace：更换 Capability 或丢弃旧执行上下文。替换不代表旧任务完成。'),
     tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的剩余工作。已完成事项由运行时保留，不重新提交；continue 时第一项对应保留身份与交付的当前任务。'),
   }).strict() }).strict(),
-  z.object({ name: z.literal('execute_current'), args: z.object({
-    guidance: z.string().trim().min(1).max(2_000).optional().describe('本次执行需要遵循的补充指导。'),
+  z.object({ name: z.literal('delegate_capability'), args: z.object({
+    guidance: z.string().trim().min(1).max(2_000).optional().describe('当前计划任务在本次执行需要的补充上下文或补做要求；无需重述任务。省略表示按计划直接执行，不用于更换能力、任务或目标。'),
   }).strict() }).strict(),
 ]);
 
@@ -31,20 +31,13 @@ export const supervisorControlSchemas = {
   submit_plan: controlSchema.options[0].shape.args,
   review_current: controlSchema.options[1].shape.args,
   adjust_plan: controlSchema.options[2].shape.args,
-  execute_current: controlSchema.options[3].shape.args,
+  delegate_capability: controlSchema.options[3].shape.args,
 };
 
-const executionSchema = z.object({
+export const capabilityExecutionSnapshotSchema = z.object({
   taskId: z.string().min(1),
   delegationId: z.string().min(1),
   capability: z.string().min(1),
   task: z.string().min(1),
   mode: z.enum(['initial', 'continue']),
-  guidance: z.string().nullable(),
-}).strict();
-
-/** Root's actual tool input, not a second model-selected tool or a pending slot. */
-export const capabilityHandoffSchema = z.object({
-  control: controlSchema.options[3],
-  execution: executionSchema,
 }).strict();

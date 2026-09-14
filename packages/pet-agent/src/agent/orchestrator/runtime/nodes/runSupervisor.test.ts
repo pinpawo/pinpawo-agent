@@ -1,3 +1,4 @@
+import { getAgentMessageMetadata } from '../../../messages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
@@ -57,7 +58,7 @@ test('control handoff goes straight to Capability with separate main and work re
   assert.deepEqual(command.goto, ['capability']);
   assert.equal(next.runSupervisorState.plan[0].status, 'pending');
   assert.equal(readCapabilityCall(next).task, tasks[0].task);
-  assert.equal(queryAgentMessages(next.messages).supervisor(next.runId).select().messages.length, 4);
+  assert.equal(queryAgentMessages(next.messages).supervisor(next.runId).select().messages.length, 2);
   for (const key of ['proposal', 'pendingCall', 'nextAttempt', 'activeDelegation', 'messages', 'run']) {
     assert.equal(key in next.runSupervisorState, false);
   }
@@ -78,7 +79,7 @@ test('retry derives same-run execution identity and carries feedback in the actu
   const command = await node({ name: 'review_current', args: { completed: false, reason: 'Verify the document.' } })(input, options);
   const call = readCapabilityCall(apply(input, command));
   const previous = input.messages.filter((m) => AIMessage.isInstance(m) && m.tool_calls?.[0]?.name === 'delegate_capability').at(-1) as AIMessage;
-  assert.equal(call.delegationId, previous.tool_calls![0].args.execution.delegationId);
+  assert.equal(call.delegationId, (getAgentMessageMetadata(previous).execution as { delegationId: string }).delegationId);
   assert.equal(call.mode, 'continue');
   assert.equal(call.guidance, 'Verify the document.');
 });
@@ -121,7 +122,7 @@ test('Root rejects changed handoff arguments and decisions without actual intern
   const runner = createRunSupervisorNode({ models, runSupervisorRunner: { invoke: async (invocation) => {
     const result = scriptedSupervisorResult(invocation, { name: 'submit_plan', args: { tasks } });
     const dispatch = result.messages.at(-1) as AIMessage;
-    dispatch.tool_calls![0].args.execution.task = 'Tampered task.';
+    (getAgentMessageMetadata(dispatch).execution as { task: string }).task = 'Tampered task.';
     return result;
   } } });
   await assert.rejects(runner(input, options), /does not match/);

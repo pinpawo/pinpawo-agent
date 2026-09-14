@@ -73,15 +73,15 @@ await Promise.all(Array.from({ length: 2 }, async () => {
     } catch (failure) { error = failure instanceof Error ? failure.message : String(failure); }
     if (!turns.length) throw new Error('Evaluation did not observe model input/output');
     const calls = turns.flatMap(t => (t.calls ?? []) as Array<{ name: string }>);
-    const allowed = new Set(['submit_plan', 'adjust_plan', 'review_current', 'execute_current', ...(input.mode === 'entry' ? ['capability_details'] : [])]);
+    const allowed = new Set(['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability', ...(input.mode === 'entry' ? ['capability_details'] : [])]);
     const passed = !error && score?.passed === true && calls.every(c => allowed.has(c.name));
-    const row = { id, passed, ...spec, model: subject.metadata.model, profileFingerprint: subject.metadata.fingerprint, elapsedMs: Date.now() - started,
+    const row = { id, passed, protocol: 'supervisor-delegation-v1', ...spec, model: subject.metadata.model, profileFingerprint: subject.metadata.fingerprint, elapsedMs: Date.now() - started,
       firstCalls: turns[0]?.calls, illegalCalls: calls.filter(c => !allowed.has(c.name)),
-      delegateAttempts: calls.filter(c => c.name === 'delegate_capability').length, score, error, turns };
+      delegateCalls: calls.filter(c => c.name === 'delegate_capability').length, score, error, turns };
     rows.push(row);
     writeFileSync(join(output, `${id}.json`), JSON.stringify(row, null, 2));
     writeFileSync(join(output, 'summary.json'), JSON.stringify({ profileId, counts, modes, variants, repeats, rows }, null, 2));
-    console.log(JSON.stringify({ id, elapsedMs: row.elapsedMs, delegateAttempts: row.delegateAttempts,
+    console.log(JSON.stringify({ id, elapsedMs: row.elapsedMs, delegateCalls: row.delegateCalls,
       illegalCalls: row.illegalCalls.map(c => c.name), score, error }));
   }
 }));

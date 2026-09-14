@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { getAgentMessageMetadata } from '../messages';
-import { capabilityHandoffSchema } from './runSupervisor/protocol';
+import { capabilityExecutionSnapshotSchema, supervisorControlSchemas } from './runSupervisor/protocol';
 
 const resultSchema = z.object({
   status: z.enum(['returned', 'paused', 'missing_deliverable']),
@@ -13,6 +13,19 @@ const resultSchema = z.object({
     }),
   }).nullable(),
 });
+
+/** Runtime-owned snapshot plus the Supervisor's public arguments. */
+export function readCapabilityExecutionCall(message: BaseMessage) {
+  if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1) return null;
+  const metadata = getAgentMessageMetadata(message);
+  if (metadata.lane || !metadata.runId || !metadata.traceId || metadata.source !== 'supervisor') return null;
+  const call = message.tool_calls[0];
+  if (call.name !== 'delegate_capability' || !call.id) return null;
+  const args = supervisorControlSchemas.delegate_capability.safeParse(call.args);
+  const snapshot = capabilityExecutionSnapshotSchema.safeParse(metadata.execution);
+  if (!args.success || !snapshot.success) return null;
+  return { call, metadata, execution: { ...snapshot.data, guidance: args.data.guidance ?? null } };
+}
 
 /** A read-only view of actual Root tool pairs, never a second execution register. */
 export function readCapabilityExecutions(messages: readonly unknown[]) {
@@ -26,31 +39,25 @@ export function readCapabilityExecutions(messages: readonly unknown[]) {
   }
   return messages.flatMap((value) => {
     if (!value || !AIMessage.isInstance(value as BaseMessage)) return [];
-    const message = value as AIMessage;
-    const metadata = getAgentMessageMetadata(message);
-    if (metadata.lane || !metadata.runId || !metadata.traceId) return [];
-    return (message.tool_calls ?? []).flatMap((call) => {
-      if (call.name !== 'delegate_capability' || !call.id) return [];
-      const parsed = capabilityHandoffSchema.safeParse(call.args);
-      if (!parsed.success) return [];
-      const execution = parsed.data.execution;
-      const resultMessage = results.get(call.id);
-      let result: z.infer<typeof resultSchema> | null = null;
-      if (resultMessage && typeof resultMessage.content === 'string') {
-        try {
-          const data = resultSchema.safeParse(JSON.parse(resultMessage.content));
-          const resultMetadata = getAgentMessageMetadata(resultMessage);
-          if (data.success && resultMetadata.runId === metadata.runId && resultMetadata.traceId === metadata.traceId) {
-            const delivery = data.data.delivery;
-            if ((!delivery || (delivery.scope.runId === metadata.runId && delivery.scope.traceId === metadata.traceId
-              && delivery.scope.delegationId === execution.delegationId
-              && delivery.scope.lane === `capability:${execution.capability}`))
-              && !(data.data.status === 'returned' && resultMessage.status === 'error')) result = data.data;
-          }
-        } catch { /* Malformed results cannot serve as acceptance evidence. */ }
-      }
-      return [{ call, metadata, execution, result }];
-    });
+    const invocation = readCapabilityExecutionCall(value as AIMessage);
+    if (!invocation) return [];
+    const { call, metadata, execution } = invocation;
+    const resultMessage = results.get(call.id!);
+    let result: z.infer<typeof resultSchema> | null = null;
+    if (resultMessage && typeof resultMessage.content === 'string') {
+      try {
+        const data = resultSchema.safeParse(JSON.parse(resultMessage.content));
+        const resultMetadata = getAgentMessageMetadata(resultMessage);
+        if (data.success && resultMetadata.runId === metadata.runId && resultMetadata.traceId === metadata.traceId) {
+          const delivery = data.data.delivery;
+          if ((!delivery || (delivery.scope.runId === metadata.runId && delivery.scope.traceId === metadata.traceId
+            && delivery.scope.delegationId === execution.delegationId
+            && delivery.scope.lane === `capability:${execution.capability}`))
+            && !(data.data.status === 'returned' && resultMessage.status === 'error')) result = data.data;
+        }
+      } catch { /* Malformed results cannot serve as acceptance evidence. */ }
+    }
+    return [{ call, metadata, execution, result }];
   });
 }
 

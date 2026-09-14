@@ -14,11 +14,11 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
     && message.tool_calls?.some((call) => call.name === 'delegate_capability')).at(-1);
   if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1
     || getAgentMessageMetadata(message).traceId !== state.traceId) {
-    throw Object.assign(new Error('This checkpoint has no compatible Capability execution call.'), { code: 'checkpoint_incompatible' });
+    throw new Error('Expected a current Capability tool call.');
   }
   const call = message.tool_calls[0];
   const invocation = readCapabilityExecutionCall(message);
-  if (!invocation) throw Object.assign(new Error('This checkpoint has no compatible Capability execution call.'), { code: 'checkpoint_incompatible' });
+  if (!invocation) throw new Error('Expected a current Capability tool call.');
   const current = currentSupervisorTask(state.runSupervisorState);
   if (!call.id || !current) throw new Error('Capability call has no current plan task.');
   if (state.messages.some((message) => ToolMessage.isInstance(message)

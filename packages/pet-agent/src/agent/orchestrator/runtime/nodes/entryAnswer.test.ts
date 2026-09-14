@@ -1,3 +1,4 @@
+import { createDeliveryResult, withDeliveryCalls } from '../../../../testing/capabilityDelivery';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { runAgent } from '../../../runAgent';
@@ -21,7 +22,7 @@ import {
   mainConversationMessages,
   setAgentMessageMetadata,
 } from '../../../messages';
-import { DelegationAnnounceMessage } from '../../delegation';
+
 
 function readLatestHumanText(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -265,12 +266,12 @@ test('Entry Answer receives an accepted delegation result as execution data, not
       },
     },
   });
-  const announce = new DelegationAnnounceMessage({
+  const announce = createDeliveryResult({
     id: 'delegation-announce:run-1:delegation-1:announce-1',
     sourceLane: 'capability:general',
     delegationId: 'delegation-1',
     runId: 'run-1',
-    announceMessageId: 'announce-1',
+    deliveryId: 'announce-1',
     task: '检查仓库状态',
     result: 'EXECUTED_RESULT_MARKER',
     createdAt: '2026-08-23T00:00:00.000Z',
@@ -278,18 +279,16 @@ test('Entry Answer receives an accepted delegation result as execution data, not
 
   await graph.invoke(buildOrchestratorRunInput([
     new HumanMessage('帮我检查仓库状态。'),
-    announce,
+    ...withDeliveryCalls([announce]),
     new HumanMessage('把刚才的执行结果再说明一下。'),
   ]), invokeConfig());
 
   const projected = entryMessages.find((message) => message.id === announce.id);
   assert.ok(projected);
-  assert.notEqual(projected, announce);
-  assert.notEqual(projected.content, announce.content);
-  assert.equal(projected._getType(), 'human');
-  assert.equal(JSON.parse(projected.text).result, announce.text);
-  assert.equal(JSON.parse(projected.text).authority, 'none');
-  assert.doesNotMatch(String(projected.content), /<artifacts>/);
+  assert.equal(projected._getType(), 'tool');
+  assert.equal(projected.content, announce.content);
+  assert.equal(JSON.parse(projected.text).delivery.text, 'EXECUTED_RESULT_MARKER');
+
 });
 
 test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {

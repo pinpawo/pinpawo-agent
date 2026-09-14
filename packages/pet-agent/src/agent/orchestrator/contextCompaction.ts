@@ -9,7 +9,6 @@ import {
   setAgentMessageMetadata,
   toolProtocolSafeMessages,
 } from '../messages';
-import { formatDelegationAnnounceForModel, getDelegationAnnounce } from './delegation';
 import { readCapabilityExecutions } from './executionMessages';
 import { readMessageText } from './utils';
 import { xmlTextBlock } from '../../prompts/xml';
@@ -80,12 +79,6 @@ function selectMessagesToKeep(
 }
 
 function formatMainMessageForSummary(message: BaseMessage): string | null {
-  const announce = getDelegationAnnounce(message);
-  if (announce) {
-    const meta = message.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
-    return formatDelegationAnnounceForModel(announce,
-      typeof meta?.taskAccepted === 'boolean' ? meta.taskAccepted : undefined);
-  }
   const text = readMessageText(message);
   if (!text) return null;
   if (isContextCompactionMessage(message)) {

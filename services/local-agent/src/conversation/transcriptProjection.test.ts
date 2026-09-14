@@ -1,3 +1,4 @@
+import { createDeliveryResult, withDeliveryCalls } from '../../../../packages/pet-agent/src/testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
@@ -27,29 +28,14 @@ test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => 
       content: 'subagent hidden',
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
-    new AIMessage({
-      content: 'handoff result visible',
-      additional_kwargs: {
-        pinpawo: {
-          delegationAnnounce: {
-            version: 1,
-            sourceLane: 'capability:general',
-            delegationId: 'delegation-1',
-            runId: 'run-1',
-            announceMessageId: 'announce-1',
-            task: '关闭 Issue #272',
-            result: 'handoff result visible',
-            createdAt: '2026-06-01T01:00:00.000Z',
-          },
-        },
-      },
-    }),
+    ...withDeliveryCalls([createDeliveryResult({ sourceLane: 'capability:general', delegationId: 'delegation-1',
+      runId: 'run-1', deliveryId: 'delivery-1', task: 'Close issue', result: 'handoff result visible', createdAt: '2026-06-01T01:00:00.000Z' })]),
     assistantMessage,
   ]);
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-    { role: 'subagent', requestId: 'run-1', text: 'handoff result visible' },
+    { role: 'subagent', requestId: 'run-1', text: 'handoff result visible', createdAt: '2026-06-01T01:00:00.000Z' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
 });

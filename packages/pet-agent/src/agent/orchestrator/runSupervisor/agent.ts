@@ -19,7 +19,6 @@ import { createSupervisorCapabilityDetailsTool } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
 import { supervisorWorkMessages } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
-import { projectDelegationAnnouncesForModel } from '../delegation';
 
 export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
@@ -45,8 +44,7 @@ export function createRunSupervisorAgent(params: {
         content: buildRunSupervisorAgentInput(input, disclosedDocuments, routing),
       });
       const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
-      // Legacy reports exist only in Root history, not in Capability private work.
-      const agentMessages = [...projectDelegationAnnouncesForModel(selected), frame];
+      const agentMessages = [...selected, frame];
       const tools: StructuredTool[] = [
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,

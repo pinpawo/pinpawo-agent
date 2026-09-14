@@ -1,4 +1,5 @@
-import { DelegationAnnounceMessage } from './delegation';
+import { createDeliveryResult } from '../../testing/capabilityDelivery';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -102,8 +103,8 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
     messages: [...[], ...[{
       messageId: 'announce-1',
       result: '浏览器已连接。',
-    }].map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    }].map((attempt) => createDeliveryResult({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
     state: { goal: null, plan: [
       { id: 'task-1', capability: 'browser', task: '确认浏览器可用', status: 'pending' },
@@ -131,8 +132,8 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
     messages: [...[], ...[{
       messageId: 'announce-1',
       result: '浏览器已连接。',
-    }].map((attempt) => new DelegationAnnounceMessage({
-      id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', announceMessageId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
+    }].map((attempt) => createDeliveryResult({
+      id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
     state: { goal: null, plan: [{ id: 'task-1', capability: 'browser', task: '确认浏览器可用', status: 'pending' }] },
     capabilityDisclosure: plannerDisclosure,

@@ -1,3 +1,4 @@
+import { createDeliveryResult, readFixtureDelivery } from '../../testing/capabilityDelivery';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -57,8 +58,6 @@ import {
   toolProtocolSafeMessages,
 } from '../messages';
 import {
-  DelegationAnnounceMessage,
-  getDelegationAnnounce,
   isDelegationBriefingMessage,
   materializeDelegation,
 } from './delegation';
@@ -67,32 +66,6 @@ import {
   createContextCompactionMessage,
   isContextCompactionMessage,
 } from './contextCompaction';
-
-function isTypedDelegationAnnounce(message: BaseMessage) {
-  return getDelegationAnnounce(message) !== null;
-}
-
-function createMainAnnounce(params: {
-  id?: string;
-  lane: `capability:${string}`;
-  runId: string;
-  delegationId: string;
-  task?: string | null;
-  result: string;
-  completionReason?: 'natural' | 'limit_reached' | 'error';
-}) {
-  const announceMessageId = params.id ?? `announce:${params.runId}:${params.delegationId}`;
-  return new DelegationAnnounceMessage({
-    id: announceMessageId,
-    sourceLane: params.lane,
-    runId: params.runId,
-    delegationId: params.delegationId,
-    announceMessageId,
-    task: params.task ?? null,
-    result: params.result,
-    createdAt: '2026-08-31T00:00:00.000Z',
-  });
-}
 
 function selectCapabilityHistory(
   messages: readonly BaseMessage[],
@@ -565,8 +538,6 @@ test('execution boundary routes through runSupervisor before the next task', asy
   assert.equal(state.messages.some((message) =>
     readMessageText(message).includes('<supervision_boundary_event')), false);
   assert.equal(answerMessages.length, 0);
-  const handoffs = state.messages.filter((message) => getDelegationAnnounce(message));
-  assert.equal(handoffs.length, 0);
   assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
 });
@@ -981,7 +952,10 @@ test('Run Supervisor materializer rejects selections outside the catalog', async
     },
     runSupervisorRunner: {
       async invoke(input) {
-        assert.equal(input.mode, 'entry');
+        if (input.mode === 'boundary') {
+          assert.ok(input.messages.some(m => ToolMessage.isInstance(m) && m.status === 'error'));
+          return { reply: 'Requested capability is unavailable.' };
+        }
         return {
           name: 'submit_plan', args: {
             tasks: [{
@@ -994,8 +968,7 @@ test('Run Supervisor materializer rejects selections outside the catalog', async
     },
   });
 
-  await assert.rejects(
-    graph.invoke(
+  const output = await graph.invoke(
       buildOrchestratorRunInput([new HumanMessage('帮我读取 src/index.ts')]),
       {
         configurable: {
@@ -1004,9 +977,9 @@ test('Run Supervisor materializer rejects selections outside the catalog', async
           tools: [],
         },
       },
-    ),
-    /outside the current catalog/,
-  );
+    );
+  assert.equal(output.runSupervisorState.plan.length, 0);
+  assert.equal(output.messages.at(-1)?.text, 'Requested capability is unavailable.');
 });
 
 test('Run Supervisor owns the executable task boundary at entry', async () => {
@@ -3476,7 +3449,6 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   assert.equal(delivery.scope.lane, 'capability:general');
   assert.ok(delivery.scope.delegationId);
   assert.match(delivery.text, /ran git status/);
-  assert.equal(finalState.messages.some(getDelegationAnnounce), false);
 });
 
 test('toolkit review rejection records terminal tool results and retains the delegation', async () => {
@@ -3655,7 +3627,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   assert.equal(routeCallCount, 2);
   assert.equal(recorder.subagentInputs.length, 1);
   const handoffCopy = mainConversationMessages(finalState.messages)
-    .find((message) => Boolean(getDelegationAnnounce(message)));
+    .find((message) => Boolean(readFixtureDelivery(message)));
   assert.equal(handoffCopy, undefined);
   assert.equal(currentSupervisorTask(finalState.runSupervisorState)?.status, 'pending');
   assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.status, 'paused');
@@ -3856,7 +3828,7 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.equal('runSupervisorSession' in finalState, false);
   assert.equal(
     mainConversationMessages(finalState.messages)
-      .some((message) => Boolean(getDelegationAnnounce(message))),
+      .some((message) => Boolean(readFixtureDelivery(message))),
     false,
   );
 
@@ -4037,21 +4009,6 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   assert.equal(reviewCount, 4);
 });
 
-test('old handoff metadata is not treated as an accepted delegation result', () => {
-  const oldCopy = new AIMessage('旧 handoff 文本');
-  setAgentMessageMetadata(oldCopy, {
-    taskAccepted: true,
-    handoffFrom: 'capability:general',
-    delegationId: 'old-delegation',
-    runId: 'old-run',
-    task: '旧任务',
-    announceMessageId: 'old-announce',
-  });
-
-  assert.equal(getDelegationAnnounce(oldCopy), null);
-  assert.equal(getDelegationAnnounce(oldCopy), null);
-});
-
 test('execution without a deliverable returns an error result to Supervisor without accepting the task', async () => {
   const checkpoint = new MemorySaver();
   let boundaries = 0;
@@ -4075,7 +4032,7 @@ test('execution without a deliverable returns an error result to Supervisor with
   assert.equal(currentSupervisorTask(saved.runSupervisorState)?.status, 'pending');
   assert.equal('taskRunContinuation' in saved, false);
   assert.equal('runSupervisorSession' in saved, false);
-  assert.equal(saved.messages.some((message) => getDelegationAnnounce(message)), false);
+  assert.equal(saved.messages.some((message) => readFixtureDelivery(message)), false);
 });
 
 test('lane reconciliation never emits root removals for the current briefing', () => {
@@ -4110,23 +4067,23 @@ test('lane reconciliation never emits root removals for the current briefing', (
 
 test('main conversation preserves accepted handoffs that begin with briefing formats', () => {
   const handoffs = [
-    new DelegationAnnounceMessage({
+    createDeliveryResult({
       id: 'stored-accepted-briefing-0',
       sourceLane: 'capability:general',
       delegationId: 'task-accepted-briefing',
       runId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
-      announceMessageId: 'accepted-briefing-0',
+      deliveryId: 'accepted-briefing-0',
       result: '【委派简报】\n- 这是已经验收的普通 handoff 内容',
       createdAt: '2026-08-23T00:00:00.000Z',
     }),
-    new DelegationAnnounceMessage({
+    createDeliveryResult({
       id: 'stored-accepted-briefing-1',
       sourceLane: 'capability:general',
       delegationId: 'task-accepted-briefing',
       runId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
-      announceMessageId: 'accepted-briefing-1',
+      deliveryId: 'accepted-briefing-1',
       result: '<delegation_briefing mode="initial">\n  <task>已验收结果</task>\n</delegation_briefing>',
       createdAt: '2026-08-23T00:00:00.000Z',
     }),
@@ -4410,7 +4367,6 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   // Completed delegation lanes are cleared without copying per-task plans into
   // the private lane. Root keeps evidence outside the user-facing conversation.
   assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  assert.equal(state.messages.filter((message) => getDelegationAnnounce(message)).length, 0);
   assert.equal(readDelegationDeliveries(state.messages).length, 2);
 
   // Each selected subagent receives one complete invocation-scoped briefing.
@@ -4526,7 +4482,7 @@ test('review_current projects a continuation briefing without rewriting the task
   const secondInput = recorder.subagentInputs[1];
   assert.match(String(secondInput.at(-1)?.content), /^<delegation_briefing[^>]*mode="continue">/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
-  assert.equal(secondInput.some(getDelegationAnnounce), false);
+  assert.equal(secondInput.some(readFixtureDelivery), false);
   assert.match(secondInputText, /已尝试关闭 issue。/);
 });
 
@@ -4660,13 +4616,9 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
 
 function announces(input: RunSupervisorInput | undefined) {
   const active = currentExecution(input);
-  return [...(input?.messages ?? []).flatMap((message) => {
-    const value = getDelegationAnnounce(message);
-    return value && active && value.delegationId === active.delegationId && value.runId === active.runId
-      ? [{ messageId: value.announceMessageId, result: value.result }] : [];
-  }), ...(executionDeliveries(input)).filter((delivery) => active
+  return (executionDeliveries(input)).filter((delivery) => active
     && delivery.scope.delegationId === active.delegationId && delivery.scope.runId === active.runId)
-    .map((delivery) => ({ messageId: delivery.id, result: delivery.text }))];
+    .map((delivery) => ({ messageId: delivery.id, result: delivery.text }));
 }
 test('a review-origin task pause consults Supervisor on guided continue by id', async () => {
   let runCount = 0;

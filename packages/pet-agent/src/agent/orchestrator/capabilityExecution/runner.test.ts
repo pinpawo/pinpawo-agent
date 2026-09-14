@@ -1,3 +1,4 @@
+import { readFixtureDelivery } from '../../../testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, RemoveMessage } from '@langchain/core/messages';
@@ -12,7 +13,7 @@ import { defineToolkit, type AgentToolkit } from '../../../types/toolkit';
 import type { SubagentRunInput } from '../../../types/subagent';
 import { getAgentMessageMetadata, queryAgentMessages, setAgentMessageMetadata } from '../../messages';
 import { isDelegationBriefingMessage } from '../delegation/briefing';
-import { getDelegationAnnounce } from '../delegation';
+
 import { PauseTaskInterruptSignal } from '../interrupt/pauseTaskInterrupt';
 import { compileAgentRegistry } from '../registry';
 import { exactAuthorization } from '../../../autoReview/reviewAuthorizations';
@@ -105,7 +106,7 @@ test('executor scopes history and returns an unapplied handoff without persistin
   assert.equal(result.delivery?.scope.delegationId, 'd1');
   assert.equal(result.delivery?.text, 'Delivered');
   assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
-  assert.equal(result.privateMessages.filter(getDelegationAnnounce).length, 0);
+  assert.equal(result.privateMessages.filter(readFixtureDelivery).length, 0);
   assert.equal(result.privateMessages.some((message) => message instanceof RemoveMessage), false);
   assert.deepEqual(messages.map((message) => message.toDict()), before);
 });
@@ -264,7 +265,7 @@ test('overlapping calls keep contexts, bindings, artifacts and authorizations se
     assert.deepEqual(b.toolAuthorizations, []);
     for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
       assert.equal(result.delivery?.scope.delegationId, id);
-      const privateMessage = result.privateMessages.find((message) => !getDelegationAnnounce(message));
+      const privateMessage = result.privateMessages.find((message) => !readFixtureDelivery(message));
       assert.equal(getAgentMessageMetadata(privateMessage!).delegationId, id);
       assert.equal(events.filter((event) => event === `release:${id}`).length, 1);
     }

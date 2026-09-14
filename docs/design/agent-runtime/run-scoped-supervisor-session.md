@@ -196,7 +196,7 @@ invoke 结束时，Root 接收工具更新后的最终计划 state，并验证�
 Supervisor: review_current → ToolMessage(更新后的计划)
           → 模型继续判断
           → 自然回复，或调整计划后继续判断，或 delegate_capability
-Root:      校验交接身份，提交最终计划 + 消息
+Root:      原生 Command 提交最终计划 + 消息
           → answer，或执行明确交接的 Capability
 ```
 
@@ -225,7 +225,7 @@ Middleware 检查调用协议与 schema；工具返回真实状态，供下一�
 - review 最后一项后模型自然回复：计划完成、一个最终主会话回复、Capability 不再执行。
 - submit/adjust/review 后均能再次调用模型；仅 delegate_capability 产生 delegation。
 - review 后继续执行、调整后执行、仍有 pending 任务时提问，均保持正确状态。
-- 多次工具调用的状态一致，Root 交接身份校验、去重与原生恢复保持有效。
+- 多次工具调用的状态一致，原生调用配对、去重与暂停恢复保持有效。
 
 ### lane 归属不变
 
@@ -319,8 +319,8 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 | Review 框架兼容代码 | [Toolkit Review](../../../packages/pet-agent/src/agent/orchestrator/toolkitReviewMiddleware.ts)为 #749 / langgraphjs#2667 读取私有 scratchpad，避免嵌套 interrupt 恢复时重复全局审核。删除前需在实际安装版本上复现并验证原生恢复；不能仅因标记 temporary 就删除。 |
 | 已废弃授权类型仍在使用 | [globalReviewPolicy.ts](../../../packages/pet-agent/src/agent/orchestrator/review/globalReviewPolicy.ts)仍导出 `BuiltinGlobalReviewPolicyMode` 别名，local-agent 有实际消费者。可逐步改用 agent-contracts 的 `ToolAuthorizationMode`，不能只删除 pet-agent 导出。 |
 
-历史 Announce 读取、工具协议输入过滤和 Capability 私有消息留存不是待删除的运行状态。
-它们分别承担旧会话读取、模型输入配对安全和隔离历史保存；是否淘汰历史兼容或缩短
+历史 Announce 读取已移除；工具协议输入过滤和 Capability 私有消息留存仍承担当前职责。
+后两者承担模型输入配对安全和隔离历史保存；是否缩短
 留存周期应单独决定，不混入 Supervisor 调度重构。
 
 
@@ -332,7 +332,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 
 - `answer` 不调用模型；它从已提交的 Supervisor 工作消息读取回复，生成主会话 AIMessage，补齐消息时间与 run/trace，清理终止标志。
 - `runSupervisor` 先提交计划和工作消息，再路由到 `answer` 发布；因此正常回复经过两个 Root 提交步骤。
-- 迭代预算停止和 `checkpoint_incompatible` 也走 `answer`；普通异常仍由 `runTermination` 记录并重新抛出。
+- 迭代预算停止也走 `answer`；普通异常仍由 `runTermination` 记录并重新抛出。
 - `entryAnswer` 已能直接写主会话回复并结束，不应与末端 `answer` 混为一谈。
 - Host 原始流适配会隐藏 `runSupervisor` 命名空间，并通过 `answer` 节点名识别主回复；root values 与最终 checkpoint 另行提供已提交的主会话消息。
 
@@ -348,7 +348,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 
 Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`delegate_capability` 准备好执行请求后结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
 
-运行停止原因由程序单独格式化：迭代预算停止及 checkpoint 不兼容时，复用发布函数输出运行状态并结束；真正异常保持原来的失败通道。保留 Entry 的职责，必要时复用消息构造函数，但不在本次重构中改变 Entry 的决策或提示机制。
+运行停止原因由程序单独格式化：迭代预算停止时，复用发布函数输出运行状态并结束；真正异常保持原来的失败通道。保留 Entry 的职责，必要时复用消息构造函数，但不在本次重构中改变 Entry 的决策或提示机制。
 
 ### Host 与消息可见性
 
@@ -371,7 +371,7 @@ Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次�
 1. 提取发布/停止格式化函数，验证文本、身份和收尾状态；保持现有图行为。
 2. 在真实 Root 协议流下验证 Host 对已提交主回复的识别与去重，同时排除内部模型文本和工作消息。
 3. 将正常回复和运行停止改为提交后直接 END，删除 answer 节点及其路由。
-4. 覆盖自然回复、保留 pending 的提问、执行交接不发最终答复、当前拓扑内的 checkpoint 恢复、重复恢复不重复发布、预算停止、不兼容 checkpoint 和普通异常。
+4. 覆盖自然回复、保留 pending 的提问、执行交接不发最终答复、当前拓扑内的 checkpoint 恢复、重复恢复不重复发布、预算停止和普通异常。
 
 收益是减少正常回复的一次图节点调度和一次状态提交，并统一回复发布责任；当前 answer 没有模型调用，因此不宣称节省一次模型调用或实现新的 token 流式能力。
 
@@ -396,7 +396,7 @@ delegation 身份、执行模式与 briefing；执行正文只从此快照读取
 请求/实际结果，当前与历史调用参数均为 `{}`，不向模型工具参数注入内部数据。原始模型调用 id 作为
 来源关联保留。Root 接收 Supervisor 工具维护的最终计划，检查交接与当前任务、run 和调用身份一致，并拒绝重复交接；不重放决策序列。
 
-执行历史读取、暂停恢复和上下文压缩都从该元数据取快照，不能用现有计划反推旧任务。
+执行历史读取与上下文压缩从实际结果 artifact 读取执行事实，暂停恢复由原生 checkpoint 管理，不能用现有计划反推旧任务。
 Host 的 readCapabilityExecutions 读取实际已返回的执行；原生待执行调用结合当前计划投影活跃任务。
 回归覆盖单次派发、错误自纠、验收、continue/replace、新 run、重复调用 id、篡改、
 暂停恢复、压缩保留、Host 投影及 Studio 工作→反馈能力交接。旧协议 checkpoint 不迁移。
@@ -454,3 +454,16 @@ Root 的 capability 节点直接使用 `new ToolNode([delegateCapability], { han
 规范化调用 ID，让原生 ToolNode 在完整历史中去重；参数与原模型消息保持不变，实际结果
 使用同一个规范化 ID 配对。可纠正参数或业务错误由节点 errorHandler 返回错误 ToolMessage
 并进入 Supervisor；其他异常继续走 Root 终止路径，原生 interrupt 由框架恢复。
+
+## 合并 #821 后的遗留清理
+
+Root 的 Supervisor 节点只消费自然结束的状态与消息；执行交接仅通过原生 Command.PARENT。
+删除按 runner 返回的 tool call 再次决定 Capability 路由的分支，以及对受信任结果的重复
+reply、披露和消息 lane 校验。测试 runner 通过脚本模型驱动真实 createAgent 工具与交接，
+不再把测试中直接计算的状态作为另一条执行路径提交给 Root。
+
+删除 DelegationAnnounceMessage、版本解析和模型边界投影。主线交付只使用实际
+AI tool call / ToolMessage 配对与结果 artifact；Host 展示和压缩直接读取这些消息。
+静态测试数据使用 native Capability result fixture，进入主线时补齐请求/结果对。
+旧 checkpoint 的 runRuntimeFailure、checkpoint_incompatible 分支和 afterPrepare 路由一并删除。
+普通运行错误、取消和原生 interrupt 继续沿现有 LangGraph 生命周期处理。

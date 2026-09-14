@@ -1,3 +1,4 @@
+import { adjustPlan } from '../../runSupervisor/adjustPlanTool';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HumanMessage } from '@langchain/core/messages';
@@ -128,16 +129,19 @@ test('checkpointed adjustment resumes execution without repeating the Supervisor
 
 test('execution alone cannot authorize plan adjustment; fresh guidance still cannot change a continued task capability', async () => {
   const state = pausedState();
-  const node = (decision: ScriptedSupervisorDecision) => createRunSupervisorNode({ models,
-    runSupervisorRunner: withScriptedDelegation({ invoke: async () => decision }) });
-  const config = { configurable: { registry } };
-  await assert.rejects(node(adjustment('replace'))(state, config), /fresh user input/);
+  const apply = (root: typeof state, decision: ScriptedSupervisorDecision) => {
+    if (!('name' in decision) || decision.name !== 'adjust_plan') throw new Error('Expected adjustment');
+    return adjustPlan({ state: root.runSupervisorState, runId: root.runId, traceId: root.traceId,
+      userRequest: root.runUserRequest!, messages: root.messages, mode: 'boundary',
+      hasNewUserInput: root.messages.some(m => m.id === 'new'), allowedCapabilityNames: ['general', 'writer'] }, decision.args, 'adjust');
+  };
+  assert.throws(() => apply(state, adjustment('replace')), /fresh user input/);
   const fresh = { ...state, messages: [...state.messages, setAgentMessageMetadata(new HumanMessage({ id: 'new', content: 'Adjust.' }),
     { runId: state.runId, traceId: state.traceId })] };
-  await assert.rejects(node({ name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'continue',
-    tasks: [{ capability: 'writer', task: 'Write.' }] } })(fresh, config), /keep its capability/);
-  await assert.rejects(node({ name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'replace',
-    tasks: [{ capability: 'unknown', task: 'Write.' }] } })(fresh, config), /outside/);
+  assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'continue',
+    tasks: [{ capability: 'writer', task: 'Write.' }] } }), /keep its capability/);
+  assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'replace',
+    tasks: [{ capability: 'unknown', task: 'Write.' }] } }), /outside/);
 });
 
 test('native pause resume shares the execution budget and cannot dispatch beyond it', async () => {

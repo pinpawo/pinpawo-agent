@@ -13,9 +13,6 @@ import {
   mergeToolAuthorizations,
   type ToolAuthorizationRecord,
 } from '../../autoReview/reviewAuthorizations';
-import type {
-  OrchestratorRuntimeFailure,
-} from './runSupervisor/protocol';
 import type { RunSupervisorState } from './runSupervisor/state';
 import type { CapabilityDisclosureState } from './runSupervisor/capabilityDisclosure';
 
@@ -65,10 +62,6 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => 0,
   }),
-  runRuntimeFailure: Annotation<OrchestratorRuntimeFailure | null>({
-    reducer: (_prev, next) => next,
-    default: () => null,
-  }),
   runTerminalError: Annotation<OrchestratorTerminalErrorState | null>({
     reducer: (_prev, next) => next,
     default: () => null,
@@ -105,7 +98,6 @@ export type OrchestratorRunState = Pick<
   | 'runSupervisorUserMessageId'
   | 'runUserRequest'
   | 'runIterationCount'
-  | 'runRuntimeFailure'
   | 'runTerminalError'
   | 'runId'
   | 'traceId'
@@ -125,7 +117,6 @@ export function buildRunStateReset(
     runSupervisorUserMessageId: null,
     runUserRequest: null,
     runIterationCount: 0,
-    runRuntimeFailure: null,
     runTerminalError: null,
     runId: randomUUID().slice(0, 8),
     traceId: options.traceId ?? randomUUID(),

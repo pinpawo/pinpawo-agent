@@ -27,9 +27,7 @@ import { createSubmitPlanTool } from '../../src/agent/orchestrator/runSupervisor
 import { createReviewCurrentTool } from '../../src/agent/orchestrator/runSupervisor/reviewCurrentTool';
 import { createAdjustPlanTool } from '../../src/agent/orchestrator/runSupervisor/adjustPlanTool';
 import { createDelegateCapabilityTool } from '../../src/agent/orchestrator/runSupervisor/delegateCapabilityTool';
-import {
-  DelegationAnnounceMessage,
-} from '../../src/agent/orchestrator/delegation/index.ts';
+
 import {
   queryAgentMessages,
   setAgentMessageMetadata,
@@ -75,16 +73,6 @@ const disclosure = createCapabilityDisclosureState({
 });
 
 const userMessage = new HumanMessage({ id: 'audit-user', content: userRequest });
-const acceptedAnnounce = new DelegationAnnounceMessage({
-  id: 'audit-accepted-announce',
-  sourceLane: 'capability:repository',
-  delegationId: 'audit-prior-delegation',
-  runId: 'audit-prior-run',
-  announceMessageId: 'audit-prior-result',
-  task: 'Inspect the issue and identify the required change.',
-  result: 'Inspection completed and identified the affected module.',
-  createdAt: '2026-01-01T00:00:00.000Z',
-});
 const privateLaneMessage = new AIMessage({
   id: 'audit-private-lane-message',
   content: 'Private executor reasoning that must not enter Supervisor context.',

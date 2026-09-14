@@ -1,3 +1,4 @@
+import { createDeliveryResult, withDeliveryCalls } from '../../testing/capabilityDelivery';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
@@ -14,7 +15,7 @@ import {
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
 } from '../messages';
-import { DelegationAnnounceMessage } from './delegation';
+
 
 function fakeSummaryModel(summary = '旧上下文摘要', onInvoke?: (messages: unknown[], config?: RunnableConfig) => void) {
   return {
@@ -195,19 +196,19 @@ test('orchestrator context compaction passes the complete old history to the sum
 test('orchestrator context compaction summarizes a complete accepted main announce', async () => {
   let summaryInput = '';
   const resultTail = 'DELEGATION_RESULT_TAIL_MARKER';
-  const acceptedAnnounce = new DelegationAnnounceMessage({
+  const acceptedAnnounce = createDeliveryResult({
     id: 'delegation-announce:run-1:delegation-1:announce-1',
     sourceLane: 'capability:general',
     delegationId: 'delegation-1',
     runId: 'run-1',
-    announceMessageId: 'announce-1',
+    deliveryId: 'announce-1',
     task: '生成完整报告',
     result: `${'大结果内容 '.repeat(6000)}${resultTail}`,
     createdAt: '2026-08-24T00:00:00.000Z',
   });
   const messages: BaseMessage[] = [
     new HumanMessage('用户目标：保留完整的委派结果并总结。'),
-    acceptedAnnounce,
+    ...withDeliveryCalls([acceptedAnnounce]),
     usageMessage('保留在当前上下文的最新消息。', 900),
   ];
 
@@ -220,7 +221,7 @@ test('orchestrator context compaction summarizes a complete accepted main announ
   });
 
   assert.match(summaryInput, /用户目标：保留完整的委派结果并总结。/);
-  assert.ok(summaryInput.includes(JSON.stringify(acceptedAnnounce.text)), 'legacy result remains complete');
+  assert.ok(summaryInput.includes(acceptedAnnounce.text), 'native result remains complete');
   assert.match(summaryInput, new RegExp(resultTail));
   assert.equal(
     result.messages.some((message) => message.id === acceptedAnnounce.id),
@@ -229,12 +230,12 @@ test('orchestrator context compaction summarizes a complete accepted main announ
 });
 
 test('orchestrator context compaction pins every unaccepted lane announce outside the suffix', async () => {
-  const firstAnnounce = setAgentMessageDelegationScope(new DelegationAnnounceMessage({
+  const firstAnnounce = setAgentMessageDelegationScope(createDeliveryResult({
     id: 'announce-1',
     sourceLane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
-    announceMessageId: 'announce-1',
+    deliveryId: 'announce-1',
     task: null,
     result: 'FIRST_ATTEMPT',
     createdAt: '2026-08-31T00:00:00.000Z',
@@ -243,12 +244,12 @@ test('orchestrator context compaction pins every unaccepted lane announce outsid
     runId: 'run-1',
     delegationId: 'delegation-1',
   });
-  const secondAnnounce = setAgentMessageDelegationScope(new DelegationAnnounceMessage({
+  const secondAnnounce = setAgentMessageDelegationScope(createDeliveryResult({
     id: 'announce-2',
     sourceLane: 'capability:general',
     runId: 'run-1',
     delegationId: 'delegation-1',
-    announceMessageId: 'announce-2',
+    deliveryId: 'announce-2',
     task: null,
     result: 'SECOND_ATTEMPT',
     createdAt: '2026-08-31T00:00:00.000Z',
@@ -313,12 +314,12 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
   });
   messages.push(subagentDetail);
 
-  const announce = setAgentMessageDelegationScope(new DelegationAnnounceMessage({
+  const announce = setAgentMessageDelegationScope(createDeliveryResult({
     id: 'task-1-announce',
     sourceLane: 'capability:general',
     runId: 'turn-1',
     delegationId: 'task-1',
-    announceMessageId: 'task-1-announce',
+    deliveryId: 'task-1-announce',
     task: '整理素材',
     result: '素材已经整理完成，输出了 result.md。',
     createdAt: '2026-08-31T00:00:00.000Z',

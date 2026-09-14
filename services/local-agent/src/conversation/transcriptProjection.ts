@@ -31,16 +31,14 @@ export type TuiCheckpointMessage = {
   createdAt?: string;
 };
 
-type TuiCheckpointMessageSource =
-  | { role: 'user' | 'assistant' }
-  | { role: 'subagent'; requestId: string };
+type TuiCheckpointMessageSource = { role: 'user' | 'assistant' };
 /** Aggregate provider usage for one session's transcript. */
 export type TuiCheckpointTokenUsage = (TokenUsageSnapshot & { scope: 'session' }) | null;
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   const deliveries = new Map(readCapabilityExecutions(messages).flatMap(({ call, metadata, result }) =>
     result?.delivery ? [[call.id!, { metadata, delivery: result.delivery }] as const] : []));
-  return messages.flatMap((message) => {
+  return messages.flatMap<TuiCheckpointMessage>((message) => {
     if (ToolMessage.isInstance(message)) {
       const execution = deliveries.get(message.tool_call_id);
       const metadata = message.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
@@ -111,15 +109,7 @@ function readTuiCheckpointMessageSource(
     }
   }
   if (type === 'human') return { role: 'user' };
-  if (!pinpawo || typeof pinpawo !== 'object') return { role: 'assistant' };
-  const announce = (pinpawo as Record<string, unknown>).delegationAnnounce;
-  if (!announce || typeof announce !== 'object' || Array.isArray(announce)) {
-    return { role: 'assistant' };
-  }
-  const runId = (announce as Record<string, unknown>).runId;
-  return typeof runId === 'string' && runId.trim()
-    ? { role: 'subagent', requestId: runId }
-    : null;
+  return { role: 'assistant' };
 }
 
 export function summarizeTuiCheckpointMessages(

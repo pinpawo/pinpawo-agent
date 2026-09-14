@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { scoreClosure } from './supervisor-delivery-closure';
 import { projectHistoryEvidence, toolHistoryInput, withoutToolScope, type HistoryVariant, type HistoryMode } from './supervisor-tool-history';

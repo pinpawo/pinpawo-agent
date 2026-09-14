@@ -4757,7 +4757,10 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
   assert.equal(routeCallCount, 3, 'guidance must reach Supervisor before continuing');
   assert.equal(runCount, 0);
   const continuedState = await graph.getState(config);
-  assert.equal(readCapabilityExecutions(continuedState.values.messages).at(-1)?.result, null, 'continued call awaits its own result');
+  const pendingCall = continuedState.values.messages.at(-1) as AIMessage;
+  assert.equal(pendingCall.tool_calls?.[0]?.name, 'delegate_capability');
+  assert.ok(!continuedState.values.messages.some((message: BaseMessage) => ToolMessage.isInstance(message)
+    && message.tool_call_id === pendingCall.tool_calls![0].id), 'continued call awaits its own result');
   const guidance = (continuedState.values.messages as BaseMessage[]).find((message) =>
     HumanMessage.isInstance(message) && message.text === 'Skip git status; inspect recent commits.');
   assert.ok(guidance);

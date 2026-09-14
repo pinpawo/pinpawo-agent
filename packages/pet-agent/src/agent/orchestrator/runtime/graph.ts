@@ -11,6 +11,7 @@ import {
   readSubagentGenerationReserveTokens,
 } from './config';
 import { createAnswerNode } from './nodes/answer';
+import { createDelegateCapabilityTool } from '../runSupervisor/delegateCapabilityTool';
 import { createCapabilityNode } from './nodes/capability';
 import { createRunSupervisorNode } from './nodes/runSupervisor';
 import {
@@ -32,16 +33,15 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const subagentGenerationReserveTokens = readSubagentGenerationReserveTokens(config);
   const prepare = createPrepareNode();
   const compactContext = createCompactContextNode({ config });
-  const runSupervisor = createRunSupervisorNode(config);
+  const delegateCapability = createDelegateCapabilityTool({
+    ...config, subagentContextWindowTokens, subagentGenerationReserveTokens,
+  });
+  const runSupervisor = createRunSupervisorNode(config, delegateCapability);
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
   const resultAnswer = createAnswerNode();
-  const capabilityNode = createCapabilityNode({
-    config,
-    subagentContextWindowTokens,
-    subagentGenerationReserveTokens,
-  });
+  const capabilityNode = createCapabilityNode(delegateCapability);
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
     .addNode('prepare', prepare, { ends: ['answer', 'compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })

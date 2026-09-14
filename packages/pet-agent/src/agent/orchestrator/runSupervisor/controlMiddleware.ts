@@ -4,9 +4,13 @@ import { createMiddleware, ToolInvocationError } from 'langchain';
 import { currentSupervisorTask, supervisorAgentStateSchema } from './state';
 import { SupervisorDecisionError } from './controlContext';
 import { isSupervisorControlTool } from './protocol';
-import { readCapabilityExecutionCall } from '../executionMessages';
+import { Command } from '@langchain/langgraph';
+import type { RunSupervisorInput } from './runner';
+import { supervisorHandoffContext } from './input';
+import { supervisorWorkMessages } from './messageHandoff';
+import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 
-export function createSupervisorControlValidationMiddleware() {
+export function createSupervisorControlValidationMiddleware(input: RunSupervisorInput, messageCount: number) {
   return createMiddleware({
     name: 'SupervisorControlValidation',
     stateSchema: supervisorAgentStateSchema,
@@ -15,6 +19,16 @@ export function createSupervisorControlValidationMiddleware() {
       if (typeof request.toolCall.args === 'string') {
         return new ToolMessage({ name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error',
           content: `Tool arguments could not be parsed as a JSON object. Correct the arguments and retry. Received: ${request.toolCall.args}` });
+      }
+      if (request.toolCall.name === 'delegate_capability') {
+        return new Command({ graph: Command.PARENT, goto: 'capability', update: {
+          runSupervisorState: request.state.runSupervisorState,
+          runSupervisorReviewFeedback: request.state.reviewFeedback,
+          runCapabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure,
+            request.state.disclosedCapabilityNames ?? []),
+          ...(input.inputId.startsWith('human:') ? { runSupervisorUserMessageId: input.inputId } : {}),
+          messages: supervisorWorkMessages(supervisorHandoffContext(input), request.state.messages.slice(messageCount)),
+        } });
       }
       try {
         return await handler(request);
@@ -29,16 +43,6 @@ export function createSupervisorControlValidationMiddleware() {
           content: plan ? JSON.stringify({ error: cause.message, currentTask: currentSupervisorTask(plan), plan }) : cause.message,
         });
       }
-    },
-    beforeModel: {
-      canJumpTo: ['end'],
-      hook: (state) => {
-        const last = state.messages.at(-1);
-        // Only the request stamped by the handoff tool ends this loop. Errors return to the model.
-        if (last && readCapabilityExecutionCall(last)) {
-          return { jumpTo: 'end' as const };
-        }
-      },
     },
     wrapModelCall: async (request, handler) => {
       let response = await handler(request);

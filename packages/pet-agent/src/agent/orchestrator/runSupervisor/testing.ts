@@ -1,8 +1,14 @@
+import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { createCapabilityNode } from '../runtime/nodes/capability';
+import { Command, StateGraph, START, END } from '@langchain/langgraph';
+import { createRunSupervisorAgent } from './agent';
+import { OrchestratorState } from '../state';
+import { setAgentMessageMetadata } from '../../messages';
 import { randomUUID } from 'node:crypto';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { createSupervisorMessageHandoff, prepareCapabilityHandoff } from './messageHandoff';
+import { supervisorWorkMessages } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 import { submitPlan, submitPlanSchema } from './submitPlanTool';
 import { adjustPlan, adjustPlanSchema } from './adjustPlanTool';
@@ -70,7 +76,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
     else if (control.name !== 'delegate_capability') feedback = undefined;
     const request = new AIMessage({ id: `request:${callId}`, content: '',
       tool_calls: [{ id: callId, name: control.name, args: control.args, type: 'tool_call' }] });
-    if (execution) messages.push(prepareCapabilityHandoff(context, request, execution));
+    if (execution) messages.push(request);
     else messages.push(request, new ToolMessage({ name: control.name, tool_call_id: callId, content: 'Scenario tool result.' }));
 
   };
@@ -80,8 +86,8 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
     else call(decision);
   }
   if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));
-  return { runSupervisorState: state, capabilityDisclosure: input.capabilityDisclosure, ...(reply !== undefined ? { reply } : {}),
-    messages: createSupervisorMessageHandoff(supervisorHandoffContext(input), messages) };
+  return { runSupervisorState: state, reviewFeedback: feedback ?? null, capabilityDisclosure: input.capabilityDisclosure, ...(reply !== undefined ? { reply } : {}),
+    messages: supervisorWorkMessages(supervisorHandoffContext(input), messages) };
 }
 
 export function withScriptedDelegation(runner: ScriptedSupervisorRunner): RunSupervisorRunner {
@@ -90,4 +96,44 @@ export function withScriptedDelegation(runner: ScriptedSupervisorRunner): RunSup
     const result = scriptedSupervisorResult(input, decision);
     return { ...result, capabilityDisclosure: decision.capabilityDisclosure ?? result.capabilityDisclosure };
   } };
+}
+
+/** Real native parent graph for decision-only tests/evals; Capability is deliberately not executed. */
+export function createRunSupervisorProbe(params: Parameters<typeof createRunSupervisorAgent>[0]): RunSupervisorRunner {
+  const runner = createRunSupervisorAgent(params);
+  return { invoke: async (input, config) => {
+    const capture = tool((_args, runtime: ToolRuntime<typeof OrchestratorState.State>) => {
+      buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: runtime.state.runSupervisorState,
+        messages: [...input.messages, ...runtime.state.messages] }, runtime.state.runSupervisorReviewFeedback ?? undefined);
+      return new Command({ update: {} });
+    }, { name: 'delegate_capability', description: 'Capture a valid execution decision without executing Capability.', schema: delegateCapabilitySchema });
+    const graph = new StateGraph(OrchestratorState)
+      .addNode('supervisor', async (_state, runtime) => {
+        const result = await runner.invoke({ ...input, state: _state.runSupervisorState, reviewFeedback: _state.runSupervisorReviewFeedback,
+          messages: [...input.messages, ..._state.messages] }, runtime);
+        return new Command({ update: { messages: result.messages, runSupervisorState: result.runSupervisorState,
+          runCapabilityDisclosure: result.capabilityDisclosure, runSupervisorReviewFeedback: result.reviewFeedback ?? null }, goto: END });
+      }, { ends: ['capability', END] })
+      .addNode('capability', createCapabilityNode(capture))
+      .addEdge(START, 'supervisor').addConditionalEdges('capability', state =>
+        ToolMessage.isInstance(state.messages.at(-1)) ? 'supervisor' : END, ['supervisor', END]).compile();
+    const result = await graph.invoke({ runId: input.runId, traceId: input.traceId,
+      runSupervisorState: input.state, runSupervisorReviewFeedback: input.reviewFeedback ?? null, runUserRequest: input.userRequest, runCapabilityDisclosure: input.capabilityDisclosure }, config);
+    const last = result.messages.at(-1);
+    return { messages: result.messages, runSupervisorState: result.runSupervisorState,
+      reviewFeedback: result.runSupervisorReviewFeedback,
+      capabilityDisclosure: result.runCapabilityDisclosure!,
+      ...(AIMessage.isInstance(last) && !last.tool_calls?.length ? { reply: last.text } : {}) };
+  } };
+}
+
+/** Fixture for an actual returned execution, matching the native tool's result artifact. */
+export function capabilityResultMessage(state: { runId: string; traceId: string },
+  call: { id: string; taskId: string; delegationId: string; capability: string; task: string; mode: 'initial' | 'continue'; briefing?: string },
+  result: { status: string; delivery: unknown; artifacts: unknown[] }) {
+  const { id, ...input } = call;
+  return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id,
+    content: JSON.stringify(result), artifact: { ...input, briefing: input.briefing ?? JSON.stringify({ plan: [] }) },
+    status: result.status === 'missing_deliverable' ? 'error' : 'success',
+  }), { runId: state.runId, traceId: state.traceId });
 }

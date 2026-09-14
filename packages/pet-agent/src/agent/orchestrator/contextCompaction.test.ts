@@ -32,14 +32,17 @@ function longMessage(index: number) {
 function executionCall(id: string, taskId: string) {
   return setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id, name: 'delegate_capability', args: {},
-  }] }), { runId: 'run', traceId: 'trace', source: 'supervisor', execution: {
-    taskId, delegationId: `delegation:${taskId}`, capability: 'general', task: `Work on ${taskId}`, mode: 'initial', briefing: 'Execute the confirmed task.',
-  } });
+  }] }), { runId: 'run', traceId: 'trace', source: 'supervisor' });
+}
+function executionResult(id: string, taskId: string, content: string) {
+  return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id, content,
+    artifact: { taskId, delegationId: `delegation:${taskId}`, capability: 'general', task: `Work on ${taskId}`, mode: 'initial', briefing: 'Execute the confirmed task.' },
+  }), { runId: 'run', traceId: 'trace' });
 }
 
 test('compaction retains unfinished execution pairs and private lanes without exposing them to the summary', async () => {
   const call = executionCall('execution-1', 'task-1');
-  const result = new ToolMessage({ tool_call_id: 'execution-1', content: 'unaccepted evidence' });
+  const result = executionResult('execution-1', 'task-1', 'unaccepted evidence');
   const privateMessage = setAgentMessageMetadata(new HumanMessage('private executor context'), {
     lane: 'capability:general', runId: 'old-run', delegationId: 'old-delegation',
   });
@@ -354,7 +357,7 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
 test('aggressive compaction keeps all main attempts of unfinished work and summarizes other scopes', async () => {
   const attempt = (id: string, taskId: string) => [
     executionCall(id, taskId),
-    new ToolMessage({ tool_call_id: id, content: `Evidence ${id}` }),
+    executionResult(id, taskId, `Evidence ${id}`),
   ];
   const first = attempt('first', 'active');
   const second = attempt('second', 'active');
@@ -375,7 +378,7 @@ test('aggressive compaction keeps all main attempts of unfinished work and summa
 test('compaction separates current-task evidence from older history and folds each summary on resume', async () => {
   const task = (message: BaseMessage) => setAgentMessageMetadata(message, { traceId: 'current-goal' });
   const call = task(executionCall('active-evidence', 'active'));
-  const evidence = task(new ToolMessage({ tool_call_id: 'active-evidence', content: 'KEEP_VERBATIM' }));
+  const evidence = task(executionResult('active-evidence', 'active', 'KEEP_VERBATIM'));
   const requests: string[] = [];
   const model = { invoke: async (messages: BaseMessage[]) => {
     const text = String(messages.at(-1)?.content); requests.push(text);

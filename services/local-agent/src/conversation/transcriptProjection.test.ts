@@ -60,8 +60,8 @@ test('readTuiCheckpointMessages restores paired Capability deliveries without ex
   const metadata = { runId: 'run-1', traceId: 'trace-1' };
   const call = setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id: 'dispatch-1', name: 'delegate_capability', args: {},
-  }] }), { ...metadata, source: 'supervisor', execution });
-  const result = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: 'dispatch-1',
+  }] }), { ...metadata, source: 'supervisor' });
+  const result = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: 'dispatch-1', artifact: execution,
     content: JSON.stringify({ status: 'returned', delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } }),
   }), metadata);

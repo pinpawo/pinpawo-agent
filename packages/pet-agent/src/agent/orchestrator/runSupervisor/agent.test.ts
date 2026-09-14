@@ -23,7 +23,7 @@ import {
   RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
 } from './detailsTool';
 import type { CapabilityCatalog } from './capabilityCatalog';
-import { createRunSupervisorAgent } from './agent';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from './testing';
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { parseSupervisorControl } from './testing';
@@ -329,11 +329,11 @@ function supervisorInput(
     const metadata = { runId: report.runId, traceId: input.traceId };
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id: callId, name: 'delegate_capability', type: 'tool_call', args: {},
-    }] }), { ...metadata, source: 'supervisor', execution: {
+    }] }), { ...metadata, source: 'supervisor' }));
+    messages.push(setAgentMessageMetadata(new ToolMessage({ artifact: {
       taskId: current!.delegationId, delegationId: current!.delegationId,
       capability: current!.capability, task: current!.task, mode: 'initial', briefing: 'Execute the confirmed task.',
-    } }));
-    messages.push(setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: callId,
+    },  name: 'delegate_capability', tool_call_id: callId,
       content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
         runId: report.runId, traceId: input.traceId, delegationId: report.delegationId, lane: report.sourceLane,
       } } }),
@@ -1351,7 +1351,7 @@ test('an unknown Capability returns feedback and a corrected plan can be committ
     supervisorInput(catalog),
   );
   assert.ok(result.messages.some(m => ToolMessage.isInstance(m) && m.status === 'error'));
-  assert.equal(readCapabilityExecutionCall(result.messages.at(-1)!)?.execution.capability, 'general');
+  assert.equal(result.runSupervisorState.plan[0].capability, 'general');
   assert.equal(model.invocations.length, 2);
 });
 

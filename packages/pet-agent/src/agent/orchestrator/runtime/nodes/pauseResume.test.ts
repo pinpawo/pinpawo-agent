@@ -12,7 +12,8 @@ import { withScriptedDelegation, type ScriptedSupervisorDecision } from '../../r
 import { createRunSupervisorNode } from './runSupervisor';
 import { pauseGate } from './pauseGate';
 import { createAnswerNode } from './answer';
-import { readCapabilityCall, capabilityResultMessage } from '../delegationToolResult';
+import { readCapabilityCall } from '../../runSupervisor/testingExecution';
+import { capabilityResultMessage } from '../../runSupervisor/testing';
 import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
 
 const models = { act: {} } as AgentModels;

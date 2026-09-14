@@ -13,6 +13,7 @@ export type RunSupervisorInput = {
   readonly runId: string;
   readonly userRequest: string;
   readonly state: RunSupervisorState;
+  readonly reviewFeedback?: string | null;
   /** Canonical records; the adapter selects main + this run's work lane. */
   readonly messages: readonly BaseMessage[];
   readonly catalog: CapabilityCatalog;
@@ -21,6 +22,7 @@ export type RunSupervisorInput = {
 
 export type RunSupervisorResult = {
   readonly runSupervisorState: RunSupervisorState;
+  readonly reviewFeedback?: string | null;
   /** New work records and, when executing, the Supervisor's request handed to Root. */
   readonly messages: readonly BaseMessage[];
   readonly reply?: string;

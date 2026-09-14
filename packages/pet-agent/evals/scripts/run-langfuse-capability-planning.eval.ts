@@ -1,7 +1,7 @@
 import { DelegationAnnounceMessage } from '../../src/agent/orchestrator/delegation';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { createRunSupervisorAgent } from '../../src/agent/orchestrator/runSupervisor/agent.ts';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../../src/agent/orchestrator/runSupervisor/testing.ts';
 import { createCapabilityDisclosureState } from '../../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import {
   type RunSupervisorInput,

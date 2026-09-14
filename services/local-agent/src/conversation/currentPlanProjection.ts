@@ -1,12 +1,19 @@
 import type { AgentPlan } from '@pinpawo/agent-session';
-import { readCapabilityExecutions } from '@pinpawo/pet-agent';
+import { AIMessage } from '@langchain/core/messages';
+import { readCapabilityExecutionCall, readCapabilityExecutions } from '@pinpawo/pet-agent';
 
 /** Project business progress directly; execution messages are not another plan. */
 export function projectCurrentPlan(state: unknown): AgentPlan | null {
   const root = asRecord(state);
   const supervisor = asRecord(root?.runSupervisorState);
   if (!Array.isArray(supervisor?.plan)) return null;
-  const executions = readCapabilityExecutions(Array.isArray(root?.messages) ? root.messages : []);
+  const messages = Array.isArray(root?.messages) ? root.messages : [];
+  const executions = readCapabilityExecutions(messages);
+  const current = supervisor.plan.find(value => asRecord(value)?.status === 'pending');
+  const last = messages.at(-1);
+  const pending = last && AIMessage.isInstance(last) ? readCapabilityExecutionCall(last) : null;
+  const hasPendingCall = pending?.metadata.runId === root?.runId && !!pending;
+
   const items = supervisor.plan.flatMap((value) => {
     const item = asRecord(value);
     const id = readIdentifier(item?.id);
@@ -16,7 +23,7 @@ export function projectCurrentPlan(state: unknown): AgentPlan | null {
     if (!id || !capability || !task || !['pending', 'completed'].includes(String(status))) return [];
     return [{ id, capability, task,
       status: status === 'completed' ? 'completed' as const
-        : executions.some(({ execution }) => execution.taskId === id && execution.capability === capability)
+        : (hasPendingCall && value === current) || executions.some(({ execution }) => execution.taskId === id && execution.capability === capability)
           ? 'active' as const : 'pending' as const }];
   });
   return items.length ? { items } : null;

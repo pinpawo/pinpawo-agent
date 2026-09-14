@@ -15,9 +15,9 @@ import { queryAgentMessages } from '../../messages';
 import { toolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
-import { createSupervisorCapabilityDetailsTool, createSupervisorDisclosureStateMiddleware } from './detailsTool';
+import { createSupervisorCapabilityDetailsTool } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-import { createSupervisorMessageHandoff } from './messageHandoff';
+import { supervisorWorkMessages } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 import { projectDelegationAnnouncesForModel } from '../delegation';
 
@@ -25,6 +25,7 @@ export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
   defaultCapabilityName?: string;
   maxDocumentReadBytes?: number;
+  delegateCapabilityTool?: StructuredTool;
 }): RunSupervisorRunner {
   return {
     async invoke(input: RunSupervisorInput, runnableConfig?: RunnableConfig): Promise<RunSupervisorResult> {
@@ -53,7 +54,7 @@ export function createRunSupervisorAgent(params: {
         createSubmitPlanTool(context),
         createReviewCurrentTool(context),
         createAdjustPlanTool(context),
-        createDelegateCapabilityTool(context),
+        params.delegateCapabilityTool ?? createDelegateCapabilityTool({ models: { act: params.model, subagent: params.model } }),
       ];
       const agent = createAgent({
         name: 'runSupervisor',
@@ -61,8 +62,7 @@ export function createRunSupervisorAgent(params: {
         tools,
         systemPrompt: buildRunSupervisorAgentSystemPrompt(input.mode),
         middleware: [
-          createSupervisorControlValidationMiddleware(),
-          createSupervisorDisclosureStateMiddleware(),
+          createSupervisorControlValidationMiddleware(input, agentMessages.length),
           systemPromptMiddleware,
           toolProtocolMiddleware,
         ],
@@ -70,7 +70,7 @@ export function createRunSupervisorAgent(params: {
       const result = await agent.invoke({
         messages: agentMessages,
         runSupervisorState: input.state,
-        reviewFeedback: null,
+        reviewFeedback: input.reviewFeedback ?? null,
         disclosedCapabilityNames: [...input.capabilityDisclosure.disclosedCapabilityNames],
       }, {
         ...runnableConfig,
@@ -96,15 +96,12 @@ export function createRunSupervisorAgent(params: {
       // never retag canonical main messages or the temporary catalog frame.
       const work = result.messages.slice(agentMessages.length);
       const capabilityDisclosure = mergeCapabilityDisclosure(input.capabilityDisclosure, result.disclosedCapabilityNames ?? []);
-      const handoff = createSupervisorMessageHandoff(context, work);
+      const handoff = supervisorWorkMessages(context, work);
       const last = handoff.at(-1);
       if (AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim()) {
-        return { runSupervisorState: result.runSupervisorState, reply: last.text, capabilityDisclosure, messages: handoff };
+        return { runSupervisorState: result.runSupervisorState, reply: last.text, reviewFeedback: result.reviewFeedback, capabilityDisclosure, messages: handoff };
       }
-      if (!AIMessage.isInstance(last) || last.tool_calls?.[0]?.name !== 'delegate_capability') {
-        throw new Error('Supervisor must reply or explicitly request execution.');
-      }
-      return { runSupervisorState: result.runSupervisorState, capabilityDisclosure, messages: handoff };
+      throw new Error('Supervisor must reply or explicitly request execution.');
     },
   };
 }

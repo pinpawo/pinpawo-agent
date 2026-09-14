@@ -3,7 +3,7 @@ import { buildRunSupervisorAgentSystemPrompt } from '../src/agent/orchestrator/p
 import { readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing';
 import { createDecisionEvalModel } from './scripts/decision-eval-model';
 import { supervisorDeliveryClosureDataset } from './datasets/supervisor-delivery-closure';
 import { closureInput, scoreClosure } from './supervisor-delivery-closure';

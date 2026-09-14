@@ -12,7 +12,7 @@ import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
 import { getDelegationAnnounce } from '../delegation';
 import { getAgentMessageMetadata, queryAgentMessages } from '../../messages';
-import { readCapabilityCall } from '../runtime/delegationToolResult';
+import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
   readonly inputs: BaseMessage[][] = [];

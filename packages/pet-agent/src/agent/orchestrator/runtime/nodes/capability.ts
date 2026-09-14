@@ -1,53 +1,28 @@
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { ToolInputParsingException, type StructuredTool } from '@langchain/core/tools';
+import { ToolNode } from '@langchain/langgraph/prebuilt';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { capabilityResultMessage, readCapabilityCall } from '../delegationToolResult';
 import type { OrchestratorStateType } from '../../state';
-import type { OrchestratorConfig } from '../../types';
-import { createCapabilityExecutor } from '../../capabilityExecution';
-import { getInvokeRegistry, getInvokeOptions } from '../config';
+import { SupervisorDecisionError } from '../../runSupervisor/controlContext';
+import { currentSupervisorTask } from '../../runSupervisor/state';
+import { setAgentMessageMetadata } from '../../../messages';
 
-export function createCapabilityNode(params: {
-  config: OrchestratorConfig;
-  subagentContextWindowTokens: number | undefined;
-  subagentGenerationReserveTokens: number | undefined;
-}) {
-  const { config } = params;
-  const executeCapability = createCapabilityExecutor({
-    models: config.models, modelInputModalities: config.modelInputModalities,
-    capabilityArtifactStore: config.capabilityArtifactStore,
-    toolkitRuntimeManager: config.toolkitRuntimeManager,
-    subagentContextWindowTokens: params.subagentContextWindowTokens,
-    subagentGenerationReserveTokens: params.subagentGenerationReserveTokens,
-  });
-  return async (state: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
-    const options = getInvokeOptions(runnableConfig);
-    const registry = getInvokeRegistry(runnableConfig);
-    const call = readCapabilityCall(state);
-    const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === call.capability);
-    if (!compiledCapability || (options.allowedCapabilityNames && !options.allowedCapabilityNames.includes(call.capability))) {
-      throw new Error('Capability call selects an unavailable capability.');
+export function createCapabilityNode(delegateCapability: StructuredTool) {
+  const tools = new ToolNode([delegateCapability], { handleToolErrors: false });
+  return async (state: OrchestratorStateType, config?: RunnableConfig) => {
+    try {
+      const last = state.messages.at(-1);
+      if (!AIMessage.isInstance(last) || last.tool_calls?.length !== 1) throw new Error('Capability requires one pending tool call.');
+      // ToolNode inherits callbacks from the current graph task; passing them again duplicates handlers.
+      return await tools.invoke({ ...state, lg_tool_call: last.tool_calls[0] }, { ...config, callbacks: undefined });
+    } catch (error) {
+      if (!(error instanceof ToolInputParsingException) && !(error instanceof SupervisorDecisionError)) throw error;
+      const last = state.messages.at(-1);
+      if (!AIMessage.isInstance(last) || last.tool_calls?.length !== 1) throw error;
+      return { messages: [setAgentMessageMetadata(new ToolMessage({
+        name: delegateCapability.name, tool_call_id: last.tool_calls[0].id!, status: 'error',
+        content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(state.runSupervisorState), plan: state.runSupervisorState }),
+      }), { runId: state.runId, traceId: state.traceId })], runIterationCount: state.runIterationCount + 1 };
     }
-    const userRequest = state.runSupervisorState.goal ?? state.runUserRequest;
-    if (!userRequest) throw new Error('Capability execution requires a goal.');
-    const delegation = { id: call.delegationId, runId: state.runId, traceId: state.traceId, userRequest, task: call.task };
-    const execution = await executeCapability({
-      capability: compiledCapability,
-      delegation: { ...delegation, mode: call.mode, briefing: call.briefing },
-      history: state.messages,
-    }, {
-      review: {
-        authorizations: state.sessionToolAuthorizations.generation === registry.authorizationGeneration
-          ? state.sessionToolAuthorizations.records : [],
-        hostCapabilities: options.reviewCapabilities, policy: options.globalReviewPolicy,
-      },
-      runnableConfig,
-    });
-    return {
-      messages: [...execution.privateMessages, capabilityResultMessage(state, call, {
-        status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts,
-      })],
-      sessionCapabilityArtifacts: execution.artifacts,
-      runIterationCount: state.runIterationCount + 1,
-      sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
-    };
   };
 }

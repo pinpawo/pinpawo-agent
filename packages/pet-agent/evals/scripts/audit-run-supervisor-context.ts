@@ -1,3 +1,4 @@
+import { FakeListChatModel } from '@langchain/core/utils/testing';
 import { createSupervisorCapabilityDetailsTool } from '../../src/agent/orchestrator/runSupervisor/detailsTool.ts';
 import {
   AIMessage,
@@ -131,6 +132,8 @@ async function captureProviderHistory(messages: readonly BaseMessage[]) {
   return invocation.slice(1);
 }
 
+const auditModel = new FakeListChatModel({ responses: ['audit'] });
+
 async function renderMode(mode: RunSupervisorMode) {
   const input = buildInput(mode);
   const mainSelection = queryAgentMessages(input.messages).main().select();
@@ -144,7 +147,7 @@ async function renderMode(mode: RunSupervisorMode) {
     createSubmitPlanTool(context),
     createReviewCurrentTool(context),
     createAdjustPlanTool(context),
-    createDelegateCapabilityTool(context),
+    createDelegateCapabilityTool({ models: { act: auditModel, subagent: auditModel } }),
   ];
   console.log(`\n## ${mode.toUpperCase()} MODE`);
   console.log(`\nProjection: ${String(input.messages.length)} canonical messages -> ${String(projectedMessages.length)} provider history messages.`);

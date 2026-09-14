@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { ReducedValue, StateSchema } from '@langchain/langgraph';
 
 /** Business facts only. Calls, private transcripts and run metadata live in Root. */
 export const supervisorPlanTaskSchema = z.object({
@@ -31,9 +32,20 @@ export function updateSupervisorTask(
   return { ...state, plan: state.plan.map((task) => task.id === taskId ? { ...task, status } : task) };
 }
 
-/** Mutable facts for one Supervisor invocation; Root commits only its final result. */
-export const supervisorAgentStateSchema = z.object({
-  runSupervisorState: runSupervisorStateSchema,
-  reviewFeedback: z.string().nullable().default(null),
+/** Native agent state; parallel detail reads merge while decisions replace plan facts. */
+export const supervisorAgentStateSchema = new StateSchema({
+  runSupervisorState: new ReducedValue<RunSupervisorState, RunSupervisorState>(runSupervisorStateSchema as never, {
+    inputSchema: runSupervisorStateSchema as never, reducer: (_, next) => next,
+  }),
+  reviewFeedback: new ReducedValue<string | null, string | null>(z.string().nullable().default(null) as never, {
+    inputSchema: z.string().nullable() as never, reducer: (_, next) => next,
+  }),
+  disclosedCapabilityNames: new ReducedValue<string[], string[]>(z.array(z.string()).default([]) as never, {
+    inputSchema: z.array(z.string()) as never, reducer: (current, next) => [...new Set([...current, ...next])],
+  }),
 });
-export type SupervisorAgentState = z.infer<typeof supervisorAgentStateSchema>;
+export type SupervisorAgentState = {
+  runSupervisorState: RunSupervisorState;
+  reviewFeedback: string | null;
+  disclosedCapabilityNames: string[];
+};

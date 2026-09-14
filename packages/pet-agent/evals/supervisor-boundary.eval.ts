@@ -11,9 +11,8 @@ import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from './supervisor-fixtures';
-import { acceptSupervisorMessageHandoff } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
 import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input';
-import { createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/agent.ts';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing.ts';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 
@@ -145,7 +144,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     const actual = await supervisor.invoke(input);
     result = readSupervisorDecision(actual);
     scenario.check(result);
-    const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual);
+    const accepted = actual;
     const dispatched = accepted.messages.some((message) => AIMessage.isInstance(message)
       && message.tool_calls?.some((call) => call.name === 'delegate_capability'));
     assert.equal(dispatched, !decisionReply(result), 'Only the explicit execution branch dispatches a Capability.');
@@ -154,14 +153,14 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     }
     if (['boundary-without-evidence-asks-user', 'unfinished-task-asks-then-continues'].includes(scenario.name)
       && actual.reply !== undefined) {
-      const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual);
+      const accepted = actual;
       assert.deepEqual(accepted.runSupervisorState, input.state);
       assert.ok(!accepted.messages.some((message) => AIMessage.isInstance(message)
         && message.tool_calls?.some((call) => call.name === 'delegate_capability')), 'A question must not dispatch execution.');
     }
     if (scenario.supplement) {
       assert.ok(decisionReply(result)?.trim(), 'A question must precede the user supplement.');
-      const saved = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), actual).runSupervisorState;
+      const saved = actual.runSupervisorState;
       const resumed: RunSupervisorInput = {
         ...input, state: saved, mode: 'boundary',
         runId: `${scenario.name}:resume`, traceId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,

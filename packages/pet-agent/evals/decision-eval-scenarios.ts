@@ -1,9 +1,7 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { tool } from '@langchain/core/tools';
-import { z } from 'zod';
 import { buildEntryAnswerSystemPrompt } from '../src/agent/orchestrator/prompts/answer.ts';
-import { PLAN_REQUEST_TOOL_NAME } from '../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
+import { PLAN_REQUEST_TOOL_NAME, createPlanRequestTool, createContinueTool } from '../src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
 import { readMessageText } from '../src/agent/orchestrator/utils.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
@@ -113,17 +111,8 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
 ];
 
 
-// Mirrors createPlanRequestTool()'s contract in
-// runtime/nodes/entryAnswer.ts. The eval scores args.goal, so a stub without
-// that parameter makes every correct route look like a shape failure.
-const planRequest = tool(async () => '', {
-  name: PLAN_REQUEST_TOOL_NAME,
-  description: 'Hand the current user request to the Run Supervisor when satisfying it requires any tool, external capability, or task execution.',
-  schema: z.object({
-    goal: z.string().trim().min(1).max(2_000)
-      .describe('用户当前要达成的目标，用用户自己的话陈述。默认直接用用户当前这句话；只在其中含有指代（“这个 PR”“继续”“开始吧”）时，把指代替换成它在对话中指向的具体对象。除替换指代外不要新增用户没说过的内容——不写执行步骤、检查项、关注维度、输出格式或技术方案。保留用户给出的编号、URL、路径和显式约束。'),
-  }).strict(),
-});
+// Bind production definitions so prompt/schema edits are evaluated immediately.
+const entryTools = [createPlanRequestTool(), createContinueTool()];
 
 function renderMessages(prompt: RenderedDecisionPrompt) {
   return [
@@ -155,7 +144,7 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
         if (!model.bindTools) {
           throw new Error('Entry Answer eval model must support tool binding.');
         }
-        const response = await model.bindTools([planRequest]).invoke(
+        const response = await model.bindTools(entryTools).invoke(
           renderMessages(render()),
           config,
         );

@@ -22,6 +22,8 @@ const examples: Array<[string, ClosureExample, ClosureExpected]> = [
   ['e2e-review-delivery', { goal, capability: 'studio_review', task: '独立读取三个配置文件并复核已有结论，给出通过或需修正判定，最后将审阅结论写入看板任务结果。', evidence: evidence.replace('当前任务 T-NEW 为 doing，以上是审阅交付文本。', '复核完成，判定通过，可交由 Wiki 根据本审阅结论更新知识。'), staleCompletion: true, disclosure: 'manifest' }, { action: 'report', maxAdjustments: 1 }],
   ['already-submitted', { goal, capability: 'studio_reporting', task: '提交 T-NEW 的完整审阅结论。', evidence: evidence + '\n前序独立复核已验收通过。task_complete 成功回执：taskId=T-NEW, status=done, result=通过，附三份配置脚本证据、四条覆盖结论以及未运行构建测试的边界。随后 task_list 确认同一任务已保存相同结果。' }, { action: 'reply', maxAdjustments: 0 }],
   ['review-only', { goal: '只独立复核三个配置文件并在聊天中给出结论，不提交看板。', capability: 'studio_review', task: '独立复核三个配置文件并返回结论。', evidence }, { action: 'reply', maxAdjustments: 0 }],
+  ['minor-formatting-accept', { goal: '独立复核三个配置文件，给出结论和简短说明。', capability: 'studio_review', task: '独立复核三个配置文件，返回结论和简短说明。', evidence: '已读取并复核三个配置文件，结论通过。根 build 覆盖 web，根 test 覆盖 app，与各子项目提供的脚本一致。结果以段落给出，未整理成表格；未附逐次工具回执。' }, { action: 'reply', maxAdjustments: 0 }],
+  ['major-missing-work-retry', { goal: '独立复核三个配置文件，给出结论和简短说明。', capability: 'studio_review', task: '独立复核三个配置文件，返回结论和简短说明。', evidence: '本次只读取了根配置，尚未读取 app 和 web 的两个配置文件，无法判断脚本覆盖关系。需要继续读取后再给出结论。' }, { action: 'review', maxAdjustments: 0 }],
 ];
 export const supervisorDeliveryClosureDataset: AgentEvalDataset<ClosureExample, ClosureExpected> = {
   name: 'supervisor-delivery-closure',

@@ -23,13 +23,23 @@ export type SupervisorHandoffContext = {
 
 const controlNames = ['submit_plan', 'review_current', 'adjust_plan', 'delegate_capability'] as const;
 
+/** A valid tool call whose requested transition is not available in the current plan. */
+class SupervisorDecisionError extends Error {}
+
 /** Plan/review tools return facts to the model. Only explicit execution yields to Root. */
 export function createMessageSupervisorControlTools(context: SupervisorHandoffContext, messageOffset = 0): StructuredTool[] {
   return controlNames.map((name) => tool(async (args, runtime: ToolRuntime) => {
     const messages = (((runtime.state ?? {}) as { messages?: BaseMessage[] }).messages ?? []).slice(messageOffset);
     const current = resolveTranscript(context, messages, 'pending');
     const control = controlSchema.parse({ name, args });
-    const resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!);
+    let resolved;
+    try {
+      resolved = resolveControl({ ...context, state: current.state }, control, runtime.toolCallId!);
+    } catch (error) {
+      if (!(error instanceof SupervisorDecisionError)) throw error;
+      return new ToolMessage({ name, tool_call_id: runtime.toolCallId, status: 'error',
+        content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(current.state), plan: current.state }) });
+    }
     return new ToolMessage({ name, tool_call_id: runtime.toolCallId,
       content: JSON.stringify({ plan: resolved.state, ...(resolved.execution ? { handoff: true } : {}) }) });
   }, {
@@ -39,7 +49,7 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
     description: name === 'submit_plan' ? '建立计划并返回计划事实，由你继续决定下一步。'
       : name === 'adjust_plan' ? '调整计划并返回更新后的事实，由你继续决定下一步。'
       : name === 'review_current' ? '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。'
-      : '执行当前计划项，将控制权交给 Capability；返回交付后由你继续判断。',
+      : '执行当前计划项，将控制权交给 Capability。无需参数；运行时注入已确认的当前任务、按顺序排列的计划与本次补做意见。返回交付后由你继续判断。',
   }));
 }
 
@@ -97,21 +107,21 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
   if (!context.runId || !context.traceId || !controlCallId) throw new Error('Handoff requires run and call identities.');
   if (control.name === 'adjust_plan' && !context.hasNewUserInput
     && control.args.goal !== (context.state.goal ?? context.userRequest)) {
-    throw new Error('Changing the goal requires fresh user input.');
+    throw new SupervisorDecisionError('Changing the goal requires fresh user input.');
   }
   let state: RunSupervisorState = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
   if (control.name === 'submit_plan' || control.name === 'adjust_plan') {
     const tasks = control.args.tasks;
     if (tasks.some((task) => !context.allowedCapabilityNames.includes(task.capability))) {
-      throw new Error('Plan selects a capability outside the current catalog.');
+      throw new SupervisorDecisionError('Plan selects a capability outside the current catalog.');
     }
     if (control.name === 'submit_plan' && current && !context.hasNewUserInput) {
-      throw new Error('Replacing unfinished work requires fresh user input.');
+      throw new SupervisorDecisionError('Replacing unfinished work requires fresh user input.');
     }
     const reuse = control.name === 'adjust_plan' && control.args.currentDelegation === 'continue';
     if (reuse && current && current.capability !== tasks[0].capability) {
-      throw new Error('Continuing a task must keep its capability.');
+      throw new SupervisorDecisionError('Continuing a task must keep its capability.');
     }
     const retained = (control.name === 'submit_plan' ? [] : state.plan).filter((task) => task.status === 'completed' || task.status === 'superseded'
       || (executionsForTask(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
@@ -126,18 +136,18 @@ function resolveControl(context: SupervisorHandoffContext, control: SupervisorCo
     };
   } else if (control.name === 'review_current') {
     const latestResult = current ? executionsForTask(context, current.id).at(-1)?.result : null;
-    if (!current) throw new Error('There is no task to review.');
+    if (!current) throw new SupervisorDecisionError('There is no task to review.');
     if (control.args.completed) {
       if (!latestResult || latestResult.status !== 'returned' || !latestResult.delivery) {
-        throw new Error('Accepting a task requires its returned delivery.');
+        throw new SupervisorDecisionError('Accepting a task requires its returned delivery. The current task has no returned delivery to accept; execute it or adjust the remaining plan.');
       }
       state = updateSupervisorTask(state, current.id, 'completed');
     }
   }
   if (control.name !== 'delegate_capability') return { state, execution: null };
   const next = currentSupervisorTask(state);
-  if (!next) throw new Error('There is no planned task to execute.');
-  if (!context.allowedCapabilityNames.includes(next.capability)) throw new Error('Capability is no longer available.');
+  if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
+  if (!context.allowedCapabilityNames.includes(next.capability)) throw new SupervisorDecisionError('Capability is no longer available.');
   const previous = executionsForTask(context, next.id).filter(({ metadata }) => metadata.runId === context.runId).at(-1);
   if (previous && !context.messages.some((message) => ToolMessage.isInstance(message)
     && message.tool_call_id === previous.call.id && !getAgentMessageMetadata(message).lane)) {
@@ -161,6 +171,7 @@ function resolveTranscript(context: SupervisorHandoffContext, messages: readonly
   let state = context.state;
   let execution: ReturnType<typeof resolveControl>['execution'] = null;
   let executionCall: { id: string; index: number } | null = null;
+  let feedback: string | undefined;
   const seen = new Set<string>();
   for (let index = 0; index < messages.length; index++) {
     const request = messages[index];
@@ -197,8 +208,11 @@ function resolveTranscript(context: SupervisorHandoffContext, messages: readonly
     if (!canonical) index++;
     if (!canonical && ToolMessage.isInstance(confirmation) && confirmation.status === 'error') continue;
     if (executionCall) throw new Error('Supervisor must yield after requesting execution.');
-    const control = controlSchema.parse({ name: call.name, args: call.args });
+    // Root reconstructs injected arguments and checks equality before accepting the handoff.
+    const control = controlSchema.parse({ name: call.name, args: canonical ? {} : call.args });
     const resolved = resolveControl({ ...context, state }, control, callId);
+    if (control.name === 'review_current') feedback = control.args.completed ? undefined : control.args.reason;
+    if (control.name === 'submit_plan' || control.name === 'adjust_plan') feedback = undefined;
     state = resolved.state;
     execution = resolved.execution;
     if (execution) {
@@ -206,7 +220,12 @@ function resolveTranscript(context: SupervisorHandoffContext, messages: readonly
       executionCall = { id: callId, index: canonical ? index : index - 1 };
     }
   }
-  return { state, execution, executionCall };
+  const briefing = execution ? JSON.stringify({
+    task: execution.task,
+    plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
+    ...(feedback ? { feedback } : {}),
+  }, null, 2) : null;
+  return { state, execution, executionCall, briefing };
 }
 
 /** Promote the Supervisor's request; never fabricate a second execution call. */
@@ -225,7 +244,7 @@ function assembleHandoff(context: SupervisorHandoffContext, messages: readonly B
       const id = identity('delegate', context.runId, resolved.executionCall.id);
       copy.id = id;
       copy.content = '';
-      copy.tool_calls = [{ ...copy.tool_calls![0], id }];
+      copy.tool_calls = [{ ...copy.tool_calls![0], id, args: { briefing: resolved.briefing! } }];
       // The execution snapshot is internal data, not model-supplied tool arguments.
       copy.additional_kwargs = { ...copy.additional_kwargs, pinpawo: {
         runId: context.runId, traceId: context.traceId, source: 'supervisor',

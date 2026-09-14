@@ -75,7 +75,7 @@ await Promise.all(Array.from({ length: 2 }, async () => {
     const calls = turns.flatMap(t => (t.calls ?? []) as Array<{ name: string }>);
     const allowed = new Set(['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability', ...(input.mode === 'entry' ? ['capability_details'] : [])]);
     const passed = !error && score?.passed === true && calls.every(c => allowed.has(c.name));
-    const row = { id, passed, protocol: 'supervisor-briefing-v1', ...spec, model: subject.metadata.model, profileFingerprint: subject.metadata.fingerprint, elapsedMs: Date.now() - started,
+    const row = { id, passed, protocol: 'supervisor-plan-briefing-v2', ...spec, model: subject.metadata.model, profileFingerprint: subject.metadata.fingerprint, elapsedMs: Date.now() - started,
       firstCalls: turns[0]?.calls, illegalCalls: calls.filter(c => !allowed.has(c.name)),
       delegateCalls: calls.filter(c => c.name === 'delegate_capability').length, score, error, turns };
     rows.push(row);

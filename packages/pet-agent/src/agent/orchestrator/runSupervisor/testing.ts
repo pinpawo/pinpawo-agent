@@ -32,17 +32,11 @@ export function scriptedSupervisorResult(input: RunSupervisorInput,
     } });
     reply = 'reply' in decision.args ? decision.args.reply : undefined;
     if (!reply) {
-      const pending = input.state.plan.filter(task => task.status === 'pending');
-      const task = pending[decision.args.completed ? 1 : 0];
-      call({ name: 'delegate_capability', args: {
-        briefing: decision.args.completed === false ? decision.args.reason : task?.task ?? decision.args.reason,
-      } });
+      call({ name: 'delegate_capability', args: {} });
     }
   } else {
     call(decision);
-    if (decision.name !== 'delegate_capability') call({ name: 'delegate_capability', args: {
-      briefing: decision.name === 'adjust_plan' ? decision.args.reason : decision.args.tasks[0].task,
-    } });
+    if (decision.name !== 'delegate_capability') call({ name: 'delegate_capability', args: {} });
   }
   if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));
   return { capabilityDisclosure: input.capabilityDisclosure, ...(reply !== undefined ? { reply } : {}),

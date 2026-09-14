@@ -41,7 +41,7 @@ function resultFor(dispatch: AIMessage) {
   }), metadata);
 }
 function returned(firstContext = context(), tasks = [taskA, taskB]) {
-  const handoff = createSupervisorMessageHandoff(firstContext, [...control('submit_plan', { tasks }), ...control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute-first')] );
+  const handoff = createSupervisorMessageHandoff(firstContext, [...control('submit_plan', { tasks }), ...control('delegate_capability', {}, 'execute-first')] );
   const accepted = acceptSupervisorMessageHandoff(firstContext, handoff);
   const dispatch = handoff.at(-1) as AIMessage;
   return {
@@ -52,7 +52,7 @@ function returned(firstContext = context(), tasks = [taskA, taskB]) {
 
 test('Supervisor delegates once; Root supplies the actual result without a second call', () => {
   const input = context();
-  const internal = [...control('submit_plan', { tasks: [taskA, taskB] }), ...control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute-first')];
+  const internal = [...control('submit_plan', { tasks: [taskA, taskB] }), ...control('delegate_capability', {}, 'execute-first')];
   const original = JSON.stringify(internal);
   const handoff = createSupervisorMessageHandoff(input, internal);
   const accepted = acceptSupervisorMessageHandoff(input, handoff);
@@ -64,7 +64,9 @@ test('Supervisor delegates once; Root supplies the actual result without a secon
   const dispatch = handoff.at(-1) as AIMessage;
   assert.notEqual(dispatch.tool_calls![0].id, 'control-1');
   assert.equal(getAgentMessageMetadata(dispatch).sourceToolCallId, 'execute-first');
-  assert.deepEqual(dispatch.tool_calls![0].args, { briefing: 'Execute the current planned task and return evidence.' });
+  assert.deepEqual(JSON.parse(dispatch.tool_calls![0].args.briefing), {
+    task: taskA.task, plan: [taskA, taskB].map(task => ({ ...task, status: 'pending' })),
+  });
   assert.equal(getAgentMessageMetadata(dispatch).source, 'supervisor');
   assert.equal(handoff.length, 3);
   const main = queryAgentMessages([...handoff, resultFor(dispatch)]).main().select().messages;
@@ -83,7 +85,7 @@ test('accepted A may end the run with a question, then Boundary starts B without
     messages: [...first.messages, ...accepted.messages, new HumanMessage('Yes, proceed.')],
   });
   const handoff = createSupervisorMessageHandoff(next,
-    control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'start-B'));
+    control('delegate_capability', {}, 'start-B'));
   const execution = readCapabilityExecutionCall(handoff.at(-1) as AIMessage)!.execution;
   assert.equal(execution.task, taskB.task);
   assert.equal(execution.mode, 'initial');
@@ -103,7 +105,7 @@ test('a review question can defer acceptance without dispatching or changing ret
 test('a failed retry cannot be accepted using an older successful delivery', () => {
   const first = returned();
   const retry = createSupervisorMessageHandoff(first,
-    [...control('review_current', { completed: false, reason: 'Verify missing evidence.' }, 'retry-failed'), ...control('delegate_capability', { briefing: 'Verify missing evidence.' }, 'execute-retry')]);
+    [...control('review_current', { completed: false, reason: 'Verify missing evidence.' }, 'retry-failed'), ...control('delegate_capability', {}, 'execute-retry')]);
   const dispatch = retry.at(-1) as AIMessage;
   for (const status of ['missing_deliverable', 'paused']) {
     const result = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability',
@@ -115,7 +117,7 @@ test('a failed retry cannot be accepted using an older successful delivery', () 
     assert.throws(() => createSupervisorMessageHandoff(input,
       control('review_current', { completed: true, reason: 'Old evidence is enough.' }, 'accept-failed')), /returned delivery/);
     assert.equal(createSupervisorMessageHandoff(input,
-      control('delegate_capability', { briefing: 'Try producing a new deliverable.' }, 'retry-again')).length, 1);
+      control('delegate_capability', {}, 'retry-again')).length, 1);
   }
 });
 
@@ -144,7 +146,7 @@ test('acceptance ignores private, mismatched, malformed and error results', () =
 
 test('same-run retries keep execution scope; new runs never inherit the old delegation instance', () => {
   const first = returned();
-  const retry = [...control('review_current', { completed: false, reason: 'Check the missing detail.' }, 'retry'), ...control('delegate_capability', { briefing: 'Check the missing detail.' }, 'execute-retry')];
+  const retry = [...control('review_current', { completed: false, reason: 'Check the missing detail.' }, 'retry'), ...control('delegate_capability', {}, 'execute-retry')];
   const oldDispatch = first.messages.find((message) => AIMessage.isInstance(message)
     && message.tool_calls?.[0]?.name === 'delegate_capability') as AIMessage;
   const oldExecution = readCapabilityExecutionCall(oldDispatch)!.execution;
@@ -152,7 +154,7 @@ test('same-run retries keep execution scope; new runs never inherit the old dele
   const sameExecution = readCapabilityExecutionCall(same)!.execution;
   assert.equal(sameExecution.delegationId, oldExecution.delegationId);
   assert.equal(sameExecution.mode, 'continue');
-  assert.equal(sameExecution.briefing, 'Check the missing detail.');
+  assert.equal(JSON.parse(sameExecution.briefing).feedback, 'Check the missing detail.');
   const fresh = createSupervisorMessageHandoff({ ...first, runId: 'r2' }, retry).at(-1) as AIMessage;
   const freshExecution = readCapabilityExecutionCall(fresh)!.execution;
   assert.notEqual(freshExecution.delegationId, oldExecution.delegationId);
@@ -181,7 +183,7 @@ test('handoff rejects unexecuted, mixed, mismatched, unavailable and replayed ca
   ] });
   assert.throws(() => createSupervisorMessageHandoff(input, [mixed, pair[1]]), /exclusive/);
   assert.throws(() => createSupervisorMessageHandoff({ ...input, allowedCapabilityNames: [] }, pair), /catalog/);
-  const handoff = createSupervisorMessageHandoff(input, [...pair, ...control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute')]);
+  const handoff = createSupervisorMessageHandoff(input, [...pair, ...control('delegate_capability', {}, 'execute')]);
   assert.equal(acceptSupervisorMessageHandoff(input, handoff.slice(0, -1)).messages.length, 2, 'plan alone never dispatches');
   const altered = new AIMessage({ ...(handoff.at(-1) as AIMessage) });
   altered.tool_calls = structuredClone(altered.tool_calls);
@@ -244,7 +246,7 @@ class OneControlModel extends BaseChatModel {
   bindTools() { return this; }
   async _generate(): Promise<ChatResult> {
     if (++this.invocations > 2) throw new Error('Unexpected extra model dispatch');
-    const message = (this.invocations === 1 ? control('submit_plan', { tasks: [taskA] }) : control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute-first'))[0] as AIMessage;
+    const message = (this.invocations === 1 ? control('submit_plan', { tasks: [taskA] }) : control('delegate_capability', {}, 'execute-first'))[0] as AIMessage;
     return { generations: [{ message, text: '' }] };
   }
 }
@@ -265,7 +267,7 @@ test('unavailable tools return framework feedback and allow correction without m
         assert.equal(JSON.stringify(input), before);
         return control('submit_plan', { tasks: [taskA] })[0] as AIMessage;
       },
-      () => control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }, 'execute-first')[0] as AIMessage,
+      () => control('delegate_capability', {}, 'execute-first')[0] as AIMessage,
     ]);
     const accepted = await decisionLoop(input, model);
     assert.equal(model.inputs.length, 3);
@@ -274,14 +276,23 @@ test('unavailable tools return framework feedback and allow correction without m
   }
 });
 
-test('invalid business decisions propagate without mutating Root or retrying the model', async () => {
+test('invalid business decisions return feedback without mutating Root', async () => {
   const input = context({ allowedCapabilityNames: [] });
   const before = JSON.stringify(input);
-  const model = new OneControlModel({});
+  const model = new DecisionLoopModel([
+    () => control('submit_plan', { tasks: [taskA] })[0] as AIMessage,
+    (messages) => {
+      const feedback = messages.at(-1) as ToolMessage;
+      assert.equal(feedback.status, 'error');
+      assert.match(feedback.text, /outside the current catalog/);
+      return new AIMessage('No capability is available.');
+    },
+  ]);
   const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
     middleware: [createSupervisorControlValidationMiddleware()] });
-  await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }), /outside the current catalog/);
-  assert.equal(model.invocations, 1);
+  const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
+  assert.equal(result.messages.at(-1)?.text, 'No capability is available.');
+  assert.equal(model.inputs.length, 2);
   assert.equal(JSON.stringify(input), before);
 });
 
@@ -411,7 +422,7 @@ test('review, autonomous adjustment and explicit execution share updated facts i
       const facts = toolPlan(messages);
       assert.equal('execution' in facts, false);
       assert.equal(currentSupervisorTask(facts.plan)?.task, 'Inspect B using A evidence.');
-      return control('delegate_capability', { briefing: 'Verify the linked evidence.' }, 'execute-B')[0] as AIMessage;
+      return control('delegate_capability', {}, 'execute-B')[0] as AIMessage;
     },
   ]);
   const accepted = await decisionLoop(input, model);
@@ -420,7 +431,7 @@ test('review, autonomous adjustment and explicit execution share updated facts i
   const dispatch = accepted.messages.at(-1) as AIMessage;
   const { execution } = readCapabilityExecutionCall(dispatch)!;
   assert.equal(execution.task, 'Inspect B using A evidence.');
-  assert.equal(execution.briefing, 'Verify the linked evidence.');
+  assert.equal(JSON.parse(execution.briefing).task, 'Inspect B using A evidence.');
   assert.deepEqual(accepted.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
   assert.equal(queryAgentMessages(accepted.messages).main().select().messages.length, 1);
 });
@@ -495,17 +506,18 @@ test('tool interrupt remains resumable rather than becoming correction feedback'
   assert.equal(model.inputs.length, 2);
 });
 
-test('delegation carries only briefing; task identity stays in the immutable execution snapshot', () => {
+test('delegation injects the confirmed task and ordered plan into an immutable briefing', () => {
   const input = context();
-  const briefing = 'Use the existing evidence and verify only the missing case.';
   const handoff = createSupervisorMessageHandoff(input, [
     ...control('submit_plan', { tasks: [taskA] }, 'plan'),
-    ...control('delegate_capability', { briefing }, 'delegate'),
+    ...control('delegate_capability', {}, 'delegate'),
   ]);
   const dispatch = handoff.at(-1) as AIMessage;
   const record = readCapabilityExecutionCall(dispatch)!;
-  assert.deepEqual(record.call.args, { briefing });
-  assert.equal(record.execution.briefing, briefing);
+  assert.deepEqual(Object.keys(record.call.args), ['briefing']);
+  assert.deepEqual(JSON.parse(record.execution.briefing), {
+    task: taskA.task, plan: [{ ...taskA, status: 'pending' }],
+  });
   assert.equal(record.execution.task, taskA.task);
   assert.equal('briefing' in (record.metadata.execution as object), false);
   assert.equal(handoff.filter(m => AIMessage.isInstance(m)
@@ -513,6 +525,8 @@ test('delegation carries only briefing; task identity stays in the immutable exe
   assert.equal(handoff.some(m => ToolMessage.isInstance(m) && m.name === 'delegate_capability'), false);
   const accepted = acceptSupervisorMessageHandoff(input, handoff);
   const result = resultFor(dispatch);
+  const tampered = new AIMessage({ ...dispatch, tool_calls: [{ ...dispatch.tool_calls![0], args: { briefing: 'Execute all future tasks.' } }] });
+  assert.throws(() => acceptSupervisorMessageHandoff(input, [...handoff.slice(0, -1), tampered]), /does not match/);
   assert.ok(ToolMessage.isInstance(result));
   assert.equal(result.tool_call_id, record.call.id);
   const next = { ...input, state: accepted.runSupervisorState, messages: [...handoff, result], hasNewUserInput: false };

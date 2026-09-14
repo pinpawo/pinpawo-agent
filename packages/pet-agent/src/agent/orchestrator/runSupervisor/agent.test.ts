@@ -1,5 +1,6 @@
 import { DelegationAnnounceMessage, getDelegationAnnounce } from '../delegation';
 import assert from 'node:assert/strict';
+import { readCapabilityExecutionCall } from '../executionMessages';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import {
@@ -215,9 +216,7 @@ class ScriptedSupervisorModel extends BaseChatModel {
       const reply = control.args.reply;
       delete control.args.reply;
       this.#followUp = reply ? new AIMessage(String(reply)) : new AIMessage({ content: '', tool_calls: [{
-        id: `${control.id}:execute`, name: 'delegate_capability', args: {
-          briefing: typeof control.args.reason === 'string' ? control.args.reason : 'Execute the planned task and return evidence.',
-        }, type: 'tool_call',
+        id: `${control.id}:execute`, name: 'delegate_capability', args: {}, type: 'tool_call',
       }] });
       if (control.name === 'review_current' && control.args.completed === undefined) {
         const message = this.#followUp; this.#followUp = undefined;
@@ -1320,7 +1319,7 @@ test('Supervisor can return bounded facts to Answer without submitting a plan', 
   assert.deepEqual(model.structuredOutputCapabilityEnums, []);
 });
 
-test('an unknown Capability fails before any control is committed', async (t) => {
+test('an unknown Capability returns feedback and a corrected plan can be committed', async (t) => {
   const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
@@ -1348,10 +1347,12 @@ test('an unknown Capability fails before any control is committed', async (t) =>
     },
   ]);
 
-  await assert.rejects(createRunSupervisorAgent({ model }).invoke(
+  const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog),
-  ));
-  assert.equal(model.invocations.length, 1);
+  );
+  assert.ok(result.messages.some(m => ToolMessage.isInstance(m) && m.status === 'error'));
+  assert.equal(readCapabilityExecutionCall(result.messages.at(-1)!)?.execution.capability, 'general');
+  assert.equal(model.invocations.length, 2);
 });
 
 test('invalid discovery arguments return a tool error for the calling model', async (t) => {
@@ -1971,12 +1972,13 @@ test('adjust_plan is available at every Boundary but changing the goal requires 
     const invocation = createRunSupervisorAgent({ model }).invoke(input);
     if (scenario === 'user' || scenario === 'autonomous') {
       assert.deepEqual(commandOnly(await invocation), { name: 'adjust_plan', args: invocationArgs });
-    } else if (scenario === 'execution') {
-      await assert.rejects(invocation, /Changing the goal requires fresh user input/);
     } else {
-      await assert.rejects(invocation, /Changing the goal requires fresh user input/);
+      const result = await invocation;
+      const feedback = result.messages.find(m => ToolMessage.isInstance(m) && m.status === 'error');
+      assert.ok(feedback);
+      assert.match(feedback.text, /Changing the goal requires fresh user input/);
     }
     assert.equal(model.boundToolNames.includes('adjust_plan'), true);
-    assert.equal(model.invocations.length, 1);
+    assert.ok(model.invocations.length >= 1);
   }
 });

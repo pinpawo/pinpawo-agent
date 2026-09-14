@@ -4,7 +4,7 @@ export type OrchestratorRuntimeFailure = 'checkpoint_incompatible';
 
 export const supervisorTaskSchema = z.object({
   capability: z.string().trim().min(1).max(200),
-  task: z.string().trim().min(1).max(2_000).describe('一个可独立验收的交付结果，明确本 task 的范围。仅因依赖前项结果或需要不同 Capability 负责才拆分。'),
+  task: z.string().refine(text => text.trim().length > 0).describe('当前任务的完整执行说明与预期交付，运行时会原样注入委派。'),
 }).strict();
 
 export const controlSchema = z.discriminatedUnion('name', [
@@ -21,10 +21,13 @@ export const controlSchema = z.discriminatedUnion('name', [
     currentDelegation: z.enum(['continue', 'replace']).describe('continue：保留当前执行上下文，可修改 task 但必须保持 Capability；replace：更换 Capability 或丢弃旧执行上下文。替换不代表旧任务完成。'),
     tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的剩余工作。已完成事项由运行时保留，不重新提交；continue 时第一项对应保留身份与交付的当前任务。'),
   }).strict() }).strict(),
-  z.object({ name: z.literal('delegate_capability'), args: z.object({
-    briefing: z.string().refine(text => text.trim().length > 0, 'briefing must contain non-whitespace text').describe('交给当前计划 Capability 的本次完整执行说明：说明执行要求、必要背景、已有成果或证据引用及预期交付。用普通文本或 Markdown 组织，无需 XML；遵循当前计划任务与用户目标，不重复填写能力或执行身份。'),
-  }).strict() }).strict(),
+  z.object({ name: z.literal('delegate_capability'), args: z.object({}).strict() }).strict(),
 ]);
+
+/** Root's canonical call carries the briefing injected from confirmed plan facts. */
+export const capabilityDelegationArgumentsSchema = z.object({
+  briefing: z.string().refine(text => text.trim().length > 0),
+}).strict();
 
 export type SupervisorControl = z.infer<typeof controlSchema>;
 export const supervisorControlSchemas = {

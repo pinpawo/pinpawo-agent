@@ -24,7 +24,7 @@ test('actual reporting handoff passes regardless of natural-language wording', (
   const messages = createSupervisorMessageHandoff(supervisorHandoffContext(input), [
     ...control('review_current', { completed: true, reason: 'Review content is complete.' }),
     ...control('adjust_plan', { goal: input.userRequest, reason: 'Submission remains.', currentDelegation: 'replace', tasks: [{ capability: 'studio_reporting', task: 'Submit the complete review.' }] }),
-    ...control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }),
+    ...control('delegate_capability', {}),
   ]);
   assert.equal(scoreClosure(input, { messages, capabilityDisclosure: input.capabilityDisclosure }, example.expected).passed, true);
 });
@@ -46,7 +46,7 @@ test('gratuitous replanning fails even when the final reporting capability is co
   const messages = createSupervisorMessageHandoff(supervisorHandoffContext(input), [
     ...control('review_current', { completed: true, reason: 'Review content is complete.' }),
     ...control('adjust_plan', { goal: input.userRequest, reason: 'Restate the existing pending task.', currentDelegation: 'replace', tasks: [{ capability: 'studio_reporting', task: 'Submit the complete review.' }] }),
-    ...control('delegate_capability', { briefing: 'Execute the current planned task and return evidence.' }),
+    ...control('delegate_capability', {}),
   ]);
   const score = scoreClosure(input, { messages, capabilityDisclosure: input.capabilityDisclosure }, example.expected);
   assert.equal(score.actual, 'report');

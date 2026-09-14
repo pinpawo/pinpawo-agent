@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { getAgentMessageMetadata } from '../messages';
-import { capabilityExecutionSnapshotSchema, supervisorControlSchemas } from './runSupervisor/protocol';
+import { capabilityExecutionSnapshotSchema, capabilityDelegationArgumentsSchema } from './runSupervisor/protocol';
 
 const resultSchema = z.object({
   status: z.enum(['returned', 'paused', 'missing_deliverable']),
@@ -21,7 +21,7 @@ export function readCapabilityExecutionCall(message: BaseMessage) {
   if (metadata.lane || !metadata.runId || !metadata.traceId || metadata.source !== 'supervisor') return null;
   const call = message.tool_calls[0];
   if (call.name !== 'delegate_capability' || !call.id) return null;
-  const args = supervisorControlSchemas.delegate_capability.safeParse(call.args);
+  const args = capabilityDelegationArgumentsSchema.safeParse(call.args);
   const snapshot = capabilityExecutionSnapshotSchema.safeParse(metadata.execution);
   if (!args.success || !snapshot.success) return null;
   return { call, metadata, execution: { ...snapshot.data, briefing: args.data.briefing } };

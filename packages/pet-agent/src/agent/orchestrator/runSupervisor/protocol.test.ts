@@ -6,7 +6,7 @@ test('control schemas describe plan, review, adjustment and explicit execution w
   const tasks = [{ capability: 'general', task: 'Verify the change' }];
   for (const control of [
     { name: 'submit_plan', args: { tasks } },
-    { name: 'delegate_capability', args: { briefing: 'Check the missing evidence.' } },
+    { name: 'delegate_capability', args: {} },
     { name: 'review_current', args: { completed: false, reason: 'Missing verification' } },
     { name: 'review_current', args: { completed: true, reason: 'Verified' } },
     { name: 'adjust_plan', args: { goal: 'Updated goal', reason: 'New request', currentDelegation: 'replace', tasks } },
@@ -21,7 +21,7 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
     { name: 'review_current', args: { reason: 'Review', reply: ' ' } },
     { name: 'review_current', args: { reason: 'Review', pendingCall: {} } },
     { name: 'review_current', args: { completed: true, reason: 'Verified', reply: 'Done' } },
-    { name: 'delegate_capability', args: {} },
+    { name: 'delegate_capability', args: { briefing: 'Do another task.' } },
     { name: 'delegate_capability', args: { briefing: null } },
     { name: 'delegate_capability', args: { briefing: 'Execute', guidance: 'Old field' } },
     { name: 'delegate_capability', args: { taskId: 'model-selected-task' } },
@@ -38,10 +38,10 @@ test('execution snapshot is internal and does not duplicate model arguments', ()
   assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, briefing: 'Duplicate' }).success, false);
 });
 
-test('briefing accepts a complete formatted handoff beyond the former guidance limit without rewriting it', () => {
+test('plan task accepts the complete formatted execution instructions without rewriting them', () => {
   const briefing = '  # Execution context\n\n' + 'Evidence and reference details.\n'.repeat(150) + '\nReturn a verified result.  ';
   assert.ok(briefing.length > 2_000);
-  const parsed = controlSchema.parse({ name: 'delegate_capability', args: { briefing } });
-  assert.equal(parsed.name, 'delegate_capability');
-  if (parsed.name === 'delegate_capability') assert.equal(parsed.args.briefing, briefing);
+  const parsed = controlSchema.parse({ name: 'submit_plan', args: { tasks: [{ capability: 'general', task: briefing }] } });
+  assert.equal(parsed.name, 'submit_plan');
+  if (parsed.name === 'submit_plan') assert.equal(parsed.args.tasks[0].task, briefing);
 });

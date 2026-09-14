@@ -81,7 +81,7 @@ test('retry derives same-run execution identity and carries feedback in the actu
   const previous = input.messages.filter((m) => AIMessage.isInstance(m) && m.tool_calls?.[0]?.name === 'delegate_capability').at(-1) as AIMessage;
   assert.equal(call.delegationId, (getAgentMessageMetadata(previous).execution as { delegationId: string }).delegationId);
   assert.equal(call.mode, 'continue');
-  assert.equal(call.briefing, 'Verify the document.');
+  assert.equal(JSON.parse(call.briefing).feedback, 'Verify the document.');
 });
 
 test('accepted A and pending B survive an answer and new run without a continuation object', async () => {

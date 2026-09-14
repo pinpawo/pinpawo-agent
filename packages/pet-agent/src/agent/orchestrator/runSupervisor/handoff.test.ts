@@ -28,9 +28,7 @@ class ScriptedModel extends BaseChatModel {
       const control = message.tool_calls?.[0];
       if (!control || !['submit_plan', 'adjust_plan', 'review_current'].includes(control.name)) return [message];
       const { reply, ...args } = control.args;
-      const followUp = reply ? new AIMessage(String(reply)) : call('delegate_capability', {
-        briefing: typeof args.reason === 'string' ? args.reason : 'Execute the planned task and return evidence.',
-      }, `${control.id}:execute`);
+      const followUp = reply ? new AIMessage(String(reply)) : call('delegate_capability', {}, `${control.id}:execute`);
       this.continuations.add(followUp);
       if (control.name === 'review_current' && args.completed === undefined) return [followUp];
       return [call(control.name, args, control.id!), followUp];

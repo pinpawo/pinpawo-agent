@@ -1421,14 +1421,14 @@ test('review rejects a plan mutation before discovery or dispatch', async (t) =>
   });
   const model = new ScriptedSupervisorModel([{
     toolCalls: [{
-      name: 'review_current', args: {
+      id: 'invalid-review', name: 'review_current', args: {
         completed: true, reason: 'Current task verified.', reply: 'Done.', remainingPlan: [],
       }
     }],
   }]);
   const fullHandoff = `Research completed. ${'Evidence detail. '.repeat(40)}Final constraint: preserve the public API.`;
 
-  await assert.rejects(createRunSupervisorAgent({ model }).invoke(
+  const result = await createRunSupervisorAgent({ model }).invoke(
     supervisorInput(catalog, {
       mode: 'boundary',
       currentTask: {
@@ -1446,8 +1446,11 @@ test('review rejects a plan mutation before discovery or dispatch', async (t) =>
         task: 'Prepare the review from the findings.',
       }],
     }),
-  ));
-  assert.equal(model.invocations.length, 1);
+  );
+  const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'invalid-review') as ToolMessage;
+  assert.equal(error.status, 'error');
+  assert.ok(result.runSupervisorState.plan.every(task => task.status === 'pending'));
+  assert.equal(result.messages.some(m => AIMessage.isInstance(m) && m.tool_calls?.some(call => call.name === 'delegate_capability')), false);
 });
 
 test('a fresh Boundary with an exhausted plan can disclose capabilities before reviewing', async (t) => {
@@ -1838,7 +1841,7 @@ test('one Supervisor runner reads each invocation context in entry and boundary 
     assert.equal(message.text.includes((index === 0 ? second : first)[0].content), false);
   }
 });
-test('multiple controls and mixed discovery/control responses run no tools or follow-up model calls', async (t) => {
+test('conflicting controls return tool errors without changing state and allow correction', async (t) => {
   const catalog = createTestCatalog({ general: capabilityDocument({
     name: 'general', description: 'Execute work.', instructions: 'Execute work.',
   }) });
@@ -1850,11 +1853,17 @@ test('multiple controls and mixed discovery/control responses run no tools or fo
   for (const toolCalls of [
     [proposal, { ...proposal, id: 'second' }],
     [{ id: 'details', name: 'capability_details', args: { names: ['general'] } }, proposal],
+    [proposal, { id: 'delegate', name: 'delegate_capability', args: {} }],
   ]) {
-    const model = new ScriptedSupervisorModel([{ toolCalls }, { content: 'must not run' }]);
-    await assert.rejects(createRunSupervisorAgent({ model })
-      .invoke(supervisorInput(catalog)), /only tool call/);
-    assert.equal(model.invocations.length, 1);
+    const model = new ScriptedSupervisorModel([{ toolCalls }, { toolCalls: [{ ...proposal, id: 'corrected', args: { ...proposal.args, reply: 'Plan ready.' } }] }]);
+    const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
+    assert.equal(model.invocations.length, 2);
+    const errors = model.invocations[1].filter(m => ToolMessage.isInstance(m) && toolCalls.some(call => call.id === m.tool_call_id));
+    assert.equal(errors.length, toolCalls.length);
+    assert.ok(errors.every(m => ToolMessage.isInstance(m) && m.status === 'error'));
+    assert.equal(result.runSupervisorState.plan.length, 1);
+    assert.equal(result.runSupervisorState.plan[0].task, 'Execute work.');
+    assert.deepEqual(result.capabilityDisclosure.disclosedCapabilityNames, []);
   }
 });
 

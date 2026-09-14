@@ -1,3 +1,4 @@
+import { supervisorReply } from '../../src/agent/orchestrator/runSupervisor/testing';
 
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -86,7 +87,7 @@ function supervisorOutput(
 }
 
 function supervisorDiagnostics(result: RunSupervisorResult, searchDiagnostics: CapabilityDetailsDiagnostics) {
-  return { ...searchDiagnostics, supervisorStatus: result.reply !== undefined ? 'reply' : 'proposed' };
+  return { ...searchDiagnostics, supervisorStatus: supervisorReply(result) !== undefined ? 'reply' : 'proposed' };
 }
 
 function splitList(value: string | undefined): string[] {

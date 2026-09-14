@@ -1,3 +1,4 @@
+import { supervisorReply } from '../src/agent/orchestrator/runSupervisor/testing';
 
 import assert from 'node:assert/strict';
 import { tool } from '@langchain/core/tools';
@@ -152,7 +153,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       assert.ok(accepted.runSupervisorState.plan.every((task) => task.status === 'completed'));
     }
     if (['boundary-without-evidence-asks-user', 'unfinished-task-asks-then-continues'].includes(scenario.name)
-      && actual.reply !== undefined) {
+      && supervisorReply(actual) !== undefined) {
       const accepted = actual;
       assert.deepEqual(accepted.runSupervisorState, input.state);
       assert.ok(!accepted.messages.some((message) => AIMessage.isInstance(message)

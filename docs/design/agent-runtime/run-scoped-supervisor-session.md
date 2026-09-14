@@ -197,7 +197,7 @@ Supervisor: review_current → ToolMessage(更新后的计划)
           → 模型继续判断
           → 自然回复，或调整计划后继续判断，或 delegate_capability
 Root:      原生 Command 提交最终计划 + 消息
-          → answer，或执行明确交接的 Capability
+          → 提交主会话回复并 END，或执行明确交接的 Capability
 ```
 
 业务更新由独立工具写入 LangGraph state；模型不能直接提供计划状态或执行快照。
@@ -324,56 +324,17 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 留存周期应单独决定，不混入 Supervisor 调度重构。
 
 
-## 后续草案：将回复发布合并到 Root 提交（未实施）
+## 回复与 Root 提交合并（2026-09-15 实施）
 
-2026-09-14，基于 PR #804 的 review 继续讨论。以下为下一次独立改动的建议，不描述当前运行行为。
+Supervisor 原生工具循环正常结束后，将最后一个无工具调用、非空的 AIMessage 作为主会话回复；保留其内容、消息身份与模型元数据，补齐时间并移除私有 lane。其余工作消息留在 Supervisor lane。Root 一次提交计划和消息后直接 END；用户提问可以保留 pending 计划。
 
-### 当前事实
+删除 answer 节点、回复扫描器和 RunSupervisorResult.reply 字段，不复制一份回复消息，也不增加 pending reply 状态。迭代预算停止由 runSupervisor 节点提交程序生成的状态消息后 END；真正异常保持 runTermination 失败通道。Entry 仍负责直答和新请求/继续计划的路由。
 
-- `answer` 不调用模型；它从已提交的 Supervisor 工作消息读取回复，生成主会话 AIMessage，补齐消息时间与 run/trace，清理终止标志。
-- `runSupervisor` 先提交计划和工作消息，再路由到 `answer` 发布；因此正常回复经过两个 Root 提交步骤。
-- 迭代预算停止也走 `answer`；普通异常仍由 `runTermination` 记录并重新抛出。
-- `entryAnswer` 已能直接写主会话回复并结束，不应与末端 `answer` 混为一谈。
-- Host 原始流适配会隐藏 `runSupervisor` 命名空间，并通过 `answer` 节点名识别主回复；root values 与最终 checkpoint 另行提供已提交的主会话消息。
+Host 继续隐藏 runSupervisor 原始模型流，从 root values 中识别当前 run 新提交的最终主会话 AIMessage，按消息 ID 去重。初始快照只建立历史基线，避免恢复时重发旧回复。message.delta 使用已提交的消息 ID，message.completed 延续同一身份；不通过回复文字判断 Supervisor 是否提交，不承诺逐 token 展示其私有模型输出。
 
-证据：[answer](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/answer.ts)、
-[Supervisor Root 节点](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts)、
-[运行终止](../../../packages/pet-agent/src/agent/orchestrator/runtime/runTermination.ts)、
-[Host 流适配](../../../services/local-agent/src/events/rootStreamEventAdapter.ts)、
-[会话发布](../../../services/local-agent/src/chatSessionAdapter.ts)。
+不保留旧 answer checkpoint 的恢复入口。当前拓扑验证自然回复、保留 pending 的提问、执行交接、原生暂停恢复、预算停止及异常；已完成的 checkpoint 再次读取不重复执行模型或 Capability。
 
-### 建议职责与提交方式
-
-提取无模型调用的回复发布函数，接收明确的回复文本和当前运行身份，返回主会话消息及必要的收尾更新。该函数不判断任务完成、不选择下一步、不重写模型文本、不引入独立 reply/pending 状态字段。
-
-Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`delegate_capability` 准备好执行请求后结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
-
-运行停止原因由程序单独格式化：迭代预算停止时，复用发布函数输出运行状态并结束；真正异常保持原来的失败通道。保留 Entry 的职责，必要时复用消息构造函数，但不在本次重构中改变 Entry 的决策或提示机制。
-
-### Host 与消息可见性
-
-不能简单地把整个 runSupervisor 节点列为用户可见，否则内部模型的中间文本会成为聊天内容。正式回复以 Root 已提交的当前 run 主会话消息为依据，按消息身份去重；Supervisor/Capability 的私有工作继续保持隔离。
-
-优先复用现有 main lane、runId、traceId 和 messageId。先用真实协议流验证节点状态写入时携带哪些消息字段；若 messages 事件不足以可靠判断归属，就从 root values/最终 checkpoint 提取已提交的主回复。不要为识别最终回复新增另一份持久业务状态，也不要通过比较文本内容代替消息身份。
-
-2026-09-14 隔离实验：同一段已提交回复，经独立 answer 节点时适配器输出一条 assistant.delta；改为由 runSupervisor 同时提交后，最终 root values 中仍有正确的主回复，但 assistant.delta 为零。两种情况下均未泄露内部模型文本。现有 Host 流适配 9 项测试通过；这说明需要补充新发布路径的事件测试，不能只依据现有测试为绿判断可直接删节点。
-
-验收时须同时检查 message.delta 与 message.completed 的 messageId 和文本一致，不能只验证最终 checkpoint 有一条 AIMessage。此重构不承诺让 Supervisor 内部文本实时对用户输出。
-
-### checkpoint 范围
-
-按用户 2026-09-14 的明确决定，后续重构直接移除 answer 节点及其路由，不保留旧 checkpoint 专用入口、旧 schema、迁移分支或支持窗口。跨协议或图拓扑的旧 checkpoint 恢复不作为设计约束。
-
-新拓扑内部仍验证原生暂停恢复、消息只发布一次和执行不重复；不能以兼容旧数据为由静默重跑可能已有副作用的工作。
-
-### 实施与验收顺序
-
-1. 提取发布/停止格式化函数，验证文本、身份和收尾状态；保持现有图行为。
-2. 在真实 Root 协议流下验证 Host 对已提交主回复的识别与去重，同时排除内部模型文本和工作消息。
-3. 将正常回复和运行停止改为提交后直接 END，删除 answer 节点及其路由。
-4. 覆盖自然回复、保留 pending 的提问、执行交接不发最终答复、当前拓扑内的 checkpoint 恢复、重复恢复不重复发布、预算停止和普通异常。
-
-收益是减少正常回复的一次图节点调度和一次状态提交，并统一回复发布责任；当前 answer 没有模型调用，因此不宣称节省一次模型调用或实现新的 token 流式能力。
+Entry 直接注册 ToolNode。路由调用 ID 按 run 与当前模型轮次命名，避免历史及错误重试中重复 provider ID 被 ToolNode 去重；工具获得完整注入状态，不再手工裁剪 ToolNode 输入。
 
 ## Supervisor 单一委派交接（2026-09-14 实施草案）
 

@@ -117,8 +117,9 @@ test('fresh run preserves Root facts without inheriting Supervisor work or dedup
   assert.equal(readDelegationDeliveries(secondOutput.messages).length, 2);
   const executions = readCapabilityExecutions(secondOutput.messages);
   assert.equal(new Set(executions.map(record => record.call.id)).size, 2, 'reused provider IDs remain distinct across runs');
-  assert.equal(secondOutput.messages.filter((message) => ToolMessage.isInstance(message)
-    && message.name === 'plan_request' && message.tool_call_id === 'entry-call').length, 2);
+  const entryResults = secondOutput.messages.filter((message): message is ToolMessage => ToolMessage.isInstance(message) && message.name === 'plan_request');
+  assert.equal(entryResults.length, 2);
+  assert.equal(new Set(entryResults.map(message => message.tool_call_id)).size, 2);
   assert.ok(second.supervisor.inputs[0].some((message) => message.text === 'Inspection complete.'));
   assert.equal(second.supervisor.inputs[0].some((message) => getAgentMessageMetadata(message).lane === 'supervisor'
     && getAgentMessageMetadata(message).runId === firstOutput.runId), false);
@@ -326,7 +327,7 @@ test('Entry handoff checkpoints one canonical state and Supervisor reads it afte
 test('checkpointed Supervisor reply publishes once after restart without a reply state slot', async () => {
   const { graph, config, supervisor, executor } = setup();
   const options = { configurable: { thread_id: 'reply-from-messages', registry } };
-  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), { ...options, interruptBefore: ['answer'] });
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), options);
   const saved = await graph.getState(options);
   assert.equal('runSupervisorReply' in saved.values, false);
   const output = await createOrchestratorGraph(config).invoke(null, options);
@@ -368,4 +369,25 @@ test('Entry announcement repair can continue the saved plan instead of replacing
   assert.equal(executor.inputs.length, 0);
   assert.equal(output.runSupervisorState.plan[0].id, saved.values.runSupervisorState.plan[0].id);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');
+});
+
+
+test('Entry retries a failed tool with the same provider call ID using full native ToolNode state', async () => {
+  const { config, supervisor, executor } = setup();
+  const entry = new ScriptedModel([
+    call('continue', {}, 'reused-call'),
+    call('plan_request', { goal: task.task }, 'reused-call'),
+  ]);
+  const output = await createOrchestratorGraph({ ...config, models: { ...config.models, answer: entry } }).invoke(
+    buildOrchestratorRunInput([new HumanMessage(task.task)]),
+    { configurable: { thread_id: 'entry-retry', registry } },
+  );
+  assert.equal(entry.inputs.length, 2);
+  assert.ok(entry.inputs[1].some(m => ToolMessage.isInstance(m) && m.name === 'continue' && m.status === 'error'));
+  const results = output.messages.filter((m): m is ToolMessage => ToolMessage.isInstance(m) && ['continue', 'plan_request'].includes(m.name!));
+  // Only the handoff pair is committed from Entry to Root; the failed call is local exploration.
+  assert.equal(results.length, 1);
+  assert.notEqual(results[0].tool_call_id, (entry.inputs[1].at(-1) as ToolMessage).tool_call_id);
+  assert.equal(executor.inputs.length, 1);
+  assert.equal(supervisor.inputs.length, 2);
 });

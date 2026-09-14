@@ -1,4 +1,6 @@
-import { Command } from '@langchain/langgraph';
+import { AIMessage } from '@langchain/core/messages';
+import { setAgentMessageMetadata, stampAgentMessageCreatedAt } from '../../../messages';
+import { Command, END } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import { createRunSupervisorAgent } from '../../runSupervisor/agent';
@@ -15,7 +17,12 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
     model: config.models.act, defaultCapabilityName: config.defaultCapabilityName, delegateCapabilityTool,
   });
   return async (root: OrchestratorStateType, runnableConfig?: RunnableConfig) => {
-    if (runIterationBudgetReached(root, runnableConfig)) return new Command({ goto: 'answer' });
+    if (runIterationBudgetReached(root, runnableConfig)) return new Command({
+      update: { messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(new AIMessage(
+        '主流程循环已达到上限，任务尚未验收完成。你可以继续当前任务。',
+      )), { runId: root.runId, traceId: root.traceId })], runTerminalError: null },
+      goto: END,
+    });
     const catalog = createCapabilityCatalog({
       registry: getInvokeRegistry(runnableConfig),
       allowedCapabilityNames: getInvokeOptions(runnableConfig).allowedCapabilityNames,
@@ -33,7 +40,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
         runSupervisorReviewFeedback: result.reviewFeedback ?? null,
         messages: result.messages,
       },
-      goto: 'answer',
+      goto: END,
     });
   };
 }

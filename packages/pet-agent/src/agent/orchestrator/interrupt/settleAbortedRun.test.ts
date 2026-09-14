@@ -45,7 +45,7 @@ test('settleAbortedRun leaves a finished run alone', async () => {
 test('settleAbortedRun does not turn cancelled execution into a synthetic interrupt', async () => {
   // Cancellation is not a native interrupt. Whatever the run was in the
   // middle of, settling only reads — it never writes a resumable pause.
-  for (const pending of ['capability', 'throwRunFailure', 'answer']) {
+  for (const pending of ['capability', 'throwRunFailure', 'runSupervisor']) {
     const { graph, reads } = graphOf({
       ...pendingDelegation,
       next: [pending],

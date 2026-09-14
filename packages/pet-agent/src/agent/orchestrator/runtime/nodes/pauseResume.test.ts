@@ -12,7 +12,6 @@ import type { RunSupervisorInput } from '../../runSupervisor/runner';
 import { withScriptedDelegation, type ScriptedSupervisorDecision } from '../../runSupervisor/testing';
 import { createRunSupervisorNode } from './runSupervisor';
 import { pauseGate } from './pauseGate';
-import { createAnswerNode } from './answer';
 import { readCapabilityCall } from '../../runSupervisor/testingExecution';
 import { capabilityResultMessage } from '../../runSupervisor/testing';
 import { ORCHESTRATOR_MAX_ITERATIONS } from '../constants';
@@ -49,16 +48,15 @@ function harness(decide: (input: RunSupervisorInput) => ScriptedSupervisorDecisi
   return new StateGraph(OrchestratorState)
     .addNode('pauseGate', pauseGate)
     .addNode('runSupervisor', createRunSupervisorNode({ models, runSupervisorRunner: withScriptedDelegation({ invoke: async (input) => decide(input) }) }),
-      { ends: ['capability', 'answer'] })
+      { ends: ['capability', END] })
     .addNode('capability', (state) => {
       execute(state);
       const call = readCapabilityCall(state);
       return { messages: [capabilityResultMessage(state, call, { status: 'paused', delivery: null, artifacts: [] })] };
     })
-    .addNode('answer', createAnswerNode())
     .addEdge(START, 'pauseGate')
     .addEdge('pauseGate', 'runSupervisor')
-    .addEdge('capability', END).addEdge('answer', END).compile({ checkpointer });
+    .addEdge('capability', END).compile({ checkpointer });
 }
 
 for (const strategy of ['continue', 'replace'] as const) {

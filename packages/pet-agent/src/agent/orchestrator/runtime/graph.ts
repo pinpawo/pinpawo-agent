@@ -10,7 +10,6 @@ import {
   readSubagentContextWindowTokens,
   readSubagentGenerationReserveTokens,
 } from './config';
-import { createAnswerNode } from './nodes/answer';
 import { createDelegateCapabilityTool } from '../runSupervisor/delegateCapabilityTool';
 import { ToolNode } from '@langchain/langgraph/prebuilt';
 import { recoverCapabilityError } from './capabilityError';
@@ -41,36 +40,30 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
   const runTermination = createRunTerminationHandlers();
 
   const entryAnswer = createEntryAnswerSubgraph(config);
-  const resultAnswer = createAnswerNode();
 
   const graph = new StateGraph(OrchestratorState, agentRuntimeContextSchema)
-    .addNode('prepare', prepare, { ends: ['answer', 'compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
-    .addNode('compactContext', compactContext, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
-    .addNode('captureUserRequest', captureRunUserRequest, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('prepare', prepare, { ends: ['compactContext', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('compactContext', compactContext, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('captureUserRequest', captureRunUserRequest, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addNode('entryAnswer', entryAnswer, {
-      ends: ['runSupervisor', 'answer', 'throwRunFailure'],
+      ends: ['runSupervisor', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('runSupervisor', runSupervisor, {
-      ends: ['answer', 'capability', 'throwRunFailure'],
-      errorHandler: runTermination.onNodeError,
-    })
-    .addNode('answer', resultAnswer, {
-      ends: ['throwRunFailure'],
+      ends: [END, 'capability', 'throwRunFailure'],
       errorHandler: runTermination.onNodeError,
     })
     .addNode('capability', new ToolNode<typeof OrchestratorState.State>([delegateCapability], { handleToolErrors: false }), {
-      ends: ['runSupervisor', 'throwRunFailure', 'answer'],
+      ends: ['runSupervisor', 'throwRunFailure'],
       errorHandler: (state: typeof OrchestratorState.State, error) => recoverCapabilityError(state, error) ?? runTermination.onNodeError(state, error),
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
-    .addNode('pauseGate', pauseGate, { ends: ['answer', 'throwRunFailure'], errorHandler: runTermination.onNodeError })
+    .addNode('pauseGate', pauseGate, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addEdge(START, 'prepare')
     // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
     .addEdge('compactContext', 'captureUserRequest')
     .addEdge('captureUserRequest', 'entryAnswer')
     .addEdge('entryAnswer', END)
-    .addEdge('answer', END)
     .addConditionalEdges('capability', afterCapability, {
       pauseGate: 'pauseGate',
       runSupervisor: 'runSupervisor',

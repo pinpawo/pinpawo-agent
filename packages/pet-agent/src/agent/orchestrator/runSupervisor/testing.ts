@@ -91,7 +91,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
     else call(decision);
   }
   if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));
-  return { runSupervisorState: state, reviewFeedback: feedback ?? null, capabilityDisclosure: input.capabilityDisclosure, ...(reply !== undefined ? { reply } : {}),
+  return { runSupervisorState: state, reviewFeedback: feedback ?? null, capabilityDisclosure: input.capabilityDisclosure,
     messages: supervisorWorkMessages(supervisorHandoffContext(input), messages) };
 }
 
@@ -145,11 +145,9 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
         ToolMessage.isInstance(state.messages.at(-1)) ? 'runSupervisor' : END, ['runSupervisor', END]).compile();
     const result = await graph.invoke({ runId: input.runId, traceId: input.traceId,
       runSupervisorState: input.state, runSupervisorReviewFeedback: input.reviewFeedback ?? null, runUserRequest: input.userRequest, runCapabilityDisclosure: input.capabilityDisclosure }, config);
-    const last = result.messages.at(-1);
     return { messages: result.messages, runSupervisorState: result.runSupervisorState,
       reviewFeedback: result.runSupervisorReviewFeedback,
-      capabilityDisclosure: result.runCapabilityDisclosure!,
-      ...(AIMessage.isInstance(last) && !last.tool_calls?.length ? { reply: last.text } : {}) };
+      capabilityDisclosure: result.runCapabilityDisclosure! };
   } };
 }
 
@@ -162,4 +160,10 @@ export function capabilityResultMessage(state: { runId: string; traceId: string 
     content: JSON.stringify(result), artifact: { ...input, briefing: input.briefing ?? JSON.stringify({ plan: [] }) },
     status: result.status === 'missing_deliverable' ? 'error' : 'success',
   }), { runId: state.runId, traceId: state.traceId });
+}
+
+/** Evaluation convenience; production replies exist only as committed messages. */
+export function supervisorReply(result: Pick<RunSupervisorResult, 'messages'>) {
+  const last = result.messages.at(-1);
+  return AIMessage.isInstance(last) && !last.tool_calls?.length ? last.text : undefined;
 }

@@ -1353,3 +1353,34 @@ test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt
     emitToolEvent: () => {},
   }), { status: 'waiting' });
 });
+
+
+test('committed Supervisor reply uses one message identity for delta and completion', async () => {
+  const emittedEvents: AgentRuntimeEvent[] = [];
+  const reply = new AIMessage({ id: 'supervisor-final', content: [{ type: 'text', text: 'Inspection' }, { type: 'text', text: 'complete.' }],
+    additional_kwargs: { pinpawo: { runId: 'run-current' } } });
+  const setup = { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup;
+  let reads = 0;
+  const graphService = {
+    async readThreadState() {
+      return { messages: ++reads === 1 ? [] : [reply], pendingInterrupt: null };
+    },
+    streamEvents() {
+      return (async function* () {
+        yield protocolEvent('values', { messages: [], runId: 'run-current' });
+        yield protocolEvent('values', { messages: [reply], runId: 'run-current' });
+        yield protocolEvent('values', { messages: [reply], runId: 'run-current' });
+      })();
+    },
+  };
+  const result = await runAgentSessionTurn({
+    request: { kind: 'user_message', requestId: 'req-supervisor', message: 'Inspect' }, setup,
+    graphService: graphService as unknown as LocalAgentGraphService,
+    isCurrent: () => true, emitEvent: event => { emittedEvents.push(event); }, emitToolEvent: () => {},
+  });
+  assert.deepEqual(result, { status: 'completed', reply: 'Inspection\ncomplete.' });
+  const messages = emittedEvents.filter(e => e.type === 'message.delta' || e.type === 'message.completed');
+  assert.deepEqual(messages.map(e => [e.type, e.messageId, e.text]), [
+    ['message.delta', reply.id, 'Inspection\ncomplete.'], ['message.completed', reply.id, 'Inspection\ncomplete.'],
+  ]);
+});

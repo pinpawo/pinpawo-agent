@@ -1,3 +1,4 @@
+import { supervisorReply } from '../src/agent/orchestrator/runSupervisor/testing';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner';
 import { isSupervisorControlTool } from '../src/agent/orchestrator/runSupervisor/protocol';
@@ -11,7 +12,7 @@ export function readSupervisorDecision(result: RunSupervisorResult) {
     && message.tool_calls?.some((call) => isSupervisorControlTool(call.name) && call.name !== 'delegate_capability')).at(-1) as AIMessage | undefined;
   const call = message?.tool_calls?.[0];
   if (!call) {
-    if (result.reply !== undefined) return { reply: result.reply, name: undefined };
+    if (supervisorReply(result) !== undefined) return { reply: supervisorReply(result), name: undefined };
     // A resumed pending task can be executed without another plan/review decision.
     const execute = result.messages.flatMap((message) => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
       .find((call) => call.name === 'delegate_capability');
@@ -23,7 +24,7 @@ export function readSupervisorDecision(result: RunSupervisorResult) {
   }
   const control = parseSupervisorControl({ name: call.name, args: call.args });
   // Evaluation projection only: the reply comes from the final AIMessage, never review args.
-  return control.name === 'review_current' ? { ...control, args: { ...control.args, reply: result.reply } } : control;
+  return control.name === 'review_current' ? { ...control, args: { ...control.args, reply: supervisorReply(result) } } : control;
 }
 export type SupervisorDecision = ReturnType<typeof readSupervisorDecision>;
 

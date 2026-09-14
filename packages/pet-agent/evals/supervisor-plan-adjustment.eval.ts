@@ -1,3 +1,4 @@
+import { supervisorReply } from '../src/agent/orchestrator/runSupervisor/testing';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -69,14 +70,9 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
     } else {
       const reply = result.name === undefined ? result.reply : result.name === 'review_current' ? result.args.reply : undefined;
       assert.ok(reply?.trim());
-      // Asking may use a direct answer or a no-execution review reply. The
-      // observable contract is unchanged work and no Capability dispatch.
-      if (actual.reply === undefined) {
-        const accepted = actual;
-        assert.deepEqual(accepted.runSupervisorState, input.state);
-        assert.ok(accepted.reply?.trim());
-        assert.equal(accepted.messages.length, 2);
-      }
+      // A clarification preserves pending work regardless of preceding control calls.
+      assert.deepEqual(actual.runSupervisorState, input.state);
+      assert.ok(supervisorReply(actual)?.trim());
     }
     console.log(JSON.stringify({ case: scenario.name, passed: true }));
   } catch (error) {

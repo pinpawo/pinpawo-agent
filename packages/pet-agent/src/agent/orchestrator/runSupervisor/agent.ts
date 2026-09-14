@@ -11,7 +11,7 @@ import { createAgent } from 'langchain';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
 import { buildRunSupervisorAgentInput, buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { queryAgentMessages } from '../../messages';
+import { queryAgentMessages, getAgentMessageMetadata, stampAgentMessageCreatedAt } from '../../messages';
 import { toolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
@@ -97,7 +97,10 @@ export function createRunSupervisorAgent(params: {
       const handoff = supervisorWorkMessages(context, work);
       const last = handoff.at(-1);
       if (AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim()) {
-        return { runSupervisorState: result.runSupervisorState, reply: last.text, reviewFeedback: result.reviewFeedback, capabilityDisclosure, messages: handoff };
+        // Publish the final message itself; private tool-loop work stays in its lane.
+        delete getAgentMessageMetadata(last).lane;
+        stampAgentMessageCreatedAt(last);
+        return { runSupervisorState: result.runSupervisorState, reviewFeedback: result.reviewFeedback, capabilityDisclosure, messages: handoff };
       }
       throw new Error('Supervisor must reply or explicitly request execution.');
     },

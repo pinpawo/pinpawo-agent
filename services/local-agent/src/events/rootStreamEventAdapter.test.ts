@@ -1,9 +1,11 @@
+import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { FakeListChatModel } from '@langchain/core/utils/testing';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import {
+  Annotation,
   MessagesAnnotation,
   StateGraph,
   START,
@@ -53,19 +55,19 @@ async function collectChatEvents(graph: {
     { version: 'v3' },
   );
   const events: RootStreamChatEvent[] = [];
-  for await (const event of adaptRootStream(run)) {
+  for await (const event of adaptRootStream(run, { isMainAssistantNode: node => node === 'publicReply' })) {
     events.push(event);
   }
   return events;
 }
 
-test('adapter attributes root answer tokens to assistant and drops internal decision output', async () => {
+test('adapter supports an explicit public model scope and drops internal decision output', async () => {
   const graph = new StateGraph(MessagesAnnotation)
     .addNode('runSupervisor', streamingNode(new FakeListChatModel({ responses: ['route-thinking'], sleep: 0 })))
-    .addNode('answer', streamingNode(new FakeListChatModel({ responses: ['你好，这是回复'], sleep: 0 })))
+    .addNode('publicReply', streamingNode(new FakeListChatModel({ responses: ['你好，这是回复'], sleep: 0 })))
     .addEdge(START, 'runSupervisor')
-    .addEdge('runSupervisor', 'answer')
-    .addEdge('answer', END)
+    .addEdge('runSupervisor', 'publicReply')
+    .addEdge('publicReply', END)
     .compile();
 
   const events = await collectChatEvents(graph as never);
@@ -78,7 +80,7 @@ test('adapter attributes root answer tokens to assistant and drops internal deci
   assert.ok(
     events
       .filter((event) => event.type === 'assistant.delta')
-      .every((event) => event.type === 'assistant.delta' && event.node === 'answer'),
+      .every((event) => event.type === 'assistant.delta' && event.node === 'publicReply'),
   );
   // Internal node output must not leak into any chat-visible event.
   assert.ok(!assistantText.includes('route-thinking'));
@@ -136,6 +138,7 @@ test('adapter exposes Entry Answer text as the main reply and hides its control 
 test('adapted Entry Answer text is emitted only when root state accepts it as the reply', async () => {
   async function collect(events: RootProtocolEvent[]) {
     async function* protocolEvents() {
+      yield { type: 'event', seq: 0, method: 'values', params: { namespace: [], data: { runId: 'entry-run', messages: [] } } } as RootProtocolEvent;
       for (const event of events) yield event;
     }
     const adapted: RootStreamChatEvent[] = [];
@@ -168,7 +171,8 @@ test('adapted Entry Answer text is emitted only when root state accepts it as th
     params: {
       namespace: [],
       data: {
-        messages: [new HumanMessage('问题'), new AIMessage('只在直答时展示')],
+        runId: 'entry-run',
+        messages: [new HumanMessage('问题'), new AIMessage({ id: 'entry-message', content: '只在直答时展示', additional_kwargs: { pinpawo: { runId: 'entry-run' } } })],
       },
     },
   }]);
@@ -177,7 +181,7 @@ test('adapted Entry Answer text is emitted only when root state accepts it as th
     [{
       type: 'assistant.delta',
       messageId: 'entry-message',
-      node: 'entryAnswer',
+      node: null,
       text: '只在直答时展示',
     }],
   );
@@ -314,10 +318,10 @@ test('adapter emits one completed subagent message per child lifecycle across mu
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode('capability', capability)
-    .addNode('answer', streamingNode(new FakeListChatModel({ responses: ['主回复'], sleep: 0 })))
+    .addNode('publicReply', streamingNode(new FakeListChatModel({ responses: ['主回复'], sleep: 0 })))
     .addEdge(START, 'capability')
-    .addEdge('capability', 'answer')
-    .addEdge('answer', END)
+    .addEdge('capability', 'publicReply')
+    .addEdge('publicReply', END)
     .compile();
 
   const events = await collectChatEvents(graph as never);
@@ -467,4 +471,29 @@ test('readRootStreamChatEvent maps tool lifecycle and filters non-AI message del
 
   assert.equal(readNamespaceNode(['answer:abc-123']), 'answer');
   assert.equal(readNamespaceNode([]), null);
+});
+
+
+test('committed Supervisor reply publishes once with its identity while private streams and old history stay hidden', async () => {
+  const state = Annotation.Root({ ...MessagesAnnotation.spec, runId: Annotation<string>() });
+  const graph = new StateGraph(state)
+    .addNode('runSupervisor', async (input, config) => {
+      const privateWork = await streamingNode(new FakeListChatModel({ responses: ['private deliberation'], sleep: 0 }))(input, config);
+      return { messages: [
+        setAgentMessageMetadata(privateWork.messages[0], { runId: 'current', lane: 'supervisor' }),
+        setAgentMessageMetadata(new AIMessage({ id: 'final-reply', content: 'Ready to publish.' }), { runId: 'current' }),
+      ] };
+    })
+    .addNode('settled', () => ({}))
+    .addEdge(START, 'runSupervisor').addEdge('runSupervisor', 'settled').addEdge('settled', END).compile();
+  const run = await graph.streamEvents({ runId: 'current', messages: [
+    setAgentMessageMetadata(new AIMessage({ id: 'old-reply', content: 'Ready to publish.' }), { runId: 'current' }),
+    new HumanMessage('Proceed'),
+  ] }, { version: 'v3' });
+  const events: RootStreamChatEvent[] = [];
+  for await (const event of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) events.push(event);
+  assert.deepEqual(events.filter(e => e.type === 'assistant.delta'), [
+    { type: 'assistant.delta', node: null, messageId: 'final-reply', text: 'Ready to publish.' },
+  ]);
+  assert.equal(events.some(e => e.type === 'subagent.message'), false);
 });

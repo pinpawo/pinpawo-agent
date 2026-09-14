@@ -43,7 +43,7 @@ test('PauseTaskInterrupt reads explicit Runtime payloads and state', () => {
   }), { kind: 'pause_task' });
   assert.equal(readPauseTaskInterrupt({
     values: {},
-    next: ['answer'],
+    next: ['runSupervisor'],
     tasks: [],
   }), null);
   assert.equal(readPauseTaskInterrupt({

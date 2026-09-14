@@ -1,3 +1,5 @@
+import { readFinalMessageText } from '../agentStreamEvents';
+import { AIMessage } from '@langchain/core/messages';
 import {
   GUARD_DECISION_EVENT,
   isOrchestratorInternalAiStreamNode,
@@ -20,11 +22,11 @@ import {
  * - namespace depth >= 2 normally = a delegated child scope (subagent model
  *   calls, tool executions run inside a child agent); the `entryAnswer`
  *   subgraph is the one user-facing exception;
- * - the node name is the first segment of a namespace entry (`"answer:<task>"`).
+ * - the node name is the first segment of a namespace entry (`"runSupervisor:<task>"`).
  *
  * Scope granularities differ on purpose:
- * - The main assistant reply streams only from the root `answer` node (or an
- *   unnamed root model scope) with prefix dedup against the state echo.
+ * - Supervisor replies publish from committed root values. Private model streams
+ *   remain hidden; unnamed root model scopes may stream directly.
  * - Subagent output is an ambient progress feed with MULTIPLE messages per
  *   run; it is emitted as one completed `subagent.message` per model message
  *   lifecycle. Token-level dedup across messages is unsound there (a legit
@@ -65,7 +67,6 @@ export type RootStreamChatEvent =
   /** The run paused on an interrupt (human review etc.). */
   | { type: 'interrupt'; interrupts: unknown[] };
 
-const MAIN_ASSISTANT_NODE_NAMES = new Set(['answer']);
 const ENTRY_ANSWER_NODE_NAME = 'entryAnswer';
 const INTERNAL_SUBAGENT_MESSAGE_NODE_NAMES = new Set([
   'SummarizationMiddleware.before_model',
@@ -104,7 +105,7 @@ function isGuardDecisionCustomData(data: Record<string, unknown>): boolean {
 export type RootStreamAdapterOptions = {
   /**
    * Assistant-reply node filter for depth-1 message activity. Defaults to the
-   * production orchestrator contract: only `answer` is user-facing. Internal
+   * production orchestrator contract: named model scopes require explicit opt-in. Internal
    * nodes can write synthetic AI messages such as delegation briefings, which
    * stay observable on the raw stream without becoming chat output.
    */
@@ -112,10 +113,7 @@ export type RootStreamAdapterOptions = {
 };
 
 function defaultIsMainAssistantNode(node: string | null): boolean {
-  if (node === null) {
-    return true;
-  }
-  return MAIN_ASSISTANT_NODE_NAMES.has(node);
+  return node === null;
 }
 
 function isInternalOrchestratorNamespace(namespace: string[]) {
@@ -331,24 +329,16 @@ export async function* adaptRootStream(
 ): AsyncGenerator<RootStreamChatEvent> {
   const state: RootStreamAdapterState = new Map();
   let assistantReply = '';
-  let pendingEntryReply: Extract<RootStreamChatEvent, { type: 'assistant.delta' }> | null = null;
+  const seenMessages = new Set<string>();
+  let receivedInitialValues = false;
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);
     if (!chatEvent) {
       continue;
     }
     if (chatEvent.type === 'assistant.delta') {
-      if (chatEvent.node === ENTRY_ANSWER_NODE_NAME) {
-        const buffered: string = pendingEntryReply?.text ?? '';
-        const token = chatEvent.text.startsWith(buffered)
-          ? chatEvent.text.slice(buffered.length)
-          : chatEvent.text;
-        pendingEntryReply = {
-          ...chatEvent,
-          text: `${buffered}${token}`,
-        };
-        continue;
-      }
+      // Entry replies, like Supervisor replies, are published only after Root commits them.
+      if (chatEvent.node === ENTRY_ANSWER_NODE_NAME) continue;
       const token = chatEvent.text.startsWith(assistantReply)
         ? chatEvent.text.slice(assistantReply.length)
         : chatEvent.text;
@@ -359,21 +349,25 @@ export async function* adaptRootStream(
       yield { ...chatEvent, text: token };
       continue;
     }
-    if (chatEvent.type === 'values' && pendingEntryReply) {
-      const messages = Array.isArray(chatEvent.values.messages)
-        ? chatEvent.values.messages
-        : [];
-      const finalMessage = readRecord(messages.at(-1));
-      const finalText = typeof finalMessage?.text === 'string'
-        ? finalMessage.text
-        : typeof finalMessage?.content === 'string'
-          ? finalMessage.content
-          : '';
-      if (finalText === pendingEntryReply.text) {
-        assistantReply += pendingEntryReply.text;
-        yield pendingEntryReply;
-        pendingEntryReply = null;
+    if (chatEvent.type === 'values') {
+      const messages = Array.isArray(chatEvent.values.messages) ? chatEvent.values.messages : [];
+      const last = messages.at(-1);
+      // The first snapshot is existing history, including on native resume.
+      // Only a newly committed final AI in the current run is a public reply.
+      if (receivedInitialValues && AIMessage.isInstance(last) && last.id && !seenMessages.has(last.id)
+        && !last.tool_calls?.length) {
+        const text = readFinalMessageText(last);
+        const metadata = readRecord(last.additional_kwargs.pinpawo) ?? {};
+        if (text && !metadata.lane && !metadata.synthetic && metadata.runId === chatEvent.values.runId && metadata.runId) {
+          yield { type: 'assistant.delta', messageId: last.id, node: null, text };
+          assistantReply += text;
+        }
       }
+      for (const message of messages) {
+        const id = readRecord(message)?.id;
+        if (typeof id === 'string') seenMessages.add(id);
+      }
+      receivedInitialValues = true;
     }
     yield chatEvent;
   }

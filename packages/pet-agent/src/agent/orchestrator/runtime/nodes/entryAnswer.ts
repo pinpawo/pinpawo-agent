@@ -11,6 +11,7 @@ import {
   stampAgentMessageCreatedAt,
   setAgentMessageMetadata,
 } from '../../../messages';
+import { identity } from '../../runSupervisor/controlContext';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
 import { OrchestratorState, type OrchestratorStateType } from '../../state';
@@ -166,7 +167,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     throw new Error('Entry Answer model must support tool binding.');
   }
   const model = answerModel.bindTools([planRequest, continuePlan]);
-  const routingTools = new ToolNode([planRequest, continuePlan]);
+  const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 
   const invokeModel = async (
     state: OrchestratorStateType,
@@ -209,19 +210,18 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     if (!response.tool_calls?.length && !response.text.trim()) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
     }
+    // Scope provider call IDs to this model turn; history may reuse them across runs or retries.
+    const committed = new AIMessage({ ...response, tool_calls: response.tool_calls?.map(call => ({
+      ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id!),
+    })) });
     return {
-      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(response), { traceId: state.traceId, runId: state.runId })],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { traceId: state.traceId, runId: state.runId })],
     };
   };
 
   return new StateGraph(OrchestratorState)
     .addNode('model', invokeModel)
-    .addNode('tools', (state, runnableConfig) => {
-      // ToolNode deduplicates against every ToolMessage in its input. Execute
-      // only this routing call, not a historical call with the same provider ID.
-      // Parent updates still append the pair to canonical Root history.
-      return routingTools.invoke({ ...state, messages: state.messages.slice(-1) }, runnableConfig);
-    })
+    .addNode('tools', routingTools)
     .addEdge(START, 'model')
     .addConditionalEdges('model', toolsCondition, {
       tools: 'tools',

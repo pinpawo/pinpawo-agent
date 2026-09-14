@@ -25,7 +25,6 @@ export type RunSupervisorResult = {
   readonly reviewFeedback?: string | null;
   /** New work records and, when executing, the Supervisor's request handed to Root. */
   readonly messages: readonly BaseMessage[];
-  readonly reply?: string;
   readonly capabilityDisclosure: CapabilityDisclosureState;
 };
 

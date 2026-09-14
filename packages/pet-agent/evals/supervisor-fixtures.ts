@@ -1,6 +1,6 @@
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner';
-import { supervisorControlSchemas } from '../src/agent/orchestrator/runSupervisor/messageHandoff';
+import { supervisorControlSchemas } from '../src/agent/orchestrator/runSupervisor/protocol';
 import { controlSchema } from '../src/agent/orchestrator/runSupervisor/protocol';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure';
 import { setAgentMessageMetadata } from '../src/agent/messages';

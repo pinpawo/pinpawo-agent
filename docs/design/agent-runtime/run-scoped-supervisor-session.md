@@ -139,9 +139,15 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 ### 工具职责
 
 四个控制工具分别定义在 submitPlanTool、reviewCurrentTool、adjustPlanTool 和
-delegateCapabilityTool 中，各自声明 schema、说明与回调，Supervisor 显式注册。
-不再用按名称分支的工具工厂统一生成。仅共享状态转换、错误回执和提交校验；
-本次工具拆分不改变消息提交与恢复协议，只有 delegate_capability 发起 Root 执行交接。
+delegateCapabilityTool 中，各自声明 schema、说明、回调和对应的纯状态变更函数，
+Supervisor 显式注册。工具直接执行自己的变更函数，不经过统一业务分支。
+
+toolSession 只负责读取本次已确认状态、调用工具提供的变更函数并返回成功/错误回执；
+controlTranscript 校验控制记录、按顺序复用各工具的纯变更函数；controlMiddleware
+处理调用格式、自纠与让出控制权。messageHandoff 只负责交接消息的整理、身份规范化
+和 Root 接收校验，不定义工具、不处理计划业务、不配置模型中间件。
+
+这次职责拆分保留现有消息提交与恢复协议，只有 delegate_capability 发起 Root 执行交接。
 
 本次调整依据 [Studio E2E #803](https://github.com/pinpawo/pinpawo-agent/issues/803)：
 验收与下一步行动分离，由 Supervisor 模型在工具结果返回后继续决定。

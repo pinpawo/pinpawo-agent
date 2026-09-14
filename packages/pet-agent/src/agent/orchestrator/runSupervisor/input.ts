@@ -2,7 +2,7 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import type { RunSupervisorInput } from './runner';
-import type { SupervisorHandoffContext } from './messageHandoff';
+import type { SupervisorHandoffContext } from './controlContext';
 
 /** Entry intent is already checkpointed in the actual routing tool pair. */
 export function readSupervisorMode(root: OrchestratorStateType): RunSupervisorInput['mode'] {

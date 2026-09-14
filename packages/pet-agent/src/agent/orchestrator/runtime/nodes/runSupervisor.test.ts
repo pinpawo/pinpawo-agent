@@ -14,7 +14,7 @@ import { buildRunSupervisorInput } from '../../runSupervisor/input';
 import { createCapabilityCatalog } from '../../runSupervisor/capabilityCatalog';
 import { createCapabilityDisclosureState } from '../../runSupervisor/capabilityDisclosure';
 import { withScriptedDelegation, scriptedSupervisorResult } from '../../runSupervisor/testing';
-import type { SupervisorControl } from '../../runSupervisor/messageHandoff';
+import type { SupervisorControl } from '../../runSupervisor/protocol';
 import { readCapabilityCall, capabilityResultMessage } from '../delegationToolResult';
 
 const models = { act: { invoke: () => { throw new Error('Unexpected model call'); } } } as unknown as AgentModels;

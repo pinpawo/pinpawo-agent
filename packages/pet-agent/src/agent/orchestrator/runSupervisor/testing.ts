@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { createSupervisorMessageHandoff, type SupervisorControl } from './messageHandoff';
+import { createSupervisorMessageHandoff } from './messageHandoff';
+import type { SupervisorControl } from './protocol';
 import { supervisorHandoffContext } from './input';
 import { setAgentMessageMetadata } from '../../messages';
 

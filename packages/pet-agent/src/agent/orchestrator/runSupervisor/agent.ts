@@ -1,3 +1,5 @@
+import { createSupervisorControlValidationMiddleware } from './controlMiddleware';
+import { createSupervisorToolSession } from './toolSession';
 import { createSubmitPlanTool } from './submitPlanTool';
 import { createReviewCurrentTool } from './reviewCurrentTool';
 import { createAdjustPlanTool } from './adjustPlanTool';
@@ -16,7 +18,7 @@ import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 import { createSupervisorCapabilityDetailsTool, createSupervisorDisclosureStateMiddleware } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-import { createSupervisorControlValidationMiddleware, createSupervisorMessageHandoff } from './messageHandoff';
+import { createSupervisorMessageHandoff } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 import { projectDelegationAnnouncesForModel } from '../delegation';
 
@@ -45,14 +47,15 @@ export function createRunSupervisorAgent(params: {
       const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
       // Legacy reports exist only in Root history, not in Capability private work.
       const agentMessages = [...projectDelegationAnnouncesForModel(selected), frame];
+      const toolSession = createSupervisorToolSession(context, agentMessages.length);
       const tools: StructuredTool[] = [
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,
         })] : []),
-        createSubmitPlanTool(context, agentMessages.length),
-        createReviewCurrentTool(context, agentMessages.length),
-        createAdjustPlanTool(context, agentMessages.length),
-        createDelegateCapabilityTool(context, agentMessages.length),
+        createSubmitPlanTool(toolSession),
+        createReviewCurrentTool(toolSession),
+        createAdjustPlanTool(toolSession),
+        createDelegateCapabilityTool(toolSession),
       ];
       const agent = createAgent({
         name: 'runSupervisor',

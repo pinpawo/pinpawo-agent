@@ -247,34 +247,39 @@ class OneControlModel extends BaseChatModel {
   }
 }
 
-test('unavailable model tools fail before an extra model loop or tool execution', async () => {
+test('unavailable tools return framework feedback and allow correction without mutating Root', async () => {
   for (const name of ['delegate_capability', 'unknown_tool', 'capability_details']) {
-    class UnavailableModel extends OneControlModel {
-      async _generate(): Promise<ChatResult> {
-        this.invocations++;
-        const message = new AIMessage({ content: '', tool_calls: [{ name, args: {}, id: 'unknown' }] });
-        return { generations: [{ message, text: '' }] };
-      }
-    }
     const input = context({ mode: 'boundary', hasNewUserInput: false });
-    const model = new UnavailableModel({});
-    const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
-      middleware: [createSupervisorControlValidationMiddleware(input)] });
-    await assert.rejects(agent.invoke({ messages: [new HumanMessage('Continue.')] }), /unavailable/);
-    assert.equal(model.invocations, 1);
+    const before = JSON.stringify(input);
+    const model = new DecisionLoopModel([
+      () => new AIMessage({ content: '', tool_calls: [{ name, args: {}, id: 'unknown' }] }),
+      (messages) => {
+        const feedback = messages.at(-1);
+        assert.ok(ToolMessage.isInstance(feedback));
+        assert.equal(feedback.status, 'error');
+        assert.equal(feedback.tool_call_id, 'unknown');
+        assert.equal(feedback.name, name);
+        assert.match(feedback.text, /submit_plan/);
+        assert.equal(JSON.stringify(input), before);
+        return control('submit_plan', { tasks: [taskA] })[0] as AIMessage;
+      },
+      () => control('execute_current', {}, 'execute-first')[0] as AIMessage,
+    ]);
+    const accepted = await decisionLoop(input, model);
+    assert.equal(model.inputs.length, 3);
+    assert.equal(accepted.runSupervisorState.plan.length, 1);
+    assert.equal(JSON.stringify(input), before);
   }
 });
 
-test('invalid business decisions fail without mutating Root', async () => {
+test('invalid business decisions propagate without mutating Root or retrying the model', async () => {
   const input = context({ allowedCapabilityNames: [] });
   const before = JSON.stringify(input);
   const model = new OneControlModel({});
   const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
-    middleware: [createSupervisorControlValidationMiddleware(input)] });
-  const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
-  assert.throws(() => createSupervisorMessageHandoff(input, result.messages.slice(1)), /outside the current catalog/);
-  assert.throws(() => acceptSupervisorMessageHandoff(input, result.messages.slice(1)), /outside the current catalog/);
-  assert.equal(model.invocations, 2);
+    middleware: [createSupervisorControlValidationMiddleware()] });
+  await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }), /outside the current catalog/);
+  assert.equal(model.invocations, 1);
   assert.equal(JSON.stringify(input), before);
 });
 
@@ -296,7 +301,7 @@ test('mixed model control and discovery calls are rejected before either tool ex
   const model: BaseChatModel = new MixedModel({});
   const tools: StructuredTool[] = [...createMessageSupervisorControlTools(input), query];
   const agent = createAgent({ model, tools,
-    middleware: [createSupervisorControlValidationMiddleware(input)] });
+    middleware: [createSupervisorControlValidationMiddleware()] });
   await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }), /only tool call/);
   assert.equal(queries, 0);
 });
@@ -315,7 +320,7 @@ test('real createAgent continues after planning and exits only on explicit execu
       .addNode('supervisor', async (state) => {
         const input = context({ state: state.runSupervisorState, messages: state.messages });
         const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
-          middleware: [createSupervisorControlValidationMiddleware(input)] });
+          middleware: [createSupervisorControlValidationMiddleware()] });
         const result = await agent.invoke({ messages: [new HumanMessage('Inspect A.')] });
         assert.equal(result.messages.length, 5);
         assert.deepEqual(Object.keys(result).sort(), ['messages'], 'no supervisorCommand or handoff slot');
@@ -366,7 +371,7 @@ function toolPlan(messages: BaseMessage[]) {
 }
 async function decisionLoop(input: SupervisorHandoffContext, model: DecisionLoopModel) {
   const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input, 1),
-    middleware: [createSupervisorControlValidationMiddleware(input)] });
+    middleware: [createSupervisorControlValidationMiddleware()] });
   const result = await agent.invoke({ messages: [new HumanMessage('Decide the next step.')] });
   return acceptSupervisorMessageHandoff(input, createSupervisorMessageHandoff(input, result.messages.slice(1)));
 }
@@ -448,4 +453,42 @@ test('control message identities are run scoped even when the provider reuses me
   assert.notEqual(first[0].id, second[0].id);
   assert.notEqual(first[1].id, second[1].id);
   assert.deepEqual(createSupervisorMessageHandoff(context(), pair).map((message) => message.id), first.map((message) => message.id));
+});
+
+
+test('tool cancellation propagates without model correction', async () => {
+  const model = new DecisionLoopModel([
+    () => new AIMessage({ content: '', tool_calls: [{ name: 'capability_details', args: {}, id: 'read' }] }),
+  ]);
+  const reader = tool(() => { throw new DOMException('Read cancelled', 'AbortError'); }, {
+    name: 'capability_details', description: 'Read details', schema: z.object({}),
+  });
+  const agent = createAgent({ model, tools: [reader], middleware: [createSupervisorControlValidationMiddleware()] });
+  await assert.rejects(agent.invoke({ messages: [new HumanMessage('Read details.')] }), /Read cancelled/);
+  assert.equal(model.inputs.length, 1);
+});
+
+test('tool interrupt remains resumable rather than becoming correction feedback', async () => {
+  const model = new DecisionLoopModel([
+    () => new AIMessage({ content: '', tool_calls: [{ name: 'capability_details', args: {}, id: 'read' }] }),
+    (messages) => {
+      const receipt = messages.at(-1);
+      assert.ok(ToolMessage.isInstance(receipt));
+      assert.notEqual(receipt.status, 'error');
+      assert.equal(receipt.text, 'Approved details');
+      return new AIMessage('Read complete.');
+    },
+  ]);
+  const reader = tool(() => interrupt('Approve details'), {
+    name: 'capability_details', description: 'Read details', schema: z.object({}),
+  });
+  const agent = createAgent({ model, tools: [reader], checkpointer: new MemorySaver(),
+    middleware: [createSupervisorControlValidationMiddleware()] });
+  const config = { configurable: { thread_id: 'tool-interrupt-recovery' } };
+  const paused = await agent.invoke({ messages: [new HumanMessage('Read details.')] }, config);
+  assert.equal(paused.__interrupt__?.length, 1);
+  assert.equal(model.inputs.length, 1);
+  const resumed = await agent.invoke(new Command({ resume: 'Approved details' }), config);
+  assert.equal(resumed.messages.at(-1)?.text, 'Read complete.');
+  assert.equal(model.inputs.length, 2);
 });

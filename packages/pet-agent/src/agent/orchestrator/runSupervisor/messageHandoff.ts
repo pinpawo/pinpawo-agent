@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
-import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
-import { createMiddleware } from 'langchain';
+import { tool, ToolInputParsingException, type StructuredTool, type ToolRuntime } from '@langchain/core/tools';
+import { createMiddleware, ToolInvocationError } from 'langchain';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages';
 import { executionsForTask } from '../executionMessages';
 import { capabilityHandoffSchema, controlSchema, supervisorControlSchemas, type SupervisorControl } from './protocol';
@@ -35,6 +35,7 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
   }, {
     name,
     schema: supervisorControlSchemas[name],
+    verboseParsingErrors: true,
     description: name === 'submit_plan' ? '建立计划并返回计划事实，由你继续决定下一步。'
       : name === 'adjust_plan' ? '调整计划并返回更新后的事实，由你继续决定下一步。'
       : name === 'review_current' ? '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。'
@@ -42,26 +43,22 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
   }));
 }
 
-export function createSupervisorControlValidationMiddleware(context: SupervisorHandoffContext) {
+export function createSupervisorControlValidationMiddleware() {
   return createMiddleware({
     name: 'SupervisorControlValidation',
-    afterModel: {
-      canJumpTo: ['model'],
-      hook: (state) => {
-        const last = state.messages.at(-1);
-        const call = AIMessage.isInstance(last) ? last.tool_calls?.[0] : undefined;
-        if (!call || !Object.hasOwn(supervisorControlSchemas, call.name)) return;
-        const parsed = controlSchema.safeParse({ name: call.name, args: call.args });
-        if (!parsed.success) {
-          return {
-            messages: [new ToolMessage({
-              name: call.name, tool_call_id: call.id!, status: 'error',
-              content: JSON.stringify({ error: 'Invalid tool arguments', issues: parsed.error.issues }),
-            })],
-            jumpTo: 'model' as const,
-          };
-        }
-      },
+    wrapToolCall: async (request, handler) => {
+      try {
+        return await handler(request);
+      } catch (error) {
+        // ToolNode validates arguments before invoking the tool body. Keep its
+        // feedback, but mark failures explicitly so they cannot commit controls.
+        if (!(error instanceof ToolInvocationError)
+          || !(error.toolError instanceof ToolInputParsingException)) throw error;
+        return new ToolMessage({
+          name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error',
+          content: error.toolError.message,
+        });
+      }
     },
     beforeModel: {
       canJumpTo: ['end'],
@@ -79,17 +76,12 @@ export function createSupervisorControlValidationMiddleware(context: SupervisorH
         throw new Error('Supervisor must produce a valid AIMessage.');
       }
       const calls = response.tool_calls ?? [];
-      if (calls.some((call) => !Object.hasOwn(supervisorControlSchemas, call.name)
-        && !(call.name === 'capability_details' && (context.mode === 'entry' || context.hasNewUserInput)))) {
-        throw new Error('Supervisor called a tool unavailable in this invocation.');
-      }
+      // ToolNode returns unknown-tool errors with the available names. Do not
+      // intercept those here: the model needs the normal tool feedback to retry.
+      if (calls.some((call) => !call.id)) throw new Error('Supervisor tool call requires a tool call id.');
       const controls = calls.filter((call) => Object.hasOwn(supervisorControlSchemas, call.name));
       if (controls.length) {
         if (calls.length !== 1) throw new Error('Supervisor control must be the only tool call.');
-        const call = controls[0];
-        if (!call.id) throw new Error('Supervisor control requires a tool call id.');
-        // Argument validation belongs to afterModel, where errors can be
-        // returned as tool feedback without committing state.
       }
       return response;
     },

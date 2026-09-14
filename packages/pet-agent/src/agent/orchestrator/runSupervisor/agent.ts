@@ -53,7 +53,7 @@ export function createRunSupervisorAgent(params: {
         tools,
         systemPrompt: buildRunSupervisorAgentSystemPrompt(input.mode),
         middleware: [
-          createSupervisorControlValidationMiddleware(context),
+          createSupervisorControlValidationMiddleware(),
           createSupervisorDisclosureStateMiddleware(),
           systemPromptMiddleware,
           toolProtocolMiddleware,
@@ -75,9 +75,12 @@ export function createRunSupervisorAgent(params: {
           registryDigest: input.catalog.registryDigest,
           supervisorMode: input.mode,
         },
+      }).finally(() => {
+        // Preserve cancellation and the document-budget error code even when
+        // LangChain wraps a tool failure in a middleware error.
+        signal?.throwIfAborted();
+        documents.assertWithinBudget();
       });
-      signal?.throwIfAborted();
-      documents.assertWithinBudget();
 
       // createAgent returns its input too. Persist only this invocation's new work;
       // never retag canonical main messages or the temporary catalog frame.

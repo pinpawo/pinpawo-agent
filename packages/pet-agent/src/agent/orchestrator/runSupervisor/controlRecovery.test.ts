@@ -54,6 +54,7 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'execute_cur
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
     assert.equal(feedback.name, name);
+    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'execute_current' ? 'guidance' : 'taskId'));
     assert.equal(executor.inputs.length, 1);
     assert.equal(readCapabilityExecutions(result.messages).length, 1);
     assert.equal(result.runSupervisorState.plan.length, 1);
@@ -64,9 +65,9 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'execute_cur
   });
 }
 
-test('repeated invalid calls respect the caller loop limit without executing work', async () => {
+for (const name of ['submit_plan', 'unknown_tool']) test(`repeated ${name} errors respect the caller loop limit without executing work`, async () => {
   const supervisor = new RecoveryModel(Array.from({ length: 30 }, (_, i) =>
-    call('submit_plan', { tasks: [{ ...task, taskId: 'unexpected' }] }, `bad-${i}`)));
+    call(name, { tasks: [{ ...task, taskId: 'unexpected' }] }, `bad-${i}`)));
   const executor = new RecoveryModel([]);
   const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
   const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
@@ -76,3 +77,33 @@ test('repeated invalid calls respect the caller loop limit without executing wor
   assert.ok(supervisor.inputs.length > 1 && supervisor.inputs.length < 12);
   assert.equal(executor.inputs.length, 0);
 });
+
+for (const phase of ['entry', 'boundary']) {
+  for (const name of ['unknown_tool', 'delegate_capability', 'capability_details']) {
+    // capability_details is unavailable only at Boundary without new input.
+    if (phase === 'entry' && name === 'capability_details') continue;
+    test(`${phase}: ${name} is corrected in the same run with exactly one delegation`, async () => {
+      const plan = call('submit_plan', { tasks: [task] }, 'plan');
+      const execute = call('execute_current', {}, 'execute');
+      const review = call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review');
+      const bad = call(name, {}, 'unknown');
+      const responses = phase === 'entry' ? [bad, plan, execute, review] : [plan, execute, bad, review];
+      const supervisor = new RecoveryModel([...responses, new AIMessage('Inspection complete.')]);
+      const executor = new RecoveryModel([new AIMessage('Repository evidence.')]);
+      const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
+      const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
+      const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+        configurable: { thread_id: `unknown-${phase}-${name}`, registry },
+      });
+      const feedback = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'unknown');
+      assert.ok(ToolMessage.isInstance(feedback));
+      assert.equal(feedback.status, 'error');
+      assert.equal(feedback.name, name);
+      assert.equal(executor.inputs.length, 1);
+      assert.equal(readCapabilityExecutions(result.messages).length, 1);
+      assert.equal(result.runSupervisorState.plan.length, 1);
+      assert.equal(result.runSupervisorState.plan[0].status, 'completed');
+      assert.equal(result.messages.at(-1)?.text, 'Inspection complete.');
+    });
+  }
+}

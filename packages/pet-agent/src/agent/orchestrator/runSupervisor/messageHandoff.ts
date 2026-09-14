@@ -39,13 +39,40 @@ export function createMessageSupervisorControlTools(context: SupervisorHandoffCo
       : name === 'adjust_plan' ? '调整计划并返回更新后的事实，由你继续决定下一步。'
       : name === 'review_current' ? '验收当前交付并记录结论。返回计划事实，不触发执行；之后由你决定执行、调整或直接回复。'
       : '执行当前计划项，将控制权交给 Capability；返回交付后由你继续判断。',
-    returnDirect: name === 'execute_current',
   }));
 }
 
 export function createSupervisorControlValidationMiddleware(context: SupervisorHandoffContext) {
   return createMiddleware({
     name: 'SupervisorControlValidation',
+    afterModel: {
+      canJumpTo: ['model'],
+      hook: (state) => {
+        const last = state.messages.at(-1);
+        const call = AIMessage.isInstance(last) ? last.tool_calls?.[0] : undefined;
+        if (!call || !Object.hasOwn(supervisorControlSchemas, call.name)) return;
+        const parsed = controlSchema.safeParse({ name: call.name, args: call.args });
+        if (!parsed.success) {
+          return {
+            messages: [new ToolMessage({
+              name: call.name, tool_call_id: call.id!, status: 'error',
+              content: JSON.stringify({ error: 'Invalid tool arguments', issues: parsed.error.issues }),
+            })],
+            jumpTo: 'model' as const,
+          };
+        }
+      },
+    },
+    beforeModel: {
+      canJumpTo: ['end'],
+      hook: (state) => {
+        const last = state.messages.at(-1);
+        // Failed execution requests must reach the model for correction too.
+        if (ToolMessage.isInstance(last) && last.name === 'execute_current' && last.status !== 'error') {
+          return { jumpTo: 'end' as const };
+        }
+      },
+    },
     wrapModelCall: async (request, handler) => {
       const response = await handler(request);
       if (!AIMessage.isInstance(response) || response.invalid_tool_calls?.length) {
@@ -61,7 +88,8 @@ export function createSupervisorControlValidationMiddleware(context: SupervisorH
         if (calls.length !== 1) throw new Error('Supervisor control must be the only tool call.');
         const call = controls[0];
         if (!call.id) throw new Error('Supervisor control requires a tool call id.');
-        controlSchema.parse({ name: call.name, args: call.args });
+        // Argument validation belongs to afterModel, where errors can be
+        // returned as tool feedback without committing state.
       }
       return response;
     },

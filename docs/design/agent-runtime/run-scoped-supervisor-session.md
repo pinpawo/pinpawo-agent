@@ -147,8 +147,19 @@ task 是计划任务，delegation 是具体执行实例。同一 run 内可以�
 | `execute_current` | 模型明确决定执行当前计划项，可带补做指导；只在这里交接给 Root |
 | `capability_details` | 返回能力详情，继续模型循环 |
 
-计划/验收工具不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
-自然回复。只在执行工具处使用 `returnDirect` 作为已有 Root Capability 节点的交接边界。
+控制工具均不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
+自然回复。只有 `execute_current` 的成功工具回执才结束 Supervisor 循环并交接给 Root；
+错误回执继续返回模型，不能因工具名称是执行工具而提前结束。
+
+Supervisor 优先沿用适用的现有计划，非必要不重排。补做可使用执行 guidance；只有新要求
+或具体证据表明原安排不适用、能力选错或存在遗漏时，才决定最小调整。`adjust_plan.tasks`
+只列剩余工作，运行时自动保留已完成事项。保留当前能力和交付身份使用 continue；replace
+不携带旧交付作为新任务的验收依据。这是模型职责与工具语义，不新增强制路由或重排次数限制。
+
+控制工具参数不符合 schema 时，保留原调用并附上匹配 call ID 的 `status: error`
+ToolMessage，携带字段路径与校验问题，让模型在同轮修正。错误调用不执行工具、不提交
+计划或派发 Capability；成功调用仍按原有 schema 与业务约束校验。纠错循环遵守调用方
+的 recursionLimit，取消与协议完整性错误仍走原有失败路径。
 没有待执行任务不构成失败，也不自动生成答案；Supervisor 通过普通 AIMessage 回复。
 
 ### 工具状态与 Root 提交
@@ -315,7 +326,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 
 提取无模型调用的回复发布函数，接收明确的回复文本和当前运行身份，返回主会话消息及必要的收尾更新。该函数不判断任务完成、不选择下一步、不重写模型文本、不引入独立 reply/pending 状态字段。
 
-Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`execute_current` 继续使用 returnDirect 并进入 Capability，执行分支不调用回复发布函数。
+Supervisor 返回自然回复时，Root 使用已经验收的结果，在一次更新中提交计划、Supervisor 工作消息和主会话回复，然后进入 END。用户提问同样是合法回复，保留 pending 计划；是否回复不要求计划全部完成。`execute_current` 的成功回执结束 Supervisor 循环并进入 Capability，执行分支不调用回复发布函数。
 
 运行停止原因由程序单独格式化：迭代预算停止及 checkpoint 不兼容时，复用发布函数输出运行状态并结束；真正异常保持原来的失败通道。保留 Entry 的职责，必要时复用消息构造函数，但不在本次重构中改变 Entry 的决策或提示机制。
 

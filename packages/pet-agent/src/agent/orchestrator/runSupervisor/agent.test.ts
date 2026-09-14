@@ -1933,7 +1933,10 @@ test('repeated empty detail reads do not close disclosure and parallel names mer
     { toolCalls: [details('known-again', ['general', 'explore'])] },
     { structuredOutput: { kind: 'plan', args: submitArgs('explore') } },
   ]);
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog), {
+    // This scenario deliberately exercises eight model turns plus middleware nodes.
+    recursionLimit: 100,
+  });
   assert.deepEqual([...result.capabilityDisclosure!.disclosedCapabilityNames].sort(), ['explore', 'general']);
   assert.deepEqual(Object.keys(result.capabilityDisclosure!).sort(), ['disclosedCapabilityNames', 'registryDigest']);
   for (let i = 0; i < 4; i++) {

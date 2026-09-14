@@ -1,3 +1,4 @@
+import { supervisorDeliveryClosureDataset } from './supervisor-delivery-closure.ts';
 import { capabilityPlanningBasicsDataset } from './capability-planning-basics.ts';
 import { contextSynthesisBasicsDataset } from './context-synthesis-basics.ts';
 import { delegationControlBasicsDataset } from './delegation-control-basics.ts';
@@ -10,6 +11,7 @@ import { permissionControlBasicsDataset } from './permission-control-basics.ts';
 import { toolReviewRejectRuntimeDataset } from './tool-review-reject-runtime.ts';
 
 export const agentEvalDatasets = [
+  supervisorDeliveryClosureDataset,
   orchestratorRouteDataset,
   orchestratorFlowMockSubagentDataset,
   capabilityPlanningBasicsDataset,
@@ -23,7 +25,7 @@ export const agentEvalDatasets = [
 ] as const;
 
 export {
-  capabilityPlanningBasicsDataset,
+  supervisorDeliveryClosureDataset,  capabilityPlanningBasicsDataset,
   contextSynthesisBasicsDataset,
   delegationControlBasicsDataset,
   interruptionRecoveryBasicsDataset,

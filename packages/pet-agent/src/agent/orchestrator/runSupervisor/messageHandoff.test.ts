@@ -296,6 +296,25 @@ test('invalid business decisions return feedback without mutating Root', async (
   assert.equal(JSON.stringify(input), before);
 });
 
+test('repeated malformed arguments stop at the graph recursion limit without dispatch', async () => {
+  const input = context();
+  class InvalidModel extends OneControlModel {
+    async _generate(): Promise<ChatResult> {
+      const message = new AIMessage({ content: '', invalid_tool_calls: [{
+        name: 'delegate_capability', id: `bad-${++this.invocations}`, args: '{', type: 'invalid_tool_call',
+      }] });
+      return { generations: [{ message, text: '' }] };
+    }
+  }
+  const model = new InvalidModel({});
+  const agent = createAgent({ model, tools: createMessageSupervisorControlTools(input),
+    middleware: [createSupervisorControlValidationMiddleware()] });
+  await assert.rejects(agent.invoke({ messages: [new HumanMessage('Inspect A.')] }, { recursionLimit: 6 }),
+    /Recursion limit/i);
+  assert.ok(model.invocations > 1 && model.invocations <= 6);
+  assert.deepEqual(input.state.plan, []);
+});
+
 test('mixed model control and discovery calls are rejected before either tool executes', async () => {
   const input = context();
   let queries = 0;

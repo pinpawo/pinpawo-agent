@@ -53,3 +53,20 @@ test('gratuitous replanning fails even when the final reporting capability is co
   assert.equal(score.adjustments, 1);
   assert.equal(score.passed, false);
 });
+
+test('a rejected adjustment followed by correction counts as one actual plan change', () => {
+  const input = closureInput(example.input, 'corrected-adjustment');
+  const args = { goal: input.userRequest, reason: 'Submission remains.', currentDelegation: 'replace',
+    tasks: [{ capability: 'studio_reporting', task: 'Submit the complete review.' }] };
+  const rejected = control('adjust_plan', { ...args, tasks: [{ ...args.tasks[0], id: 'invented' }] });
+  (rejected[0] as AIMessage).tool_calls![0].id = 'bad-adjust';
+  rejected[1] = new ToolMessage({ name: 'adjust_plan', tool_call_id: 'bad-adjust', status: 'error', content: 'Unexpected id.' });
+  const messages = createSupervisorMessageHandoff(supervisorHandoffContext(input), [
+    ...control('review_current', { completed: true, reason: 'Review returned.' }),
+    ...rejected, ...control('adjust_plan', args), ...control('delegate_capability', {}),
+  ]);
+  const score = scoreClosure(input, { messages, capabilityDisclosure: input.capabilityDisclosure }, example.expected);
+  assert.equal(score.passed, true);
+  assert.equal(score.adjustments, 1);
+  assert.equal(score.adjustmentAttempts, 2);
+});

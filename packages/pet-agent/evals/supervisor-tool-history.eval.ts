@@ -57,6 +57,7 @@ await Promise.all(Array.from({ length: 2 }, async () => {
           if (!this.bound) throw new Error('Model tools were not bound');
           const message = await this.bound.invoke(projected, { ...options, callbacks: [] });
           turn.calls = message.tool_calls ?? [];
+          turn.invalidCalls = message.invalid_tool_calls ?? [];
           turn.text = message.content;
           turn.usage = message.usage_metadata;
           return { generations: [{ message, text: message.text }] };

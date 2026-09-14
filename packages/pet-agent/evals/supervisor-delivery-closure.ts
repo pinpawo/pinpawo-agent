@@ -1,4 +1,4 @@
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { defineInstructionDocument } from '../src/types/capability';
 import { compileAgentRegistry } from '../src/agent/orchestrator/registry';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog';
@@ -33,13 +33,16 @@ export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorRes
   const accepted = acceptSupervisorMessageHandoff(supervisorHandoffContext(input), result.messages);
   const dispatch = result.messages.map(readCapabilityExecutionCall).find(record => record !== null);
   const actual = dispatch ? dispatch.execution.capability === 'studio_reporting' ? 'report' : 'review' : result.reply?.trim() ? 'reply' : 'none';
-  const adjustments = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan').length;
+  const adjustmentCalls = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan');
+  const successfulAdjustments = new Set(result.messages.filter(m => ToolMessage.isInstance(m)
+    && m.name === 'adjust_plan' && m.status !== 'error').map(m => (m as ToolMessage).tool_call_id));
+  const adjustments = adjustmentCalls.filter(c => c.id && successfulAdjustments.has(c.id)).length;
   const completed = input.state.plan.filter(t => t.status === 'completed');
   const reintroducedCompleted = accepted.runSupervisorState.plan.some(t => t.status === 'pending'
     && completed.some(old => old.capability === t.capability && old.task === t.task));
   return { passed: actual === expected.action && !reintroducedCompleted
       && (expected.maxAdjustments === undefined || adjustments <= expected.maxAdjustments),
-    actual, expected: expected.action, adjustments, maxAdjustments: expected.maxAdjustments, reintroducedCompleted,
+    actual, expected: expected.action, adjustments, adjustmentAttempts: adjustmentCalls.length, maxAdjustments: expected.maxAdjustments, reintroducedCompleted,
     plan: accepted.runSupervisorState.plan, reply: result.reply,
     dispatch: dispatch?.execution };
 }

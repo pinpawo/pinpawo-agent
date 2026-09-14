@@ -40,9 +40,9 @@ await Promise.all(Array.from({ length: Math.min(3, pending.length) }, async () =
         modelStarts.set(runId, Date.now());
         record({ event: 'model.start', runId, messageCount: messages[0]?.length, inputChars: JSON.stringify(messages).length });
       },
-      handleLLMEnd: (result: { generations: Array<Array<{ message?: { tool_calls?: Array<{ name: string; args: unknown }>; usage_metadata?: unknown }; generationInfo?: unknown }>> }, runId: string) => {
+      handleLLMEnd: (result: { generations: Array<Array<{ message?: { tool_calls?: Array<{ name: string; args: unknown }>; invalid_tool_calls?: unknown; usage_metadata?: unknown }; generationInfo?: unknown }>> }, runId: string) => {
         record({ event: 'model.end', runId, durationMs: Date.now() - (modelStarts.get(runId) ?? started),
-          generations: result.generations.flat().map(g => ({ toolCalls: g.message?.tool_calls, usage: g.message?.usage_metadata, info: g.generationInfo })) });
+          generations: result.generations.flat().map(g => ({ toolCalls: g.message?.tool_calls, invalidToolCalls: g.message?.invalid_tool_calls, usage: g.message?.usage_metadata, info: g.generationInfo })) });
       },
       handleLLMError: (error: Error, runId: string) => record({ event: 'model.error', runId, durationMs: Date.now() - (modelStarts.get(runId) ?? started), error: error.name }),
     }];

@@ -57,6 +57,11 @@ export function createSupervisorControlValidationMiddleware() {
   return createMiddleware({
     name: 'SupervisorControlValidation',
     wrapToolCall: async (request, handler) => {
+      // Preserve the SDK's unparsed JSON as failed input, never execute it.
+      if (typeof request.toolCall.args === 'string') {
+        return new ToolMessage({ name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error',
+          content: `Tool arguments could not be parsed as a JSON object. Correct the arguments and retry. Received: ${request.toolCall.args}` });
+      }
       try {
         return await handler(request);
       } catch (error) {
@@ -81,9 +86,18 @@ export function createSupervisorControlValidationMiddleware() {
       },
     },
     wrapModelCall: async (request, handler) => {
-      const response = await handler(request);
-      if (!AIMessage.isInstance(response) || response.invalid_tool_calls?.length) {
-        throw new Error('Supervisor must produce a valid AIMessage.');
+      let response = await handler(request);
+      if (!AIMessage.isInstance(response)) throw new Error('Supervisor must produce an AIMessage.');
+      if (response.invalid_tool_calls?.length) {
+        const invalidCalls = response.invalid_tool_calls.map(call => {
+          if (!call.name || !call.id) throw new Error('Invalid Supervisor tool call requires a name and call id.');
+          return { name: call.name, id: call.id, type: 'tool_call' as const,
+            // ToolCall types assume parsed arguments. Keep raw input only until
+            // wrapToolCall returns its error; do not fabricate usable arguments.
+            args: (call.args ?? '') as unknown as Record<string, unknown> };
+        });
+        response = new AIMessage({ ...response,
+          tool_calls: [...(response.tool_calls ?? []), ...invalidCalls], invalid_tool_calls: [] });
       }
       const calls = response.tool_calls ?? [];
       // ToolNode returns unknown-tool errors with the available names. Do not

@@ -30,6 +30,35 @@ const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   instructions: defineInstructionDocument({ content: 'Inspect and report evidence.' }),
 }] });
 
+test('malformed JSON reaches the model as tool feedback and correction delegates exactly once', async () => {
+  const invalid = (name: string, id: string) => new AIMessage({ content: '',
+    invalid_tool_calls: [{ name, id, args: '{"unfinished":', error: 'Invalid JSON', type: 'invalid_tool_call' }] });
+  const supervisor = new RecoveryModel([
+    invalid('submit_plan', 'bad-plan'),
+    call('submit_plan', { tasks: [task] }, 'plan'),
+    invalid('delegate_capability', 'bad-delegate'),
+    call('delegate_capability', {}, 'execute'),
+    invalid('review_current', 'bad-review'),
+    call('review_current', { completed: true, reason: 'Inspection returned.' }, 'review'),
+    new AIMessage('Complete.'),
+  ]);
+  const executor = new RecoveryModel([new AIMessage('Repository inspected.')]);
+  const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
+  const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+    configurable: { thread_id: 'malformed-json-recovery', registry },
+  });
+  for (const id of ['bad-plan', 'bad-delegate', 'bad-review']) {
+    const error = supervisor.inputs.flat().find(m => ToolMessage.isInstance(m) && m.tool_call_id === id);
+    assert.ok(ToolMessage.isInstance(error));
+    assert.equal(error.status, 'error');
+    assert.match(error.text, /could not be parsed/);
+  }
+  assert.equal(executor.inputs.length, 1);
+  assert.equal(readCapabilityExecutions(result.messages).length, 1);
+  assert.equal(result.runSupervisorState.plan[0].status, 'completed');
+});
+
 test('reviewing the next unexecuted task returns feedback, retains accepted work and executes only the next task', async () => {
   const tasks = [task, { ...task, task: 'Prepare the review.' }];
   const supervisor = new RecoveryModel([
@@ -56,6 +85,8 @@ test('reviewing the next unexecuted task returns feedback, retains accepted work
   const executions = readCapabilityExecutions(result.messages);
   assert.deepEqual(executions.map(e => e.execution.task), tasks.map(t => t.task));
   assert.equal(executor.inputs.length, 2);
+  assert.ok(executor.inputs[1].some(m => ToolMessage.isInstance(m) && m.text.includes('Repository inspected.')),
+    'the next executor can read the previous delivery without copying it into its task');
   assert.ok(executions.every(e => Object.keys(e.call.args).length === 0));
   const historicalCalls = supervisor.inputs.at(-1)!.flatMap(m => AIMessage.isInstance(m)
     ? (m.tool_calls ?? []).filter(c => c.name === 'delegate_capability') : []);

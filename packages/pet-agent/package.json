@@ -45,6 +45,7 @@
     "eval:flow:mock-subagent": "node --env-file=.env --import tsx/esm evals/orchestrator-flow.mock-subagent.eval.ts",
     "eval:supervisor-details": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-details.eval.ts",
     "eval:supervisor-delivery-closure": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-delivery-closure.eval.ts",
+    "eval:supervisor-tool-history": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-tool-history.eval.ts",
     "eval:supervisor-boundary": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-boundary.eval.ts",
     "eval:supervisor-plan-adjustment": "LANGCHAIN_TRACING_V2=false LANGSMITH_TRACING=false node --import tsx/esm evals/supervisor-plan-adjustment.eval.ts",
     "eval:subagent": "node --env-file-if-exists=.env --import tsx/esm evals/subagent.eval.ts",

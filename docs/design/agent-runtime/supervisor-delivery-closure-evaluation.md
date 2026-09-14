@@ -140,3 +140,65 @@ Wiki 的后续入口均出现过 `Supervisor called a tool unavailable in this i
 
 这些确定性回归覆盖 #813 已观察到的两个错误恢复分支，但不等于已重新跑过完整真实
 模型 E2E，也不证明 #815 的自主收尾决策稳定性。
+
+## 历史工具调用压力对照（2026-09-14）
+
+针对 #813 的另一假设：Supervisor 看到大量 `delegate_capability` 历史调用，是否会
+模仿这些记录而调用未提供的工具。新增独立 runner
+`packages/pet-agent/evals/supervisor-tool-history.eval.ts`，通过真实 Supervisor graph
+与本机已配置的 DeepSeek V4.1 Flash（API 模型名 `deepseek-flash`）运行合成场景。
+只模拟交付证据，不调用 Capability 执行方，也不访问真实仓库或看板。
+
+三个对照组：
+
+- baseline：仅移除新增的工具范围说明段落，保留其余当前提示词和运行时纠错机制。
+- prompt：当前生产提示词和原始历史工具消息。
+- projection：当前提示词，在模型输入边界将历史派发和结果转成只读数据消息。
+  原始执行参数、结果、call id 与元数据保留；不改 Root 状态，不转换本轮新调用或错误回执。
+  该投影仅存在于 eval helper，没有接入生产。
+
+场景包括新计划 Entry、审阅已返回且 reporting 待办的 Boundary，以及已有计划、长历史
+之后用户说“继续”的恢复 Entry。分别插入 0、40、120、300 组历史调用和结果；Boundary
+额外包含当前任务的一组真实形态合成交付。历史任务使用独立 task id，避免混入当前任务
+验收证据。每组均校验实际送入模型的历史调用数量，记录模型每轮原始调用，不能把
+Supervisor 返回后运行时生成的合法 `delegate_capability` 派发算作模型误调用。
+
+有效样本共 51 次 Supervisor invocation、99 次模型响应：
+
+| 对照 | invocation 数 | 模型误调用 delegate_capability | 其他未提供工具调用 | 正确最终交接 |
+| --- | ---: | ---: | ---: | ---: |
+| baseline | 21 | 0 | 0 | 21 |
+| prompt | 21 | 0 | 0 | 21 |
+| projection | 9 | 0 | 0 | 9 |
+
+0/40/120 组覆盖 Entry 与 Boundary，新旧提示词每个组合重复 2 次，共 24 次；300 组
+覆盖三个场景与三个方案，每个组合重复 3 次，共 27 次。projection 只与相同的 300 组
+场景比较，不把不同历史长度混在一起计算性能优劣。
+
+另观察到 6 次参数错误：5 次给 submit_plan 增加不支持的 goal，1 次给 task 增加
+不支持的 task_note。均收到框架错误反馈后在同一 invocation 自行修正并正确交接。
+这支持参数恢复路径的有效性，不构成未知工具恢复的真实模型验证。
+
+**结论：本次未复现工具名误用。** 不能将历史数量当作已确认根因，也不能认定提示词
+已消除风险；旧提示词同样通过。没有观察到足以支持生产消息投影改造的收益，暂时保留
+明确的工具范围提示与错误恢复。合成历史内容较规整，不能代替现场完整 checkpoint 中
+交错的计划、重试、错误反馈、能力文档与业务上下文。下一步若真实 trace 再次出现误用，
+应先脱敏提取该轮完整输入，作为固定反例再比较投影方案。
+
+投影若后续采用，应仅改变 Supervisor 的模型视图，保留 Root 的标准工具协议记录作为
+执行、验收、回放依据；保留执行状态、task/delegation 身份及交付正文，避免为消除模仿
+而丢失验收证据。本轮并未证明投影对 interrupt、复杂混合工具消息与完整 Studio 生命周期
+的生产兼容性，不据此直接接入运行时。
+
+运行方式：
+
+```sh
+npm run eval:supervisor-tool-history --workspace=@pinpawo/pet-agent
+HISTORY_COUNTS=300 HISTORY_MODES=entry,boundary,resume HISTORY_VARIANTS=baseline,prompt,projection PROMPT_EVAL_REPEATS=3 npm run eval:supervisor-tool-history --workspace=@pinpawo/pet-agent
+```
+
+支持 `PROMPT_EVAL_PROFILE_ID`、`PROMPT_EVAL_OUTPUT_DIR`；每个 runner 两路并发，
+每例 150 秒和 24 graph steps 上限，模型网络层不自动重试。结果保存完整合成首轮输入、
+输入哈希、逐轮调用、token usage、耗时及最终交接评分。该次有效结果保存在本机
+`/tmp/supervisor-tool-history-v2`、`/tmp/supervisor-tool-history-300` 和
+`/tmp/supervisor-tool-history-resume`；启动时用于校验采集链路与夹具的无效试跑不计入表格。

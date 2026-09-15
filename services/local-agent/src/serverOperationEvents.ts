@@ -38,15 +38,24 @@ function stringifyLogValue(value: unknown) {
 }
 
 export function isHumanReviewInterruptError(value: unknown): boolean {
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return false;
+    }
+  }
   if (!value || typeof value !== 'object') {
     return false;
   }
   const record = value as Record<string, unknown>;
-  const interrupts = Array.isArray(record.interrupts)
-    ? record.interrupts
-    : Array.isArray(record.__interrupt__)
-      ? record.__interrupt__
-      : [];
+  const interrupts = Array.isArray(value)
+    ? value
+    : Array.isArray(record.interrupts)
+      ? record.interrupts
+      : Array.isArray(record.__interrupt__)
+        ? record.__interrupt__
+        : [];
   return interrupts.some((interrupt) => {
     const payload = interrupt && typeof interrupt === 'object' && 'value' in interrupt
       ? (interrupt as { value?: unknown }).value

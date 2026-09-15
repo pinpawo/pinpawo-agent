@@ -14,9 +14,9 @@ test('builds an expanded current plan when terminal space allows', () => {
   assert.deepEqual(buildCurrentPlanPanel(plan, { width: 100, terminalHeight: 40 }), {
     content: [
       '当前计划 · 2/3',
-      '  ✓ general · Understand request',
-      '  → explore · Inspect code',
-      '  · browser · Verify result',
+      '  ✓ Understand request',
+      '  → Inspect code',
+      '  · Verify result',
     ].join('\n'),
     height: 4,
     mode: 'expanded',
@@ -43,7 +43,7 @@ test('temporarily compacts the plan while an overlay is open', () => {
   });
   assert.equal(panel.mode, 'compact');
   assert.equal(panel.height, 1);
-  assert.match(panel.content, /^计划 2\/3 · → explore/);
+  assert.match(panel.content, /^计划 2\/3 · → Inspect code/);
 });
 
 test('keeps the plan visible between delegations when no item is active', () => {
@@ -107,10 +107,10 @@ test('wraps complete plan tasks instead of truncating them', () => {
   assert.equal(panel.mode, 'expanded');
   assert.ok(panel.height > 3);
   assert.doesNotMatch(panel.content, /…/);
-  assert.match(panel.content, /losing any/);
-  assert.match(panel.content, /details/);
-  assert.match(panel.content, /runni\s+ng/);
-  assert.match(panel.content, /application/);
+  const displayed = panel.content.replace(/\s/g, '');
+  for (const item of detailedPlan.items) {
+    assert.ok(displayed.includes(item.task.replace(/\s/g, '')));
+  }
 });
 
 test('a taller terminal reveals more of a long plan', () => {
@@ -135,4 +135,12 @@ test('hides the panel after the canonical plan is cleared', () => {
     height: 0,
     mode: 'hidden',
   });
+});
+
+
+test('hides completed plans without requiring the saved plan to be cleared', () => {
+  const completed = { items: plan.items.map(item => ({ ...item, status: 'completed' as const })) };
+  for (const overlayOpen of [false, true]) {
+    assert.equal(buildCurrentPlanPanel(completed, { width: 100, terminalHeight: 40, overlayOpen }).mode, 'hidden');
+  }
 });

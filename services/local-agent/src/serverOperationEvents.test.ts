@@ -13,6 +13,24 @@ import {
 } from './serverOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
 import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { buildReviewSpec } from '@pinpawo/pet-agent';
+
+test('serialized review batches are interrupted and hide internal error JSON', () => {
+  const batch = [{ id: 'interrupt', value: { kind: 'review_batch', reviews: [{
+    kind: 'review', review: buildReviewSpec({ id: 'write', view: { kind: 'plain', body: 'Write?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] }),
+  }] } }];
+  for (const error of [batch, JSON.stringify(batch), { interrupts: batch }, { __interrupt__: batch }]) {
+    const event = emitLocalServerToolOperationEvent({
+      run: createInflightOperationRun('request'),
+      payload: { event: 'on_tool_error', name: 'delegate_capability', error },
+      emit: () => {}, log: () => {},
+    });
+    assert.equal(event.phase, 'interrupted');
+    assert.equal(event.raw?.error, undefined);
+  }
+  assert.equal(isHumanReviewInterruptError('[{"value":{"kind":"review_batch","reviews":[]}}]'), false);
+  assert.equal(isHumanReviewInterruptError('ordinary tool error'), false);
+});
 
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
   createBashToolkit(),

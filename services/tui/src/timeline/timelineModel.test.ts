@@ -45,6 +45,22 @@ const assistant: AgentTimelineEntry = {
   status: 'completed',
 };
 
+test('live delegation shows only its objective and disappears after the run ends', () => {
+  const session: AgentSession = {
+    sessionId: 'session', kind: 'chat', pendingInterrupt: null,
+    activeRun: { requestId: 'request', state: 'running', activity: 'using_tool' },
+    currentPlan: { items: [{ id: 'task', capability: 'general', task: 'Verify contract extraction', status: 'active' }] },
+    timeline: [{ ...operation, kind: 'runtime.delegate_capability', title: 'delegate_capability',
+      raw: { input: { briefing: 'Long private execution instructions' } } }],
+  };
+  assert.equal(formatLiveSession(session), 'Verify contract extraction');
+  assert.equal(formatLiveSession({ ...session, activeRun: null }), 'idle');
+  assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
+  assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
+    ...operation, id: 'inner', title: 'Read file',
+  }] }), '  ◌ Read file（开始）');
+});
+
 test('timeline model commits only the settled ordered prefix', () => {
   assert.equal(isSettledTimelineEntry(user), true);
   assert.equal(isSettledTimelineEntry(operation), false);

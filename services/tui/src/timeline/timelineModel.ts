@@ -7,6 +7,7 @@ import { sessionActorLabel } from '../session/sessionDisplay';
 import { LOADING_CELL_WIDTH } from '../visuals/loadingCells';
 import { buildMessageDisplayLines } from './messageDisplay';
 import { buildOperationDisplayLines } from './operationDisplay';
+import { truncateTerminalLine } from '../text/terminalText';
 
 const OPERATION_LINE_PREFIX_WIDTH = 4;
 export type TimelineDisplayLine = {
@@ -112,7 +113,8 @@ export function formatLiveSession(
   session: AgentSession,
   maxCodePoints = 80,
 ) {
-  const pending = findLastPendingEntry(session.timeline);
+  const run = session.activeRun;
+  const pending = run ? findLastPendingEntry(session.timeline) : undefined;
   if (pending) {
     if (pending.type === 'message') {
       return formatLiveMessageTail(
@@ -121,9 +123,14 @@ export function formatLiveSession(
         sessionActorLabel(session),
       );
     }
+    if (pending.operationSource?.toolName === 'delegate_capability'
+      || pending.kind === 'runtime.delegate_capability') {
+      const current = session.currentPlan?.items.find(item => item.status === 'active')
+        ?? session.currentPlan?.items.find(item => item.status === 'pending');
+      return current ? truncateTerminalLine(singleLine(current.task), maxCodePoints) : 'using tool';
+    }
     return singleLine(formatTimelineEntry(pending));
   }
-  const run = session.activeRun;
   if (!run) {
     if (session.pendingInterrupt?.payload.kind === 'human_review') {
       return 'waiting for review';

@@ -4,6 +4,7 @@ import {
   BoxRenderable,
   dim,
   fg,
+  parseColor,
   StyledText,
   TextAttributes,
   TextRenderable,
@@ -19,6 +20,8 @@ import type {
 import {
   WELCOME_LOGO_HEIGHT,
   WELCOME_LOGO_WIDTH,
+  WELCOME_PAD_COLUMNS,
+  WELCOME_PAD_ROWS,
 } from '../welcome/welcomeModel';
 import {
   countSettledTimelinePrefix,
@@ -34,10 +37,11 @@ import {
 import { subagentDisplayText } from './messageDisplay';
 
 const WELCOME_COLOR = '#69c0c8';
+const WELCOME_BACKGROUND = '#22272e';
 const WELCOME_MUTED_COLOR = '#789da3';
 const WELCOME_STATUS_COLOR = '#7fcf9b';
 const WELCOME_TITLE_COLOR = '#efa6ca';
-const USER_MESSAGE_BACKGROUND = '#303842';
+const USER_MESSAGE_BACKGROUND = '#272c33';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
 const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
 const ASSISTANT_LABEL_COLOR = '#69c0c8';
@@ -347,34 +351,41 @@ export class TimelineScrollback {
 }
 
 function styleWelcomeLine(line: string, row: number) {
-  if (line.startsWith('╭') || line.startsWith('╰')) {
-    return new StyledText([dim(fg(WELCOME_MUTED_COLOR)(line))]);
-  }
-  if (line.startsWith('│ ') && line.endsWith(' │')) {
-    return new StyledText([
-      dim(fg(WELCOME_MUTED_COLOR)('│ ')),
-      ...styleWelcomeContent(line.slice(2, -2), row - 1),
-      dim(fg(WELCOME_MUTED_COLOR)(' │')),
-    ]);
-  }
-  return new StyledText(styleWelcomeContent(line, row));
+  return new StyledText(
+    styleWelcomeContent(line, row).map(withWelcomeBackground),
+  );
+}
+
+/**
+ * The welcome block has no drawn border: a shared background is what separates
+ * it from the transcript, so every chunk that does not set its own background
+ * inherits it.
+ */
+function withWelcomeBackground(chunk: TextChunk): TextChunk {
+  return chunk.bg ? chunk : { ...chunk, bg: parseColor(WELCOME_BACKGROUND) };
 }
 
 function styleWelcomeContent(line: string, row: number) {
   const chunks: TextChunk[] = [];
   let remainder = line;
-  if (row < WELCOME_LOGO_HEIGHT) {
-    const logo = line.slice(0, WELCOME_LOGO_WIDTH);
-    chunks.push(...logo
-      .split(/(█+)/)
-      .filter(Boolean)
-      .map((value) => value[0] === '█'
-        ? bg(WELCOME_COLOR)(' '.repeat(value.length))
-        : fg(WELCOME_COLOR)(value)));
-    remainder = line.slice(WELCOME_LOGO_WIDTH);
+  const logoEnd = WELCOME_PAD_COLUMNS + WELCOME_LOGO_WIDTH;
+  if (row >= WELCOME_PAD_ROWS && row < WELCOME_PAD_ROWS + WELCOME_LOGO_HEIGHT) {
+    const logo = line.slice(0, logoEnd);
+    chunks.push(...styleWelcomeLogo(logo));
+    remainder = line.slice(logoEnd);
   }
   chunks.push(...styleWelcomeText(remainder));
   return chunks;
+}
+
+/** The paw is solid pixels, so each run is painted as filled cells. */
+function styleWelcomeLogo(logo: string): TextChunk[] {
+  return logo
+    .split(/(█+)/)
+    .filter(Boolean)
+    .map((value) => value[0] === '█'
+      ? bg(WELCOME_COLOR)(' '.repeat(value.length))
+      : fg(WELCOME_COLOR)(value));
 }
 
 function styleWelcomeText(text: string): TextChunk[] {
@@ -692,15 +703,17 @@ function lineStyle(line: TimelineDisplayLine): {
   bg?: string;
 } {
   switch (line.tone) {
+    // Timestamps are wayfinding, not content: dim keeps them legible without
+    // competing with the message they head.
     case 'user-label':
       return {
-        attributes: TextAttributes.BOLD,
+        attributes: TextAttributes.DIM,
         fg: USER_MESSAGE_LABEL_COLOR,
         bg: USER_MESSAGE_BACKGROUND,
       };
     case 'assistant-label':
       return {
-        attributes: TextAttributes.BOLD,
+        attributes: TextAttributes.DIM,
         fg: ASSISTANT_LABEL_COLOR,
       };
     case 'user':

@@ -175,6 +175,9 @@ import { buildLoadingCellLine } from './visuals/loadingCells';
 import { buildWelcomeLines } from './welcome/welcomeModel';
 
 const launchOptions = parseTuiLaunchOptions(process.argv.slice(2));
+/** Shared with the welcome block: grey ground replaces the drawn borders. */
+const COMPOSER_BACKGROUND = '#22272e';
+
 const { demo, smoke } = launchOptions;
 
 if (launchOptions.showVersion) {
@@ -233,10 +236,13 @@ const composerFrame = new BoxRenderable(renderer, {
   id: 'composer-frame',
   width: '100%',
   height: 5,
-  border: true,
-  paddingLeft: 1,
-  paddingRight: 1,
-  backgroundColor: RGBA.defaultBackground(),
+  // No drawn border: the composer is separated from the transcript by its own
+  // background, and the padding keeps the row geometry the border used to own.
+  paddingTop: 1,
+  paddingBottom: 1,
+  paddingLeft: 2,
+  paddingRight: 2,
+  backgroundColor: COMPOSER_BACKGROUND,
 });
 const status = new TextRenderable(renderer, {
   id: 'status',
@@ -361,8 +367,8 @@ const composer = new TextareaRenderable(renderer, {
   id: 'composer',
   width: '100%',
   height: '100%',
-  backgroundColor: RGBA.defaultBackground(),
-  focusedBackgroundColor: RGBA.defaultBackground(),
+  backgroundColor: COMPOSER_BACKGROUND,
+  focusedBackgroundColor: COMPOSER_BACKGROUND,
   syntaxStyle: composerDecorationStyle,
   placeholder: COMPOSER_PLACEHOLDER,
   keyBindings: COMPOSER_KEY_BINDINGS,
@@ -733,9 +739,8 @@ function syncComposerLayout() {
       planHeight: currentPlan.height,
     },
   );
-  composerFrame.border = commandOverlay.phase === 'palette'
-    ? ['top']
-    : true;
+  composerFrame.paddingTop = commandOverlay.phase === 'palette' ? 0 : 1;
+  composerFrame.paddingBottom = commandOverlay.phase === 'palette' ? 0 : 1;
   composerFrame.height = layout.frameHeight;
   header.height = layout.headerHeight;
   live.height = layout.liveHeight;

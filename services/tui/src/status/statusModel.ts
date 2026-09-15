@@ -142,18 +142,32 @@ export function formatUsage(session: AgentSession) {
       : 'in/out: –/–';
   }
   const latestInput = usage.latestInputTokens;
-  const compactionRemaining = latestInput !== undefined && contextCompactionWatermarkTokens
-    ? Math.max(0, contextCompactionWatermarkTokens - latestInput)
-    : null;
-  const contextRemaining = latestInput !== undefined && contextWindow
-    ? Math.max(0, contextWindow - latestInput)
-    : null;
+  const compactRemainingPercent = remainingPercent(
+    latestInput,
+    contextCompactionWatermarkTokens,
+  );
+  const contextRemainingPercent = remainingPercent(latestInput, contextWindow);
   return [
     `in/out: ${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
-    ...(compactionRemaining !== null
-      ? [`compact in: ${formatCount(compactionRemaining)}`]
-      : contextRemaining !== null ? [`context: ${formatCount(contextRemaining)} left`] : []),
+    ...(compactRemainingPercent !== null
+      ? [`compact: ${compactRemainingPercent}% left`]
+      : contextRemainingPercent !== null
+        ? [`ctx: ${contextRemainingPercent}% left`]
+        : []),
   ].join(' · ');
+}
+
+/**
+ * Headroom before a budget is reached, as a percentage. Absolute token counts
+ * read as "used" next to the cumulative in/out totals, so both status variants
+ * report the remaining share instead.
+ */
+function remainingPercent(
+  latestInput: number | undefined,
+  budget: number | undefined,
+) {
+  if (latestInput === undefined || !budget) return null;
+  return Math.max(0, Math.round((1 - latestInput / budget) * 100));
 }
 
 function compactPath(path: string) {
@@ -166,24 +180,15 @@ function formatCount(value: number) {
   return COUNT_FORMATTER.format(Math.max(0, Math.round(value)));
 }
 
+/**
+ * Narrow-width usage. Both variants now report the same remaining percentage;
+ * only the no-usage case differs, where the wide line can still afford to name
+ * the context window.
+ */
 function formatCompactUsage(session: AgentSession) {
   const usage = session.sessionTokenUsage ?? session.tokenUsage;
-  const contextWindow = usage?.contextWindow ?? session.runtime?.contextWindow;
-  const contextCompactionWatermarkTokens = session.runtime?.contextCompactionWatermarkTokens;
   if (!usage) return 'in/out: –/–';
-  const latestInput = usage.latestInputTokens;
-  const compactRemainingPercent = latestInput !== undefined && contextCompactionWatermarkTokens
-    ? Math.max(0, Math.round((1 - latestInput / contextCompactionWatermarkTokens) * 100))
-    : null;
-  const contextRemainingPercent = latestInput !== undefined && contextWindow
-    ? Math.max(0, Math.round((1 - latestInput / contextWindow) * 100))
-    : null;
-  return [
-    `in/out: ${formatCount(usage.inputTokens)}/${formatCount(usage.outputTokens)}`,
-    ...(compactRemainingPercent !== null
-      ? [`compact: ${compactRemainingPercent}% left`]
-      : contextRemainingPercent !== null ? [`ctx: ${contextRemainingPercent}% left`] : []),
-  ].join(' · ');
+  return formatUsage(session);
 }
 
 function displayWidth(segments: string[]) {

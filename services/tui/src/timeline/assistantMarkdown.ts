@@ -8,6 +8,10 @@ import {
   type RenderContext,
 } from '@opentui/core';
 
+/** Shared ground for blocks that used to be marked by a drawn left rule. */
+const MARKDOWN_BLOCK_BACKGROUND = '#272c33';
+const MARKDOWN_BLOCK_INDENT = 2;
+
 export type AssistantMarkdownSurface = {
   container: BoxRenderable;
   markdown: MarkdownRenderable;
@@ -44,14 +48,13 @@ export function createAssistantMarkdownSurface(
     flexDirection: 'row',
     flexShrink: 0,
   });
-  container.add(new TextRenderable(context, {
+  // A blank gutter, not a rule: the old '| ' marker had height 1, so it drew a
+  // bar beside the first line only and read as stray punctuation. The width is
+  // what aligns agent text with the user message gutter.
+  container.add(new BoxRenderable(context, {
     id: `${options.id}:gutter`,
-    width: 2,
-    height: 1,
+    width: MARKDOWN_BLOCK_INDENT,
     flexShrink: 0,
-    content: '| ',
-    fg: '#5fd75f',
-    attributes: TextAttributes.DIM,
   }));
 
   let renderedNodeSequence = 0;
@@ -157,9 +160,9 @@ function createCodeBlock(
     width: '100%',
     flexDirection: 'column',
     flexShrink: 0,
-    border: ['left'],
-    borderColor: '#4f7f86',
-    paddingLeft: 1,
+    // Grey ground instead of a drawn rule, matching blockquotes.
+    backgroundColor: MARKDOWN_BLOCK_BACKGROUND,
+    paddingLeft: MARKDOWN_BLOCK_INDENT,
   });
   if (code.language?.trim()) {
     root.add(new TextRenderable(context, {
@@ -194,9 +197,10 @@ function createBlockquote(
     width: '100%',
     flexDirection: 'column',
     flexShrink: 0,
-    border: ['left'],
-    borderColor: '#666666',
-    paddingLeft: 1,
+    // Grey ground instead of a drawn rule: the transcript separates blocks by
+    // background, so a lone left border reads as stray punctuation.
+    backgroundColor: MARKDOWN_BLOCK_BACKGROUND,
+    paddingLeft: MARKDOWN_BLOCK_INDENT,
   });
   text.split('\n').forEach((line, index) => {
     root.add(new TextRenderable(context, {

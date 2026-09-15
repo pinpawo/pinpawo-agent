@@ -6,21 +6,31 @@ import { formatRuntimeModel } from '../status/statusModel';
 import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
 
+/**
+ * Pixel-art paw print. One square pixel is two columns wide because terminal
+ * cells are twice as tall as they are wide, so every run starts on an even
+ * column and spans an even width. Square corners only: half-block bevels read
+ * as mush at this size.
+ */
 const PAW_LINES = [
-  '       ████   ████       ',
-  '      ██████ ██████      ',
-  '  ████ ████   ████ ████  ',
-  ' ██████           ██████ ',
-  '  ████   ███████   ████  ',
-  '       ███████████       ',
-  '      █████████████      ',
-  '      █████████████      ',
-  '       ███████████       ',
-  '         ███████         ',
+  '  ██    ██  ',
+  '██        ██',
+  '            ',
+  '  ████████  ',
+  '████████████',
+  '  ████████  ',
 ] as const;
 
 export const WELCOME_LOGO_HEIGHT = PAW_LINES.length;
 export const WELCOME_LOGO_WIDTH = terminalBlockWidth(PAW_LINES);
+
+/**
+ * The welcome block is separated from the transcript by a shared background
+ * rather than a drawn border, so it reserves one blank row and two blank
+ * columns on each side as the visual gutter.
+ */
+export const WELCOME_PAD_ROWS = 1;
+export const WELCOME_PAD_COLUMNS = 2;
 
 export function buildWelcomeLines(input: {
   session: AgentSession;
@@ -30,8 +40,8 @@ export function buildWelcomeLines(input: {
   hostMetadata?: LocalHostMetadata | null;
 }) {
   const width = Math.max(1, Math.floor(input.width));
-  const bordered = width >= 6;
-  const contentWidth = bordered ? width - 4 : width;
+  const padded = width >= WELCOME_PAD_COLUMNS * 2 + 2;
+  const contentWidth = padded ? width - WELCOME_PAD_COLUMNS * 2 : width;
   const actor = sessionActorLabel(input.session);
   const model = formatRuntimeModel(input.session) || 'model loading';
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
@@ -73,11 +83,15 @@ export function buildWelcomeLines(input: {
     ...shortcuts,
     '',
   ].map((line) => truncateTerminalLine(line, contentWidth));
-  if (!bordered) return content;
+  if (!padded) return content;
+  const gutter = ' '.repeat(WELCOME_PAD_COLUMNS);
+  const blankRow = ' '.repeat(width);
   return [
-    `╭${'─'.repeat(width - 2)}╮`,
-    ...content.map((line) => `│ ${padTerminalLine(line, contentWidth)} │`),
-    `╰${'─'.repeat(width - 2)}╯`,
+    ...Array<string>(WELCOME_PAD_ROWS).fill(blankRow),
+    ...content.map(
+      (line) => `${gutter}${padTerminalLine(line, contentWidth)}${gutter}`,
+    ),
+    ...Array<string>(WELCOME_PAD_ROWS).fill(blankRow),
     '',
   ];
 }

@@ -106,7 +106,7 @@ test('lifecycle composition accepts an isolated resumable checkpoint for require
     finalState: {
       messages: [retainedAnnounce],
       runSupervisorState: { goal: 'check staging deployment', plan: [{
-        id: 'task-1', capability: 'workspace_analysis', task: 'check staging deployment', status: 'pending',
+        id: 'task-1', capability: 'workspace_analysis', objective: 'check staging deployment', status: 'pending',
       }] },
       runIterationCount: 0,
     },

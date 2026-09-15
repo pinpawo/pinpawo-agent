@@ -107,8 +107,8 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
       id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
     state: { goal: null, plan: [
-      { id: 'task-1', capability: 'browser', task: '确认浏览器可用', status: 'pending' },
-      { id: 'task-2', capability: 'browser', task: '浏览相关内容', status: 'pending' },
+      { id: 'task-1', capability: 'browser', objective: '确认浏览器可用', status: 'pending' },
+      { id: 'task-2', capability: 'browser', objective: '浏览相关内容', status: 'pending' },
     ] },
     capabilityDisclosure: plannerDisclosure,
   } satisfies RunSupervisorInput, disclosedDocuments, routingManifest);
@@ -135,7 +135,7 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
     }].map((attempt) => createDeliveryResult({
       id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
-    state: { goal: null, plan: [{ id: 'task-1', capability: 'browser', task: '确认浏览器可用', status: 'pending' }] },
+    state: { goal: null, plan: [{ id: 'task-1', capability: 'browser', objective: '确认浏览器可用', status: 'pending' }] },
     capabilityDisclosure: plannerDisclosure,
   } satisfies RunSupervisorInput, disclosedDocuments, routingManifest);
 

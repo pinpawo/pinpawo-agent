@@ -43,7 +43,7 @@ const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? [
 assert.ok([...selected].every((name) => cases.some((scenario) => scenario.name === name)), 'Unknown EVAL_CASES entry.');
 for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
   const userRequest = scenario.goal ?? goal;
-  const remainingPlan = scenario.name === 'entry' ? [] : [{ capability: 'general', task: 'Publish the findings.' }];
+  const remainingPlan = scenario.name === 'entry' ? [] : [{ capability: 'general', objective: 'Publish the findings.' }];
   const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest, freshUserInput: scenario.name !== 'autonomous',
     evidence: scenario.evidence,
     task: scenario.name === 'entry' ? undefined : 'Inspect the example/old repository.', remaining: remainingPlan });

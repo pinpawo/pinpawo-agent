@@ -114,10 +114,10 @@ function buildScriptedSupervisorRunner() {
           name: 'submit_plan', args: {
             tasks: [{
               capability: 'explore',
-              task: objective,
+              objective: objective,
             }, {
               capability: 'code_modify',
-              task: '根据调查结论重构 auth 模块',
+              objective: '根据调查结论重构 auth 模块',
             }]
           }
         };
@@ -135,7 +135,7 @@ function buildScriptedSupervisorRunner() {
         input.messages.filter((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability')
           .map((message) => String(message.content)).join('\n'),
       );
-      const objective = input.state.plan.find((task) => task.status === 'pending')?.task ?? '';
+      const objective = input.state.plan.find((task) => task.status === 'pending')?.objective ?? '';
       plannedObjectives.push(objective);
       selectedCapabilityNames.push('code_modify');
       return {

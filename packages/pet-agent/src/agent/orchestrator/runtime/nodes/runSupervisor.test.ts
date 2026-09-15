@@ -22,7 +22,7 @@ const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   instructions: defineInstructionDocument({ content: 'Execute the requested task.' }),
 }] });
 const options = { configurable: { registry } };
-const tasks = [{ capability: 'general', task: 'Prepare the document.' }, { capability: 'general', task: 'Publish it.' }];
+const tasks = [{ capability: 'general', objective: 'Prepare the document.' }, { capability: 'general', objective: 'Publish it.' }];
 function state(): OrchestratorStateType {
   return { ...buildRunStateReset(), runId: 'r1', traceId: 't1', runUserRequest: 'Prepare and publish.',
     runSupervisorState: { goal: null, plan: [] },
@@ -65,7 +65,7 @@ test('control handoff goes straight to Capability with separate main and work re
   const next = apply(input, command);
   assert.deepEqual(command.goto, ['capability']);
   assert.equal(next.runSupervisorState.plan[0].status, 'pending');
-  assert.equal(readCapabilityCall(next).task, tasks[0].task);
+  assert.equal(readCapabilityCall(next).task, tasks[0].objective);
   assert.equal(queryAgentMessages(next.messages).supervisor(next.runId).select().messages.length, 2);
   for (const key of ['proposal', 'pendingCall', 'nextAttempt', 'activeDelegation', 'messages', 'run']) {
     assert.equal(key in next.runSupervisorState, false);
@@ -78,7 +78,7 @@ test('review accepts only current task and dispatches the next without another S
   const next = apply(input, command);
   assert.deepEqual(command.goto, ['capability']);
   assert.deepEqual(next.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
-  assert.equal(readCapabilityCall(next).task, tasks[1].task);
+  assert.equal(readCapabilityCall(next).task, tasks[1].objective);
   assert.ok(next.messages.includes(input.messages.at(-1)!));
 });
 
@@ -89,7 +89,7 @@ test('retry derives same-run execution identity and carries feedback in the actu
   const previous = input.messages.filter((m) => AIMessage.isInstance(m) && m.tool_calls?.[0]?.name === 'delegate_capability').at(-1) as AIMessage;
   assert.equal(call.delegationId, (input.messages.at(-1) as ToolMessage).artifact.delegationId);
   assert.equal(call.mode, 'continue');
-  assert.equal(JSON.parse(call.briefing).feedback, 'Verify the document.');
+  assert.equal(call.briefing, 'Execute the current objective.\n\nReview feedback:\nVerify the document.');
 });
 
 test('accepted A and pending B survive an answer and new run without a continuation object', async () => {
@@ -100,7 +100,7 @@ test('accepted A and pending B survive an answer and new run without a continuat
   assert.deepEqual(resumed.runSupervisorState.plan.map((task) => task.status), ['completed', 'pending']);
   const next = apply(resumed, await node({ name: 'review_current', args: { reason: 'Proceed with publication.' } })(
     { ...resumed, runUserRequest: 'Publish now.' }, options));
-  assert.equal(readCapabilityCall(next).task, tasks[1].task);
+  assert.equal(readCapabilityCall(next).task, tasks[1].objective);
   assert.equal(readCapabilityCall(next).mode, 'initial');
 });
 

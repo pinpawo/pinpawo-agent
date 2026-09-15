@@ -234,7 +234,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
         args: {
           tasks: [{
             capability: 'general',
-            task: readsAttachment
+            objective: readsAttachment
               ? 'read the selected attachment'
               : 'write the guarded fixture',
           }],

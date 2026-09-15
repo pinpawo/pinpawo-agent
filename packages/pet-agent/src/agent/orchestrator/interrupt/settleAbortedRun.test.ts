@@ -19,7 +19,7 @@ const pendingDelegation = {
   values: {
     runSupervisorState: {
       goal: 'Work',
-      plan: [{ id: 'task', capability: 'general', task: 'Work', status: 'pending' }],
+      plan: [{ id: 'task', capability: 'general', objective: 'Work', status: 'pending' }],
     },
   },
 };

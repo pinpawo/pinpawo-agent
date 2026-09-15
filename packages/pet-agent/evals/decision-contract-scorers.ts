@@ -30,7 +30,7 @@ export function scoreCapabilityPlanning(
     completed?: boolean;
     nextTask?: string | null;
     capabilityName?: string | null;
-    remainingPlan: Array<{ capability: string; task: string }>;
+    remainingPlan: Array<{ capability: string; objective: string }>;
   },
   expected: CapabilityPlanningExpected,
 ): DecisionContractScore[] {
@@ -64,17 +64,17 @@ export function scoreCapabilityPlanning(
   ];
 }
 
-function normalizePlan(plan: Array<{ capability: string; task: string }>) {
+function normalizePlan(plan: Array<{ capability: string; objective: string }>) {
   return plan.map((item) => ({
     capability: item.capability.trim(),
-    task: item.task.trim().replace(/\s+/g, ' '),
+    objective: item.objective.trim().replace(/\s+/g, ' '),
   }));
 }
 
 export function derivePlanningMetrics(
   input: CapabilityPlanningInput,
-  outputPlan: Array<{ capability: string; task: string }>,
-  materializedTask: { capability: string; task: string } | null = null,
+  outputPlan: Array<{ capability: string; objective: string }>,
+  materializedTask: { capability: string; objective: string } | null = null,
 ): { planEffect: CapabilityPlanningExpected['planEffect']; rubberStamp: boolean } {
   const before = normalizePlan(input.remainingPlan ?? []);
   const after = normalizePlan([

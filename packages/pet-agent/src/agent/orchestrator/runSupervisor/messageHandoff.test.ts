@@ -17,8 +17,8 @@ import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
 
-const taskA = { capability: 'general', task: 'Inspect A.' };
-const taskB = { capability: 'general', task: 'Inspect B.' };
+const taskA = { capability: 'general', objective: 'Inspect A.' };
+const taskB = { capability: 'general', objective: 'Inspect B.' };
 function context(overrides: Partial<SupervisorHandoffContext> = {}): SupervisorHandoffContext {
   return { state: { goal: null, plan: [] }, runId: 'r1', traceId: 't1', userRequest: 'Inspect the project.',
     mode: 'entry', hasNewUserInput: true, allowedCapabilityNames: ['general'], messages: [], ...overrides };
@@ -27,10 +27,10 @@ function control(name: string, args: Record<string, unknown>, id: string) {
   return new AIMessage({ id: `request:${id}`, content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
 }
 function dispatchResult(input: SupervisorHandoffContext, id = 'execute-first') {
-  return { runSupervisorState: input.state, messages: supervisorWorkMessages(input, [control('delegate_capability', {}, id)]) };
+  return { runSupervisorState: input.state, messages: supervisorWorkMessages(input, [control('delegate_capability', { briefing: 'Execute the current objective.' }, id)]) };
 }
 function resultFor(input: SupervisorHandoffContext, dispatch: AIMessage) {
-  const execution = buildCapabilityExecutionInput(input);
+  const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' });
   const metadata = getAgentMessageMetadata(dispatch);
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
     artifact: execution, content: JSON.stringify({ status: 'returned', delivery: {
@@ -67,25 +67,25 @@ test('acceptance uses the latest returned delivery and ignores mismatched or pri
   const dispatch = retry.messages.at(-1) as AIMessage;
   for (const status of ['missing_deliverable', 'paused']) {
     const failure = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
-      artifact: buildCapabilityExecutionInput(first), content: JSON.stringify({ status, delivery: null, artifacts: [] }),
+      artifact: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }), content: JSON.stringify({ status, delivery: null, artifacts: [] }),
     }), getAgentMessageMetadata(dispatch));
     const input = { ...first, messages: [...first.messages, ...retry.messages, failure] };
     assert.throws(() => reviewCurrent(input, { completed: true, reason: 'Old evidence' }), /returned delivery/);
-    assert.ok(buildCapabilityExecutionInput(input));
+    assert.ok(buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }));
   }
 });
 
 test('same-run retries retain execution scope; new runs start a new delegation', () => {
   const input = returned();
   const before = readCapabilityExecutions(input.messages)[0].execution;
-  const retry = buildCapabilityExecutionInput(input, 'Missing evidence');
-  const fresh = buildCapabilityExecutionInput({ ...input, runId: 'r2' }, 'Missing evidence');
+  const retry = buildCapabilityExecutionInput(input, { briefing: 'Continue work.' }, 'Missing evidence');
+  const fresh = buildCapabilityExecutionInput({ ...input, runId: 'r2' }, { briefing: 'Continue work.' }, 'Missing evidence');
   assert.equal(retry.mode, 'continue');
   assert.equal(retry.delegationId, before.delegationId);
   assert.equal(fresh.mode, 'initial');
   assert.notEqual(fresh.delegationId, before.delegationId);
   assert.equal(fresh.briefing, retry.briefing);
-  assert.equal(JSON.parse(retry.briefing).feedback, 'Missing evidence');
+  assert.equal(retry.briefing, 'Continue work.\n\nReview feedback:\nMissing evidence');
 });
 
 test('adjustment preserves completed work, supersedes replaced executions and checks goal changes', () => {
@@ -104,7 +104,7 @@ test('adjustment preserves completed work, supersedes replaced executions and ch
 });
 
 test('work projection scopes delegation IDs per run without changing arguments or the original message', () => {
-  const request = control('delegate_capability', {}, 'native-call');
+  const request = control('delegate_capability', { briefing: 'Execute the current objective.' }, 'native-call');
   const projected = supervisorWorkMessages(context(), [request]);
   const projectedCall = (projected[0] as AIMessage).tool_calls![0];
   assert.equal(projectedCall.id, identity('call', context().runId, 'native-call'));
@@ -143,7 +143,7 @@ test('native parent handoff carries updated plan and feedback without a fake res
   const input = returned();
   const { result, model } = await probe(input, [
     control('review_current', { completed: false, reason: 'Verify missing evidence' }, 'review'),
-    control('delegate_capability', {}, 'execute'),
+    control('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
   ]);
   assert.equal(model.inputs.length, 2);
   assert.equal(result.reviewFeedback, 'Verify missing evidence');
@@ -157,7 +157,7 @@ test('review then adjustment shares current state and clears feedback before nat
   const { result } = await probe(input, [
     control('review_current', { completed: true, reason: 'A verified' }, 'review'),
     control('adjust_plan', { goal: input.userRequest, reason: 'Use A evidence', currentDelegation: 'continue', tasks: [taskB] }, 'adjust'),
-    control('delegate_capability', {}, 'execute'),
+    control('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
   ]);
   assert.deepEqual(result.runSupervisorState.plan.map(t => t.status), ['completed', 'pending']);
   assert.equal(result.reviewFeedback, null);
@@ -174,7 +174,7 @@ test('correcting delegation arguments preserves the rejected delivery feedback',
   const { result, model } = await probe(returned(), [
     control('review_current', { completed: false, reason: 'Verify missing evidence' }, 'review'),
     control('delegate_capability', { taskId: 'invented' }, 'invalid'),
-    control('delegate_capability', {}, 'corrected'),
+    control('delegate_capability', { briefing: 'Execute the current objective.' }, 'corrected'),
   ]);
   assert.equal(model.inputs.length, 3);
   assert.equal(result.reviewFeedback, 'Verify missing evidence');

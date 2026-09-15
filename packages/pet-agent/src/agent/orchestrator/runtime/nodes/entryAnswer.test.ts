@@ -87,8 +87,8 @@ test('entry capture resolves the fresh request without clearing saved business p
   const input = {
     ...buildOrchestratorRunInput([new HumanMessage('继续。')], { traceId: 'new-trace' }),
     runSupervisorState: { goal: '完成两项工作', plan: [
-      { id: 'a', capability: 'general', task: 'First', status: 'completed' },
-      { id: 'b', capability: 'general', task: 'Second', status: 'pending' },
+      { id: 'a', capability: 'general', objective: 'First', status: 'completed' },
+      { id: 'b', capability: 'general', objective: 'Second', status: 'pending' },
     ] },
   } as unknown as OrchestratorStateType;
   assert.deepEqual(captureRunUserRequest(input), { runUserRequest: '继续。' });
@@ -388,7 +388,7 @@ test('root invocation context reaches direct Entry replies and final Answer with
 for (const status of ['empty', 'completed', 'superseded'] as const) {
   test(`Entry exposes the ${status} plan and rejects continue without handing off`, async () => {
     const plan = { goal: status === 'empty' ? null : 'Plan the trip.', plan: status === 'empty' ? [] : [
-      { id: 'trip', capability: 'general', task: 'Plan the trip.', status },
+      { id: 'trip', capability: 'general', objective: 'Plan the trip.', status },
     ] };
     let turns = 0;
     const model = { bindTools: (tools: Array<{ name: string }>) => {

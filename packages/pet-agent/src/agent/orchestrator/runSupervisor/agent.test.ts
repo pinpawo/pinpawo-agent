@@ -30,7 +30,7 @@ import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { parseSupervisorControl } from './testing';
 type SupervisorDelegationInput = { delegationId: string; runId: string; capability: string; task: string };
-type CapabilityPlanTask = { capability: string; task: string };
+type CapabilityPlanTask = { capability: string; objective: string };
 import {
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
@@ -218,7 +218,7 @@ class ScriptedSupervisorModel extends BaseChatModel {
       const reply = control.args.reply;
       delete control.args.reply;
       this.#followUp = reply ? new AIMessage(String(reply)) : new AIMessage({ content: '', tool_calls: [{
-        id: `${control.id}:execute`, name: 'delegate_capability', args: {}, type: 'tool_call',
+        id: `${control.id}:execute`, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' }, type: 'tool_call',
       }] });
       if (control.name === 'review_current' && control.args.completed === undefined) {
         const message = this.#followUp; this.#followUp = undefined;
@@ -317,7 +317,7 @@ function supervisorInput(
   };
   const current = overrides.currentTask;
   const plan = [...(current ? [{ id: current.delegationId, capability: current.capability,
-    task: current.task, status: 'pending' as const }] : []),
+    objective: current.task, status: 'pending' as const }] : []),
     ...(overrides.remainingPlan ?? []).map((task, i) => ({ ...task, id: `future:${i}`, status: 'pending' as const }))];
   // Historical scenario fixtures supply reports; represent their evidence as
   // the new actual call/result pair before invoking the production adapter.
@@ -355,10 +355,10 @@ function submitArgs(
   return {
     tasks: [{
       capability: capabilityName,
-      task: 'Research the repository.',
+      objective: 'Research the repository.',
     }, {
       capability: 'general',
-      task: 'Prepare the review from the findings.',
+      objective: 'Prepare the review from the findings.',
     }],
   };
 }
@@ -382,7 +382,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
     structuredOutput: {
       kind: 'plan',
       args: {
-        tasks: [{ capability: 'general', task: 'Complete trace A.' }],
+        tasks: [{ capability: 'general', objective: 'Complete trace A.' }],
       },
     },
   }, {
@@ -443,7 +443,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   });
 
   const entryState = await graph.invoke({ input: entryA }, config);
-  assert.deepEqual(commandOnly(entryState.command), { name: 'submit_plan', args: { tasks: [{ capability: 'general', task: 'Complete trace A.' }] } });
+  assert.deepEqual(commandOnly(entryState.command), { name: 'submit_plan', args: { tasks: [{ capability: 'general', objective: 'Complete trace A.' }] } });
   assert.match(model.invocations[0]?.map(readMessageText).join('\n') ?? '', /PRIOR_MAIN_CONVERSATION/);
   const boundaryInput = {
     ...boundaryA,
@@ -601,10 +601,10 @@ test('Supervisor Agent explores Capability documents and returns a compact order
     name: 'submit_plan', args: {
       tasks: [{
         capability: 'explore',
-        task: 'Research the repository.',
+        objective: 'Research the repository.',
       }, {
         capability: 'general',
-        task: 'Prepare the review from the findings.',
+        objective: 'Prepare the review from the findings.',
       }]
     }
   });
@@ -635,7 +635,7 @@ test('entry mode forms one executable task after Capability exploration', async 
         args: {
           tasks: [{
             capability: 'explore',
-            task: 'Inspect issue #473 and report the Supervisor Agent constraints.',
+            objective: 'Inspect issue #473 and report the Supervisor Agent constraints.',
           }],
         },
       },
@@ -653,7 +653,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   const decision = commandOnly(result);
   assert.ok('name' in decision && decision.name === 'submit_plan');
   assert.equal(
-    decision.args.tasks[0]?.task,
+    decision.args.tasks[0]?.objective,
     'Inspect issue #473 and report the Supervisor Agent constraints.',
   );
   assert.equal(decision.args.tasks.length, 1);
@@ -674,7 +674,7 @@ test('Supervisor accepts a detailed task beyond the legacy 500-character limit',
       args: {
         tasks: [{
           capability: 'general',
-          task: detailedTask,
+          objective: detailedTask,
         }],
       },
     },
@@ -687,7 +687,7 @@ test('Supervisor accepts a detailed task beyond the legacy 500-character limit',
     name: 'submit_plan', args: {
       tasks: [{
         capability: 'general',
-        task: detailedTask,
+        objective: detailedTask,
       }]
     }
   });
@@ -708,10 +708,10 @@ test('Supervisor accepts consecutive tasks from one Capability when the model ke
         args: {
           tasks: [{
             capability: 'general',
-            task: 'Inspect the failing release and identify the exact package boundary.',
+            objective: 'Inspect the failing release and identify the exact package boundary.',
           }, {
             capability: 'general',
-            task: 'Apply the accepted findings, verify the package, and publish it.',
+            objective: 'Apply the accepted findings, verify the package, and publish it.',
           }],
         },
       },
@@ -725,10 +725,10 @@ test('Supervisor accepts consecutive tasks from one Capability when the model ke
   assert.ok('name' in decision && decision.name === 'submit_plan');
   assert.deepEqual(decision.args.tasks, [{
     capability: 'general',
-    task: 'Inspect the failing release and identify the exact package boundary.',
+    objective: 'Inspect the failing release and identify the exact package boundary.',
   }, {
     capability: 'general',
-    task: 'Apply the accepted findings, verify the package, and publish it.',
+    objective: 'Apply the accepted findings, verify the package, and publish it.',
   }]);
 });
 
@@ -746,7 +746,7 @@ test('Supervisor receives General routing metadata without preloading its docume
       args: {
         tasks: [{
           capability: 'general',
-          task: 'Inspect and organize the requested Downloads directory.',
+          objective: 'Inspect and organize the requested Downloads directory.',
         }],
       },
     },
@@ -762,7 +762,7 @@ test('Supervisor receives General routing metadata without preloading its docume
     name: 'submit_plan', args: {
       tasks: [{
         capability: 'general',
-        task: 'Inspect and organize the requested Downloads directory.',
+        objective: 'Inspect and organize the requested Downloads directory.',
       }]
     }
   });
@@ -860,7 +860,7 @@ test('boundary projects the current lane announce into the standard model-visibl
       }))],
       remainingPlan: [{
         capability: 'general',
-        task: 'Implement the verified dependency changes.',
+        objective: 'Implement the verified dependency changes.',
       }],
     }),
   );
@@ -909,7 +909,7 @@ test('Supervisor identifies the configured default without preloading its docume
       args: {
         tasks: [{
           capability: 'kanban_planning',
-          task: 'Create a task plan on the board.',
+          objective: 'Create a task plan on the board.',
         }],
       },
     },
@@ -929,7 +929,7 @@ test('Supervisor identifies the configured default without preloading its docume
     name: 'submit_plan', args: {
       tasks: [{
         capability: 'kanban_planning',
-        task: 'Create a task plan on the board.',
+        objective: 'Create a task plan on the board.',
       }]
     }
   });
@@ -973,7 +973,7 @@ test('an explicit second details discloses a specific Capability after a miss', 
         args: {
           tasks: [{
             capability: 'explore',
-            task: 'Inspect the auth module structure and risks.',
+            objective: 'Inspect the auth module structure and risks.',
           }],
         },
       },
@@ -988,7 +988,7 @@ test('an explicit second details discloses a specific Capability after a miss', 
     name: 'submit_plan', args: {
       tasks: [{
         capability: 'explore',
-        task: 'Inspect the auth module structure and risks.',
+        objective: 'Inspect the auth module structure and risks.',
       }]
     }
   });
@@ -1030,7 +1030,7 @@ test('General is disclosed through the same details path as other Capabilities',
       args: {
         tasks: [{
           capability: 'general',
-          task: 'Complete the ordinary workspace task.',
+          objective: 'Complete the ordinary workspace task.',
         }],
       },
     },
@@ -1253,7 +1253,7 @@ test('a submitted plan submits once without a final ordinary-text reply', async 
   });
   const submittedTasks = [{
     capability: 'general',
-    task: 'Apply the requested repository change, verify it, and report the result.',
+    objective: 'Apply the requested repository change, verify it, and report the result.',
   }];
   const model = new ScriptedSupervisorModel([{
     structuredOutput: {
@@ -1342,7 +1342,7 @@ test('an unknown Capability returns feedback and a corrected plan can be committ
         args: {
           tasks: [{
             capability: 'general',
-            task: 'Research the repository and prepare the review.',
+            objective: 'Research the repository and prepare the review.',
           }],
         },
       },
@@ -1377,7 +1377,7 @@ test('invalid discovery arguments return a tool error for the calling model', as
       args: {
         tasks: [{
           capability: 'general',
-          task: 'Complete the ordinary task.',
+          objective: 'Complete the ordinary task.',
         }],
       },
     },
@@ -1445,7 +1445,7 @@ test('review rejects a plan mutation before discovery or dispatch', async (t) =>
       }))],
       remainingPlan: [{
         capability: 'general',
-        task: 'Prepare the review from the findings.',
+        objective: 'Prepare the review from the findings.',
       }],
     }),
   );
@@ -1468,7 +1468,7 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
       id: 'adjust-new-work', name: 'adjust_plan',
       args: {
         goal: 'Update the README.', reason: 'User requested the update.', currentDelegation: 'replace',
-        tasks: [{ capability: 'general', task: 'Update the README section for issue #587.' }]
+        tasks: [{ capability: 'general', objective: 'Update the README section for issue #587.' }]
       }
     }] }]);
 
@@ -1611,7 +1611,7 @@ test('boundary Supervisor exposes plan, review, adjustment and execution tools',
   });
   const tasks = [{
     capability: 'general',
-    task: 'Implement the change supported by the accepted investigation.',
+    objective: 'Implement the change supported by the accepted investigation.',
   }];
   const model = new ScriptedSupervisorModel([{
     structuredOutput: {
@@ -1701,7 +1701,7 @@ test('oversized persisted disclosure stops without dropping documents or retryin
       args: {
         tasks: [{
           capability: 'general',
-          task: 'Complete the requested work.',
+          objective: 'Complete the requested work.',
         }],
       },
     },
@@ -1849,13 +1849,13 @@ test('conflicting controls return tool errors without changing state and allow c
   }) });
   const proposal = {
     id: 'plan', name: 'submit_plan', args: {
-      tasks: [{ capability: 'general', task: 'Execute work.' }],
+      tasks: [{ capability: 'general', objective: 'Execute work.' }],
     }
   };
   for (const toolCalls of [
     [proposal, { ...proposal, id: 'second' }],
     [{ id: 'details', name: 'capability_details', args: { names: ['general'] } }, proposal],
-    [proposal, { id: 'delegate', name: 'delegate_capability', args: {} }],
+    [proposal, { id: 'delegate', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }],
   ]) {
     const model = new ScriptedSupervisorModel([{ toolCalls }, { toolCalls: [{ ...proposal, id: 'corrected', args: { ...proposal.args, reply: 'Plan ready.' } }] }]);
     const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
@@ -1864,7 +1864,7 @@ test('conflicting controls return tool errors without changing state and allow c
     assert.equal(errors.length, toolCalls.length);
     assert.ok(errors.every(m => ToolMessage.isInstance(m) && m.status === 'error'));
     assert.equal(result.runSupervisorState.plan.length, 1);
-    assert.equal(result.runSupervisorState.plan[0].task, 'Execute work.');
+    assert.equal(result.runSupervisorState.plan[0].objective, 'Execute work.');
     assert.deepEqual(result.capabilityDisclosure.disclosedCapabilityNames, []);
   }
 });
@@ -1968,7 +1968,7 @@ test('adjust_plan is available at every Boundary but changing the goal requires 
     goal: 'Inspect the corrected repository and prepare a private report.',
     reason: 'The user corrected the repository and cancelled publication.',
     currentDelegation: 'replace',
-    tasks: [{ capability: 'writer', task: 'Prepare a private report from the corrected repository.' }],
+    tasks: [{ capability: 'writer', objective: 'Prepare a private report from the corrected repository.' }],
   };
   const activeDelegation = { delegationId: 'd1', runId: 'run-test', capability: 'general', task: 'Publish the old repository.' };
   for (const scenario of ['entry', 'execution', 'user', 'autonomous'] as const) {
@@ -1978,7 +1978,7 @@ test('adjust_plan is available at every Boundary but changing the goal requires 
       messages: [new HumanMessage('Use the corrected repository; cancel publication and write a private report.')],
     });
     const invocationArgs = scenario === 'autonomous' ? { ...args, goal: input.state.goal ?? input.userRequest,
-      reason: 'Execution evidence requires a revised method.', tasks: [{ capability: 'general', task: activeDelegation.task }] } : args;
+      reason: 'Execution evidence requires a revised method.', tasks: [{ capability: 'general', objective: activeDelegation.task }] } : args;
     const model = new ScriptedSupervisorModel([{ toolCalls: [{ id: `adjust-${scenario}`, name: 'adjust_plan', args: invocationArgs }] }]);
     const invocation = createRunSupervisorAgent({ model }).invoke(input);
     if (scenario === 'user' || scenario === 'autonomous') {

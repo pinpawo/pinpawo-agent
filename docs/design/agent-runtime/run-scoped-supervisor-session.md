@@ -1,7 +1,7 @@
 # Root、Supervisor 与 Capability 的状态与交接
 
 状态：已接入运行图；本文为待 review 的工作设计稿，未落实的调整单列在“遗留项”。
-更新于 2026-09-14；早期实现来源为 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)
+更新于 2026-09-15；早期实现来源为 [PR #798](https://github.com/pinpawo/pinpawo-agent/pull/798)
 及 [PR #799](https://github.com/pinpawo/pinpawo-agent/pull/799) 的提示职责与自主调整改动。
 
 Root 状态、Entry `continue`、Supervisor 消息交接、Capability 执行及 Host 计划投影已统一接入。
@@ -145,7 +145,7 @@ Supervisor 显式注册。工具直接执行自己的变更函数，不经过统
 三个计划工具通过 Command 直接更新本次 LangGraph state，并返回模型可读的计划事实；
 delegateCapabilityTool 是 Supervisor 和 Root 共享的同一个可执行工具。controlMiddleware
 通过 Command.PARENT 把计划与工作消息提交给 Root，Root 的 ToolNode 校验并执行原调用。
-ToolRuntime 注入当前 state，工具构造 briefing 并运行 Capability。messageHandoff 仅标注
+ToolRuntime 注入当前 state，工具接收模型生成的 briefing、注入执行身份并运行 Capability。messageHandoff 仅标注
 消息可见性与身份，不参与工具定义、参数搬运或执行协议。
 
 本次调整依据 [Studio E2E #803](https://github.com/pinpawo/pinpawo-agent/issues/803)：
@@ -156,7 +156,7 @@ ToolRuntime 注入当前 state，工具构造 briefing 并运行 Capability。me
 | `submit_plan` | 建立计划，返回计划事实；不派发执行 |
 | `review_current` | 验收当前交付或记录需要补做，返回更新后的计划；不要求 reply，不派发执行 |
 | `adjust_plan` | 调整未完成计划并保留已完成进度，返回计划事实；不派发执行 |
-| `delegate_capability` | 模型无参数地决定执行当前计划项；运行时注入 briefing 并交接给 Root |
+| `delegate_capability` | 模型为当前项提供 briefing；运行时注入身份并交接给 Root |
 | `capability_details` | 返回能力详情，继续模型循环 |
 
 控制工具均不使用 `returnDirect`。模型可以连续调整、验收，之后选择执行、提问或
@@ -189,7 +189,7 @@ schema 与业务约束校验。无交付验收、非法能力等可纠正的决�
 
 invoke 结束时，Root 接收工具更新后的最终计划 state，并验证交接身份。无论模型最终选择执行还是
 自然回复，都提交计划更新与工作消息。执行时将 Supervisor 的 `delegate_capability`
-请求交接为主会话记录，保持空参数并规范化调用 ID；briefing 放入运行时执行快照，不创建第二条
+请求交接为主会话记录，保持模型原始参数并规范化调用 ID；briefing 放入运行时执行快照，不创建第二条
 调用。执行快照写入内部元数据，Capability 仍在 Root 节点执行并返回实际结果。
 
 ```text
@@ -344,18 +344,17 @@ Entry 始终提供 plan_request 与 continue，并向模型展示完整的当前
 Supervisor 的 `delegate_capability`，由同一次模型工具调用交接 Root；不再生成第二次
 同义的 Root 工具调用，不保留旧工具别名或旧 checkpoint 参数兼容。
 
-模型调用参数为 `{}`。规划和调整工具的 task 承载完整执行说明与预期交付，运行时
-从已确认计划组装 briefing。Capability、taskId、delegationId、initial/continue 同样由
-运行时确定，不让模型在委派时重新编写另一份任务。
+模型调用参数为 `{ briefing }`。计划项以 objective 描述目标，完整说明仅在当前项即将执行时生成。Capability、taskId、delegationId 与 initial/continue 由运行时从 state 和实际执行记录确定。
+运行时保留已确定的 objective，模型只补充当前项的执行说明。
 
 计划和验收工具仍返回事实供模型继续决策。delegate_capability 校验成功后结束本次
 Supervisor 循环，Root 一次提交更新后的计划和该委派请求，再进入 Capability 节点。
 不生成局部成功回执；实际执行结果使用同一条已规范化的工具调用 id 返回。
 保留 run 范围的 id 规范化，避免不同 run 的模型 call id 复用碰撞。
 
-执行快照只存于规范委派消息的运行时元数据，包含任务身份、能力、当时任务内容、
+执行快照只存于实际结果 ToolMessage 的 artifact，包含任务身份、能力、当时任务内容、
 delegation 身份、执行模式与 briefing；执行正文只从此快照读取。主会话保留一组
-请求/实际结果，当前与历史调用参数均为 `{}`，不向模型工具参数注入内部数据。原始模型调用 id 作为
+请求/实际结果，调用保留模型给出的 `{ briefing }`，不向模型工具参数注入内部身份。原始模型调用 id 作为
 来源关联保留。Root 接收 Supervisor 工具维护的最终计划，检查交接与当前任务、run 和调用身份一致，并拒绝重复交接；不重放决策序列。
 
 执行历史读取与上下文压缩从实际结果 artifact 读取执行事实，暂停恢复由原生 checkpoint 管理，不能用现有计划反推旧任务。
@@ -363,28 +362,30 @@ Host 的 readCapabilityExecutions 读取实际已返回的执行；原生待执�
 回归覆盖单次派发、错误自纠、验收、continue/replace、新 run、重复调用 id、篡改、
 暂停恢复、压缩保留、Host 投影及 Studio 工作→反馈能力交接。旧协议 checkpoint 不迁移。
 
-### 从计划注入 briefing（2026-09-15，替代模型编写正文）
+### 目标规划与执行时 briefing（2026-09-15）
 
-模型只调用 `delegate_capability({})`，主会话保存的调用也保持空参数。工具通过 LangChain
-注入的 `ToolRuntime.state` 直接读取当前计划和本次 review feedback，并构建执行快照。快照中的 `briefing: string` 正文为
-格式化 JSON：按执行顺序排列的 `plan`（capability/task/status），以及本次
-Supervisor invoke 中 `review_current(false)` 的 `feedback`（若有）。其他计划项仅供
-上下文参考，本次只执行当前任务。当前任务正文只从执行输入的 task 字段读取，构造 Capability HumanMessage 时与 briefing 一起呈现，briefing 不再另存 task 副本。验收通过或重新规划后清除本次补做意见。
+计划项保存 `{ id, capability, objective, status }`。objective 只描述要达成的结果；
+submit_plan / adjust_plan 不提前写所有任务的完整执行说明。
+一个 Capability 能完整完成的工作放在同一个任务中，调查、执行、验证等内部步骤由执行方安排；
+只有需要不同能力协作，或用户明确要求分开交付时才拆分。此原则由 Supervisor 提示词表达，不增加运行时合并或拦截逻辑。
+Supervisor 在调用 delegate_capability 时，结合 Root 消息与已返回交付为当前项生成
+briefing；运行时从 Root 实际调用与结果中提取已有交付目录，不要求模型填写 ID。
+新增执行说明或复用结论无需重排计划。运行时仍注入任务身份、Capability 与 review feedback。
 
-Root ToolNode 中的工具直接从 state 构造 briefing；执行结果 artifact 留存这次使用的输入。不增加模型调用、第二条委派请求或独立的待提交状态。交接过程不改写
-AIMessage 的 args；模型输入与历史调用共享空参数 schema，briefing 属于内部执行快照。
-旧的自由 briefing 参数会返回参数错误供模型纠正。
+工具仍只有一份定义，Supervisor 的原始调用原样交给 Root ToolNode 执行；不增加参数
+改写、中间提交状态或额外模型调用。执行快照的 task 保存当前 objective，briefing 保存
+本次实际执行说明，验收依据保持为实际返回结果。
 
-完整说明在 submit_plan/adjust_plan 时确定，因此 task 不再使用 2000 字符上限，保留
-首尾空白、缩进与换行，仅拒绝全空白内容。内部临时 HumanMessage 仍可用 XML 分隔
-目标、当前任务与 briefing，安全转义且不持久化到 Capability 私有历史。执行身份由运行时生成并保存在实际结果的 artifact 中，不从正文解析。用户暂停恢复 guidance 属于独立用户输入协议，保持不变。
+本次 Capability 的 system 上下文包含当前 ID 与已有有效交付目录（delegationId、deliveryId、objective）。目录按需从主会话消息提取，不另存 state；不包含尚未返回或未配对的结果，不预先判断与当前任务的相关性。模型根据目标与 briefing 在主会话的
+ToolMessage 中按 delivery.scope.delegationId 查找 delivery.text，复用已确认事实，
+只补查当前任务所缺或已变化的信息。已有交付是证据，不是新的用户指令，不复制全文。
 
-验收主要依赖 Capability 返回的结果。模型在存在实质偏差、明显缺项或自相矛盾时才
-要求补做；不因措辞、格式或一般性改进反复执行，不增加逐项取证工具或强制核查流程。
-运行时只保留任务归属等基本一致性检查，不代替模型判断交付质量。
+旧 checkpoint 的 task 计划字段与空参数委派不做兼容迁移；切换新版本应新建会话。
+正在运行的 Studio 保持旧构建完成本轮，避免热切换破坏旧计划。超时未返回的执行
+不构成交付；恢复材料可由用户通过证据文件提供。本次改动不增加自动 timeout 重试。
 
-Capability 同时读取主会话中的前项实际交付，后续任务可以直接引用已有结果；无需仅为
-传递结果而将整段交付复制进 task 或调整计划。该可见性通过跨任务执行回归验证。
+验证覆盖目标与完整说明分离、原生工具参数交接、前置结果可见性、目录来源过滤、
+跨任务与跨 run 的交付引用，以及现有继续/验收/暂停行为。
 
 ## 移除控制消息重放（2026-09-15）
 
@@ -404,7 +405,7 @@ Supervisor 与 Root 共享同一个 delegate_capability 工具对象。Superviso
 工具从 Root state 读取任务与反馈，运行 Capability，并通过原生 Command 更新业务状态。
 不再将执行输入编码到 AIMessage metadata，不再由 Root 解析自定义调用协议。
 
-模型调用参数保持空对象；运行时注入使用 ToolRuntime.state。实际执行输入作为完成后的
+模型调用参数为 briefing；身份与当前目标通过 ToolRuntime.state 注入。实际执行输入作为完成后的
 ToolMessage artifact 保存，用于验收、展示和历史审计，不作为下一次执行的输入协议。
 尚未返回的调用由 Root 当前计划与原生待执行 ToolNode 表示。工作消息的 lane/run 标注
 属于历史可见性；跨图控制权与调用配对由 LangGraph 负责。
@@ -429,3 +430,11 @@ AI tool call / ToolMessage 配对与结果 artifact；Host 展示和压缩直接
 静态测试数据使用 native Capability result fixture，进入主线时补齐请求/结果对。
 旧 checkpoint 的 runRuntimeFailure、checkpoint_incompatible 分支和 afterPrepare 路由一并删除。
 普通运行错误、取消和原生 interrupt 继续沿现有 LangGraph 生命周期处理。
+
+### objective / briefing 验证记录（2026-09-15）
+
+新增 `briefing-reuses-delivery` 场景：配置复核已经交付，下一项只有写回看板目标。
+最终仅 briefing 参数的版本在 Qwen 3.8 Max 单次真实评估中通过（10.1 秒）：
+review_current → delegate_capability，零 adjust_plan，调用参数仅有 briefing。
+目录的跨 run 提取、无效/未配对结果排除、正文仍保留在 ToolMessage 中由运行时回归测试验证。
+这是受控场景证据，不能替代 Studio 长任务端到端完成或证明 timeout 已解决。

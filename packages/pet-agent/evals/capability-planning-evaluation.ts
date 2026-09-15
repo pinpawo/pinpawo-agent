@@ -23,7 +23,7 @@ export type CapabilityPlanningEvalOutput = {
   reason?: string;
   nextTask: string | null;
   capabilityName: string | null;
-  remainingPlan: Array<{ capability: string; task: string }>;
+  remainingPlan: Array<{ capability: string; objective: string }>;
 };
 
 export function buildCapabilityPlanningMessages(

@@ -22,8 +22,8 @@ export function toolHistoryInput(mode: HistoryMode, count: number, id: string) {
   if (mode === 'resume') {
     return { input: { ...input,
       state: { ...input.state, plan: [
-        { id: 'current', capability: 'studio_review', task: '独立核验三个配置文件并返回审阅结论。', status: 'pending' as const },
-        { id: 'next', capability: 'studio_reporting', task: '提交 T-NEW 的完整审阅结论。', status: 'pending' as const },
+        { id: 'current', capability: 'studio_review', objective: '独立核验三个配置文件并返回审阅结论。', status: 'pending' as const },
+        { id: 'next', capability: 'studio_reporting', objective: '提交 T-NEW 的完整审阅结论。', status: 'pending' as const },
       ] },
       messages: [...input.messages, ...history, new HumanMessage('继续')],
     }, expected: example.expected };

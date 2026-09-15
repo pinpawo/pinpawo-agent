@@ -18,7 +18,7 @@ export function projectCurrentPlan(state: unknown): AgentPlan | null {
     const item = asRecord(value);
     const id = readIdentifier(item?.id);
     const capability = readDisplayText(item?.capability);
-    const task = readDisplayText(item?.task);
+    const task = readDisplayText(item?.objective);
     const status = item?.status;
     if (!id || !capability || !task || !['pending', 'completed'].includes(String(status))) return [];
     return [{ id, capability, task,

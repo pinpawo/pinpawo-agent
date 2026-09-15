@@ -295,13 +295,13 @@ test('runAgentSessionTurn replaces the current plan from root values and clears 
         yield protocolEvent('values', {
           messages: [new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace',
             source: 'supervisor',
-          } }, tool_calls: [{ id: 'execution-call', name: 'delegate_capability', args: {} }] })],
+          } }, tool_calls: [{ id: 'execution-call', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] })],
           runId: 'run',
           runSupervisorState: {
             goal: 'Inspect and verify',
             plan: [
-              { id: 'task-1', capability: 'explore', task: 'Inspect code', status: 'pending' },
-              { id: 'task-2', capability: 'browser', task: 'Verify result', status: 'pending' },
+              { id: 'task-1', capability: 'explore', objective: 'Inspect code', status: 'pending' },
+              { id: 'task-2', capability: 'browser', objective: 'Verify result', status: 'pending' },
             ],
           },
         });

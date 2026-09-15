@@ -4,8 +4,8 @@ import { currentSupervisorTask, runSupervisorStateSchema, updateSupervisorTask }
 
 test('current work is derived from plan progress without a second active task record', () => {
   const state = runSupervisorStateSchema.parse({ goal: 'Deliver', plan: [
-    { id: 'a', capability: 'general', task: 'First', status: 'completed' },
-    { id: 'b', capability: 'general', task: 'Second', status: 'pending' },
+    { id: 'a', capability: 'general', objective: 'First', status: 'completed' },
+    { id: 'b', capability: 'general', objective: 'Second', status: 'pending' },
   ] });
   assert.equal(currentSupervisorTask(state)?.id, 'b');
   const completed = updateSupervisorTask(state, 'b', 'completed');
@@ -20,7 +20,7 @@ test('business state rejects duplicated calls, messages and run metadata', () =>
   }
   for (const status of ['executing', 'returned']) {
     assert.equal(runSupervisorStateSchema.safeParse({ goal: 'Work', plan: [
-      { id: 'task', capability: 'general', task: 'Work', status },
+      { id: 'task', capability: 'general', objective: 'Work', status },
     ] }).success, false, 'execution progress belongs to messages, not the business plan');
   }
 });

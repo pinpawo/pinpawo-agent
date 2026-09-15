@@ -36,7 +36,7 @@ export function supervisorFixture(params: {
   task?: string;
   capability?: string;
   evidence?: string;
-  remaining?: Array<{ capability: string; task: string }>;
+  remaining?: Array<{ capability: string; objective: string }>;
   freshUserInput?: boolean;
 }): RunSupervisorInput {
   const capability = params.capability ?? 'general';
@@ -47,7 +47,7 @@ export function supervisorFixture(params: {
     runId: params.runId, traceId: params.runId, userRequest: params.goal, messages,
     catalog: params.catalog, capabilityDisclosure: createCapabilityDisclosureState({ catalog: params.catalog }),
     state: { goal: params.goal, plan: [
-      ...(params.task ? [{ id: 'current', task: params.task, capability, status: 'pending' as const }] : []),
+      ...(params.task ? [{ id: 'current', objective: params.task, capability, status: 'pending' as const }] : []),
       ...(params.remaining ?? []).map((task, i) => ({ ...task, id: `next:${i}`, status: 'pending' as const })),
     ] },
   };

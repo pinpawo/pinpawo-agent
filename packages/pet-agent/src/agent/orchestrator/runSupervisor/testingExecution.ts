@@ -2,8 +2,7 @@ import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { readCapabilityExecutionCall } from '../executionMessages';
-import { identity } from './controlContext';
-import { readCapabilityExecutions } from '../executionMessages';
+import { buildCapabilityExecutionInput, delegateCapabilitySchema } from './delegateCapabilityTool';
 import { currentSupervisorTask } from './state';
 
 /** Read the actual checkpointed invocation, not a second pending-call register. */
@@ -25,13 +24,9 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
     && !getAgentMessageMetadata(message).lane && message.tool_call_id === call.id)) {
     throw new Error('Capability call already has a result.');
   }
-  const previous = readCapabilityExecutions(state.messages)
-    .filter(record => record.metadata.runId === state.runId && record.execution.taskId === current.id).at(-1);
-  return { id: call.id, taskId: current.id, task: current.task, capability: current.capability,
-    delegationId: previous?.execution.delegationId ?? identity('delegation', state.runId, current.id),
-    mode: previous ? 'continue' as const : 'initial' as const,
-    briefing: JSON.stringify({ plan: state.runSupervisorState.plan.map(({ capability, task, status }) => ({ capability, task, status })),
-      ...(state.runSupervisorReviewFeedback ? { feedback: state.runSupervisorReviewFeedback } : {}) }) };
-
+  return { id: call.id, ...buildCapabilityExecutionInput({
+    state: state.runSupervisorState, messages: state.messages, runId: state.runId, traceId: state.traceId,
+    userRequest: state.runSupervisorState.goal!, mode: 'boundary', hasNewUserInput: false,
+    allowedCapabilityNames: state.runSupervisorState.plan.map(task => task.capability),
+  }, delegateCapabilitySchema.parse(call.args), state.runSupervisorReviewFeedback ?? undefined) };
 }
-

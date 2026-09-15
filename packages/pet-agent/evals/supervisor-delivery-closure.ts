@@ -6,7 +6,7 @@ import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor
 import { supervisorFixture } from './supervisor-fixtures';
 import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input';
 import { currentSupervisorTask } from '../src/agent/orchestrator/runSupervisor/state';
-import { buildCapabilityExecutionInput } from '../src/agent/orchestrator/runSupervisor/delegateCapabilityTool';
+import { buildCapabilityExecutionInput, delegateCapabilitySchema } from '../src/agent/orchestrator/runSupervisor/delegateCapabilityTool';
 import { readCapabilityExecutionCall } from '../src/agent/orchestrator/executionMessages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../src/agent/orchestrator/runSupervisor/runner';
 import type { ClosureExample, ClosureExpected } from './datasets/supervisor-delivery-closure';
@@ -21,8 +21,8 @@ export function closureInput(example: ClosureExample, id: string): RunSupervisor
   // All responsibilities are disclosed: isolates goal closure from document retrieval.
   return { ...input, capabilityDisclosure: { ...input.capabilityDisclosure, disclosedCapabilityNames: example.disclosure === 'manifest' ? [] : [...catalog.capabilityNames] },
     state: { ...input.state, plan: [
-      ...(example.capability === 'studio_reporting' ? [{ id: 'review-accepted', capability: 'studio_review', task: '独立复核三个配置文件并返回完整结论。', status: 'completed' as const }] : []),
-      ...(example.staleCompletion ? [{ id: 'old-review', capability: 'studio_review', task: '复核任务 T-OLD 并将结果提交看板。', status: 'completed' as const }] : []),
+      ...(example.capability === 'studio_reporting' ? [{ id: 'review-accepted', capability: 'studio_review', objective: '独立复核三个配置文件并返回完整结论。', status: 'completed' as const }] : []),
+      ...(example.staleCompletion ? [{ id: 'old-review', capability: 'studio_review', objective: '复核任务 T-OLD 并将结果提交看板。', status: 'completed' as const }] : []),
       ...input.state.plan,
     ] },
     messages: example.staleCompletion ? [
@@ -35,7 +35,7 @@ export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorRes
   const accepted = result;
   const dispatch = result.messages.map(readCapabilityExecutionCall).find(record => record !== null);
   const execution = dispatch && currentSupervisorTask(result.runSupervisorState)
-    ? buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: result.runSupervisorState }, result.reviewFeedback ?? undefined) : null;
+    ? buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: result.runSupervisorState }, delegateCapabilitySchema.parse(dispatch.call.args), result.reviewFeedback ?? undefined) : null;
   const actual = dispatch ? execution?.capability === 'studio_reporting' ? 'report' : 'review' : supervisorReply(result)?.trim() ? 'reply' : 'none';
   const adjustmentCalls = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan');
   const successfulAdjustments = new Set(result.messages.filter(m => ToolMessage.isInstance(m)
@@ -43,7 +43,7 @@ export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorRes
   const adjustments = adjustmentCalls.filter(c => c.id && successfulAdjustments.has(c.id)).length;
   const completed = input.state.plan.filter(t => t.status === 'completed');
   const reintroducedCompleted = accepted.runSupervisorState.plan.some(t => t.status === 'pending'
-    && completed.some(old => old.capability === t.capability && old.task === t.task));
+    && completed.some(old => old.capability === t.capability && old.objective === t.objective));
   return { passed: actual === expected.action && !reintroducedCompleted
       && (expected.maxAdjustments === undefined || adjustments <= expected.maxAdjustments),
     actual, expected: expected.action, adjustments, adjustmentAttempts: adjustmentCalls.length, maxAdjustments: expected.maxAdjustments, reintroducedCompleted,

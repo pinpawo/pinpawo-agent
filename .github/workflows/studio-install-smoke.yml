@@ -52,3 +52,14 @@ jobs:
         run: npm ci
       - name: Pack, install, and check Studio
         run: npm run test:install -w @pinpawo/studio
+      - name: Locate npm logs
+        if: failure()
+        shell: bash
+        run: echo "NPM_LOG_DIR=$(npm config get cache)/_logs" >> "$GITHUB_ENV"
+      - name: Upload npm failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-npm-logs-${{ matrix.os }}
+          path: ${{ env.NPM_LOG_DIR }}
+          retention-days: 3

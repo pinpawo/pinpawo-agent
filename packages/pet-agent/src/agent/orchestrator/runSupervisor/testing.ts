@@ -48,11 +48,11 @@ function scriptedSupervisorDecisions(decision: ScriptedSupervisorDecision) {
     } });
     reply = 'reply' in decision.args ? decision.args.reply : undefined;
     if (!reply) {
-      decisions.push({ name: 'delegate_capability', args: {} });
+      decisions.push({ name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } });
     }
   } else {
     decisions.push(decision);
-    if (decision.name !== 'delegate_capability') decisions.push({ name: 'delegate_capability', args: {} });
+    if (decision.name !== 'delegate_capability') decisions.push({ name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } });
   }
   if (reply !== undefined) decisions.push({ reply });
   return decisions;
@@ -73,7 +73,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
   const call = (control: ScriptedSupervisorControl) => {
     const callId = `${id}:${messages.length}`;
     const current = { ...context, state };
-    const execution = control.name === 'delegate_capability' ? buildCapabilityExecutionInput(current, feedback) : undefined;
+    const execution = control.name === 'delegate_capability' ? buildCapabilityExecutionInput(current, control.args, feedback) : undefined;
     if (control.name === 'submit_plan') state = submitPlan(current, control.args, callId);
     else if (control.name === 'adjust_plan') state = adjustPlan(current, control.args, callId);
     else if (control.name === 'review_current') state = reviewCurrent(current, control.args);
@@ -121,9 +121,9 @@ export function withScriptedDelegation(runner: ScriptedSupervisorRunner): RunSup
 export function createRunSupervisorProbe(params: Parameters<typeof createRunSupervisorAgent>[0]): RunSupervisorRunner {
   const runner = createRunSupervisorAgent(params);
   return { invoke: async (input, config) => {
-    const capture = tool((_args, runtime: ToolRuntime<typeof OrchestratorState.State>) => {
+    const capture = tool((args, runtime: ToolRuntime<typeof OrchestratorState.State>) => {
       buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: runtime.state.runSupervisorState,
-        messages: [...input.messages, ...runtime.state.messages] }, runtime.state.runSupervisorReviewFeedback ?? undefined);
+        messages: [...input.messages, ...runtime.state.messages] }, args, runtime.state.runSupervisorReviewFeedback ?? undefined);
       return new Command({ update: {} });
     }, { name: 'delegate_capability', description: 'Capture a valid execution decision without executing Capability.', schema: delegateCapabilitySchema });
     const graph = new StateGraph(OrchestratorState)

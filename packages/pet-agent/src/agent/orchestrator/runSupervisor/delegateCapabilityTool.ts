@@ -11,12 +11,16 @@ import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
 
-export const delegateCapabilitySchema = z.object({}).strict();
+export const delegateCapabilitySchema = z.object({
+  briefing: z.string().refine(text => text.trim().length > 0).describe('只为当前计划项准备执行说明。结合用户要求与已返回交付，说明要完成的工作、可复用结论和必要约束；不复制历史交付全文，不展开后续任务。'),
+}).strict();
+
+export type DelegateCapabilityArgs = z.infer<typeof delegateCapabilitySchema>;
 
 /** One executable tool definition, exposed by Supervisor and run by Root ToolNode. */
 export function createDelegateCapabilityTool(options: CapabilityExecutionOptions) {
   const executeCapability = createCapabilityExecutor(options);
-  return tool(async (_args, runtime: ToolRuntime<OrchestratorStateType, Record<string, unknown>>) => {
+  return tool(async (args, runtime: ToolRuntime<OrchestratorStateType, Record<string, unknown>>) => {
     const state = runtime.state;
     const registry = getInvokeRegistry(runtime.config);
     const invokeOptions = getInvokeOptions(runtime.config);
@@ -27,7 +31,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       messages: state.messages, mode: 'boundary', hasNewUserInput: false,
       allowedCapabilityNames: registry.capabilities.map(({ capability }) => capability.name)
         .filter(name => !invokeOptions.allowedCapabilityNames || invokeOptions.allowedCapabilityNames.includes(name)),
-    }, state.runSupervisorReviewFeedback ?? undefined);
+    }, args, state.runSupervisorReviewFeedback ?? undefined);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,
@@ -58,11 +62,11 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     } });
   }, {
     name: 'delegate_capability', schema: delegateCapabilitySchema, verboseParsingErrors: true,
-    description: '执行当前计划项，将控制权交给 Capability。无需参数；运行时注入当前任务、计划与补做意见。返回交付后由你继续判断。',
+    description: '为当前计划项准备 briefing 并引用相关的已有交付，交给 Capability 执行。运行时确定任务身份与能力；返回后由你继续判断。',
   });
 }
 
-export function buildCapabilityExecutionInput(context: SupervisorHandoffContext, feedback?: string): CapabilityExecutionInput {
+export function buildCapabilityExecutionInput(context: SupervisorHandoffContext, args: DelegateCapabilityArgs, feedback?: string): CapabilityExecutionInput {
   const state = context.state;
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
@@ -72,11 +76,8 @@ export function buildCapabilityExecutionInput(context: SupervisorHandoffContext,
     taskId: next.id,
     delegationId: previous?.execution.delegationId ?? identity('delegation', context.runId, next.id),
     capability: next.capability,
-    task: next.task,
+    task: next.objective,
     mode: previous ? 'continue' as const : 'initial' as const,
-    briefing: JSON.stringify({
-      plan: state.plan.map(({ capability, task, status }) => ({ capability, task, status })),
-      ...(feedback ? { feedback } : {}),
-    }, null, 2),
+    briefing: feedback ? `${args.briefing}\n\nReview feedback:\n${feedback}` : args.briefing,
   };
 }

@@ -33,7 +33,7 @@ export function withDeliveryCalls(messages: BaseMessage[]): BaseMessage[] {
   return messages.flatMap(message => {
     if (!ToolMessage.isInstance(message) || message.name !== 'delegate_capability' || ids.has(message.tool_call_id)) return [message];
     const request = setAgentMessageMetadata(new AIMessage({ id: `request:${message.id ?? message.tool_call_id}`, content: '',
-      tool_calls: [{ id: message.tool_call_id, name: message.name, args: {} }],
+      tool_calls: [{ id: message.tool_call_id, name: message.name, args: { briefing: 'Fixture plan' } }],
     }), getAgentMessageMetadata(message));
     return [request, message];
   });

@@ -23,8 +23,7 @@ export function buildCurrentPlanPanel(
   // Between delegations no item is active; the next pending step still tells
   // the operator where the plan stands.
   const active = plan.items.find((item) => item.status === 'active')
-    ?? plan.items.find((item) => item.status === 'pending')
-    ?? plan.items.at(-1);
+    ?? plan.items.find((item) => item.status === 'pending');
   if (!active) return { content: '', height: 0, mode: 'hidden' };
   const currentStep = plan.items.indexOf(active) + 1;
 
@@ -102,5 +101,5 @@ function formatItemPrefix(item: AgentPlanItem) {
     : item.status === 'active'
       ? '→'
       : '·';
-  return `${marker} ${item.capability} · `;
+  return `${marker} `;
 }

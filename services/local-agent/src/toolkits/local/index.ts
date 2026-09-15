@@ -224,10 +224,6 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
-    reviewGuidance: {
-      allow: 'Judge file, HTTP, and shell tools by the same concrete effects, not by execution mechanism. Eligible operations include non-sensitive inspection, scoped recoverable development edits, builds, tests, formatting, project-local dependency installation from the existing manifest/lockfile, and bounded generated-artifact cleanup. Explicitly named development files, sibling checkouts and temporary artifacts may qualify outside the workdir; location alone is not a reason to ask.',
-      ask: 'Require human authorization for broad or materially destructive effects, deletion of user data or sensitive files, unclear recursive deletion targets, privilege elevation, permission or system-service changes, unknown remote script execution, global software installation, sensitive-data exposure, publishing or deployment, and shared-history rewrites. Do not treat ordinary project scripts or package-manager use as unknown software without concrete evidence.',
-    },
     runtime: {
       start: () => {
         const root = new ShellRuntime();
@@ -292,8 +288,8 @@ export function createGitToolkit(): AgentToolkit {
     tools: createToolDefinitions(gitTools, gitOperationMetadata, reviews),
     instructions: gitToolkitInstructions.join('\n'),
     reviewGuidance: {
-      allow: 'Treat routine, scoped version-control collaboration as eligible for automatic authorization: staging named files, local commits, normal non-force pushes, creating pull requests or issues, and closing a specifically identified issue or unmerged pull request without deleting it. Normal authenticated collaboration does not itself expose credentials.',
-      ask: 'Require human authorization for destructive worktree or history changes, force pushes, deleting branches or tags, merging a pull request, changing repository settings or access, managing secrets, deleting remote resources, bulk closures, and publishing packages or releases.',
+      allow: 'Local Git edits and ordinary remote collaboration can be recoverable; assess the actual target and effect.',
+      ask: 'Shared-history rewrites, access changes, and releases require human review.',
     },
     runtime: {
       start: () => undefined,

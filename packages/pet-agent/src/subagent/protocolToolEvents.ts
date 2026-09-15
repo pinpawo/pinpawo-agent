@@ -1,5 +1,6 @@
 import type { ProtocolEvent } from '@langchain/langgraph';
 import type { SubagentToolLifecycleEvent } from '../types/subagent';
+import { isHumanReviewBatchInterruptPayload } from '../types/reviewSpec';
 
 /**
  * Translates the v3 protocol `tools` channel into subagent tool lifecycle
@@ -52,6 +53,9 @@ function isSerializedInterruptMessage(message: unknown, toolCallId: string | und
       if (!value) {
         return false;
       }
+      // A delegation can be suspended by a batch inside the capability. Its
+      // tool call id differs from the reviewed inner calls.
+      if (isHumanReviewBatchInterruptPayload(value)) return true;
       const pendingAction = readRecord(value.pendingAction);
       const actionId = readOptionalString(pendingAction?.actionId);
       return (

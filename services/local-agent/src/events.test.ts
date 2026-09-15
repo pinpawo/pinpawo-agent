@@ -246,26 +246,6 @@ test('createGitToolkit exposes git operation metadata with the toolkit definitio
   assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
   assert.equal(Boolean(definition(toolkit, 'git_add')?.review), true);
   assert.equal(Boolean(definition(toolkit, 'git_commit')?.review), true);
-  assert.match(toolkit.reviewGuidance?.allow ?? '', /normal non-force push/);
-  assert.match(toolkit.reviewGuidance?.ask ?? '', /force pushes/);
-});
-
-test('createBashToolkit exposes shell auto-review risk context', () => {
-  const toolkit = createBashToolkit();
-
-  // These assert which risks the guidance covers, not how it words them, so a
-  // rewrite of the prose does not fail the test while the coverage is intact.
-  const allow = toolkit.reviewGuidance?.allow ?? '';
-  assert.match(allow, /build/i);
-  assert.match(allow, /test/i);
-  assert.match(allow, /format/i);
-  assert.match(allow, /cleanup|deletion/i);
-
-  const ask = toolkit.reviewGuidance?.ask ?? '';
-  assert.match(ask, /recursive/i);
-  assert.match(ask, /user data or sensitive files/i);
-  assert.match(ask, /privilege/i);
-  assert.match(ask, /publish|deploy/i);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {

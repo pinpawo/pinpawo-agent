@@ -1,6 +1,26 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NamespacedProtocolToolEventReader } from './protocolToolEvents';
+import { buildReviewSpec } from '../types/reviewSpec';
+
+test('a nested review batch interrupts delegation without emitting a tool failure', () => {
+  const reader = new NamespacedProtocolToolEventReader();
+  const scope = ['tools:root'];
+  reader.readToolsData(scope, { event: 'tool-started', tool_call_id: 'delegate', tool_name: 'delegate_capability' });
+  const review = buildReviewSpec({ id: 'review', view: { kind: 'plain', body: 'Write file?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] });
+  const result = reader.readToolsData(scope, {
+    event: 'tool-error', tool_call_id: 'delegate',
+    message: JSON.stringify([{ id: 'interrupt', value: { kind: 'review_batch', reviews: [{
+      kind: 'review', review,
+      pendingAction: { actionId: 'inner-write', toolName: 'write_file', args: { path: '/tmp/report.txt' } },
+    }] } }]),
+  });
+  assert.equal(result, null);
+  reader.readToolsData(scope, { event: 'tool-started', tool_call_id: 'next', tool_name: 'read_file' });
+  assert.equal(reader.readToolsData(scope, {
+    event: 'tool-error', tool_call_id: 'next', message: 'Permission denied',
+  })?.event, 'on_tool_error');
+});
 
 test('keeps reader state per namespace when scopes reuse the same tool_call_id', () => {
   const reader = new NamespacedProtocolToolEventReader();

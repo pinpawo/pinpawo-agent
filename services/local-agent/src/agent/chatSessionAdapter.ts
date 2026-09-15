@@ -79,9 +79,6 @@ export type AgentSessionTurnOptions = {
   prepareUserMessage?: () => Promise<BaseMessage>;
 };
 
-/** @deprecated Use AgentSessionTurnOptions. */
-export type ChatSessionAdapterOptions = AgentSessionTurnOptions;
-
 async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null) {
   const output = (run as { output?: PromiseLike<unknown> } | null)?.output;
   if (!output) return;
@@ -540,7 +537,4 @@ export async function runAgentSessionTurn(
 
   return { status: 'completed', reply: finalReply };
 }
-
-/** @deprecated Use runAgentSessionTurn. */
-export const runChatSession = runAgentSessionTurn;
 

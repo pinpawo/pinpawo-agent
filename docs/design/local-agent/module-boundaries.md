@@ -179,7 +179,7 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 | runTermination 的 pendingErrors Map 由 onNodeError 写入、throwRunFailure 删除 | 验证并处理取消/中断跳过删除的路径，保证长期复用时的清理和执行隔离 |
 
 来源：[graph.ts](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)、
-[agentRegistryPreparation.ts](../../../services/local-agent/src/agentRegistryPreparation.ts)、
+[agentRegistryPreparation.ts](../../../services/local-agent/src/agent/agentRegistryPreparation.ts)、
 [runTermination.ts](../../../packages/pet-agent/src/agent/orchestrator/runtime/runTermination.ts)。
 
 每次获准执行先取得配置快照，再选择或创建匹配的 graph。消息、resume、signal 等
@@ -194,7 +194,7 @@ Host 的完整组装类型留在组合入口，业务模块不反向依赖它。
 
 ## 三、agentGraphService 的入口
 
-基线实现见 [agentGraphService.ts](../../../services/local-agent/src/agentGraphService.ts)。
+基线实现见 [agentGraphService.ts](../../../services/local-agent/src/agent/agentGraphService.ts)。
 
 | 方法 | 处理 |
 |---|---|
@@ -286,7 +286,7 @@ buildResumeCommand，不保留兼容别名。相应更新
 
 来源：[settleAbortedRun.ts](../../../packages/pet-agent/src/agent/orchestrator/interrupt/settleAbortedRun.ts)、
 [AgentInterrupt](../../../packages/pet-agent/src/agent/orchestrator/interrupt/agentInterrupt.ts)、
-[chatSessionAdapter.ts](../../../services/local-agent/src/chatSessionAdapter.ts)。
+[chatSessionAdapter.ts](../../../services/local-agent/src/agent/chatSessionAdapter.ts)。
 
 ### 已有语义与剩余适配
 

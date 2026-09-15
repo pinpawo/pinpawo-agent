@@ -1,18 +1,18 @@
-import { resolveHostExecutionConfig } from './config/hostExecutionConfig';
-import { buildLocalAgentRuntimeConfig } from './config/runtimeConfig';
+import { resolveHostExecutionConfig } from '../config/hostExecutionConfig';
+import { buildLocalAgentRuntimeConfig } from '../config/runtimeConfig';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { getConfig, setConfig } from './config/config';
-import { resolveUserDir } from './config/runtimeConfig';
+import { getConfig, setConfig } from '../config/config';
+import { resolveUserDir } from '../config/runtimeConfig';
 import { randomUUID } from 'node:crypto';
 
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
-import type { AgentContext } from './contextLoader';
+import type { AgentContext } from '../contextLoader';
 import {
   defineInstructionDocument,
   definePetDocument,
@@ -21,15 +21,15 @@ import {
   type AgentToolkit,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
-import { FileCapabilityArtifactStore } from './capabilityArtifactStore';
+import { FileCapabilityArtifactStore } from '../capabilityArtifactStore';
 import {
   createCapabilityCreatorCapability,
   createCapabilityCreatorToolkit,
-} from './capabilities/capabilityCreator';
-import { createExploreCapability } from './capabilities/explore';
-import { loadGeneralCapability } from './capabilities/general';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
-import { createTestModelProfiles } from './testing/modelProfiles';
+} from '../capabilities/capabilityCreator';
+import { createExploreCapability } from '../capabilities/explore';
+import { loadGeneralCapability } from '../capabilities/general';
+import { createBashToolkit, createGitToolkit } from '../toolkits/local';
+import { createTestModelProfiles } from '../testing/modelProfiles';
 
 function createContext(): AgentContext {
   return {

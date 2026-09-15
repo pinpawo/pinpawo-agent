@@ -16,7 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { createSubagent } from '@pinpawo/pet-agent';
-import { buildLocalAgentModels } from '../src/agentModels';
+import { buildLocalAgentModels } from '../src/agent/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/config/llmConfig';
 import { parsePatch } from '../src/toolkits/local/applyPatch';
 import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';

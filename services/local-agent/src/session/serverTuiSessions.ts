@@ -16,12 +16,12 @@ import {
   type ReviewSpec,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
-import { createCapabilityDiagnosticReporter } from '../agentRegistryPreparation';
+import { createCapabilityDiagnosticReporter } from '../agent/agentRegistryPreparation';
 import {
   buildChatSetup,
 } from '../agent/buildChatSetup';
-import { LocalAgentGraphService } from '../agentGraphService';
-import { readFinalMessageText } from '../agentStreamEvents';
+import { LocalAgentGraphService } from '../agent/agentGraphService';
+import { readFinalMessageText } from '../agent/agentStreamEvents';
 import { loadAgentContext } from '../contextLoader';
 import { FileSaver } from '../fileSaver';
 import type { ServerDeps } from '../serverTypes';

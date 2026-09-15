@@ -9,7 +9,7 @@ import {
 } from '@pinpawo/pet-agent';
 import type { AgentInputModality } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
-import { readFinalMessageText } from '../agentStreamEvents';
+import { readFinalMessageText } from '../agent/agentStreamEvents';
 
 /**
  * Transcript projection for the interface.

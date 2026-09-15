@@ -11,7 +11,7 @@ import {
   prepareAgentRegistry,
   projectExecutorCompilationIssues,
 } from './agentRegistryPreparation';
-import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
+import type { ToolkitInventoryEntry } from '../toolkits/toolkitInventory';
 
 function artifactCapability(name: string): AgentCapability {
   return {

@@ -32,12 +32,12 @@ import {
 import {
   adaptRootStream,
   type RootProtocolEvent,
-} from './events/rootStreamEventAdapter';
-import { createLocalChatHumanMessage } from './agent/chatMessageInput';
+} from '../events/rootStreamEventAdapter';
+import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
 import {
   currentPlansEqual,
   projectCurrentPlan,
-} from './conversation/currentPlanProjection';
+} from '../conversation/currentPlanProjection';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';

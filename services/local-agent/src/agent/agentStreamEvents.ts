@@ -1,12 +1,12 @@
 import {
   normalizeToolStreamEvent,
   type StreamToolsPayload,
-} from './events/agentStreamNormalizer';
+} from '../events/agentStreamNormalizer';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
   emptyOperationRegistry,
   type OperationRegistry,
-} from './events/operationRegistry';
+} from '../events/operationRegistry';
 
 export type { StreamToolsPayload };
 

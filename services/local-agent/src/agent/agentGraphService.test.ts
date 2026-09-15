@@ -7,7 +7,7 @@ import { MemorySaver, interrupt } from '@langchain/langgraph';
 import { buildOrchestratorRunInput, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import { buildAgentGraphConfigurable, LocalAgentGraphService, type InterruptResume } from './agentGraphService';
-import { scriptedSupervisorResult } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+import { scriptedSupervisorResult } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 
 function setup(
   interfaceContext?: AgentChannelSetup['interfaceContext'],

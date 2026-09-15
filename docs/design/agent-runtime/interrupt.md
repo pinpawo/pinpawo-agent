@@ -174,7 +174,7 @@ Snapshot projection:
 
 | Layer | Target | Today | Where |
 |---|---|---|---|
-| Host read | any kind by id | only `human_review`; other kinds return `null` | `services/local-agent/src/agentGraphService.ts` `projectPendingInterrupt` |
+| Host read | any kind by id | only `human_review`; other kinds return `null` | `services/local-agent/src/agent/agentGraphService.ts` `projectPendingInterrupt` |
 | Host read | no second source | `pauseTaskInterrupt` channel + `hasPendingContinuation` | `agentGraphService.ts`, `residentPetHost.ts` `readSettledState` |
 | Host settle | `waiting` | done: settlement returns `PendingInterrupt \| null`, reported as `waiting` / `interrupted` | `agentGraphService.ts`, `serverChatHandler.ts`, `residentPetHost.ts` |
 | Host resume | one entry | `handleHumanReviewResponse`, `handleReviewCancel`, `handleRunInterrupt` review branch, `handleChatRequest` transition | `localServerChatHandler.ts` |

@@ -12,9 +12,9 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { Command, type GraphRunStream } from '@langchain/langgraph';
 import type { AgentPlan } from '@pinpawo/agent-session';
 import type { AgentChannelSetup } from './agentChannel';
-import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from './chatInterface';
-import { projectCurrentPlan } from './conversation/currentPlanProjection';
-import { createLangfuseCallbacks } from './langfuseTracing';
+import { LOCAL_AGENT_INTERFACE_CONFIG_KEY } from '../chatInterface';
+import { projectCurrentPlan } from '../conversation/currentPlanProjection';
+import { createLangfuseCallbacks } from '../langfuseTracing';
 
 const HEADLESS_REVIEW_CAPABILITIES = {
   humanReview: false,

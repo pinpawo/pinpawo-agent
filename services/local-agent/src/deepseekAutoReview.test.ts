@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildLocalAgentModels } from './agentModels';
-import { buildDecisionStructuredOutput } from './agentChannel';
+import { buildLocalAgentModels } from './agent/agentModels';
+import { buildDecisionStructuredOutput } from './agent/agentChannel';
 import { createLocalModelProfileRegistry } from './config/llmConfig';
 import { buildModelProfileRegistry } from './config/modelProfiles';
 import { resolveGlobalReviewBatchPolicy } from '../../../packages/pet-agent/src/agent/orchestrator/review/globalReviewPolicy';

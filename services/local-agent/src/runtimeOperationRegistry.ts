@@ -1,4 +1,4 @@
-import type { AgentChannelSetup } from './agentChannel';
+import type { AgentChannelSetup } from './agent/agentChannel';
 import {
   getLocalServerToolkitInventory,
   type ServerDeps,

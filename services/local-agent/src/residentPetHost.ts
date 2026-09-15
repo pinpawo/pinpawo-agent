@@ -14,14 +14,14 @@ import {
   type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 
-import type { AgentChannelSetup } from './agentChannel';
-import { LocalAgentGraphService } from './agentGraphService';
+import type { AgentChannelSetup } from './agent/agentChannel';
+import { LocalAgentGraphService } from './agent/agentGraphService';
 import { projectPendingInterrupt } from './conversation/pendingInterruptProjection';
 import {
   runAgentSessionTurn,
   type AgentSessionTurnOptions,
   type AgentSessionTurnResult,
-} from './chatSessionAdapter';
+} from './agent/chatSessionAdapter';
 import { loadAgentContext } from './contextLoader';
 import { createLocalServerHandlers, type ServerHandlerOptions } from './serverHandlers';
 import {

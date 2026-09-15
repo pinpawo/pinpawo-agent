@@ -10,7 +10,7 @@ import {
   definePetDocument,
   petDocumentSystemPromptSection,
 } from '@pinpawo/pet-agent';
-import { buildLocalAgentModels } from '../src/agentModels';
+import { buildLocalAgentModels } from '../src/agent/agentModels';
 import type { AgentLlmConfig } from '../src/config/agentConfig';
 import { loadStoredConfig } from '../src/storage';
 

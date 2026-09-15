@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { ToolMessage } from '@langchain/core/messages';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { buildToolOperationEvent } from './agentStreamEvents';
+import { buildToolOperationEvent } from './agent/agentStreamEvents';
 import { normalizeToolStreamEvent } from './events/agentStreamNormalizer';
 import {
   createOperationRegistry,

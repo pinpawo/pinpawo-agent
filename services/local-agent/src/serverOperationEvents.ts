@@ -1,5 +1,5 @@
 import { isHumanReviewInterrupt } from '@pinpawo/pet-agent';
-import type { StreamToolsPayload } from './agentStreamEvents';
+import type { StreamToolsPayload } from './agent/agentStreamEvents';
 import type { AgentOperationEvent } from '@pinpawo/agent-session';
 import {
   acceptInflightToolEvent,

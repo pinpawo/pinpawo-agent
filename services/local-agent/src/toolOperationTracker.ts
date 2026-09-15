@@ -2,7 +2,7 @@ import type { SubagentToolOperationMetadata } from '@pinpawo/pet-agent';
 import {
   buildToolOperationEvent,
   type StreamToolsPayload,
-} from './agentStreamEvents';
+} from './agent/agentStreamEvents';
 import type {
   AgentOperationEvent,
   AgentOperationPhase,

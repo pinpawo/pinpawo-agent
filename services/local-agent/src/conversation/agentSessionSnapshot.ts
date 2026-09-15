@@ -9,7 +9,7 @@ import type {
 } from '@pinpawo/agent-session';
 import { createAgentSessionSnapshot } from '@pinpawo/agent-session';
 import type { PauseTaskInterruptPayload } from '@pinpawo/pet-agent';
-import type { PendingInterruptSnapshot } from '../serverChatHandler';
+import type { PendingInterruptSnapshot } from '../agent/serverChatHandler';
 import type { RuntimeProjectionDeps } from '../serverTypes';
 import type { TuiCheckpointMessage } from '../session/serverTuiSessions';
 import { buildLocalRuntimeProjection } from '../config/configProjection';

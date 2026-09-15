@@ -16,7 +16,7 @@
  *      options and structured resume semantics.
  *
  * SUT seams:
- *   - services/local-agent/src/chatSessionAdapter.ts (runAgentSessionTurn)
+ *   - services/local-agent/src/agent/chatSessionAdapter.ts (runAgentSessionTurn)
  *   - services/local-agent/src/localServerChatHandler.ts (review route guard)
  *   - packages/pet-agent/src/autoReview/reviewAuthorizations.ts
  *
@@ -37,7 +37,7 @@ import {
   isToolActionAuthorized,
   type ToolAuthorizationRecord,
 } from '@pinpawo/pet-agent';
-import { runAgentSessionTurn } from '../src/chatSessionAdapter';
+import { runAgentSessionTurn } from '../src/agent/chatSessionAdapter';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
 
 const DATASET_NAME = 'local-agent-hitl-resume';

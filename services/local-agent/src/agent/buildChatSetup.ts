@@ -1,7 +1,7 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { buildLocalChatAgentInput } from '../agentChannel';
+import { buildLocalChatAgentInput } from './agentChannel';
 import type { loadAgentContext } from '../contextLoader';
-import { createCapabilityDiagnosticReporter } from '../agentRegistryPreparation';
+import { createCapabilityDiagnosticReporter } from './agentRegistryPreparation';
 import {
   getLocalServerToolkitInventory,
   type ChatSetupDeps,

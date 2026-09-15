@@ -6,11 +6,11 @@ import {
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   AgentChannelSetup,
-} from '../../../local-agent/src/agentChannel';
+} from '../../../local-agent/src/agent/agentChannel';
 import type {
   InterruptResume,
   LocalAgentGraphService,
-} from '../../../local-agent/src/agentGraphService';
+} from '../../../local-agent/src/agent/agentGraphService';
 
 export const ASSISTANT_MESSAGE = '# Result\n\nThe **host transport** is aligned.';
 export const INTERRUPT_MESSAGE = 'Start a long host task.';

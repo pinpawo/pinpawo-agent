@@ -1,5 +1,5 @@
 import type { SubagentToolOperationMetadata } from '@pinpawo/pet-agent';
-import type { StreamToolsPayload } from './agentStreamEvents';
+import type { StreamToolsPayload } from './agent/agentStreamEvents';
 import type {
   AgentOperationEvent,
   AgentOperationPhase,

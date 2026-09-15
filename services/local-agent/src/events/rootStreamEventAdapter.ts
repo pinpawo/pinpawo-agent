@@ -1,4 +1,4 @@
-import { readFinalMessageText } from '../agentStreamEvents';
+import { readFinalMessageText } from '../agent/agentStreamEvents';
 import { AIMessage } from '@langchain/core/messages';
 import {
   GUARD_DECISION_EVENT,

@@ -46,367 +46,49 @@ import {
 import { emitLocalServerToolOperationEvent } from './serverOperationEvents';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
-export type PetDispatchState = 'open' | 'busy' | 'waiting' | 'blocked';
-export type PetDispatchSettledState = Exclude<PetDispatchState, 'busy'>;
-
-/** One coherent snapshot of the resident admission queue and its current state. */
-export type PetDispatchQueueSnapshot = {
-  state: PetDispatchState;
-  activeOperation: 'conversation' | 'dispatch' | null;
-  queuedConversations: number;
-  queuedDispatches: number;
-};
-
 /**
- * An opaque caller correlation key. The resident runtime does not interpret it;
- * it only returns the same key in lifecycle observations.
+ * The Host runtime: it builds one Pet's runtime and derives the two surfaces
+ * that serve it.
+ *
+ * The port contracts live in host/contracts, and the admission gate shared by
+ * conversation and dispatch lives in host/residentPetCoordinator. Both are
+ * re-exported here: this module is the Host's entry point, and callers should
+ * not have to know which file inside host/ declares what.
  */
-export type PetDispatchRequest = {
-  request: string;
-  dispatchId?: string;
-};
+export {
+  ResidentPetInteractionBusyError,
+  ResidentPetOperationCancelledError,
+  type AgentSessionPeer,
+  type PetDispatchLifecycleEvent,
+  type PetDispatchLifecycleState,
+  type PetDispatchPort,
+  type PetDispatchQueueSnapshot,
+  type PetDispatchRequest,
+  type PetDispatchSettledState,
+  type PetDispatchState,
+  type ResidentPet,
+  type ResidentPetCoordinatorOptions,
+  type ResidentPetHost,
+  type ResidentPetInteraction,
+} from './host/contracts';
+export { ResidentPetCoordinator } from './host/residentPetCoordinator';
 
-export type PetDispatchLifecycleState =
-  | 'queued'
-  | 'running'
-  | 'waiting'
-  | 'completed'
-  | 'interrupted'
-  | 'failed';
-
-/**
- * Observation-only lifecycle for one admitted dispatch. This is not an Agent
- * execution handle: callers cannot cancel, resume, or read model output here.
- */
-export type PetDispatchLifecycleEvent = {
-  dispatchId: string;
-  request: string;
-  state: PetDispatchLifecycleState;
-  requestId?: string;
-  error?: string;
-};
-
-export interface PetDispatchPort {
-  getQueueSnapshot(): PetDispatchQueueSnapshot;
-  onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void;
-  onDispatchLifecycle(listener: (event: PetDispatchLifecycleEvent) => void): () => void;
-  /** Accept one-way input into the resident queue. Execution is observed through Agent Session. */
-  dispatch(request: PetDispatchRequest): Promise<void>;
-}
-
-export interface ResidentPet {
-  readonly dispatch: PetDispatchPort;
-  close(): Promise<void>;
-}
-
-export interface AgentSessionPeer {
-  isConnected(): boolean;
-  send(message: AgentServerMessage): boolean;
-}
-
-export interface ResidentPetInteraction {
-  connect(peer: AgentSessionPeer): Promise<void> | void;
-  handle(peer: AgentSessionPeer, message: AgentClientMessage): Promise<void>;
-  disconnect(peer: AgentSessionPeer): Promise<void> | void;
-  close(): Promise<void>;
-}
-
-export interface ResidentPetHost {
-  readonly resident: ResidentPet;
-  readonly interaction: ResidentPetInteraction;
-  close(): Promise<void>;
-}
-
-type MaybePromise<T> = T | Promise<T>;
-
-export type ResidentPetCoordinatorOptions = {
-  initialState?: PetDispatchSettledState;
-  /** Read the authoritative active-thread checkpoint after an operation settles. */
-  readSettledState: () => MaybePromise<PetDispatchState>;
-  logError?: (message: string, error: unknown) => void;
-};
-
-type QueuedOperation = {
-  kind: 'conversation' | 'dispatch';
-  run: () => Promise<unknown>;
-  resolve: (value: unknown) => void;
-  reject: (error: unknown) => void;
-};
-
-/** A second interactive client tried to attach to a Host that already has one. */
-export class ResidentPetInteractionBusyError extends Error {
-  readonly code = 'interaction_busy';
-
-  constructor(
-    message = 'This Pet already has an interactive client. Use dispatch for additional input.',
-  ) {
-    super(message);
-    this.name = 'ResidentPetInteractionBusyError';
-  }
-}
-
-export class ResidentPetOperationCancelledError extends Error {
-  constructor(message = 'Resident Pet operation was cancelled before it started.') {
-    super(message);
-    this.name = 'ResidentPetOperationCancelledError';
-  }
-}
+import {
+  ResidentPetInteractionBusyError,
+  type AgentSessionPeer,
+  type MaybePromise,
+  type PetDispatchLifecycleEvent,
+  type PetDispatchPort,
+  type PetDispatchSettledState,
+  type PetDispatchState,
+  type ResidentPet,
+  type ResidentPetHost,
+  type ResidentPetInteraction,
+} from './host/contracts';
+import { ResidentPetCoordinator } from './host/residentPetCoordinator';
 
 function defaultLogError(message: string, error: unknown): void {
   console.error(message, error instanceof Error ? error.message : error);
-}
-
-/** One non-preemptive graph admission point shared by conversation and dispatch. */
-export class ResidentPetCoordinator {
-  private readonly dispatchQueue: QueuedOperation[] = [];
-  /** Conversations currently holding the gate busy; they never enter a queue. */
-  private conversations = 0;
-  private readonly listeners = new Set<(state: PetDispatchState) => void>();
-  private readonly queueListeners = new Set<(snapshot: PetDispatchQueueSnapshot) => void>();
-  private readonly readSettledState: ResidentPetCoordinatorOptions['readSettledState'];
-  private readonly logError: NonNullable<ResidentPetCoordinatorOptions['logError']>;
-  private state: PetDispatchState;
-  private active: Promise<void> | null = null;
-  private activeOperation: PetDispatchQueueSnapshot['activeOperation'] = null;
-  private refreshing: Promise<PetDispatchState> | null = null;
-  private closing = false;
-
-  constructor(options: ResidentPetCoordinatorOptions) {
-    this.state = options.initialState ?? 'open';
-    this.readSettledState = options.readSettledState;
-    this.logError = options.logError ?? defaultLogError;
-  }
-
-  getState(): PetDispatchState {
-    return this.state;
-  }
-
-  getQueueSnapshot(): PetDispatchQueueSnapshot {
-    return {
-      state: this.state,
-      activeOperation: this.activeOperation,
-      // Conversations hold the gate but never queue, so this is the count of
-      // conversations currently holding it. Kept because StudioDispatchQueue
-      // publishes the field.
-      queuedConversations: this.conversations,
-      queuedDispatches: this.dispatchQueue.length,
-    };
-  }
-
-  onStateChange(listener: (state: PetDispatchState) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  onQueueChange(listener: (snapshot: PetDispatchQueueSnapshot) => void): () => void {
-    this.queueListeners.add(listener);
-    return () => this.queueListeners.delete(listener);
-  }
-
-  /**
-   * Run a conversation operation while holding the gate busy.
-   *
-   * Conversation does not join the dispatch queue. dispatch is Studio's
-   * scheduling concept and this coordinator is the gate that answers "can
-   * this Agent take new work"; conversation is not a competitor for that
-   * gate, it is one of the reasons the Agent becomes busy. Conversation has
-   * its own admission (SessionAdmission) and thread-level coordination
-   * (ThreadInvocationCoordinator), so queueing it here would be a second,
-   * unrelated queue.
-   *
-   * The gate is still held for the operation's duration and refreshed after
-   * it settles, so a dispatch cannot start mid-conversation and a pending
-   * interrupt raised by the conversation leaves the gate `waiting`.
-   */
-  async holdForConversation<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.closing) {
-      throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
-    }
-    // The hold is claimed synchronously, before waiting out an active
-    // dispatch. A queued dispatch reads Session state when it starts, so a
-    // session switch already in flight has to land first — waiting before
-    // claiming would let that dispatch drain against the old thread.
-    this.conversations += 1;
-    try {
-      while (this.active) {
-        await this.active;
-      }
-    } catch {
-      // The active operation's own caller owns its failure.
-    }
-    this.setState('busy');
-    this.publishQueueSnapshot();
-    let value: T;
-    try {
-      value = await operation();
-    } finally {
-      this.conversations -= 1;
-      if (this.conversations === 0) {
-        this.publishQueueSnapshot();
-      }
-    }
-    // Awaited, not fire-and-forget: callers rely on the gate being settled by
-    // the time the operation resolves, the way the queue's own run() refreshed
-    // before resolving. A failed refresh leaves the gate `blocked` and is
-    // logged rather than failing the conversation, which already succeeded.
-    if (this.conversations === 0) {
-      try {
-        await this.refreshState();
-      } catch (error) {
-        this.logError('[resident-pet] failed to refresh state after a conversation:', error);
-      }
-    }
-    return value;
-  }
-
-  enqueueDispatch<T>(operation: () => Promise<T>): Promise<T> {
-    return this.enqueue(operation);
-  }
-
-  /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
-  submitDispatch(operation: () => Promise<void>): void {
-    if (this.closing) {
-      throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
-    }
-    void this.enqueue(operation).catch((error) => {
-      if (error instanceof ResidentPetOperationCancelledError) return;
-      this.logError('[resident-pet] dispatch execution failed:', error);
-    });
-    // A pending review can be resolved through a reconnect or another
-    // session client. Do not let the queue keep that old settled state and
-    // strand a later one-way dispatch behind it.
-    void this.refreshState().catch((error) => {
-      this.logError('[resident-pet] failed to refresh dispatch admission state:', error);
-    });
-  }
-
-  async refreshState(): Promise<PetDispatchState> {
-    if (this.active) return this.state;
-    if (this.refreshing) return this.refreshing;
-    const refreshing = Promise.resolve().then(async () => {
-      try {
-        const next = await this.readNextSettledState();
-        this.setState(next);
-        return next;
-      } catch (error) {
-        this.setState('blocked');
-        throw error;
-      }
-    });
-    this.refreshing = refreshing;
-    try {
-      return await refreshing;
-    } finally {
-      if (this.refreshing === refreshing) this.refreshing = null;
-      this.drain();
-    }
-  }
-
-  async close(): Promise<void> {
-    if (!this.closing) {
-      this.closing = true;
-      this.cancelQueue(this.dispatchQueue);
-    }
-    await Promise.all([this.active, this.refreshing]);
-  }
-
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.closing) {
-      return Promise.reject(new ResidentPetOperationCancelledError());
-    }
-    return new Promise<T>((resolve, reject) => {
-      this.dispatchQueue.push({
-        kind: 'dispatch',
-        run: operation,
-        resolve: (value) => resolve(value as T),
-        reject,
-      });
-      this.publishQueueSnapshot();
-      this.drain();
-    });
-  }
-
-  private drain(): void {
-    // A conversation holding the gate keeps dispatch waiting, same as an
-    // active dispatch does.
-    if (this.active || this.refreshing || this.closing || this.conversations > 0) return;
-    const entry = this.state === 'open' ? this.dispatchQueue.shift() : undefined;
-    if (!entry) return;
-    this.activeOperation = entry.kind;
-    const active = Promise.resolve().then(() => this.run(entry));
-    this.active = active;
-    this.setState('busy');
-    void active.then(() => {
-      if (this.active === active) {
-        this.active = null;
-        this.activeOperation = null;
-        this.publishQueueSnapshot();
-      }
-      this.drain();
-    });
-  }
-
-  private async run(entry: QueuedOperation): Promise<void> {
-    let value: unknown;
-    let operationError: unknown;
-    try {
-      value = await entry.run();
-    } catch (error) {
-      operationError = error;
-    }
-    try {
-      this.setState(await this.readNextSettledState());
-    } catch (error) {
-      this.setState('blocked');
-      if (operationError === undefined) operationError = error;
-      else this.logError('[resident-pet] failed to refresh settled state:', error);
-    }
-    if (operationError !== undefined) entry.reject(operationError);
-    else entry.resolve(value);
-  }
-
-  private async readNextSettledState(): Promise<PetDispatchSettledState> {
-    const next = await this.readSettledState();
-    if (next === 'busy') {
-      throw new Error('Resident Pet remained busy after its active operation settled.');
-    }
-    return next;
-  }
-
-  private setState(next: PetDispatchState): void {
-    if (this.state === next) return;
-    this.state = next;
-    for (const listener of this.listeners) {
-      try {
-        listener(next);
-      } catch (error) {
-        this.logError('[resident-pet] state listener failed:', error);
-      }
-    }
-    // The active operation clears immediately after its settled state is read.
-    // Publish that single coherent snapshot from the completion callback instead
-    // of briefly reporting an idle state while an operation is still active.
-    if (this.active && next !== 'busy') return;
-    this.publishQueueSnapshot();
-  }
-
-  private publishQueueSnapshot(): void {
-    const snapshot = this.getQueueSnapshot();
-    for (const listener of this.queueListeners) {
-      try {
-        listener(snapshot);
-      } catch (error) {
-        this.logError('[resident-pet] queue listener failed:', error);
-      }
-    }
-  }
-
-  private cancelQueue(queue: QueuedOperation[]): void {
-    for (const entry of queue.splice(0)) {
-      entry.reject(new ResidentPetOperationCancelledError('Resident Pet Host is closing.'));
-    }
-    this.publishQueueSnapshot();
-  }
 }
 
 export type CreateResidentPetRuntimeOptions = HostExecutionConfig & {

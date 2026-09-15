@@ -12,7 +12,7 @@ export type CapabilityPlanningInput = {
   activeCapability?: string;
   activeTask?: string;
   latestAnnounce?: string;
-  remainingPlan?: Array<{ capability: string; task: string }>;
+  remainingPlan?: Array<{ capability: string; objective: string }>;
 };
 
 export type CapabilityPlanningExpected = {
@@ -322,7 +322,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       activeCapability: 'explore',
       activeTask: '调查 auth 模块的现有结构和风险',
       latestAnnounce: 'auth/index.ts 存在循环依赖；应提取 token validation 并保持现有公开接口。',
-      remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块' }],
+      remainingPlan: [{ capability: 'general', objective: '根据调查结论重构 auth 模块' }],
     },
     expected: {
       result: 'execute_plan',
@@ -366,7 +366,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       activeCapability: 'explore',
       activeTask: '调查 auth 模块的现有结构、依赖和风险。',
       latestAnnounce: 'auth/index.ts 存在循环依赖；token validation 需要提取，同时必须保持现有公开接口。',
-      remainingPlan: [{ capability: 'general', task: '根据调查结论重构 auth 模块并验证。' }],
+      remainingPlan: [{ capability: 'general', objective: '根据调查结论重构 auth 模块并验证。' }],
     },
     expected: {
       result: 'execute_plan',
@@ -433,7 +433,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       activeCapability: 'document_writer',
       activeTask: '生成项目报告',
       latestAnnounce: '报告已生成，路径为 /tmp/report.pdf，内容检查通过。',
-      remainingPlan: [{ capability: 'messaging', task: '把完成的报告发送给项目负责人' }],
+      remainingPlan: [{ capability: 'messaging', objective: '把完成的报告发送给项目负责人' }],
     },
     expected: {
       result: 'execute_plan',
@@ -471,8 +471,8 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       activeTask: '调查 auth 风险',
       latestAnnounce: '调查确认 token validation 存在循环依赖，需要保持公开接口。',
       remainingPlan: [
-        { capability: 'general', task: '根据调查结论修复 auth 风险' },
-        { capability: 'release_check', task: '独立运行 release verification' },
+        { capability: 'general', objective: '根据调查结论修复 auth 风险' },
+        { capability: 'release_check', objective: '独立运行 release verification' },
       ],
     },
     expected: {
@@ -516,11 +516,11 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       remainingPlan: [
         {
           capability: 'explore',
-          task: '读取 issue #345 并整理架构演进内容',
+          objective: '读取 issue #345 并整理架构演进内容',
         },
         {
           capability: 'explore',
-          task: '检查当前仓库实现是否覆盖 issue 中的架构演进提案',
+          objective: '检查当前仓库实现是否覆盖 issue 中的架构演进提案',
         },
       ],
     },

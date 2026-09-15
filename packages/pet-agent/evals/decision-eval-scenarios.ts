@@ -114,7 +114,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
     name: 'saved-unfinished-plan-continues',
     messages: [{ role: 'user', text: '继续把周末的杭州旅行安排完成。' }],
     plan: { goal: '安排周末的杭州旅行。', plan: [
-      { id: 'transport', capability: 'general', task: '整理往返交通安排。', status: 'pending' },
+      { id: 'transport', capability: 'general', objective: '整理往返交通安排。', status: 'pending' },
     ] },
     expectedRoutes: ['continue'],
   },
@@ -125,7 +125,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
       { role: 'user', text: '继续调整一下，把总预算控制在八百元以内。' },
     ],
     plan: { goal: '安排周末的杭州旅行。', plan: [
-      { id: 'itinerary', capability: 'general', task: '完成杭州周末行程。', status: 'completed' },
+      { id: 'itinerary', capability: 'general', objective: '完成杭州周末行程。', status: 'completed' },
     ] },
     expectedRoutes: ['plan_request'],
   },

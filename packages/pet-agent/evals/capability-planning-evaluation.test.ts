@@ -161,7 +161,7 @@ test('supervisor goal evaluation rejects a semantically wrong plan with the corr
       capabilityName: 'explore',
       remainingPlan: [{
         capability: 'general',
-        task: '撰写一篇与 auth 重构无关的博客',
+        objective: '撰写一篇与 auth 重构无关的博客',
       }],
     },
     judge: goalJudgeWithFailure('future_work_strategy_valid'),

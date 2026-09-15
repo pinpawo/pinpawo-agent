@@ -87,7 +87,7 @@ function buildInput(mode: RunSupervisorMode): RunSupervisorInput {
   const fixture = supervisorFixture({ catalog, runId: 'audit-run', goal: userRequest,
     task: mode === 'boundary' ? 'Implement and verify the identified change.' : undefined,
     capability: 'repository', evidence: mode === 'boundary' ? 'The change is implemented and focused tests pass.' : undefined,
-    remaining: mode === 'boundary' ? [{ capability: 'general', task: 'Report the verified result to the user.' }] : [],
+    remaining: mode === 'boundary' ? [{ capability: 'general', objective: 'Report the verified result to the user.' }] : [],
   });
   return { ...fixture, capabilityDisclosure: disclosure, messages: [...fixture.messages, privateLaneMessage] };
 }

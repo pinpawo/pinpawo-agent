@@ -97,7 +97,7 @@ test('direct invocation repairs invalid tool protocol before the model call', as
 
 test('Agent invocation applies after earlier middleware without mutating state', async () => {
   const call = new AIMessage({ id: 'call', content: '',
-    tool_calls: [{ name: 'delegate_capability', args: {}, id: 'execution' }] });
+    tool_calls: [{ name: 'delegate_capability', args: { briefing: 'Execute the current objective.' }, id: 'execution' }] });
   const delivery = new ToolMessage({ id: 'delivery', name: 'delegate_capability',
     tool_call_id: 'execution', content: 'Execution evidence' });
   const orphan = new ToolMessage({ id: 'orphan', tool_call_id: 'missing', content: 'orphan' });

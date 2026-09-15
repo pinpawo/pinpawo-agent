@@ -254,7 +254,7 @@ async function target(input: ToolReviewRejectRuntimeInput): Promise<EvalOutput> 
             name: 'submit_plan', args: {
               tasks: [{
                 capability: 'general',
-                task: input.delegatedTask,
+                objective: input.delegatedTask,
               }]
             }
           };

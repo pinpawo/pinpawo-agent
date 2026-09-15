@@ -59,7 +59,7 @@ test('supervisor scorer reconstructs an unchanged plan from next task plus futur
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
     result: 'execute_plan',
-    nextTask: materialized.task,
+    nextTask: materialized.objective,
     capabilityName: materialized.capability,
     remainingPlan: [],
   }, testCase.expected);
@@ -75,7 +75,7 @@ test('supervisor deterministic scorer treats Capability as executor identity', (
   assert.ok(materialized);
   const scores = scoreCapabilityPlanning({
     result: 'execute_plan',
-    nextTask: materialized.task,
+    nextTask: materialized.objective,
     capabilityName: 'general',
     remainingPlan: [],
   }, testCase.expected);
@@ -96,7 +96,7 @@ test('supervisor deterministic scorer can enforce a case-specific future task co
     capabilityName: 'workspace_analysis',
     remainingPlan: [{
       capability: 'code_change',
-      task: '修复代码',
+      objective: '修复代码',
     }],
   }, testCase.expected);
   assert.equal(

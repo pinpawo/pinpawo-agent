@@ -32,7 +32,7 @@ function longMessage(index: number) {
 
 function executionCall(id: string, taskId: string) {
   return setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
-    id, name: 'delegate_capability', args: {},
+    id, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
   }] }), { runId: 'run', traceId: 'trace', source: 'supervisor' });
 }
 function executionResult(id: string, taskId: string, content: string) {
@@ -65,7 +65,7 @@ test('compaction retains unfinished execution pairs and private lanes without ex
 
 test('compaction includes completed main tool results in the summary input', async () => {
   let summarized = '';
-  const call = new AIMessage({ content: '', tool_calls: [{ id: 'done', name: 'delegate_capability', args: {} }] });
+  const call = new AIMessage({ content: '', tool_calls: [{ id: 'done', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] });
   const result = new ToolMessage({ tool_call_id: 'done', name: 'delegate_capability', content: 'deployed revision abc123' });
   const compacted = await compactOrchestratorMessages({
     messages: [call, result, new HumanMessage('next request')],

@@ -35,9 +35,9 @@ let failures = 0;
 const catalog = createCapabilityCatalog({ registry });
 const disclosure = { ...createCapabilityDisclosureState({ catalog }), disclosedCapabilityNames: ['general'] };
 const supervisor = createRunSupervisorAgent({ model: subject.model });
-const publicationPlan = [{ capability: 'general', task: 'Publish the prepared release notes after the user selects a destination.' }];
+const publicationPlan = [{ capability: 'general', objective: 'Publish the prepared release notes after the user selects a destination.' }];
 const cases: Array<{ name: string; goal: string; task?: string; evidence?: string;
-  remaining?: Array<{ capability: string; task: string }>;
+  remaining?: Array<{ capability: string; objective: string }>;
   pendingDispatch?: boolean;
   supplement?: string;
   checkFollowUp?: (result: SupervisorDecision) => void;
@@ -56,7 +56,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     } },
   { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
     task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
-    remaining: [{ capability: 'general', task: 'Fix the identified off-by-one check and run the regression suite.' }],
+    remaining: [{ capability: 'general', objective: 'Fix the identified off-by-one check and run the regression suite.' }],
     check: (result) => {
       assert.equal(result.name, 'review_current');
       if (result.name === 'review_current') {
@@ -83,7 +83,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
       if (result.name === 'adjust_plan') {
         assert.equal(result.args.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
         assert.equal(result.args.tasks[0].capability, 'general');
-        assert.match(result.args.tasks[0].task, /publish|发布/i);
+        assert.match(result.args.tasks[0].objective, /publish|发布/i);
       } else if (result.name !== 'delegate_capability') {
         assert.equal(result.name, 'review_current');
         if (result.name === 'review_current') {
@@ -110,8 +110,8 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
         assert.equal(result.args.currentDelegation, 'continue');
         assert.equal(result.args.tasks.length, 1);
         assert.equal(result.args.tasks[0].capability, 'general');
-        assert.match(result.args.tasks[0].task, /pinpawo\/example/);
-        assert.match(result.args.tasks[0].task, /v1\.2\.3/);
+        assert.match(result.args.tasks[0].objective, /pinpawo\/example/);
+        assert.match(result.args.tasks[0].objective, /v1\.2\.3/);
       }
     } },
   { name: 'entry-asks-for-user-owned-choice', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.',

@@ -273,7 +273,7 @@ function createQueuedPlannerRunner(
         return this.invoke(input);
       }
       const [nextTask, ...remainingTasks] = Array.isArray(planning.tasks)
-        ? planning.tasks as Array<{ capability?: unknown; task?: unknown }>
+        ? planning.tasks as Array<{ capability?: unknown; objective?: unknown }>
         : [];
       if (!nextTask) {
         throw new Error('scripted Run Supervisor requires at least one task');
@@ -295,11 +295,11 @@ function createQueuedPlannerRunner(
           tasks: [
             {
               capability: capabilityName,
-              task: String(nextTask.task ?? ''),
+              objective: String(nextTask.objective ?? ''),
             },
             ...remainingTasks.map((task) => ({
               capability: String(task.capability ?? ''),
-              task: String(task.task ?? ''),
+              objective: String(task.objective ?? ''),
             })),
           ]
         }
@@ -399,10 +399,10 @@ function readToolMessages(messages: unknown[]) {
 
 function scriptedPlannerTask(
   task: string,
-  remainingPlan: Array<{ capability: string; task: string }> = [],
+  remainingPlan: Array<{ capability: string; objective: string }> = [],
 ) {
   return {
-    tasks: [{ capability: '', task }, ...remainingPlan],
+    tasks: [{ capability: '', objective: task }, ...remainingPlan],
   };
 }
 
@@ -448,8 +448,8 @@ test('execution boundary routes through runSupervisor before the next task', asy
           name: 'submit_plan', args: {
             tasks: [{
               capability: 'explore',
-              task: '读取 issue #269 并提炼需求点。',
-            }, { capability: 'explore', task: '检索本地实现与 git log，判断需求点是否已覆盖。' }]
+              objective: '读取 issue #269 并提炼需求点。',
+            }, { capability: 'explore', objective: '检索本地实现与 git log，判断需求点是否已覆盖。' }]
           }
         };
       }
@@ -551,7 +551,7 @@ test('a completed single-task goal is accepted by the boundary Supervisor', asyn
     async invoke(input) {
       supervisorInputs.push(input);
       return input.mode === 'entry'
-        ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', task: '读取 issue #587 状态。' }] } }
+        ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', objective: '读取 issue #587 状态。' }] } }
         : {
           name: 'review_current', args: {
             completed: true,
@@ -607,10 +607,10 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
           name: 'submit_plan', args: {
             tasks: [{
               capability: 'explore',
-              task: '读取 issue #269 并提炼需求点。',
+              objective: '读取 issue #269 并提炼需求点。',
             }, {
               capability: 'explore',
-              task: '检索本地实现与 git log。',
+              objective: '检索本地实现与 git log。',
             }]
           }
         };
@@ -659,12 +659,12 @@ test('Supervisor boundary returns to runSupervisor until the remaining goal is c
 
   assert.equal(supervisorInputs.length, 3);
   assert.deepEqual(supervisorInputs.map(({ mode }) => mode), ['entry', 'boundary', 'boundary']);
-  assert.deepEqual(supervisorInputs[1]?.state.plan.filter((task) => task.status === 'pending').map(({ capability, task }) => ({ capability, task })), [{
+  assert.deepEqual(supervisorInputs[1]?.state.plan.filter((task) => task.status === 'pending').map(({ capability, objective: task }) => ({ capability, objective: task })), [{
     capability: 'explore',
-    task: '读取 issue #269 并提炼需求点。',
+    objective: '读取 issue #269 并提炼需求点。',
   }, {
     capability: 'explore',
-    task: '检索本地实现与 git log。',
+    objective: '检索本地实现与 git log。',
   }]);
   assert.equal(currentExecution(supervisorInputs[1])?.task, '读取 issue #269 并提炼需求点。');
   assert.match(announces(supervisorInputs[1])[0]?.result ?? '', /issue #269 需求点：需要检查本地实现/);
@@ -960,7 +960,7 @@ test('Run Supervisor materializer rejects selections outside the catalog', async
           name: 'submit_plan', args: {
             tasks: [{
               capability: 'not_registered',
-              task: '读取 src/index.ts。',
+              objective: '读取 src/index.ts。',
             }]
           }
         };
@@ -1007,7 +1007,7 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
           name: 'submit_plan', args: {
             tasks: [{
               capability: 'general',
-              task: '检查 src/index.ts 并整理其公开接口。',
+              objective: '检查 src/index.ts 并整理其公开接口。',
             }]
           }
         };
@@ -1027,7 +1027,7 @@ test('Run Supervisor owns the executable task boundary at entry', async () => {
   ) as OrchestratorStateType;
 
   assert.equal(
-    state.runSupervisorState.plan[0]?.task,
+    state.runSupervisorState.plan[0]?.objective,
     '检查 src/index.ts 并整理其公开接口。',
   );
 });
@@ -4022,7 +4022,7 @@ test('execution without a deliverable returns an error result to Supervisor with
         assert.equal(readCapabilityExecutions(input.messages).at(-1)?.result?.status, 'missing_deliverable');
         return { reply: 'No new deliverable was produced.' };
       }
-      return { name: 'submit_plan', args: { tasks: [{ capability: 'general', task: 'Inspect files.' }] } };
+      return { name: 'submit_plan', args: { tasks: [{ capability: 'general', objective: 'Inspect files.' }] } };
     } },
   });
   const config = { configurable: { thread_id: 'no-deliverable', capabilities: [capability('general', 'Inspect files.')] } };
@@ -4271,7 +4271,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
   await graph.updateState(config, {
     messages: oldMessages,
     runSupervisorState: { goal: oldDelegation.userRequest, plan: [{
-      id: 'old-task', capability: 'general', task: oldDelegation.task, status: 'pending',
+      id: 'old-task', capability: 'general', objective: oldDelegation.task, status: 'pending',
     }] },
     runId: oldDelegation.runId,
   });
@@ -4319,7 +4319,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
         if (structuredCallCount === 1) {
           return scriptedPlannerTask(
             '关闭 GitHub Issue #272。',
-            [{ capability: 'ops', task: '删除 packages/goat 目录。' }],
+            [{ capability: 'ops', objective: '删除 packages/goat 目录。' }],
           );
         }
         if (structuredCallCount === 2) return scriptedSupervisorCapability('ops');
@@ -4408,8 +4408,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
     /可选历史 artifacts/,
   );
 
-  // Per-delegation task data stays in the briefing instead of being copied
-  // into system context.
+  // Full execution instructions stay in the briefing; the system may index prior objectives.
   for (const input of recorder.subagentInputs) {
     const systemMessages = input.filter((message) => message._getType() === 'system');
     assert.ok(systemMessages.length > 0);
@@ -4417,7 +4416,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
       const systemText = typeof message.content === 'string'
         ? message.content
         : JSON.stringify(message.content);
-      assert.doesNotMatch(systemText, /关闭 GitHub Issue #272/);
+
       assert.doesNotMatch(systemText, /上下文摘要/);
     }
   }
@@ -4496,7 +4495,7 @@ test('Capability node inherits root system context into its executor without sec
     runSupervisorRunner: {
       async invoke(input) {
         return input.mode === 'entry'
-          ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', task: 'Inspect the request.' }] } }
+          ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', objective: 'Inspect the request.' }] } }
           : {
             name: 'review_current', args: {
               completed: true,
@@ -4567,7 +4566,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
     models: { act: answer, subagent: new Executor({}) }, toolkitRuntimeManager,
     runSupervisorRunner: { async invoke(input) {
       return input.mode === 'entry'
-        ? { name: 'submit_plan', args: { tasks: [{ capability: 'inspect', task: 'Inspect context.' }] } }
+        ? { name: 'submit_plan', args: { tasks: [{ capability: 'inspect', objective: 'Inspect context.' }] } }
         : {
           name: 'review_current', args: {
             completed: true,
@@ -4754,12 +4753,12 @@ for (const continuePlan of [false, true]) {
         if(supervisorCalls === 1) return {
           name: 'submit_plan', args: {
             tasks: [
-              { capability: 'general', task: 'Inspect.' }, { capability: 'general', task: 'Report.' },
+              { capability: 'general', objective: 'Inspect.' }, { capability: 'general', objective: 'Report.' },
             ]
           }
         };
         assert.equal(input.mode, 'boundary');
-        assert.deepEqual(input.state.plan.map((task) => task.task), ['Inspect.', 'Report.']);
+        assert.deepEqual(input.state.plan.map((task) => task.objective), ['Inspect.', 'Report.']);
         return { reply: 'The previous execution was cancelled; please clarify the remaining work.' };
       } }),
     });

@@ -7,11 +7,11 @@ import { scriptedSupervisorSequence } from '../src/agent/orchestrator/runSupervi
 import type { ScriptedSupervisorControl } from '../src/agent/orchestrator/runSupervisor/testing';
 
 const review: ScriptedSupervisorControl = { name: 'review_current', args: { completed: true, reason: 'Review content is complete.' } };
-const delegate: ScriptedSupervisorControl = { name: 'delegate_capability', args: {} };
+const delegate: ScriptedSupervisorControl = { name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } };
 const example = supervisorDeliveryClosureDataset.cases.find(c => c.name === 'review-text-is-not-submission')!;
 function adjustment(goal: string): ScriptedSupervisorControl {
   return { name: 'adjust_plan', args: { goal, reason: 'Submission remains.', currentDelegation: 'replace',
-    tasks: [{ capability: 'studio_reporting', task: 'Submit the complete review.' }] } };
+    tasks: [{ capability: 'studio_reporting', objective: 'Submit the complete review.' }] } };
 }
 
 test('a completion claim without reporting fails the outcome evaluator', () => {

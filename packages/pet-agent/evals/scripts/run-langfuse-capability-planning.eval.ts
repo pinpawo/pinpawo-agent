@@ -82,7 +82,7 @@ function supervisorOutput(
   }
   const [nextTask, ...remainingPlan] = result.args.tasks;
   // Keep the existing dataset's outcome label; the control protocol is submit_plan.
-  return { result: 'execute_plan', nextTask: nextTask.task, capabilityName: nextTask.capability,
+  return { result: 'execute_plan', nextTask: nextTask.objective, capabilityName: nextTask.capability,
     remainingPlan: remainingPlan.map((task) => ({ ...task })) };
 }
 

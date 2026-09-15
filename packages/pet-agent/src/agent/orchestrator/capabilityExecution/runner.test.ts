@@ -1,4 +1,4 @@
-import { readFixtureDelivery } from '../../../testing/capabilityDelivery';
+import { readFixtureDelivery, createDeliveryResult, withDeliveryCalls } from '../../../testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, RemoveMessage } from '@langchain/core/messages';
@@ -373,3 +373,24 @@ for (const mode of ['initial', 'continue'] as const) {
     assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
   });
 }
+
+test('prior delivery directory derives from main history across runs without model-supplied references', async () => {
+  const prior = createDeliveryResult({ id: 'prior-result', sourceLane: 'capability:general',
+    delegationId: 'previous-delegation', runId: 'previous-run', deliveryId: 'previous-delivery',
+    task: 'Verify the source data', result: 'Verified evidence remains in the tool result.', createdAt: '2026-09-15T00:00:00Z' });
+  const orphan = createDeliveryResult({ id: 'orphan-result', sourceLane: 'capability:general',
+    delegationId: 'orphan-delegation', runId: 'previous-run', deliveryId: 'orphan-delivery',
+    task: 'Unpaired result', result: 'Not validated.', createdAt: '2026-09-15T00:00:00Z' });
+  const request = input();
+  const execute = createCapabilityExecutor({ models, runSubagent: async run => {
+    const context = run.promptSections?.map(section => section.content).join('\n') ?? '';
+    assert.ok(context.includes('previous-delegation'));
+    assert.ok(context.includes('previous-delivery'));
+    assert.ok(context.includes('Verify the source data'));
+    assert.equal(context.includes('orphan-delegation'), false);
+    assert.equal(context.includes('Verified evidence remains in the tool result.'), false);
+    assert.ok(run.messages.some(message => message.id === prior.id));
+    return deliver(run);
+  } });
+  await execute({ ...request, history: [...request.history, ...withDeliveryCalls([prior]), orphan] }, hostContext());
+});

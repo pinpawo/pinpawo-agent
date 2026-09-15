@@ -5,7 +5,7 @@ import { ReducedValue, StateSchema } from '@langchain/langgraph';
 export const supervisorPlanTaskSchema = z.object({
   id: z.string().min(1),
   capability: z.string().min(1),
-  task: z.string().min(1),
+  objective: z.string().min(1),
   status: z.enum(['pending', 'completed', 'superseded']),
 }).strict();
 

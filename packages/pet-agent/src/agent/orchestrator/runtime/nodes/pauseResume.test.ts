@@ -25,8 +25,8 @@ function pausedState(): OrchestratorStateType {
     ...buildRunStateReset(), runId: 'r1', traceId: 't1', runIterationCount: 7,
     runUserRequest: 'Inspect the old project and publish.', runSupervisorUserMessageId: 'human:original',
     runSupervisorState: { goal: 'Inspect the old project and publish.', plan: [
-      { id: 'task1', capability: 'general', task: 'Inspect the old project.', status: 'pending' },
-      { id: 'task2', capability: 'writer', task: 'Publish the old result.', status: 'pending' },
+      { id: 'task1', capability: 'general', objective: 'Inspect the old project.', status: 'pending' },
+      { id: 'task2', capability: 'writer', objective: 'Publish the old result.', status: 'pending' },
     ] },
     messages: [setAgentMessageMetadata(new HumanMessage({ id: 'original', content: 'Inspect the old project and publish.' }), { traceId: 't1', runId: 'r1' })],
     sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
@@ -40,8 +40,8 @@ function pauseInterruptId(output: unknown): string {
 function adjustment(strategy: 'continue' | 'replace'): ScriptedSupervisorDecision {
   return { name: 'adjust_plan', args: { goal: 'Inspect the correct project; prepare a private report.',
     reason: 'User corrected the project and cancelled publication.', currentDelegation: strategy,
-    tasks: [{ capability: strategy === 'continue' ? 'general' : 'writer', task: 'Work on the corrected project.' },
-      { capability: 'writer', task: 'Prepare the private report.' }] } };
+    tasks: [{ capability: strategy === 'continue' ? 'general' : 'writer', objective: 'Work on the corrected project.' },
+      { capability: 'writer', objective: 'Prepare the private report.' }] } };
 }
 function harness(decide: (input: RunSupervisorInput) => ScriptedSupervisorDecision, checkpointer = new MemorySaver(),
   execute: (state: OrchestratorStateType) => void = () => {}) {
@@ -65,7 +65,7 @@ for (const strategy of ['continue', 'replace'] as const) {
     const graph = harness((input) => {
       events.push('supervisor');
       assert.equal(input.mode, 'boundary'); assert.ok(input.inputId.startsWith('human:'));
-      assert.equal(input.state.plan[1].task, 'Publish the old result.');
+      assert.equal(input.state.plan[1].objective, 'Publish the old result.');
       assert.equal(input.messages.at(-1)?.text, 'Use the correct project and do not publish.');
       return adjustment(strategy);
     }, new MemorySaver(), () => { events.push('execute'); });
@@ -79,7 +79,7 @@ for (const strategy of ['continue', 'replace'] as const) {
     assert.equal(result.runId, initial.runId); assert.equal(result.traceId, initial.traceId);
     assert.equal(result.runIterationCount, 7);
     assert.equal(result.runSupervisorState.goal, 'Inspect the correct project; prepare a private report.');
-    assert.deepEqual(result.runSupervisorState.plan.map((task) => task.task), ['Work on the corrected project.', 'Prepare the private report.']);
+    assert.deepEqual(result.runSupervisorState.plan.map((task) => task.objective), ['Work on the corrected project.', 'Prepare the private report.']);
     assert.equal(result.runSupervisorState.plan[0].id === 'task1', strategy === 'continue');
     assert.equal(queryAgentMessages(result.messages).supervisor(result.runId).select().messages.length, 2);
   });
@@ -137,9 +137,9 @@ test('execution alone cannot authorize plan adjustment; fresh guidance still can
   const fresh = { ...state, messages: [...state.messages, setAgentMessageMetadata(new HumanMessage({ id: 'new', content: 'Adjust.' }),
     { runId: state.runId, traceId: state.traceId })] };
   assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'continue',
-    tasks: [{ capability: 'writer', task: 'Write.' }] } }), /keep its capability/);
+    tasks: [{ capability: 'writer', objective: 'Write.' }] } }), /keep its capability/);
   assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'replace',
-    tasks: [{ capability: 'unknown', task: 'Write.' }] } }), /outside/);
+    tasks: [{ capability: 'unknown', objective: 'Write.' }] } }), /outside/);
 });
 
 test('native pause resume shares the execution budget and cannot dispatch beyond it', async () => {

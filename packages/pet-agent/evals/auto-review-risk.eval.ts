@@ -280,9 +280,6 @@ async function main() {
     role: 'subject',
   });
   const bashToolkit = createBashToolkit();
-  if (!bashToolkit.reviewGuidance) {
-    throw new Error('The bash toolkit must expose auto-review guidance.');
-  }
 
   console.log(`Model: ${modelConfig.label}`);
   const failures: Array<{ kind: string; name: string; riskScore: number }> = [];

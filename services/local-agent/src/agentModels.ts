@@ -1,6 +1,7 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './config/agentConfig';
 import { ChatOpenAI } from '@langchain/openai';
+import { ReasoningChatModel } from './reasoningChatModel';
 import {
   requiresLlmStreaming,
   resolveLlmGenerationReserveTokens,
@@ -18,7 +19,7 @@ export function buildLocalAgentModels(
       ? llmConfig.observeModel
       : llmConfig.model;
 
-    return new ChatOpenAI({
+    const fields = {
       model,
       // Leave temperature to the provider; thinking and reasoning effort also use provider defaults.
       timeout: llmConfig.timeoutMs ?? 45000,
@@ -33,7 +34,10 @@ export function buildLocalAgentModels(
         baseURL: llmConfig.baseUrl,
         defaultHeaders: { Authorization: `Bearer ${llmConfig.apiKey}` },
       },
-    });
+    };
+    return model.toLowerCase().startsWith('deepseek')
+      ? new ReasoningChatModel(fields)
+      : new ChatOpenAI(fields);
   };
 
   return {

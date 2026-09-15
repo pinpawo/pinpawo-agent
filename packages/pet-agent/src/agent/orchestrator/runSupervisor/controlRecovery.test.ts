@@ -31,21 +31,32 @@ const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
   instructions: defineInstructionDocument({ content: 'Inspect and report evidence.' }),
 }] });
 
-test('malformed JSON is not recast as an executable tool call', async () => {
-  const invalid = new AIMessage({ content: '',
-    invalid_tool_calls: [{ name: 'submit_plan', id: 'bad-plan', args: '{"unfinished":', error: 'Invalid JSON', type: 'invalid_tool_call' }] });
-  const supervisor = new RecoveryModel([invalid]);
-  const executor = new RecoveryModel([]);
-  const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
-  const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor } });
-  await assert.rejects(graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
-    configurable: { thread_id: 'malformed-json', registry },
-  }), /must reply or explicitly request execution/);
-  assert.equal(executor.inputs.length, 0);
-  assert.equal(supervisor.inputs.length, 1);
-  assert.equal(invalid.tool_calls?.length, 0);
-  assert.equal(invalid.invalid_tool_calls?.[0]?.args, '{"unfinished":');
-});
+for (const name of ['submit_plan', 'delegate_capability']) {
+  test(`malformed ${name} returns parse feedback before any execution and permits retry`, async () => {
+    const invalid = new AIMessage({ content: '', additional_kwargs: { reasoning_content: 'synthetic reasoning' },
+      invalid_tool_calls: [{ name, id: 'bad-call', args: '{"unfinished":', error: 'Invalid JSON', type: 'invalid_tool_call' }] });
+    const supervisor = new RecoveryModel([invalid,
+      call('submit_plan', { tasks: [task] }, 'fixed-plan'),
+      call('delegate_capability', {}, 'execute'),
+      call('review_current', { completed: true, reason: 'Evidence delivered.' }, 'review'),
+      new AIMessage('Done.'),
+    ]);
+    const executor = new RecoveryModel([new AIMessage('Repository evidence.')]);
+    const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
+    const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor } });
+    const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.task)]), {
+      configurable: { thread_id: `malformed-${name}`, registry },
+    });
+    const feedback = supervisor.inputs[1].find(m => ToolMessage.isInstance(m) && m.tool_call_id === 'bad-call');
+    assert.ok(ToolMessage.isInstance(feedback));
+    assert.equal(feedback.status, 'error');
+    assert.match(feedback.text, /JSON/);
+    assert.equal(executor.inputs.length, 1);
+    assert.equal(result.runSupervisorState.plan[0].status, 'completed');
+    assert.equal(invalid.tool_calls?.length, 0);
+    assert.equal(invalid.invalid_tool_calls?.[0]?.args, '{"unfinished":');
+  });
+}
 
 test('reviewing the next unexecuted task returns feedback, retains accepted work and executes only the next task', async () => {
   const tasks = [task, { ...task, task: 'Prepare the review.' }];
@@ -122,9 +133,11 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_ca
   });
 }
 
-for (const name of ['submit_plan', 'unknown_tool']) test(`repeated ${name} errors respect the caller loop limit without executing work`, async () => {
+for (const name of ['submit_plan', 'unknown_tool', 'invalid_json']) test(`repeated ${name} errors respect the caller loop limit without executing work`, async () => {
   const supervisor = new RecoveryModel(Array.from({ length: 30 }, (_, i) =>
-    call(name, { tasks: [{ ...task, taskId: 'unexpected' }] }, `bad-${i}`)));
+    name === 'invalid_json'
+      ? new AIMessage({ content: '', invalid_tool_calls: [{ name: 'submit_plan', id: `bad-${i}`, args: '{', error: 'Invalid JSON', type: 'invalid_tool_call' }] })
+      : call(name, { tasks: [{ ...task, taskId: 'unexpected' }] }, `bad-${i}`)));
   const executor = new RecoveryModel([]);
   const entry = new RecoveryModel([call('plan_request', { goal: task.task }, 'entry')]);
   const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });

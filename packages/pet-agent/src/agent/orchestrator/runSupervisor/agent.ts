@@ -60,9 +60,9 @@ export function createRunSupervisorAgent(params: {
         tools,
         systemPrompt: buildRunSupervisorAgentSystemPrompt(input.mode),
         middleware: [
+          toolProtocolMiddleware,
           createSupervisorControlValidationMiddleware(input, agentMessages.length),
           systemPromptMiddleware,
-          toolProtocolMiddleware,
         ],
       });
       const result = await agent.invoke({

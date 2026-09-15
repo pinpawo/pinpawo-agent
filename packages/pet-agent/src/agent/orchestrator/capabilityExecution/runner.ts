@@ -153,8 +153,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
         contextWindowTokens: subagentContextWindowTokens,
         generationReserveTokens: subagentGenerationReserveTokens,
         middleware: [
-          ...usedResolvedToolkitExecution.middleware,
           toolProtocolMiddleware,
+          ...usedResolvedToolkitExecution.middleware,
         ],
         runtimeContext: {
           executionScope: {

@@ -74,6 +74,8 @@ try {
     '--no-fund',
     '--package-lock=false',
     '--prefer-offline',
+    '--loglevel=verbose',
+    '--timing',
     '--save=false',
     ...tarballs,
   ], consumerDir, 'install packed public packages', 600_000);

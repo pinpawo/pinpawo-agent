@@ -1,7 +1,11 @@
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { LocalAgentGraphService } from './agent/agentGraphService';
 import { runAgentSessionTurn } from './agent/chatSessionAdapter';
-import { buildAgentEventEnvelope, type AgentRuntimeEvent } from '@pinpawo/agent-session';
+import {
+  buildAgentEventEnvelope,
+  type AgentRuntimeEvent,
+  type AgentServerMessage,
+} from '@pinpawo/agent-session';
 import { createLocalServerHandlers } from './serverHandlers';
 import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
 import {
@@ -190,8 +194,13 @@ export async function createResidentPetRuntime(
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
   const activeHostRuns = new Map<string, AbortController>();
   const activeRuns = new ActiveRunRegister();
-  const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
-    const message = buildAgentEventEnvelope(event);
+  const messageListeners = new Set<(message: AgentServerMessage) => void>();
+  const publishMessage = (message: AgentServerMessage) => {
+    for (const listener of messageListeners) {
+      try { listener(message); } catch (error) {
+        defaultLogError('[resident-pet] event observer failed:', error);
+      }
+    }
     const peer = interactivePeer.current;
     if (!peer || !peer.isConnected()) return;
     try {
@@ -199,6 +208,11 @@ export async function createResidentPetRuntime(
     } catch (error) {
       defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
     }
+  };
+  const publishRuntimeEvent = (event: AgentRuntimeEvent) => publishMessage(buildAgentEventEnvelope(event));
+  const hostPeer: AgentSessionPeer = {
+    isConnected: () => closing === null,
+    send: (message) => { publishMessage(message); return closing === null; },
   };
   const publishDispatchLifecycle = (event: PetDispatchLifecycleEvent) => {
     for (const listener of dispatchLifecycleListeners) {
@@ -210,7 +224,7 @@ export async function createResidentPetRuntime(
     }
   };
   const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
-  const localHandlers = createLocalServerHandlers(runtimeDeps, {
+  const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
@@ -220,7 +234,7 @@ export async function createResidentPetRuntime(
     activeRuns,
     interruptHostRun: (requestId) => {
       const controller = activeHostRuns.get(requestId);
-      if (!controller) return false;
+      if (!controller) return localHandlers.interruptRun(requestId);
       controller.abort();
       return true;
     },
@@ -238,7 +252,9 @@ export async function createResidentPetRuntime(
       const peer = interactivePeer.current;
       interactivePeer.current = null;
       if (peer) await peerHandlers.onClose(peer);
+      await peerHandlers.onClose(hostPeer);
       await coordinator.close();
+      messageListeners.clear();
       localHandlers.close();
     })();
     return closing;
@@ -255,6 +271,8 @@ export async function createResidentPetRuntime(
     localHandlers,
     peerHandlers,
     interactivePeer,
+    hostPeer,
+    messageListeners,
     publishRuntimeEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,

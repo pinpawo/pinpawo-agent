@@ -4,7 +4,7 @@ import type {
   PetDocument,
   ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
-import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
+import type { AgentRuntimeEvent, AgentServerMessage } from '@pinpawo/agent-session';
 
 import type { ActiveRunRegister } from '../agent/activeRunRegister';
 import type { LocalAgentGraphService } from '../agent/agentGraphService';
@@ -83,14 +83,10 @@ export type ResidentPetRuntimeContext = {
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;
-  /**
-   * The one interactive client, or null. A Host serves one Pet whose session
-   * state is single-valued, so interaction is exclusive; everything else
-   * reaches the Pet through dispatch, which queues behind the availability
-   * gate. Studio observes through the PetDispatchPort callbacks and never
-   * attaches here.
-   */
+  /** One WebSocket client; passive readers and Host-owned HTTP commands do not claim it. */
   interactivePeer: { current: AgentSessionPeer | null };
+  hostPeer: AgentSessionPeer;
+  messageListeners: Set<(message: AgentServerMessage) => void>;
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;

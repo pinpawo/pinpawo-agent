@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { buildAgentEventEnvelope, type AgentServerMessage } from '@pinpawo/agent-session';
+
 import { dispatchLocalServerMessage } from '../wire/messageDispatcher';
 import {
   ResidentPetInteractionBusyError,
@@ -7,6 +10,10 @@ import {
   readResidentPetRuntimeContext,
   type ResidentPetRuntime,
 } from './runtimeContext';
+
+function defaultLogError(message: string, error: unknown): void {
+  console.error(message, error instanceof Error ? error.message : error);
+}
 
 /**
  * The interaction surface: the Host's single interactive connection.
@@ -23,14 +30,39 @@ export function createResidentPetInteraction(
   const context = readResidentPetRuntimeContext(runtime);
   const { peerHandlers, interactivePeer } = context;
   const interaction: ResidentPetInteraction = {
+    snapshot: async () => {
+      if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
+      let result: AgentServerMessage | undefined;
+      await peerHandlers.onSessionSnapshotGet({
+        isConnected: () => true,
+        send: (message) => { result = message; return true; },
+      }, { type: 'session.snapshot.get', requestId: randomUUID() });
+      if (!result) throw new Error('Session snapshot did not return a response.');
+      return result;
+    },
+    getQueueSnapshot: () => context.coordinator.getQueueSnapshot(),
+    subscribe: (listener) => {
+      context.messageListeners.add(listener);
+      return () => { context.messageListeners.delete(listener); };
+    },
+    request: async (message) => {
+      if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
+      await dispatchLocalServerMessage(context.hostPeer, JSON.stringify(message), peerHandlers, (_label, error) => {
+        if (!('requestId' in message) || !message.requestId) {
+          defaultLogError(_label, error);
+          return;
+        }
+        context.hostPeer.send(buildAgentEventEnvelope({
+          type: 'error',
+          requestId: message.requestId,
+          message: error instanceof Error ? error.message : 'Agent Session command failed.',
+        }));
+      });
+    },
     connect: (peer) => {
       if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
-      // One interactive connection per Host. Everything else reaches a Pet
-      // through dispatch, which is queued behind the availability gate — that
-      // is what dispatch is for. Two interactive clients would instead race
-      // over shared session state (the active session pointer is per-Pet), and
-      // the runtime already assumes a single interaction elsewhere: the run
-      // register is one value per Host and throws on a second claim.
+      // WebSocket connection ownership remains exclusive. HTTP commands use
+      // the Host peer and the same admission gate; SSE readers hold no peer.
       if (interactivePeer.current?.isConnected()) {
         throw new ResidentPetInteractionBusyError();
       }

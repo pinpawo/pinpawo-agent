@@ -19,6 +19,16 @@ function createTestController() {
   return { controller, controls, operations };
 }
 
+test('Host interruption finds the exact run across transports', () => {
+  const { controller } = createTestController();
+  const tui = controller.start('tui', 'tui-run');
+  const http = controller.start('http', 'http-run');
+  assert.equal(controller.interruptById('missing'), null);
+  assert.equal(controller.interruptById('http-run'), http);
+  assert.equal(http.controller.signal.aborted, true);
+  assert.equal(tui.controller.signal.aborted, false);
+});
+
 test('InflightRequestController tracks concurrent requests for the same transport', () => {
   const { controller, controls, operations } = createTestController();
   const observedOperations: AgentOperationEvent[] = [];

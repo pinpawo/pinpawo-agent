@@ -73,6 +73,10 @@ export interface AgentSessionPeer {
 }
 
 export interface ResidentPetInteraction {
+  snapshot(): Promise<AgentServerMessage>;
+  getQueueSnapshot(): PetDispatchQueueSnapshot;
+  subscribe(listener: (message: AgentServerMessage) => void): () => void;
+  request(message: AgentClientMessage): Promise<void>;
   connect(peer: AgentSessionPeer): Promise<void> | void;
   handle(peer: AgentSessionPeer, message: AgentClientMessage): Promise<void>;
   disconnect(peer: AgentSessionPeer): Promise<void> | void;

@@ -341,13 +341,28 @@ test('two resident Pets isolate waiting checkpoints and resume through Agent Ses
     )) as { snapshot?: { session?: { pendingInterrupt?: unknown } } } | undefined;
     assert.ok(waitingSnapshot?.snapshot?.session?.pendingInterrupt);
 
-    await petA.interaction.handle(resumedConnection, {
+    const observed: AgentServerMessage[] = [];
+    const unsubscribe = petA.interaction.subscribe((message) => observed.push(message));
+    const httpSnapshot = await petA.interaction.snapshot();
+    assert.equal(httpSnapshot.type, 'session.snapshot.result');
+    assert.equal(petA.interaction.getQueueSnapshot().state, 'waiting');
+    await petA.interaction.request({
+      type: 'interrupt.resume', requestId: 'stale-resume', interruptId: 'stale-id', value: {},
+    });
+    assert.equal(petA.interaction.getQueueSnapshot().state, 'waiting');
+    assert.ok(observed.some((message) => message.type === 'event' && message.event.type === 'error'));
+    // A passive observer disconnect does not own the command or the TUI.
+    unsubscribe();
+    await petA.interaction.request({
       type: 'interrupt.resume',
       requestId: 'resume-1',
       interruptId: 'interrupt-1',
       value: { decisions: [{ interactionId: 'review-1', selectedOptionId: 'approve' }] },
     });
     assert.equal(petA.resident.dispatch.getQueueSnapshot().state, 'open');
+    assert.ok(resumedConnectionMessages.some((message) =>
+      (message as AgentServerMessage).type === 'event'
+      && (message as Extract<AgentServerMessage, { type: 'event' }>).event.requestId === 'resume-1'));
     await petA.interaction.disconnect(resumedConnection);
 
     const finalConnectionMessages: unknown[] = [];
@@ -371,6 +386,7 @@ test('dispatch and conversation publish the same Agent Session event stream', as
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-events-'));
   const runtimeConfig = buildLocalAgentRuntimeConfig(root);
   const blockingTurnStarted = deferred();
+  let blockingStarts = 0;
   let dispatchCallerMetadata: unknown;
   const graphService = {
     readThreadState: async () => ({
@@ -402,6 +418,7 @@ test('dispatch and conversation publish the same Agent Session event stream', as
           .getRunnableConfig()?.metadata;
       }
       if (text === 'blocking host turn') {
+        blockingStarts += 1;
         blockingTurnStarted.resolve();
         await new Promise<void>((resolve) => {
           const signal = setup.input.signal;
@@ -530,6 +547,21 @@ test('dispatch and conversation publish the same Agent Session event stream', as
     assert.ok(sourceMessages.some((message) => (
       (message as { event?: { type?: string } }).event?.type === 'run.interrupted'
     )));
+    await waitFor(() => host.interaction.getQueueSnapshot().state === 'open', 'dispatch did not settle');
+    // Stop commands cross the transport boundary in either direction.
+    for (const owner of ['http', 'tui']) {
+      const started = blockingStarts;
+      const command = { type: 'chat_request' as const, requestId: `${owner}-blocking`, message: 'blocking host turn' };
+      const running = owner === 'http'
+        ? host.interaction.request(command)
+        : host.interaction.handle(source, command);
+      await waitFor(() => blockingStarts > started, 'conversation did not start');
+      const stop = { type: 'run.interrupt' as const, requestId: command.requestId };
+      if (owner === 'http') await host.interaction.handle(source, stop);
+      else await host.interaction.request(stop);
+      await running;
+      assert.equal(host.interaction.getQueueSnapshot().state, 'open');
+    }
   } finally {
     stopLifecycleObservation();
     await host.close();

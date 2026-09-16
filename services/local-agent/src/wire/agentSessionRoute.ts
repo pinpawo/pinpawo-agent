@@ -13,6 +13,7 @@ import {
   isAuthorizedLocalServerRequest,
 } from './auth';
 import type { ServerTransport } from './transport';
+import { handleAgentSessionHttp } from './agentSessionHttp';
 import type {
   AgentSessionPeer,
   ResidentPetInteraction,
@@ -131,9 +132,13 @@ export async function startResidentPetAgentSessionTransport(
   const logError = options.logError ?? ((message, error) => {
     console.error(message, error instanceof Error ? error.message : error);
   });
-  const server = createServer((_request, response) => {
-    response.writeHead(404);
-    response.end();
+  const server = createServer((request, response) => {
+    void handleAgentSessionHttp(request, response, interactions, authToken).catch((error) => {
+      logError('[agent-session] HTTP request failed:', error);
+      if (response.headersSent) { response.destroy(); return; }
+      response.writeHead(500, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ error: 'Agent Session request failed' }));
+    });
   });
   const wss = new WebSocketServer({ noServer: true });
   attachConnection(wss, interactions, logError);
@@ -177,6 +182,7 @@ export async function startResidentPetAgentSessionTransport(
   });
 
   log(`[agent-session] listening on ws://127.0.0.1:${address.port}${RESIDENT_PET_AGENT_SESSION_ROUTE_PREFIX}:petId`);
+  log(`[agent-session] HTTP snapshot/messages and SSE events on http://127.0.0.1:${address.port}${RESIDENT_PET_AGENT_SESSION_ROUTE_PREFIX}:petId`);
   let closeRequested = false;
   let requestClose!: () => void;
   const closeSignal = new Promise<void>((resolve) => {

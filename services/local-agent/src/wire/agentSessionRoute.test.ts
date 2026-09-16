@@ -37,6 +37,10 @@ function waitForMessage(ws: WebSocket): Promise<unknown> {
 
 function interaction(petId: string, handled: string[]): ResidentPetInteraction {
   return {
+    snapshot: async () => ({ type: 'pong' }),
+    getQueueSnapshot: () => ({ state: 'open', activeOperation: null, queuedConversations: 0, queuedDispatches: 0 }),
+    subscribe: () => () => undefined,
+    request: async () => undefined,
     connect: () => undefined,
     handle: (peer: AgentSessionPeer, message: AgentClientMessage) => {
       handled.push(`${petId}:${message.type}`);

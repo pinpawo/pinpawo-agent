@@ -36,6 +36,7 @@ import {
 } from './serverTypes';
 
 export type ServerHandlers = {
+  interruptRun: (requestId: string) => boolean;
   peerHandlers: LocalServerPeerHandlers;
   handleHttpRequest: (
     req: IncomingMessage,
@@ -759,6 +760,7 @@ export function createLocalServerHandlers(
 
   return {
     peerHandlers,
+    interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
     close: () => {},
     handleHttpRequest: (req, res, authToken) => {
       const requestDeps = runtimeDeps.get();

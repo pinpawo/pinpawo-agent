@@ -45,3 +45,31 @@ inspect a runtime, or participate in Agent Session conversation.
 the whole Host back. `startStudioHost()` also starts the local-agent Pet-scoped
 Agent Session listener. Configured HTTP Plugins provide the Studio control plane;
 Studio has no built-in WebSocket or stdio dispatch protocol.
+
+## Host Agent Session HTTP
+
+The local-agent listener also exposes HTTP/SSE alongside its WebSocket, on the
+Pet port (default `3212`). This is separate from the Studio HTTP Plugin (`3211`).
+All routes require the existing Bearer token; they share the WebSocket Origin
+policy, protocol parser and runtime handlers.
+
+| Route | Result |
+| --- | --- |
+| `GET /agent-session/pets/:petId/snapshot` | Existing `session.snapshot.result` envelope plus `queue` state |
+| `GET /agent-session/pets/:petId/events` | Live SSE, `event: message`, JSON `AgentServerMessage` data |
+| `POST /agent-session/pets/:petId/messages` | Existing `AgentClientMessage` with `requestId`; JSON body, 1 MiB limit; `202 {requestId}` |
+
+HTTP commands and SSE readers do not claim the exclusive TUI connection. The
+Host owns submitted commands, so disconnecting HTTP/SSE does not stop execution.
+To resolve review, read the snapshot and send `interrupt.resume` with its
+interrupt ID and the kind-owned decision value. The runtime validates the same
+IDs and decisions used by the TUI. `run.interrupt` targets a run by request ID
+across HTTP, TUI and dispatch.
+
+202 is acceptance, not completion. Events have no persistent replay; subscribe
+before sending commands and reread the snapshot after reconnecting. Do not
+blindly resubmit accepted mutations. Legacy `new_session` without a request ID
+is not an HTTP command; use the current `session.new` protocol instead.
+
+The repository's [Studio skill](../../../skills/studio/SKILL.md) includes a
+standard-library client for these endpoints and Studio dispatch/Kanban.

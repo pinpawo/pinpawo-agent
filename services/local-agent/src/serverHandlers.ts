@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from './config/agentConfig';
-import { LocalAgentGraphService } from './agentGraphService';
+import { LocalAgentGraphService } from './agent/agentGraphService';
 import { InflightRequestController } from './inflightRequestController';
 import { buildLocalAgentSessionSnapshot } from './conversation/agentSessionSnapshot';
 import type {
@@ -18,11 +18,11 @@ import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
 import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
 import { SessionAdmission } from './session/sessionAdmission';
 import { SessionCommandQueue } from './session/sessionCommandQueue';
-import { ServerChatHandler } from './serverChatHandler';
+import { ServerChatHandler } from './agent/serverChatHandler';
 import type {
   AgentSessionTurnOptions,
   AgentSessionTurnResult,
-} from './chatSessionAdapter';
+} from './agent/chatSessionAdapter';
 import { ServerTuiSessionService } from './session/serverTuiSessions';
 import { persistGlobalReviewPolicyMode } from './config/globalReviewPolicyConfig';
 import { loadAgentContext } from './contextLoader';

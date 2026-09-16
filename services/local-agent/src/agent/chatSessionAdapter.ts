@@ -32,12 +32,12 @@ import {
 import {
   adaptRootStream,
   type RootProtocolEvent,
-} from './events/rootStreamEventAdapter';
-import { createLocalChatHumanMessage } from './agent/chatMessageInput';
+} from '../events/rootStreamEventAdapter';
+import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
 import {
   currentPlansEqual,
   projectCurrentPlan,
-} from './conversation/currentPlanProjection';
+} from '../conversation/currentPlanProjection';
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 32000;
 const STALE_RESUME_MESSAGE = '这个 review 已关闭或不存在，请等待当前确认面板刷新后再应答。';
@@ -78,9 +78,6 @@ export type AgentSessionTurnOptions = {
    */
   prepareUserMessage?: () => Promise<BaseMessage>;
 };
-
-/** @deprecated Use AgentSessionTurnOptions. */
-export type ChatSessionAdapterOptions = AgentSessionTurnOptions;
 
 async function waitForGraphRunSettlement(run: LocalAgentGraphEventStream | null) {
   const output = (run as { output?: PromiseLike<unknown> } | null)?.output;
@@ -540,7 +537,4 @@ export async function runAgentSessionTurn(
 
   return { status: 'completed', reply: finalReply };
 }
-
-/** @deprecated Use runAgentSessionTurn. */
-export const runChatSession = runAgentSessionTurn;
 

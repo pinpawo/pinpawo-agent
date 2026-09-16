@@ -3,8 +3,8 @@ import test from 'node:test';
 import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import type { HumanReviewResponse, InterruptResumeMessage } from '@pinpawo/agent-session';
 import { isToolProtocolHistoryError, ServerChatHandler } from './serverChatHandler';
-import { InflightRequestController } from './inflightRequestController';
-import type { ServerPeer } from './wire/peer';
+import { InflightRequestController } from '../inflightRequestController';
+import type { ServerPeer } from '../wire/peer';
 
 function createFakePeer(
   sent: unknown[] = [],

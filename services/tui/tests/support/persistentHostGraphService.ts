@@ -19,13 +19,13 @@ import {
 } from '@pinpawo/pet-agent';
 import type {
   AgentChannelSetup,
-} from '../../../local-agent/src/agentChannel';
+} from '../../../local-agent/src/agent/agentChannel';
 import type {
   InterruptResume,
   LocalAgentGraphEventStream,
   LocalAgentGraphService,
   LocalAgentGraphThreadState,
-} from '../../../local-agent/src/agentGraphService';
+} from '../../../local-agent/src/agent/agentGraphService';
 
 export const PERSISTENT_HOST_INPUT = 'Persist this host conversation.';
 export const PERSISTENT_HOST_CONTINUATION = 'Continue after the host restart.';

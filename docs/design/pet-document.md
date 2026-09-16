@@ -134,7 +134,7 @@ these deterministic checks.
 - [Context schema and root accessor](../../packages/pet-agent/src/runtime/context.ts)
 - [Shared SystemMessage composer and middleware](../../packages/pet-agent/src/prompts/systemPrompt.ts)
 - [Root context propagation into dynamic children](../../packages/pet-agent/src/subagent/systemContext.test.ts)
-- [Host invocation and graph reuse tests](../../services/local-agent/src/agentGraphService.test.ts)
+- [Host invocation and graph reuse tests](../../services/local-agent/src/agent/agentGraphService.test.ts)
 
 Validation on 2026-09-05: pet-agent 482 tests passed; Studio 90 passed;
 local-agent 606 passed with 5 skipped. Local-agent's full suite requires local

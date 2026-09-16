@@ -3,13 +3,13 @@ import {
   type PendingInterrupt,
   type ReviewSpec,
 } from '@pinpawo/pet-agent';
-import { loadAgentContext } from './contextLoader';
+import { loadAgentContext } from '../contextLoader';
 import {
   type ChatRequestMessage,
   type InterruptResumeMessage,
   type RunInterruptMessage,
-} from './wire/protocol';
-import { projectPendingInterrupt } from './conversation/pendingInterruptProjection';
+} from '../wire/protocol';
+import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import {
   type StreamToolsPayload,
 } from './agentStreamEvents';
@@ -21,28 +21,28 @@ import {
   configureInflightOperationRegistry,
   overlayInflightDelegationOperations,
   type InflightOperationRun,
-} from './inflightOperationRun';
-import { InflightRequestController } from './inflightRequestController';
-import { emitLocalServerToolOperationEvent } from './serverOperationEvents';
+} from '../inflightOperationRun';
+import { InflightRequestController } from '../inflightRequestController';
+import { emitLocalServerToolOperationEvent } from '../serverOperationEvents';
 import { LocalAgentGraphService } from './agentGraphService';
 import {
   ServerTuiSessionService,
   type ActivePendingInterrupt,
-} from './session/serverTuiSessions';
-import type { ServerDeps } from './serverTypes';
-import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
+} from '../session/serverTuiSessions';
+import type { ServerDeps } from '../serverTypes';
+import { createOperationRegistryForAgentSetup } from '../runtimeOperationRegistry';
 import {
   resolvePendingHumanReviewInterrupt,
   type PendingHumanReviewInterruptRoute,
   type HumanReviewResolutionSource,
-} from './pendingHumanReviewInterrupt';
+} from '../pendingHumanReviewInterrupt';
 import type { AgentRuntimeEvent, PendingInterruptProjection } from '@pinpawo/agent-session';
 import {
   classifyAgentRunFailure,
   describeFatalAgentRunFailure,
 } from './agentRunFailure';
-import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
-import { ThreadInvocationCoordinator } from './threadInvocationCoordinator';
+import { sendLocalServerPeerEvent, type ServerPeer } from '../wire/peer';
+import { ThreadInvocationCoordinator } from '../threadInvocationCoordinator';
 
 type InflightRequest = InflightOperationRun;
 

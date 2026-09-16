@@ -8,8 +8,8 @@ import {
   type CompiledAgentRegistry,
   type ExecutorCompilationIssue,
 } from '@pinpawo/pet-agent';
-import { createArtifactDiscoveryToolkit } from './toolkits/local';
-import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
+import { createArtifactDiscoveryToolkit } from '../toolkits/local';
+import type { ToolkitInventoryEntry } from '../toolkits/toolkitInventory';
 
 /**
  * Host-facing diagnostic projection. The core compiler intentionally reports

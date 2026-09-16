@@ -17,23 +17,23 @@ import {
   buildLocalAgentModels,
   resolveLlmGenerationReserveTokens,
 } from './agentModels';
-import type { AgentLlmConfig } from './config/agentConfig';
-import type { AgentContext } from './contextLoader';
-import type { HostExecutionConfig } from './config/hostExecutionConfig';
-import { buildRuntimeEnvironmentSummary } from './config/runtimeEnvironment';
+import type { AgentLlmConfig } from '../config/agentConfig';
+import type { AgentContext } from '../contextLoader';
+import type { HostExecutionConfig } from '../config/hostExecutionConfig';
+import { buildRuntimeEnvironmentSummary } from '../config/runtimeEnvironment';
 import {
   buildLocalAgentInterfaceContext,
   type AgentInterfaceContext,
   type AgentInterfaceKind,
-} from './chatInterface';
+} from '../chatInterface';
 import {
   inferLlmStructuredOutputMethod,
-} from './config/llmModelPresets';
+} from '../config/llmModelPresets';
 import {
   prepareAgentRegistry,
   type CapabilityDiagnosticReporter,
 } from './agentRegistryPreparation';
-import type { ToolkitInventoryEntry } from './toolkits/toolkitInventory';
+import type { ToolkitInventoryEntry } from '../toolkits/toolkitInventory';
 
 export type AgentChannelSetup = {
   graphConfig: OrchestratorConfig;

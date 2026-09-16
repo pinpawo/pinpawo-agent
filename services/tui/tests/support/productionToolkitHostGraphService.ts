@@ -19,13 +19,13 @@ import { z } from 'zod';
 import { withScriptedDelegation } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import type {
   AgentChannelSetup,
-} from '../../../local-agent/src/agentChannel';
+} from '../../../local-agent/src/agent/agentChannel';
 import {
   LocalAgentGraphService,
   type InterruptResume,
   type LocalAgentGraphEventStream,
   type LocalAgentGraphThreadState,
-} from '../../../local-agent/src/agentGraphService';
+} from '../../../local-agent/src/agent/agentGraphService';
 
 export const GUARDED_HOST_INPUT =
   'Run the guarded production toolkit action.';

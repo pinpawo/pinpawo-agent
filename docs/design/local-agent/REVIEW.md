@@ -235,27 +235,40 @@ health 字段测试。
 
 ---
 
-## 七、为什么顶层还剩 63 个文件
+## 七、顶层文件的收敛进度
 
-这是 review 中被问到的问题，值得写清楚。按 domain 归类，顶层剩余文件分三类：
+这是 review 中被问到的问题，值得写清楚：顶层不会归零，终态大约 10 个。
 
-| domain | 顶层数 | 原因 |
+| 轮次 | 顶层非测试文件 | 这一轮做了什么 |
 |---|---|---|
-| **agent** | 18 | 阶段 1 只搬了 `buildChatSetup`；`chatSessionAdapter`、`agentGraphService` 等要等生命周期收敛（现仍在两处重复） |
-| **Config** | 17 | 阶段 5 只拆了**契约**，未建 `config/` 目录 |
-| **Host** | 11 | 结论 1 **仅文档**；`residentPetHost` 的拆分是下一轮主体 |
-| **Session** | 4 | 未建 `session/` 目录 |
-| **wire** | 4 | `httpHandlers` / `server` 等是**组装侧**，不是协议解析 |
-| 组装/入口 | ~9 | `index` / `cli` / `serverTypes` / `runtime` **本来就该在顶层** |
+| §七 五阶段结束 | 63 | 归位、准入、拆契约 |
+| Config/Session 建目录（#800） | 43 | 纯移动；顺带删掉只写不读的 run 状态 |
+| 生命周期收敛（#801） | 41 | 两个 run register 合一，解除 agent 归位的前置 |
+| agent 归位（本轮） | 33 | `agent*` 八件 + `chatSessionAdapter` + `serverChatHandler` |
 
-三个原因：
+当前各 domain 目录：agent 12、config 17、wire 9、commands 6、conversation 5、
+session 4、events 3、toolkits 3。
 
-1. **归属已定、目录未建（约 21 个）** —— Config 与 Session。阶段 5 拆了 Config
-   的**契约**（`RuntimeProjectionDeps`），但没建 `config/` 目录；建目录是纯移动，
-   留给下一轮一次做完更省事。
-2. **等下一轮的结构收敛（约 29 个）** —— agent 的生命周期仍在
-   `serverChatHandler` 与 `residentPetHost` 两处重复（结论 2 的未完成部分），
-   `serverHandlers` 要拆到四个 domain。这两件事一起做，提前搬会反复冲突。
-3. **本来就该在顶层（9 个）** —— `index` / `cli` / `runtime` / `serverTypes` 等。
+顶层还剩 33 个，分三类：
+
+1. **Host domain（约 11 个）** —— 下一轮主体。`residentPetHost.ts` 一个文件 908 行，
+   装着 7 个 port 契约、2 个错误类、`ResidentPetCoordinator`（250 行）和 runtime 组装。
+   结论 1 至今**仅文档**。
+2. **待拆而非待搬（约 12 个）** —— `serverHandlers.ts`（768 行）要拆到四个 domain，
+   不是移动一个文件能解决的；operation 那一组（`inflightOperationRun` /
+   `toolOperationTracker` / `serverOperationEvents` / `runtimeOperationRegistry`）
+   归属待定：它们是「一次 run 内的工具执行跟踪」，与 agent 同生命周期，但和
+   `events/`（事件投影）是两回事。
+3. **本来就该在顶层（约 10 个）** —— `index` / `cli` / `runtime` / `serverTypes` 等。
    domains.md 说的「Host 的完整组装类型留在组合入口」。
-   **终态顶层大约是 10 个，不是 0 个。**
+
+### agent 归位为什么能做了
+
+§七 写这张表时，agent 的生命周期在 `serverChatHandler` 与 `residentPetHost`
+两处重复，所以「提前搬会反复冲突」。#801 把两个 register 合成一个之后这个前提
+消失了：`chatSessionAdapter` / `agentGraphService` 现在是两侧**共享的依赖**，
+不是各写一份，搬动只改 import 路径。
+
+`serverChatHandler` 名字带 `server` 前缀，但它持有的是 chat run 的执行，属于
+agent domain；`serverHandlers` 留在顶层，因为它同时承担 Session 命令队列、
+快照和模型选择——那是拆分工作，不是这一轮的搬运。

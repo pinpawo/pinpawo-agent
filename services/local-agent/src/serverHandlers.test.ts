@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
-import type { LocalAgentGraphService } from './agentGraphService';
+import type { LocalAgentGraphService } from './agent/agentGraphService';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { createLocalServerHandlers as createProductionLocalServerHandlers } from './serverHandlers';
 import type { LocalAgentServerMessage } from './wire/protocol';

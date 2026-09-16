@@ -48,19 +48,8 @@ function withPresetCompatibility(
   profile: ReturnType<typeof resolveModelProfile>,
 ) {
   const preset = findMatchingSourcePreset(profile);
-  // Older DeepSeek presets persisted forced function calling. The runtime now
-  // uses provider-default thinking, which rejects a named tool_choice.
-  const migrateDeepSeekStructuredOutput = preset?.provider === 'deepseek'
-    && new URL(profile.baseUrl).hostname === 'api.deepseek.com'
-    && profile.structuredOutputMethod === 'functionCalling';
   return preset
-    ? {
-        ...profile,
-        inputModalities: preset.inputModalities,
-        ...(migrateDeepSeekStructuredOutput
-          ? { structuredOutputMethod: 'jsonMode' as const }
-          : {}),
-      }
+    ? { ...profile, inputModalities: preset.inputModalities }
     : profile;
 }
 

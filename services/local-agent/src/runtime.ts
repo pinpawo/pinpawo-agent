@@ -24,22 +24,43 @@ import { DEFAULT_SERVER_MODE, type ServerMode } from './config/serverMode';
  * runtime/interaction surfaces; this Chat Host never imports it.
  */
 /**
- * Chat runs one Pet. A second configuration file is a composition mistake
- * rather than an unsupported feature, so it fails loudly and points at the
- * Host that does own multi-Pet identity.
+ * The Pet this Chat Host serves.
+ *
+ * Chat runs exactly one Pet (§一.8: a Host is one Pet's host, and multi-Pet is
+ * Studio holding several Hosts). That leaves three cases, and only one of them
+ * is a choice:
+ *
+ * - one configured Pet — serve it;
+ * - none — serve the standalone default, as an install that never wrote one
+ *   always did;
+ * - several — the directory belongs to Studio, so Chat serves the standalone
+ *   default too rather than picking one of them.
+ *
+ * The last case used to fail. Refusing was defensible — picking one of several
+ * would be a guess — but the standalone default is not a guess: it is a Pet of
+ * its own (`local-only`), with its own session namespace, so a Chat session
+ * started here cannot disturb the Pets Studio owns. Failing only forced the
+ * user to move files around to get a Chat window.
  */
 export async function loadChatPetConfig(
   runtimeConfig: Pick<LocalAgentRuntimeConfig, 'petsDir'>,
+  log: (message: string) => void = console.log,
 ): Promise<PetConfig> {
   const { petsDir } = runtimeConfig;
   const configs = await loadPetConfigs(petsDir);
+  if (configs.length === 1) return configs[0]!;
   if (configs.length > 1) {
-    throw new Error(
-      `Chat Host runs one Pet, but ${configs.length.toString()} are configured in ${petsDir}. `
-      + 'Use Studio to run several Pets.',
+    // Say which Pets are being passed over. Serving `local-only` beside four
+    // configured Pets is correct but surprising, and silence would read as the
+    // Host having picked one of them.
+    log(
+      `[local-agent] ${configs.length.toString()} Pets are configured in ${petsDir} `
+      + `(${configs.map((config) => config.petId).join(', ')}). `
+      + `Chat serves one Pet, so it runs the standalone "${DEFAULT_CHAT_PET.petId}" `
+      + 'instead; use Studio to run those Pets.',
     );
   }
-  return configs[0] ?? DEFAULT_CHAT_PET;
+  return DEFAULT_CHAT_PET;
 }
 
 export class AgentHost {

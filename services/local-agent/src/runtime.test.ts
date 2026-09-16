@@ -53,17 +53,42 @@ test('Chat Pet resolution adopts the configured identity and model profile', asy
 });
 
 /**
- * Chat runs one Pet by contract, not by current limitation, so a second file is
- * an error that names the Host which does own multi-Pet identity.
+ * Chat runs one Pet by contract (§一.8), so a directory holding several belongs
+ * to Studio. Chat serves its own standalone Pet rather than picking one of
+ * them: `local-only` has its own session namespace, so starting a Chat session
+ * here cannot disturb the Pets Studio owns.
  */
-test('Chat Pet resolution refuses a second Pet and points at Studio', async () => {
+test('Chat serves the standalone Pet when the directory holds several', async () => {
   await withWorkdir(async (workdir) => {
     writePet(workdir, 'writer', { petId: 'writer', name: 'Writer' });
     writePet(workdir, 'reviewer', { petId: 'reviewer', name: 'Reviewer' });
 
-    await assert.rejects(
-      () => loadChatPetConfig(buildLocalAgentRuntimeConfig(workdir)),
-      /Chat Host runs one Pet, but 2 are configured.*Use Studio/s,
+    const logged: string[] = [];
+    const petConfig = await loadChatPetConfig(
+      buildLocalAgentRuntimeConfig(workdir),
+      (message) => logged.push(message),
     );
+
+    assert.equal(petConfig.petId, DEFAULT_CHAT_PET.petId);
+    // The skipped Pets are named, so serving `local-only` beside them does not
+    // read as the Host having silently picked one.
+    assert.equal(logged.length, 1);
+    assert.match(logged[0]!, /2 Pets are configured/);
+    assert.match(logged[0]!, /writer/);
+    assert.match(logged[0]!, /reviewer/);
+    assert.match(logged[0]!, /use Studio/);
+  });
+});
+
+test('Chat serves the standalone Pet silently when none is configured', async () => {
+  await withWorkdir(async (workdir) => {
+    const logged: string[] = [];
+    const petConfig = await loadChatPetConfig(
+      buildLocalAgentRuntimeConfig(workdir),
+      (message) => logged.push(message),
+    );
+
+    assert.equal(petConfig.petId, DEFAULT_CHAT_PET.petId);
+    assert.deepEqual(logged, []);
   });
 });

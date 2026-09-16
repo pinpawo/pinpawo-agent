@@ -128,20 +128,36 @@ dispatch 触发的确实是一次普通 Execution（走同一个执行入口与�
 | `activeRun` 是 Host 级单值 | 第二个执行直接抛 `already has active run` |
 | `ThreadInvocationCoordinator` | 同 thread 的替换请求取消前驱 |
 
-**三条路径是分开的，不该混谈：**
+**这些路径是分开的，不该混谈：**
 
-| 路径 | 接口 | 谁用 |
-|---|---|---|
-| 交互 | `interaction.connect/handle` | TUI（或任一直接交互 client），**独占** |
-| dispatch | `PetDispatchPort.dispatch()` | Studio 插件，排在 gate 后面 |
-| 观察 | `onDispatchLifecycle` / `onQueueChange` / `onStateChange`（**回调订阅**） | Studio，**不占交互名额** |
+| 路径 | 接口 | 谁用 | 占交互名额？ |
+|---|---|---|---|
+| 交互 | `interaction.connect/handle` | TUI（或任一直接交互 client） | **是，独占** |
+| Host 命令 | `interaction.request()`（HTTP `POST .../messages`） | Studio HTTP、脚本 | 否 |
+| dispatch | `PetDispatchPort.dispatch()` | Studio 插件，排在 gate 后面 | 否 |
+| 观察（回调） | `onDispatchLifecycle` / `onQueueChange` / `onStateChange` | Studio | 否 |
+| 观察（流） | `interaction.subscribe()`（HTTP SSE `GET .../events`） | Studio Console、外部读者 | 否 |
 
-Studio 从不 `interaction.connect` —— 它订阅的是回调。所以「只能连一个」
+Studio 从不 `interaction.connect` —— 它订阅的是回调或 SSE。所以「只能连一个」
 不影响 Studio 的观察面。
 
-**推论：`publishRuntimeEvent` 不再广播。** 事件发给那一个交互连接；
-`peers: Set` 收敛为 `interactivePeer`。此前的多 peer 广播是「支持多客户端并存」
-的遗留，与本条冲突。
+**独占的是写入者，不是接收者。** 占名额的判据是「会不会竞争单值会话状态」：
+
+- `connect()` 只检查 `interactivePeer.current`。Host 命令走一个内部的
+  `hostPeer`，从不写入那个变量，所以 WebSocket 名额仍然空着。
+- Host 命令**不绕过准入**：`request()` 和 `handle()` 走同一个 `peerHandlers`，
+  同样经过 `admitHumanMessage` → `SessionAdmission` → 命令队列。它是另一个
+  入口，不是后门。
+- SSE 读者只读不写，连 peer 都不持有。
+
+**推论：事件按「一个写入者 + 任意读者」投递。** `publishMessage` 先遍历
+`messageListeners`（SSE 读者），再发给那一个交互连接。
+
+这看起来像是恢复了广播，但与当初收敛 `peers: Set` 的理由不冲突：当初删多 peer
+广播，是因为「多客户端并存」会竞争单值会话状态；只读的监听者产生不了那个竞争。
+边界因此从「只能有一个接收者」收紧成「**只能有一个写入者**」——这个划法更准确。
+
+落地见 `wire/agentSessionHttp.ts` 与 `host/residentPetInteraction.ts`。
 
 拒绝以协议错误 `interaction_busy` 返回，而不是断开 socket —— 客户端要能
 区分「已被占用」和「连不上」。
@@ -535,7 +551,7 @@ peer message
 | 1 | Host 只有一种，local 是退化形态 |
 | 2 | setup 与 invoke 都归 agent，不放 Session |
 | 3 | dispatch 是 Studio 概念；Host 只提供「Agent 可用」gate，与会话无关 |
-| 3b | 一个 Host 只接一个交互连接；dispatch 与观察各走各的路径 |
+| 3b | 一个 Host 只接一个交互**写入者**；Host 命令、dispatch、观察各走各的路径，都不占名额 |
 | 4 | Conversation = UI 交互 state 管理，主体在 `@pinpawo/agent-session` |
 | 5 | `modelProfileId`：Session 覆盖 / Config 默认 |
 | 6 | wire 不是 domain；适配传输，能力必须统一 |

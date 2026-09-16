@@ -2217,7 +2217,8 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   assert.equal(callCount, 1);
   assert.equal(autoReviewCount, 1);
   const systemPrompt = (autoReviewMessages as Array<{ content?: unknown }>)[0]?.content;
-  assert.match(String(systemPrompt), /untrusted evidence/);
+  assert.equal(typeof systemPrompt, 'string');
+  assert.ok(!String(systemPrompt).includes('Write the requested notes file'));
   const reviewPrompt = String((autoReviewMessages as Array<{ content?: unknown }>)[1]?.content);
   assert.match(reviewPrompt, /<current_task role="context" authority="none">[\s\S]*Write the requested notes file/);
   assert.match(reviewPrompt, /<workdir authority="runtime">[\s\S]*\/repo/);

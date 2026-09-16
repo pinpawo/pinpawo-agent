@@ -7,8 +7,10 @@ import {
   AUTO_REVIEW_SYSTEM_PROMPT,
 } from './templates';
 
-const MAX_PROMPT_CHARS = 8_000;
-const MAX_ACTIONS_CHARS = 6_000;
+// Budget full file contents as evidence, not as a compact UI preview.
+// Keep a finite batch limit; oversized inputs still require human review.
+const MAX_ACTIONS_CHARS = 128_000;
+const MAX_PROMPT_CHARS = MAX_ACTIONS_CHARS + 8_000;
 const MAX_REVIEW_ACTIONS = 32;
 const MAX_TASK_CHARS = 500;
 

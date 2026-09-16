@@ -195,7 +195,7 @@ test('auto review preserves a shell command that fits the essential evidence bud
 
 test('auto review fails closed when an essential command cannot fit the evidence budget', async () => {
   let calls = 0;
-  const command = `printf '${'x'.repeat(8_000)}' > output.txt`;
+  const command = `printf '${'x'.repeat(140_000)}' > output.txt`;
   const resolution = await resolveGlobalReviewBatchPolicy({
     policy: { mode: 'auto_authorization' },
     models: {
@@ -246,7 +246,7 @@ test('auto review shares the evidence budget across small and large actions', ()
 test('auto review does not hide large content or unserializable input to approve a batch', () => {
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
-  for (const input of [{ content: 'x'.repeat(10_000) }, cycle]) {
+  for (const input of [{ content: 'x'.repeat(140_000) }, cycle]) {
     assert.equal(buildAutoReviewPrompt({ reviews: [review(input)] }).complete, false);
   }
 });
@@ -521,4 +521,39 @@ test('auto review deduplicates toolkit policy across a batch', async () => {
   assert.equal(systemPrompt.match(/Toolkit git:/g)?.length, 1);
   assert.equal(systemPrompt.match(/Automatic-authorization eligibility: routine repository collaboration/g)?.length, 1);
   assert.equal(systemPrompt.match(/Human-authorization conditions: before history-rewriting repository operations/g)?.length, 1);
+});
+
+
+test('ordinary source file writes reach the model intact and follow its risk assessment', async () => {
+  const content = 'export const fixture = "测试数据";\n'.repeat(800) + '// final evidence';
+  for (const path of ['/repo/src/example.spec.ts', '/tmp/example.spec.ts']) {
+    for (const riskScore of [1, 10]) {
+      let calls = 0;
+      const input = { path, content };
+      const resolution = await resolveGlobalReviewBatchPolicy({
+        policy: { mode: 'auto_authorization' },
+        models: { act: autoModel(async (messages) => {
+          calls++;
+          const prompt = String((messages as Array<{ content: unknown }>)[1].content);
+          assert.ok(prompt.includes(JSON.stringify(input, null, 2)));
+          return { riskScore, reason: 'Assessment of the full write.' };
+        }) },
+        messages: [],
+        workdir: '/repo',
+        reviews: [{ ...review(input), operation: undefined }],
+      });
+      assert.equal(calls, 1);
+      assert.equal(resolution.type, riskScore === 1
+        ? GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE
+        : GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION);
+    }
+  }
+});
+
+test('combined write evidence exceeding the batch budget still requires human review', () => {
+  const reviews = Array.from({ length: 3 }, (_, i) => review({
+    path: `/repo/file-${i}.ts`, content: 'x'.repeat(50_000),
+  }));
+  for (const item of reviews) assert.equal(buildAutoReviewPrompt({ reviews: [item] }).complete, true);
+  assert.equal(buildAutoReviewPrompt({ reviews }).complete, false);
 });

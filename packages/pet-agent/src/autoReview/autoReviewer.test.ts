@@ -33,7 +33,7 @@ test('AutoReviewer preserves budget failure and leaves model failure handling to
   const failure = new Error('model unavailable');
   const model = { withStructuredOutput: () => ({ invoke: async () => { invocations++; throw failure; } }) } as unknown as BaseChatModel;
   const reviewer = createAutoReviewer({ model, structuredOutput: { autoRepair: false } });
-  assert.deepEqual(await reviewer.assess({ reviews: [action({ content: 'x'.repeat(10_000) })] }), { complete: false });
+  assert.deepEqual(await reviewer.assess({ reviews: [action({ content: 'x'.repeat(140_000) })] }), { complete: false });
   assert.equal(invocations, 0);
   await assert.rejects(reviewer.assess({ reviews: [action({ path: '/project/a' })] }), error => error === failure);
   assert.equal(invocations, 1);

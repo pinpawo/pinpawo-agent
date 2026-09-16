@@ -9,6 +9,10 @@
 `local-agent` 之间的所有权边界。它替代“一个 `PetAgentRuntime.invoke()` 同时代表
 Pet 的全部外部入口”这一隐含假设。
 
+HTTP/SSE 扩展草案见 [Agent Session HTTP](../studio/agent-session-http.md)：
+WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Host 持有的命令入口，
+复用已有协议和 coordinator，Studio dispatch port 的边界不变。
+
 ## 1. 决策
 
 同一个 resident Pet 可以同时被两类调用者使用，但两类调用不是同一个概念：

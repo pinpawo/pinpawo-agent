@@ -105,6 +105,10 @@ export interface AgentSessionPeer {
 }
 
 export interface ResidentPetInteraction {
+  snapshot(): Promise<AgentServerMessage>;
+  getQueueSnapshot(): PetDispatchQueueSnapshot;
+  subscribe(listener: (message: AgentServerMessage) => void): () => void;
+  request(message: AgentClientMessage): Promise<void>;
   connect(peer: AgentSessionPeer): Promise<void> | void;
   handle(peer: AgentSessionPeer, message: AgentClientMessage): Promise<void>;
   disconnect(peer: AgentSessionPeer): Promise<void> | void;
@@ -456,14 +460,10 @@ type ResidentPetRuntimeContext = {
   coordinator: ResidentPetCoordinator;
   localHandlers: ReturnType<typeof createLocalServerHandlers>;
   peerHandlers: LocalServerPeerHandlers;
-  /**
-   * The one interactive client, or null. A Host serves one Pet whose session
-   * state is single-valued, so interaction is exclusive; everything else
-   * reaches the Pet through dispatch, which queues behind the availability
-   * gate. Studio observes through the PetDispatchPort callbacks and never
-   * attaches here.
-   */
+  /** One WebSocket client; passive readers and Host-owned HTTP commands do not claim it. */
   interactivePeer: { current: AgentSessionPeer | null };
+  hostPeer: AgentSessionPeer;
+  messageListeners: Set<(message: AgentServerMessage) => void>;
   publishRuntimeEvent: (event: AgentRuntimeEvent) => void;
   dispatchLifecycleListeners: Set<(event: PetDispatchLifecycleEvent) => void>;
   publishDispatchLifecycle: (event: PetDispatchLifecycleEvent) => void;
@@ -605,8 +605,13 @@ export async function createResidentPetRuntime(
   const dispatchLifecycleListeners = new Set<(event: PetDispatchLifecycleEvent) => void>();
   const activeHostRuns = new Map<string, AbortController>();
   const activeRuns = new ActiveRunRegister();
-  const publishRuntimeEvent = (event: AgentRuntimeEvent) => {
-    const message = buildAgentEventEnvelope(event);
+  const messageListeners = new Set<(message: AgentServerMessage) => void>();
+  const publishMessage = (message: AgentServerMessage) => {
+    for (const listener of messageListeners) {
+      try { listener(message); } catch (error) {
+        defaultLogError('[resident-pet] event observer failed:', error);
+      }
+    }
     const peer = interactivePeer.current;
     if (!peer || !peer.isConnected()) return;
     try {
@@ -614,6 +619,11 @@ export async function createResidentPetRuntime(
     } catch (error) {
       defaultLogError('[resident-pet] failed to publish Agent Session event:', error);
     }
+  };
+  const publishRuntimeEvent = (event: AgentRuntimeEvent) => publishMessage(buildAgentEventEnvelope(event));
+  const hostPeer: AgentSessionPeer = {
+    isConnected: () => closing === null,
+    send: (message) => { publishMessage(message); return closing === null; },
   };
   const publishDispatchLifecycle = (event: PetDispatchLifecycleEvent) => {
     for (const listener of dispatchLifecycleListeners) {
@@ -625,7 +635,7 @@ export async function createResidentPetRuntime(
     }
   };
   const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
-  const localHandlers = createLocalServerHandlers(runtimeDeps, {
+  const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
@@ -635,7 +645,7 @@ export async function createResidentPetRuntime(
     activeRuns,
     interruptHostRun: (requestId) => {
       const controller = activeHostRuns.get(requestId);
-      if (!controller) return false;
+      if (!controller) return localHandlers.interruptRun(requestId);
       controller.abort();
       return true;
     },
@@ -653,7 +663,9 @@ export async function createResidentPetRuntime(
       const peer = interactivePeer.current;
       interactivePeer.current = null;
       if (peer) await peerHandlers.onClose(peer);
+      await peerHandlers.onClose(hostPeer);
       await coordinator.close();
+      messageListeners.clear();
       localHandlers.close();
     })();
     return closing;
@@ -670,6 +682,8 @@ export async function createResidentPetRuntime(
     localHandlers,
     peerHandlers,
     interactivePeer,
+    hostPeer,
+    messageListeners,
     publishRuntimeEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
@@ -858,14 +872,39 @@ export function createResidentPetInteraction(
   const context = readResidentPetRuntimeContext(runtime);
   const { peerHandlers, interactivePeer } = context;
   const interaction: ResidentPetInteraction = {
+    snapshot: async () => {
+      if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
+      let result: AgentServerMessage | undefined;
+      await peerHandlers.onSessionSnapshotGet({
+        isConnected: () => true,
+        send: (message) => { result = message; return true; },
+      }, { type: 'session.snapshot.get', requestId: randomUUID() });
+      if (!result) throw new Error('Session snapshot did not return a response.');
+      return result;
+    },
+    getQueueSnapshot: () => context.coordinator.getQueueSnapshot(),
+    subscribe: (listener) => {
+      context.messageListeners.add(listener);
+      return () => { context.messageListeners.delete(listener); };
+    },
+    request: async (message) => {
+      if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
+      await dispatchLocalServerMessage(context.hostPeer, JSON.stringify(message), peerHandlers, (_label, error) => {
+        if (!('requestId' in message) || !message.requestId) {
+          defaultLogError(_label, error);
+          return;
+        }
+        context.hostPeer.send(buildAgentEventEnvelope({
+          type: 'error',
+          requestId: message.requestId,
+          message: error instanceof Error ? error.message : 'Agent Session command failed.',
+        }));
+      });
+    },
     connect: (peer) => {
       if (context.isClosing()) throw new Error('Resident Pet interaction is closed.');
-      // One interactive connection per Host. Everything else reaches a Pet
-      // through dispatch, which is queued behind the availability gate — that
-      // is what dispatch is for. Two interactive clients would instead race
-      // over shared session state (the active session pointer is per-Pet), and
-      // the runtime already assumes a single interaction elsewhere: the run
-      // register is one value per Host and throws on a second claim.
+      // WebSocket connection ownership remains exclusive. HTTP commands use
+      // the Host peer and the same admission gate; SSE readers hold no peer.
       if (interactivePeer.current?.isConnected()) {
         throw new ResidentPetInteractionBusyError();
       }

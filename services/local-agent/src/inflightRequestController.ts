@@ -107,4 +107,13 @@ export class InflightRequestController<TKey> {
     run.controller.abort();
     return run;
   }
+
+  /** Host control can stop a run without owning its transport connection. */
+  interruptById(requestId: string) {
+    for (const key of this.requests.keys()) {
+      const run = this.interrupt(key, { requestId });
+      if (run) return run;
+    }
+    return null;
+  }
 }

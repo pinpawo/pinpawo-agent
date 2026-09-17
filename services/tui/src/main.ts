@@ -320,11 +320,28 @@ const interruptPendingNoticeController =
     },
   });
 const timeline = new TimelineScrollback(renderer);
+/**
+ * A running operation's header carries its elapsed time, but the timeline only
+ * redraws on canonical state changes — and a slow tool can leave seconds
+ * between those. Repaint it on the activity tick so the elapsed time advances,
+ * throttled to the one-second granularity the header actually displays.
+ */
+let lastLiveTimelineRepaint = 0;
+function repaintLiveTimeline(now: number) {
+  if (terminalHandoffOpen) return;
+  if (now - lastLiveTimelineRepaint < 1000) return;
+  const state = controller.getState();
+  if (!state.session.activeRun) return;
+  lastLiveTimelineRepaint = now;
+  timeline.render(state.session);
+}
+
 const liveActivityController = new LiveActivityController({
   onTick: () => {
     if (!terminalHandoffOpen && live.height > 0) {
       refreshLive();
     }
+    repaintLiveTimeline(Date.now());
   },
   onLongWait: () => {
     if (!terminalHandoffOpen && live.height > 0) {

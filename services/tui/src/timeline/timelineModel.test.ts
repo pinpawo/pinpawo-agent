@@ -58,7 +58,7 @@ test('live delegation shows only its objective and disappears after the run ends
   assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
-  }] }), '  ◌ Read file（开始）');
+  }] }), '  ◌ Read file（进行中 0s）');
 });
 
 test('timeline model commits only the settled ordered prefix', () => {
@@ -430,7 +430,7 @@ test('a pending operation keeps later settled entries in the live ordered tail',
     )),
     [
       '  hello\n  world',
-      '  ◌ Read file（开始）',
+      '  ◌ Read file（进行中 0s）',
       'progress',
       '| done',
     ],

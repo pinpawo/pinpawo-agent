@@ -89,8 +89,10 @@ function readDetailText(value: unknown) {
 
 function operationStatus(entry: AgentOperationEntry, now: number) {
   switch (entry.phase) {
+    // `started` and `updated` are both "still running": tool events rarely
+    // carry an intermediate update, so a long operation would otherwise sit at
+    // a static label with no sign that it is still making progress.
     case 'started':
-      return '开始';
     case 'updated': {
       const elapsed = formatElapsed(
         entry.startedAt ?? entry.updatedAt ?? now,

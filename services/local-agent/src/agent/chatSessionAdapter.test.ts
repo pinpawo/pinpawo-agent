@@ -200,22 +200,18 @@ test('runAgentSessionTurn sources tool operations from the root protocol stream,
   assert.equal(setup.input.messages[0]?._getType(), 'human');
   assert.equal(readFinalMessageText(setup.input.messages[0] ?? {}), 'hello');
   assert.match(readAgentMessageCreatedAt(setup.input.messages[0]!) ?? '', /^\d{4}-\d{2}-\d{2}T.*Z$/);
-  // The namespace rides along as scopeKey so consumers can tell which
-  // delegation a call ran inside.
   assert.deepEqual(emittedTools, [
     {
       event: 'on_tool_start',
       toolCallId: 'stream-call',
       name: 'stream_source',
       input: { source: 'stream' },
-      scopeKey: 'general:t1',
     },
     {
       event: 'on_tool_end',
       toolCallId: 'stream-call',
       name: 'stream_source',
       output: 'ok',
-      scopeKey: 'general:t1',
     },
   ]);
   assert.equal(

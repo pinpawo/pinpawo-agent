@@ -47,11 +47,6 @@ export function agentOperationEntryFromEvent(
       : previous?.operationSource
         ? { operationSource: previous.operationSource }
         : {}),
-    ...(operation.scopeKey
-      ? { scopeKey: operation.scopeKey }
-      : previous?.scopeKey
-        ? { scopeKey: previous.scopeKey }
-        : {}),
     startedAt: previous?.startedAt ?? observedAt,
     updatedAt: observedAt,
     ...(isTerminalOperationPhase(event.phase) ? { completedAt: observedAt } : {}),

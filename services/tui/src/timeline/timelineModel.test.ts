@@ -61,34 +61,6 @@ test('live delegation shows only its objective and disappears after the run ends
   }] }), '  ◌ Read file（进行中 0s）');
 });
 
-test('a running delegation heads its task and stops blocking finished tools', () => {
-  const delegation: AgentTimelineEntry = {
-    ...operation,
-    id: 'delegation',
-    operationKey: 'delegation',
-    kind: 'runtime.delegate_capability',
-    title: 'delegate_capability',
-    phase: 'started',
-    raw: { input: { briefing: '读取 issue #826\n并定位相关代码' } },
-  };
-  const finishedTool: AgentTimelineEntry = {
-    ...operation, id: 'tool', operationKey: 'tool', phase: 'completed',
-  };
-  // The delegation is still running, but the transcript may commit it and
-  // everything its capability has already finished behind it.
-  assert.equal(isSettledTimelineEntry(delegation), false);
-  assert.equal(
-    countSettledTimelinePrefix([user, delegation, finishedTool, operation]),
-    3,
-  );
-  // Its header names the task rather than the delegate_capability call, and
-  // the multi-line briefing stays on one row.
-  const header = formatTimelineEntry(delegation, { width: 80 });
-  assert.match(header, /任务 读取 issue #826 并定位相关代码/);
-  assert.doesNotMatch(header, /delegate_capability/);
-  assert.equal(header.split('\n').length, 1);
-});
-
 test('timeline model commits only the settled ordered prefix', () => {
   assert.equal(isSettledTimelineEntry(user), true);
   assert.equal(isSettledTimelineEntry(operation), false);

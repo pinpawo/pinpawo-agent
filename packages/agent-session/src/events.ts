@@ -105,12 +105,6 @@ export type AgentOperationEvent = {
       toolName?: string;
       callId?: string;
     };
-    /**
-     * Delegation scope the call ran in; absent at the root. Tool events are a
-     * flat stream, so this is what records that an operation ran *inside* a
-     * delegation rather than beside it.
-     */
-    scopeKey?: string;
   };
   /**
    * Raw tool-call input/output/error. Transports currently preserve this

@@ -19,24 +19,6 @@ const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'patch',
 ]);
 
-/**
- * A delegation is a container, not a leaf: it stays `started` for as long as
- * the capability runs, while the tools it spawns settle one by one behind it.
- * Because the transcript only commits a contiguous settled prefix, treating it
- * as pending holds every finished child out of the transcript until the whole
- * delegation returns — which is most of a long run.
- *
- * Its header is safe to commit early: a delegation is identified by the task
- * it was given, which is fixed when it starts and never rewritten. The tools
- * underneath still commit on their own terminal phase.
- */
-export function isDelegationContainerEntry(entry: { type: string; kind?: string;
-  operationSource?: { toolName?: string } }) {
-  return entry.type === 'operation'
-    && (entry.kind === 'runtime.delegate_capability'
-      || entry.operationSource?.toolName === 'delegate_capability');
-}
-
 export function buildOperationDisplayLines(
   entry: AgentOperationEntry,
   now: number,
@@ -45,41 +27,9 @@ export function buildOperationDisplayLines(
 ): OperationDisplayLine[] {
   const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
   if (authorizationLines) return authorizationLines;
-  const delegationLines = buildDelegationDisplayLines(entry, now, headerWidth);
-  if (delegationLines) return delegationLines;
   return [{
     text: buildOperationHeader(entry, now, headerWidth),
   }, ...buildOperationPayloadLines(entry, width), ...buildOperationOutputLines(entry, width)];
-}
-
-/**
- * A delegation heads a task rather than reporting a tool call, so it shows the
- * task it was given instead of `delegate_capability(...)`. The briefing is the
- * only place that text exists on the entry; its payload and output stay hidden
- * because the tools underneath already report the work in detail.
- */
-function buildDelegationDisplayLines(
-  entry: AgentOperationEntry,
-  now: number,
-  width: number,
-): OperationDisplayLine[] | null {
-  if (!isDelegationContainerEntry(entry)) return null;
-  const task = readDelegationTask(entry);
-  if (!task) return null;
-  return [{
-    text: buildOperationHeaderText(`任务 ${task}`, entry, now, width),
-  }];
-}
-
-function readDelegationTask(entry: AgentOperationEntry) {
-  const input = entry.raw?.input;
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const briefing = (input as Record<string, unknown>).briefing;
-  return typeof briefing === 'string' ? singleLineText(briefing) : null;
-}
-
-function singleLineText(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
 }
 
 function buildOperationHeader(

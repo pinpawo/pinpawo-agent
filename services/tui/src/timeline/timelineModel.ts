@@ -6,10 +6,7 @@ import type {
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { LOADING_CELL_WIDTH } from '../visuals/loadingCells';
 import { buildMessageDisplayLines } from './messageDisplay';
-import {
-  buildOperationDisplayLines,
-  isDelegationContainerEntry,
-} from './operationDisplay';
+import { buildOperationDisplayLines } from './operationDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
 
 const OPERATION_LINE_PREFIX_WIDTH = 4;
@@ -28,12 +25,6 @@ export type TimelineDisplayLine = {
     | `operation-${AgentOperationEntry['phase']}`;
 };
 
-/**
- * Whether the entry has reached a terminal phase — "is this still running?".
- * Distinct from whether the transcript may commit it: a delegation is running
- * for its whole duration but its header is still safe to commit (see
- * `isCommittableTimelineEntry`).
- */
 export function isSettledTimelineEntry(entry: AgentTimelineEntry) {
   if (entry.type === 'message') {
     return entry.status === 'completed';
@@ -43,27 +34,12 @@ export function isSettledTimelineEntry(entry: AgentTimelineEntry) {
     || entry.phase === 'interrupted';
 }
 
-/**
- * Whether the transcript may commit the entry now.
- *
- * A delegation is a container, not a leaf: it stays `started` for as long as
- * the capability runs, while the tools it spawns settle one by one behind it.
- * Because the transcript only commits a contiguous settled prefix, holding the
- * container back also holds every finished child out of the transcript — for
- * most of a long run. Its header is safe to commit early: a delegation is
- * identified by the task it was given, which is fixed at the start and never
- * rewritten.
- */
-export function isCommittableTimelineEntry(entry: AgentTimelineEntry) {
-  return isSettledTimelineEntry(entry) || isDelegationContainerEntry(entry);
-}
-
 export function countSettledTimelinePrefix(
   timeline: readonly AgentTimelineEntry[],
   startIndex = 0,
 ) {
   let index = startIndex;
-  while (index < timeline.length && isCommittableTimelineEntry(timeline[index]!)) {
+  while (index < timeline.length && isSettledTimelineEntry(timeline[index]!)) {
     index += 1;
   }
   return index;

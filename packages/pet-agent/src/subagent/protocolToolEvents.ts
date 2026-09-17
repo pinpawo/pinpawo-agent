@@ -203,23 +203,6 @@ export class NamespacedProtocolToolEventReader {
       reader = new SubagentProtocolToolEventReader();
       this.readers.set(key, reader);
     }
-    const scopeKey = readDelegationScopeKey(namespace);
-    const event = reader.readToolsData(rawData);
-    if (!event) return null;
-    return scopeKey ? { ...event, scopeKey } : event;
+    return reader.readToolsData(rawData);
   }
-}
-
-/**
- * The delegation scope a tool call ran in, or null at the root.
- *
- * Depth 0/1 is the root graph and its own nodes; a delegated child scope
- * starts at depth >= 2. The first segment carries both the node name and the
- * delegation's id (`"capability:<task>"`), and the id is what keeps parallel
- * delegations apart — so the whole segment is the key.
- */
-function readDelegationScopeKey(namespace: string[] | undefined): string | null {
-  if (!namespace || namespace.length < 2) return null;
-  const segment = namespace[0];
-  return typeof segment === 'string' && segment.length > 0 ? segment : null;
 }

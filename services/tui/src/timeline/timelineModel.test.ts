@@ -61,6 +61,36 @@ test('live delegation shows only its objective and disappears after the run ends
   }] }), '  ◌ Read file（进行中 0s）');
 });
 
+test('a delegation is headed by its task and keeps its failure reason', () => {
+  const delegation: AgentTimelineEntry = {
+    ...operation,
+    id: 'delegation',
+    operationKey: 'delegation',
+    kind: 'runtime.delegate_capability',
+    title: 'delegate_capability',
+    raw: { input: { briefing: '读取 issue #826\n并定位相关代码' } },
+  };
+  // The heading names the task, on one row, instead of the tool call.
+  const header = formatTimelineEntry(delegation, { width: 80 });
+  assert.match(header, /任务 读取 issue #826 并定位相关代码/);
+  assert.doesNotMatch(header, /delegate_capability/);
+  assert.equal(header.split('\n').length, 1);
+
+  // A failed delegation still reports why: the briefing replaces the payload
+  // rows, never the output ones.
+  const failed = formatTimelineEntry({
+    ...delegation,
+    phase: 'failed',
+    raw: { input: { briefing: '读取 issue' }, error: 'capability crashed' },
+  }, { width: 80 });
+  assert.match(failed, /capability crashed/);
+
+  // Commit semantics are unchanged: a running delegation is still pending, so
+  // the transcript cannot commit rows it may still have to correct.
+  assert.equal(isSettledTimelineEntry(delegation), false);
+  assert.equal(countSettledTimelinePrefix([user, delegation, operation]), 1);
+});
+
 test('timeline model commits only the settled ordered prefix', () => {
   assert.equal(isSettledTimelineEntry(user), true);
   assert.equal(isSettledTimelineEntry(operation), false);

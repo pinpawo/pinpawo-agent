@@ -19,6 +19,32 @@ const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'patch',
 ]);
 
+/**
+ * A delegation heads a task instead of reporting a tool call: it stays
+ * `started` for the whole capability run, and the tools it spawns arrive
+ * behind it as siblings in the flat timeline. Callers use this to render those
+ * tools as its content rather than as peers.
+ */
+export function isDelegationEntry(entry: {
+  type: string;
+  kind?: string;
+  operationSource?: { toolName?: string };
+}) {
+  return entry.type === 'operation'
+    && (entry.kind === 'runtime.delegate_capability'
+      || entry.operationSource?.toolName === 'delegate_capability');
+}
+
+/** The task a delegation was given, as a single line, or null. */
+export function readDelegationTask(entry: AgentOperationEntry) {
+  const input = entry.raw?.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const briefing = (input as Record<string, unknown>).briefing;
+  if (typeof briefing !== 'string') return null;
+  const task = briefing.replace(/\s+/g, ' ').trim();
+  return task || null;
+}
+
 export function buildOperationDisplayLines(
   entry: AgentOperationEntry,
   now: number,
@@ -27,9 +53,16 @@ export function buildOperationDisplayLines(
 ): OperationDisplayLine[] {
   const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
   if (authorizationLines) return authorizationLines;
+  const task = isDelegationEntry(entry) ? readDelegationTask(entry) : null;
   return [{
-    text: buildOperationHeader(entry, now, headerWidth),
-  }, ...buildOperationPayloadLines(entry, width), ...buildOperationOutputLines(entry, width)];
+    // A delegation is named by its task; its briefing is the heading, not a
+    // payload row. Output still renders below, so a failure keeps its reason.
+    text: task
+      ? buildOperationHeaderText(`任务 ${task}`, entry, now, headerWidth)
+      : buildOperationHeader(entry, now, headerWidth),
+  },
+  ...(task ? [] : buildOperationPayloadLines(entry, width)),
+  ...buildOperationOutputLines(entry, width)];
 }
 
 function buildOperationHeader(

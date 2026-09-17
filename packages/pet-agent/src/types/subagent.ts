@@ -32,6 +32,13 @@ export type SubagentToolOperationMetadata = ToolOperationMetadata & {
 
 type SubagentToolEventMetadata = {
   operation?: SubagentToolOperationMetadata;
+  /**
+   * Delegation scope that produced the call, derived from the protocol
+   * namespace. Absent for the root scope. Tool events arrive flat on one
+   * stream, so this is what tells a consumer that a call ran *inside* a
+   * delegation rather than beside it.
+   */
+  scopeKey?: string;
 };
 
 export type SubagentToolLifecycleEvent =

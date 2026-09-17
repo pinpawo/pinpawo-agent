@@ -39,6 +39,8 @@ export type AgentOperationEntry = {
     toolName?: string;
     callId?: string;
   };
+  /** Delegation scope the operation ran in; absent at the root. */
+  scopeKey?: string;
   startedAt?: number;
   updatedAt?: number;
   completedAt?: number;

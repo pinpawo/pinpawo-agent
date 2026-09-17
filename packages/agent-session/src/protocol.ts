@@ -638,6 +638,9 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
               },
             }
           : {}),
+        ...(readOptionalString(operation, 'scopeKey') !== undefined
+          ? { scopeKey: readOptionalString(operation, 'scopeKey') }
+          : {}),
       },
       ...(raw ? { raw } : {}),
     };

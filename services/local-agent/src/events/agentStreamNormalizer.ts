@@ -22,6 +22,8 @@ export type StreamToolsPayload = {
   error?: unknown;
   data?: unknown;
   operation?: SubagentToolOperationMetadata;
+  /** Delegation scope the call ran in; absent at the root. */
+  scopeKey?: string;
 };
 
 /** Flatten a message `content` (string | content-block array) to display text. */
@@ -207,6 +209,7 @@ export function normalizeToolStreamEvent(
         toolName: metadata?.source.toolName ?? payload.name,
         callId: payload.toolCallId,
       },
+      ...(payload.scopeKey ? { scopeKey: payload.scopeKey } : {}),
     },
     raw: {
       input: payload.input,

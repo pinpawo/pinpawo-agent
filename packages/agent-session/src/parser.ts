@@ -344,6 +344,9 @@ function parseAgentTimelineEntry(
       ...(typeof value.summary === 'string' ? { summary: value.summary } : {}),
       ...(details ? { details } : {}),
       ...(operationSource ? { operationSource } : {}),
+      ...(typeof value.scopeKey === 'string' && value.scopeKey
+        ? { scopeKey: value.scopeKey }
+        : {}),
       ...(isFiniteNumber(value.startedAt) ? { startedAt: value.startedAt } : {}),
       ...(isFiniteNumber(value.updatedAt) ? { updatedAt: value.updatedAt } : {}),
       ...(isFiniteNumber(value.completedAt) ? { completedAt: value.completedAt } : {}),

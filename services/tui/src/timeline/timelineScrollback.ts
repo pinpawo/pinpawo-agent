@@ -26,6 +26,7 @@ import {
 import {
   countSettledTimelinePrefix,
   buildTimelineDisplayLines,
+  isCommittableTimelineEntry,
   isSettledTimelineEntry,
   type TimelineDisplayLine,
 } from './timelineModel';
@@ -667,7 +668,9 @@ function populateTimelineRoot(
   return { assistantMarkdown };
 
   function addTimelineEntrySpacing(entry: AgentTimelineEntry) {
-    if (!isSettledTimelineEntry(entry)) return;
+    // Committed entries get their trailing blank row, a running delegation
+    // header included — it is part of the transcript now, not the live tail.
+    if (!isCommittableTimelineEntry(entry)) return;
     addLine({ text: ' ', tone: 'muted' });
   }
 }

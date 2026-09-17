@@ -85,10 +85,28 @@ test('a delegation is headed by its task and keeps its failure reason', () => {
   }, { width: 80 });
   assert.match(failed, /capability crashed/);
 
-  // Commit semantics are unchanged: a running delegation is still pending, so
-  // the transcript cannot commit rows it may still have to correct.
+  // A running delegation has not finished, but its committed heading — the
+  // task alone — is already final, so the transcript may commit it and the
+  // finished tools behind it while the capability keeps working.
   assert.equal(isSettledTimelineEntry(delegation), false);
-  assert.equal(countSettledTimelinePrefix([user, delegation, operation]), 1);
+  assert.equal(
+    countSettledTimelinePrefix([
+      user,
+      delegation,
+      { ...operation, id: 'done', operationKey: 'done', phase: 'completed' },
+      operation,
+    ]),
+    3,
+  );
+  // Its heading carries no status or elapsed time while it runs, which is what
+  // makes those rows safe to commit.
+  assert.doesNotMatch(header, /进行中|完成|失败/);
+  // Settling must not rewrite what was committed, or the block is emitted a
+  // second time when the delegation returns.
+  assert.equal(
+    timelineFingerprint(delegation),
+    timelineFingerprint({ ...delegation, phase: 'completed' }),
+  );
 });
 
 test('timeline model commits only the settled ordered prefix', () => {

@@ -54,15 +54,25 @@ export function buildOperationDisplayLines(
   const authorizationLines = buildAuthorizationDisplayLines(entry, now, width, headerWidth);
   if (authorizationLines) return authorizationLines;
   const task = isDelegationEntry(entry) ? readDelegationTask(entry) : null;
+  if (task) {
+    // A delegation heads a task: the briefing is its title, not a payload row.
+    //
+    // While it runs the heading carries no status and no elapsed time. That is
+    // what lets the transcript commit it immediately, which in turn lets the
+    // tools behind it commit as they finish instead of appearing all at once
+    // when the delegation returns — the transcript only commits rows it will
+    // never have to rewrite. Once the delegation settles its outcome is fixed,
+    // so the terminal phase is safe to show.
+    const settled = entry.phase !== 'started' && entry.phase !== 'updated';
+    return [{
+      text: settled
+        ? buildOperationHeaderText(`任务 ${task}`, entry, now, headerWidth)
+        : sanitizeLine(`任务 ${task}`, headerWidth),
+    }, ...buildOperationOutputLines(entry, width)];
+  }
   return [{
-    // A delegation is named by its task; its briefing is the heading, not a
-    // payload row. Output still renders below, so a failure keeps its reason.
-    text: task
-      ? buildOperationHeaderText(`任务 ${task}`, entry, now, headerWidth)
-      : buildOperationHeader(entry, now, headerWidth),
-  },
-  ...(task ? [] : buildOperationPayloadLines(entry, width)),
-  ...buildOperationOutputLines(entry, width)];
+    text: buildOperationHeader(entry, now, headerWidth),
+  }, ...buildOperationPayloadLines(entry, width), ...buildOperationOutputLines(entry, width)];
 }
 
 function buildOperationHeader(

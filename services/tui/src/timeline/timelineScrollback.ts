@@ -498,7 +498,11 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
     normalizeText(entry.title),
     normalizeText(entry.target ?? ''),
     normalizeText(entry.summary ?? ''),
-    entry.phase,
+    // A delegation's committed heading is its task alone, so its phase does not
+    // change the rows already in the transcript. Keeping phase out of the
+    // fingerprint is what stops the whole block being re-committed when the
+    // delegation finally settles.
+    isDelegationEntry(entry) ? 'delegation' : entry.phase,
   ]);
 }
 

@@ -22,7 +22,7 @@ pinpawo init
 pinpawo setup
 ```
 
-`pinpawo init` 会创建 `~/.pinpawo/.env`、本地 Capability 目录与 `hello-pinpawo` 示例。编辑 `~/.pinpawo/.env` 配置凭证与模型；`pinpawo setup` 用于诊断缺失配置。
+`pinpawo init` 会创建 `~/.pinpawo/.env`、带有可编辑默认模型 profile 的 `~/.pinpawo/config.json`、本地 Capability 目录与 `hello-pinpawo` 示例。凭证与端点写在 `~/.pinpawo/config.json` 的 `models` 段，只从存储的 profile 读取，不来自环境变量；`~/.pinpawo/.env` 只放运行时设置。`pinpawo setup` 用于诊断缺失配置；profile 格式见[模型 profile 配置](../../guides/model-profiles.md)。
 
 ## 验证示例
 
@@ -36,9 +36,6 @@ pinpawo capability list
 ## 运行 Agent
 
 ```bash
-# 交互式终端
-pinpawo tui
-
 # OpenTUI 客户端
 pinpawo tui
 

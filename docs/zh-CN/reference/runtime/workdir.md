@@ -3,7 +3,7 @@
 [English](../../../reference/runtime/workdir.md)
 
 > **状态：当前 local-host 配置。** 路径解析实现位于
-> [`services/local-agent/src/runtimeConfig.ts`](../../../../services/local-agent/src/runtimeConfig.ts)。
+> [`services/local-agent/src/config/runtimeConfig.ts`](../../../../services/local-agent/src/config/runtimeConfig.ts)。
 
 本地宿主一次运行使用一个 effective workdir。默认优先级为
 `PINPAWO_WORKDIR`、已保存的 `workdir` 配置、当前进程目录；相对路径和 `~/`

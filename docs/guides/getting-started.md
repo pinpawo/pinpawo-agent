@@ -25,10 +25,14 @@ pinpawo init
 pinpawo setup
 ```
 
-`pinpawo init` creates `~/.pinpawo/.env`, a local Capability directory, and a
-small `hello-pinpawo` example. Edit `~/.pinpawo/.env` to configure credentials
-and model settings. Use `pinpawo setup` whenever you want a concise
-diagnostic of missing configuration.
+`pinpawo init` creates `~/.pinpawo/.env`, `~/.pinpawo/config.json` with an
+editable default model profile, a local Capability directory, and a small
+`hello-pinpawo` example. Edit the `models` section of `~/.pinpawo/config.json` to
+configure credentials and endpoints; they are read only from the stored profile,
+not from environment variables. Keep `~/.pinpawo/.env` for runtime settings.
+Use `pinpawo setup` whenever you want a concise diagnostic of missing
+configuration. See [Model profile configuration](model-profiles.md) for the
+stored profile format.
 
 ## Verify the scaffold
 
@@ -43,13 +47,7 @@ plugin. Read [Core Concepts](../concepts/core-concepts.md) before building a lar
 
 ## Run the agent
 
-For the interactive terminal client:
-
-```bash
-pinpawo tui
-```
-
-For the OpenTUI client:
+For the OpenTUI terminal client:
 
 ```bash
 pinpawo tui

@@ -6,7 +6,7 @@
 
 | 集成目标 | 参考 |
 |---|---|
-| 装配 resident Pet Host | [Resident Pet Host ports](../../../design/agent-runtime/resident-pet-host-ports.md) |
+| 装配 resident Pet Host | [Resident Pet Host ports](../../../design/agent-runtime/resident-pet-host-ports.md)（design 层的 accepted boundary，不是 reference 契约） |
 | 协调多个 Pet | [Studio API](../../../reference/api/studio.md) |
 | 编写任务扩展 | [Capability / Toolkit 契约](../extensions/capability-toolkit.md) |
 | 渲染工具活动或审批界面 | [事件与人工审核（英文）](../../../reference/api/events-and-review.md) |

@@ -147,7 +147,7 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 现状依据：
 [toolkitInventory](../../../services/local-agent/src/toolkits/toolkitInventory.ts) 有 replace/updateAvailability；
 [hostCapabilityCatalog](../../../services/local-agent/src/hostCapabilityCatalog.ts) 的 getSnapshot 读取当前配置；
-[serverTuiSessions](../../../services/local-agent/src/serverTuiSessions.ts) 支持同会话模型切换；
+[serverTuiSessions](../../../services/local-agent/src/session/serverTuiSessions.ts) 支持同会话模型切换；
 [ServerDeps](../../../services/local-agent/src/serverTypes.ts) 持有 petDocument 和可更新的 review policy。
 
 ### 配置生效规则（目标）

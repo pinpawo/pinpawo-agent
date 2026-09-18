@@ -3,7 +3,7 @@
 [简体中文](../../zh-CN/reference/runtime/workdir.md)
 
 > **Status: current local-host configuration.** Path resolution is implemented
-> in [`services/local-agent/src/runtimeConfig.ts`](../../../services/local-agent/src/runtimeConfig.ts).
+> in [`services/local-agent/src/config/runtimeConfig.ts`](../../../services/local-agent/src/config/runtimeConfig.ts).
 
 The local host runs against one effective workdir. It resolves the default in
 this order: `PINPAWO_WORKDIR`, the stored `workdir` setting, then the current

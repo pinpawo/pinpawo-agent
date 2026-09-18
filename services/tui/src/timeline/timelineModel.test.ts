@@ -58,7 +58,55 @@ test('live delegation shows only its objective and disappears after the run ends
   assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
-  }] }), '  ◌ Read file（开始）');
+  }] }), '  ◌ Read file（进行中）');
+});
+
+test('a delegation is headed by its task and keeps its failure reason', () => {
+  const delegation: AgentTimelineEntry = {
+    ...operation,
+    id: 'delegation',
+    operationKey: 'delegation',
+    kind: 'runtime.delegate_capability',
+    title: 'delegate_capability',
+    raw: { input: { briefing: '读取 issue #826\n并定位相关代码' } },
+  };
+  // The heading names the task, on one row, instead of the tool call.
+  const header = formatTimelineEntry(delegation, { width: 80 });
+  assert.match(header, /任务 读取 issue #826 并定位相关代码/);
+  assert.doesNotMatch(header, /delegate_capability/);
+  assert.equal(header.split('\n').length, 1);
+
+  // A failed delegation still reports why: the briefing replaces the payload
+  // rows, never the output ones.
+  const failed = formatTimelineEntry({
+    ...delegation,
+    phase: 'failed',
+    raw: { input: { briefing: '读取 issue' }, error: 'capability crashed' },
+  }, { width: 80 });
+  assert.match(failed, /capability crashed/);
+
+  // A running delegation has not finished, but its committed heading — the
+  // task alone — is already final, so the transcript may commit it and the
+  // finished tools behind it while the capability keeps working.
+  assert.equal(isSettledTimelineEntry(delegation), false);
+  assert.equal(
+    countSettledTimelinePrefix([
+      user,
+      delegation,
+      { ...operation, id: 'done', operationKey: 'done', phase: 'completed' },
+      operation,
+    ]),
+    3,
+  );
+  // Its heading carries no status or elapsed time while it runs, which is what
+  // makes those rows safe to commit.
+  assert.doesNotMatch(header, /进行中|完成|失败/);
+  // Settling must not rewrite what was committed, or the block is emitted a
+  // second time when the delegation returns.
+  assert.equal(
+    timelineFingerprint(delegation),
+    timelineFingerprint({ ...delegation, phase: 'completed' }),
+  );
 });
 
 test('timeline model commits only the settled ordered prefix', () => {
@@ -123,10 +171,11 @@ test('timeline formatting includes bounded tool output and errors', () => {
         output: ['line 1', 'line 2'].join('\n'),
       },
     }),
+    // Successful output collapses to one row plus the elision marker.
     [
       '  ● Read file（完成）',
       '  ⎿ line 1',
-      '    line 2',
+      '    … +1 lines',
     ].join('\n'),
   );
   assert.equal(
@@ -151,7 +200,7 @@ test('timeline formatting includes bounded tool output and errors', () => {
         output: Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n'),
       },
     }),
-    /… \+4 lines$/,
+    /… \+9 lines$/,
   );
 });
 
@@ -430,7 +479,7 @@ test('a pending operation keeps later settled entries in the live ordered tail',
     )),
     [
       '  hello\n  world',
-      '  ◌ Read file（开始）',
+      '  ◌ Read file（进行中）',
       'progress',
       '| done',
     ],

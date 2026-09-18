@@ -35,6 +35,7 @@ import {
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
 import { subagentDisplayText } from './messageDisplay';
+import { isDelegationEntry } from './operationDisplay';
 
 const WELCOME_COLOR = '#69c0c8';
 const WELCOME_BACKGROUND = '#22272e';
@@ -497,7 +498,11 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
     normalizeText(entry.title),
     normalizeText(entry.target ?? ''),
     normalizeText(entry.summary ?? ''),
-    entry.phase,
+    // A delegation's committed heading is its task alone, so its phase does not
+    // change the rows already in the transcript. Keeping phase out of the
+    // fingerprint is what stops the whole block being re-committed when the
+    // delegation finally settles.
+    isDelegationEntry(entry) ? 'delegation' : entry.phase,
   ]);
 }
 
@@ -604,12 +609,21 @@ function populateTimelineRoot(
     }));
   };
 
+  // A delegation owns the operations that follow it until it settles: they are
+  // its content, not its peers. The stream delivers them contiguously behind
+  // it (the delegation's own terminal event arrives last), so tracking one
+  // open scope is enough to nest them.
+  let delegationScope: BoxRenderable | null = null;
+
   entries.forEach((entry, entryIndex) => {
     const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
       now,
       width,
     });
+    if (delegationScope && !isDelegationScopeChild(entry)) {
+      delegationScope = null;
+    }
     if (entry.type === 'message' && entry.role === 'user') {
       const userMessageSurface = new BoxRenderable(context, {
         id: `${root.id}:user:${entryIndex}:${entry.id}`,
@@ -649,9 +663,11 @@ function populateTimelineRoot(
       }
       return;
     }
+    const openingDelegation = isDelegationEntry(entry);
+    const scopeParent = openingDelegation ? root : delegationScope ?? root;
     const detailSurface = lines.length > 0 && isDetailEntry(entry)
-      ? createDetailEntrySurface(context, root, entryIndex, entry.id)
-      : root;
+      ? createDetailEntrySurface(context, scopeParent, entryIndex, entry.id)
+      : scopeParent;
     lines.forEach((line, lineIndex) => {
       addLine(
         entry.type === 'operation' && lineIndex === 0
@@ -660,6 +676,13 @@ function populateTimelineRoot(
         detailSurface,
       );
     });
+    if (openingDelegation) {
+      // Leave the scope open only while the delegation is still running; a
+      // settled one has no more content coming.
+      delegationScope = isSettledTimelineEntry(entry)
+        ? null
+        : createDelegationScopeSurface(context, root, entryIndex, entry.id);
+    }
     if (root.getChildrenCount() > childCountBeforeEntry) {
       addTimelineEntrySpacing(entry);
     }
@@ -670,6 +693,32 @@ function populateTimelineRoot(
     if (!isSettledTimelineEntry(entry)) return;
     addLine({ text: ' ', tone: 'muted' });
   }
+}
+
+/**
+ * Indented container holding a running delegation's tool calls. Mirrors the
+ * detail-entry indent so nested operations line up with other detail rows.
+ */
+function createDelegationScopeSurface(
+  context: RenderContext,
+  root: BoxRenderable,
+  entryIndex: number,
+  entryId: string,
+) {
+  const surface = new BoxRenderable(context, {
+    id: `${root.id}:delegation:${entryIndex}:${entryId}`,
+    width: '100%',
+    height: 'auto',
+    flexDirection: 'column',
+    paddingLeft: DETAIL_ENTRY_INDENT,
+  });
+  root.add(surface);
+  return surface;
+}
+
+/** Operations render as a delegation's content; messages end its scope. */
+function isDelegationScopeChild(entry: AgentTimelineEntry) {
+  return entry.type === 'operation' && !isDelegationEntry(entry);
 }
 
 function createDetailEntrySurface(

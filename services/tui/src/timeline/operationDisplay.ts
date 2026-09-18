@@ -10,6 +10,7 @@ export type OperationDisplayLine = {
 };
 
 export const OPERATION_OUTPUT_MAX_LINES = 6;
+const SUCCESS_OUTPUT_MAX_LINES = 1;
 const OPERATION_PATCH_MAX_LINES = 24;
 const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
@@ -35,14 +36,38 @@ export function isDelegationEntry(entry: {
       || entry.operationSource?.toolName === 'delegate_capability');
 }
 
-/** The task a delegation was given, as a single line, or null. */
+/**
+ * The task a delegation was given, as a single line, or null.
+ *
+ * Tool input reaches the transcript either as the decoded arguments or as the
+ * raw JSON the model emitted, depending on how far along the call was when the
+ * event was built, so both shapes have to be read here.
+ */
 export function readDelegationTask(entry: AgentOperationEntry) {
-  const input = entry.raw?.input;
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const briefing = (input as Record<string, unknown>).briefing;
+  const briefing = readBriefing(entry.raw?.input);
   if (typeof briefing !== 'string') return null;
   const task = briefing.replace(/\s+/g, ' ').trim();
   return task || null;
+}
+
+function readBriefing(input: unknown): unknown {
+  const record = asRecord(input) ?? asRecord(parseJson(input));
+  return record?.briefing;
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function parseJson(value: unknown) {
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 export function buildOperationDisplayLines(
@@ -136,13 +161,10 @@ function operationStatus(entry: AgentOperationEntry, now: number) {
     // carry an intermediate update, so a long operation would otherwise sit at
     // a static label with no sign that it is still making progress.
     case 'started':
-    case 'updated': {
-      const elapsed = formatElapsed(
-        entry.startedAt ?? entry.updatedAt ?? now,
-        now,
-      );
-      return `进行中 ${elapsed ?? '–'}`;
-    }
+    case 'updated':
+      // No elapsed time: a tool call is short, and inside a delegation a dozen
+      // of them each ticking their own clock is noise rather than progress.
+      return '进行中';
     case 'completed':
       return '完成';
     case 'failed':
@@ -207,7 +229,14 @@ function buildOperationOutputLines(
   if (!text) return [];
 
   const lines = normalizeMultilineTerminalText(text).split('\n');
-  const visible = lines.slice(0, OPERATION_OUTPUT_MAX_LINES);
+  // A successful tool is evidence that the step happened, not something the
+  // reader works through line by line — and inside a delegation there are many
+  // of them, so a full dump buries the task. Failures keep their room: that
+  // output is the reason the run stopped.
+  const budget = isError
+    ? OPERATION_OUTPUT_MAX_LINES
+    : SUCCESS_OUTPUT_MAX_LINES;
+  const visible = lines.slice(0, budget);
   const hidden = lines.length - visible.length;
   const tone: OperationDisplayTone = isError ? 'removed' : 'muted';
   const output = visible.map((line, index) => ({
@@ -319,17 +348,6 @@ function sanitizeLine(line: string, width: number) {
   return truncateTerminalLine(line, width);
 }
 
-function formatElapsed(startedAt: number, now: number) {
-  if (!Number.isFinite(startedAt) || !Number.isFinite(now)) return null;
-  const elapsedMs = Math.min(
-    24 * 60 * 60 * 1000,
-    Math.max(0, now - startedAt),
-  );
-  const totalSeconds = Math.floor(elapsedMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-}
 
 function joinUniqueParts(parts: Array<string | undefined>) {
   const seen = new Set<string>();

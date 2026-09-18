@@ -46,11 +46,10 @@ test('operation display bounds output, surfaces errors, and sanitizes controls',
     raw: { error: 'permission\tdenied\x1B' },
   }), 3_500, 40);
 
-  assert.equal(
-    completed.slice(1).length,
-    OPERATION_OUTPUT_MAX_LINES + 1,
-  );
-  assert.match(completed.at(-1)!.text, /… \+4 lines$/);
+  // A successful tool collapses to one output row plus the elision marker; the
+  // full dump would bury the delegation that owns it.
+  assert.equal(completed.slice(1).length, 2);
+  assert.match(completed.at(-1)!.text, /… \+9 lines$/);
   assert.ok(failed.some((line) => (
     line.text.includes('permission  denied�')
     && line.tone === 'removed'
@@ -136,7 +135,7 @@ test('operation display keeps running and terminal phases distinct', () => {
     phase: 'interrupted',
   }), 3_500, 80)[0]!.text;
 
-  assert.match(running, /进行中 2s/);
+  assert.match(running, /进行中/);
   assert.match(interrupted, /已中断/);
 });
 

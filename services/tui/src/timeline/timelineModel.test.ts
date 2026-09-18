@@ -58,7 +58,7 @@ test('live delegation shows only its objective and disappears after the run ends
   assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
-  }] }), '  ◌ Read file（进行中 0s）');
+  }] }), '  ◌ Read file（进行中）');
 });
 
 test('a delegation is headed by its task and keeps its failure reason', () => {
@@ -171,10 +171,11 @@ test('timeline formatting includes bounded tool output and errors', () => {
         output: ['line 1', 'line 2'].join('\n'),
       },
     }),
+    // Successful output collapses to one row plus the elision marker.
     [
       '  ● Read file（完成）',
       '  ⎿ line 1',
-      '    line 2',
+      '    … +1 lines',
     ].join('\n'),
   );
   assert.equal(
@@ -199,7 +200,7 @@ test('timeline formatting includes bounded tool output and errors', () => {
         output: Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n'),
       },
     }),
-    /… \+4 lines$/,
+    /… \+9 lines$/,
   );
 });
 
@@ -478,7 +479,7 @@ test('a pending operation keeps later settled entries in the live ordered tail',
     )),
     [
       '  hello\n  world',
-      '  ◌ Read file（进行中 0s）',
+      '  ◌ Read file（进行中）',
       'progress',
       '| done',
     ],

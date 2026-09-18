@@ -284,8 +284,8 @@ predictable token/context usage. Submit with Enter, use Shift+Enter or `Ctrl+J`
 for a newline, browse
 native history while events arrive, edit a multiline CJK/emoji draft during
 the run, resize, and use Esc to verify interruption. `/quit` exits normally.
-The transport is reachable only through the explicit `--qa` flag; normal v2
-startup and the default legacy entry remain production paths. Direct workspace
+The transport is reachable only through the explicit `--qa` flag; normal
+startup remains the production path. Direct workspace
 development is still available through `npm run dev:qa -w @pinpawo/tui`.
 
 The TUI has no Studio mode and sends no `studio_request` messages. It consumes

@@ -13,7 +13,7 @@ surfaces. It is reference material: for the system model and architecture, read
 
 | You need to… | Reference |
 |---|---|
-| Compose a resident Pet Host | [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) |
+| Compose a resident Pet Host | [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) (accepted boundary, design layer) |
 | Coordinate multiple pet runtimes | [Studio API](studio.md) |
 | Author a task-specific extension | [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md) |
 | Load a local `CAPABILITY.md` extension | [Capability directory protocol](../extensions/capability-directory.md) |
@@ -25,7 +25,8 @@ surfaces. It is reference material: for the system model and architecture, read
 
 - [API overview](overview.md) — ownership boundaries across the
   runtime, local host, extensions, and Studio.
-- [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) —
+- [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)
+  (an accepted design boundary, not a reference contract) —
   resident runtime, dispatch, Agent Session interaction, and lifecycle ownership.
 - [Studio API](studio.md) — multi-pet dispatch, runtime-gate, event, and plugin
   interfaces.

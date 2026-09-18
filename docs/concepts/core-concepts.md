@@ -42,7 +42,7 @@ PinPawo Agent helps you build agents with clear operational boundaries:
 | **Checkpoint** | Durable LangGraph state for messages and pending continuation. | It is the authority for resume and recovery. |
 | **Session projection** | The client-neutral view of a checkpoint plus current runtime facts. | TUI and remote clients share one presentation contract without each rebuilding state. |
 | **Artifact** | A durable reference to a Capability output that must outlive its private lane. | It moves files and structured results across boundaries without treating chat messages as storage. |
-| **Studio** | The multi-pet run controller, task queue, and conversation-wiki coordinator. | It adds collaboration while preserving each worker's local execution boundary. |
+| **Studio** | The multi-Pet dispatch substrate: a Pet registry, read-only per-Pet dispatch-queue observation, and an in-process plugin event bus. | It adds collaboration while preserving each worker's local execution boundary. |
 | **Workdir** | The local scope for runtime configuration, Studio state, and relative tool paths. | It prevents unrelated projects from sharing runtime state accidentally. |
 
 ## Canonical detail by concept

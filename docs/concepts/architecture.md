@@ -63,10 +63,10 @@ layer. See the accepted
 | Contracts | `packages/agent-contracts/` | Shared request, event, review, and run contracts. |
 | Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and artifact references. |
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
-| Collaboration | `packages/studio/` | Studio Host, dispatch, per-Pet dispatch queues (including admission state), transports, and the standalone process entry. |
+| Collaboration | `packages/studio/` | Studio Host, dispatch, read-only per-Pet dispatch-queue observation (including admission state), and the standalone process entry. |
 | Local host | `services/local-agent/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
-| Tool integrations | `toolkits/` | Browser and Studio Kanban Toolkits, including their runtime lifecycles. |
+| Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/kanban/`, including their runtime lifecycles. |
 | Desktop companion | `tools/agent-macos/` | macOS supervision and configuration UI. |
 
 ## Request lifecycle

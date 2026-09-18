@@ -69,9 +69,9 @@ This is the core responsibility of an agent harness: **keep the loop running sta
 
 - Reusable TypeScript runtime for agent orchestration and isolated Capability delegation.
 - Local HTTP/WebSocket or JSONL stdio host with checkpoint-backed sessions.
-- Ink and OpenTUI terminal clients with tool activity and human-review flows.
+- OpenTUI terminal client with tool activity and human-review flows.
 - Browser automation through Playwright or a Chrome Extension plus Native Messaging host.
-- Studio runtime for multi-Pet dispatch, per-Pet dispatch queues, and plugin-driven workflows.
+- Studio runtime for multi-Pet dispatch, read-only per-Pet dispatch-queue observation, and plugin-driven workflows.
 - Extensible local Capabilities and Toolkit-based plugins.
 
 ## Architecture
@@ -118,21 +118,27 @@ The main boundaries are:
 | `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
 | `plugins/kanban/` | Optional Kanban Plugin and its Agent Toolkit. |
 | `plugins/scheduler/` | Optional durable one-shot Scheduler Plugin. |
+| `plugins/notice/` | Optional durable Studio notice projection Plugin. |
 | `plugins/trigger/` | Optional event-condition Trigger Plugin for Pet dispatch. |
 | `plugins/project-files/` | Optional read-only project Markdown projection Plugin. |
 | `apps/studio-console/` | Independent pure frontend for Studio and Plugin APIs. |
 | `tools/agent-macos/` | macOS desktop companion. |
+| `infra/langfuse/` | Local Langfuse stack used by tracing and evaluation workflows. |
 | `docs/concepts/` | Project vocabulary and architecture for new contributors. |
 | `docs/guides/` | Installation, configuration, and browser-operation guides. |
 | `docs/reference/` | Current API, extension, runtime, artifact, and tool contracts. |
 | `docs/studio/` | Current multi-agent push model, configuration, host integration, and API links. |
 | `docs/design/` / `docs/history/` | Proposals and rationale / superseded records that do not define current behavior. |
+| `docs/wiki/` | Synthesized documentation wiki and its maintenance log, gated behind explicit ingest. |
 
 The repository root is a private npm workspace. Publishable packages live in their respective workspace directories.
+Root `package.json` scripts beyond the quality gates include `langfuse:*` (local
+observability stack), `eval:*` and `prompt:*` (model and prompt evaluations), and
+`supervisor:context-audit`; see [package.json](package.json) for the full list.
 
 ## Requirements
 
-- Node.js `>=24` (Node 24 LTS and Node 26 are validated)
+- Node.js `>=24` (validated on Node 24; see `.nvmrc` and CI workflows)
 - npm
 - macOS only when building `tools/agent-macos/`
 
@@ -200,7 +206,11 @@ Configuration is resolved from:
 
 1. `~/.pinpawo/config.json`
 2. `~/.pinpawo/.env`
-3. process environment variables
+3. `.env` in the current working directory (dev convenience; dev-only)
+4. process environment variables
+
+A process environment variable that is already set always wins over a value from
+either `.env` file.
 
 Runnable model profiles, including their credentials and endpoints, are stored in
 `~/.pinpawo/config.json`. Use `PINPAWO_MODEL_PROFILE` to select one, and use
@@ -227,17 +237,18 @@ profile format and selection behavior.
 | `pinpawo init` | Create local config and the example Capability. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
 | `pinpawo tui` | Start the terminal client. |
-| `pinpawo-studio --stdio` | Start the independent Studio Host over JSONL stdio. |
-| `pinpawo-studio --port <port>` | Start the independent Studio Host over loopback HTTP/WebSocket. |
-| `pinpawo detect` | Print browser and backend detection as JSON. |
+| `pinpawo-studio [--workdir <dir>] [--pet-port <port>]` | Start the independent Studio Host. |
+| `pinpawo-studio init` / `tmux` / `console` | Scaffold Studio config, build a Pet tmux layout, or open the Studio Console. |
 | `pinpawo capability list` | List installed user Capabilities. |
 | `pinpawo capability validate <dir>` | Validate a Capability directory. |
 | `pinpawo capability install <dir>` | Install a Capability. |
 | `pinpawo capability install <dir> --link` | Link a Capability in place. |
 
 The independent Studio Host and `pinpawo-studio` executable both live in
-`@pinpawo/studio`. Concrete Studio Plugins are injected through the Host's
-`StudioPluginResolver` port; Studio is not a mode of the Chat server command.
+`@pinpawo/studio`. Studio has no built-in WebSocket or stdio dispatch protocol;
+configured Plugins provide its HTTP control plane. Concrete Studio Plugins are
+injected through the Host's `StudioPluginResolver` port; Studio is not a mode of
+the Chat server command.
 
 ## Capabilities and Plugins
 
@@ -312,7 +323,9 @@ Start with the [Documentation Index](docs/index.md). The primary public path is:
 简体中文入口：[PinPawo Agent 文档](docs/zh-CN/index.md)。
 
 The documentation index also separates current contracts from detailed design
-records and historical context.
+records and historical context. The synthesized wiki under
+[`docs/wiki/`](docs/wiki/index.md) and its [maintenance log](docs/log.md) are a
+later ingest layer and are modified only with explicit ingest authorization.
 
 ## Quality Gates
 

@@ -6,6 +6,7 @@ import type { ShellRunHandle } from './processExecutor';
 import { runShellCommand } from './processTree';
 import type { ShellProcessBinding } from './processRegistry';
 import { windowsProcessExecutor } from './windowsProcessExecutor';
+import { classifyReadOnlyShellCommand } from './readOnlyShell';
 
 
 function readShellActionInput(input: unknown) {
@@ -259,8 +260,52 @@ function adoptYieldedProcess(params: {
   ].join('\n');
 }
 
+/**
+ * Read-only shell, admitted by rule instead of by review.
+ *
+ * `run_shell` costs a model-driven review on every call, and most of what an
+ * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
+ * This tool carries no review policy, so `classifyReadOnlyShellCommand` is the
+ * whole safety boundary: anything it does not positively recognise as
+ * read-only is refused here and the agent falls back to `run_shell`.
+ */
+export function createInspectShellTool(binding: ShellProcessBinding | null) {
+  const runShell = createRunShellTool(binding);
+  return tool(
+    async (
+      input: { command: string; cwd?: string; timeoutSeconds?: number },
+      runtime: ToolRuntime,
+    ) => {
+      let command: string;
+      try {
+        command = normalizeShellAuthorizationInput(input).command;
+      } catch (err) {
+        return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+      const verdict = classifyReadOnlyShellCommand(command);
+      if (!verdict.allowed) {
+        return `Error: inspect_shell 只接受可静态判定为只读的命令（${verdict.reason}）。`
+          + '需要执行该命令时改用 run_shell，它会走工具审批。';
+      }
+      return (runShell as unknown as {
+        invoke: (i: unknown, r: ToolRuntime) => Promise<string>;
+      }).invoke(input, runtime);
+    },
+    {
+      name: 'inspect_shell',
+      description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，适合探查代码、目录、Git 历史。支持 cd、管道与 && 串联，例如 `cd src && grep -rn "foo" . | head -20`。只接受白名单内的只读命令（cat/head/tail/ls/find/grep/rg/sed -n/awk/cut/sort/uniq/wc/jq/diff/stat/file/env/date/git log|status|diff|show|branch|blame|rev-parse 等）；不支持输出重定向、命令替换、heredoc、后台执行，也不支持 bash -c、node -e、python -c 这类内联执行。任何写入、安装、删除、推送或不在白名单内的命令都要改用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。',
+      schema: z.object({
+        command: z.string().describe('要执行的只读 shell 命令'),
+        cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
+        timeoutSeconds: z.number().int().positive().optional().describe('等待多少秒后转入后台；默认 60，上限 600'),
+      }),
+    },
+  );
+}
+
 /** Static schema inventory; a runtime binding replaces only the implementation. */
 export const runShellTool = createRunShellTool(null);
+export const inspectShellTool = createInspectShellTool(null);
 
 export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   get_current_time: {
@@ -274,6 +319,16 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   },
   run_shell: {
     title: '执行命令',
+    summarizeInput: (input) => {
+      const shellAction = normalizeShellAuthorizationInput(input);
+      return {
+        target: shellAction.cwd ?? undefined,
+        summary: shellAction.command,
+      };
+    },
+  },
+  inspect_shell: {
+    title: '只读命令',
     summarizeInput: (input) => {
       const shellAction = normalizeShellAuthorizationInput(input);
       return {

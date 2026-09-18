@@ -11,7 +11,7 @@ export function isSupervisorControlTool(name: string): boolean {
 }
 
 export const capabilityExecutionSnapshotSchema = z.object({
-  taskId: z.string().min(1),
+  planItemId: z.string().min(1),
   delegationId: z.string().min(1),
   capability: z.string().min(1),
   task: z.string().min(1),

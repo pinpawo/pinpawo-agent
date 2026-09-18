@@ -70,7 +70,7 @@ const orchestratorStateChannels = {
     reducer: (_prev, next) => next,
     default: () => '',
   }),
-  traceId: Annotation<string>({
+  taskId: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => '',
   }),
@@ -100,12 +100,12 @@ export type OrchestratorRunState = Pick<
   | 'runIterationCount'
   | 'runTerminalError'
   | 'runId'
-  | 'traceId'
+  | 'taskId'
 >;
 
 export type BuildOrchestratorRunOptions = {
   /** Stable user-task identity. A fresh task receives a new value by default. */
-  traceId?: string;
+  taskId?: string;
 };
 
 export function buildRunStateReset(
@@ -119,7 +119,7 @@ export function buildRunStateReset(
     runIterationCount: 0,
     runTerminalError: null,
     runId: randomUUID().slice(0, 8),
-    traceId: options.traceId ?? randomUUID(),
+    taskId: options.taskId ?? randomUUID(),
   };
 }
 

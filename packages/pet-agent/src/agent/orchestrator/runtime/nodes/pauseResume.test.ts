@@ -22,13 +22,13 @@ const registry = compileAgentRegistry({ toolkits: [], capabilities: ['general', 
 })) });
 function pausedState(): OrchestratorStateType {
   const initial: OrchestratorStateType = {
-    ...buildRunStateReset(), runId: 'r1', traceId: 't1', runIterationCount: 7,
+    ...buildRunStateReset(), runId: 'r1', taskId: 't1', runIterationCount: 7,
     runUserRequest: 'Inspect the old project and publish.', runSupervisorUserMessageId: 'human:original',
     runSupervisorState: { goal: 'Inspect the old project and publish.', plan: [
       { id: 'task1', capability: 'general', objective: 'Inspect the old project.', status: 'pending' },
       { id: 'task2', capability: 'writer', objective: 'Publish the old result.', status: 'pending' },
     ] },
-    messages: [setAgentMessageMetadata(new HumanMessage({ id: 'original', content: 'Inspect the old project and publish.' }), { traceId: 't1', runId: 'r1' })],
+    messages: [setAgentMessageMetadata(new HumanMessage({ id: 'original', content: 'Inspect the old project and publish.' }), { taskId: 't1', runId: 'r1' })],
     sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
   };
   return initial;
@@ -76,7 +76,7 @@ for (const strategy of ['continue', 'replace'] as const) {
       action: 'continue', guidance: 'Use the correct project and do not publish.',
     } } }), config);
     assert.deepEqual(events, ['supervisor', 'execute']);
-    assert.equal(result.runId, initial.runId); assert.equal(result.traceId, initial.traceId);
+    assert.equal(result.runId, initial.runId); assert.equal(result.taskId, initial.taskId);
     assert.equal(result.runIterationCount, 7);
     assert.equal(result.runSupervisorState.goal, 'Inspect the correct project; prepare a private report.');
     assert.deepEqual(result.runSupervisorState.plan.map((task) => task.objective), ['Work on the corrected project.', 'Prepare the private report.']);
@@ -129,13 +129,13 @@ test('execution alone cannot authorize plan adjustment; fresh guidance still can
   const state = pausedState();
   const apply = (root: typeof state, decision: ScriptedSupervisorDecision) => {
     if (!('name' in decision) || decision.name !== 'adjust_plan') throw new Error('Expected adjustment');
-    return adjustPlan({ state: root.runSupervisorState, runId: root.runId, traceId: root.traceId,
+    return adjustPlan({ state: root.runSupervisorState, runId: root.runId, taskId: root.taskId,
       userRequest: root.runUserRequest!, messages: root.messages, mode: 'boundary',
       hasNewUserInput: root.messages.some(m => m.id === 'new'), allowedCapabilityNames: ['general', 'writer'] }, decision.args, 'adjust');
   };
   assert.throws(() => apply(state, adjustment('replace')), /fresh user input/);
   const fresh = { ...state, messages: [...state.messages, setAgentMessageMetadata(new HumanMessage({ id: 'new', content: 'Adjust.' }),
-    { runId: state.runId, traceId: state.traceId })] };
+    { runId: state.runId, taskId: state.taskId })] };
   assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'continue',
     tasks: [{ capability: 'writer', objective: 'Write.' }] } }), /keep its capability/);
   assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'replace',

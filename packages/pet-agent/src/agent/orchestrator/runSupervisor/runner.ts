@@ -9,7 +9,7 @@ export type RunSupervisorMode = 'entry' | 'boundary';
 export type RunSupervisorInput = {
   readonly mode: RunSupervisorMode;
   readonly inputId: string;
-  readonly traceId: string;
+  readonly taskId: string;
   readonly runId: string;
   readonly userRequest: string;
   readonly state: RunSupervisorState;

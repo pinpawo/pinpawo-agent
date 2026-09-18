@@ -73,7 +73,7 @@ function setup(responses: AIMessage[], review = false, useProductionExecutor = f
         const result = await execute({
           capability: registry.capabilities[0],
           delegation: {
-            id: 'delegation-1', runId: 'business-run-1', traceId: 'task-1', mode: 'initial',
+            id: 'delegation-1', runId: 'business-run-1', taskId: 'task-1', mode: 'initial',
             userRequest: args.task, task: args.task, briefing: args.task,
           },
           history: [new HumanMessage({ id: 'executor-input', content: args.task })],

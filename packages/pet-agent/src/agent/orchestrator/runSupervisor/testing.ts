@@ -143,7 +143,7 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
       })
       .addEdge(START, 'runSupervisor').addConditionalEdges('capability', state =>
         ToolMessage.isInstance(state.messages.at(-1)) ? 'runSupervisor' : END, ['runSupervisor', END]).compile();
-    const result = await graph.invoke({ runId: input.runId, traceId: input.traceId,
+    const result = await graph.invoke({ runId: input.runId, taskId: input.taskId,
       runSupervisorState: input.state, runSupervisorReviewFeedback: input.reviewFeedback ?? null, runUserRequest: input.userRequest, runCapabilityDisclosure: input.capabilityDisclosure }, config);
     return { messages: result.messages, runSupervisorState: result.runSupervisorState,
       reviewFeedback: result.runSupervisorReviewFeedback,
@@ -152,14 +152,14 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
 }
 
 /** Fixture for an actual returned execution, matching the native tool's result artifact. */
-export function capabilityResultMessage(state: { runId: string; traceId: string },
-  call: { id: string; taskId: string; delegationId: string; capability: string; task: string; mode: 'initial' | 'continue'; briefing?: string },
+export function capabilityResultMessage(state: { runId: string; taskId: string },
+  call: { id: string; planItemId: string; delegationId: string; capability: string; task: string; mode: 'initial' | 'continue'; briefing?: string },
   result: { status: string; delivery: unknown; artifacts: unknown[] }) {
   const { id, ...input } = call;
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id,
     content: JSON.stringify(result), artifact: { ...input, briefing: input.briefing ?? JSON.stringify({ plan: [] }) },
     status: result.status === 'missing_deliverable' ? 'error' : 'success',
-  }), { runId: state.runId, traceId: state.traceId });
+  }), { runId: state.runId, taskId: state.taskId });
 }
 
 /** Evaluation convenience; production replies exist only as committed messages. */

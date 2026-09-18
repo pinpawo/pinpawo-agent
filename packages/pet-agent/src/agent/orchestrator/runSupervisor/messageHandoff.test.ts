@@ -20,7 +20,7 @@ import { defineInstructionDocument } from '../../../types/capability';
 const taskA = { capability: 'general', objective: 'Inspect A.' };
 const taskB = { capability: 'general', objective: 'Inspect B.' };
 function context(overrides: Partial<SupervisorHandoffContext> = {}): SupervisorHandoffContext {
-  return { state: { goal: null, plan: [] }, runId: 'r1', traceId: 't1', userRequest: 'Inspect the project.',
+  return { state: { goal: null, plan: [] }, runId: 'r1', taskId: 't1', userRequest: 'Inspect the project.',
     mode: 'entry', hasNewUserInput: true, allowedCapabilityNames: ['general'], messages: [], ...overrides };
 }
 function control(name: string, args: Record<string, unknown>, id: string) {
@@ -35,7 +35,7 @@ function resultFor(input: SupervisorHandoffContext, dispatch: AIMessage) {
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
     artifact: execution, content: JSON.stringify({ status: 'returned', delivery: {
       id: 'delivery', task: execution.task, text: 'Verified execution evidence.', scope: {
-        runId: metadata.runId, traceId: metadata.traceId, delegationId: execution.delegationId, lane: `capability:${execution.capability}`,
+        runId: metadata.runId, taskId: metadata.taskId, delegationId: execution.delegationId, lane: `capability:${execution.capability}`,
       },
     }, artifacts: [] }),
   }), metadata);
@@ -173,7 +173,7 @@ test('a natural question commits the plan without dispatching it', async () => {
 test('correcting delegation arguments preserves the rejected delivery feedback', async () => {
   const { result, model } = await probe(returned(), [
     control('review_current', { completed: false, reason: 'Verify missing evidence' }, 'review'),
-    control('delegate_capability', { taskId: 'invented' }, 'invalid'),
+    control('delegate_capability', { planItemId: 'invented' }, 'invalid'),
     control('delegate_capability', { briefing: 'Execute the current objective.' }, 'corrected'),
   ]);
   assert.equal(model.inputs.length, 3);

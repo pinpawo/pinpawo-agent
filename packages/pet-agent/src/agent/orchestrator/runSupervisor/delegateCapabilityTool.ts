@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask } from './state';
-import { executionsForTask } from '../executionMessages';
+import { executionsForPlanItem } from '../executionMessages';
 import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
@@ -27,7 +27,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const userRequest = state.runSupervisorState.goal ?? state.runUserRequest;
     if (!userRequest) throw new Error('Capability execution requires a goal.');
     const input = buildCapabilityExecutionInput({
-      state: state.runSupervisorState, runId: state.runId, traceId: state.traceId, userRequest,
+      state: state.runSupervisorState, runId: state.runId, taskId: state.taskId, userRequest,
       messages: state.messages, mode: 'boundary', hasNewUserInput: false,
       allowedCapabilityNames: registry.capabilities.map(({ capability }) => capability.name)
         .filter(name => !invokeOptions.allowedCapabilityNames || invokeOptions.allowedCapabilityNames.includes(name)),
@@ -35,7 +35,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,
-      delegation: { id: input.delegationId, runId: state.runId, traceId: state.traceId,
+      delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId,
         userRequest, task: input.task, mode: input.mode, briefing: input.briefing },
       history: state.messages,
     }, {
@@ -52,7 +52,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       status: execution.status === 'missing_deliverable' ? 'error' : 'success',
       content: JSON.stringify({ status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts }),
       artifact: input,
-    }), { runId: state.runId, traceId: state.traceId, delegationId: input.delegationId,
+    }), { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
       sourceCapability: input.capability, runtimeGenerated: true });
     return new Command({ update: {
       messages: [...execution.privateMessages, result],
@@ -71,9 +71,9 @@ export function buildCapabilityExecutionInput(context: SupervisorHandoffContext,
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
   if (!context.allowedCapabilityNames.includes(next.capability)) throw new SupervisorDecisionError('Capability is no longer available.');
-  const previous = executionsForTask(context, next.id).filter(({ metadata }) => metadata.runId === context.runId).at(-1);
+  const previous = executionsForPlanItem(context, next.id).filter(({ metadata }) => metadata.runId === context.runId).at(-1);
   return {
-    taskId: next.id,
+    planItemId: next.id,
     delegationId: previous?.execution.delegationId ?? identity('delegation', context.runId, next.id),
     capability: next.capability,
     task: next.objective,

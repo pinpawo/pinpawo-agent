@@ -27,7 +27,7 @@ export type AgentInvokeInput = {
   /** Optional allowlist exposed through the Supervisor document workspace. */
   allowedCapabilityNames?: string[];
   /** Optional stable task identity supplied by a host that owns task lifecycle. */
-  traceId?: string;
+  taskId?: string;
 };
 
 export type AgentRunResult = {

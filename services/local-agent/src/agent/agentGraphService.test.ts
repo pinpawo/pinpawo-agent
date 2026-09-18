@@ -92,7 +92,7 @@ test('graphs take current common context through the root stream entry point', a
 });
 
 test('all invocation entry points preserve scope, trace identity and current metadata', async () => {
-  const seen: Array<{ traceId: string; capabilities: readonly string[]; workdir: unknown }> = [];
+  const seen: Array<{ taskId: string; capabilities: readonly string[]; workdir: unknown }> = [];
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
@@ -101,7 +101,7 @@ test('all invocation entry points preserve scope, trace identity and current met
   } as unknown as AgentModels['act'];
   const runner: RunSupervisorRunner = {
     async invoke(input, config) {
-      seen.push({ traceId: input.traceId, capabilities: input.catalog.capabilityNames, workdir: getAgentRuntimeContext(config).workdir });
+      seen.push({ taskId: input.taskId, capabilities: input.catalog.capabilityNames, workdir: getAgentRuntimeContext(config).workdir });
       assert.equal('actor' in (config?.configurable ?? {}), false);
       assert.ok(config?.signal);
       assert.equal(config?.signal?.aborted, false);
@@ -118,23 +118,23 @@ test('all invocation entry points preserve scope, trace identity and current met
   const graph = createOrchestratorGraph(graphConfig);
   for (const path of ['core', 'streamEvents']) {
     for (const allowedCapabilityNames of [['first'], []]) {
-      const traceId = randomUUID();
+      const taskId = randomUUID();
       const workdir = `/workspace/${randomUUID()}`;
       const input: AgentChannelSetup = {
         registry, graphConfig,
-        input: { messages: [new HumanMessage('inspect')], traceId, allowedCapabilityNames,
+        input: { messages: [new HumanMessage('inspect')], taskId, allowedCapabilityNames,
           context: { workdir }, signal: new AbortController().signal, globalReviewPolicy: { mode: 'full_access' } },
       };
       if (path === 'core') await runAgent(graph, input.input, { registry, reviewCapabilities: { humanReview: false, sessionAuthorization: true } });
       else await runToCompletion(service, input);
-      assert.deepEqual(seen.at(-1), { traceId, capabilities: allowedCapabilityNames, workdir }, path);
+      assert.deepEqual(seen.at(-1), { taskId, capabilities: allowedCapabilityNames, workdir }, path);
     }
   }
   assert.equal(seen.length, 4);
 });
 
 test('local stream resume refreshes invocation metadata while preserving the checkpoint task', async () => {
-  const seen: Array<{ traceId: string; workdir: string | null }> = [];
+  const seen: Array<{ taskId: string; workdir: string | null }> = [];
   const model = {
     invoke: async () => new AIMessage('done'),
     bindTools: () => ({ invoke: async () => new AIMessage({ content: '', tool_calls: [{
@@ -143,20 +143,20 @@ test('local stream resume refreshes invocation metadata while preserving the che
   } as unknown as AgentModels['act'];
   const service = new LocalAgentGraphService();
   const workdirs = [`/workspace/${randomUUID()}`, `/workspace/${randomUUID()}`];
-  const traceId = randomUUID();
+  const taskId = randomUUID();
   const input: AgentChannelSetup = {
     registry: compileAgentRegistry({ toolkits: [], capabilities: [] }),
     graphConfig: {
       models: { act: model }, checkpoint: new MemorySaver(),
       runSupervisorRunner: { async invoke(input, config) {
-        seen.push({ traceId: input.traceId,
+        seen.push({ taskId: input.taskId,
           workdir: getAgentRuntimeContext(config).workdir });
         assert.deepEqual(config?.configurable?.allowedCapabilityNames, []);
         interrupt({ kind: 'invocation-refresh-test' });
         return scriptedSupervisorResult(input, { reply: 'No execution available.' });
       } },
     },
-    input: { messages: [new HumanMessage('inspect')], threadId: randomUUID(), traceId,
+    input: { messages: [new HumanMessage('inspect')], threadId: randomUUID(), taskId,
       allowedCapabilityNames: [], context: { workdir: workdirs[0] } },
   };
   const initial = await service.streamEvents(input);
@@ -164,7 +164,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
   await initial.output;
   assert.equal(seen.length, 1);
   const resumed: AgentChannelSetup = { ...input,
-    input: { ...input.input, traceId: randomUUID(), context: { workdir: workdirs[1] } },
+    input: { ...input.input, taskId: randomUUID(), context: { workdir: workdirs[1] } },
   };
   // This fixture raises a payload the Runtime deliberately cannot decode, so
   // the id is read from the checkpoint rather than through readThreadState.
@@ -183,8 +183,8 @@ test('local stream resume refreshes invocation metadata while preserving the che
   for await (const _event of stream) { /* Resume through the production streaming path. */ }
   await stream.output;
   assert.deepEqual(seen, [
-    { traceId, workdir: workdirs[0] },
-    { traceId, workdir: workdirs[1] },
+    { taskId, workdir: workdirs[0] },
+    { taskId, workdir: workdirs[1] },
   ]);
 });
 

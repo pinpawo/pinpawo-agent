@@ -33,7 +33,7 @@ function input(id = 'd1', toolkits: AgentToolkit[] = [], lifecycle?: CapabilityL
   return {
     capability: registry.capabilities[0],
     delegation: {
-      id, runId: 'r1', traceId: 't1',
+      id, runId: 'r1', taskId: 't1',
       mode: 'initial', userRequest: 'Prepare two documents.', task: `Prepare ${id}`, briefing: 'Execute the planned work and return evidence.',
     },
     history: [new HumanMessage({ id: 'user', content: 'Prepare two documents.' })],
@@ -52,7 +52,7 @@ function messageScope(request: CapabilityExecutionInput) {
     lane: `capability:${request.capability.capability.name}` as const,
     delegationId: request.delegation.id,
     runId: request.delegation.runId,
-    traceId: request.delegation.traceId,
+    taskId: request.delegation.taskId,
   };
 }
 

@@ -18,10 +18,10 @@ export const CONTEXT_COMPACTION_MESSAGE_NAME = 'context_compaction';
 
 export type ContextCompactionOptions = {
   /** Actual call/result records still needed to review unfinished plan tasks. */
-  preserveExecutionTaskIds?: readonly string[];
+  preservePlanItemIds?: readonly string[];
   keepMessages?: number;
   /** Keep the current logical task summary separate from older conversations. */
-  traceId?: string;
+  taskId?: string;
 };
 
 export type ContextCompactionResult = {
@@ -58,12 +58,12 @@ export function createContextCompactionMessage(
 function selectMessagesToKeep(
   messages: BaseMessage[],
   keepMessages: number,
-  preserveExecutionTaskIds: readonly string[] = [],
+  preservePlanItemIds: readonly string[] = [],
 ): BaseMessage[] {
   const candidates = messages.filter((message) => !isContextCompactionMessage(message));
   const recentMessages = new Set(candidates.slice(-Math.max(1, keepMessages)));
   const preservedCalls = new Set(readCapabilityExecutions(candidates)
-    .filter(record => preserveExecutionTaskIds.includes(record.execution.taskId)).map(record => record.call.id!));
+    .filter(record => preservePlanItemIds.includes(record.execution.planItemId)).map(record => record.call.id!));
   // Preserve every attempt for the unfinished delegation, including main evidence.
   const selected = candidates.filter((message) => {
     if (recentMessages.has(message)) return true;
@@ -155,7 +155,7 @@ export async function compactOrchestratorMessages(params: {
   const keptMessages = selectMessagesToKeep(
     messages,
     keepMessages,
-    params.options?.preserveExecutionTaskIds,
+    params.options?.preservePlanItemIds,
   );
   const keptMessageRefs = new Set(keptMessages);
   const keptIds = new Set(keptMessages.map((message) => message.id).filter((id): id is string => Boolean(id)));
@@ -167,19 +167,19 @@ export async function compactOrchestratorMessages(params: {
     return { messages: [], compacted: false, mainMessageCount };
   }
 
-  const traceId = params.options?.traceId;
+  const taskId = params.options?.taskId;
   // At most two summaries: current task and older history. A later compaction
   // folds older task summaries together, so task boundaries do not accumulate.
-  const groups = traceId ? [
-    messagesToSummarize.filter((message) => getAgentMessageMetadata(message).traceId !== traceId),
-    messagesToSummarize.filter((message) => getAgentMessageMetadata(message).traceId === traceId),
+  const groups = taskId ? [
+    messagesToSummarize.filter((message) => getAgentMessageMetadata(message).taskId !== taskId),
+    messagesToSummarize.filter((message) => getAgentMessageMetadata(message).taskId === taskId),
   ] : [messagesToSummarize];
   const summaries: BaseMessage[] = [];
   for (const group of groups) {
     if (group.length === 0) continue;
     const summary = await summarizeMessages({ model, messages: group, runnableConfig: params.runnableConfig });
     const message = createContextCompactionMessage(summary, mainConversationMessages(group).length);
-    if (traceId && group === groups[1]) setAgentMessageMetadata(message, { traceId });
+    if (taskId && group === groups[1]) setAgentMessageMetadata(message, { taskId });
     summaries.push(message);
   }
 

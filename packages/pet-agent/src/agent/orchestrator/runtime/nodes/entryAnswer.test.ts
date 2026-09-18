@@ -85,7 +85,7 @@ function invokeConfig() {
 
 test('entry capture resolves the fresh request without clearing saved business progress', () => {
   const input = {
-    ...buildOrchestratorRunInput([new HumanMessage('继续。')], { traceId: 'new-trace' }),
+    ...buildOrchestratorRunInput([new HumanMessage('继续。')], { taskId: 'new-trace' }),
     runSupervisorState: { goal: '完成两项工作', plan: [
       { id: 'a', capability: 'general', objective: 'First', status: 'completed' },
       { id: 'b', capability: 'general', objective: 'Second', status: 'pending' },

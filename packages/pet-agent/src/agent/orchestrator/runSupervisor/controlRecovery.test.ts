@@ -90,8 +90,8 @@ test('reviewing the next unexecuted task returns feedback, retains accepted work
 
 for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability']) {
   test(`${name} schema error reaches the model and correction executes exactly once`, async () => {
-    const badArgs = name === 'submit_plan' ? { tasks: [{ ...task, taskId: 'kanban-task' }] }
-      : name === 'adjust_plan' ? { goal: task.objective, reason: 'Correct the plan.', currentDelegation: 'replace', tasks: [{ ...task, taskId: 'kanban-task' }] }
+    const badArgs = name === 'submit_plan' ? { tasks: [{ ...task, planItemId: 'kanban-task' }] }
+      : name === 'adjust_plan' ? { goal: task.objective, reason: 'Correct the plan.', currentDelegation: 'replace', tasks: [{ ...task, planItemId: 'kanban-task' }] }
       : name === 'review_current' ? { completed: 'yes', reason: 'Evidence returned.' }
       : { briefing: 123 };
     const goodPlan = call('submit_plan', { tasks: [task] }, 'plan');
@@ -112,20 +112,20 @@ for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_ca
     assert.ok(ToolMessage.isInstance(feedback));
     assert.equal(feedback.status, 'error');
     assert.equal(feedback.name, name);
-    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'delegate_capability' ? 'briefing' : 'taskId'));
+    assert.match(feedback.text, new RegExp(name === 'review_current' ? 'completed' : name === 'delegate_capability' ? 'briefing' : 'planItemId'));
     assert.equal(executor.inputs.length, 1);
     assert.equal(readCapabilityExecutions(result.messages).length, 1);
     assert.equal(result.runSupervisorState.plan.length, 1);
     assert.equal(result.runSupervisorState.plan[0].status, 'completed');
     assert.equal(result.runSupervisorState.plan[0].objective, task.objective);
-    assert.equal('taskId' in result.runSupervisorState.plan[0], false);
+    assert.equal('planItemId' in result.runSupervisorState.plan[0], false);
     assert.equal(result.messages.at(-1)?.text, 'Inspection complete.');
   });
 }
 
 for (const name of ['submit_plan', 'unknown_tool']) test(`repeated ${name} errors respect the caller loop limit without executing work`, async () => {
   const supervisor = new RecoveryModel(Array.from({ length: 30 }, (_, i) =>
-    call(name, { tasks: [{ ...task, taskId: 'unexpected' }] }, `bad-${i}`)));
+    call(name, { tasks: [{ ...task, planItemId: 'unexpected' }] }, `bad-${i}`)));
   const executor = new RecoveryModel([]);
   const entry = new RecoveryModel([call('plan_request', { goal: task.objective }, 'entry')]);
   const graph = createOrchestratorGraph({ models: { act: supervisor, answer: entry, subagent: executor }, checkpoint: new MemorySaver() });
@@ -170,7 +170,7 @@ test('copied internal handoff parameters are corrected before a single Superviso
   const supervisor = new RecoveryModel([
     call('submit_plan', { tasks: [task] }, 'plan'),
     call('delegate_capability', { control: { name: 'execute_current', args: {} },
-      execution: { taskId: 'invented', capability: 'unauthorized' } }, 'copied-history'),
+      execution: { planItemId: 'invented', capability: 'unauthorized' } }, 'copied-history'),
     call('delegate_capability', { briefing: 'Inspect the repository.' }, 'delegate'),
     call('review_current', { completed: true, reason: 'Evidence returned.' }, 'review'),
     new AIMessage('Inspection complete.'),

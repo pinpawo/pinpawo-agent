@@ -14,15 +14,15 @@ import { guardDecisionEmitter } from '../guards/decisionEvents';
 
 export function createPrepareNode() {
   return async function prepare(state: OrchestratorStateType, runnableConfig?: RunnableConfig) {
-    if (!state.runId || !state.traceId) {
+    if (!state.runId || !state.taskId) {
       throw new Error('Fresh runs must be initialized with buildOrchestratorRunInput.');
     }
     const freshMessages = state.messages.filter((message) => HumanMessage.isInstance(message)
       && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId);
     if (!freshMessages.length) throw new Error('Fresh run requires a HumanMessage bound to its runId.');
-    const traceId = state.traceId;
+    const taskId = state.taskId;
     const messages = freshMessages.map((message) =>
-      setAgentMessageMetadata(new HumanMessage({ ...message }), { traceId }));
+      setAgentMessageMetadata(new HumanMessage({ ...message }), { taskId }));
     return new Command({ update: { messages }, goto: 'compactContext' });
   };
 }
@@ -46,8 +46,8 @@ export function createCompactContextNode(params: {
       messages: state.messages,
       model: params.config.models.observe ?? params.config.models.act,
       options: {
-        traceId: state.traceId,
-        preserveExecutionTaskIds: state.runSupervisorState.plan
+        taskId: state.taskId,
+        preservePlanItemIds: state.runSupervisorState.plan
           .filter((task) => task.status !== 'completed' && task.status !== 'superseded').map((task) => task.id),
       },
       runnableConfig,

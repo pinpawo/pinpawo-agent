@@ -92,14 +92,14 @@ import {
 import { withScriptedDelegation, type ScriptedSupervisorDecision as RunSupervisorResult,
   type ScriptedSupervisorRunner as RunSupervisorRunner } from './runSupervisor/testing';
 import { currentSupervisorTask } from './runSupervisor/state';
-import { executionsForTask, readCapabilityExecutions, readDelegationDeliveries } from './executionMessages';
+import { executionsForPlanItem, readCapabilityExecutions, readDelegationDeliveries } from './executionMessages';
 import type { DelegationDelivery } from './delegation/delivery';
 
 function currentExecution(input: RunSupervisorInput | undefined) {
   if (!input) return null;
   const task = currentSupervisorTask(input.state);
   if (!task) return null;
-  const latest = executionsForTask(input, task.id).at(-1);
+  const latest = executionsForPlanItem(input, task.id).at(-1);
   return latest ? { ...latest.execution, runId: String(latest.metadata.runId) } : null;
 }
 function executionDeliveries(input: RunSupervisorInput | undefined): DelegationDelivery[] {
@@ -367,7 +367,7 @@ function readToolMessageContent(messages: unknown[], toolCallId: string) {
 test('orchestrator state channels encode lifecycle prefixes in their names', () => {
   const invalidChannels = ORCHESTRATOR_STATE_CHANNEL_NAMES.filter((name) =>
     name !== 'messages'
-    && name !== 'traceId'
+    && name !== 'taskId'
     && !/^(session|task|run)/.test(name),
   );
 
@@ -380,14 +380,14 @@ test('orchestrator state channels encode lifecycle prefixes in their names', () 
 
 test('run identity is fresh while task trace identity can be supplied by the caller', () => {
   const first = buildOrchestratorRunInput([new HumanMessage('first')], {
-    traceId: 'task-trace-1',
+    taskId: 'task-trace-1',
   });
   const resumed = buildOrchestratorRunInput([new HumanMessage('resume')], {
-    traceId: first.traceId,
+    taskId: first.taskId,
   });
 
-  assert.equal(first.traceId, 'task-trace-1');
-  assert.equal(resumed.traceId, first.traceId);
+  assert.equal(first.taskId, 'task-trace-1');
+  assert.equal(resumed.taskId, first.taskId);
   assert.notEqual(resumed.runId, first.runId);
   assert.equal('runSupervisorState' in first, false, 'fresh run reset preserves saved plan');
   assert.equal('runSupervisorSession' in resumed, false);
@@ -1728,12 +1728,12 @@ test('capability finalize stores only artifact refs in state', async () => {
 
 test('runAgent reuses a host-precompiled artifact discovery registry', async () => {
   const calls: Array<{
-    input?: { traceId?: string; runId?: string };
+    input?: { taskId?: string; runId?: string };
     configurable?: Record<string, unknown>;
   }> = [];
   const graph = {
     invoke: async (
-      graphInput: { traceId?: string; runId?: string },
+      graphInput: { taskId?: string; runId?: string },
       options?: { configurable?: Record<string, unknown> },
     ) => {
       calls.push({ input: graphInput, configurable: options?.configurable });
@@ -1761,7 +1761,7 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
   });
   const result = await runAgent(graph as never, {
     messages: [new HumanMessage('hello')],
-    traceId: 'host-task-trace',
+    taskId: 'host-task-trace',
     toolkits: [artifactDiscoveryToolkit],
     capabilities: [
       capability(
@@ -1780,7 +1780,7 @@ test('runAgent reuses a host-precompiled artifact discovery registry', async () 
 
   assert.equal(result.reply, 'done');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.input?.traceId, 'host-task-trace');
+  assert.equal(calls[0]?.input?.taskId, 'host-task-trace');
   assert.ok(calls[0]?.input?.runId);
   const registry = calls[0]?.configurable?.registry as {
     toolkits?: AgentToolkit[];
@@ -3635,7 +3635,7 @@ test('toolkit review rejection records terminal tool results and retains the del
 
   const task = currentSupervisorTask(finalState.runSupervisorState);
   assert.ok(task);
-  const previous = executionsForTask(finalState, task.id).at(-1);
+  const previous = executionsForPlanItem(finalState, task.id).at(-1);
   assert.ok(previous);
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
@@ -3835,7 +3835,7 @@ test('toolkit review run interruption retains the delegation without another mod
 
   const task = currentSupervisorTask(finalState.runSupervisorState);
   assert.ok(task);
-  const previous = executionsForTask(finalState, task.id).at(-1);
+  const previous = executionsForPlanItem(finalState, task.id).at(-1);
   assert.ok(previous);
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
@@ -4211,7 +4211,7 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
     task: '旧任务：检查历史 review 状态',
     contextSummary: '这段上下文不得进入新任务。',
     runId: 'old-awaiting-run',
-    traceId: 'old-awaiting-trace',
+    taskId: 'old-awaiting-trace',
     status: 'awaiting_decision',
     resultPreview: '旧任务执行了一部分。',
     userRequest: '检查历史 review 状态。',
@@ -4716,7 +4716,7 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
   const guidance = (continuedState.values.messages as BaseMessage[]).find((message) =>
     HumanMessage.isInstance(message) && message.text === 'Skip git status; inspect recent commits.');
   assert.ok(guidance);
-  assert.equal(getAgentMessageMetadata(guidance).traceId, continuedState.values.traceId);
+  assert.equal(getAgentMessageMetadata(guidance).taskId, continuedState.values.taskId);
   assert.equal(getAgentMessageRunId(guidance), continuedState.values.runId);
   assert.equal(currentSupervisorTask(continuedState.values.runSupervisorState)?.id, currentSupervisorTask(pausedState.values.runSupervisorState)?.id);
 });

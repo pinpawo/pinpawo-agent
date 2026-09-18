@@ -13,6 +13,6 @@ export function supervisorWorkMessages(context: SupervisorHandoffContext, messag
     if (dispatch) copy.tool_calls = copy.tool_calls!.map(call => ({ ...call, id: identity('call', context.runId, call.id!) }));
     copy.id = identity('supervisor-message', context.runId, message.id ?? (ToolMessage.isInstance(message) ? message.tool_call_id : String(index)));
     return setAgentMessageMetadata(copy, { lane: dispatch ? undefined : 'supervisor',
-      runId: context.runId, traceId: context.traceId, ...(dispatch ? { source: 'supervisor' } : {}) });
+      runId: context.runId, taskId: context.taskId, ...(dispatch ? { source: 'supervisor' } : {}) });
   });
 }

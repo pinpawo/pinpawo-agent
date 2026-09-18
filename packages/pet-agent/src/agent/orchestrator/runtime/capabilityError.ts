@@ -16,7 +16,7 @@ export function recoverCapabilityError(state: OrchestratorStateType, { error }: 
     messages: [setAgentMessageMetadata(new ToolMessage({
       name: call.name, tool_call_id: call.id!, status: 'error',
       content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(state.runSupervisorState), plan: state.runSupervisorState }),
-    }), { runId: state.runId, traceId: state.traceId })],
+    }), { runId: state.runId, taskId: state.taskId })],
     runIterationCount: state.runIterationCount + 1,
   } });
 }

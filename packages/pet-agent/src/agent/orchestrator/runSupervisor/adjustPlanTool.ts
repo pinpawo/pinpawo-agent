@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
-import { executionsForTask } from '../executionMessages';
+import { executionsForPlanItem } from '../executionMessages';
 
 export const adjustPlanSchema = z.object({
   goal: z.string().trim().min(1).max(4_000).describe('没有新用户输入时必须原样保留当前 goal；只有用户明确要求或确认改变目标时才更新。'),
@@ -51,7 +51,7 @@ export function adjustPlan(
     throw new SupervisorDecisionError('Continuing a task must keep its capability.');
   }
   const retained = context.state.plan.filter(task => task.status === 'completed' || task.status === 'superseded'
-    || (executionsForTask(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
+    || (executionsForPlanItem(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
     .map(task => task.status === 'completed' ? task : { ...task, status: 'superseded' as const });
   return { goal: args.goal, plan: [...retained, ...args.tasks.map((task, index) => ({
     ...task,

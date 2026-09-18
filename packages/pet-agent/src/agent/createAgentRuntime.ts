@@ -10,7 +10,7 @@ export type {
   RunSupervisorResult,
   RunSupervisorRunner,
 } from './orchestrator/runSupervisor/runner';
-export type { RunSupervisorState, SupervisorPlanTask } from './orchestrator/runSupervisor/state';
+export type { RunSupervisorState, SupervisorPlanItem } from './orchestrator/runSupervisor/state';
 export { buildOrchestratorRunInput } from './orchestrator/state';
 export { validateUniqueCapabilityNames, validateUniqueToolkitNames } from './orchestrator/validation';
 export {

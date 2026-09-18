@@ -119,7 +119,7 @@ function entryHandoff(runtime: ToolRuntime<OrchestratorStateType>, runUserReques
   const confirmation = setAgentMessageMetadata(new ToolMessage({
     name: last.tool_calls[0].name, tool_call_id: runtime.toolCallId,
     content: 'Request handed to Supervisor.',
-  }), { runId: runtime.state.runId, traceId: runtime.state.traceId });
+  }), { runId: runtime.state.runId, taskId: runtime.state.taskId });
   const messages = [last, confirmation];
   return new Command({
     graph: Command.PARENT,
@@ -218,7 +218,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id!),
     })) });
     return {
-      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { traceId: state.traceId, runId: state.runId })],
+      messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],
     };
   };
 

@@ -57,7 +57,7 @@ test('Run Supervisor entry input represents an empty disclosure explicitly', () 
   const input = buildRunSupervisorAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
-    traceId: 'trace-1',
+    taskId: 'trace-1',
     runId: 'run-1',
     catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
@@ -73,7 +73,7 @@ test('Run Supervisor entry input represents an empty disclosure explicitly', () 
 test('dynamic capability documents remain data and do not enter the system prompt', () => {
   const request = 'Inspect target <external> & retain constraints';
   const input: RunSupervisorInput = {
-    mode: 'entry', inputId: 'human:test', traceId: 'trace-1', runId: 'run-1',
+    mode: 'entry', inputId: 'human:test', taskId: 'trace-1', runId: 'run-1',
     catalog: plannerPromptCatalog, userRequest: request, messages: [],
     state: { goal: null, plan: [] }, capabilityDisclosure: plannerDisclosure,
   };
@@ -96,7 +96,7 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
   const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
-    traceId: 'trace-1',
+    taskId: 'trace-1',
     runId: 'run-1',
     catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
@@ -125,7 +125,7 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
   const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
-    traceId: 'trace-1',
+    taskId: 'trace-1',
     runId: 'run-1',
     catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。',

@@ -23,7 +23,7 @@ export function projectCurrentPlan(state: unknown): AgentPlan | null {
     if (!id || !capability || !task || !['pending', 'completed'].includes(String(status))) return [];
     return [{ id, capability, task,
       status: status === 'completed' ? 'completed' as const
-        : (hasPendingCall && value === current) || executions.some(({ execution }) => execution.taskId === id && execution.capability === capability)
+        : (hasPendingCall && value === current) || executions.some(({ execution }) => execution.planItemId === id && execution.capability === capability)
           ? 'active' as const : 'pending' as const }];
   });
   return items.length ? { items } : null;

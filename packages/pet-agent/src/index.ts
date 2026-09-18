@@ -138,7 +138,7 @@ export type {
   RunSupervisorResult,
   RunSupervisorRunner,
   RunSupervisorState,
-  SupervisorPlanTask,
+  SupervisorPlanItem,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';

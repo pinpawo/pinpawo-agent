@@ -24,12 +24,12 @@ const registry = compileAgentRegistry({ toolkits: [], capabilities: [{
 const options = { configurable: { registry } };
 const tasks = [{ capability: 'general', objective: 'Prepare the document.' }, { capability: 'general', objective: 'Publish it.' }];
 function state(): OrchestratorStateType {
-  return { ...buildRunStateReset(), runId: 'r1', traceId: 't1', runUserRequest: 'Prepare and publish.',
+  return { ...buildRunStateReset(), runId: 'r1', taskId: 't1', runUserRequest: 'Prepare and publish.',
     runSupervisorState: { goal: null, plan: [] },
     messages: [new HumanMessage({ id: 'human', content: 'Prepare and publish.' }),
       new AIMessage({ content: '', tool_calls: [{ id: 'entry', name: 'plan_request', args: { goal: 'Prepare and publish.' } }] }),
       new ToolMessage({ name: 'plan_request', tool_call_id: 'entry', content: 'Handed off.' }),
-    ].map((message) => setAgentMessageMetadata(message, { runId: 'r1', traceId: 't1' })),
+    ].map((message) => setAgentMessageMetadata(message, { runId: 'r1', taskId: 't1' })),
     sessionCapabilityArtifacts: [], sessionToolAuthorizations: { generation: '', records: [] },
   };
 }
@@ -54,7 +54,7 @@ async function delivered() {
   const planned = apply(initial, await node({ name: 'submit_plan', args: { tasks } })(initial, options));
   const call = readCapabilityCall(planned);
   const delivery = { id: 'delivery', task: call.task, text: 'Draft saved; publication has not run.', scope: {
-    lane: 'capability:general' as const, runId: planned.runId, traceId: planned.traceId, delegationId: call.delegationId,
+    lane: 'capability:general' as const, runId: planned.runId, taskId: planned.taskId, delegationId: call.delegationId,
   } };
   return { ...planned, messages: [...planned.messages, capabilityResultMessage(planned, call, { status: 'returned', delivery, artifacts: [] })] };
 }
@@ -114,7 +114,7 @@ test('natural question does not accept the returned task or erase its results', 
 test('new user input is consumed once, including guidance added within a native resumed run', async () => {
   const input = await delivered();
   const guidance = setAgentMessageMetadata(new HumanMessage({ id: 'guidance', content: 'Change destination.' }),
-    { runId: input.runId, traceId: input.traceId });
+    { runId: input.runId, taskId: input.taskId });
   input.messages.push(guidance);
   const catalog = createCapabilityCatalog({ registry });
   const build = (root: OrchestratorStateType) => buildRunSupervisorInput({ root, catalog,

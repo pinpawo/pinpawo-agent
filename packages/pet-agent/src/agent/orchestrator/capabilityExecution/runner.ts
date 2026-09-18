@@ -47,7 +47,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       lane: `capability:${capability.name}`,
       delegationId: delegation.id,
       runId: delegation.runId,
-      traceId: delegation.traceId,
+      taskId: delegation.taskId,
     };
     if (!scope.delegationId || !scope.runId) {
       throw new Error('Capability execution requires a complete delegation identity.');

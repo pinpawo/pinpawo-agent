@@ -10,7 +10,7 @@ export async function pauseGate(state: OrchestratorStateType) {
   const resumed = pauseTaskInterrupt.resume(interrupt(pauseTaskInterrupt.interaction()));
   const guidance = resumed.guidance ? setAgentMessageMetadata(
     new HumanMessage({ id: randomUUID(), content: resumed.guidance }),
-    { traceId: state.traceId, runId: state.runId },
+    { taskId: state.taskId, runId: state.runId },
   ) : null;
   return guidance ? { messages: [guidance] } : {};
 }

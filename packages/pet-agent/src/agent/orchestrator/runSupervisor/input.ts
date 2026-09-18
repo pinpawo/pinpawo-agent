@@ -8,7 +8,7 @@ import type { SupervisorHandoffContext } from './controlContext';
 export function readSupervisorMode(root: OrchestratorStateType): RunSupervisorInput['mode'] {
   const main = root.messages.filter((message) => {
     const metadata = getAgentMessageMetadata(message);
-    return !metadata.lane && metadata.runId === root.runId && metadata.traceId === root.traceId;
+    return !metadata.lane && metadata.runId === root.runId && metadata.taskId === root.taskId;
   });
   const result = main.at(-1);
   const request = main.at(-2);
@@ -20,7 +20,7 @@ export function readSupervisorMode(root: OrchestratorStateType): RunSupervisorIn
 
 export function supervisorHandoffContext(input: RunSupervisorInput): SupervisorHandoffContext {
   return {
-    state: input.state, runId: input.runId, traceId: input.traceId,
+    state: input.state, runId: input.runId, taskId: input.taskId,
     userRequest: input.userRequest, mode: input.mode,
     hasNewUserInput: input.inputId.startsWith('human:'),
     allowedCapabilityNames: input.catalog.capabilityNames, messages: input.messages,
@@ -41,7 +41,7 @@ export function buildRunSupervisorInput(params: {
     mode: readSupervisorMode(root),
     inputId: humanId && root.runSupervisorUserMessageId !== humanId
       ? humanId : `boundary:${root.runId}:${root.runIterationCount}`,
-    runId: root.runId, traceId: root.traceId, userRequest: root.runUserRequest,
+    runId: root.runId, taskId: root.taskId, userRequest: root.runUserRequest,
     reviewFeedback: root.runSupervisorReviewFeedback,
     state: root.runSupervisorState, messages: root.messages, catalog, capabilityDisclosure,
   };

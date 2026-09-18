@@ -310,7 +310,7 @@ function supervisorInput(
   } = {},
 ): RunSupervisorInput {
   const input: RunSupervisorInput = {
-    mode: 'entry', inputId: 'trace_started:trace-test', traceId: 'trace-test', runId: 'run-test',
+    mode: 'entry', inputId: 'trace_started:trace-test', taskId: 'trace-test', runId: 'run-test',
     userRequest: 'Research the repository and then prepare a review.', messages: [],
     state: { goal: null, plan: [] }, catalog,
     capabilityDisclosure: createCapabilityDisclosureState({ catalog }), ...overrides,
@@ -328,16 +328,16 @@ function supervisorInput(
   const messages = [...input.messages.filter((message) => !readFixtureDelivery(message))];
   for (const [i, report] of reports.entries()) {
     const callId = `fixture:${report.delegationId}:${i}`;
-    const metadata = { runId: report.runId, traceId: input.traceId };
+    const metadata = { runId: report.runId, taskId: input.taskId };
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id: callId, name: 'delegate_capability', type: 'tool_call', args: {},
     }] }), { ...metadata, source: 'supervisor' }));
     messages.push(setAgentMessageMetadata(new ToolMessage({ artifact: {
-      taskId: current!.delegationId, delegationId: current!.delegationId,
+      planItemId: current!.delegationId, delegationId: current!.delegationId,
       capability: current!.capability, task: current!.task, mode: 'initial', briefing: 'Execute the confirmed task.',
     },  name: 'delegate_capability', tool_call_id: callId,
       content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
-        runId: report.runId, traceId: input.traceId, delegationId: report.delegationId, lane: report.sourceLane,
+        runId: report.runId, taskId: input.taskId, delegationId: report.delegationId, lane: report.sourceLane,
       } } }),
     }), metadata));
   }
@@ -413,7 +413,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   const config = { configurable: { thread_id: 'supervisor-lane-root' } };
   const entryA = supervisorInput(catalog, {
     inputId: 'trace_started:trace-a',
-    traceId: 'trace-a',
+    taskId: 'trace-a',
     runId: 'run-a1',
     userRequest: 'PRIVATE_TRACE_A_GOAL',
     messages: [
@@ -424,7 +424,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
   const boundaryA = supervisorInput(catalog, {
     mode: 'boundary',
     inputId: 'announce:delegation-a:1',
-    traceId: 'trace-a',
+    taskId: 'trace-a',
     runId: 'run-a2',
     userRequest: entryA.userRequest,
     currentTask: {
@@ -507,7 +507,7 @@ test('completed graph checkpoints retain the decision without replaying the Supe
 
   const entryB = supervisorInput(catalog, {
     inputId: 'trace_started:trace-b',
-    traceId: 'trace-b',
+    taskId: 'trace-b',
     runId: 'run-b1',
     userRequest: 'PRIVATE_TRACE_B_GOAL',
   });

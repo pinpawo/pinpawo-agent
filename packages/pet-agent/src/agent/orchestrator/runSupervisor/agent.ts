@@ -77,7 +77,7 @@ export function createRunSupervisorAgent(params: {
         metadata: {
           ...runnableConfig?.metadata,
           frameworkComponent: 'run_supervisor',
-          traceId: input.traceId,
+          taskId: input.taskId,
           runId: input.runId,
           supervisorInputId: input.inputId,
           registryDigest: input.catalog.registryDigest,

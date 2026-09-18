@@ -7,12 +7,12 @@ export function createDeliveryResult(data: {
   deliveryId: string; task: string | null; result: string; createdAt: string;
 }) {
   const task = data.task ?? 'Fixture task';
-  const scope = { lane: data.sourceLane, delegationId: data.delegationId, runId: data.runId, traceId: data.runId };
+  const scope = { lane: data.sourceLane, delegationId: data.delegationId, runId: data.runId, taskId: data.runId };
   return setAgentMessageMetadata(new ToolMessage({ id: data.id, name: 'delegate_capability',
     tool_call_id: `call:${data.deliveryId}`, status: 'success',
     content: JSON.stringify({ status: 'returned', delivery: { id: data.deliveryId, task, text: data.result, scope } }),
-    artifact: { taskId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, mode: 'initial', briefing: 'Fixture plan' },
-  }), { runId: data.runId, traceId: data.runId, createdAt: data.createdAt });
+    artifact: { planItemId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, mode: 'initial', briefing: 'Fixture plan' },
+  }), { runId: data.runId, taskId: data.runId, createdAt: data.createdAt });
 }
 
 export function readFixtureDelivery(message: BaseMessage) {

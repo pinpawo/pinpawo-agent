@@ -28,14 +28,14 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
     { schema: delegateCapabilitySchema, args: { briefing: 'Task', priorDelegationIds: ['not-a-model-parameter'] } },
     { schema: delegateCapabilitySchema, args: { briefing: null } },
     { schema: delegateCapabilitySchema, args: { briefing: 'Execute', guidance: 'Old field' } },
-    { schema: delegateCapabilitySchema, args: { taskId: 'model-selected-task' } },
+    { schema: delegateCapabilitySchema, args: { planItemId: 'model-selected-task' } },
     { schema: delegateCapabilitySchema, args: { briefing: ' ' } },
     { schema: delegateCapabilitySchema, args: { control: {}, execution: {} } },
   ]) assert.equal(control.schema.safeParse(control.args).success, false);
 });
 
 test('execution snapshot is internal and does not duplicate model arguments', () => {
-  const snapshot = { taskId: 'task', delegationId: 'delegation', capability: 'general',
+  const snapshot = { planItemId: 'task', delegationId: 'delegation', capability: 'general',
     task: 'Verify the change', mode: 'initial', briefing: 'Verify the change' };
   assert.deepEqual(capabilityExecutionSnapshotSchema.parse(snapshot), snapshot);
   assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, briefing: undefined }).success, false);

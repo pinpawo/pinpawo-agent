@@ -233,7 +233,9 @@ projected history, tool descriptions, and argument schemas together.
 
 ## 6. Node: capability (subagent execution)
 
-Executes one delegated task. Source: `runtime/nodes/capability.ts`.
+Executes one delegated task. Source: `runSupervisor/delegateCapabilityTool.ts`,
+registered as the `capability` ToolNode in `runtime/graph.ts`; the isolated
+attempt itself runs in `capabilityExecution/runner.ts`.
 
 | Slot | Class | Content |
 |---|---|---|

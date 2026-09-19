@@ -192,7 +192,7 @@ export function createRunShellTool(binding: ShellProcessBinding | null) {
     },
     {
       name: 'run_shell',
-      description: '兜底工具：异步执行非交互 shell 命令并返回输出。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。命令在超时后不会被中止，而是转入后台并返回一个进程 id，用 wait_process 继续跟进、terminate_process 终止；因此无需为构建、安装、测试等慢命令预先调大超时，也不要因为超时就重复执行同一命令。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+      description: '兜底工具：异步执行非交互 shell 命令并返回输出，每次调用都要经过工具审批，因此明显慢于 inspect_shell。命令如果只是查看而不修改任何状态（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道），改用 inspect_shell，不要用本工具。只有确实会写入、安装、删除、推送，或需要重定向、heredoc、bash -c/node -e 这类内联执行时才用它。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。命令在超时后不会被中止，而是转入后台并返回一个进程 id，用 wait_process 继续跟进、terminate_process 终止；因此无需为构建、安装、测试等慢命令预先调大超时，也不要因为超时就重复执行同一命令。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
       schema: z.object({
         command: z.string().describe('要执行的 shell 命令'),
         cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),

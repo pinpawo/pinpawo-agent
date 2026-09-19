@@ -106,7 +106,20 @@ export const getCurrentTimeTool = tool(
   },
 );
 
-export function createRunShellTool(binding: ShellProcessBinding | null) {
+export function createRunShellTool(
+  binding: ShellProcessBinding | null,
+  /**
+   * Builds the tool under a different identity with an admission check in
+   * front. `inspect_shell` is the same executor as `run_shell`; building it
+   * here rather than delegating through `run_shell.invoke()` is what keeps its
+   * lifecycle events reported under its own name.
+   */
+  variant?: {
+    name: string;
+    description: string;
+    admit: (command: string) => { allowed: true } | { allowed: false; reason: string };
+  },
+) {
   // Run through the same executor the registry will terminate through.
   // Without a binding there is no registry, so pick by platform the same
   // way ShellRuntime does.
@@ -125,6 +138,14 @@ export function createRunShellTool(binding: ShellProcessBinding | null) {
         shellAction = normalizeShellActionInput(input);
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : err}`;
+      }
+
+      if (variant) {
+        const verdict = variant.admit(shellAction.command);
+        if (!verdict.allowed) {
+          return `Error: ${variant.name} 只接受可静态判定为只读的命令（${verdict.reason}）。`
+            + '需要执行该命令时改用 run_shell，它会走工具审批。';
+        }
       }
 
       const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
@@ -191,8 +212,8 @@ export function createRunShellTool(binding: ShellProcessBinding | null) {
         .join('\n');
     },
     {
-      name: 'run_shell',
-      description: '兜底工具：异步执行非交互 shell 命令并返回输出，每次调用都要经过工具审批，因此明显慢于 inspect_shell。命令如果只是查看而不修改任何状态（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道），改用 inspect_shell，不要用本工具。只有确实会写入、安装、删除、推送，或需要重定向、heredoc、bash -c/node -e 这类内联执行时才用它。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。命令在超时后不会被中止，而是转入后台并返回一个进程 id，用 wait_process 继续跟进、terminate_process 终止；因此无需为构建、安装、测试等慢命令预先调大超时，也不要因为超时就重复执行同一命令。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+      name: variant?.name ?? 'run_shell',
+      description: variant?.description ?? '兜底工具：异步执行非交互 shell 命令并返回输出，每次调用都要经过工具审批，因此明显慢于 inspect_shell。命令如果只是查看而不修改任何状态（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道），改用 inspect_shell，不要用本工具。只有确实会写入、安装、删除、推送，或需要重定向、heredoc、bash -c/node -e 这类内联执行时才用它。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/jq_query/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/glob_search/grep_search/http_fetch/download_file。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。命令在超时后不会被中止，而是转入后台并返回一个进程 id，用 wait_process 继续跟进、terminate_process 终止；因此无需为构建、安装、测试等慢命令预先调大超时，也不要因为超时就重复执行同一命令。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
       schema: z.object({
         command: z.string().describe('要执行的 shell 命令'),
         cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
@@ -269,38 +290,21 @@ function adoptYieldedProcess(params: {
  * whole safety boundary: anything it does not positively recognise as
  * read-only is refused here and the agent falls back to `run_shell`.
  */
+/**
+ * Read-only shell, admitted by rule instead of by review.
+ *
+ * `run_shell` costs a model-driven review on every call, and most of what an
+ * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
+ * This tool carries no review policy, so `classifyReadOnlyShellCommand` is the
+ * whole safety boundary: anything it does not positively recognise as
+ * read-only is refused and the agent falls back to `run_shell`.
+ */
 export function createInspectShellTool(binding: ShellProcessBinding | null) {
-  const runShell = createRunShellTool(binding);
-  return tool(
-    async (
-      input: { command: string; cwd?: string; timeoutSeconds?: number },
-      runtime: ToolRuntime,
-    ) => {
-      let command: string;
-      try {
-        command = normalizeShellAuthorizationInput(input).command;
-      } catch (err) {
-        return `Error: ${err instanceof Error ? err.message : err}`;
-      }
-      const verdict = classifyReadOnlyShellCommand(command);
-      if (!verdict.allowed) {
-        return `Error: inspect_shell 只接受可静态判定为只读的命令（${verdict.reason}）。`
-          + '需要执行该命令时改用 run_shell，它会走工具审批。';
-      }
-      return (runShell as unknown as {
-        invoke: (i: unknown, r: ToolRuntime) => Promise<string>;
-      }).invoke(input, runtime);
-    },
-    {
-      name: 'inspect_shell',
-      description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，适合探查代码、目录、Git 历史。支持 cd、管道与 && 串联，例如 `cd src && grep -rn "foo" . | head -20`。只接受白名单内的只读命令（cat/head/tail/ls/find/grep/rg/sed -n/awk/cut/sort/uniq/wc/jq/diff/stat/file/env/date/git log|status|diff|show|branch|blame|rev-parse 等）；不支持输出重定向、命令替换、heredoc、后台执行，也不支持 bash -c、node -e、python -c 这类内联执行。任何写入、安装、删除、推送或不在白名单内的命令都要改用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。',
-      schema: z.object({
-        command: z.string().describe('要执行的只读 shell 命令'),
-        cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
-        timeoutSeconds: z.number().int().positive().optional().describe('等待多少秒后转入后台；默认 60，上限 600'),
-      }),
-    },
-  );
+  return createRunShellTool(binding, {
+    name: 'inspect_shell',
+    description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，因此比 run_shell 快得多，应作为查看类命令的默认选择。支持 cd、管道与 && 串联，例如 `cd src && grep -rn "foo" . | head -20`。只接受白名单内的只读命令（cat/head/tail/ls/find/grep/rg/sed -n/awk/cut/sort/uniq/wc/jq/diff/stat/file/env/date/git log|status|diff|show|branch|blame|rev-parse 等）；不支持输出重定向、命令替换、heredoc、后台执行，也不支持 bash -c、node -e、python -c 这类内联执行。任何写入、安装、删除、推送或不在白名单内的命令都要改用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。',
+    admit: classifyReadOnlyShellCommand,
+  });
 }
 
 /** Static schema inventory; a runtime binding replaces only the implementation. */

@@ -12,7 +12,7 @@ PinPawo Agent 是一个本地优先的 Agent 框架。它让模型可以推理�
 - **显式权限：** Capability 必须声明可使用的 Toolkit；有副作用的工具可在执行前等待人工审核。
 - **可恢复执行：** checkpoint 保存对话和待继续状态，session projection 为 TUI 与集成提供统一视图。
 - **可组合扩展：** 任务意图写在可审查的 Markdown Capability 中，可执行行为与安全策略写在 typed Toolkit 中。
-- **可扩展协作：** Studio 提供共享 dispatch 底座（Pet registry、只读的每 Pet dispatch 队列观测）与 Plugin 事件总线，而不暴露 worker 的私有推理。
+- **可扩展协作：** Studio 向多个 Pet runtime 派发工作并广播 Plugin 事件，而不暴露 worker 的私有推理。任务队列、依赖、重试与共享知识属于 Plugin 或 resident Host，不属于 Studio。
 
 ## 术语
 

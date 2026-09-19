@@ -25,9 +25,10 @@ PinPawo Agent helps you build agents with clear operational boundaries:
   pending review work, while clients consume a stable session projection.
 - **Composable extensions.** Add task-specific Capabilities as Markdown and
   reusable implementation Toolkits as typed code.
-- **Scalable collaboration.** Studio coordinates multiple pet runtimes through
-  a task queue and shared conversation knowledge, without exposing each agent's
-  private working state to every other agent.
+- **Scalable collaboration.** Studio dispatches work to multiple pet runtimes
+  and fans out plugin events, without exposing each agent's private working
+  state to every other agent. Task queues, dependencies, retries, and shared
+  knowledge belong to Plugins or the resident Host, not to Studio.
 
 ## The core vocabulary
 

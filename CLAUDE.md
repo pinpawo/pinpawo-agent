@@ -9,6 +9,7 @@ npm workspaces monorepo (Node.js >=24, validated on Node 24, ESM-only, TypeScrip
 - `packages/pet-agent/` → `@pinpawo/pet-agent` — runtime-independent agent core: orchestrator graph, subagent, capability registry, built-in tools. No CLI, no filesystem, no network beyond what LangChain models need.
 - `packages/studio/` → `@pinpawo/studio` — Studio Host/runtime library and the `pinpawo-studio` executable entry.
 - `services/local-agent/` → `pinpawo` (bin: `pinpawo`) — depends on pet-agent. Hosts the CLI and the OpenTUI client launcher, the local HTTP+WebSocket server (`server*.ts`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), and browser tools.
+- `services/tui/` → `@pinpawo/tui` — the OpenTUI (Bun-targeted) terminal client.
 - `tools/agent-macos/` — macOS desktop companion (not part of the npm workspaces root).
 
 The architectural boundary is enforced by convention: anything that touches the machine (FS, shell, network, browser, ~/.pinpawo) belongs in `services/local-agent` or `tools/agent-macos`; anything reusable on a server belongs in `packages/pet-agent`.

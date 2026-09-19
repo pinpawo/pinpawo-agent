@@ -5,6 +5,7 @@ import { assertCapabilityDocumentMatches } from './capabilityDocument';
 import type { AgentModels } from './agent';
 import type { SubagentResult } from './subagent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from './artifact';
+import type { DelegationScope } from './scope';
 
 export type CapabilityDocumentSource = {
   readonly kind: 'file';
@@ -26,11 +27,8 @@ export type CapabilityFinalizeContext = {
   messages: readonly BaseMessage[];
   artifactStore?: CapabilityArtifactStore;
   recordCapabilityArtifact?: (ref: CapabilityArtifactRef) => void | Promise<void>;
-  threadId?: string | null;
   capabilityId: string;
-  delegationId: string;
-  runId: string;
-};
+} & DelegationScope;
 
 export type CapabilityFinalizeResult = {
   messages?: BaseMessage[];

@@ -118,6 +118,7 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
     runtimeContext: {
       executionScope: {
         threadId: 'thread-1',
+        taskId: 'task-1',
         runId: 'run-1',
         delegationId: 'delegation-1',
         workdir: '/workspace',
@@ -130,6 +131,7 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
 
   assert.deepEqual(seenExecutionScope, {
     threadId: 'thread-1',
+    taskId: 'task-1',
     runId: 'run-1',
     delegationId: 'delegation-1',
     workdir: '/workspace',

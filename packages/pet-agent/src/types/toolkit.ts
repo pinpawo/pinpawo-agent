@@ -4,6 +4,7 @@ import {
 } from '@langchain/core/tools';
 import type { JsonValue } from '@pinpawo/agent-contracts';
 import { wrapToolCancellation } from './toolCancellation';
+import type { DelegationScope } from './scope';
 
 import type { ToolReviewPolicy, ToolOperationMetadata, ToolkitReviewGuidance } from '../autoReview/policy';
 import { TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS } from '../autoReview/policy';
@@ -63,10 +64,7 @@ export type ToolkitAvailabilityCheck = () =>
  * subagent execution. It deliberately contains no provider/session/backend
  * concepts: those remain private to the Toolkit runtime implementation.
  */
-export type ToolkitRuntimeExecutionScope = {
-  threadId: string | null;
-  runId: string;
-  delegationId: string;
+export type ToolkitRuntimeExecutionScope = DelegationScope & {
   workdir: string | null;
   signal?: AbortSignal;
 };

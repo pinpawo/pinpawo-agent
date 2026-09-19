@@ -64,6 +64,7 @@ function createRuntimeToolkit(params: {
 function execution(delegationId: string) {
   return {
     threadId: 'thread-1',
+    taskId: 'task-1',
     runId: 'run-1',
     delegationId,
     workdir: '/workspace',

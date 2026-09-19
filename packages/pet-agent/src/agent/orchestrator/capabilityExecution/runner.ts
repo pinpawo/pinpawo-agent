@@ -109,6 +109,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
             toolkits: toolkitList,
             execution: {
               threadId,
+              taskId: scope.taskId,
               runId,
               delegationId: scope.delegationId,
               workdir: workdir ?? null,
@@ -171,6 +172,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
         runtimeContext: {
           executionScope: {
             threadId,
+            taskId: scope.taskId,
             runId,
             delegationId: scope.delegationId,
             workdir: workdir ?? null,
@@ -205,6 +207,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
           artifactRefs.push(ref);
         },
         threadId,
+        taskId: scope.taskId,
         capabilityId: capability.name,
         delegationId: scope.delegationId,
         runId,

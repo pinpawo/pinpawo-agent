@@ -34,6 +34,13 @@ export { definePetDocument } from './types/petDocument';
 export { petDocumentSystemPromptSection } from './prompts/petDocument';
 
 export type {
+  SessionScope,
+  TaskScope,
+  RunScope,
+  DelegationScope,
+} from './types/scope';
+
+export type {
   SubagentInputState,
   SubagentExecutionScope,
   SubagentPromptSection,

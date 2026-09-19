@@ -398,91 +398,71 @@ private struct BrowserOptionStatus {
   var supportsExtension: Bool { chromeAvailable }
   var hasAnyExternalSupport: Bool { supportsPlaywright || supportsExtension }
 
-  static let fallback = BrowserOptionStatus(
-    chromePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    chromeAvailable: false,
-    playwrightCorePath: nil
-  )
+  /// Chrome executable consulted when the environment does not override it.
+  private static let defaultChromePath =
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 
-  /// Run `node dist/index.js detect` and parse the JSON output.
-  /// Detection logic lives in the Node agent so it only needs to be maintained once.
+  /// Resolve the local browser environment without shelling out.
+  ///
+  /// This used to run `node dist/index.js detect` and parse its JSON, but that
+  /// subcommand was removed in #665, so the call always exited non-zero and the
+  /// pane reported "no Chrome / no playwright-core" even when both were present.
+  /// The facts are resolved locally now; keep them in sync with
+  /// `resolveBrowserEnvironment` in `toolkits/browser/src/session.ts`.
   static func detect() -> BrowserOptionStatus {
-    guard let node = findNodePath(), let script = findDistScriptPath() else {
-      return fallback
-    }
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: node)
-    task.arguments = [script, "detect"]
-    task.environment = ProcessInfo.processInfo.environment
-    let pipe = Pipe()
-    task.standardOutput = pipe
-    task.standardError = Pipe()
-    do {
-      try task.run()
-      task.waitUntilExit()
-    } catch {
-      return fallback
-    }
-    guard task.terminationStatus == 0 else { return fallback }
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    guard let parsed = try? JSONDecoder().decode(DetectOutput.self, from: data) else {
-      return fallback
-    }
+    let environment = ProcessInfo.processInfo.environment
+    let chromePath = trimmedNonEmpty(environment["PINPAWO_BROWSER_EXECUTABLE_PATH"])
+      ?? defaultChromePath
     return BrowserOptionStatus(
-      chromePath: parsed.browser.chromePath,
-      chromeAvailable: parsed.browser.chromeAvailable,
-      playwrightCorePath: parsed.browser.playwrightCorePath
+      chromePath: chromePath,
+      chromeAvailable: FileManager.default.fileExists(atPath: chromePath),
+      playwrightCorePath: findPlaywrightCorePath(environment: environment)
     )
   }
 
-  // Minimal node/dist discovery — mirrors AgentProcess logic without requiring an instance.
-  private static func findNodePath() -> String? {
-    if let bundled = Bundle.main.path(forResource: "node", ofType: nil, inDirectory: "bin"),
-       FileManager.default.isExecutableFile(atPath: bundled) {
-      return bundled
-    }
-    if let override = ProcessInfo.processInfo.environment["PINPAWO_NODE_PATH"],
-       !override.isEmpty, FileManager.default.isExecutableFile(atPath: override) {
-      return override
-    }
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let candidates = ["/usr/local/bin/node", "/opt/homebrew/bin/node", "/usr/bin/node"]
-    for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
-      return path
-    }
-    // nvm
-    let nvmDir = "\(home)/.nvm/versions/node"
-    if let versions = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
-      for version in versions.sorted().reversed() {
-        let path = "\(nvmDir)/\(version)/bin/node"
-        if FileManager.default.isExecutableFile(atPath: path) { return path }
-      }
-    }
-    return nil
+  private static func trimmedNonEmpty(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return (trimmed?.isEmpty ?? true) ? nil : trimmed
   }
 
-  private static func findDistScriptPath() -> String? {
-    if let bundled = Bundle.main.path(forResource: "index", ofType: "js", inDirectory: "dist") {
-      return bundled
+  /// Mirrors `resolvePlaywrightCorePath`: an explicit override first, then the
+  /// node_modules roots a Node runtime would search for a global installation.
+  private static func findPlaywrightCorePath(environment: [String: String]) -> String? {
+    if let override = trimmedNonEmpty(environment["PINPAWO_PLAYWRIGHT_CORE_PATH"]),
+       FileManager.default.fileExists(atPath: override) {
+      return override
     }
-    let devPath = Config.shared.load().agentDistPath
-    if let p = devPath, FileManager.default.fileExists(atPath: p) { return p }
-    if let bundlePath = Bundle.main.bundlePath
-      .components(separatedBy: "/tools/agent-macos/").first {
-      let candidate = "\(bundlePath)/services/local-agent/dist/index.js"
+    for root in playwrightSearchRoots(environment: environment) {
+      let candidate = "\(root)/playwright-core"
       if FileManager.default.fileExists(atPath: candidate) { return candidate }
     }
     return nil
   }
 
-  private struct DetectOutput: Codable {
-    let browser: BrowserDetect
-  }
-
-  private struct BrowserDetect: Codable {
-    let chromePath: String
-    let chromeAvailable: Bool
-    let playwrightCorePath: String?
+  private static func playwrightSearchRoots(environment: [String: String]) -> [String] {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    var roots: [String] = []
+    // Bundled runtime layout: <App>.app/Contents/Resources/{dist,node_modules}.
+    if let resources = Bundle.main.resourceURL?.path {
+      roots.append("\(resources)/node_modules")
+    }
+    // Local development: the dist directory the companion was pointed at.
+    if let dist = Config.shared.load().agentDistPath {
+      roots.append("\((dist as NSString).deletingLastPathComponent)/node_modules")
+    }
+    roots.append(contentsOf: [
+      "/usr/local/lib/node_modules",
+      "/opt/homebrew/lib/node_modules",
+      "\(home)/.npm-global/lib/node_modules",
+      "\(home)/.local/lib/node_modules",
+    ])
+    // nvm keeps one global node_modules per installed Node version.
+    let nvmDir = trimmedNonEmpty(environment["NVM_DIR"]) ?? "\(home)/.nvm"
+    let versionsDir = "\(nvmDir)/versions/node"
+    if let versions = try? FileManager.default.contentsOfDirectory(atPath: versionsDir) {
+      roots.append(contentsOf: versions.sorted().map { "\(versionsDir)/\($0)/lib/node_modules" })
+    }
+    return roots
   }
 }
 

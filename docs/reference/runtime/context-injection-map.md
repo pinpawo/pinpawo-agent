@@ -118,9 +118,12 @@ typed Announce reaches this view after handoff moves its semantic identity into
 the main queue. Entry Answer selects this history with the shared message query;
 the model-invocation runtime renders typed messages without changing state.
 
-Entry Answer also receives `<supervisor_snapshot origin="current_run|previous_run">`,
+Entry Answer also receives `<supervisor_snapshot origin="none|current_run|previous_run">`,
 the projected Supervisor state. Supervisor state outlives a run, so `origin`
-reports whether these facts belong to this run or were left by an earlier one.
+reports where these facts came from: no plan yet, this run's own, or an earlier
+run's. "No plan yet" is its own answer, not an empty previous run. Plan items
+project `capability`, `status` and `objective`; their ids are content hashes the
+model never cites, and `continue` takes no arguments.
 That freshness is what choosing between `continue` and `plan_request` turns on;
 the runtime renders the fact and the model makes the choice — nothing in the
 runtime infers the answer from the plan being non-empty.

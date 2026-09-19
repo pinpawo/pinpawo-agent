@@ -12,7 +12,7 @@ import {
   setAgentMessageMetadata,
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
-import { indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
+import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
 import { identity } from '../../runSupervisor/controlContext';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
@@ -173,18 +173,40 @@ export function createPlanRequestTool() {
 /**
  * Project the Supervisor snapshot for the routing decision.
  *
- * `origin` states whether these facts belong to this run or were left by an
- * earlier one. Supervisor state outlives a run, so without it the model cannot
- * tell a plan built moments ago from one a past request abandoned — and that
- * distinction is exactly what choosing between `continue` and `plan_request`
- * turns on. The runtime renders the fact; the choice stays the model's.
+ * `origin` states where these facts came from. Supervisor state outlives a run,
+ * so without it the model cannot tell a plan built moments ago from one a past
+ * request abandoned — and that distinction is what choosing between `continue`
+ * and `plan_request` turns on. "No plan yet" is its own answer rather than a
+ * degenerate previous run, so the three cases stay distinct.
+ *
+ * Plan item ids are deliberately omitted: they are content hashes the model
+ * never cites, and `continue` takes no arguments. The runtime renders the
+ * facts; the choice stays the model's.
  */
 export function entryPlanMessage(state: RunSupervisorState, runId?: string) {
-  const origin = state.runId && state.runId === runId ? 'current_run' : 'previous_run';
+  const origin = !state.runId && state.plan.length === 0 ? 'none'
+    : state.runId && state.runId === runId ? 'current_run'
+    : 'previous_run';
+  const body = state.plan.length > 0 || state.goal
+    ? [
+        ...(state.goal ? [indentXmlBlock(xmlTextBlock('goal', state.goal), 2)] : []),
+        ...(state.plan.length > 0
+          ? [
+              '  <plan>',
+              ...state.plan.map((item) => [
+                `    <item capability="${escapeXmlAttribute(item.capability)}" status="${item.status}">`,
+                indentXmlBlock(xmlTextBlock('objective', item.objective), 6),
+                '    </item>',
+              ].join('\n')),
+              '  </plan>',
+            ]
+          : ['  <plan />']),
+      ]
+    : ['  <none />'];
   return new HumanMessage({
     content: [
       `<supervisor_snapshot role="fact" source="orchestrator_state" trust="read_only" origin="${origin}">`,
-      indentXmlBlock(xmlTextBlock('plan', JSON.stringify({ goal: state.goal, plan: state.plan })), 2),
+      ...body,
       '</supervisor_snapshot>',
     ].join('\n'),
   });

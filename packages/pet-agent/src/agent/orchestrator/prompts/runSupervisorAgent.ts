@@ -8,15 +8,7 @@ import {
   RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT,
 } from './templates/runSupervisorAgent.prompt';
 import { buildRunUserRequestContext } from './context';
-import { indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
-
-function escapeXmlAttribute(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-}
+import { escapeXmlAttribute, indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
 
 function buildCapabilityContext(
   documents: readonly RunSupervisorCapabilityDocument[],

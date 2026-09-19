@@ -16,19 +16,22 @@ import { withScriptedDelegation, type ScriptedSupervisorRunner } from '../../run
 function createOrchestratorGraph(config: Omit<OrchestratorConfig, 'runSupervisorRunner'> & { runSupervisorRunner?: ScriptedSupervisorRunner }) {
   return createRuntimeGraph({ ...config, runSupervisorRunner: config.runSupervisorRunner ? withScriptedDelegation(config.runSupervisorRunner) : undefined });
 }
-import { captureRunUserRequest, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
+import { captureRunUserRequest, entryPlanMessage, PLAN_REQUEST_TOOL_NAME } from './entryAnswer';
 import { createContextCompactionMessage } from '../../contextCompaction';
 import {
   mainConversationMessages,
   setAgentMessageMetadata,
 } from '../../../messages';
 
-/** Read the plan back out of the <supervisor_snapshot> projection. */
+/** Read the facts back out of the <supervisor_snapshot> projection. */
 function readSnapshot(text: string) {
-  const plan = text.match(/<plan>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/);
   const origin = text.match(/origin="([^"]+)"/);
-  if (!plan || !origin) throw new Error(`Not a supervisor snapshot: ${text}`);
-  return { origin: origin[1], ...JSON.parse(plan[1].trim()) };
+  if (!origin) throw new Error(`Not a supervisor snapshot: ${text}`);
+  const goal = text.match(/<goal>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/);
+  const plan = [...text.matchAll(
+    /<item capability="([^"]+)" status="([^"]+)">\s*<objective>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/g,
+  )].map(([, capability, status, objective]) => ({ capability, status, objective }));
+  return { origin: origin[1], goal: goal ? goal[1] : null, plan };
 }
 
 
@@ -253,7 +256,7 @@ test('Entry Answer receives normalized main conversation and excludes delegation
     new HumanMessage(currentRequest),
   ]), invokeConfig());
 
-  assert.deepEqual(readSnapshot(entryMessages[1].text), { origin: 'previous_run', goal: null, plan: [] });
+  assert.deepEqual(readSnapshot(entryMessages[1].text), { origin: 'none', goal: null, plan: [] });
   assert.deepEqual(entryMessages.slice(2).map((message) => message.content), [
     compaction.content,
     '之前我们在讨论 Entry 架构。',
@@ -403,7 +406,13 @@ for (const status of ['empty', 'completed', 'superseded'] as const) {
     const model = { bindTools: (tools: Array<{ name: string }>) => {
       assert.deepEqual(tools.map(tool => tool.name), ['plan_request', 'continue']);
       return { invoke: async (messages: BaseMessage[]) => {
-        assert.deepEqual(readSnapshot(messages[1].text), { origin: 'previous_run', goal: plan.goal, plan: plan.plan });
+        assert.deepEqual(readSnapshot(messages[1].text), {
+          origin: status === 'empty' ? 'none' : 'previous_run',
+          goal: plan.goal,
+          // Plan item ids are not projected; the model never cites them.
+          plan: plan.plan.map(({ capability, status: itemStatus, objective }) =>
+            ({ capability, status: itemStatus, objective })),
+        });
         if (++turns === 1) return new AIMessage({ content: '', tool_calls: [{ name: 'continue', id: 'invalid-continue', args: {} }] });
         assert.ok(messages.some(message => ToolMessage.isInstance(message) && message.name === 'continue' && message.status === 'error'));
         return new AIMessage('请说明接下来要完成的目标。');
@@ -418,3 +427,20 @@ for (const status of ['empty', 'completed', 'superseded'] as const) {
     assert.equal(output.runIterationCount, 0);
   });
 }
+
+test('snapshot origin separates no plan from a run that owns one and a run that inherited it', () => {
+  const plan = [{ id: 'task:hash', capability: 'general', objective: 'Inspect.', status: 'pending' as const }];
+  const origin = (state: Parameters<typeof entryPlanMessage>[0]) =>
+    readSnapshot(entryPlanMessage(state, 'r1').text).origin;
+
+  // A fresh conversation has no earlier run to inherit from, so "none" is its
+  // own answer rather than a previous run that happens to be empty.
+  assert.equal(origin({ runId: null, goal: null, plan: [] }), 'none');
+  assert.equal(origin({ runId: 'r1', goal: 'Inspect.', plan }), 'current_run');
+  assert.equal(origin({ runId: 'r0', goal: 'Inspect.', plan }), 'previous_run');
+  // Checkpoints written before runId existed carry a plan with no owning run.
+  assert.equal(origin({ runId: null, goal: 'Inspect.', plan }), 'previous_run');
+
+  // Plan item ids are content hashes the model never cites, so they stay out.
+  assert.doesNotMatch(entryPlanMessage({ runId: 'r0', goal: 'Inspect.', plan }, 'r1').text, /task:hash/);
+});

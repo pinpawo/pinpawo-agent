@@ -56,22 +56,28 @@ test('all built-in presets declare authoritative input modalities', () => {
   }
 });
 
-test('DeepSeek V4 Flash has its own preset and does not resolve as V4 Pro', () => {
-  assert.equal(findLlmModelPresetByKey('deepseek-flash')?.model, 'deepseek-v4-flash');
+test('DeepSeek V4.1 Flash has its own preset and does not resolve as V4 Pro', () => {
+  assert.equal(findLlmModelPresetByKey('deepseek-flash')?.model, 'deepseek-flash');
   assert.equal(inferLlmModelPreset('deepseek-v4-pro')?.key, 'deepseek');
   assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
+  assert.equal(inferLlmModelPreset('deepseek-flash')?.key, 'deepseek-flash');
 });
 
-test('DeepSeek V4 Flash Vision preset enables image input independently', () => {
-  const preset = findLlmModelPresetByKey('deepseek-flash-vision');
+test('DeepSeek V4.1 Flash declares native image input and absorbs the retired vision name', () => {
+  const preset = findLlmModelPresetByKey('deepseek-flash');
 
-  assert.equal(preset?.model, 'deepseek-v4-flash-vision-exp');
+  assert.equal(preset?.model, 'deepseek-flash');
   assert.deepEqual(preset?.inputModalities, ['text', 'image']);
+  // The retired `-vision-exp` model is served by the same V4.1 Flash model, so
+  // it must resolve to the one Flash preset instead of a separate vision preset.
   assert.equal(
     inferLlmModelPreset('deepseek-v4-flash-vision-exp')?.key,
-    'deepseek-flash-vision',
+    'deepseek-flash',
   );
-  assert.equal(inferLlmModelPreset('deepseek-v4-flash')?.key, 'deepseek-flash');
+  // No dedicated vision preset remains; a stored `deepseek-flash-vision`
+  // sourcePreset still resolves to the Flash preset by prefix instead of
+  // becoming an unknown preset that fails profile parsing.
+  assert.equal(findLlmModelPresetByKey('deepseek-flash-vision')?.key, 'deepseek-flash');
 });
 
 test('Qwen 3.8 Max has a Token Plan-specific preset', () => {

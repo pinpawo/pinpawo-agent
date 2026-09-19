@@ -45,6 +45,8 @@ import {
   getCurrentTimeTool,
   normalizeShellAuthorizationInput,
   runShellTool,
+  inspectShellTool,
+  createInspectShellTool,
   shellOperationMetadata,
 } from './shellTools';
 import { bindToolToExecutionWorkdir } from './workdirBinding';
@@ -68,6 +70,7 @@ const localUtilityTools: StructuredTool[] = [
 ];
 
 const bashToolkitTools: StructuredTool[] = [
+  inspectShellTool,
   ...localUtilityTools,
   getCurrentTimeTool,
   runShellTool,
@@ -118,6 +121,7 @@ export function createArtifactDiscoveryToolkit(params: {
 
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
+  '需要执行 shell 命令时先判断它是否修改状态：只查看不修改的（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道）一律用 inspect_shell，它免审批、明显更快；只有确实会写入、安装、删除、推送或需要内联执行时才用 run_shell。两者都能跑的命令永远选 inspect_shell。',
   '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
   '优先使用语义具体的文件工具：view_file_chunk、read_file、jq_query、list_dir、glob_search、grep_search。',
   '分析 JSON 文件的结构、字段、分组或计数时优先使用 jq_query；不要用 run_shell 或临时 Python 脚本包装 jq。',
@@ -238,7 +242,11 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
         // process-aware tools get a bound implementation; the rest are handed
         // back as they are.
         const bound = new Map<string, StructuredTool>(
-          [createRunShellTool(shell), ...createProcessTools(shell)]
+          [
+            createRunShellTool(shell),
+            createInspectShellTool(shell),
+            ...createProcessTools(shell),
+          ]
             .map((item) => [item.name, item]),
         );
         return tools.map((staticTool) => bindToolToExecutionWorkdir(

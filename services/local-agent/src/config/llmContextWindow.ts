@@ -33,6 +33,7 @@ export function inferLlmContextWindowTokens(model: string | null | undefined): n
   if (
     startsWithAny(normalized, [
       'deepseek-v4-pro',
+      'deepseek-flash',
       'deepseek-v4-flash',
       'deepseek-chat',
       'deepseek-reasoner',

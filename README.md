@@ -129,7 +129,6 @@ The main boundaries are:
 | `docs/reference/` | Current API, extension, runtime, artifact, and tool contracts. |
 | `docs/studio/` | Current multi-agent push model, configuration, host integration, and API links. |
 | `docs/design/` / `docs/history/` | Proposals and rationale / superseded records that do not define current behavior. |
-| `docs/wiki/` | Synthesized documentation wiki and its maintenance log, gated behind explicit ingest. |
 
 The repository root is a private npm workspace. Publishable packages live in their respective workspace directories.
 Root `package.json` scripts beyond the quality gates include `langfuse:*` (local
@@ -323,9 +322,10 @@ Start with the [Documentation Index](docs/index.md). The primary public path is:
 简体中文入口：[PinPawo Agent 文档](docs/zh-CN/index.md)。
 
 The documentation index also separates current contracts from detailed design
-records and historical context. The synthesized wiki under
-[`docs/wiki/`](docs/wiki/index.md) and its [maintenance log](docs/log.md) are a
-later ingest layer and are modified only with explicit ingest authorization.
+records and historical context. The synthesized wiki layer that used to live under
+`docs/wiki/` was removed as unmaintained; the append-only
+[maintenance log](docs/log.md) is kept for a future rebuild and is modified only
+with explicit ingest authorization.
 
 ## Quality Gates
 

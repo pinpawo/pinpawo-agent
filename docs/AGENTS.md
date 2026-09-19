@@ -12,8 +12,10 @@ The documentation model has three layers:
 1. **Sources** — existing design documents, implementation, tests, issues, pull
    requests, traces, and external references. Sources retain their original role
    and are not silently rewritten during ingest.
-2. **Wiki** — synthesized pages under `docs/wiki/`. These pages integrate claims
-   across sources, maintain relationships, and record the current understanding.
+2. **Wiki** — synthesized pages under `docs/wiki/`. The current directory was
+   removed as unmaintained and is rebuilt only by an explicit ingest. When
+   present, these pages integrate claims across sources, maintain relationships,
+   and record the current understanding.
 3. **Schema** — this file. It defines page types, evidence rules, and the ingest,
    query, lint, and migration workflows.
 
@@ -123,7 +125,8 @@ Run this workflow only when the user explicitly requests ingest.
 
 ### Prompt Contract Map
 
-The minimal Prompt Contract Map lives in `docs/wiki/overview.md`. One row
+The minimal Prompt Contract Map lived in `docs/wiki/overview.md`, which was removed
+with the rest of the wiki; re-establish it during the next ingest. One row
 represents one stable behavior contract, not one prompt sentence.
 
 Update a row when a change alters its behavior meaning, owner, design source,

@@ -203,8 +203,6 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
     aliases: [
       'deepseek-v4-pro',
       'deepseek-v4',
-      'deepseek-chat',
-      'deepseek-reasoner',
     ],
     officialDocs: [
       'https://api-docs.deepseek.com/quick_start/pricing',
@@ -213,41 +211,26 @@ export const LLM_MODEL_PRESETS: readonly LlmModelPreset[] = [
   },
   {
     key: 'deepseek-flash',
-    label: 'DeepSeek V4 Flash',
+    label: 'DeepSeek V4.1 Flash',
     provider: 'deepseek',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-flash',
     baseUrl: 'https://api.deepseek.com',
     contextWindowTokens: 1_000_000,
     maxOutputTokens: 384_000,
     structuredOutputMethod: 'jsonMode',
-    inputModalities: ['text'],
-    thinkingControl: 'thinking_type',
-    aliases: [
-      'deepseek-v4-flash',
-    ],
-    officialDocs: [
-      'https://api-docs.deepseek.com/quick_start/pricing',
-      'https://api-docs.deepseek.com/guides/json_mode',
-    ],
-  },
-  {
-    key: 'deepseek-flash-vision',
-    label: 'DeepSeek V4 Flash Vision (Experimental)',
-    provider: 'deepseek',
-    model: 'deepseek-v4-flash-vision-exp',
-    baseUrl: 'https://api.deepseek.com',
-    contextWindowTokens: 1_000_000,
-    maxOutputTokens: 384_000,
-    structuredOutputMethod: 'jsonMode',
+    // V4.1 Flash is natively multimodal; the retired `-vision-exp` model name
+    // is only a compatibility alias that routes to this same model.
     inputModalities: ['text', 'image'],
     thinkingControl: 'thinking_type',
     aliases: [
+      'deepseek-v4-flash',
+      // Retired model name; requests are served by DeepSeek-V4.1-Flash.
       'deepseek-v4-flash-vision-exp',
     ],
     officialDocs: [
       'https://api-docs.deepseek.com/quick_start/pricing',
-      'https://api-docs.deepseek.com/guides/vision',
       'https://api-docs.deepseek.com/guides/json_mode',
+      'https://api-docs.deepseek.com/guides/vision',
     ],
   },
   {

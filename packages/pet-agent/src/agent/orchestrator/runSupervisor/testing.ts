@@ -70,6 +70,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
   const context = supervisorHandoffContext(input);
   let state = input.state;
   let feedback: string | undefined;
+  let dispatching = false;
   const call = (control: ScriptedSupervisorControl) => {
     const callId = `${id}:${messages.length}`;
     const current = { ...context, state };
@@ -81,6 +82,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
     else if (control.name !== 'delegate_capability') feedback = undefined;
     const request = new AIMessage({ id: `request:${callId}`, content: '',
       tool_calls: [{ id: callId, name: control.name, args: control.args, type: 'tool_call' }] });
+    dispatching = Boolean(execution);
     if (execution) messages.push(request);
     else messages.push(request, new ToolMessage({ name: control.name, tool_call_id: callId, content: 'Scenario tool result.' }));
 
@@ -92,7 +94,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
   }
   if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));
   return { runSupervisorState: state, reviewFeedback: feedback ?? null, capabilityDisclosure: input.capabilityDisclosure,
-    messages: supervisorWorkMessages(supervisorHandoffContext(input), messages) };
+    messages: supervisorWorkMessages(supervisorHandoffContext(input), messages, dispatching) };
 }
 
 /** Script only model outputs; real agent tools and parent handoff perform all state changes. */

@@ -25,7 +25,7 @@ const options = { configurable: { registry } };
 const tasks = [{ capability: 'general', objective: 'Prepare the document.' }, { capability: 'general', objective: 'Publish it.' }];
 function state(): OrchestratorStateType {
   return { ...buildRunStateReset(), runId: 'r1', taskId: 't1', runUserRequest: 'Prepare and publish.',
-    runSupervisorState: { goal: null, plan: [] },
+    runSupervisorState: { runId: null, goal: null, plan: [] },
     messages: [new HumanMessage({ id: 'human', content: 'Prepare and publish.' }),
       new AIMessage({ content: '', tool_calls: [{ id: 'entry', name: 'plan_request', args: { goal: 'Prepare and publish.' } }] }),
       new ToolMessage({ name: 'plan_request', tool_call_id: 'entry', content: 'Handed off.' }),

@@ -4777,6 +4777,11 @@ for (const continuePlan of [false, true]) {
     assert.equal(supervisorCalls, continuePlan ? 2 : 1);
     assert.equal(toolRuns, 1);
     assert.notEqual(next.runId, cancelled.values.runId);
-    assert.deepEqual(next.runSupervisorState, cancelled.values.runSupervisorState);
+    // Cancelled plan facts stay factual across the boundary; only `continue`
+    // adopts them into the new run, which is what puts Supervisor at a boundary.
+    assert.deepEqual({ goal: next.runSupervisorState.goal, plan: next.runSupervisorState.plan },
+      { goal: cancelled.values.runSupervisorState.goal, plan: cancelled.values.runSupervisorState.plan });
+    assert.equal(next.runSupervisorState.runId,
+      continuePlan ? next.runId : cancelled.values.runSupervisorState.runId);
   });
 }

@@ -34,7 +34,7 @@ const orchestratorStateChannels = {
   runSupervisorReviewFeedback: Annotation<string | null>({ reducer: (_prev, next) => next, default: () => null }),
   runSupervisorState: Annotation<RunSupervisorState>({
     reducer: (_prev, next) => next,
-    default: () => ({ goal: null, plan: [] }),
+    default: () => ({ runId: null, goal: null, plan: [] }),
   }),
   runCapabilityDisclosure: Annotation<CapabilityDisclosureState | null>({
     reducer: (_prev, next) => next,

@@ -24,7 +24,7 @@ function pausedState(): OrchestratorStateType {
   const initial: OrchestratorStateType = {
     ...buildRunStateReset(), runId: 'r1', taskId: 't1', runIterationCount: 7,
     runUserRequest: 'Inspect the old project and publish.', runSupervisorUserMessageId: 'human:original',
-    runSupervisorState: { goal: 'Inspect the old project and publish.', plan: [
+    runSupervisorState: { runId: 'r1', goal: 'Inspect the old project and publish.', plan: [
       { id: 'task1', capability: 'general', objective: 'Inspect the old project.', status: 'pending' },
       { id: 'task2', capability: 'writer', objective: 'Publish the old result.', status: 'pending' },
     ] },

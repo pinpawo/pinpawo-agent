@@ -35,7 +35,8 @@ export function reviewCurrent(
   context: SupervisorHandoffContext,
   args: ReviewCurrentArgs,
 ): RunSupervisorState {
-  let state: SupervisorHandoffContext['state'] = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
+  let state: SupervisorHandoffContext['state'] = { runId: context.runId,
+    goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');
   if (args.completed) {

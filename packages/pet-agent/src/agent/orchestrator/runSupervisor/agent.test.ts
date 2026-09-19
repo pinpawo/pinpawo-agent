@@ -312,7 +312,7 @@ function supervisorInput(
   const input: RunSupervisorInput = {
     mode: 'entry', inputId: 'trace_started:trace-test', taskId: 'trace-test', runId: 'run-test',
     userRequest: 'Research the repository and then prepare a review.', messages: [],
-    state: { goal: null, plan: [] }, catalog,
+    state: { runId: null, goal: null, plan: [] }, catalog,
     capabilityDisclosure: createCapabilityDisclosureState({ catalog }), ...overrides,
   };
   const current = overrides.currentTask;
@@ -343,7 +343,7 @@ function supervisorInput(
   }
   const boundaryNames = plan.map((task) => task.capability).filter((name) => catalog.capabilityNames.includes(name));
   return { ...input, messages,
-    state: overrides.state ?? { goal: input.userRequest, plan },
+    state: overrides.state ?? { runId: null, goal: input.userRequest, plan },
     capabilityDisclosure: overrides.capabilityDisclosure ?? { ...input.capabilityDisclosure,
       disclosedCapabilityNames: [...new Set([...input.capabilityDisclosure.disclosedCapabilityNames, ...boundaryNames])] },
   };

@@ -23,6 +23,15 @@ import {
   setAgentMessageMetadata,
 } from '../../../messages';
 
+/** Read the plan back out of the <supervisor_snapshot> projection. */
+function readSnapshot(text: string) {
+  const plan = text.match(/<plan>\s*<!\[CDATA\[\s*([\s\S]*?)\s*\]\]>/);
+  const origin = text.match(/origin="([^"]+)"/);
+  if (!plan || !origin) throw new Error(`Not a supervisor snapshot: ${text}`);
+  return { origin: origin[1], ...JSON.parse(plan[1].trim()) };
+}
+
+
 
 function readLatestHumanText(messages: BaseMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -244,7 +253,7 @@ test('Entry Answer receives normalized main conversation and excludes delegation
     new HumanMessage(currentRequest),
   ]), invokeConfig());
 
-  assert.deepEqual(JSON.parse(entryMessages[1].text.split('\n').slice(1).join('\n')), { goal: null, plan: [] });
+  assert.deepEqual(readSnapshot(entryMessages[1].text), { origin: 'previous_run', goal: null, plan: [] });
   assert.deepEqual(entryMessages.slice(2).map((message) => message.content), [
     compaction.content,
     '之前我们在讨论 Entry 架构。',
@@ -387,14 +396,14 @@ test('root invocation context reaches direct Entry replies and final Answer with
 
 for (const status of ['empty', 'completed', 'superseded'] as const) {
   test(`Entry exposes the ${status} plan and rejects continue without handing off`, async () => {
-    const plan = { goal: status === 'empty' ? null : 'Plan the trip.', plan: status === 'empty' ? [] : [
+    const plan = { runId: null, goal: status === 'empty' ? null : 'Plan the trip.', plan: status === 'empty' ? [] : [
       { id: 'trip', capability: 'general', objective: 'Plan the trip.', status },
     ] };
     let turns = 0;
     const model = { bindTools: (tools: Array<{ name: string }>) => {
       assert.deepEqual(tools.map(tool => tool.name), ['plan_request', 'continue']);
       return { invoke: async (messages: BaseMessage[]) => {
-        assert.deepEqual(JSON.parse(messages[1].text.split('\n').slice(1).join('\n')), plan);
+        assert.deepEqual(readSnapshot(messages[1].text), { origin: 'previous_run', goal: plan.goal, plan: plan.plan });
         if (++turns === 1) return new AIMessage({ content: '', tool_calls: [{ name: 'continue', id: 'invalid-continue', args: {} }] });
         assert.ok(messages.some(message => ToolMessage.isInstance(message) && message.name === 'continue' && message.status === 'error'));
         return new AIMessage('请说明接下来要完成的目标。');

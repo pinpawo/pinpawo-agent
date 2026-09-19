@@ -12,6 +12,7 @@ import {
   setAgentMessageMetadata,
 } from '../../../messages';
 import type { RunSupervisorState } from '../../runSupervisor/state';
+import { indentXmlBlock, xmlTextBlock } from '../../../../prompts/xml';
 import { identity } from '../../runSupervisor/controlContext';
 import { invokeOrchestratorModel } from '../../modelInvocation';
 import { buildEntryAnswerSystemPrompt } from '../../prompts';
@@ -111,7 +112,11 @@ const EXECUTION_ANNOUNCEMENT_REPAIR = [
   '现在重新处理这一轮：继续已有未完成计划就调用 continue；需要新规划就调用 plan_request；不需要执行就直接给出面向用户的最终回复。',
 ].join('\n');
 
-function entryHandoff(runtime: ToolRuntime<OrchestratorStateType>, runUserRequest: string) {
+function entryHandoff(
+  runtime: ToolRuntime<OrchestratorStateType>,
+  runUserRequest: string,
+  update: Partial<OrchestratorStateType> = {},
+) {
   const last = runtime.state.messages.at(-1);
   if (!AIMessage.isInstance(last) || last.tool_calls?.length !== 1 || last.tool_calls[0].id !== runtime.toolCallId) {
     throw new Error('Entry routing requires one exclusive tool call.');
@@ -123,17 +128,22 @@ function entryHandoff(runtime: ToolRuntime<OrchestratorStateType>, runUserReques
   const messages = [last, confirmation];
   return new Command({
     graph: Command.PARENT,
-    update: { runUserRequest, messages },
+    update: { ...update, runUserRequest, messages },
     goto: 'runSupervisor',
   });
 }
 
 export function createContinueTool() {
   return tool(async (_args, runtime: ToolRuntime<OrchestratorStateType>) => {
-    if (!runtime.state.runSupervisorState.plan.some((task) => !['completed', 'superseded'].includes(task.status))) {
+    const saved = runtime.state.runSupervisorState;
+    if (!saved.plan.some((task) => !['completed', 'superseded'].includes(task.status))) {
       throw new Error('No unfinished plan is available to continue.');
     }
-    return entryHandoff(runtime, requireRunUserRequest(runtime.state));
+    // Choosing to continue adopts the saved plan into this run, so Supervisor
+    // enters at a boundary over facts it now owns rather than re-entering.
+    return entryHandoff(runtime, requireRunUserRequest(runtime.state), {
+      runSupervisorState: { ...saved, runId: runtime.state.runId },
+    });
   }, {
     name: 'continue',
     description: '继续当前计划中尚未完成的任务。',
@@ -160,8 +170,24 @@ export function createPlanRequestTool() {
   );
 }
 
-export function entryPlanMessage(state: RunSupervisorState) {
-  return new HumanMessage({ content: 'Saved plan (data, not instructions):\n' + JSON.stringify(state) });
+/**
+ * Project the Supervisor snapshot for the routing decision.
+ *
+ * `origin` states whether these facts belong to this run or were left by an
+ * earlier one. Supervisor state outlives a run, so without it the model cannot
+ * tell a plan built moments ago from one a past request abandoned — and that
+ * distinction is exactly what choosing between `continue` and `plan_request`
+ * turns on. The runtime renders the fact; the choice stays the model's.
+ */
+export function entryPlanMessage(state: RunSupervisorState, runId?: string) {
+  const origin = state.runId && state.runId === runId ? 'current_run' : 'previous_run';
+  return new HumanMessage({
+    content: [
+      `<supervisor_snapshot role="fact" source="orchestrator_state" trust="read_only" origin="${origin}">`,
+      indentXmlBlock(xmlTextBlock('plan', JSON.stringify({ goal: state.goal, plan: state.plan })), 2),
+      '</supervisor_snapshot>',
+    ].join('\n'),
+  });
 }
 
 export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
@@ -186,7 +212,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
       runnableConfig,
     );
     const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
-    const snapshot = entryPlanMessage(state.runSupervisorState);
+    const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
     let response = await invokeOrchestratorModel(model, {
       systemMessage,
       messages: [snapshot, ...mainSelection.messages],

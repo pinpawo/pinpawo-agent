@@ -20,14 +20,14 @@ import { defineInstructionDocument } from '../../../types/capability';
 const taskA = { capability: 'general', objective: 'Inspect A.' };
 const taskB = { capability: 'general', objective: 'Inspect B.' };
 function context(overrides: Partial<SupervisorHandoffContext> = {}): SupervisorHandoffContext {
-  return { state: { goal: null, plan: [] }, runId: 'r1', taskId: 't1', userRequest: 'Inspect the project.',
+  return { state: { runId: null, goal: null, plan: [] }, runId: 'r1', taskId: 't1', userRequest: 'Inspect the project.',
     mode: 'entry', hasNewUserInput: true, allowedCapabilityNames: ['general'], messages: [], ...overrides };
 }
 function control(name: string, args: Record<string, unknown>, id: string) {
   return new AIMessage({ id: `request:${id}`, content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
 }
 function dispatchResult(input: SupervisorHandoffContext, id = 'execute-first') {
-  return { runSupervisorState: input.state, messages: supervisorWorkMessages(input, [control('delegate_capability', { briefing: 'Execute the current objective.' }, id)]) };
+  return { runSupervisorState: input.state, messages: supervisorWorkMessages(input, [control('delegate_capability', { briefing: 'Execute the current objective.' }, id)], true) };
 }
 function resultFor(input: SupervisorHandoffContext, dispatch: AIMessage) {
   const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' });
@@ -105,12 +105,12 @@ test('adjustment preserves completed work, supersedes replaced executions and ch
 
 test('work projection scopes delegation IDs per run without changing arguments or the original message', () => {
   const request = control('delegate_capability', { briefing: 'Execute the current objective.' }, 'native-call');
-  const projected = supervisorWorkMessages(context(), [request]);
+  const projected = supervisorWorkMessages(context(), [request], true);
   const projectedCall = (projected[0] as AIMessage).tool_calls![0];
   assert.equal(projectedCall.id, identity('call', context().runId, 'native-call'));
   assert.deepEqual(projectedCall.args, request.tool_calls![0].args);
   assert.equal(request.tool_calls![0].id, 'native-call');
-  assert.notEqual((supervisorWorkMessages(context({ runId: 'other' }), [request])[0] as AIMessage).tool_calls![0].id, projectedCall.id);
+  assert.notEqual((supervisorWorkMessages(context({ runId: 'other' }), [request], true)[0] as AIMessage).tool_calls![0].id, projectedCall.id);
   assert.equal(getAgentMessageMetadata(projected[0]).execution, undefined);
   assert.equal(queryAgentMessages(projected).main().select().messages.length, 1);
 });

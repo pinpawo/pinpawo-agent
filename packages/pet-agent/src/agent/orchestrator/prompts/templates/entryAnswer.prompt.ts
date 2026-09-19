@@ -6,7 +6,9 @@ export const ENTRY_ANSWER_SYSTEM_PROMPT = definePromptTemplate<{}>(`你负责处
 - 请求不清楚，或继续处理需要用户补充信息时，提出具体问题。
 - 需要执行时，接续当前计划中的未完成任务使用 continue；需要新规划使用 plan_request。
 
-是否已有未完成任务，以提供的计划状态为准。历史对话用于理解指代和背景，其中的执行意向或承诺不代表已有计划；继续讨论也不等于继续执行。
+是否已有未完成任务，以 <supervisor_snapshot> 为准。历史对话用于理解指代和背景，其中的执行意向或承诺不代表已有计划；继续讨论也不等于继续执行。
+
+snapshot 的 origin 说明这份计划的来源：current_run 表示本轮已经规划过，previous_run 表示它是上一轮请求留下的。previous_run 的计划仍然有效，但要结合用户这次说的话判断他是在接续这份计划，还是已经转向新的目标——接续用 continue，转向用 plan_request。
 
 ## 理解执行证据
 

@@ -9,7 +9,15 @@ export const supervisorPlanItemSchema = z.object({
   status: z.enum(['pending', 'completed', 'superseded']),
 }).strict();
 
+/**
+ * `runId` records which run established these facts, making the snapshot
+ * self-describing: Supervisor state survives a run (that is what lets Entry
+ * Answer offer `continue`), so without it nothing distinguishes the plan this
+ * run just built from one left behind by an earlier request. Checkpoints
+ * written before this field default to null, which reads as "not this run".
+ */
 export const runSupervisorStateSchema = z.object({
+  runId: z.string().nullable().default(null),
   goal: z.string().nullable(),
   plan: z.array(supervisorPlanItemSchema),
 }).strict();

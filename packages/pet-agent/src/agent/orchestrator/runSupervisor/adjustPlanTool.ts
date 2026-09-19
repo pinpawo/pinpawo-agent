@@ -53,7 +53,7 @@ export function adjustPlan(
   const retained = context.state.plan.filter(task => task.status === 'completed' || task.status === 'superseded'
     || (executionsForPlanItem(context, task.id).length > 0 && !(reuse && task.id === current?.id)))
     .map(task => task.status === 'completed' ? task : { ...task, status: 'superseded' as const });
-  return { goal: args.goal, plan: [...retained, ...args.tasks.map((task, index) => ({
+  return { runId: context.runId, goal: args.goal, plan: [...retained, ...args.tasks.map((task, index) => ({
     ...task,
     id: reuse && index === 0 && current ? current.id : identity('task', context.runId, callId, String(index)),
     status: 'pending' as const,

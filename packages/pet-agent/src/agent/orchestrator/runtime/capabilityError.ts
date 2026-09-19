@@ -18,5 +18,9 @@ export function recoverCapabilityError(state: OrchestratorStateType, { error }: 
       content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(state.runSupervisorState), plan: state.runSupervisorState }),
     }), { runId: state.runId, taskId: state.taskId })],
     runIterationCount: state.runIterationCount + 1,
+    // This path returns to Supervisor without passing through its node, so it
+    // carries the same "this run has entered" stamp. A rejected decision still
+    // spent the turn; re-entering at Entry would just repeat it.
+    runSupervisorState: { ...state.runSupervisorState, runId: state.runId },
   } });
 }

@@ -1,21 +1,17 @@
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import type { RunSupervisorInput } from './runner';
 import type { SupervisorHandoffContext } from './controlContext';
 
-/** Entry intent is already checkpointed in the actual routing tool pair. */
+/**
+ * Entry means this run has not reached Supervisor yet; Boundary means it is
+ * returning to its own turn. The snapshot records the run that entered it, so
+ * this is a state read rather than a reconstruction from message shape — a
+ * routing pair in the transcript is a consequence of the decision, not its
+ * source of truth.
+ */
 export function readSupervisorMode(root: OrchestratorStateType): RunSupervisorInput['mode'] {
-  const main = root.messages.filter((message) => {
-    const metadata = getAgentMessageMetadata(message);
-    return !metadata.lane && metadata.runId === root.runId && metadata.taskId === root.taskId;
-  });
-  const result = main.at(-1);
-  const request = main.at(-2);
-  return ToolMessage.isInstance(result) && result.name === 'plan_request' && result.status !== 'error'
-    && AIMessage.isInstance(request) && request.tool_calls?.length === 1
-    && request.tool_calls[0].name === 'plan_request' && request.tool_calls[0].id === result.tool_call_id
-    ? 'entry' : 'boundary';
+  return root.runSupervisorState.runId === root.runId ? 'boundary' : 'entry';
 }
 
 export function supervisorHandoffContext(input: RunSupervisorInput): SupervisorHandoffContext {

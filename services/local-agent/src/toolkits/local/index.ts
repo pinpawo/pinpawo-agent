@@ -29,7 +29,12 @@ import {
   fileOperationMetadata,
 } from './fileTools';
 import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
-import { downloadFileTool, httpFetchTool, networkOperationMetadata } from './networkTools';
+import {
+  downloadFileTool,
+  httpFetchTool,
+  networkOperationMetadata,
+  normalizeHttpFetchAuthorizationInput,
+} from './networkTools';
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitInspectionTools, gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
@@ -127,6 +132,7 @@ const bashToolkitInstructions = [
   '分析 JSON 文件的结构、字段、分组或计数时优先使用 jq_query；不要用 run_shell 或临时 Python 脚本包装 jq。',
   '编辑已有文件一律使用 apply_patch（每次调用只更新一个已存在文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
+  '联网取内容优先用 http_fetch：静态页面、REST API、RSS、天气或汇率这类公开接口一次请求即可拿到结果，不要为此逐步驱动浏览器。只有确实需要登录态、页面交互或 JS 动态渲染时才用浏览器。同一站点首次获批后，后续同源同方法的请求不再重复审批。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
   '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看本次执行启动的后台命令。不要因为超时就重复执行同一命令。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
@@ -208,7 +214,13 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    http_fetch: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    http_fetch: ReviewPolicies.externalAccess({
+      authorization: AuthorizationPolicies.exact({
+        // Same origin and method stay within the approved scope.
+        reuseAutoReview: true,
+        subject: ({ input }) => normalizeHttpFetchAuthorizationInput(input),
+      }),
+    }),
     download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     run_shell: ReviewPolicies.commandExecution({
       authorization: AuthorizationPolicies.exact({

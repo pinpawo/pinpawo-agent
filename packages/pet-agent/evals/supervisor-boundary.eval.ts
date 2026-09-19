@@ -164,7 +164,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       const saved = actual.runSupervisorState;
       const resumed: RunSupervisorInput = {
         ...input, state: saved, mode: 'boundary',
-        runId: `${scenario.name}:resume`, traceId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,
+        runId: `${scenario.name}:resume`, taskId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,
         messages: [...input.messages, ...actual.messages, new AIMessage(decisionReply(result)!), new HumanMessage(scenario.supplement)],
         capabilityDisclosure: createCapabilityDisclosureState({ catalog }),
       };

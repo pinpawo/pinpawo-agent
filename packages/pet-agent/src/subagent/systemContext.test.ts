@@ -56,7 +56,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
       model: new ContextModel(seen), tools: [inspect], messages: state.messages,
       promptSections: [executionSection], runnableConfig: config,
       runtimeContext: {
-        executionScope: { threadId: null, runId: key, delegationId: key },
+        executionScope: { threadId: null, taskId: key, runId: key, delegationId: key },
         toolkitRuntimes: { example: { id: key } },
         workdir: '/forbidden-child-override',
         systemPromptSections: [{ id: 'host:forbidden-child-override', content: 'override' }],

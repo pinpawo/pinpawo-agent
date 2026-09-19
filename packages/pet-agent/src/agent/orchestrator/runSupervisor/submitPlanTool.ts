@@ -41,7 +41,7 @@ export function submitPlan(
   if (currentSupervisorTask(context.state) && !context.hasNewUserInput) {
     throw new SupervisorDecisionError('Replacing unfinished work requires fresh user input.');
   }
-  return { goal: context.userRequest, plan: args.tasks.map((task, index) => ({
+  return { runId: context.runId, goal: context.userRequest, plan: args.tasks.map((task, index) => ({
     ...task, id: identity('task', context.runId, callId, String(index)), status: 'pending',
   })) };
 }

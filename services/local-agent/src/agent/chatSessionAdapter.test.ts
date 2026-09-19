@@ -293,7 +293,7 @@ test('runAgentSessionTurn replaces the current plan from root values and clears 
     streamEvents() {
       return (async function* () {
         yield protocolEvent('values', {
-          messages: [new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', traceId: 'trace',
+          messages: [new AIMessage({ content: '', additional_kwargs: { pinpawo: { runId: 'run', taskId: 'trace',
             source: 'supervisor',
           } }, tool_calls: [{ id: 'execution-call', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] })],
           runId: 'run',

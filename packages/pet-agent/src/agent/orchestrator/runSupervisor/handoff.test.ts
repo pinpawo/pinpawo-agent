@@ -141,8 +141,11 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   const second = await createOrchestratorGraph({ ...config, models: { ...config.models, act: nextSupervisor, answer: new ScriptedModel([call('continue', {}, 'continue-entry')]) } })
     .invoke(buildOrchestratorRunInput([new HumanMessage('Check compatibility next.')]), options);
   assert.notEqual(second.runId, first.runId);
-  assert.notEqual(second.traceId, first.traceId);
-  assert.deepEqual(second.runSupervisorState, first.runSupervisorState);
+  assert.notEqual(second.taskId, first.taskId);
+  // The plan facts survive the boundary; continue adopts them into the new run.
+  assert.deepEqual({ goal: second.runSupervisorState.goal, plan: second.runSupervisorState.plan },
+    { goal: first.runSupervisorState.goal, plan: first.runSupervisorState.plan });
+  assert.equal(second.runSupervisorState.runId, second.runId);
   const messages = nextSupervisor.inputs[0];
   assert.ok(messages.some((message) => message.text.includes('Repository inspection evidence.')));
   assert.ok(messages.some((message) => message.text === 'Check compatibility next.'));

@@ -2,34 +2,42 @@ import { z } from 'zod/v4';
 import { ReducedValue, StateSchema } from '@langchain/langgraph';
 
 /** Business facts only. Calls, private transcripts and run metadata live in Root. */
-export const supervisorPlanTaskSchema = z.object({
+export const supervisorPlanItemSchema = z.object({
   id: z.string().min(1),
   capability: z.string().min(1),
   objective: z.string().min(1),
   status: z.enum(['pending', 'completed', 'superseded']),
 }).strict();
 
+/**
+ * `runId` records which run established these facts, making the snapshot
+ * self-describing: Supervisor state survives a run (that is what lets Entry
+ * Answer offer `continue`), so without it nothing distinguishes the plan this
+ * run just built from one left behind by an earlier request. Checkpoints
+ * written before this field default to null, which reads as "not this run".
+ */
 export const runSupervisorStateSchema = z.object({
+  runId: z.string().nullable().default(null),
   goal: z.string().nullable(),
-  plan: z.array(supervisorPlanTaskSchema),
+  plan: z.array(supervisorPlanItemSchema),
 }).strict();
 
-export type SupervisorPlanTask = z.infer<typeof supervisorPlanTaskSchema>;
+export type SupervisorPlanItem = z.infer<typeof supervisorPlanItemSchema>;
 export type RunSupervisorState = z.infer<typeof runSupervisorStateSchema>;
 
-export function currentSupervisorTask(state: RunSupervisorState): SupervisorPlanTask | null {
+export function currentSupervisorTask(state: RunSupervisorState): SupervisorPlanItem | null {
   return state.plan.find((task) => task.status !== 'completed' && task.status !== 'superseded') ?? null;
 }
 
 export function updateSupervisorTask(
   state: RunSupervisorState,
-  taskId: string,
-  status: SupervisorPlanTask['status'],
+  planItemId: string,
+  status: SupervisorPlanItem['status'],
 ): RunSupervisorState {
-  if (!state.plan.some((task) => task.id === taskId)) {
+  if (!state.plan.some((task) => task.id === planItemId)) {
     throw new Error('Supervisor task is not part of the plan.');
   }
-  return { ...state, plan: state.plan.map((task) => task.id === taskId ? { ...task, status } : task) };
+  return { ...state, plan: state.plan.map((task) => task.id === planItemId ? { ...task, status } : task) };
 }
 
 /** Native agent state; parallel detail reads merge while decisions replace plan facts. */

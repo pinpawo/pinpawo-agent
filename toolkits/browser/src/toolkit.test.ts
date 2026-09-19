@@ -24,6 +24,7 @@ test('Browser Runtime is exposed as a port without replacing static tools', asyn
     toolkits: [toolkit],
     execution: {
       threadId: 'thread-1',
+      taskId: 'task-1',
       runId: 'run-1',
       delegationId: 'delegation-1',
       workdir: process.cwd(),
@@ -64,6 +65,7 @@ test('separate Host managers start independent Browser Runtime roots', async () 
     toolkits: [toolkit],
     execution: {
       threadId: 'thread-a',
+      taskId: 'task-a',
       runId: 'run-a',
       delegationId: 'delegation-a',
       workdir: process.cwd(),
@@ -73,6 +75,7 @@ test('separate Host managers start independent Browser Runtime roots', async () 
     toolkits: [toolkit],
     execution: {
       threadId: 'thread-b',
+      taskId: 'task-b',
       runId: 'run-b',
       delegationId: 'delegation-b',
       workdir: process.cwd(),

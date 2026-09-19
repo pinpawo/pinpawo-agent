@@ -6,13 +6,13 @@ import { buildCapabilityExecutionInput, delegateCapabilitySchema } from './deleg
 import { currentSupervisorTask } from './state';
 
 /** Read the actual checkpointed invocation, not a second pending-call register. */
-export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages' | 'runId' | 'traceId' | 'runSupervisorState'> & { runSupervisorReviewFeedback?: string | null }) {
+export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages' | 'runId' | 'taskId' | 'runSupervisorState'> & { runSupervisorReviewFeedback?: string | null }) {
   const message = state.messages.filter((message) => AIMessage.isInstance(message)
     && !getAgentMessageMetadata(message).lane
     && getAgentMessageMetadata(message).runId === state.runId
     && message.tool_calls?.some((call) => call.name === 'delegate_capability')).at(-1);
   if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1
-    || getAgentMessageMetadata(message).traceId !== state.traceId) {
+    || getAgentMessageMetadata(message).taskId !== state.taskId) {
     throw new Error('Expected a current Capability tool call.');
   }
   const call = message.tool_calls[0];
@@ -25,7 +25,7 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
     throw new Error('Capability call already has a result.');
   }
   return { id: call.id, ...buildCapabilityExecutionInput({
-    state: state.runSupervisorState, messages: state.messages, runId: state.runId, traceId: state.traceId,
+    state: state.runSupervisorState, messages: state.messages, runId: state.runId, taskId: state.taskId,
     userRequest: state.runSupervisorState.goal!, mode: 'boundary', hasNewUserInput: false,
     allowedCapabilityNames: state.runSupervisorState.plan.map(task => task.capability),
   }, delegateCapabilitySchema.parse(call.args), state.runSupervisorReviewFeedback ?? undefined) };

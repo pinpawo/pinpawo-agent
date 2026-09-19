@@ -5,7 +5,7 @@ import type { RunSupervisorState } from './state';
 export type SupervisorHandoffContext = {
   state: RunSupervisorState;
   runId: string;
-  traceId: string;
+  taskId: string;
   userRequest: string;
   mode: 'entry' | 'boundary';
   hasNewUserInput: boolean;

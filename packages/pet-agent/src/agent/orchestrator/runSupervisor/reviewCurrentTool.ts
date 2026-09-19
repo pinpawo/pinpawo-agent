@@ -4,7 +4,7 @@ import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { SupervisorDecisionError, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
-import { executionsForTask } from '../executionMessages';
+import { executionsForPlanItem } from '../executionMessages';
 
 export const reviewCurrentSchema = z.object({
   completed: z.boolean().describe('是否验收当前任务的最新交付。false 保留任务供后续补做；工具不触发执行。'),
@@ -35,11 +35,12 @@ export function reviewCurrent(
   context: SupervisorHandoffContext,
   args: ReviewCurrentArgs,
 ): RunSupervisorState {
-  let state: SupervisorHandoffContext['state'] = { goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
+  let state: SupervisorHandoffContext['state'] = { runId: context.runId,
+    goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');
   if (args.completed) {
-    const latestResult = executionsForTask(context, current.id).at(-1)?.result;
+    const latestResult = executionsForPlanItem(context, current.id).at(-1)?.result;
     if (!latestResult || latestResult.status !== 'returned' || !latestResult.delivery) {
       throw new SupervisorDecisionError('Accepting a task requires its returned delivery. The current task has no returned delivery to accept; execute it or adjust the remaining plan.');
     }

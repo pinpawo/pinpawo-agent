@@ -7,7 +7,7 @@ import { createPrepareNode } from './prepare';
 
 function state(): OrchestratorStateType {
   return { ...buildOrchestratorRunInput([new HumanMessage({ id: 'human', content: 'Inspect.' })]),
-    runSupervisorState: { goal: null, plan: [] }, sessionCapabilityArtifacts: [],
+    runSupervisorState: { runId: null, goal: null, plan: [] }, sessionCapabilityArtifacts: [],
     sessionToolAuthorizations: { generation: '', records: [] } };
 }
 
@@ -16,14 +16,14 @@ test('prepare preserves initialized run identity and binds its current human tra
   const command = await createPrepareNode()(input);
   const update = command.update as Partial<OrchestratorStateType>;
   assert.equal(update.runId, undefined);
-  assert.equal(update.traceId, undefined);
+  assert.equal(update.taskId, undefined);
   assert.equal(update.messages?.[0].id, 'human');
-  assert.deepEqual(getAgentMessageMetadata(update.messages![0]), { runId: input.runId, traceId: input.traceId });
+  assert.deepEqual(getAgentMessageMetadata(update.messages![0]), { runId: input.runId, taskId: input.taskId });
 });
 
 test('prepare rejects uninitialized runs and unbound historical input instead of manufacturing a run', async () => {
   const input = state();
-  for (const patch of [{ runId: '' }, { traceId: '' }, { messages: [new HumanMessage('Old unbound message')] }]) {
+  for (const patch of [{ runId: '' }, { taskId: '' }, { messages: [new HumanMessage('Old unbound message')] }]) {
     await assert.rejects(createPrepareNode()({ ...input, ...patch }), /initialized|bound to its runId/);
   }
 });

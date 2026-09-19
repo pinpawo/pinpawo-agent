@@ -16,7 +16,7 @@ export function toolHistoryInput(mode: HistoryMode, count: number, id: string) {
       evidence: `历史任务 H-${i} 的配置已核验，结论通过。文件 scripts 与构建入口一致。`,
     }, `history-${i}`);
     const result = previous.messages[2] as ToolMessage;
-    (result.artifact as { taskId: string }).taskId = `history-task-${i}`;
+    (result.artifact as { planItemId: string }).planItemId = `history-task-${i}`;
     history.push(...previous.messages.slice(1));
   }
   if (mode === 'resume') {

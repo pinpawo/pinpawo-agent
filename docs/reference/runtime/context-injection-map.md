@@ -83,7 +83,7 @@ These are assembled by several nodes. Defined in
 | Block | Class | Built by | Notes |
 |---|---|---|---|
 | `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor uses the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
-| `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + optional `<essential_context>` (initial) or `<guidance>` (continue). |
+| `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + `<briefing>`. `mode` distinguishes initial from continue; the block names do not change. |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
 
 `xmlTextBlock()` wraps payloads in `CDATA` and escapes nested `]]>`. Always use
@@ -118,8 +118,20 @@ typed Announce reaches this view after handoff moves its semantic identity into
 the main queue. Entry Answer selects this history with the shared message query;
 the model-invocation runtime renders typed messages without changing state.
 
+Entry Answer also receives `<supervisor_snapshot origin="none|current_run|previous_run">`,
+the projected Supervisor state. Supervisor state outlives a run, so `origin`
+reports where these facts came from: no plan yet, this run's own, or an earlier
+run's. "No plan yet" is its own answer, not an empty previous run. Plan items
+project `capability`, `status` and `objective`; their ids are content hashes the
+model never cites, and `continue` takes no arguments.
+That freshness is what choosing between `continue` and `plan_request` turns on;
+the runtime renders the fact and the model makes the choice — nothing in the
+runtime infers the answer from the plan being non-empty.
+
 **Output → state:** `plan_request(goal)` resolves the run goal against the whole
 conversation. This authors the initial goal; user-directed Supervisor adjustments may revise it. See §8.
+`continue` adopts the saved plan into this run, which is what places Supervisor
+at a Boundary over facts it now owns.
 
 ## 5. Node: runSupervisor
 
@@ -147,6 +159,12 @@ Sources:
 | session state | `RUN-STABLE` / `FACT` | goal, committed plan and prepared Capability disclosure; initialization may discover before plan commit | same execution agreement and prepared disclosure |
 | current input | `DYNAMIC` / `BOUNDARY` | entry data, including remaining work on resume | active delegation association and remaining tasks from the established plan; result bodies are already in main |
 | tools | invocation projection / `INSTRUCTION` | `capability_details`, `submit_plan` | execution: `review_current`; fresh user input additionally enables `adjust_plan` and `capability_details` |
+
+Mode is a state read: `runSupervisorState.runId === runId` means this run has
+already entered Supervisor (Boundary); otherwise Entry. The field records
+entering, not committing — the Supervisor node and the decision-error recovery
+path both stamp it, because a rejected decision still spends the turn. Runtime
+code does not reconstruct Entry intent from a trailing routing tool pair.
 
 Entry initializes a clean run-scoped Supervisor session. Root
 publishes normal Capability results directly into main before Boundary, including
@@ -243,12 +261,12 @@ Initial projection:
     <request><![CDATA[用户的整体目标与约束]]></request>
   </run_user_request>
   <task><![CDATA[当前 Capability 的执行边界]]></task>
-  <essential_context><![CDATA[首次执行所需的补充背景]]></essential_context>
+  <briefing><![CDATA[Supervisor 为本次执行准备的说明]]></briefing>
 </delegation_briefing>
 ```
 
-Continuation uses the same shape with `mode="continue"` and optional
-`<guidance>` in place of `<essential_context>`.
+Continuation uses the identical shape with `mode="continue"`; the briefing then
+carries any gap note for the remaining work.
 
 ## 7. Current node: answer
 
@@ -361,6 +379,6 @@ ephemeral; Capability's private context maintenance remains subagent-owned.
 
 Tool responsibilities (2026-09-07): `submit_plan` is Entry-only and has no acceptance flag. `review_current(completed=true)` alone accepts the current task: omit reply to dispatch the established next task, or supply reply to end the run and retain unfinished future work. With no remaining tasks a final reply is required. Reviews do not carry plan updates; user-directed changes use adjust_plan. Root applies these effects inside its existing `runSupervisor` node.
 
-Boundary context and review (2026-09-07): select main by the existing logical-task traceId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps traceId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
+Boundary context and review (2026-09-07): select main by the existing logical-task taskId, preserving same-task history across physical runs while excluding unrelated tasks. Root stamps user supplements after resolving resume identity, along with normal replies and main Announces. Compaction retains current-task and older-history summaries separately (at most two); the current summary keeps taskId. Unfinished delegation Announces remain verbatim. Entry may use the full conversation.
 
 The short system prompt defines responsibilities and task scope; tool descriptions and schemas define review criteria and parameter semantics. Execution Boundary uses review_current; a fresh user input also enables adjust_plan. For review_current, completed concerns the current task only, with required reason identifying delivery evidence or a concrete in-scope gap. Pending future tasks do not make the current task incomplete. false forwards reason as feedback; true advances the existing plan or returns reply. Asking for missing user input uses natural text. Deterministic validation and returnDirect remain in code, with no extra model judgment.

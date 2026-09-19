@@ -39,7 +39,7 @@ test('lifecycle composition pass requires semantic goals and mechanical invarian
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {
       messages: [new AIMessage('done')],
-      runSupervisorState: { goal: null, plan: [] },
+      runSupervisorState: { runId: null, goal: null, plan: [] },
       runIterationCount: 0,
     },
     assistantMessageCount: 1,
@@ -68,7 +68,7 @@ test('lifecycle composition cannot pass an exactly-once case without an executor
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {
       messages: [new AIMessage('looks complete')],
-      runSupervisorState: { goal: null, plan: [] },
+      runSupervisorState: { runId: null, goal: null, plan: [] },
       runIterationCount: 0,
     },
     assistantMessageCount: 1,
@@ -105,7 +105,7 @@ test('lifecycle composition accepts an isolated resumable checkpoint for require
   const invariants = evaluateLifecycleCompositionInvariants({
     finalState: {
       messages: [retainedAnnounce],
-      runSupervisorState: { goal: 'check staging deployment', plan: [{
+      runSupervisorState: { runId: null, goal: 'check staging deployment', plan: [{
         id: 'task-1', capability: 'workspace_analysis', objective: 'check staging deployment', status: 'pending',
       }] },
       runIterationCount: 0,

@@ -3,13 +3,13 @@ import test from 'node:test';
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { currentPlansEqual, projectCurrentPlan } from './currentPlanProjection';
 
-function execution(taskId: string, capability: string, lane?: string) {
-  const metadata = { runId: 'run', traceId: 'trace', lane };
+function execution(planItemId: string, capability: string, lane?: string) {
+  const metadata = { runId: 'run', taskId: 'trace', lane };
   return [new AIMessage({ content: '', additional_kwargs: { pinpawo: metadata },
-    tool_calls: [{ id: `call:${taskId}`, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] }),
-  new ToolMessage({ name: 'delegate_capability', tool_call_id: `call:${taskId}`, content: 'Delivery',
+    tool_calls: [{ id: `call:${planItemId}`, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] }),
+  new ToolMessage({ name: 'delegate_capability', tool_call_id: `call:${planItemId}`, content: 'Delivery',
     additional_kwargs: { pinpawo: metadata },
-    artifact: { taskId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial', briefing: 'Plan' } })];
+    artifact: { planItemId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial', briefing: 'Plan' } })];
 }
 
 test('projects business progress and derives active execution from Root messages', () => {

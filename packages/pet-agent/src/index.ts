@@ -34,6 +34,13 @@ export { definePetDocument } from './types/petDocument';
 export { petDocumentSystemPromptSection } from './prompts/petDocument';
 
 export type {
+  SessionScope,
+  TaskScope,
+  RunScope,
+  DelegationScope,
+} from './types/scope';
+
+export type {
   SubagentInputState,
   SubagentExecutionScope,
   SubagentPromptSection,
@@ -138,7 +145,7 @@ export type {
   RunSupervisorResult,
   RunSupervisorRunner,
   RunSupervisorState,
-  SupervisorPlanTask,
+  SupervisorPlanItem,
   CompiledAgentRegistry,
   ExecutorCompilationIssue,
 } from './agent/createAgentRuntime';

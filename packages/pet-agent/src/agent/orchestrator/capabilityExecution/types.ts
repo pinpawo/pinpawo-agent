@@ -16,7 +16,7 @@ import type { ToolkitRuntimeManager } from '../toolkitRuntime';
 export type CapabilityExecutionDelegation = Readonly<DelegationSpec> & {
   readonly id: string;
   readonly runId: string;
-  readonly traceId: string;
+  readonly taskId: string;
 };
 
 export type CapabilityExecutionInput = {
@@ -58,7 +58,7 @@ export type CapabilityExecutionOptions = {
 
 export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
-  readonly scope: DelegationMessageScope & { readonly traceId: string };
+  readonly scope: DelegationMessageScope & { readonly taskId: string };
   readonly delivery: DelegationDelivery | null;
   /** Unapplied private-history patch; contains no main ToolMessage. */
   readonly privateMessages: BaseMessage[];

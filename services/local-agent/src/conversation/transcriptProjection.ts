@@ -43,7 +43,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       const execution = deliveries.get(message.tool_call_id);
       const metadata = message.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
       if (!execution || !metadata || metadata.lane || message.name !== 'delegate_capability'
-        || metadata.runId !== execution.metadata.runId || metadata.traceId !== execution.metadata.traceId) return [];
+        || metadata.runId !== execution.metadata.runId || metadata.taskId !== execution.metadata.taskId) return [];
       const createdAt = readAgentMessageCreatedAt(message);
       return [{ role: 'subagent' as const, requestId: execution.delivery.scope.runId,
         text: execution.delivery.text, ...(createdAt ? { createdAt } : {}) }];

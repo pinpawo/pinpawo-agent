@@ -9,7 +9,7 @@ const resultSchema = z.object({
     id: z.string().min(1), task: z.string(), text: z.string().refine((text) => text.trim().length > 0),
     scope: z.object({
       lane: z.string().refine((lane): lane is `capability:${string}` => lane.startsWith('capability:')),
-      runId: z.string().min(1), traceId: z.string().min(1), delegationId: z.string().min(1),
+      runId: z.string().min(1), taskId: z.string().min(1), delegationId: z.string().min(1),
     }),
   }).nullable(),
 });
@@ -19,7 +19,7 @@ export function readCapabilityExecutionCall(message: BaseMessage) {
   if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1) return null;
   const metadata = getAgentMessageMetadata(message);
   const call = message.tool_calls[0];
-  if (metadata.lane || !metadata.runId || !metadata.traceId || call.name !== 'delegate_capability' || !call.id) return null;
+  if (metadata.lane || !metadata.runId || !metadata.taskId || call.name !== 'delegate_capability' || !call.id) return null;
   return { call, metadata };
 }
 
@@ -47,9 +47,9 @@ export function readCapabilityExecutions(messages: readonly unknown[]) {
       try {
         const data = resultSchema.safeParse(JSON.parse(resultMessage.content));
         const resultMetadata = getAgentMessageMetadata(resultMessage);
-        if (data.success && resultMetadata.runId === metadata.runId && resultMetadata.traceId === metadata.traceId) {
+        if (data.success && resultMetadata.runId === metadata.runId && resultMetadata.taskId === metadata.taskId) {
           const delivery = data.data.delivery;
-          if ((!delivery || (delivery.scope.runId === metadata.runId && delivery.scope.traceId === metadata.traceId
+          if ((!delivery || (delivery.scope.runId === metadata.runId && delivery.scope.taskId === metadata.taskId
             && delivery.scope.delegationId === execution.delegationId
             && delivery.scope.lane === `capability:${execution.capability}`))
             && !(data.data.status === 'returned' && resultMessage.status === 'error')) result = data.data;
@@ -60,8 +60,8 @@ export function readCapabilityExecutions(messages: readonly unknown[]) {
   });
 }
 
-export function executionsForTask(context: { messages: readonly BaseMessage[] }, taskId: string) {
-  return readCapabilityExecutions(context.messages).filter(({ execution }) => execution.taskId === taskId);
+export function executionsForPlanItem(context: { messages: readonly BaseMessage[] }, planItemId: string) {
+  return readCapabilityExecutions(context.messages).filter(({ execution }) => execution.planItemId === planItemId);
 }
 
 export function readDelegationDeliveries(messages: readonly unknown[]) {

@@ -20,7 +20,7 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
     if (runIterationBudgetReached(root, runnableConfig)) return new Command({
       update: { messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(new AIMessage(
         '主流程循环已达到上限，任务尚未验收完成。你可以继续当前任务。',
-      )), { runId: root.runId, traceId: root.traceId })], runTerminalError: null },
+      )), { runId: root.runId, taskId: root.taskId })], runTerminalError: null },
       goto: END,
     });
     const catalog = createCapabilityCatalog({
@@ -36,7 +36,10 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
       update: {
         runCapabilityDisclosure: result.capabilityDisclosure,
         runSupervisorUserMessageId: input.inputId.startsWith('human:') ? input.inputId : root.runSupervisorUserMessageId,
-        runSupervisorState: result.runSupervisorState,
+        // Entering is what the mode records, not committing a plan: a rejected
+        // decision still spent this run's Supervisor turn, and re-entering at
+        // Entry would repeat it.
+        runSupervisorState: { ...result.runSupervisorState, runId: root.runId },
         runSupervisorReviewFeedback: result.reviewFeedback ?? null,
         messages: result.messages,
       },

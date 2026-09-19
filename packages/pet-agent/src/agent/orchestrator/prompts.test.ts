@@ -57,12 +57,12 @@ test('Run Supervisor entry input represents an empty disclosure explicitly', () 
   const input = buildRunSupervisorAgentInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
-    traceId: 'trace-1',
+    taskId: 'trace-1',
     runId: 'run-1',
     catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
     messages: [],
-    state: { goal: null, plan: [] },
+    state: { runId: null, goal: null, plan: [] },
     capabilityDisclosure: plannerDisclosure,
   } satisfies RunSupervisorInput, [], routingManifest);
 
@@ -73,9 +73,9 @@ test('Run Supervisor entry input represents an empty disclosure explicitly', () 
 test('dynamic capability documents remain data and do not enter the system prompt', () => {
   const request = 'Inspect target <external> & retain constraints';
   const input: RunSupervisorInput = {
-    mode: 'entry', inputId: 'human:test', traceId: 'trace-1', runId: 'run-1',
+    mode: 'entry', inputId: 'human:test', taskId: 'trace-1', runId: 'run-1',
     catalog: plannerPromptCatalog, userRequest: request, messages: [],
-    state: { goal: null, plan: [] }, capabilityDisclosure: plannerDisclosure,
+    state: { runId: null, goal: null, plan: [] }, capabilityDisclosure: plannerDisclosure,
   };
   const rendered = buildRunSupervisorAgentInput(input, disclosedDocuments, routingManifest);
   assert.ok(rendered.includes(request));
@@ -96,7 +96,7 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
   const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
-    traceId: 'trace-1',
+    taskId: 'trace-1',
     runId: 'run-1',
     catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。\n\n浏览器已经连接。',
@@ -106,7 +106,7 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
     }].map((attempt) => createDeliveryResult({
       id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
-    state: { goal: null, plan: [
+    state: { runId: null, goal: null, plan: [
       { id: 'task-1', capability: 'browser', objective: '确认浏览器可用', status: 'pending' },
       { id: 'task-2', capability: 'browser', objective: '浏览相关内容', status: 'pending' },
     ] },
@@ -125,7 +125,7 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
   const input = buildRunSupervisorAgentInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
-    traceId: 'trace-1',
+    taskId: 'trace-1',
     runId: 'run-1',
     catalog: plannerPromptCatalog,
     userRequest: '打开示例站点并浏览相关内容。',
@@ -135,7 +135,7 @@ test('Run Supervisor boundary input omits the follow-up section once the plan is
     }].map((attempt) => createDeliveryResult({
       id: 'announce:' + attempt.messageId, sourceLane: 'capability:browser' as const, delegationId: 'delegation-1', runId: 'run-1', task: '确认浏览器可用', deliveryId: attempt.messageId, result: attempt.result, createdAt: '2026-09-05T00:00:00Z'
     }))],
-    state: { goal: null, plan: [{ id: 'task-1', capability: 'browser', objective: '确认浏览器可用', status: 'pending' }] },
+    state: { runId: null, goal: null, plan: [{ id: 'task-1', capability: 'browser', objective: '确认浏览器可用', status: 'pending' }] },
     capabilityDisclosure: plannerDisclosure,
   } satisfies RunSupervisorInput, disclosedDocuments, routingManifest);
 

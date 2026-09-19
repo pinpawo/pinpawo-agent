@@ -30,15 +30,15 @@ function longMessage(index: number) {
   return new HumanMessage(`message-${index} ${'x'.repeat(3200)}`);
 }
 
-function executionCall(id: string, taskId: string) {
+function executionCall(id: string, planItemId: string) {
   return setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
-  }] }), { runId: 'run', traceId: 'trace', source: 'supervisor' });
+  }] }), { runId: 'run', taskId: 'trace', source: 'supervisor' });
 }
-function executionResult(id: string, taskId: string, content: string) {
+function executionResult(id: string, planItemId: string, content: string) {
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id, content,
-    artifact: { taskId, delegationId: `delegation:${taskId}`, capability: 'general', task: `Work on ${taskId}`, mode: 'initial', briefing: 'Execute the confirmed task.' },
-  }), { runId: 'run', traceId: 'trace' });
+    artifact: { planItemId, delegationId: `delegation:${planItemId}`, capability: 'general', task: `Work on ${planItemId}`, mode: 'initial', briefing: 'Execute the confirmed task.' },
+  }), { runId: 'run', taskId: 'trace' });
 }
 
 test('compaction retains unfinished execution pairs and private lanes without exposing them to the summary', async () => {
@@ -54,7 +54,7 @@ test('compaction retains unfinished execution pairs and private lanes without ex
   const compacted = await compactOrchestratorMessages({
     messages: [new HumanMessage('old request'), call, result, privateMessage, workMessage, new HumanMessage('latest')],
     model: fakeSummaryModel('summary', (messages) => { summarized = JSON.stringify(messages); }),
-    options: { keepMessages: 1, preserveExecutionTaskIds: ['task-1'] },
+    options: { keepMessages: 1, preservePlanItemIds: ['task-1'] },
   });
   assert.equal(compacted.compacted, true);
   for (const message of [call, result, privateMessage, workMessage]) assert.ok(compacted.messages.includes(message));
@@ -356,9 +356,9 @@ test('orchestrator context compaction uses handoff copies and excludes every lan
 });
 
 test('aggressive compaction keeps all main attempts of unfinished work and summarizes other scopes', async () => {
-  const attempt = (id: string, taskId: string) => [
-    executionCall(id, taskId),
-    executionResult(id, taskId, `Evidence ${id}`),
+  const attempt = (id: string, planItemId: string) => [
+    executionCall(id, planItemId),
+    executionResult(id, planItemId, `Evidence ${id}`),
   ];
   const first = attempt('first', 'active');
   const second = attempt('second', 'active');
@@ -368,7 +368,7 @@ test('aggressive compaction keeps all main attempts of unfinished work and summa
   const result = await compactOrchestratorMessages({
     messages: [...first, ...other, ...Array.from({ length: 12 }, (_, i) => longMessage(i)), ...second, recent],
     model: fakeSummaryModel('Summary of other work.', (messages) => { summaryInput = String((messages.at(-1) as BaseMessage | undefined)?.content); }),
-    options: { keepMessages: 1, preserveExecutionTaskIds: ['active'] },
+    options: { keepMessages: 1, preservePlanItemIds: ['active'] },
   });
   assert.deepEqual(result.messages.slice(2), [...first, ...second, recent]);
   assert.equal(summaryInput.includes('Evidence first'), false);
@@ -377,7 +377,7 @@ test('aggressive compaction keeps all main attempts of unfinished work and summa
 });
 
 test('compaction separates current-task evidence from older history and folds each summary on resume', async () => {
-  const task = (message: BaseMessage) => setAgentMessageMetadata(message, { traceId: 'current-goal' });
+  const task = (message: BaseMessage) => setAgentMessageMetadata(message, { taskId: 'current-goal' });
   const call = task(executionCall('active-evidence', 'active'));
   const evidence = task(executionResult('active-evidence', 'active', 'KEEP_VERBATIM'));
   const requests: string[] = [];
@@ -385,8 +385,8 @@ test('compaction separates current-task evidence from older history and folds ea
     const text = String(messages.at(-1)?.content); requests.push(text);
     return new AIMessage(text.includes('CURRENT_TASK_FACT') ? 'CURRENT_TASK_FACT summary' : 'UNRELATED_TASK_FACT summary');
   } } as unknown as BaseChatModel;
-  const options = { traceId: 'current-goal', keepMessages: 1,
-    preserveExecutionTaskIds: ['active'] };
+  const options = { taskId: 'current-goal', keepMessages: 1,
+    preservePlanItemIds: ['active'] };
   let messages: BaseMessage[] = [new HumanMessage('UNRELATED_TASK_FACT'), task(new HumanMessage('CURRENT_TASK_FACT')),
     call, evidence, task(new HumanMessage('Continue.'))];
   for (let round = 0; round < 2; round += 1) {
@@ -395,7 +395,7 @@ test('compaction separates current-task evidence from older history and folds ea
     assert.equal(messages.filter(isContextCompactionMessage).length, 2);
     assert.ok(messages.includes(evidence));
     const currentSummary = messages.find((message) => isContextCompactionMessage(message)
-      && getAgentMessageMetadata(message).traceId === 'current-goal');
+      && getAgentMessageMetadata(message).taskId === 'current-goal');
     assert.ok(currentSummary);
     assert.match(String(currentSummary.content), /CURRENT_TASK_FACT/);
     assert.doesNotMatch(String(currentSummary.content), /UNRELATED_TASK_FACT/);

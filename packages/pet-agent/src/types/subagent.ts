@@ -7,11 +7,9 @@ import type { CapabilityArtifactRef } from './artifact';
 import type { SystemPromptSection } from './systemPrompt';
 import type { AgentRuntimeContext } from '../runtime/context';
 import type { ToolOperationMetadata } from './toolkit';
+import type { DelegationScope } from './scope';
 
-export type SubagentExecutionScope = {
-  threadId: string | null;
-  runId: string;
-  delegationId: string;
+export type SubagentExecutionScope = DelegationScope & {
   workdir?: string | null;
 };
 

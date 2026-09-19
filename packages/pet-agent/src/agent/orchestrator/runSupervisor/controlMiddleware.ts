@@ -29,7 +29,7 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
           runCapabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure,
             request.state.disclosedCapabilityNames ?? []),
           ...(input.inputId.startsWith('human:') ? { runSupervisorUserMessageId: input.inputId } : {}),
-          messages: supervisorWorkMessages(supervisorHandoffContext(input), request.state.messages.slice(messageCount)),
+          messages: supervisorWorkMessages(supervisorHandoffContext(input), request.state.messages.slice(messageCount), true),
         } });
       }
       try {

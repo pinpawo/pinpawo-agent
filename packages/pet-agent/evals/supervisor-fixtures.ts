@@ -44,22 +44,22 @@ export function supervisorFixture(params: {
   const input: RunSupervisorInput = {
     mode: params.task ? 'boundary' : 'entry',
     inputId: !params.task || params.freshUserInput ? `human:${params.runId}` : params.runId,
-    runId: params.runId, traceId: params.runId, userRequest: params.goal, messages,
+    runId: params.runId, taskId: params.runId, userRequest: params.goal, messages,
     catalog: params.catalog, capabilityDisclosure: createCapabilityDisclosureState({ catalog: params.catalog }),
-    state: { goal: params.goal, plan: [
+    state: { runId: null, goal: params.goal, plan: [
       ...(params.task ? [{ id: 'current', objective: params.task, capability, status: 'pending' as const }] : []),
       ...(params.remaining ?? []).map((task, i) => ({ ...task, id: `next:${i}`, status: 'pending' as const })),
     ] },
   };
   if (!params.task || !params.evidence) return input;
   const id = `execute-fixture:${params.runId}`;
-  const metadata = { runId: params.runId, traceId: params.runId };
+  const metadata = { runId: params.runId, taskId: params.runId };
   return { ...input, messages: [...messages,
     setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id, name: 'delegate_capability', type: 'tool_call', args: {},
     }] }), { ...metadata, source: 'supervisor' }),
     setAgentMessageMetadata(new ToolMessage({ artifact: {
-      taskId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, mode: 'initial', briefing: 'Execute the confirmed task.',
+      planItemId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, mode: 'initial', briefing: 'Execute the confirmed task.',
     },  name: 'delegate_capability', tool_call_id: id, content: JSON.stringify({
       status: 'returned', delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
         scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } },

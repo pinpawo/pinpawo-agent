@@ -46,7 +46,7 @@ export function supervisorFixture(params: {
     inputId: !params.task || params.freshUserInput ? `human:${params.runId}` : params.runId,
     runId: params.runId, taskId: params.runId, userRequest: params.goal, messages,
     catalog: params.catalog, capabilityDisclosure: createCapabilityDisclosureState({ catalog: params.catalog }),
-    state: { goal: params.goal, plan: [
+    state: { runId: null, goal: params.goal, plan: [
       ...(params.task ? [{ id: 'current', objective: params.task, capability, status: 'pending' as const }] : []),
       ...(params.remaining ?? []).map((task, i) => ({ ...task, id: `next:${i}`, status: 'pending' as const })),
     ] },

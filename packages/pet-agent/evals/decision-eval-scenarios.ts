@@ -113,7 +113,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
   {
     name: 'saved-unfinished-plan-continues',
     messages: [{ role: 'user', text: '继续把周末的杭州旅行安排完成。' }],
-    plan: { goal: '安排周末的杭州旅行。', plan: [
+    plan: { runId: null, goal: '安排周末的杭州旅行。', plan: [
       { id: 'transport', capability: 'general', objective: '整理往返交通安排。', status: 'pending' },
     ] },
     expectedRoutes: ['continue'],
@@ -124,7 +124,7 @@ const ENTRY_ANSWER_CASES: readonly EntryAnswerEvalCase[] = [
       { role: 'assistant', text: '杭州周末旅行的安排已经全部完成。' },
       { role: 'user', text: '继续调整一下，把总预算控制在八百元以内。' },
     ],
-    plan: { goal: '安排周末的杭州旅行。', plan: [
+    plan: { runId: null, goal: '安排周末的杭州旅行。', plan: [
       { id: 'itinerary', capability: 'general', objective: '完成杭州周末行程。', status: 'completed' },
     ] },
     expectedRoutes: ['plan_request'],
@@ -148,7 +148,7 @@ function entryAnswerScenarios(): DecisionEvalScenario[] {
     const render = (): RenderedDecisionPrompt => ({
       system: buildEntryAnswerSystemPrompt(),
       input: '',
-      conversationMessages: [entryPlanMessage(testCase.plan ?? { goal: null, plan: [] }), ...testCase.messages.map((message) => message.role === 'user'
+      conversationMessages: [entryPlanMessage(testCase.plan ?? { runId: null, goal: null, plan: [] }), ...testCase.messages.map((message) => message.role === 'user'
         ? new HumanMessage(message.text)
         : new AIMessage(message.text))],
     });

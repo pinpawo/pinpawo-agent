@@ -1,6 +1,24 @@
+export type TuiEmbeddedHostTarget = {
+  command: string;
+  args: string[];
+};
+
 export type TuiLaunchOptions = {
   showVersion: boolean;
   agentSession: { port: number; petId: string } | null;
+  /**
+   * Loopback port of an already-running Host, selected by `--server-port`.
+   * The terminal UI then dials that Host over the authenticated WebSocket
+   * transport instead of starting one of its own.
+   */
+  serverPort: number | null;
+  /**
+   * Host command for embedded stdio mode, which is the default: the terminal UI
+   * starts and owns the Host child process. It stays `null` whenever another
+   * transport owns the session — check, demo, Pet, `--server-port`, or the
+   * host smokes that deliberately attach to a separately running Host.
+   */
+  embeddedHost: TuiEmbeddedHostTarget | null;
   demo: {
     command: boolean;
     qa: boolean;
@@ -21,10 +39,15 @@ export type TuiLaunchOptions = {
   useDemoConnection: boolean;
 };
 
+const DEFAULT_EMBEDDED_HOST_COMMAND = 'pinpawo';
+const DEFAULT_EMBEDDED_HOST_ARGS = ['run', '--stdio'];
+
 export function parseTuiLaunchOptions(
   argv: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
 ): TuiLaunchOptions {
   const flags = new Set(argv);
+  const explicitEmbedHost = flags.has('--embed-host');
   const agentSessionPort = readOption(argv, '--pet-port');
   const agentSessionPetId = readOption(argv, '--pet-id');
   if ((agentSessionPort === undefined) !== (agentSessionPetId === undefined)) {
@@ -39,6 +62,26 @@ export function parseTuiLaunchOptions(
     const petId = agentSessionPetId.trim();
     if (!petId) throw new Error('--pet-id must not be empty.');
     agentSession = { port, petId };
+  }
+  const serverPortValue = readOption(argv, '--server-port');
+  let serverPort: number | null = null;
+  if (serverPortValue !== undefined) {
+    const port = Number(serverPortValue);
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error('--server-port must be an integer from 1 to 65535.');
+    }
+    serverPort = port;
+  }
+  if (explicitEmbedHost && serverPort !== null) {
+    throw new Error(
+      '--embed-host and --server-port are mutually exclusive: the embedded Host replaces connecting to a running one.',
+    );
+  }
+  if (explicitEmbedHost && agentSession) {
+    throw new Error('--embed-host cannot be combined with --pet-port/--pet-id.');
+  }
+  if (serverPort !== null && agentSession) {
+    throw new Error('--server-port cannot be combined with --pet-port/--pet-id.');
   }
   const demo = {
     command: flags.has('--demo-command'),
@@ -63,19 +106,77 @@ export function parseTuiLaunchOptions(
     || smoke.review
     || smoke.transcript
     || hostSmoke;
+  const useDemoConnection = (smokeEnabled && !hostSmoke)
+    || demo.command
+    || demo.qa
+    || demo.review;
 
   return {
     showVersion: flags.has('--version'),
     agentSession,
+    serverPort,
+    embeddedHost: usesEmbeddedHost({
+      showVersion: flags.has('--version'),
+      useDemoConnection,
+      connectsToRunningHost: agentSession !== null || serverPort !== null || hostSmoke,
+    })
+      ? readEmbeddedHostTarget(env)
+      : null,
     demo,
     smoke,
     smokeEnabled,
     hostSmoke,
-    useDemoConnection: (smokeEnabled && !hostSmoke)
-      || demo.command
-      || demo.qa
-      || demo.review,
+    useDemoConnection,
   };
+}
+
+/**
+ * Embedded stdio is the default transport: it is the only one that needs no
+ * port, token, or separately started Host. Everything that selects another
+ * endpoint — a demo transport, a resident Pet, `--server-port`, or a host smoke
+ * written against an externally started Host — turns it off instead.
+ */
+function usesEmbeddedHost(options: {
+  showVersion: boolean;
+  useDemoConnection: boolean;
+  connectsToRunningHost: boolean;
+}) {
+  return !options.showVersion
+    && !options.useDemoConnection
+    && !options.connectsToRunningHost;
+}
+
+/**
+ * The launcher resolves the Host runtime and forwards it as an environment
+ * contract, so the terminal UI never has to guess where the local agent lives.
+ * Without it the flag falls back to the `pinpawo` executable on `PATH`.
+ */
+export function readEmbeddedHostTarget(
+  env: NodeJS.ProcessEnv = process.env,
+): TuiEmbeddedHostTarget {
+  const command = env.PINPAWO_EMBED_HOST_COMMAND?.trim();
+  return {
+    command: command || DEFAULT_EMBEDDED_HOST_COMMAND,
+    args: readEmbeddedHostArgs(env.PINPAWO_EMBED_HOST_ARGS),
+  };
+}
+
+function readEmbeddedHostArgs(value: string | undefined): string[] {
+  const raw = value?.trim();
+  if (!raw) return [...DEFAULT_EMBEDDED_HOST_ARGS];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('PINPAWO_EMBED_HOST_ARGS must be a JSON array of arguments.');
+  }
+  if (
+    !Array.isArray(parsed)
+    || parsed.some((item) => typeof item !== 'string' || item === '')
+  ) {
+    throw new Error('PINPAWO_EMBED_HOST_ARGS must be a JSON array of arguments.');
+  }
+  return parsed as string[];
 }
 
 function readOption(argv: readonly string[], option: string): string | undefined {

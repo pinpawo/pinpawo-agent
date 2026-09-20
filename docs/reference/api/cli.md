@@ -15,7 +15,7 @@
 | `pinpawo init` | Create local configuration and the example Capability. | `--dir <directory>`, `--force`, `--no-example-capability` |
 | `pinpawo setup` | Diagnose local model and runtime configuration. | `--workdir <directory>` |
 | `pinpawo server` / `pinpawo run` | Start the local Chat host. | `--workdir <directory>`, `--stdio` |
-| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, Chat-only `--workdir <directory>`, or paired `--pet-port <port>` and `--pet-id <petId>` |
+| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--embed-host`, Chat-only `--workdir <directory>`, `--server-port <port>`, or paired `--pet-port <port>` and `--pet-id <petId>` |
 | `pinpawo-studio` | Start the independent Studio Host. | `--workdir <directory>`, `--pet-port <port>` |
 | `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
@@ -33,11 +33,22 @@
 - `pinpawo-studio --pet-port` optionally fixes the resident Pet conversation listener;
   if omitted, Studio selects an available loopback port.
 - `pinpawo tui` starts the Chat/local-agent conversation client. It does not
-  connect to the Studio control plane or send Studio dispatch messages. The paired
-  `--pet-port` and `--pet-id` options instead select one resident Pet's local-agent
-  Agent Session endpoint. Pet connection mode does not accept `--workdir`: the Studio
-  Host already resolved and owns the resident Pet workdir. `--check` and `--qa` cannot
-  be used together.
+  connect to the Studio control plane or send Studio dispatch messages. By default
+  it starts its own local agent as a stdio child process, so no separately running
+  Host is needed. The launcher forwards the resolved Host runtime through
+  `PINPAWO_EMBED_HOST_COMMAND` and `PINPAWO_EMBED_HOST_ARGS`; when they are absent
+  the client falls back to `pinpawo` on `PATH`. The Host's stderr is appended to
+  `~/.pinpawo/logs/embedded-host.log`. Exiting the client ends the Host.
+- `pinpawo tui --server-port <port>` instead dials a local agent Chat server that
+  is already listening on that loopback port, using its bearer token and origin
+  check. `LOCAL_SERVER_PORT` supplies the default port for connection modes that do
+  not name one. An embedded Host cannot attach to a running Host, so
+  `--embed-host` is mutually exclusive with `--server-port`, `--pet-port`/`--pet-id`,
+  `--check`, and `--qa`; passing it only restates the default.
+- The paired `--pet-port` and `--pet-id` options select one resident Pet's
+  local-agent Agent Session endpoint instead. Pet connection mode does not accept
+  `--workdir` or `--server-port`: the Studio Host already resolved and owns the
+  resident Pet workdir. `--check` and `--qa` cannot be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
 

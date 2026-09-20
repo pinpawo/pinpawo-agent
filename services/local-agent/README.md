@@ -90,6 +90,7 @@ pinpawo server
 pinpawo run
 pinpawo server --stdio
 pinpawo tui
+pinpawo tui --server-port 3210
 pinpawo browser extension status
 pinpawo browser extension register --extension-id <id>
 pinpawo browser extension repair --extension-id <id>
@@ -115,9 +116,24 @@ package-local runtime path without entering terminal mode. It prints the v2
 version only after the selected bundle and external OpenTUI runtime load
 successfully.
 
-The TUI client connects to the separately running local host, so start
-`pinpawo run` first. `--workdir` selects the child client's working directory;
+By default the terminal client starts its own local agent as a stdio child
+process and speaks the same JSONL protocol over the pipe, so `pinpawo tui` needs
+no separately started Host. The launcher resolves the Host runtime and forwards it
+as `PINPAWO_EMBED_HOST_COMMAND` / `PINPAWO_EMBED_HOST_ARGS`; without them the
+client falls back to `pinpawo` on `PATH`. This default needs no port, auth token,
+or loopback origin check, and the Host's stderr is appended to
+`~/.pinpawo/logs/embedded-host.log` instead of the terminal. Quitting the client
+ends the Host, so this mode cannot attach to an already running Host.
+
+`pinpawo tui --server-port <port>` switches the client back to dialing a
+separately running Host instead, which is why it requires `pinpawo run` to be
+started first. `LOCAL_SERVER_PORT` supplies the default port for connection modes
+that do not name one. `--workdir` selects the child client's working directory;
 the host's canonical snapshot remains authoritative for the runtime workspace.
+
+Because one session has exactly one transport owner, `--embed-host` (which only
+restates the default) is mutually exclusive with `--server-port`,
+`--pet-port`/`--pet-id`, `--check`, and `--qa`.
 
 The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
 

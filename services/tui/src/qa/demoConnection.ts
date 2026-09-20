@@ -7,7 +7,7 @@ import {
   type BuiltinGlobalReviewPolicyMode,
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-session';
-import type { AgentHostConnectionFactory } from '../client/localHostConnection';
+import type { AgentHostConnectionFactory } from '../client/agentHostConnection';
 import {
   buildDemoQaEventSequence,
   createDemoQaHistory,

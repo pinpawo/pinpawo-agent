@@ -101,8 +101,10 @@ export class TuiSessionController {
       reconnectDelaysMs: options.reconnectDelaysMs?.length
         ? options.reconnectDelaysMs
         : DEFAULT_RECONNECT_DELAYS_MS,
-      snapshotTimeoutMs: options.snapshotTimeoutMs
-        ?? DEFAULT_SNAPSHOT_TIMEOUT_MS,
+      // `null` is an explicit "no timeout", so it must survive `??`.
+      snapshotTimeoutMs: options.snapshotTimeoutMs === undefined
+        ? DEFAULT_SNAPSHOT_TIMEOUT_MS
+        : options.snapshotTimeoutMs,
       setTimer,
       clearTimer,
       onConnection: (connection, detail) => {

@@ -12,6 +12,7 @@ type LocalAgentCliHandlers = {
     workdir?: string;
     check: boolean;
     qa: boolean;
+    embedHost: boolean;
     agentSessionPort?: number;
     agentSessionPetId?: string;
   }) => Promise<void> | void;
@@ -100,12 +101,16 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
     .description('Start the interactive terminal UI')
     .option('--check', 'verify the terminal runtime without entering terminal mode')
     .option('--qa', 'run the deterministic terminal QA scenario')
+    .option('--embed-host', 'start the local agent as a stdio child process of the terminal UI (default)')
+    .option('--server-port <port>', 'connect to a local agent Chat server already listening on this loopback port')
     .option('--workdir <directory>', 'agent working directory for runtime state and relative tool paths')
     .option('--pet-port <port>', 'connect to a resident Pet listener')
     .option('--pet-id <petId>', 'resident Pet selected for the connection')
     .action(async (options: {
       check?: boolean;
       qa?: boolean;
+      embedHost?: boolean;
+      serverPort?: string;
       workdir?: string;
       petPort?: string;
       petId?: string;
@@ -113,11 +118,46 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       if (options.check && options.qa) {
         throw new Error('Choose either --check or --qa, not both.');
       }
+      const embedHost = options.embedHost ?? false;
       const workdir = options.workdir?.trim()
         ? resolveWorkdirOption(options.workdir)
         : undefined;
       if ((options.petPort === undefined) !== (options.petId === undefined)) {
         throw new Error('Provide --pet-port and --pet-id together.');
+      }
+      const serverPort = options.serverPort === undefined
+        ? undefined
+        : Number(options.serverPort);
+      if (
+        serverPort !== undefined
+        && (!Number.isInteger(serverPort) || serverPort < 1 || serverPort > 65_535)
+      ) {
+        throw new Error('--server-port must be an integer from 1 to 65535.');
+      }
+      if (embedHost && options.petPort !== undefined) {
+        throw new Error(
+          'Do not provide --embed-host with --pet-port/--pet-id; embedded mode starts its own local agent instead of a resident Pet.',
+        );
+      }
+      if (embedHost && serverPort !== undefined) {
+        throw new Error(
+          'Do not provide --embed-host with --server-port; embedded mode starts its own local agent instead of connecting to a running one.',
+        );
+      }
+      if (serverPort !== undefined && options.petPort !== undefined) {
+        throw new Error(
+          'Do not provide --server-port with --pet-port/--pet-id; each selects a different running local agent.',
+        );
+      }
+      if (embedHost && (options.check || options.qa)) {
+        throw new Error(
+          'Do not provide --embed-host with --check or --qa; neither mode starts a local agent.',
+        );
+      }
+      if (serverPort !== undefined && (options.check || options.qa)) {
+        throw new Error(
+          'Do not provide --server-port with --check or --qa; neither mode connects to a local agent.',
+        );
       }
       if (workdir && options.petPort !== undefined) {
         throw new Error(
@@ -143,6 +183,8 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
         workdir,
         check: options.check ?? false,
         qa: options.qa ?? false,
+        embedHost,
+        ...(serverPort !== undefined ? { serverPort } : {}),
         ...(agentSessionPort !== undefined ? { agentSessionPort } : {}),
         ...(agentSessionPetId ? { agentSessionPetId } : {}),
       });

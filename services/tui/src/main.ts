@@ -12,6 +12,8 @@ import {
   removeLastAttachment,
 } from './attachments/attachmentModel';
 import { handleAttachmentPasteEvent } from './attachments/attachmentPaste';
+import { createEmbeddedHostConnectionFactory } from './client/embeddedHostConnection';
+import { createEmbeddedHostDiagnosticsSink } from './client/embeddedHostDiagnostics';
 import {
   createLocalHostConnectionFactory,
   readLocalServerPort,
@@ -186,14 +188,22 @@ if (launchOptions.showVersion) {
 }
 
 const agentSession = launchOptions.agentSession;
-const port = agentSession?.port ?? readLocalServerPort();
+const embeddedHost = launchOptions.embeddedHost;
+/** Host stderr goes to a log file; the terminal belongs to OpenTUI. */
+const embeddedHostDiagnostics = createEmbeddedHostDiagnosticsSink();
+// `--server-port` selects a running Host directly; `LOCAL_SERVER_PORT` only
+// supplies the default for the connect paths that do not name a port.
+const port = agentSession?.port ?? launchOptions.serverPort ?? readLocalServerPort();
 const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
   ? {
       localAgentVersion: 'demo',
     }
-  : agentSession
+  : agentSession || embeddedHost
+    // A Pet-scoped Agent Session and an embedded Host both skip the loopback
+    // `/runtime` probe: the former is observed through its own route, and the
+    // latter does not start an HTTP side channel at all.
     ? { localAgentVersion: null }
-  : await loadLocalHostMetadata({ port });
+    : await loadLocalHostMetadata({ port });
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
   targetFps: 60,
@@ -248,7 +258,9 @@ const status = new TextRenderable(renderer, {
   id: 'status',
   content: agentSession
     ? `agent-session ${agentSession.petId} :${port}`
-    : `local-agent :${port}`,
+    : embeddedHost
+      ? 'local-agent stdio'
+      : `local-agent :${port}`,
   fg: '#8a8a8a',
   bg: RGBA.defaultBackground(),
   height: 2,
@@ -286,18 +298,29 @@ let timelineReplayPending = false;
 let timelineResizeReplayTimer: ReturnType<typeof setTimeout> | null = null;
 let timelineWidth = renderer.width;
 let taskPauseMode: TaskPauseMode = 'ordinary';
-const controller = new TuiSessionController({
-  connectionFactory: launchOptions.useDemoConnection
-    ? createDemoConnectionFactory({
-        review: smoke.review || demo.review,
-        qa: demo.qa,
+const connectionFactory = launchOptions.useDemoConnection
+  ? createDemoConnectionFactory({
+      review: smoke.review || demo.review,
+      qa: demo.qa,
+    })
+  : embeddedHost
+    ? createEmbeddedHostConnectionFactory({
+        command: embeddedHost.command,
+        args: embeddedHost.args,
+        cwd: process.cwd(),
+        onDiagnostics: embeddedHostDiagnostics,
       })
     : createLocalHostConnectionFactory({
         port,
         ...(agentSession
           ? { path: `/agent-session/pets/${encodeURIComponent(agentSession.petId)}` }
           : {}),
-      }),
+      });
+const controller = new TuiSessionController({
+  connectionFactory,
+  // Embedded stdio cannot reconnect: disconnecting terminates the Host, so a
+  // synchronization timeout would restart a cold Host instead of re-dialing.
+  ...(embeddedHost ? { snapshotTimeoutMs: null } : {}),
   onManualSnapshotApplied: () => {
     timelineReplayPending = true;
   },

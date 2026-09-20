@@ -156,3 +156,47 @@ function snapshot(requestId: string) {
     }),
   };
 }
+
+test('a null snapshot timeout keeps a slow Host connected', () => {
+  const timers: Array<() => void> = [];
+  let connection!: FakeConnection;
+  const connections: Array<readonly [string, string | undefined]> = [];
+  const transport = new SessionTransportCoordinator({
+    connectionFactory: (handlers) => {
+      connection = new FakeConnection(handlers);
+      return connection;
+    },
+    requestIdFactory: () => 'startup',
+    reconnectDelaysMs: [10],
+    snapshotTimeoutMs: null,
+    setTimer: (callback) => {
+      timers.push(callback);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    },
+    clearTimer: () => undefined,
+    onConnection: (state, detail) => {
+      connections.push([state, detail]);
+    },
+    onSnapshot: () => undefined,
+    onMessage: () => undefined,
+    onDisconnected: () => undefined,
+  });
+
+  transport.start();
+  connection.open();
+  assert.deepEqual(connection.sent.at(-1), {
+    type: 'session.snapshot.get',
+    requestId: 'startup',
+  });
+  // Embedded stdio disconnects the Host on teardown, so a synchronization
+  // timeout would restart a cold Host instead of re-dialing one.
+  assert.deepEqual(timers, []);
+  assert.equal(connection.connected, true);
+
+  connection.receive(snapshot('startup'));
+  assert.deepEqual(connections, [
+    ['connecting', 'connecting to local-agent'],
+    ['connecting', 'synchronizing session'],
+  ]);
+  transport.stop();
+});

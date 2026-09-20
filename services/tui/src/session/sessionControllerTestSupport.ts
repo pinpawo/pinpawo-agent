@@ -6,8 +6,8 @@ import {
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnection,
-  LocalHostConnectionHandlers,
-} from '../client/localHostConnection';
+  AgentHostConnectionHandlers,
+} from '../client/agentHostConnection';
 import type { TuiSessionController } from './sessionController';
 
 export class FakeConnection implements AgentHostConnection {
@@ -16,7 +16,7 @@ export class FakeConnection implements AgentHostConnection {
   failNextSend = false;
   sent: AgentClientMessage[] = [];
 
-  constructor(readonly handlers: LocalHostConnectionHandlers) {}
+  constructor(readonly handlers: AgentHostConnectionHandlers) {}
 
   connect() {
     this.connectCount += 1;

@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseTuiLaunchOptions } from './launchOptions';
+import {
+  parseTuiLaunchOptions,
+  readEmbeddedHostTarget,
+} from './launchOptions';
 
 test('launch options keep production mode free of demo transports', () => {
   assert.deepEqual(parseTuiLaunchOptions([]), {
     showVersion: false,
     agentSession: null,
+    embeddedHost: null,
     demo: {
       command: false,
       qa: false,
@@ -62,4 +66,54 @@ test('launch options expose interactive demos and version mode', () => {
   assert.equal(options.demo.command, true);
   assert.equal(options.demo.qa, true);
   assert.equal(options.useDemoConnection, true);
+});
+
+test('launch options take the embedded Host command from the launcher contract', () => {
+  const options = parseTuiLaunchOptions(['--embed-host'], {
+    PINPAWO_EMBED_HOST_COMMAND: '/usr/local/bin/node',
+    PINPAWO_EMBED_HOST_ARGS: JSON.stringify([
+      '/app/node_modules/pinpawo/dist/index.js',
+      'run',
+      '--stdio',
+    ]),
+  });
+
+  assert.deepEqual(options.embeddedHost, {
+    command: '/usr/local/bin/node',
+    args: ['/app/node_modules/pinpawo/dist/index.js', 'run', '--stdio'],
+  });
+  assert.equal(options.agentSession, null);
+  assert.equal(options.useDemoConnection, false);
+});
+
+test('launch options leave the embedded Host off without the flag', () => {
+  const options = parseTuiLaunchOptions([], {
+    PINPAWO_EMBED_HOST_COMMAND: '/usr/local/bin/node',
+  });
+  assert.equal(options.embeddedHost, null);
+});
+
+test('embedded Host target falls back to the pinpawo executable on PATH', () => {
+  assert.deepEqual(readEmbeddedHostTarget({}), {
+    command: 'pinpawo',
+    args: ['run', '--stdio'],
+  });
+  assert.deepEqual(readEmbeddedHostTarget({
+    PINPAWO_EMBED_HOST_COMMAND: '  ',
+    PINPAWO_EMBED_HOST_ARGS: '  ',
+  }), {
+    command: 'pinpawo',
+    args: ['run', '--stdio'],
+  });
+});
+
+test('embedded Host arguments reject a value the launcher cannot have written', () => {
+  assert.throws(
+    () => readEmbeddedHostTarget({ PINPAWO_EMBED_HOST_ARGS: 'run --stdio' }),
+    /PINPAWO_EMBED_HOST_ARGS must be a JSON array/,
+  );
+  assert.throws(
+    () => readEmbeddedHostTarget({ PINPAWO_EMBED_HOST_ARGS: '["run",7]' }),
+    /PINPAWO_EMBED_HOST_ARGS must be a JSON array/,
+  );
 });

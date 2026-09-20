@@ -4,7 +4,7 @@ import type {
 } from '@pinpawo/agent-session';
 import type {
   AgentHostConnectionFactory,
-} from '../client/localHostConnection';
+} from '../client/agentHostConnection';
 import type { SessionSnapshotReason } from './sessionSnapshot';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
@@ -85,7 +85,8 @@ export type TuiSessionControllerOptions = {
   now?: () => number;
   requestIdFactory?: () => string;
   reconnectDelaysMs?: readonly number[];
-  snapshotTimeoutMs?: number;
+  /** `null` disables the timeout; see `SessionTransportCoordinatorOptions`. */
+  snapshotTimeoutMs?: number | null;
   sessionCommandTimeoutMs?: number;
   /** Manual compaction includes a model call and therefore needs a longer timeout. */
   sessionCompactTimeoutMs?: number;

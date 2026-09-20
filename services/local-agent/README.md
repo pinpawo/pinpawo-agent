@@ -90,6 +90,7 @@ pinpawo server
 pinpawo run
 pinpawo server --stdio
 pinpawo tui
+pinpawo tui --embed-host
 pinpawo browser extension status
 pinpawo browser extension register --extension-id <id>
 pinpawo browser extension repair --extension-id <id>
@@ -118,6 +119,16 @@ successfully.
 The TUI client connects to the separately running local host, so start
 `pinpawo run` first. `--workdir` selects the child client's working directory;
 the host's canonical snapshot remains authoritative for the runtime workspace.
+
+`pinpawo tui --embed-host` reverses that ownership: the terminal client starts
+its own local agent as a stdio child process and speaks the same JSONL protocol
+over the pipe. The launcher resolves the Host runtime and forwards it as
+`PINPAWO_EMBED_HOST_COMMAND` / `PINPAWO_EMBED_HOST_ARGS`; without them the client
+falls back to `pinpawo` on `PATH`. Embedded mode needs no port, auth token, or
+loopback origin check, and the Host's stderr is appended to
+`~/.pinpawo/logs/embedded-host.log` instead of the terminal. Quitting the client
+ends the Host, so this mode is mutually exclusive with `--pet-port`/`--pet-id`,
+`--check`, and `--qa`, and it cannot reattach to an already running Host.
 
 The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
 

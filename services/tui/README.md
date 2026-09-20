@@ -118,6 +118,20 @@ active Session before enabling submission and will reconnect with bounded
 backoff if the host disappears. After the fast retry sequence, it keeps polling
 at the capped interval until the host returns and a fresh snapshot is applied.
 
+`pinpawo tui --embed-host` swaps that transport for a child process: the client
+starts its own local agent with piped stdio and speaks the same JSONL protocol
+over the pipe, so no port, bearer token, or loopback origin check is involved.
+The transport contract (`AgentHostConnection`) is unchanged and the session layer
+is unaware of the swap; only the connection implementation differs. Three
+consequences are worth knowing:
+
+- the Host's stdout carries protocol frames only and its stderr is appended to
+  `~/.pinpawo/logs/embedded-host.log`, because the terminal belongs to OpenTUI;
+- disconnecting ends the Host, so there is no reconnect — a new `connect()`
+  starts a new Host process, and the synchronization timeout is disabled;
+- Host-level facts that only the HTTP surface reports degrade: the welcome block
+  shows `local-agent unknown`.
+
 Production client controls:
 
 - Enter submits the composer; Shift+Enter inserts a newline when the terminal

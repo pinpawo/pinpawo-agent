@@ -1,6 +1,17 @@
+export type TuiEmbeddedHostTarget = {
+  command: string;
+  args: string[];
+};
+
 export type TuiLaunchOptions = {
   showVersion: boolean;
   agentSession: { port: number; petId: string } | null;
+  /**
+   * Host command for embedded stdio mode, where the terminal UI starts and owns
+   * the Host child process. `pinpawo tui --embed-host` already rejects the
+   * combinations that cannot carry an embedded Host (Pet mode, check, QA).
+   */
+  embeddedHost: TuiEmbeddedHostTarget | null;
   demo: {
     command: boolean;
     qa: boolean;
@@ -21,8 +32,12 @@ export type TuiLaunchOptions = {
   useDemoConnection: boolean;
 };
 
+const DEFAULT_EMBEDDED_HOST_COMMAND = 'pinpawo';
+const DEFAULT_EMBEDDED_HOST_ARGS = ['run', '--stdio'];
+
 export function parseTuiLaunchOptions(
   argv: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
 ): TuiLaunchOptions {
   const flags = new Set(argv);
   const agentSessionPort = readOption(argv, '--pet-port');
@@ -67,6 +82,9 @@ export function parseTuiLaunchOptions(
   return {
     showVersion: flags.has('--version'),
     agentSession,
+    embeddedHost: flags.has('--embed-host')
+      ? readEmbeddedHostTarget(env)
+      : null,
     demo,
     smoke,
     smokeEnabled,
@@ -76,6 +94,39 @@ export function parseTuiLaunchOptions(
       || demo.qa
       || demo.review,
   };
+}
+
+/**
+ * The launcher resolves the Host runtime and forwards it as an environment
+ * contract, so the terminal UI never has to guess where the local agent lives.
+ * Without it the flag falls back to the `pinpawo` executable on `PATH`.
+ */
+export function readEmbeddedHostTarget(
+  env: NodeJS.ProcessEnv = process.env,
+): TuiEmbeddedHostTarget {
+  const command = env.PINPAWO_EMBED_HOST_COMMAND?.trim();
+  return {
+    command: command || DEFAULT_EMBEDDED_HOST_COMMAND,
+    args: readEmbeddedHostArgs(env.PINPAWO_EMBED_HOST_ARGS),
+  };
+}
+
+function readEmbeddedHostArgs(value: string | undefined): string[] {
+  const raw = value?.trim();
+  if (!raw) return [...DEFAULT_EMBEDDED_HOST_ARGS];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('PINPAWO_EMBED_HOST_ARGS must be a JSON array of arguments.');
+  }
+  if (
+    !Array.isArray(parsed)
+    || parsed.some((item) => typeof item !== 'string' || item === '')
+  ) {
+    throw new Error('PINPAWO_EMBED_HOST_ARGS must be a JSON array of arguments.');
+  }
+  return parsed as string[];
 }
 
 function readOption(argv: readonly string[], option: string): string | undefined {

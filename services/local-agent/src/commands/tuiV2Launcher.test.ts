@@ -6,6 +6,7 @@ import {
   buildTuiV2LaunchArgs,
   findLocalAgentPackageRoot,
   parseTuiV2DistributionManifest,
+  resolveEmbeddedHostEnv,
   resolveTuiV2LaunchPlan,
   runTuiV2,
   verifyTuiV2DistributionEntry,
@@ -224,9 +225,17 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
     '--pet-id',
     'planner',
   ]);
+  assert.deepEqual(buildTuiV2LaunchArgs(plan, { embedHost: true }), [
+    ...plan.args,
+    '--embed-host',
+  ]);
   assert.throws(
     () => buildTuiV2LaunchArgs(plan, { check: true, qa: true }),
     /mutually exclusive/,
+  );
+  assert.throws(
+    () => buildTuiV2LaunchArgs(plan, { check: true, embedHost: true }),
+    /does not apply to check or QA mode/,
   );
 });
 
@@ -335,6 +344,76 @@ test('package root discovery accepts source and bundled module locations', () =>
     exists,
     read,
   ), LOCAL_AGENT_ROOT);
+});
+
+test('embedded host mode forwards the resolved Host runtime to the terminal UI', () => {
+  const distEntry = join(LOCAL_AGENT_ROOT, 'dist', 'index.js');
+  assert.deepEqual(resolveEmbeddedHostEnv({
+    env: {},
+    localAgentRoot: LOCAL_AGENT_ROOT,
+    execPath: '/usr/local/bin/node',
+    argv: ['/usr/local/bin/node', distEntry, 'tui'],
+    execArgv: [],
+    pathExists: (path) => path === distEntry,
+  }), {
+    command: '/usr/local/bin/node',
+    args: [distEntry, 'run', '--stdio'],
+  });
+});
+
+test('embedded host mode runs a source checkout with the launcher loader', () => {
+  const sourceEntry = join(LOCAL_AGENT_ROOT, 'src', 'index.ts');
+  assert.deepEqual(resolveEmbeddedHostEnv({
+    env: {},
+    localAgentRoot: LOCAL_AGENT_ROOT,
+    execPath: '/usr/local/bin/node',
+    argv: ['/usr/local/bin/node', sourceEntry, 'tui'],
+    execArgv: ['--import', 'tsx'],
+    pathExists: (path) => path === sourceEntry,
+  }), {
+    command: '/usr/local/bin/node',
+    args: ['--import', 'tsx', sourceEntry, 'run', '--stdio'],
+  });
+});
+
+test('embedded host mode prefers a built entry over an unbuilt source entry', () => {
+  const distEntry = join(LOCAL_AGENT_ROOT, 'dist', 'index.js');
+  const sourceEntry = join(LOCAL_AGENT_ROOT, 'src', 'index.ts');
+  const paths = new Set([distEntry, sourceEntry]);
+  assert.deepEqual(resolveEmbeddedHostEnv({
+    env: {},
+    localAgentRoot: LOCAL_AGENT_ROOT,
+    execPath: '/usr/local/bin/node',
+    argv: ['/usr/local/bin/node', sourceEntry, 'tui'],
+    execArgv: ['--import', 'tsx'],
+    pathExists: (path) => paths.has(path),
+  }), {
+    command: '/usr/local/bin/node',
+    args: [distEntry, 'run', '--stdio'],
+  });
+});
+
+test('embedded host mode defers to the PATH fallback when no runtime can be resolved', () => {
+  assert.equal(resolveEmbeddedHostEnv({
+    env: {},
+    localAgentRoot: LOCAL_AGENT_ROOT,
+    execPath: '/usr/local/bin/node',
+    // A TypeScript entry cannot run under plain Node without its loader.
+    argv: ['/usr/local/bin/node', '/workspace/src/index.ts', 'tui'],
+    execArgv: [],
+    pathExists: (path) => path.endsWith('.ts'),
+  }), null);
+});
+
+test('embedded host mode never overrides an operator-provided Host command', () => {
+  assert.equal(resolveEmbeddedHostEnv({
+    env: { PINPAWO_EMBED_HOST_COMMAND: 'custom-host' },
+    localAgentRoot: LOCAL_AGENT_ROOT,
+    execPath: '/usr/local/bin/node',
+    argv: ['/usr/local/bin/node'],
+    execArgv: [],
+    pathExists: () => true,
+  }), null);
 });
 
 test('v2 launcher rejects an invalid child working directory before spawning', async () => {

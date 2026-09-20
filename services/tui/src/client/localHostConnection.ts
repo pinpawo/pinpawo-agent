@@ -4,30 +4,22 @@ import { resolve } from 'node:path';
 import {
   parseAgentServerMessage,
   type AgentClientMessage,
-  type AgentServerMessage,
 } from '@pinpawo/agent-session';
+import type {
+  AgentHostConnection,
+  AgentHostConnectionFactory,
+  AgentHostConnectionHandlers,
+} from './agentHostConnection';
+
+export type {
+  AgentHostConnection,
+  AgentHostConnectionFactory,
+  AgentHostConnectionHandlers,
+} from './agentHostConnection';
 
 const DEFAULT_LOCAL_SERVER_PORT = 3210;
 const DEFAULT_TOKEN_PATH = resolve(homedir(), '.pinpawo', 'local-server-token');
 const SOCKET_OPEN = 1;
-
-export type LocalHostConnectionHandlers = {
-  onOpen: () => void;
-  onMessage: (message: AgentServerMessage) => void;
-  onClose: () => void;
-  onError: (error: Error) => void;
-};
-
-export type AgentHostConnection = {
-  connect: () => void;
-  disconnect: () => void;
-  send: (message: AgentClientMessage) => boolean;
-  isConnected: () => boolean;
-};
-
-export type AgentHostConnectionFactory = (
-  handlers: LocalHostConnectionHandlers,
-) => AgentHostConnection;
 
 type SocketEvent = {
   data?: unknown;
@@ -81,7 +73,7 @@ export class LocalHostConnection implements AgentHostConnection {
   private removeSocketListeners: (() => void) | null = null;
 
   constructor(
-    private readonly handlers: LocalHostConnectionHandlers,
+    private readonly handlers: AgentHostConnectionHandlers,
     private readonly options: LocalHostConnectionOptions = {},
   ) {
     this.tokenProvider = options.tokenProvider ?? (() => readLocalServerToken());

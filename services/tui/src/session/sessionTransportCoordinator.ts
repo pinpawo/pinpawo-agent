@@ -6,7 +6,7 @@ import type {
 import type {
   AgentHostConnection,
   AgentHostConnectionFactory,
-} from '../client/localHostConnection';
+} from '../client/agentHostConnection';
 import type {
   TuiConnectionStatus,
 } from './sessionControllerTypes';
@@ -23,7 +23,12 @@ export type SessionTransportCoordinatorOptions = {
   connectionFactory: AgentHostConnectionFactory;
   requestIdFactory: () => string;
   reconnectDelaysMs: readonly number[];
-  snapshotTimeoutMs: number;
+  /**
+   * `null` disables the synchronization timeout. A transport whose disconnect
+   * also terminates the Host (embedded stdio) would otherwise turn a slow cold
+   * start into a kill/restart loop.
+   */
+  snapshotTimeoutMs: number | null;
   setTimer: (callback: () => void, delayMs: number) => TimerHandle;
   clearTimer: (timer: TimerHandle) => void;
   onConnection: (
@@ -178,7 +183,7 @@ export class SessionTransportCoordinator {
       }
       return;
     }
-    if (!isCompletionSnapshotReason(reason)) {
+    if (!isCompletionSnapshotReason(reason) && this.options.snapshotTimeoutMs !== null) {
       this.clearSnapshotTimer();
       this.snapshotTimer = this.options.setTimer(() => {
         this.snapshotTimer = null;

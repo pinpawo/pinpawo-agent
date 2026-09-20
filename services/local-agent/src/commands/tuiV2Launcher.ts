@@ -7,6 +7,7 @@ import {
 import { spawn } from 'node:child_process';
 import {
   dirname,
+  isAbsolute,
   join,
   resolve,
 } from 'node:path';
@@ -39,6 +40,8 @@ export type RunTuiV2Options = {
   workdir?: string;
   check?: boolean;
   qa?: boolean;
+  /** Let the terminal UI start this local agent as its own stdio child. */
+  embedHost?: boolean;
   agentSessionPort?: number;
   agentSessionPetId?: string;
 };
@@ -302,7 +305,7 @@ export async function runTuiV2(
     fileURLToPath(import.meta.url),
   );
   const plan = resolveTuiV2LaunchPlan({ localAgentRoot });
-  await spawnTuiV2(plan, options);
+  await spawnTuiV2(plan, options, localAgentRoot);
 }
 
 export function findLocalAgentPackageRoot(
@@ -332,13 +335,15 @@ export function findLocalAgentPackageRoot(
 async function spawnTuiV2(
   plan: TuiV2LaunchPlan,
   options: RunTuiV2Options,
+  localAgentRoot: string,
 ) {
   const cwd = options.workdir ?? process.cwd();
   const args = buildTuiV2LaunchArgs(plan, options);
+  const env = buildTuiV2LaunchEnv(options, localAgentRoot);
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(plan.command, args, {
       cwd,
-      env: process.env,
+      env,
       stdio: 'inherit',
     });
     child.once('error', (error) => {
@@ -376,16 +381,22 @@ export function buildTuiV2LaunchArgs(
   plan: TuiV2LaunchPlan,
   options: Pick<
     RunTuiV2Options,
-    'check' | 'qa' | 'agentSessionPort' | 'agentSessionPetId'
+    'check' | 'qa' | 'embedHost' | 'agentSessionPort' | 'agentSessionPetId'
   > = {},
 ) {
   if (options.check && options.qa) {
     throw new Error('OpenTUI v2 check and QA modes are mutually exclusive.');
   }
+  if (options.embedHost && (options.check || options.qa)) {
+    throw new Error(
+      'OpenTUI v2 embedded host mode does not apply to check or QA mode.',
+    );
+  }
   return [
     ...plan.args,
     ...(options.check ? ['--version'] : []),
     ...(options.qa ? ['--demo-qa'] : []),
+    ...(options.embedHost ? ['--embed-host'] : []),
     ...(options.agentSessionPort !== undefined
       ? ['--pet-port', options.agentSessionPort.toString()]
       : []),
@@ -393,6 +404,81 @@ export function buildTuiV2LaunchArgs(
       ? ['--pet-id', options.agentSessionPetId]
       : []),
   ];
+}
+
+export type EmbeddedHostEnvOptions = {
+  env: NodeJS.ProcessEnv;
+  /** Package root of the running local agent, already resolved by the launcher. */
+  localAgentRoot: string;
+  execPath: string;
+  argv: readonly string[];
+  execArgv: readonly string[];
+  pathExists?: (path: string) => boolean;
+};
+
+/**
+ * Embedded stdio mode makes the terminal UI start a Host it cannot resolve by
+ * itself: it is a Bun bundle with no knowledge of the local agent package
+ * layout. The launcher knows both, so it forwards the command instead.
+ */
+export function resolveEmbeddedHostEnv(
+  options: EmbeddedHostEnvOptions,
+): { command: string; args: string[] } | null {
+  // An operator-provided contract wins; the launcher must not second-guess it.
+  if (options.env.PINPAWO_EMBED_HOST_COMMAND?.trim()) return null;
+  const entry = resolveEmbeddedHostEntry(options);
+  if (!entry) return null;
+  const needsLoader = !/\.[cm]?js$/.test(entry);
+  return {
+    command: options.execPath,
+    args: [
+      ...(needsLoader ? options.execArgv : []),
+      entry,
+      'run',
+      '--stdio',
+    ],
+  };
+}
+
+function buildTuiV2LaunchEnv(
+  options: RunTuiV2Options,
+  localAgentRoot: string,
+) {
+  if (!options.embedHost) return process.env;
+  const target = resolveEmbeddedHostEnv({
+    env: process.env,
+    localAgentRoot,
+    execPath: process.execPath,
+    argv: process.argv,
+    execArgv: process.execArgv,
+  });
+  if (!target) return process.env;
+  return {
+    ...process.env,
+    PINPAWO_EMBED_HOST_COMMAND: target.command,
+    PINPAWO_EMBED_HOST_ARGS: JSON.stringify(target.args),
+  };
+}
+
+function resolveEmbeddedHostEntry(options: EmbeddedHostEnvOptions) {
+  const pathExists = options.pathExists ?? existsSync;
+  return hostEntryCandidates(options).find((candidate) => (
+    pathExists(candidate)
+    && (/\.[cm]?js$/.test(candidate) || options.execArgv.length > 0)
+  )) ?? null;
+}
+
+/**
+ * A built distribution runs under plain Node. A source checkout only runs with
+ * the loader its own launcher was started with, and an installed layout has
+ * both the bundle and the bin shim pointing at the same `dist/index.js`.
+ */
+function hostEntryCandidates(options: EmbeddedHostEnvOptions) {
+  return [
+    join(options.localAgentRoot, 'dist', 'index.js'),
+    options.argv[1]?.trim() ?? '',
+    join(options.localAgentRoot, 'src', 'index.ts'),
+  ].filter((candidate) => isAbsolute(candidate));
 }
 
 function signalExitCode(signal: NodeJS.Signals | null) {

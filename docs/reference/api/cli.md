@@ -15,7 +15,7 @@
 | `pinpawo init` | Create local configuration and the example Capability. | `--dir <directory>`, `--force`, `--no-example-capability` |
 | `pinpawo setup` | Diagnose local model and runtime configuration. | `--workdir <directory>` |
 | `pinpawo server` / `pinpawo run` | Start the local Chat host. | `--workdir <directory>`, `--stdio` |
-| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, Chat-only `--workdir <directory>`, or paired `--pet-port <port>` and `--pet-id <petId>` |
+| `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--embed-host`, Chat-only `--workdir <directory>`, or paired `--pet-port <port>` and `--pet-id <petId>` |
 | `pinpawo-studio` | Start the independent Studio Host. | `--workdir <directory>`, `--pet-port <port>` |
 | `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
@@ -38,6 +38,14 @@
   Agent Session endpoint. Pet connection mode does not accept `--workdir`: the Studio
   Host already resolved and owns the resident Pet workdir. `--check` and `--qa` cannot
   be used together.
+- `pinpawo tui --embed-host` makes the terminal client start its own local agent
+  as a stdio child process instead of connecting to a separately running one. The
+  launcher forwards the resolved Host runtime through `PINPAWO_EMBED_HOST_COMMAND`
+  and `PINPAWO_EMBED_HOST_ARGS`; when they are absent the client falls back to
+  `pinpawo` on `PATH`. The Host's stderr is appended to
+  `~/.pinpawo/logs/embedded-host.log`. Exiting the client ends the Host, so the
+  flag is mutually exclusive with `--pet-port`/`--pet-id`, `--check`, and `--qa`,
+  and it cannot attach to an already running Host.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
 

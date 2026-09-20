@@ -71,8 +71,9 @@ function launch(
     ...smokeOverrides,
   };
   return {
-  showVersion: false,
-  agentSession: null,
+    showVersion: false,
+    agentSession: null,
+    embeddedHost: null,
     demo: {
       command: false,
       qa: false,

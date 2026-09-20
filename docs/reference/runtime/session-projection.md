@@ -1,8 +1,8 @@
 # Local-agent session projection
 
-> **Current authority for this topic.** This document is the canonical contract.
-> The synthesized, navigable knowledge layer over it lives at
-> [`../../wiki/local-agent-session-projection.md`](../../wiki/local-agent-session-projection.md).
+> **Current authority for this topic.** This document is the canonical contract for
+> the topic; the synthesized wiki page that used to summarize it was removed with
+> `docs/wiki/`.
 >
 > **Audience:** client, transport, and local-host implementers. Start with
 > [Core Concepts](../../concepts/core-concepts.md) for the distinction between checkpoints,

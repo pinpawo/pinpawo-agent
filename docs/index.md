@@ -74,10 +74,9 @@ defines how Studio consumes dispatch and composes its process. Together they mak
 dispatch one-way, leave active-thread/continuation ownership in Agent Session,
 and give conversation non-preemptive scheduling priority.
 
-## Documentation maintenance and future wiki ingest
+## Documentation maintenance
 
-`docs/` is the source-document layer. The synthesized
-[documentation wiki](wiki/index.md) and its [maintenance log](log.md) remain a
-later ingest layer and are intentionally unchanged by this reorganization. See
-[Documentation Wiki Guidelines](AGENTS.md) before ingesting into `wiki/` or
-modifying `log.md`.
+`docs/` is the source-document layer. The synthesized wiki under `docs/wiki/` was
+removed as unmaintained; the append-only [maintenance log](log.md) is kept for the
+next ingest. See [Documentation Wiki Guidelines](AGENTS.md) before rebuilding the
+wiki or modifying `log.md`.

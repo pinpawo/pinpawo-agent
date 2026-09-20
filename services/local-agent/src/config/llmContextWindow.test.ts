@@ -4,6 +4,7 @@ import { inferLlmContextWindowTokens } from './llmContextWindow';
 
 test('inferLlmContextWindowTokens covers mainstream model families', () => {
   assert.equal(inferLlmContextWindowTokens('deepseek-v4-pro'), 1_000_000);
+  assert.equal(inferLlmContextWindowTokens('deepseek-flash'), 1_000_000);
   assert.equal(inferLlmContextWindowTokens('gpt-5.5'), 1_000_000);
   assert.equal(inferLlmContextWindowTokens('gpt-5.4-mini'), 400_000);
   assert.equal(inferLlmContextWindowTokens('gpt-4.1-mini'), 1_047_576);

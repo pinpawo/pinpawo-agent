@@ -6,6 +6,7 @@ import {
   httpFetchTool,
   inferFilename,
   sanitizeFilename,
+  normalizeHttpFetchAuthorizationInput,
 } from './networkTools';
 import { createBashToolkit } from './index';
 
@@ -111,4 +112,27 @@ test('bash toolkit external access policy reviews configured network calls', asy
     downloadReview && 'schemaVersion' in downloadReview ? downloadReview.options.map((option) => option.id) : [],
     ['approve', 'approve-and-authorize-thread', 'reject', 'respond'],
   );
+});
+
+test('http_fetch authorization covers an origin but not a new method', () => {
+  const key = (input: unknown) => JSON.stringify(
+    normalizeHttpFetchAuthorizationInput(input),
+  );
+  // One approval should cover the rest of the host: re-reviewing every path is
+  // what pushed models to the unreviewed browser toolkit instead.
+  assert.equal(
+    key({ url: 'https://weather.com.cn/ningbo' }),
+    key({ url: 'https://weather.com.cn/hangzhou?day=1' }),
+  );
+  // A grant must not carry a request body it never saw.
+  assert.notEqual(
+    key({ url: 'https://api.example.com/v1', method: 'GET' }),
+    key({ url: 'https://api.example.com/v1', method: 'POST' }),
+  );
+  assert.notEqual(
+    key({ url: 'https://weather.com.cn/ningbo' }),
+    key({ url: 'https://evil.example/ningbo' }),
+  );
+  // Unparsable URLs must stay distinct rather than share one key.
+  assert.notEqual(key({ url: 'not-a-url' }), key({ url: 'also-bad' }));
 });

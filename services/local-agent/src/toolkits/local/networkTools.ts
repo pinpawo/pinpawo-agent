@@ -154,7 +154,7 @@ export const httpFetchTool = tool(
   },
   {
     name: 'http_fetch',
-    description: '通过 HTTP 请求获取网页或 API 内容，不会打开浏览器窗口，也不会复用浏览器登录态。适合不依赖 JS 渲染的页面、REST API、RSS 等。HTML 响应默认自动去除标签返回纯文本；JSON 响应格式化返回；传 format="raw" 返回原始内容。不支持需要登录态、页面交互或 JS 动态加载的页面；这类任务应交给浏览器 capability。',
+    description: '通过 HTTP 请求获取网页或 API 内容，不会打开浏览器窗口，也不会复用浏览器登录态。取静态页面、REST API、RSS、天气/汇率一类公开接口时应优先用它，一次请求就能拿到结果，比逐步驱动浏览器快得多；同一站点首次获批后，后续同源同方法的请求不再重复审批。适合不依赖 JS 渲染的页面、REST API、RSS 等。HTML 响应默认自动去除标签返回纯文本；JSON 响应格式化返回；传 format="raw" 返回原始内容。不支持需要登录态、页面交互或 JS 动态加载的页面；这类任务应交给浏览器 capability。',
     schema: z.object({
       url: z.string().url().describe('目标 URL'),
       method: z.string().optional().describe('HTTP 方法，默认 GET'),
@@ -164,6 +164,35 @@ export const httpFetchTool = tool(
     }),
   },
 );
+
+/**
+ * Authorization subject for `http_fetch`: the origin plus the method, and
+ * nothing else.
+ *
+ * Approving one URL on a host should cover the rest of that host — an agent
+ * reading a weather site fetches many paths under it, and re-reviewing each
+ * one is what pushed models to the unreviewed browser toolkit instead. The
+ * method stays in the subject because a plain `url_origin` grant would let an
+ * approved GET carry an unreviewed POST to the same host; a request body
+ * cannot be vetted by origin alone.
+ */
+export function normalizeHttpFetchAuthorizationInput(input: unknown) {
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const method = typeof record.method === 'string' && record.method.trim()
+    ? record.method.trim().toUpperCase()
+    : 'GET';
+  let origin: string | null = null;
+  try {
+    origin = typeof record.url === 'string' ? new URL(record.url).origin : null;
+  } catch {
+    origin = null;
+  }
+  // An unparsable URL falls back to the raw value so the grant stays narrow
+  // rather than collapsing every bad URL into one shared key.
+  return { origin: origin ?? String(record.url ?? ''), method };
+}
 
 export const downloadFileTool = tool(
   async ({ url, filename }: { url: string; filename?: string }) => {

@@ -7,9 +7,16 @@ export type TuiLaunchOptions = {
   showVersion: boolean;
   agentSession: { port: number; petId: string } | null;
   /**
-   * Host command for embedded stdio mode, where the terminal UI starts and owns
-   * the Host child process. `pinpawo tui --embed-host` already rejects the
-   * combinations that cannot carry an embedded Host (Pet mode, check, QA).
+   * Loopback port of an already-running Host, selected by `--server-port`.
+   * The terminal UI then dials that Host over the authenticated WebSocket
+   * transport instead of starting one of its own.
+   */
+  serverPort: number | null;
+  /**
+   * Host command for embedded stdio mode, which is the default: the terminal UI
+   * starts and owns the Host child process. It stays `null` whenever another
+   * transport owns the session — check, demo, Pet, `--server-port`, or the
+   * host smokes that deliberately attach to a separately running Host.
    */
   embeddedHost: TuiEmbeddedHostTarget | null;
   demo: {
@@ -40,6 +47,7 @@ export function parseTuiLaunchOptions(
   env: NodeJS.ProcessEnv = process.env,
 ): TuiLaunchOptions {
   const flags = new Set(argv);
+  const explicitEmbedHost = flags.has('--embed-host');
   const agentSessionPort = readOption(argv, '--pet-port');
   const agentSessionPetId = readOption(argv, '--pet-id');
   if ((agentSessionPort === undefined) !== (agentSessionPetId === undefined)) {
@@ -54,6 +62,26 @@ export function parseTuiLaunchOptions(
     const petId = agentSessionPetId.trim();
     if (!petId) throw new Error('--pet-id must not be empty.');
     agentSession = { port, petId };
+  }
+  const serverPortValue = readOption(argv, '--server-port');
+  let serverPort: number | null = null;
+  if (serverPortValue !== undefined) {
+    const port = Number(serverPortValue);
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      throw new Error('--server-port must be an integer from 1 to 65535.');
+    }
+    serverPort = port;
+  }
+  if (explicitEmbedHost && serverPort !== null) {
+    throw new Error(
+      '--embed-host and --server-port are mutually exclusive: the embedded Host replaces connecting to a running one.',
+    );
+  }
+  if (explicitEmbedHost && agentSession) {
+    throw new Error('--embed-host cannot be combined with --pet-port/--pet-id.');
+  }
+  if (serverPort !== null && agentSession) {
+    throw new Error('--server-port cannot be combined with --pet-port/--pet-id.');
   }
   const demo = {
     command: flags.has('--demo-command'),
@@ -78,22 +106,44 @@ export function parseTuiLaunchOptions(
     || smoke.review
     || smoke.transcript
     || hostSmoke;
+  const useDemoConnection = (smokeEnabled && !hostSmoke)
+    || demo.command
+    || demo.qa
+    || demo.review;
 
   return {
     showVersion: flags.has('--version'),
     agentSession,
-    embeddedHost: flags.has('--embed-host')
+    serverPort,
+    embeddedHost: usesEmbeddedHost({
+      showVersion: flags.has('--version'),
+      useDemoConnection,
+      connectsToRunningHost: agentSession !== null || serverPort !== null || hostSmoke,
+    })
       ? readEmbeddedHostTarget(env)
       : null,
     demo,
     smoke,
     smokeEnabled,
     hostSmoke,
-    useDemoConnection: (smokeEnabled && !hostSmoke)
-      || demo.command
-      || demo.qa
-      || demo.review,
+    useDemoConnection,
   };
+}
+
+/**
+ * Embedded stdio is the default transport: it is the only one that needs no
+ * port, token, or separately started Host. Everything that selects another
+ * endpoint — a demo transport, a resident Pet, `--server-port`, or a host smoke
+ * written against an externally started Host — turns it off instead.
+ */
+function usesEmbeddedHost(options: {
+  showVersion: boolean;
+  useDemoConnection: boolean;
+  connectsToRunningHost: boolean;
+}) {
+  return !options.showVersion
+    && !options.useDemoConnection
+    && !options.connectsToRunningHost;
 }
 
 /**

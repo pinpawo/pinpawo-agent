@@ -8,7 +8,9 @@ dogfood entrypoint from issue #454:
 - it imports the canonical projection from `@pinpawo/agent-session`;
 - it does not import `services/local-agent/src/*`;
 - it is launched by `pinpawo tui` — the only terminal client;
-- it connects to the authenticated loopback local-agent WebSocket;
+- it starts its own local agent as a stdio child by default, and dials the
+  authenticated loopback local-agent WebSocket only when `--server-port` names a
+  running Host;
 - it decodes asynchronous WebSocket payloads on one per-socket queue, so a
   slower Blob/binary frame cannot be overtaken by a later event and change
   canonical timeline order;
@@ -67,18 +69,19 @@ dogfood entrypoint from issue #454:
 
 ## Run the vertical slice
 
-Install dependencies. Start the Node host in one terminal:
+Install dependencies, then start the client from the repository root:
 
 ```sh
 npm install
-npm run start -w pinpawo -- run
+npm run tui:v2 -w pinpawo
 ```
 
-Then start the OpenTUI client through the Phase 5 migration entrypoint from the
-repository root in another terminal:
+The client starts its own local agent Host as a stdio child process, so no second
+terminal is needed. To attach to one that is already listening instead, start
+`npm run start -w pinpawo -- run` in another terminal and name its port:
 
 ```sh
-npm run tui:v2 -w pinpawo
+npm run tui:v2 -w pinpawo -- --server-port 3210
 ```
 
 An installed package runs the Bun-targeted bundle carried at
@@ -112,18 +115,19 @@ Windows drive and UNC attachment paths, plus quoted `VISUAL`/`EDITOR`/`PAGER`
 commands under `Program Files`, use Windows tokenization so separator
 backslashes are not interpreted as POSIX shell escapes.
 
-The client reads `LOCAL_SERVER_PORT` (default `3210`) and the bearer token
-written by the host to `~/.pinpawo/local-server-token`. It will synchronize the
-active Session before enabling submission and will reconnect with bounded
-backoff if the host disappears. After the fast retry sequence, it keeps polling
-at the capped interval until the host returns and a fresh snapshot is applied.
+`pinpawo tui --server-port <port>` selects the connect transport: the client
+reads the bearer token written by the host to `~/.pinpawo/local-server-token` and
+dials `ws://127.0.0.1:<port>`, where `LOCAL_SERVER_PORT` (default `3210`) supplies
+the port when the flag is absent. It synchronizes the active Session before
+enabling submission and reconnects with bounded backoff if the host disappears;
+after the fast retry sequence it keeps polling at the capped interval until the
+host returns and a fresh snapshot is applied.
 
-`pinpawo tui --embed-host` swaps that transport for a child process: the client
-starts its own local agent with piped stdio and speaks the same JSONL protocol
-over the pipe, so no port, bearer token, or loopback origin check is involved.
-The transport contract (`AgentHostConnection`) is unchanged and the session layer
-is unaware of the swap; only the connection implementation differs. Three
-consequences are worth knowing:
+Without that flag the client starts its own local agent instead: piped stdio and
+the same JSONL protocol over the pipe, so no port, bearer token, or loopback
+origin check is involved. The transport contract (`AgentHostConnection`) is
+unchanged and the session layer is unaware of the swap; only the connection
+implementation differs. Three consequences are worth knowing:
 
 - the Host's stdout carries protocol frames only and its stderr is appended to
   `~/.pinpawo/logs/embedded-host.log`, because the terminal belongs to OpenTUI;
@@ -131,6 +135,10 @@ consequences are worth knowing:
   starts a new Host process, and the synchronization timeout is disabled;
 - Host-level facts that only the HTTP surface reports degrade: the welcome block
   shows `local-agent unknown`.
+
+Exactly one transport owns a session, so the embedded default and the connect
+targets are mutually exclusive: `--embed-host` (which only restates the default)
+rejects `--server-port`, `--pet-port`/`--pet-id`, `--check`, and `--qa`.
 
 Production client controls:
 

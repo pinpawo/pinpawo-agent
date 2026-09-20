@@ -42,6 +42,8 @@ export type RunTuiV2Options = {
   qa?: boolean;
   /** Let the terminal UI start this local agent as its own stdio child. */
   embedHost?: boolean;
+  /** Loopback port of an already-running Chat server, instead of embedding one. */
+  serverPort?: number;
   agentSessionPort?: number;
   agentSessionPetId?: string;
 };
@@ -381,7 +383,12 @@ export function buildTuiV2LaunchArgs(
   plan: TuiV2LaunchPlan,
   options: Pick<
     RunTuiV2Options,
-    'check' | 'qa' | 'embedHost' | 'agentSessionPort' | 'agentSessionPetId'
+    | 'check'
+    | 'qa'
+    | 'embedHost'
+    | 'serverPort'
+    | 'agentSessionPort'
+    | 'agentSessionPetId'
   > = {},
 ) {
   if (options.check && options.qa) {
@@ -392,11 +399,19 @@ export function buildTuiV2LaunchArgs(
       'OpenTUI v2 embedded host mode does not apply to check or QA mode.',
     );
   }
+  if (options.embedHost && options.serverPort !== undefined) {
+    throw new Error(
+      'OpenTUI v2 embedded host mode cannot connect to a running server.',
+    );
+  }
   return [
     ...plan.args,
     ...(options.check ? ['--version'] : []),
     ...(options.qa ? ['--demo-qa'] : []),
     ...(options.embedHost ? ['--embed-host'] : []),
+    ...(options.serverPort !== undefined
+      ? ['--server-port', options.serverPort.toString()]
+      : []),
     ...(options.agentSessionPort !== undefined
       ? ['--pet-port', options.agentSessionPort.toString()]
       : []),
@@ -440,11 +455,14 @@ export function resolveEmbeddedHostEnv(
   };
 }
 
-function buildTuiV2LaunchEnv(
+export function buildTuiV2LaunchEnv(
   options: RunTuiV2Options,
   localAgentRoot: string,
 ) {
-  if (!options.embedHost) return process.env;
+  // Embedded stdio is the terminal UI default, so the launcher forwards the Host
+  // runtime whenever no other endpoint owns the session. Read-only modes and
+  // every explicit connect target resolve their own runtime.
+  if (!usesEmbeddedHostTransport(options)) return process.env;
   const target = resolveEmbeddedHostEnv({
     env: process.env,
     localAgentRoot,
@@ -458,6 +476,24 @@ function buildTuiV2LaunchEnv(
     PINPAWO_EMBED_HOST_COMMAND: target.command,
     PINPAWO_EMBED_HOST_ARGS: JSON.stringify(target.args),
   };
+}
+
+/**
+ * Embedded stdio is the terminal UI default, which makes this the single place
+ * that decides whether the launcher resolves a Host runtime for the child. Any
+ * other endpoint — check, QA, a resident Pet, or an explicit `--server-port` —
+ * owns its own runtime and must not inherit the embedded Host contract.
+ */
+export function usesEmbeddedHostTransport(
+  options: Pick<
+    RunTuiV2Options,
+    'check' | 'qa' | 'embedHost' | 'agentSessionPort' | 'serverPort'
+  >,
+) {
+  return !options.check
+    && !options.qa
+    && options.agentSessionPort === undefined
+    && options.serverPort === undefined;
 }
 
 function resolveEmbeddedHostEntry(options: EmbeddedHostEnvOptions) {

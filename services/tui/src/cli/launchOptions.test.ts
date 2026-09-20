@@ -5,11 +5,12 @@ import {
   readEmbeddedHostTarget,
 } from './launchOptions';
 
-test('launch options keep production mode free of demo transports', () => {
+test('launch options default production mode to the embedded stdio Host', () => {
   assert.deepEqual(parseTuiLaunchOptions([]), {
     showVersion: false,
     agentSession: null,
-    embeddedHost: null,
+    serverPort: null,
+    embeddedHost: { command: 'pinpawo', args: ['run', '--stdio'] },
     demo: {
       command: false,
       qa: false,
@@ -32,12 +33,17 @@ test('launch options keep production mode free of demo transports', () => {
 });
 
 test('launch options select one Pet-scoped Agent Session endpoint', () => {
-  assert.deepEqual(parseTuiLaunchOptions([
+  const pet = parseTuiLaunchOptions([
     '--pet-port',
     '4322',
     '--pet-id',
     'planner',
-  ]).agentSession, { port: 4322, petId: 'planner' });
+  ]);
+  assert.deepEqual(pet.agentSession, { port: 4322, petId: 'planner' });
+  // Studio launches the client this way; it must keep dialing the resident Pet
+  // instead of embedding a Host of its own.
+  assert.equal(pet.embeddedHost, null);
+  assert.equal(pet.serverPort, null);
   assert.throws(
     () => parseTuiLaunchOptions(['--pet-id', 'planner']),
     /provided together/,
@@ -86,10 +92,69 @@ test('launch options take the embedded Host command from the launcher contract',
   assert.equal(options.useDemoConnection, false);
 });
 
-test('launch options leave the embedded Host off without the flag', () => {
+test('launch options keep the embedded Host on by default', () => {
   const options = parseTuiLaunchOptions([], {
     PINPAWO_EMBED_HOST_COMMAND: '/usr/local/bin/node',
+    PINPAWO_EMBED_HOST_ARGS: JSON.stringify(['/app/pinpawo/dist/index.js', 'run', '--stdio']),
   });
+  assert.deepEqual(options.embeddedHost, {
+    command: '/usr/local/bin/node',
+    args: ['/app/pinpawo/dist/index.js', 'run', '--stdio'],
+  });
+  assert.equal(options.serverPort, null);
+});
+
+test('launch options dial a running Host only when --server-port names one', () => {
+  const options = parseTuiLaunchOptions(['--server-port', '4321'], {
+    PINPAWO_EMBED_HOST_COMMAND: '/usr/local/bin/node',
+  });
+
+  assert.equal(options.serverPort, 4321);
+  assert.equal(options.embeddedHost, null);
+  assert.equal(options.agentSession, null);
+  assert.equal(options.useDemoConnection, false);
+  assert.throws(
+    () => parseTuiLaunchOptions(['--server-port', '0']),
+    /--server-port must be an integer from 1 to 65535/,
+  );
+  assert.throws(
+    () => parseTuiLaunchOptions(['--server-port']),
+    /--server-port requires a value/,
+  );
+});
+
+test('launch options reject competing embedded and connect targets', () => {
+  assert.throws(
+    () => parseTuiLaunchOptions(['--embed-host', '--server-port', '4321']),
+    /--embed-host and --server-port are mutually exclusive/,
+  );
+  assert.throws(
+    () => parseTuiLaunchOptions(['--embed-host', '--pet-port', '4322', '--pet-id', 'planner']),
+    /--embed-host cannot be combined with --pet-port/,
+  );
+  assert.throws(
+    () => parseTuiLaunchOptions(['--server-port', '4321', '--pet-port', '4322', '--pet-id', 'planner']),
+    /--server-port cannot be combined with --pet-port/,
+  );
+});
+
+test('launch options keep the read-only and demo modes off the embedded Host', () => {
+  assert.equal(
+    parseTuiLaunchOptions(['--version'], {
+      PINPAWO_EMBED_HOST_COMMAND: '/usr/local/bin/node',
+    }).embeddedHost,
+    null,
+  );
+  assert.equal(parseTuiLaunchOptions(['--demo-qa']).embeddedHost, null);
+});
+
+test('host smokes keep attaching to a separately started Host', () => {
+  const options = parseTuiLaunchOptions(['--smoke-host-chat'], {
+    PINPAWO_EMBED_HOST_COMMAND: '/usr/local/bin/node',
+  });
+
+  assert.equal(options.hostSmoke, true);
+  assert.equal(options.useDemoConnection, false);
   assert.equal(options.embeddedHost, null);
 });
 

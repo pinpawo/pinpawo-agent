@@ -191,7 +191,9 @@ const agentSession = launchOptions.agentSession;
 const embeddedHost = launchOptions.embeddedHost;
 /** Host stderr goes to a log file; the terminal belongs to OpenTUI. */
 const embeddedHostDiagnostics = createEmbeddedHostDiagnosticsSink();
-const port = agentSession?.port ?? readLocalServerPort();
+// `--server-port` selects a running Host directly; `LOCAL_SERVER_PORT` only
+// supplies the default for the connect paths that do not name a port.
+const port = agentSession?.port ?? launchOptions.serverPort ?? readLocalServerPort();
 const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
   ? {
       localAgentVersion: 'demo',

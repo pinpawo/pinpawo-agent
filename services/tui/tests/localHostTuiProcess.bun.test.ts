@@ -78,6 +78,22 @@ import {
 const AUTH_TOKEN = 'tui-v2-production-pty-token';
 const TUI_ENTRY = fileURLToPath(new URL('../src/main.ts', import.meta.url));
 
+/**
+ * These PTYs cover the connect transport against a separately started Host, so
+ * they ask for it explicitly: the embedded stdio Host is the client default and
+ * an unqualified launch would spawn one instead of dialing the fixture.
+ */
+function tuiEntrySpawnCommand(port: number) {
+  return [
+    'spawn -noecho',
+    JSON.stringify(process.execPath),
+    'run',
+    JSON.stringify(TUI_ENTRY),
+    '--server-port',
+    String(port),
+  ].join(' ');
+}
+
 test('process harness settles a spawn error without waiting for exit', async () => {
   const child = spawn(
     '/definitely/missing/pinpawo-tui-process',
@@ -120,12 +136,7 @@ test('production v2 accepts input after starting before the first local host and
 
     const expectScript = [
       'set timeout 10',
-      [
-        'spawn -noecho',
-        JSON.stringify(process.execPath),
-        'run',
-        JSON.stringify(TUI_ENTRY),
-      ].join(' '),
+      tuiEntrySpawnCommand(hostPort),
       'fconfigure $spawn_id -translation binary -encoding binary',
       // Dismiss the first connection error while retries continue. Recovery
       // must restore composer focus before the Enter submission below.
@@ -247,12 +258,7 @@ test('production v2 preserves an active-run draft across PTY resize', {
     const expectScript = [
       'set timeout 8',
       'set stty_init "rows 24 columns 80"',
-      [
-        'spawn -noecho',
-        JSON.stringify(process.execPath),
-        'run',
-        JSON.stringify(TUI_ENTRY),
-      ].join(' '),
+      tuiEntrySpawnCommand(host.port),
       'fconfigure $spawn_id -translation binary -encoding binary',
       'expect {',
       '  -re "process-restart-model" {}',
@@ -381,12 +387,7 @@ test('production v2 reconciles a response completed while the pager owns the TTY
     });
     const expectScript = [
       'set timeout 8',
-      [
-        'spawn -noecho',
-        JSON.stringify(process.execPath),
-        'run',
-        JSON.stringify(TUI_ENTRY),
-      ].join(' '),
+      tuiEntrySpawnCommand(host.port),
       'fconfigure $spawn_id -translation binary -encoding binary',
       'expect {',
       '  -re "process-restart-model" {}',
@@ -590,12 +591,7 @@ test('production v2 process exercises composer workflows through a real PTY', {
     });
     const expectScript = [
       'set timeout 5',
-      [
-        'spawn -noecho',
-        JSON.stringify(process.execPath),
-        'run',
-        JSON.stringify(TUI_ENTRY),
-      ].join(' '),
+      tuiEntrySpawnCommand(host.port),
       'fconfigure $spawn_id -translation binary -encoding binary',
       'expect {',
       '  -re "process-restart-model" {}',
@@ -987,12 +983,7 @@ test('production v2 executes reviewed and attachment toolkit calls through a rea
     });
     const expectScript = [
       'set timeout 5',
-      [
-        'spawn -noecho',
-        JSON.stringify(process.execPath),
-        'run',
-        JSON.stringify(TUI_ENTRY),
-      ].join(' '),
+      tuiEntrySpawnCommand(host.port),
       'fconfigure $spawn_id -translation binary -encoding binary',
       'expect {',
       '  -re "process-restart-model" {}',

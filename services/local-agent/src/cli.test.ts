@@ -43,6 +43,7 @@ test('the removed legacy flags are no longer declared', () => {
     '--pet-id',
     '--pet-port',
     '--qa',
+    '--server-port',
     '--workdir',
   ]);
 });
@@ -82,6 +83,85 @@ test('tui forwards embedded Host mode to the launcher', async () => {
   await program.parseAsync(['node', 'pinpawo', 'tui', '--embed-host']);
 
   assert.equal(received!.embedHost, true);
+});
+
+test('tui forwards an explicit server port to the launcher', async () => {
+  let received: unknown;
+  const program = createLocalAgentCli({
+    runTuiV2: (options) => { received = options; },
+  });
+
+  await program.parseAsync(['node', 'pinpawo', 'tui', '--server-port', '4321']);
+
+  assert.deepEqual(received, {
+    workdir: undefined,
+    check: false,
+    qa: false,
+    embedHost: false,
+    serverPort: 4321,
+  });
+});
+
+test('tui rejects a server port the loopback dial cannot use', async () => {
+  for (const port of ['0', '65536', 'nope']) {
+    await assert.rejects(
+      createLocalAgentCli({ runTuiV2: () => undefined }).parseAsync([
+        'node',
+        'pinpawo',
+        'tui',
+        '--server-port',
+        port,
+      ]),
+      /--server-port must be an integer from 1 to 65535/,
+    );
+  }
+});
+
+test('an explicit server port and embedded mode are mutually exclusive', async () => {
+  await assert.rejects(
+    createLocalAgentCli({ runTuiV2: () => undefined }).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--embed-host',
+      '--server-port',
+      '4321',
+    ]),
+    /Do not provide --embed-host with --server-port/,
+  );
+});
+
+test('a server port cannot be combined with a resident Pet target', async () => {
+  await assert.rejects(
+    createLocalAgentCli({ runTuiV2: () => undefined }).parseAsync([
+      'node',
+      'pinpawo',
+      'tui',
+      '--server-port',
+      '4321',
+      '--pet-port',
+      '4322',
+      '--pet-id',
+      'planner',
+    ]),
+    /Do not provide --server-port with --pet-port/,
+  );
+});
+
+test('a server port does not apply to the modes that never connect', async () => {
+  for (const mode of ['--check', '--qa']) {
+    await assert.rejects(
+      createLocalAgentCli({ runTuiV2: () => undefined }).parseAsync([
+        'node',
+        'pinpawo',
+        'tui',
+        '--server-port',
+        '4321',
+        mode,
+      ]),
+      /Do not provide --server-port with --check or --qa/,
+    );
+  }
 });
 
 test('embedded Host mode rejects a resident Pet target', async () => {

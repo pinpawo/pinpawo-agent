@@ -4,11 +4,13 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   buildTuiV2LaunchArgs,
+  buildTuiV2LaunchEnv,
   findLocalAgentPackageRoot,
   parseTuiV2DistributionManifest,
   resolveEmbeddedHostEnv,
   resolveTuiV2LaunchPlan,
   runTuiV2,
+  usesEmbeddedHostTransport,
   verifyTuiV2DistributionEntry,
 } from './tuiV2Launcher';
 
@@ -229,6 +231,11 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
     ...plan.args,
     '--embed-host',
   ]);
+  assert.deepEqual(buildTuiV2LaunchArgs(plan, { serverPort: 4321 }), [
+    ...plan.args,
+    '--server-port',
+    '4321',
+  ]);
   assert.throws(
     () => buildTuiV2LaunchArgs(plan, { check: true, qa: true }),
     /mutually exclusive/,
@@ -236,6 +243,10 @@ test('v2 launcher forwards only explicit public modes to the TUI process', () =>
   assert.throws(
     () => buildTuiV2LaunchArgs(plan, { check: true, embedHost: true }),
     /does not apply to check or QA mode/,
+  );
+  assert.throws(
+    () => buildTuiV2LaunchArgs(plan, { embedHost: true, serverPort: 4321 }),
+    /cannot connect to a running server/,
   );
 });
 
@@ -414,6 +425,44 @@ test('embedded host mode never overrides an operator-provided Host command', () 
     execArgv: [],
     pathExists: () => true,
   }), null);
+});
+
+test('the embedded Host contract is the default but never for another endpoint', () => {
+  // No flag at all: embedded stdio owns the session, so the launcher must
+  // forward a Host runtime the terminal UI cannot resolve on its own.
+  assert.equal(usesEmbeddedHostTransport({}), true);
+  assert.equal(usesEmbeddedHostTransport({ embedHost: true }), true);
+
+  for (const options of [
+    { check: true },
+    { qa: true },
+    { serverPort: 4321 },
+    { agentSessionPort: 4322, agentSessionPetId: 'planner' },
+  ]) {
+    assert.equal(usesEmbeddedHostTransport(options), false);
+  }
+});
+
+test('the launcher leaves the environment untouched for non-embedded modes', () => {
+  assert.equal(
+    buildTuiV2LaunchEnv({ serverPort: 4321 }, LOCAL_AGENT_ROOT),
+    process.env,
+  );
+  assert.equal(
+    buildTuiV2LaunchEnv({ check: true }, LOCAL_AGENT_ROOT),
+    process.env,
+  );
+  assert.equal(
+    buildTuiV2LaunchEnv({ qa: true }, LOCAL_AGENT_ROOT),
+    process.env,
+  );
+  assert.equal(
+    buildTuiV2LaunchEnv(
+      { agentSessionPort: 4322, agentSessionPetId: 'planner' },
+      LOCAL_AGENT_ROOT,
+    ),
+    process.env,
+  );
 });
 
 test('v2 launcher rejects an invalid child working directory before spawning', async () => {

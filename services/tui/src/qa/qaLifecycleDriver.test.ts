@@ -73,6 +73,7 @@ function launch(
   return {
     showVersion: false,
     agentSession: null,
+    serverPort: null,
     embeddedHost: null,
     demo: {
       command: false,

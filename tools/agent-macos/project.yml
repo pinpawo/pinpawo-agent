@@ -122,7 +122,8 @@ targets:
           NODE_VERSION="$("$NODE_SRC" -v 2>/dev/null || true)"
           if ! node_version_ok "$NODE_VERSION"; then
             echo "error: bundled Node version must be 20.x, got '${NODE_VERSION:-unknown}' from $NODE_SRC." >&2
-            echo "error: update PINPAWO_NODE_PATH or your local Node installation to match .nvmrc." >&2
+            echo "error: set PINPAWO_NODE_PATH to your local Node 20 path (see tools/agent-macos/release.env.example)." >&2
+            echo "error: the macOS companion bundles its own Node 20 runtime and does not follow the repository .nvmrc." >&2
             exit 1
           fi
           NODE_ARCH="$("$NODE_SRC" -p 'process.arch' 2>/dev/null || true)"

@@ -237,8 +237,9 @@ profile format and selection behavior.
 | `pinpawo init` | Create local config and the example Capability. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
 | `pinpawo tui` | Start the terminal client. |
-| `pinpawo-studio [--workdir <dir>] [--pet-port <port>]` | Start the independent Studio Host. |
-| `pinpawo-studio init` / `tmux` / `console` | Scaffold Studio config, build a Pet tmux layout, or open the Studio Console. |
+| `pinpawo-studio [start]` | Start the independent Studio Host (`--workdir <dir>`, `--pet-port <port>`). |
+| `pinpawo-studio init` | Scaffold Studio configuration, Pet Capabilities, and initial Wiki files. |
+| `pinpawo-studio tmux` / `console` | Build a tiled Pet TUI for a running Host, or open the Studio Console. |
 | `pinpawo capability list` | List installed user Capabilities. |
 | `pinpawo capability validate <dir>` | Validate a Capability directory. |
 | `pinpawo capability install <dir>` | Install a Capability. |

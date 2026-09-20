@@ -95,7 +95,7 @@ Phase 3 要用 `StudioRuntimeHost` 替换掉的东西。
 ### 1.2 已存在的 startup-scoped 正面样板
 
 Chat 侧已经有正确形状：`LocalAgentGraphService` 用 `graphKey` 缓存 compiled graph
-（[agentGraphService.ts:139-152](../../../services/local-agent/src/agentGraphService.ts#L139)），
+（`agentGraphService.ts:139-152`，该文件已改名 `agent/agentGraphService.ts`），
 graph 常驻、每次请求只传 `configurable`。Phase 3 的 host registry 应当对齐这个模型，
 而不是发明新的缓存策略。
 
@@ -182,8 +182,8 @@ npm run typecheck && npm test
 | C4 | resident runtime 不持 request-scoped 状态 | `humanReviewer` 在**构造时**绑定 ws（`send`/`requestId`/`slot`），是典型 request-scoped 状态被固化进 runtime | `studioRuntime.ts:196-201`（已移除文件） |
 | C5 | pet 复用 Chat runtime，无私有 HITL loop | `createPetAgentRuntime` 自持 `while(true) { graph.invoke(); Command({resume}) }` | `createPetAgentRuntime.ts:219-232` |
 | C6 | pet runtime 无 mutable status | 闭包内 `let status`，invoke 期间被改写为 `'active'` 再还原 | `createPetAgentRuntime.ts:144`、`:212-235` |
-| C7 | cancel 区分 invocation/task/run scope | 只有单个 `controller.signal`，取消即整 turn | [localServerStudioHandler.ts:106](../../../services/local-agent/src/localServerStudioHandler.ts#L106) |
-| C8 | 断线不丢正在执行/等 review 的 run | `rejectDisconnected()` 直接 reject pending review 并标记连接关闭 | [localServerStudioHandler.ts:72](../../../services/local-agent/src/localServerStudioHandler.ts#L72) |
+| C7 | cancel 区分 invocation/task/run scope | 只有单个 `controller.signal`，取消即整 turn | `localServerStudioHandler.ts:106`（已移除文件） |
+| C8 | 断线不丢正在执行/等 review 的 run | `rejectDisconnected()` 直接 reject pending review 并标记连接关闭 | `localServerStudioHandler.ts:72`（已移除文件） |
 | C9 | queue recovery 每 host generation 一次 | 靠 module-level `restoredRunQueuePaths` Set 近似 | `studioRuntime.ts:89-104`（已移除文件） |
 | C10 | 并行 wiki 提交有序列化策略 | 无；依赖当前恰好串行 | `agent/studio/wikiCurator.ts` |
 | C11 | 事件带完整 correlation identity | `StudioTurnEvent` 带 `taskIndex`/`petId`/`petRunId`，缺 `runId`/`invocationId` | `types.ts` `StudioTurnEvent` |
@@ -231,7 +231,7 @@ pet invocation、工具执行这些编排细节都不出协议边界。事件形
 既有的 `wiki_changed`（`changedPaths`），只说哪些路径变了，不带内容或摘要；
 需要内容的消费者自己去读 wiki。
 
-当前 HTTP 路由（[localHttpHandlers.ts](../../../services/local-agent/src/localHttpHandlers.ts)）：
+当前 HTTP 路由（`localHttpHandlers.ts`，该文件已改名 `httpHandlers.ts`）：
 
 ```text
 /health  /runtime  /studio_due_runs  /capabilities  /capabilities/rescan

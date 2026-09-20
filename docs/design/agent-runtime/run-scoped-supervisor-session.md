@@ -258,7 +258,7 @@ Subagent 自身摘要产生的私有消息替换仍需同步，避免下次执�
 [消息交接](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/messageHandoff.ts)、
 [Supervisor agent](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.ts)、
 [Root 适配](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts)、
-[Capability 节点](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/capability.ts)、
+[Capability 节点](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)（`runSupervisor/delegateCapabilityTool.ts` 提供其工具）、
 [状态定义](../../../packages/pet-agent/src/agent/orchestrator/state.ts)。
 
 ## LangChain 参考

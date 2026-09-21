@@ -12,7 +12,7 @@ import {
 } from './transcriptProjection';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
 
-test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => {
+test('readTuiCheckpointMessages keeps visible conversation without replaying Capability deliveries', () => {
   const userMessage = stampAgentMessageCreatedAt(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -29,18 +29,17 @@ test('readTuiCheckpointMessages keeps visible conversation and handoffs', () => 
       additional_kwargs: { pinpawo: { lane: 'subagent' } },
     }),
     ...withDeliveryCalls([createDeliveryResult({ sourceLane: 'capability:general', delegationId: 'delegation-1',
-      runId: 'run-1', deliveryId: 'delivery-1', task: 'Close issue', result: 'handoff result visible', createdAt: '2026-06-01T01:00:00.000Z' })]),
+      runId: 'run-1', deliveryId: 'delivery-1', task: 'Close issue', result: 'internal delivery result', createdAt: '2026-06-01T01:00:00.000Z' })]),
     assistantMessage,
   ]);
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-    { role: 'subagent', requestId: 'run-1', text: 'handoff result visible', createdAt: '2026-06-01T01:00:00.000Z' },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
 });
 
-test('readTuiCheckpointMessages restores paired Capability deliveries without exposing private or unmatched results', () => {
+test('readTuiCheckpointMessages hides paired, private and unmatched Capability deliveries', () => {
   const execution = { planItemId: 'task-1', delegationId: 'delegation-1', capability: 'general',
     task: 'Inspect files', mode: 'initial', briefing: 'Execute the confirmed task.' };
   const metadata = { runId: 'run-1', taskId: 'trace-1' };
@@ -51,14 +50,17 @@ test('readTuiCheckpointMessages restores paired Capability deliveries without ex
     content: JSON.stringify({ status: 'returned', delivery: { id: 'delivery-1', task: execution.task,
       text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } }),
   }), metadata);
-  const expected = [{ role: 'subagent', requestId: 'run-1', text: 'Verified delivery' }];
-  assert.deepEqual(readTuiCheckpointMessages([call, result]), expected);
+  assert.deepEqual(readTuiCheckpointMessages([call, result]), []);
   assert.deepEqual(readTuiCheckpointMessages([result]), []);
   for (const overrides of [{ lane: 'capability:general' as const }, { runId: 'other-run' }]) {
     const hidden = setAgentMessageMetadata(new ToolMessage({ ...result, tool_call_id: 'dispatch-1' }), overrides);
     assert.deepEqual(readTuiCheckpointMessages([call, hidden]), []);
   }
-  assert.deepEqual(readTuiCheckpointMessages([call, result]), expected);
+  const before = result.content;
+  assert.deepEqual(readTuiCheckpointMessages([call, result, new AIMessage('Verified delivery')]), [
+    { role: 'assistant', text: 'Verified delivery' },
+  ]);
+  assert.equal(result.content, before);
 });
 
 test('readTuiCheckpointMessages hides internal Capability transcript messages', () => {

@@ -11,7 +11,6 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
     kind: 'chat',
     messages: [
       { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
-      { role: 'subagent', requestId: 'run-1', text: 'handoff result' },
       { role: 'assistant', text: 'hi' },
     ],
     deps: {
@@ -72,18 +71,11 @@ test('buildLocalAgentSessionSnapshot returns a native LocalAgentSession snapshot
   assert.equal(snapshot.session.sessionId, 'chat:pet-a');
   assert.deepEqual(snapshot.session.timeline.map((entry) => [entry.id, entry.type, entry.type === 'message' ? entry.role : '']), [
     ['message:0:user', 'message', 'user'],
-    ['message:1:subagent', 'message', 'subagent'],
-    ['message:2:assistant', 'message', 'assistant'],
+    ['message:1:assistant', 'message', 'assistant'],
   ]);
   assert.equal(
     snapshot.session.timeline[0]?.type === 'message' ? snapshot.session.timeline[0].createdAt : undefined,
     '2026-06-01T01:00:00.000Z',
-  );
-  assert.equal(
-    snapshot.session.timeline[1]?.type === 'message'
-      ? snapshot.session.timeline[1].requestId
-      : undefined,
-    'run-1',
   );
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
   assert.equal(snapshot.session.activeRun, null);

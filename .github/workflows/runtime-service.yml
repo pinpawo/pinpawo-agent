@@ -40,9 +40,6 @@ jobs:
       - run: npm run build -w @pinpawo/agent-contracts
       - run: npm run build -w @pinpawo/pet-agent
       - run: npm run build -w @pinpawo-toolkit/browser
-      - name: Diagnose Windows CDP rendering
-        if: runner.os == 'Windows'
-        run: node services/local-agent/scripts/diagnose-cdp.mjs
       - name: Real shell, local IPC and Host clients
         run: npm run test:runtime -w pinpawo
       - name: Real CDP browser behavior and ownership

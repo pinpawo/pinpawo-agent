@@ -108,6 +108,8 @@ export class CdpConnection {
       '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
       '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check',
       '--disable-background-networking', '--disable-component-update',
+      // Keep pages renderable when another client's window is in front.
+      '--disable-backgrounding-occluded-windows',
       // Match Playwright's screenshot surface: avoid ForceRedraw waiting for a
       // frame to be presented in a background/occluded Windows window.
       // https://chromium.googlesource.com/chromium/src/+/main/content/common/features.cc
@@ -150,7 +152,8 @@ export class CdpConnection {
       });
     }
     if (this.temporaryProfile) {
-      await rm(this.temporaryProfile, { recursive: true, force: true });
+      // Chrome helpers can finish profile writes just after the browser exits.
+      await rm(this.temporaryProfile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       this.temporaryProfile = null;
     }
   }

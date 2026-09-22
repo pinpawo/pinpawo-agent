@@ -48,7 +48,7 @@ test('real CDP: borrowed ownership, refs, popup origins, extraction, background 
   t.after(() => cleanupFixture([
     async () => runtime?.close(),
     () => harness.close(),
-    () => rm(workdir, { recursive: true, force: true }),
+    () => rm(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   ]));
   await Promise.all([new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)), new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve))]);
   const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
@@ -139,7 +139,7 @@ test('real CDP: managed process closes and named contexts isolate storage', { sk
   t.after(() => closeHttpFixtures([server]));
   t.after(() => cleanupFixture([
     () => runtime.close(),
-    () => rm(workdir, { recursive: true, force: true }),
+    () => rm(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   ]));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = 'http://127.0.0.1:' + (server.address() as { port: number }).port;

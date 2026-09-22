@@ -65,15 +65,15 @@ async function fixture() {
   const service = await startRuntimeService({
     endpoint, token: 'test-token',
     config: {
-      instances: { shared: { type: 'test' }, separate: { type: 'test' } },
+      instances: { shared: { kind: 'test' }, separate: { kind: 'test' } },
       toolkitBindings: { bash: 'shared', git: 'shared', isolated: 'separate' },
     }, factories: { test: factory },
   });
   const clients: RuntimeClient[] = [];
   return {
     resources, released,
-    async connect(toolkits: Record<string, string>, administrative = false) {
-      const client = await RuntimeClient.connect({ endpoint, token: 'test-token', toolkits, administrative });
+    async connect(requirements: Record<string, string>, administrative = false) {
+      const client = await RuntimeClient.connect({ endpoint, token: 'test-token', requirements, administrative });
       clients.push(client);
       return client;
     },
@@ -138,7 +138,7 @@ test('cancellation reaches the running operation and disconnect cleans resources
 test('authentication, binding validation and structured operation errors cross the same IPC boundary', async () => {
   const service = await fixture();
   try {
-    await assert.rejects(RuntimeClient.connect({ endpoint: service.endpoint, token: 'wrong', toolkits: {} }), { code: 'authentication_failed' });
+    await assert.rejects(RuntimeClient.connect({ endpoint: service.endpoint, token: 'wrong', requirements: {} }), { code: 'authentication_failed' });
     await assert.rejects(service.connect({ bash: 'wrong-interface' }), { code: 'binding_mismatch' });
     const a = await service.connect({ bash: 'test' });
     await assert.rejects(a.call('bash', 'browser-error', null, execution), (error: unknown) => {

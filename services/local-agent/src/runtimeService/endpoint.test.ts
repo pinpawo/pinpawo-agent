@@ -39,7 +39,7 @@ test('permissive endpoint directories are rejected before connecting or listenin
   const endpoint = join(directory, 's');
   await chmod(directory, 0o755);
   await assert.rejects(ensureRuntimeEndpointDirectory(endpoint), { code: 'invalid_endpoint' });
-  await assert.rejects(RuntimeClient.connect({ endpoint, token: 'unused-test-token', toolkits: {} }), { code: 'invalid_endpoint' });
+  await assert.rejects(RuntimeClient.connect({ endpoint, token: 'unused-test-token', requirements: {} }), { code: 'invalid_endpoint' });
   await assert.rejects(startRuntimeService({ endpoint, token: 'unused-test-token',
     config: { instances: {}, toolkitBindings: {} }, factories: {},
   }), { code: 'invalid_endpoint' });
@@ -58,5 +58,5 @@ test('linked directories, linked endpoints and regular files cannot be Runtime s
   await assert.rejects(validateRuntimeEndpoint(file), { code: 'invalid_endpoint' });
   const link = join(directory, 's');
   await symlink(file, link);
-  await assert.rejects(RuntimeClient.connect({ endpoint: link, token: 'unused-test-token', toolkits: {} }), { code: 'invalid_endpoint' });
+  await assert.rejects(RuntimeClient.connect({ endpoint: link, token: 'unused-test-token', requirements: {} }), { code: 'invalid_endpoint' });
 });

@@ -26,7 +26,7 @@ export async function loadRuntimeServiceConfig(path: string): Promise<RuntimeSer
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     source = {
-      instances: { local: { type: 'shell', pathBase: dirname(path) }, browser: { type: 'cdp' } },
+      instances: { local: { kind: 'shell', pathBase: dirname(path) }, browser: { kind: 'cdp' } },
       toolkitBindings: { bash: 'local', git: 'local', 'project-inspection': 'local', browser: 'browser' },
     };
   }
@@ -35,8 +35,11 @@ export async function loadRuntimeServiceConfig(path: string): Promise<RuntimeSer
   const bindings = record(input.toolkitBindings);
   for (const [name, value] of Object.entries(instances)) {
     const entry = record(value);
-    if (!name.trim() || typeof entry.type !== 'string' || !entry.type.trim()) {
-      throw new RuntimeServiceError('invalid_config', 'Every Runtime instance needs a name and type.');
+    if (Object.hasOwn(entry, 'type')) {
+      throw new RuntimeServiceError('invalid_config', `Runtime instance "${name}" uses removed field "type"; use "kind".`);
+    }
+    if (!name.trim() || typeof entry.kind !== 'string' || !entry.kind.trim()) {
+      throw new RuntimeServiceError('invalid_config', 'Every Runtime instance needs a name and kind.');
     }
   }
   for (const [name, instanceId] of Object.entries(bindings)) {

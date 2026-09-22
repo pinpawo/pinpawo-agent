@@ -10,7 +10,7 @@ import {
 } from './toolkitInventory';
 import { createBashToolkit, createGitToolkit } from './local';
 import { createOperationRegistryForLocalServerDeps } from '../runtimeOperationRegistry';
-import type { HostToolkitRegistration } from './runtimeBinding';
+import type { ToolkitRuntimeRequirement } from './runtimeBinding';
 
 function toolkit(name: string, available = true): AgentToolkit {
   return defineToolkit({
@@ -29,7 +29,7 @@ function toolkit(name: string, available = true): AgentToolkit {
   });
 }
 
-function registration(toolkit: AgentToolkit, runtimeKind?: string): HostToolkitRegistration {
+function requirement(toolkit: AgentToolkit, runtimeKind?: string): ToolkitRuntimeRequirement {
   return { toolkit, ...(runtimeKind ? { runtimeKind } : {}) };
 }
 
@@ -40,11 +40,11 @@ test('buildHostToolkitInventory preserves source order and provenance', async ()
 
   const inventory = await buildHostToolkitInventory({
     sources: [
-      { id: 'plugin-a', kind: 'plugin', definitions: [registration(pluginToolkit)] },
+      { id: 'plugin-a', kind: 'plugin', definitions: [requirement(pluginToolkit)] },
       {
         id: 'local-agent',
         kind: 'host_builtin',
-        definitions: [registration(bashToolkit), registration(offlineToolkit)],
+        definitions: [requirement(bashToolkit), requirement(offlineToolkit)],
       },
     ],
   });
@@ -89,12 +89,12 @@ test('buildHostToolkitInventory rejects duplicate names before starting runtimes
   await assert.rejects(
     () => buildHostToolkitInventory({
       sources: [
-        { id: 'plugin-a', kind: 'plugin', definitions: [registration(toolkit('shared'))] },
-        { id: 'local-agent', kind: 'host_builtin', definitions: [registration(toolkit('shared'))] },
+        { id: 'plugin-a', kind: 'plugin', definitions: [requirement(toolkit('shared'))] },
+        { id: 'local-agent', kind: 'host_builtin', definitions: [requirement(toolkit('shared'))] },
       ],
-      assembleToolkits: async registrations => {
+      assembleToolkits: async requirements => {
         started = true;
-        return registrations.map(({ toolkit }) => toolkit);
+        return requirements.map(({ toolkit }) => toolkit);
       },
     }),
     /Duplicate Toolkit name "shared".*plugin source "plugin-a".*host_builtin source "local-agent"/,
@@ -107,12 +107,12 @@ test('buildHostToolkitInventory rejects duplicate source ids before starting run
   await assert.rejects(
     () => buildHostToolkitInventory({
       sources: [
-        { id: 'plugin-a', kind: 'plugin', definitions: [registration(toolkit('one'))] },
-        { id: 'plugin-a', kind: 'plugin', definitions: [registration(toolkit('two'))] },
+        { id: 'plugin-a', kind: 'plugin', definitions: [requirement(toolkit('one'))] },
+        { id: 'plugin-a', kind: 'plugin', definitions: [requirement(toolkit('two'))] },
       ],
-      assembleToolkits: async registrations => {
+      assembleToolkits: async requirements => {
         started = true;
-        return registrations.map(({ toolkit }) => toolkit);
+        return requirements.map(({ toolkit }) => toolkit);
       },
     }),
     /Duplicate Toolkit definition source id "plugin-a" at indexes 0 and 1/,
@@ -122,12 +122,12 @@ test('buildHostToolkitInventory rejects duplicate source ids before starting run
 
 test('buildHostToolkitInventory starts all definitions before availability evaluation', async () => {
   const events: string[] = [];
-  const definitions = [registration(toolkit('plugin')), registration(toolkit('bash'))];
+  const definitions = [requirement(toolkit('plugin')), requirement(toolkit('bash'))];
   await buildHostToolkitInventory({
     sources: [{ id: 'all', kind: 'host_builtin', definitions }],
-    assembleToolkits: async (registrations) => {
-      events.push(`start:${registrations.map(({ toolkit }) => toolkit.name).join(',')}`);
-      return registrations.map(({ toolkit }) => toolkit);
+    assembleToolkits: async (requirements) => {
+      events.push(`start:${requirements.map(({ toolkit }) => toolkit.name).join(',')}`);
+      return requirements.map(({ toolkit }) => toolkit);
     },
     resolveAvailability: async (definition) => {
       events.push(`availability:${definition.name}`);
@@ -145,8 +145,8 @@ test('buildHostToolkitInventory starts all definitions before availability evalu
 test('reports unavailable Toolkits uniformly with actionable provenance', async () => {
   const inventory = await buildHostToolkitInventory({
     sources: [
-      { id: 'offline-plugin.mjs', kind: 'plugin', definitions: [registration(toolkit('plugin', false))] },
-      { id: 'local-agent', kind: 'host_builtin', definitions: [registration(toolkit('bash', false))] },
+      { id: 'offline-plugin.mjs', kind: 'plugin', definitions: [requirement(toolkit('plugin', false))] },
+      { id: 'local-agent', kind: 'host_builtin', definitions: [requirement(toolkit('bash', false))] },
     ],
   });
   const warnings: string[] = [];
@@ -164,7 +164,7 @@ test('reports unavailable Toolkits uniformly with actionable provenance', async 
 test('HostToolkitInventoryStore replaces one immutable availability projection', async () => {
   const definition = toolkit('browser', false);
   const before = await buildHostToolkitInventory({
-    sources: [{ id: 'local-agent', kind: 'host_builtin', definitions: [registration(definition)] }],
+    sources: [{ id: 'local-agent', kind: 'host_builtin', definitions: [requirement(definition)] }],
   });
   const inventory = new HostToolkitInventoryStore(before);
   const after = await inventory.refresh(
@@ -184,7 +184,7 @@ test('concurrent refreshes merge into the latest Host inventory generation', asy
   const first = toolkit('first', false);
   const second = toolkit('second', false);
   const initial = await buildHostToolkitInventory({
-    sources: [{ id: 'local-agent', kind: 'host_builtin', definitions: [registration(first), registration(second)] }],
+    sources: [{ id: 'local-agent', kind: 'host_builtin', definitions: [requirement(first), requirement(second)] }],
   });
   const inventory = new HostToolkitInventoryStore(initial);
   let releaseFirst!: () => void;
@@ -214,7 +214,7 @@ test('concurrent refreshes merge into the latest Host inventory generation', asy
 test('an in-flight refresh cannot overwrite a replacement inventory generation', async () => {
   const definition = toolkit('shared', false);
   const initial = await buildHostToolkitInventory({
-    sources: [{ id: 'initial', kind: 'host_builtin', definitions: [registration(definition)] }],
+    sources: [{ id: 'initial', kind: 'host_builtin', definitions: [requirement(definition)] }],
   });
   const inventory = new HostToolkitInventoryStore(initial);
   let release!: () => void;
@@ -224,7 +224,7 @@ test('an in-flight refresh cannot overwrite a replacement inventory generation',
     return { available: true };
   });
   const replacement = await buildHostToolkitInventory({
-    sources: [{ id: 'replacement', kind: 'host_builtin', definitions: [registration(definition)] }],
+    sources: [{ id: 'replacement', kind: 'host_builtin', definitions: [requirement(definition)] }],
     resolveAvailability: async () => ({
       available: false,
       reason: 'replacement generation is offline',
@@ -243,7 +243,7 @@ test('operation registry derives only from the effective Host inventory', async 
     sources: [{
       id: 'local-agent',
       kind: 'host_builtin',
-      definitions: [registration(createBashToolkit()), registration(createGitToolkit())],
+      definitions: [requirement(createBashToolkit()), requirement(createGitToolkit())],
     }],
     resolveAvailability: async (definition) => definition.name === 'bash'
       ? { available: true }

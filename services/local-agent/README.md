@@ -134,9 +134,9 @@ Because one session has exactly one transport owner, `--embed-host` (which only
 restates the default) is mutually exclusive with `--server-port`,
 `--pet-port`/`--pet-id`, `--check`, and `--qa`.
 
-## Shared Runtime Service
+## Toolkit Runtime Service
 
-Chat and Studio ensure one independent Runtime service is running, then connect
+Chat and Studio ensure one independent Toolkit Runtime Service is running, then connect
 as clients. The service owns Shell environments, background processes, CDP
 connections and browser pages. Closing one Host releases that client's resources;
 the service remains available to other Hosts. `pinpawo runtime stop` explicitly
@@ -150,9 +150,9 @@ instance, and `browser` uses its own CDP instance. To isolate Git, for example:
 ```json
 {
   "instances": {
-    "local": { "type": "shell" },
-    "git-env": { "type": "shell" },
-    "browser": { "type": "cdp" }
+    "local": { "kind": "shell" },
+    "git-env": { "kind": "shell" },
+    "browser": { "kind": "cdp" }
   },
   "toolkitBindings": {
     "bash": "local",
@@ -170,8 +170,10 @@ startup environment; an instance can configure `shell`, `env`, absolute
 shell is bash or zsh on POSIX and PowerShell on Windows. Commands receive an
 explicit cwd from the current execution. Changes to service configuration or its
 startup environment require a service restart and fresh Host connections.
+Existing configurations must change each instance's `type` field to `kind`.
+Stop an older service before starting this version; the IPC protocol is version 2.
 
-Host Toolkit registrations declare `runtimeKind: 'shell'` or `runtimeKind: 'cdp'`; the
+Host Toolkit Runtime requirements declare `runtimeKind: 'shell'` or `runtimeKind: 'cdp'`; the
 `AgentToolkit` definitions carry no execution metadata. The Host
 injects async clients; static Tools are retained across executions. The selected
 Capability receives only the clients for its `uses` dependencies. Local tools

@@ -6,11 +6,11 @@ import { ensureRuntimeEndpointDirectory } from './endpoint';
 import {
   RUNTIME_PROTOCOL_VERSION, RuntimeServiceError, receive, record, send, string,
 } from './protocol';
-import type { HostedRuntime, RuntimeExecution, RuntimeFactory, RuntimeServiceConfig } from './types';
+import type { RuntimeInstance, RuntimeExecution, RuntimeFactory, RuntimeServiceConfig } from './types';
 
 type Instance = {
-  value?: HostedRuntime;
-  pending?: Promise<HostedRuntime>;
+  value?: RuntimeInstance;
+  pending?: Promise<RuntimeInstance>;
   failed?: string;
 };
 
@@ -72,7 +72,7 @@ export async function startRuntimeService(options: {
   const cleanups = new Set<Promise<unknown>>();
   let stopping: Promise<void> | undefined;
 
-  async function instance(id: string): Promise<HostedRuntime> {
+  async function instance(id: string): Promise<RuntimeInstance> {
     const config = options.config.instances[id];
     if (!config) throw new RuntimeServiceError('unknown_instance', `Unknown Runtime instance: ${id}`);
     let entry = instances.get(id);
@@ -83,8 +83,8 @@ export async function startRuntimeService(options: {
     if (entry.failed) throw new RuntimeServiceError('runtime_unavailable', entry.failed);
     if (entry.value) return entry.value;
     if (!entry.pending) {
-      const factory = options.factories[config.type];
-      if (!factory) throw new RuntimeServiceError('unknown_runtime_type', `Unregistered Runtime type: ${config.type}`);
+      const factory = options.factories[config.kind];
+      if (!factory) throw new RuntimeServiceError('unknown_runtime_kind', `Unregistered Runtime kind: ${config.kind}`);
       const target = entry;
       target.pending = Promise.resolve().then(() => factory(config)).then((value) => {
         target.value = value;
@@ -129,7 +129,7 @@ export async function startRuntimeService(options: {
         const entry = instances.get(id);
         return {
           instanceId: id,
-          type: options.config.instances[id]?.type,
+          runtimeKind: options.config.instances[id]?.kind,
           state: entry?.failed ? 'failed' : entry?.value ? 'ready' : entry?.pending ? 'starting' : 'idle',
           ...(entry?.failed ? { error: entry.failed } : {}),
           // Instance diagnostics are aggregate state only, never other clients' resources.
@@ -172,17 +172,17 @@ export async function startRuntimeService(options: {
           if (message.protocol !== RUNTIME_PROTOCOL_VERSION) {
             throw new RuntimeServiceError('protocol_mismatch', 'Runtime protocol mismatch; restart with matching client and service versions.');
           }
-          const requested = record(message.toolkits);
-          const bindings: Record<string, { instanceId: string; runtimeType: string }> = Object.create(null);
-          for (const [toolkit, type] of Object.entries(requested)) {
-            string(type, 'runtimeType');
+          const requested = record(message.requirements);
+          const bindings: Record<string, { instanceId: string; runtimeKind: string }> = Object.create(null);
+          for (const [toolkit, kind] of Object.entries(requested)) {
+            string(kind, 'runtimeKind');
             const instanceId = options.config.toolkitBindings[toolkit];
             const config = instanceId ? options.config.instances[instanceId] : undefined;
-            if (!config || config.type !== type || !Object.hasOwn(options.factories, config.type)) {
+            if (!config || config.kind !== kind || !Object.hasOwn(options.factories, config.kind)) {
               throw new RuntimeServiceError('binding_mismatch', `No compatible configured Runtime for Toolkit: ${toolkit}`);
             }
             client.bindings.set(toolkit, instanceId);
-            bindings[toolkit] = { instanceId, runtimeType: config.type };
+            bindings[toolkit] = { instanceId, runtimeKind: config.kind };
           }
           client.authenticated = true;
           client.administrative = message.administrative === true;

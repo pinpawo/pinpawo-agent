@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { RuntimeClient } from './client';
-import { receive, send } from './protocol';
+import { RUNTIME_PROTOCOL_VERSION, receive, send } from './protocol';
 import type { RuntimeExecution } from './types';
 
 const execution: RuntimeExecution = {
@@ -31,7 +31,7 @@ async function peer(
       if (message.op === 'hello') {
         send(socket, {
           id: message.id, ok: true,
-          value: { clientId: randomUUID(), pid: process.pid, bindings: { bash: { instanceId: 'local', runtimeType: 'shell' } } },
+          value: { clientId: randomUUID(), pid: process.pid, bindings: { bash: { instanceId: 'local', runtimeKind: 'shell' } } },
         });
       } else onRequest(socket, message);
     });
@@ -45,7 +45,7 @@ async function peer(
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   });
-  const client = await RuntimeClient.connect({ endpoint, token: 'test-only-token', toolkits: { bash: 'shell' } });
+  const client = await RuntimeClient.connect({ endpoint, token: 'test-only-token', requirements: { bash: 'shell' } });
   t.after(() => client.close());
   return client;
 }
@@ -110,7 +110,7 @@ test('valid structured errors preserve recovery details and leave the connection
       code: 'origin_changed', message: 'Explicit approval required.', retryable: false,
       details: { interactionDispatched: true },
     } });
-    else send(socket, { id: message.id, ok: true, value: { pid: process.pid, protocol: 1, instances: [] } });
+    else send(socket, { id: message.id, ok: true, value: { pid: process.pid, protocol: RUNTIME_PROTOCOL_VERSION, instances: [] } });
   });
   await assert.rejects(client.status(), (error: unknown) => {
     const value = error as { code: string; retryable: boolean; details: unknown };

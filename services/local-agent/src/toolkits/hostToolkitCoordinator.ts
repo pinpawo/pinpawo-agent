@@ -3,10 +3,10 @@ import {
   type HostToolkitInventorySnapshot, type ToolkitAvailabilityResolver, type ToolkitDefinitionSource,
 } from './toolkitInventory';
 import { connectHostRuntimes, type RuntimeClientFactory } from '../runtimeService/hostClient';
-import { bindToolkitRuntime, type HostToolkitRegistration, type ToolkitRuntimeClientBinding } from './runtimeBinding';
+import { bindToolkitRuntime, type ToolkitRuntimeRequirement, type ConnectedToolkitRuntime } from './runtimeBinding';
 
 type RuntimeConnection = {
-  bindings: Readonly<Record<string, ToolkitRuntimeClientBinding>>;
+  bindings: Readonly<Record<string, ConnectedToolkitRuntime>>;
   close: () => Promise<void>;
 };
 export type HostToolkitCoordinatorOptions = Readonly<{
@@ -14,7 +14,7 @@ export type HostToolkitCoordinatorOptions = Readonly<{
   resolveAvailability?: ToolkitAvailabilityResolver;
   warn?: (message: string) => void;
   connectRuntimes?: (options: {
-    registrations: readonly HostToolkitRegistration[];
+    requirements: readonly ToolkitRuntimeRequirement[];
     clientFactories?: Readonly<Record<string, RuntimeClientFactory>>;
   }) => Promise<RuntimeConnection>;
 }>;
@@ -38,12 +38,12 @@ export class HostToolkitCoordinator {
     try {
       const snapshot = await buildHostToolkitInventory({
         sources,
-        assembleToolkits: async (registrations) => {
+        assembleToolkits: async (requirements) => {
           const connect = this.options.connectRuntimes ?? connectHostRuntimes;
-          this.connection = await connect({ registrations, ...options });
-          return registrations.map(registration => bindToolkitRuntime(
-            registration,
-            this.connection!.bindings[registration.toolkit.name],
+          this.connection = await connect({ requirements, ...options });
+          return requirements.map(requirement => bindToolkitRuntime(
+            requirement,
+            this.connection!.bindings[requirement.toolkit.name],
           ));
         },
         ...(this.options.resolveAvailability ? { resolveAvailability: this.options.resolveAvailability } : {}),

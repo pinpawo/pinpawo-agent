@@ -7,7 +7,7 @@ import {
   validateToolkitDefinition,
 } from '@pinpawo/pet-agent';
 import type { ToolkitDefinitionSource } from './toolkits/toolkitInventory';
-import type { HostToolkitRegistration } from './toolkits/runtimeBinding';
+import type { ToolkitRuntimeRequirement } from './toolkits/runtimeBinding';
 import type { RuntimeClientFactory } from './runtimeService/hostClient';
 
 export type AgentPlugin = {
@@ -54,8 +54,9 @@ export async function loadPluginsFromDir(
       const mod = await import(pathToFileURL(filePath).href) as {
         default?: unknown;
         tools?: unknown;
-        toolkits?: unknown;
         toolkitRegistrations?: unknown;
+        toolkits?: unknown;
+        toolkitRuntimeRequirements?: unknown;
         runtimeClients?: Record<string, unknown>;
       };
 
@@ -66,24 +67,27 @@ export async function loadPluginsFromDir(
       }
 
       const loadedPlugin = plugin as AgentPlugin;
+      if (mod.toolkitRegistrations !== undefined) {
+        throw new Error('Plugin export toolkitRegistrations was removed; use toolkitRuntimeRequirements.');
+      }
       const candidateRuntimeClients = mod.runtimeClients ?? {};
-      for (const [type, factory] of Object.entries(candidateRuntimeClients)) {
-        if (typeof factory !== 'function' || Object.hasOwn(runtimeClients, type)) {
-          throw new Error(`Invalid or duplicate Runtime client adapter: ${type}`);
+      for (const [kind, factory] of Object.entries(candidateRuntimeClients)) {
+        if (typeof factory !== 'function' || Object.hasOwn(runtimeClients, kind)) {
+          throw new Error(`Invalid or duplicate Runtime client adapter: ${kind}`);
         }
       }
-      if (Array.isArray(mod.toolkits) && Array.isArray(mod.toolkitRegistrations)) {
-        throw new Error('Plugin must export either toolkits or toolkitRegistrations, not both.');
+      if (Array.isArray(mod.toolkits) && Array.isArray(mod.toolkitRuntimeRequirements)) {
+        throw new Error('Plugin must export either toolkits or toolkitRuntimeRequirements, not both.');
       }
       if (Array.isArray(mod.toolkits) && mod.toolkits.some((toolkit) => (
         toolkit != null
         && typeof toolkit === 'object'
         && (Object.hasOwn(toolkit, 'runtime') || Object.hasOwn(toolkit, 'runtimeKind'))
       ))) {
-        throw new Error('Runtime metadata belongs in toolkitRegistrations, not AgentToolkit exports.');
+        throw new Error('Runtime metadata belongs in toolkitRuntimeRequirements, not AgentToolkit exports.');
       }
-      const definitions = Array.isArray(mod.toolkitRegistrations)
-        ? mod.toolkitRegistrations as HostToolkitRegistration[]
+      const definitions = Array.isArray(mod.toolkitRuntimeRequirements)
+        ? mod.toolkitRuntimeRequirements as ToolkitRuntimeRequirement[]
         : Array.isArray(mod.toolkits)
           ? (mod.toolkits as AgentToolkit[]).map((toolkit) => Object.freeze({ toolkit }))
           : [];

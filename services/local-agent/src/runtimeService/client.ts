@@ -4,13 +4,13 @@ import { validateRuntimeEndpoint } from './endpoint';
 import { RUNTIME_PROTOCOL_VERSION, RuntimeServiceError, receive, record, send } from './protocol';
 import type { RuntimeCaller, RuntimeExecution } from './types';
 
-export type RuntimeBinding = Readonly<{ instanceId: string; runtimeType: string }>;
+export type ToolkitRuntimeBinding = Readonly<{ instanceId: string; runtimeKind: string }>;
 export type RuntimeServiceStatus = {
   pid: number;
   protocol: number;
   instances: Array<{
     instanceId: string;
-    type: string;
+    runtimeKind: string;
     state: string;
     error?: string;
     details?: unknown;
@@ -25,7 +25,7 @@ export class RuntimeClient implements RuntimeCaller {
   private connected = true;
   private identity = '';
   private servicePid = 0;
-  private instanceBindings: Readonly<Record<string, RuntimeBinding>> = Object.freeze({});
+  private instanceBindings: Readonly<Record<string, ToolkitRuntimeBinding>> = Object.freeze({});
 
   private constructor(private readonly socket: Socket) {
     receive(socket, (message) => {
@@ -62,7 +62,7 @@ export class RuntimeClient implements RuntimeCaller {
   static async connect(options: {
     endpoint: string;
     token: string;
-    toolkits: Readonly<Record<string, string>>;
+    requirements: Readonly<Record<string, string>>;
     administrative?: boolean;
     timeoutMs?: number;
   }): Promise<RuntimeClient> {
@@ -79,7 +79,7 @@ export class RuntimeClient implements RuntimeCaller {
       });
       const response = record(await client.request({
         op: 'hello', protocol: RUNTIME_PROTOCOL_VERSION, token: options.token,
-        toolkits: options.toolkits, administrative: options.administrative ?? false,
+        requirements: options.requirements, administrative: options.administrative ?? false,
       }));
       if (typeof response.clientId !== 'string' || typeof response.pid !== 'number') {
         throw new RuntimeServiceError('invalid_response', 'Invalid Runtime handshake.');
@@ -89,10 +89,10 @@ export class RuntimeClient implements RuntimeCaller {
       client.instanceBindings = Object.freeze(Object.fromEntries(
         Object.entries(record(response.bindings)).map(([name, value]) => {
           const binding = record(value);
-          if (typeof binding.instanceId !== 'string' || typeof binding.runtimeType !== 'string') {
+          if (typeof binding.instanceId !== 'string' || typeof binding.runtimeKind !== 'string') {
             throw new RuntimeServiceError('invalid_response', 'Invalid Runtime binding.');
           }
-          return [name, Object.freeze({ instanceId: binding.instanceId, runtimeType: binding.runtimeType })];
+          return [name, Object.freeze({ instanceId: binding.instanceId, runtimeKind: binding.runtimeKind })];
         }),
       ));
       return client;
@@ -106,7 +106,7 @@ export class RuntimeClient implements RuntimeCaller {
 
   get clientId(): string { return this.identity; }
   get pid(): number { return this.servicePid; }
-  get bindings(): Readonly<Record<string, RuntimeBinding>> { return this.instanceBindings; }
+  get bindings(): Readonly<Record<string, ToolkitRuntimeBinding>> { return this.instanceBindings; }
   get isConnected(): boolean { return this.connected && !this.socket.destroyed; }
 
   private request(message: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {

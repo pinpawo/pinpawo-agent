@@ -54,16 +54,16 @@ test('concurrent Hosts use one independent service, shared shell environments an
     };`);
     await writeFile(paths.config, JSON.stringify({
       instances: {
-        shared: { type: 'shell', pathBase: directory, env: { PINPAWO_TEST_ENVIRONMENT: 'shared' } },
-        isolated: { type: 'shell', pathBase: directory, env: { PINPAWO_TEST_ENVIRONMENT: 'isolated' } },
-        example: { type: 'example' },
+        shared: { kind: 'shell', pathBase: directory, env: { PINPAWO_TEST_ENVIRONMENT: 'shared' } },
+        isolated: { kind: 'shell', pathBase: directory, env: { PINPAWO_TEST_ENVIRONMENT: 'isolated' } },
+        example: { kind: 'example' },
       },
       toolkitBindings: { bash: 'shared', git: 'shared', inspection: 'isolated', extension: 'example' },
       modules: [modulePath],
     }));
     const [a, b] = await Promise.all([
-      ensureRuntimeService({ directory, toolkits: { bash: 'shell', git: 'shell', extension: 'example' } }),
-      ensureRuntimeService({ directory, toolkits: { bash: 'shell', inspection: 'shell' } }),
+      ensureRuntimeService({ directory, requirements: { bash: 'shell', git: 'shell', extension: 'example' } }),
+      ensureRuntimeService({ directory, requirements: { bash: 'shell', inspection: 'shell' } }),
     ]);
     clients.push(a, b);
     assert.equal(a.pid, b.pid);
@@ -338,13 +338,13 @@ await writeFile(${JSON.stringify(pidPath)}, String(process.pid));
 export const runtimeFactories = {};
 `);
     await writeFile(paths.config, JSON.stringify({ instances: {}, toolkitBindings: {}, modules: [modulePath] }));
-    await assert.rejects(ensureRuntimeService({ directory, toolkits: { bash: 'shell' } }), { code: 'binding_mismatch' });
+    await assert.rejects(ensureRuntimeService({ directory, requirements: { bash: 'shell' } }), { code: 'binding_mismatch' });
     pid = Number((await readFile(pidPath, 'utf8')).trim());
     assert.ok(Number.isSafeInteger(pid) && pid > 0);
     assert.equal(isProcessAlive(pid), false, 'A failed handshake must not leave this launcher\'s candidate running.');
 
     owner = await ensureRuntimeService({ directory, administrative: true });
-    await assert.rejects(ensureRuntimeService({ directory, toolkits: { bash: 'shell' } }), { code: 'binding_mismatch' });
+    await assert.rejects(ensureRuntimeService({ directory, requirements: { bash: 'shell' } }), { code: 'binding_mismatch' });
     assert.equal((await owner.status()).pid, owner.pid, 'An existing owner must survive a different Host\'s binding error.');
   } finally {
     if (owner) {

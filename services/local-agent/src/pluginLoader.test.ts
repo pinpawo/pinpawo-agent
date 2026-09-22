@@ -141,6 +141,21 @@ export default { name: 'legacy-runtime-plugin' };
   assert.deepEqual(Object.keys(result.runtimeClients), []);
 });
 
+test('loadPluginsFromDir rejects the removed toolkitRegistrations export', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-legacy-export-'));
+  await fs.writeFile(path.join(root, 'legacy-plugin.mjs'), `${toolModulePrelude()}
+export const toolkitRegistrations = [{
+  runtimeKind: 'shell',
+  toolkit: { name: 'legacy_toolkit', description: 'Legacy toolkit', tools: [{ tool: defineTestTool('legacy_tool') }] },
+}];
+export default { name: 'legacy-plugin' };
+`, 'utf8');
+
+  const result = await loadPluginsFromDir(root);
+  assert.deepEqual(result.plugins, []);
+  assert.deepEqual(result.toolkitSources, []);
+});
+
 test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-policy-'));
   await fs.writeFile(path.join(root, 'invalid-policy-plugin.mjs'), `${toolModulePrelude()}

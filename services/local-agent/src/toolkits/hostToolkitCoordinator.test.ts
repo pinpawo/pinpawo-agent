@@ -34,9 +34,9 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
   });
   const coordinator = new HostToolkitCoordinator({
     warn: (message) => warnings.push(message),
-    connectRuntimes: async ({ registrations }) => {
+    connectRuntimes: async ({ requirements }) => {
       events.push('connect');
-      assert.deepEqual(registrations, [
+      assert.deepEqual(requirements, [
         { toolkit: runtimeToolkit, runtimeKind: 'fake' },
         { toolkit: unavailableToolkit },
       ]);

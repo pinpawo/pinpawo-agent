@@ -19,9 +19,9 @@ bindings and borrows a local Chrome CDP endpoint:
 ~~~json
 {
   "instances": {
-    "local": { "type": "shell" },
+    "local": { "kind": "shell" },
     "browser": {
-      "type": "cdp",
+      "kind": "cdp",
       "endpoint": "http://127.0.0.1:9222"
     }
   },
@@ -44,7 +44,7 @@ Alternatively, remove `endpoint` and configure a managed browser:
 
 ~~~json
 {
-  "type": "cdp",
+  "kind": "cdp",
   "executablePath": "/absolute/path/to/chrome",
   "headless": false,
   "userDataDir": "/absolute/path/to/dedicated-profile"

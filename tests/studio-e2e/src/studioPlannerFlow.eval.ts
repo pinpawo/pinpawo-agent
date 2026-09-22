@@ -37,16 +37,16 @@ try {
   const capabilities = loaded.map(({ capability }) => capability);
   const toolkits = [createProjectInspectionToolkit(), createKanbanPlanningToolkit(service),
     createStudioContextToolkit(() => ['planner', 'executor', 'reviewer', 'wiki'].map((petId) => ({ petId, name: petId })))];
-  const registrations = toolkits.map((toolkit) => ({
+  const requirements = toolkits.map((toolkit) => ({
     toolkit,
     ...(toolkit.name === 'project-inspection' ? { runtimeKind: 'shell' } : {}),
   }));
-  runtimeConnection = await connectHostRuntimes({ registrations });
+  runtimeConnection = await connectHostRuntimes({ requirements });
   const registry = compileAgentRegistry({
     capabilities,
-    toolkits: registrations.map(registration => bindToolkitRuntime(
-      registration,
-      runtimeConnection!.bindings[registration.toolkit.name],
+    toolkits: requirements.map(requirement => bindToolkitRuntime(
+      requirement,
+      runtimeConnection!.bindings[requirement.toolkit.name],
     )),
   });
   assert.equal(registry.capabilities.length, 2, 'Both production Planner capabilities must compile');

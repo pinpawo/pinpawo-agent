@@ -2,7 +2,7 @@
 
 > 状态：Draft。单进程托管、Shell Runtime 表示执行环境、实例共享/隔离和 Browser 只保留 CDP
 > 已确认。契约、托管服务和消费方已实现，三平台联合验收通过；本草案仍待评审，未提升为正式设计。
-> 更新：2026-09-22
+> 更新：2026-09-23
 > Tracking：[issue #848](https://github.com/pinpawo/pinpawo-agent/issues/848)
 > 现有契约：[领域关系](../host-agent-capability-toolkit.md)、
 > [Toolkit Runtime](../../reference/extensions/toolkit-runtime.md)
@@ -22,7 +22,7 @@ Tools，也不由 Agent 中间件手工执行 Tool。连接关闭后绑定失效
 资源归属校验继续由 Runtime 服务负责，与审批无关。Host 提供工作目录提示，具体
 Toolkit 提供工具使用说明；Agent 不硬编码环境提示或特定 Toolkit 名称。
 
-**一个本机独立进程持有所有实际 Runtime。Host 运行 Agent、Toolkit Tools 和审核，
+**Toolkit Runtime Service 是持有所有实际 Runtime 的本机独立进程。Host 运行 Agent、Toolkit Tools 和审核，
 通过一个本机连接调用 Runtime。Toolkit 按能力使用实例，可共享，也可隔离。**
 
 ~~~text
@@ -31,15 +31,15 @@ Chat / Studio Host
   一个 Runtime client
              │ 本机 IPC
              ▼
-Runtime 托管进程
+Toolkit Runtime Service
   Shell instance dev  ← bash、git、project-inspection
   Shell instance isolated ← 需要独立环境的 Toolkit
   CDP instance browser ← browser Toolkit
 ~~~
 
-本期默认提供两种 Runtime：
+本期默认提供两种 Runtime kind：
 
-| 类型 | 能力 | 消费方 |
+| Kind | 能力 | 消费方 |
 | --- | --- | --- |
 | shell | bash/zsh 命令、argv 程序执行、进程与输出管理 | bash、git、project-inspection |
 | cdp | CDP 连接、页面、浏览器操作与事件 | browser |
@@ -58,7 +58,7 @@ bash/zsh 是 Shell 实例的配置。Git 的参数和结果语义归 git Toolkit
 Runtime。git/gh 等 argv 调用可直接启动程序，无须拼接 shell 字符串。
 browser 明确表示 CDP Toolkit；其他浏览器 backend 删除，未来需要时建立独立 Toolkit。
 
-设计只区分 Toolkit、Runtime 类型和 Runtime 实例。Toolkit 依赖异步能力接口，
+设计只区分 Toolkit、Runtime kind 和 Runtime 实例。Toolkit 依赖异步能力接口，
 实例由配置指定；不要求 Toolkit 与 Runtime 一一对应。没有资源需求的 Toolkit 不分配
 Runtime。当前消费方不需要通用的多 Runtime 组合协议，待出现实际需求再增加。
 
@@ -71,9 +71,9 @@ Toolkit 到实例的固定映射。默认配置文件为 `~/.pinpawo/runtime/con
 ~~~json
 {
   "instances": {
-    "dev": { "type": "shell", "shell": "bash", "pathBase": "/workspace" },
-    "git-isolated": { "type": "shell", "shell": "zsh", "pathBase": "/workspace" },
-    "browser": { "type": "cdp", "endpoint": "http://127.0.0.1:9222" }
+    "dev": { "kind": "shell", "shell": "bash", "pathBase": "/workspace" },
+    "git-isolated": { "kind": "shell", "shell": "zsh", "pathBase": "/workspace" },
+    "browser": { "kind": "cdp", "endpoint": "http://127.0.0.1:9222" }
   },
   "toolkitBindings": {
     "bash": "dev",
@@ -90,7 +90,7 @@ Toolkit 到实例的固定映射。默认配置文件为 `~/.pinpawo/runtime/con
   同一仓库仍会修改同一批文件；CDP 连接同一浏览器也可能共享登录状态。
 - 配置与绑定在连接期间固定。修改服务配置需显式重启服务，Host 重新连接和装配；
   本期不做热更新、配置 revision 或实例在线替换。
-- 服务按 type 静态注册执行实现，按 instanceId 持有环境及其操作入口，管理初始化、
+- 服务按 kind 静态注册执行实现，按 instanceId 持有环境及其操作入口，管理初始化、
   诊断和释放。本机实例直接使用宿主资源，不要求创建独占进程；不为每个 Toolkit 创建 root。
 - Shell 与 CDP 各有自己的异步接口，Toolkit 只使用所需方法。接口复用通过代码契约
   和装配检查保证；不建立独立的 port registry、双侧 descriptor 或动态能力协商。
@@ -99,7 +99,7 @@ Toolkit 到实例的固定映射。默认配置文件为 `~/.pinpawo/runtime/con
 
 现有 [pluginLoader](../../../services/local-agent/src/pluginLoader.ts) 返回含函数的
 Toolkit 注册记录，不能直接传给另一个进程。需要 Runtime 的插件通过
-`toolkitRegistrations` 声明 `runtimeKind`，并以 `runtimeClients` 导出提供 Host 适配器；
+`toolkitRuntimeRequirements` 声明 `runtimeKind`，并以 `runtimeClients` 导出提供 Host 适配器；
 配置中的 `modules` 绝对路径指向受信服务模块，其 `runtimeFactories` 导出提供实际实现。
 服务不接收 RPC 上传的 JS、函数或任意模块路径；未注册的接口明确报错。
 本期采用随发行配套的客户端与服务入口，一个 IPC 协议版本；独立插件版本协商不在本期。

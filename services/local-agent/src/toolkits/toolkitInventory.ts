@@ -1,4 +1,4 @@
-import type { HostToolkitRegistration } from './runtimeBinding';
+import type { ToolkitRuntimeRequirement } from './runtimeBinding';
 import {
   type AgentToolkit,
   type ToolkitAvailability,
@@ -17,7 +17,7 @@ export type ToolkitDefinitionSourceKind = 'host_builtin' | 'plugin';
 export type ToolkitDefinitionSource = Readonly<{
   id: string;
   kind: ToolkitDefinitionSourceKind;
-  definitions: readonly HostToolkitRegistration[];
+  definitions: readonly ToolkitRuntimeRequirement[];
 }>;
 
 export type ToolkitDefinitionProvenance = Readonly<{
@@ -48,7 +48,7 @@ export type ToolkitAvailabilityResolver = (
 
 export type BuildHostToolkitInventoryOptions = Readonly<{
   sources: readonly ToolkitDefinitionSource[];
-  assembleToolkits?: (registrations: readonly HostToolkitRegistration[]) => Promise<readonly AgentToolkit[]>;
+  assembleToolkits?: (requirements: readonly ToolkitRuntimeRequirement[]) => Promise<readonly AgentToolkit[]>;
   resolveAvailability?: ToolkitAvailabilityResolver;
 }>;
 
@@ -104,7 +104,7 @@ function collectDefinitions(sources: readonly ToolkitDefinitionSource[]) {
   const seenSourceIds = new Map<string, number>();
   const seenToolkitNames = new Map<string, ToolkitDefinitionProvenance>();
   const definitions: Array<{
-    registration: HostToolkitRegistration;
+    requirement: ToolkitRuntimeRequirement;
     toolkit: AgentToolkit;
     provenance: ToolkitDefinitionProvenance;
   }> = [];
@@ -120,8 +120,8 @@ function collectDefinitions(sources: readonly ToolkitDefinitionSource[]) {
     }
     seenSourceIds.set(source.id, sourceIndex);
 
-    source.definitions.forEach((registration, definitionIndex) => {
-      const { toolkit } = registration;
+    source.definitions.forEach((requirement, definitionIndex) => {
+      const { toolkit } = requirement;
       validateToolkitDefinition(toolkit);
       const provenance = Object.freeze({
         sourceId: source.id,
@@ -137,7 +137,7 @@ function collectDefinitions(sources: readonly ToolkitDefinitionSource[]) {
         );
       }
       seenToolkitNames.set(toolkit.name, provenance);
-      definitions.push({ registration, toolkit, provenance });
+      definitions.push({ requirement, toolkit, provenance });
     });
   });
 
@@ -148,12 +148,12 @@ export async function buildHostToolkitInventory(
   options: BuildHostToolkitInventoryOptions,
 ): Promise<HostToolkitInventorySnapshot> {
   const definitions = collectDefinitions(options.sources);
-  const registrations = Object.freeze(definitions.map(({ registration }) => registration));
+  const requirements = Object.freeze(definitions.map(({ requirement }) => requirement));
   const toolkits = Object.freeze(definitions.map(({ toolkit }) => toolkit));
 
   // Duplicate definitions and malformed contracts fail before any dynamic
   // resource is acquired.
-  const assembled = await options.assembleToolkits?.(registrations) ?? toolkits;
+  const assembled = await options.assembleToolkits?.(requirements) ?? toolkits;
   if (assembled.length !== toolkits.length || assembled.some((toolkit, index) => toolkit.name !== toolkits[index].name)) {
     throw new Error('Host assembly must preserve Toolkit inventory identity and order.');
   }

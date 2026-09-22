@@ -11,7 +11,7 @@ export function testExecution(overrides: Partial<RuntimeExecution> = {}): Runtim
   };
 }
 
-export function createLocalRuntimeFixture(config: RuntimeInstanceConfig = { type: 'shell' }) {
+export function createLocalRuntimeFixture(config: RuntimeInstanceConfig = { kind: 'shell' }) {
   const environment = createShellEnvironment({ pathBase: process.cwd(), ...config });
   const caller = (clientId = 'test-client'): RuntimeCaller => ({
     call: (toolkitName, method, args, execution, signal) => environment.call(method, args, {

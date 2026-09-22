@@ -46,7 +46,7 @@ import type {
   HostToolkitInventoryStore,
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
-import type { HostToolkitRegistration } from './toolkits/runtimeBinding';
+import type { ToolkitRuntimeRequirement } from './toolkits/runtimeBinding';
 import { FileSaver } from './fileSaver';
 
 export type HostCapabilityAssemblyOptions = {
@@ -112,7 +112,7 @@ export class HostCapabilityAssembly {
   private readonly sourceId: string;
   private modelProfiles: LocalModelProfileRegistry | null = null;
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
-  private readonly hostBuiltInToolkits: readonly HostToolkitRegistration[];
+  private readonly hostBuiltInToolkits: readonly ToolkitRuntimeRequirement[];
   private readonly capabilityCatalog: HostCapabilityCatalog;
   private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
   private readonly checkpointer: FileSaver;

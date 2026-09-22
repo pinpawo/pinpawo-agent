@@ -1,4 +1,4 @@
-import type { HostToolkitRegistration, ToolkitRuntimeClientBinding } from '../toolkits/runtimeBinding';
+import type { ToolkitRuntimeRequirement, ConnectedToolkitRuntime } from '../toolkits/runtimeBinding';
 import { BROWSER_RUNTIME_METHODS, type BrowserRuntimeCallContext, type BrowserRuntimePort } from '@pinpawo-toolkit/browser';
 import { createShellRuntimeClient } from '../toolkits/local/shellClient';
 import { ensureRuntimeService } from './launcher';
@@ -21,7 +21,7 @@ function createBrowserClient(caller: RuntimeCaller, toolkitName: string): Browse
 }
 
 export async function connectHostRuntimes(options: {
-  registrations: readonly HostToolkitRegistration[];
+  requirements: readonly ToolkitRuntimeRequirement[];
   directory?: string;
   clientFactories?: Readonly<Record<string, RuntimeClientFactory>>;
 }) {
@@ -29,12 +29,12 @@ export async function connectHostRuntimes(options: {
     shell: createShellRuntimeClient,
     cdp: createBrowserClient,
   });
-  for (const [type, factory] of Object.entries(options.clientFactories ?? {})) {
-    if (Object.hasOwn(factories, type)) throw new Error(`Duplicate Runtime client factory: ${type}`);
-    factories[type] = factory;
+  for (const [kind, factory] of Object.entries(options.clientFactories ?? {})) {
+    if (Object.hasOwn(factories, kind)) throw new Error(`Duplicate Runtime client factory: ${kind}`);
+    factories[kind] = factory;
   }
   const requested: Record<string, string> = Object.create(null);
-  for (const { toolkit, runtimeKind } of options.registrations) {
+  for (const { toolkit, runtimeKind } of options.requirements) {
     if (runtimeKind === undefined) continue;
     if (typeof runtimeKind !== 'string' || !runtimeKind.trim() || runtimeKind !== runtimeKind.trim()) {
       throw new Error(`Toolkit "${toolkit.name}" must declare a non-empty Runtime kind.`);
@@ -43,13 +43,13 @@ export async function connectHostRuntimes(options: {
     requested[toolkit.name] = runtimeKind;
   }
   if (!Object.keys(requested).length) return { bindings: {}, close: async () => {} };
-  const connection = await ensureRuntimeService({ directory: options.directory, toolkits: requested });
+  const connection = await ensureRuntimeService({ directory: options.directory, requirements: requested });
   try {
-    const bindings: Record<string, ToolkitRuntimeClientBinding> = Object.create(null);
+    const bindings: Record<string, ConnectedToolkitRuntime> = Object.create(null);
     for (const [toolkitName, binding] of Object.entries(connection.bindings)) {
       bindings[toolkitName] = {
-        runtimeKind: binding.runtimeType,
-        client: factories[binding.runtimeType](connection, toolkitName),
+        runtimeKind: binding.runtimeKind,
+        client: factories[binding.runtimeKind](connection, toolkitName),
       };
     }
     return { bindings, close: () => connection.close() };

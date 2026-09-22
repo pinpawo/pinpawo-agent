@@ -78,9 +78,9 @@ async function serviceFixture(t: TestContext) {
     async connect(options: Omit<Parameters<typeof connectHostRuntimes>[0], 'directory'>) {
       const host = await connectHostRuntimes({ ...options, directory });
       hosts.push(host);
-      return { ...host, toolkits: options.registrations.map(registration => bindToolkitRuntime(
-        registration,
-        host.bindings[registration.toolkit.name],
+      return { ...host, toolkits: options.requirements.map(requirement => bindToolkitRuntime(
+        requirement,
+        host.bindings[requirement.toolkit.name],
       )) };
     },
   };
@@ -105,7 +105,7 @@ const echo = tool(async ({ value }, runtime) => {
   const { executionScope, toolkitRuntime } = runtime.context;
   return JSON.stringify(await toolkitRuntime.echo(value, executionScope, runtime.signal));
 }, { name: 'extension_echo', description: 'Read the service identity and echo a test value.', schema: z.object({ value: z.string() }) });
-export const toolkitRegistrations = [{ runtimeKind: 'example', toolkit: defineToolkit({ name: 'example', description: 'Exercise a plugin Runtime client adapter.', tools: [{ tool: echo }] }) }];
+export const toolkitRuntimeRequirements = [{ runtimeKind: 'example', toolkit: defineToolkit({ name: 'example', description: 'Exercise a plugin Runtime client adapter.', tools: [{ tool: echo }] }) }];
 export const runtimeFactories = {
   example: () => ({
     async call(method, args, context) {
@@ -117,7 +117,7 @@ export const runtimeFactories = {
 };
 `);
   await fixture.configure({
-    instances: { local: { type: 'shell', env: { PINPAWO_ADAPTER_TEST: 'from-runtime' }, pathBase: fixture.directory }, extension: { type: 'example' } },
+    instances: { local: { kind: 'shell', env: { PINPAWO_ADAPTER_TEST: 'from-runtime' }, pathBase: fixture.directory }, extension: { kind: 'example' } },
     toolkitBindings: { bash: 'local', example: 'extension' },
     modules: [modulePath],
   });
@@ -126,9 +126,9 @@ export const runtimeFactories = {
   assert.equal(typeof loaded.runtimeClients.example, 'function');
   const extension = loaded.toolkitSources[0]!.definitions[0]!;
   const shell = createBashToolkit([runShellTool]);
-  const registrations = [{ toolkit: shell, runtimeKind: 'shell' }, extension];
-  const a = await fixture.connect({ registrations, clientFactories: loaded.runtimeClients });
-  const b = await fixture.connect({ registrations, clientFactories: loaded.runtimeClients });
+  const requirements = [{ toolkit: shell, runtimeKind: 'shell' }, extension];
+  const a = await fixture.connect({ requirements, clientFactories: loaded.runtimeClients });
+  const b = await fixture.connect({ requirements, clientFactories: loaded.runtimeClients });
   const execution = scope(fixture.directory);
   const command = process.platform === 'win32'
     ? '[Console]::Write($env:PINPAWO_ADAPTER_TEST)'
@@ -174,13 +174,13 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
   otherOrigin = 'http://127.0.0.1:' + (other.address() as { port: number }).port;
   await fixture.configure({
-    instances: { browser: { type: 'cdp', headless: true } },
+    instances: { browser: { kind: 'cdp', headless: true } },
     toolkitBindings: { browser: 'browser' },
   });
   const browser = createBrowserToolkit();
-  const registrations = [{ toolkit: browser, runtimeKind: 'cdp' }];
-  const a = await fixture.connect({ registrations });
-  const b = await fixture.connect({ registrations });
+  const requirements = [{ toolkit: browser, runtimeKind: 'cdp' }];
+  const a = await fixture.connect({ requirements });
+  const b = await fixture.connect({ requirements });
   const execution = scope(fixture.directory);
   const invoke = async (host: HostConnection & { toolkits: AgentToolkit[] }, name: string, input: Record<string, unknown> = {}, expectedError = false) => {
     const tool = host.toolkits[0].tools.find((definition) => definition.tool.name === name)!.tool;
@@ -224,7 +224,7 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   const disconnected = JSON.parse(await invoke(a, 'browser_snapshot', {}, true) as string);
   assert.equal(disconnected.ok, false);
   assert.equal(disconnected.error.code, 'connection_lost');
-  const replacement = await fixture.connect({ registrations });
+  const replacement = await fixture.connect({ requirements });
   const staleSession = JSON.parse(await invoke(replacement, 'browser_snapshot', {}, true) as string);
   assert.equal(staleSession.error.code, 'browser_not_open');
 });

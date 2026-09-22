@@ -1,6 +1,6 @@
 import { Socket } from 'node:net';
 
-export const RUNTIME_PROTOCOL_VERSION = 1;
+export const RUNTIME_PROTOCOL_VERSION = 2;
 export const MAX_RUNTIME_MESSAGE_BYTES = 32 * 1024 * 1024;
 
 export class RuntimeServiceError extends Error {

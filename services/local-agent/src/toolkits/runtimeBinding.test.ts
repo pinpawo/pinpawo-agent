@@ -6,9 +6,9 @@ import { Command } from '@langchain/langgraph';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createSubagent, defineToolkit } from '@pinpawo/pet-agent';
 import { z } from 'zod';
-import { bindToolkitRuntime, type ToolkitRuntimeClientBinding } from './runtimeBinding';
+import { bindToolkitRuntime, type ConnectedToolkitRuntime } from './runtimeBinding';
 
-const binding = (client: unknown): ToolkitRuntimeClientBinding => ({
+const binding = (client: unknown): ConnectedToolkitRuntime => ({
   runtimeKind: 'shell', client,
 });
 
@@ -21,20 +21,20 @@ test('Host binds a shared static Tool independently and overrides untrusted invo
     return 'done';
   }, { name: 'action', description: 'Act.', schema: z.object({}) });
   const first = {}, second = {};
-  const registrations = ['first', 'second'].map(name => ({ runtimeKind: 'shell', toolkit: defineToolkit({
+  const requirements = ['first', 'second'].map(name => ({ runtimeKind: 'shell', toolkit: defineToolkit({
     name, description: name, tools: [{ tool: action }],
   }) }));
-  const assembled = registrations.map((registration, index) => bindToolkitRuntime(registration, binding([first, second][index])));
+  const assembled = requirements.map((requirement, index) => bindToolkitRuntime(requirement, binding([first, second][index])));
   await Promise.all(assembled.map(({ tools }) => tools[0].tool.invoke({}, { context: {
     toolkitRuntime: {}, marker: 'preserved',
   } })));
   assert.deepEqual(seen, [[first, 'preserved'], [second, 'preserved']]);
   assert.equal('runtime' in assembled[0], false);
   assert.strictEqual(assembled[0].tools[0].tool.schema, action.schema);
-  assert.strictEqual(registrations[0].toolkit.tools[0].tool.schema, action.schema);
-  assert.throws(() => bindToolkitRuntime({ ...registrations[0], runtimeKind: '' }), /non-empty Runtime/);
-  assert.throws(() => bindToolkitRuntime(registrations[0]), /requires a connected/);
-  assert.throws(() => bindToolkitRuntime(registrations[0], { ...binding(first), runtimeKind: 'cdp' }), /requires a connected/);
+  assert.strictEqual(requirements[0].toolkit.tools[0].tool.schema, action.schema);
+  assert.throws(() => bindToolkitRuntime({ ...requirements[0], runtimeKind: '' }), /non-empty Runtime/);
+  assert.throws(() => bindToolkitRuntime(requirements[0]), /requires a connected/);
+  assert.throws(() => bindToolkitRuntime(requirements[0], { ...binding(first), runtimeKind: 'cdp' }), /requires a connected/);
 });
 
 test('Host binding retains native Tool events, Command results and graph invocation scope', async () => {

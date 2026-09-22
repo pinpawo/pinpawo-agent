@@ -3,7 +3,7 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:pa
 import { tmpdir } from 'node:os';
 import { rgPath } from '@vscode/ripgrep';
 import { z } from 'zod';
-import type { HostedRuntime, RuntimeCallContext, RuntimeInstanceConfig } from '../../runtimeService/types';
+import type { RuntimeInstance, RuntimeCallContext, RuntimeInstanceConfig } from '../../runtimeService/types';
 import { posixProcessExecutor } from './processTree';
 import { createWindowsProcessExecutor } from './windowsProcessExecutor';
 import { ProcessRegistry, type ManagedProcessOwner, type ProcessSnapshot } from './processRegistry';
@@ -33,7 +33,7 @@ const globSchema = z.object({
   rootPath: absolutePath, pattern: z.string(), maxResults: z.number().int().positive().max(201),
 });
 const environmentSchema = z.object({
-  type: z.literal('shell'), shell: z.string().optional(), defaultShell: z.string().optional(),
+  kind: z.literal('shell'), shell: z.string().optional(), defaultShell: z.string().optional(),
   env: z.record(z.string(), z.string().nullable()).optional(),
   programs: z.record(z.string(), z.string()).optional(), pathBase: absolutePath.optional(),
 });
@@ -69,7 +69,7 @@ function publicProcess(record: ProcessSnapshot) {
 }
 
 /** One configured execution environment, owned only by the runtime service. */
-export function createShellEnvironment(config: RuntimeInstanceConfig): HostedRuntime {
+export function createShellEnvironment(config: RuntimeInstanceConfig): RuntimeInstance {
   const options = environmentSchema.parse(config);
   const snapshot = normalizedEnv(process.env);
   const initial = options.env && Object.keys(options.env).length === 0 ? {} : snapshot;
@@ -284,7 +284,7 @@ export function createShellEnvironment(config: RuntimeInstanceConfig): HostedRun
       rmSync(bin, { recursive: true, force: true });
     },
     diagnose: () => ({
-      type: 'shell', shell, state: closed ? 'closed' : 'ready', processCount: registry.size,
+      runtimeKind: 'shell', shell, state: closed ? 'closed' : 'ready', processCount: registry.size,
       processTreeCleanup: process.platform === 'win32' ? 'live-parent-only' : 'process-group',
     }),
   };

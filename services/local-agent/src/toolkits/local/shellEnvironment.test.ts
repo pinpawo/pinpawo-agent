@@ -88,7 +88,7 @@ test('cancelling a wait does not terminate the yielded process', { skip: !posix 
 });
 
 test('argv execution preserves quoting and per-call env does not mutate a shared environment', async (t) => {
-  const fixture = createLocalRuntimeFixture({ type: 'shell', env: { PINPAWO_TEST_ENV: 'base' } });
+  const fixture = createLocalRuntimeFixture({ kind: 'shell', env: { PINPAWO_TEST_ENV: 'base' } });
   t.after(() => fixture.close());
   const args = ['space value', '中文', '$(echo not-run)', '"quotes"'];
   const result = await fixture.client('git').exec({
@@ -115,7 +115,7 @@ test('one instance freezes its environment while a different instance can select
 });
 
 test('minimal argv environment removes secrets and preserves explicit locale policy', async (t) => {
-  const fixture = createLocalRuntimeFixture({ type: 'shell', env: { TEST_PRIVATE_VALUE: 'private' } });
+  const fixture = createLocalRuntimeFixture({ kind: 'shell', env: { TEST_PRIVATE_VALUE: 'private' } });
   t.after(() => fixture.close());
   const result = await fixture.client().exec({
     ...argv(['-e', 'console.log(JSON.stringify(process.env))']),
@@ -131,7 +131,7 @@ test('an empty environment uses platform defaults without inheriting Host variab
   const previous = process.env.PINPAWO_TEST_EMPTY_ENV;
   let fixture: ReturnType<typeof createLocalRuntimeFixture>;
   process.env.PINPAWO_TEST_EMPTY_ENV = 'must-not-inherit';
-  try { fixture = createLocalRuntimeFixture({ type: 'shell', env: {} }); }
+  try { fixture = createLocalRuntimeFixture({ kind: 'shell', env: {} }); }
   finally {
     if (previous === undefined) delete process.env.PINPAWO_TEST_EMPTY_ENV;
     else process.env.PINPAWO_TEST_EMPTY_ENV = previous;
@@ -154,7 +154,7 @@ test('configured programs win over PATH for both shell names and argv tools', { 
   writeFileSync(competing, '#!/bin/bash\nprintf wrong');
   chmodSync(competing, 0o755);
   const fixture = createLocalRuntimeFixture({
-    type: 'shell', programs: { git: selectedGit }, env: { PATH: `${dir}:${process.env.PATH}` },
+    kind: 'shell', programs: { git: selectedGit }, env: { PATH: `${dir}:${process.env.PATH}` },
   });
   t.after(async () => { await fixture.close(); rmSync(dir, { recursive: true, force: true }); });
   assert.equal((await fixture.client('bash').run(command('git'), scope)).stdout, 'selected');
@@ -174,8 +174,8 @@ test('POSIX program launchers preserve wrapper paths and argv for shell and dire
   const args = ['space value', '中文', "single ' quote", 'double " quote', '$(touch not-run)', ''];
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   for (const config of [
-    { type: 'shell', programs: { git: wrapper } },
-    { type: 'shell', env: { PATH: `${dir}${delimiter}${process.env.PATH}` } },
+    { kind: 'shell', programs: { git: wrapper } },
+    { kind: 'shell', env: { PATH: `${dir}${delimiter}${process.env.PATH}` } },
   ]) {
     const fixture = createLocalRuntimeFixture(config);
     try {
@@ -228,7 +228,7 @@ test('bundled ripgrep ignores a competing PATH program and keeps search limits',
   const fake = join(dir, 'rg');
   writeFileSync(fake, '#!/bin/bash\nprintf wrong'); chmodSync(fake, 0o755);
   writeFileSync(join(dir, 'evidence.txt'), 'needle\nsecond needle\n');
-  const fixture = createLocalRuntimeFixture({ type: 'shell', env: { PATH: `${dir}:${process.env.PATH}` } });
+  const fixture = createLocalRuntimeFixture({ kind: 'shell', env: { PATH: `${dir}:${process.env.PATH}` } });
   t.after(async () => { await fixture.close(); rmSync(dir, { recursive: true, force: true }); });
   const result = await fixture.client().grep({
     rootPath: dir, query: 'needle', literal: true, caseSensitive: false, context: 0, maxMatches: 1,
@@ -241,7 +241,7 @@ test('bash and zsh are environment configuration, with no persistent cwd or expo
   skip: !posix || !existsSync('/bin/zsh'),
 }, async (t) => {
   for (const shell of ['/bin/bash', '/bin/zsh']) {
-    const fixture = createLocalRuntimeFixture({ type: 'shell', shell });
+    const fixture = createLocalRuntimeFixture({ kind: 'shell', shell });
     t.after(() => fixture.close());
     assert.equal((await fixture.client().run(command('export TRANSIENT_VALUE=changed; cd /'), scope)).status, 'exited');
     const result = await fixture.client().run(command('printf "%s" "${TRANSIENT_VALUE-unset}"'), scope);
@@ -251,8 +251,8 @@ test('bash and zsh are environment configuration, with no persistent cwd or expo
 
 test('invalid explicit programs and ambiguous PATH entries never silently fall back', () => {
   const missingGit = join(tmpdir(), `pinpawo-missing-${process.pid}`, 'git');
-  assert.throws(() => createShellEnvironment({ type: 'shell', pathBase: process.cwd(), programs: { git: missingGit } }), /not installed/);
-  assert.throws(() => createShellEnvironment({ type: 'shell', env: { PATH: ['.', tmpdir()].join(delimiter) } }), /pathBase/);
+  assert.throws(() => createShellEnvironment({ kind: 'shell', pathBase: process.cwd(), programs: { git: missingGit } }), /not installed/);
+  assert.throws(() => createShellEnvironment({ kind: 'shell', env: { PATH: ['.', tmpdir()].join(delimiter) } }), /pathBase/);
 });
 
 test('cancellation reaches a descendant that ignores SIGTERM after its parent exits', { skip: !posix }, async (t) => {

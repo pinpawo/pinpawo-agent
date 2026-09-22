@@ -102,7 +102,7 @@ Toolkit 是可执行能力和工具策略的唯一归属，负责：
 - Toolkit availability；
 - 具体 Tool 使用 Host 绑定的执行依赖。
 
-Runtime 依赖属于 Host 的 `HostToolkitRegistration` 装配记录，不属于 Toolkit 责任或
+Runtime 依赖属于 Host 的 `ToolkitRuntimeRequirement` 装配记录，不属于 Toolkit 责任或
 `AgentToolkit` 契约。
 
 Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只声明工具级

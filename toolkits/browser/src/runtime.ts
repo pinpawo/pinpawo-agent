@@ -111,7 +111,7 @@ export class CdpRuntime {
 
   diagnose() {
     return {
-      type: 'cdp',
+      runtimeKind: 'cdp',
       ...this.connection.diagnose(),
       clients: new Set([...this.threads.values()].map((thread) => thread.clientId)).size,
       sessions: [...this.threads.values()].reduce((count, thread) => count + thread.sessions.size + thread.closing.size, 0),

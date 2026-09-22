@@ -30,13 +30,13 @@ async function serviceToken(directory?: string): Promise<string> {
 
 export async function connectRuntimeService(options: {
   directory?: string;
-  toolkits?: Readonly<Record<string, string>>;
+  requirements?: Readonly<Record<string, string>>;
   administrative?: boolean;
 } = {}): Promise<RuntimeClient> {
   const paths = runtimeServicePaths(options.directory);
   const token = (await readFile(paths.token, 'utf8')).trim();
   return RuntimeClient.connect({
-    endpoint: paths.endpoint, token, toolkits: options.toolkits ?? {},
+    endpoint: paths.endpoint, token, requirements: options.requirements ?? {},
     administrative: options.administrative,
   });
 }
@@ -47,7 +47,7 @@ function isMissingService(error: unknown): boolean {
 
 export async function ensureRuntimeService(options: {
   directory?: string;
-  toolkits?: Readonly<Record<string, string>>;
+  requirements?: Readonly<Record<string, string>>;
   administrative?: boolean;
   bootstrapEnv?: NodeJS.ProcessEnv;
   /** Maximum time to establish the initial service connection. */
@@ -56,7 +56,7 @@ export async function ensureRuntimeService(options: {
   const paths = runtimeServicePaths(options.directory);
   const token = await serviceToken(paths.root);
   const connect = () => RuntimeClient.connect({
-    endpoint: paths.endpoint, token, toolkits: options.toolkits ?? {},
+    endpoint: paths.endpoint, token, requirements: options.requirements ?? {},
     administrative: options.administrative,
   });
   try { return await connect(); }

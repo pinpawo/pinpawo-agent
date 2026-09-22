@@ -11,12 +11,12 @@ export type RuntimeCallContext = Readonly<{
 }>;
 
 export type RuntimeInstanceConfig = Readonly<{
-  type: string;
+  kind: string;
   [key: string]: unknown;
 }>;
 
 /** An execution environment owned exclusively by the runtime service. */
-export interface HostedRuntime {
+export interface RuntimeInstance {
   call(method: string, args: unknown, context: RuntimeCallContext): Promise<unknown>;
   releaseClient(clientId: string): Promise<void>;
   close(): Promise<void>;
@@ -25,7 +25,7 @@ export interface HostedRuntime {
 
 export type RuntimeFactory = (
   config: RuntimeInstanceConfig,
-) => HostedRuntime | Promise<HostedRuntime>;
+) => RuntimeInstance | Promise<RuntimeInstance>;
 
 export type RuntimeServiceConfig = Readonly<{
   instances: Readonly<Record<string, RuntimeInstanceConfig>>;

@@ -179,7 +179,7 @@ LangChain Tool 可能包含可变运行时内部状态。registry 会冻结
 
 ### 3.2 Runtime 客户端与输入准备
 
-`AgentToolkit` 不声明 Runtime。Host 通过 `HostToolkitRegistration` 将 Toolkit 与可选
+`AgentToolkit` 不声明 Runtime。Host 通过 `ToolkitRuntimeRequirement` 将 Toolkit 与可选
 `runtimeKind` 组合，并在初始化时绑定客户端；多个 Toolkit 可以共享或隔离实例。
 bash 和 git 都使用 Shell，browser 当前使用 CDP。实际资源由独立服务持有。
 

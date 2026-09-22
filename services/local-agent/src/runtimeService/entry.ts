@@ -8,7 +8,7 @@ import { startRuntimeService } from './server';
 import { RuntimeClient } from './client';
 import { ensureRuntimeEndpointDirectory } from './endpoint';
 import { RuntimeServiceError, record } from './protocol';
-import type { HostedRuntime, RuntimeFactory, RuntimeInstanceConfig, RuntimeCallContext } from './types';
+import type { RuntimeInstance, RuntimeFactory, RuntimeInstanceConfig, RuntimeCallContext } from './types';
 
 async function main() {
   const index = process.argv.indexOf('--directory');
@@ -18,7 +18,7 @@ async function main() {
   const token = (await readFile(paths.token, 'utf8')).trim();
   const endpointIsActive = async () => {
     try {
-      const client = await RuntimeClient.connect({ endpoint: paths.endpoint, token, toolkits: {} });
+      const client = await RuntimeClient.connect({ endpoint: paths.endpoint, token, requirements: {} });
       await client.close();
       return true;
     } catch (error) {
@@ -69,7 +69,7 @@ async function main() {
     const config = await loadRuntimeServiceConfig(paths.config);
     const factories: Record<string, RuntimeFactory> = Object.assign(Object.create(null), {
       shell: createShellEnvironment,
-      cdp: (config: RuntimeInstanceConfig): HostedRuntime => {
+      cdp: (config: RuntimeInstanceConfig): RuntimeInstance => {
         const runtime = createCdpRuntime(config as CdpRuntimeConfig);
         return {
           call: async (method: string, args: unknown, context: RuntimeCallContext) => {

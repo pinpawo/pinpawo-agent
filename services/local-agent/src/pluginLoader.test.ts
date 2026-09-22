@@ -44,7 +44,7 @@ export default { name: 'valid-plugin' };
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['valid-plugin']);
   assert.deepEqual(
-    result.toolkitSources.flatMap(({ definitions }) => definitions.map(({ name }) => name)),
+    result.toolkitSources.flatMap(({ definitions }) => definitions.map(({ toolkit }) => toolkit.name)),
     ['sample_toolkit'],
   );
   assert.deepEqual(result.toolkitSources.map(({ id, kind }) => ({ id, kind })), [{
@@ -52,7 +52,7 @@ export default { name: 'valid-plugin' };
     kind: 'plugin',
   }]);
   assert.equal(
-    result.toolkitSources[0]?.definitions[0]?.tools[0]?.operation?.title,
+    result.toolkitSources[0]?.definitions[0]?.toolkit.tools[0]?.operation?.title,
     'Sample Tool',
   );
 });
@@ -116,9 +116,29 @@ export default { name: 'offline-plugin' };
 
   assert.deepEqual(result.plugins.map((plugin) => plugin.name), ['offline-plugin']);
   assert.deepEqual(
-    result.toolkitSources.flatMap(({ definitions }) => definitions.map(({ name }) => name)),
+    result.toolkitSources.flatMap(({ definitions }) => definitions.map(({ toolkit }) => toolkit.name)),
     ['offline_toolkit'],
   );
+});
+
+test('loadPluginsFromDir rejects Runtime metadata embedded in AgentToolkit exports', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-plugins-runtime-shape-'));
+  await fs.writeFile(path.join(root, 'legacy-runtime-plugin.mjs'), `${toolModulePrelude()}
+export const runtimeClients = { example: () => ({}) };
+export const toolkits = [{
+  runtime: 'example',
+  name: 'legacy_runtime_toolkit',
+  description: 'Legacy runtime shape',
+  tools: [{ tool: defineTestTool('legacy_runtime_tool') }],
+}];
+export default { name: 'legacy-runtime-plugin' };
+`, 'utf8');
+
+  const result = await loadPluginsFromDir(root);
+
+  assert.deepEqual(result.plugins, []);
+  assert.deepEqual(result.toolkitSources, []);
+  assert.deepEqual(Object.keys(result.runtimeClients), []);
 });
 
 test('loadPluginsFromDir fails startup for an oversized toolkit auto-review policy', async () => {

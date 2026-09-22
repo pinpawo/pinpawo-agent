@@ -171,7 +171,8 @@ shell is bash or zsh on POSIX and PowerShell on Windows. Commands receive an
 explicit cwd from the current execution. Changes to service configuration or its
 startup environment require a service restart and fresh Host connections.
 
-Toolkit definitions declare `runtime: 'shell'` or `runtime: 'cdp'`. The Host
+Host Toolkit registrations declare `runtimeKind: 'shell'` or `runtimeKind: 'cdp'`; the
+`AgentToolkit` definitions carry no execution metadata. The Host
 injects async clients; static Tools are retained across executions. The selected
 Capability receives only the clients for its `uses` dependencies. Local tools
 resolve relative file paths and cwd through `ToolDefinition.prepareInput`

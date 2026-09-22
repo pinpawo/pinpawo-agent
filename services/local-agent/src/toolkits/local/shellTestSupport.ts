@@ -35,8 +35,8 @@ export function createLocalRuntimeFixture(config: RuntimeInstanceConfig = { type
       return tool.invoke((toolCall ? { ...record, args } : args) as Parameters<NamedStructuredTool['invoke']>[0], {
         ...config,
         context: {
-          toolkitName, executionScope: scope,
-          toolkitRuntimes: { [toolkitName]: client(toolkitName, clientId) },
+          executionScope: scope,
+          toolkitRuntime: client(toolkitName, clientId),
         },
       } as Parameters<NamedStructuredTool['invoke']>[1]);
     },

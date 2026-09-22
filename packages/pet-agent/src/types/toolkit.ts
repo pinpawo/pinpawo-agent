@@ -64,8 +64,6 @@ export type ToolkitAvailabilityCheck = () =>
 
 /** Tool-owned normalization receives opaque Host context before review. */
 export type ToolInputPreparationContext = Readonly<{
-  toolkitName: string;
-  toolName: string;
   context: Readonly<Record<string, unknown>>;
 }>;
 

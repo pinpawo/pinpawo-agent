@@ -26,13 +26,13 @@ const browserToolkitInstructions = [
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-export function createBrowserToolkit(): AgentToolkit & { readonly runtime: string } {
+export function createBrowserToolkit(): AgentToolkit {
   const reviews: Record<string, ToolReviewPolicy> = {
     browser_open: ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
     browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact' }),
   };
-  return { runtime: 'cdp', ...defineToolkit({
+  return defineToolkit({
     name: BROWSER_TOOLKIT_NAME,
     description: '通过 CDP 访问浏览器、读取渲染页面、点击输入、提取文本和截图。',
     tools: browserTools.map((item) => ({
@@ -42,5 +42,5 @@ export function createBrowserToolkit(): AgentToolkit & { readonly runtime: strin
       ...(item.name === 'browser_screenshot' ? { requiresInputModalities: ['image'] as const } : {}),
     })),
     instructions: browserToolkitInstructions.join('\n'),
-  }) };
+  });
 }

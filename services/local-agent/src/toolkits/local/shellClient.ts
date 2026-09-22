@@ -93,11 +93,10 @@ export function createShellRuntimeClient(caller: RuntimeCaller, toolkitName: str
 
 export function shellInvocation(runtime: ToolRuntime): CallScope & { client: ShellRuntimeClient } {
   const context = runtime.context as {
-    toolkitName?: string;
-    toolkitRuntimes?: Readonly<Record<string, unknown>>;
+    toolkitRuntime?: unknown;
     executionScope?: RuntimeExecution;
   } | undefined;
-  const client = context?.toolkitName ? context.toolkitRuntimes?.[context.toolkitName] : undefined;
+  const client = context?.toolkitRuntime;
   if (!client || (client as ShellRuntimeClient).kind !== 'shell') {
     throw new Error('This Toolkit requires a connected Shell Runtime.');
   }

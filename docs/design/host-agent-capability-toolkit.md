@@ -100,8 +100,10 @@ Toolkit 是可执行能力和工具策略的唯一归属，负责：
 - operation metadata 与需要时的审核前输入规范化 `prepareInput`；
 - 单个工具的 review requirement / policy；
 - Toolkit availability；
-- 具体 Tool 使用 Host 绑定的执行依赖；可选 `runtime?: string` 属于 Host 的装配声明，
-  不属于 AgentToolkit 契约。
+- 具体 Tool 使用 Host 绑定的执行依赖。
+
+Runtime 依赖属于 Host 的 `HostToolkitRegistration` 装配记录，不属于 Toolkit 责任或
+`AgentToolkit` 契约。
 
 Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只声明工具级
 规则。Human review 的请求/响应属于 Agent 与交互边界，不能因此把全局配置或

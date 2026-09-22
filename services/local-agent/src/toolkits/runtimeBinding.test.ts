@@ -9,47 +9,47 @@ import { z } from 'zod';
 import { bindToolkitRuntime, type ToolkitRuntimeClientBinding } from './runtimeBinding';
 
 const binding = (client: unknown): ToolkitRuntimeClientBinding => ({
-  runtimeType: 'shell', client, identity: { clientId: 'host', instanceId: 'shell' },
+  runtimeKind: 'shell', client,
 });
 
 test('Host binds a shared static Tool independently and overrides untrusted invocation bindings', async () => {
   const seen: unknown[] = [];
   const action = tool(async (_input, config) => {
     await Promise.resolve();
-    const context = config.context as { toolkitName: string; toolkitRuntimes: Record<string, unknown>; marker: string };
-    seen.push([context.toolkitName, context.toolkitRuntimes[context.toolkitName], context.marker]);
+    const context = config.context as { toolkitRuntime: unknown; marker: string };
+    seen.push([context.toolkitRuntime, context.marker]);
     return 'done';
   }, { name: 'action', description: 'Act.', schema: z.object({}) });
   const first = {}, second = {};
-  const definitions = ['first', 'second'].map(name => ({ runtime: 'shell', ...defineToolkit({
+  const registrations = ['first', 'second'].map(name => ({ runtimeKind: 'shell', toolkit: defineToolkit({
     name, description: name, tools: [{ tool: action }],
   }) }));
-  const assembled = definitions.map((definition, index) => bindToolkitRuntime(definition, binding([first, second][index])));
+  const assembled = registrations.map((registration, index) => bindToolkitRuntime(registration, binding([first, second][index])));
   await Promise.all(assembled.map(({ tools }) => tools[0].tool.invoke({}, { context: {
-    toolkitName: 'forged', toolkitRuntimes: { forged: {} }, marker: 'preserved',
+    toolkitRuntime: {}, marker: 'preserved',
   } })));
-  assert.deepEqual(seen, [['first', first, 'preserved'], ['second', second, 'preserved']]);
+  assert.deepEqual(seen, [[first, 'preserved'], [second, 'preserved']]);
   assert.equal('runtime' in assembled[0], false);
   assert.strictEqual(assembled[0].tools[0].tool.schema, action.schema);
-  assert.strictEqual(definitions[0].tools[0].tool.schema, action.schema);
-  assert.throws(() => bindToolkitRuntime({ ...definitions[0], runtime: '' }), /non-empty Runtime/);
-  assert.throws(() => bindToolkitRuntime(definitions[0]), /requires a connected/);
-  assert.throws(() => bindToolkitRuntime(definitions[0], { ...binding(first), runtimeType: 'cdp' }), /requires a connected/);
+  assert.strictEqual(registrations[0].toolkit.tools[0].tool.schema, action.schema);
+  assert.throws(() => bindToolkitRuntime({ ...registrations[0], runtimeKind: '' }), /non-empty Runtime/);
+  assert.throws(() => bindToolkitRuntime(registrations[0]), /requires a connected/);
+  assert.throws(() => bindToolkitRuntime(registrations[0], { ...binding(first), runtimeKind: 'cdp' }), /requires a connected/);
 });
 
 test('Host binding retains native Tool events, Command results and graph invocation scope', async () => {
   const events: string[] = [];
   const client = {};
   const action = tool((_input, config) => {
-    const context = config.context as { toolkitRuntimes: Record<string, unknown>; executionScope: { delegationId: string } };
-    assert.strictEqual(context.toolkitRuntimes.example, client);
+    const context = config.context as { toolkitRuntime: unknown; executionScope: { delegationId: string } };
+    assert.strictEqual(context.toolkitRuntime, client);
     assert.equal(context.executionScope.delegationId, 'delegation');
     return new Command({ update: { messages: [
       new ToolMessage({ name: 'action', tool_call_id: (config as ToolRuntime).toolCallId!, content: 'completed' }),
       new AIMessage('Tool-owned result'),
     ] } });
   }, { name: 'action', description: 'Act.', schema: z.object({}) });
-  const toolkit = bindToolkitRuntime({ runtime: 'shell', ...defineToolkit({
+  const toolkit = bindToolkitRuntime({ runtimeKind: 'shell', toolkit: defineToolkit({
     name: 'example', description: 'Example', tools: [{ tool: action }],
   }) }, binding(client));
   const result = await createSubagent({

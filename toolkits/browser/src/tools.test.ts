@@ -5,7 +5,6 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { isCommand } from '@langchain/langgraph';
 import { persistBrowserScreenshot } from './screenshot';
-import { BROWSER_TOOLKIT_NAME } from './constants';
 import { createBrowserTools } from './tools';
 import type {
   BrowserRuntimeCallContext,
@@ -51,9 +50,7 @@ function invocation(
         delegationId: 'delegation-1',
         workdir,
       },
-      toolkitRuntimes: {
-        [BROWSER_TOOLKIT_NAME]: browser,
-      },
+      toolkitRuntime: browser,
     },
   };
 }

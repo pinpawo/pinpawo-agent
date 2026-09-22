@@ -307,7 +307,7 @@ test('compiled registry snapshots authorization policy functions for its generat
 test('input preparation is snapshotted and participates in authorization generation', () => {
   const original = (input: unknown) => input;
   const toolkit = {
-    name: 'local', description: 'Local', runtime: 'shell',
+    name: 'local', description: 'Local',
     tools: [{ tool: mockTool('act'), prepareInput: original,
       review: ReviewPolicies.commandExecution({ authorization: 'exact' }),
     }],
@@ -318,6 +318,4 @@ test('input preparation is snapshotted and participates in authorization generat
   const second = build();
   assert.strictEqual(first.toolkits[0].tools[0].prepareInput, original);
   assert.notEqual(first.authorizationGeneration, second.authorizationGeneration);
-  toolkit.runtime = 'other';
-  assert.equal(second.authorizationGeneration, build().authorizationGeneration);
 });

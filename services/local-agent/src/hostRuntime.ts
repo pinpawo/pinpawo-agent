@@ -55,6 +55,7 @@ export type {
   HostToolkitInventoryStore,
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
+export type { HostToolkitRegistration } from './toolkits/runtimeBinding';
 
 export { resolveHostExecutionConfig } from './config/hostExecutionConfig';
 export type { HostExecutionConfig } from './config/hostExecutionConfig';

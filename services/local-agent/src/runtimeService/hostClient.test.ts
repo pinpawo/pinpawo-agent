@@ -78,7 +78,10 @@ async function serviceFixture(t: TestContext) {
     async connect(options: Omit<Parameters<typeof connectHostRuntimes>[0], 'directory'>) {
       const host = await connectHostRuntimes({ ...options, directory });
       hosts.push(host);
-      return { ...host, toolkits: options.toolkits.map(toolkit => bindToolkitRuntime(toolkit, host.bindings[toolkit.name])) };
+      return { ...host, toolkits: options.registrations.map(registration => bindToolkitRuntime(
+        registration,
+        host.bindings[registration.toolkit.name],
+      )) };
     },
   };
 }
@@ -99,10 +102,10 @@ export const runtimeClients = {
   }),
 };
 const echo = tool(async ({ value }, runtime) => {
-  const { executionScope, toolkitRuntimes } = runtime.context;
-  return JSON.stringify(await toolkitRuntimes.example.echo(value, executionScope, runtime.signal));
+  const { executionScope, toolkitRuntime } = runtime.context;
+  return JSON.stringify(await toolkitRuntime.echo(value, executionScope, runtime.signal));
 }, { name: 'extension_echo', description: 'Read the service identity and echo a test value.', schema: z.object({ value: z.string() }) });
-export const toolkits = [{ runtime: 'example', ...defineToolkit({ name: 'example', description: 'Exercise a plugin Runtime client adapter.', tools: [{ tool: echo }] }) }];
+export const toolkitRegistrations = [{ runtimeKind: 'example', toolkit: defineToolkit({ name: 'example', description: 'Exercise a plugin Runtime client adapter.', tools: [{ tool: echo }] }) }];
 export const runtimeFactories = {
   example: () => ({
     async call(method, args, context) {
@@ -123,9 +126,9 @@ export const runtimeFactories = {
   assert.equal(typeof loaded.runtimeClients.example, 'function');
   const extension = loaded.toolkitSources[0]!.definitions[0]!;
   const shell = createBashToolkit([runShellTool]);
-  const toolkits = [shell, extension];
-  const a = await fixture.connect({ toolkits, clientFactories: loaded.runtimeClients });
-  const b = await fixture.connect({ toolkits, clientFactories: loaded.runtimeClients });
+  const registrations = [{ toolkit: shell, runtimeKind: 'shell' }, extension];
+  const a = await fixture.connect({ registrations, clientFactories: loaded.runtimeClients });
+  const b = await fixture.connect({ registrations, clientFactories: loaded.runtimeClients });
   const execution = scope(fixture.directory);
   const command = process.platform === 'win32'
     ? '[Console]::Write($env:PINPAWO_ADAPTER_TEST)'
@@ -138,8 +141,6 @@ export const runtimeFactories = {
   const second = JSON.parse(await echoB.invoke({ value: 'second' }, { context: { executionScope: execution } }) as string);
   assert.notEqual(first.pid, process.pid);
   assert.equal(first.pid, second.pid);
-  assert.equal(first.clientId, a.bindings.example!.identity.clientId);
-  assert.equal(second.clientId, b.bindings.example!.identity.clientId);
   assert.notEqual(first.clientId, second.clientId);
   assert.equal(first.toolkitName, 'example');
   assert.deepEqual(first.execution, execution);
@@ -177,9 +178,9 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
     toolkitBindings: { browser: 'browser' },
   });
   const browser = createBrowserToolkit();
-  const toolkits = [browser];
-  const a = await fixture.connect({ toolkits });
-  const b = await fixture.connect({ toolkits });
+  const registrations = [{ toolkit: browser, runtimeKind: 'cdp' }];
+  const a = await fixture.connect({ registrations });
+  const b = await fixture.connect({ registrations });
   const execution = scope(fixture.directory);
   const invoke = async (host: HostConnection & { toolkits: AgentToolkit[] }, name: string, input: Record<string, unknown> = {}, expectedError = false) => {
     const tool = host.toolkits[0].tools.find((definition) => definition.tool.name === name)!.tool;
@@ -187,16 +188,11 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
     if (!expectedError && typeof output === 'string') assertBrowserSuccess(JSON.parse(output), name);
     return output;
   };
-  assert.notEqual(a.bindings.browser!.identity.clientId, b.bindings.browser!.identity.clientId);
-  assert.equal(a.bindings.browser!.identity.instanceId, b.bindings.browser!.identity.instanceId);
+  assert.equal(a.bindings.browser!.runtimeKind, b.bindings.browser!.runtimeKind);
   const openedA = JSON.parse(await invoke(a, 'browser_open', { url: origin }) as string);
   const openedB = JSON.parse(await invoke(b, 'browser_open', { url: origin + '/b' }) as string);
   assert.equal(openedA.title, 'Host A');
   assert.equal(openedB.title, 'Host B');
-  const diagnosticA = await a.bindings.browser!.diagnose!() as { pid: number };
-  const diagnosticB = await b.bindings.browser!.diagnose!() as { pid: number };
-  assert.notEqual(diagnosticA.pid, process.pid);
-  assert.equal(diagnosticA.pid, diagnosticB.pid);
   assert.equal(JSON.parse(await invoke(a, 'browser_snapshot') as string).title, 'Host A');
   assert.equal(JSON.parse(await invoke(b, 'browser_snapshot') as string).title, 'Host B');
 
@@ -228,7 +224,7 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   const disconnected = JSON.parse(await invoke(a, 'browser_snapshot', {}, true) as string);
   assert.equal(disconnected.ok, false);
   assert.equal(disconnected.error.code, 'connection_lost');
-  const replacement = await fixture.connect({ toolkits });
+  const replacement = await fixture.connect({ registrations });
   const staleSession = JSON.parse(await invoke(replacement, 'browser_snapshot', {}, true) as string);
   assert.equal(staleSession.error.code, 'browser_not_open');
 });

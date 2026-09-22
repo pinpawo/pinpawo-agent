@@ -1,5 +1,4 @@
-import type { HostedToolkit, ToolkitRuntimeClientBinding } from '../toolkits/runtimeBinding';
-import { isJsonValue } from '@pinpawo/agent-contracts';
+import type { HostToolkitRegistration, ToolkitRuntimeClientBinding } from '../toolkits/runtimeBinding';
 import { BROWSER_RUNTIME_METHODS, type BrowserRuntimeCallContext, type BrowserRuntimePort } from '@pinpawo-toolkit/browser';
 import { createShellRuntimeClient } from '../toolkits/local/shellClient';
 import { ensureRuntimeService } from './launcher';
@@ -22,7 +21,7 @@ function createBrowserClient(caller: RuntimeCaller, toolkitName: string): Browse
 }
 
 export async function connectHostRuntimes(options: {
-  toolkits: readonly HostedToolkit[];
+  registrations: readonly HostToolkitRegistration[];
   directory?: string;
   clientFactories?: Readonly<Record<string, RuntimeClientFactory>>;
 }) {
@@ -35,13 +34,13 @@ export async function connectHostRuntimes(options: {
     factories[type] = factory;
   }
   const requested: Record<string, string> = Object.create(null);
-  for (const toolkit of options.toolkits) {
-    if (toolkit.runtime === undefined) continue;
-    if (typeof toolkit.runtime !== 'string' || !toolkit.runtime.trim() || toolkit.runtime !== toolkit.runtime.trim()) {
-      throw new Error(`Toolkit "${toolkit.name}" must declare a non-empty Runtime interface name.`);
+  for (const { toolkit, runtimeKind } of options.registrations) {
+    if (runtimeKind === undefined) continue;
+    if (typeof runtimeKind !== 'string' || !runtimeKind.trim() || runtimeKind !== runtimeKind.trim()) {
+      throw new Error(`Toolkit "${toolkit.name}" must declare a non-empty Runtime kind.`);
     }
-    if (!Object.hasOwn(factories, toolkit.runtime)) throw new Error(`No Runtime client adapter registered for ${toolkit.runtime}.`);
-    requested[toolkit.name] = toolkit.runtime;
+    if (!Object.hasOwn(factories, runtimeKind)) throw new Error(`No Runtime client adapter registered for ${runtimeKind}.`);
+    requested[toolkit.name] = runtimeKind;
   }
   if (!Object.keys(requested).length) return { bindings: {}, close: async () => {} };
   const connection = await ensureRuntimeService({ directory: options.directory, toolkits: requested });
@@ -49,16 +48,8 @@ export async function connectHostRuntimes(options: {
     const bindings: Record<string, ToolkitRuntimeClientBinding> = Object.create(null);
     for (const [toolkitName, binding] of Object.entries(connection.bindings)) {
       bindings[toolkitName] = {
-        runtimeType: binding.runtimeType,
+        runtimeKind: binding.runtimeType,
         client: factories[binding.runtimeType](connection, toolkitName),
-        identity: { clientId: connection.clientId, instanceId: binding.instanceId },
-        diagnose: async () => {
-          const status = await connection.status();
-          const instance = status.instances.find((item) => item.instanceId === binding.instanceId);
-          const value = { pid: status.pid, connected: connection.isConnected, instance: instance ?? null };
-          if (!isJsonValue(value)) throw new Error('Invalid Runtime diagnostics.');
-          return value;
-        },
       };
     }
     return { bindings, close: () => connection.close() };

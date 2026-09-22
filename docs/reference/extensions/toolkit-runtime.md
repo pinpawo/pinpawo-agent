@@ -8,15 +8,15 @@
 `AgentToolkit` 只定义 Tools、instructions、availability 与 review 等 Agent 契约。
 Runtime 类型、客户端、连接身份、实例配置和诊断由 Host 管理，不进入 pet-agent。
 
-本地 Host 的 [HostedToolkit](../../../services/local-agent/src/toolkits/runtimeBinding.ts)
-在 `AgentToolkit` 外增加可选 `runtime: string`，声明所需接口。Shell 实例是一套配置好的
+本地 Host 的 [HostToolkitRegistration](../../../services/local-agent/src/toolkits/runtimeBinding.ts)
+将 `AgentToolkit` 与可选 `runtimeKind` 组合为装配记录。Shell 实例是一套配置好的
 shell/CLI 执行环境，不要求常驻 shell 进程。bash、git、project-inspection 可以共享
 Shell 实例，也可以选择独立实例；browser 当前只使用 CDP。
 
 ```ts
-const toolkit = {
-  runtime: 'shell',
-  ...defineToolkit({ name: 'example', description: 'Example', tools }),
+const registration = {
+  toolkit: defineToolkit({ name: 'example', description: 'Example', tools }),
+  runtimeKind: 'shell',
 };
 ```
 
@@ -24,14 +24,14 @@ const toolkit = {
 
 [HostToolkitCoordinator](../../../services/local-agent/src/toolkits/hostToolkitCoordinator.ts)
 先校验 inventory，再连接本机独立 Runtime 服务，通过 `bindToolkitRuntime` 为静态 Tool
-绑定对应客户端。缺少客户端或接口不匹配明确失败。传给 Agent 的 Toolkit 不含 runtime
-声明；Tool 的 schema、description、operation metadata 和 review policy 保持不变。
+绑定对应客户端。缺少客户端或接口不匹配明确失败。传给 Agent 的 Toolkit 就是注册记录
+中的原始 `AgentToolkit`；Tool 的 schema、description、operation metadata 和 review policy 保持不变。
 
-绑定只包装原 Tool 的 `invoke`，注入固定的 Toolkit 所属和客户端，然后交给原生 Tool
+绑定只包装原 Tool 的 `invoke`，注入固定的 `context.toolkitRuntime` 客户端，然后交给原生 Tool
 执行链处理校验、事件、ToolMessage、Command 和 interrupt。不逐调用重建 Tool，不在
 pet-agent 中维护第二套执行器。
 
-本地 Tool 读取 Host 私有的 `context.toolkitName` 和 `context.toolkitRuntimes`，再传入
+本地 Tool 读取 Host 私有的 `context.toolkitRuntime`，再传入
 通用 `executionScope` 与取消信号。框架只透传调用上下文，不认识这些客户端字段。
 共享客户端不保存可变的“当前执行”。客户端不进入 prompt 或 checkpoint。
 
@@ -41,7 +41,7 @@ pet-agent 中维护第二套执行器。
 
 ## 参数准备与审批
 
-`ToolDefinition.prepareInput(input, { toolkitName, toolName, context })` 是通用参数准备接口。
+`ToolDefinition.prepareInput(input, { context })` 是通用参数准备接口。
 框架不解释 context；具体 Toolkit 决定如何生成完整参数。比如本地 Toolkit 根据 Host
 提供的 workdir 解析 cwd 和路径。该函数必须纯且幂等，不创建资源。
 

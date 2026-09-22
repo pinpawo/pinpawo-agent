@@ -117,7 +117,7 @@ export class StudioHost {
         (plugin) => ({
           id: `studio-plugin:${plugin.name}`,
           kind: 'plugin',
-          definitions: plugin.toolkits,
+          definitions: plugin.toolkits.map((toolkit) => ({ toolkit })),
         }),
       );
       // Load the shared Host catalog before resolving Pet directories so every
@@ -126,7 +126,7 @@ export class StudioHost {
         toolkitSources: [{
           id: 'studio-host:context',
           kind: 'host_builtin',
-          definitions: [createStudioContextToolkit(() => this.getStudio().listPets())],
+          definitions: [{ toolkit: createStudioContextToolkit(() => this.getStudio().listPets()) }],
         }, ...pluginToolkitSources],
       });
       const petCapabilities = new Map<string, AgentCapability[]>();

@@ -1,15 +1,15 @@
 import { AIMessage, type ToolCall } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
-import type { AgentToolkit, ToolDefinition } from '../../types/toolkit';
+import type { ToolDefinition } from '../../types/toolkit';
 import { cloneAIMessageWithToolCalls, replaceMessageInState } from './toolCallMessages';
 
 /** Prepare the actual arguments once before review, including full-access calls. */
 export function createToolInputPreparationMiddleware(
-  bindings: readonly { toolkit: AgentToolkit; definition: ToolDefinition }[],
+  definitions: readonly ToolDefinition[],
   context: Readonly<Record<string, unknown>>,
 ) {
-  const tools = new Map(bindings.filter(({ definition }) => definition.prepareInput)
-    .map(binding => [binding.definition.tool.name, binding]));
+  const tools = new Map(definitions.filter((definition) => definition.prepareInput)
+    .map(definition => [definition.tool.name, definition]));
   if (!tools.size) return null;
   return createMiddleware({
     name: 'ToolInputPreparation',
@@ -23,11 +23,9 @@ export function createToolInputPreparationMiddleware(
       let changed = false;
       const calls: ToolCall[] = [];
       for (const call of message.tool_calls) {
-        const binding = tools.get(call.name);
-        if (!binding) { calls.push(call); continue; }
-        const args = await binding.definition.prepareInput!(call.args, {
-          toolkitName: binding.toolkit.name, toolName: call.name, context,
-        });
+        const definition = tools.get(call.name);
+        if (!definition) { calls.push(call); continue; }
+        const args = await definition.prepareInput!(call.args, { context });
         if (!args || typeof args !== 'object' || Array.isArray(args)) {
           throw new Error(`Tool "${call.name}" input preparation must return an argument object.`);
         }

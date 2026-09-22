@@ -37,7 +37,7 @@ subagent 执行时装配工具实现。这个方案解决了当时的 registry �
 
 **当前实现**由本机独立服务持有 Shell 实例和
 [ProcessRegistry](../../../services/local-agent/src/toolkits/local/processRegistry.ts)。
-bash、git 等 Toolkit 声明 `runtime: 'shell'`，静态 Tool 从 context 取得客户端；
+bash、git 等 Toolkit 由 Host 以 `runtimeKind: 'shell'` 注册，静态 Tool 从 context 取得客户端；
 Host 不创建进程 registry，也不按 execution 重建 Tool。实例可以共享或独立，进程
 归属同时包含服务端 client 身份、Toolkit 与 thread/task/run/delegation scope。
 

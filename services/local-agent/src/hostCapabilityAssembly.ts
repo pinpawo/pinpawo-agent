@@ -10,10 +10,7 @@
  * construction helper. Per design §6.7, construction helpers must not
  * reverse-define domain models.
  */
-import {
-  type AgentToolkit,
-  type CapabilityArtifactStore,
-} from '@pinpawo/pet-agent';
+import { type CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
   createBrowserCapability,
   createBrowserToolkit,
@@ -49,6 +46,7 @@ import type {
   HostToolkitInventoryStore,
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
+import type { HostToolkitRegistration } from './toolkits/runtimeBinding';
 import { FileSaver } from './fileSaver';
 
 export type HostCapabilityAssemblyOptions = {
@@ -114,7 +112,7 @@ export class HostCapabilityAssembly {
   private readonly sourceId: string;
   private modelProfiles: LocalModelProfileRegistry | null = null;
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
-  private readonly hostBuiltInToolkits: readonly AgentToolkit[];
+  private readonly hostBuiltInToolkits: readonly HostToolkitRegistration[];
   private readonly capabilityCatalog: HostCapabilityCatalog;
   private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
   private readonly checkpointer: FileSaver;
@@ -131,12 +129,12 @@ export class HostCapabilityAssembly {
     const browserSelected = options.includeBrowser
       ?? loadStoredConfig().capabilities?.browser !== false;
     this.hostBuiltInToolkits = [
-      createBashToolkit(),
-      createGitToolkit(),
-      createProjectInspectionToolkit(),
-      createCapabilityCreatorToolkit(),
+      { toolkit: createBashToolkit(), runtimeKind: 'shell' },
+      { toolkit: createGitToolkit(), runtimeKind: 'shell' },
+      { toolkit: createProjectInspectionToolkit(), runtimeKind: 'shell' },
+      { toolkit: createCapabilityCreatorToolkit() },
       ...(browserSelected
-        ? [createBrowserToolkit()]
+        ? [{ toolkit: createBrowserToolkit(), runtimeKind: 'cdp' }]
         : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({

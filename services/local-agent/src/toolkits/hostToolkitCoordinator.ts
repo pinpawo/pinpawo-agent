@@ -3,7 +3,7 @@ import {
   type HostToolkitInventorySnapshot, type ToolkitAvailabilityResolver, type ToolkitDefinitionSource,
 } from './toolkitInventory';
 import { connectHostRuntimes, type RuntimeClientFactory } from '../runtimeService/hostClient';
-import { bindToolkitRuntime, type HostedToolkit, type ToolkitRuntimeClientBinding } from './runtimeBinding';
+import { bindToolkitRuntime, type HostToolkitRegistration, type ToolkitRuntimeClientBinding } from './runtimeBinding';
 
 type RuntimeConnection = {
   bindings: Readonly<Record<string, ToolkitRuntimeClientBinding>>;
@@ -14,7 +14,7 @@ export type HostToolkitCoordinatorOptions = Readonly<{
   resolveAvailability?: ToolkitAvailabilityResolver;
   warn?: (message: string) => void;
   connectRuntimes?: (options: {
-    toolkits: readonly HostedToolkit[];
+    registrations: readonly HostToolkitRegistration[];
     clientFactories?: Readonly<Record<string, RuntimeClientFactory>>;
   }) => Promise<RuntimeConnection>;
 }>;
@@ -38,10 +38,13 @@ export class HostToolkitCoordinator {
     try {
       const snapshot = await buildHostToolkitInventory({
         sources,
-        assembleToolkits: async (definitions) => {
+        assembleToolkits: async (registrations) => {
           const connect = this.options.connectRuntimes ?? connectHostRuntimes;
-          this.connection = await connect({ toolkits: definitions, ...options });
-          return definitions.map(toolkit => bindToolkitRuntime(toolkit, this.connection!.bindings[toolkit.name]));
+          this.connection = await connect({ registrations, ...options });
+          return registrations.map(registration => bindToolkitRuntime(
+            registration,
+            this.connection!.bindings[registration.toolkit.name],
+          ));
         },
         ...(this.options.resolveAvailability ? { resolveAvailability: this.options.resolveAvailability } : {}),
       });

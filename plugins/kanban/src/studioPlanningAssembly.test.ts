@@ -54,7 +54,7 @@ async function residentBuildResources(workdir: string, plugins: ReturnType<typeo
     sources: [{
       id: 'plugins',
       kind: 'plugin',
-      definitions: plugins.flatMap((plugin) => plugin.toolkits),
+      definitions: plugins.flatMap((plugin) => plugin.toolkits.map((toolkit) => ({ toolkit }))),
     }],
     resolveAvailability: async () => ({ available: true }),
   }));

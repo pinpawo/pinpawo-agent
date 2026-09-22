@@ -98,7 +98,8 @@ Toolkit 到实例的固定映射。默认配置文件为 `~/.pinpawo/runtime/con
   对应客户端适配器，由服务配置显式注册。框架不按 Toolkit 名增加执行分支。
 
 现有 [pluginLoader](../../../services/local-agent/src/pluginLoader.ts) 返回含函数的
-Toolkit 对象，不能直接传给另一个进程。插件的 `runtimeClients` 导出提供 Host 适配器；
+Toolkit 注册记录，不能直接传给另一个进程。需要 Runtime 的插件通过
+`toolkitRegistrations` 声明 `runtimeKind`，并以 `runtimeClients` 导出提供 Host 适配器；
 配置中的 `modules` 绝对路径指向受信服务模块，其 `runtimeFactories` 导出提供实际实现。
 服务不接收 RPC 上传的 JS、函数或任意模块路径；未注册的接口明确报错。
 本期采用随发行配套的客户端与服务入口，一个 IPC 协议版本；独立插件版本协商不在本期。

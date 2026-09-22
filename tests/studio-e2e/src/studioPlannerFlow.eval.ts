@@ -37,8 +37,18 @@ try {
   const capabilities = loaded.map(({ capability }) => capability);
   const toolkits = [createProjectInspectionToolkit(), createKanbanPlanningToolkit(service),
     createStudioContextToolkit(() => ['planner', 'executor', 'reviewer', 'wiki'].map((petId) => ({ petId, name: petId })))];
-  runtimeConnection = await connectHostRuntimes({ toolkits });
-  const registry = compileAgentRegistry({ capabilities, toolkits: toolkits.map(toolkit => bindToolkitRuntime(toolkit, runtimeConnection!.bindings[toolkit.name])) });
+  const registrations = toolkits.map((toolkit) => ({
+    toolkit,
+    ...(toolkit.name === 'project-inspection' ? { runtimeKind: 'shell' } : {}),
+  }));
+  runtimeConnection = await connectHostRuntimes({ registrations });
+  const registry = compileAgentRegistry({
+    capabilities,
+    toolkits: registrations.map(registration => bindToolkitRuntime(
+      registration,
+      runtimeConnection!.bindings[registration.toolkit.name],
+    )),
+  });
   assert.equal(registry.capabilities.length, 2, 'Both production Planner capabilities must compile');
   const graph = createOrchestratorGraph({
     models: { act: subject.model, subagent: subject.model }, defaultCapabilityName: 'studio_planning',

@@ -8,7 +8,7 @@ import { HostToolkitCoordinator } from './hostToolkitCoordinator';
 test('HostToolkitCoordinator connects one client, injects static bindings and closes only its connection', async () => {
   const events: string[] = [];
   const warnings: string[] = [];
-  const runtimeToolkit = { runtime: 'fake', ...defineToolkit({
+  const runtimeToolkit = defineToolkit({
     name: 'fake-runtime',
     description: 'fake runtime',
     availability: () => ({ available: true }),
@@ -19,7 +19,7 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
         schema: z.object({}),
       }),
     }],
-  }) };
+  });
   const unavailableToolkit = defineToolkit({
     name: 'offline',
     description: 'offline',
@@ -34,15 +34,16 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
   });
   const coordinator = new HostToolkitCoordinator({
     warn: (message) => warnings.push(message),
-    connectRuntimes: async ({ toolkits }) => {
+    connectRuntimes: async ({ registrations }) => {
       events.push('connect');
-      assert.deepEqual(toolkits, [runtimeToolkit, unavailableToolkit]);
+      assert.deepEqual(registrations, [
+        { toolkit: runtimeToolkit, runtimeKind: 'fake' },
+        { toolkit: unavailableToolkit },
+      ]);
       return {
         bindings: {
           'fake-runtime': {
-            runtimeType: 'fake', client: { provider: 'fake' },
-            identity: { clientId: 'host', instanceId: 'environment' },
-            diagnose: () => ({ provider: 'fake' }),
+            runtimeKind: 'fake', client: { provider: 'fake' },
           },
         },
         close: async () => { events.push('disconnect'); },
@@ -53,7 +54,10 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
   const snapshot = await coordinator.initialize([{
     id: 'test-host',
     kind: 'host_builtin',
-    definitions: [runtimeToolkit, unavailableToolkit],
+    definitions: [
+      { toolkit: runtimeToolkit, runtimeKind: 'fake' },
+      { toolkit: unavailableToolkit },
+    ],
   }]);
 
   assert.equal(coordinator.getInventoryStore().getSnapshot(), snapshot);

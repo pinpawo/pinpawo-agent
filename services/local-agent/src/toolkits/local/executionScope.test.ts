@@ -36,14 +36,14 @@ test('Toolkit preparation resolves targets before review, including inspect_shel
     const definition = toolkit.tools.find(({ tool }) => tool.name === name)!;
     assert.ok(definition.prepareInput);
     const input = await definition.prepareInput({ command: 'pwd', cwd: 'src' }, {
-      toolkitName: toolkit.name, toolName: name, context: { workdir, executionScope },
+      context: { workdir, executionScope },
     });
     assert.equal((input as { cwd: string }).cwd, join(workdir, 'src'));
   }
   assert.deepEqual(prepareLocalToolInput('read_file', { path: 'README.md' }, workdir), { path: join(workdir, 'README.md') });
   assert.throws(() => prepareLocalToolInput('inspect_shell', { command: 'pwd' }, null), /absolute execution workdir/);
-  assert.equal(createBashToolkit().runtime, 'shell');
-  assert.equal(createGitToolkit().runtime, 'shell');
+  assert.equal('runtime' in createBashToolkit(), false);
+  assert.equal('runtime' in createGitToolkit(), false);
 });
 
 test('Git and inspect_shell use prepared cwd instead of the Host or service directory', async (t) => {

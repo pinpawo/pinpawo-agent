@@ -9,7 +9,6 @@ import type {
 } from './session';
 import { formatBrowserToolError } from './errors';
 import { buildBrowserScreenshotMessages } from './screenshot';
-import { BROWSER_TOOLKIT_NAME } from './constants';
 import {
   isBrowserRuntimePort,
   type BrowserRuntimeCallContext,
@@ -30,7 +29,7 @@ function readBrowserTarget(input: BrowserTargetInput) {
   return { selector: input.selector, ref: input.ref };
 }
 
-type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext & { toolkitRuntimes?: Readonly<Record<string, unknown>> }>;
+type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext & { toolkitRuntime?: unknown }>;
 
 function resolveBrowserCall(runtime: BrowserToolRuntime): {
   browser: BrowserRuntimePort;
@@ -43,7 +42,7 @@ function resolveBrowserCall(runtime: BrowserToolRuntime): {
   if (!scope.workdir) {
     throw new Error('Browser tool call requires a workdir.');
   }
-  const browser = runtime.context?.toolkitRuntimes?.[BROWSER_TOOLKIT_NAME];
+  const browser = runtime.context?.toolkitRuntime;
   if (!isBrowserRuntimePort(browser)) {
     throw new Error('Browser tool call requires an active Browser Runtime.');
   }

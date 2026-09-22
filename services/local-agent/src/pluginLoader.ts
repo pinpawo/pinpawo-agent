@@ -7,6 +7,7 @@ import {
   validateToolkitDefinition,
 } from '@pinpawo/pet-agent';
 import type { ToolkitDefinitionSource } from './toolkits/toolkitInventory';
+import type { HostToolkitRegistration } from './toolkits/runtimeBinding';
 import type { RuntimeClientFactory } from './runtimeService/hostClient';
 
 export type AgentPlugin = {
@@ -50,7 +51,13 @@ export async function loadPluginsFromDir(
   for (const file of files) {
     const filePath = resolve(pluginsDir, file);
     try {
-      const mod = await import(pathToFileURL(filePath).href) as { default?: unknown; tools?: unknown; toolkits?: unknown; runtimeClients?: Record<string, unknown> };
+      const mod = await import(pathToFileURL(filePath).href) as {
+        default?: unknown;
+        tools?: unknown;
+        toolkits?: unknown;
+        toolkitRegistrations?: unknown;
+        runtimeClients?: Record<string, unknown>;
+      };
 
       const plugin = mod.default;
       if (!plugin || typeof plugin !== 'object' || !('name' in plugin)) {
@@ -59,17 +66,30 @@ export async function loadPluginsFromDir(
       }
 
       const loadedPlugin = plugin as AgentPlugin;
-      for (const [type, factory] of Object.entries(mod.runtimeClients ?? {})) {
+      const candidateRuntimeClients = mod.runtimeClients ?? {};
+      for (const [type, factory] of Object.entries(candidateRuntimeClients)) {
         if (typeof factory !== 'function' || Object.hasOwn(runtimeClients, type)) {
           throw new Error(`Invalid or duplicate Runtime client adapter: ${type}`);
         }
       }
-      // Register only after every adapter has validated; a skipped plugin must
-      // not leave a partially installed client behind.
-      Object.assign(runtimeClients, mod.runtimeClients ?? {});
-      const definitions = Array.isArray(mod.toolkits)
-        ? mod.toolkits as AgentToolkit[]
-        : [];
+      if (Array.isArray(mod.toolkits) && Array.isArray(mod.toolkitRegistrations)) {
+        throw new Error('Plugin must export either toolkits or toolkitRegistrations, not both.');
+      }
+      if (Array.isArray(mod.toolkits) && mod.toolkits.some((toolkit) => (
+        toolkit != null
+        && typeof toolkit === 'object'
+        && (Object.hasOwn(toolkit, 'runtime') || Object.hasOwn(toolkit, 'runtimeKind'))
+      ))) {
+        throw new Error('Runtime metadata belongs in toolkitRegistrations, not AgentToolkit exports.');
+      }
+      const definitions = Array.isArray(mod.toolkitRegistrations)
+        ? mod.toolkitRegistrations as HostToolkitRegistration[]
+        : Array.isArray(mod.toolkits)
+          ? (mod.toolkits as AgentToolkit[]).map((toolkit) => Object.freeze({ toolkit }))
+          : [];
+      // Publish only after the module shape and adapters have validated. A
+      // skipped plugin must not leave a partial adapter or Toolkit source.
+      Object.assign(runtimeClients, candidateRuntimeClients);
       if (definitions.length > 0) {
         toolkitSources.push(Object.freeze({
           // The Host source identity describes where definitions came from,
@@ -84,7 +104,7 @@ export async function loadPluginsFromDir(
 
       plugins.push(loadedPlugin);
       const toolCount = Array.isArray(mod.tools) ? mod.tools.length : 0;
-      const toolkitCount = Array.isArray(mod.toolkits) ? mod.toolkits.length : 0;
+      const toolkitCount = definitions.length;
       const ignoredTools = toolCount > 0 ? `, ignored ${toolCount} unsupported tools export${toolCount !== 1 ? 's' : ''}` : '';
       console.log(`[plugins] loaded "${(plugin as AgentPlugin).name}" (${toolkitCount} toolkit${toolkitCount !== 1 ? 's' : ''}${ignoredTools})`);
     } catch (err) {
@@ -93,7 +113,7 @@ export async function loadPluginsFromDir(
   }
 
   for (const source of toolkitSources) {
-    source.definitions.forEach(validateToolkitDefinition);
+    source.definitions.forEach(({ toolkit }) => validateToolkitDefinition(toolkit));
   }
 
   return {

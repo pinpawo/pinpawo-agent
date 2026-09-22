@@ -65,7 +65,6 @@ for (const fullAccess of [false, true]) {
       name: 'consumer', description: 'Consumer',
       tools: [{ tool: staticTool, operation,
         prepareInput: (input, context) => {
-          assert.equal(context.toolkitName, 'consumer');
           const cwd = resolve(context.context.workdir as string, (input as { cwd: string }).cwd);
           steps.push(`prepare:${cwd}`);
           return { cwd };

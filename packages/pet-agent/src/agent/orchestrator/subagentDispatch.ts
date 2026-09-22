@@ -93,7 +93,10 @@ export async function resolveToolkitExecution(
     }
   }
   const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx);
-  const preparation = createToolInputPreparationMiddleware(toolBindings, toolContext);
+  const preparation = createToolInputPreparationMiddleware(
+    toolBindings.map(({ definition }) => definition),
+    toolContext,
+  );
 
   return {
     toolkits: selectedToolkits,

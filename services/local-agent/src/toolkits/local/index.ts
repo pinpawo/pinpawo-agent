@@ -1,5 +1,4 @@
 import { ARTIFACT_DISCOVERY_LIST_TOOL_NAME, ARTIFACT_DISCOVERY_READ_TOOL_NAME, ARTIFACT_DISCOVERY_TOOLKIT_NAME } from './artifactDiscoveryNames';
-import type { HostedToolkit } from '../runtimeBinding';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
   AuthorizationPolicies,
@@ -164,7 +163,7 @@ const projectInspectionInstructions = [
   '交付物包含已确认事实、关键来源、仍存在的不确定性，以及后续规划可直接使用的边界。',
 ];
 
-export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): HostedToolkit {
+export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
   const reviews = {
     write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
     apply_patch: ReviewPolicies.localMutation(),
@@ -192,15 +191,15 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): H
     // authority the command did not already have — the same reasoning that
     // leaves browser_close unreviewed.
   };
-  return { runtime: 'shell', ...defineToolkit({
+  return defineToolkit({
     name: 'bash',
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
-  }) };
+  });
 }
 
-export function createProjectInspectionToolkit(): HostedToolkit {
+export function createProjectInspectionToolkit(): AgentToolkit {
   const operations = {
     ...fileOperationMetadata,
     ...searchOperationMetadata,
@@ -209,15 +208,15 @@ export function createProjectInspectionToolkit(): HostedToolkit {
     ...shellOperationMetadata,
     ...gitOperationMetadata,
   };
-  return { runtime: 'shell', ...defineToolkit({
+  return defineToolkit({
     name: 'project-inspection',
     description: '只读探索本地项目、Git 历史与 GitHub PR/issue，形成可用于规划的事实证据。',
     tools: createToolDefinitions(projectInspectionTools, operations),
     instructions: projectInspectionInstructions.join('\n'),
-  }) };
+  });
 }
 
-export function createGitToolkit(): HostedToolkit {
+export function createGitToolkit(): AgentToolkit {
   const reviews = {
     git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
     git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
@@ -225,7 +224,7 @@ export function createGitToolkit(): HostedToolkit {
     gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
   };
-  return { runtime: 'shell', ...defineToolkit({
+  return defineToolkit({
     name: 'git',
     description: '本地 git 仓库查看、暂存、提交和普通推送，以及 GitHub PR/issue 创建与查看工具。',
     tools: createToolDefinitions(gitTools, gitOperationMetadata, reviews),
@@ -234,5 +233,5 @@ export function createGitToolkit(): HostedToolkit {
       allow: 'Local Git edits and ordinary remote collaboration can be recoverable; assess the actual target and effect.',
       ask: 'Shared-history rewrites, access changes, and releases require human review.',
     },
-  }) };
+  });
 }

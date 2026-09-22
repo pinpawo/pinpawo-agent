@@ -55,8 +55,8 @@ Runtime-independent orchestration stays in
 
 The definition chain is `Host -> Agent -> Capability -> Toolkit -> ToolDefinition`;
 the orchestrator and subagent lanes are internal to Agent. Runtime resources have
-a separate owner: the independent local Runtime service. A Toolkit declares a
-dependency such as `runtime: 'shell'` or `runtime: 'cdp'`; the Host injects a client
+a separate owner: the independent local Runtime service. The Host registers a Toolkit
+with a dependency such as `runtimeKind: 'shell'` or `runtimeKind: 'cdp'`, then injects a client
 and each Capability receives only the clients selected by its `uses` declaration.
 Tool objects remain static across executions.
 

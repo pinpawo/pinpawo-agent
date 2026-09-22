@@ -1,8 +1,8 @@
 # `@pinpawo-toolkit/browser`
 
 Browser Tools use one CDP Runtime in the local runtime service. Hosts register
-`createBrowserToolkit()` (which declares `runtime: 'cdp'`) and inject a
-`BrowserRuntimePort` into `ToolRuntime.context.toolkitRuntimes.browser`.
+`createBrowserToolkit()` with `runtimeKind: 'cdp'` in Host assembly and inject a
+`BrowserRuntimePort` into `ToolRuntime.context.toolkitRuntime`.
 Each call supplies the current execution scope and abort signal.
 
 The service constructs `createCdpRuntime(config)` and calls

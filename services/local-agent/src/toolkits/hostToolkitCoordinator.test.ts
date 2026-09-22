@@ -8,7 +8,7 @@ import { HostToolkitCoordinator } from './hostToolkitCoordinator';
 test('HostToolkitCoordinator connects one client, injects static bindings and closes only its connection', async () => {
   const events: string[] = [];
   const warnings: string[] = [];
-  const runtimeToolkit = defineToolkit({
+  const runtimeToolkit = { runtime: 'fake', ...defineToolkit({
     name: 'fake-runtime',
     description: 'fake runtime',
     availability: () => ({ available: true }),
@@ -19,8 +19,7 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
         schema: z.object({}),
       }),
     }],
-    runtime: 'fake',
-  });
+  }) };
   const unavailableToolkit = defineToolkit({
     name: 'offline',
     description: 'offline',
@@ -58,14 +57,12 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
   }]);
 
   assert.equal(coordinator.getInventoryStore().getSnapshot(), snapshot);
-  assert.deepEqual(snapshot.effectiveToolkits, [runtimeToolkit]);
+  assert.equal(snapshot.effectiveToolkits.length, 1);
+  const assembled = snapshot.effectiveToolkits[0];
+  assert.equal(assembled.name, runtimeToolkit.name);
+  assert.equal('runtime' in assembled, false);
+  assert.equal(await assembled.tools[0].tool.invoke({}), 'ok');
   assert.deepEqual(events, ['connect']);
-  assert.deepEqual(await coordinator.diagnose(), [{
-    toolkitName: 'fake-runtime',
-    runtimeType: 'fake',
-    identity: { clientId: 'host', instanceId: 'environment' },
-    details: { provider: 'fake' },
-  }]);
   assert.deepEqual(warnings, [
     '[toolkits] Toolkit "offline" unavailable '
       + '(host_builtin source "test-host" definition 1): offline for test',
@@ -73,7 +70,6 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
 
   await coordinator.shutdown();
   assert.deepEqual(events, ['connect', 'disconnect']);
-  assert.deepEqual(await coordinator.diagnose(), []);
   await coordinator.shutdown();
   assert.deepEqual(events, ['connect', 'disconnect']);
 });

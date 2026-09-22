@@ -3,7 +3,6 @@ import {
   type StructuredTool,
 } from '@langchain/core/tools';
 import { wrapToolCancellation } from './toolCancellation';
-import type { DelegationScope } from './scope';
 
 import type { ToolReviewPolicy, ToolOperationMetadata, ToolkitReviewGuidance } from '../autoReview/policy';
 import { TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS } from '../autoReview/policy';
@@ -63,26 +62,11 @@ export type ToolkitAvailabilityCheck = () =>
   | ToolkitAvailability
   | Promise<ToolkitAvailability>;
 
-/**
- * Existing execution identity carried with each Runtime operation. It contains
- * no provider/session/backend concepts; those belong to the execution service.
- */
-export type ToolkitRuntimeExecutionScope = DelegationScope & {
-  workdir: string | null;
-  signal?: AbortSignal;
-};
-
-/** Trusted identity of a connected execution environment, never model input. */
-export type ToolkitRuntimeIdentity = Readonly<{
-  clientId: string;
-  instanceId: string;
-}>;
-
+/** Tool-owned normalization receives opaque Host context before review. */
 export type ToolInputPreparationContext = Readonly<{
   toolkitName: string;
   toolName: string;
-  executionScope: ToolkitRuntimeExecutionScope;
-  runtimeIdentity?: ToolkitRuntimeIdentity;
+  context: Readonly<Record<string, unknown>>;
 }>;
 
 export async function evaluateToolkitAvailability(
@@ -143,8 +127,6 @@ export type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
-  /** Required asynchronous capability interface, supplied by Host assembly. */
-  readonly runtime?: string;
 };
 
 function assertToolkitReviewGuidance(
@@ -196,10 +178,6 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   }
   if (toolkit.availability !== undefined && typeof toolkit.availability !== 'function') {
     throw new Error(`Toolkit "${toolkit.name}" availability must be a function`);
-  }
-  if (toolkit.runtime !== undefined
-    && (typeof toolkit.runtime !== 'string' || !toolkit.runtime.trim())) {
-    throw new Error(`Toolkit "${toolkit.name}" runtime must name a capability interface`);
   }
 
   assertToolkitReviewGuidance(toolkit.name, toolkit.reviewGuidance);

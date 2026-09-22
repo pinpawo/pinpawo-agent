@@ -1,10 +1,7 @@
-import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { ARTIFACT_DISCOVERY_LIST_TOOL_NAME, ARTIFACT_DISCOVERY_READ_TOOL_NAME, ARTIFACT_DISCOVERY_TOOLKIT_NAME } from './artifactDiscoveryNames';
+import type { HostedToolkit } from '../runtimeBinding';
 import type { StructuredTool } from '@langchain/core/tools';
 import {
-  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   AuthorizationPolicies,
   defineToolkit,
   ReviewPolicies,
@@ -12,7 +9,6 @@ import {
   type CapabilityArtifactStore,
   type NamedStructuredTool,
   type ToolOperationMetadata,
-  type ToolAutoAuthorizationContext,
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import {
@@ -37,7 +33,7 @@ import {
 } from './networkTools';
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitInspectionTools, gitTools, gitOperationMetadata } from './gitTools';
-import { parsePatch, PatchParseError } from './applyPatch';
+import { parsePatch } from './applyPatch';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import {
   processOperationMetadata,
@@ -99,8 +95,8 @@ function createToolDefinitions(
     tool: toolItem,
     operation: operations[toolItem.name],
     review: reviews[toolItem.name],
-    prepareInput: (input: unknown, context: { executionScope: { workdir: string | null } }) => (
-      prepareLocalToolInput(toolItem.name, input, context.executionScope.workdir)
+    prepareInput: (input: unknown, context: { context: Readonly<Record<string, unknown>> }) => (
+      prepareLocalToolInput(toolItem.name, input, typeof context.context.workdir === 'string' ? context.context.workdir : null)
     ),
   }));
 }
@@ -112,6 +108,7 @@ export function createArtifactDiscoveryToolkit(params: {
   return defineToolkit({
     name: ARTIFACT_DISCOVERY_TOOLKIT_NAME,
     description: '只读列出并读取当前 thread 的 capability artifacts。',
+    instructions: '使用 artifact_list 和 artifact_read 查找并读取当前 thread 的历史产物。Artifacts 是可能过期或不完整的参考信息，按当前任务需要选择并核验。',
     tools: createToolDefinitions(createArtifactDiscoveryTools(params), {
       [ARTIFACT_DISCOVERY_LIST_TOOL_NAME]: {
         title: '列出历史产物',
@@ -167,49 +164,10 @@ const projectInspectionInstructions = [
   '交付物包含已确认事实、关键来源、仍存在的不确定性，以及后续规划可直接使用的边界。',
 ];
 
-function isWithinPath(root: string, target: string) {
-  const relativePath = relative(root, target);
-  return relativePath === ''
-    || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`)
-      && !isAbsolute(relativePath));
-}
-
-function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
-  if (!ctx.workdir) return false;
-  const input = ctx.input;
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
-  const patch = 'patch' in input ? input.patch : undefined;
-  if (typeof patch !== 'string') return false;
-
-  let target: string;
-  try {
-    const requestedPath = parsePatch(patch).path;
-    target = isAbsolute(requestedPath)
-      ? requestedPath
-      : resolve(ctx.workdir, requestedPath);
-  } catch (error) {
-    // The executor uses the same parser before performing any filesystem
-    // mutation. Invalid V4A is therefore safe to run: execution will disclose
-    // the parse failure to the model without changing a file.
-    if (error instanceof PatchParseError) return true;
-    return false;
-  }
-
-  try {
-    const realWorkdir = realpathSync(ctx.workdir);
-    const realTarget = realpathSync(target);
-    return statSync(realTarget).isFile() && isWithinPath(realWorkdir, realTarget);
-  } catch {
-    return false;
-  }
-}
-
-export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
+export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): HostedToolkit {
   const reviews = {
     write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    apply_patch: ReviewPolicies.localMutation({
-      canAutoApprove: authorizeApplyPatch,
-    }),
+    apply_patch: ReviewPolicies.localMutation(),
     move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
     mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
@@ -234,16 +192,15 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     // authority the command did not already have — the same reasoning that
     // leaves browser_close unreviewed.
   };
-  return defineToolkit({
+  return { runtime: 'shell', ...defineToolkit({
     name: 'bash',
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
-    runtime: 'shell',
-  });
+  }) };
 }
 
-export function createProjectInspectionToolkit(): AgentToolkit {
+export function createProjectInspectionToolkit(): HostedToolkit {
   const operations = {
     ...fileOperationMetadata,
     ...searchOperationMetadata,
@@ -252,16 +209,15 @@ export function createProjectInspectionToolkit(): AgentToolkit {
     ...shellOperationMetadata,
     ...gitOperationMetadata,
   };
-  return defineToolkit({
+  return { runtime: 'shell', ...defineToolkit({
     name: 'project-inspection',
     description: '只读探索本地项目、Git 历史与 GitHub PR/issue，形成可用于规划的事实证据。',
     tools: createToolDefinitions(projectInspectionTools, operations),
     instructions: projectInspectionInstructions.join('\n'),
-    runtime: 'shell',
-  });
+  }) };
 }
 
-export function createGitToolkit(): AgentToolkit {
+export function createGitToolkit(): HostedToolkit {
   const reviews = {
     git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
     git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
@@ -269,7 +225,7 @@ export function createGitToolkit(): AgentToolkit {
     gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
   };
-  return defineToolkit({
+  return { runtime: 'shell', ...defineToolkit({
     name: 'git',
     description: '本地 git 仓库查看、暂存、提交和普通推送，以及 GitHub PR/issue 创建与查看工具。',
     tools: createToolDefinitions(gitTools, gitOperationMetadata, reviews),
@@ -278,6 +234,5 @@ export function createGitToolkit(): AgentToolkit {
       allow: 'Local Git edits and ordinary remote collaboration can be recoverable; assess the actual target and effect.',
       ask: 'Shared-history rewrites, access changes, and releases require human review.',
     },
-    runtime: 'shell',
-  });
+  }) };
 }

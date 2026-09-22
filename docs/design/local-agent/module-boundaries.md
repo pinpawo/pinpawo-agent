@@ -140,7 +140,7 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 
 | 类别 | 例子 | 所有权与更新规则 |
 |---|---|---|
-| Host 持有的服务及配置来源 | capabilityCatalog、toolkitInventory、artifactStore、toolkitRuntimeManager、petDocument | 服务长期持有；catalog/inventory 可提供更新后的内容；petDocument 当前由 Host 加载，不属于会话记录 |
+| Host 持有的服务及配置来源 | capabilityCatalog、toolkitInventory、artifactStore、petDocument | 服务长期持有；catalog/inventory 可提供更新后的内容；petDocument 当前由 Host 加载，不属于会话记录 |
 | 会话数据 | threadId、modelProfileId、会话创建时间 | threadId 标识会话；modelProfileId 可以经准入检查在同一会话中更新 |
 | 本次执行输入与配置快照 | 消息或 resume、AbortSignal、解析后的模型/能力/策略配置 | 执行获得准入后确定；同次执行及其收尾使用同一份配置 |
 

@@ -108,11 +108,11 @@ test('runtime context snapshots common sections and has no configurable fallback
   assert.deepEqual(getAgentRuntimeContext({ configurable: { systemPromptSections: source } }), { workdir: null, systemPromptSections: [] });
 });
 
-test('workdir is rendered once from typed context across direct and middleware calls', async () => {
+test('Host sections are rendered once across direct and middleware calls', async () => {
   const workdir = `/workspace/${randomUUID()}`;
   const model = new RecordingModel({});
   const role = new SystemMessage('role');
-  const context = getAgentRuntimeContext({ context: { workdir } });
+  const context = getAgentRuntimeContext({ context: { workdir, systemPromptSections: [{ id: 'host:workdir', content: workdir }] } });
   await invokeOrchestratorModel(model, { systemMessage: role, messages: [new HumanMessage('first')] }, { context });
   const agent = createAgent({ model, tools: [], systemPrompt: role, middleware: [systemPromptMiddleware] });
   await agent.invoke({ messages: [new HumanMessage('second')] }, { context });
@@ -122,6 +122,6 @@ test('workdir is rendered once from typed context across direct and middleware c
   assert.throws(() => getAgentRuntimeContext({ context: { workdir: '   ' } }));
   assert.equal(getAgentRuntimeContext({ context: { workdir: `${workdir} ` } }).workdir, `${workdir} `);
   assert.throws(() => composeSystemPrompt(role, {
-    workdir, systemPromptSections: [{ id: 'framework:workdir', content: 'conflict' }],
+    workdir, systemPromptSections: [{ id: 'host:workdir', content: 'first' }, { id: 'host:workdir', content: 'conflict' }],
   }), /Duplicate system prompt section id/);
 });

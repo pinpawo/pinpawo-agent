@@ -36,7 +36,7 @@ test('Toolkit preparation resolves targets before review, including inspect_shel
     const definition = toolkit.tools.find(({ tool }) => tool.name === name)!;
     assert.ok(definition.prepareInput);
     const input = await definition.prepareInput({ command: 'pwd', cwd: 'src' }, {
-      toolkitName: toolkit.name, toolName: name, executionScope,
+      toolkitName: toolkit.name, toolName: name, context: { workdir, executionScope },
     });
     assert.equal((input as { cwd: string }).cwd, join(workdir, 'src'));
   }

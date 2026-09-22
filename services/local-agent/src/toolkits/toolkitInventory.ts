@@ -1,3 +1,4 @@
+import type { HostedToolkit } from './runtimeBinding';
 import {
   type AgentToolkit,
   type ToolkitAvailability,
@@ -16,7 +17,7 @@ export type ToolkitDefinitionSourceKind = 'host_builtin' | 'plugin';
 export type ToolkitDefinitionSource = Readonly<{
   id: string;
   kind: ToolkitDefinitionSourceKind;
-  definitions: readonly AgentToolkit[];
+  definitions: readonly HostedToolkit[];
 }>;
 
 export type ToolkitDefinitionProvenance = Readonly<{
@@ -47,7 +48,7 @@ export type ToolkitAvailabilityResolver = (
 
 export type BuildHostToolkitInventoryOptions = Readonly<{
   sources: readonly ToolkitDefinitionSource[];
-  connectToolkitRuntimes?: (definitions: readonly AgentToolkit[]) => Promise<void>;
+  assembleToolkits?: (definitions: readonly HostedToolkit[]) => Promise<readonly AgentToolkit[]>;
   resolveAvailability?: ToolkitAvailabilityResolver;
 }>;
 
@@ -149,14 +150,17 @@ export async function buildHostToolkitInventory(
 
   // Duplicate definitions and malformed contracts fail before any dynamic
   // resource is acquired.
-  await options.connectToolkitRuntimes?.(toolkits);
+  const assembled = await options.assembleToolkits?.(toolkits) ?? toolkits;
+  if (assembled.length !== toolkits.length || assembled.some((toolkit, index) => toolkit.name !== toolkits[index].name)) {
+    throw new Error('Host assembly must preserve Toolkit inventory identity and order.');
+  }
 
   const resolveAvailability = options.resolveAvailability
     ?? defaultAvailabilityResolver;
-  const entries = await Promise.all(definitions.map(async ({ toolkit, provenance }) => ({
-    toolkit,
+  const entries = await Promise.all(definitions.map(async ({ provenance }, index) => ({
+    toolkit: assembled[index],
     provenance,
-    availability: await resolveAvailability(toolkit),
+    availability: await resolveAvailability(assembled[index]),
   })));
   return snapshotEntries(entries);
 }

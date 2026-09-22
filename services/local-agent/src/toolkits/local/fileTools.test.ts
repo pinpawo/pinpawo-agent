@@ -214,57 +214,11 @@ test('bash toolkit reviews apply_patch with resolved file paths', async (t) => {
   assert.match(view.target ?? '', new RegExp(filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
-test('auto review deterministically authorizes safe apply_patch execution', async (t) => {
-  const root = createFileFixture(t);
-  const outsideRoot = createFileFixture(t);
-  const insidePath = resolve(root, 'inside.txt');
-  const outsidePath = resolve(outsideRoot, 'outside.txt');
-  writeFileSync(insidePath, 'before\n', 'utf-8');
-  writeFileSync(outsidePath, 'before\n', 'utf-8');
-
+test('apply_patch requests normal Tool review without environment-based auto approval', () => {
   const policy = reviewPolicyFor('apply_patch');
-  const authorize = policy.canAutoApprove;
-  assert.ok(authorize);
+  assert.equal(policy.canAutoApprove, undefined);
   assert.equal(policy.authorization?.buildMatcher, undefined);
-  const patchInput = (path: string) => ({
-    patch: [
-      '*** Begin Patch',
-      `*** Update File: ${path}`,
-      '@@',
-      '-before',
-      '+after',
-      '*** End Patch',
-    ].join('\n'),
-  });
-
-  assert.equal(await authorize({
-    ...reviewContext('apply_patch', patchInput(insidePath)),
-    workdir: root,
-  }), true);
-  assert.equal(await authorize({
-    ...reviewContext('apply_patch', patchInput('inside.txt')),
-    workdir: root,
-  }), true);
-  assert.equal(await authorize({
-    ...reviewContext('apply_patch', patchInput(outsidePath)),
-    workdir: root,
-  }), false);
-  if (process.platform !== 'win32') {
-    const linkedOutside = resolve(root, 'linked-outside');
-    symlinkSync(outsideRoot, linkedOutside, 'dir');
-    assert.equal(await authorize({
-      ...reviewContext('apply_patch', patchInput(resolve(linkedOutside, 'outside.txt'))),
-      workdir: root,
-    }), false);
-  }
-  assert.equal(await authorize({
-    ...reviewContext('apply_patch', { patch: 'not V4A' }),
-    workdir: root,
-  }), true);
-  assert.equal(await authorize({
-    ...reviewContext('apply_patch', {}),
-    workdir: root,
-  }), false);
+  assert.ok(policy.request(reviewContext('apply_patch', { patch: '*** Begin Patch\n*** End Patch' })));
 });
 
 test('bash toolkit reviews local path mutations with presets', () => {

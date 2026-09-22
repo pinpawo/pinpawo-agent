@@ -1,4 +1,5 @@
 import type { StructuredTool } from '@langchain/core/tools';
+import { createToolInputPreparationMiddleware } from './toolInputPreparation';
 import type {
   AgentToolkit,
   ModelInputModality,
@@ -12,29 +13,6 @@ import {
   type ToolkitReviewBinding,
   type ToolkitReviewRuntimeContext,
 } from './toolkitReviewMiddleware';
-import {
-  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-} from './artifacts/discovery';
-/** Runtime facts and conditional interfaces available to this execution. */
-export function buildSubagentExecutionContext(params: {
-  artifactDiscovery: boolean;
-}): string | null {
-  const sections = [
-    ...(params.artifactDiscovery
-      ? [
-          [
-            '## 可选历史 artifacts',
-            `可使用 ${ARTIFACT_DISCOVERY_LIST_TOOL_NAME} 和 ${ARTIFACT_DISCOVERY_READ_TOOL_NAME} 查找并读取当前 thread 的历史产物。`,
-            'Artifacts 是可能过期或不完整的参考信息；按当前任务的需要选择并核验。',
-          ].join('\n'),
-        ]
-      : []),
-  ].filter((section): section is string => section !== null);
-
-  return sections.length > 0 ? sections.join('\n\n') : null;
-}
-
 export function collectToolkitOperations(
   toolkits: AgentToolkit[],
 ): Record<string, SubagentToolOperationMetadata> {
@@ -78,6 +56,7 @@ export async function resolveToolkitExecution(
   toolkits: AgentToolkit[],
   names: string[] | undefined,
   ctx: ToolkitReviewRuntimeContext,
+  toolContext: Readonly<Record<string, unknown>> = {},
 ) {
   const selectedToolkits = names === undefined
     ? toolkits
@@ -113,11 +92,13 @@ export async function resolveToolkitExecution(
       }
     }
   }
-  const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx, toolBindings);
+  const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx);
+  const preparation = createToolInputPreparationMiddleware(toolBindings, toolContext);
 
   return {
     toolkits: selectedToolkits,
     tools,
-    middleware: reviewMiddleware ? [reviewMiddleware] : [],
+    // afterModel hooks run in reverse registration order: prepare, then review.
+    middleware: [reviewMiddleware, preparation].filter((item): item is NonNullable<typeof item> => item !== null),
   };
 }

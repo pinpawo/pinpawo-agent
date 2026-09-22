@@ -120,18 +120,6 @@ test('toolkit registration rejects malformed static contract fields', () => {
     /operation\.summarizeInput must be a function/,
   );
 
-  assert.throws(
-    () => validateToolkitDefinition({
-      name: 'invalid_runtime_lifecycle',
-      description: 'Runtime dependencies name a capability rather than defining Host lifecycle hooks.',
-      tools: [{ tool: alphaTool }],
-      runtime: {
-        start: () => ({}),
-        diagnose: 'not callable',
-      },
-    } as never),
-    /runtime must name a capability interface/,
-  );
 
   assert.throws(
     () => validateToolkitDefinition({

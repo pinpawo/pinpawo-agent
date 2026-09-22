@@ -1,7 +1,7 @@
+import { ARTIFACT_DISCOVERY_TOOLKIT_NAME } from '../toolkits/local/artifactDiscoveryNames';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   defineInstructionDocument,
   type AgentCapability,
   type CapabilityArtifactStore,

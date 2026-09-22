@@ -133,7 +133,6 @@ type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
-  readonly runtime?: string;
 };
 
 type ToolDefinition = {
@@ -155,7 +154,6 @@ type ToolDefinition = {
   system prompt。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
-- `runtime`：可选、所需异步能力接口的名称，由 Host 注入对应客户端。
 - `ToolDefinition.prepareInput`：审核前规范化参数的纯函数，必须可重复调用。
 - `ToolDefinition.operation`：工具调用的展示和摘要 metadata。
 - `ToolDefinition.review`：单个工具的确定性 review policy。
@@ -166,7 +164,6 @@ Toolkit 必须由代码定义；它不是 Markdown skill，也不是 orchestrato
 const bash = defineToolkit({
   name: 'bash',
   description: '本地文件、搜索和受控 shell 工具。',
-  runtime: 'shell',
   tools: [{
     tool: runShellTool,
     operation: { title: '执行命令' },
@@ -182,27 +179,16 @@ LangChain Tool 可能包含可变运行时内部状态。registry 会冻结
 
 ### 3.2 Runtime 客户端与输入准备
 
-`runtime` 是能力接口名，例如 `shell` 或 `cdp`；不需要执行环境的 Toolkit 省略它。
-多个 Toolkit 可以共享同一个实例，也可以绑定不同实例。bash 和 git 都使用 Shell
-接口，无须各自构造专用 Runtime。该声明不改变 `uses`、权限、review 或 instructions。
+`AgentToolkit` 不声明 Runtime。Host 的 `HostedToolkit` 在 Agent 定义外声明可选
+`runtime` 接口类型，并在初始化时绑定客户端；多个 Toolkit 可以共享或隔离实例。
+bash 和 git 都使用 Shell，browser 当前使用 CDP。实际资源由独立服务持有。
 
-Host 连接本机独立 Runtime 服务并装配客户端；`ToolkitRuntimeManager` 只按 Toolkit
-选择、校验和诊断这些绑定。实际进程、浏览器连接及页面由服务管理。Host 断开只清理
-该客户端的资源，服务和其他 Host 的资源继续存活。
+Agent 只接收已装配的静态 Tools。调用走原生 Tool 执行链，通用调用上下文和取消信号
+每次传入；客户端不进入 prompt 或 checkpoint。
 
-静态 Tool 每次从 `ToolRuntime.context.toolkitRuntimes[toolkitName]` 读取客户端，
-并传入当前 `executionScope` 与 `ToolRuntime.signal`。Toolkit 所属、连接身份和
-实例身份来自受信 context；共享客户端不保存可变的当前 execution。Tool 对象与
-schema 保持静态，客户端不会进入 prompt 或 checkpoint。
-
-需要解析工作区路径的 Tool 通过 `prepareInput` 在审核前确定参数：省略 cwd 使用
-workdir，相对路径基于 workdir，缺少所需工作区明确失败。审核、授权和执行使用同一份
-规范化参数；full_access 也执行此步骤。该函数必须纯且幂等，不能创建资源或在执行时
-再隐式改写目标。越出 workdir 的访问仍由 review / authorization 判断。
-
-完整客户端类型、调用 context、`ToolInputPreparationContext` 字段与诊断语义见
-[Toolkit Runtime 客户端契约](toolkit-runtime.md)；部署与资源归属见
-[Runtime 重构草案](../../design/toolkits/local-execution-runtime.md)。
+`prepareInput(input, { toolkitName, toolName, context })` 在审批前准备完整参数，
+full_access 也运行。该函数必须纯且幂等。审批、授权匹配和执行使用同一份有效参数，
+不附加 Runtime 身份或工作目录审批 scope。详见 [Host Runtime 装配](toolkit-runtime.md)。
 
 ### 3.3 可用性
 

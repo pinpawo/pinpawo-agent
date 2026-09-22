@@ -231,9 +231,9 @@ attempt itself runs in `capabilityExecution/runner.ts`.
 
 | Slot | Class | Content |
 |---|---|---|
-| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ artifactDiscovery })` |
+| system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections (including Host-provided workdir), then execution-local `promptSections`: toolkit instructions, capability instructions (including Toolkit-owned artifact discovery guidance) |
 | history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().select()` — main conversation including paired Capability results |
-| boundary | `RUN-STABLE` / `BOUNDARY` | One `<delegation_briefing>` containing goal context, current task and Supervisor's next-step instructions; always last |
+| boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context, current task and Supervisor's next-step instructions; always last |
 
 Each tool call gets a distinct delegation identity. Earlier findings are available
 through paired ToolMessages and the Supervisor-authored briefing; internal child

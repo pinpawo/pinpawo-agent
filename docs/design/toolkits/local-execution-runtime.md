@@ -9,6 +9,19 @@
 
 ## 1. 最终结构
 
+### Agent 与 Host 的边界（本轮清理）
+
+pet-agent 只接收已装配的静态 Tools、通用调用上下文和审核策略。Runtime 类型声明、
+客户端绑定、实例身份与诊断留在 Host；不进入 Agent 的注册、调度或授权匹配契约。
+Host 初始化时为各 Toolkit 的 Tool 绑定客户端，调用仍走原生 Tool 执行链，不逐次重建
+Tools，也不由 Agent 中间件手工执行 Tool。连接关闭后绑定失效，不自动重连或重放。
+
+参数准备是审核前的通用步骤，具体 Tool 通过 Host 上下文解析路径等默认值。审批及
+授权复用只依据 Tool 和有效参数，不纳入连接、实例、runtime 类型或额外 workdir。
+中断恢复中的已批准调用也绑定有效参数；参数改变后不能沿用旧批准。执行环境中的
+资源归属校验继续由 Runtime 服务负责，与审批无关。Host 提供工作目录提示，具体
+Toolkit 提供工具使用说明；Agent 不硬编码环境提示或特定 Toolkit 名称。
+
 **一个本机独立进程持有所有实际 Runtime。Host 运行 Agent、Toolkit Tools 和审核，
 通过一个本机连接调用 Runtime。Toolkit 按能力使用实例，可共享，也可隔离。**
 
@@ -107,7 +120,7 @@ Host 退出或连接断开：回收该 client 的资源
 ### Tool 调用
 
 静态 Tool 从 ToolRuntime.context 取得异步客户端和已有的 execution scope。
-context 只注入当前 Capability 已选择的 Toolkit 接口；scope/signal 每次调用读取，
+Host 在初始化时将每个 Tool 绑定到其 Toolkit 客户端；scope/signal 每次调用读取，
 共享 client 不保存可变的“当前执行”。
 每次操作携带 Toolkit、实例、thread/run/delegation、有效 workdir 与参数；
 clientId 来自服务端连接上下文，不相信调用者自报的身份。
@@ -117,10 +130,10 @@ clientId 来自服务端连接上下文，不相信调用者自报的身份。
 start/attach/resolve/release/detach；执行身份随请求传入即可。
 AbortSignal 留在 Host，并映射为请求取消消息。
 
-[Toolkit 契约](../../../packages/pet-agent/src/types/toolkit.ts) 的 `runtime` 仅声明接口类型；
-[manager](../../../packages/pet-agent/src/agent/orchestrator/toolkitRuntime.ts) 只选择与诊断客户端绑定。
-Host 负责客户端注入与关闭。Tools 使用 context 中的接口，旧 root hooks、逐执行 bindTools
-重建及仅用于改写 cwd 的假 root 已删除。
+[Host 的声明与绑定](../../../services/local-agent/src/toolkits/runtimeBinding.ts) 负责接口类型、
+客户端注入与关闭；AgentToolkit 不声明 Runtime。Tools 使用 Host 注入的客户端接口，
+pet-agent 只调用已装配 Tools。旧 root hooks、逐执行 bindTools 重建及仅用于改写 cwd
+的假 root 已删除。
 
 ### 资源归属
 
@@ -173,8 +186,8 @@ Windows 使用 named pipe；两平台的服务端均验证命名空间 token。�
 失效由 CDP 实现处理，不扩展为通用 IPC 恢复框架。
 
 Host 保留准入与 review，服务校验资源访问，不增加第二套审核引擎。
-审核缓存绑定消费方 Toolkit、当前连接、实例与有效目标；新连接或实例绑定变化不能
-复用旧授权。连接身份与实例配置放在受信上下文，不进入模型 Tool schema。
+审核缓存只按 Tool 和有效参数匹配；连接或实例变化本身不影响授权复用。审批恢复
+校验 Tool、调用 ID 与有效参数。连接身份只用于服务资源归属，不参与审批。
 
 ### workdir 只解析一次
 
@@ -183,7 +196,7 @@ cwd/路径，让审核和执行使用同一目标：绝对路径保持原值，�
 省略 cwd 使用 workdir。没有 workdir 时，需要工作区的操作明确失败。
 服务只执行已确定的目标，不回退到服务 process.cwd，也不调用全局 process.chdir。
 
-[prepareInput](../../../packages/pet-agent/src/agent/orchestrator/toolkitReviewMiddleware.ts)
+[prepareInput](../../../packages/pet-agent/src/agent/orchestrator/toolInputPreparation.ts)
 在审核或 full_access 执行前调用；[本机路径解析](../../../services/local-agent/src/toolkits/local/workdirBinding.ts)
 是纯输入准备函数，覆盖 run_shell、inspect_shell、git/gh 与文件工具。
 [上位设计](../host-agent-capability-toolkit.md) 和 [workdir reference](../../reference/runtime/workdir.md)

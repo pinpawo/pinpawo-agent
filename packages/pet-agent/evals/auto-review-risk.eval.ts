@@ -308,7 +308,6 @@ async function main() {
     const result = await assessAutoReviewRisk({
       model: modelConfig.model,
       task: testCase.task,
-      workdir,
       reviews: [{
         toolkitName: 'bash',
         toolName: 'file' in testCase ? 'write_file' : 'run_shell',

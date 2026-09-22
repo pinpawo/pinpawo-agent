@@ -27,3 +27,13 @@ test('exact matches projected identity; origin matches scheme host and effective
     assert.equal(toolAuthorizationMatchersEqual(origin, urlOriginAuthorization(url)!), false);
   }
 });
+
+test('historical environment-scoped grants cannot become unscoped grants', async () => {
+  const { readToolAuthorizationMatcher } = await import('./authorizationMatchers');
+  const exact = exactAuthorization({ cwd: '/workspace', command: 'pwd' });
+  const origin = urlOriginAuthorization('https://example.com')!;
+  for (const matcher of [exact, origin]) {
+    assert.equal(readToolAuthorizationMatcher({ ...matcher, scope: 'old-environment' }), null);
+    assert.deepEqual(readToolAuthorizationMatcher(matcher), matcher);
+  }
+});

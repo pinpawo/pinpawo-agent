@@ -12,13 +12,11 @@ import type { SubagentRuntimeContext } from '../../types/subagent';
 import { defineInstructionDocument } from '../../types/capability';
 import { buildToolAuthorizationRecord, urlOriginAuthorization, type ToolAuthorizationMatcher, type ToolAuthorizationRecord } from '../../autoReview/reviewAuthorizations';
 import { compileAgentRegistry } from './registry';
-import { ToolkitRuntimeManager } from './toolkitRuntime';
 import { createCapabilityExecutor } from './capabilityExecution';
 
 async function invoke(params: {
   toolkit: AgentToolkit;
   args?: Record<string, unknown>;
-  manager?: ToolkitRuntimeManager;
   workdir?: string;
   grants?: ToolAuthorizationRecord[];
   fullAccess?: boolean;
@@ -32,7 +30,6 @@ async function invoke(params: {
     instructions: defineInstructionDocument({ content: 'Execute the requested tool.' }),
   }] });
   return createCapabilityExecutor({
-    toolkitRuntimeManager: params.manager,
     modelInputModalities: params.modelInputModalities,
     runSubagent: params.middleware ? input => createSubagent({ ...input,
       middleware: [...(input.middleware ?? []), ...params.middleware!],
@@ -65,50 +62,26 @@ for (const fullAccess of [false, true]) {
     }, { name: 'action', description: 'Act.', schema: z.object({ cwd: z.string() }) });
     const operation = { title: 'Action' };
     const toolkit: AgentToolkit = {
-      name: 'consumer', description: 'Consumer', runtime: 'shell',
+      name: 'consumer', description: 'Consumer',
       tools: [{ tool: staticTool, operation,
         prepareInput: (input, context) => {
           assert.equal(context.toolkitName, 'consumer');
-          assert.deepEqual(context.runtimeIdentity, { clientId: 'host', instanceId: 'env' });
-          const cwd = resolve(context.executionScope.workdir!, (input as { cwd: string }).cwd);
+          const cwd = resolve(context.context.workdir as string, (input as { cwd: string }).cwd);
           steps.push(`prepare:${cwd}`);
           return { cwd };
         },
         review: { request: context => { steps.push(`review:${(context.input as { cwd: string }).cwd}`); return null; } },
       }],
     };
-    const manager = new ToolkitRuntimeManager({ consumer: { runtimeType: 'shell', client, identity: { clientId: 'host', instanceId: 'env' } } });
-    await invoke({ toolkit, manager, args: { cwd: 'subdir', toolkitName: 'forged' }, fullAccess });
+    await invoke({ toolkit, args: { cwd: 'subdir', toolkitName: 'forged' }, fullAccess });
     assert.deepEqual(steps, fullAccess
       ? ['prepare:/workspace/subdir', 'execute:/workspace/subdir']
       : ['prepare:/workspace/subdir', 'review:/workspace/subdir', 'execute:/workspace/subdir']);
-    assert.equal(actualContext?.toolkitName, 'consumer');
-    assert.strictEqual(actualContext?.toolkitRuntimes?.consumer, client);
     assert.equal(actualContext?.executionScope?.delegationId, 'delegation');
     assert.strictEqual(toolkit.tools[0].tool, staticTool);
     assert.strictEqual(toolkit.tools[0].operation, operation);
   });
 }
-
-test('one static Tool obtains its owning Toolkit client in overlapping executions', async () => {
-  const seen = new Map<string, unknown>();
-  const sharedTool = tool(async (_args, runtime) => {
-    const context = runtime.context as SubagentRuntimeContext;
-    await Promise.resolve();
-    seen.set(context.toolkitName!, context.toolkitRuntimes?.[context.toolkitName!]);
-    return 'done';
-  }, { name: 'shared_action', description: 'Act.', schema: z.object({}) });
-  const firstClient = {}, secondClient = {};
-  const manager = new ToolkitRuntimeManager({
-    first: { runtimeType: 'shell', client: firstClient, identity: { clientId: 'host', instanceId: 'one' } },
-    second: { runtimeType: 'shell', client: secondClient, identity: { clientId: 'host', instanceId: 'two' } },
-  });
-  await Promise.all(['first', 'second'].map(name => invoke({
-    toolkit: { name, description: name, runtime: 'shell', tools: [{ tool: sharedTool }] }, manager,
-  })));
-  assert.strictEqual(seen.get('first'), firstClient);
-  assert.strictEqual(seen.get('second'), secondClient);
-});
 
 for (const unavailableToolName of ['read_image', 'unknown_tool']) {
   test(`Capability execution recovers from unavailable tool ${unavailableToolName}`, async () => {
@@ -171,9 +144,9 @@ test('prepared input, review and Tool execution retain literal workdir whitespac
   await invoke({ workdir, toolkit: { name: 'local', description: 'Local', tools: [{
     tool: action,
     prepareInput: (_input, context) => {
-      assert.equal(context.executionScope.workdir, workdir);
+      assert.equal(context.context.workdir, workdir);
       observed.push('prepare');
-      return { cwd: context.executionScope.workdir };
+      return { cwd: context.context.workdir };
     },
     review: { request: context => {
       assert.equal((context.input as { cwd: string }).cwd, workdir);
@@ -184,34 +157,25 @@ test('prepared input, review and Tool execution retain literal workdir whitespac
   assert.deepEqual(observed, ['prepare', 'review', 'execute']);
 });
 
-test('session grants retain URL origin semantics and cannot cross client, instance, Toolkit or workdir', async () => {
+test('session grants depend on Tool parameters and preserve URL origin semantics across Host contexts', async () => {
   let reviews = 0;
   let matcher: ToolAuthorizationMatcher | null = null;
-  const staticTool = tool(() => 'done', { name: 'navigate', description: 'Navigate.', schema: z.object({}) });
-  const makeToolkit = (name = 'browser'): AgentToolkit => ({ name, description: name, runtime: 'cdp', tools: [{ tool: staticTool,
+  const action = tool(() => 'done', { name: 'navigate', description: 'Navigate.', schema: z.object({ url: z.string() }) });
+  const toolkit: AgentToolkit = { name: 'browser', description: 'Browser', tools: [{ tool: action,
     review: {
-      authorization: { buildMatcher: () => urlOriginAuthorization('https://example.com/page') },
+      authorization: { buildMatcher: ({ input }) => urlOriginAuthorization((input as { url: string }).url) },
       request: ctx => { reviews += 1; matcher = ctx.authorizationMatcher ?? null; return null; },
     },
-  }] });
-  const manager = (clientId = 'host-1', instanceId = 'browser-1', name = 'browser') => new ToolkitRuntimeManager({
-    [name]: { runtimeType: 'cdp', client: {}, identity: { clientId, instanceId } },
-  });
-  await invoke({ toolkit: makeToolkit(), manager: manager() });
+  }] };
+  await invoke({ toolkit, args: { url: 'https://example.com/page' } });
   assert.equal(reviews, 1);
   assert.equal((matcher as unknown as ToolAuthorizationMatcher).type, 'url_origin');
-  assert.equal((matcher as unknown as ToolAuthorizationMatcher).scope?.length, 64);
+  assert.equal('scope' in matcher!, false);
   const grants = [buildToolAuthorizationRecord({ toolName: 'navigate', matcher: matcher!, source: 'human' })];
-  await invoke({ toolkit: makeToolkit(), manager: manager(), grants });
-  assert.equal(reviews, 1, 'same trusted target reuses the grant');
-  await invoke({ toolkit: makeToolkit(), manager: manager('host-2'), grants });
-  await invoke({ toolkit: makeToolkit(), manager: manager('host-1', 'browser-2'), grants });
-  await invoke({ toolkit: makeToolkit('other'), manager: manager('host-1', 'browser-1', 'other'), grants });
-  await invoke({ toolkit: makeToolkit(), manager: manager(), workdir: '/elsewhere', grants });
-  assert.equal(reviews, 5);
-  const oldGrant = buildToolAuthorizationRecord({ toolName: 'navigate', matcher: urlOriginAuthorization('https://example.com')!, source: 'human' });
-  await invoke({ toolkit: makeToolkit(), manager: manager(), grants: [oldGrant] });
-  assert.equal(reviews, 6, 'unscoped historical grants fail closed');
+  await invoke({ toolkit, args: { url: 'https://example.com/other' }, workdir: '/elsewhere', grants });
+  assert.equal(reviews, 1);
+  await invoke({ toolkit, args: { url: 'https://other.example/page' }, grants });
+  assert.equal(reviews, 2);
 });
 
 test('input preparation failures prevent review and execution', async () => {
@@ -233,22 +197,19 @@ for (const invalid of [false, true]) {
       try {
         const result = await handler(request);
         events.push('after');
-        if (invalid) {
-          assert.equal((result as { status?: string }).status, 'error');
-          assert.match(String((result as { content?: unknown }).content), /value|number|string/);
-        }
         return result;
       } finally { events.push('finally'); }
     } });
     const action = tool(({ value }, runtime) => {
-      assert.equal((runtime.context as SubagentRuntimeContext).toolkitName, 'local');
       events.push(`execute:${value}`);
       return 'done';
     }, { name: 'action', description: 'Act.', schema: z.object({ value: z.string() }) });
-    await invoke({ toolkit: { name: 'local', description: 'Local', tools: [{ tool: action }] },
+    const result = invoke({ toolkit: { name: 'local', description: 'Local', tools: [{ tool: action }] },
       args: { value: invalid ? 42 : 'valid' }, middleware: [wrapped],
     });
-    assert.deepEqual(events, invalid ? ['before', 'after', 'finally'] : ['before', 'execute:valid', 'after', 'finally']);
+    if (invalid) await assert.rejects(result, /Received tool input did not match expected schema/);
+    else await result;
+    assert.deepEqual(events, invalid ? ['before', 'finally'] : ['before', 'execute:valid', 'after', 'finally']);
   });
 }
 
@@ -272,3 +233,41 @@ test('the final execution boundary propagates abort even when the tool returns n
   assert.equal(started, true);
   assert.equal(wrapped, true);
 });
+
+test('native Tool execution reports invalid arguments and lets the model correct them', async () => {
+  let calls = 0;
+  const action = tool(({ value }) => { calls += 1; return value; }, {
+    name: 'action', description: 'Act.', schema: z.object({ value: z.string() }),
+  });
+  const result = await invoke({ toolkit: { name: 'example', description: 'Example', tools: [{ tool: action }] }, toolCalls: [
+    [{ id: 'invalid', name: 'action', args: { value: 42 } }],
+    [{ id: 'corrected', name: 'action', args: { value: 'valid' } }], [],
+  ] });
+  assert.equal(calls, 1);
+  const messages = result.privateMessages.filter(ToolMessage.isInstance);
+  assert.equal(messages[0].tool_call_id, 'invalid');
+  assert.match(String(messages[0].content), /expected schema|Expected string/);
+  assert.equal(messages[1].content, 'valid');
+});
+
+for (const changed of [false, true]) {
+  test(`restored call approval is tied to effective arguments (changed: ${changed})`, async () => {
+    const { createAgent } = await import('langchain');
+    const { resolveToolkitExecution } = await import('./subagentDispatch');
+    const { stableToolCallHash } = await import('./toolCallMessages');
+    let reviews = 0;
+    const action = tool(({ path }) => path, { name: 'action', description: 'Act.', schema: z.object({ path: z.string() }) });
+    const oldCall = { id: 'same-id', name: 'action', args: { path: '/before' } };
+    const call = { ...oldCall, args: { path: changed ? '/after' : '/before' } };
+    const model = new FakeToolCallingModel({ toolCalls: [[call], []] });
+    const resources = await resolveToolkitExecution([{ name: 'example', description: 'Example', tools: [{
+      tool: action, review: { request: () => { reviews += 1; return null; } },
+    }] }], undefined, { models: { act: model }, messages: [] });
+    const agent = createAgent({ model, tools: resources.tools, middleware: resources.middleware });
+    const restoredState = { messages: [new HumanMessage('Execute')], toolkitReviewApprovals: {
+      [`tool-review:action:same-id:${stableToolCallHash(oldCall)}`]: true,
+    } };
+    await agent.invoke(restoredState);
+    assert.equal(reviews, changed ? 1 : 0);
+  });
+}

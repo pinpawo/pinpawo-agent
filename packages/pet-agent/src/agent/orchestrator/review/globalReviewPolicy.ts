@@ -38,8 +38,6 @@ export type GlobalReviewPolicyResolution =
 type GlobalReviewRuntimeContext = {
   /** Non-authoritative relevance hint; it may only make auto review more conservative. */
   task?: string | null;
-  /** Effective workdir used to interpret relative paths and mutation scope. */
-  workdir?: string | null;
 };
 
 export type GlobalReviewPolicyContext = GlobalReviewRuntimeContext & AutoReviewAction & {
@@ -103,7 +101,7 @@ function normalizeReason(reason: string | undefined, fallback: string) {
 async function resolveAutoAuthorization(
   options: Pick<
     ResolveGlobalReviewBatchPolicyOptions,
-    'models' | 'policy' | 'reviews' | 'task' | 'workdir'
+    'models' | 'policy' | 'reviews' | 'task'
   >,
 ): Promise<GlobalReviewPolicyResolution> {
   const model = options.models.decision ?? options.models.observe ?? options.models.act;
@@ -117,7 +115,6 @@ async function resolveAutoAuthorization(
     const result = await createAutoReviewer({ model, structuredOutput }).assess({
       reviews: options.reviews,
       task: options.task,
-      workdir: options.workdir,
     });
     if (!result.complete) {
       return {
@@ -181,7 +178,6 @@ export async function resolveGlobalReviewBatchPolicy(
           models: options.models,
           messages: options.messages,
           task: options.task,
-          workdir: options.workdir,
           ...review,
         });
         if (resolution.type !== GLOBAL_REVIEW_POLICY_RESOLUTION.AUTHORIZE) {
@@ -213,7 +209,6 @@ export async function resolveGlobalReviewPolicy(
     models,
     messages,
     task,
-    workdir,
     ...review
   } = options;
   return resolveGlobalReviewBatchPolicy({
@@ -221,7 +216,6 @@ export async function resolveGlobalReviewPolicy(
     models,
     messages,
     task,
-    workdir,
     reviews: [review],
   });
 }

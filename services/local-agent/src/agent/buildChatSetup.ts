@@ -49,7 +49,6 @@ export function buildChatSetup(options: BuildChatSetupOptions) {
     hostConfig: deps,
     toolkits: [...toolkitInventory.effectiveToolkits],
     toolkitInventoryEntries: toolkitInventory.entries,
-    toolkitRuntimeManager: deps.toolkitRuntimeManager,
     reportCapabilityDiagnostics: options.reportCapabilityDiagnostics,
     capabilities: deps.capabilityCatalog.getSnapshot().capabilities,
     ...(deps.defaultCapabilityName !== undefined

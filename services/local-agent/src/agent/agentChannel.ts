@@ -11,7 +11,6 @@ import {
   type PetDocument,
   type OrchestratorConfig,
   type OrchestrationDecisionStructuredOutputConfig,
-  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
   buildLocalAgentModels,
@@ -75,7 +74,6 @@ export function buildLocalChatAgentInput(params: {
   toolkits?: AgentToolkit[];
   /** Complete Host inventory projection, including unavailable Toolkits and reasons. */
   toolkitInventoryEntries?: readonly ToolkitInventoryEntry[];
-  toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host-owned diagnostic reporter whose dedupe state follows the host lifecycle. */
   reportCapabilityDiagnostics?: CapabilityDiagnosticReporter;
   /** Stable thread scope required by artifact discovery and checkpoint routing. */
@@ -128,7 +126,6 @@ export function buildLocalChatAgentInput(params: {
       generationReserveTokens,
       subagentGenerationReserveTokens: generationReserveTokens,
       capabilityArtifactStore: params.capabilityArtifactStore,
-      toolkitRuntimeManager: params.toolkitRuntimeManager,
 
       ...(params.defaultCapabilityName !== undefined
         ? { defaultCapabilityName: params.defaultCapabilityName }
@@ -141,6 +138,7 @@ export function buildLocalChatAgentInput(params: {
         workdir,
         systemPromptSections: [
           ...(params.petDocument ? [petDocumentSystemPromptSection(params.petDocument)] : []),
+          { id: 'host:workdir', owner: 'host', content: `Current working directory: ${workdir}` },
           {
             id: 'host:runtime-environment',
             owner: 'host',

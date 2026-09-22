@@ -10,7 +10,6 @@ import type {
 import type { CompiledAgentRegistry } from './registry';
 import type { RunSupervisorRunner } from './runSupervisor/runner';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
-import type { ToolkitRuntimeManager } from './toolkitRuntime';
 import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { CapabilityMessageLane } from '../messages';
 
@@ -58,12 +57,6 @@ export type OrchestratorConfig = {
    * scripted runner with an explicit delegation-call fixture.
    */
   runSupervisorRunner?: RunSupervisorRunner;
-  /**
-   * Host-owned optional Toolkit runtime lifecycle. The orchestrator resolves
-   * per-subagent bindings through it, but the manager itself remains outside
-   * model context and checkpoint state.
-   */
-  toolkitRuntimeManager?: ToolkitRuntimeManager;
 };
 
 export type OrchestratorInvokeOptions = {

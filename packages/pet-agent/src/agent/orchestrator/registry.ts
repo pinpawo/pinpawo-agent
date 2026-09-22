@@ -81,7 +81,7 @@ function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
           }]
         : [];
     });
-    return tools.length > 0 ? [{ name: toolkit.name, runtime: toolkit.runtime ?? null, tools }] : [];
+    return tools.length > 0 ? [{ name: toolkit.name, tools }] : [];
   });
   return createHash('sha256')
     .update(JSON.stringify(subject))

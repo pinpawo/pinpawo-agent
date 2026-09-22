@@ -34,10 +34,10 @@ runtime 还能由 workdir 派生 `id`、`name`、`rootPath` 形式的 workspace 
 公共协议。
 
 Host 将解析后的目录放入 `AgentInvokeInput.context.workdir`；直接调用 graph 时使用
-runnable options 中的 `context.workdir`。共享 system-message 构造器为 Entry、Supervisor、
-Capability 执行器和最终 Answer 渲染一次工作目录。review context 与 Toolkit Runtime
-execution scope 读取同一个结构化值。Host 的机器和会话信息走公共 system sections，
-不再重复目录；旧 `runtimeEnvironment` 和 `configurable.workdir` 通道已移除。
+runnable options 中的 `context.workdir`。Host 提供工作目录 system section，通用构造器
+只组合传入的 sections。参数准备与 execution scope 读取结构化目录；审批只接收准备
+后的参数，没有额外 workdir 字段。旧 `runtimeEnvironment` 和 `configurable.workdir`
+通道已移除。
 
 每次调用都需要重新提供 context，包括 checkpoint resume。它不从对话历史恢复，通用
 agent runtime 也不会从进程全局状态猜测目录。
@@ -53,8 +53,8 @@ Toolkit 通过 `ToolDefinition.prepareInput`，在**审核之前**将受支持�
 Shell 和 CDP 资源由独立的本地 Runtime 服务持有。多个 Host 和 Toolkit 可以共用一个
 实例，同时为每次调用提供各自的执行范围与 cwd。服务实例由
 `~/.pinpawo/runtime/config.json`（或 `PINPAWO_RUNTIME_DIR` 指定目录）配置，与 workdir
-独立。授权复用包含 Toolkit、当前客户端连接、实例与 workdir；切换环境或目录不会
-复用旧目标的授权。契约见 [Toolkit Runtime（英文）](../../../reference/extensions/toolkit-runtime.md)。
+独立。授权复用只匹配 Tool 和有效参数。环境变化本身不影响授权；解析后的路径或 cwd
+变化属于参数变化。契约见 [Toolkit Runtime（英文）](../../../reference/extensions/toolkit-runtime.md)。
 
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见
 [workspace proposal（英文）](../../../design/local-agent/workspace-runtime-config.md)。

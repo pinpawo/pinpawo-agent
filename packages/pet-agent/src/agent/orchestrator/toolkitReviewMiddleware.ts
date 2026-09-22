@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
-import { AIMessage, RemoveMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
-import { REMOVE_ALL_MESSAGES, getConfig } from '@langchain/langgraph';
+import { stableToolCallHash, readToolCallId, materializeToolCallIds, cloneAIMessageWithToolCalls, replaceMessageInState } from './toolCallMessages';
+import { AIMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
+import { getConfig } from '@langchain/langgraph';
 import { createMiddleware, type AnyAgentMiddleware } from 'langchain';
 import { z } from 'zod';
 import type {
@@ -9,9 +9,6 @@ import type {
   ToolkitReviewCapabilities,
   ToolReviewPolicy,
   ToolOperationMetadata,
-  ToolDefinition,
-  ToolkitRuntimeExecutionScope,
-  ToolkitRuntimeIdentity,
 } from '../../types/toolkit';
 import type { AgentModels } from '../../types/agent';
 import type { SubagentRuntimeEvent } from '../../types/subagent';
@@ -52,14 +49,11 @@ import {
 
 export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
-  executionScope?: ToolkitRuntimeExecutionScope;
-  runtimeIdentities?: Readonly<Record<string, ToolkitRuntimeIdentity>>;
   /** Input modalities the active model profile accepts. */
   modelInputModalities?: readonly ModelInputModality[];
   messages: BaseMessage[];
   reviewContext?: {
     task?: string | null;
-    workdir?: string | null;
   };
   reviewCapabilities?: ToolkitReviewCapabilities;
   globalReviewPolicy?: GlobalReviewPolicy;
@@ -190,76 +184,6 @@ function isToolkitReviewBlock(value: unknown): value is { type: 'block'; reason:
   );
 }
 
-function stableStringify(value: unknown): string {
-  if (!value || typeof value !== 'object') {
-    return JSON.stringify(value) ?? String(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
-  }
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(',')}}`;
-}
-
-function stableToolCallHash(toolCall: ToolCall) {
-  return createHash('sha256')
-    .update(stableStringify({ name: toolCall.name, args: toolCall.args }))
-    .digest('hex')
-    .slice(0, 12);
-}
-
-function readToolCallId(toolCall: ToolCall) {
-  const id = toolCall.id;
-  return typeof id === 'string' && id.trim() ? id.trim() : 'pending_action';
-}
-
-function materializeToolCallId(toolCall: ToolCall, messageIndex: number, toolCallIndex: number): ToolCall {
-  const explicitId = typeof toolCall.id === 'string' && toolCall.id.trim()
-    ? toolCall.id.trim()
-    : null;
-  const actionId = explicitId
-    ?? `pending_action:${messageIndex}:${toolCallIndex}:${stableToolCallHash(toolCall)}`;
-  return toolCall.id === actionId ? toolCall : { ...toolCall, id: actionId };
-}
-
-function materializeToolCallIds(
-  toolCalls: ToolCall[],
-  messageIndex: number,
-): ToolCall[] {
-  return toolCalls.map((toolCall, index) => materializeToolCallId(toolCall, messageIndex, index));
-}
-
-function cloneAIMessageWithToolCalls(message: AIMessage, toolCalls: ToolCall[]): AIMessage {
-  return new AIMessage({
-    content: message.content,
-    id: message.id,
-    name: message.name,
-    additional_kwargs: { ...message.additional_kwargs },
-    response_metadata: { ...message.response_metadata },
-    tool_calls: toolCalls,
-    invalid_tool_calls: message.invalid_tool_calls,
-    usage_metadata: message.usage_metadata,
-  });
-}
-
-function replaceMessageInState(
-  messages: BaseMessage[],
-  index: number,
-  replacement: BaseMessage,
-  appended: BaseMessage[],
-) {
-  return [
-    new RemoveMessage({ id: REMOVE_ALL_MESSAGES }) as BaseMessage,
-    ...messages.slice(0, index),
-    replacement,
-    ...messages.slice(index + 1),
-    ...appended,
-  ];
-}
-
 function inputToActionArgs(input: unknown): Record<string, unknown> {
   return input && typeof input === 'object' && !Array.isArray(input)
     ? { ...(input as Record<string, unknown>) }
@@ -289,11 +213,11 @@ function buildPendingReviewAction(params: {
 }
 
 function buildToolReviewId(action: PendingReviewAction) {
-  return `tool-review:${action.toolName}:${action.actionId}`;
+  return `tool-review:${action.toolName}:${action.actionId}:${stableToolCallHash({ name: action.toolName, args: action.args })}`;
 }
 
 function buildToolReviewIdForToolCall(toolName: string, toolCall: ToolCall) {
-  return `tool-review:${toolName}:${readToolCallId(toolCall)}`;
+  return `tool-review:${toolName}:${readToolCallId(toolCall)}:${stableToolCallHash(toolCall)}`;
 }
 
 function materializeToolReviewSpec(review: ReviewSpec, action: PendingReviewAction): ReviewSpec {
@@ -491,19 +415,9 @@ function buildToolMessage(toolCall: ToolCall, content: string) {
   });
 }
 
-function authorizationScope(binding: ToolkitReviewBinding, ctx: ToolkitReviewRuntimeContext): string | undefined {
-  if (!ctx.executionScope && !ctx.runtimeIdentities?.[binding.toolkit.name]) return undefined;
-  return createHash('sha256').update(stableStringify({
-    toolkit: binding.toolkit.name,
-    runtime: ctx.runtimeIdentities?.[binding.toolkit.name] ?? null,
-    workdir: ctx.executionScope?.workdir ?? ctx.reviewContext?.workdir ?? null,
-  })).digest('hex');
-}
-
 async function buildCandidateAuthorizationMatcher(params: {
   binding: ToolkitReviewBinding;
   input: unknown;
-  ctx: ToolkitReviewRuntimeContext;
 }): Promise<ToolAuthorizationMatcher | null> {
   const buildMatcher = params.binding.reviewPolicy.authorization?.buildMatcher;
   if (!buildMatcher) {
@@ -516,8 +430,7 @@ async function buildCandidateAuthorizationMatcher(params: {
       input: params.input,
       operation: params.binding.operation,
     }));
-    const scope = authorizationScope(params.binding, params.ctx);
-    return matcher && scope ? { ...matcher, scope } : matcher;
+    return matcher;
   } catch {
     // Matcher construction is optional reuse metadata. A policy bug must fail
     // closed into the normal review path, never authorize the current call.
@@ -532,8 +445,7 @@ async function prepareToolkitToolReview(params: {
   approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewPreparation> {
   const { approvedReviewIds, binding, ctx, toolCall } = params;
-  const scope = authorizationScope(binding, ctx);
-  const reviewId = `${buildToolReviewIdForToolCall(binding.toolName, toolCall)}${scope ? `:${scope}` : ''}`;
+  const reviewId = buildToolReviewIdForToolCall(binding.toolName, toolCall);
   if (approvedReviewIds.has(reviewId)) {
     return { type: 'allow' };
   }
@@ -542,7 +454,6 @@ async function prepareToolkitToolReview(params: {
   const authorizationMatcher = await buildCandidateAuthorizationMatcher({
     binding,
     input: currentInput,
-    ctx,
   });
   const activeAuthorization = authorizationMatcher
     && reviewCapabilities?.sessionAuthorization === true
@@ -828,7 +739,6 @@ async function reviewToolkitToolCalls(params: {
           models: params.ctx.models,
           messages: params.ctx.messages,
           task: params.ctx.reviewContext?.task,
-          workdir: params.ctx.reviewContext?.workdir,
           reviews: unresolvedReviews,
         });
 
@@ -892,7 +802,6 @@ async function selectUnresolvedReviews(params: {
         toolName: review.toolName,
         input: review.input,
         operation: review.operation,
-        workdir: params.ctx.reviewContext?.workdir ?? null,
       });
       if (authorized !== true) unresolved.push(review);
     } catch {
@@ -963,13 +872,11 @@ function buildPolicyCancellationResult(params: {
 export function createToolkitReviewMiddleware(
   bindings: ToolkitReviewBinding[],
   ctx: ToolkitReviewRuntimeContext,
-  tools: readonly { toolkit: AgentToolkit; definition: ToolDefinition }[] = [],
 ): AnyAgentMiddleware | null {
-  if (bindings.length === 0 && !tools.some(({ definition }) => definition.prepareInput)) {
+  if (bindings.length === 0) {
     return null;
   }
   const bindingsByToolName = new Map(bindings.map((binding) => [binding.toolName, binding]));
-  const toolsByName = new Map(tools.map(binding => [binding.definition.tool.name, binding]));
 
   return createMiddleware({
     name: 'ToolkitReviewMiddleware',
@@ -981,35 +888,10 @@ export function createToolkitReviewMiddleware(
         if (!latestAIMessage?.message.tool_calls?.length) {
           return undefined;
         }
-        let reviewedMessage = materializeAIMessageToolCalls({
+        const reviewedMessage = materializeAIMessageToolCalls({
           aiMessage: latestAIMessage.message,
           aiMessageIndex: latestAIMessage.index,
         });
-        const preparedCalls: ToolCall[] = [];
-        for (const call of reviewedMessage.toolCalls) {
-          const binding = toolsByName.get(call.name);
-          if (!binding?.definition.prepareInput) {
-            preparedCalls.push(call);
-            continue;
-          }
-          if (!ctx.executionScope) throw new Error(`Tool "${call.name}" requires a trusted execution scope for input preparation.`);
-          const args = await binding.definition.prepareInput(call.args, {
-            toolkitName: binding.toolkit.name,
-            toolName: call.name,
-            executionScope: ctx.executionScope,
-            runtimeIdentity: ctx.runtimeIdentities?.[binding.toolkit.name],
-          });
-          if (!args || typeof args !== 'object' || Array.isArray(args)) {
-            throw new Error(`Tool "${call.name}" input preparation must return an argument object.`);
-          }
-          preparedCalls.push({ ...call, args: args as Record<string, unknown> });
-        }
-        if (preparedCalls.some((call, i) => call !== reviewedMessage.toolCalls[i])) {
-          reviewedMessage = { ...reviewedMessage,
-            message: cloneAIMessageWithToolCalls(reviewedMessage.message, preparedCalls),
-            toolCalls: preparedCalls, replacedMessage: true,
-          };
-        }
         const reviewResults = await reviewToolkitToolCalls({
           messages,
           reviewedMessage,

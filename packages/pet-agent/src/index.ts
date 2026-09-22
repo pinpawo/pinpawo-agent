@@ -97,8 +97,6 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
-  ToolkitRuntimeExecutionScope,
-  ToolkitRuntimeIdentity,
   ToolInputPreparationContext,
 } from './types/toolkit';
 export {
@@ -150,14 +148,6 @@ export {
   createCapabilityCatalog,
   renderCapabilityDocument,
 } from './agent/orchestrator/runSupervisor/capabilityCatalog';
-export {
-  ToolkitRuntimeManager,
-} from './agent/orchestrator/toolkitRuntime';
-export type {
-  ToolkitRuntimeDiagnostic,
-  ToolkitRuntimeClientBinding,
-  ToolkitRuntimeSelection,
-} from './agent/orchestrator/toolkitRuntime';
 export type {
   CapabilityCatalog,
   CapabilityCatalogEntry,
@@ -172,12 +162,6 @@ export {
 export type {
   CapabilityDocumentFrontmatter,
 } from './types/capabilityDocument';
-export {
-  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
-  ARTIFACT_DISCOVERY_TOOL_NAMES,
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
-} from './agent/orchestrator/artifacts/discovery';
 export {
   PROVIDER_INPUT_WATERMARK_RATIO,
   createTokenUsageSnapshot,

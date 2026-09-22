@@ -4,7 +4,6 @@ import {
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
-  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { prepareStudio } from '../createStudio';
 import type { Studio, StudioPlugin } from '../studioContract';
@@ -41,7 +40,6 @@ export type BuildStudioInput = HostExecutionConfig & {
   /** Optional PET.md root-document snapshot keyed by Pet id. */
   petDocuments?: ReadonlyMap<string, PetDocument>;
   toolkitInventory: HostToolkitInventoryStore;
-  toolkitRuntimeManager: ToolkitRuntimeManager;
   capabilityArtifactStore: CapabilityArtifactStore;
   checkpoint: FileSaver;
   /** Host composition defers Plugin listeners until Agent Session transport is ready. */
@@ -210,7 +208,6 @@ export async function buildStudio(input: BuildStudioInput): Promise<BuildStudioR
           petCapabilities,
         }),
         toolkitInventory: input.toolkitInventory,
-        toolkitRuntimeManager: input.toolkitRuntimeManager,
         capabilityArtifactStore: input.capabilityArtifactStore,
         checkpointer: input.checkpoint,
         runtimeConfig: input.runtimeConfig,

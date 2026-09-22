@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
+import type { DelegationScope } from '@pinpawo/pet-agent';
 import type { ShellRunHandle } from './processExecutor';
 
 /**
@@ -22,7 +22,7 @@ export type ManagedProcessStatus =
   | 'terminated';
 
 export type ManagedProcessOwner = Pick<
-  ToolkitRuntimeExecutionScope,
+  DelegationScope,
   'threadId' | 'taskId' | 'runId' | 'delegationId'
 > & { clientId: string; toolkitName: string };
 

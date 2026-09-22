@@ -8,11 +8,11 @@ import { MemorySaver } from '@langchain/langgraph';
 import {
   buildOrchestratorRunInput, compileAgentRegistry, createOrchestratorGraph,
   definePetDocument, petDocumentSystemPromptSection, readCapabilityExecutions,
-  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { createInMemoryKanbanTaskService, createKanbanPlanningToolkit } from '@pinpawo-plugin/kanban';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import { createProjectInspectionToolkit } from '../../../services/local-agent/src/toolkits/local';
+import { bindToolkitRuntime } from '../../../services/local-agent/src/toolkits/runtimeBinding';
 import { connectHostRuntimes } from '../../../services/local-agent/src/runtimeService/hostClient';
 import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
 import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
@@ -25,7 +25,6 @@ const subject = createDecisionEvalModel({ profileId, role: 'subject' });
 console.log(`Studio Planner flow model: ${subject.label}`);
 const root = await mkdtemp(join(tmpdir(), 'studio-planner-model-e2e-'));
 const service = createInMemoryKanbanTaskService();
-const runtimeManager = new ToolkitRuntimeManager();
 let runtimeConnection: Awaited<ReturnType<typeof connectHostRuntimes>> | undefined;
 await service.init();
 
@@ -38,13 +37,12 @@ try {
   const capabilities = loaded.map(({ capability }) => capability);
   const toolkits = [createProjectInspectionToolkit(), createKanbanPlanningToolkit(service),
     createStudioContextToolkit(() => ['planner', 'executor', 'reviewer', 'wiki'].map((petId) => ({ petId, name: petId })))];
-  const registry = compileAgentRegistry({ capabilities, toolkits });
-  assert.equal(registry.capabilities.length, 2, 'Both production Planner capabilities must compile');
   runtimeConnection = await connectHostRuntimes({ toolkits });
-  runtimeManager.replaceBindings(runtimeConnection.bindings);
+  const registry = compileAgentRegistry({ capabilities, toolkits: toolkits.map(toolkit => bindToolkitRuntime(toolkit, runtimeConnection!.bindings[toolkit.name])) });
+  assert.equal(registry.capabilities.length, 2, 'Both production Planner capabilities must compile');
   const graph = createOrchestratorGraph({
     models: { act: subject.model, subagent: subject.model }, defaultCapabilityName: 'studio_planning',
-    checkpoint: new MemorySaver(), toolkitRuntimeManager: runtimeManager,
+    checkpoint: new MemorySaver(),
   });
   const calls: Array<{ name: string; input: string }> = [];
   const turns = [
@@ -53,7 +51,7 @@ try {
   ];
   for (const [index, request] of turns.entries()) {
     const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(request)]), {
-      context: { workdir: root, systemPromptSections: [petDocumentSystemPromptSection(definePetDocument({ content: await readFile(join(template, 'PET.md'), 'utf8') }))] },
+      context: { workdir: root, systemPromptSections: [{ id: 'host:workdir', content: root }, petDocumentSystemPromptSection(definePetDocument({ content: await readFile(join(template, 'PET.md'), 'utf8') }))] },
       configurable: { thread_id: 'studio-planner-flow', registry, globalReviewPolicy: { mode: 'full_access' } },
       recursionLimit: 100,
       signal: AbortSignal.timeout(300_000),

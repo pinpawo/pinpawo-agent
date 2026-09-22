@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { isCommand } from '@langchain/langgraph';
-import { ToolkitRuntimeManager, type AgentToolkit } from '@pinpawo/pet-agent';
+import type { AgentToolkit } from '@pinpawo/pet-agent';
+import { bindToolkitRuntime } from '../toolkits/runtimeBinding';
 import { createBrowserToolkit } from '@pinpawo-toolkit/browser';
 import { loadPluginsFromDir } from '../pluginLoader';
 import { createBashToolkit } from '../toolkits/local';
@@ -47,11 +48,6 @@ function scope(workdir: string): RuntimeExecution {
   return { threadId: 'same-thread', taskId: 'same-task', runId: 'same-run', delegationId: 'same-delegation', workdir };
 }
 
-function invocation(host: HostConnection, toolkits: readonly AgentToolkit[], toolkitName: string, execution: RuntimeExecution) {
-  const selection = new ToolkitRuntimeManager(host.bindings).select(toolkits);
-  return { context: { toolkitName, executionScope: execution, toolkitRuntimes: selection.runtimes } };
-}
-
 async function serviceFixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'ppr-adapter-'));
   const paths = runtimeServicePaths(directory);
@@ -82,7 +78,7 @@ async function serviceFixture(t: TestContext) {
     async connect(options: Omit<Parameters<typeof connectHostRuntimes>[0], 'directory'>) {
       const host = await connectHostRuntimes({ ...options, directory });
       hosts.push(host);
-      return host;
+      return { ...host, toolkits: options.toolkits.map(toolkit => bindToolkitRuntime(toolkit, host.bindings[toolkit.name])) };
     },
   };
 }
@@ -106,7 +102,7 @@ const echo = tool(async ({ value }, runtime) => {
   const { executionScope, toolkitRuntimes } = runtime.context;
   return JSON.stringify(await toolkitRuntimes.example.echo(value, executionScope, runtime.signal));
 }, { name: 'extension_echo', description: 'Read the service identity and echo a test value.', schema: z.object({ value: z.string() }) });
-export const toolkits = [defineToolkit({ name: 'example', description: 'Exercise a plugin Runtime client adapter.', runtime: 'example', tools: [{ tool: echo }] })];
+export const toolkits = [{ runtime: 'example', ...defineToolkit({ name: 'example', description: 'Exercise a plugin Runtime client adapter.', tools: [{ tool: echo }] }) }];
 export const runtimeFactories = {
   example: () => ({
     async call(method, args, context) {
@@ -134,11 +130,12 @@ export const runtimeFactories = {
   const command = process.platform === 'win32'
     ? '[Console]::Write($env:PINPAWO_ADAPTER_TEST)'
     : 'printf "%s" "$PINPAWO_ADAPTER_TEST"';
-  const shellOutput = await runShellTool.invoke({ command, cwd: fixture.directory }, invocation(a, toolkits, 'bash', execution));
+  const shellOutput = await a.toolkits[0].tools[0].tool.invoke({ command, cwd: fixture.directory }, { context: { executionScope: execution } });
   assert.match(String(shellOutput), /from-runtime/);
-  const echo = extension.tools[0]!.tool;
-  const first = JSON.parse(await echo.invoke({ value: 'first' }, invocation(a, toolkits, 'example', execution)) as string);
-  const second = JSON.parse(await echo.invoke({ value: 'second' }, invocation(b, toolkits, 'example', execution)) as string);
+  const echoA = a.toolkits[1].tools[0].tool;
+  const echoB = b.toolkits[1].tools[0].tool;
+  const first = JSON.parse(await echoA.invoke({ value: 'first' }, { context: { executionScope: execution } }) as string);
+  const second = JSON.parse(await echoB.invoke({ value: 'second' }, { context: { executionScope: execution } }) as string);
   assert.notEqual(first.pid, process.pid);
   assert.equal(first.pid, second.pid);
   assert.equal(first.clientId, a.bindings.example!.identity.clientId);
@@ -148,7 +145,7 @@ export const runtimeFactories = {
   assert.deepEqual(first.execution, execution);
   assert.equal(first.value, 'first');
   await a.close();
-  const afterDisconnect = JSON.parse(await echo.invoke({ value: 'still-connected' }, invocation(b, toolkits, 'example', execution)) as string);
+  const afterDisconnect = JSON.parse(await echoB.invoke({ value: 'still-connected' }, { context: { executionScope: execution } }) as string);
   assert.equal(afterDisconnect.pid, second.pid);
   assert.equal(afterDisconnect.value, 'still-connected');
 });
@@ -184,9 +181,9 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   const a = await fixture.connect({ toolkits });
   const b = await fixture.connect({ toolkits });
   const execution = scope(fixture.directory);
-  const invoke = async (host: HostConnection, name: string, input: Record<string, unknown> = {}, expectedError = false) => {
-    const tool = browser.tools.find((definition) => definition.tool.name === name)!.tool;
-    const output = await tool.invoke(input, invocation(host, toolkits, 'browser', execution));
+  const invoke = async (host: HostConnection & { toolkits: AgentToolkit[] }, name: string, input: Record<string, unknown> = {}, expectedError = false) => {
+    const tool = host.toolkits[0].tools.find((definition) => definition.tool.name === name)!.tool;
+    const output = await tool.invoke(input, { context: { executionScope: execution } });
     if (!expectedError && typeof output === 'string') assertBrowserSuccess(JSON.parse(output), name);
     return output;
   };

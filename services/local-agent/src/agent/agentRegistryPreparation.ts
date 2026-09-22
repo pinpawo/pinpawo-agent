@@ -1,5 +1,5 @@
+import { ARTIFACT_DISCOVERY_TOOLKIT_NAME } from '../toolkits/local/artifactDiscoveryNames';
 import {
-  ARTIFACT_DISCOVERY_TOOLKIT_NAME,
   compileAgentRegistry,
   formatExecutorCompilationIssues,
   type AgentCapability,

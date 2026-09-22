@@ -1,4 +1,4 @@
-import { readFixtureDelivery, createDeliveryResult, withDeliveryCalls } from '../../../testing/capabilityDelivery';
+import { createDeliveryResult, withDeliveryCalls } from '../../../testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
@@ -16,7 +16,6 @@ import { isDelegationBriefingMessage } from '../delegation/briefing';
 import { PauseTaskInterruptSignal } from '../interrupt/pauseTaskInterrupt';
 import { compileAgentRegistry } from '../registry';
 import { exactAuthorization } from '../../../autoReview/reviewAuthorizations';
-import { ToolkitRuntimeManager } from '../toolkitRuntime';
 import { createCapabilityExecutor, type CapabilityExecutionContext, type CapabilityExecutionInput } from './index';
 
 const models = { act: { invoke: () => { throw new Error('Unexpected model call'); } } } as unknown as AgentModels;
@@ -68,18 +67,11 @@ function artifact(id: string): CapabilityArtifactRef {
   };
 }
 
-const runtimePort = Object.freeze({ ping: async () => 'ok' });
-function runtimeToolkit(): AgentToolkit {
+function exampleToolkit(): AgentToolkit {
   return defineToolkit({
     name: 'runtime', description: 'Execution-scoped toolkit.',
     tools: [{ tool: tool(() => 'ok', { name: 'check', description: 'Check.', schema: z.object({}) }) }],
-    runtime: 'test',
   });
-}
-function runtimeManager(name = 'runtime') {
-  return new ToolkitRuntimeManager({ [name]: {
-    runtimeType: 'test', client: runtimePort, identity: { clientId: 'host-1', instanceId: 'env-1' },
-  } });
 }
 
 test('executor uses main history and briefing without replaying child transcripts', async () => {
@@ -127,39 +119,31 @@ for (const output of [null, '', '  ']) {
   });
 }
 
-test('finalize can replace delivery and merge artifacts while the shared Runtime client remains available', async () => {
-  const toolkit = runtimeToolkit();
-  const manager = runtimeManager();
+test('finalize can replace delivery and merge artifacts with execution context', async () => {
+  const toolkit = exampleToolkit();
   const ref = artifact('d1');
   const request = input('d1', [toolkit], { finalize: (result, context) => {
-    assert.strictEqual(manager.select([toolkit]).runtimes.runtime, runtimePort);
     assert.equal(context.delegationId, 'd1');
     context.recordCapabilityArtifact?.(ref);
     assert.equal(result.output, 'Delivered');
     return { output: 'Finalized delivery', artifactRefs: [ref] };
   } });
-  try {
-    const result = await createCapabilityExecutor({ models, toolkitRuntimeManager: manager, runSubagent: async (run) => {
-      assert.equal(run.runtimeContext?.toolkitRuntimes?.runtime, runtimePort);
-      run.artifacts?.push(ref);
-      return deliver(run);
-    } })(request, hostContext());
-    assert.equal(result.delivery?.text, 'Finalized delivery');
-    assert.deepEqual(result.artifacts, [ref]);
-  } finally {
-    assert.ok(manager.select([toolkit]));
-  }
+  const result = await createCapabilityExecutor({ models, runSubagent: async (run) => {
+    run.artifacts?.push(ref);
+    return deliver(run);
+  } })(request, hostContext());
+  assert.equal(result.delivery?.text, 'Finalized delivery');
+  assert.deepEqual(result.artifacts, [ref]);
 });
 
 for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as const) {
-  test(`${outcome} preserves the outcome without changing the shared Runtime client`, async () => {
-    const toolkit = runtimeToolkit();
-    const manager = runtimeManager();
+  test(`${outcome} preserves the outcome through finalization`, async () => {
+    const toolkit = exampleToolkit();
     let finalized = false;
     const request = input('d1', [toolkit], { finalize: () => { finalized = true; } });
     const failure = new Error(outcome);
     const controller = new AbortController();
-    const execute = createCapabilityExecutor({ models, toolkitRuntimeManager: manager, runSubagent: async (run) => {
+    const execute = createCapabilityExecutor({ models, runSubagent: async (run) => {
       if (outcome === 'error') throw failure;
       if (outcome === 'aborted') {
         controller.abort(failure);
@@ -169,38 +153,32 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
       if (outcome === 'paused') throw new PauseTaskInterruptSignal({ kind: 'pause_task' }, { artifacts: [artifact('d1')] });
       return { messages, artifacts: [], output: null };
     } });
-    try {
-      if (outcome === 'error' || outcome === 'aborted') {
-        await assert.rejects(execute(request, { ...hostContext(), runnableConfig: { signal: controller.signal } }), (error) => error === failure);
-      } else {
-        const result = await execute(request, hostContext());
-        assert.equal(result.status, outcome);
-        assert.equal(result.delivery, null);
-        assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
-      }
-      assert.equal(finalized, outcome === 'missing_deliverable');
-      assert.strictEqual(manager.select([toolkit]).runtimes.runtime, runtimePort);
-    } finally {
-      assert.ok(manager.select([toolkit]));
+    if (outcome === 'error' || outcome === 'aborted') {
+      await assert.rejects(execute(request, { ...hostContext(), runnableConfig: { signal: controller.signal } }), (error) => error === failure);
+    } else {
+      const result = await execute(request, hostContext());
+      assert.equal(result.status, outcome);
+      assert.equal(result.delivery, null);
+      assert.ok(result.privateMessages.some(({ id }) => id === 'partial'));
+      assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
     }
+    assert.equal(finalized, outcome === 'missing_deliverable');
   });
 }
 
-test('overlapping calls keep contexts, clients, artifacts and authorizations separate', async () => {
-  const toolkit = runtimeToolkit();
-  const manager = runtimeManager();
+test('overlapping calls keep contexts, artifacts and authorizations separate', async () => {
+  const toolkit = exampleToolkit();
   let arrivals = 0;
   let release!: () => void;
   const barrier = new Promise<void>((resolve) => { release = resolve; });
   const seen: SubagentRunInput[] = [];
-  const execute = createCapabilityExecutor({ models, toolkitRuntimeManager: manager, runSubagent: async (run) => {
+  const execute = createCapabilityExecutor({ models, runSubagent: async (run) => {
     seen.push(run);
     const id = run.runtimeContext!.executionScope!.delegationId;
     run.artifacts!.push(artifact(id));
     arrivals += 1;
     if (arrivals === 2) release();
     await barrier;
-    assert.equal(run.runtimeContext?.toolkitRuntimes?.runtime, runtimePort);
     return deliver(run, id);
   } });
   const first = input('d1', [toolkit]);
@@ -208,24 +186,19 @@ test('overlapping calls keep contexts, clients, artifacts and authorizations sep
   const grants = Object.freeze([{
     toolName: 'check', matcher: exactAuthorization('d1'), source: 'human' as const, createdAt: '2026-09-10T00:00:00Z',
   }]);
-  try {
-    const [a, b] = await Promise.all([
-      execute(first, { ...hostContext(), review: { authorizations: grants } }), execute(second, hostContext()),
-    ]);
-    assert.notStrictEqual(seen[0].messages, seen[1].messages);
-    assert.notStrictEqual(seen[0].artifacts, seen[1].artifacts);
-    assert.notEqual(seen[0].messages.at(-1)?.id, seen[1].messages.at(-1)?.id);
-    assert.deepEqual(a.artifacts.map(({ id }) => id), ['d1']);
-    assert.deepEqual(b.artifacts.map(({ id }) => id), ['d2']);
-    assert.deepEqual(a.toolAuthorizations, grants);
-    assert.notStrictEqual(a.toolAuthorizations, grants);
-    assert.deepEqual(b.toolAuthorizations, []);
-    for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
-      assert.equal(result.delivery?.scope.delegationId, id);
-      assert.equal(seen.find(run => run.runtimeContext?.executionScope?.delegationId === id)?.runtimeContext?.toolkitRuntimes?.runtime, runtimePort);
-    }
-  } finally {
-    assert.ok(manager.select([toolkit]));
+  const [a, b] = await Promise.all([
+    execute(first, { ...hostContext(), review: { authorizations: grants } }), execute(second, hostContext()),
+  ]);
+  assert.notStrictEqual(seen[0].messages, seen[1].messages);
+  assert.notStrictEqual(seen[0].artifacts, seen[1].artifacts);
+  assert.notEqual(seen[0].messages.at(-1)?.id, seen[1].messages.at(-1)?.id);
+  assert.deepEqual(a.artifacts.map(({ id }) => id), ['d1']);
+  assert.deepEqual(b.artifacts.map(({ id }) => id), ['d2']);
+  assert.deepEqual(a.toolAuthorizations, grants);
+  assert.notStrictEqual(a.toolAuthorizations, grants);
+  assert.deepEqual(b.toolAuthorizations, []);
+  for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
+    assert.equal(result.delivery?.scope.delegationId, id);
   }
 });
 
@@ -243,7 +216,7 @@ test('default executor still invokes the existing createAgent-based subagent wra
   assert.ok(result.delivery?.text);
 });
 
-test('runtime bindings, real tools and finalize share the host config identity', async () => {
+test('real tools and finalize share the host config identity', async () => {
   let called = false;
   let finalized = false;
   const probe = tool((_args, runtime) => {
@@ -257,26 +230,19 @@ test('runtime bindings, real tools and finalize share the host config identity',
   const toolkit = defineToolkit({
     name: 'probe_toolkit', description: 'Inspect the shared execution identity.',
     tools: [{ tool: probe }],
-    runtime: 'test',
   });
-  const manager = runtimeManager('probe_toolkit');
-  try {
-    const execute = createCapabilityExecutor({
-      models: { act: new FakeToolCallingModel({ toolCalls: [
-        [{ id: 'probe-call', name: 'probe', args: {} }], [],
-      ] }) },
-      toolkitRuntimeManager: manager,
-    });
-    const result = await execute(input('d1', [toolkit], { finalize: (_result, context) => {
-      finalized = true;
-      assert.equal(context.threadId, 'thread1');
-    } }), hostContext());
-    assert.equal(result.status, 'returned');
-    assert.equal(called, true);
-    assert.equal(finalized, true);
-  } finally {
-    assert.ok(manager.select([toolkit]));
-  }
+  const execute = createCapabilityExecutor({
+    models: { act: new FakeToolCallingModel({ toolCalls: [
+      [{ id: 'probe-call', name: 'probe', args: {} }], [],
+    ] }) },
+  });
+  const result = await execute(input('d1', [toolkit], { finalize: (_result, context) => {
+    finalized = true;
+    assert.equal(context.threadId, 'thread1');
+  } }), hostContext());
+  assert.equal(result.status, 'returned');
+  assert.equal(called, true);
+  assert.equal(finalized, true);
 });
 
 test('real subagent execution accepts frozen history with stable IDs without changing it', async () => {

@@ -21,7 +21,6 @@ export type AutoReviewInput = {
   reviews: AutoReviewAction[];
   /** Non-authoritative relevance hint; cannot establish permission. */
   task?: string | null;
-  workdir?: string | null;
 };
 
 export type AutoReviewStructuredOutputConfig = Omit<StructuredOutputOptions, 'name'>;

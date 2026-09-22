@@ -157,10 +157,10 @@ builder receives the requested trace identity for run, invokeState and stream;
 resume commands keep their checkpoint transition semantics.
 
 `AgentRuntimeContext.workdir` is the effective directory resolved once by the
-Host. Toolkit execution and review scopes read this same structured value. The
-common prompt composer renders it once as `framework:workdir`; executor prompt
-assembly no longer repeats it. Host environment sections contain machine/session
-facts, without a second workdir or global browser-backend lookup. They travel
+Host. Toolkit input preparation and execution scopes read this structured value.
+The Host renders it as `host:workdir`; the common prompt composer combines supplied
+sections. Review only receives prepared Tool parameters. Other Host environment
+sections contain machine/session facts without repeating the workdir. They travel
 through common runtime context together with PET.md, including Entry and Answer.
 The previous `runtimeEnvironment` configurable/input text channel is removed.
 Low-level graph callers migrate `configurable.workdir` to `context.workdir`;

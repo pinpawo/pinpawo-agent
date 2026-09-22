@@ -13,8 +13,6 @@
 import {
   type AgentToolkit,
   type CapabilityArtifactStore,
-  type ToolkitRuntimeDiagnostic,
-  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
   createBrowserCapability,
@@ -247,14 +245,6 @@ export class HostCapabilityAssembly {
   /** Chat compatibility name; shared consumers should use getCheckpointer(). */
   getChatCheckpointer(): FileSaver {
     return this.getCheckpointer();
-  }
-
-  getToolkitRuntimeManager(): ToolkitRuntimeManager {
-    return this.toolkitCoordinator.getRuntimeManager();
-  }
-
-  getToolkitRuntimeDiagnostics(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
-    return this.toolkitCoordinator.diagnose();
   }
 
   getModelProfiles(): LocalModelProfileRegistry {

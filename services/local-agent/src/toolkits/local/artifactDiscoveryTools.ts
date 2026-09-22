@@ -1,7 +1,6 @@
+import { ARTIFACT_DISCOVERY_LIST_TOOL_NAME, ARTIFACT_DISCOVERY_READ_TOOL_NAME } from './artifactDiscoveryNames';
 import { tool } from '@langchain/core/tools';
 import {
-  ARTIFACT_DISCOVERY_LIST_TOOL_NAME,
-  ARTIFACT_DISCOVERY_READ_TOOL_NAME,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';

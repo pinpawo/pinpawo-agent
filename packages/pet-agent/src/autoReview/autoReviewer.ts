@@ -21,7 +21,6 @@ export async function assessAutoReviewRisk(options: AutoReviewInput & {
 }): Promise<AutoReviewResult> {
   const prompt = buildAutoReviewPrompt({
     task: options.task,
-    workdir: options.workdir,
     reviews: options.reviews,
   });
   if (!prompt.complete) return { complete: false };

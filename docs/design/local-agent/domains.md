@@ -316,7 +316,7 @@ const admitted = await this.imageAdmission.admit(attachments, {
 ```
 Studio
  ├─ residentPets: Map<petId, ResidentPetHost>   ← 多 Pet 在这一层
- ├─ 共享注入：modelProfiles、toolkitInventory、toolkitRuntimeManager、
+ ├─ 共享注入：modelProfiles、toolkitInventory、
  │            capabilityArtifactStore、checkpointer(同一个 FileSaver)、
  │            runtimeConfig、globalReviewPolicyMode
  └─ 每 Pet 独有：petId、petName、modelProfileId、defaultCapabilityName、
@@ -392,7 +392,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 
 | 消费者 | 实际读的字段 |
 |---|---|
-| `serverTuiSessions.ts` | 7 个（`capabilityArtifactStore`、`capabilityCatalog`、`defaultCapabilityName`、`modelProfiles`、`petDocument`、`petId`、`toolkitRuntimeManager`） |
+| `serverTuiSessions.ts` | 6 个（`capabilityArtifactStore`、`capabilityCatalog`、`defaultCapabilityName`、`modelProfiles`、`petDocument`、`petId`） |
 | `configProjection.ts` | 5 个 |
 | `residentPetHost.ts` | 3 个 |
 | `httpHandlers.ts` | 2 个（`petId`、`petName`） |
@@ -412,7 +412,7 @@ Host 重启后会报告一个根本没人在执行的 run，而且无法与真�
 |---|---|---|
 | `petId`、`petName`、`serverMode` | Pet 的身份 | Host |
 | `modelProfiles` | 配置来源 | Config |
-| `capabilityCatalog`、`toolkitInventory`、`toolkitRuntimeManager`、`petDocument`、`capabilityArtifactStore` | Host 长期持有的服务 | Host |
+| `capabilityCatalog`、`toolkitInventory`、`petDocument`、`capabilityArtifactStore` | Host 长期持有的服务 | Host |
 | `chatCheckpointer` | 存储适配器 | Host |
 
 **`ServerTuiSessionService`**（19 个公开方法）：

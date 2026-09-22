@@ -1,7 +1,7 @@
 import type { JsonValue } from '@pinpawo/agent-contracts';
-import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
+import type { DelegationScope } from '@pinpawo/pet-agent';
 
-export type RuntimeExecution = Omit<ToolkitRuntimeExecutionScope, 'signal'>;
+export type RuntimeExecution = DelegationScope & { workdir: string | null };
 
 export type RuntimeCallContext = Readonly<{
   clientId: string;

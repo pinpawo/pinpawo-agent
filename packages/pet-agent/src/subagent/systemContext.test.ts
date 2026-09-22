@@ -24,7 +24,7 @@ class ContextModel extends BaseChatModel {
   }
 }
 
-function commonSections() {
+function commonSections(): Array<{ id: string; content: string }> {
   return [{ id: 'host:pet', content: randomUUID() }, { id: 'host:policy', content: randomUUID() }];
 }
 
@@ -57,7 +57,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
       promptSections: [executionSection], runnableConfig: config,
       runtimeContext: {
         executionScope: { threadId: null, taskId: key, runId: key, delegationId: key },
-        toolkitRuntimes: { example: { id: key } },
+        exampleClient: { id: key },
         workdir: '/forbidden-child-override',
         systemPromptSections: [{ id: 'host:forbidden-child-override', content: 'override' }],
       },
@@ -67,6 +67,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
   const inputs = [commonSections(), commonSections()];
   await Promise.all(inputs.map(async (sections, index) => {
     const key = `pet-${index}`;
+    sections.push({ id: 'host:workdir', content: `/workspace/${key}` });
     const callbackInputs: BaseMessage[][] = [];
     const run = await graph.streamEvents({ messages: [new HumanMessage(key)] }, {
       version: 'v3', context: { workdir: `/workspace/${key}`, systemPromptSections: sections, parentMarker: key },
@@ -91,14 +92,14 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
       && (event.params.data as { name?: string }).name === SUBAGENT_PROMPT_SECTIONS_EVENT);
     assert.ok(promptEvent);
     const diagnostics = (promptEvent.params.data as { data: { sections: Array<{ id: string }> } }).data.sections;
-    assert.deepEqual(diagnostics.map(s => s.id), ['framework:governing', ...sections.map(s => s.id), 'framework:workdir', executionSection.id]);
+    assert.deepEqual(diagnostics.map(s => s.id), ['framework:governing', ...sections.map(s => s.id), executionSection.id]);
   }));
   assert.equal(runtimeContexts.length, 2);
   for (const context of runtimeContexts) {
     const key = context.executionScope?.runId;
     assert.equal(context.parentMarker, key);
     assert.equal(context.workdir, `/workspace/${key}`);
-    assert.deepEqual(context.toolkitRuntimes, { example: { id: key } });
+    assert.deepEqual(context.exampleClient, { id: key });
     const index = key === 'pet-0' ? 0 : 1;
     assert.deepEqual(context.systemPromptSections, inputs[index]);
   }
@@ -121,6 +122,8 @@ test('checkpoint resume reapplies root context to the interrupted child without 
   const after = commonSections();
   const beforeWorkdir = `/workspace/${randomUUID()}`;
   const afterWorkdir = `/workspace/${randomUUID()}`;
+  before.push({ id: 'host:workdir', content: beforeWorkdir });
+  after.push({ id: 'host:workdir', content: afterWorkdir });
   const configurable = { thread_id: randomUUID() };
   await graph.invoke({ messages: [new HumanMessage('resume')] }, { configurable, context: { workdir: beforeWorkdir, systemPromptSections: before } });
   const snapshot = await graph.getState({ configurable });

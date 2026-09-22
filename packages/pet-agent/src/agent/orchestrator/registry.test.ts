@@ -319,5 +319,5 @@ test('input preparation is snapshotted and participates in authorization generat
   assert.strictEqual(first.toolkits[0].tools[0].prepareInput, original);
   assert.notEqual(first.authorizationGeneration, second.authorizationGeneration);
   toolkit.runtime = 'other';
-  assert.notEqual(second.authorizationGeneration, build().authorizationGeneration);
+  assert.equal(second.authorizationGeneration, build().authorizationGeneration);
 });

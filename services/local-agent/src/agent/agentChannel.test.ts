@@ -359,7 +359,7 @@ test('buildLocalChatAgentInput uses caller-provided workdir', () => {
   });
 
   assert.equal(setup.input.context?.workdir, '/tmp/pinpawo-chat-workdir');
-  assert.equal(setup.input.context?.systemPromptSections?.some(({ content }) => content.includes('/tmp/pinpawo-chat-workdir')), false);
+  assert.equal(setup.input.context?.systemPromptSections?.some(({ content }) => content.includes('/tmp/pinpawo-chat-workdir')), true);
 });
 
 test('buildLocalChatAgentInput registers artifact discovery for an empty thread', async (t) => {

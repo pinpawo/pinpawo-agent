@@ -36,10 +36,7 @@ export type ToolAuthorizationContext = {
   operation?: ToolOperationMetadata;
 };
 
-export type ToolAutoAuthorizationContext = ToolAuthorizationContext & {
-  /** Effective runtime workdir used to evaluate mutation scope. */
-  workdir: string | null;
-};
+export type ToolAutoAuthorizationContext = ToolAuthorizationContext;
 
 /** Reusable session authorization, independent of current-call approval. */
 export type ToolAuthorizationPolicy = {

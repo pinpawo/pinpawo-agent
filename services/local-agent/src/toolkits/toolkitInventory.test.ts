@@ -87,8 +87,9 @@ test('buildHostToolkitInventory rejects duplicate names before starting runtimes
         { id: 'plugin-a', kind: 'plugin', definitions: [toolkit('shared')] },
         { id: 'local-agent', kind: 'host_builtin', definitions: [toolkit('shared')] },
       ],
-      connectToolkitRuntimes: async () => {
+      assembleToolkits: async definitions => {
         started = true;
+        return definitions;
       },
     }),
     /Duplicate Toolkit name "shared".*plugin source "plugin-a".*host_builtin source "local-agent"/,
@@ -104,8 +105,9 @@ test('buildHostToolkitInventory rejects duplicate source ids before starting run
         { id: 'plugin-a', kind: 'plugin', definitions: [toolkit('one')] },
         { id: 'plugin-a', kind: 'plugin', definitions: [toolkit('two')] },
       ],
-      connectToolkitRuntimes: async () => {
+      assembleToolkits: async definitions => {
         started = true;
+        return definitions;
       },
     }),
     /Duplicate Toolkit definition source id "plugin-a" at indexes 0 and 1/,
@@ -118,8 +120,9 @@ test('buildHostToolkitInventory starts all definitions before availability evalu
   const definitions = [toolkit('plugin'), toolkit('bash')];
   await buildHostToolkitInventory({
     sources: [{ id: 'all', kind: 'host_builtin', definitions }],
-    connectToolkitRuntimes: async (toolkits) => {
+    assembleToolkits: async (toolkits) => {
       events.push(`start:${toolkits.map(({ name }) => name).join(',')}`);
+      return toolkits;
     },
     resolveAvailability: async (definition) => {
       events.push(`availability:${definition.name}`);

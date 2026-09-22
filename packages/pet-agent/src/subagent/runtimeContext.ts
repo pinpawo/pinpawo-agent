@@ -13,7 +13,4 @@ const subagentExecutionScopeSchema = z.object({
 
 export const subagentRuntimeContextSchema = agentRuntimeContextSchema.extend({
   executionScope: subagentExecutionScopeSchema.optional(),
-  toolkitName: z.string().optional(),
-  toolkitRuntimeIdentities: z.record(z.string(), z.object({ clientId: z.string(), instanceId: z.string() })).optional(),
-  toolkitRuntimes: z.record(z.string(), z.unknown()).optional(),
 }).passthrough() satisfies z.ZodType<SubagentRuntimeContext>;

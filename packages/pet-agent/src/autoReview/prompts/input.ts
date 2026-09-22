@@ -109,7 +109,6 @@ export function buildAutoReviewSystemPrompt(
 
 export function buildAutoReviewPrompt(params: {
   task?: string | null;
-  workdir?: string | null;
   reviews: AutoReviewAction[];
 }) {
   const actions = formatAutoReviewItems(params.reviews);
@@ -119,9 +118,6 @@ export function buildAutoReviewPrompt(params: {
   const text = AUTO_REVIEW_INPUT_PROMPT.render({
     taskBlock: promptBlock(params.task?.trim()
       ? xmlTextBlock('current_task', clipText(params.task.trim(), MAX_TASK_CHARS), ' role="context" authority="none"')
-      : null, 2),
-    workdirBlock: promptBlock(params.workdir?.trim()
-      ? xmlTextBlock('workdir', clipText(params.workdir.trim(), 400), ' authority="runtime"')
       : null, 2),
     batchSize: params.reviews.length.toString(),
     actionsBlock: promptBlock(xmlTextBlock('actions', actions.text, ' role="data"'), 2),

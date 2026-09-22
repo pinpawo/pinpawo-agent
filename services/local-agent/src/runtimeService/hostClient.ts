@@ -1,5 +1,5 @@
+import type { HostedToolkit, ToolkitRuntimeClientBinding } from '../toolkits/runtimeBinding';
 import { isJsonValue } from '@pinpawo/agent-contracts';
-import type { AgentToolkit, ToolkitRuntimeClientBinding } from '@pinpawo/pet-agent';
 import { BROWSER_RUNTIME_METHODS, type BrowserRuntimeCallContext, type BrowserRuntimePort } from '@pinpawo-toolkit/browser';
 import { createShellRuntimeClient } from '../toolkits/local/shellClient';
 import { ensureRuntimeService } from './launcher';
@@ -22,7 +22,7 @@ function createBrowserClient(caller: RuntimeCaller, toolkitName: string): Browse
 }
 
 export async function connectHostRuntimes(options: {
-  toolkits: readonly AgentToolkit[];
+  toolkits: readonly HostedToolkit[];
   directory?: string;
   clientFactories?: Readonly<Record<string, RuntimeClientFactory>>;
 }) {
@@ -36,7 +36,10 @@ export async function connectHostRuntimes(options: {
   }
   const requested: Record<string, string> = Object.create(null);
   for (const toolkit of options.toolkits) {
-    if (!toolkit.runtime) continue;
+    if (toolkit.runtime === undefined) continue;
+    if (typeof toolkit.runtime !== 'string' || !toolkit.runtime.trim() || toolkit.runtime !== toolkit.runtime.trim()) {
+      throw new Error(`Toolkit "${toolkit.name}" must declare a non-empty Runtime interface name.`);
+    }
     if (!Object.hasOwn(factories, toolkit.runtime)) throw new Error(`No Runtime client adapter registered for ${toolkit.runtime}.`);
     requested[toolkit.name] = toolkit.runtime;
   }

@@ -10,13 +10,11 @@ import {
 import { materializeDelegation } from '../delegation';
 import { readCapabilityExecutions } from '../executionMessages';
 import { toolProtocolMiddleware } from '../modelInvocation';
-import { buildSubagentExecutionContext, collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
+import { collectToolkitOperations, resolveToolkitExecution } from '../subagentDispatch';
 import { emitRuntimeEventToStreamWriter } from '../../../utils/streamWriterEvents';
 import { createToolAuthorizationRecorder } from '../runtime/authorization';
 import { CAPABILITY_SUBAGENT_MAX_ITERATIONS } from '../runtime/constants';
 import { readThreadId } from '../runtime/config';
-import { hasArtifactDiscoveryToolkit } from '../artifacts/discovery';
-import { ToolkitRuntimeManager } from '../toolkitRuntime';
 import { readPauseTaskInterruptSignal, type PausedSubagentState } from '../interrupt';
 import type {
   CapabilityExecutionContext,
@@ -32,7 +30,6 @@ import type {
  */
 export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
   const runSubagent = options.runSubagent ?? createSubagent;
-  const toolkitRuntimeManager = options.toolkitRuntimeManager ?? new ToolkitRuntimeManager();
   const {
     subagentContextWindowTokens,
     subagentGenerationReserveTokens,
@@ -88,16 +85,12 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       threadId, taskId: scope.taskId, runId, delegationId: scope.delegationId,
       workdir: workdir ?? null, signal: runnableConfig?.signal,
     };
-    const runtimeSelection = toolkitRuntimeManager.select(toolkitList);
     const toolkitContext = {
       models: options.models,
-      executionScope,
-      runtimeIdentities: runtimeSelection.identities,
       modelInputModalities: options.modelInputModalities,
       messages: scopedMessages,
       reviewContext: {
         task: delegation.task,
-        workdir: workdir ?? null,
       },
       reviewCapabilities: review.hostCapabilities,
       globalReviewPolicy: review.policy,
@@ -116,18 +109,11 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       toolkitList,
       undefined,
       toolkitContext,
+      { ...(runnableConfig?.context ?? {}), executionScope },
     );
-    const canExploreArtifacts = hasArtifactDiscoveryToolkit(
-      usedResolvedToolkitExecution.toolkits,
-    );
-    const executionContext = buildSubagentExecutionContext({
-      artifactDiscovery: canExploreArtifacts,
-    });
     subagentInput = {
       model: options.models.subagent ?? options.models.act,
       tools: usedResolvedToolkitExecution.tools,
-      toolkitNamesByTool: Object.fromEntries(toolkitList.flatMap(toolkit =>
-        toolkit.tools.map(({ tool }) => [tool.name, toolkit.name]))),
       promptSections: [
         {
           id: 'delegation-deliveries',
@@ -146,13 +132,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
           owner: capability.name,
           content: capability.instructions.content,
         },
-        ...(executionContext
-          ? [{
-              id: 'execution-context',
-              owner: 'framework',
-              content: executionContext,
-            }]
-          : []),
       ],
       operations: collectToolkitOperations(usedResolvedToolkitExecution.toolkits),
       messages: scopedMessages,
@@ -171,8 +150,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
           delegationId: scope.delegationId,
           workdir: workdir ?? null,
         },
-        toolkitRuntimes: runtimeSelection.runtimes,
-        toolkitRuntimeIdentities: runtimeSelection.identities,
       },
       runnableConfig,
       signal: runnableConfig?.signal,

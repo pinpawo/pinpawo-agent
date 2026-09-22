@@ -37,10 +37,10 @@ workspace registry or per-request workspace selection contract.
 
 The Host supplies its resolved directory as `AgentInvokeInput.context.workdir`;
 low-level graph calls pass `context.workdir` in their runnable options. The shared
-system-message composer renders this fact once for Entry, Supervisor, Capability
-execution and final Answer. Review context and Toolkit Runtime execution scopes
-read the same structured value. Host machine/session facts use common system
-sections and do not repeat the directory. The legacy `runtimeEnvironment` and
+Host adds a workdir system section for Entry, Supervisor, Capability execution
+and final Answer. The generic composer only combines supplied sections. Tool
+input preparation and execution scopes read the structured directory; approval
+receives the prepared parameters without a separate workdir field. The legacy `runtimeEnvironment` and
 `configurable.workdir` channels are removed.
 
 Context is supplied again on every invocation, including checkpoint resume. It
@@ -61,8 +61,8 @@ Shell and CDP resources live in the independent local Runtime service. Multiple
 Hosts and Toolkits may share one configured instance while supplying separate
 execution scopes and cwd values. `~/.pinpawo/runtime/config.json` (or
 `PINPAWO_RUNTIME_DIR`) chooses service instances independently of workdir.
-Authorization reuse includes the Toolkit, connected client, instance and workdir;
-switching an environment or directory cannot reuse the previous target's grant.
+Authorization reuse matches the Tool and its effective parameters. Environment
+identity is not part of approval; changed resolved paths or cwd are parameter changes.
 See the [Toolkit Runtime contract](../extensions/toolkit-runtime.md).
 
 See [Studio configuration](../../studio/configuration.md) for the files Studio

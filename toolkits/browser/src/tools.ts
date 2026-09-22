@@ -30,7 +30,7 @@ function readBrowserTarget(input: BrowserTargetInput) {
   return { selector: input.selector, ref: input.ref };
 }
 
-type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext>;
+type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext & { toolkitRuntimes?: Readonly<Record<string, unknown>> }>;
 
 function resolveBrowserCall(runtime: BrowserToolRuntime): {
   browser: BrowserRuntimePort;

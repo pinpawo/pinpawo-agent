@@ -24,8 +24,8 @@ export function reconcileCompletionSnapshot(
       ? mergeCompletionSnapshotMetadata(live, applied)
       : applied;
   }
-  // Checkpoints persist the conversation spine and canonical subagent handoffs,
-  // while operation and system entries still exist only in the live projection.
+  // Checkpoints persist the user/assistant conversation. Subagent progress,
+  // operations and system entries belong to the live projection.
   // Replace checkpoint-owned messages without discarding those settled details.
   return {
     ...applied,
@@ -105,7 +105,7 @@ function isCheckpointMessage(
   entry: AgentTimelineEntry,
 ): entry is AgentMessageEntry {
   return entry.type === 'message'
-    && entry.role !== 'system';
+    && (entry.role === 'user' || entry.role === 'assistant');
 }
 
 function reconcileCheckpointMessages(
@@ -117,7 +117,7 @@ function reconcileCheckpointMessages(
     const exactIndex = live.findIndex((candidate, index) => (
       index >= liveIndex
       && candidate.role === message.role
-      && checkpointMessageTextMatchesLive(message, candidate)
+      && message.text === candidate.text
     ));
     const matchingIndex = exactIndex >= 0
       ? exactIndex
@@ -144,17 +144,6 @@ function isSettledSupplementaryEntry(entry: AgentTimelineEntry) {
     : entry.phase === 'completed'
       || entry.phase === 'failed'
       || entry.phase === 'interrupted';
-}
-
-function checkpointMessageTextMatchesLive(
-  checkpoint: AgentMessageEntry,
-  live: AgentMessageEntry,
-) {
-  return checkpoint.text === live.text
-    || (
-      checkpoint.role === 'subagent'
-      && checkpoint.text.startsWith(live.text)
-    );
 }
 
 function hasCanonicalOperationEntries(

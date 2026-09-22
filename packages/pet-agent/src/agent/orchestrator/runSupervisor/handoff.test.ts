@@ -11,7 +11,7 @@ import { buildOrchestratorRunInput } from '../state';
 import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
 
-import { getAgentMessageMetadata, queryAgentMessages } from '../../messages';
+import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages } from '../../messages';
 import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
@@ -64,7 +64,7 @@ function setup(checkpointer = new MemorySaver()) {
 }
 
 test('real control handoff returns evidence to main and retains separate Supervisor work', async () => {
-  const { graph, supervisor, executor } = setup();
+  const { graph, supervisor, executor, config } = setup();
   const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
     configurable: { thread_id: 'real-handoff', registry },
   });
@@ -82,6 +82,18 @@ test('real control handoff returns evidence to main and retains separate Supervi
   assert.equal(readDelegationDeliveries(output.messages).length, 1);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');
   assert.equal(output.messages.at(-1)?.text, 'Inspection complete.');
+  assert.equal('runCapabilityState' in output, false);
+  assert.equal(output.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  const saved = (await graph.getState({ configurable: { thread_id: 'real-handoff' } })).values;
+  assert.equal(saved.messages.some((message: BaseMessage) => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  assert.equal(saved.runSupervisorState.plan.some((task: object) => 'delegation' in task), false);
+  let childOutputSaved = false;
+  for await (const entry of config.checkpoint.list({ configurable: { thread_id: 'real-handoff' } })) {
+    if (!entry.config.configurable?.checkpoint_ns?.startsWith('capability:')) continue;
+    const messages = entry.checkpoint.channel_values.messages as BaseMessage[] | undefined;
+    childOutputSaved ||= messages?.some(message => AIMessage.isInstance(message) && message.text === 'Repository inspection evidence.') ?? false;
+  }
+  assert.equal(childOutputSaved, true, 'native child namespace owns the execution transcript');
 });
 
 test('restart after dispatch restores pending call without repeating the planning model', async () => {
@@ -141,6 +153,7 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   const second = await createOrchestratorGraph({ ...config, models: { ...config.models, act: nextSupervisor, answer: new ScriptedModel([call('continue', {}, 'continue-entry')]) } })
     .invoke(buildOrchestratorRunInput([new HumanMessage('Check compatibility next.')]), options);
   assert.notEqual(second.runId, first.runId);
+  assert.equal('runCapabilityState' in second, false);
   assert.notEqual(second.taskId, first.taskId);
   // The plan facts survive the boundary; continue adopts them into the new run.
   assert.deepEqual({ goal: second.runSupervisorState.goal, plan: second.runSupervisorState.plan },
@@ -182,8 +195,7 @@ test('Entry continue executes unfinished work in a fresh private scope', async (
     const metadata = getAgentMessageMetadata(message);
     return metadata.lane === 'capability:general' && metadata.runId === before.runId;
   }), false);
-  assert.ok(second.messages.some((message) => getAgentMessageMetadata(message).lane === 'capability:general'
-    && getAgentMessageMetadata(message).runId === before.runId));
+  assert.equal(second.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
 });
 
 test('root stream retains node-level Capability model visibility after tool handoff', async () => {
@@ -271,7 +283,9 @@ test('multiple attempts keep both actual main tool results in one run', async ()
   assert.equal(new Set(results.map((message) => message.tool_call_id)).size, 2);
   assert.deepEqual(results.map((message) => JSON.parse(message.text).delivery.text),
     ['First attempt evidence.', 'Second attempt evidence.']);
-  assert.equal(new Set(readDelegationDeliveries(output.messages).map((delivery) => delivery.scope.delegationId)).size, 1);
+  assert.equal(new Set(readDelegationDeliveries(output.messages).map((delivery) => delivery.scope.delegationId)).size, 2);
+  assert.equal(executor.inputs[1].some(message => message.text === 'First attempt evidence.'), false);
+  assert.ok(executor.inputs[1].some(message => ToolMessage.isInstance(message) && message.name === 'delegate_capability' && JSON.parse(message.text).delivery?.text === 'First attempt evidence.'));
 });
 
 test('missing delivery checkpoints an error result, leaves the plan untouched and lets Supervisor retry', async () => {
@@ -303,7 +317,7 @@ test('missing delivery checkpoints an error result, leaves the plan untouched an
   const executions = readCapabilityExecutions(output.messages);
   assert.deepEqual(executions.map(({ result }) => result?.status), ['missing_deliverable', 'returned']);
   assert.notEqual(executions[0].call.id, executions[1].call.id);
-  assert.equal(executions[0].execution.delegationId, executions[1].execution.delegationId);
+  assert.notEqual(executions[0].execution.delegationId, executions[1].execution.delegationId);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');
   assert.equal(output.runIterationCount, 2);
   assert.equal(executor.inputs.length, 2);
@@ -393,4 +407,55 @@ test('Entry retries a failed tool with the same provider call ID using full nati
   assert.notEqual(results[0].tool_call_id, (entry.inputs[1].at(-1) as ToolMessage).tool_call_id);
   assert.equal(executor.inputs.length, 1);
   assert.equal(supervisor.inputs.length, 2);
+});
+
+
+test('each task receives an independent execution and earlier results through ToolMessages', async () => {
+  const { config } = setup();
+  const supervisor = new ScriptedModel([
+    call('submit_plan', { tasks: [task, { ...task, objective: 'Verify compatibility.' }] }, 'two-tasks'),
+    call('review_current', { completed: true, reason: 'Inspection verified.' }, 'accept-first'),
+    call('review_current', { completed: true, reason: 'Compatibility verified.', reply: 'Done.' }, 'accept-second'),
+  ]);
+  const executor = new ScriptedModel([new AIMessage('Inspection evidence.'), new AIMessage('Compatibility evidence.')]);
+  const output = await createOrchestratorGraph({ ...config, models: { ...config.models, act: supervisor, subagent: executor } })
+    .invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
+      configurable: { thread_id: 'task-owned-delegations', registry },
+    });
+  const executions = readCapabilityExecutions(output.messages);
+  assert.equal(new Set(executions.map(({ execution }) => execution.delegationId)).size, 2);
+  assert.equal(output.runSupervisorState.plan.some(task => 'delegation' in task), false);
+  assert.equal(executor.inputs[1].some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  assert.equal(output.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  const lastInput = supervisor.inputs.at(-1)!;
+  for (const evidence of ['Inspection evidence.', 'Compatibility evidence.']) {
+    assert.equal(lastInput.filter(message => message.text.includes(evidence)).length, 1);
+  }
+});
+
+
+test('Supervisor progressively discloses each independent invocation through its own briefing', async () => {
+  const { config } = setup();
+  const nextStep = 'The source is verified. Check only the compatibility gap and return the comparison.';
+  const supervisor = new ScriptedModel([
+    call('submit_plan', { tasks: [task] }, 'plan'),
+    call('delegate_capability', { briefing: nextStep }, 'next-step'),
+    call('review_current', { completed: true, reason: 'Comparison checked.', reply: 'Done.' }, 'accept'),
+  ]);
+  const executor = new ScriptedModel([new AIMessage('Source verified.'), new AIMessage('Comparison complete.')]);
+  const output = await createOrchestratorGraph({ ...config, models: { ...config.models, act: supervisor, subagent: executor } })
+    .invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
+      configurable: { thread_id: 'progressive-briefing', registry },
+    });
+  const executions = readCapabilityExecutions(output.messages);
+  assert.equal(executions.length, 2);
+  assert.notEqual(executions[0].execution.delegationId, executions[1].execution.delegationId);
+  assert.equal(executions[1].execution.planItemId, executions[0].execution.planItemId);
+  assert.equal(executions[1].execution.briefing, nextStep);
+  assert.equal(executor.inputs[0].some(message => message.text.includes(nextStep)), false);
+  assert.equal(executor.inputs[1].filter(message => message.text.includes(nextStep)).length, 1);
+  assert.equal(executor.inputs[1].some(message => AIMessage.isInstance(message) && message.text === 'Source verified.'), false);
+  assert.ok(supervisor.inputs[1].some(message => ToolMessage.isInstance(message)
+    && message.name === 'delegate_capability' && JSON.parse(message.text).delivery.text === 'Source verified.'));
+  assert.equal(output.runSupervisorState.plan[0].status, 'completed');
 });

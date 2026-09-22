@@ -596,3 +596,26 @@ test('createSubagent reports no output when a limited run has no AI text deliver
   assert.equal(Object.hasOwn(result ?? {}, 'completionReason'), false);
   assert.equal(result.output, null);
 });
+
+
+test('invocation output and token usage exclude the supplied history', async () => {
+  class UsageModel extends BaseChatModel {
+    _llmType() { return 'invocation-usage'; }
+    bindTools() { return this; }
+    async _generate() {
+      const message = new AIMessage({ content: 'Current result',
+        usage_metadata: { input_tokens: 30, output_tokens: 5, total_tokens: 35 },
+      });
+      return { generations: [{ message, text: message.text }] };
+    }
+  }
+  const prior = new AIMessage({ content: 'Earlier result',
+    usage_metadata: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+  });
+  const result = await createSubagent({ model: new UsageModel({}), tools: [], promptSections: [],
+    messages: [new HumanMessage('Earlier request'), prior, new HumanMessage('Current request')],
+  });
+  assert.equal(result.output, 'Current result');
+  assert.deepEqual(result.tokenUsage, { inputTokens: 30, outputTokens: 5, totalTokens: 35 });
+  assert.ok(result.messages.some(message => message.id === prior.id), 'native transcript remains intact');
+});

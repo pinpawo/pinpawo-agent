@@ -25,7 +25,6 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
       if (request.toolCall.name === 'delegate_capability') {
         return new Command({ graph: Command.PARENT, goto: 'capability', update: {
           runSupervisorState: request.state.runSupervisorState,
-          runSupervisorReviewFeedback: request.state.reviewFeedback,
           runCapabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure,
             request.state.disclosedCapabilityNames ?? []),
           ...(input.inputId.startsWith('human:') ? { runSupervisorUserMessageId: input.inputId } : {}),

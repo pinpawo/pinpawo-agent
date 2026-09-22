@@ -1,10 +1,10 @@
+import type { ProviderTokenUsage } from '../../tokenUsage';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
 import type { AgentModels } from '../../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../../types/artifact';
 import type { ModelInputModality, ToolkitReviewCapabilities } from '../../../types/toolkit';
-import type { DelegationMessageScope } from '../../messages';
 import type { DelegationSpec } from '../delegation';
 import type { DelegationDelivery } from '../delegation/delivery';
 import type { CompiledCapability } from '../registry';
@@ -23,10 +23,7 @@ export type CapabilityExecutionInput = {
   /** Resolved by the caller's registry, never supplied directly by the model. */
   readonly capability: CompiledCapability;
   readonly delegation: CapabilityExecutionDelegation;
-  /**
-   * Canonical history snapshot; selected messages must already have stable IDs.
-   * The executor selects only main + this delegation and never assigns input IDs.
-   */
+  /** Main conversation containing prior tool results; no child transcript replay. */
   readonly history: readonly BaseMessage[];
 };
 
@@ -58,10 +55,9 @@ export type CapabilityExecutionOptions = {
 
 export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
-  readonly scope: DelegationMessageScope & { readonly taskId: string };
   readonly delivery: DelegationDelivery | null;
-  /** Unapplied private-history patch; contains no main ToolMessage. */
-  readonly privateMessages: BaseMessage[];
+  /** Provider usage reported by this invocation. */
+  readonly tokenUsage: ProviderTokenUsage | null;
   readonly artifacts: CapabilityArtifactRef[];
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */
   readonly toolAuthorizations: ToolAuthorizationRecord[];

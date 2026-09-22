@@ -9,7 +9,7 @@ function execution(planItemId: string, capability: string, lane?: string) {
     tool_calls: [{ id: `call:${planItemId}`, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } }] }),
   new ToolMessage({ name: 'delegate_capability', tool_call_id: `call:${planItemId}`, content: 'Delivery',
     additional_kwargs: { pinpawo: metadata },
-    artifact: { planItemId, capability, task: 'Work', delegationId: 'delegation', mode: 'initial', briefing: 'Plan' } })];
+    artifact: { planItemId, capability, task: 'Work', delegationId: 'delegation', briefing: 'Plan' } })];
 }
 
 test('projects business progress and derives active execution from Root messages', () => {

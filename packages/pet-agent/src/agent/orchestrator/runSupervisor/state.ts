@@ -1,7 +1,7 @@
 import { z } from 'zod/v4';
 import { ReducedValue, StateSchema } from '@langchain/langgraph';
 
-/** Business facts only. Calls, private transcripts and run metadata live in Root. */
+/** Supervisor owns goals and plan progress; execution results live in ToolMessages. */
 export const supervisorPlanItemSchema = z.object({
   id: z.string().min(1),
   capability: z.string().min(1),
@@ -45,15 +45,11 @@ export const supervisorAgentStateSchema = new StateSchema({
   runSupervisorState: new ReducedValue<RunSupervisorState, RunSupervisorState>(runSupervisorStateSchema as never, {
     inputSchema: runSupervisorStateSchema as never, reducer: (_, next) => next,
   }),
-  reviewFeedback: new ReducedValue<string | null, string | null>(z.string().nullable().default(null) as never, {
-    inputSchema: z.string().nullable() as never, reducer: (_, next) => next,
-  }),
   disclosedCapabilityNames: new ReducedValue<string[], string[]>(z.array(z.string()).default([]) as never, {
     inputSchema: z.array(z.string()) as never, reducer: (current, next) => [...new Set([...current, ...next])],
   }),
 });
 export type SupervisorAgentState = {
   runSupervisorState: RunSupervisorState;
-  reviewFeedback: string | null;
   disclosedCapabilityNames: string[];
 };

@@ -1,3 +1,4 @@
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { createHash } from 'node:crypto';

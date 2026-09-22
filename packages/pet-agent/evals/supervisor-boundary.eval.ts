@@ -107,7 +107,7 @@ const cases: Array<{ name: string; goal: string; task?: string; evidence?: strin
     checkFollowUp: (result) => {
       assert.equal(result.name, 'adjust_plan');
       if (result.name === 'adjust_plan') {
-        assert.equal(result.args.currentDelegation, 'continue');
+        assert.equal(result.args.currentTask, 'keep');
         assert.equal(result.args.tasks.length, 1);
         assert.equal(result.args.tasks[0].capability, 'general');
         assert.match(result.args.tasks[0].objective, /pinpawo\/example/);

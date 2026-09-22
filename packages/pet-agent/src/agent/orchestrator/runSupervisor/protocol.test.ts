@@ -13,7 +13,7 @@ test('control schemas describe plan, review, adjustment and explicit execution w
     { schema: delegateCapabilitySchema, args: { briefing: 'Execute current objective.' } },
     { schema: reviewCurrentSchema, args: { completed: false, reason: 'Missing verification' } },
     { schema: reviewCurrentSchema, args: { completed: true, reason: 'Verified' } },
-    { schema: adjustPlanSchema, args: { goal: 'Updated goal', reason: 'New request', currentDelegation: 'replace', tasks } },
+    { schema: adjustPlanSchema, args: { goal: 'Updated goal', reason: 'New request', currentTask: 'replace', tasks } },
   ]) assert.deepEqual(control.schema.parse(control.args), control.args);
 });
 
@@ -36,7 +36,7 @@ test('control schemas reject unknown fields, empty tasks and invalid review valu
 
 test('execution snapshot is internal and does not duplicate model arguments', () => {
   const snapshot = { planItemId: 'task', delegationId: 'delegation', capability: 'general',
-    task: 'Verify the change', mode: 'initial', briefing: 'Verify the change' };
+    task: 'Verify the change', briefing: 'Verify the change' };
   assert.deepEqual(capabilityExecutionSnapshotSchema.parse(snapshot), snapshot);
   assert.equal(capabilityExecutionSnapshotSchema.safeParse({ ...snapshot, briefing: undefined }).success, false);
 });

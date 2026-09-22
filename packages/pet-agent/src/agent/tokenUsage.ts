@@ -184,7 +184,11 @@ function addProviderUsage(
 export function readMessagesTokenUsage(messages: Iterable<unknown>): ProviderTokenUsage | null {
   let aggregate: ProviderTokenUsage | null = null;
   for (const message of messages) {
-    const usage = readMessageTokenUsage(message);
+    // Delegation ToolMessages carry the child invocation usage. Do not treat it as a model's latest input size.
+    const additional = isRecord(message) && readRecord(message, 'additional_kwargs');
+    const metadata = additional && readRecord(additional, 'pinpawo');
+    const usage = readMessageTokenUsage(message)
+      ?? normalizeProviderUsage(metadata && readRecord(metadata, 'capabilityTokenUsage'));
     if (!usage) {
       continue;
     }

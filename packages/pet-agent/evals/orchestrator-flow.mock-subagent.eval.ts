@@ -1,4 +1,5 @@
 // @ts-nocheck — eval script, types from langsmith barrel are incomplete
+import { readCapabilityExecutions } from '../src/agent/orchestrator/executionMessages';
 import { readFixtureDelivery } from '../src/testing/capabilityDelivery';
 /**
  * LangSmith evaluation: orchestrator flow with mocked subagent.
@@ -101,10 +102,6 @@ const examples = [
       reason: 'When the subagent completed both requested actions, route should answer.',
     },
   },
-  // Known issue: the current orchestrator reuses the same delegation id for a
-  // same-lane follow-up too aggressively. This keeps the multi-task boundary
-  // problem visible until the next multi-task delegation redesign decides when
-  // to continue a delegation vs. start a clean one.
   {
     name: 'two-tasks-second-subagent-starts-clean',
     inputs: {
@@ -122,48 +119,23 @@ const examples = [
       expected_delegation_count: 2,
       expected_private_message_leak: false,
       expected_carryover_seen: false,
-      known_issue: 'multi_task_delegation_boundary_reuses_same_lane_delegation',
-      reason: 'Known issue for the next multi-task redesign: the second task should start clean, but same-lane delegation reuse currently carries the first task private messages.',
+      reason: 'The next task receives earlier results as ToolMessages without replaying child messages.',
     },
   },
   {
-    name: 'limit-reached-continuation-carries-private-messages',
+    name: 'partial-result-leads-to-an-independent-invocation',
     inputs: {
-      user_message: '帮我把 data/items.csv 里的所有分片都处理完，全部处理完成后告诉我结果',
-      subagent_script: 'tool_calls_until_carryover',
-      subagent_final_response: '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
+      user_message: '处理完 data/items.csv 的全部 120 条记录，完成后报告结果。',
+      subagent_responses: [
+        '已处理前 60 条，结果已保存。还需处理第 61 至 120 条；环境正常，无需用户提供信息。',
+        '已处理第 61 至 120 条，全部 120 条记录完成，没有失败项。',
+      ],
     },
     outputs: {
-      expected_route: 'answer',
-      expected_mode: 'answer',
-      expected_phase: 'after_subagent',
-      expected_latest_announce_kind: 'completed',
-      expected_delegation_count: 1,
-      expected_carryover_seen: true,
-      reason: 'limit_reached continuation must reuse the delegation id and carry the prior private messages back into the subagent input.',
-    },
-  },
-  {
-    name: 'capability-limit-orchestrator-resume-stays-on-explore-lane',
-    inputs: {
-      user_message: '帮我调查 pinpawo-agent 仓库里 local-agent 的 capability 注册链路，列出关键文件和证据。',
-      capability_pack: 'explore',
-      allowed_capability_names: ['explore'],
-      subagent_script: 'tool_calls_until_carryover',
-      subagent_final_response: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
-      max_iterations: 1,
-      auto_resume_iteration_limit: true,
-    },
-    outputs: {
-      expected_route: 'answer',
-      expected_mode: 'answer',
-      expected_phase: 'after_subagent',
-      expected_latest_announce_kind: 'completed',
-      expected_latest_announce_lane: 'capability:explore',
-      expected_delegation_count: 1,
-      expected_carryover_seen: true,
-      expected_iteration_limit_interrupt_count: 2,
-      reason: 'Capability progress caused by subagent limit plus orchestrator iteration-limit resume should continue the same capability lane, then answer.',
+      expected_route: 'answer', expected_mode: 'answer', expected_phase: 'after_subagent',
+      expected_latest_announce_kind: 'completed', expected_delegation_count: 2,
+      expected_carryover_seen: false,
+      reason: 'Supervisor prepares the remaining work in a new briefing after reading the first ToolMessage.',
     },
   },
   {
@@ -233,9 +205,8 @@ function messageHasLaneMeta(message: unknown): boolean {
  * Subclasses BaseChatModel directly (not FakeListChatModel) because the fake's
  * _streamResponseChunks would bypass _generate on streamed runs.
  *
- * Lane meta MUST be snapshotted at invocation time: reconcileDelegationMessages mutates
- * the same message objects after the run, so inspecting stored references
- * later would see post-hoc tags and report false carryover.
+ * Snapshot model inputs to distinguish prior ToolMessage evidence from replayed
+ * child AI messages.
  */
 class ProbeSubagentModel extends BaseChatModel {
   invocationStats = [];
@@ -258,7 +229,7 @@ class ProbeSubagentModel extends BaseChatModel {
     const nonSystem = messages.filter((message) => message?._getType?.() !== 'system');
     this.invocationStats.push({
       sawLaneMeta: nonSystem.some(messageHasLaneMeta),
-      nonSystemTexts: nonSystem.map((message) =>
+      nonSystemTexts: nonSystem.filter((message) => AIMessage.isInstance(message)).map((message) =>
         typeof message?.content === 'string' ? message.content : ''),
     });
     const message = this.respond(messages, this.invocationStats.length);
@@ -275,36 +246,7 @@ function buildTextScriptSubagent(responses: string[]) {
   });
 }
 
-/**
- * Emits tool calls forever until its input contains lane-tagged messages —
- * i.e. until the orchestrator re-delegated with the prior private messages carried
- * over. First run exhausts the subagent recursion limit (limit_reached);
- * the continuation run finishes naturally only if carryover happened.
- * Calls process_next_chunk so the progress preview clearly says "unfinished",
- * otherwise the route model can legitimately answer from the preview alone.
- */
-function buildCarryoverProbeSubagent(finalResponse: string) {
-  let toolCallCounter = 0;
-  return new ProbeSubagentModel((messages) => {
-    if (messages.some(messageHasLaneMeta)) {
-      return new AIMessage(finalResponse);
-    }
-    toolCallCounter += 1;
-    return new AIMessage({
-      content: '',
-      tool_calls: [{
-        id: `probe-call-${toolCallCounter}`,
-        name: 'process_next_chunk',
-        args: { source: 'data/items.csv' },
-      }],
-    });
-  });
-}
-
 function buildSubagentModel(inputs: Record<string, unknown>): ProbeSubagentModel {
-  if (inputs.subagent_script === 'tool_calls_until_carryover') {
-    return buildCarryoverProbeSubagent(String(inputs.subagent_final_response ?? '完成。'));
-  }
   const responses = Array.isArray(inputs.subagent_responses) && inputs.subagent_responses.length > 0
     ? inputs.subagent_responses.map(String)
     : [String(inputs.subagent_response ?? '')];
@@ -538,7 +480,7 @@ function extractResult(
   // - private_message_leak: a previous task's reply text showed up in a later
   //   delegation's input (delegationId scoping broken).
   // - carryover_seen: some invocation received lane-tagged messages, i.e. a
-  //   continuation of the same delegation carried its private messages back.
+  //   replay of an earlier child transcript occurred.
   const invocationStats = subagentModel.invocationStats;
   const firstTaskMarker = Array.isArray(inputs.subagent_responses) && typeof inputs.subagent_responses[0] === 'string'
     ? inputs.subagent_responses[0]
@@ -555,7 +497,7 @@ function extractResult(
       ? 'after_subagent'
       : 'initial_request',
     reply: typeof lastMsg?.content === 'string' ? lastMsg.content : '',
-    delegation_count: runDelegationSummaries.length,
+    delegation_count: readCapabilityExecutions(result.messages ?? []).length,
     delegation_statuses: runDelegationSummaries.map((item) => item.status),
     latest_announce_kind: latestObservedDelegation?.status
       ?? (activeDelegation?.status === 'awaiting_decision' ? 'progress' : null),

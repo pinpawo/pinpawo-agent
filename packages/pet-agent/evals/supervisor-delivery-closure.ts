@@ -35,7 +35,7 @@ export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorRes
   const accepted = result;
   const dispatch = result.messages.map(readCapabilityExecutionCall).find(record => record !== null);
   const execution = dispatch && currentSupervisorTask(result.runSupervisorState)
-    ? buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: result.runSupervisorState }, delegateCapabilitySchema.parse(dispatch.call.args), result.reviewFeedback ?? undefined) : null;
+    ? buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: result.runSupervisorState }, delegateCapabilitySchema.parse(dispatch.call.args), dispatch.call.id!) : null;
   const actual = dispatch ? execution?.capability === 'studio_reporting' ? 'report' : 'review' : supervisorReply(result)?.trim() ? 'reply' : 'none';
   const adjustmentCalls = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan');
   const successfulAdjustments = new Set(result.messages.filter(m => ToolMessage.isInstance(m)

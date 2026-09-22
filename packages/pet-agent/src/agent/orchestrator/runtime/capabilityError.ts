@@ -12,10 +12,11 @@ export function recoverCapabilityError(state: OrchestratorStateType, { error }: 
   const message = state.messages.at(-1);
   if (!AIMessage.isInstance(message) || message.tool_calls?.length !== 1) return;
   const call = message.tool_calls[0];
+  const plan = state.runSupervisorState;
   return new Command({ goto: 'runSupervisor', update: {
     messages: [setAgentMessageMetadata(new ToolMessage({
       name: call.name, tool_call_id: call.id!, status: 'error',
-      content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(state.runSupervisorState), plan: state.runSupervisorState }),
+      content: JSON.stringify({ error: error.message, currentTask: currentSupervisorTask(plan), plan }),
     }), { runId: state.runId, taskId: state.taskId })],
     runIterationCount: state.runIterationCount + 1,
     // This path returns to Supervisor without passing through its node, so it

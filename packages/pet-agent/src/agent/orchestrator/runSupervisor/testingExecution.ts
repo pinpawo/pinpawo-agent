@@ -6,7 +6,7 @@ import { buildCapabilityExecutionInput, delegateCapabilitySchema } from './deleg
 import { currentSupervisorTask } from './state';
 
 /** Read the actual checkpointed invocation, not a second pending-call register. */
-export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages' | 'runId' | 'taskId' | 'runSupervisorState'> & { runSupervisorReviewFeedback?: string | null }) {
+export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages' | 'runId' | 'taskId' | 'runSupervisorState'>) {
   const message = state.messages.filter((message) => AIMessage.isInstance(message)
     && !getAgentMessageMetadata(message).lane
     && getAgentMessageMetadata(message).runId === state.runId
@@ -28,5 +28,5 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
     state: state.runSupervisorState, messages: state.messages, runId: state.runId, taskId: state.taskId,
     userRequest: state.runSupervisorState.goal!, mode: 'boundary', hasNewUserInput: false,
     allowedCapabilityNames: state.runSupervisorState.plan.map(task => task.capability),
-  }, delegateCapabilitySchema.parse(call.args), state.runSupervisorReviewFeedback ?? undefined) };
+  }, delegateCapabilitySchema.parse(call.args), call.id) };
 }

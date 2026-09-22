@@ -231,7 +231,7 @@ test('adapter drops synthetic assistant messages written by prepare', () => {
           delta: {
             type: 'text-delta',
             text: [
-              '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+              '<delegation_briefing role="task_boundary" source="orchestrator">',
               '  <task><![CDATA[continue the delegated task]]></task>',
               '</delegation_briefing>',
             ].join('\n'),
@@ -257,7 +257,7 @@ test('adapter preserves briefing-shaped subagent output from a user-visible chil
   const state: RootStreamAdapterState = new Map();
   const namespace = ['general:task-1', 'model:task-2'];
   const text = [
-    '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+    '<delegation_briefing role="task_boundary" source="orchestrator">',
     '  <task><![CDATA[continue the delegated task]]></task>',
     '</delegation_briefing>',
   ].join('\n');

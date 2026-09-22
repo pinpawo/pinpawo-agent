@@ -16,7 +16,6 @@ export function createReviewCurrentTool(context: SupervisorHandoffContext) {
     const state = reviewCurrent({ ...context, state: runtime.state.runSupervisorState }, args);
     return new Command({ update: {
       runSupervisorState: state,
-      reviewFeedback: args.completed ? null : args.reason,
       messages: [new ToolMessage({ name: 'review_current', tool_call_id: runtime.toolCallId,
         content: JSON.stringify({ plan: state }),
       })],

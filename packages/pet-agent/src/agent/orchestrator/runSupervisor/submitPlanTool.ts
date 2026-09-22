@@ -15,7 +15,6 @@ export function createSubmitPlanTool(context: SupervisorHandoffContext) {
     const state = submitPlan({ ...context, state: runtime.state.runSupervisorState }, args, runtime.toolCallId);
     return new Command({ update: {
       runSupervisorState: state,
-      reviewFeedback: null,
       messages: [new ToolMessage({ name: 'submit_plan', tool_call_id: runtime.toolCallId,
         content: JSON.stringify({ plan: state }),
       })],

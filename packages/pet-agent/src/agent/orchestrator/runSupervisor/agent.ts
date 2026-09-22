@@ -68,7 +68,6 @@ export function createRunSupervisorAgent(params: {
       const result = await agent.invoke({
         messages: agentMessages,
         runSupervisorState: input.state,
-        reviewFeedback: input.reviewFeedback ?? null,
         disclosedCapabilityNames: [...input.capabilityDisclosure.disclosedCapabilityNames],
       }, {
         ...runnableConfig,
@@ -100,7 +99,7 @@ export function createRunSupervisorAgent(params: {
         // Publish the final message itself; private tool-loop work stays in its lane.
         delete getAgentMessageMetadata(last).lane;
         stampAgentMessageCreatedAt(last);
-        return { runSupervisorState: result.runSupervisorState, reviewFeedback: result.reviewFeedback, capabilityDisclosure, messages: handoff };
+        return { runSupervisorState: result.runSupervisorState, capabilityDisclosure, messages: handoff };
       }
       throw new Error('Supervisor must reply or explicitly request execution.');
     },

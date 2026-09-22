@@ -124,9 +124,6 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Agent
       role: message.role,
       text,
       status: 'completed',
-      ...(message.role === 'subagent'
-        ? { requestId: message.requestId }
-        : {}),
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies AgentTimelineEntry];
   });

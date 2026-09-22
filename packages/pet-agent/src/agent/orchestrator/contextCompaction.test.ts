@@ -37,7 +37,7 @@ function executionCall(id: string, planItemId: string) {
 }
 function executionResult(id: string, planItemId: string, content: string) {
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id, content,
-    artifact: { planItemId, delegationId: `delegation:${planItemId}`, capability: 'general', task: `Work on ${planItemId}`, mode: 'initial', briefing: 'Execute the confirmed task.' },
+    artifact: { planItemId, delegationId: `delegation:${planItemId}`, capability: 'general', task: `Work on ${planItemId}`, briefing: 'Execute the confirmed task.' },
   }), { runId: 'run', taskId: 'trace' });
 }
 

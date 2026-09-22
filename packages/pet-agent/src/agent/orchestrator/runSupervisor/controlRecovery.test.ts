@@ -91,7 +91,7 @@ test('reviewing the next unexecuted task returns feedback, retains accepted work
 for (const name of ['submit_plan', 'adjust_plan', 'review_current', 'delegate_capability']) {
   test(`${name} schema error reaches the model and correction executes exactly once`, async () => {
     const badArgs = name === 'submit_plan' ? { tasks: [{ ...task, planItemId: 'kanban-task' }] }
-      : name === 'adjust_plan' ? { goal: task.objective, reason: 'Correct the plan.', currentDelegation: 'replace', tasks: [{ ...task, planItemId: 'kanban-task' }] }
+      : name === 'adjust_plan' ? { goal: task.objective, reason: 'Correct the plan.', currentTask: 'replace', tasks: [{ ...task, planItemId: 'kanban-task' }] }
       : name === 'review_current' ? { completed: 'yes', reason: 'Evidence returned.' }
       : { briefing: 123 };
     const goodPlan = call('submit_plan', { tasks: [task] }, 'plan');

@@ -1,8 +1,7 @@
-import { ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import {
   mainConversationMessages,
   readAgentMessageCreatedAt,
-  readCapabilityExecutions,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   type TokenUsageSnapshot,
@@ -24,11 +23,6 @@ export type TuiCheckpointMessage = {
   role: 'user' | 'assistant';
   text: string;
   createdAt?: string;
-} | {
-  role: 'subagent';
-  requestId: string;
-  text: string;
-  createdAt?: string;
 };
 
 type TuiCheckpointMessageSource = { role: 'user' | 'assistant' };
@@ -36,18 +30,8 @@ type TuiCheckpointMessageSource = { role: 'user' | 'assistant' };
 export type TuiCheckpointTokenUsage = (TokenUsageSnapshot & { scope: 'session' }) | null;
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
-  const deliveries = new Map(readCapabilityExecutions(messages).flatMap(({ call, metadata, result }) =>
-    result?.delivery ? [[call.id!, { metadata, delivery: result.delivery }] as const] : []));
+  // Tool results remain execution evidence; never replay deliveries as chat messages.
   return messages.flatMap<TuiCheckpointMessage>((message) => {
-    if (ToolMessage.isInstance(message)) {
-      const execution = deliveries.get(message.tool_call_id);
-      const metadata = message.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
-      if (!execution || !metadata || metadata.lane || message.name !== 'delegate_capability'
-        || metadata.runId !== execution.metadata.runId || metadata.taskId !== execution.metadata.taskId) return [];
-      const createdAt = readAgentMessageCreatedAt(message);
-      return [{ role: 'subagent' as const, requestId: execution.delivery.scope.runId,
-        text: execution.delivery.text, ...(createdAt ? { createdAt } : {}) }];
-    }
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);

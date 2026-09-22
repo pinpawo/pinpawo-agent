@@ -4,29 +4,13 @@ import { getAgentMessageMetadata, setAgentMessageMetadata } from '../../messages
 import { indentXmlBlock, xmlTextBlock } from '../../../prompts/xml';
 import type { UserRequest } from '../types';
 
-/**
- * Delegation briefing — the downward counterpart of the (upward) subagent
- * handoff. Immediately before a Capability model call, the runtime projects the
- * stable user request, current objective and Supervisor-written briefing into
- * one HumanMessage. The
- * projection is invocation-only: neither it nor a separate user-request context
- * message is persisted in canonical main or private-lane history.
- *
- * Naming contract: "briefing" is orchestrator → subagent (task dispatch);
- * "handoff" is subagent → main (deliverable return). See issue #362.
- *
- * DelegationSpec is the source of truth. Its XML briefing is a deterministic
- * projection for the selected subagent — no model call and no reverse parsing.
- * The caller's typed delegation scope, rather than this message, drives lane
- * routing and cleanup.
- */
+/** Supervisor discloses this invocation's objective and next steps through briefing. */
 
 export const DELEGATION_BRIEFING_SOURCE = 'delegation_briefing';
 
 export type DelegationSpec = {
   userRequest: UserRequest;
   task: string;
-  mode: 'initial' | 'continue';
   briefing: string;
 };
 
@@ -54,7 +38,7 @@ function renderDelegationBriefingXml(spec: DelegationSpec): string {
   ];
 
   return [
-    `<delegation_briefing role="task_boundary" source="orchestrator" mode="${spec.mode}">`,
+    `<delegation_briefing role="task_boundary" source="orchestrator">`,
     ...blocks.map((block) => indentXmlBlock(block, 2)),
     '</delegation_briefing>',
   ].join('\n');

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import {
   streamOrchestratorGraph,
   type OrchestratorGraph,
@@ -239,4 +239,15 @@ test('streamOrchestratorGraph streams graph chunks without injecting callbacks',
   assert.deepEqual(chunks, [
     ['values', { messages: [] }],
   ]);
+});
+
+
+test('Capability usage contributes to totals without becoming the Root context watermark', () => {
+  const supervisor = new AIMessage({ content: '', usage_metadata: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } });
+  const result = new ToolMessage({ content: 'Delivery', tool_call_id: 'delegate', additional_kwargs: {
+    pinpawo: { capabilityTokenUsage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 } },
+  } });
+  assert.deepEqual(readMessagesTokenUsage([supervisor, result]), { inputTokens: 110, outputTokens: 22, totalTokens: 132 });
+  assert.equal(readLatestProviderInputTokens([supervisor, result]), 10);
+  assert.equal(readMessageTokenUsage(result), null);
 });

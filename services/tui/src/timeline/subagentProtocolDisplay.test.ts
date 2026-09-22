@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { formatSubagentProtocolMessage } from './subagentProtocolDisplay';
 
-test('formats a canonical initial delegation briefing for the timeline', () => {
+test('formats a canonical delegation briefing for the timeline', () => {
   assert.equal(
     formatSubagentProtocolMessage([
-      '<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">',
+      '<delegation_briefing role="task_boundary" source="orchestrator">',
       '  <run_user_request role="goal_context" source="orchestrator_state" trust="read_only">',
       '    <request><![CDATA[Review the pull request and explain the architecture.]]></request>',
       '  </run_user_request>',
@@ -14,11 +14,11 @@ test('formats a canonical initial delegation briefing for the timeline', () => {
       'Review the current pull request.',
       '  ]]>',
       '  </task>',
-      '  <essential_context>',
+      '  <briefing>',
       '  <![CDATA[',
       'Preserve the existing main behavior.',
       '  ]]>',
-      '  </essential_context>',
+      '  </briefing>',
       '</delegation_briefing>',
     ].join('\n')),
     [
@@ -33,16 +33,16 @@ test('formats a canonical initial delegation briefing for the timeline', () => {
   );
 });
 
-test('formats a continuation briefing and decodes split CDATA', () => {
+test('formats a briefing and decodes split CDATA', () => {
   assert.equal(
     formatSubagentProtocolMessage([
-      '<delegation_briefing role="task_boundary" source="orchestrator" mode="continue">',
+      '<delegation_briefing role="task_boundary" source="orchestrator">',
       '<task><![CDATA[Handle ]]]]><![CDATA[> safely.]]></task>',
-      '<guidance><![CDATA[Resume after the failed check.]]></guidance>',
+      '<briefing><![CDATA[Resume after the failed check.]]></briefing>',
       '</delegation_briefing>',
     ].join('\n')),
     [
-      '**Delegating · continuing**',
+      '**Delegating**',
       '',
       'Handle ]]> safely.',
       '',
@@ -56,7 +56,7 @@ test('formats a continuation briefing and decodes split CDATA', () => {
 test('ignores tag-shaped text inside the nested run request', () => {
   assert.equal(
     formatSubagentProtocolMessage([
-      '<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">',
+      '<delegation_briefing role="task_boundary" source="orchestrator">',
       '  <run_user_request role="goal_context" source="orchestrator_state" trust="read_only">',
       '    <request><![CDATA[Explain <task><![CDATA[fake]]]]><![CDATA[></task>.]]></request>',
       '  </run_user_request>',
@@ -84,7 +84,7 @@ test('formats a canonical artifact discovery context compactly', () => {
 
 test('leaves ordinary subagent XML untouched', () => {
   assert.equal(
-    formatSubagentProtocolMessage('<delegation_briefing mode="initial"><task>model text</task></delegation_briefing>'),
+    formatSubagentProtocolMessage('<delegation_briefing><task>model text</task></delegation_briefing>'),
     null,
   );
 });

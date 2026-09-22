@@ -82,14 +82,13 @@ test('review accepts only current task and dispatches the next without another S
   assert.ok(next.messages.includes(input.messages.at(-1)!));
 });
 
-test('retry derives same-run execution identity and carries feedback in the actual call', async () => {
+test('another delegation creates a new execution without rewriting the model briefing', async () => {
   const input = await delivered();
   const command = await node({ name: 'review_current', args: { completed: false, reason: 'Verify the document.' } })(input, options);
   const call = readCapabilityCall(apply(input, command));
   const previous = input.messages.filter((m) => AIMessage.isInstance(m) && m.tool_calls?.[0]?.name === 'delegate_capability').at(-1) as AIMessage;
-  assert.equal(call.delegationId, (input.messages.at(-1) as ToolMessage).artifact.delegationId);
-  assert.equal(call.mode, 'continue');
-  assert.equal(call.briefing, 'Execute the current objective.\n\nReview feedback:\nVerify the document.');
+  assert.notEqual(call.delegationId, (input.messages.at(-1) as ToolMessage).artifact.delegationId);
+  assert.equal(call.briefing, 'Execute the current objective.');
 });
 
 test('accepted A and pending B survive an answer and new run without a continuation object', async () => {
@@ -101,7 +100,6 @@ test('accepted A and pending B survive an answer and new run without a continuat
   const next = apply(resumed, await node({ name: 'review_current', args: { reason: 'Proceed with publication.' } })(
     { ...resumed, runUserRequest: 'Publish now.' }, options));
   assert.equal(readCapabilityCall(next).task, tasks[1].objective);
-  assert.equal(readCapabilityCall(next).mode, 'initial');
 });
 
 test('natural question does not accept the returned task or erase its results', async () => {

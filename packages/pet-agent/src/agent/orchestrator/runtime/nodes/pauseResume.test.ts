@@ -37,10 +37,10 @@ function pauseInterruptId(output: unknown): string {
   const id = (output as { __interrupt__?: Array<{ id?: string }> }).__interrupt__?.[0]?.id;
   assert.ok(id); return id;
 }
-function adjustment(strategy: 'continue' | 'replace'): ScriptedSupervisorDecision {
+function adjustment(strategy: 'keep' | 'replace'): ScriptedSupervisorDecision {
   return { name: 'adjust_plan', args: { goal: 'Inspect the correct project; prepare a private report.',
-    reason: 'User corrected the project and cancelled publication.', currentDelegation: strategy,
-    tasks: [{ capability: strategy === 'continue' ? 'general' : 'writer', objective: 'Work on the corrected project.' },
+    reason: 'User corrected the project and cancelled publication.', currentTask: strategy,
+    tasks: [{ capability: strategy === 'keep' ? 'general' : 'writer', objective: 'Work on the corrected project.' },
       { capability: 'writer', objective: 'Prepare the private report.' }] } };
 }
 function harness(decide: (input: RunSupervisorInput) => ScriptedSupervisorDecision, checkpointer = new MemorySaver(),
@@ -59,7 +59,7 @@ function harness(decide: (input: RunSupervisorInput) => ScriptedSupervisorDecisi
     .addEdge('capability', END).compile({ checkpointer });
 }
 
-for (const strategy of ['continue', 'replace'] as const) {
+for (const strategy of ['keep', 'replace'] as const) {
   test(`native pause guidance lets Supervisor ${strategy} before execution without changing run identity or budget`, async () => {
     const initial = pausedState(); const events: string[] = [];
     const graph = harness((input) => {
@@ -80,7 +80,7 @@ for (const strategy of ['continue', 'replace'] as const) {
     assert.equal(result.runIterationCount, 7);
     assert.equal(result.runSupervisorState.goal, 'Inspect the correct project; prepare a private report.');
     assert.deepEqual(result.runSupervisorState.plan.map((task) => task.objective), ['Work on the corrected project.', 'Prepare the private report.']);
-    assert.equal(result.runSupervisorState.plan[0].id === 'task1', strategy === 'continue');
+    assert.equal(result.runSupervisorState.plan[0].id === 'task1', strategy === 'keep');
     assert.equal(queryAgentMessages(result.messages).supervisor(result.runId).select().messages.length, 2);
   });
 }
@@ -136,9 +136,9 @@ test('execution alone cannot authorize plan adjustment; fresh guidance still can
   assert.throws(() => apply(state, adjustment('replace')), /fresh user input/);
   const fresh = { ...state, messages: [...state.messages, setAgentMessageMetadata(new HumanMessage({ id: 'new', content: 'Adjust.' }),
     { runId: state.runId, taskId: state.taskId })] };
-  assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'continue',
+  assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentTask: 'keep',
     tasks: [{ capability: 'writer', objective: 'Write.' }] } }), /keep its capability/);
-  assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentDelegation: 'replace',
+  assert.throws(() => apply(fresh, { name: 'adjust_plan', args: { goal: 'new', reason: 'new', currentTask: 'replace',
     tasks: [{ capability: 'unknown', objective: 'Write.' }] } }), /outside/);
 });
 

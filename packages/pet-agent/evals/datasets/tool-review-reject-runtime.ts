@@ -51,7 +51,7 @@ const cases: AgentEvalCase<ToolReviewRejectRuntimeInput, ToolReviewRejectRuntime
       expectedHandoffPresent: false,
       expectedAuthorizationCount: 0,
       expectedFinalAnnounceIncludes: [],
-      reason: 'Rejecting a reviewed tool action must roll it back without a ToolMessage, model resume, or handoff, while retaining the delegation for explicit continuation.',
+      reason: 'Rejecting a reviewed tool action must roll it back without a ToolMessage, model resume, or handoff, while retaining the pending plan task for Supervisor to reconsider after user guidance.',
     },
     metadata: {
       difficulty: 'hard',

@@ -15,7 +15,6 @@ export const capabilityExecutionSnapshotSchema = z.object({
   delegationId: z.string().min(1),
   capability: z.string().min(1),
   task: z.string().min(1),
-  mode: z.enum(['initial', 'continue']),
   briefing: z.string().refine(text => text.trim().length > 0),
 }).strict();
 

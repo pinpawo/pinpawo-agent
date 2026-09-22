@@ -40,7 +40,6 @@ export function createRunSupervisorNode(config: OrchestratorConfig, delegateCapa
         // decision still spent this run's Supervisor turn, and re-entering at
         // Entry would repeat it.
         runSupervisorState: { ...result.runSupervisorState, runId: root.runId },
-        runSupervisorReviewFeedback: result.reviewFeedback ?? null,
         messages: result.messages,
       },
       goto: END,

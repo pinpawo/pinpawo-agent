@@ -34,8 +34,8 @@ const cases = [
   { name: 'entry',
     goal: '根据已提供的迁移检查结果撰写中文内部报告，以 Markdown 正文交付。已确认：配置文件迁移完成；42 项回归测试全部通过；尚未进行线上压测。报告包含迁移结论、验证证据及待验证风险，明确区分已验证和未验证事项。',
     guidance: '检查结果已经完整提供，不需要再调查仓库。请开始撰写内部报告，仅在当前对话交付正文，不涉及保存文件或发布。' },
-  { name: 'continue', guidance: '项目看错了。改为 example/correct；沿用当前 general delegation 的调查记录，修正当前任务和计划，只检查迁移说明，然后写内部报告，不要发布。', strategy: 'continue', capability: 'general' },
-  { name: 'replace', guidance: '停止旧项目调查，保留旧记录但不要再使用旧 delegation 的私有上下文。我已提供结论：迁移已完成、测试通过。请新建 writer delegation，直接据此写内部报告。不要发布，也不需要再确认。', strategy: 'replace', capability: 'writer' },
+  { name: 'continue', guidance: '项目看错了。改为 example/correct；使用当前 general 任务已有的交付，修正当前任务和计划，只检查迁移说明，然后写内部报告，不要发布。', strategy: 'keep', capability: 'general' },
+  { name: 'replace', guidance: '停止旧项目调查，保留旧任务记录但不要再使用其结果。我已提供结论：迁移已完成、测试通过。请安排 writer 任务，直接据此写内部报告。不要发布，也不需要再确认。', strategy: 'replace', capability: 'writer' },
   { name: 'clarify', guidance: '计划改一下，目标换成另外那个，具体选哪个我等下告诉你。现在先问我，不要继续执行。' },
 ];
 let failures = 0;
@@ -63,7 +63,7 @@ for (const scenario of cases.filter(({ name }) => selected.size === 0 || selecte
       assert.equal(result.name, 'adjust_plan');
       if (result.name === 'adjust_plan') {
         if (scenario.name === 'autonomous') assert.equal(result.args.goal, userRequest);
-        assert.equal(result.args.currentDelegation, scenario.strategy);
+        assert.equal(result.args.currentTask, scenario.strategy);
         assert.equal(result.args.tasks[0].capability, scenario.capability);
         assert.ok(result.args.tasks.length > 0);
       }

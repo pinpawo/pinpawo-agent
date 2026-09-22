@@ -1,4 +1,4 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import type { ProviderTokenUsage } from '../../tokenUsage';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import { z } from 'zod';
 import type { AgentInterrupt } from './agentInterrupt';
@@ -27,7 +27,7 @@ export type PauseTaskInterruptResolution = {
 };
 
 export type PausedSubagentState = {
-  messages: BaseMessage[];
+  tokenUsage?: ProviderTokenUsage | null;
   artifacts: CapabilityArtifactRef[];
 };
 

@@ -1,3 +1,4 @@
+import type { ProviderTokenUsage } from '../agent/tokenUsage';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
@@ -87,6 +88,8 @@ export type SubagentRunInput = SubagentInputState & {
 };
 
 export type SubagentResult = {
+  /** Usage reported by this invocation, independent of transcript storage. */
+  tokenUsage?: ProviderTokenUsage | null;
   messages: BaseMessage[];
   artifacts: CapabilityArtifactRef[];
   /** This invocation's textual output for the parent tool result, not a history-message reference. */

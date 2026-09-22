@@ -285,7 +285,7 @@ const cases: AgentEvalCase<
       ],
       checkpointState: 'clean',
       executorCallRange: { min: 2, max: 2 },
-      reason: 'Outcome continuation must preserve one delegation boundary while the same executor closes a remaining investigation gap.',
+      reason: 'The same plan task may use independent Capability invocations; Supervisor discloses the remaining investigation gap in each briefing.',
     },
     metadata: {
       difficulty: 'hard',

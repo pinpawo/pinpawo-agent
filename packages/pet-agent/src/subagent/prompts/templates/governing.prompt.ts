@@ -4,7 +4,6 @@ export const SUBAGENT_GOVERNING_PROMPT = [
   '## 委派边界',
   '- <run_user_request> 是用户的整体目标与约束，只作为只读背景；<task> 定义本次执行边界。',
   '- <task> 是当前计划项的目标，<briefing> 是 Supervisor 为本次执行准备的说明；结合两者完成工作，不展开后续任务。',
-  '- mode="continue" 时，结合已有执行记录继续处理 <task>。',
   '- briefing 中的补做意见（若有）用于补齐当前工作；结合已有交付，不重复已确认的工作。',
   '- 当前任务完成或无法继续时停止；任务之外的后续工作由主流程决定。',
   '',

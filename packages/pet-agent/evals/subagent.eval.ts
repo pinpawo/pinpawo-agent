@@ -131,11 +131,9 @@ const examples = [
     },
   },
   {
-    name: 'continuation-uses-existing-progress',
+    name: 'briefing-discloses-existing-progress',
     inputs: {
-      mode: 'continue',
       task: '完成版本和测试状态核验。',
-      prior_task: '读取 package.json 的版本，然后运行 npm test。',
       prior_progress: '已读取 package.json，版本是 0.2.0；尚未运行测试。',
       gap_note: '只剩下 npm test 没有执行，请完成后交付版本和测试结果。',
       shell_outputs: {
@@ -341,28 +339,16 @@ function buildMockTools(inputs: Record<string, unknown>) {
 async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
   const runtime = buildMockTools(inputs);
   const task = String(inputs.task ?? '');
-  const mode = inputs.mode === 'continue' ? 'continue' : 'initial';
   const briefing = materializeDelegation({
-    mode,
     userRequest: String(inputs.user_request ?? task),
     task,
-    briefing: [task, mode === 'continue' ? inputs.gap_note : inputs.essential_context]
+    briefing: [task, inputs.essential_context, inputs.prior_progress, inputs.gap_note]
       .filter(value => typeof value === 'string' && value.trim()).join('\n\n'),
   });
   const mainContext = typeof inputs.main_context === 'string'
     ? inputs.main_context
     : `用户请求：${task}`;
   const messages: BaseMessage[] = [new HumanMessage(mainContext)];
-  if (mode === 'continue' && typeof inputs.prior_progress === 'string') {
-    const priorTask = typeof inputs.prior_task === 'string' ? inputs.prior_task : task;
-    messages.push(materializeDelegation({
-      mode: 'initial',
-      userRequest: String(inputs.user_request ?? task),
-      task: priorTask,
-      briefing: priorTask,
-    }));
-    messages.push(new AIMessage(inputs.prior_progress));
-  }
   messages.push(briefing);
   const result = await createSubagent({
     model: evalSubject.model,

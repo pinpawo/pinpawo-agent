@@ -38,7 +38,6 @@ export function buildRunSupervisorInput(params: {
     inputId: humanId && root.runSupervisorUserMessageId !== humanId
       ? humanId : `boundary:${root.runId}:${root.runIterationCount}`,
     runId: root.runId, taskId: root.taskId, userRequest: root.runUserRequest,
-    reviewFeedback: root.runSupervisorReviewFeedback,
     state: root.runSupervisorState, messages: root.messages, catalog, capabilityDisclosure,
   };
 }

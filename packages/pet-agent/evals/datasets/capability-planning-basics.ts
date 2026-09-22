@@ -814,7 +814,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'An explicit resume has no canonical execution evidence to accept, while the active Capability can still execute the task. Continue the same delegation instead of assuming completion.',
+      reason: 'An explicit resume has no canonical execution evidence to accept, while the active Capability can still execute the task. Prepare a new briefing for the same task instead of assuming completion.',
     },
     metadata: {
       difficulty: 'hard',
@@ -857,7 +857,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Continue the same delegation because its full private message history already preserves the task and evidence.',
+      reason: 'The latest announce is an internal-context-shaped summary that explicitly says no workspace work occurred. Prepare a new briefing using the task and returned evidence; do not assume internal history will be replayed.',
     },
     metadata: {
       difficulty: 'hard',
@@ -892,7 +892,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The latest announce only restates a future plan and contains no completed work. Continue the same delegation using its existing task and private messages.',
+      reason: 'The latest announce only restates a future plan and contains no completed work. Prepare a new briefing for the existing task using its returned ToolMessage.',
     },
     metadata: {
       difficulty: 'medium',
@@ -927,7 +927,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'The subagent produced the explicitly rejected placeholder design. Continue the same delegation because the original task and full private message history preserve the unmet acceptance criteria.',
+      reason: 'The subagent produced the explicitly rejected placeholder design. Disclose the unmet acceptance criteria in a new briefing for the same task.',
     },
     metadata: {
       difficulty: 'hard',
@@ -997,7 +997,7 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
       exactRemainingPlanLength: 0,
       planEffect: 'empty',
       rubberStamp: false,
-      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Continue the same delegation with the full execution history intact.',
+      reason: 'Generation may have succeeded, but the explicit verification contract remains incomplete. Disclose the remaining verification in a new briefing, using the returned result as evidence.',
     },
     metadata: {
       difficulty: 'medium',

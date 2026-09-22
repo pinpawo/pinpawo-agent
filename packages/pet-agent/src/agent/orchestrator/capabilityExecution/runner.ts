@@ -3,7 +3,10 @@ import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
-import { observeAgentMessageSelection, queryAgentMessages, reconcileDelegationMessages } from '../../messages';
+import {
+  observeAgentMessageSelection,
+  queryAgentMessages,
+} from '../../messages';
 import { materializeDelegation } from '../delegation';
 import { readCapabilityExecutions } from '../executionMessages';
 import { toolProtocolMiddleware } from '../modelInvocation';
@@ -43,8 +46,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const threadId = readThreadId(runnableConfig);
     const { delegation } = input;
     const { capability } = input.capability;
-    const scope: CapabilityExecutionResult['scope'] = {
-      lane: `capability:${capability.name}`,
+    const scope = {
+      lane: `capability:${capability.name}` as const,
       delegationId: delegation.id,
       runId: delegation.runId,
       taskId: delegation.taskId,
@@ -56,8 +59,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const { runId } = scope;
     const delegationBriefing = materializeDelegation(delegation);
     const scopedQuery = queryAgentMessages(input.history)
-      .main()
-      .delegation(scope);
+      .main();
     const canonicalSelection = scopedQuery.select();
     const priorDeliveries = readCapabilityExecutions(canonicalSelection.messages)
       .flatMap(({ result }) => result?.status === 'returned' && result.delivery ? [{
@@ -72,7 +74,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       .append(delegationBriefing)
       .select();
     observeAgentMessageSelection(
-      'capability.private_messages',
+      'capability.input_messages',
       scopedSelection.diagnostics,
       runnableConfig,
     );
@@ -229,14 +231,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     if (!result && !pausedSubagentState) {
       throw new Error('Capability subagent produced neither a result nor a pause signal.');
     }
-    const resultMessages = pausedSubagentState?.messages ?? result!.messages;
     const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
-    const reconciled = reconcileDelegationMessages({
-      resultMessages,
-      inputMessages: subagentInput.messages,
-      canonicalInputMessages: canonicalSelection.messages,
-      scope,
-    });
     const output = result?.output ?? null;
     const delivery = output?.trim() ? {
       id: `delivery:${scope.runId}:${scope.delegationId}:${randomUUID()}`,
@@ -246,9 +241,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     } : null;
     return {
       status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
-      scope,
       delivery,
-      privateMessages: [...reconciled.removed, ...reconciled.added],
+      tokenUsage: result?.tokenUsage ?? pausedSubagentState?.tokenUsage ?? null,
       artifacts: resultArtifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };

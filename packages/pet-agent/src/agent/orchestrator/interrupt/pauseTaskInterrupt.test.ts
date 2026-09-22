@@ -19,7 +19,7 @@ test('PauseTaskInterrupt propagates across the private child boundary', () => {
   assert.throws(
     () => propagatePauseTaskInterrupt(
       { [PAUSE_TASK_INTERRUPT_STATE_KEY]: { kind: 'pause_task' } },
-      { messages: [], artifacts: [] },
+      { artifacts: [] },
     ),
     (error) => error instanceof PauseTaskInterruptSignal
       && error.payload.kind === 'pause_task',

@@ -334,7 +334,7 @@ function supervisorInput(
     }] }), { ...metadata, source: 'supervisor' }));
     messages.push(setAgentMessageMetadata(new ToolMessage({ artifact: {
       planItemId: current!.delegationId, delegationId: current!.delegationId,
-      capability: current!.capability, task: current!.task, mode: 'initial', briefing: 'Execute the confirmed task.',
+      capability: current!.capability, task: current!.task, briefing: 'Execute the confirmed task.',
     },  name: 'delegate_capability', tool_call_id: callId,
       content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
         runId: report.runId, taskId: input.taskId, delegationId: report.delegationId, lane: report.sourceLane,
@@ -1467,7 +1467,7 @@ test('a fresh Boundary with an exhausted plan can disclose capabilities before r
     toolCalls: [{
       id: 'adjust-new-work', name: 'adjust_plan',
       args: {
-        goal: 'Update the README.', reason: 'User requested the update.', currentDelegation: 'replace',
+        goal: 'Update the README.', reason: 'User requested the update.', currentTask: 'replace',
         tasks: [{ capability: 'general', objective: 'Update the README section for issue #587.' }]
       }
     }] }]);
@@ -1967,7 +1967,7 @@ test('adjust_plan is available at every Boundary but changing the goal requires 
   const args = {
     goal: 'Inspect the corrected repository and prepare a private report.',
     reason: 'The user corrected the repository and cancelled publication.',
-    currentDelegation: 'replace',
+    currentTask: 'replace',
     tasks: [{ capability: 'writer', objective: 'Prepare a private report from the corrected repository.' }],
   };
   const activeDelegation = { delegationId: 'd1', runId: 'run-test', capability: 'general', task: 'Publish the old repository.' };

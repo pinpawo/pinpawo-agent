@@ -1,5 +1,5 @@
 import type { ProviderTokenUsage } from '../../tokenUsage';
-import type { CapabilityExecutionState } from './state';
+import type { DelegationMessageScope } from '../../messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
@@ -12,6 +12,12 @@ import type { CompiledCapability } from '../registry';
 import type { GlobalReviewPolicy } from '../review/globalReviewPolicy';
 import type { ToolAuthorizationRecord } from '../../../autoReview/reviewAuthorizations';
 import type { ToolkitRuntimeManager } from '../toolkitRuntime';
+
+/** The current delegation's private execution snapshot, separate from Root messages. */
+export type CapabilityExecutionState = {
+  scope: DelegationMessageScope & { taskId: string };
+  messages: BaseMessage[];
+};
 
 /** Task data, not rendered briefing text or a graph routing command. */
 export type CapabilityExecutionDelegation = Readonly<DelegationSpec> & {

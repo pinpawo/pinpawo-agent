@@ -1,9 +1,9 @@
 import { readDelegationDeliveries, readCapabilityExecutions } from '../executionMessages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, ToolMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { Command, MemorySaver, interrupt, REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
+import { Command, MemorySaver, interrupt } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createOrchestratorGraph } from '../runtime/graph';
@@ -11,7 +11,7 @@ import { buildOrchestratorRunInput } from '../state';
 import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
 
-import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages, setAgentMessageMetadata } from '../../messages';
+import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages } from '../../messages';
 import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
@@ -400,25 +400,4 @@ test('Entry retries a failed tool with the same provider call ID using full nati
   assert.notEqual(results[0].tool_call_id, (entry.inputs[1].at(-1) as ToolMessage).tool_call_id);
   assert.equal(executor.inputs.length, 1);
   assert.equal(supervisor.inputs.length, 2);
-});
-
-
-test('restart at a legacy Capability boundary migrates private history out of Root', async () => {
-  const { graph, config, executor } = setup();
-  const options = { configurable: { thread_id: 'legacy-private-migration', registry } };
-  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
-    ...options, interruptBefore: ['capability'],
-  });
-  const snapshot = await graph.getState(options);
-  const call = readCapabilityCall(snapshot.values as Parameters<typeof readCapabilityCall>[0]);
-  const work = setAgentMessageMetadata(new AIMessage({ id: 'legacy-work', content: 'Earlier private investigation' }), {
-    lane: 'capability:general', runId: snapshot.values.runId, taskId: snapshot.values.taskId, delegationId: call.delegationId,
-  });
-  await graph.updateState(options, { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), work, ...snapshot.values.messages] }, 'runSupervisor');
-  const rebuilt = createOrchestratorGraph(config);
-  const output = await rebuilt.invoke(new Command({ goto: 'capability' }), options);
-  assert.ok(executor.inputs[0].some(message => message.id === 'legacy-work'));
-  assert.equal(output.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
-  assert.ok(output.runCapabilityState?.messages.some(message => message.id === 'legacy-work'));
-  assert.equal(readDelegationDeliveries(output.messages).length, 1);
 });

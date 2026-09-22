@@ -5,5 +5,5 @@ export type {
   CapabilityExecutionInput,
   CapabilityExecutionOptions,
   CapabilityExecutionResult,
+  CapabilityExecutionState,
 } from './types';
-export type { CapabilityExecutionState } from './state';

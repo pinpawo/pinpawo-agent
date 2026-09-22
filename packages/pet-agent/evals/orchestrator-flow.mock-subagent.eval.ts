@@ -233,8 +233,8 @@ function messageHasLaneMeta(message: unknown): boolean {
  * Subclasses BaseChatModel directly (not FakeListChatModel) because the fake's
  * _streamResponseChunks would bypass _generate on streamed runs.
  *
- * Lane meta MUST be snapshotted at invocation time: reconcileDelegationMessages mutates
- * the same message objects after the run, so inspecting stored references
+ * Snapshot lane metadata at invocation time: the executor tags newly returned
+ * private message objects after the run, so inspecting stored references
  * later would see post-hoc tags and report false carryover.
  */
 class ProbeSubagentModel extends BaseChatModel {

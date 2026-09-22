@@ -9,7 +9,6 @@ import { executionsForPlanItem } from '../executionMessages';
 import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
-import { restoreCapabilityState, removeLegacyCapabilityMessages } from '../capabilityExecution/state';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
 
 export const delegateCapabilitySchema = z.object({
@@ -39,10 +38,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId,
         userRequest, task: input.task, mode: input.mode, briefing: input.briefing },
       history: state.messages,
-      state: restoreCapabilityState(state.runCapabilityState, state.messages, {
-        lane: `capability:${input.capability}`, delegationId: input.delegationId,
-        runId: state.runId, taskId: state.taskId,
-      }),
+      state: state.runCapabilityState,
     }, {
       review: {
         authorizations: state.sessionToolAuthorizations.generation === registry.authorizationGeneration
@@ -62,7 +58,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       ...(execution.tokenUsage ? { capabilityTokenUsage: execution.tokenUsage } : {}),
     });
     return new Command({ update: {
-      messages: [...removeLegacyCapabilityMessages(state.messages), result],
+      messages: [result],
       runCapabilityState: execution.state,
       sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,

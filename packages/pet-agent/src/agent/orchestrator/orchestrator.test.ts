@@ -52,16 +52,13 @@ import {
   getAgentMessageMetadata,
   mainConversationMessages,
   queryAgentMessages,
-  reconcileDelegationMessages,
   setAgentMessageDelegationScope,
   setAgentMessageMetadata,
   toolProtocolSafeMessages,
 } from '../messages';
 import {
   isDelegationBriefingMessage,
-  materializeDelegation,
 } from './delegation';
-import { RemoveMessage } from '@langchain/core/messages';
 import {
   createContextCompactionMessage,
   isContextCompactionMessage,
@@ -4039,36 +4036,6 @@ test('execution without a deliverable returns an error result to Supervisor with
   assert.equal(saved.messages.some((message) => readFixtureDelivery(message)), false);
 });
 
-test('lane reconciliation never emits root removals for the current briefing', () => {
-  const human = new HumanMessage({ id: 'main-human', content: '继续处理任务' });
-  const persistedProgress = new AIMessage({ id: 'old-progress', content: '旧进度' });
-  setAgentMessageMetadata(persistedProgress, {
-    lane: 'capability:general',
-    runId: 'turn-1',
-    delegationId: 'task-1',
-  });
-  const briefing = materializeDelegation({
-    mode: 'continue',
-    userRequest: '完成任务',
-    task: '继续处理任务',
-    briefing: 'Complete the current task and return evidence.',
-  });
-  const finalAnswer = new AIMessage({ id: 'final-answer', content: '任务完成' });
-
-  const update = reconcileDelegationMessages({
-    resultMessages: [human, finalAnswer],
-    inputMessages: [human, persistedProgress, briefing],
-    scope: { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-1' },
-    canonicalInputMessages: [human, persistedProgress],
-  });
-  const removedIds = update.removed
-    .filter((message) => message instanceof RemoveMessage)
-    .map((message) => message.id);
-
-  assert.deepEqual(removedIds, ['old-progress']);
-  assert.equal(removedIds.includes(briefing.id ?? ''), false);
-});
-
 test('main conversation preserves accepted handoffs that begin with briefing formats', () => {
   const handoffs = [
     createDeliveryResult({
@@ -4127,11 +4094,9 @@ test('lane messages scope to delegation: new task starts clean, reused id carrie
   const task1Answer = new AIMessage({ id: 'task-1-answer', content: '目录已整理完成。' });
   const messages = [human, task1ToolCall, task1ToolResult, task1Answer];
 
-  reconcileDelegationMessages({
-    resultMessages: messages,
-    inputMessages: [human],
-    scope: { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-1' },
-  });
+  for (const message of [task1ToolCall, task1ToolResult, task1Answer]) {
+    setAgentMessageDelegationScope(message, { lane: 'capability:general', runId: 'turn-1', delegationId: 'task-1' });
+  }
 
   // 同 turn 同 lane 的新 task：看不到上一个 task 的 private messages，只剩主对话。
   assert.deepEqual(selectCapabilityHistory(messages, 'capability:general', 'turn-1', 'task-2').map((message) => message.content), [
@@ -4207,7 +4172,7 @@ function interruptedLaneMessages(params: {
 
 
 
-test('fresh delegated request removes legacy private messages from Root', async () => {
+test('fresh delegated request replaces the previous private snapshot', async () => {
   const oldDelegation = {
     id: 'old-awaiting-delegation',
     lane: 'capability:general',
@@ -4273,7 +4238,10 @@ test('fresh delegated request removes legacy private messages from Root', async 
     callbacks: recorder.callbacks,
   };
   await graph.updateState(config, {
-    messages: oldMessages,
+    runCapabilityState: {
+      scope: { lane: 'capability:general', runId: oldDelegation.runId, taskId: oldDelegation.taskId, delegationId: oldDelegation.id },
+      messages: oldMessages,
+    },
     runSupervisorState: { goal: oldDelegation.userRequest, plan: [{
       id: 'old-task', capability: 'general', objective: oldDelegation.task, status: 'pending',
     }] },

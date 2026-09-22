@@ -1,8 +1,7 @@
 import { readFixtureDelivery, createDeliveryResult, withDeliveryCalls } from '../../../testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, RemoveMessage } from '@langchain/core/messages';
-import { capabilityStateMessages } from './state';
+import { AIMessage, HumanMessage, RemoveMessage, ToolMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
@@ -126,17 +125,6 @@ test('continuation returns a complete private snapshot without copying main hist
   assert.equal(result.delivery?.text, 'Second attempt');
   assert.equal(result.state.messages.some(({ id }) => id === 'prior'), true);
   assert.deepEqual(result.state.scope, messageScope(request));
-});
-
-test('retained capability history is private to the exact delegation and run after delivery', async () => {
-  const request = input();
-  const result = await createCapabilityExecutor({ models, runSubagent: async (run) => deliver(run) })(request, hostContext());
-  assert.deepEqual(queryAgentMessages(result.state.messages).main().select().messages, []);
-  assert.equal(capabilityStateMessages(result.state, messageScope(request))[0]?.text, 'Delivered');
-  for (const different of [{ delegationId: 'd2' }, { runId: 'r2' }, { taskId: 't2' }, { lane: 'capability:other' as const }]) {
-    const next = { ...messageScope(request), ...different };
-    assert.deepEqual(capabilityStateMessages(result.state, next), []);
-  }
 });
 
 test('executor returns explicit output without requiring a matching private message', async () => {
@@ -438,4 +426,19 @@ test('continuation accounts only newly committed provider usage', async () => {
   const result = await execute({ ...request, state: { scope: messageScope(request), messages: [prior] } }, hostContext());
   assert.deepEqual(result.tokenUsage, { inputTokens: 30, outputTokens: 5, totalTokens: 35 });
   assert.equal(result.state.messages.length, 2);
+});
+
+
+test('private snapshots retain completed tool pairs and discard unanswered calls', async () => {
+  const request = input();
+  const call = new AIMessage({ id: 'call', content: '', tool_calls: [{ id: 'check', name: 'check', args: {} }] });
+  const result = new ToolMessage({ id: 'result', tool_call_id: 'check', content: 'Verified' });
+  const pending = new AIMessage({ id: 'pending', content: '', tool_calls: [{ id: 'pending-call', name: 'check', args: {} }] });
+  const execute = createCapabilityExecutor({ models, runSubagent: async run => ({
+    messages: [...run.messages, call, result, pending], artifacts: [], output: null,
+  }) });
+  const output = await execute(request, hostContext());
+  assert.deepEqual(output.state.messages.map(message => message.id), ['call', 'result']);
+  assert.deepEqual(queryAgentMessages(output.state.messages).main().select().messages, []);
+  assert.equal(output.delivery, null);
 });

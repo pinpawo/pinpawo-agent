@@ -99,13 +99,12 @@ Root 的执行快照负责已经返回/暂停后的下一次委派调用，两�
 元数据，用于会话/运行总量统计；不伪装成 Root 模型响应，也不参与 Root 上下文水位判断。
 交付正文留在实际 ToolMessage；禁止为聊天显示或历史传递再造 handoff AIMessage。
 
-旧 checkpoint 迁移集中在 capabilityExecution/state：新 run 在 prepare 删除旧 Capability
-lane 消息；原生恢复若没有新字段，委派工具只提取当前 scope 的旧消息作为一次迁移输入，
-返回时移除 Root 中旧 Capability lane 消息并提交新快照。已有非空快照不回退读取旧混存历史。
-历史 checkpoint 文件不批量重写，恢复后的下一次状态提交才生效。
+不再读取或迁移 Root messages 中的旧 Capability lane 历史，也不生成 RemoveMessage
+补丁去回写私有消息。executor 直接保存本次返回的完整私有快照，移除/压缩自然反映在
+替换后的快照中。旧混存格式的 checkpoint 不兼容本次状态边界，切换版本应新建会话。
 
 验证覆盖：私有历史与工具结果分离、精确作用域、补做与暂停恢复、切换委派、新 run 清空、
-旧 checkpoint 迁移、快照序列化及子代理压缩。此次不改变 Supervisor 自身工作消息的归属：
+快照序列化及子代理压缩。此次不改变 Supervisor 自身工作消息的归属：
 它们仍是编排器本轮的私有工作 lane，Capability 不会读取。
 
 ### runSupervisorState 与 snapshot

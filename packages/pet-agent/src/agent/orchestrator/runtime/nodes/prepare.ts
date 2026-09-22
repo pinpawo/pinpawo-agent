@@ -4,7 +4,6 @@ import { getAgentMessageLane, getAgentMessageRunId, setAgentMessageMetadata } fr
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { evaluateGuard } from '../../../../guards';
 import { compactOrchestratorMessages } from '../../contextCompaction';
-import { removeLegacyCapabilityMessages } from '../../capabilityExecution/state';
 import {
   contextCompactionWatermarkGuard,
   ORCHESTRATOR_GUARD_POSITION,
@@ -24,7 +23,7 @@ export function createPrepareNode() {
     const taskId = state.taskId;
     const messages = freshMessages.map((message) =>
       setAgentMessageMetadata(new HumanMessage({ ...message }), { taskId }));
-    return new Command({ update: { messages: [...removeLegacyCapabilityMessages(state.messages), ...messages] }, goto: 'compactContext' });
+    return new Command({ update: { messages }, goto: 'compactContext' });
   };
 }
 

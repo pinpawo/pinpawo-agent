@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { messagesStateReducer } from '@langchain/langgraph';
 import { readMessagesTokenUsage } from '../../tokenUsage';
-import { capabilityStateMessages, type CapabilityExecutionState } from './state';
 import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
 import type { SubagentRunInput } from '../../../types/subagent';
-import { observeAgentMessageSelection, queryAgentMessages, reconcileDelegationMessages } from '../../messages';
+import {
+  observeAgentMessageSelection,
+  queryAgentMessages,
+  delegationMessageScopesEqual,
+  ensureAgentMessageId,
+  setAgentMessageDelegationScope,
+  toolProtocolSafeMessages,
+} from '../../messages';
 import { materializeDelegation } from '../delegation';
 import { readCapabilityExecutions } from '../executionMessages';
 import { toolProtocolMiddleware } from '../modelInvocation';
@@ -23,6 +28,7 @@ import type {
   CapabilityExecutionInput,
   CapabilityExecutionOptions,
   CapabilityExecutionResult,
+  CapabilityExecutionState,
 } from './types';
 
 /**
@@ -58,7 +64,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const toolkitList = [...input.capability.toolkits];
     const { runId } = scope;
     const delegationBriefing = materializeDelegation(delegation);
-    const privateHistory = capabilityStateMessages(input.state, scope);
+    const privateHistory = input.state && input.state.scope.taskId === scope.taskId
+      && delegationMessageScopesEqual(input.state.scope, scope) ? input.state.messages : [];
     const scopedQuery = queryAgentMessages(input.history)
       .main()
       .append(...privateHistory);
@@ -235,12 +242,17 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     }
     const resultMessages = pausedSubagentState?.messages ?? result!.messages;
     const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
-    const reconciled = reconcileDelegationMessages({
-      resultMessages,
-      inputMessages: subagentInput.messages,
-      canonicalInputMessages: canonicalSelection.messages,
-      scope,
-    });
+    // Keep the returned private transcript as a snapshot. Root history and the
+    // invocation-only briefing are input context, not private state to copy back.
+    const inputIds = new Set(subagentInput.messages.map(message => message.id));
+    const privateIds = new Set(privateHistory.map(message => message.id));
+    const privateMessages = toolProtocolSafeMessages(resultMessages.filter(message =>
+      !message.id || !inputIds.has(message.id) || privateIds.has(message.id)));
+    const added = privateMessages.filter(message => !message.id || !privateIds.has(message.id));
+    for (const message of added) {
+      ensureAgentMessageId(message);
+      setAgentMessageDelegationScope(message, scope);
+    }
     const output = result?.output ?? null;
     const delivery = output?.trim() ? {
       id: `delivery:${scope.runId}:${scope.delegationId}:${randomUUID()}`,
@@ -251,8 +263,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     return {
       status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
       delivery,
-      state: { scope, messages: messagesStateReducer(privateHistory, [...reconciled.removed, ...reconciled.added]) },
-      tokenUsage: readMessagesTokenUsage(reconciled.added),
+      state: { scope, messages: privateMessages },
+      tokenUsage: readMessagesTokenUsage(added),
       artifacts: resultArtifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };

@@ -14,7 +14,7 @@ import {
   type ToolAuthorizationRecord,
 } from '../../autoReview/reviewAuthorizations';
 import type { RunSupervisorState } from './runSupervisor/state';
-import type { CapabilityExecutionState } from './capabilityExecution/state';
+import type { CapabilityExecutionState } from './capabilityExecution/types';
 import type { CapabilityDisclosureState } from './runSupervisor/capabilityDisclosure';
 
 export type SessionToolAuthorizationState = {

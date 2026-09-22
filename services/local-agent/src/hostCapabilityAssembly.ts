@@ -39,7 +39,6 @@ import {
   findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
 } from './config/runtimeConfig';
-import { getConfig } from './config/config';
 import { resolveHostExecutionConfig, type HostExecutionConfig } from './config/hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
 import {
@@ -63,9 +62,8 @@ export type HostCapabilityAssemblyOptions = {
   /** Chat loads the global user registry; per-Pet hosts may own stricter sources. */
   loadUserCapabilities?: boolean;
   /**
-   * Whether this Host includes the local Browser runtime and its global bridge.
-   * Chat keeps the user-selected default; a Studio must opt in explicitly
-   * instead of inheriting a Chat-only process resource.
+   * Whether this Host selects the CDP Browser Toolkit. Its execution environment
+   * is owned by the shared service, independently of Chat or Studio.
    */
   includeBrowser?: boolean;
 };
@@ -140,7 +138,7 @@ export class HostCapabilityAssembly {
       createProjectInspectionToolkit(),
       createCapabilityCreatorToolkit(),
       ...(browserSelected
-        ? [createBrowserToolkit({ backend: () => getConfig().browserBackend })]
+        ? [createBrowserToolkit()]
         : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({
@@ -217,9 +215,9 @@ export class HostCapabilityAssembly {
         );
       }
     }
-    const { toolkitSources } = await loadPlugins();
+    const { toolkitSources, runtimeClients } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
-    // Validate Capability sources before starting any Toolkit Runtime roots.
+    // Validate Capability sources before connecting Runtime clients.
     // A configured name collision must fail without acquiring dynamic
     // resources or leaving a dirty Runtime manager behind.
     await this.capabilityCatalog.load();
@@ -231,7 +229,7 @@ export class HostCapabilityAssembly {
         kind: 'host_builtin',
         definitions: this.hostBuiltInToolkits,
       },
-    ]);
+    ], { clientFactories: runtimeClients });
   }
 
   getExecutionConfig(): HostExecutionConfig {

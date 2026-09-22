@@ -43,10 +43,18 @@ execution scope 读取同一个结构化值。Host 的机器和会话信息走�
 agent runtime 也不会从进程全局状态猜测目录。
 
 workdir 是路径解析基准，不是文件系统 sandbox。本地 bash、project-inspection 和 Git
-Toolkit 的绑定会将受支持的相对路径，以及相对或省略的 `cwd`，解析到执行目录下；绝对
-路径保持绝对路径。绑定不会修改进程 cwd，因此同一进程里的不同 Host 可以保持各自的
-执行范围。实现见
+Toolkit 通过 `ToolDefinition.prepareInput`，在**审核之前**将受支持的相对路径，以及
+相对或省略的 `cwd`，解析到执行目录下；绝对路径保持绝对路径。相对路径缺少绝对执行
+目录时会报错。审核和执行使用同一份准备后的输入；full-access 模式也会准备输入，
+只是不请求人工审核。Tool 对象保持静态，不需要每次执行重新绑定 Tool，也不修改
+进程 cwd。实现见
 [workdirBinding.ts](../../../../services/local-agent/src/toolkits/local/workdirBinding.ts)。
+
+Shell 和 CDP 资源由独立的本地 Runtime 服务持有。多个 Host 和 Toolkit 可以共用一个
+实例，同时为每次调用提供各自的执行范围与 cwd。服务实例由
+`~/.pinpawo/runtime/config.json`（或 `PINPAWO_RUNTIME_DIR` 指定目录）配置，与 workdir
+独立。授权复用包含 Toolkit、当前客户端连接、实例与 workdir；切换环境或目录不会
+复用旧目标的授权。契约见 [Toolkit Runtime（英文）](../../../reference/extensions/toolkit-runtime.md)。
 
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见
 [workspace proposal（英文）](../../../design/local-agent/workspace-runtime-config.md)。

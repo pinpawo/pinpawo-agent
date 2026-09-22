@@ -1,150 +1,146 @@
-# Chrome extension browser backend
+# CDP browser guide
 
-**Audience:** operators and Toolkit implementers who need the agent to use an
-existing Chrome session. For the project-level boundaries, start with
-[Architecture](../concepts/architecture.md); for installation, use
-[Getting Started](getting-started.md).
+The default `browser` Toolkit uses Chrome DevTools Protocol (CDP). Its Runtime
+runs in the shared local Runtime service; Chat and Studio use clients of that
+service. Browser operations have one execution path. Chrome Extension, Native
+Messaging, backend selection and automatic fallback have been removed.
 
-The Chrome extension backend uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). Named sessions, custom profiles and headless mode remain Playwright-only semantics.
+This guide keeps its existing URL. The former extension implementation is
+recorded in the [Browser package history](../design/toolkits/browser-package.md).
+The [Runtime design](../design/toolkits/local-execution-runtime.md) explains the
+shared process and instance boundaries.
 
-Architecturally, the extension is a driver inside the Browser Toolkit Runtime,
-not a driver of the Browser Capability and not a top-level local-agent
-subsystem. Its Native Messaging host is a private companion process of that
-Runtime. Browser Toolkit Runtime owns the bridge, its live snapshot and the
-`BrowserSession`; the generic Toolkit runtime lifecycle starts that root with
-the local-agent Host, then resolves an execution-bound Browser tool facade for
-each Capability subagent. The Browser Capability only declares
-`uses: ['browser']`. No Browser-specific branch belongs in the generic Host or
-Agent lifecycle. See the accepted
-[domain constraints](../design/host-agent-capability-toolkit.md).
+## Configure the Runtime
 
-## Fixed backend selection
+The service reads `~/.pinpawo/runtime/config.json`. `PINPAWO_RUNTIME_DIR` selects
+a different configuration directory. This example preserves the default Shell
+bindings and borrows a local Chrome CDP endpoint:
 
-Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`) to force the extension. A `BrowserSession` still selects one implementation for its lifetime. There is no dynamic router, mid-session fallback or provider abstraction.
+~~~json
+{
+  "instances": {
+    "local": { "type": "shell" },
+    "browser": {
+      "type": "cdp",
+      "endpoint": "http://127.0.0.1:9222"
+    }
+  },
+  "toolkitBindings": {
+    "bash": "local",
+    "git": "local",
+    "project-inspection": "local",
+    "browser": "browser"
+  }
+}
+~~~
 
-In `auto`, local-agent listens for the installed extension and chooses it first for compatible default-session, visible-browser operations. If no extension is connected, or the initial open explicitly requires headless, a named session or a custom profile, selection uses Playwright. Selection is still one-time for that active `BrowserSession`.
+Chrome must already expose that debugging endpoint. The endpoint may be an
+HTTP(S) or WebSocket URL on localhost, 127.0.0.1 or ::1. The Runtime creates its own
+pages; it never adopts a user's existing tab or closes the borrowed browser.
+Default-session pages share the browser's default context and may share its
+login state.
 
-Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser-specific status views consume that projection instead of independently combining Bridge booleans. Under #645, a generic Toolkit Runtime diagnostics surface will carry the same state as Browser-owned details rather than creating a Browser-only diagnostics lifecycle. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
+Alternatively, remove `endpoint` and configure a managed browser:
 
-## Process boundary
+~~~json
+{
+  "type": "cdp",
+  "executablePath": "/absolute/path/to/chrome",
+  "headless": false,
+  "userDataDir": "/absolute/path/to/dedicated-profile"
+}
+~~~
 
-```text
-local-agent Browser runtime / BrowserSession
-        │ versioned JSONL + per-run token
-        ▼
-Unix socket (~/.pinpawo/run/browser-bridge.sock)
-        │
-        ▼
-independent Native Messaging host (stdio framing only)
-        │ chrome.runtime.connectNative
-        ▼
-MV3 service worker ── chrome.debugger / allowlisted CDP ── one Chrome tab
-```
+This object replaces the `instances.browser` entry in the full configuration.
+The Runtime starts Chrome with a local debugging port and connects using CDP.
+The executable is optional when Chrome is installed at a supported platform
+location. An omitted `userDataDir` uses a temporary profile, removed on shutdown;
+an explicit profile remains on disk. Avoid using a profile that another Chrome
+process already has open.
 
-The local-agent owns commands, deadlines, authorization context and final payload normalization. The native host only translates Chrome's length-prefixed messages to authenticated Unix-socket JSONL. The extension owns tab binding and the narrow CDP execution allowlist.
+`endpoint` cannot be combined with `executablePath`, `userDataDir` or `headless`.
+Paths must be absolute, `headless` must be boolean, and optional `env` values must
+be strings. If omitted, env uses the service's startup snapshot; an empty object
+inherits nothing. Invalid configuration fails explicitly.
 
-Only one native-host/extension connection is active. Once an extension is active, additional native-host connections are rejected until it disconnects; this prevents an unpacked development extension and the Web Store extension from displacing each other. A service-worker reconnection for the active extension replaces its old `connectionId` and rejects its pending requests; commands are never replayed across a connection change. Both the extension and Native Host use bounded exponential reconnect backoff with jitter, resetting only after a stable connection; extension diagnostics preserve Chrome's disconnect reason when available. If the local-agent bridge restarts while the native host remains alive, the host drops results and lifecycle events from the disconnected bridge epoch and replays only the latest extension registration so the new bridge can recover safely. Current registrations carry a complete target/debugger state snapshot with a connection-scoped monotonic revision; the bridge ignores duplicate or older revisions. Registrations without that snapshot remain readable for compatibility with an older installed extension.
+Host startup ensures the shared service is running. Operators can also use:
 
-## Snapshot contract
+~~~bash
+pinpawo runtime start
+pinpawo runtime status
+pinpawo runtime stop
+~~~
 
-The extension returns a bounded, backend-level raw snapshot. `parseBrowserRawSnapshot()` validates it before `buildBrowserSnapshotPayload()` creates the agent-facing payload.
+Configuration changes require an explicit service restart and fresh Host
+connections. Stopping the service affects all attached Hosts. Closing one Host
+releases only its pages and resources; it does not stop the shared service.
 
-The raw and final contracts are intentionally separate:
+## Use browser tools
 
-- Raw extension text is UTF-8 bounded for IPC and includes `textLength` for the full source length.
-- Raw interactive elements are capped at 200 and may include CDP `backendNodeId` metadata.
-- Runtime snapshots assign opaque element `ref` values backed by a page-local registry; accessibility fallback refs use CDP backend node IDs.
-- The shared final builder caps previews at 50,000 characters and 20 interactive elements.
-- The builder normalizes each hint to include its stable `[index]` prefix.
-- `Runtime.evaluate` is primary. `Accessibility.getFullAXTree` is the fallback when runtime evaluation is unavailable.
+Open an explicitly reviewed HTTP(S) URL with `browser_open`, then use snapshot,
+click, type, scroll, wait, extract and screenshot as needed. There is no arbitrary
+CDP-command tool.
 
-These builders are a reusable normalization boundary, not a frozen cross-backend schema. New backend fields must be runtime-validated and covered by compatibility tests before being exposed in the final payload.
+- Snapshot previews contain at most 50,000 text characters and 20 interactive
+  elements. When `hasMore` is true, use `browser_extract` with successive offsets
+  and limits until all required content has been read.
+- Click, type and wait accept a CSS/text selector or the latest snapshot's opaque
+  `ref`. Refs expire after a new snapshot or navigation. A stale ref requires a
+  fresh snapshot.
+- Wait supports visible and hidden conditions. Cancelled operations close the
+  affected session's owned pages; dispatched interactions are not replayed.
+- A popup opened by the active page becomes the active target. When it closes,
+  the Runtime returns to its live parent.
+- Named sessions use separate browser contexts within the current Host
+  connection and thread. They are not Chrome profile names and do not recover
+  across a disconnected Host.
+- Tool-level `headless` and `userDataDir` requirements must match a managed
+  Runtime's configuration. A borrowed browser cannot change these startup
+  settings. Configure the intended instance before opening it.
 
-## P1 interaction contract
+Client, Toolkit and thread identify a session. Two Hosts with the same thread
+string cannot access each other's pages, even when they share one Runtime
+instance. This resource isolation does not isolate login state in a shared
+default browser context.
 
-- `browser_click`, `browser_type` and selector-based `browser_wait` accept either the opaque `ref` from the latest snapshot or a CSS / `text=...` selector. Prefer `ref`; take a new snapshot after `stale_element_reference`.
-- Click activates the bound target inside the extension, then sends mouse move, hover delay, press and release through CDP `Input.dispatchMouseEvent`. This keeps trusted pointer input reliable if the user switched tabs after binding.
-- Type focuses through the trusted click path and selects existing text with a CDP editing command. Normal input uses per-character `Input.dispatchKeyEvent` sequences; large input uses bounded `Input.insertText` chunks so the public `browser_type` contract does not gain a backend-specific length limit.
-- Scroll uses `Input.dispatchMouseEvent` with `mouseWheel`; it can be targeted at an element or use the page viewport.
-- Wait supports backend-neutral `visible` and `hidden` target conditions. Extension selector waits poll within the caller deadline; stale refs remain explicit except that a detached stale ref already satisfies `hidden`.
-- Extract slices text inside the page before IPC and local-agent validates and builds the final chunk metadata.
-- Screenshot captures the exact attached viewport through allowlisted CDP, retries with bounded JPEG quality, then local-agent stores the image under `.pinpawo/browser/screenshots/` with mode `0600`.
+## Origin checks and browser data
 
-## Security and tab binding
+An explicit open establishes the approved origin. Cross-origin redirects and
+popups cannot be read, screenshotted or operated until their URL is opened
+explicitly for review. A cross-origin popup can be completed manually in a
+visible browser, or closed to return to the approved page. Errors indicate when
+an interaction may already have been dispatched; do not blindly repeat it.
+Pending locator actions are cancelled if their owned page navigates to an
+unapproved origin.
 
-- The extension requests `debugger`, `nativeMessaging`, `storage` and `tabs`; it has no broad host permission.
-- `browser_open` creates an agent-owned tab if none is bound.
-- Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. This Browser-only binding is unrelated to delegation execution ownership.
-- Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
-- Tool cancellation propagates through the Browser session and local bridge as a connection-scoped `browser.cancel` message. The extension observes cancellation before a queued command begins and at bounded wait/type/action safe points; it does not undo an input event that Chrome has already dispatched, and cancelled commands are never retried or replayed. Take a fresh snapshot before deciding what, if anything, needs to happen next.
-- A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
-- Same-origin popups remain fully readable and interactive. A cross-origin popup is followed only for lifecycle recovery: its content, screenshots and trusted input remain blocked, and the user must complete that step manually in visible Chrome. After the popup closes or returns to the previously approved origin, the agent can take a new snapshot and continue.
-- Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
-- Each navigation carries an origin already authorized by the local-agent review policy.
-- Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
-- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
-- The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
-- Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
-- Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.
+Snapshots and text extraction read visible page content. Screenshots may contain
+anything visible in the viewport. These results become part of the Agent
+conversation and may be sent to the configured model provider. Screenshots are
+stored under the execution workdir's `.pinpawo/browser/screenshots/` with private
+file permissions, then removed when the owning session is released. Conversation
+retention follows the Host's existing configuration.
 
-## Build and install
+CDP disconnection invalidates page handles. It does not trigger backend fallback,
+transparent reconnection or replay. Runtime diagnostics distinguish borrowed and
+managed ownership and report connection state. Unconfirmed cleanup is reported
+as an error.
 
-```bash
-npm run build
-npm run test:browser-smoke -w pinpawo
-npm run test:browser-extension-smoke -w pinpawo
-```
+## Verify the installation
 
-Both smoke tests use the same loopback-only fixture: delayed SPA-style content,
-long-content extraction in consecutive chunks, opaque-ref form type/click, scrolling,
-and parent page → popup → parent fallback. The first runs headless with Playwright;
-the extension smoke requires the unpacked extension and registered Native Host in the
-user’s Chrome. The extension smoke also verifies the cross-origin popup safety path:
-the dispatched click reports manual takeover without exposing its URL path, then the
-fixture closes the popup so the agent can recover the original page, and restarts the
-local bridge to verify re-authentication and target recovery. It is the baseline
-regression set, not evidence that iframe, dialogs, file transfer, or shadow-DOM support
-is complete.
+~~~bash
+npm run typecheck --workspace @pinpawo-toolkit/browser
+npm test --workspace @pinpawo-toolkit/browser
+npm run test:cdp --workspace @pinpawo-toolkit/browser
+~~~
 
-Each smoke ends with one URL-free `[browser-evaluation]` JSON record. It includes the
-driver, scenario, overall status, first-pass and recovery outcomes, per-phase duration,
-and a stable final error code/category when a phase fails. Categories cover
-snapshot/content, ref/selector, frame/shadow, stability/wait, target lifecycle,
-origin/manual takeover, dialog, file transfer, and bridge lifecycle. Keep these records
-with CI or manual run output when deciding whether a repeated failure should become a
-focused Browser issue; they are not product telemetry and do not persist page content
-or URLs.
+The CDP test starts temporary headless Chrome profiles and loopback-only HTTP
+fixtures. It checks real CDP connection, borrowed/managed cleanup, separate
+clients, named-context storage isolation, refs, popups, origin enforcement,
+bounded extraction, screenshots and cancellation. Chrome must be installed;
+unit tests alone do not establish browser support.
 
-Then:
-
-1. Open `chrome://extensions` and enable Developer mode.
-2. Load `toolkits/browser/dist/hosts/chrome-extension/extension` as an unpacked extension. For an installed npm package, use the `bundledExtensionPath` printed by `pinpawo browser extension status`.
-3. Copy the extension ID shown by Chrome.
-4. Register the exact allowed extension origin:
-
-   ```bash
-   pinpawo browser extension register --extension-id <id>
-   ```
-
-5. Restart the agent. `auto` uses the connected extension first; set `PINPAWO_BROWSER_BACKEND=extension` when you want to require it.
-
-Inspect host registration and bridge runtime-file diagnostics with:
-
-```bash
-pinpawo browser extension status
-```
-
-The `host.healthy` field verifies the Native Messaging wrapper is executable, its
-entry exists, and at least one installed manifest points at that wrapper with an
-allowed extension ID. If `host.repairRecommended` is true, repair the registration
-and restart the local agent:
-
-```bash
-pinpawo browser extension repair
-```
-
-`/health` only reports local-agent service health; it does not expose Browser-specific fields. Use `pinpawo browser extension status` for installed-host details. The accepted #645 target reports all Toolkit runtimes through one common diagnostics contract rather than adding Browser fields back to `/health`; this command may project Browser-owned details from that source but must not become a second lifecycle. Remove registration with `pinpawo browser extension unregister`.
-
-## Attribution
-
-The Native Messaging/extension architecture and selected registration patterns were adapted with reference to [`hangwin/mcp-chrome`](https://github.com/hangwin/mcp-chrome). The upstream project is MIT licensed; its notice is retained in `toolkits/browser/src/hosts/chromeExtension/extension/THIRD_PARTY_NOTICES.md`.
+Implementation and evidence:
+[CDP connection](../../toolkits/browser/src/connection.ts),
+[Runtime ownership](../../toolkits/browser/src/runtime.ts),
+[page operations](../../toolkits/browser/src/session.ts),
+[real Chrome tests](../../toolkits/browser/src/cdp.integration.test.ts).

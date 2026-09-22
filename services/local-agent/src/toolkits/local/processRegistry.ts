@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
-import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
+import type { ShellRunHandle } from './processExecutor';
 
 /**
  * Session-lifetime registry for shell processes that outlive the tool call
@@ -11,10 +11,9 @@ import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
  * the model can wait on it, read from it, or terminate it later, and so host
  * shutdown can clean up whatever is still running.
  *
- * Ownership follows the Toolkit runtime lifecycle (#543): processes live on
- * the runtime root, not on a per-execution binding, so releasing an execution
- * does not kill its long-running work. Access is still scoped — only the
- * execution that started a process may operate on it.
+ * One service-owned Shell environment holds the registry. Access includes
+ * client, Toolkit and execution identity; ending a Tool call does not kill
+ * yielded work, while disconnecting its client does.
  */
 
 export type ManagedProcessStatus =
@@ -24,15 +23,14 @@ export type ManagedProcessStatus =
 
 export type ManagedProcessOwner = Pick<
   ToolkitRuntimeExecutionScope,
-  'threadId' | 'runId' | 'delegationId'
->;
+  'threadId' | 'taskId' | 'runId' | 'delegationId'
+> & { clientId: string; toolkitName: string };
 
 export type ManagedProcess = {
   processId: string;
   owner: ManagedProcessOwner;
   command: string;
   cwd: string;
-  pid: number;
   startedAt: number;
   status: ManagedProcessStatus;
   exitCode: number | null;
@@ -40,15 +38,6 @@ export type ManagedProcess = {
 };
 
 export type ProcessSnapshot = Omit<ManagedProcess, never>;
-
-/**
- * What a tool needs to reach the registry on behalf of one execution: the
- * shared registry, plus the identity that scopes access to it.
- */
-export type ShellProcessBinding = {
-  registry: ProcessRegistry;
-  owner: ManagedProcessOwner;
-};
 
 export type DrainResult = {
   process: ProcessSnapshot;
@@ -80,16 +69,11 @@ export const MAX_ACTIVE_PROCESSES = 16;
 /** How long a finished process stays readable before it is reaped. */
 export const EXITED_PROCESS_TTL_MS = 5 * 60_000;
 
-/**
- * Grace given to an orphaned group at shutdown.
- *
- * Short on purpose: nothing is waiting on these, and shutdown should not stall
- * on a group that ignores a graceful signal.
- */
-const ORPHAN_GROUP_KILL_GRACE_MS = 1_000;
-
 function sameOwner(left: ManagedProcessOwner, right: ManagedProcessOwner) {
-  return left.threadId === right.threadId
+  return left.clientId === right.clientId
+    && left.toolkitName === right.toolkitName
+    && left.threadId === right.threadId
+    && left.taskId === right.taskId
     && left.runId === right.runId
     && left.delegationId === right.delegationId;
 }
@@ -100,6 +84,8 @@ type Entry = {
   /** Output not yet drained by the owner. */
   pendingStdout: string;
   pendingStderr: string;
+  omittedStdout: number;
+  omittedStderr: number;
   unsubscribe: () => void;
   /**
    * Serializes drain, terminate and exit bookkeeping for one process.
@@ -113,36 +99,8 @@ type Entry = {
 export class ProcessRegistry {
   private readonly entries = new Map<string, Entry>();
 
-  /** Process groups that outlived their command, kept only for cleanup. */
-  private readonly orphanGroups = new Set<number>();
-
-  /**
-   * How this registry reaches the OS.
-   *
-   * Ownership, quota, buffering and lifetime are the same everywhere, so the
-   * registry never signals a process itself; it asks the executor to.
-   *
-   * Required rather than defaulted on purpose: defaulting would let a caller
-   * pick up POSIX behaviour without meaning to, and the registry is precisely
-   * the layer that should not know which platform it is on. `ShellRuntime`
-   * makes that choice once, for everyone.
-   */
-  constructor(private readonly executor: ProcessExecutor) {}
-
   get size() {
     return this.entries.size;
-  }
-
-  /**
-   * How commands are run and signalled on this platform.
-   *
-   * Exposed so a tool that starts processes (`run_shell`) goes through the
-   * same executor the registry will later use to terminate them; running
-   * through one implementation and killing through another is exactly the
-   * mismatch the interface exists to prevent.
-   */
-  get processExecutor(): ProcessExecutor {
-    return this.executor;
   }
 
   /**
@@ -186,7 +144,6 @@ export class ProcessRegistry {
       owner: params.owner,
       command: params.command,
       cwd: params.cwd,
-      pid: params.handle.pid,
       startedAt: Date.now(),
       status: alreadyExited ? 'exited' : 'running',
       exitCode: null,
@@ -200,12 +157,22 @@ export class ProcessRegistry {
       // unless the caller has already shown it.
       pendingStdout: params.outputAlreadyDelivered ? '' : params.handle.stdout,
       pendingStderr: params.outputAlreadyDelivered ? '' : params.handle.stderr,
+      omittedStdout: 0,
+      omittedStderr: 0,
       unsubscribe: () => undefined,
       lock: Promise.resolve(),
     };
     entry.unsubscribe = params.handle.onOutput((stream, chunk) => {
-      if (stream === 'stdout') entry.pendingStdout += chunk;
-      else entry.pendingStderr += chunk;
+      const limit = 4 * 1024 * 1024;
+      if (stream === 'stdout') {
+        const kept = chunk.slice(0, Math.max(0, limit - entry.pendingStdout.length));
+        entry.pendingStdout += kept;
+        entry.omittedStdout += chunk.length - kept.length;
+      } else {
+        const kept = chunk.slice(0, Math.max(0, limit - entry.pendingStderr.length));
+        entry.pendingStderr += kept;
+        entry.omittedStderr += chunk.length - kept.length;
+      }
     });
     this.entries.set(processId, entry);
 
@@ -218,24 +185,9 @@ export class ProcessRegistry {
         record.exitedAt = Date.now();
         entry.unsubscribe();
       });
-    });
+    }, () => { entry.unsubscribe(); });
 
     return { ...record };
-  }
-
-  /**
-   * Remember a process group that survived its command so shutdown can still
-   * clean it up.
-   *
-   * A command may exit successfully having left work behind — `npm run dev &`
-   * is the ordinary case. Those children stay in the original group even
-   * though its leader is gone, so the group id remains a precise handle on
-   * exactly what that command started.
-   */
-  trackOrphanGroup(pid: number) {
-    if (!this.executor.isGroupAlive(pid)) return false;
-    this.orphanGroups.add(pid);
-    return true;
   }
 
   list(owner: ManagedProcessOwner): ProcessSnapshot[] {
@@ -254,10 +206,12 @@ export class ProcessRegistry {
   async drain(processId: string, owner: ManagedProcessOwner): Promise<DrainResult> {
     const entry = this.require(processId, owner);
     return await this.withLock(entry, () => {
-      const stdout = entry.pendingStdout;
-      const stderr = entry.pendingStderr;
+      const stdout = entry.pendingStdout + (entry.omittedStdout ? `\n[truncated ${entry.omittedStdout} chars]` : '');
+      const stderr = entry.pendingStderr + (entry.omittedStderr ? `\n[truncated ${entry.omittedStderr} chars]` : '');
       entry.pendingStdout = '';
       entry.pendingStderr = '';
+      entry.omittedStdout = 0;
+      entry.omittedStderr = 0;
       return { process: { ...entry.record }, stdout, stderr };
     });
   }
@@ -267,18 +221,27 @@ export class ProcessRegistry {
     processId: string,
     owner: ManagedProcessOwner,
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<DrainResult> {
     const entry = this.require(processId, owner);
     if (entry.record.status === 'running') {
       let timer: NodeJS.Timeout | undefined;
-      await Promise.race([
+      let abort: (() => void) | undefined;
+      if (signal?.aborted) throw Object.assign(new Error('Process wait aborted'), { name: 'AbortError' });
+      try { await Promise.race([
         entry.handle.wait(),
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, timeoutMs);
           timer.unref?.();
         }),
-      ]);
-      if (timer) clearTimeout(timer);
+        new Promise<never>((_resolve, reject) => {
+          abort = () => reject(Object.assign(new Error('Process wait aborted'), { name: 'AbortError' }));
+          signal?.addEventListener('abort', abort, { once: true });
+        }),
+      ]); } finally {
+        if (timer) clearTimeout(timer);
+        if (abort) signal?.removeEventListener('abort', abort);
+      }
     }
     return await this.drain(processId, owner);
   }
@@ -291,9 +254,9 @@ export class ProcessRegistry {
     const entry = this.require(processId, owner);
     return await this.withLock(entry, async () => {
       if (entry.record.status === 'running') {
-        entry.record.status = 'terminated';
         entry.handle.terminate(killGraceMs);
         await entry.handle.wait();
+        entry.record.status = 'terminated';
         entry.record.exitedAt = Date.now();
       }
       return { ...entry.record };
@@ -303,31 +266,31 @@ export class ProcessRegistry {
   /**
    * Terminate everything this registry knows about.
    *
-   * Called from the Toolkit runtime's `stop`, so host shutdown does not strand
-   * processes started on its behalf.
+   * Called when the service shuts down its environment.
    */
   async stopAll(killGraceMs?: number) {
+    await this.stopMatching(() => true, killGraceMs);
+  }
+
+  async stopClient(clientId: string, killGraceMs?: number) {
+    await this.stopMatching((owner) => owner.clientId === clientId, killGraceMs);
+  }
+
+  private async stopMatching(matches: (owner: ManagedProcessOwner) => boolean, killGraceMs?: number) {
     const running = [...this.entries.values()]
-      .filter((entry) => entry.record.status === 'running');
+      .filter((entry) => matches(entry.record.owner) && entry.record.status === 'running');
     await Promise.all(running.map(async (entry) => {
-      entry.record.status = 'terminated';
       entry.handle.terminate(killGraceMs);
       await entry.handle.wait();
+      entry.record.status = 'terminated';
       entry.record.exitedAt = Date.now();
     }));
-    for (const entry of this.entries.values()) entry.unsubscribe();
-    this.entries.clear();
-
-    for (const pid of this.orphanGroups) {
-      // Unlike a managed process, nothing here has been holding this group
-      // open, so its id could since have been recycled by an unrelated
-      // process. Only signal a group that is still alive, and accept that the
-      // check is advisory — this narrows the window rather than closing it.
-      if (this.executor.isGroupAlive(pid)) {
-        this.executor.terminateGroup(pid, ORPHAN_GROUP_KILL_GRACE_MS);
-      }
+    for (const [id, entry] of this.entries) {
+      if (!matches(entry.record.owner)) continue;
+      entry.unsubscribe();
+      this.entries.delete(id);
     }
-    this.orphanGroups.clear();
+
   }
 
   private require(processId: string, owner: ManagedProcessOwner): Entry {

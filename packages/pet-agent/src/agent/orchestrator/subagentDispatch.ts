@@ -91,10 +91,12 @@ export async function resolveToolkitExecution(
 
   const tools: StructuredTool[] = [];
   const reviewBindings: ToolkitReviewBinding[] = [];
+  const toolBindings: Array<{ toolkit: AgentToolkit; definition: AgentToolkit['tools'][number] }> = [];
   for (const toolkit of selectedToolkits) {
     const boundDefinitions = toolkit.tools.filter((definition) => (
       supportsInputModalities(definition.requiresInputModalities, ctx.modelInputModalities)
     ));
+    toolBindings.push(...boundDefinitions.map(definition => ({ toolkit, definition })));
     const toolkitTools = boundDefinitions.map((definition) => definition.tool);
     tools.push(...toolkitTools);
     if (ctx.globalReviewPolicy?.mode !== GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS) {
@@ -111,7 +113,7 @@ export async function resolveToolkitExecution(
       }
     }
   }
-  const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx);
+  const reviewMiddleware = createToolkitReviewMiddleware(reviewBindings, ctx, toolBindings);
 
   return {
     toolkits: selectedToolkits,

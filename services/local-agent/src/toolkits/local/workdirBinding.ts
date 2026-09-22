@@ -1,5 +1,4 @@
 import { isAbsolute, resolve } from 'node:path';
-import type { NamedStructuredTool } from '@pinpawo/pet-agent';
 import { parsePatch } from './applyPatch';
 
 const SINGLE_PATH_TOOLS = new Set([
@@ -15,12 +14,15 @@ const SINGLE_PATH_TOOLS = new Set([
 
 const SEARCH_TOOLS = new Set(['glob_search', 'grep_search']);
 
-function resolveFromWorkdir(path: unknown, workdir: string) {
-  if (typeof path !== 'string' || !path.trim()) return path;
-  return isAbsolute(path) ? path : resolve(workdir, path);
+function resolveFromWorkdir(path: unknown, workdir: string | null | undefined) {
+  if (typeof path !== 'string') return path;
+  if (path.length === 0) throw new Error('A file path must not be empty.');
+  if (isAbsolute(path)) return path;
+  if (!workdir || !isAbsolute(workdir)) throw new Error('This operation requires an absolute execution workdir.');
+  return resolve(workdir, path);
 }
 
-function bindPatchToWorkdir(patch: unknown, workdir: string) {
+function bindPatchToWorkdir(patch: unknown, workdir: string | null | undefined) {
   if (typeof patch !== 'string') return patch;
   let update: ReturnType<typeof parsePatch>;
   try {
@@ -30,15 +32,20 @@ function bindPatchToWorkdir(patch: unknown, workdir: string) {
     return patch;
   }
   if (isAbsolute(update.path)) return patch;
-  const target = resolve(workdir, update.path);
+  const target = resolveFromWorkdir(update.path, workdir);
   return patch.replace(
     /^(\*\*\* Update File: ).+$/m,
     (_line, prefix: string) => `${prefix}${target}`,
   );
 }
 
-function bindInput(toolName: string, input: unknown, workdir: string) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+/** Resolve paths before review; this function never wraps or reconstructs a Tool. */
+export function prepareLocalToolInput(
+  toolName: string,
+  input: unknown,
+  workdir: string | null | undefined,
+): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Tool input must be an object.');
   const record = input as Record<string, unknown>;
 
   if (SINGLE_PATH_TOOLS.has(toolName)) {
@@ -57,38 +64,10 @@ function bindInput(toolName: string, input: unknown, workdir: string) {
   if (toolName === 'apply_patch') {
     return { ...record, patch: bindPatchToWorkdir(record.patch, workdir) };
   }
-  if (toolName === 'run_shell' || toolName.startsWith('git_') || toolName.startsWith('gh_')) {
-    return { ...record, cwd: resolveFromWorkdir(record.cwd ?? '.', workdir) };
+  if (toolName === 'run_shell' || toolName === 'inspect_shell' || toolName.startsWith('git_') || toolName.startsWith('gh_')) {
+    return { ...record, cwd: resolveFromWorkdir(
+      typeof record.cwd === 'string' && record.cwd.trim() ? record.cwd : '.', workdir,
+    ) };
   }
-  return input;
-}
-
-/**
- * Bind relative local-tool inputs to one Agent execution's workdir.
- *
- * A Host can run beside other Hosts in the same process, so changing the
- * process-wide cwd is not a valid way to establish Agent file scope. The
- * Toolkit runtime already receives that scope; this adapter applies it only
- * while selecting the concrete inputs for one execution.
- */
-export function bindToolToExecutionWorkdir(
-  tool: NamedStructuredTool,
-  workdir: string | null,
-): NamedStructuredTool {
-  if (!workdir) return tool;
-  const call = Reflect.get(tool as object, '_call', tool);
-  if (typeof call !== 'function') return tool;
-
-  return new Proxy(tool, {
-    get(target, property, receiver) {
-      if (property === '_call') {
-        return (input: unknown, ...args: unknown[]) => call.call(
-          tool,
-          bindInput(tool.name, input, workdir),
-          ...args,
-        );
-      }
-      return Reflect.get(target, property, receiver);
-    },
-  });
+  return record;
 }

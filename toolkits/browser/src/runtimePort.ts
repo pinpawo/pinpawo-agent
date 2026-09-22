@@ -9,6 +9,9 @@ import type {
 export type BrowserRuntimeCallContext = Readonly<{
   threadId: string;
   workdir: string;
+  taskId?: string;
+  runId?: string;
+  delegationId?: string;
   signal?: AbortSignal;
 }>;
 
@@ -16,7 +19,7 @@ export type BrowserRuntimeCallContext = Readonly<{
  * Browser operations visible to Tool implementations.
  *
  * The port accepts generic invocation context on every call. Session lookup,
- * ownership, backend selection, and resource lifecycle remain Browser Runtime
+ * ownership and resource lifecycle remain Browser Runtime
  * implementation details.
  */
 export type BrowserRuntimePort = {
@@ -61,7 +64,7 @@ export type BrowserRuntimePort = {
   listSessions(context: BrowserRuntimeCallContext): Promise<string[]>;
 };
 
-const BROWSER_RUNTIME_METHODS = [
+export const BROWSER_RUNTIME_METHODS = [
   'open',
   'openWithProfile',
   'snapshot',

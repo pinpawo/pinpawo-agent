@@ -302,3 +302,22 @@ test('compiled registry snapshots authorization policy functions for its generat
   assert.ok(Object.isFrozen(compiledMatcherReview?.authorization));
   assert.ok(Object.isFrozen(compiledAuthorizeReview));
 });
+
+
+test('input preparation is snapshotted and participates in authorization generation', () => {
+  const original = (input: unknown) => input;
+  const toolkit = {
+    name: 'local', description: 'Local', runtime: 'shell',
+    tools: [{ tool: mockTool('act'), prepareInput: original,
+      review: ReviewPolicies.commandExecution({ authorization: 'exact' }),
+    }],
+  };
+  const build = () => compileAgentRegistry({ toolkits: [toolkit], capabilities: [capability('general', ['local'])] });
+  const first = build();
+  toolkit.tools[0].prepareInput = () => ({ target: '/changed' });
+  const second = build();
+  assert.strictEqual(first.toolkits[0].tools[0].prepareInput, original);
+  assert.notEqual(first.authorizationGeneration, second.authorizationGeneration);
+  toolkit.runtime = 'other';
+  assert.notEqual(second.authorizationGeneration, build().authorizationGeneration);
+});

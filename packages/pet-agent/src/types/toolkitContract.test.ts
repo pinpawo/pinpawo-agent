@@ -122,15 +122,15 @@ test('toolkit registration rejects malformed static contract fields', () => {
 
   assert.throws(
     () => validateToolkitDefinition({
-      name: 'invalid_runtime_diagnostic',
-      description: 'Runtime diagnostic hooks must be callable.',
+      name: 'invalid_runtime_lifecycle',
+      description: 'Runtime dependencies name a capability rather than defining Host lifecycle hooks.',
       tools: [{ tool: alphaTool }],
       runtime: {
         start: () => ({}),
         diagnose: 'not callable',
       },
     } as never),
-    /runtime\.diagnose must be a function/,
+    /runtime must name a capability interface/,
   );
 
   assert.throws(

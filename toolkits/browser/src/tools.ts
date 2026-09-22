@@ -52,6 +52,9 @@ function resolveBrowserCall(runtime: BrowserToolRuntime): {
     context: {
       threadId: scope.threadId,
       workdir: scope.workdir,
+      ...(scope.taskId ? { taskId: scope.taskId } : {}),
+      ...(scope.runId ? { runId: scope.runId } : {}),
+      ...(scope.delegationId ? { delegationId: scope.delegationId } : {}),
       ...(runtime.signal ? { signal: runtime.signal } : {}),
     },
   };
@@ -79,14 +82,14 @@ const browserOpenTool = tool(
     description:
       '用默认浏览器会话打开一个网页 URL，返回页面标题、文本预览、截断元数据和可交互元素。\n' +
       '- 如果返回 truncated/hasMore=true，先用 browser_extract({ offset, limit }) 分块读取全文，再总结或判断页面内容。\n' +
-      '- headless: 默认 false（显示浏览器窗口）。需要登录或处理验证码时保持 false，让用户可以手动操作；纯抓取时可设为 true。\n' +
+      '- headless: 省略时采用 Runtime 配置；显式值必须与受管浏览器的配置一致，已连接的浏览器不能修改启动模式。\n' +
       '- session 固定使用 default；不要根据 URL、网站名或任务名创建特殊 session。',
     schema: z.object({
       url: z.string().url().describe('要打开的网页 URL'),
       headless: z
         .boolean()
         .optional()
-        .describe('是否无头模式。默认 false（显示窗口）。需要用户交互（登录/验证码）时保持 false'),
+        .describe('可选的无头模式要求；必须与受管 Runtime 配置一致，借用浏览器不支持此参数'),
     }),
   },
 );
@@ -124,7 +127,7 @@ const browserOpenWithSessionTool = tool(
       headless: z
         .boolean()
         .optional()
-        .describe('是否无头模式。默认 false（显示窗口）。需要用户交互（登录/验证码）时保持 false'),
+        .describe('可选的无头模式要求；必须与受管 Runtime 配置一致，借用浏览器不支持此参数'),
     }),
   },
 );
@@ -152,8 +155,8 @@ const browserOpenWithProfileTool = tool(
       '用显式指定的本机浏览器 profile 打开网页，返回页面标题、文本预览、截断元数据和可交互元素。\n' +
       '- 如果返回 truncated/hasMore=true，先用 browser_extract({ offset, limit }) 分块读取全文，再总结或判断页面内容。\n' +
       '- userDataDir: 本机 Chrome/Chromium 的 user-data-dir 目录，等价于 Chrome 的 --user-data-dir 参数；模型必须填写用户提供或已经确认过的本地目录。\n' +
-      '- 这会直接使用该目录作为持久化浏览器上下文。若目录正被 Chrome 或其他 browser session 使用，可能因为 profile lock / ProcessSingleton 打不开；此时需要用户关闭占用的浏览器，或先复制 profile 到临时目录再使用。\n' +
-      '- headless: 默认 false（显示浏览器窗口）。需要登录、验证码或人工操作时保持 false。',
+      '- 目录必须与受管 CDP Runtime 的 userDataDir 配置一致；工具不能切换已启动浏览器的 profile，借用浏览器不支持此参数。\n' +
+      '- headless 省略时采用 Runtime 配置，显式值必须与该配置一致。',
     schema: z.object({
       url: z.string().url().describe('要打开的网页 URL'),
       userDataDir: z
@@ -403,9 +406,9 @@ const browserSessionTool = tool(
         const { browser, context } = resolveBrowserCall(runtime);
         const sessions = await browser.listSessions(context);
         if (sessions.length === 0) {
-          return '暂无已保存的浏览器会话。browser_open 默认使用 default；明确传入 session 时会创建对应会话。';
+          return '当前连接尚无浏览器会话。browser_open 使用 default；明确传入 session 时创建独立会话。';
         }
-        return `已保存的浏览器会话：\n${sessions.map((s) => `  - ${s}`).join('\n')}`;
+        return `当前连接的浏览器会话：\n${sessions.map((s) => `  - ${s}`).join('\n')}`;
       }
 
       return formatBrowserToolError({
@@ -421,7 +424,7 @@ const browserSessionTool = tool(
     name: 'browser_session',
     description:
       '管理浏览器会话（登录状态）。\n' +
-      '- list: 列出所有已保存的浏览器会话。\n' +
+      '- list: 列出当前 Host 连接与 thread 的浏览器会话；命名会话不跨连接恢复。\n' +
       'browser_open 省略 session 时使用 default；明确传入 session 时使用对应的独立登录状态。',
     schema: z.object({
       action: z.enum(['list']).describe('"list" 列出已有浏览器会话'),

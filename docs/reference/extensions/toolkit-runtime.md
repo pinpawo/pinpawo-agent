@@ -1,118 +1,103 @@
-# Toolkit 可选 Runtime 生命周期
+# Toolkit Runtime 客户端契约
 
-## 状态
+## 状态与范围
 
-当前实现契约（#543）。公共类型位于
-[`packages/pet-agent/src/types/toolkit.ts`](../../../packages/pet-agent/src/types/toolkit.ts)，
-协调器位于
-[`packages/pet-agent/src/agent/orchestrator/toolkitRuntime.ts`](../../../packages/pet-agent/src/agent/orchestrator/toolkitRuntime.ts)。
+当前工作树的实现契约（[#848](https://github.com/pinpawo/pinpawo-agent/issues/848)）。
+它替代 #543/#645 中 Host 持有 root、逐执行 resolve/bindTools/release 的接口。
+整体部署与联合验收仍由 [Runtime 重构草案](../../design/toolkits/local-execution-runtime.md)
+跟踪，该草案保持 Draft。
 
-## 目标与边界
+公共类型见 [toolkit.ts](../../../packages/pet-agent/src/types/toolkit.ts)，
+客户端注入见 [ToolkitRuntimeManager](../../../packages/pet-agent/src/agent/orchestrator/toolkitRuntime.ts)。
+框架只认识 Toolkit 名、所需能力接口与通用执行身份，不实现 shell、CDP 或平台进程管理。
 
-Toolkit 可以有可选 runtime：例如 Browser Runtime 持有桥接连接和浏览器 session；
-未来 Bash 或第三方登录服务也可以持有自己的 host 绑定。runtime 是 Toolkit 的
-实现细节，不是 local-agent 的一级概念，也不是新的 Capability 或 backend router。
+## 定义与实例
 
-框架只认识 Toolkit 名、opaque root/binding 和通用执行身份：`threadId`、`runId`、
-`delegationId`、`workdir`、`AbortSignal`。它不认识 browser、session、profile、
-backend、cookie 或登录协议。
+`AgentToolkit.runtime?: string` 声明所需的异步能力接口，例如 `shell`、`cdp` 或扩展接口名。
+不需要执行环境的 Toolkit 省略该字段。该字段不接受生命周期 hooks。
 
-Toolkit Runtime 属于 Toolkit 领域，不是与 Host、Agent、Capability、Toolkit
-平级的第五个概念。完整领域关系见
-[领域关系与装配约束](../../design/host-agent-capability-toolkit.md)。
+Runtime 实例是具体执行环境。Shell 实例是一套配置好的 shell/CLI 执行环境，不要求
+一个常驻 shell 进程；多个 Toolkit 可以共享同一实例，也可绑定不同实例。git 与 bash
+复用 Shell 能力，不需要 Git Runtime 类型。本期 browser 只使用 CDP。
 
-## 生命周期
+Host 装配 Toolkit → 实例的映射，并建立一个服务连接。实际环境、进程、浏览器连接
+和页面由本机独立服务持有；Host 只持有异步客户端。平台实现与扩展装载不进入 pet-agent。
+详见 [领域关系](../../design/host-agent-capability-toolkit.md) 与
+[Host 客户端装配](../../../services/local-agent/src/runtimeService/hostClient.ts)。
 
-```text
-host start
-  -> assemble static Toolkit definitions
-  -> ToolkitRuntimeManager.start(roots, declared order)
-  -> availability -> compile immutable registry
+## Host 注入
 
-capability subagent start
-  -> resolve(root, generic execution scope)
-  -> expose invocation identity and opaque Toolkit Runtime ports through ToolRuntime.context
-  -> bindTools(binding) for Toolkit-owned live resources [same static names only]
-  -> execute with bound tools
-  -> release(binding, reverse order; also on error/cancellation)
+```ts
+type ToolkitRuntimeClientBinding = {
+  runtimeType: string;
+  client: unknown;
+  identity: { clientId: string; instanceId: string };
+  diagnose?: () => JsonValue | Promise<JsonValue>;
+};
 
-host shutdown
-  -> host cancels in-flight executions
-  -> wait for active executions to release their own bindings
-  -> stop roots (reverse start order)
+const manager = new ToolkitRuntimeManager(bindings); // Toolkit name -> binding
+manager.replaceBindings(nextBindings);
+const { runtimes, identities } = manager.select(selectedToolkits);
 ```
 
-Root starts are serialized: concurrent subagents cannot start the same Toolkit
-twice. Binding resolution remains concurrent and must be isolated by the Toolkit.
-On a partial start or resolve failure, already-created resources are rolled back
-in reverse order. Shutdown marks the manager as stopping before it waits for
-in-flight resolutions; each execution owns one shared release promise, so its
-normal finally path and any repeated release call cannot invoke the hook twice.
-Shutdown does not take bindings away from an active subagent. The host owns
-cancellation policy; the manager waits for those executions to unwind and run
-their normal release path before it stops shared roots.
+`select` 同步校验每个已选择 Toolkit 的依赖与客户端类型，只返回这些 Toolkit 的客户端。
+缺少客户端或类型不匹配明确失败。它不连接服务、不创建资源、不重建 Tool。
+`replaceBindings` 用于 Host 建立或关闭连接时替换客户端映射；它不关闭连接或环境。
 
-## 静态与动态边界
+[HostToolkitCoordinator](../../../services/local-agent/src/toolkits/hostToolkitCoordinator.ts)
+负责连接与断开；Host 关闭时清空映射并关闭自己的连接。服务清理该 client 的资源，
+共享实例与其他 Host 的资源不随之关闭。没有 Toolkit root/start/resolve/bindTools/
+release/stop hooks，也没有每次 Agent execution 的远端绑定或释放步骤。
 
-`AgentToolkit` 中的 tools、`operation` metadata、review policy、authorization、
-instructions、availability 和 Capability 的 `uses` 均是静态契约。没有声明
-`bindTools` 的 Toolkit 保持同一批静态 Tool；它的 opaque runtime port 以 Toolkit
-name 为 key 放入 `ToolRuntime.context.toolkitRuntimes`，Tool 可以在每次调用时把
-invocation identity 传给自己的 Runtime。框架不解释 port 的接口，也不把它放进
-registry、Supervisor workspace、prompt 或 checkpoint。
+## 每次 Tool 调用
 
-`bindTools` 是另一种互斥的消费方式：只在某个 Toolkit 确实需要替换执行
-implementation 时，为同名、同数量的 Tool 注入 Toolkit 自己持有的动态资源或
-ownership，例如 process registry；这类 binding 不再额外暴露到 Tool runtime context。
-管理器保留原始 Tool 对象的
-schema、description、response format 等公开契约，只把底层 `_call` 分派给 bound
-implementation。管理器拒绝更名、增删或非 StructuredTool 的返回值。因此 Supervisor、
-checkpoint、registry 与 review 决策永远引用静态契约，不携带 runtime binding。
+Capability 只能使用 `uses` 选中的 Toolkit，执行时注入：
 
-`threadId`、`runId`、`delegationId` 等 invocation identity 由 Agent 放入
-`ToolRuntime.context.executionScope`。同一个 context 还携带按 Toolkit name 索引的
-opaque Runtime port。workdir 不属于普通 Tool 的模型输入或隐藏参数：Host 将同一份
-snapshot 提供给 Agent prompt、Tool runtime context 与 review/authorization，模型
-负责生成具体 path 或 cwd。Toolkit Runtime 可以从通用 execution scope 读取 workdir
-来管理自身资源，例如 Browser session 和截图目录，但不能据此静默补全、解析或改写
-普通 Tool input。是否需要审核属于 review / authorization 层。
+- `ToolRuntime.context.toolkitRuntimes`：按 Toolkit 名索引的异步客户端。
+- `ToolRuntime.context.toolkitRuntimeIdentities`：受信的连接与实例身份。
+- `ToolRuntime.context.toolkitName`：当前静态 Tool 的 Toolkit 所属，不来自模型参数。
+- `ToolRuntime.context.executionScope`：thread、task、run、delegation 与有效 workdir。
+- `ToolRuntime.signal`：本次调用的取消信号。
 
-Browser Tools 不绑定或持有 `BrowserSession`。它们保持静态 Tool 形状，在每次调用时
-从 `toolkitRuntimes.browser` 取得 Browser Runtime port，并显式传入当前 `threadId`、
-workdir 和 cancellation signal。Browser Runtime 根据 thread 选择和管理 session；
-session ownership、backend、origin 和释放策略都留在 Browser Toolkit 内部。通用
-manager 和 Agent 不接触这些概念。
+Tool 每次读取这些值并调用自己的客户端。共享客户端不保存可变的“当前执行”。框架
+保持静态 Tool 对象、schema、description、operation metadata 与 review policy；客户端
+不改变工具列表或执行实现。客户端对象只在调用 context 中，不写入 prompt 或 checkpoint。
 
-## 宿主责任
+[执行边界](../../../packages/pet-agent/src/subagent/toolkitExecution.ts) 位于 createSubagent
+的工具 middleware 末尾，外层自定义 middleware 仍包围调用。它把受信的 Toolkit 所属
+放入原静态 Tool 的 context，普通失败返回错误 ToolMessage，取消与 graph interrupt
+继续传播。资源归属由服务使用连接身份、Toolkit 与 execution scope 校验。
 
-- 长驻 local-agent 在 transport 开始接收请求前启动 Toolkit roots，并在进程关闭时
-  stop 共享 manager。
-- Plugin/本地 Toolkit 先以定义形式加载，root 启动后再做 availability 解析，避免
-  runtime-dependent availability 读取到未启动状态。
-- 独立 `createResidentPetRuntime()` 使用 Host 注入的 manager，调用方结束时调用
-  `shutdown()`；host 注入 shared manager 后，只有 host 可以关闭它。
-- 若 host 直接传入预构建 orchestrator graph，则该 graph 创建时必须获得同一个
-  manager；pet factory 不会在 graph 外额外启动 root。
+## 审核前输入规范化
 
-## 统一诊断
+需要工作区解析的 Tool 声明纯函数、可重复调用的 `ToolDefinition.prepareInput`：
 
-`ToolkitRuntimeManager` 必须为每个声明 Runtime 的 Toolkit 暴露同一份基础诊断：
-Toolkit name、lifecycle、active binding 数和最近失败。Toolkit 可以通过通用
-`diagnose(root)` hook 提供不透明 `details`；Host 只负责聚合和转发，不按 Toolkit
-名称解释这些字段，也不维护 Browser、shell 或 git 专属状态源。
+```ts
+prepareInput(input, { toolkitName, toolName, executionScope, runtimeIdentity })
+```
 
-Host 调用 `ToolkitRuntimeManager.diagnose()` 获取只读 snapshot。`starting`、`ready`、
-`stopping`、`stopped` 和 start/stop 的 `failed` 由 root lifecycle 产生；resolve、
-binding release 或 `diagnose(root)` 的非致命错误投影为 `degraded`。`lastError` 保留
-通用 code/message，`details` 必须为 JSON-safe value，不能携带 root、session 或
-其他动态对象。
+它在审核前产生明确的参数对象。比如省略 cwd 使用 workdir，相对路径基于 workdir
+解析；缺少所需工作区明确失败。审核、授权 matcher 与执行使用同一份规范化参数，
+不能在执行时再偷偷补全 cwd，服务也不回退到自己的 process.cwd。
 
-Runtime diagnostics 只描述 live operational state。它不替代 Host config selection，
-也不改变 Toolkit availability 或 Capability `uses` 的静态语义。
+该步骤在 full_access 模式仍执行；full_access 只跳过审核。它不改变 Tool schema，
+也不创建假 Runtime。框架把规范化参数写回本次 tool call，review 暂停后重入仍适用，
+所以规范化不能依赖可变会话状态或产生副作用。
 
-## 验证
+授权 matcher 的框架 scope 包含 Toolkit、连接 clientId、instanceId 与 workdir，
+exact/url_origin 的原有匹配含义保持。新连接、实例或工作区不能复用旧授权；
+待处理 review 的身份也包含该目标。输入规范化与授权策略的变更参与 registry
+授权 generation。身份只来自 Host 装配，不进入模型 Tool schema。
 
-`toolkitRuntime.test.ts` 覆盖 root 单次启动、并发 resolve 的隔离 binding、失败回滚、
-Runtime port 暴露和静态 Tool inventory 防漂移；Browser tools 测试验证同一批静态
-Tool 会在每次调用时向当前 Runtime 传递 thread identity。完整 `npm test` 同时覆盖
-local-agent、socket bridge 和 Chrome extension。
+## 诊断与验证
+
+`manager.diagnose()` 查询绑定客户端，返回 `toolkitName`、`runtimeType`、`identity`，
+以及 JSON-safe `details` 或查询失败的 `error`。Host 不维护 root lifecycle 或 active binding
+计数；实际状态由服务和实例产生。诊断不改变静态 inventory、availability 或权限。
+
+[manager 测试](../../../packages/pet-agent/src/agent/orchestrator/toolkitRuntime.test.ts)
+覆盖客户端选择、共享/独立身份、缺失依赖和诊断失败；
+[真实 subagent 测试](../../../packages/pet-agent/src/agent/orchestrator/toolkitExecution.test.ts)
+覆盖审核与执行目标一致、跨 Toolkit 并发所属隔离、授权失效、自定义 middleware 与取消；
+[orchestrator 测试](../../../packages/pet-agent/src/agent/orchestrator/orchestrator.test.ts)
+继续验证 review 暂停、恢复、拒绝和批次执行。

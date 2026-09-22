@@ -2,7 +2,7 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readRecord, readString } from '../operationMetadata';
-import { ripgrepSearchBackend } from './searchBackend';
+import { shellInvocation, rethrowAbort } from './shellClient';
 import { formatGlobSearchResult, formatGrepSearchResult } from './searchFormatter';
 
 const DEFAULT_SEARCH_LIMIT = 100;
@@ -15,16 +15,17 @@ export const globSearchTool = tool(
     runtime: ToolRuntime,
   ) => {
     try {
-      const rootPath = path ?? '.';
+      const rootPath = path ?? '';
+      const scope = shellInvocation(runtime);
       const maxResults = Math.max(1, Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
-      const result = await ripgrepSearchBackend.glob({
+      const result = await scope.client.glob({
         rootPath,
         pattern,
         maxResults: maxResults + 1,
-        signal: runtime.signal,
-      });
+      }, scope);
       return formatGlobSearchResult(result, { limit: maxResults });
     } catch (err) {
+      rethrowAbort(err);
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },
@@ -50,10 +51,11 @@ export const grepSearchTool = tool(
     context?: number;
   }, runtime: ToolRuntime) => {
     try {
-      const rootPath = path ?? '.';
+      const rootPath = path ?? '';
+      const scope = shellInvocation(runtime);
       const maxResults = Math.max(1, Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
       const contextLines = Math.max(0, Math.min(context ?? 0, MAX_SEARCH_CONTEXT));
-      const result = await ripgrepSearchBackend.grep({
+      const result = await scope.client.grep({
         rootPath,
         query,
         literal: literal ?? true,
@@ -61,13 +63,13 @@ export const grepSearchTool = tool(
         glob,
         context: contextLines,
         maxMatches: maxResults + 1,
-        signal: runtime.signal,
-      });
+      }, scope);
       return formatGrepSearchResult(result, {
         limit: maxResults,
         context: contextLines,
       });
     } catch (err) {
+      rethrowAbort(err);
       return `Error: ${err instanceof Error ? err.message : err}`;
     }
   },

@@ -5,7 +5,7 @@ import { defineToolkit } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { HostToolkitCoordinator } from './hostToolkitCoordinator';
 
-test('HostToolkitCoordinator owns inventory, Runtime lifecycle, and generic diagnostics', async () => {
+test('HostToolkitCoordinator connects one client, injects static bindings and closes only its connection', async () => {
   const events: string[] = [];
   const warnings: string[] = [];
   const runtimeToolkit = defineToolkit({
@@ -19,18 +19,7 @@ test('HostToolkitCoordinator owns inventory, Runtime lifecycle, and generic diag
         schema: z.object({}),
       }),
     }],
-    runtime: {
-      start: () => {
-        events.push('start');
-        return { provider: 'fake' };
-      },
-      diagnose: (root) => ({
-        provider: (root as { provider: string }).provider,
-      }),
-      stop: () => {
-        events.push('stop');
-      },
-    },
+    runtime: 'fake',
   });
   const unavailableToolkit = defineToolkit({
     name: 'offline',
@@ -46,6 +35,20 @@ test('HostToolkitCoordinator owns inventory, Runtime lifecycle, and generic diag
   });
   const coordinator = new HostToolkitCoordinator({
     warn: (message) => warnings.push(message),
+    connectRuntimes: async ({ toolkits }) => {
+      events.push('connect');
+      assert.deepEqual(toolkits, [runtimeToolkit, unavailableToolkit]);
+      return {
+        bindings: {
+          'fake-runtime': {
+            runtimeType: 'fake', client: { provider: 'fake' },
+            identity: { clientId: 'host', instanceId: 'environment' },
+            diagnose: () => ({ provider: 'fake' }),
+          },
+        },
+        close: async () => { events.push('disconnect'); },
+      };
+    },
   });
 
   const snapshot = await coordinator.initialize([{
@@ -56,11 +59,11 @@ test('HostToolkitCoordinator owns inventory, Runtime lifecycle, and generic diag
 
   assert.equal(coordinator.getInventoryStore().getSnapshot(), snapshot);
   assert.deepEqual(snapshot.effectiveToolkits, [runtimeToolkit]);
-  assert.deepEqual(events, ['start']);
+  assert.deepEqual(events, ['connect']);
   assert.deepEqual(await coordinator.diagnose(), [{
     toolkitName: 'fake-runtime',
-    lifecycle: 'ready',
-    activeBindings: 0,
+    runtimeType: 'fake',
+    identity: { clientId: 'host', instanceId: 'environment' },
     details: { provider: 'fake' },
   }]);
   assert.deepEqual(warnings, [
@@ -69,6 +72,8 @@ test('HostToolkitCoordinator owns inventory, Runtime lifecycle, and generic diag
   ]);
 
   await coordinator.shutdown();
-  assert.deepEqual(events, ['start', 'stop']);
-  assert.equal((await coordinator.diagnose())[0]?.lifecycle, 'stopped');
+  assert.deepEqual(events, ['connect', 'disconnect']);
+  assert.deepEqual(await coordinator.diagnose(), []);
+  await coordinator.shutdown();
+  assert.deepEqual(events, ['connect', 'disconnect']);
 });

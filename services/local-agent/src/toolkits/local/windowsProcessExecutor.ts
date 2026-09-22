@@ -21,11 +21,9 @@ import type {
  *   needs a native module, and this runtime has a zero-native-dependency
  *   constraint.
  *
- * - **Liveness probe**: there is no signal 0, and without a native module
- *   there is no OpenProcess either. `isGroupAlive` is therefore conservative:
- *   it reports alive unless the caller's own bookkeeping says otherwise.
- *   Callers treat the answer as advisory, which the interface already
- *   promises ("best-effort").
+ * - **Exited trees**: without a Job object or creation-time check, a completed
+ *   PID cannot safely identify its former descendants. Do not retain that PID
+ *   for later taskkill: it could then belong to another client or application.
  *
  * - **Shell**: PowerShell with `-NoLogo -NoProfile -NonInteractive -Command`.
  *   `cmd.exe` is avoided because its parsing of quotes, redirection and
@@ -62,17 +60,18 @@ export const WINDOWS_EXEC_YIELD_FLOOR_MS = 10_000;
  * never match or hand back a shell whose quoting rules these commands are not
  * written for.
  */
-export function windowsPowerShellPath() {
-  const override = process.env.PINPAWO_WINDOWS_SHELL?.trim();
+export function windowsPowerShellPath(env: NodeJS.ProcessEnv) {
+  const override = env.PINPAWO_WINDOWS_SHELL?.trim();
   return override || 'powershell.exe';
 }
 
-function terminateTree(pid: number) {
+function terminateTree(pid: number, env: NodeJS.ProcessEnv, taskkill: string) {
   try {
     // taskkill exits non-zero when the pid is already gone; that is the
     // normal race, not a failure worth surfacing.
-    const child = spawn('taskkill', ['/PID', pid.toString(), '/T', '/F'], {
+    const child = spawn(taskkill, ['/PID', pid.toString(), '/T', '/F'], {
       stdio: 'ignore',
+      env,
       windowsHide: true,
     });
     child.on('error', () => undefined);
@@ -84,6 +83,8 @@ function terminateTree(pid: number) {
 
 export function runShellCommandWindows(
   options: ShellRunOptions,
+  taskkill = 'taskkill',
+  controlEnv = options.env,
 ): Promise<ShellRunOutcome> {
   const {
     command,
@@ -110,10 +111,12 @@ export function runShellCommandWindows(
     let child;
     try {
       child = spawn(
-        windowsPowerShellPath(),
-        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
+        options.executable ?? options.shell ?? windowsPowerShellPath(options.env),
+        options.executable ? [...(options.args ?? [])]
+          : ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
         {
           cwd,
+          env: options.env,
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
         },
@@ -129,10 +132,12 @@ export function runShellCommandWindows(
     const pid = child.pid;
     let stdout = '';
     let stderr = '';
+    let stdoutTotalChars = 0;
+    let stderrTotalChars = 0;
     let settled = false;
     let yielded = false;
     let exited = false;
-    let reason: 'timeout' | 'aborted' | null = null;
+    let reason: 'timeout' | 'aborted' | 'output_limit' | null = null;
 
     const outputListeners = new Set<
       (stream: 'stdout' | 'stderr', chunk: string) => void
@@ -162,22 +167,26 @@ export function runShellCommandWindows(
     };
 
     collect(child.stdout, 'stdout', (chunk) => {
+      stdoutTotalChars += chunk.length;
       if (stdout.length < maxOutputChars) {
         stdout += chunk.slice(0, maxOutputChars - stdout.length);
       }
+      if (options.failOnOutputLimit && stdoutTotalChars > maxOutputChars) terminate('output_limit');
     });
     collect(child.stderr, 'stderr', (chunk) => {
+      stderrTotalChars += chunk.length;
       if (stderr.length < maxOutputChars) {
         stderr += chunk.slice(0, maxOutputChars - stderr.length);
       }
+      if (options.failOnOutputLimit && stderrTotalChars > maxOutputChars) terminate('output_limit');
     });
 
     const terminateGroup = () => {
       if (pid === undefined) return;
-      terminateTree(pid);
+      terminateTree(pid, controlEnv, taskkill);
     };
 
-    const terminate = (why: 'timeout' | 'aborted') => {
+    const terminate = (why: 'timeout' | 'aborted' | 'output_limit') => {
       if (settled || reason) return;
       reason = why;
       terminateGroup();
@@ -244,40 +253,24 @@ export function runShellCommandWindows(
         outputListeners.clear();
         return;
       }
-      if (reason === 'timeout') {
-        settle({ status: 'timeout', stdout, stderr });
+      if (reason === 'timeout' || reason === 'output_limit') {
+        settle({ status: reason, stdout, stderr, stdoutTotalChars, stderrTotalChars });
         return;
       }
       if (reason === 'aborted') {
         settle({ status: 'aborted', stdout, stderr });
         return;
       }
-      settle({ status: 'exited', code, pid, stdout, stderr });
+      settle({ status: 'exited', code, pid, stdout, stderr, stdoutTotalChars, stderrTotalChars });
     });
   });
 }
 
-/**
- * Best-effort liveness probe.
- *
- * Without a native module there is no OpenProcess on Windows, so this cannot
- * distinguish a live process from a recycled pid. Reporting alive is the
- * conservative choice: the only consumer is orphan-group cleanup, where a
- * false positive sends one harmless `taskkill` at a pid that turns out to be
- * gone, whereas a false negative would leak the group.
- */
-function isGroupAliveBestEffort(_pid: number) {
-  return true;
+export function createWindowsProcessExecutor(
+  env: NodeJS.ProcessEnv,
+  taskkill: string,
+): ProcessExecutor {
+  return {
+    run: (options) => runShellCommandWindows(options, taskkill, env),
+  };
 }
-
-function terminateGroupWindows(pid: number, _graceMs: number) {
-  // No graceful phase exists without native code: taskkill /F is the only
-  // reliable kill, so the grace period does not apply.
-  terminateTree(pid);
-}
-
-export const windowsProcessExecutor: ProcessExecutor = {
-  run: runShellCommandWindows,
-  terminateGroup: terminateGroupWindows,
-  isGroupAlive: isGroupAliveBestEffort,
-};

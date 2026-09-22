@@ -48,11 +48,22 @@ is not restored from conversation history, and the generic agent runtime does no
 infer a directory from process globals.
 
 Workdir is a path-resolution base, not a filesystem sandbox. The local bash,
-project-inspection and Git Toolkit bindings resolve supported relative paths and
-relative or omitted `cwd` against the execution workdir. Absolute paths remain
-absolute. These bindings do not change the process-wide cwd; independent Hosts
-can therefore keep separate execution scopes in one process. The implementation
-is [workdirBinding.ts](../../../services/local-agent/src/toolkits/local/workdirBinding.ts).
+project-inspection and Git Toolkits use `ToolDefinition.prepareInput` to resolve
+supported relative paths and relative or omitted `cwd` against the execution
+workdir **before review**. Absolute paths remain absolute; a relative path without
+an absolute execution workdir fails. Review and execution consume the prepared
+input, including in full-access mode where no human review is requested. Static
+Tools are retained; no per-execution Tool binding or process-wide cwd change is
+needed. The implementation is
+[workdirBinding.ts](../../../services/local-agent/src/toolkits/local/workdirBinding.ts).
+
+Shell and CDP resources live in the independent local Runtime service. Multiple
+Hosts and Toolkits may share one configured instance while supplying separate
+execution scopes and cwd values. `~/.pinpawo/runtime/config.json` (or
+`PINPAWO_RUNTIME_DIR`) chooses service instances independently of workdir.
+Authorization reuse includes the Toolkit, connected client, instance and workdir;
+switching an environment or directory cannot reuse the previous target's grant.
+See the [Toolkit Runtime contract](../extensions/toolkit-runtime.md).
 
 See [Studio configuration](../../studio/configuration.md) for the files Studio
 actually reads, and [the workspace proposal](../../design/local-agent/workspace-runtime-config.md)

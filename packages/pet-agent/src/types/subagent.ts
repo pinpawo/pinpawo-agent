@@ -7,7 +7,7 @@ import type { AnyAgentMiddleware } from 'langchain';
 import type { CapabilityArtifactRef } from './artifact';
 import type { SystemPromptSection } from './systemPrompt';
 import type { AgentRuntimeContext } from '../runtime/context';
-import type { ToolOperationMetadata } from './toolkit';
+import type { ToolOperationMetadata, ToolkitRuntimeIdentity } from './toolkit';
 import type { DelegationScope } from './scope';
 
 export type SubagentExecutionScope = DelegationScope & {
@@ -16,6 +16,9 @@ export type SubagentExecutionScope = DelegationScope & {
 
 export type SubagentRuntimeContext = AgentRuntimeContext & {
   executionScope?: SubagentExecutionScope;
+  /** Owner injected by framework middleware for the current tool call. */
+  toolkitName?: string;
+  toolkitRuntimeIdentities?: Readonly<Record<string, ToolkitRuntimeIdentity>>;
   /** Opaque Toolkit Runtime ports, keyed by Toolkit name. */
   toolkitRuntimes?: Readonly<Record<string, unknown>>;
   [key: string]: unknown;
@@ -81,6 +84,8 @@ export type SubagentRunInput = SubagentInputState & {
   model: BaseChatModel;
   tools: StructuredTool[];
   middleware?: AnyAgentMiddleware[];
+  /** Static tool ownership supplied by the compiled Capability inventory. */
+  toolkitNamesByTool?: Readonly<Record<string, string>>;
   /** Read-only invocation data exposed to tools as ToolRuntime.context. */
   runtimeContext?: SubagentRuntimeContext;
   runnableConfig?: LangGraphRunnableConfig;

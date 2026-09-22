@@ -16,6 +16,8 @@ scaffold, and points you to the next integration path.
 
 The local host runs entirely on your machine. It needs no PinPawo account or
 backend — only the model configuration above.
+Shell commands use bash or zsh on POSIX and PowerShell on Windows. Browser tasks
+also require local Chrome or a configured local CDP endpoint.
 
 ## Install and initialize
 
@@ -63,6 +65,27 @@ pinpawo server --stdio
 `--stdio` uses one JSONL peer and reserves standard output for protocol
 messages. See the [CLI reference](../reference/api/cli.md) for the
 complete command surface.
+
+The Host also ensures the independent local Runtime service is running. By
+default bash, Git and project-inspection share one Shell environment, while the
+Browser Toolkit uses a CDP instance. Each command uses the current execution's
+workdir; the environment does not require a permanent interactive shell process.
+
+Inspect or explicitly manage the shared service with:
+
+```bash
+pinpawo runtime start
+pinpawo runtime status
+pinpawo runtime stop
+```
+
+Closing the Host releases its resources and leaves the service running for other
+Hosts. `runtime stop` affects every connected Host. To customize instances or
+sharing, create `~/.pinpawo/runtime/config.json`; see the
+[local CLI README](../../services/local-agent/README.md#shared-runtime-service).
+Service configuration changes require a restart and fresh Host connections.
+The Browser Toolkit uses CDP only; remove old `PINPAWO_BROWSER_BACKEND` and
+`browser_backend` settings before starting a Host.
 
 ## Develop from a checkout
 
@@ -117,7 +140,7 @@ defined in the [Capability directory protocol](../reference/extensions/capabilit
   build extensions safely.
 - [Model profile configuration](model-profiles.md) — configure
   multiple models or custom endpoints.
-- [Chrome extension browser backend](browser-bridge.md) — connect a
+- [CDP browser guide](browser-bridge.md) — configure a managed or borrowed
   browser session.
 - [Studio configuration](../studio/configuration.md) — configure multi-Pet
   dispatch and plugins.

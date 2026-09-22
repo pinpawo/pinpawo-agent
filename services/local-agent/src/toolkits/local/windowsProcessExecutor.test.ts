@@ -4,8 +4,9 @@ import {
   runShellCommandWindows,
   WINDOWS_EXEC_YIELD_FLOOR_MS,
   windowsPowerShellPath,
-  windowsProcessExecutor,
+  createWindowsProcessExecutor,
 } from './windowsProcessExecutor';
+const windowsProcessExecutor = createWindowsProcessExecutor({ ...process.env }, 'taskkill');
 
 /**
  * The Windows executor.
@@ -21,20 +22,12 @@ const CWD = process.cwd();
 
 test('the executor honours the ProcessExecutor contract', () => {
   assert.equal(typeof windowsProcessExecutor.run, 'function');
-  assert.equal(typeof windowsProcessExecutor.terminateGroup, 'function');
-  assert.equal(typeof windowsProcessExecutor.isGroupAlive, 'function');
 });
 
 test('the yield floor matches the Codex-observed Windows startup cost', () => {
   // Process creation on Windows is slow enough that a POSIX-tuned timeout
   // would yield a command that was merely still starting.
   assert.equal(WINDOWS_EXEC_YIELD_FLOOR_MS, 10_000);
-});
-
-test('isGroupAlive is conservatively best-effort', () => {
-  // With no OpenProcess available without a native module, the probe cannot
-  // prove a pid is gone, so it must not claim it is.
-  assert.equal(windowsProcessExecutor.isGroupAlive(0x7fff_fffe), true);
 });
 
 test('defaults to the PowerShell that ships with Windows', () => {
@@ -44,7 +37,7 @@ test('defaults to the PowerShell that ships with Windows', () => {
   const previous = process.env.PINPAWO_WINDOWS_SHELL;
   delete process.env.PINPAWO_WINDOWS_SHELL;
   try {
-    assert.equal(windowsPowerShellPath(), 'powershell.exe');
+    assert.equal(windowsPowerShellPath(process.env), 'powershell.exe');
   } finally {
     if (previous !== undefined) process.env.PINPAWO_WINDOWS_SHELL = previous;
   }
@@ -54,7 +47,7 @@ test('an explicit override selects the shell', () => {
   const previous = process.env.PINPAWO_WINDOWS_SHELL;
   process.env.PINPAWO_WINDOWS_SHELL = 'pwsh.exe';
   try {
-    assert.equal(windowsPowerShellPath(), 'pwsh.exe');
+    assert.equal(windowsPowerShellPath(process.env), 'pwsh.exe');
   } finally {
     if (previous === undefined) delete process.env.PINPAWO_WINDOWS_SHELL;
     else process.env.PINPAWO_WINDOWS_SHELL = previous;
@@ -65,7 +58,7 @@ test('a blank override falls back rather than spawning nothing', () => {
   const previous = process.env.PINPAWO_WINDOWS_SHELL;
   process.env.PINPAWO_WINDOWS_SHELL = '   ';
   try {
-    assert.equal(windowsPowerShellPath(), 'powershell.exe');
+    assert.equal(windowsPowerShellPath(process.env), 'powershell.exe');
   } finally {
     if (previous === undefined) delete process.env.PINPAWO_WINDOWS_SHELL;
     else process.env.PINPAWO_WINDOWS_SHELL = previous;
@@ -80,7 +73,7 @@ test('ComSpec does not influence the shell choice', () => {
   delete process.env.PINPAWO_WINDOWS_SHELL;
   process.env.ComSpec = 'C:\\WINDOWS\\system32\\cmd.exe';
   try {
-    assert.equal(windowsPowerShellPath(), 'powershell.exe');
+    assert.equal(windowsPowerShellPath(process.env), 'powershell.exe');
   } finally {
     if (previousComSpec === undefined) delete process.env.ComSpec;
     else process.env.ComSpec = previousComSpec;
@@ -90,17 +83,12 @@ test('ComSpec does not influence the shell choice', () => {
   }
 });
 
-test('terminateGroup tolerates a pid that is already gone', { skip: !isWindows }, () => {
-  // taskkill exits non-zero for a missing pid; that race is normal and must
-  // not throw.
-  assert.doesNotThrow(() => windowsProcessExecutor.terminateGroup(0x7fff_fffe, 0));
-});
-
 test('an already aborted signal never spawns the command', async () => {
   const controller = new AbortController();
   controller.abort();
 
   const outcome = await runShellCommandWindows({
+    env: { ...process.env },
     command: 'Write-Output never',
     cwd: CWD,
     timeoutMs: 5_000,
@@ -113,6 +101,7 @@ test('an already aborted signal never spawns the command', async () => {
 
 test('runs a command through PowerShell and reports its exit code', { skip: !isWindows }, async () => {
   const outcome = await runShellCommandWindows({
+    env: { ...process.env },
     command: "Write-Output 'hello'",
     cwd: CWD,
     timeoutMs: 30_000,
@@ -127,6 +116,7 @@ test('runs a command through PowerShell and reports its exit code', { skip: !isW
 
 test('separates stdout and stderr', { skip: !isWindows }, async () => {
   const outcome = await runShellCommandWindows({
+    env: { ...process.env },
     command: "Write-Output 'out'; [Console]::Error.WriteLine('err'); exit 3",
     cwd: CWD,
     timeoutMs: 30_000,
@@ -144,6 +134,7 @@ test('a timeout yields rather than kills, honouring the Windows floor', { skip: 
   // Asked for a sub-floor timeout; the floor stretches the wait so a merely
   // slow-to-start command is not yielded prematurely.
   const outcome = await runShellCommandWindows({
+    env: { ...process.env },
     command: 'Start-Sleep -Seconds 30',
     cwd: CWD,
     timeoutMs: 500,
@@ -160,6 +151,7 @@ test('a timeout yields rather than kills, honouring the Windows floor', { skip: 
 
 test('a yielded handle terminates the process tree', { skip: !isWindows }, async () => {
   const outcome = await runShellCommandWindows({
+    env: { ...process.env },
     command: 'Start-Process -NoNewWindow powershell -ArgumentList \'-Command\', \'Start-Sleep -Seconds 60\'; Start-Sleep -Seconds 60',
     cwd: CWD,
     timeoutMs: WINDOWS_EXEC_YIELD_FLOOR_MS,

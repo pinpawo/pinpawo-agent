@@ -18,10 +18,9 @@ type LocalAgentCliHandlers = {
   }) => Promise<void> | void;
   runInit?: (opts: InitCommandOptions) => Promise<void> | void;
   runSetup?: (opts: { workdir?: string }) => Promise<void> | void;
-  runBrowser?: (
-    target: string,
+  runRuntimeService?: (
     action: string,
-    opts: { extensionId?: string },
+    opts: { directory?: string },
   ) => Promise<void> | void;
 };
 
@@ -190,18 +189,14 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       });
     });
 
-  const browserCommand = program
-    .command('browser')
-    .description('Manage browser integrations');
-
-  browserCommand
-    .command('extension <action>')
-    .description('Register, repair, inspect or unregister the Chrome extension driver')
-    .option('--extension-id <id>', 'Chrome extension ID; defaults to the official Web Store extension')
-    .action(async (action: string, options: { extensionId?: string }) => {
-      const runBrowser = handlers.runBrowser
-        ?? (await import('./commands/browser')).runBrowserCommand;
-      await runBrowser('extension', action, options);
+  program
+    .command('runtime <action>')
+    .description('Start, inspect or stop the shared local Runtime service')
+    .option('--directory <path>', 'Runtime configuration and service state directory')
+    .action(async (action: string, options: { directory?: string }) => {
+      const runRuntime = handlers.runRuntimeService
+        ?? (await import('./commands/runtimeService')).runRuntimeServiceCommand;
+      await runRuntime(action, options);
     });
 
   registerCapabilityCommand(program);

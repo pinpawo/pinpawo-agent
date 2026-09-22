@@ -39,22 +39,18 @@ import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { gitInspectionTools, gitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
-  createProcessTools,
   processOperationMetadata,
   processTools,
 } from './processTools';
 import {
-  createRunShellTool,
   getCurrentTimeTool,
   normalizeShellAuthorizationInput,
   runShellTool,
   inspectShellTool,
-  createInspectShellTool,
   shellOperationMetadata,
 } from './shellTools';
-import { bindToolToExecutionWorkdir } from './workdirBinding';
+import { prepareLocalToolInput } from './workdirBinding';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -103,6 +99,9 @@ function createToolDefinitions(
     tool: toolItem,
     operation: operations[toolItem.name],
     review: reviews[toolItem.name],
+    prepareInput: (input: unknown, context: { executionScope: { workdir: string | null } }) => (
+      prepareLocalToolInput(toolItem.name, input, context.executionScope.workdir)
+    ),
   }));
 }
 
@@ -240,34 +239,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
     tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
     instructions: bashToolkitInstructions.join('\n'),
-    runtime: {
-      start: () => {
-        const root = new ShellRuntime();
-        root.start();
-        return root;
-      },
-      resolve: (root, context) => (root as ShellRuntime).resolve(context.execution),
-      bindTools: (binding, context) => {
-        const shell = binding as ShellRuntimeBinding;
-        // The framework matches bound tools to the static inventory by
-        // position, so this must return the whole list in order. Only the
-        // process-aware tools get a bound implementation; the rest are handed
-        // back as they are.
-        const bound = new Map<string, StructuredTool>(
-          [
-            createRunShellTool(shell),
-            createInspectShellTool(shell),
-            ...createProcessTools(shell),
-          ]
-            .map((item) => [item.name, item]),
-        );
-        return tools.map((staticTool) => bindToolToExecutionWorkdir(
-          (bound.get(staticTool.name) ?? staticTool) as NamedStructuredTool,
-          context.execution.workdir,
-        ));
-      },
-      stop: async (root) => { await (root as ShellRuntime).stop(); },
-    },
+    runtime: 'shell',
   });
 }
 
@@ -285,12 +257,7 @@ export function createProjectInspectionToolkit(): AgentToolkit {
     description: '只读探索本地项目、Git 历史与 GitHub PR/issue，形成可用于规划的事实证据。',
     tools: createToolDefinitions(projectInspectionTools, operations),
     instructions: projectInspectionInstructions.join('\n'),
-    runtime: {
-      start: () => undefined,
-      bindTools: (_binding, context) => projectInspectionTools.map((toolItem) => (
-        bindToolToExecutionWorkdir(toolItem, context.execution.workdir)
-      )),
-    },
+    runtime: 'shell',
   });
 }
 
@@ -311,11 +278,6 @@ export function createGitToolkit(): AgentToolkit {
       allow: 'Local Git edits and ordinary remote collaboration can be recoverable; assess the actual target and effect.',
       ask: 'Shared-history rewrites, access changes, and releases require human review.',
     },
-    runtime: {
-      start: () => undefined,
-      bindTools: (_binding, context) => gitTools.map((toolItem) => (
-        bindToolToExecutionWorkdir(toolItem, context.execution.workdir)
-      )),
-    },
+    runtime: 'shell',
   });
 }

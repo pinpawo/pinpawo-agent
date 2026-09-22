@@ -1,3 +1,4 @@
+import { invokeLocalTool } from './shellTestSupport';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -64,31 +65,41 @@ test('git tools inspect and stage a repository without shell command strings', a
   writeFileSync(file, 'hello\n', 'utf-8');
 
   assert.match(
-    String(await gitStatusTool.invoke({ cwd: repo })),
+    String(await invokeLocalTool(gitStatusTool, { cwd: repo })),
     /README\.md/,
   );
 
   assert.match(
-    String(await gitAddTool.invoke({ cwd: repo, pathspecs: ['README.md'] })),
+    String(await invokeLocalTool(gitAddTool, { cwd: repo, pathspecs: ['README.md'] })),
     /\(no output\)/,
   );
 
   assert.match(
-    String(await gitDiffTool.invoke({ cwd: repo, staged: true, stat: true })),
+    String(await invokeLocalTool(gitDiffTool, { cwd: repo, staged: true, stat: true })),
     /README\.md/,
   );
 
   assert.match(
-    String(await gitCommitTool.invoke({ cwd: repo, message: 'test: add readme' })),
+    String(await invokeLocalTool(gitCommitTool, { cwd: repo, message: 'test: add readme' })),
     /test: add readme/,
   );
 });
 
 test('git_add requires explicit pathspecs', async () => {
   await assert.rejects(
-    () => gitAddTool.invoke({ pathspecs: [] }),
+    () => invokeLocalTool(gitAddTool, { pathspecs: [] }),
     /Too small|at least/,
   );
+});
+
+test('git pathspecs preserve filename whitespace through the Shell environment', { skip: process.platform === 'win32' }, async (t) => {
+  const repo = createRepo();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(join(repo, 'file '), 'selected\n');
+  writeFileSync(join(repo, 'file'), 'leave untracked\n');
+  assert.equal(String(await invokeLocalTool(gitAddTool, { cwd: repo, pathspecs: ['file '] })), '(no output)');
+  const staged = execFileSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(staged, 'file \0');
 });
 
 test('git_push performs a normal push without exposing force or delete options', async (t) => {
@@ -107,7 +118,7 @@ test('git_push performs a normal push without exposing force or delete options',
   const branch = execFileSync('git', ['branch', '--show-current'], { cwd: repo, encoding: 'utf-8' }).trim();
 
   assert.match(
-    String(await gitPushTool.invoke({ cwd: repo, remote })),
+    String(await invokeLocalTool(gitPushTool, { cwd: repo, remote })),
     /new branch/,
   );
   assert.equal(
@@ -115,12 +126,12 @@ test('git_push performs a normal push without exposing force or delete options',
     40,
   );
   await assert.rejects(
-    () => gitPushTool.invoke({ cwd: repo, remote, refspec: '+HEAD:main' }),
+    () => invokeLocalTool(gitPushTool, { cwd: repo, remote, refspec: '+HEAD:main' }),
     /force and delete refspecs are not supported/,
   );
 
   assert.match(
-    String(await gitPushTool.invoke({
+    String(await invokeLocalTool(gitPushTool, {
       cwd: repo,
       remote: `ext::touch ${extMarker}`,
     })),
@@ -130,7 +141,7 @@ test('git_push performs a normal push without exposing force or delete options',
 
   execFileSync('git', ['remote', 'add', 'unsafe-ext', `ext::touch ${extMarker}`], { cwd: repo });
   assert.match(
-    String(await gitPushTool.invoke({ cwd: repo, remote: 'unsafe-ext' })),
+    String(await invokeLocalTool(gitPushTool, { cwd: repo, remote: 'unsafe-ext' })),
     /transport 'ext' not allowed/,
   );
   assert.equal(existsSync(extMarker), false);
@@ -154,7 +165,7 @@ case "$*" in
 esac`);
 
   assert.equal(
-    await ghPrCreateTool.invoke({
+    await invokeLocalTool(ghPrCreateTool, {
       cwd: workdir,
       title: 'Fix',
       body: 'Details',
@@ -166,7 +177,7 @@ esac`);
     'https://github.com/pinpawo/pinpawo-agent/pull/12',
   );
   assert.equal(
-    await ghIssueCreateTool.invoke({
+    await invokeLocalTool(ghIssueCreateTool, {
       cwd: workdir,
       title: 'Bug',
       body: 'Reproduction',
@@ -191,7 +202,7 @@ case "$*" in
 esac`);
 
   assert.deepEqual(
-    JSON.parse(String(await ghIssueListTool.invoke({
+    JSON.parse(String(await invokeLocalTool(ghIssueListTool, {
       cwd: workdir,
       repository: 'pinpawo/pinpawo-agent',
       state: 'open',
@@ -221,15 +232,15 @@ case "$*" in
 esac`);
 
   const expected = 'Fix empty PR comments\nstate: OPEN\nauthor: octocat\nbody: Details';
-  assert.equal(await ghPrViewTool.invoke({ cwd: workdir, pr: '12' }), expected);
-  assert.equal(await ghPrViewTool.invoke({ cwd: workdir, pr: prUrl }), expected);
-  assert.equal(await ghPrViewTool.invoke({ cwd: workdir, pr: 'codex/fix' }), expected);
+  assert.equal(await invokeLocalTool(ghPrViewTool, { cwd: workdir, pr: '12' }), expected);
+  assert.equal(await invokeLocalTool(ghPrViewTool, { cwd: workdir, pr: prUrl }), expected);
+  assert.equal(await invokeLocalTool(ghPrViewTool, { cwd: workdir, pr: 'codex/fix' }), expected);
   assert.equal(
-    await ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' }),
+    await invokeLocalTool(ghPrCommentsTool, { cwd: workdir, pr: '12' }),
     '(no PR comments or reviews)',
   );
   assert.equal(
-    await ghPrCommentsTool.invoke({ cwd: workdir, pr: prUrl }),
+    await invokeLocalTool(ghPrCommentsTool, { cwd: workdir, pr: prUrl }),
     '(no PR comments or reviews)',
   );
 
@@ -240,7 +251,7 @@ case "$*" in
     ;;
 esac
 `, 'utf-8');
-  const boundedOverview = String(await ghPrViewTool.invoke({ cwd: workdir, pr: '12' }));
+  const boundedOverview = String(await invokeLocalTool(ghPrViewTool, { cwd: workdir, pr: '12' }));
   assert.equal(boundedOverview.startsWith('x'.repeat(30_000)), true);
   assert.match(boundedOverview, /\[truncated 1 chars\]$/);
 
@@ -256,27 +267,27 @@ case "$*" in
 esac
 `, 'utf-8');
   assert.match(
-    String(await ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' })),
+    String(await invokeLocalTool(ghPrCommentsTool, { cwd: workdir, pr: '12' })),
     /comment: Please add a test\./,
   );
 
   writeFileSync(fakeGh, '#!/bin/sh\nexit 0\n', 'utf-8');
   await assert.rejects(
-    () => ghPrViewTool.invoke({ cwd: workdir, pr: '12' }),
+    () => invokeLocalTool(ghPrViewTool, { cwd: workdir, pr: '12' }),
     /gh command returned no output/,
   );
   assert.equal(
-    await ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' }),
+    await invokeLocalTool(ghPrCommentsTool, { cwd: workdir, pr: '12' }),
     '(no PR comments or reviews)',
   );
 
   writeFileSync(fakeGh, '#!/bin/sh\nprintf \'authentication required\\n\' >&2\nexit 1\n', 'utf-8');
   await assert.rejects(
-    () => ghPrViewTool.invoke({ cwd: workdir, pr: '12' }),
+    () => invokeLocalTool(ghPrViewTool, { cwd: workdir, pr: '12' }),
     /gh command failed \(exit 1\):\nauthentication required/,
   );
   await assert.rejects(
-    () => ghPrCommentsTool.invoke({ cwd: workdir, pr: '12' }),
+    () => invokeLocalTool(ghPrCommentsTool, { cwd: workdir, pr: '12' }),
     /gh command failed \(exit 1\):\nauthentication required/,
   );
 });
@@ -304,7 +315,7 @@ case "$*" in
     ;;
 esac`);
 
-  const issueOutput = JSON.parse(String(await ghIssueViewTool.invoke({
+  const issueOutput = JSON.parse(String(await invokeLocalTool(ghIssueViewTool, {
     issue: issueUrl,
     cwd: workdir,
   }))) as {
@@ -322,7 +333,7 @@ esac`);
   assert.equal(issueOutput.commentsTotal, 3);
   assert.equal(issueOutput.comments, undefined);
 
-  const inlineOutput = JSON.parse(String(await ghIssueCommentsTool.invoke({
+  const inlineOutput = JSON.parse(String(await invokeLocalTool(ghIssueCommentsTool, {
     issue: issueUrl,
     cwd: workdir,
     page: 2,
@@ -356,7 +367,7 @@ esac`);
     truncated: false,
   });
 
-  const fileOutput = JSON.parse(String(await ghIssueCommentsTool.invoke({
+  const fileOutput = JSON.parse(String(await invokeLocalTool(ghIssueCommentsTool, {
     issue: issueUrl,
     cwd: workdir,
     page: 1,
@@ -386,7 +397,7 @@ esac`);
     readFileSync(fileOutput.commentsContent.path, 'utf-8').match(/x/g)?.length,
     120_000,
   );
-  const firstChunk = JSON.parse(String(await ghReadContentTool.invoke({
+  const firstChunk = JSON.parse(String(await invokeLocalTool(ghReadContentTool, {
     cwd: workdir,
     path: fileOutput.commentsContent.path,
     startLine: 1,
@@ -405,7 +416,7 @@ esac`);
   assert.equal(firstChunk.nextStartLine, 8);
   assert.equal(firstChunk.hasMore, true);
 
-  const budgetedChunk = JSON.parse(String(await ghReadContentTool.invoke({
+  const budgetedChunk = JSON.parse(String(await invokeLocalTool(ghReadContentTool, {
     cwd: workdir,
     path: fileOutput.commentsContent.path,
     startLine: 1,
@@ -424,7 +435,7 @@ esac`);
   assert.equal(budgetedChunk.endLine < budgetedChunk.totalLines, true);
   assert.equal(budgetedChunk.nextStartLine, budgetedChunk.endLine + 1);
   await assert.rejects(
-    () => ghReadContentTool.invoke({
+    () => invokeLocalTool(ghReadContentTool, {
       cwd: workdir,
       path: fileOutput.commentsContent.path,
       lineCount: 201,
@@ -432,17 +443,17 @@ esac`);
     /Too big|less than or equal to 200/,
   );
   await assert.rejects(
-    () => ghReadContentTool.invoke({ cwd: workdir, path: join(workdir, 'outside.md') }),
+    () => invokeLocalTool(ghReadContentTool, { cwd: workdir, path: join(workdir, 'outside.md') }),
     /only reads files under/,
   );
 
   writeFileSync(fakeGh, '#!/bin/sh\nprintf \'auth failed\\n\' >&2\nexit 1\n', 'utf-8');
   await assert.rejects(
-    () => ghIssueViewTool.invoke({ issue: issueUrl, cwd: workdir }),
+    () => invokeLocalTool(ghIssueViewTool, { issue: issueUrl, cwd: workdir }),
     /gh command failed \(exit 1\):\nauth failed/,
   );
 
-  const toolError = await ghIssueViewTool.invoke({
+  const toolError = await invokeLocalTool(ghIssueViewTool, {
     name: 'gh_issue_view',
     args: { issue: issueUrl, cwd: workdir },
     id: 'call-error',
@@ -452,9 +463,9 @@ esac`);
   assert.equal(ToolMessage.isInstance(toolError) ? toolError.status : null, 'error');
 
   writeFileSync(fakeGh, '#!/bin/sh\nexit 0\n', 'utf-8');
-  assert.equal(await ghPrDiffTool.invoke({ pr: '123', cwd: workdir }), '(empty diff)');
+  assert.equal(await invokeLocalTool(ghPrDiffTool, { pr: '123', cwd: workdir }), '(empty diff)');
   await assert.rejects(
-    () => ghIssueViewTool.invoke({ issue: issueUrl, cwd: workdir }),
+    () => invokeLocalTool(ghIssueViewTool, { issue: issueUrl, cwd: workdir }),
     /gh command returned no output/,
   );
 });

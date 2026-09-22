@@ -1,3 +1,4 @@
+import { invokeLocalTool } from './shellTestSupport';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,7 +23,7 @@ function createSearchFixture(t: TestContext) {
 
 test('globSearchTool searches recursively and respects limit', async (t) => {
   const root = createSearchFixture(t);
-  const output = String(await globSearchTool.invoke({
+  const output = String(await invokeLocalTool(globSearchTool, {
     path: root,
     pattern: '*.ts',
     limit: 1,
@@ -37,7 +38,7 @@ test('globSearchTool searches recursively and respects limit', async (t) => {
 test('grepSearchTool searches file content with case sensitivity controls', async (t) => {
   const root = createSearchFixture(t);
 
-  const insensitive = String(await grepSearchTool.invoke({
+  const insensitive = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'target',
     limit: 10,
@@ -45,7 +46,7 @@ test('grepSearchTool searches file content with case sensitivity controls', asyn
   assert.match(insensitive, /main\.ts:1: Target line/);
   assert.match(insensitive, /helper\.ts:1: target lower/);
 
-  const sensitive = String(await grepSearchTool.invoke({
+  const sensitive = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'target',
     limit: 10,

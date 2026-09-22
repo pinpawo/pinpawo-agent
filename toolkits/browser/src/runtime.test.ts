@@ -1,233 +1,44 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  type BrowserBridgeStatus,
-  type BrowserExtensionBridge,
-} from './drivers/chromeExtension/bridge';
-import { BrowserRuntime } from './runtime';
-import type { BrowserRuntimeCallContext } from './runtimePort';
+import { createCdpRuntime } from './runtime';
+import { validateCdpConfig } from './connection';
+import type { CdpRuntimeConfig } from './options';
 
-function call(
-  threadId: string,
-  workdir = process.cwd(),
-): BrowserRuntimeCallContext {
-  return {
-    threadId,
-    workdir,
-  };
-}
-
-test('independent BrowserRuntime roots lease one process extension bridge', async () => {
-  const lifecycle: string[] = [];
-  const bridge = {
-    async start() { lifecycle.push('start'); },
-    async stop() { lifecycle.push('stop'); },
-    getStatus() {
-      return {
-        listening: lifecycle.includes('start') && !lifecycle.includes('stop'),
-        hostConnected: false,
-        extensionConnected: false,
-        debuggerAttached: false,
-        targetAlive: false,
-        connectionId: null,
-        extensionId: null,
-        activeTabId: null,
-        activeTabBinding: null,
-        userBoundOrigin: null,
-        stateRevision: null,
-        capabilities: [],
-        socketPath: '/tmp/browser.sock',
-      } satisfies BrowserBridgeStatus;
-    },
-  } as unknown as BrowserExtensionBridge;
-  const runtimeA = new BrowserRuntime(
-    { backend: () => 'extension' },
-    { bridge },
-  );
-  const runtimeB = new BrowserRuntime(
-    { backend: () => 'extension' },
-    { bridge },
-  );
-
-  await Promise.all([runtimeA.start(), runtimeB.start()]);
-  assert.deepEqual(lifecycle, ['start']);
-
-  await runtimeA.stop();
-  assert.deepEqual(lifecycle, ['start']);
-
-  await runtimeB.stop();
-  assert.deepEqual(lifecycle, ['start', 'stop']);
+test('CDP configuration rejects remote endpoints and conflicting ownership', () => {
+  assert.throws(() => validateCdpConfig({ endpoint: 'http://example.com:9222' }), /local/);
+  assert.throws(() => validateCdpConfig({ endpoint: 'http://127.0.0.1:9222', headless: true }), /borrowed/);
+  assert.throws(() => validateCdpConfig({ userDataDir: '../profile' }), /absolute/);
+  validateCdpConfig({ endpoint: 'ws://127.0.0.1:9222/devtools/browser/test' });
 });
 
-test('BrowserRuntime binds each thread to its execution workdir', async (t) => {
-  const bridge = {
-    async sendCommand(command: string, params: Record<string, unknown>) {
-      if (command === 'navigate') return { ok: true };
-      return {
-        title: 'Example',
-        url: String(params.url ?? 'https://example.com/page'),
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
-      };
-    },
-    getStatus() {
-      return {
-        listening: true,
-        hostConnected: true,
-        extensionConnected: true,
-        debuggerAttached: true,
-        targetAlive: true,
-        connectionId: 'connection-1',
-        extensionId: 'extension-1',
-        activeTabId: 1,
-        activeTabBinding: 'agent',
-        userBoundOrigin: null,
-        stateRevision: 1,
-        capabilities: ['navigate'],
-        socketPath: '/tmp/browser.sock',
-      } satisfies BrowserBridgeStatus;
-    },
-  } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ backend: () => 'extension' }, { bridge });
-  t.after(async () => await runtime.stop());
-
-  await runtime.open(call('thread-a', '/workspace/a'), 'https://example.com/a');
-  await runtime.open(call('thread-b', '/workspace/b'), 'https://example.com/b');
-  await assert.rejects(
-    runtime.snapshot(call('thread-a', '/workspace/other')),
-    /already bound to workdir/,
-  );
+test('JSON CDP configuration validates scalar and environment types before starting resources', () => {
+  for (const config of [
+    { headless: 'false' }, { endpoint: 9222 }, { endpoint: '' },
+    { executablePath: false }, { userDataDir: [] }, { timeoutMs: '1000' },
+    { env: [] }, { env: { PATH: 1 } }, { env: { PATH: null } },
+    { env: { 'INVALID=NAME': 'value' } },
+  ]) {
+    assert.throws(() => createCdpRuntime(config as unknown as CdpRuntimeConfig));
+  }
+  validateCdpConfig({ headless: false, env: {}, timeoutMs: 1000 });
+  validateCdpConfig({ env: { PATH: '', LANG: 'C' } });
 });
 
-test('BrowserRuntime refuses to create an unowned browser workspace', async (t) => {
-  const runtime = new BrowserRuntime();
-  t.after(async () => await runtime.stop());
-
-  await assert.rejects(
-    runtime.open(call(''), 'https://example.com'),
-    /requires a threadId/,
-  );
+test('released CDP clients cannot create resources and calls require explicit ownership', async () => {
+  const runtime = createCdpRuntime({ endpoint: 'http://127.0.0.1:1' });
+  const context = { clientId: 'host-a', toolkitName: 'browser', execution: { threadId: 'thread', workdir: '/tmp' } };
+  await runtime.releaseClient(context.clientId);
+  await assert.rejects(runtime.call('open', ['https://example.com'], context), /released/);
+  await assert.rejects(runtime.call('executeAnything', [], context), /Unknown/);
+  await runtime.close();
 });
 
-test('BrowserRuntime routes separate thread workspaces with distinct opaque extension context ids', async (t) => {
-  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
-  const status: BrowserBridgeStatus = {
-    listening: true,
-    hostConnected: true,
-    extensionConnected: true,
-    debuggerAttached: true,
-    targetAlive: true,
-    connectionId: 'connection-1',
-    extensionId: 'extension-1',
-    activeTabId: 1,
-    activeTabBinding: 'agent',
-    userBoundOrigin: null,
-    stateRevision: 1,
-    capabilities: ['navigate'],
-    socketPath: '/tmp/browser.sock',
-  };
-  const bridge = {
-    async sendCommand(command: string, params: Record<string, unknown>) {
-      calls.push({ command, params });
-      if (command === 'navigate') {
-        return { ok: true };
-      }
-      return {
-        title: 'Example',
-        url: String(params.url ?? 'https://example.com/page'),
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
-      };
-    },
-    getStatus() {
-      return status;
-    },
-  } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime(
-    { backend: () => 'extension' },
-    { bridge },
-  );
-  t.after(async () => await runtime.stop());
-
-  await runtime.open(call('thread-1'), 'https://example.com/first');
-  await runtime.open(call('thread-2'), 'https://example.com/second');
-
-  const navigations = calls.filter((call) => call.command === 'navigate');
-  const firstContextId = navigations[0]?.params.browserContextId;
-  const secondContextId = navigations[1]?.params.browserContextId;
-  assert.equal(navigations.length, 2);
-  assert.equal(typeof firstContextId, 'string');
-  assert.equal(typeof secondContextId, 'string');
-  assert.notEqual(firstContextId, secondContextId);
-  assert.notEqual(firstContextId, 'thread-1');
-  assert.notEqual(secondContextId, 'thread-2');
-});
-
-test('BrowserRuntime broadcasts an unscoped reconnect to every thread workspace', async (t) => {
-  const generationListeners = new Set<(change: {
-    connectionGeneration: number;
-    targetGeneration: number;
-    contextId?: string;
-  }) => void>();
-  const status: BrowserBridgeStatus = {
-    listening: true,
-    hostConnected: true,
-    extensionConnected: true,
-    debuggerAttached: true,
-    targetAlive: true,
-    connectionId: 'connection-1',
-    extensionId: 'extension-1',
-    activeTabId: 1,
-    activeTabBinding: 'agent',
-    userBoundOrigin: null,
-    stateRevision: 1,
-    capabilities: ['navigate'],
-    socketPath: '/tmp/browser.sock',
-    connectionGeneration: 1,
-    targetGeneration: 1,
-  };
-  const bridge = {
-    beginNavigation() {
-      return 1;
-    },
-    async sendCommand(command: string) {
-      for (const listener of generationListeners) {
-        listener({ connectionGeneration: 2, targetGeneration: 1 });
-      }
-      if (command === 'navigate') return { ok: true };
-      return {
-        title: 'Example',
-        url: 'https://example.com/page',
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
-      };
-    },
-    getStatus() {
-      return status;
-    },
-    onRuntimeEvent() {
-      return () => {};
-    },
-    onGenerationChanged(listener: (change: {
-      connectionGeneration: number;
-      targetGeneration: number;
-      contextId?: string;
-    }) => void) {
-      generationListeners.add(listener);
-      return () => generationListeners.delete(listener);
-    },
-  } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ backend: () => 'extension' }, { bridge });
-  t.after(async () => await runtime.stop());
-
-  await assert.rejects(
-    runtime.open(call('thread-1'), 'https://example.com/page'),
-    (error: unknown) => {
-      assert.equal((error as { code?: string }).code, 'runtime_disconnected');
-      return true;
-    },
-  );
+test('pre-aborted CDP requests do not connect and a missing session does not adopt a browser page', async () => {
+  const runtime = createCdpRuntime({ endpoint: 'http://127.0.0.1:1' });
+  const context = { clientId: 'host', toolkitName: 'browser', execution: { threadId: 'thread', workdir: '/tmp' } };
+  await assert.rejects(runtime.call('open', ['https://example.com'], { ...context, signal: AbortSignal.abort() }), { code: 'browser_command_cancelled' });
+  await assert.rejects(runtime.call('snapshot', [], context), { code: 'browser_not_open' });
+  assert.equal(runtime.diagnose().connected, false);
+  assert.equal(runtime.diagnose().sessions, 0);
+  await runtime.close();
 });

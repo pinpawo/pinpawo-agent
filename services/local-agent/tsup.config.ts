@@ -2,26 +2,23 @@ import { defineConfig } from 'tsup';
 import { copyFile, mkdir } from 'node:fs/promises';
 
 // Packages with CJS internals that require Node.js built-ins at runtime —
-// keep them external so node_modules (rsync'd into the .app bundle) resolves them.
+// keep them external so the installed node_modules resolves them.
 const CJS_EXTERNALS = [
   'ws',
   'ws/*',
   // ripgrep: runtime-resolved platform package with a native binary
   '@vscode/ripgrep',
   '@vscode/ripgrep/*',
-  // playwright / chromium: native binaries, never bundle
+  // CDP client library resolves its runtime assets from its installed package.
   'playwright-core',
   'playwright-core/*',
-  'playwright',
-  'playwright/*',
-  'chromium-bidi',
-  'chromium-bidi/*',
 ];
 
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
     hostRuntime: 'src/hostRuntime.ts',
+    runtimeService: 'src/runtimeService/entry.ts',
     // Entry key is the published artifact name; keep it stable so the
     // `pinpawo/local-server-transport` subpath keeps resolving after the move.
     localServerTransportApi: 'src/wire/index.ts',

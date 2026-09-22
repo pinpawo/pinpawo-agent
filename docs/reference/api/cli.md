@@ -17,7 +17,7 @@
 | `pinpawo server` / `pinpawo run` | Start the local Chat host. | `--workdir <directory>`, `--stdio` |
 | `pinpawo tui` | Start the terminal UI. | `--check`, `--qa`, `--embed-host`, Chat-only `--workdir <directory>`, `--server-port <port>`, or paired `--pet-port <port>` and `--pet-id <petId>` |
 | `pinpawo-studio` | Start the independent Studio Host. | `--workdir <directory>`, `--pet-port <port>` |
-| `pinpawo browser extension <action>` | Manage the Chrome Extension driver. | `--extension-id <id>` |
+| `pinpawo runtime start / status / stop` | Start, inspect, or stop the shared local Runtime service. | `--directory <path>` |
 | `pinpawo capability list` | List installed user Capabilities. | — |
 | `pinpawo capability validate <dir>` | Validate one Capability directory. | — |
 | `pinpawo capability install <dir>` | Install or link a Capability directory. | `--overwrite`, `--link` |
@@ -51,6 +51,28 @@
   resident Pet workdir. `--check` and `--qa` cannot be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes
   runtime state and relative tool paths; see [Workdir configuration](../runtime/workdir.md).
+
+## Runtime service
+
+Host startup ensures the independent Runtime service is running. `runtime start`
+does the same explicitly and prints a JSON status snapshot; `runtime status`
+connects to an existing service and prints its status. `runtime stop` requests
+shutdown and prints a confirmation. Status and stop do not start a missing service.
+
+The service directory defaults to `~/.pinpawo/runtime`. `PINPAWO_RUNTIME_DIR`
+overrides it; `--directory` overrides that value for the Runtime command. Its
+`config.json` defines named instances and `toolkitBindings`. By default `bash`,
+`git` and `project-inspection` share a Shell instance, and `browser` uses CDP.
+The directory and instance selection are independent of each Host's `--workdir`.
+
+Closing a Host releases that connection's resources and leaves the service
+running. Explicitly stopping the service affects all attached Hosts. Changing
+configuration requires a service restart and fresh Host connections; existing
+clients do not silently reconnect or replay operations.
+
+Browser extension commands and backend selection have been removed. Remove
+`PINPAWO_BROWSER_BACKEND` and stored `browser_backend` settings; configure the
+CDP instance in the service config. See the [CDP browser guide](../../guides/browser-bridge.md).
 
 ## Automation boundary
 

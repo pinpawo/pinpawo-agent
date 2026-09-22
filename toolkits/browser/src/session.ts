@@ -1,445 +1,175 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { rm } from 'node:fs/promises';
+import type { BrowserContext, Page, ElementHandle } from 'playwright-core';
+import { CdpConnection } from './connection';
+import { BrowserOperationError } from './errors';
+import { persistBrowserScreenshot, parseBrowserScreenshot } from './screenshot';
 import {
   buildBrowserExtractPayload,
+  buildBrowserExtractPayloadFromRaw,
   buildBrowserSnapshotPayload,
+  normalizeBrowserExtractOptions,
   MAX_BROWSER_INTERACTIVE_ELEMENTS,
   type BrowserExtractOptions,
-  type BrowserInteractiveElement,
   type BrowserRawSnapshot,
 } from './snapshotPayload';
-import { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
-import type { BrowserRuntimeSnapshot } from './runtime';
-import { persistBrowserScreenshot } from './screenshot';
-import { BrowserOperationError } from './errors';
-import {
-  BrowserContextOwnership,
-  type BrowserExecutionOwner,
-} from './ownership';
-import {
-  configuredBrowserBackend,
-  resolveBrowserToolkitOptions,
-  type BrowserToolkitOptions,
-  type ResolvedBrowserToolkitOptions,
-} from './options';
 
-export {
-  buildBrowserExtractPayload,
-  buildBrowserSnapshotPayload,
-  buildBrowserTextChunk,
-} from './snapshotPayload';
+export { buildBrowserExtractPayload, buildBrowserSnapshotPayload, buildBrowserTextChunk } from './snapshotPayload';
 export type { BrowserExtractOptions } from './snapshotPayload';
-const execFileAsync = promisify(execFile);
-
-const nodeRequire = createRequire(import.meta.url);
-
-async function execLoginShellLine(command: string, timeoutMs = 3_000): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync('/bin/zsh', ['-lc', command], {
-      timeout: timeoutMs,
-      encoding: 'utf8',
-    });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-// ── Playwright types ───────────────────────────────────────────────────────────
-type PlaywrightCore = typeof import('playwright-core');
-type BrowserContext = import('playwright-core').BrowserContext;
-type Page = import('playwright-core').Page;
-type PageElementHandle = import('playwright-core').ElementHandle<HTMLElement | SVGElement>;
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_CHROME_EXECUTABLE_PATH =
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const SESSIONS_DIR = resolve(homedir(), '.pinpawo', 'sessions');
-const DEFAULT_SESSION = 'default';
-const SAFE_SESSION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-
-function throwIfBrowserOperationAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  throw new BrowserOperationError(
-    'browser_command_cancelled',
-    'Browser command was cancelled.',
-    true,
-  );
-}
-
-function sessionDir(name: string): string {
-  const trimmed = name.trim();
-  if (
-    !SAFE_SESSION_NAME_PATTERN.test(trimmed)
-    || trimmed === '.'
-    || trimmed === '..'
-  ) {
-    throw new Error('browser session name must use 1-64 chars: letters, numbers, ".", "_" or "-", and must not contain path separators');
-  }
-  return resolve(SESSIONS_DIR, trimmed);
-}
-
-function listSessionNames(): string[] {
-  if (!existsSync(SESSIONS_DIR)) return [];
-  try {
-    return readdirSync(SESSIONS_DIR, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name);
-  } catch {
-    return [];
-  }
-}
-
-// ── Backend detection ─────────────────────────────────────────────────────────
-
-export type BrowserBackend = 'extension' | 'playwright';
-
-export function selectAutoBrowserBackend(input: {
-  extensionCommandReady: boolean;
-  extensionListening?: boolean;
-  playwrightAvailable: boolean;
-  requiresPlaywright?: boolean;
-}): BrowserBackend | null {
-  if (!input.requiresPlaywright && input.extensionCommandReady) return 'extension';
-  if (input.playwrightAvailable) return 'playwright';
-  if (!input.requiresPlaywright && input.extensionListening) return 'extension';
-  return null;
-}
-
-async function detectBackend(
-  runtime: BrowserRuntimeSnapshot,
-  options: ResolvedBrowserToolkitOptions,
-  requiresPlaywright = false,
-): Promise<BrowserBackend> {
-  const fromEnv = process.env.PINPAWO_BROWSER_BACKEND?.trim();
-  const fromHost = options.backend();
-  const forced = configuredBrowserBackend(options);
-
-  console.log(`[browser] detectBackend: env=${fromEnv ?? '(unset)'} host=${fromHost} → forced=${forced}`);
-
-  if (forced === 'agent-browser') {
-    throw new Error(
-      'Browser backend "agent-browser" is no longer supported.\n' +
-        '  Set PINPAWO_BROWSER_BACKEND=auto, "playwright", or the explicitly installed "extension" backend.',
-    );
-  }
-
-  if (forced === 'extension') {
-    console.log('[browser] using Chrome extension (forced)');
-    return 'extension';
-  }
-
-  if (forced === 'playwright') {
-    if (!(await canUsePlaywright())) {
-      throw new Error(
-        'Browser backend forced to "playwright" but it is not available.\n' +
-          '  Install external playwright-core (for example: npm install -g playwright-core)\n' +
-          '  Also ensure Google Chrome is installed.',
-      );
-    }
-    console.log('[browser] using playwright (forced)');
-    return 'playwright';
-  }
-
-  if (forced !== 'auto') {
-    throw new Error(
-      `Unknown browser backend "${forced}". Use auto, playwright, or extension.`,
-    );
-  }
-
-  // auto-detect
-  const extensionStatus = runtime.extension;
-  const playwrightAvailable = await canUsePlaywright();
-  const autoBackend = selectAutoBrowserBackend({
-    extensionCommandReady: extensionStatus.commandReady,
-    extensionListening: extensionStatus.bridgeListening,
-    playwrightAvailable,
-    requiresPlaywright,
-  });
-  if (autoBackend) {
-    console.log(`[browser] using ${autoBackend === 'extension' ? 'Chrome extension' : 'playwright'} (auto)`);
-    return autoBackend;
-  }
-  throw new Error(
-      'No browser backend available.\n' +
-      '  Install external playwright-core (for example: npm install -g playwright-core)\n' +
-      '  Also ensure Google Chrome is installed.',
-  );
-}
-
-async function resolvePlaywrightSearchRoots(): Promise<string[]> {
-  const home = homedir();
-  const roots = [
-    process.env.PINPAWO_PLAYWRIGHT_CORE_PATH?.trim() || '',
-    '/usr/local/lib/node_modules',
-    '/opt/homebrew/lib/node_modules',
-    `${home}/.npm-global/lib/node_modules`,
-    `${home}/.local/lib/node_modules`,
-  ].filter(Boolean);
-
-  // npm root -g via login shell
-  const npmRoot = await execLoginShellLine('npm root -g');
-  if (npmRoot) {
-    roots.push(npmRoot);
-  }
-
-  // nvm: scan all installed node versions for global node_modules
-  const nvmDir = process.env.NVM_DIR || `${home}/.nvm`;
-  const nvmVersionsDir = resolve(nvmDir, 'versions', 'node');
-  try {
-    const versions = readdirSync(nvmVersionsDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => resolve(nvmVersionsDir, d.name, 'lib', 'node_modules'));
-    roots.push(...versions);
-  } catch {
-    // nvm not installed or no versions — skip
-  }
-
-  // Also check the running node's own prefix (covers nvm's active version)
-  const runningPrefix = resolve(process.execPath, '..', '..', 'lib', 'node_modules');
-  roots.push(runningPrefix);
-
-  return [...new Set(roots)];
-}
-
-async function resolvePlaywrightCorePath(): Promise<string | null> {
-  const override = process.env.PINPAWO_PLAYWRIGHT_CORE_PATH?.trim();
-  if (override && existsSync(override)) {
-    return override;
-  }
-
-  try {
-    return nodeRequire.resolve('playwright-core');
-  } catch {
-    // Optional package dependency not installed; fall back to global search roots.
-  }
-
-  for (const root of await resolvePlaywrightSearchRoots()) {
-    try {
-      const resolved = nodeRequire.resolve('playwright-core', { paths: [root] });
-      if (resolved) {
-        return resolved;
-      }
-    } catch {
-      // try next root
-    }
-  }
-
-  return null;
-}
-
-async function loadPlaywrightCore(): Promise<PlaywrightCore | null> {
-  const resolved = await resolvePlaywrightCorePath();
-  if (!resolved) {
-    return null;
-  }
-  try {
-    return nodeRequire(resolved) as PlaywrightCore;
-  } catch {
-    return null;
-  }
-}
-
-async function canUsePlaywright(): Promise<boolean> {
-  const execPath =
-    process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
-  return await loadPlaywrightCore() !== null && existsSync(execPath);
-}
-
-// ── Open options ──────────────────────────────────────────────────────────────
-
-export interface BrowserOpenOptions {
-  /** Run without a visible browser window. Keep false when login or captcha handling is needed. */
-  headless?: boolean;
-  /** Named browser session. Login state is persisted per session in ~/.pinpawo/sessions/<name>/ */
-  session?: string;
-  /** Explicit Chrome-style user-data-dir. Use only when the caller provides a local browser profile path. */
-  userDataDir?: string;
-}
-
-export type BrowserElementTarget = {
-  selector?: string;
-  ref?: string;
-};
-
-export type BrowserScrollOptions = {
-  deltaX?: number;
-  deltaY?: number;
-  target?: BrowserElementTarget;
-};
-
+export type BrowserOpenOptions = { headless?: boolean; session?: string; userDataDir?: string };
+export type BrowserElementTarget = { selector?: string; ref?: string };
+export type BrowserScrollOptions = { deltaX?: number; deltaY?: number; target?: BrowserElementTarget };
 export type BrowserWaitState = 'visible' | 'hidden';
+type PageElementHandle = ElementHandle<HTMLElement | SVGElement>;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
-function normalizeBrowserElementTarget(target: string | BrowserElementTarget): BrowserElementTarget {
-  const normalized = typeof target === 'string' ? { selector: target.trim() } : {
-    selector: target.selector?.trim(),
-    ref: target.ref?.trim(),
-  };
-  if ((normalized.selector ? 1 : 0) + (normalized.ref ? 1 : 0) !== 1) {
-    throw new Error('browser element target requires exactly one of selector or ref');
-  }
-  return normalized;
+export function checkBrowserAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new BrowserOperationError('browser_command_cancelled', 'Browser operation was cancelled.', false);
 }
 
-function resolveUserDataDir(userDataDir: string, workdir: string): string {
-  const trimmed = userDataDir.trim();
-  if (!trimmed) {
-    throw new Error('userDataDir must not be empty');
+function normalizeTarget(target: string | BrowserElementTarget): BrowserElementTarget {
+  const value = typeof target === 'string' ? { selector: target.trim() } : target;
+  if (!value || (value.selector ? 1 : 0) + (value.ref ? 1 : 0) !== 1) {
+    throw new Error('browser target requires exactly one selector or ref');
   }
-  if (trimmed === '~') {
-    return homedir();
-  }
-  if (trimmed.startsWith('~/')) {
-    return resolve(homedir(), trimmed.slice(2));
-  }
-  return isAbsolute(trimmed) ? trimmed : resolve(workdir, trimmed);
+  return value;
 }
 
-function openSessionPath(opts: BrowserOpenOptions, workdir: string): string {
-  return opts.userDataDir
-    ? resolveUserDataDir(opts.userDataDir, workdir)
-    : sessionDir(opts.session ?? DEFAULT_SESSION);
-}
-
-// ── Playwright implementation ─────────────────────────────────────────────────
-
-class PlaywrightBrowserSession {
+/** A serialized page session belonging to one client + Toolkit + thread. */
+export class CdpBrowserSession {
   private context: BrowserContext | null = null;
+  private ownsContext = false;
   private page: Page | null = null;
-  private readonly trackedPages = new WeakSet<Page>();
-  private readonly parentPages = new WeakMap<Page, Page>();
-  private activeHeadless = false;
-  private activeSessionDir = sessionDir(DEFAULT_SESSION);
-  private readonly refAttribute = `data-pinpawo-ref-${randomUUID()}`;
+  private readonly pages = new Set<Page>();
+  private readonly parents = new WeakMap<Page, Page>();
   private readonly refElements = new Map<string, PageElementHandle>();
+  private readonly refAttribute = 'data-pinpawo-ref-' + randomUUID();
+  private readonly artifacts = new Set<string>();
+  private navigationVersion = 0;
+  private approvedOrigin: string | null = null;
+  private disposed = false;
+  private createdResources = false;
+  private pendingPage: Promise<Page> | null = null;
+  private closing: Promise<string> | null = null;
+  private tail: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly workdir: () => string) {}
-
-  private readExecutablePath() {
-    return process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
-  }
-
-  private liveParentFor(page: Page): Page | null {
-    let parent = this.parentPages.get(page) ?? null;
-    while (parent?.isClosed()) {
-      parent = this.parentPages.get(parent) ?? null;
+  constructor(
+    private readonly connection: CdpConnection,
+    readonly workdir: string,
+    readonly name = 'default',
+  ) {
+    if (!isAbsolute(workdir)) throw new Error('Browser workdir must be absolute.');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name) || name === '.' || name === '..') {
+      throw new Error('Browser session must use 1-64 letters, numbers, dots, underscores or hyphens.');
     }
-    return parent;
   }
 
-  private activatePage(page: Page, parent?: Page): Page {
-    if (page.isClosed()) return page;
-    if (parent && parent !== page) this.parentPages.set(page, parent);
-    if (!this.trackedPages.has(page)) {
-      this.trackedPages.add(page);
+  run<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    const result = this.tail.then(async () => {
+      checkBrowserAbort(signal);
+      if (this.disposed) throw new BrowserOperationError('target_closed', 'Browser session has been closed. Use browser_open again.', true);
+      let onAbort: (() => void) | undefined;
+      const interrupted = new Promise<never>((_, reject) => {
+        onAbort = () => {
+          void this.close().then(
+            () => reject(new BrowserOperationError('browser_command_cancelled', 'Browser operation was cancelled and its owned pages were closed. An interaction may already have been dispatched.', false, { interactionDispatched: true })),
+            (error) => reject(error),
+          );
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+      try {
+        return await Promise.race([operation(), interrupted]);
+      } catch (error) {
+        if (signal?.aborted) {
+          await this.close();
+          throw new BrowserOperationError('browser_command_cancelled', 'Browser operation was cancelled and its owned pages were closed. An interaction may already have been dispatched.', false, { interactionDispatched: true });
+        }
+        throw error;
+      } finally {
+        if (onAbort) signal?.removeEventListener('abort', onAbort);
+      }
+    });
+    this.tail = result.catch(() => undefined);
+    return result;
+  }
+
+  private originError(interactionDispatched = false): BrowserOperationError {
+    return new BrowserOperationError('origin_changed', 'The active page left the approved origin. Open its URL explicitly for review before reading or interacting with it.', false, {
+      approvedOrigin: this.approvedOrigin,
+      manualActionRequired: true,
+      interactionDispatched,
+    });
+  }
+
+  private assertOrigin(page: Page, interactionDispatched = false): void {
+    if (page.isClosed()) throw new BrowserOperationError('target_closed', 'Browser page was closed.', true);
+    if (!this.approvedOrigin) throw new BrowserOperationError('origin_approval_missing', 'Use browser_open with an explicitly reviewed URL.');
+    let origin: string;
+    try { origin = new URL(page.url()).origin; } catch { throw this.originError(interactionDispatched); }
+    if (origin !== this.approvedOrigin) throw this.originError(interactionDispatched);
+  }
+
+  private activate(page: Page, parent?: Page): void {
+    this.createdResources = true;
+    if (parent) this.parents.set(page, parent);
+    if (!this.pages.has(page)) {
+      this.pages.add(page);
       page.setDefaultTimeout(DEFAULT_TIMEOUT_MS);
+      page.on('popup', (popup) => {
+        if (this.disposed) { void popup.close().catch(() => {}); return; }
+        this.activate(popup, page);
+      });
+      page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) {
+          this.navigationVersion += 1;
+          void this.clearRefElements();
+        }
+      });
       page.on('close', () => {
-        if (this.page !== page) return;
-        const fallback = this.liveParentFor(page);
-        this.page = fallback;
-        if (fallback) {
-          this.activatePage(fallback);
-          void fallback.bringToFront().catch(() => {});
+        this.pages.delete(page);
+        if (this.page === page) {
+          let parentPage = this.parents.get(page) ?? null;
+          while (parentPage?.isClosed()) parentPage = this.parents.get(parentPage) ?? null;
+          this.page = parentPage;
+          void this.clearRefElements();
         }
       });
     }
     this.page = page;
-    return page;
   }
 
-  private async settleActivePage(previousPage: Page, followWindowMs = 300): Promise<Page> {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, followWindowMs));
-    const activePage = this.page && !this.page.isClosed()
-      ? this.page
-      : this.liveParentFor(previousPage);
-    if (!activePage) {
-      throw new BrowserOperationError(
-        'target_closed',
-        'Browser target closed before the operation completed.',
-        true,
-      );
-    }
-    this.activatePage(activePage);
-    await activePage.waitForLoadState('domcontentloaded', {
-      timeout: DEFAULT_TIMEOUT_MS,
-    }).catch(() => {});
-    if (activePage !== previousPage && !this.activeHeadless) {
-      await activePage.bringToFront().catch(() => {});
-    }
-    return activePage;
-  }
-
-  private async ensurePage(headless: boolean, sessionPath: string): Promise<Page> {
-    // Restart context if headless or browser session changed.
-    if (this.context && (headless !== this.activeHeadless || sessionPath !== this.activeSessionDir)) {
-      await this.close();
-    }
-
-    if (this.page) return this.page;
-
-    const playwrightCore = await loadPlaywrightCore();
-    if (!playwrightCore) {
-      throw new Error(
-        'playwright-core not found. Install external playwright-core or set PINPAWO_PLAYWRIGHT_CORE_PATH.',
-      );
-    }
-    const { chromium } = playwrightCore;
-    const executablePath = this.readExecutablePath();
-    if (!existsSync(executablePath)) {
-      throw new Error(
-        `Chrome not found at "${executablePath}". Set PINPAWO_BROWSER_EXECUTABLE_PATH if installed elsewhere.`,
-      );
-    }
-    mkdirSync(sessionPath, { recursive: true });
-
-    this.activeHeadless = headless;
-    this.activeSessionDir = sessionPath;
-
-    this.context = await chromium.launchPersistentContext(sessionPath, {
-      headless,
-      executablePath,
-    });
-    const existing = this.context.pages();
-    const initialPage = existing[0] ?? (await this.context.newPage());
-    const activePage = this.activatePage(initialPage);
-    this.context.on('page', (page) => {
-      const activeAtCreation = this.page;
-      void page.opener().then((opener) => {
-        if (
-          !activeAtCreation
-          || opener !== activeAtCreation
-          || this.page !== activeAtCreation
-          || page.isClosed()
-        ) return;
-        this.activatePage(page, activeAtCreation);
-        if (!this.activeHeadless) void page.bringToFront().catch(() => {});
-      }).catch(() => {});
-    });
-
-    // When running inside the app bundle the parent process has no foreground
-    // privileges, so Chrome won't come to front automatically. Bring it forward.
-    if (!headless) {
-      await activePage.bringToFront().catch(() => {});
-    }
-
-    return activePage;
-  }
-
-  private async requirePage(): Promise<Page> {
+  private async ensurePage(): Promise<Page> {
     if (this.page && !this.page.isClosed()) return this.page;
-    const fallback = this.page ? this.liveParentFor(this.page) : null;
-    if (fallback) return this.activatePage(fallback);
-    throw new BrowserOperationError(
-      'browser_not_open',
-      'No active browser page. Use browser_open first.',
-      true,
-    );
+    if (!this.pendingPage) {
+      this.pendingPage = (async () => {
+        const browser = await this.connection.getBrowser();
+        const context = this.name === 'default' ? browser.contexts()[0] : await browser.newContext();
+        if (!context) throw new Error('CDP browser has no default context.');
+        this.ownsContext = this.name !== 'default';
+        this.context = context;
+        if (this.disposed) {
+          if (this.ownsContext) await context.close();
+          throw new BrowserOperationError('target_closed', 'Browser session closed while creating its context.');
+        }
+        const page = await context.newPage();
+        if (this.disposed) {
+          await page.close();
+          if (this.ownsContext) await context.close();
+          throw new BrowserOperationError('target_closed', 'Browser session closed while creating its page.');
+        }
+        this.activate(page);
+        return page;
+      })().finally(() => { this.pendingPage = null; });
+    }
+    return this.pendingPage;
+  }
+
+  private requirePage(): Page {
+    if (!this.page || this.page.isClosed()) throw new BrowserOperationError('browser_not_open', 'No active browser page. Use browser_open first.', true);
+    this.assertOrigin(this.page);
+    return this.page;
   }
 
   private async clearRefElements(): Promise<void> {
@@ -449,6 +179,7 @@ class PlaywrightBrowserSession {
   }
 
   private async buildSnapshot(page: Page): Promise<string> {
+    this.assertOrigin(page);
     await this.clearRefElements();
     const snapshot = await page.evaluate<BrowserRawSnapshot>(`
       (() => {
@@ -485,10 +216,12 @@ class PlaywrightBrowserSession {
               hint: hintFor(el),
             };
           });
+        const fullText = (document.body?.innerText || '').trim();
         return {
           title: document.title,
           url: window.location.href,
-          text: (document.body?.innerText || '').trim(),
+          text: fullText.slice(0, 50000),
+          textLength: fullText.length,
           interactiveCount: interactiveElements.length,
           interactive,
         };
@@ -509,381 +242,212 @@ class PlaywrightBrowserSession {
         });
       }, this.refAttribute).catch(() => {});
     }
+    this.assertOrigin(page);
+    if (new URL(snapshot.url).origin !== this.approvedOrigin) throw this.originError();
     return JSON.stringify(buildBrowserSnapshotPayload({
       title: snapshot.title,
       url: snapshot.url,
       text: snapshot.text,
+      textLength: snapshot.textLength,
       textSource: 'document.body.innerText',
       interactive: snapshot.interactive,
       interactiveCount: snapshot.interactiveCount,
     }), null, 2);
   }
 
-  async open(
-    url: string,
-    opts: BrowserOpenOptions = {},
-    _signal?: AbortSignal,
-  ): Promise<string> {
-    const headless = opts.headless ?? this.activeHeadless;
-    const sessionPath = openSessionPath(opts, this.workdir());
-    const page = await this.ensurePage(headless, sessionPath);
+
+  async open(url: string, options: BrowserOpenOptions = {}): Promise<string> {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new BrowserOperationError('restricted_target', 'Only HTTP(S) browser targets are supported.');
+    const config = this.connection.config;
+    if (config.endpoint && (options.headless !== undefined || options.userDataDir !== undefined)) {
+      throw new Error('A borrowed CDP browser cannot change headless or profile. Configure a managed runtime for startup options.');
+    }
+    if (!config.endpoint && options.headless !== undefined && options.headless !== (config.headless ?? false)) {
+      throw new Error('headless must match the managed CDP runtime configuration.');
+    }
+    if (options.userDataDir && resolve(this.workdir, options.userDataDir) !== config.userDataDir) {
+      throw new Error('userDataDir must match the managed CDP runtime configuration.');
+    }
+    await this.clearRefElements();
+    this.approvedOrigin = parsed.origin;
+    const page = await this.ensurePage();
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: this.connection.config.timeoutMs ?? 30_000 });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new BrowserOperationError('navigation_timeout', 'Navigation timed out. Use browser_wait to inspect readiness without repeating navigation.', true);
+      }
+      throw error;
+    }
+    this.assertOrigin(page);
+    return this.buildSnapshot(page);
+  }
+
+  async snapshot(): Promise<string> {
+    const page = this.requirePage();
+    try {
       return await this.buildSnapshot(page);
     } catch (error) {
-      await this.close();
+      // A popup may close between the initial check and the CDP response.
+      // Retrying this read on its already-owned parent never repeats an action.
+      if (page.isClosed() && this.page && this.page !== page) {
+        return this.buildSnapshot(this.requirePage());
+      }
       throw error;
     }
   }
 
-  async snapshot(_signal?: AbortSignal): Promise<string> { return this.buildSnapshot(await this.requirePage()); }
-
-  private resolveTarget(target: string | BrowserElementTarget):
-    | { selector: string }
-    | { element: PageElementHandle } {
-    const normalized = normalizeBrowserElementTarget(target);
-    if (normalized.selector) return { selector: normalized.selector };
+  private async target(target: string | BrowserElementTarget) {
+    const page = this.requirePage();
+    const normalized = normalizeTarget(target);
+    if (normalized.selector) return page.locator(normalized.selector).first();
     const element = this.refElements.get(normalized.ref!);
-    if (!element) {
-      throw new BrowserOperationError(
-        'stale_element_reference',
-        'Stale browser element reference. Take a new browser_snapshot and retry.',
-        true,
-      );
+    if (!element || !(await element.evaluate((node) => node.isConnected).catch(() => false))) {
+      throw new BrowserOperationError('stale_element_reference', 'Element ref is stale. Take a new browser_snapshot.', true);
     }
-    return { element };
+    return element;
   }
 
-  async click(target: string | BrowserElementTarget, _signal?: AbortSignal): Promise<string> {
-    const page = await this.requirePage();
-    const resolved = this.resolveTarget(target);
-    if ('selector' in resolved) {
-      await page.locator(resolved.selector).first().click({ timeout: DEFAULT_TIMEOUT_MS });
-    } else {
-      await resolved.element.click({ timeout: DEFAULT_TIMEOUT_MS });
-    }
-    const activePage = await this.settleActivePage(page);
-    return this.buildSnapshot(activePage);
-  }
-
-  async type(
-    target: string | BrowserElementTarget,
-    text: string,
-    submit = false,
-    _signal?: AbortSignal,
-  ): Promise<string> {
-    const page = await this.requirePage();
-    const resolved = this.resolveTarget(target);
-    const loc = 'selector' in resolved ? page.locator(resolved.selector).first() : resolved.element;
-    await loc.fill(text, { timeout: DEFAULT_TIMEOUT_MS });
-    if (submit) {
-      await loc.press('Enter', { timeout: DEFAULT_TIMEOUT_MS });
-      const activePage = await this.settleActivePage(page);
-      return this.buildSnapshot(activePage);
-    }
+  private async settle(previous: Page): Promise<string> {
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 250));
+    const page = this.page ?? previous;
+    await page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_TIMEOUT_MS });
+    this.assertOrigin(page, true);
     return this.buildSnapshot(page);
   }
 
-  async scroll(options: BrowserScrollOptions = {}, _signal?: AbortSignal): Promise<string> {
-    const page = await this.requirePage();
-    if (options.target) {
-      const resolved = this.resolveTarget(options.target);
-      if ('selector' in resolved) {
-        await page.locator(resolved.selector).first().hover({ timeout: DEFAULT_TIMEOUT_MS });
-      } else {
-        await resolved.element.hover({ timeout: DEFAULT_TIMEOUT_MS });
+  private async guardAction<T>(page: Page, operation: () => Promise<T>): Promise<T> {
+    let originChanged = false;
+    const onNavigation = () => {
+      try { this.assertOrigin(page); } catch {
+        originChanged = true;
+        // A pending locator action must never follow a new, unapproved document.
+        // Closing only this session-owned target cancels Playwright's auto-wait.
+        void page.close().catch(() => {});
       }
+    };
+    page.on('framenavigated', onNavigation);
+    try {
+      this.assertOrigin(page);
+      const result = await operation();
+      if (originChanged) throw this.originError(true);
+      return result;
+    } catch (error) {
+      if (originChanged) throw this.originError(true);
+      throw error;
+    } finally {
+      page.off('framenavigated', onNavigation);
     }
-    await page.mouse.wheel(options.deltaX ?? 0, options.deltaY ?? 600);
-    await page.waitForTimeout(150);
-    return this.buildSnapshot(page);
   }
 
-  async wait(
-    target?: string | BrowserElementTarget,
-    timeoutMs = 3_000,
-    state: BrowserWaitState = 'visible',
-    _signal?: AbortSignal,
-  ): Promise<string> {
-    const page = await this.requirePage();
-    if (target) {
-      const resolved = this.resolveTarget(target);
-      if ('selector' in resolved) {
-        await page.locator(resolved.selector).first().waitFor({ state, timeout: timeoutMs });
-      } else {
-        await resolved.element.waitForElementState(state, { timeout: timeoutMs });
-      }
-    } else {
-      await page.waitForTimeout(timeoutMs);
-    }
-    return this.buildSnapshot(page);
+  async click(target: string | BrowserElementTarget): Promise<string> {
+    const page = this.requirePage();
+    const element = await this.target(target);
+    this.assertOrigin(page);
+    await this.guardAction(page, () => element.click({ timeout: DEFAULT_TIMEOUT_MS }));
+    return this.settle(page);
   }
 
-  async extract(options: BrowserExtractOptions = {}, _signal?: AbortSignal): Promise<string> {
-    const page = await this.requirePage();
-    const text = options.selector
-      ? await page.locator(options.selector).first().innerText({ timeout: DEFAULT_TIMEOUT_MS })
-      : await page.evaluate<string>(`(document.body?.innerText || '').trim()`);
-    return JSON.stringify(buildBrowserExtractPayload({
-      title: await page.title(),
-      url: page.url(),
-      selector: options.selector,
-      text: text.trim(),
-      offset: options.offset,
-      limit: options.limit,
-      textSource: options.selector ? 'locator.innerText' : 'document.body.innerText',
-    }), null, 2);
-  }
-
-  async screenshot(_signal?: AbortSignal): Promise<string> {
-    const page = await this.requirePage();
-    const bytes = await page.screenshot({
-      type: 'jpeg',
-      quality: 75,
-      fullPage: false,
+  async type(target: string | BrowserElementTarget, text: string, submit = false): Promise<string> {
+    const page = this.requirePage();
+    const element = await this.target(target);
+    this.assertOrigin(page);
+    await this.guardAction(page, async () => {
+      await element.fill(text, { timeout: DEFAULT_TIMEOUT_MS });
+      if (submit) await element.press('Enter', { timeout: DEFAULT_TIMEOUT_MS });
     });
-    return persistBrowserScreenshot(
-      { mimeType: 'image/jpeg', data: bytes.toString('base64') },
-      this.workdir(),
-    );
+    return this.settle(page);
   }
 
-  async close(_signal?: AbortSignal): Promise<string> {
+  async scroll(options: BrowserScrollOptions = {}): Promise<string> {
+    const page = this.requirePage();
+    const delta = { x: options.deltaX ?? 0, y: options.deltaY ?? 600 };
+    if (!Number.isFinite(delta.x) || !Number.isFinite(delta.y)) throw new Error('Scroll delta must be finite.');
+    if (options.target) {
+      const element = await this.target(options.target);
+      if ('elementHandle' in element) {
+        await element.evaluate((node, d) => node.scrollBy(d.x, d.y), delta);
+      } else {
+        await element.evaluate((node, d) => node.scrollBy(d.x, d.y), delta);
+      }
+    } else {
+      await page.evaluate((d) => window.scrollBy(d.x, d.y), delta);
+    }
+    return this.buildSnapshot(page);
+  }
+
+  async wait(target?: string | BrowserElementTarget, timeoutMs = DEFAULT_TIMEOUT_MS, state: BrowserWaitState = 'visible'): Promise<string> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) throw new Error('Browser wait timeout must be between 1 and 120000ms.');
+    const pendingPage = this.page;
+    if (pendingPage && !pendingPage.isClosed() && pendingPage.url() === 'about:blank' && this.approvedOrigin) {
+      await pendingPage.waitForURL((url) => url.protocol === 'http:' || url.protocol === 'https:', { timeout: timeoutMs });
+    }
+    const page = this.requirePage();
+    if (target) {
+      const element = await this.target(target);
+      if ('waitFor' in element) await element.waitFor({ state, timeout: timeoutMs });
+      else await element.waitForElementState(state, { timeout: timeoutMs });
+    } else {
+      await page.waitForLoadState('domcontentloaded', { timeout: timeoutMs });
+    }
+    return this.buildSnapshot(page);
+  }
+
+  async extract(options: BrowserExtractOptions = {}): Promise<string> {
+    const page = this.requirePage();
+    const textWindow = normalizeBrowserExtractOptions(options);
+    const raw = await page.locator(options.selector ?? 'body').first().evaluate((node, range) => {
+      const fullText = (node as HTMLElement).innerText;
+      const offset = Math.min(range.offset, fullText.length);
+      return {
+        text: fullText.slice(offset, offset + range.limit),
+        textLength: fullText.length,
+        offset,
+        limit: range.limit,
+        title: document.title,
+        url: window.location.href,
+      };
+    }, textWindow);
+    this.assertOrigin(page);
+    if (new URL(raw.url).origin !== this.approvedOrigin) throw this.originError();
+    return JSON.stringify(buildBrowserExtractPayloadFromRaw({ ...raw, selector: options.selector, textSource: options.selector ? 'selector.innerText' : 'document.body.innerText' }));
+  }
+
+  async screenshot(): Promise<string> {
+    const page = this.requirePage();
+    const navigationVersion = this.navigationVersion;
+    const bytes = await page.screenshot({ type: 'jpeg', quality: 80, fullPage: false, timeout: DEFAULT_TIMEOUT_MS });
+    this.assertOrigin(page);
+    if (navigationVersion !== this.navigationVersion) throw new BrowserOperationError('navigation_failed', 'Page changed while capturing the screenshot. Capture again.', true);
+    const serialized = await persistBrowserScreenshot({ mimeType: 'image/jpeg', data: bytes.toString('base64') }, this.workdir);
+    const artifact = parseBrowserScreenshot(serialized).path;
+    this.artifacts.add(artifact);
+    if (this.disposed) { await rm(artifact, { force: true }); throw new BrowserOperationError('target_closed', 'Browser session closed while saving screenshot.'); }
+    return serialized;
+  }
+
+  close(): Promise<string> {
+    this.closing ??= this.dispose();
+    return this.closing;
+  }
+
+  private async dispose(): Promise<string> {
+    this.disposed = true;
+    await this.pendingPage?.catch(() => {});
     await this.clearRefElements();
-    await this.page?.close().catch(() => {});
-    await this.context?.close().catch(() => {});
+    const cleanupUnconfirmed = this.createdResources && this.connection.diagnose().disconnected;
+    const results = await Promise.allSettled([...this.pages].map((page) => page.close()));
+    if (this.ownsContext && this.context) results.push(...await Promise.allSettled([this.context.close()]));
     this.page = null;
     this.context = null;
+    await Promise.all([...this.artifacts].map((path) => rm(path, { force: true })));
+    this.artifacts.clear();
+    this.createdResources = false;
+    const failure = results.find((result) => result.status === 'rejected');
+    if (cleanupUnconfirmed || failure) {
+      throw new BrowserOperationError('runtime_disconnected', 'Browser resource cleanup could not be confirmed after a CDP failure.', false, { cleanupUnconfirmed: true });
+    }
     return 'browser session closed';
   }
-
-  listSessions(): string[] { return listSessionNames(); }
-}
-
-// ── Facade ────────────────────────────────────────────────────────────────────
-
-type BrowserImpl = PlaywrightBrowserSession | ChromeExtensionBrowserSession;
-
-type ChromeExtensionSessionFactory = () => ChromeExtensionBrowserSession;
-
-export class BrowserSession {
-  private impl: BrowserImpl | null = null;
-  private initPromise: Promise<BrowserImpl> | null = null;
-  private readonly ownership: BrowserContextOwnership | null;
-  private readonly getRuntimeSnapshot: (() => BrowserRuntimeSnapshot) | null;
-  private readonly createChromeExtensionSession: ChromeExtensionSessionFactory | null;
-  private readonly options: ResolvedBrowserToolkitOptions;
-
-  constructor(options: {
-    requireExecutionOwner?: boolean;
-    getRuntimeSnapshot?: () => BrowserRuntimeSnapshot;
-    createChromeExtensionSession?: ChromeExtensionSessionFactory;
-    environment?: BrowserToolkitOptions;
-  } = {}) {
-    this.ownership = options.requireExecutionOwner
-      ? new BrowserContextOwnership()
-      : null;
-    this.getRuntimeSnapshot = options.getRuntimeSnapshot ?? null;
-    this.options = resolveBrowserToolkitOptions(options.environment);
-    this.createChromeExtensionSession = options.createChromeExtensionSession ?? null;
-  }
-
-  private ensureImpl(requiresPlaywright = false): Promise<BrowserImpl> {
-    if (this.impl) return Promise.resolve(this.impl);
-    if (!this.initPromise) {
-      if (!this.getRuntimeSnapshot) {
-        throw new Error('Browser session requires a Browser Runtime snapshot provider.');
-      }
-      this.initPromise = detectBackend(
-        this.getRuntimeSnapshot(),
-        this.options,
-        requiresPlaywright,
-      ).then((backend) => {
-        if (backend === 'extension') {
-          if (!this.createChromeExtensionSession) {
-            throw new Error('Chrome extension browser sessions must be created by BrowserRuntime.');
-          }
-          this.impl = this.createChromeExtensionSession();
-        } else {
-          this.impl = new PlaywrightBrowserSession(this.options.workdir);
-        }
-        return this.impl;
-      }).catch((error) => {
-        this.initPromise = null;
-        throw error;
-      });
-    }
-    return this.initPromise;
-  }
-
-  async open(
-    url: string,
-    opts?: BrowserOpenOptions,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      const requiresPlaywright = Boolean(
-        opts?.headless
-        || opts?.userDataDir
-        || (opts?.session && opts.session !== DEFAULT_SESSION),
-      );
-      return (await this.ensureImpl(requiresPlaywright)).open(url, opts, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOpen(owner, operation, signal)
-      : operation();
-  }
-  async openWithProfile(
-    url: string,
-    userDataDir: string,
-    opts?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl(true)).open(url, { ...opts, userDataDir }, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOpen(owner, operation, signal)
-      : operation();
-  }
-  async snapshot(owner: BrowserExecutionOwner | null = null, signal?: AbortSignal) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).snapshot(signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async click(
-    target: string | BrowserElementTarget,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).click(target, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async type(
-    target: string | BrowserElementTarget,
-    text: string,
-    submit?: boolean,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).type(target, text, submit, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async scroll(
-    options?: BrowserScrollOptions,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).scroll(options, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async wait(
-    target?: string | BrowserElementTarget,
-    timeoutMs?: number,
-    state?: BrowserWaitState,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).wait(target, timeoutMs, state, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async extract(
-    options?: BrowserExtractOptions,
-    owner: BrowserExecutionOwner | null = null,
-    signal?: AbortSignal,
-  ) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).extract(options, signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async screenshot(owner: BrowserExecutionOwner | null = null, signal?: AbortSignal) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return (await this.ensureImpl()).screenshot(signal);
-    };
-    return this.ownership
-      ? this.ownership.runOwned(owner, operation, signal)
-      : operation();
-  }
-  async close(owner: BrowserExecutionOwner | null = null, signal?: AbortSignal) {
-    const operation = async () => {
-      throwIfBrowserOperationAborted(signal);
-      return this.closeImpl(signal);
-    };
-    return this.ownership
-      ? this.ownership.closeOwned(owner, operation, signal)
-      : operation();
-  }
-  async shutdown() {
-    const operation = async () => this.closeImpl();
-    return this.ownership
-      ? this.ownership.shutdown(operation)
-      : operation();
-  }
-  private async closeImpl(signal?: AbortSignal) {
-    const impl = this.impl ?? (this.initPromise ? await this.initPromise : null);
-    if (!impl) return 'browser session closed';
-    try {
-      return await impl.close(signal);
-    } finally {
-      this.impl = null;
-      this.initPromise = null;
-    }
-  }
-  async listSessions() { return (await this.ensureImpl()).listSessions(); }
-}
-
-// ── Structural environment resolution used by Toolkit availability ───────────
-export type BrowserEnvironment = {
-  configured: string;
-  chromePath: string;
-  chromeAvailable: boolean;
-  playwrightCorePath: string | null;
-};
-
-export async function resolveBrowserEnvironment(
-  browserOptions: BrowserToolkitOptions = {},
-): Promise<BrowserEnvironment> {
-  const chromePath =
-    process.env.PINPAWO_BROWSER_EXECUTABLE_PATH?.trim() || DEFAULT_CHROME_EXECUTABLE_PATH;
-  const options = resolveBrowserToolkitOptions(browserOptions);
-
-  return {
-    configured: configuredBrowserBackend(options),
-    chromePath,
-    chromeAvailable: existsSync(chromePath),
-    playwrightCorePath: await resolvePlaywrightCorePath(),
-  };
 }

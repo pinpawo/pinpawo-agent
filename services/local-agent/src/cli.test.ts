@@ -351,27 +351,26 @@ test('local agent CLI routes run and server through the same Chat handler option
   assert.deepEqual(seen[0], seen[1]);
 });
 
-test('local agent CLI passes Chrome extension registration options to the handler', async () => {
+test('local agent CLI passes Runtime service management to its handler', async () => {
   let received: unknown = null;
   const program = createLocalAgentCli({
-    runBrowser: (target, action, options) => {
-      received = { target, action, options };
+    runRuntimeService: (action, options) => {
+      received = { action, options };
     },
   });
 
   await program.parseAsync([
     'node',
     'pinpawo',
-    'browser',
-    'extension',
-    'register',
-    '--extension-id',
-    'abcdefghijklmnopabcdefghijklmnop',
+    'runtime',
+    'status',
+    '--directory',
+    '/tmp/pinpawo-test-runtime',
   ]);
 
   assert.deepEqual(received, {
-    target: 'extension',
-    action: 'register',
-    options: { extensionId: 'abcdefghijklmnopabcdefghijklmnop' },
+    action: 'status',
+    options: { directory: '/tmp/pinpawo-test-runtime' },
   });
+  assert.equal(program.commands.some((command) => command.name() === 'browser'), false);
 });

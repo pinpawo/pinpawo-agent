@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
 import { createBashToolkit } from './index';
-import { runJqProcess, runJqQuery } from './jsonTools';
+import { runJqQuery } from './jsonTools';
+import { createLocalRuntimeFixture, testExecution } from './shellTestSupport';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
@@ -47,7 +48,7 @@ test('jq_query invokes jq without forwarding the agent environment', async (t) =
     '.runs | length',
     filePath,
   ]);
-  assert.deepEqual(Object.keys(invocation.env).sort(), ['LANG', 'LC_ALL', 'PATH']);
+  assert.deepEqual(Object.keys(invocation.env).sort(), ['LANG', 'LC_ALL']);
 });
 
 test('jq_query rejects directories before invoking jq', async (t) => {
@@ -79,19 +80,17 @@ test('jq_query returns a truncation marker for streamed output beyond its previe
   assert.match(output, /^x{50000}\n\[truncated 5192880 chars\]$/);
 });
 
-test('jq process drains large output while retaining a bounded preview', async () => {
+test('Shell argv execution drains large output while retaining a bounded jq preview', async (t) => {
+  const fixture = createLocalRuntimeFixture();
+  t.after(() => fixture.close());
   const outputChars = 5 * 1024 * 1024;
-  const result = await runJqProcess(process.execPath, [
-    '-e',
-    `process.stdout.write('x'.repeat(${outputChars.toString()}))`,
-  ], {
-    cwd: process.cwd(),
-    encoding: 'utf-8',
-    env: {},
-    timeout: 30_000,
-  });
-
-  assert.equal(String(result.stdout).length, 50_000);
+  const result = await fixture.client().exec({
+    program: process.execPath,
+    args: ['-e', `process.stdout.write('x'.repeat(${outputChars}))`],
+    cwd: process.cwd(), timeoutMs: 30_000, maxOutputChars: 50_000,
+    envMode: 'minimal', failOnOutputLimit: false,
+  }, { execution: testExecution() });
+  assert.equal(result.stdout.length, 50_000);
   assert.equal(result.stdoutTotalChars, outputChars);
   assert.equal(result.stderr, '');
 });

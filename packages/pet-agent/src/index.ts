@@ -97,12 +97,9 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
-  ToolkitRuntimeDefinition,
   ToolkitRuntimeExecutionScope,
-  ToolkitRuntimeReleaseContext,
-  ToolkitRuntimeResolveContext,
-  ToolkitRuntimeStartContext,
-  ToolkitRuntimeStopContext,
+  ToolkitRuntimeIdentity,
+  ToolInputPreparationContext,
 } from './types/toolkit';
 export {
   defineToolkit,
@@ -158,9 +155,8 @@ export {
 } from './agent/orchestrator/toolkitRuntime';
 export type {
   ToolkitRuntimeDiagnostic,
-  ToolkitRuntimeDiagnosticError,
-  ToolkitRuntimeExecution,
-  ToolkitRuntimeLifecycle,
+  ToolkitRuntimeClientBinding,
+  ToolkitRuntimeSelection,
 } from './agent/orchestrator/toolkitRuntime';
 export type {
   CapabilityCatalog,

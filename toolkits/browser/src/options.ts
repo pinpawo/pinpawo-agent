@@ -1,24 +1,10 @@
-export type BrowserToolkitOptions = {
-  backend?: () => string;
-  workdir?: () => string;
-};
-
-export type ResolvedBrowserToolkitOptions = {
-  backend: () => string;
-  workdir: () => string;
-};
-
-export function resolveBrowserToolkitOptions(
-  options: BrowserToolkitOptions = {},
-): ResolvedBrowserToolkitOptions {
-  return {
-    backend: options.backend ?? (() => 'auto'),
-    workdir: options.workdir ?? (() => process.cwd()),
-  };
-}
-
-export function configuredBrowserBackend(options: ResolvedBrowserToolkitOptions): string {
-  return process.env.PINPAWO_BROWSER_BACKEND?.trim()
-    || options.backend().trim()
-    || 'auto';
-}
+export type CdpRuntimeConfig = Readonly<{
+  /** Borrow an existing local Chrome CDP endpoint. Its browser is never closed. */
+  endpoint?: string;
+  /** Managed Chrome configuration; incompatible with endpoint. */
+  executablePath?: string;
+  userDataDir?: string;
+  headless?: boolean;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}>;

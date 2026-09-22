@@ -68,19 +68,18 @@ function artifact(id: string): CapabilityArtifactRef {
   };
 }
 
-function runtimeToolkit(events: string[]): AgentToolkit {
+const runtimePort = Object.freeze({ ping: async () => 'ok' });
+function runtimeToolkit(): AgentToolkit {
   return defineToolkit({
     name: 'runtime', description: 'Execution-scoped toolkit.',
     tools: [{ tool: tool(() => 'ok', { name: 'check', description: 'Check.', schema: z.object({}) }) }],
-    runtime: {
-      start: async () => ({}),
-      resolve: async (_root, context) => {
-        events.push(`resolve:${context.execution.delegationId}`);
-        return context.execution.delegationId;
-      },
-      release: async (binding) => { events.push(`release:${binding}`); },
-    },
+    runtime: 'test',
   });
+}
+function runtimeManager(name = 'runtime') {
+  return new ToolkitRuntimeManager({ [name]: {
+    runtimeType: 'test', client: runtimePort, identity: { clientId: 'host-1', instanceId: 'env-1' },
+  } });
 }
 
 test('executor uses main history and briefing without replaying child transcripts', async () => {
@@ -128,14 +127,12 @@ for (const output of [null, '', '  ']) {
   });
 }
 
-test('finalize can replace delivery and merge artifacts after runtime release', async () => {
-  const events: string[] = [];
-  const toolkit = runtimeToolkit(events);
-  const manager = new ToolkitRuntimeManager();
-  await manager.start([toolkit]);
+test('finalize can replace delivery and merge artifacts while the shared Runtime client remains available', async () => {
+  const toolkit = runtimeToolkit();
+  const manager = runtimeManager();
   const ref = artifact('d1');
   const request = input('d1', [toolkit], { finalize: (result, context) => {
-    assert.deepEqual(events, ['resolve:d1', 'release:d1']);
+    assert.strictEqual(manager.select([toolkit]).runtimes.runtime, runtimePort);
     assert.equal(context.delegationId, 'd1');
     context.recordCapabilityArtifact?.(ref);
     assert.equal(result.output, 'Delivered');
@@ -143,23 +140,21 @@ test('finalize can replace delivery and merge artifacts after runtime release', 
   } });
   try {
     const result = await createCapabilityExecutor({ models, toolkitRuntimeManager: manager, runSubagent: async (run) => {
-      assert.equal(run.runtimeContext?.toolkitRuntimes?.runtime, 'd1');
+      assert.equal(run.runtimeContext?.toolkitRuntimes?.runtime, runtimePort);
       run.artifacts?.push(ref);
       return deliver(run);
     } })(request, hostContext());
     assert.equal(result.delivery?.text, 'Finalized delivery');
     assert.deepEqual(result.artifacts, [ref]);
   } finally {
-    await manager.stop();
+    assert.ok(manager.select([toolkit]));
   }
 });
 
 for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as const) {
-  test(`${outcome} preserves the outcome and releases this execution's runtime`, async () => {
-    const events: string[] = [];
-    const toolkit = runtimeToolkit(events);
-    const manager = new ToolkitRuntimeManager();
-    await manager.start([toolkit]);
+  test(`${outcome} preserves the outcome without changing the shared Runtime client`, async () => {
+    const toolkit = runtimeToolkit();
+    const manager = runtimeManager();
     let finalized = false;
     const request = input('d1', [toolkit], { finalize: () => { finalized = true; } });
     const failure = new Error(outcome);
@@ -184,18 +179,16 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
         assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
       }
       assert.equal(finalized, outcome === 'missing_deliverable');
-      assert.deepEqual(events, ['resolve:d1', 'release:d1']);
+      assert.strictEqual(manager.select([toolkit]).runtimes.runtime, runtimePort);
     } finally {
-      await manager.stop();
+      assert.ok(manager.select([toolkit]));
     }
   });
 }
 
-test('overlapping calls keep contexts, bindings, artifacts and authorizations separate', async () => {
-  const events: string[] = [];
-  const toolkit = runtimeToolkit(events);
-  const manager = new ToolkitRuntimeManager();
-  await manager.start([toolkit]);
+test('overlapping calls keep contexts, clients, artifacts and authorizations separate', async () => {
+  const toolkit = runtimeToolkit();
+  const manager = runtimeManager();
   let arrivals = 0;
   let release!: () => void;
   const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -207,7 +200,7 @@ test('overlapping calls keep contexts, bindings, artifacts and authorizations se
     arrivals += 1;
     if (arrivals === 2) release();
     await barrier;
-    assert.equal(run.runtimeContext?.toolkitRuntimes?.runtime, id);
+    assert.equal(run.runtimeContext?.toolkitRuntimes?.runtime, runtimePort);
     return deliver(run, id);
   } });
   const first = input('d1', [toolkit]);
@@ -229,10 +222,10 @@ test('overlapping calls keep contexts, bindings, artifacts and authorizations se
     assert.deepEqual(b.toolAuthorizations, []);
     for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
       assert.equal(result.delivery?.scope.delegationId, id);
-      assert.equal(events.filter((event) => event === `release:${id}`).length, 1);
+      assert.equal(seen.find(run => run.runtimeContext?.executionScope?.delegationId === id)?.runtimeContext?.toolkitRuntimes?.runtime, runtimePort);
     }
   } finally {
-    await manager.stop();
+    assert.ok(manager.select([toolkit]));
   }
 });
 
@@ -257,24 +250,16 @@ test('runtime bindings, real tools and finalize share the host config identity',
     called = true;
     assert.equal(runtime.context?.workdir, '/workspace');
     assert.deepEqual(runtime.context?.executionScope, {
-      threadId: 'thread1', runId: 'r1', delegationId: 'd1', workdir: '/workspace',
+      threadId: 'thread1', taskId: 't1', runId: 'r1', delegationId: 'd1', workdir: '/workspace',
     });
     return 'Verified runtime context.';
   }, { name: 'probe', description: 'Inspect runtime context.', schema: z.object({}) });
   const toolkit = defineToolkit({
     name: 'probe_toolkit', description: 'Inspect the shared execution identity.',
     tools: [{ tool: probe }],
-    runtime: {
-      start: () => ({}),
-      resolve: (_root, context) => {
-        assert.equal(context.execution.threadId, 'thread1');
-        assert.equal(context.execution.workdir, '/workspace');
-        return {};
-      },
-    },
+    runtime: 'test',
   });
-  const manager = new ToolkitRuntimeManager();
-  await manager.start([toolkit]);
+  const manager = runtimeManager('probe_toolkit');
   try {
     const execute = createCapabilityExecutor({
       models: { act: new FakeToolCallingModel({ toolCalls: [
@@ -290,7 +275,7 @@ test('runtime bindings, real tools and finalize share the host config identity',
     assert.equal(called, true);
     assert.equal(finalized, true);
   } finally {
-    await manager.stop();
+    assert.ok(manager.select([toolkit]));
   }
 });
 

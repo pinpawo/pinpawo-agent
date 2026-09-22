@@ -1,22 +1,7 @@
-import {
-  defineToolkit,
-  ReviewPolicies,
-  type AgentToolkit,
-  type ToolReviewPolicy,
-  type ToolkitAvailability,
-} from '@pinpawo/pet-agent';
+import { defineToolkit, ReviewPolicies, type AgentToolkit, type ToolReviewPolicy } from '@pinpawo/pet-agent';
 import { BROWSER_TOOLKIT_NAME } from './constants';
-import { resolveBrowserEnvironment } from './session';
 import { browserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import { BrowserRuntime } from './runtime';
-import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
-import {
-  configuredBrowserBackend,
-  resolveBrowserToolkitOptions,
-  type BrowserToolkitOptions,
-  type ResolvedBrowserToolkitOptions,
-} from './options';
 
 export { BROWSER_TOOLKIT_NAME } from './constants';
 
@@ -28,99 +13,35 @@ const browserToolkitInstructions = [
   '如果用户明确提供了本机浏览器 profile 或 user-data-dir 路径，使用 browser_open_with_profile；不要把本机 profile 路径填到 browser_open 的 session 参数里。',
   '浏览器会话名称不是本机 Chrome profile 名；本机 Chrome user-data-dir 只能走 browser_open_with_profile。',
   '需要登录、验证码或用户手动操作时保持可见浏览器窗口；纯读取或抓取时可以使用 headless。',
-  '当 PINPAWO_BROWSER_BACKEND=extension 时，使用 snapshot 返回的 ref 进行 click/type/wait 最稳定；ref 在下一次页面变化或 snapshot 后可能失效，遇到 stale reference 时重新 snapshot。命名 session、profile 和 headless 对 extension 后端仍不适用。',
+  '使用 snapshot 返回的 ref 进行 click/type/wait；ref 在页面变化或下一次 snapshot 后失效，遇到 stale reference 时重新 snapshot。',
+  'Browser 使用 CDP。已连接浏览器不能改变 profile/headless；启动参数必须符合 Runtime 配置，不能切换 backend。命名 session 的独立登录态在当前 Host 连接内保留。',
   'browser_open、browser_snapshot、点击、输入和等待返回的是页面预览；如果结果里的 truncated 或 hasMore 为 true，说明模型只看到了片段。',
   '页面需要视觉判断时使用 browser_screenshot；截图会直接作为图片给到你，看完就基于结论继续操作。',
   '长文章、Gist、文档、GitHub 页面或搜索结果页在总结、引用、判断前，必须用 browser_extract({ offset, limit }) 按 nextOffset 分块读取，直到 hasMore 为 false。',
   'browser_extract 不给 selector 时会读取当前页面正文全文分块；不要为了绕过截断而从不完整 snapshot 里猜 selector。',
   '点击或提交打开 popup/新标签页时，browser capability 会跟随新目标；新目标关闭后会尽量回到上一目标。',
-  'extension 后端只允许继续读取和操作同源 popup。遇到 origin_changed 且 manualActionRequired=true，表示跨源 popup 已打开但安全策略要求用户在可见 Chrome 中手动完成；不要重试 interactionDispatched=true 的原 click/type。用户确认 popup 关闭或返回原 approved origin 后，再调用 browser_snapshot。',
+  '只允许继续读取和操作 approved origin 的页面与 popup。遇到 origin_changed 且 manualActionRequired=true，表示跨源 popup 已打开但安全策略要求用户在可见 Chrome 中手动完成；不要重试 interactionDispatched=true 的原 click/type。用户确认 popup 关闭或返回原 approved origin 后，再调用 browser_snapshot。',
   '等待动态页面时，使用 browser_wait 的 visible/hidden 条件；等待 loading 或遮罩消失时用 hidden，不要只依赖固定 sleep。',
   '浏览器失败返回 ok=false 的结构化错误。retryable=true 时根据 code/details 重新 snapshot、等待或重新 open；不要盲目重复有副作用的操作。',
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-async function checkBrowserAvailability(
-  options: ResolvedBrowserToolkitOptions,
-): Promise<ToolkitAvailability> {
-  const configured = configuredBrowserBackend(options);
-  if (configured === 'auto' || configured === 'extension') {
-    return { available: true };
-  }
-  if (configured === 'playwright') {
-    const environment = await resolveBrowserEnvironment(options);
-    const available = environment.chromeAvailable && Boolean(environment.playwrightCorePath);
-    return available
-      ? { available: true }
-      : {
-          available: false,
-          reason: `configured playwright but unavailable: missing playwright-core or Chrome at ${environment.chromePath}`,
-        };
-  }
-  return {
-    available: false,
-    reason: configured === 'agent-browser'
-      ? 'configured agent-browser but that backend is no longer supported'
-      : `unknown browser backend "${configured}"; use auto, playwright, or extension`,
-  };
-}
-
-function projectBrowserRuntimeDetails(runtime: BrowserRuntime) {
-  const snapshot = runtime.getSnapshot();
-  return {
-    extension: {
-      ...snapshot.extension,
-      capabilities: [...snapshot.extension.capabilities],
-    },
-    readiness: snapshot.readiness
-      ? {
-          phase: snapshot.readiness.phase,
-          ready: snapshot.readiness.ready,
-          ...(snapshot.readiness.error
-            ? { error: { ...snapshot.readiness.error } }
-            : {}),
-        }
-      : null,
-  };
-}
-
-export function createBrowserToolkit(
-  browserOptions: BrowserToolkitOptions = {},
-): AgentToolkit {
-  const options = resolveBrowserToolkitOptions(browserOptions);
-  // One Toolkit definition may be started by independent Host managers. Each
-  // manager owns its BrowserRuntime root; roots share only the provider-level
-  // bridge transport through Browser's internal lease coordinator.
-  const bridge = new BrowserExtensionBridge();
-
+export function createBrowserToolkit(): AgentToolkit {
   const reviews: Record<string, ToolReviewPolicy> = {
     browser_open: ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
     browser_open_with_session: ReviewPolicies.externalAccess({ authorization: 'exact' }),
     browser_open_with_profile: ReviewPolicies.externalAccess({ authorization: 'exact' }),
   };
-  const toolkit = defineToolkit({
+  return defineToolkit({
     name: BROWSER_TOOLKIT_NAME,
-    description: '浏览器网页访问、登录态复用、JS 渲染页面读取、点击输入等待和页面内容提取。',
-    availability: async () => await checkBrowserAvailability(options),
-    tools: browserTools.map((toolItem) => ({
-      tool: toolItem,
-      operation: browserOperationMetadata[toolItem.name],
-      review: reviews[toolItem.name],
-      ...(toolItem.name === 'browser_screenshot'
-        ? { requiresInputModalities: ['image'] as const }
-        : {}),
+    description: '通过 CDP 访问浏览器、读取渲染页面、点击输入、提取文本和截图。',
+    runtime: 'cdp',
+    tools: browserTools.map((item) => ({
+      tool: item,
+      operation: browserOperationMetadata[item.name],
+      review: reviews[item.name],
+      ...(item.name === 'browser_screenshot' ? { requiresInputModalities: ['image'] as const } : {}),
     })),
-    runtime: {
-      start: async () => {
-        const root = new BrowserRuntime(options, { bridge });
-        await root.start();
-        return root;
-      },
-      diagnose: (root) => projectBrowserRuntimeDetails(root as BrowserRuntime),
-      stop: async (root) => await (root as BrowserRuntime).stop(),
-    },
     instructions: browserToolkitInstructions.join('\n'),
   });
-
-  return toolkit;
 }

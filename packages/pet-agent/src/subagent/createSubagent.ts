@@ -1,6 +1,7 @@
 import { readMessagesTokenUsage } from '../agent/tokenUsage';
 import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext } from '../runtime/context';
+import { createToolkitExecutionMiddleware } from './toolkitExecution';
 import {
   composeSystemPrompt,
   createSystemPromptMiddleware,
@@ -287,6 +288,7 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
     iterationGuardMiddleware,
     ...(input.middleware ?? []),
     createSystemPromptMiddleware(inputState.promptSections),
+    createToolkitExecutionMiddleware(input),
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   // No checkpointer here: the child inherits the parent's through the runnable

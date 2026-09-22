@@ -26,7 +26,11 @@ contracts in [reference/](../reference/index.md).
   [app chat UI](local-agent/app-chat-runtime-ui.md)
 - [TUI textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the
   [OpenTUI capability matrix](tui/v2-capability-matrix.md)
-- [Browser Toolkit package](toolkits/browser-package.md)
+- [Browser Toolkit package extraction](toolkits/browser-package.md) — historical
+- [Local process hosting all Toolkit Runtimes](toolkits/local-execution-runtime.md) — draft
+  one shared local service, reusable shell/CLI execution environments backed by bash/zsh,
+  CDP-only Browser, explicit instance bindings, and one Runtime client per Host;
+  implementation tracked by issue #848
 - [Resident Pet Host ports](agent-runtime/resident-pet-host-ports.md) — canonical
   local-agent boundary for resident runtime, Agent Session interaction, and
   conversation-priority dispatch coordination

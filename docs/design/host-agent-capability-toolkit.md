@@ -2,16 +2,18 @@
 
 > 状态：Accepted design；实现迁移由
 > [issue #645](https://github.com/pinpawo/pinpawo-agent/issues/645) 跟踪
-> 更新：2026-08-16
+> Runtime 契约修订：2026-09-22，跟随 [#848](https://github.com/pinpawo/pinpawo-agent/issues/848)
+> 当前实现；整体 [Runtime 重构草案](toolkits/local-execution-runtime.md) 仍为 Draft。
 
 本文固定 Host、Agent、Capability 与 Toolkit 的领域关系，并约束 Chat Host、
 Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当前公共类型
 仍以 [Capability / Toolkit V2 契约](../reference/extensions/capability-toolkit.md)
-为准；Toolkit Runtime 的已实现生命周期见
-[Toolkit 可选 Runtime 生命周期](../reference/extensions/toolkit-runtime.md)。
+为准；Toolkit Runtime 的静态依赖与客户端注入见
+[Toolkit Runtime 客户端契约](../reference/extensions/toolkit-runtime.md)。
 
 本文中的 inventory、execution boundary、Host Toolkit 协调器和统一诊断已按 #645
-进入当前实现。当历史设计中的 `local tools`、
+进入实现。#848 明确修订了原先 Host 持有 Toolkit roots 与逐执行 binding 的归属：
+Host 持有客户端，实际执行环境由独立服务管理；旧 hooks 不作为兼容运行模式保留。当历史设计中的 `local tools`、
 `host tools`、`capability-private tools`、Browser 专属 lifecycle/diagnostics 或
 `BrowserIntegration` 与本文冲突时，只能把这些表述作为历史实现背景，不能据此
 新增公共架构层。
@@ -28,23 +30,24 @@ dispatch，TUI 的直接对话通过独立 conversation adapter，不增加新�
 Host
   ├─ 读取配置并选择 Capability / Toolkit definitions
   ├─ 创建并持有一个或多个 Agent Runtime
-  └─ 持有 ToolkitRuntimeManager
-       └─ 管理每个 Toolkit 自己声明的可选 Runtime
+  └─ 持有一个 Runtime 服务连接和 Toolkit → 实例客户端映射
 
 Agent Runtime
   └─ 编译并执行 Capability
        └─ Capability.uses 解析 Toolkit
             ├─ tools / instructions / operation metadata / review policy
             ├─ availability
-            └─ optional Toolkit Runtime
-                 ├─ root lifecycle
-                 ├─ execution binding 与资源所有权
-                 └─ runtime diagnostics
+            └─ 可选 runtime 能力依赖（shell、cdp 或扩展接口）
+
+本机 Runtime 服务
+  └─ 按 instanceId 管理执行环境及资源
+       ├─ Shell 实例，可由 bash / git / project-inspection 共享
+       └─ CDP 实例，由 browser 使用
 ```
 
-Toolkit Runtime 不是与 Host、Agent、Capability、Toolkit 平级的第五个扩展概念。
-它属于 Toolkit 领域，是 Toolkit 在需要连接、进程、登录态或 execution-scoped
-binding 时使用的运行部分。
+Runtime 是 Toolkit 使用的执行环境与能力，不是每个 Toolkit 私有的一套 root。
+Toolkit 与 Runtime 实例不一一对应。实例类型、共享或隔离由装配决定，
+不改变 Capability 与 Toolkit 这两个 Agent 扩展入口。
 
 ## 2. 领域职责
 
@@ -55,12 +58,13 @@ Host 是进程或产品入口的装配边界。它负责：
 - 读取 Host 配置，并据此选择 Capability 与 Toolkit definitions；
 - 定义 inventory 的来源、优先级、重复名称失败规则和 provenance；
 - 创建、持有和关闭 Agent Runtime；Studio Host 可以持有多个常驻 Agent Runtime；
-- 持有共享的 `ToolkitRuntimeManager`，启动/停止 Toolkit roots，并汇总诊断；
+- 建立 Runtime 服务连接，向 `ToolkitRuntimeManager` 注入静态客户端映射，关闭自身连接并汇总诊断；
 - 提供 transport、API、TUI/Web adapter、持久化 port 和全局 review mode 等
   Host concerns。
 
 Host 不解释某个 Toolkit 的 backend、连接协议、工具语义或资源所有权，也不按
-Toolkit 名称编写 start、resolve、stop 或 diagnostics 分支。
+Toolkit 名称编写生命周期或 diagnostics 分支。实际 Runtime 由服务管理，Host
+不直接启动命令进程、创建浏览器 session 或执行本地 fallback。
 
 ### Agent
 
@@ -70,13 +74,12 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 - 从编译后的 registry 选择并执行 Capability；
 - 使用 Host 提供的同一份 workdir snapshot 构造 execution prompt 与 review context；
 - 通过 `ToolRuntime.context` 传递 thread、run、delegation identity 和按 Toolkit name
-  索引的 opaque Runtime ports，并通过 `ToolRuntime.signal` 传递 cancellation；
-- 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
+  索引的异步 Runtime clients，并通过 `ToolRuntime.signal` 传递 cancellation；
+- 只注入当前 Capability 选中的 Toolkit 客户端，逐调用传递受信的 Toolkit 所属。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在
 graph state 之外维护第二份 Toolkit 业务状态。独立 `createResidentPetRuntime()`
-在没有外部 Host 时可以创建私有 manager；这只是工厂代行最小 Host 所有权，
-不把 Toolkit Runtime 变成 Agent 领域概念。
+的本地装配同样建立服务客户端；Agent 本身不持有实际执行环境。
 
 ### Capability
 
@@ -95,10 +98,10 @@ Capability 不拥有 tools、backend、availability、workdir、Runtime 或 Host
 Toolkit 是可执行能力和工具策略的唯一归属，负责：
 
 - tools 与工具族 instructions；
-- operation metadata；
+- operation metadata 与需要时的审核前输入规范化 `prepareInput`；
 - 单个工具的 review requirement / policy；
 - Toolkit availability；
-- 可选 Toolkit Runtime definition。
+- 可选 `runtime?: string` 能力依赖；Tool 从 context 使用对应异步客户端。
 
 Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只声明工具级
 规则。Human review 的请求/响应属于 Agent 与交互边界，不能因此把全局配置或
@@ -126,7 +129,7 @@ Studio Host 根据 `petId` 从
 Toolkit definitions
   -> Host config selection
   -> selected Toolkit definitions
-  -> start optional Runtime roots
+  -> connect Runtime service and validate Toolkit client mappings
   -> Toolkit availability evaluation
   -> effective Toolkit inventory
   -> compile Capability bindings
@@ -136,64 +139,44 @@ Toolkit definitions
 - **Toolkit availability**：该 Toolkit 的静态契约在当前环境能否成立，归 Toolkit。
 - **Runtime diagnostics**：已选择 Toolkit 的 Runtime 当前是否 ready/degraded/failed，
   是实时观测，不改变 Capability 的静态权限含义。
-- **Runtime root / execution binding**：动态资源，不进入 inventory、Supervisor workspace、
-  prompt 或 checkpoint。
+- **Runtime 实例与资源**：由服务持有；Host 客户端按 Toolkit 注入调用 context，
+  不进入 inventory、Supervisor workspace、prompt 或 checkpoint。
 
 Inventory 合并必须是确定性的：来源和顺序可追溯，重复 Capability/Toolkit 名称
 必须显式失败，不能依赖“最后一个覆盖”或让不同入口各自重算。
 
 ## 4. Toolkit Runtime 的统一诊断
 
-所有声明 Runtime 的 Toolkit 都必须通过同一管理面被诊断。Browser 不是特殊诊断
-对象；被诊断的是 Browser Toolkit Runtime，和 shell、git 或未来第三方 Toolkit
-Runtime 使用相同契约。
-
-目标诊断最小形态如下：
+Host 通过 `ToolkitRuntimeManager.diagnose()` 查询客户端；服务与实例是实际运行状态
+的来源。bash、git 可以指向同一 Shell 实例，不因此复制一套环境或生命周期状态。
 
 ```ts
 type ToolkitRuntimeDiagnostic = {
   toolkitName: string;
-  lifecycle:
-    | 'starting'
-    | 'ready'
-    | 'degraded'
-    | 'stopping'
-    | 'stopped'
-    | 'failed';
-  activeBindings: number;
-  lastError?: {
-    code?: string;
-    message: string;
-  };
+  runtimeType: string;
+  identity: { clientId: string; instanceId: string };
   details?: JsonValue;
+  error?: string;
 };
 ```
 
-约束：
-
-- `ToolkitRuntimeManager` 为每个 Runtime 统一维护 lifecycle、active bindings 和
-  通用失败信息，因此每个 Toolkit Runtime 都有基础诊断；
-- Toolkit Runtime 可以通过通用 `diagnose(root)` hook 补充 `details`，但 Host
-  不解释其结构；
-- Host 只调用 manager 的聚合 diagnostics API，不检查 `toolkitName === 'browser'`；
-- diagnostics 是只读 snapshot，不负责配置变更、availability 选择或资源控制；
-- Toolkit 专属 CLI/API 可以展示 `details`，但它是通用诊断投影，不是另一套
-  lifecycle 或状态源。
+manager 只投影客户端映射、实例诊断和查询错误，不维护 root lifecycle 或 active binding
+计数。Host 不按 Toolkit 名解释 `details`；诊断只读，不负责配置变更、availability
+选择或资源控制。Toolkit 专属 CLI/API 可展示服务投影，但不维护第二份资源状态。
 
 ## 5. Browser 与 local-machine Toolkit 的归位
 
 Browser、bash、git 都是普通 Toolkit：
 
-- Browser backend/driver、bridge、session、ownership 和 live state 属于 Browser
-  Toolkit Runtime；Browser Capability 只声明 `uses: ['browser']`。
-- Browser 包分别导出 Capability、Toolkit 和窄的管理接口。local-agent 的
-  composition root 只根据 Host 配置选择静态 definitions；不持有 Runtime root、
-  availability cache 或 diagnostics 状态。
+- browser 本期只依赖 CDP。CDP 连接、session、ownership 和 live state 属于服务中的
+  CDP 实例；Browser Capability 只声明 `uses: ['browser']`。未来其他 backend 采用独立 Toolkit。
+- Browser 的静态 Toolkit 与服务执行实现分开装载。local-agent composition root 按配置
+  选择 definitions、实例映射和客户端；不在 Host 持有浏览器连接或 session。
 - 当前所谓 `local tools` 不是领域概念。它们是 local-machine / Node Host 提供的
   Toolkit definitions；CLI 只是其中一类 Host 入口。
 - `bash` 当前包含文件、搜索、JSON、网络、shell、process 等工具，`git` 同时包含
   本地 git 与 GitHub 操作。后续是否拆分必须按 authority、availability、review
-  policy 和 runtime lifecycle 决定，不能按目录或现有名称机械拆分。
+  policy 和执行环境需求决定，不能按目录或现有名称机械拆分。
 - operation registry 必须由最终 Toolkit definitions 派生，不能维护一份平级的
   flat tools inventory。
 
@@ -202,19 +185,20 @@ Browser、bash、git 都是普通 Toolkit：
 以下规则适用于 Chat Host、Studio Host 和未来 Host surface：
 
 1. 新 Capability 只需要注册定义和 `uses`，不应修改 Host lifecycle。
-2. 新 Toolkit 只需要注册定义及可选 Runtime，不应修改 Agent graph 或 Host 的
-   Toolkit-name 分支。
+2. 新 Toolkit 注册定义与可选能力依赖；复用已有实例时只配置绑定。新能力接口提供
+   受信的服务模块和客户端适配器，不修改 Agent graph 或增加 Host Toolkit-name 分支。
 3. 所有暴露给 Capability subagent 的可执行业务/外部 Tool 必须归属一个 Toolkit；
    不存在 direct host tools、capability-private tools 或与 Toolkit 平级的
    LocalTools。Run Supervisor 的框架内部 control action 不属于扩展 inventory，
    不应为了形式统一伪装成 Host Toolkit；具体 command contract 由
    [Root、Supervisor 与 Capability 的状态与交接](agent-runtime/run-scoped-supervisor-session.md)
    统一定义。
-4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 review/authorization
-   context。Tool 的 path、cwd、command 等参数由模型决定并保持原样；不得为了
-   workdir scoping 创建虚假 Toolkit Runtime，也不得由 binding 静默补全或改写输入。
-   Toolkit Runtime 只绑定 Toolkit 自己拥有的动态资源和 ownership。
-5. shutdown 一个 Host/manager 不能释放另一个 Host 的 roots、bindings、进程或连接。
+4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 Tool/review context。
+   Tool 需要解析相对路径或缺省 cwd 时，通过纯函数 `prepareInput` 在审核前完成；
+   审核、授权和执行使用同一份规范化参数。不得创建假 Runtime 或在执行 binding
+   中暗改输入。授权同时绑定消费方 Toolkit、连接、实例与 workdir。
+5. Host 关闭自己的连接，服务仅清理该 client 的资源；不能关闭共享实例、另一个 Host
+   的进程或浏览器连接。Agent execution 结束不触发远端绑定释放，已 yield 进程仍按工具语义管理。
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。
    Chat Host (`LocalAgentHost`) 和 Studio Host (`StudioHost`) 是两个独立的
@@ -244,8 +228,8 @@ Browser、bash、git 都是普通 Toolkit：
 - `Host`：产品/进程装配与所有权边界；
 - `Agent Runtime`：常驻、可反复 invoke 的 Agent 执行单元；
 - `Capability`：业务行为与 `uses`；
-- `Toolkit`：tools、工具策略、availability 和可选 Runtime；
-- `Toolkit Runtime`：Toolkit 内部的动态资源与 execution binding；
+- `Toolkit`：tools、工具策略、availability 和可选执行能力依赖；
+- `Toolkit Runtime`：可被多个 Toolkit 使用、由服务持有的执行环境实例；
 - `local-machine Toolkit` 或 `local Host built-in Toolkit`：取代含糊的
   `local tools` / `CLI tools`。
 

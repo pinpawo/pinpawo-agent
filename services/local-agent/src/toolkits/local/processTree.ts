@@ -62,8 +62,11 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
 
     let child;
     try {
-      child = spawn('/bin/sh', ['-c', command], {
+      const executable = options.executable ?? options.shell;
+      if (!executable) throw new Error('The Shell environment must select an executable.');
+      child = spawn(executable, options.executable ? [...(options.args ?? [])] : ['-c', command], {
         cwd,
+        env: options.env,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -78,11 +81,13 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     const pid = child.pid;
     let stdout = '';
     let stderr = '';
+    let stdoutTotalChars = 0;
+    let stderrTotalChars = 0;
     let settled = false;
     let yielded = false;
     let exited = false;
-    let reason: 'timeout' | 'aborted' | null = null;
-    let killTimer: NodeJS.Timeout | null = null;
+    let reason: 'timeout' | 'aborted' | 'output_limit' | null = null;
+    let termination: Promise<void> | null = null;
 
     const outputListeners = new Set<
       (stream: 'stdout' | 'stderr', chunk: string) => void
@@ -92,11 +97,12 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       stdout: string;
       stderr: string;
     }) => void;
+    let rejectExit!: (error: Error) => void;
     const exitPromise = new Promise<{
       code: number | null;
       stdout: string;
       stderr: string;
-    }>((r) => { resolveExit = r; });
+    }>((r, reject) => { resolveExit = r; rejectExit = reject; });
 
     const collect = (
       stream: NodeJS.ReadableStream | null,
@@ -112,27 +118,28 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     };
 
     collect(child.stdout, 'stdout', (chunk) => {
+      stdoutTotalChars += chunk.length;
       if (stdout.length < maxOutputChars) {
         stdout += chunk.slice(0, maxOutputChars - stdout.length);
       }
+      if (options.failOnOutputLimit && stdoutTotalChars > maxOutputChars) terminate('output_limit');
     });
     collect(child.stderr, 'stderr', (chunk) => {
+      stderrTotalChars += chunk.length;
       if (stderr.length < maxOutputChars) {
         stderr += chunk.slice(0, maxOutputChars - stderr.length);
       }
+      if (options.failOnOutputLimit && stderrTotalChars > maxOutputChars) terminate('output_limit');
     });
 
     const terminateGroup = (grace: number) => {
-      if (pid === undefined) return;
-      killProcessGroup(pid, 'SIGTERM');
-      killTimer = setTimeout(() => {
-        killProcessGroup(pid, 'SIGKILL');
-      }, grace);
-      // Do not hold the event loop open just to escalate a kill.
-      killTimer.unref?.();
+      if (pid === undefined || termination) return;
+      termination = terminateProcessGroup(pid, grace);
+      // The close handler reports a cleanup failure after consuming this promise.
+      void termination.catch(() => undefined);
     };
 
-    const terminate = (why: 'timeout' | 'aborted') => {
+    const terminate = (why: 'timeout' | 'aborted' | 'output_limit') => {
       if (settled || reason) return;
       reason = why;
       terminateGroup(killGraceMs);
@@ -150,7 +157,6 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
 
     const cleanup = () => {
       clearTimeout(timeoutTimer);
-      if (killTimer) clearTimeout(killTimer);
       signal?.removeEventListener('abort', onAbort);
     };
 
@@ -202,25 +208,40 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       settle({ status: 'spawn_failed', error: err });
     });
 
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       exited = true;
+      // A completed shell may leave redirected background children. They have
+      // no returned process handle, so clean them now, never retain an exited
+      // PGID for a later client disconnect when the number could be reused.
+      if (!termination && pid !== undefined && isProcessGroupAlive(pid)) {
+        terminateGroup(killGraceMs);
+      }
+      // The direct child can close its pipes before descendants finish. Keep
+      // the escalation alive and confirm the group before reporting completion.
+      if (termination) {
+        try { await termination; } catch (error) {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          if (yielded) rejectExit(failure);
+          else settle({ status: 'spawn_failed', error: failure });
+          return;
+        }
+      }
       if (yielded) {
-        if (killTimer) clearTimeout(killTimer);
         resolveExit({ code, stdout, stderr });
         // Nothing more will be emitted; do not keep subscriber closures alive
         // for as long as the handle is retained.
         outputListeners.clear();
         return;
       }
-      if (reason === 'timeout') {
-        settle({ status: 'timeout', stdout, stderr });
+      if (reason === 'timeout' || reason === 'output_limit') {
+        settle({ status: reason, stdout, stderr, stdoutTotalChars, stderrTotalChars });
         return;
       }
       if (reason === 'aborted') {
         settle({ status: 'aborted', stdout, stderr });
         return;
       }
-      settle({ status: 'exited', code, pid, stdout, stderr });
+      settle({ status: 'exited', code, pid, stdout, stderr, stdoutTotalChars, stderrTotalChars });
     });
   });
 }
@@ -240,25 +261,29 @@ export function isProcessGroupAlive(pid: number) {
 /**
  * Terminate a process group, escalating if it does not go quietly.
  *
- * The forceful follow-up is unref'd: it must not hold the event loop open
- * merely to escalate a kill.
- *
- * `runShellCommand` has a near-identical closure rather than calling this one,
- * and the difference is not incidental: that one keeps the escalation timer so
- * `cleanup` can cancel it when the process exits on its own, which avoids
- * signalling a pid that may since have been reused. Here there is no exit to
- * observe — the caller holds no handle — so the timer simply expires.
+ * The operation completes only when the group disappears. A direct child's
+ * close event alone cannot confirm descendant cleanup. Timers stop once the
+ * group is gone; failure to confirm cleanup is surfaced to the caller.
  */
-function terminateProcessGroup(pid: number, graceMs: number) {
+function terminateProcessGroup(pid: number, graceMs: number): Promise<void> {
   killProcessGroup(pid, 'SIGTERM');
-  const timer = setTimeout(() => {
-    killProcessGroup(pid, 'SIGKILL');
-  }, graceMs);
-  timer.unref?.();
+  if (!isProcessGroupAlive(pid)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + Math.max(0, graceMs) + 1000;
+    const escalation = setTimeout(() => {
+      if (isProcessGroupAlive(pid)) killProcessGroup(pid, 'SIGKILL');
+    }, Math.max(0, graceMs));
+    const poll = setInterval(() => {
+      const alive = isProcessGroupAlive(pid);
+      if (alive && Date.now() < deadline) return;
+      clearTimeout(escalation);
+      clearInterval(poll);
+      if (alive) reject(new Error(`Process group ${pid} cleanup could not be confirmed.`));
+      else resolve();
+    }, 20);
+  });
 }
 
 export const posixProcessExecutor: ProcessExecutor = {
   run: runShellCommand,
-  terminateGroup: terminateProcessGroup,
-  isGroupAlive: isProcessGroupAlive,
 };

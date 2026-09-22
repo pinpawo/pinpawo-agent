@@ -6,10 +6,8 @@
  * groups and signals are POSIX, and Windows reaches the same outcomes through
  * job objects or `taskkill`.
  *
- * The methods therefore name intent, not mechanism. `terminateGroup` means
- * "end this command and everything it started", which each platform answers in
- * its own way. That is what lets Windows arrive as an additional
- * implementation rather than a fork of the working one (#562).
+ * The platform returns an owned handle for yielded work. Callers terminate
+ * through that handle; completed numeric PIDs are never retained for reuse.
  */
 
 /**
@@ -55,21 +53,22 @@ export type ShellRunHandle = {
 };
 
 export type ShellRunOutcome =
-  /**
-   * `pid` doubles as the process group id. A command can exit cleanly having
-   * left background children behind (`npm run dev &`); those stay in the
-   * original group even though its leader is gone, so the caller can still use
-   * this to find and clean them up.
-   */
-  | { status: 'exited'; code: number | null; pid: number | undefined; stdout: string; stderr: string }
-  | { status: 'timeout'; stdout: string; stderr: string }
-  | { status: 'aborted'; stdout: string; stderr: string }
+  /** POSIX reclaims unhandled descendants before reporting an exited command. */
+  | { status: 'exited'; code: number | null; pid: number | undefined; stdout: string; stderr: string; stdoutTotalChars?: number; stderrTotalChars?: number }
+  | { status: 'timeout' | 'output_limit'; stdout: string; stderr: string; stdoutTotalChars?: number; stderrTotalChars?: number }
+  | { status: 'aborted'; stdout: string; stderr: string; stdoutTotalChars?: number; stderrTotalChars?: number }
   | { status: 'spawn_failed'; error: Error }
   | { status: 'yielded'; handle: ShellRunHandle };
 
 export type ShellRunOptions = {
   command: string;
   cwd: string;
+  /** Fixed by the service-owned environment, never inherited at spawn time. */
+  env: NodeJS.ProcessEnv;
+  shell?: string;
+  /** An argv invocation bypasses the shell entirely. */
+  executable?: string;
+  args?: readonly string[];
   timeoutMs: number;
   /**
    * Cap on captured characters per stream. Counted in characters, not bytes,
@@ -77,6 +76,8 @@ export type ShellRunOptions = {
    * result; the byte cost of multi-byte output is a small multiple of this.
    */
   maxOutputChars: number;
+  /** Stop immediately on overflow (e.g. Git output); otherwise keep bounded output. */
+  failOnOutputLimit?: boolean;
   signal?: AbortSignal;
   /** Grace period before a termination is escalated to a forceful one. */
   killGraceMs?: number;
@@ -93,17 +94,4 @@ export type ShellRunOptions = {
 export type ProcessExecutor = {
   /** Start a command and resolve once it settles, times out, or yields. */
   run: (options: ShellRunOptions) => Promise<ShellRunOutcome>;
-  /**
-   * End a command and everything it started.
-   *
-   * Graceful first, forceful after `graceMs`.
-   */
-  terminateGroup: (pid: number, graceMs: number) => void;
-  /**
-   * Whether any member of the command's process tree is still running.
-   *
-   * Best-effort: a caller can only learn that the tree was alive at the moment
-   * of the check.
-   */
-  isGroupAlive: (pid: number) => boolean;
 };

@@ -70,7 +70,7 @@ This is the core responsibility of an agent harness: **keep the loop running sta
 - Reusable TypeScript runtime for agent orchestration and isolated Capability delegation.
 - Local HTTP/WebSocket or JSONL stdio host with checkpoint-backed sessions.
 - OpenTUI terminal client with tool activity and human-review flows.
-- Browser automation through Playwright or a Chrome Extension plus Native Messaging host.
+- A shared local Runtime service for Shell environments and CDP browser automation.
 - Studio runtime for multi-Pet dispatch, read-only per-Pet dispatch-queue observation, and plugin-driven workflows.
 - Extensible local Capabilities and Toolkit-based plugins.
 
@@ -80,7 +80,10 @@ This is the core responsibility of an agent harness: **keep the loop running sta
 User / TUI / desktop app
         |
         v
-local-agent host ---- browser and local Toolkits
+local-agent host ---- static Toolkits + async Runtime clients
+        |                                  |
+        |                         shared local Runtime service
+        |                         Shell / CDP instances
         |
         v
 pet-agent orchestrator
@@ -100,6 +103,7 @@ The main boundaries are:
 | Pet agent | Actor identity, orchestration, delegation, review policy, and model execution. |
 | Capability | A focused business ability executed in an isolated subagent lane. |
 | Toolkit | A typed family of tools, operation metadata, availability, and review guidance. |
+| Runtime service | Owns execution environments and resources; multiple Toolkits and Hosts can use one configured instance. |
 | Session | Runtime-neutral event projection, snapshots, resume state, and transport contracts. |
 | Studio | Multi-Pet dispatch, per-Pet dispatch queues, and plugin event fan-out. |
 
@@ -115,7 +119,7 @@ The main boundaries are:
 | `services/tui/` | OpenTUI client and distribution bundle. |
 | `tests/studio-e2e/` | Cross-package Studio dispatch/event acceptance tests. |
 | `plugins/studio-http/` | Optional Studio HTTP dispatch and SSE event Plugin. |
-| `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
+| `toolkits/browser/` | CDP Browser Toolkit, client contract, and service-owned browser runtime. |
 | `plugins/kanban/` | Optional Kanban Plugin and its Agent Toolkit. |
 | `plugins/scheduler/` | Optional durable one-shot Scheduler Plugin. |
 | `plugins/notice/` | Optional durable Studio notice projection Plugin. |
@@ -174,7 +178,7 @@ Validate the generated example with:
 pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
 ```
 
-See [services/local-agent/README.md](services/local-agent/README.md) for TUI v2, stdio, extension setup, and package-level release details.
+See [services/local-agent/README.md](services/local-agent/README.md) for TUI v2, stdio, Runtime configuration, and package-level release details.
 
 ## Local Development
 
@@ -220,7 +224,7 @@ Never commit local credentials or generated runtime state.
 |---|---|
 | `PINPAWO_MODEL_PROFILE` | Stored model profile ID. |
 | `PINPAWO_WORKDIR` | Default runtime working directory. |
-| `PINPAWO_BROWSER_BACKEND` | `auto`, `playwright`, or `extension`. |
+| `PINPAWO_RUNTIME_DIR` | Shared Runtime configuration and service-state directory; defaults to `~/.pinpawo/runtime`. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket port. |
 
 See [Model Profile Configuration](docs/guides/model-profiles.md) for the stored
@@ -236,6 +240,7 @@ profile format and selection behavior.
 | `pinpawo init` | Create local config and the example Capability. |
 | `pinpawo setup` | Diagnose configuration and show next steps. |
 | `pinpawo tui` | Start the terminal client. |
+| `pinpawo runtime start / status / stop` | Start, inspect, or explicitly stop the shared local Runtime service. |
 | `pinpawo-studio [start]` | Start the independent Studio Host (`--workdir <dir>`, `--pet-port <port>`). |
 | `pinpawo-studio init` | Scaffold Studio configuration, Pet Capabilities, and initial Wiki files. |
 | `pinpawo-studio tmux` / `console` | Build a tiled Pet TUI for a running Host, or open the Studio Console. |
@@ -281,20 +286,36 @@ export default { name: 'sample-plugin' };
 
 Legacy top-level `tools` exports are ignored.
 
-## Browser Toolkit
+## Execution Environments and Browser Toolkit
 
-Browser `auto` mode prefers a connected Chrome Extension for supported default-session operations and falls back to Playwright. Force a backend with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+Chat and Studio connect to one independent local Runtime service. Host startup
+starts it if needed. The default Shell instance is shared by `bash`, `git` and
+`project-inspection`; `browser` uses a CDP instance. A Shell instance is a
+configured environment for shell and CLI commands, not a permanent interactive
+shell process. Each call supplies its own execution scope and absolute cwd.
 
-For extension setup:
+Configure instances and Toolkit-to-instance mappings in
+`~/.pinpawo/runtime/config.json` to share an environment or isolate Toolkits.
+Toolkit definitions declare a dependency such as `runtime: 'shell'`; the Host
+injects clients and the service owns the actual resources. Relative file paths
+and cwd are prepared before review, and review and execution use the same input.
 
 ```bash
-pinpawo browser extension status
-pinpawo browser extension register --extension-id <id>
-pinpawo browser extension repair --extension-id <id>
-pinpawo browser extension unregister
+pinpawo runtime start
+pinpawo runtime status
+pinpawo runtime stop
 ```
 
-See [Chrome Extension Browser Backend](docs/guides/browser-bridge.md) for the protocol, security model, and supported interaction scope.
+Closing a Host releases its own resources and leaves the service running.
+`runtime stop` affects every connected Host; configuration changes require a
+service restart and fresh Host connections. A disconnected client fails explicitly.
+
+The Browser Toolkit uses CDP only. It can manage a Chrome process or connect to a
+configured local CDP endpoint. Remove the old `PINPAWO_BROWSER_BACKEND` or
+`browser_backend` setting; extension registration and backend selection are no
+longer supported. See the [CDP browser guide](docs/guides/browser-bridge.md),
+[CLI reference](docs/reference/api/cli.md), and
+[Toolkit Runtime contract](docs/reference/extensions/toolkit-runtime.md).
 
 ## Runtime State
 
@@ -302,6 +323,7 @@ See [Chrome Extension Browser Backend](docs/guides/browser-bridge.md) for the pr
 |---|---|
 | `~/.pinpawo/config.json` | Saved local configuration. |
 | `~/.pinpawo/.env` | Environment-style configuration. |
+| `~/.pinpawo/runtime/` | Shared Runtime instance configuration, service ownership, credentials, and diagnostics. |
 | `~/.pinpawo/capabilities/` | Installed user Capabilities. |
 | `~/.pinpawo/plugins/` | Local plugin modules. |
 | `<workdir>/.pinpawo/studio.json` | Studio configuration. |

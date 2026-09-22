@@ -28,7 +28,7 @@ npx pinpawo tui
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. Credentials and endpoints are read only from the stored profile. `pinpawo init` creates an editable profile template and migrates a complete legacy `.env` model tuple when no `config.json` exists. Use `pinpawo setup` to check missing config and next steps. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. Credentials and endpoints are read only from the stored profile. `pinpawo init` creates an editable profile template and migrates a complete legacy `.env` model tuple when no `config.json` exists. Use `pinpawo setup` to check missing config and next steps. Shell and CDP browser instances are configured separately in `~/.pinpawo/runtime/config.json`.
 
 Programmatic Chat and Studio Hosts resolve execution settings once with
 `resolveHostExecutionConfig(runtimeConfig, settings)`. The resolved settings own
@@ -91,10 +91,9 @@ pinpawo run
 pinpawo server --stdio
 pinpawo tui
 pinpawo tui --server-port 3210
-pinpawo browser extension status
-pinpawo browser extension register --extension-id <id>
-pinpawo browser extension repair --extension-id <id>
-pinpawo browser extension unregister
+pinpawo runtime start
+pinpawo runtime status
+pinpawo runtime stop
 pinpawo capability list
 pinpawo capability validate ./my-capability
 pinpawo capability install ./my-capability
@@ -135,17 +134,57 @@ Because one session has exactly one transport owner, `--embed-host` (which only
 restates the default) is mutually exclusive with `--server-port`,
 `--pet-port`/`--pet-id`, `--check`, and `--qa`.
 
-The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
+## Shared Runtime Service
 
-For the official Chrome Web Store build, run
-`pinpawo browser extension register` without `--extension-id`. The option
-is only needed for an unpacked development build. Registration preserves the
-official Store ID and any previously registered development IDs.
+Chat and Studio ensure one independent Runtime service is running, then connect
+as clients. The service owns Shell environments, background processes, CDP
+connections and browser pages. Closing one Host releases that client's resources;
+the service remains available to other Hosts. `pinpawo runtime stop` explicitly
+stops the service for every attached Host.
 
-`pinpawo browser extension status` reports whether the Native Messaging setup is
-healthy, including the wrapper, native-host entry, and manifest consistency. If it
-reports `repairRecommended: true`, run `pinpawo browser extension repair` (with an
-unpacked extension ID when applicable) and restart the local agent.
+The service reads `~/.pinpawo/runtime/config.json`; `PINPAWO_RUNTIME_DIR` or the
+Runtime commands' `--directory <path>` option selects another directory. Without
+a config file, `bash`, `git` and `project-inspection` share the `local` Shell
+instance, and `browser` uses its own CDP instance. To isolate Git, for example:
+
+```json
+{
+  "instances": {
+    "local": { "type": "shell" },
+    "git-env": { "type": "shell" },
+    "browser": { "type": "cdp" }
+  },
+  "toolkitBindings": {
+    "bash": "local",
+    "project-inspection": "local",
+    "git": "git-env",
+    "browser": "browser"
+  }
+}
+```
+
+A Shell instance provides a configured environment for shell and CLI commands.
+It does not require one permanent shell process. The service snapshots its
+startup environment; an instance can configure `shell`, `env`, absolute
+`programs` paths and an absolute `pathBase` for relative PATH entries. The default
+shell is bash or zsh on POSIX and PowerShell on Windows. Commands receive an
+explicit cwd from the current execution. Changes to service configuration or its
+startup environment require a service restart and fresh Host connections.
+
+Toolkit definitions declare `runtime: 'shell'` or `runtime: 'cdp'`. The Host
+injects async clients; static Tools are retained across executions. The selected
+Capability receives only the clients for its `uses` dependencies. Local tools
+resolve relative file paths and cwd through `ToolDefinition.prepareInput`
+before review so the reviewed input is also the executed input. See the
+[Runtime contract](../../docs/reference/extensions/toolkit-runtime.md) and
+[workdir reference](../../docs/reference/runtime/workdir.md).
+
+The Browser Toolkit uses CDP only, either with managed Chrome or a configured
+local endpoint. Remove `PINPAWO_BROWSER_BACKEND` and `browser_backend`; extension
+registration, Native Messaging and backend fallback have been removed. Follow
+the [CDP browser guide](../../docs/guides/browser-bridge.md) for browser setup.
+
+## Stdio Transport
 
 `pinpawo run --stdio` starts one logical local-agent peer over newline-delimited
 JSON. It reads one `LocalAgentClientMessage` per stdin line and writes one
@@ -154,7 +193,8 @@ diagnostics go to stderr. Stdin EOF closes the peer and aborts its active work b
 the process exits. Input framing rejects a JSONL line larger than 8 MiB so malformed
 input cannot grow process memory without bound.
 
-The stdio process is self-contained and does not start an HTTP side channel. Use
+The stdio transport does not start an HTTP side channel; Runtime operations use
+the shared service's local IPC connection. Use
 `ping` / `pong` for liveness. Checkpoint-backed session operations use correlated
 request/result messages:
 

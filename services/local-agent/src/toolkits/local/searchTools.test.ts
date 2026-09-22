@@ -1,3 +1,4 @@
+import { invokeLocalTool } from './shellTestSupport';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,8 @@ import test from 'node:test';
 import { rgPath } from '@vscode/ripgrep';
 import { walkFiles, DEFAULT_WALK_IGNORED_DIRS } from './fileSystemUtils';
 import { globSearchTool, grepSearchTool } from './searchTools';
-import { ripgrepSearchBackend } from './searchBackend';
+import { createRipgrepSearchBackend } from './searchBackend';
+const ripgrepSearchBackend = createRipgrepSearchBackend(rgPath, { ...process.env });
 
 function makeTree() {
   const root = mkdtempSync(resolve(tmpdir(), 'pinpawo-search-'));
@@ -55,7 +57,7 @@ test('grep_search does not descend into .pinpawo checkpoint storage', async () =
   writeFileSync(resolve(root, '.git/objects/leak'), 'capability_search\n');
   writeFileSync(resolve(root, 'node_modules/pkg/index.js'), 'capability_search\n');
 
-  const output = String(await grepSearchTool.invoke({ path: root, query: 'capability_search' }));
+  const output = String(await invokeLocalTool(grepSearchTool, { path: root, query: 'capability_search' }));
 
   assert.ok(output.includes('src/app.ts'), 'should still match real source files');
   assert.ok(!output.includes('.pinpawo'), 'must not return checkpoint storage matches');
@@ -68,7 +70,7 @@ test('grep_search truncates a single huge matched line', async () => {
   const root = makeTree();
   writeFileSync(resolve(root, 'big.json'), `${'a'.repeat(300_000)} needle\n`);
 
-  const output = String(await grepSearchTool.invoke({ path: root, query: 'needle' }));
+  const output = String(await invokeLocalTool(grepSearchTool, { path: root, query: 'needle' }));
 
   assert.ok(output.includes('big.json'), 'matched the file');
   assert.ok(output.includes('truncated'), 'annotated the truncation');
@@ -84,13 +86,13 @@ test('grep_search supports a single file search root with and without context', 
     'after',
   ].join('\n'));
 
-  const plain = String(await grepSearchTool.invoke({
+  const plain = String(await invokeLocalTool(grepSearchTool, {
     path: filePath,
     query: 'needle',
   }));
   assert.match(plain, /^single\.ts:2: needle$/m);
 
-  const withContext = String(await grepSearchTool.invoke({
+  const withContext = String(await invokeLocalTool(grepSearchTool, {
     path: filePath,
     query: 'needle',
     context: 1,
@@ -109,7 +111,7 @@ test('grep_search stops at the total-bytes budget across many big lines', async 
     );
   }
 
-  const output = String(await grepSearchTool.invoke({ path: root, query: 'needle', limit: 200 }));
+  const output = String(await invokeLocalTool(grepSearchTool, { path: root, query: 'needle', limit: 200 }));
 
   assert.ok(output.includes('50000-byte output limit'), 'should report byte-budget truncation');
   assert.ok(Buffer.byteLength(output, 'utf-8') <= 50_000);
@@ -128,7 +130,7 @@ test('glob_search ignores .pinpawo and finds real files', async () => {
   writeFileSync(resolve(root, '.git/state.ts'), '');
   writeFileSync(resolve(root, 'node_modules/state.ts'), '');
 
-  const output = String(await globSearchTool.invoke({ path: root, pattern: '*.ts' }));
+  const output = String(await invokeLocalTool(globSearchTool, { path: root, pattern: '*.ts' }));
 
   assert.ok(output.includes('src/app.ts'));
   assert.ok(!output.includes('.pinpawo'), 'glob must not surface checkpoint storage');
@@ -145,8 +147,8 @@ test('native searches honor .gitignore outside a git repository', async () => {
   writeFileSync(resolve(root, 'generated/noisy.ts'), 'needle\n');
   writeFileSync(resolve(root, 'ignored.ts'), 'needle\n');
 
-  const grep = String(await grepSearchTool.invoke({ path: root, query: 'needle' }));
-  const glob = String(await globSearchTool.invoke({ path: root, pattern: '*.ts' }));
+  const grep = String(await invokeLocalTool(grepSearchTool, { path: root, query: 'needle' }));
+  const glob = String(await invokeLocalTool(globSearchTool, { path: root, pattern: '*.ts' }));
 
   assert.match(grep, /^src\/kept\.ts:1: needle/m);
   assert.doesNotMatch(grep, /generated|ignored\.ts/);
@@ -167,14 +169,14 @@ test('grep_search supports literal, regex, glob, case, and merged context', asyn
   ].join('\n'));
   writeFileSync(resolve(root, 'src/code.md'), 'target789\n');
 
-  const literal = String(await grepSearchTool.invoke({
+  const literal = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'target\\d+',
     literal: true,
   }));
   assert.equal(literal, '(no matches)');
 
-  const regex = String(await grepSearchTool.invoke({
+  const regex = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'target\\d+',
     literal: false,
@@ -186,7 +188,7 @@ test('grep_search supports literal, regex, glob, case, and merged context', asyn
   assert.doesNotMatch(regex, /code\.md/);
   assert.equal((regex.match(/^src\/code\.ts-3-/gm) ?? []).length, 1);
 
-  const sensitive = String(await grepSearchTool.invoke({
+  const sensitive = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'target\\d+',
     literal: false,
@@ -212,7 +214,7 @@ test('grep_search preserves context after disjoint ripgrep blocks', async () => 
     'after second',
   ].join('\n'));
 
-  const output = String(await grepSearchTool.invoke({
+  const output = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'needle',
     context: 1,
@@ -234,8 +236,8 @@ test('native searches reject symlink aliases into hard-excluded roots', async ()
     process.platform === 'win32' ? 'junction' : 'dir',
   );
 
-  const grep = String(await grepSearchTool.invoke({ path: alias, query: 'needle' }));
-  const glob = String(await globSearchTool.invoke({ path: alias, pattern: '*.ts' }));
+  const grep = String(await invokeLocalTool(grepSearchTool, { path: alias, query: 'needle' }));
+  const glob = String(await invokeLocalTool(globSearchTool, { path: alias, pattern: '*.ts' }));
   assert.match(grep, /^Error: search root is inside a hard-excluded directory/);
   assert.match(glob, /^Error: search root is inside a hard-excluded directory/);
 });
@@ -244,8 +246,8 @@ test('native searches include non-ignored hidden files with consistent semantics
   const root = makeTree();
   writeFileSync(resolve(root, '.hidden.ts'), 'hidden needle\n');
 
-  const grep = String(await grepSearchTool.invoke({ path: root, query: 'hidden needle' }));
-  const glob = String(await globSearchTool.invoke({ path: root, pattern: '*.ts' }));
+  const grep = String(await invokeLocalTool(grepSearchTool, { path: root, query: 'hidden needle' }));
+  const glob = String(await invokeLocalTool(globSearchTool, { path: root, pattern: '*.ts' }));
 
   assert.match(grep, /^\.hidden\.ts:1:/m);
   assert.match(glob, /^\.hidden\.ts$/m);
@@ -256,7 +258,7 @@ test('search limit notices are explicit and actionable', async () => {
   writeFileSync(resolve(root, 'many.txt'), 'needle one\nneedle two\n');
   writeFileSync(resolve(root, 'other.txt'), 'other\n');
 
-  const grep = String(await grepSearchTool.invoke({
+  const grep = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: 'needle',
     limit: 1,
@@ -264,7 +266,7 @@ test('search limit notices are explicit and actionable', async () => {
   assert.match(grep, /match limit 1/);
   assert.match(grep, /narrow path\/query\/glob or increase limit/);
 
-  const glob = String(await globSearchTool.invoke({
+  const glob = String(await invokeLocalTool(globSearchTool, {
     path: root,
     pattern: '*',
     limit: 1,
@@ -277,7 +279,7 @@ test('grep_search reports invalid regex deterministically', async () => {
   const root = makeTree();
   writeFileSync(resolve(root, 'code.ts'), 'text\n');
 
-  const output = String(await grepSearchTool.invoke({
+  const output = String(await invokeLocalTool(grepSearchTool, {
     path: root,
     query: '[',
     literal: false,

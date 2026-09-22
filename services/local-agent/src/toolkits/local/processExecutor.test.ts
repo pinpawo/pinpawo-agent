@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
+import type { ShellRunHandle } from './processExecutor';
 import { ProcessRegistry, type ManagedProcessOwner } from './processRegistry';
 
 /**
@@ -13,6 +13,7 @@ import { ProcessRegistry, type ManagedProcessOwner } from './processRegistry';
  */
 
 const OWNER: ManagedProcessOwner = {
+  clientId: 'client', toolkitName: 'bash', taskId: 'task',
   threadId: 'thread-1',
   runId: 'run-1',
   delegationId: 'delegation-1',
@@ -42,61 +43,28 @@ function fakeHandle(pid: number): ShellRunHandle & { finish: (code: number) => v
   };
 }
 
-function recordingExecutor(overrides: Partial<ProcessExecutor> = {}) {
-  const terminated: { pid: number; graceMs: number }[] = [];
-  const probed: number[] = [];
-  const executor: ProcessExecutor = {
-    run: () => Promise.reject(new Error('not used in these tests')),
-    terminateGroup: (pid, graceMs) => { terminated.push({ pid, graceMs }); },
-    isGroupAlive: (pid) => { probed.push(pid); return true; },
-    ...overrides,
-  };
-  return { executor, terminated, probed };
-}
-
-test('the registry asks the executor to signal, never the OS', async () => {
-  const { executor, terminated } = recordingExecutor();
-  const registry = new ProcessRegistry(executor);
+test('termination uses the owned handle rather than a numeric PID', async () => {
+  const registry = new ProcessRegistry();
   const handle = fakeHandle(4242);
-  const record = registry.register({
-    handle,
-    owner: OWNER,
-    command: 'fake',
-    cwd: '/tmp',
-  });
-
+  const record = registry.register({ handle, owner: OWNER, command: 'fake', cwd: '/tmp' });
   await registry.terminate(record.processId, OWNER, 500);
-
-  // Termination reached the executor rather than a signal call inside the
-  // registry.
-  assert.equal(terminated.length, 0, 'per-process termination goes through the handle');
+  assert.equal(handle.hasExited, true);
   assert.equal(registry.list(OWNER)[0]?.status, 'terminated');
 });
 
-test('an orphan group is probed before it is signalled', async () => {
-  const { executor, terminated, probed } = recordingExecutor();
-  const registry = new ProcessRegistry(executor);
-
-  assert.equal(registry.trackOrphanGroup(9001), true);
-  assert.deepEqual(probed, [9001], 'tracking must confirm the group is alive');
-
-  await registry.stopAll();
-  assert.equal(terminated.length, 1);
-  assert.equal(terminated[0]?.pid, 9001);
-});
-
-test('a dead orphan group is neither tracked nor signalled', async () => {
-  const { executor, terminated } = recordingExecutor({ isGroupAlive: () => false });
-  const registry = new ProcessRegistry(executor);
-
-  assert.equal(registry.trackOrphanGroup(9002), false);
-  await registry.stopAll();
-  assert.deepEqual(terminated, [], 'nothing to signal');
+test('disconnect never signals an already finished process', async () => {
+  const registry = new ProcessRegistry();
+  const handle = fakeHandle(9001);
+  const record = registry.register({ handle, owner: OWNER, command: 'finished', cwd: '/tmp' });
+  handle.finish(0);
+  await registry.wait(record.processId, OWNER, 1000);
+  handle.terminate = () => { throw new Error('stale handle termination'); };
+  await registry.stopClient(OWNER.clientId);
+  assert.equal(registry.size, 0);
 });
 
 test('ownership is enforced without touching a process', async () => {
-  const { executor } = recordingExecutor();
-  const registry = new ProcessRegistry(executor);
+  const registry = new ProcessRegistry();
   const record = registry.register({
     handle: fakeHandle(1),
     owner: OWNER,
@@ -106,6 +74,7 @@ test('ownership is enforced without touching a process', async () => {
 
   await assert.rejects(
     () => registry.drain(record.processId, {
+      clientId: 'client', toolkitName: 'bash', taskId: 'task',
       threadId: 'thread-1',
       runId: 'run-2',
       delegationId: 'delegation-2',
@@ -115,8 +84,7 @@ test('ownership is enforced without touching a process', async () => {
 });
 
 test('a finished process frees its slot without an OS call', async () => {
-  const { executor } = recordingExecutor();
-  const registry = new ProcessRegistry(executor);
+  const registry = new ProcessRegistry();
   const handle = fakeHandle(7);
   const record = registry.register({
     handle,

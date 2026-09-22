@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 const EXACT_AUTHORIZATION_KEY_PREFIX = 'exact:v1:sha256:';
 
-export type ToolAuthorizationMatcher =
+export type ToolAuthorizationMatcher = (
   | {
       type: 'exact';
       key: string;
@@ -10,6 +10,9 @@ export type ToolAuthorizationMatcher =
   | {
       type: 'url_origin';
       origin: string;
+    }) & {
+      /** Framework digest of the trusted Toolkit, connection, instance and workdir. */
+      scope?: string;
     };
 
 const policyGenerationKeys = new WeakMap<object, string>();
@@ -112,25 +115,26 @@ export function readToolAuthorizationMatcher(value: unknown): ToolAuthorizationM
   if (!record) {
     return null;
   }
+  if (record.scope !== undefined && (typeof record.scope !== 'string' || !/^[a-f0-9]{64}$/.test(record.scope))) return null;
+  const scope = typeof record.scope === 'string' ? { scope: record.scope } : {};
   if (
     record.type === 'exact'
     && typeof record.key === 'string'
     && record.key.startsWith(EXACT_AUTHORIZATION_KEY_PREFIX)
     && /^[a-f0-9]{64}$/.test(record.key.slice(EXACT_AUTHORIZATION_KEY_PREFIX.length))
   ) {
-    return { type: 'exact', key: record.key };
+    return { type: 'exact', key: record.key, ...scope };
   }
   if (record.type === 'url_origin') {
     const matcher = urlOriginAuthorization(record.origin);
-    return matcher?.type === 'url_origin' ? matcher : null;
+    return matcher?.type === 'url_origin' ? { ...matcher, ...scope } : null;
   }
   return null;
 }
 
 export function toolAuthorizationMatcherKey(matcher: ToolAuthorizationMatcher) {
-  return matcher.type === 'exact'
-    ? matcher.key
-    : `url_origin:${matcher.origin}`;
+  const subject = matcher.type === 'exact' ? matcher.key : `url_origin:${matcher.origin}`;
+  return matcher.scope ? `${subject}:scope:${matcher.scope}` : subject;
 }
 
 export function toolAuthorizationMatchersEqual(

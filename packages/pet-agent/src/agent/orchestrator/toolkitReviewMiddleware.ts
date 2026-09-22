@@ -9,6 +9,9 @@ import type {
   ToolkitReviewCapabilities,
   ToolReviewPolicy,
   ToolOperationMetadata,
+  ToolDefinition,
+  ToolkitRuntimeExecutionScope,
+  ToolkitRuntimeIdentity,
 } from '../../types/toolkit';
 import type { AgentModels } from '../../types/agent';
 import type { SubagentRuntimeEvent } from '../../types/subagent';
@@ -49,6 +52,8 @@ import {
 
 export type ToolkitReviewRuntimeContext = {
   models: AgentModels;
+  executionScope?: ToolkitRuntimeExecutionScope;
+  runtimeIdentities?: Readonly<Record<string, ToolkitRuntimeIdentity>>;
   /** Input modalities the active model profile accepts. */
   modelInputModalities?: readonly ModelInputModality[];
   messages: BaseMessage[];
@@ -486,21 +491,33 @@ function buildToolMessage(toolCall: ToolCall, content: string) {
   });
 }
 
+function authorizationScope(binding: ToolkitReviewBinding, ctx: ToolkitReviewRuntimeContext): string | undefined {
+  if (!ctx.executionScope && !ctx.runtimeIdentities?.[binding.toolkit.name]) return undefined;
+  return createHash('sha256').update(stableStringify({
+    toolkit: binding.toolkit.name,
+    runtime: ctx.runtimeIdentities?.[binding.toolkit.name] ?? null,
+    workdir: ctx.executionScope?.workdir ?? ctx.reviewContext?.workdir ?? null,
+  })).digest('hex');
+}
+
 async function buildCandidateAuthorizationMatcher(params: {
   binding: ToolkitReviewBinding;
   input: unknown;
+  ctx: ToolkitReviewRuntimeContext;
 }): Promise<ToolAuthorizationMatcher | null> {
   const buildMatcher = params.binding.reviewPolicy.authorization?.buildMatcher;
   if (!buildMatcher) {
     return null;
   }
   try {
-    return readToolAuthorizationMatcher(await buildMatcher({
+    const matcher = readToolAuthorizationMatcher(await buildMatcher({
       toolkitName: params.binding.toolkit.name,
       toolName: params.binding.toolName,
       input: params.input,
       operation: params.binding.operation,
     }));
+    const scope = authorizationScope(params.binding, params.ctx);
+    return matcher && scope ? { ...matcher, scope } : matcher;
   } catch {
     // Matcher construction is optional reuse metadata. A policy bug must fail
     // closed into the normal review path, never authorize the current call.
@@ -515,7 +532,9 @@ async function prepareToolkitToolReview(params: {
   approvedReviewIds: Set<string>;
 }): Promise<ToolkitReviewPreparation> {
   const { approvedReviewIds, binding, ctx, toolCall } = params;
-  if (approvedReviewIds.has(buildToolReviewIdForToolCall(binding.toolName, toolCall))) {
+  const scope = authorizationScope(binding, ctx);
+  const reviewId = `${buildToolReviewIdForToolCall(binding.toolName, toolCall)}${scope ? `:${scope}` : ''}`;
+  if (approvedReviewIds.has(reviewId)) {
     return { type: 'allow' };
   }
   const currentInput = toolCall.args;
@@ -523,6 +542,7 @@ async function prepareToolkitToolReview(params: {
   const authorizationMatcher = await buildCandidateAuthorizationMatcher({
     binding,
     input: currentInput,
+    ctx,
   });
   const activeAuthorization = authorizationMatcher
     && reviewCapabilities?.sessionAuthorization === true
@@ -593,6 +613,7 @@ async function prepareToolkitToolReview(params: {
     review: reviewSpec,
     toolCall,
   });
+  reviewPayload.review = { ...reviewPayload.review, id: reviewId };
   if (approvedReviewIds.has(reviewPayload.review.id)) {
     return { type: 'allow' };
   }
@@ -942,11 +963,13 @@ function buildPolicyCancellationResult(params: {
 export function createToolkitReviewMiddleware(
   bindings: ToolkitReviewBinding[],
   ctx: ToolkitReviewRuntimeContext,
+  tools: readonly { toolkit: AgentToolkit; definition: ToolDefinition }[] = [],
 ): AnyAgentMiddleware | null {
-  if (bindings.length === 0) {
+  if (bindings.length === 0 && !tools.some(({ definition }) => definition.prepareInput)) {
     return null;
   }
   const bindingsByToolName = new Map(bindings.map((binding) => [binding.toolName, binding]));
+  const toolsByName = new Map(tools.map(binding => [binding.definition.tool.name, binding]));
 
   return createMiddleware({
     name: 'ToolkitReviewMiddleware',
@@ -958,10 +981,35 @@ export function createToolkitReviewMiddleware(
         if (!latestAIMessage?.message.tool_calls?.length) {
           return undefined;
         }
-        const reviewedMessage = materializeAIMessageToolCalls({
+        let reviewedMessage = materializeAIMessageToolCalls({
           aiMessage: latestAIMessage.message,
           aiMessageIndex: latestAIMessage.index,
         });
+        const preparedCalls: ToolCall[] = [];
+        for (const call of reviewedMessage.toolCalls) {
+          const binding = toolsByName.get(call.name);
+          if (!binding?.definition.prepareInput) {
+            preparedCalls.push(call);
+            continue;
+          }
+          if (!ctx.executionScope) throw new Error(`Tool "${call.name}" requires a trusted execution scope for input preparation.`);
+          const args = await binding.definition.prepareInput(call.args, {
+            toolkitName: binding.toolkit.name,
+            toolName: call.name,
+            executionScope: ctx.executionScope,
+            runtimeIdentity: ctx.runtimeIdentities?.[binding.toolkit.name],
+          });
+          if (!args || typeof args !== 'object' || Array.isArray(args)) {
+            throw new Error(`Tool "${call.name}" input preparation must return an argument object.`);
+          }
+          preparedCalls.push({ ...call, args: args as Record<string, unknown> });
+        }
+        if (preparedCalls.some((call, i) => call !== reviewedMessage.toolCalls[i])) {
+          reviewedMessage = { ...reviewedMessage,
+            message: cloneAIMessageWithToolCalls(reviewedMessage.message, preparedCalls),
+            toolCalls: preparedCalls, replacedMessage: true,
+          };
+        }
         const reviewResults = await reviewToolkitToolCalls({
           messages,
           reviewedMessage,

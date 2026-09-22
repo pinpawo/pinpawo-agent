@@ -71,6 +71,7 @@ function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
       return authorization || canAutoApprove
         ? [{
             name: definition.tool.name,
+            prepareInput: functionSource(definition.prepareInput),
             authorization: {
               matcher: authorization ? readAuthorizationPolicyGeneration(authorization)
                 ?? functionSource(authorization.buildMatcher) : null,
@@ -80,7 +81,7 @@ function computeAuthorizationGeneration(toolkits: readonly AgentToolkit[]) {
           }]
         : [];
     });
-    return tools.length > 0 ? [{ name: toolkit.name, tools }] : [];
+    return tools.length > 0 ? [{ name: toolkit.name, runtime: toolkit.runtime ?? null, tools }] : [];
   });
   return createHash('sha256')
     .update(JSON.stringify(subject))
@@ -200,6 +201,7 @@ function snapshotToolDefinition(definition: ToolDefinition): ToolDefinition {
   // Tool name stable for the lifetime of this registry generation.
   return Object.freeze({
     tool: definition.tool,
+    ...(definition.prepareInput ? { prepareInput: definition.prepareInput } : {}),
     ...(definition.operation
       ? { operation: snapshotOperation(definition.operation) }
       : {}),

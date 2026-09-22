@@ -22,7 +22,6 @@ import type {
   ModelInputModality,
   ToolDefinition,
   ToolReviewPolicy,
-  ToolkitRuntimeResolveContext,
 } from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
 import { runAgent } from '../runAgent';
@@ -1139,7 +1138,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   let routeCallCount = 0;
   let capabilityToolNames: string[] = [];
   let capabilityTools: Array<{ name: string }> = [];
-  const runtimeEvents: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1168,8 +1166,7 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
     return bindTools(tools as never);
   };
   const staticReadFile = mockTool('read_file');
-  const boundReadFile = mockTool('read_file');
-  const toolkitRuntimeManager = new ToolkitRuntimeManager();
+  const toolkitRuntimeManager = new ToolkitRuntimeManager({ bash: { runtimeType: 'shell', client: {}, identity: { clientId: 'host', instanceId: 'shell' } } });
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
@@ -1196,20 +1193,7 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
           name: 'bash',
           description: 'bash toolkit',
           tools: toolDefinitions(staticReadFile),
-          runtime: {
-            start: () => {
-              runtimeEvents.push('start');
-              return { host: 'local' };
-            },
-            resolve: (_root: unknown, context: ToolkitRuntimeResolveContext) => {
-              runtimeEvents.push(`resolve:${context.execution.delegationId}`);
-              return { host: 'local' };
-            },
-            bindTools: () => [boundReadFile],
-            release: () => {
-              runtimeEvents.push('release');
-            },
-          },
+          runtime: 'shell',
         },
         {
           name: 'browser',
@@ -1227,16 +1211,11 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   });
 
   assert.deepEqual(capabilityToolNames, ['read_file']);
-  assert.notEqual(capabilityTools[0], staticReadFile);
-  assert.notEqual(capabilityTools[0], boundReadFile);
+  assert.equal(capabilityTools[0], staticReadFile);
   assert.equal(
     (capabilityTools[0] as StructuredTool | undefined)?.schema,
     staticReadFile.schema,
   );
-  assert.equal(runtimeEvents[0], 'start');
-  assert.match(runtimeEvents[1] ?? '', /^resolve:/);
-  assert.equal(runtimeEvents[2], 'release');
-  await toolkitRuntimeManager.stop();
 });
 
 test('capability tools receive their Toolkit Runtime port with invocation identity', async () => {
@@ -1274,7 +1253,7 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
       [],
     ],
   });
-  const toolkitRuntimeManager = new ToolkitRuntimeManager();
+  const toolkitRuntimeManager = new ToolkitRuntimeManager({ browser: { runtimeType: 'cdp', client: browserRuntime, identity: { clientId: 'host', instanceId: 'browser' } } });
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel, subagent: subagentModel },
     toolkitRuntimeManager,
@@ -1295,9 +1274,7 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
         name: 'browser',
         description: 'browser toolkit',
         tools: toolDefinitions(inspectRuntime),
-        runtime: {
-          start: () => browserRuntime,
-        },
+        runtime: 'cdp',
       }],
       allowedCapabilityNames: ['inspect_browser'],
     },
@@ -1308,7 +1285,6 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
   assert.equal(seenExecutionScope?.workdir, '/workspace');
   assert.ok(seenExecutionScope?.runId);
   assert.ok(seenExecutionScope?.delegationId);
-  await toolkitRuntimeManager.stop();
 });
 
 test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
@@ -2663,7 +2639,11 @@ test('exact auto authorization survives graph rebuild but expires on registry re
   assert.equal(autoReviewCount, 1);
   assert.deepEqual(
     firstState.sessionToolAuthorizations.records
-      .map(({ createdAt: _createdAt, ...record }) => record),
+      .map(({ createdAt: _createdAt, matcher, ...record }) => {
+        assert.match(matcher.scope ?? '', /^[a-f0-9]{64}$/);
+        const { scope: _scope, ...subject } = matcher;
+        return { ...record, matcher: subject };
+      }),
     [{
       toolName: 'run_shell',
       matcher: exactAuthorization({ command: 'git status --short' }),
@@ -3264,7 +3244,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
     reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
   assert.equal(payload?.kind, 'review_batch');
-  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
+  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id?.split(':').slice(0, 3).join(':')), [
     'tool-review:run_shell:call-1',
   ]);
   assert.equal(reviewCount, 1);
@@ -3274,7 +3254,7 @@ test('toolkit review policy records authorization through orchestrator runtime t
   // the root protocol stream and collect `custom` events.
   const reviewResume = {
     decisions: [{
-      reviewId: 'tool-review:run_shell:call-1',
+      reviewId: payload!.reviews![0].review!.id,
       selectedOptionId: 'approve-and-authorize-thread',
     }],
   };
@@ -3292,14 +3272,18 @@ test('toolkit review policy records authorization through orchestrator runtime t
     __interrupt__?: unknown;
     sessionToolAuthorizations: {
       generation: string;
-      records: Array<{ toolName: string; matcher: unknown; createdAt: string }>;
+      records: Array<{ toolName: string; matcher: ToolAuthorizationRecord['matcher']; createdAt: string }>;
     };
   };
 
   assert.equal(finalState.__interrupt__, undefined);
   assert.deepEqual(
     finalState.sessionToolAuthorizations.records
-      .map(({ createdAt: _createdAt, ...item }) => item),
+      .map(({ createdAt: _createdAt, matcher, ...item }) => {
+        assert.match(matcher.scope ?? '', /^[a-f0-9]{64}$/);
+        const { scope: _scope, ...subject } = matcher;
+        return { ...item, matcher: subject };
+      }),
     [{
       toolName: 'run_shell',
       matcher: exactAuthorization({ command: 'git status' }),
@@ -3414,7 +3398,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
     reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
   assert.equal(payload?.kind, 'review_batch');
-  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
+  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id?.split(':').slice(0, 3).join(':')), [
     'tool-review:run_shell:call-plain-1',
   ]);
 
@@ -3423,7 +3407,7 @@ test('toolkit review policy resumes plain approve through interrupt checkpoint',
   subagentModel.index = 1;
   const reviewResume = {
     decisions: [{
-      reviewId: 'tool-review:run_shell:call-plain-1',
+      reviewId: payload!.reviews![0].review!.id,
       selectedOptionId: 'approve',
     }],
   };
@@ -3571,7 +3555,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
   assert.equal(payload?.kind, 'review_batch');
-  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id), [
+  assert.deepEqual(payload?.reviews?.map((item) => item.review?.id?.split(':').slice(0, 3).join(':')), [
     'tool-review:run_shell:call-rejected-first',
     'tool-review:run_shell:call-rejected-second',
   ]);
@@ -3594,7 +3578,7 @@ test('toolkit review rejection records terminal tool results and retains the del
 
   const reviewResume = {
     decisions: [{
-      reviewId: 'tool-review:run_shell:call-rejected-first',
+      reviewId: payload!.reviews![0].review!.id,
       selectedOptionId: 'reject',
     }],
   };
@@ -3656,7 +3640,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   const nextPayload = nextReview.__interrupt__?.[0]?.value as {
     reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
-  assert.deepEqual(nextPayload?.reviews?.map((item) => item.review?.id), [
+  assert.deepEqual(nextPayload?.reviews?.map((item) => item.review?.id?.split(':').slice(0, 3).join(':')), [
     'tool-review:run_shell:call-after-continue',
   ]);
   assert.equal(autoReviewCount, 2, 'a later capability review must run auto-review normally');
@@ -3931,7 +3915,7 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
     reviews?: Array<{ review?: { id?: string } }>;
   } | undefined;
   assert.equal(batchPayload?.kind, 'review_batch');
-  assert.deepEqual(batchPayload?.reviews?.map((item) => item.review?.id), [
+  assert.deepEqual(batchPayload?.reviews?.map((item) => item.review?.id?.split(':').slice(0, 3).join(':')), [
     'tool-review:run_shell:call-first',
     'tool-review:run_shell:call-second',
   ]);
@@ -3940,11 +3924,11 @@ test('toolkit review resumes multiple reviewed tool calls in one model response'
   const batchResume = {
     decisions: [
       {
-        reviewId: 'tool-review:run_shell:call-first',
+        reviewId: batchPayload!.reviews![0].review!.id,
         selectedOptionId: 'approve',
       },
       {
-        reviewId: 'tool-review:run_shell:call-second',
+        reviewId: batchPayload!.reviews![1].review!.id,
         selectedOptionId: 'approve',
       },
     ],
@@ -4297,6 +4281,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
   }
   const inspect = tool(async (_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     const scope = runtime.context.executionScope!;
+    scopes.push(scope);
     assert.equal(scope.workdir, runtime.context.workdir);
     toolsSeen.set(scope.threadId!, runtime.context.workdir);
     return 'inspected';
@@ -4304,11 +4289,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
   const toolkit: AgentToolkit = {
     name: 'inspection', description: 'Inspect context',
     tools: [reviewedTool(inspect, ReviewPolicies.localMutation())],
-    runtime: {
-      start: () => ({}),
-      resolve: (_root, context) => { scopes.push(context.execution); return {}; },
-      bindTools: () => [inspect],
-    },
+    runtime: 'test',
   };
   const item = {
     ...capability('inspect', 'Inspect context', ['inspection']),
@@ -4317,7 +4298,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
       finalized.add(ctx.threadId!);
     } },
   };
-  const toolkitRuntimeManager = new ToolkitRuntimeManager();
+  const toolkitRuntimeManager = new ToolkitRuntimeManager({ inspection: { runtimeType: 'test', client: {}, identity: { clientId: 'host', instanceId: 'inspection' } } });
   const answer = { invoke: async () => new AIMessage('done') } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
     models: { act: answer, subagent: new Executor({}) }, toolkitRuntimeManager,
@@ -4366,7 +4347,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
       }
     }
   } finally {
-    await toolkitRuntimeManager.stop();
+    assert.equal(toolkitRuntimeManager.select([toolkit]).runtimes.inspection !== undefined, true);
   }
 });
 
@@ -4435,7 +4416,7 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
       globalReviewPolicy: { mode: 'custom', resolve: () => ({ type: 'require_authorization' as const }) },
     },
   };
-  type Out = { __interrupt__?: Array<{ id?: string; value?: { kind?: string } }> };
+  type Out = { __interrupt__?: Array<{ id?: string; value?: { kind?: string; reviews?: Array<{ review: { id: string } }> } }> };
 
   // 1. run until the review interrupt
   const reviewed = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('run git status')]), config) as Out;
@@ -4445,7 +4426,7 @@ test('a review-origin task pause consults Supervisor on guided continue by id', 
 
   // 2. reject → the run must SUSPEND on a pause_task interrupt, not end
   const paused = await graph.invoke(new Command({
-    resume: { [reviewId]: { decisions: [{ reviewId: 'tool-review:run_shell:call-first', selectedOptionId: 'reject' }] } },
+    resume: { [reviewId]: { decisions: [{ reviewId: reviewed.__interrupt__![0].value!.reviews![0].review.id, selectedOptionId: 'reject' }] } },
   }), config) as Out;
   const pauseId = paused.__interrupt__?.[0]?.id;
   assert.equal(paused.__interrupt__?.[0]?.value?.kind, 'pause_task', 'pause must surface as a real interrupt');

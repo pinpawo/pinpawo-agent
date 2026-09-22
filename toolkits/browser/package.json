@@ -1,7 +1,7 @@
 {
   "name": "@pinpawo-toolkit/browser",
   "version": "0.2.1",
-  "description": "PinPawo Browser Toolkit runtime, drivers, and Chrome extension host",
+  "description": "PinPawo Browser Toolkit and hosted CDP runtime",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -22,12 +22,12 @@
   "files": [
     "dist/",
     "README.md",
-    "STORE_RELEASE.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup && node --import tsx/esm scripts/build-extension.ts",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.extension.json --noEmit",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test:cdp": "node scripts/test-cdp.mjs",
     "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
@@ -35,13 +35,10 @@
     "@langchain/core": "^1.2.1",
     "@langchain/langgraph": "^1.4.7",
     "@pinpawo/pet-agent": "^0.2.1",
-    "zod": "^3.22.0"
-  },
-  "optionalDependencies": {
+    "zod": "^3.22.0",
     "playwright-core": "^1.59.1"
   },
   "devDependencies": {
-    "@types/chrome": "^0.2.5",
     "@types/node": "^24.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.22.3",

@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { rgPath } from '@vscode/ripgrep';
 import { DEFAULT_WALK_IGNORED_DIRS } from './fileSystemUtils';
 
 const RG_LINE_PREVIEW_CHARS = 2_000;
@@ -132,12 +131,15 @@ async function runRipgrep(
   cwd: string,
   signal: AbortSignal | undefined,
   consumeStdout: (chunk: string, stop: () => void) => void,
+  executable: string,
+  env: NodeJS.ProcessEnv,
 ) {
   if (signal?.aborted) throw createAbortError();
 
   await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(rgPath, args, {
+    const child = spawn(executable, args, {
       cwd,
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.setEncoding('utf-8');
@@ -181,7 +183,7 @@ async function runRipgrep(
       if (spawnError) {
         const codeValue = (spawnError as NodeJS.ErrnoException).code;
         reject(codeValue === 'ENOENT'
-          ? new Error(`bundled ripgrep executable is unavailable: ${rgPath}`)
+          ? new Error(`ripgrep executable is unavailable: ${executable}`)
           : spawnError);
         return;
       }
@@ -204,7 +206,9 @@ function commonArgs() {
   ];
 }
 
-export const ripgrepSearchBackend: SearchBackend = {
+/** Service-side backend; executable selection belongs to the Shell environment. */
+export function createRipgrepSearchBackend(executable: string, env: NodeJS.ProcessEnv): SearchBackend {
+  return {
   async grep(options) {
     const root = resolveSearchRoot(options.rootPath);
     const args = [
@@ -280,7 +284,7 @@ export const ripgrepSearchBackend: SearchBackend = {
         consumeRecord(pendingPath, payload, stop);
         pendingPath = null;
       }
-    });
+    }, executable, env);
 
     return { lines, matchCount, stoppedAtMatchLimit };
   },
@@ -313,8 +317,9 @@ export const ripgrepSearchBackend: SearchBackend = {
           return;
         }
       }
-    });
+    }, executable, env);
 
     return { paths, stoppedAtResultLimit };
   },
-};
+  };
+}

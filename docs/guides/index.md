@@ -8,9 +8,9 @@ Guides help an operator or contributor use a current project surface.
   local agent or local server.
 - [Model profiles](model-profiles.md) — configure model providers and endpoints
   without putting credentials in source control.
-- [Browser bridge](browser-bridge.md) — install and operate the Chrome
-  Extension / Native Messaging integration.
-- [Browser privacy notice](browser-extension-privacy.md) — data handling and
-  supported browser scope.
+- [CDP browser](browser-bridge.md) — configure the hosted CDP Runtime,
+  manage browser ownership, and verify real browser operations.
+- [Historical Browser Bridge privacy notice](browser-extension-privacy.md) —
+  retained notice for the retired Chrome Extension / Native Messaging implementation.
 
 For type-level and protocol detail, use the [Reference](../reference/index.md).

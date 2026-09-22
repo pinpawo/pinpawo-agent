@@ -10,19 +10,20 @@ import {
 import type { ShellRunHandle } from './processExecutor';
 import {
   isProcessGroupAlive,
-  posixProcessExecutor,
   runShellCommand,
 } from './processTree';
 
 const CWD = process.cwd();
 
 const OWNER: ManagedProcessOwner = {
+  clientId: 'client', toolkitName: 'bash', taskId: 'task',
   threadId: 'thread-1',
   runId: 'run-1',
   delegationId: 'delegation-1',
 };
 
 const OTHER_OWNER: ManagedProcessOwner = {
+  clientId: 'client', toolkitName: 'bash', taskId: 'task',
   threadId: 'thread-1',
   runId: 'run-2',
   delegationId: 'delegation-2',
@@ -34,6 +35,7 @@ const OTHER_OWNER: ManagedProcessOwner = {
 const isWindows = process.platform === 'win32';
 async function yieldedHandle(command: string): Promise<ShellRunHandle> {
   const outcome = await runShellCommand({
+    env: { ...process.env }, shell: '/bin/bash',
     command,
     cwd: CWD,
     timeoutMs: 150,
@@ -50,7 +52,7 @@ function register(registry: ProcessRegistry, handle: ShellRunHandle, owner = OWN
 }
 
 test('registers a yielded process and reports it as running', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const record = register(registry, await yieldedHandle('sleep 2'));
 
   assert.equal(record.status, 'running');
@@ -61,7 +63,7 @@ test('registers a yielded process and reports it as running', { skip: isWindows 
 });
 
 test('drain returns only output produced since the previous drain', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const handle = await yieldedHandle('echo first; sleep 0.4; echo second; sleep 2');
   const { processId } = register(registry, handle);
 
@@ -80,7 +82,7 @@ test('drain returns only output produced since the previous drain', { skip: isWi
 });
 
 test('output captured before the handover reaches the owner', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   // `early` is printed before the yield, so it is only in handle.stdout.
   const handle = await yieldedHandle('echo early; sleep 2');
   const { processId } = register(registry, handle);
@@ -92,7 +94,7 @@ test('output captured before the handover reaches the owner', { skip: isWindows 
 });
 
 test('wait resolves on exit and reports the exit code', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const { processId } = register(registry, await yieldedHandle('sleep 0.4; exit 6'));
 
   const result = await registry.wait(processId, OWNER, 5_000);
@@ -101,7 +103,7 @@ test('wait resolves on exit and reports the exit code', { skip: isWindows }, asy
 });
 
 test('wait returns the running state when its own timeout elapses first', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const { processId } = register(registry, await yieldedHandle('sleep 3'));
 
   const started = Date.now();
@@ -115,7 +117,7 @@ test('wait returns the running state when its own timeout elapses first', { skip
 });
 
 test('terminate stops the process and records the outcome', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const { processId } = register(registry, await yieldedHandle('sleep 5'));
 
   const record = await registry.terminate(processId, OWNER, 200);
@@ -124,7 +126,7 @@ test('terminate stops the process and records the outcome', { skip: isWindows },
 });
 
 test('another execution cannot touch a process it did not start', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const { processId } = register(registry, await yieldedHandle('sleep 2'));
 
   for (const operation of [
@@ -143,7 +145,7 @@ test('another execution cannot touch a process it did not start', { skip: isWind
 });
 
 test('adopting an already finished process reports it as finished', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const handle = await yieldedHandle('echo before; sleep 0.2; echo after; exit 3');
   // The process exits in the gap between yielding and being adopted.
   await handle.wait();
@@ -157,7 +159,7 @@ test('adopting an already finished process reports it as finished', { skip: isWi
 });
 
 test('an unknown process id is reported as such', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   await assert.rejects(
     () => registry.drain('does-not-exist', OWNER),
     (err: unknown) => err instanceof ProcessRegistryError && err.code === 'unknown_process',
@@ -165,7 +167,7 @@ test('an unknown process id is reported as such', { skip: isWindows }, async () 
 });
 
 test('refuses to register beyond the concurrency cap', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const handles: ShellRunHandle[] = [];
   for (let i = 0; i < MAX_ACTIVE_PROCESSES; i += 1) {
     const handle = await yieldedHandle('sleep 5');
@@ -186,7 +188,7 @@ test('refuses to register beyond the concurrency cap', { skip: isWindows }, asyn
 });
 
 test('an exited process frees its slot', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const { processId } = register(registry, await yieldedHandle('sleep 0.3'));
   await registry.wait(processId, OWNER, 5_000);
 
@@ -198,7 +200,7 @@ test('an exited process frees its slot', { skip: isWindows }, async () => {
 });
 
 test('concurrent drains never deliver the same output twice', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const handle = await yieldedHandle('echo alpha; sleep 2');
   const { processId } = register(registry, handle);
 
@@ -217,7 +219,7 @@ test('concurrent drains never deliver the same output twice', { skip: isWindows 
 });
 
 test('a drain racing an exit still yields the final output', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const handle = await yieldedHandle('sleep 0.3; echo last');
   const { processId } = register(registry, handle);
 
@@ -231,7 +233,7 @@ test('a drain racing an exit still yields the final output', { skip: isWindows }
 });
 
 test('stopAll terminates everything still running', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
+  const registry = new ProcessRegistry();
   const marker = `pinpawo-registry-stop-${Date.now().toString()}`;
   const handle = await yieldedHandle(
     `node -e "process.title='${marker}'; setTimeout(() => {}, 10000)"`,
@@ -245,66 +247,6 @@ test('stopAll terminates everything still running', { skip: isWindows }, async (
   execSync(`pkill -9 -f ${JSON.stringify(marker)} || true`);
   assert.equal(alive, '', 'shutdown must not strand processes');
   assert.equal(registry.size, 0);
-});
-
-test('tracks a process group that outlived its command', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
-  const marker = `pinpawo-registry-orphan-${Date.now().toString()}`;
-  // The command exits cleanly but leaves a background child behind, the
-  // `npm run dev &` shape.
-  const outcome = await runShellCommand({
-    command:
-      `node -e "process.title='${marker}'; setInterval(() => {}, 1000)" >/dev/null 2>&1 & echo started`,
-    cwd: CWD,
-    timeoutMs: 5_000,
-    maxOutputChars: 1024,
-  });
-  assert.equal(outcome.status, 'exited');
-  if (outcome.status !== 'exited') return;
-
-  assert.ok(outcome.pid, 'exited runs must report their process group');
-  assert.equal(registry.trackOrphanGroup(outcome.pid), true);
-
-  await registry.stopAll(200);
-  await new Promise((r) => setTimeout(r, 400));
-
-  const alive = execSync(`pgrep -f ${JSON.stringify(marker)} || true`).toString().trim();
-  execSync(`pkill -9 -f ${JSON.stringify(marker)} || true`);
-  assert.equal(alive, '', 'shutdown must clean up a surviving process group');
-});
-
-test('does not signal an orphan group that has since died', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
-  const marker = `pinpawo-registry-dead-${Date.now().toString()}`;
-  const outcome = await runShellCommand({
-    command:
-      `node -e "process.title='${marker}'; setTimeout(() => {}, 400)" >/dev/null 2>&1 & echo started`,
-    cwd: CWD,
-    timeoutMs: 5_000,
-    maxOutputChars: 1024,
-  });
-  assert.equal(outcome.status, 'exited');
-  if (outcome.status !== 'exited' || !outcome.pid) return;
-
-  assert.equal(registry.trackOrphanGroup(outcome.pid), true);
-  // Let the background child finish on its own; the group id may be recycled
-  // by then, so shutdown must not fire blindly at it.
-  await new Promise((r) => setTimeout(r, 700));
-  await registry.stopAll(200);
-});
-
-test('does not track a group that left nothing behind', { skip: isWindows }, async () => {
-  const registry = new ProcessRegistry(posixProcessExecutor);
-  const outcome = await runShellCommand({
-    command: 'echo done',
-    cwd: CWD,
-    timeoutMs: 5_000,
-    maxOutputChars: 1024,
-  });
-  assert.equal(outcome.status, 'exited');
-  if (outcome.status !== 'exited') return;
-  assert.ok(outcome.pid);
-  assert.equal(registry.trackOrphanGroup(outcome.pid), false);
 });
 
 test('isProcessGroupAlive reports a finished group as gone', { skip: isWindows }, () => {

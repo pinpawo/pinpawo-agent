@@ -1,0 +1,46 @@
+name: Runtime service
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/runtime-service.yml'
+      - 'package*.json'
+      - 'packages/pet-agent/**'
+      - 'services/local-agent/**'
+      - 'toolkits/browser/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/runtime-service.yml'
+      - 'package*.json'
+      - 'packages/pet-agent/**'
+      - 'services/local-agent/**'
+      - 'toolkits/browser/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @pinpawo/agent-contracts
+      - run: npm run build -w @pinpawo/pet-agent
+      - run: npm run build -w @pinpawo-toolkit/browser
+      - name: Real shell, local IPC and Host clients
+        run: npm run test:runtime -w pinpawo
+      - name: Real CDP browser behavior and ownership
+        run: npm run test:cdp -w @pinpawo-toolkit/browser

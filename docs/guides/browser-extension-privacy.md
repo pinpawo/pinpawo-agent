@@ -1,5 +1,13 @@
 # PinPawo Browser Bridge Privacy Notice
 
+> Historical notice for the retired Chrome Extension / Native Messaging implementation.
+> That implementation was removed by the CDP-only Runtime refactor tracked in
+> [issue #848](https://github.com/pinpawo/pinpawo-agent/issues/848).
+> The original notice below is retained for earlier installations; it does not
+> describe the current CDP implementation. See the [CDP browser guide](browser-bridge.md)
+> for current operation and data handling. Repository changes do not automatically
+> remove a user's previously installed extension, Native Host registration or profile.
+
 Last updated: July 25, 2026
 
 PinPawo Browser Bridge connects a Chrome tab explicitly approved by the user to

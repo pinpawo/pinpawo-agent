@@ -47,7 +47,7 @@ export type ToolkitAvailabilityResolver = (
 
 export type BuildHostToolkitInventoryOptions = Readonly<{
   sources: readonly ToolkitDefinitionSource[];
-  startToolkitRuntimes?: (definitions: readonly AgentToolkit[]) => Promise<void>;
+  connectToolkitRuntimes?: (definitions: readonly AgentToolkit[]) => Promise<void>;
   resolveAvailability?: ToolkitAvailabilityResolver;
 }>;
 
@@ -149,7 +149,7 @@ export async function buildHostToolkitInventory(
 
   // Duplicate definitions and malformed contracts fail before any dynamic
   // resource is acquired.
-  await options.startToolkitRuntimes?.(toolkits);
+  await options.connectToolkitRuntimes?.(toolkits);
 
   const resolveAvailability = options.resolveAvailability
     ?? defaultAvailabilityResolver;

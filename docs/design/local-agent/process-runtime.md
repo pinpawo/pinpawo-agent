@@ -1,20 +1,26 @@
-# Local Process Runtime 设计
+# Local Process Runtime 设计（历史记录）
+
+> 状态：Historical。保留 issue #513 的问题、调研与长任务协议决策，原有 Host 内
+> Runtime 生命周期已被 #848 替代。下文标为当前实现的段落说明承载方式的变化；
+> 其余调研、数值与实施顺序是当时的设计记录，不代表当前接口或待办清单。
+> 更新：2026-09-22
+>
+> 当前契约见 [Toolkit Runtime 客户端](../../reference/extensions/toolkit-runtime.md)，
+> 整体结构与验收状态见 [Runtime 重构草案](../toolkits/local-execution-runtime.md)。
 
 对应 issue #513。本文档只覆盖**决策**，不重复 #513 已经写清楚的工具协议。
 
-状态：待确认。确认后再写实现。
-
 ## 1. 问题
 
-`run_shell` 只有一种执行模型：同步等待，超时即失败。对于 `pnpm install`、构建、测试这类命令，框架的实际行为是**砍掉输出通道，但不砍掉任务，然后告诉模型"失败了"**。
+设计提出时，`run_shell` 只有一种执行模型：同步等待，超时即失败。对于 `pnpm install`、构建、测试这类命令，当时框架的实际行为是**砍掉输出通道，但不砍掉任务，然后告诉模型"失败了"**。
 
 一条 LangSmith trace 记录了后果：`pnpm install` 120s 超时 → 模型以为失败 → 重试（两个 install 并发写同一个 `node_modules`）→ 连发四条 `ls`/`pgrep` 猜测后台状态 → 最后手写 `while pgrep …; do sleep 2; done` 忙等。
 
-PR #551 已修掉其中一半：超时/abort 现在终止整个进程组，且超时文案说明"已连同子进程一并终止"。剩下的一半是本文档的范围 —— **模型需要一种表达"这是长任务"的手段**，而不是只能在"等到超时"和"猜"之间二选一。
+PR #551 当时修掉其中一半：超时/abort 终止整个进程组，且超时文案说明"已连同子进程一并终止"。剩下的一半是本文档的范围 —— **模型需要一种表达"这是长任务"的手段**，而不是只能在"等到超时"和"猜"之间二选一。
 
-## 2. 已落地的基础
+## 2. 当时已有的基础
 
-PR #551 引入了 `runShellCommand`（`toolkits/local/processTree.ts`）：
+PR #551 引入了 `runShellCommand`（[processTree.ts](../../../services/local-agent/src/toolkits/local/processTree.ts)）：
 
 - `spawn` + `detached: true`，命令拥有自己的进程组
 - SIGTERM → 宽限期 → SIGKILL，作用于整个组
@@ -23,53 +29,33 @@ PR #551 引入了 `runShellCommand`（`toolkits/local/processTree.ts`）：
 
 它刻意只做**有界命令**（总是等待退出）。本设计复用它的进程组处理，不重写。
 
-## 3. 承载方式：Toolkit Runtime（#543 / PR #544）
+## 3. 承载方式的变化
 
-PR #544 给 `AgentToolkit` 加了可选的 `runtime` 生命周期，其设计意图里明确点名了 bash：
+原方案复用了 #543 / PR #544 的 Toolkit 生命周期：Host 持有进程 registry，并在每次
+subagent 执行时装配工具实现。这个方案解决了当时的 registry 作用域与 shutdown
+挂载点问题；#848 已移除这套接口。
 
-> Browser Runtime 持有桥接连接和浏览器 session；**未来 Bash** 或第三方登录服务也可以持有自己的 host 绑定。
+**当前实现**由本机独立服务持有 Shell 实例和
+[ProcessRegistry](../../../services/local-agent/src/toolkits/local/processRegistry.ts)。
+bash、git 等 Toolkit 声明 `runtime: 'shell'`，静态 Tool 从 context 取得客户端；
+Host 不创建进程 registry，也不按 execution 重建 Tool。实例可以共享或独立，进程
+归属同时包含服务端 client 身份、Toolkit 与 thread/task/run/delegation scope。
 
-本设计直接搭在它上面，不另起炉灶：
+### 决策点 A：执行结束是否终止长任务进程
 
-```text
-start(ctx)              -> ProcessRegistry           // host 启动，只建一次
-resolve(root, ctx)      -> ExecutionBinding          // 每个 subagent execution
-bindTools(binding, ctx) -> run_shell / wait_process… // 同名同数量，只换实现
-release(binding, ctx)   -> 交还归属，不杀进程         // execution 结束/出错/取消
-stop(root, ctx)         -> 终止全部 managed process  // host 关闭
-```
+当时的结论是**不随普通调用或 subagent 执行结束而终止**，让已 yield 的长任务继续
+运行，并用 handle 查询、续读或终止。这个进程语义仍适用。
 
-`ToolkitRuntimeExecutionScope` 已经提供了需要的身份：`threadId` / `runId` / `delegationId` / `workdir` / `signal`。
-
-这消解了本文档早期版本的两个决策点：
-
-- **registry 作用域**：作为 `runtime.root` 天然是进程级单例，而归属校验由框架提供的 execution scope 保证，不再依赖"记录 sessionId 靠自觉"。**且不需要改 `createBashToolkit()` 签名**，也不牵动模块顶层的 `localToolOperationRegistry`。
-- **shutdown 挂载点**：`runtime.ts` 的 `shutdown()` 已经调用 `toolkitRuntimeManager.stop()`，不需要新增全局 hook。
-
-### 决策点 A：release 时是否终止长任务进程
-
-**结论：不终止。**
-
-外部资源的存活周期由 runtime 自己管，框架不该替它操心；工具在下一次调用时有办法知道当前状态即可。
-
-Browser 已经是这个模式的范例（`ownership.ts`）：`release()` 只把 owner 置空并记为 `resumableOwner`，浏览器和页面继续存活。同一 `threadId` 下次 `resolve` 可以续用；其他 thread 必须显式 `browser_open`。
-
-Bash 照搬：
-
-- **进程注册在 root 上**，不挂在 binding 上
-- `binding` 只持有「本次 execution 启动的 handle 列表」和归属信息
-- `release()` 只解除关联，**不发任何信号**
-- 真正的终止只有三个来源：`terminate_process`、进程自身超时、root 的 `stop()`
-
-这样 `pnpm install` 能跨 execution 存活，而 host 关闭时 `stop()` 仍然兜底清理。
-
-推论：`wait_process` 的归属校验按 execution scope 比对，而非按 binding 身份。同 scope 可续用自己的 handle；跨 scope 访问返回明确错误而不是静默失败。
+当前边界是 Host 的服务连接：同一连接内，相同 Toolkit 与 execution owner 可以继续
+访问自己的 handle；其他 scope 或新连接不能接管。Host 断连时服务终止该 client 的
+进程，服务显式停止时关闭全部实例。普通调用结束不等于连接断开，也不触发逐执行的
+远端资源释放。
 
 ## 4. 工具协议的取舍
 
 #513 已定义 `run_shell` 增加 `yieldTimeMs`、配 `wait_process` / `write_process_stdin` / `resize_process_pty` / `terminate_process`。这里只记有争议的部分。
 
-## 3.5 公开实现调研
+### 公开实现调研（当时快照）
 
 调研了三个实现，结论对本设计有直接影响。
 
@@ -139,9 +125,11 @@ trace 里模型把 timeout 从 120s 调**小**到 60s，正是缺这类提示。
 
 ### 清理挂载点
 
-由 #544 提供：`runtime.ts` 的 `shutdown()` 调用 `toolkitRuntimeManager.stop()`，进而触发 bash toolkit 的 `runtime.stop(root)`。在那里终止全部 managed process 即可，不需要新增全局 hook。
-
-注意 #544 的 manager 在 stop 时会先标记 stopping 再等待在途 resolve，且每个 execution 共享一个 release promise，因此正常路径与 shutdown 不会重复 release。
+原方案把清理挂在 Host manager 的 shutdown；**当前实现**改为
+[Shell 实例](../../../services/local-agent/src/toolkits/local/shellEnvironment.ts) 的
+`releaseClient(clientId)` 和 `close()`。Host 只关闭自己的连接，服务先使该 client
+失效，再取消在途调用、回收进程；异步创建结束后也必须检查归属，避免断连时漏掉
+刚创建的资源。关闭一个 Host 不得停止共享实例或其他 Host 的进程。
 
 ### 状态机
 
@@ -179,9 +167,9 @@ trace 里模型把 timeout 从 120s 调**小**到 60s，正是缺这类提示。
 - `run_shell` 在 yield 前被 abort → 仍然抛 `AbortError`，并终止进程组
 - 已经 yield 成 handle 的进程 → **不**随单次 tool 调用的 abort 而终止
 
-这与 §3 的 release 决策是同一条原则的两面：进程一旦转为 handle，就脱离了那次 tool 调用的生命周期。
+这与 §3 的调用结束语义一致：进程一旦转为 handle，就脱离了那次 tool 调用的生命周期。
 
-**实现上最容易写错的一处**：`runShellCommand` 目前把 `signal` 直接绑到进程组终止（`processTree.ts` 的 `onAbort`）。yield 模式下必须解绑，否则 handle 刚返回就会被下一次 abort 杀掉。
+**原设计指出的实现风险**：当时 `runShellCommand` 把 `signal` 直接绑到进程组终止（`processTree.ts` 的 `onAbort`）。yield 模式下必须解绑，否则 handle 刚返回就会被下一次 abort 杀掉。
 
 具体地说，yield 时需要：
 
@@ -189,15 +177,17 @@ trace 里模型把 timeout 从 120s 调**小**到 60s，正是缺这类提示。
 2. 清掉 `timeoutTimer` 或改挂到 registry 自己的超时预算上
 3. 把 pid、进程组、输出 buffer 的所有权移交 registry
 
-`processTree.ts` 现在是"总是等待退出"的形状，需要为此扩展一条 yield 路径 —— 而不是在 `runShellCommand` 之外另写一份 spawn 逻辑。
+当时 `processTree.ts` 是"总是等待退出"的形状，原方案要求为此扩展一条 yield 路径，而不是在 `runShellCommand` 之外另写一份 spawn 逻辑。
 
 ### 与 operation tracker
 
 现有 `toolOperationTracker.ts` / `runtimeOperationRegistry.ts` 负责把工具执行投射成 UI 可见的 operation。长任务需要它们支持"一个 operation 跨多次 tool 调用"，否则 TUI 上会显示成多个孤立操作。
 
-**待确认**：这部分是否纳入首个实现 PR，还是先让长任务在 UI 上表现为多个独立 operation。
+**当时的开放问题**：这部分是否纳入首个实现 PR，还是先让长任务在 UI 上表现为多个独立 operation。
 
-## 7. 建议的实现顺序
+## 7. 当时建议的实现顺序
+
+以下保留原实施拆分，不作为 #848 的剩余工作；当前联合验收由 Runtime 重构草案跟踪。
 
 1. **runtime 层**：`LocalProcessRuntime` + `ProcessRegistry` + `BoundedOutputBuffer`，复用 `runShellCommand` 的进程组处理；含 shutdown hook 和限额。不动任何工具。
 2. **工具协议**：`run_shell` 的 `yieldTimeMs` + `wait_process` + `terminate_process`。这一步让 trace 场景消失。
@@ -206,27 +196,30 @@ trace 里模型把 timeout 从 120s 调**小**到 60s，正是缺这类提示。
 
 第 1、2 步是"让 trace 里的 pnpm 场景不再发生"的最小集合。
 
-## 8. 明确不做
+## 8. 原范围（历史）
 
 - 跨 local-agent 重启的进程恢复（#513 已排除）
 - 跨 session 接管进程（#513 已排除）
 - 数据库/Docker/部署等领域工具（#513 已排除）
-- Windows Job Object：当前只在 macOS/Linux 验证，Windows 路径先留 TODO 并在 registry 拒绝启动
+- Windows Job Object：当时只在 macOS/Linux 验证，原方案将 Windows 留作后续工作并在 registry 拒绝启动
 
-## 9. 决策清单
+上述 Windows 限制是原方案范围。当前 Shell 平台行为与尚未完成的跨平台验证以
+[Runtime 重构草案](../toolkits/local-execution-runtime.md) 为准。
+
+## 9. 原决策与当前承载方式
 
 | # | 决策 | 结论 |
 |---|---|---|
-| A | release 时是否终止长任务进程 | ✅ **不终止**。外部资源存活由 runtime 自己管，照搬 browser 的 `resumableOwner` 模式 |
+| A | 执行结束是否终止长任务进程 | **不随普通调用结束而终止**。当前连接断开时服务回收该 client 的资源 |
 | B | yield 放 `run_shell` vs 新增工具 | ✅ **复用 `run_shell`**。新增工具解决不了问题：模型仍会先用 `run_shell` 跑长命令 |
 | C | yield 时机 | ✅ **超时即 yield**（借鉴 Claude Code）。不需要独立的 yield 时间窗 |
-| — | registry 作用域 | ✅ 由 #544 消解：作为 `runtime.root`，归属靠框架提供的 execution scope |
-| — | shutdown 挂载点 | ✅ 由 #544 消解：`toolkitRuntimeManager.stop()` 已接好 |
-| D | operation tracker 跨调用聚合是否纳入首个 PR | 🔲 倾向不纳入，先接受多个独立 operation |
+| — | registry 作用域 | 当前由服务中的 Shell 实例持有，按 client、Toolkit 与 execution owner 隔离 |
+| — | shutdown 挂载点 | 当前由服务处理 client 断连与实例关闭 |
+| D | operation tracker 跨调用聚合是否纳入首个 PR | 当时倾向不纳入，先接受多个独立 operation；保留为原设计记录 |
 
-## 10. 前置依赖
+## 10. 当时的前置依赖
 
 - PR #544（Toolkit runtime lifecycle）—— ✅ 已合并（`d5d7fb3f`）
 - PR #551（进程组终止）—— ✅ 已合并（`ab7f8303`）
 
-两者都已就位，可以开工。
+两者当时已就位。它们保留为历史依据；当前扩展应使用客户端契约，不再实现 #544 的生命周期。

@@ -1,11 +1,9 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import type { ShellRunHandle } from './processExecutor';
-import { runShellCommand } from './processTree';
-import type { ShellProcessBinding } from './processRegistry';
-import { windowsProcessExecutor } from './windowsProcessExecutor';
+import { shellInvocation, type ShellResult } from './shellClient';
 import { classifyReadOnlyShellCommand } from './readOnlyShell';
 
 
@@ -26,7 +24,7 @@ function readShellActionInput(input: unknown) {
 export function normalizeShellAuthorizationInput(input: unknown) {
   const { record, command } = readShellActionInput(input);
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? record.cwd.trim()
+    ? record.cwd
     : null;
   return { command, cwd };
 }
@@ -34,8 +32,9 @@ export function normalizeShellAuthorizationInput(input: unknown) {
 export function normalizeShellActionInput(input: unknown) {
   const { record, command } = readShellActionInput(input);
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? record.cwd.trim()
-    : process.cwd();
+    ? record.cwd
+    : null;
+  if (!cwd || !isAbsolute(cwd)) throw new Error('Shell cwd must be an absolute path prepared before review.');
   return { command, cwd };
 }
 
@@ -107,7 +106,6 @@ export const getCurrentTimeTool = tool(
 );
 
 export function createRunShellTool(
-  binding: ShellProcessBinding | null,
   /**
    * Builds the tool under a different identity with an admission check in
    * front. `inspect_shell` is the same executor as `run_shell`; building it
@@ -120,13 +118,6 @@ export function createRunShellTool(
     admit: (command: string) => { allowed: true } | { allowed: false; reason: string };
   },
 ) {
-  // Run through the same executor the registry will terminate through.
-  // Without a binding there is no registry, so pick by platform the same
-  // way ShellRuntime does.
-  const run = binding
-    ? binding.registry.processExecutor.run
-    : (process.platform === 'win32' ? windowsProcessExecutor.run : runShellCommand);
-
   return tool(
     async (
       input: { command: string; cwd?: string; timeoutSeconds?: number },
@@ -149,16 +140,13 @@ export function createRunShellTool(
       }
 
       const timeoutMs = resolveShellTimeoutMs(input.timeoutSeconds);
-      const outcome = await run({
+      const scope = shellInvocation(runtime);
+      const outcome = await scope.client.run({
         command: shellAction.command,
         cwd: shellAction.cwd,
         timeoutMs,
         maxOutputChars: SHELL_MAX_CAPTURE_CHARS,
-        ...(runtime.signal ? { signal: runtime.signal } : {}),
-        // Only hand a slow command back if there is a registry to hold it.
-        // Without a binding the old behaviour stands: terminate on timeout.
-        yieldOnTimeout: binding !== null,
-      });
+      }, scope);
 
       if (outcome.status === 'spawn_failed') {
         return `Error: ${outcome.error.message}`;
@@ -172,10 +160,7 @@ export function createRunShellTool(
 
       if (outcome.status === 'yielded') {
         return adoptYieldedProcess({
-          binding,
-          handle: outcome.handle,
-          command: shellAction.command,
-          cwd: shellAction.cwd,
+          outcome,
           timeoutMs,
         });
       }
@@ -183,7 +168,7 @@ export function createRunShellTool(
       const out = truncateShellOutput(outcome.stdout.trimEnd());
       const err = truncateShellOutput(outcome.stderr.trimEnd());
 
-      if (outcome.status === 'timeout') {
+      if (outcome.status === 'timeout' || outcome.status === 'output_limit') {
         const output = [err, out].filter(Boolean).join('\n');
         return [
           `Error: command timed out after ${(timeoutMs / 1000).toString()}s`,
@@ -194,13 +179,7 @@ export function createRunShellTool(
         ].filter(Boolean).join('\n').trimEnd();
       }
 
-      if (outcome.status === 'exited' && outcome.pid !== undefined && binding) {
-        // A command can exit cleanly having left work behind (`npm run dev &`).
-        // Those children stay in the original process group, so registering it
-        // keeps shutdown able to reach them.
-        binding.registry.trackOrphanGroup(outcome.pid);
-      }
-
+      if (outcome.status !== 'exited') throw new Error(`Unexpected Shell result: ${outcome.status}`);
       if (outcome.code !== 0) {
         const output = [err, out].filter(Boolean).join('\n');
         const exitCode = outcome.code === null ? '?' : outcome.code.toString();
@@ -224,7 +203,7 @@ export function createRunShellTool(
 }
 
 /**
- * Put a still-running command under registry ownership and tell the model how
+ * Present a service-owned running command and tell the model how
  * to follow it.
  *
  * A timed-out command is slow, not failed. Reporting failure is what led a
@@ -233,40 +212,14 @@ export function createRunShellTool(
  * ongoing work with a handle rather than an error.
  */
 function adoptYieldedProcess(params: {
-  binding: ShellProcessBinding | null;
-  handle: ShellRunHandle;
-  command: string;
-  cwd: string;
+  outcome: ShellResult & { status: 'yielded' };
   timeoutMs: number;
 }) {
-  const { binding, handle, command, cwd, timeoutMs } = params;
+  const { outcome, timeoutMs } = params;
   const seconds = (timeoutMs / 1000).toString();
 
-  if (!binding) {
-    // yieldOnTimeout is only requested when a binding exists, so this is
-    // unreachable; terminate rather than leak a handle nothing holds.
-    handle.terminate();
-    return `Error: command timed out after ${seconds}s and was terminated.`;
-  }
-
-  let record;
-  try {
-    record = binding.registry.register({
-      handle,
-      owner: binding.owner,
-      command,
-      cwd,
-      // The output so far is included in this result, so wait_process should
-      // start from what comes next.
-      outputAlreadyDelivered: true,
-    });
-  } catch (err) {
-    handle.terminate();
-    return `Error: ${err instanceof Error ? err.message : String(err)}`;
-  }
-
-  const out = truncateShellOutput(handle.stdout.trimEnd());
-  const err = truncateShellOutput(handle.stderr.trimEnd());
+  const out = truncateShellOutput(outcome.stdout.trimEnd());
+  const err = truncateShellOutput(outcome.stderr.trimEnd());
   const output = [
     out || '(no output yet)',
     err ? `--- stderr ---\n${err}` : '',
@@ -274,7 +227,7 @@ function adoptYieldedProcess(params: {
 
   return [
     `Command is still running after ${seconds}s and moved to the background.`,
-    `Process id: ${record.processId}`,
+    `Process id: ${outcome.processId}`,
     `Use wait_process to follow it, or terminate_process to stop it.`,
     'Do not rerun the same command; it is still in progress.',
     output,
@@ -288,28 +241,18 @@ function adoptYieldedProcess(params: {
  * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
  * This tool carries no review policy, so `classifyReadOnlyShellCommand` is the
  * whole safety boundary: anything it does not positively recognise as
- * read-only is refused here and the agent falls back to `run_shell`.
- */
-/**
- * Read-only shell, admitted by rule instead of by review.
- *
- * `run_shell` costs a model-driven review on every call, and most of what an
- * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
- * This tool carries no review policy, so `classifyReadOnlyShellCommand` is the
- * whole safety boundary: anything it does not positively recognise as
  * read-only is refused and the agent falls back to `run_shell`.
  */
-export function createInspectShellTool(binding: ShellProcessBinding | null) {
-  return createRunShellTool(binding, {
+export function createInspectShellTool() {
+  return createRunShellTool({
     name: 'inspect_shell',
     description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，因此比 run_shell 快得多，应作为查看类命令的默认选择。支持 cd、管道与 && 串联，例如 `cd src && grep -rn "foo" . | head -20`。只接受白名单内的只读命令（cat/head/tail/ls/find/grep/rg/sed -n/awk/cut/sort/uniq/wc/jq/diff/stat/file/env/date/git log|status|diff|show|branch|blame|rev-parse 等）；不支持输出重定向、命令替换、heredoc、后台执行，也不支持 bash -c、node -e、python -c 这类内联执行。任何写入、安装、删除、推送或不在白名单内的命令都要改用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。',
     admit: classifyReadOnlyShellCommand,
   });
 }
 
-/** Static schema inventory; a runtime binding replaces only the implementation. */
-export const runShellTool = createRunShellTool(null);
-export const inspectShellTool = createInspectShellTool(null);
+export const runShellTool = createRunShellTool();
+export const inspectShellTool = createInspectShellTool();
 
 export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   get_current_time: {

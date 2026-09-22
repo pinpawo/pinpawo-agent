@@ -1,7 +1,7 @@
 # Capability / Toolkit V2 契约
 
 > 状态：Current
-> 更新：2026-07-27
+> 更新：2026-09-22
 >
 > 读者：Capability 与 Toolkit 作者、host 集成者。如果这是你第一次使用
 > PinPawo Agent，请先阅读[Core Concepts](../../concepts/core-concepts.md)和
@@ -133,11 +133,15 @@ type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
-  readonly runtime?: ToolkitRuntimeDefinition;
+  readonly runtime?: string;
 };
 
 type ToolDefinition = {
   readonly tool: NamedStructuredTool;
+  readonly prepareInput?: (
+    input: unknown,
+    context: ToolInputPreparationContext,
+  ) => unknown | Promise<unknown>;
   readonly operation?: ToolOperationMetadata;
   readonly review?: ToolReviewPolicy;
 };
@@ -151,7 +155,8 @@ type ToolDefinition = {
   system prompt。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
-- `runtime`：可选、由 Toolkit 自己实现的 root / execution binding 生命周期。
+- `runtime`：可选、所需异步能力接口的名称，由 Host 注入对应客户端。
+- `ToolDefinition.prepareInput`：审核前规范化参数的纯函数，必须可重复调用。
 - `ToolDefinition.operation`：工具调用的展示和摘要 metadata。
 - `ToolDefinition.review`：单个工具的确定性 review policy。
 
@@ -161,6 +166,7 @@ Toolkit 必须由代码定义；它不是 Markdown skill，也不是 orchestrato
 const bash = defineToolkit({
   name: 'bash',
   description: '本地文件、搜索和受控 shell 工具。',
+  runtime: 'shell',
   tools: [{
     tool: runShellTool,
     operation: { title: '执行命令' },
@@ -174,63 +180,29 @@ LangChain Tool 可能包含可变运行时内部状态。registry 会冻结
 `ToolDefinition` 绑定和 metadata，但保留原始 Tool 实例身份；host 必须约定在
 一个 registry generation 内不修改已注册 Tool 的 `name`。
 
-### 3.2 可选 Runtime 生命周期
+### 3.2 Runtime 客户端与输入准备
 
-需要持久连接、共享进程、登录态或执行作用域绑定的 Toolkit 可以声明
-`runtime`；它不是另一套 Capability，也不改变 `uses`、tool permission、review
-或 instructions 的静态含义：
+`runtime` 是能力接口名，例如 `shell` 或 `cdp`；不需要执行环境的 Toolkit 省略它。
+多个 Toolkit 可以共享同一个实例，也可以绑定不同实例。bash 和 git 都使用 Shell
+接口，无须各自构造专用 Runtime。该声明不改变 `uses`、权限、review 或 instructions。
 
-```ts
-type ToolkitRuntimeDefinition<TRoot, TBinding = TRoot> = {
-  start(context: { signal?: AbortSignal }): Promise<TRoot> | TRoot;
-  resolve?(root: TRoot, context: {
-    execution: {
-      threadId: string | null;
-      runId: string;
-      delegationId: string;
-      workdir: string | null;
-      signal?: AbortSignal;
-    };
-  }): Promise<TBinding> | TBinding;
-  bindTools?(binding: TBinding, context: ToolkitRuntimeResolveContext):
-    Promise<readonly NamedStructuredTool[]> | readonly NamedStructuredTool[];
-  release?(binding: TBinding, context: ToolkitRuntimeReleaseContext): Promise<void> | void;
-  diagnose?(root: TRoot): Promise<JsonValue> | JsonValue;
-  stop?(root: TRoot, context: { signal?: AbortSignal }): Promise<void> | void;
-};
-```
+Host 连接本机独立 Runtime 服务并装配客户端；`ToolkitRuntimeManager` 只按 Toolkit
+选择、校验和诊断这些绑定。实际进程、浏览器连接及页面由服务管理。Host 断开只清理
+该客户端的资源，服务和其他 Host 的资源继续存活。
 
-Host 使用 `ToolkitRuntimeManager` 在启动期按 Toolkit 顺序启动 root；每个
-Capability subagent 开始时为其声明的 Toolkit resolve 不透明 binding，并在
-subagent 结束（成功、失败或取消）后逆序 release。host 关闭时先清理仍活动的
-binding，再逆序 stop root。并发 subagent 可以同时 resolve，但同一个 root 只会
-启动一次。
+静态 Tool 每次从 `ToolRuntime.context.toolkitRuntimes[toolkitName]` 读取客户端，
+并传入当前 `executionScope` 与 `ToolRuntime.signal`。Toolkit 所属、连接身份和
+实例身份来自受信 context；共享客户端不保存可变的当前 execution。Tool 对象与
+schema 保持静态，客户端不会进入 prompt 或 checkpoint。
 
-未声明 `bindTools` 时，resolved binding 以 Toolkit name 为 key，作为 opaque Runtime
-port 放入 `ToolRuntime.context.toolkitRuntimes`。静态 Tool 可以在每次调用时把当前
-invocation identity 传给自己的 Runtime；Agent 和通用 manager 不解释 port 的具体
-接口。`bindTools` 是互斥的消费方式，只用于确实需要替换执行 implementation 的
-Toolkit，例如注入 process registry；这类 binding 不再额外暴露到 Tool runtime
-context。框架会验证工具数量和名称与静态 inventory 相同，并继续使用静态 Tool 的
-schema、description、response format，以及静态 `operation`、`review`、权限与
-instructions。runtime binding 不会进入 registry、Supervisor workspace、prompt 或
-checkpoint。
+需要解析工作区路径的 Tool 通过 `prepareInput` 在审核前确定参数：省略 cwd 使用
+workdir，相对路径基于 workdir，缺少所需工作区明确失败。审核、授权和执行使用同一份
+规范化参数；full_access 也执行此步骤。该函数必须纯且幂等，不能创建资源或在执行时
+再隐式改写目标。越出 workdir 的访问仍由 review / authorization 判断。
 
-通用 invocation identity 不经过 `bindTools`；Agent 把 `threadId`、`runId` 和
-`delegationId` 放入 `ToolRuntime.context.executionScope`。Host 将同一份 workdir
-snapshot 提供给 Agent prompt、Tool runtime context 与 review/authorization context。
-Tool input 中的相对
-路径、绝对路径或 cwd 由模型决定并原样执行；越出 workdir 的风险由 review /
-authorization 判断，而不是由 execution binding 改写参数。
-
-`ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
-它；独立 `createResidentPetRuntime()` 使用的 manager 由 Host lifecycle 统一 `shutdown()`
-释放。若由 host 注入共享 manager，则由该 host 统一 stop，不能由单个 pet
-runtime 终止。
-
-`ToolkitRuntimeManager.diagnose()` 为所有声明 Runtime 的 Toolkit 返回同一份 lifecycle、
-active binding 数和最近错误。可选 `diagnose(root)` 只补充 JSON-safe、Toolkit-owned
-`details`；Host 不解释该结构，也不为 Browser 或其他 Toolkit 建第二份状态源。
+完整客户端类型、调用 context、`ToolInputPreparationContext` 字段与诊断语义见
+[Toolkit Runtime 客户端契约](toolkit-runtime.md)；部署与资源归属见
+[Runtime 重构草案](../../design/toolkits/local-execution-runtime.md)。
 
 ### 3.3 可用性
 
@@ -239,7 +211,7 @@ active binding 数和最近错误。可选 `diagnose(root)` 只补充 JSON-safe�
 
 ```text
 Toolkit definitions
-  -> start optional root runtimes
+  -> connect and validate required Runtime clients
   -> evaluate/filter availability for this generation
   -> compileAgentRegistry(effective Toolkits, Capabilities)
 ```
@@ -379,7 +351,7 @@ core 仍允许显式受限 workspace 不包含 General，且不会凭空构造�
 
 一个完整 host 应按以下顺序工作：
 
-1. 构造所有 Toolkit definitions。
+1. 构造所有 Toolkit definitions，连接并校验所需 Runtime 客户端。
 2. 解析 Toolkit availability，得到本 generation 的有效 inventory。
 3. 加入所有内建、用户和调用级 Capability definitions。
 4. 添加需要 host scope 的 Toolkit，例如 thread-scoped

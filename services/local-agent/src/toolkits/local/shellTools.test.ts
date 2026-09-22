@@ -1,3 +1,4 @@
+import { invokeLocalTool } from './shellTestSupport';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -87,28 +88,12 @@ test('shell review policy reviews configured command execution', async () => {
   );
 });
 
-test('normalizeShellActionInput preserves explicit cwd and inherits process cwd', () => {
-  assert.deepEqual(
-    normalizeShellActionInput({ command: ' printf ok ', cwd: '~' }),
-    {
-      command: 'printf ok',
-      cwd: '~',
-    },
-  );
-  assert.deepEqual(
-    normalizeShellActionInput({ command: 'pwd', cwd: 'packages/pet-agent' }),
-    {
-      command: 'pwd',
-      cwd: 'packages/pet-agent',
-    },
-  );
-  assert.deepEqual(
-    normalizeShellActionInput({ command: 'pwd' }),
-    {
-      command: 'pwd',
-      cwd: process.cwd(),
-    },
-  );
+test('normalizeShellActionInput requires the prepared absolute cwd', () => {
+  assert.deepEqual(normalizeShellActionInput({ command: ' printf ok ', cwd: process.cwd() }), {
+    command: 'printf ok', cwd: process.cwd(),
+  });
+  assert.throws(() => normalizeShellActionInput({ command: 'pwd' }), /absolute path/);
+  assert.throws(() => normalizeShellActionInput({ command: 'pwd', cwd: 'src' }), /absolute path/);
 });
 
 test('normalizeShellAuthorizationInput preserves only model-provided cwd', () => {
@@ -116,7 +101,7 @@ test('normalizeShellAuthorizationInput preserves only model-provided cwd', () =>
     normalizeShellAuthorizationInput({ command: ' printf ok ', cwd: ' packages/pet-agent ' }),
     {
       command: 'printf ok',
-      cwd: 'packages/pet-agent',
+      cwd: ' packages/pet-agent ',
     },
   );
   assert.deepEqual(
@@ -151,12 +136,12 @@ test('runShellTool executes commands and explicit output writes', async (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   assert.equal(
-    await runShellTool.invoke({ command: 'printf ok' }),
+    await invokeLocalTool(runShellTool, { command: 'printf ok' }),
     'ok',
   );
-  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
+  assert.equal(await invokeLocalTool(runShellTool, { command: `printf written > ${file}` }), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'written');
-  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }), '(no output)');
+  assert.equal(await invokeLocalTool(runShellTool, { command: `printf piped | cat > ${file}` }), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'piped');
 });
 
@@ -166,24 +151,24 @@ test('runShellTool relies on toolkit review instead of a second interface gate',
   writeFileSync(file, 'generated', 'utf-8');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(await runShellTool.invoke({ command: `rm ${file}` }), '(no output)');
+  assert.equal(await invokeLocalTool(runShellTool, { command: `rm ${file}` }), '(no output)');
   assert.equal(existsSync(file), false);
 });
 
 test('runShellTool separates stderr and reports exit codes', async () => {
   assert.equal(
-    await runShellTool.invoke({ command: 'printf out; printf err 1>&2' }),
+    await invokeLocalTool(runShellTool, { command: 'printf out; printf err 1>&2' }),
     'out\n--- stderr ---\nerr',
   );
 
   assert.match(
-    String(await runShellTool.invoke({ command: 'printf boom 1>&2; exit 3' })),
+    String(await invokeLocalTool(runShellTool, { command: 'printf boom 1>&2; exit 3' })),
     /^Error \(exit 3\):\nboom/,
   );
 });
 
 test('runShellTool truncates stdout larger than the old 64KB buffer limit', async () => {
-  const output = String(await runShellTool.invoke({
+  const output = String(await invokeLocalTool(runShellTool, {
     command: 'node -e "process.stdout.write(\'x\'.repeat(70 * 1024))"',
   }));
 
@@ -192,12 +177,12 @@ test('runShellTool truncates stdout larger than the old 64KB buffer limit', asyn
   assert.match(output, /\[\.\.\. truncated \d+ chars \.\.\.\]/);
 });
 
-test('runShellTool times out long-running commands', async () => {
-  const output = String(await runShellTool.invoke({
+test('runShellTool yields long-running commands', async () => {
+  const output = String(await invokeLocalTool(runShellTool, {
     command: 'sleep 5',
     timeoutSeconds: 1,
   }));
-  assert.match(output, /timed out after 1s/);
+  assert.match(output, /still running after 1s/);
 });
 
 test('truncateShellOutput keeps head and tail with a marker', () => {

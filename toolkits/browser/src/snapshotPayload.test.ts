@@ -31,7 +31,7 @@ test('raw browser snapshots are validated and normalized before payload building
   assert.equal(buildBrowserSnapshotPayload(raw).textSource, 'Runtime.evaluate');
 });
 
-test('raw extension extract windows are validated and normalized locally', () => {
+test('raw extract windows are validated and normalized locally', () => {
   const raw = parseBrowserRawExtract({
     title: 'Example',
     url: 'https://example.com/',

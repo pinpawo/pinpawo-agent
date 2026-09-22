@@ -1,108 +1,77 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { join } from 'node:path';
 import test from 'node:test';
-import { ToolkitRuntimeManager, type AgentToolkit } from '@pinpawo/pet-agent';
 import { createBashToolkit, createGitToolkit } from './index';
+import { runShellTool, inspectShellTool } from './shellTools';
+import { writeFileTool } from './fileTools';
+import { gitStatusTool } from './gitTools';
+import { createLocalRuntimeFixture, testExecution } from './shellTestSupport';
+import { prepareLocalToolInput } from './workdirBinding';
+import { normalizeShellAuthorizationInput } from './shellTools';
 
-function executionScope(workdir: string, suffix: string) {
-  return {
-    threadId: `thread-${suffix}`,
-    runId: `run-${suffix}`,
-    delegationId: `delegation-${suffix}`,
-    workdir,
-  };
-}
+test('shared instance uses each invocation workdir without mutating shared cwd', async (t) => {
+  const a = mkdtempSync(join(tmpdir(), 'shell-scope-a-'));
+  const b = mkdtempSync(join(tmpdir(), 'shell-scope-b-'));
+  const fixture = createLocalRuntimeFixture();
+  t.after(async () => { await fixture.close(); rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true }); });
+  const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.cwd())"`;
+  const [first, second] = await Promise.all([
+    fixture.invoke(runShellTool, { command }, undefined, testExecution({ workdir: a }), 'bash', 'a'),
+    fixture.invoke(runShellTool, { command }, undefined, testExecution({ workdir: b }), 'bash', 'b'),
+  ]);
+  assert.equal(first, realpathSync(a));
+  assert.equal(second, realpathSync(b));
+  await fixture.invoke(writeFileTool, { path: 'result.txt', content: 'a' }, undefined, testExecution({ workdir: a }));
+  assert.equal(readFileSync(join(a, 'result.txt'), 'utf8'), 'a');
+  await fixture.environment.releaseClient('a');
+  assert.equal(await fixture.invoke(runShellTool, { command }, undefined, testExecution({ workdir: b }), 'bash', 'b'), realpathSync(b));
+});
 
-function toolFrom(toolkit: AgentToolkit, name: string) {
-  const definition = toolkit.tools.find(({ tool }) => tool.name === name);
-  assert.ok(definition, `missing ${name} tool`);
-  return definition.tool;
-}
-
-test('separate Host managers bind local tools to independent execution workdirs', async (t) => {
-  const workdirA = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-a-'));
-  const workdirB = mkdtempSync(resolve(tmpdir(), 'pinpawo-shell-root-b-'));
-  t.after(() => {
-    rmSync(workdirA, { recursive: true, force: true });
-    rmSync(workdirB, { recursive: true, force: true });
-  });
-
-  const managerA = new ToolkitRuntimeManager();
-  const managerB = new ToolkitRuntimeManager();
-  const toolkitA = createBashToolkit();
-  const toolkitB = createBashToolkit();
-  let firstA: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
-  let firstB: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
-  let laterB: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
-
-  try {
-    firstA = await managerA.resolve({
-      toolkits: [toolkitA],
-      execution: executionScope(workdirA, 'a'),
+test('Toolkit preparation resolves targets before review, including inspect_shell and Git', async () => {
+  const workdir = process.cwd();
+  const executionScope = testExecution({ workdir });
+  for (const [toolkit, name] of [[createBashToolkit(), 'inspect_shell'], [createGitToolkit(), 'git_status']] as const) {
+    const definition = toolkit.tools.find(({ tool }) => tool.name === name)!;
+    assert.ok(definition.prepareInput);
+    const input = await definition.prepareInput({ command: 'pwd', cwd: 'src' }, {
+      toolkitName: toolkit.name, toolName: name, executionScope,
     });
-    firstB = await managerB.resolve({
-      toolkits: [toolkitB],
-      execution: executionScope(workdirB, 'b'),
-    });
+    assert.equal((input as { cwd: string }).cwd, join(workdir, 'src'));
+  }
+  assert.deepEqual(prepareLocalToolInput('read_file', { path: 'README.md' }, workdir), { path: join(workdir, 'README.md') });
+  assert.throws(() => prepareLocalToolInput('inspect_shell', { command: 'pwd' }, null), /absolute execution workdir/);
+  assert.equal(createBashToolkit().runtime, 'shell');
+  assert.equal(createGitToolkit().runtime, 'shell');
+});
 
-    const command = `${JSON.stringify(process.execPath)} -e "process.stdout.write(process.cwd())"`;
-    assert.equal(
-      String(await toolFrom(firstA.toolkits[0]!, 'run_shell').invoke({
-        command,
-      })),
-      realpathSync(workdirA),
-    );
-    assert.equal(
-      String(await toolFrom(firstB.toolkits[0]!, 'run_shell').invoke({
-        command,
-      })),
-      realpathSync(workdirB),
-    );
-    await toolFrom(firstA.toolkits[0]!, 'write_file').invoke({
-      path: 'host-a.txt',
-      content: 'host A',
-    });
-    assert.equal(readFileSync(resolve(workdirA, 'host-a.txt'), 'utf-8'), 'host A');
-    assert.equal(existsSync(resolve(workdirB, 'host-a.txt')), false);
+test('Git and inspect_shell use prepared cwd instead of the Host or service directory', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'shell-scope-git-'));
+  const fixture = createLocalRuntimeFixture();
+  t.after(async () => { await fixture.close(); rmSync(directory, { recursive: true, force: true }); });
+  const scope = testExecution({ workdir: directory });
+  assert.match(String(await fixture.invoke(gitStatusTool, {}, undefined, scope)), /not a git repository/i);
+  if (process.platform !== 'win32') assert.equal(await fixture.invoke(inspectShellTool, { command: 'pwd' }, undefined, scope), realpathSync(directory));
+});
 
-    await Promise.all([firstA.release(), firstB.release()]);
-    await managerA.stop();
-
-    laterB = await managerB.resolve({
-      toolkits: [toolkitB],
-      execution: executionScope(workdirB, 'b-later'),
-    });
-    assert.equal(
-      String(await toolFrom(laterB.toolkits[0]!, 'run_shell').invoke({
-        command,
-      })),
-      realpathSync(workdirB),
-    );
-  } finally {
-    await Promise.all([firstA?.release(), firstB?.release(), laterB?.release()]);
-    await Promise.all([managerA.stop(), managerB.stop()]);
+test('empty and whitespace file paths cannot bypass workdir preparation', () => {
+  for (const name of ['read_file', 'write_file', 'mkdir_path']) {
+    assert.throws(() => prepareLocalToolInput(name, { path: '' }, process.cwd()), /must not be empty/);
+    assert.throws(() => prepareLocalToolInput(name, { path: '   ' }, null), /absolute execution workdir/);
+    assert.equal(prepareLocalToolInput(name, { path: '   ' }, process.cwd()).path, join(process.cwd(), '   '));
   }
 });
 
-test('git toolkit defaults repository operations to the execution workdir', async (t) => {
-  const workdir = mkdtempSync(resolve(tmpdir(), 'pinpawo-git-workdir-'));
-  t.after(() => rmSync(workdir, { recursive: true, force: true }));
-  const manager = new ToolkitRuntimeManager();
-  const toolkit = createGitToolkit();
-  let execution: Awaited<ReturnType<ToolkitRuntimeManager['resolve']>> | null = null;
-
-  try {
-    execution = await manager.resolve({
-      toolkits: [toolkit],
-      execution: executionScope(workdir, 'git'),
-    });
-    const result = String(await toolFrom(execution.toolkits[0]!, 'git_status').invoke({}));
-    assert.match(result, /not a git repository/i);
-    assert.doesNotMatch(result, /pinpawo-agent/);
-  } finally {
-    await execution?.release();
-    await manager.stop();
-  }
+test('review and execution preserve spaces in a prepared cwd exactly', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'shell-cwd-space-'));
+  const cwd = join(root, 'repo ');
+  mkdirSync(cwd); mkdirSync(join(root, 'repo'));
+  const fixture = createLocalRuntimeFixture();
+  t.after(async () => { await fixture.close(); rmSync(root, { recursive: true, force: true }); });
+  const command = `${JSON.stringify(process.execPath)} -e "console.log(JSON.stringify(process.cwd()))"`;
+  const input = prepareLocalToolInput('run_shell', { cwd: 'repo ', command }, root);
+  assert.equal(normalizeShellAuthorizationInput(input).cwd, cwd);
+  const result = await fixture.invoke(runShellTool, input, undefined, testExecution({ workdir: root }));
+  assert.equal(JSON.parse(String(result)), realpathSync(cwd));
 });

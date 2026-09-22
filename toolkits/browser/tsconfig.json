@@ -8,6 +8,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/hosts/chromeExtension/extension/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

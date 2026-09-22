@@ -13,6 +13,7 @@ import {
 import { createInMemoryKanbanTaskService, createKanbanPlanningToolkit } from '@pinpawo-plugin/kanban';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
 import { createProjectInspectionToolkit } from '../../../services/local-agent/src/toolkits/local';
+import { connectHostRuntimes } from '../../../services/local-agent/src/runtimeService/hostClient';
 import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
 import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
 
@@ -25,6 +26,7 @@ console.log(`Studio Planner flow model: ${subject.label}`);
 const root = await mkdtemp(join(tmpdir(), 'studio-planner-model-e2e-'));
 const service = createInMemoryKanbanTaskService();
 const runtimeManager = new ToolkitRuntimeManager();
+let runtimeConnection: Awaited<ReturnType<typeof connectHostRuntimes>> | undefined;
 await service.init();
 
 try {
@@ -38,6 +40,8 @@ try {
     createStudioContextToolkit(() => ['planner', 'executor', 'reviewer', 'wiki'].map((petId) => ({ petId, name: petId })))];
   const registry = compileAgentRegistry({ capabilities, toolkits });
   assert.equal(registry.capabilities.length, 2, 'Both production Planner capabilities must compile');
+  runtimeConnection = await connectHostRuntimes({ toolkits });
+  runtimeManager.replaceBindings(runtimeConnection.bindings);
   const graph = createOrchestratorGraph({
     models: { act: subject.model, subagent: subject.model }, defaultCapabilityName: 'studio_planning',
     checkpoint: new MemorySaver(), toolkitRuntimeManager: runtimeManager,
@@ -82,7 +86,10 @@ try {
   }
   console.log('PASS: full Planner graph discovers Pets, explores evidence, drafts, and creates unassigned tasks after confirmation.');
 } finally {
-  await service.close();
-  await runtimeManager.stop();
-  await rm(root, { recursive: true, force: true });
+  try {
+    await runtimeConnection?.close();
+  } finally {
+    await service.close();
+    await rm(root, { recursive: true, force: true });
+  }
 }

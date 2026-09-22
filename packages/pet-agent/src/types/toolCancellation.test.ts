@@ -98,7 +98,7 @@ test('preserves tool identity used for review and operation lookup', async () =>
   assert.ok(wrapped.schema, 'schema must remain reachable');
 });
 
-test('preserves an outer runtime implementation proxy', async () => {
+test('preserves an outer execution decorator', async () => {
   const wrapped = wrapToolCancellation(makeTool('runtime_bound', async () => 'static'));
   const bound = makeTool('runtime_bound', async () => 'bound');
   const boundCall = Reflect.get(bound as object, '_call', bound) as (...args: unknown[]) => unknown;

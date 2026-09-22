@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import {
@@ -12,6 +10,7 @@ import {
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { readTextFileChunkResult } from './fileTools';
+import { shellInvocation, rethrowAbort } from './shellClient';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
@@ -25,7 +24,6 @@ const MAX_GH_COMMENTS_PER_PAGE = 5;
 const MAX_GH_BUFFER_BYTES = 1024 * 1024 * 4;
 const DEFAULT_GIT_TIMEOUT_MS = 15_000;
 const GIT_PUSH_TIMEOUT_MS = 120_000;
-const execFileAsync = promisify(execFile);
 
 type GitCommandResult = {
   stdout?: unknown;
@@ -41,7 +39,7 @@ function truncateOutput(output: string) {
 
 function normalizePathspecs(pathspecs: string[] | undefined) {
   return Array.isArray(pathspecs)
-    ? pathspecs.map((item) => item.trim()).filter(Boolean)
+    ? pathspecs.filter((item) => item.length > 0)
     : [];
 }
 
@@ -82,6 +80,7 @@ function formatGhError(error: unknown) {
 }
 
 function createGhToolError(name: string, error: unknown, runtime: ToolRuntime) {
+  rethrowAbort(error);
   const formatted = error instanceof Error ? error : new Error(String(error));
   if (!runtime.toolCallId) throw formatted;
   return new ToolMessage({
@@ -93,24 +92,21 @@ function createGhToolError(name: string, error: unknown, runtime: ToolRuntime) {
 }
 
 export async function runGit(
+  runtime: ToolRuntime,
   args: string[],
   cwd?: string,
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 ) {
-  const repo = cwd?.trim() || process.cwd();
+  const repo = resolveGhWorkdir(cwd);
   try {
-    const result = await execFileAsync('git', args, {
-      cwd: repo,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        LC_ALL: 'C',
-      },
-      timeout: timeoutMs,
-      maxBuffer: 1024 * 256,
-    });
+    const scope = shellInvocation(runtime);
+    const result = await scope.client.exec({
+      program: 'git', args, cwd: repo, env: { LC_ALL: 'C' },
+      timeoutMs, maxOutputChars: 1024 * 256,
+    }, scope);
     return formatGitResult(result);
   } catch (err) {
+    rethrowAbort(err);
     if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
       const errorRecord = err as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
       return formatGitResult({
@@ -127,28 +123,29 @@ export async function runGit(
 }
 
 function resolveGhWorkdir(cwd?: string) {
-  return cwd?.trim() || process.cwd();
+  if (!cwd || !isAbsolute(cwd)) throw new Error('Git cwd must be an absolute path prepared before review.');
+  return cwd;
 }
 
-async function executeGh(args: string[], cwd?: string) {
+async function executeGh(runtime: ToolRuntime, args: string[], cwd?: string) {
   const repo = resolveGhWorkdir(cwd);
   let result: GitCommandResult;
   try {
-    result = await execFileAsync('gh', args, {
-      cwd: repo,
-      encoding: 'utf-8',
-      timeout: 20_000,
-      maxBuffer: MAX_GH_BUFFER_BYTES,
-    });
+    const scope = shellInvocation(runtime);
+    result = await scope.client.exec({
+      program: 'gh', args, cwd: repo, timeoutMs: 20_000,
+      maxOutputChars: MAX_GH_BUFFER_BYTES,
+    }, scope);
   } catch (err) {
+    rethrowAbort(err);
     throw formatGhError(err);
   }
 
   return result;
 }
 
-async function runGh(args: string[], cwd?: string, emptyOutput?: string) {
-  const result = await executeGh(args, cwd);
+async function runGh(runtime: ToolRuntime, args: string[], cwd?: string, emptyOutput?: string) {
+  const result = await executeGh(runtime, args, cwd);
 
   const output = formatGitResult(result);
   if (output === '(no output)') {
@@ -158,8 +155,8 @@ async function runGh(args: string[], cwd?: string, emptyOutput?: string) {
   return output;
 }
 
-async function runGhJson(args: string[], cwd?: string) {
-  const result = await executeGh(args, cwd);
+async function runGhJson(runtime: ToolRuntime, args: string[], cwd?: string) {
+  const result = await executeGh(runtime, args, cwd);
   const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
   if (!stdout) {
     throw new Error('gh command returned no output');
@@ -194,7 +191,7 @@ function parseGhIssueUrl(value: string): ResolvedGhIssueTarget | null {
   }
 }
 
-async function resolveGhIssueTarget(issue: string, cwd?: string): Promise<ResolvedGhIssueTarget> {
+async function resolveGhIssueTarget(runtime: ToolRuntime, issue: string, cwd?: string): Promise<ResolvedGhIssueTarget> {
   const target = normalizeGhTarget(issue, 'issue');
   const urlTarget = parseGhIssueUrl(target);
   if (urlTarget) return urlTarget;
@@ -202,7 +199,7 @@ async function resolveGhIssueTarget(issue: string, cwd?: string): Promise<Resolv
     throw new Error('issue must be an issue number or URL');
   }
 
-  const repository = readRecord(await runGhJson([
+  const repository = readRecord(await runGhJson(runtime, [
     'repo',
     'view',
     '--json',
@@ -284,10 +281,10 @@ function normalizeGhComment(value: unknown) {
   };
 }
 
-async function loadGhIssue(issue: string, cwd?: string) {
-  const target = await resolveGhIssueTarget(issue, cwd);
+async function loadGhIssue(runtime: ToolRuntime, issue: string, cwd?: string) {
+  const target = await resolveGhIssueTarget(runtime, issue, cwd);
   const issueEndpoint = `repos/${target.repository}/issues/${target.issueNumber}`;
-  const issueRecord = readRecord(await runGhJson(ghApiArgs(target, issueEndpoint), cwd));
+  const issueRecord = readRecord(await runGhJson(runtime, ghApiArgs(target, issueEndpoint), cwd));
   if (!issueRecord) throw new Error('gh issue response was not an object');
   return { target, issueEndpoint, issue: issueRecord };
 }
@@ -398,8 +395,8 @@ function writeGhCommentsContent(input: {
   };
 }
 
-async function viewGhIssue(input: { cwd?: string; issue: string }) {
-  const { target, issue } = await loadGhIssue(input.issue, input.cwd);
+async function viewGhIssue(runtime: ToolRuntime, input: { cwd?: string; issue: string }) {
+  const { target, issue } = await loadGhIssue(runtime, input.issue, input.cwd);
 
   const body = truncateBody(issue.body);
   const milestone = readRecord(issue.milestone);
@@ -423,17 +420,17 @@ async function viewGhIssue(input: { cwd?: string; issue: string }) {
   });
 }
 
-async function viewGhIssueComments(input: {
+async function viewGhIssueComments(runtime: ToolRuntime, input: {
   cwd?: string;
   issue: string;
   page: number;
   perPage: number;
 }) {
-  const { target, issueEndpoint, issue } = await loadGhIssue(input.issue, input.cwd);
+  const { target, issueEndpoint, issue } = await loadGhIssue(runtime, input.issue, input.cwd);
   const totalComments = typeof issue.comments === 'number' ? issue.comments : 0;
   const commentsEndpoint = `${issueEndpoint}/comments?per_page=${input.perPage}&page=${input.page}`;
   const rawComments = totalComments > 0
-    ? await runGhJson(ghApiArgs(target, commentsEndpoint), input.cwd)
+    ? await runGhJson(runtime, ghApiArgs(target, commentsEndpoint), input.cwd)
     : [];
   if (!Array.isArray(rawComments)) throw new Error('gh issue comments response was not an array');
 
@@ -487,8 +484,8 @@ function normalizeGhTarget(value: string | undefined, label: string) {
 const gitPathspecSchema = z.array(z.string().min(1)).optional();
 
 export const gitStatusTool = tool(
-  async ({ cwd, short = true }: { cwd?: string; short?: boolean }) =>
-    runGit(['status', short ? '--short' : '--branch'], cwd),
+  async ({ cwd, short = true }: { cwd?: string; short?: boolean }, runtime: ToolRuntime) =>
+    runGit(runtime, ['status', short ? '--short' : '--branch'], cwd),
   {
     name: 'git_status',
     description: '查看当前 git 仓库状态。默认返回短格式；cwd 可指定仓库目录，默认当前 workdir。',
@@ -505,13 +502,13 @@ export const gitDiffTool = tool(
     pathspecs?: string[];
     staged?: boolean;
     stat?: boolean;
-  }) => {
+  }, runtime: ToolRuntime) => {
     const args = ['diff'];
     if (staged) args.push('--staged');
     if (stat) args.push('--stat');
     const paths = normalizePathspecs(pathspecs);
     if (paths.length > 0) args.push('--', ...paths);
-    return runGit(args, cwd);
+    return runGit(runtime, args, cwd);
   },
   {
     name: 'git_diff',
@@ -531,13 +528,13 @@ export const gitLogTool = tool(
     maxCount?: number;
     oneline?: boolean;
     pathspecs?: string[];
-  }) => {
+  }, runtime: ToolRuntime) => {
     const count = Math.max(1, Math.min(50, Math.trunc(maxCount)));
     const args = ['log', `--max-count=${count}`];
     if (oneline) args.push('--oneline', '--decorate');
     const paths = normalizePathspecs(pathspecs);
     if (paths.length > 0) args.push('--', ...paths);
-    return runGit(args, cwd);
+    return runGit(runtime, args, cwd);
   },
   {
     name: 'git_log',
@@ -552,8 +549,8 @@ export const gitLogTool = tool(
 );
 
 export const gitBranchTool = tool(
-  async ({ cwd, all = false }: { cwd?: string; all?: boolean }) =>
-    runGit(['branch', all ? '--all' : '--list'], cwd),
+  async ({ cwd, all = false }: { cwd?: string; all?: boolean }, runtime: ToolRuntime) =>
+    runGit(runtime, ['branch', all ? '--all' : '--list'], cwd),
   {
     name: 'git_branch',
     description: '列出 git 分支。默认列出本地分支；all=true 时包含远端分支。',
@@ -569,11 +566,11 @@ export const gitShowTool = tool(
     cwd?: string;
     revision?: string;
     stat?: boolean;
-  }) => {
+  }, runtime: ToolRuntime) => {
     const args = ['show', '--no-ext-diff'];
     if (stat) args.push('--stat');
     args.push(revision);
-    return runGit(args, cwd);
+    return runGit(runtime, args, cwd);
   },
   {
     name: 'git_show',
@@ -587,10 +584,10 @@ export const gitShowTool = tool(
 );
 
 export const gitAddTool = tool(
-  async ({ cwd, pathspecs }: { cwd?: string; pathspecs: string[] }) => {
+  async ({ cwd, pathspecs }: { cwd?: string; pathspecs: string[] }, runtime: ToolRuntime) => {
     const paths = normalizePathspecs(pathspecs);
     if (paths.length === 0) return 'Error: git_add requires at least one pathspec';
-    return runGit(['add', '--', ...paths], cwd);
+    return runGit(runtime, ['add', '--', ...paths], cwd);
   },
   {
     name: 'git_add',
@@ -603,10 +600,10 @@ export const gitAddTool = tool(
 );
 
 export const gitCommitTool = tool(
-  async ({ cwd, message }: { cwd?: string; message: string }) => {
+  async ({ cwd, message }: { cwd?: string; message: string }, runtime: ToolRuntime) => {
     const trimmed = message.trim();
     if (!trimmed) return 'Error: git_commit requires a non-empty message';
-    return runGit(['commit', '-m', trimmed], cwd);
+    return runGit(runtime, ['commit', '-m', trimmed], cwd);
   },
   {
     name: 'git_commit',
@@ -629,11 +626,11 @@ export const gitPushTool = tool(
     remote?: string;
     refspec?: string;
     setUpstream?: boolean;
-  }) => {
+  }, runtime: ToolRuntime) => {
     const args = ['-c', 'protocol.ext.allow=never', 'push'];
     if (setUpstream) args.push('--set-upstream');
     args.push('--', remote.trim(), refspec.trim());
-    return runGit(args, cwd, GIT_PUSH_TIMEOUT_MS);
+    return runGit(runtime, args, cwd, GIT_PUSH_TIMEOUT_MS);
   },
   {
     name: 'git_push',
@@ -665,7 +662,7 @@ export const ghPrCreateTool = tool(
       if (head?.trim()) args.push('--head', head.trim());
       if (repository?.trim()) args.push('--repo', repository.trim());
       if (draft) args.push('--draft');
-      return await runGh(args, cwd);
+      return await runGh(runtime, args, cwd);
     } catch (error) {
       return createGhToolError('gh_pr_create', error, runtime);
     }
@@ -695,7 +692,7 @@ export const ghIssueCreateTool = tool(
     try {
       const args = ['issue', 'create', '--title', title.trim(), '--body', body];
       if (repository?.trim()) args.push('--repo', repository.trim());
-      return await runGh(args, cwd);
+      return await runGh(runtime, args, cwd);
     } catch (error) {
       return createGhToolError('gh_issue_create', error, runtime);
     }
@@ -733,7 +730,7 @@ export const ghIssueListTool = tool(
       ];
       if (repository?.trim()) args.push('--repo', repository.trim());
       if (search?.trim()) args.push('--search', search.trim());
-      return await runGh(args, cwd, '[]');
+      return await runGh(runtime, args, cwd, '[]');
     } catch (error) {
       return createGhToolError('gh_issue_list', error, runtime);
     }
@@ -754,7 +751,7 @@ export const ghIssueListTool = tool(
 export const ghPrViewTool = tool(
   async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
     try {
-      return await runGh(['pr', 'view', normalizeGhTarget(pr, 'pr')], cwd);
+      return await runGh(runtime, ['pr', 'view', normalizeGhTarget(pr, 'pr')], cwd);
     } catch (error) {
       return createGhToolError('gh_pr_view', error, runtime);
     }
@@ -772,7 +769,7 @@ export const ghPrViewTool = tool(
 export const ghPrCommentsTool = tool(
   async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
     try {
-      return await runGh(
+      return await runGh(runtime,
         ['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'],
         cwd,
         '(no PR comments or reviews)',
@@ -794,7 +791,7 @@ export const ghPrCommentsTool = tool(
 export const ghPrDiffTool = tool(
   async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
     try {
-      return await runGh(
+      return await runGh(runtime,
         ['pr', 'diff', normalizeGhTarget(pr, 'pr'), '--patch'],
         cwd,
         '(empty diff)',
@@ -816,7 +813,7 @@ export const ghPrDiffTool = tool(
 export const ghIssueViewTool = tool(
   async ({ cwd, issue }: { cwd?: string; issue: string }, runtime: ToolRuntime) => {
     try {
-      return await viewGhIssue({ cwd, issue });
+      return await viewGhIssue(runtime, { cwd, issue });
     } catch (error) {
       return createGhToolError('gh_issue_view', error, runtime);
     }
@@ -844,7 +841,7 @@ export const ghIssueCommentsTool = tool(
     perPage?: number;
   }, runtime: ToolRuntime) => {
     try {
-      return await viewGhIssueComments({ cwd, issue, page, perPage });
+      return await viewGhIssueComments(runtime, { cwd, issue, page, perPage });
     } catch (error) {
       return createGhToolError('gh_issue_comments', error, runtime);
     }

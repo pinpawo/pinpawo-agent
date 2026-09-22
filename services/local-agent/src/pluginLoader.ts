@@ -6,6 +6,7 @@ import {
   validateToolkitDefinition,
 } from '@pinpawo/pet-agent';
 import type { ToolkitDefinitionSource } from './toolkits/toolkitInventory';
+import type { RuntimeClientFactory } from './runtimeService/hostClient';
 
 export type AgentPlugin = {
   name: string;
@@ -16,12 +17,14 @@ const PLUGINS_DIR = resolve(homedir(), '.pinpawo', 'plugins');
 export type LoadedLocalPlugins = {
   toolkitSources: ToolkitDefinitionSource[];
   plugins: AgentPlugin[];
+  runtimeClients: Readonly<Record<string, RuntimeClientFactory>>;
 };
 
 function emptyLocalPlugins(): LoadedLocalPlugins {
   return {
     toolkitSources: [],
     plugins: [],
+    runtimeClients: {},
   };
 }
 
@@ -41,11 +44,12 @@ export async function loadPluginsFromDir(
 
   const toolkitSources: ToolkitDefinitionSource[] = [];
   const plugins: AgentPlugin[] = [];
+  const runtimeClients: Record<string, RuntimeClientFactory> = Object.create(null);
 
   for (const file of files) {
     const filePath = resolve(pluginsDir, file);
     try {
-      const mod = await import(filePath) as { default?: unknown; tools?: unknown; toolkits?: unknown };
+      const mod = await import(filePath) as { default?: unknown; tools?: unknown; toolkits?: unknown; runtimeClients?: Record<string, unknown> };
 
       const plugin = mod.default;
       if (!plugin || typeof plugin !== 'object' || !('name' in plugin)) {
@@ -54,6 +58,14 @@ export async function loadPluginsFromDir(
       }
 
       const loadedPlugin = plugin as AgentPlugin;
+      for (const [type, factory] of Object.entries(mod.runtimeClients ?? {})) {
+        if (typeof factory !== 'function' || Object.hasOwn(runtimeClients, type)) {
+          throw new Error(`Invalid or duplicate Runtime client adapter: ${type}`);
+        }
+      }
+      // Register only after every adapter has validated; a skipped plugin must
+      // not leave a partially installed client behind.
+      Object.assign(runtimeClients, mod.runtimeClients ?? {});
       const definitions = Array.isArray(mod.toolkits)
         ? mod.toolkits as AgentToolkit[]
         : [];
@@ -86,5 +98,6 @@ export async function loadPluginsFromDir(
   return {
     toolkitSources,
     plugins,
+    runtimeClients: Object.freeze(runtimeClients),
   };
 }

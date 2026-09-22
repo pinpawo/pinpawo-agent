@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { loadLocalEnvironment } from './loadEnv';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
 import {
   buildModelProfileRegistry,
   fingerprintModelProfile,
@@ -18,26 +17,7 @@ import {
   type ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
 
-function parseDotEnv(content: string) {
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq < 1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
-    if (!(key in process.env)) process.env[key] = val;
-  }
-}
-
-function loadDotEnv() {
-  // 1. ~/.pinpawo/.env — always accessible (dev + app bundle)
-  try { parseDotEnv(readFileSync(resolve(homedir(), '.pinpawo', '.env'), 'utf-8')); } catch { /* ok */ }
-  // 2. cwd/.env — dev mode convenience (wins only for keys not already set)
-  try { parseDotEnv(readFileSync(resolve(process.cwd(), '.env'), 'utf-8')); } catch { /* ok */ }
-}
-
-loadDotEnv();
+loadLocalEnvironment();
 
 const stored = loadStoredConfig();
 
@@ -140,7 +120,6 @@ export type Config = Readonly<{
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
-  browserBackend: string;
   localServerPort: number;
 }>;
 
@@ -151,6 +130,9 @@ function freezeConfig(input: Config): Config {
 }
 
 function readConfigDefaults(): Config {
+  if (process.env.PINPAWO_BROWSER_BACKEND !== undefined || 'browser_backend' in stored) {
+    throw new Error('Browser now uses CDP only. Remove PINPAWO_BROWSER_BACKEND/browser_backend and configure the cdp instance in ~/.pinpawo/runtime/config.json.');
+  }
   const modelProfileRegistry = buildModelProfileRegistry({
     stored,
     env: process.env,
@@ -172,7 +154,6 @@ function readConfigDefaults(): Config {
     globalReviewPolicyMode: getGlobalReviewPolicyMode(),
     autoAuthorizationSafetyLevel: getAutoAuthorizationSafetyLevel(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
-    browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
     localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });
 }

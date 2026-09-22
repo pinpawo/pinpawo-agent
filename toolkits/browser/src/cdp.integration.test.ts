@@ -24,7 +24,7 @@ async function cleanupFixture(steps: ReadonlyArray<() => Promise<unknown>>): Pro
   if (errors.length) throw new AggregateError(errors, 'CDP test fixture cleanup failed.');
 }
 
-test('real CDP: borrowed ownership, refs, popup origins, extraction, screenshot, cancellation and clients', { skip: !enabled, timeout: 60_000 }, async (t) => {
+test('real CDP: borrowed ownership, refs, popup origins, extraction, background screenshots, cancellation and clients', { skip: !enabled, timeout: 60_000 }, async (t) => {
   const workdir = await mkdtemp(join(tmpdir(), 'pinpawo-cdp-test-'));
   const profile = join(workdir, 'profile');
   let otherOrigin = '';
@@ -81,11 +81,20 @@ test('real CDP: borrowed ownership, refs, popup origins, extraction, screenshot,
   const extract = JSON.parse(await call('extract', [{ offset: 100, limit: 17 }]) as string);
   assert.equal(extract.text.length, 17);
   assert.equal(extract.nextOffset, 117);
-  const screenshot = JSON.parse(await call('screenshot') as string);
-  assert.ok((await stat(screenshot.path)).size > 0);
   await call('open', [origin + '/b'], b);
   assert.match(await call('snapshot') as string, /CDP main/);
   assert.match(await call('snapshot', [], b) as string, /Host B/);
+  // Capturing A after bringing B forward reproduces the multi-client ordering
+  // that stalled Page.captureScreenshot on Windows CI. Do not activate A.
+  const frontPage = browser.contexts()[0]!.pages().find((page) => page !== userPage && page.url() === origin + '/b');
+  assert.ok(frontPage);
+  await frontPage.bringToFront();
+  const screenshot = JSON.parse(await call('screenshot') as string);
+  const screenshotB = JSON.parse(await call('screenshot', [], b) as string);
+  const [imageA, imageB] = await Promise.all([readFile(screenshot.path), readFile(screenshotB.path)]);
+  assert.equal(imageA.subarray(0, 3).toString('hex'), 'ffd8ff');
+  assert.equal(imageB.subarray(0, 3).toString('hex'), 'ffd8ff');
+  assert.notDeepEqual(imageA, imageB, 'Each client must capture its own page, including the background page');
   await call('click', [{ selector: '#popup' }]);
   assert.match(await call('snapshot') as string, /Same-origin popup/);
   await browser.contexts()[0]!.pages().find((page) => page.url() === origin + '/popup')!.close();
@@ -107,6 +116,7 @@ test('real CDP: borrowed ownership, refs, popup origins, extraction, screenshot,
   assert.match(await call('snapshot', [], b) as string, /Host B/);
   assert.equal(userPage.isClosed(), false);
   await assert.rejects(stat(screenshot.path), { code: 'ENOENT' });
+  assert.ok((await stat(screenshotB.path)).size > 0);
   const cancelled = new AbortController();
   const waiting = call('wait', [{ selector: '#never' }, 30_000], { ...b, signal: cancelled.signal });
   setTimeout(() => cancelled.abort(), 50);

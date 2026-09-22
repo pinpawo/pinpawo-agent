@@ -88,7 +88,8 @@ test('concurrent Hosts use one independent service, shared shell environments an
       await admin.stopService().catch(() => undefined);
       await admin.close();
     }
-    await rm(directory, { recursive: true, force: true });
+    // Lock release precedes process exit; Windows still holds cwd briefly.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -121,7 +122,7 @@ test('a killed service is replaced after its lock expires and the old connection
     await client?.close();
     if (replacement?.isConnected) await replacement.stopService().catch(() => undefined);
     await replacement?.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -235,6 +236,6 @@ while (true) {
       try { await admin.stopService(); } finally { await admin.close(); }
     }
     await waitFor(lockIsGone, 'Preserving the test directory because its service lock remains.');
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

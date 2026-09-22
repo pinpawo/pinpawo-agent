@@ -108,6 +108,10 @@ export class CdpConnection {
       '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
       '--user-data-dir=' + profile, '--no-first-run', '--no-default-browser-check',
       '--disable-background-networking', '--disable-component-update',
+      // Match Playwright's screenshot surface: avoid ForceRedraw waiting for a
+      // frame to be presented in a background/occluded Windows window.
+      // https://chromium.googlesource.com/chromium/src/+/main/content/common/features.cc
+      '--enable-features=CDPScreenshotNewSurface',
       ...(this.config.headless ? ['--headless=new'] : []), 'about:blank',
     ];
     const child = spawn(executable, args, { env: this.config.env, stdio: ['ignore', 'ignore', 'pipe'] });

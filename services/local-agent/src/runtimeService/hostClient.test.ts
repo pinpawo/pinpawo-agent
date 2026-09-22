@@ -72,7 +72,8 @@ async function serviceFixture(t: TestContext) {
         throw error;
       }
     }, 'The isolated Runtime service did not release its lock; preserving its directory.');
-    await rm(directory, { recursive: true, force: true });
+    // Windows holds the service's cwd until process exit, just after lock release.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   return {
     directory,

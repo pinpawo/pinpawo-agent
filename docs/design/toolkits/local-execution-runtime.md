@@ -1,7 +1,7 @@
 # 本机独立进程统一托管 Toolkit Runtime
 
 > 状态：Draft。单进程托管、Shell Runtime 表示执行环境、实例共享/隔离和 Browser 只保留 CDP
-> 已确认。契约、托管服务和消费方已在工作区实现，正在联合验收；本草案仍待评审，未提升为正式设计。
+> 已确认。契约、托管服务和消费方已实现，三平台联合验收通过；本草案仍待评审，未提升为正式设计。
 > 更新：2026-09-22
 > Tracking：[issue #848](https://github.com/pinpawo/pinpawo-agent/issues/848)
 > 现有契约：[领域关系](../host-agent-capability-toolkit.md)、
@@ -283,8 +283,10 @@ session 按 client、Toolkit 和 thread 归属，不再只按 threadId。CDP 断
   已有浏览器/受管浏览器的释放正确，非 CDP 代码、配置、构建与发行依赖已清理。
 - [x] Chat/Studio 装配与全仓测试、完整 build、编译后 CLI 独立进程 smoke 通过。
   发行包包含 runtimeService 入口且不再含 extension 产物。
-- [ ] Linux/Windows 的真实 IPC、进程与 Chrome 验证：已加入三平台
-  [Runtime CI](../../../.github/workflows/runtime-service.yml)，等待实际运行结果；本机证据为 macOS。
+- [x] Linux/macOS/Windows 的真实 IPC、进程与 Chrome 验证通过。
+  [三平台验收记录](https://github.com/pinpawo/pinpawo-agent/actions/runs/35677756043)
+  对应实现提交 `cd708945`，按正常 [Runtime CI](../../../.github/workflows/runtime-service.yml)
+  执行，没有诊断预热步骤；覆盖首次截图、后台页面截图和资源清理。
 
 ## 8. 现状依据与范围
 

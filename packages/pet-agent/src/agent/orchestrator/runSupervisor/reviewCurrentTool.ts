@@ -3,7 +3,7 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { SupervisorDecisionError, type SupervisorHandoffContext } from './controlContext';
-import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+import { supervisorPlanSnapshot, currentSupervisorTask, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForPlanItem } from '../executionMessages';
 
 export const reviewCurrentSchema = z.object({
@@ -18,7 +18,7 @@ export function createReviewCurrentTool(context: SupervisorHandoffContext) {
       runSupervisorState: state,
       reviewFeedback: args.completed ? null : args.reason,
       messages: [new ToolMessage({ name: 'review_current', tool_call_id: runtime.toolCallId,
-        content: JSON.stringify({ plan: state }),
+        content: JSON.stringify({ plan: supervisorPlanSnapshot(state) }),
       })],
     } });
   }, {

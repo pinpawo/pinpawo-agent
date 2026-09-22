@@ -100,13 +100,13 @@ test('executor combines main history with explicit private state without persist
     assert.equal(run.runtimeContext?.executionScope?.delegationId, 'd1');
     return deliver(run);
   } });
-  const result = await execute({ ...request, history: messages, state: { scope: messageScope(request), messages: [own] } }, { ...hostContext(), runnableConfig: config });
+  const result = await execute({ ...request, history: messages, previousMessages: [own] }, { ...hostContext(), runnableConfig: config });
   assert.equal(result.status, 'returned');
   assert.equal(result.delivery?.scope.delegationId, 'd1');
   assert.equal(result.delivery?.text, 'Delivered');
-  assert.equal(result.state.messages.some(isDelegationBriefingMessage), false);
-  assert.equal(result.state.messages.filter(readFixtureDelivery).length, 0);
-  assert.equal(result.state.messages.some((message) => message instanceof RemoveMessage), false);
+  assert.equal(result.messages.some(isDelegationBriefingMessage), false);
+  assert.equal(result.messages.filter(readFixtureDelivery).length, 0);
+  assert.equal(result.messages.some((message) => message instanceof RemoveMessage), false);
   assert.deepEqual(messages.map((message) => message.toDict()), before);
 });
 
@@ -118,13 +118,12 @@ test('continuation returns a complete private snapshot without copying main hist
     return deliver(run, 'Second attempt');
   } });
   const result = await execute({
-    ...request, state: { scope: messageScope(request), messages: [prior] },
+    ...request, previousMessages: [prior],
     delegation: { ...request.delegation, mode: 'continue', briefing: 'Verify the document.' },
   }, hostContext());
   assert.equal(result.delivery?.task, request.delegation.task);
   assert.equal(result.delivery?.text, 'Second attempt');
-  assert.equal(result.state.messages.some(({ id }) => id === 'prior'), true);
-  assert.deepEqual(result.state.scope, messageScope(request));
+  assert.equal(result.messages.some(({ id }) => id === 'prior'), true);
 });
 
 test('executor returns explicit output without requiring a matching private message', async () => {
@@ -135,7 +134,7 @@ test('executor returns explicit output without requiring a matching private mess
   const second = await execute(input(), hostContext());
   assert.equal(first.status, 'returned');
   assert.equal(first.delivery?.text, 'Final output independent of private history.');
-  assert.deepEqual(first.state.messages, []);
+  assert.deepEqual(first.messages, []);
   assert.notEqual(first.delivery?.id, second.delivery?.id);
 });
 
@@ -146,8 +145,8 @@ for (const output of [null, '', '  ']) {
     );
     assert.equal(result.status, 'missing_deliverable');
     assert.equal(result.delivery, null);
-    assert.equal(result.state.messages.length, 1);
-    assert.equal(result.state.messages[0].text, 'Delivered');
+    assert.equal(result.messages.length, 1);
+    assert.equal(result.messages[0].text, 'Delivered');
   });
 }
 
@@ -204,7 +203,7 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
         const result = await execute(request, hostContext());
         assert.equal(result.status, outcome);
         assert.equal(result.delivery, null);
-        assert.ok(result.state.messages.some(({ id }) => id === 'partial'));
+        assert.ok(result.messages.some(({ id }) => id === 'partial'));
         assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
       }
       assert.equal(finalized, outcome === 'missing_deliverable');
@@ -253,7 +252,7 @@ test('overlapping calls keep contexts, bindings, artifacts and authorizations se
     assert.deepEqual(b.toolAuthorizations, []);
     for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
       assert.equal(result.delivery?.scope.delegationId, id);
-      const privateMessage = result.state.messages.find((message) => !readFixtureDelivery(message));
+      const privateMessage = result.messages.find((message) => !readFixtureDelivery(message));
       assert.equal(getAgentMessageMetadata(privateMessage!).delegationId, id);
       assert.equal(events.filter((event) => event === `release:${id}`).length, 1);
     }
@@ -274,7 +273,7 @@ test('default executor still invokes the existing createAgent-based subagent wra
   })(input(), hostContext());
   assert.equal(result.status, 'returned');
   assert.ok(result.delivery?.text);
-  assert.equal(result.state.messages.some(isDelegationBriefingMessage), false);
+  assert.equal(result.messages.some(isDelegationBriefingMessage), false);
 });
 
 test('runtime bindings, real tools and finalize share the host config identity', async () => {
@@ -328,7 +327,7 @@ test('real subagent execution accepts frozen history with stable IDs without cha
   const result = await execute({ ...input(), history: Object.freeze([message]) }, hostContext());
   assert.equal(result.status, 'returned');
   assert.deepEqual(message.toDict(), before);
-  assert.equal(result.state.messages.some(({ id }) => id === 'frozen-user'), false);
+  assert.equal(result.messages.some(({ id }) => id === 'frozen-user'), false);
 });
 
 for (const id of [undefined, '', '   ']) {
@@ -358,7 +357,7 @@ for (const mode of ['initial', 'continue'] as const) {
     } });
     const result = await execute({ ...request, delegation: { ...request.delegation, mode, briefing } }, hostContext());
     assert.equal(result.status, 'returned');
-    assert.equal(result.state.messages.some(isDelegationBriefingMessage), false);
+    assert.equal(result.messages.some(isDelegationBriefingMessage), false);
   });
 }
 
@@ -391,27 +390,10 @@ test('private compaction replaces prior work without removing Root history', asy
     messages: [new AIMessage({ id: 'summary', content: 'Compacted private work' })],
     output: 'Compacted private work', artifacts: [],
   }) });
-  const result = await execute({ ...request, state: { scope: messageScope(request), messages: [prior] } }, hostContext());
-  assert.deepEqual(result.state.messages.map(message => message.id), ['summary']);
+  const result = await execute({ ...request, previousMessages: [prior] }, hostContext());
+  assert.deepEqual(result.messages.map(message => message.id), ['summary']);
   assert.deepEqual(request.history.map(message => message.id), ['user']);
 });
-
-for (const mismatch of ['runId', 'taskId', 'delegationId', 'lane'] as const) {
-  test(`executor excludes a private snapshot with a different ${mismatch}`, async () => {
-    const request = input();
-    const scope = messageScope(request);
-    const execute = createCapabilityExecutor({ models, runSubagent: async run => {
-      assert.equal(run.messages.some(message => message.id === 'foreign'), false);
-      return deliver(run);
-    } });
-    const result = await execute({ ...request, state: {
-      scope: { ...scope, [mismatch]: mismatch === 'lane' ? 'capability:other' : 'other' },
-      messages: [new AIMessage({ id: 'foreign', content: 'Other work' })],
-    } }, hostContext());
-    assert.equal(result.state.messages.some(message => message.id === 'foreign'), false);
-  });
-}
-
 
 test('continuation accounts only newly committed provider usage', async () => {
   const request = input();
@@ -423,9 +405,9 @@ test('continuation accounts only newly committed provider usage', async () => {
       usage_metadata: { input_tokens: 30, output_tokens: 5, total_tokens: 35 },
     })], artifacts: [], output: 'New work',
   }) });
-  const result = await execute({ ...request, state: { scope: messageScope(request), messages: [prior] } }, hostContext());
+  const result = await execute({ ...request, previousMessages: [prior] }, hostContext());
   assert.deepEqual(result.tokenUsage, { inputTokens: 30, outputTokens: 5, totalTokens: 35 });
-  assert.equal(result.state.messages.length, 2);
+  assert.equal(result.messages.length, 2);
 });
 
 
@@ -438,7 +420,7 @@ test('private snapshots retain completed tool pairs and discard unanswered calls
     messages: [...run.messages, call, result, pending], artifacts: [], output: null,
   }) });
   const output = await execute(request, hostContext());
-  assert.deepEqual(output.state.messages.map(message => message.id), ['call', 'result']);
-  assert.deepEqual(queryAgentMessages(output.state.messages).main().select().messages, []);
+  assert.deepEqual(output.messages.map(message => message.id), ['call', 'result']);
+  assert.deepEqual(queryAgentMessages(output.messages).main().select().messages, []);
   assert.equal(output.delivery, null);
 });

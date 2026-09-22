@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { currentSupervisorTask, runSupervisorStateSchema, updateSupervisorTask } from './state';
+import { AIMessage } from '@langchain/core/messages';
+import { currentSupervisorTask, runSupervisorStateSchema, supervisorPlanSnapshot, updateSupervisorTask } from './state';
 
 test('current work is derived from plan progress without a second active task record', () => {
   const state = runSupervisorStateSchema.parse({ goal: 'Deliver', plan: [
@@ -23,4 +24,16 @@ test('business state rejects duplicated calls, messages and run metadata', () =>
       { id: 'task', capability: 'general', objective: 'Work', status },
     ] }).success, false, 'execution progress belongs to messages, not the business plan');
   }
+});
+
+
+test('model plan excludes task transcripts while status updates retain them', () => {
+  const state = runSupervisorStateSchema.parse({ goal: 'Deliver', plan: [{
+    id: 'a', capability: 'general', objective: 'First', status: 'pending',
+    delegation: { id: 'd', runId: 'r', taskId: 't', messages: [new AIMessage('Private evidence')] },
+  }] });
+  const snapshot = supervisorPlanSnapshot(state);
+  assert.equal('delegation' in snapshot.plan[0], false);
+  assert.ok(AIMessage.isInstance(state.plan[0].delegation?.messages[0]));
+  assert.equal(updateSupervisorTask(state, 'a', 'completed').plan[0].delegation, state.plan[0].delegation);
 });

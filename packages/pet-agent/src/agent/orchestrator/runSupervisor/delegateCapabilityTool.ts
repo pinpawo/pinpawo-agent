@@ -33,12 +33,16 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
         .filter(name => !invokeOptions.allowedCapabilityNames || invokeOptions.allowedCapabilityNames.includes(name)),
     }, args, state.runSupervisorReviewFeedback ?? undefined);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
+    const task = currentSupervisorTask(state.runSupervisorState)!;
+    const previous = task.delegation;
+    const previousMessages = previous?.id === input.delegationId
+      && previous.runId === state.runId && previous.taskId === state.taskId ? previous.messages : [];
     const execution = await executeCapability({
       capability: compiledCapability,
       delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId,
         userRequest, task: input.task, mode: input.mode, briefing: input.briefing },
       history: state.messages,
-      state: state.runCapabilityState,
+      previousMessages,
     }, {
       review: {
         authorizations: state.sessionToolAuthorizations.generation === registry.authorizationGeneration
@@ -59,7 +63,12 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     });
     return new Command({ update: {
       messages: [result],
-      runCapabilityState: execution.state,
+      runSupervisorState: {
+        ...state.runSupervisorState,
+        plan: state.runSupervisorState.plan.map(task => task.id === input.planItemId ? {
+          ...task, delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId, messages: execution.messages },
+        } : task),
+      },
       sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },

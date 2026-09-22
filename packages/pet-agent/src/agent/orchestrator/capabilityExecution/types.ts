@@ -1,5 +1,4 @@
 import type { ProviderTokenUsage } from '../../tokenUsage';
-import type { DelegationMessageScope } from '../../messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
@@ -12,12 +11,6 @@ import type { CompiledCapability } from '../registry';
 import type { GlobalReviewPolicy } from '../review/globalReviewPolicy';
 import type { ToolAuthorizationRecord } from '../../../autoReview/reviewAuthorizations';
 import type { ToolkitRuntimeManager } from '../toolkitRuntime';
-
-/** The current delegation's private execution snapshot, separate from Root messages. */
-export type CapabilityExecutionState = {
-  scope: DelegationMessageScope & { taskId: string };
-  messages: BaseMessage[];
-};
 
 /** Task data, not rendered briefing text or a graph routing command. */
 export type CapabilityExecutionDelegation = Readonly<DelegationSpec> & {
@@ -32,10 +25,11 @@ export type CapabilityExecutionInput = {
   readonly delegation: CapabilityExecutionDelegation;
   /**
    * Root conversation snapshot; selected messages must already have stable IDs.
-   * Private execution history is supplied only through the dedicated state.
+   * Supervisor supplies private execution history separately.
    */
   readonly history: readonly BaseMessage[];
-  readonly state?: CapabilityExecutionState | null;
+  /** Private context selected and owned by Supervisor for this invocation. */
+  readonly previousMessages?: readonly BaseMessage[];
 };
 
 /** Host-supplied execution context, separate from the delegated task. */
@@ -68,7 +62,7 @@ export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
   readonly delivery: DelegationDelivery | null;
   /** Complete private snapshot for this delegation; never appended to Root messages. */
-  readonly state: CapabilityExecutionState;
+  readonly messages: BaseMessage[];
   /** Provider usage from newly committed private messages in this attempt. */
   readonly tokenUsage: ProviderTokenUsage | null;
   readonly artifacts: CapabilityArtifactRef[];

@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import { ToolInputParsingException } from '@langchain/core/tools';
 import { createMiddleware, ToolInvocationError } from 'langchain';
-import { currentSupervisorTask, supervisorAgentStateSchema } from './state';
+import { currentSupervisorTask, supervisorPlanSnapshot, supervisorAgentStateSchema } from './state';
 import { SupervisorDecisionError } from './controlContext';
 import { isSupervisorControlTool } from './protocol';
 import { Command } from '@langchain/langgraph';
@@ -39,7 +39,7 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
         // feedback, but mark failures explicitly so they cannot commit controls.
         const cause = error instanceof ToolInvocationError ? error.toolError : error;
         if (!(cause instanceof ToolInputParsingException) && !(cause instanceof SupervisorDecisionError)) throw error;
-        const plan = cause instanceof SupervisorDecisionError ? request.state.runSupervisorState : null;
+        const plan = cause instanceof SupervisorDecisionError ? supervisorPlanSnapshot(request.state.runSupervisorState) : null;
         return new ToolMessage({
           name: request.toolCall.name, tool_call_id: request.toolCall.id!, status: 'error',
           content: plan ? JSON.stringify({ error: cause.message, currentTask: currentSupervisorTask(plan), plan }) : cause.message,

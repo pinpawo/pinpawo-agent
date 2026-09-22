@@ -3615,7 +3615,6 @@ test('toolkit review rejection records terminal tool results and retains the del
     __interrupt__?: Array<{ id?: string; value?: { kind?: string } }>;
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
-    runCapabilityState: OrchestratorStateType['runCapabilityState'];
     runId: string;
   };
 
@@ -3638,7 +3637,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
   const retainedLane = selectCapabilityHistory(
-    finalState.runCapabilityState?.messages ?? [],
+    currentSupervisorTask(finalState.runSupervisorState)?.delegation?.messages ?? [],
     activeDelegation.lane,
     activeDelegation.runId,
     activeDelegation.id,
@@ -3813,7 +3812,6 @@ test('toolkit review run interruption retains the delegation without another mod
     __interrupt__?: Array<{ id?: string; value?: { kind?: string } }>;
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
-    runCapabilityState: OrchestratorStateType['runCapabilityState'];
     runId: string;
   };
 
@@ -3839,7 +3837,7 @@ test('toolkit review run interruption retains the delegation without another mod
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
   const retainedLane = selectCapabilityHistory(
-    finalState.runCapabilityState?.messages ?? [],
+    currentSupervisorTask(finalState.runSupervisorState)?.delegation?.messages ?? [],
     activeDelegation.lane,
     activeDelegation.runId,
     activeDelegation.id,
@@ -3862,7 +3860,6 @@ test('toolkit review run interruption retains the delegation without another mod
   ) as {
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
-    runCapabilityState: OrchestratorStateType['runCapabilityState'];
     runId: string;
   };
 
@@ -4238,12 +4235,9 @@ test('fresh delegated request replaces the previous private snapshot', async () 
     callbacks: recorder.callbacks,
   };
   await graph.updateState(config, {
-    runCapabilityState: {
-      scope: { lane: 'capability:general', runId: oldDelegation.runId, taskId: oldDelegation.taskId, delegationId: oldDelegation.id },
-      messages: oldMessages,
-    },
     runSupervisorState: { goal: oldDelegation.userRequest, plan: [{
       id: 'old-task', capability: 'general', objective: oldDelegation.task, status: 'pending',
+      delegation: { id: oldDelegation.id, runId: oldDelegation.runId, taskId: oldDelegation.taskId, messages: oldMessages },
     }] },
     runId: oldDelegation.runId,
   });
@@ -4268,7 +4262,7 @@ test('fresh delegated request replaces the previous private snapshot', async () 
     false,
   );
   assert.equal(state.messages.some(message => String(getAgentMessageLane(message)).startsWith('capability:')), false);
-  assert.equal(state.runCapabilityState?.scope.runId, state.runId);
+  assert.equal(state.runSupervisorState.plan[0]?.delegation?.runId, state.runId);
 });
 
 

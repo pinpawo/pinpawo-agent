@@ -1,12 +1,19 @@
+import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod/v4';
 import { ReducedValue, StateSchema } from '@langchain/langgraph';
 
-/** Business facts only. Calls, private transcripts and run metadata live in Root. */
+/** Supervisor owns each planned task and its latest delegation execution. */
 export const supervisorPlanItemSchema = z.object({
   id: z.string().min(1),
   capability: z.string().min(1),
   objective: z.string().min(1),
   status: z.enum(['pending', 'completed', 'superseded']),
+  delegation: z.object({
+    id: z.string().min(1),
+    runId: z.string().min(1),
+    taskId: z.string().min(1),
+    messages: z.array(z.custom<BaseMessage>()),
+  }).strict().optional(),
 }).strict();
 
 /**
@@ -24,6 +31,11 @@ export const runSupervisorStateSchema = z.object({
 
 export type SupervisorPlanItem = z.infer<typeof supervisorPlanItemSchema>;
 export type RunSupervisorState = z.infer<typeof runSupervisorStateSchema>;
+
+/** Model-facing plan facts exclude the execution transcripts owned by Supervisor. */
+export function supervisorPlanSnapshot(state: RunSupervisorState) {
+  return { ...state, plan: state.plan.map(({ delegation: _delegation, ...task }) => task) };
+}
 
 export function currentSupervisorTask(state: RunSupervisorState): SupervisorPlanItem | null {
   return state.plan.find((task) => task.status !== 'completed' && task.status !== 'superseded') ?? null;

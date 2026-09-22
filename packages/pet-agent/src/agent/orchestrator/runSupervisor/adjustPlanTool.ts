@@ -4,7 +4,7 @@ import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
-import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+import { supervisorPlanSnapshot, currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForPlanItem } from '../executionMessages';
 
 export const adjustPlanSchema = z.object({
@@ -21,7 +21,7 @@ export function createAdjustPlanTool(context: SupervisorHandoffContext) {
       runSupervisorState: state,
       reviewFeedback: null,
       messages: [new ToolMessage({ name: 'adjust_plan', tool_call_id: runtime.toolCallId,
-        content: JSON.stringify({ plan: state }),
+        content: JSON.stringify({ plan: supervisorPlanSnapshot(state) }),
       })],
     } });
   }, {
@@ -57,5 +57,6 @@ export function adjustPlan(
     ...task,
     id: reuse && index === 0 && current ? current.id : identity('task', context.runId, callId, String(index)),
     status: 'pending' as const,
+    ...(reuse && index === 0 && current?.delegation ? { delegation: current.delegation } : {}),
   }))] };
 }

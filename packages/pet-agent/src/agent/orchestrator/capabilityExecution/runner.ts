@@ -7,7 +7,6 @@ import type { SubagentRunInput } from '../../../types/subagent';
 import {
   observeAgentMessageSelection,
   queryAgentMessages,
-  delegationMessageScopesEqual,
   ensureAgentMessageId,
   setAgentMessageDelegationScope,
   toolProtocolSafeMessages,
@@ -28,7 +27,6 @@ import type {
   CapabilityExecutionInput,
   CapabilityExecutionOptions,
   CapabilityExecutionResult,
-  CapabilityExecutionState,
 } from './types';
 
 /**
@@ -52,8 +50,8 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const threadId = readThreadId(runnableConfig);
     const { delegation } = input;
     const { capability } = input.capability;
-    const scope: CapabilityExecutionState['scope'] = {
-      lane: `capability:${capability.name}`,
+    const scope = {
+      lane: `capability:${capability.name}` as const,
       delegationId: delegation.id,
       runId: delegation.runId,
       taskId: delegation.taskId,
@@ -64,8 +62,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const toolkitList = [...input.capability.toolkits];
     const { runId } = scope;
     const delegationBriefing = materializeDelegation(delegation);
-    const privateHistory = input.state && input.state.scope.taskId === scope.taskId
-      && delegationMessageScopesEqual(input.state.scope, scope) ? input.state.messages : [];
+    const privateHistory = input.previousMessages ?? [];
     const scopedQuery = queryAgentMessages(input.history)
       .main()
       .append(...privateHistory);
@@ -263,7 +260,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     return {
       status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
       delivery,
-      state: { scope, messages: privateMessages },
+      messages: privateMessages,
       tokenUsage: readMessagesTokenUsage(added),
       artifacts: resultArtifacts,
       toolAuthorizations: [...authorizationRecorder.active],

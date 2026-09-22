@@ -195,3 +195,17 @@ test('final publication preserves structured model content and usage without a p
   assert.equal(queryAgentMessages(result.messages).main().select().messages[0], message);
   assert.equal(queryAgentMessages(result.messages).supervisor(context().runId).select().messages.length, 0);
 });
+
+
+test('plan continuation retains task history and replacement starts without it', () => {
+  const input = returned();
+  const delegation = { id: 'd', runId: input.runId, taskId: input.taskId, messages: [new AIMessage('Private work')] };
+  input.state.plan[0].delegation = delegation;
+  const args = { goal: input.userRequest, reason: 'More verification', tasks: [taskA] };
+  const continued = adjustPlan(input, { ...args, currentDelegation: 'continue' }, 'continue');
+  assert.equal(continued.plan[0].delegation, delegation);
+  const replaced = adjustPlan(input, { ...args, currentDelegation: 'replace' }, 'replace');
+  assert.equal(replaced.plan[0].delegation, delegation);
+  assert.equal(replaced.plan[0].status, 'superseded');
+  assert.equal(replaced.plan[1].delegation, undefined);
+});

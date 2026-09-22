@@ -5,5 +5,4 @@ export type {
   CapabilityExecutionInput,
   CapabilityExecutionOptions,
   CapabilityExecutionResult,
-  CapabilityExecutionState,
 } from './types';

@@ -43,13 +43,13 @@ Subagent 只从本次新增的有效回复提取 output，不能把旧回复、�
 
 ## 状态：只保存必要事实
 
-Root 用 `runSupervisorState` 保存当前 run 的 Supervisor 业务状态，只表达目标、计划和
-必要任务进度。以下为[业务状态类型](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/state.ts)的简化示意：
+Root 用 `runSupervisorState` 保存 Supervisor 的目标、计划、任务进度及各任务的
+delegation 执行记录。以下为[业务状态类型](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/state.ts)的简化示意：
 
 ```ts
 type RunSupervisorState = {
   goal: string | null;
-  plan: SupervisorPlan; // 计划及必要任务进度
+  plan: SupervisorPlan; // 每项包含业务进度，以及可选 delegation 执行记录
 };
 ```
 
@@ -63,9 +63,10 @@ type RunSupervisorState = {
 当前任务由计划中首个未完成且未被替换的任务确定。
 delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不形成另一份当前任务容器。
 
-Capability 节点将私有执行快照提交到独立 `runCapabilityState`，仅将配对的 ToolMessage
-写入 Root `messages`，同时提交产物索引、授权记录、执行计数等
-程序拥有的运行事实；不更新 `runSupervisorState`。交付只保存在配对的 ToolMessage，
+Supervisor 的 delegation 工具将执行记录保存在 `runSupervisorState.plan[].delegation`，
+按任务归属管理；Capability 只接收本次输入并返回消息与交付，不拥有独立 state。
+工具仅将配对的 ToolMessage 写入 Root `messages`，同时提交产物索引、授权记录、
+执行计数等程序拥有的运行事实。交付只保存在配对的 ToolMessage，
 删除重复的 `sessionDelegationResults`。验收必须依据当前任务最近一次执行的有效交付，
 不能在重试失败后回退到旧成功结果。无新交付以 `missing_deliverable` 错误 ToolMessage
 返回 Supervisor，由其决定补做或回复；真正的运行异常仍走框架错误出口。
@@ -77,33 +78,36 @@ Capability 节点将私有执行快照提交到独立 `runCapabilityState`，仅
 | 目标、计划、任务进度 | Root 的 `runSupervisorState` 保存，Supervisor 决策；保存后的状态可供后续运行参考 |
 | Supervisor 工作消息 | 使用 Root 消息存储并保持工作归属；每个新 run 重置工作视图，不继承上轮工作现场 |
 | delegation 调用及结果 | Root 消息与 checkpoint 保存，作为实际执行记录 |
-| Capability 私有消息 | 独立 `runCapabilityState = { scope, messages }`，只保存当前委派；不进入 Root `messages` |
+| delegation 私有消息 | Supervisor 对应计划项的 `delegation = { id, runId, taskId, messages }`；不进入 Root `messages` |
 | runId、traceId、预算、输入消费 | 复用 Root 必要运行字段；新 run 初始化，原生 interrupt 恢复时保留，不再复制一个 `runSupervisorState.run` |
 | 交付、产物、授权、运行出口 | 交付保存在工具结果中；产物索引、授权与运行出口复用必要字段，授权按当前 generation 校验，不由模型任意修改 |
 
-### Capability 执行快照隔离（待 review）
+### Supervisor 管理任务的 delegation 执行记录（待 review）
 
-`runCapabilityState` 是唯一的 Capability 续执行存储，包含完整 scope（capability lane、
-runId、taskId、delegationId）和该委派私有消息。它不是调度状态，不保存计划、状态码、
-交付或产物的第二份索引。工具结果仍是 Supervisor 验收的唯一执行事实来源。
+每个计划项可保存自己的最新 delegation 身份和私有消息。Supervisor 统一拥有这些
+记录，不再建立独立 Capability state，也不另外复制计划、状态码、交付或产物索引。
+工具结果仍是 Supervisor 验收的唯一执行事实来源；模型可见计划只包含任务信息与
+业务进度，不序列化 delegation 私有记录，避免交付再次出现在模型上下文中。
 
-executor 输入明确分开 Root history 与 private state，返回完整 private state 快照。
-Root 用替换语义保存它；同一委派补做保留有效历史，子代理压缩或移除消息同步体现在
-快照中。切换委派时替换旧快照，新 run 清空，原生 interrupt 保留。只在 scope 完全一致时
-恢复私有历史，不把其他 Capability 或上轮执行历史混入输入。
+Supervisor 的 delegation 工具选择与本轮 run、task 和 delegation 匹配的记录交给
+executor。executor 接收 Root history 和 previousMessages，返回本次完整私有消息；
+存取与生命周期由 Supervisor 工具管理。同一任务补做替换该任务记录，其他任务的
+记录保留；adjust_plan continue 保留当前记录，replace 创建无旧记录的新任务。
+新计划自然替换旧计划及其记录，不设置额外的 Capability 清理或迁移机制。
 
-Root checkpoint 仍可持久化这个明确字段；`messages` channel 和 Host 的会话 snapshot
-不再混入 Capability 私有历史。子图原生 checkpoint 负责在途工具审查的精确恢复；
-Root 的执行快照负责已经返回/暂停后的下一次委派调用，两者生命周期不同。
+新 run 可以参考旧计划及公开交付，但不恢复旧 delegation 私有消息；实际再次执行时
+写入本轮新记录。Root checkpoint 持久化 Supervisor 状态，`messages` channel 和
+Host 的会话 snapshot 不混入这些私有历史。子图原生 checkpoint 负责在途工具审查
+的精确恢复；Supervisor 的任务记录负责已经返回/暂停后的下一次调用。
 本次新增私有消息的 provider token 用量汇总到返回 ToolMessage 的 `capabilityTokenUsage`
 元数据，用于会话/运行总量统计；不伪装成 Root 模型响应，也不参与 Root 上下文水位判断。
 交付正文留在实际 ToolMessage；禁止为聊天显示或历史传递再造 handoff AIMessage。
 
 不再读取或迁移 Root messages 中的旧 Capability lane 历史，也不生成 RemoveMessage
-补丁去回写私有消息。executor 直接保存本次返回的完整私有快照，移除/压缩自然反映在
+补丁去回写私有消息。Supervisor 直接保存 executor 本次返回的完整私有消息，移除/压缩自然反映在
 替换后的快照中。旧混存格式的 checkpoint 不兼容本次状态边界，切换版本应新建会话。
 
-验证覆盖：私有历史与工具结果分离、精确作用域、补做与暂停恢复、切换委派、新 run 清空、
+验证覆盖：私有历史与工具结果分离、精确作用域、补做与暂停恢复、切换任务、新 run 隔离、
 快照序列化及子代理压缩。此次不改变 Supervisor 自身工作消息的归属：
 它们仍是编排器本轮的私有工作 lane，Capability 不会读取。
 
@@ -156,7 +160,7 @@ Entry/Boundary 的校验以计划事实为准，不依赖旧 active delegation �
 
 task 是计划任务，delegation 是具体执行实例。同一 run 内可以对同一 delegation 做多次 attempt；
 非原生新 run 若继续处理该任务，产生本轮执行实例，不自动续读旧 delegation 私有历史。
-新 run 清空 `runCapabilityState`；不放宽精确作用域查询。
+旧任务记录可随计划保留，但只允许同一 run、task 和 delegation 续读。
 
 入口不由 AIMessage/ToolMessage 是否存在或是否配对决定。原生 interrupt 可发生在不同位置；
 非原生取消或失败不能冒充原生恢复，也不自动重跑可能已产生副作用的执行。
@@ -267,9 +271,8 @@ Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 [查询器](../../../packages/pet-agent/src/agent/messages/query.ts)按本轮 runId 精确选择工作历史，
 与主会话执行记录共同组成 Supervisor 模型上下文；不扩大 Capability 私有历史可见范围。
 压缩主会话时保留未完成计划任务的实际调用及结果；Capability 私有历史不参与 Root
-messages 的摘要或保留选择。`runCapabilityState` 只承载当前委派的续执行现场，替换委派
-或新 run 后不在活动 Root 状态中累积旧私有历史。子代理摘要同步替换该快照的消息；
-过去的 checkpoint 仍可用于追溯。
+messages 的摘要或保留选择。Supervisor 每个任务只保存最新 delegation 的执行记录，
+子代理摘要同步替换该任务的消息；新计划替换旧记录，过去的 checkpoint 仍可用于追溯。
 
 每组调用与结果一起选入模型上下文。失败遗留的半组消息沿用
 [工具协议安全过滤](../../../packages/pet-agent/src/agent/messages/protocol.ts)处理输入；

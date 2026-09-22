@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,21 @@ import { CdpConnection } from './connection';
 import { createCdpRuntime, type CdpRuntimeCallContext } from './runtime';
 
 const enabled = process.env.PINPAWO_TEST_CDP === '1';
+
+async function closeHttpFixtures(servers: readonly Server[]): Promise<void> {
+  await Promise.all(servers.map((server) => new Promise<void>((resolve) => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+  })));
+}
+
+async function cleanupFixture(steps: ReadonlyArray<() => Promise<unknown>>): Promise<void> {
+  const errors: unknown[] = [];
+  for (const cleanup of steps) {
+    try { await cleanup(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length) throw new AggregateError(errors, 'CDP test fixture cleanup failed.');
+}
 
 test('real CDP: borrowed ownership, refs, popup origins, extraction, screenshot, cancellation and clients', { skip: !enabled, timeout: 60_000 }, async (t) => {
   const workdir = await mkdtemp(join(tmpdir(), 'pinpawo-cdp-test-'));
@@ -26,17 +41,18 @@ test('real CDP: borrowed ownership, refs, popup origins, extraction, screenshot,
     if (request.url === '/side-effect') unapprovedActions += 1;
     response.end('<h1>Private other-origin content</h1><button id="unapproved" onclick="fetch(\'/side-effect\')">Unsafe action</button>');
   });
+  // HTTP handles close first, even when browser startup or later cleanup fails.
+  t.after(() => closeHttpFixtures([server, other]));
+  const harness = new CdpConnection({ headless: true, userDataDir: profile });
+  let runtime: ReturnType<typeof createCdpRuntime> | undefined;
+  t.after(() => cleanupFixture([
+    async () => runtime?.close(),
+    () => harness.close(),
+    () => rm(workdir, { recursive: true, force: true }),
+  ]));
   await Promise.all([new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)), new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve))]);
   const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
   otherOrigin = 'http://127.0.0.1:' + (other.address() as { port: number }).port;
-  const harness = new CdpConnection({ headless: true, userDataDir: profile });
-  let runtime: ReturnType<typeof createCdpRuntime> | undefined;
-  t.after(async () => {
-    await runtime?.close();
-    await harness.close();
-    await Promise.all([new Promise<void>((resolve) => server.close(() => resolve())), new Promise<void>((resolve) => other.close(() => resolve()))]);
-    await rm(workdir, { recursive: true, force: true });
-  });
   const browser = await harness.getBrowser();
   const initialPages = browser.contexts()[0]!.pages();
   const userPage = await browser.contexts()[0]!.newPage();
@@ -110,9 +126,13 @@ test('real CDP: managed process closes and named contexts isolate storage', { sk
   const workdir = await mkdtemp(join(tmpdir(), 'pinpawo-cdp-owned-'));
   const runtime = createCdpRuntime({ headless: true });
   const server = createServer((_request, response) => response.end('<h1>Managed CDP</h1><p id="storage"></p><script>if(location.search) localStorage.setItem("token","named-session"); document.getElementById("storage").textContent=localStorage.getItem("token")||"no-token";</script>'));
+  t.after(() => closeHttpFixtures([server]));
+  t.after(() => cleanupFixture([
+    () => runtime.close(),
+    () => rm(workdir, { recursive: true, force: true }),
+  ]));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
-  t.after(async () => { await runtime.close(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(workdir, { recursive: true, force: true }); });
   const context = { clientId: 'owned', toolkitName: 'browser', execution: { threadId: 'thread', workdir } };
   assert.match(await runtime.call('open', [url + '?save', { headless: true, session: 'isolated' }], context) as string, /named-session/);
   assert.deepEqual(await runtime.call('listSessions', [], context), ['isolated']);

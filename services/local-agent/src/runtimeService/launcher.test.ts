@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { ensureRuntimeService, connectRuntimeService } from './launcher';
 import { runtimeServicePaths } from './config';
@@ -120,6 +121,120 @@ test('a killed service is replaced after its lock expires and the old connection
     await client?.close();
     if (replacement?.isConnected) await replacement.stopService().catch(() => undefined);
     await replacement?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a late startup candidate exits before ensure returns and cannot revive a stopped service', { timeout: 60_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ppr-late-'));
+  const paths = runtimeServicePaths(directory);
+  const pidPath = join(directory, 'candidate.pid');
+  const releasePath = join(directory, 'release-candidate');
+  const preloadPath = join(directory, 'delay-candidate.mjs');
+  const clients: RuntimeClient[] = [];
+  let candidatePid: number | undefined;
+  let lateLaunch: Promise<RuntimeClient> | undefined;
+  let admin: RuntimeClient | undefined;
+
+  const waitFor = async (check: () => Promise<boolean>, message: string, timeoutMs = 10_000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await check()) return;
+      await delay(20);
+    }
+    assert.fail(message);
+  };
+  const isCandidateAlive = () => {
+    if (candidatePid === undefined) return false;
+    try { process.kill(candidatePid, 0); return true; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+      throw error;
+    }
+  };
+  const lockIsGone = async () => {
+    try { await stat(paths.lock); return false; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw error;
+    }
+  };
+  try {
+    await writeFile(paths.config, JSON.stringify({ instances: {}, toolkitBindings: {} }));
+    await writeFile(preloadPath, `
+import { writeFile, stat } from 'node:fs/promises';
+import { setTimeout } from 'node:timers/promises';
+await writeFile(${JSON.stringify(pidPath)}, String(process.pid));
+const deadline = Date.now() + 45_000;
+while (true) {
+  try { await stat(${JSON.stringify(releasePath)}); break; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (Date.now() >= deadline) throw new Error('Test candidate was never released.');
+  await setTimeout(20);
+}
+`);
+    // Start the delayed candidate first and observe its marker before starting
+    // the winner. Its preloader cannot reach entry.ts until explicitly released.
+    lateLaunch = ensureRuntimeService({
+      directory,
+      bootstrapEnv: {
+        ...process.env,
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--import=' + pathToFileURL(preloadPath).href].filter(Boolean).join(' '),
+      },
+    });
+    void lateLaunch.catch(() => {}); // Cleanup awaits a failed launch as well.
+    await waitFor(async () => {
+      try {
+        const value = Number((await readFile(pidPath, 'utf8')).trim());
+        if (!Number.isSafeInteger(value) || value <= 0) return false;
+        candidatePid = value;
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }
+    }, 'The delayed startup candidate did not reach its preloader.');
+    assert.ok(isCandidateAlive());
+
+    const winner = await ensureRuntimeService({ directory });
+    clients.push(winner);
+    const joined = await lateLaunch;
+    clients.push(joined);
+    assert.equal(joined.pid, winner.pid);
+    assert.notEqual(winner.pid, candidatePid);
+    assert.equal(isCandidateAlive(), false, 'ensure must reap its redundant child before returning');
+
+    admin = await connectRuntimeService({ directory, administrative: true });
+    await admin.stopService();
+    await admin.close();
+    admin = undefined;
+    await waitFor(lockIsGone, 'The stopped test service did not release its lock.');
+    // Keep the namespace intact and release the gate: deleting the directory
+    // here would conceal an orphan candidate starting a replacement service.
+    await writeFile(releasePath, 'released');
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await delay(50);
+      assert.equal(await lockIsGone(), true, 'A late candidate recreated the service lock');
+      await assert.rejects(connectRuntimeService({ directory }), (error: unknown) => (
+        ['ENOENT', 'ECONNREFUSED'].includes(String((error as NodeJS.ErrnoException).code))
+      ));
+    }
+  } finally {
+    // This PID was emitted by this test's gated child, never read from service
+    // diagnostics or a shared lock. Kill it before releasing/removing its gate.
+    if (isCandidateAlive()) {
+      process.kill(candidatePid!, 'SIGKILL');
+      await waitFor(async () => !isCandidateAlive(), 'The test candidate did not exit.');
+    }
+    const lateClient = await lateLaunch?.catch(() => undefined);
+    if (lateClient) clients.push(lateClient);
+    await Promise.all(clients.map((client) => client.close()));
+    admin ??= await connectRuntimeService({ directory, administrative: true }).catch((error: unknown) => {
+      if (['ENOENT', 'ECONNREFUSED'].includes(String((error as NodeJS.ErrnoException).code))) return undefined;
+      throw error;
+    });
+    if (admin) {
+      try { await admin.stopService(); } finally { await admin.close(); }
+    }
+    await waitFor(lockIsGone, 'Preserving the test directory because its service lock remains.');
     await rm(directory, { recursive: true, force: true });
   }
 });

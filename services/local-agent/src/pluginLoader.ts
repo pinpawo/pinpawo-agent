@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import {
   type AgentToolkit,
   validateToolkitDefinition,
@@ -49,7 +50,7 @@ export async function loadPluginsFromDir(
   for (const file of files) {
     const filePath = resolve(pluginsDir, file);
     try {
-      const mod = await import(filePath) as { default?: unknown; tools?: unknown; toolkits?: unknown; runtimeClients?: Record<string, unknown> };
+      const mod = await import(pathToFileURL(filePath).href) as { default?: unknown; tools?: unknown; toolkits?: unknown; runtimeClients?: Record<string, unknown> };
 
       const plugin = mod.default;
       if (!plugin || typeof plugin !== 'object' || !('name' in plugin)) {

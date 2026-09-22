@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import { mkdtemp, mkdir, writeFile, readFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +17,22 @@ import type { RuntimeExecution, RuntimeServiceConfig } from './types';
 
 type HostConnection = Awaited<ReturnType<typeof connectHostRuntimes>>;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function closeHttpFixtures(servers: readonly Server[]): Promise<void> {
+  await Promise.all(servers.map((server) => new Promise<void>((resolve) => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+  })));
+}
+
+function assertBrowserSuccess(value: { ok?: boolean; error?: { code?: string; message?: string } }, operation: string): void {
+  if (value.ok !== false) return;
+  const failure = JSON.stringify({ code: value.error?.code, message: value.error?.message }).slice(0, 4096);
+  // Emit the original structured failure before cleanup can produce a second
+  // error. Do not print service config, credentials or environment values.
+  process.stderr.write('[host-cdp] ' + operation + ': ' + failure + '\n');
+  assert.fail(operation + ': ' + failure);
+}
 
 async function eventually(check: () => Promise<boolean>, message: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -137,7 +153,6 @@ export const runtimeFactories = {
 test('real CDP Static Browser Tools cross Host adapters and IPC with client isolation and artifact cleanup', {
   skip: process.env.PINPAWO_TEST_CDP !== '1', timeout: 60_000,
 }, async (t) => {
-  const fixture = await serviceFixture(t);
   let otherOrigin = '';
   const server = createServer((request, response) => {
     response.setHeader('content-type', 'text/html; charset=utf-8');
@@ -148,16 +163,14 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
     response.setHeader('content-type', 'text/html; charset=utf-8');
     response.end('<title>Forbidden</title><h1>Unapproved private content</h1>');
   });
+  // Register HTTP cleanup before the Runtime fixture: a rejected service
+  // cleanup hook must never leave these listening handles alive.
+  t.after(() => closeHttpFixtures([server, other]));
+  const fixture = await serviceFixture(t);
   await Promise.all([
     new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve)),
     new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve)),
   ]);
-  t.after(async () => {
-    await Promise.all([
-      new Promise<void>((resolve) => server.close(() => resolve())),
-      new Promise<void>((resolve) => other.close(() => resolve())),
-    ]);
-  });
   const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
   otherOrigin = 'http://127.0.0.1:' + (other.address() as { port: number }).port;
   await fixture.configure({
@@ -169,9 +182,11 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   const a = await fixture.connect({ toolkits });
   const b = await fixture.connect({ toolkits });
   const execution = scope(fixture.directory);
-  const invoke = async (host: HostConnection, name: string, input: Record<string, unknown> = {}) => {
+  const invoke = async (host: HostConnection, name: string, input: Record<string, unknown> = {}, expectedError = false) => {
     const tool = browser.tools.find((definition) => definition.tool.name === name)!.tool;
-    return tool.invoke(input, invocation(host, toolkits, 'browser', execution));
+    const output = await tool.invoke(input, invocation(host, toolkits, 'browser', execution));
+    if (!expectedError && typeof output === 'string') assertBrowserSuccess(JSON.parse(output), name);
+    return output;
   };
   assert.notEqual(a.bindings.browser!.identity.clientId, b.bindings.browser!.identity.clientId);
   assert.equal(a.bindings.browser!.identity.instanceId, b.bindings.browser!.identity.instanceId);
@@ -195,13 +210,13 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   assert.equal((await stat(artifact.path)).size, artifact.byteLength);
   assert.ok((await readFile(artifact.path)).length > 0);
 
-  const crossOrigin = JSON.parse(await invoke(a, 'browser_click', { selector: '#cross' }) as string);
+  const crossOrigin = JSON.parse(await invoke(a, 'browser_click', { selector: '#cross' }, true) as string);
   assert.equal(crossOrigin.ok, false);
   assert.equal(crossOrigin.error.code, 'origin_changed');
   assert.equal(crossOrigin.error.retryable, false);
   assert.equal(crossOrigin.error.details.interactionDispatched, true);
   assert.equal(crossOrigin.error.details.manualActionRequired, true);
-  assert.equal(String(await invoke(a, 'browser_extract')).includes('Unapproved private content'), false);
+  assert.equal(String(await invoke(a, 'browser_extract', {}, true)).includes('Unapproved private content'), false);
 
   await a.close();
   await eventually(async () => {
@@ -211,10 +226,10 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
     }
   }, 'Disconnecting Host A did not remove its screenshot.');
   assert.equal(JSON.parse(await invoke(b, 'browser_snapshot') as string).title, 'Host B');
-  const disconnected = JSON.parse(await invoke(a, 'browser_snapshot') as string);
+  const disconnected = JSON.parse(await invoke(a, 'browser_snapshot', {}, true) as string);
   assert.equal(disconnected.ok, false);
   assert.equal(disconnected.error.code, 'connection_lost');
   const replacement = await fixture.connect({ toolkits });
-  const staleSession = JSON.parse(await invoke(replacement, 'browser_snapshot') as string);
+  const staleSession = JSON.parse(await invoke(replacement, 'browser_snapshot', {}, true) as string);
   assert.equal(staleSession.error.code, 'browser_not_open');
 });

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 
 const result = spawnSync(process.execPath, [
-  '--import', 'tsx/esm', '--test',
+  '--import', 'tsx/esm', '--test', '--test-reporter=tap',
   'src/runtimeService/client.test.ts',
   'src/runtimeService/server.test.ts',
   'src/runtimeService/launcher.test.ts',
@@ -13,6 +13,7 @@ const result = spawnSync(process.execPath, [
   cwd: new URL('..', import.meta.url),
   env: { ...process.env, PINPAWO_TEST_CDP: '1' },
   stdio: 'inherit',
+  timeout: 180_000,
 });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

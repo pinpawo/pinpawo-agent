@@ -65,6 +65,8 @@ export async function ensureRuntimeService(options: {
     : ['--import', import.meta.resolve('tsx/esm'), sourceEntry, '--directory', paths.root];
   const log = await open(paths.log, 'a', 0o600);
   let launchError: Error | undefined;
+  let candidate: ReturnType<typeof spawn>;
+  let candidateExited: Promise<void>;
   try {
     const child = spawn(process.execPath, args, {
       detached: true,
@@ -72,14 +74,48 @@ export async function ensureRuntimeService(options: {
       env: { ...(options.bootstrapEnv ?? process.env) },
       cwd: paths.root,
     });
+    candidate = child;
+    candidateExited = new Promise<void>((resolve) => {
+      child.once('exit', () => resolve());
+      child.once('error', () => { if (!child.pid) resolve(); });
+    });
     child.once('error', (error) => { launchError = error; });
     child.unref();
   } finally { await log.close(); }
 
+  const discardCandidate = async () => {
+    if (candidate.exitCode !== null || candidate.signalCode !== null) return;
+    const force = setTimeout(() => {
+      try { candidate.kill('SIGKILL'); } catch { /* the deadline reports unconfirmed cleanup */ }
+    }, 2000);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      candidate.kill('SIGTERM');
+      await Promise.race([
+        candidateExited,
+        new Promise<never>((_resolve, reject) => {
+          deadline = setTimeout(() => reject(new RuntimeServiceError(
+            'startup_cleanup_failed', 'A redundant Runtime startup process did not exit.',
+          )), 5000);
+        }),
+      ]);
+    } finally { clearTimeout(force); clearTimeout(deadline); }
+  };
+
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (launchError) throw launchError;
-    try { return await connect(); }
+    try {
+      const client = await connect();
+      try {
+        // A slower candidate must not outlive ensure-running and revive the
+        // service after an explicit stop. Only terminate our own child, never
+        // the established owner learned from the endpoint or a lock file.
+        if (candidate.pid !== client.pid) await discardCandidate();
+        if (!client.isConnected) throw new RuntimeServiceError('connection_lost', 'Runtime service stopped during startup.');
+        return client;
+      } catch (error) { await client.close(); throw error; }
+    }
     catch (error) { if (!isMissingService(error)) throw error; }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

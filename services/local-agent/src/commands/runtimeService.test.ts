@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
@@ -41,6 +41,7 @@ for (const envLocation of ['home', 'workdir'] as const) {
       assert.deepEqual(status.instances, []);
     } finally {
       await service?.stop();
+      if (process.platform !== 'win32') await rm(dirname(paths.endpoint), { recursive: true, force: true });
       await rm(root, { recursive: true, force: true });
     }
   });

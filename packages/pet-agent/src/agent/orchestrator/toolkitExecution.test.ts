@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolve } from 'node:path';
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, ToolMessage, type ToolCall } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { createMiddleware, FakeToolCallingModel, type AnyAgentMiddleware } from 'langchain';
 import { createSubagent } from '../../subagent/createSubagent';
 import { subagentRuntimeContextSchema } from '../../subagent/runtimeContext';
 import { z } from 'zod';
-import type { AgentToolkit } from '../../types/toolkit';
+import type { AgentToolkit, ModelInputModality } from '../../types/toolkit';
 import type { SubagentRuntimeContext } from '../../types/subagent';
 import { defineInstructionDocument } from '../../types/capability';
 import { buildToolAuthorizationRecord, urlOriginAuthorization, type ToolAuthorizationMatcher, type ToolAuthorizationRecord } from '../../autoReview/reviewAuthorizations';
@@ -24,6 +24,8 @@ async function invoke(params: {
   fullAccess?: boolean;
   middleware?: AnyAgentMiddleware[];
   signal?: AbortSignal;
+  modelInputModalities?: readonly ModelInputModality[];
+  toolCalls?: (ToolCall & { id: string })[][];
 }) {
   const registry = compileAgentRegistry({ toolkits: [params.toolkit], capabilities: [{
     name: 'execute', description: 'Execute a tool.', uses: [params.toolkit.name],
@@ -31,10 +33,11 @@ async function invoke(params: {
   }] });
   return createCapabilityExecutor({
     toolkitRuntimeManager: params.manager,
+    modelInputModalities: params.modelInputModalities,
     runSubagent: params.middleware ? input => createSubagent({ ...input,
       middleware: [...(input.middleware ?? []), ...params.middleware!],
     }) : undefined,
-    models: { act: new FakeToolCallingModel({ toolCalls: [
+    models: { act: new FakeToolCallingModel({ toolCalls: params.toolCalls ?? [
       [{ id: 'call', name: params.toolkit.tools[0].tool.name, args: params.args ?? {} }], [],
     ] }) },
   })({
@@ -106,6 +109,47 @@ test('one static Tool obtains its owning Toolkit client in overlapping execution
   assert.strictEqual(seen.get('first'), firstClient);
   assert.strictEqual(seen.get('second'), secondClient);
 });
+
+for (const unavailableToolName of ['read_image', 'unknown_tool']) {
+  test(`Capability execution recovers from unavailable tool ${unavailableToolName}`, async () => {
+    let imageExecutions = 0;
+    let textExecutions = 0;
+    const image = tool(() => {
+      imageExecutions += 1;
+      return 'Image output must not reach a text-only model.';
+    }, { name: 'read_image', description: 'Read an image.', schema: z.object({}) });
+    const text = tool(() => {
+      textExecutions += 1;
+      return 'Recovered using a supported tool.';
+    }, { name: 'read_text', description: 'Read text.', schema: z.object({}) });
+    const result = await invoke({
+      toolkit: { name: 'inspect', description: 'Read files.', tools: [
+        { tool: image, requiresInputModalities: ['image'] },
+        { tool: text },
+      ] },
+      modelInputModalities: ['text'],
+      toolCalls: [
+        [{ id: 'unavailable-call', name: unavailableToolName, args: {} }],
+        [{ id: 'recovery-call', name: 'read_text', args: {} }],
+        [],
+      ],
+    });
+
+    assert.equal(result.status, 'returned');
+    assert.ok(result.delivery?.text);
+    assert.equal(imageExecutions, 0);
+    assert.equal(textExecutions, 1, 'A model must be able to choose a supported tool after the error.');
+    const feedback = result.privateMessages.filter(ToolMessage.isInstance);
+    assert.equal(feedback.length, 2);
+    assert.equal(feedback[0].tool_call_id, 'unavailable-call');
+    assert.equal(feedback[0].name, unavailableToolName);
+    assert.equal(feedback[0].status, 'error');
+    assert.ok(typeof feedback[0].content === 'string' && feedback[0].content.length > 0);
+    assert.equal(feedback[1].tool_call_id, 'recovery-call');
+    assert.equal(feedback[1].name, 'read_text');
+    assert.equal(feedback[1].status, 'success');
+  });
+}
 
 test('prepared input, review and Tool execution retain literal workdir whitespace', async () => {
   const workdir = resolve('/workspace with spaces ');

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createCdpRuntime } from './runtime';
 import { validateCdpConfig } from './connection';
 import type { CdpRuntimeConfig } from './options';
+import { CdpBrowserSession } from './session';
 
 test('CDP configuration rejects remote endpoints and conflicting ownership', () => {
   assert.throws(() => validateCdpConfig({ endpoint: 'http://example.com:9222' }), /local/);
@@ -41,4 +42,32 @@ test('pre-aborted CDP requests do not connect and a missing session does not ado
   assert.equal(runtime.diagnose().connected, false);
   assert.equal(runtime.diagnose().sessions, 0);
   await runtime.close();
+});
+
+test('client release waits for sessions whose explicit close is still pending', async (t) => {
+  const runtime = createCdpRuntime({ endpoint: 'http://127.0.0.1:1' });
+  const context = { clientId: 'closing', toolkitName: 'browser', execution: { threadId: 'thread', workdir: process.cwd() } };
+  let finishClose!: () => void;
+  const gate = new Promise<void>((resolve) => { finishClose = resolve; });
+  const originalClose = CdpBrowserSession.prototype.close;
+  t.mock.method(CdpBrowserSession.prototype, 'open', async () => 'opened');
+  t.mock.method(CdpBrowserSession.prototype, 'close', async function (this: CdpBrowserSession) {
+    await gate;
+    return originalClose.call(this);
+  });
+  try {
+    await runtime.call('open', ['https://example.com'], context);
+    const closing = runtime.call('close', [], context);
+    let released = false;
+    const release = runtime.releaseClient(context.clientId).then(() => { released = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(released, false);
+    assert.equal(runtime.diagnose().sessions, 1);
+    finishClose();
+    await Promise.all([closing, release]);
+    assert.equal(runtime.diagnose().sessions, 0);
+  } finally {
+    finishClose();
+    await runtime.close();
+  }
 });

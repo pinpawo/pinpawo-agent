@@ -17,6 +17,7 @@ type ThreadSessions = {
   workdir: string;
   active: string;
   sessions: Map<string, CdpBrowserSession>;
+  closing: Set<CdpBrowserSession>;
 };
 
 export class CdpRuntime {
@@ -49,7 +50,7 @@ export class CdpRuntime {
       if (method !== 'open' && method !== 'openWithProfile') {
         throw new BrowserOperationError('browser_not_open', 'Use browser_open first.', true);
       }
-      thread = { clientId: context.clientId, toolkitName: context.toolkitName, workdir: context.execution.workdir, active: 'default', sessions: new Map() };
+      thread = { clientId: context.clientId, toolkitName: context.toolkitName, workdir: context.execution.workdir, active: 'default', sessions: new Map(), closing: new Set() };
       this.threads.set(key, thread);
     }
     const options = (method === 'open' ? args[1] : method === 'openWithProfile' ? args[2] : undefined) as BrowserOpenOptions | undefined;
@@ -65,8 +66,7 @@ export class CdpRuntime {
       thread.sessions.set(name, session);
     }
     if (method === 'close') {
-      thread.sessions.delete(name);
-      return session.close();
+      return this.closeSession(thread, name, session);
     }
     const selected = session;
     try {
@@ -87,20 +87,26 @@ export class CdpRuntime {
         }
       }, context.signal);
     } catch (error) {
-      if (context.signal?.aborted) thread.sessions.delete(name);
+      if (context.signal?.aborted) await this.closeSession(thread, name, selected);
       throw error;
     }
   }
 
+  private async closeSession(thread: ThreadSessions, name: string, session: CdpBrowserSession): Promise<string> {
+    thread.closing.add(session);
+    // A replacement can already exist when an older queued call is cancelled.
+    if (thread.sessions.get(name) === session) thread.sessions.delete(name);
+    const result = await session.close();
+    thread.closing.delete(session);
+    return result;
+  }
+
   async releaseClient(clientId: string): Promise<void> {
     this.releasedClients.add(clientId);
-    const sessions: CdpBrowserSession[] = [];
-    for (const [key, thread] of this.threads) {
-      if (thread.clientId !== clientId) continue;
-      this.threads.delete(key);
-      sessions.push(...thread.sessions.values());
-    }
+    const threads = [...this.threads].filter(([, thread]) => thread.clientId === clientId);
+    const sessions = threads.flatMap(([, thread]) => [...thread.sessions.values(), ...thread.closing]);
     await Promise.all(sessions.map((session) => session.close()));
+    for (const [key] of threads) this.threads.delete(key);
   }
 
   diagnose() {
@@ -108,7 +114,7 @@ export class CdpRuntime {
       type: 'cdp',
       ...this.connection.diagnose(),
       clients: new Set([...this.threads.values()].map((thread) => thread.clientId)).size,
-      sessions: [...this.threads.values()].reduce((count, thread) => count + thread.sessions.size, 0),
+      sessions: [...this.threads.values()].reduce((count, thread) => count + thread.sessions.size + thread.closing.size, 0),
     };
   }
 

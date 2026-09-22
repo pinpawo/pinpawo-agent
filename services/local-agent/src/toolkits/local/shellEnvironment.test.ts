@@ -163,6 +163,66 @@ test('configured programs win over PATH for both shell names and argv tools', { 
   }, scope)).stdout, 'selected');
 });
 
+test('POSIX program launchers preserve wrapper paths and argv for shell and direct execution', { skip: !posix }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "shell wrapper 中文 ' "));
+  const wrapper = join(dir, 'git');
+  const helper = join(dir, 'helper');
+  writeFileSync(wrapper, '#!/bin/sh\nexec "$(dirname "$0")/helper" "$@"\n');
+  writeFileSync(helper, '#!/bin/sh\nprintf "%s\\n" "$0" "$@"\n');
+  chmodSync(wrapper, 0o755); chmodSync(helper, 0o755);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const args = ['space value', '中文', "single ' quote", 'double " quote', '$(touch not-run)', ''];
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  for (const config of [
+    { type: 'shell', programs: { git: wrapper } },
+    { type: 'shell', env: { PATH: `${dir}${delimiter}${process.env.PATH}` } },
+  ]) {
+    const fixture = createLocalRuntimeFixture(config);
+    try {
+      const direct = await fixture.client('git').exec({
+        program: 'git', args, cwd: dir, timeoutMs: 30_000, maxOutputChars: 4096,
+      }, scope);
+      const shell = await fixture.client().run(command(`git ${args.map(quote).join(' ')}`, dir), scope);
+      assert.equal(shell.status, 'exited');
+      if (shell.status === 'exited') assert.equal(shell.code, 0);
+      assert.equal(direct.stdout, [helper, ...args, ''].join('\n'));
+      assert.equal(shell.stdout, direct.stdout);
+      assert.equal(shell.stderr, '');
+      assert.equal(existsSync(join(dir, 'not-run')), false);
+    } finally { await fixture.close(); }
+  }
+});
+
+test('yielded descendant cleanup remains running until wait, disconnect, or close confirms it', { skip: !posix }, async () => {
+  for (const operation of ['wait', 'disconnect', 'close'] as const) {
+    const fixture = createLocalRuntimeFixture();
+    let pid: number | undefined;
+    try {
+      const client = fixture.client();
+      const result = await client.run(command('trap "" TERM; sleep 30 >/dev/null 2>&1 & echo $!', process.cwd(), 1000), scope);
+      const processId = started(result);
+      pid = Number(result.stdout.trim());
+      assert.ok(Number.isInteger(pid) && pid > 0);
+      process.kill(pid, 0);
+      assert.equal((await client.list(scope))[0]?.status, 'running');
+      assert.equal((await client.wait({ processId, timeoutMs: 0 }, scope)).process.status, 'running');
+      if (operation === 'wait') {
+        const completed = await client.wait({ processId, timeoutMs: 5000 }, scope);
+        assert.equal(completed.process.status, 'exited');
+        assert.equal(completed.process.exitCode, 0);
+      } else if (operation === 'disconnect') {
+        await fixture.environment.releaseClient('test-client');
+      } else {
+        await fixture.close();
+      }
+      assert.throws(() => process.kill(pid!, 0), { code: 'ESRCH' });
+    } finally {
+      if (pid) { try { process.kill(pid, 'SIGKILL'); } catch {} }
+      await fixture.close();
+    }
+  }
+});
+
 test('bundled ripgrep ignores a competing PATH program and keeps search limits', { skip: !posix }, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'shell-rg-'));
   const fake = join(dir, 'rg');

@@ -209,7 +209,6 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     });
 
     child.on('close', async (code) => {
-      exited = true;
       // A completed shell may leave redirected background children. They have
       // no returned process handle, so clean them now, never retain an exited
       // PGID for a later client disconnect when the number could be reused.
@@ -221,11 +220,16 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       if (termination) {
         try { await termination; } catch (error) {
           const failure = error instanceof Error ? error : new Error(String(error));
+          outputListeners.clear();
           if (yielded) rejectExit(failure);
           else settle({ status: 'spawn_failed', error: failure });
           return;
         }
       }
+      // A timeout may yield while descendant cleanup is in progress. Keep
+      // that handle running until cleanup succeeds so wait/disconnect cannot
+      // skip its pending (or failed) completion based on hasExited.
+      exited = true;
       if (yielded) {
         resolveExit({ code, stdout, stderr });
         // Nothing more will be emitted; do not keep subscriber closures alive

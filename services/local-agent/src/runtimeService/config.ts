@@ -12,7 +12,7 @@ export function runtimeServicePaths(directory = process.env.PINPAWO_RUNTIME_DIR 
     root,
     endpoint: process.platform === 'win32'
       ? `\\\\.\\pipe\\pinpawo-runtime-${key}`
-      : resolve(tmpdir(), `pinpawo-runtime-${key}.sock`),
+      : resolve(tmpdir(), `ppr-${key}`, 's'),
     config: resolve(root, 'config.json'),
     token: resolve(root, 'token'),
     lock: resolve(root, 'service.lock'),

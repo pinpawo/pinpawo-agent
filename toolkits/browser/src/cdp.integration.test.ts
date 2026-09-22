@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { CdpConnection } from './connection';
+import { normalizeBrowserError } from './errors';
 import { createCdpRuntime, type CdpRuntimeCallContext } from './runtime';
 
 const enabled = process.env.PINPAWO_TEST_CDP === '1';
@@ -153,4 +154,87 @@ test('real CDP: managed process closes and named contexts isolate storage', { sk
   await runtime.close();
   assert.equal(runtime.diagnose().connected, false);
   assert.equal(runtime.diagnose().closed, true);
+});
+
+test('real CDP: queued cancellation and named-page reopening retain resource ownership', { skip: !enabled, timeout: 45_000 }, async (t) => {
+  const workdir = await mkdtemp(join(tmpdir(), 'pinpawo-cdp-lifecycle-'));
+  const profile = join(workdir, 'profile');
+  const server = createServer((_request, response) => {
+    response.setHeader('content-type', 'text/html');
+    response.end('<h1>Lifecycle page</h1><p id="storage"></p><script>if(location.search)localStorage.setItem("token","saved");document.querySelector("p").textContent=localStorage.getItem("token")||"missing";</script>');
+  });
+  const harness = new CdpConnection({ headless: true, userDataDir: profile });
+  let runtime: ReturnType<typeof createCdpRuntime> | undefined;
+  t.after(() => closeHttpFixtures([server]));
+  t.after(() => cleanupFixture([
+    async () => runtime?.close(),
+    () => harness.close(),
+    () => rm(workdir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
+  ]));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+  const browser = await harness.getBrowser();
+  const [port] = (await readFile(join(profile, 'DevToolsActivePort'), 'utf8')).split('\n');
+  runtime = createCdpRuntime({ endpoint: 'http://127.0.0.1:' + port });
+  const call = (clientId: string, method: string, args: unknown[] = [], signal?: AbortSignal) => runtime!.call(method, args, {
+    clientId, toolkitName: 'browser', execution: { threadId: 'thread', workdir }, signal,
+  });
+  const userPage = await browser.contexts()[0]!.newPage();
+  await userPage.goto(origin + '/user');
+
+  await call('queued', 'open', [origin + '/queued']);
+  const queuedPage = browser.contexts()[0]!.pages().find((page) => page.url() === origin + '/queued')!;
+  assert.ok(queuedPage);
+  const waiting = assert.rejects(call('queued', 'wait', [{ selector: '#never' }, 300]), { name: 'TimeoutError' });
+  const abortQueued = new AbortController();
+  const queued = assert.rejects(call('queued', 'snapshot', [], abortQueued.signal), { code: 'browser_command_cancelled' });
+  abortQueued.abort();
+  await Promise.all([waiting, queued]);
+  await runtime.releaseClient('queued');
+  assert.equal(queuedPage.isClosed(), true, 'A cancelled queued operation must not orphan its session page');
+  assert.equal(userPage.isClosed(), false);
+
+  await call('replacement', 'open', [origin + '/old']);
+  const oldPage = browser.contexts()[0]!.pages().find((page) => page.url() === origin + '/old')!;
+  assert.ok(oldPage);
+  const pending = assert.rejects(call('replacement', 'wait', [{ selector: '#never' }, 30_000]));
+  const abortOld = new AbortController();
+  const cancelled = assert.rejects(call('replacement', 'snapshot', [], abortOld.signal), { code: 'browser_command_cancelled' });
+  abortOld.abort();
+  const closing = call('replacement', 'close');
+  const reopened = call('replacement', 'open', [origin + '/new']);
+  await Promise.all([pending, cancelled, closing, reopened]);
+  assert.equal(oldPage.isClosed(), true);
+  assert.equal(JSON.parse(await call('replacement', 'snapshot') as string).url, origin + '/new');
+  await runtime.releaseClient('replacement');
+  assert.equal(browser.contexts()[0]!.pages().some((page) => page.url() === origin + '/new'), false);
+
+  const inspector = await browser.newBrowserCDPSession();
+  const initialContexts = (await inspector.send('Target.getBrowserContexts')).browserContextIds;
+  const first = JSON.parse(await call('named', 'open', [origin + '/storage?save', { session: 'named' }]) as string);
+  assert.match(first.text, /saved/);
+  const contexts = (await inspector.send('Target.getBrowserContexts')).browserContextIds;
+  assert.equal(contexts.length, initialContexts.length + 1);
+  const target = (await inspector.send('Target.getTargets')).targetInfos.find((target) => target.url === origin + '/storage?save');
+  assert.ok(target);
+  await inspector.send('Target.closeTarget', { targetId: target.targetId });
+  // The observer and Runtime use separate CDP connections; allow the Runtime's
+  // page-close event to arrive before asking it to create the replacement page.
+  for (let attempt = 0; ; attempt++) {
+    try { await call('named', 'snapshot'); } catch (error) {
+      const code = normalizeBrowserError(error).code;
+      if (code === 'browser_not_open') break;
+      const closedDuringRead = error instanceof Error && error.message.includes('Target page, context or browser has been closed');
+      if (code !== 'target_closed' && !closedDuringRead) throw error;
+    }
+    assert.ok(attempt < 20, 'Runtime must observe the externally closed page');
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  const reopenedNamed = JSON.parse(await call('named', 'open', [origin + '/storage', { session: 'named' }]) as string);
+  assert.match(reopenedNamed.text, /saved/, 'Reopening a named page must retain its existing login storage');
+  assert.deepEqual((await inspector.send('Target.getBrowserContexts')).browserContextIds, contexts);
+  await runtime.releaseClient('named');
+  assert.deepEqual((await inspector.send('Target.getBrowserContexts')).browserContextIds, initialContexts);
+  assert.equal(userPage.isClosed(), false);
+  await inspector.detach();
 });

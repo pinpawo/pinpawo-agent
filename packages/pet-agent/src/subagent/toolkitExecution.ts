@@ -16,7 +16,9 @@ export function createToolkitExecutionMiddleware(input: SubagentRunInput) {
       const toolkitName = Object.hasOwn(owners, request.toolCall.name) ? owners[request.toolCall.name] : undefined;
       if (!toolkitName) return handler(request);
       const tool = staticTools.get(request.toolCall.name);
-      if (!tool) throw new Error(`Tool "${request.toolCall.name}" is absent from the static inventory.`);
+      // A known Tool may be filtered out for this model's input modalities.
+      // ToolNode returns recoverable invalid-tool feedback for that request.
+      if (!tool) return handler(request);
       // LangChain ToolNode closes over config and ignores request.runtime
       // overrides. Invoke the unchanged registered Tool with explicit context.
       const config = getConfig();

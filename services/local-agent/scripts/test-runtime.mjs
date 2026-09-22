@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const result = spawnSync(process.execPath, [
   '--import', 'tsx/esm', '--test', '--test-reporter=tap',
+  'src/runtimeService/endpoint.test.ts',
   'src/runtimeService/client.test.ts',
   'src/runtimeService/server.test.ts',
   'src/runtimeService/launcher.test.ts',

@@ -6,6 +6,7 @@ import { createShellEnvironment } from '../toolkits/local/shellEnvironment';
 import { loadRuntimeServiceConfig, runtimeServicePaths } from './config';
 import { startRuntimeService } from './server';
 import { RuntimeClient } from './client';
+import { ensureRuntimeEndpointDirectory } from './endpoint';
 import { RuntimeServiceError, record } from './protocol';
 import type { HostedRuntime, RuntimeFactory, RuntimeInstanceConfig, RuntimeCallContext } from './types';
 
@@ -13,6 +14,7 @@ async function main() {
   const index = process.argv.indexOf('--directory');
   if (index < 0 || !process.argv[index + 1]) throw new Error('Runtime service requires --directory.');
   const paths = runtimeServicePaths(process.argv[index + 1]);
+  await ensureRuntimeEndpointDirectory(paths.endpoint);
   const token = (await readFile(paths.token, 'utf8')).trim();
   const endpointIsActive = async () => {
     try {

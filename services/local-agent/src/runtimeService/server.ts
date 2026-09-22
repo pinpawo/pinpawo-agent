@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { chmod } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import { isAbsolute } from 'node:path';
+import { ensureRuntimeEndpointDirectory } from './endpoint';
 import {
   RUNTIME_PROTOCOL_VERSION, RuntimeServiceError, receive, record, send, string,
 } from './protocol';
@@ -65,6 +66,7 @@ export async function startRuntimeService(options: {
   factories: Readonly<Record<string, RuntimeFactory>>;
   onStopped?: () => void | Promise<void>;
 }) {
+  await ensureRuntimeEndpointDirectory(options.endpoint);
   const instances = new Map<string, Instance>();
   const connections = new Set<Connection>();
   const cleanups = new Set<Promise<unknown>>();

@@ -63,6 +63,23 @@ test('disconnect never signals an already finished process', async () => {
   assert.equal(registry.size, 0);
 });
 
+test('failed cleanup remains observable through wait, terminate, and shutdown', async () => {
+  const registry = new ProcessRegistry();
+  const handle = fakeHandle(9002);
+  const failure = new Error('Process-group cleanup could not be confirmed.');
+  const completion = Promise.reject(failure);
+  handle.wait = () => completion;
+  handle.terminate = () => undefined;
+  const record = registry.register({ handle, owner: OWNER, command: 'failed cleanup', cwd: '/tmp' });
+
+  await assert.rejects(registry.wait(record.processId, OWNER, 1000), failure);
+  assert.equal(registry.list(OWNER)[0]?.status, 'running');
+  await assert.rejects(registry.terminate(record.processId, OWNER), failure);
+  await assert.rejects(registry.stopClient(OWNER.clientId), failure);
+  await assert.rejects(registry.stopAll(), failure);
+  assert.equal(registry.size, 1, 'unconfirmed cleanup must not be discarded as an exited process');
+});
+
 test('ownership is enforced without touching a process', async () => {
   const registry = new ProcessRegistry();
   const record = registry.register({

@@ -144,11 +144,19 @@ export class CdpBrowserSession {
     if (this.page && !this.page.isClosed()) return this.page;
     if (!this.pendingPage) {
       this.pendingPage = (async () => {
-        const browser = await this.connection.getBrowser();
-        const context = this.name === 'default' ? browser.contexts()[0] : await browser.newContext();
-        if (!context) throw new Error('CDP browser has no default context.');
-        this.ownsContext = this.name !== 'default';
-        this.context = context;
+        let context = this.context;
+        if (!context) {
+          const browser = await this.connection.getBrowser();
+          context = this.name === 'default' ? browser.contexts()[0] : await browser.newContext();
+          if (!context) throw new Error('CDP browser has no default context.');
+          this.ownsContext = this.name !== 'default';
+          this.context = context;
+          this.createdResources ||= this.ownsContext;
+          const createdContext = context;
+          context.once('close', () => {
+            if (this.context === createdContext) this.context = null;
+          });
+        }
         if (this.disposed) {
           if (this.ownsContext) await context.close();
           throw new BrowserOperationError('target_closed', 'Browser session closed while creating its context.');

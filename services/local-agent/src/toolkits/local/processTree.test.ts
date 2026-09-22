@@ -55,6 +55,27 @@ test('an exited command reclaims unhandled background children before returning'
   assert.equal(isProcessGroupAlive(outcome.pid!), false);
 });
 
+test('a yielded handle cannot claim exit when process-group cleanup cannot be confirmed', { skip: isWindows }, async (t) => {
+  const kill = process.kill.bind(process);
+  t.mock.method(process, 'kill', (pid: number, signal?: number | NodeJS.Signals) => {
+    // Real signals still stop the test process. Only group disappearance is
+    // unavailable, exercising the executor's cleanup-failure outcome.
+    if (pid < 0 && signal === 0) return true;
+    return kill(pid, signal);
+  });
+  const outcome = await runShellCommand({
+    env: { ...process.env }, shell: '/bin/bash',
+    command: 'sleep 0.1', cwd: CWD, timeoutMs: 20, maxOutputChars: 1024,
+    killGraceMs: 20, yieldOnTimeout: true,
+  });
+  assert.equal(outcome.status, 'yielded');
+  if (outcome.status !== 'yielded') return;
+  await assert.rejects(outcome.handle.wait(), /cleanup could not be confirmed/);
+  assert.equal(outcome.handle.hasExited, false);
+  outcome.handle.terminate();
+  await assert.rejects(outcome.handle.wait(), /cleanup could not be confirmed/);
+});
+
 test('separates stdout and stderr', { skip: isWindows }, async () => {
   const outcome = await runShellCommand({
     env: { ...process.env }, shell: '/bin/bash',

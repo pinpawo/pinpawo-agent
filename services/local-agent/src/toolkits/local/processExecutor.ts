@@ -32,11 +32,12 @@ export type ShellRunHandle = {
   stdout: string;
   stderr: string;
   /**
-   * Whether the process has already finished.
+   * Whether the process has finished and platform cleanup has succeeded.
    *
    * A handle can be taken over after its process exited — the gap between
    * yielding and being adopted is enough — so an owner needs to tell a live
-   * process from a finished one without waiting on it.
+   * process from a finished one without waiting on it. Pending or failed
+   * cleanup must remain false so owners still observe wait()'s outcome.
    */
   hasExited: boolean;
   /**

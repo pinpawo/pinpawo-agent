@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { ensureRuntimeService, connectRuntimeService } from './launcher';
@@ -10,6 +10,31 @@ import type { RuntimeClient } from './client';
 import type { RuntimeExecution } from './types';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isProcessAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function killTestCandidate(pid: number | undefined): Promise<void> {
+  if (!pid || !isProcessAlive(pid)) return;
+  process.kill(pid, 'SIGKILL');
+  for (let attempt = 0; attempt < 250 && isProcessAlive(pid); attempt += 1) await delay(20);
+  assert.equal(isProcessAlive(pid), false, 'The test candidate did not exit.');
+}
+
+async function removeTestSocketDirectory(paths: ReturnType<typeof runtimeServicePaths>, servicePid?: number): Promise<void> {
+  if (process.platform === 'win32') return;
+  // stopService acknowledges before shutdown finishes. Only remove this
+  // fixture's private socket directory after its known service has exited.
+  if (servicePid) {
+    for (let attempt = 0; attempt < 500 && isProcessAlive(servicePid); attempt += 1) await delay(20);
+    assert.equal(isProcessAlive(servicePid), false, 'Preserving the socket directory because the test service is still running.');
+  }
+  await rm(dirname(paths.endpoint), { recursive: true, force: true });
+}
 
 test('concurrent Hosts use one independent service, shared shell environments and a registered extension', { timeout: 30_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'ppr-host-'));
@@ -89,6 +114,7 @@ test('concurrent Hosts use one independent service, shared shell environments an
       await admin.close();
     }
     // Lock release precedes process exit; Windows still holds cwd briefly.
+    await removeTestSocketDirectory(paths, admin?.pid ?? clients[0]?.pid);
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
@@ -122,6 +148,7 @@ test('a killed service is replaced after its lock expires and the old connection
     await client?.close();
     if (replacement?.isConnected) await replacement.stopService().catch(() => undefined);
     await replacement?.close();
+    await removeTestSocketDirectory(paths, replacement?.pid ?? client?.pid);
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
@@ -236,6 +263,96 @@ while (true) {
       try { await admin.stopService(); } finally { await admin.close(); }
     }
     await waitFor(lockIsGone, 'Preserving the test directory because its service lock remains.');
+    await removeTestSocketDirectory(paths);
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+for (const phase of ['module', 'preload'] as const) {
+  test(`startup timeout reaps a delayed ${phase} before rejecting and cannot start a service later`, { timeout: 20_000 }, async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ppr-timeout-'));
+    const paths = runtimeServicePaths(directory);
+    const pidPath = join(directory, 'candidate.pid');
+    const releasePath = join(directory, 'release-candidate');
+    const modulePath = join(directory, 'delayed.mjs');
+    let pid: number | undefined;
+    try {
+      await writeFile(modulePath, `
+import { writeFile, stat } from 'node:fs/promises';
+import { setTimeout } from 'node:timers/promises';
+${phase === 'preload' ? "process.on('SIGTERM', () => {});" : ''}
+await writeFile(${JSON.stringify(pidPath)}, String(process.pid));
+const deadline = Date.now() + 15_000;
+while (true) {
+  try { await stat(${JSON.stringify(releasePath)}); break; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (Date.now() >= deadline) throw new Error('Test candidate was never released.');
+  await setTimeout(20);
+}
+export const runtimeFactories = {};
+`);
+      await writeFile(paths.config, JSON.stringify({
+        instances: {}, toolkitBindings: {}, ...(phase === 'module' ? { modules: [modulePath] } : {}),
+      }));
+      await assert.rejects(ensureRuntimeService({
+        directory, startupTimeoutMs: 4000,
+        ...(phase === 'preload' ? { bootstrapEnv: {
+          ...process.env,
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, '--import=' + pathToFileURL(modulePath).href].filter(Boolean).join(' '),
+        } } : {}),
+      }), { code: 'startup_failed' });
+      pid = Number((await readFile(pidPath, 'utf8')).trim());
+      assert.ok(Number.isSafeInteger(pid) && pid > 0, 'The candidate must reach its delayed initialization.');
+      assert.equal(isProcessAlive(pid), false, 'The startup promise must wait for its own child to exit.');
+
+      // Keep the namespace and release the gate after rejection. Removing it
+      // first would hide an orphan starting a service with stale configuration.
+      await writeFile(releasePath, 'released');
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await delay(50);
+        await assert.rejects(connectRuntimeService({ directory }), (error: unknown) => (
+          ['ENOENT', 'ECONNREFUSED'].includes(String((error as NodeJS.ErrnoException).code))
+        ));
+      }
+    } finally {
+      // Only use the PID emitted by this fixture, never shared lock contents.
+      pid ??= Number(await readFile(pidPath, 'utf8').catch(() => '')) || undefined;
+      await killTestCandidate(pid);
+      await removeTestSocketDirectory(paths);
+      await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+  });
+}
+
+test('binding failure reaps a new candidate while preserving an established service', { timeout: 20_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ppr-binding-'));
+  const paths = runtimeServicePaths(directory);
+  const pidPath = join(directory, 'candidate.pid');
+  const modulePath = join(directory, 'identity.mjs');
+  let pid: number | undefined;
+  let owner: RuntimeClient | undefined;
+  try {
+    await writeFile(modulePath, `
+import { writeFile } from 'node:fs/promises';
+await writeFile(${JSON.stringify(pidPath)}, String(process.pid));
+export const runtimeFactories = {};
+`);
+    await writeFile(paths.config, JSON.stringify({ instances: {}, toolkitBindings: {}, modules: [modulePath] }));
+    await assert.rejects(ensureRuntimeService({ directory, toolkits: { bash: 'shell' } }), { code: 'binding_mismatch' });
+    pid = Number((await readFile(pidPath, 'utf8')).trim());
+    assert.ok(Number.isSafeInteger(pid) && pid > 0);
+    assert.equal(isProcessAlive(pid), false, 'A failed handshake must not leave this launcher\'s candidate running.');
+
+    owner = await ensureRuntimeService({ directory, administrative: true });
+    await assert.rejects(ensureRuntimeService({ directory, toolkits: { bash: 'shell' } }), { code: 'binding_mismatch' });
+    assert.equal((await owner.status()).pid, owner.pid, 'An existing owner must survive a different Host\'s binding error.');
+  } finally {
+    if (owner) {
+      await owner.stopService().catch(() => undefined);
+      await owner.close();
+    }
+    await killTestCandidate(pid);
+    await removeTestSocketDirectory(paths, owner?.pid);
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

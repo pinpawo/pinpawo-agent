@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { mkdtemp, mkdir, writeFile, readFile, stat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { isCommand } from '@langchain/langgraph';
 import { ToolkitRuntimeManager, type AgentToolkit } from '@pinpawo/pet-agent';
@@ -72,6 +72,7 @@ async function serviceFixture(t: TestContext) {
         throw error;
       }
     }, 'The isolated Runtime service did not release its lock; preserving its directory.');
+    if (process.platform !== 'win32') await rm(dirname(paths.endpoint), { recursive: true, force: true });
     // Windows holds the service's cwd until process exit, just after lock release.
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });

@@ -142,6 +142,8 @@ Host 负责客户端注入与关闭。Tools 使用 context 中的接口，旧 ro
 默认按当前 OS 用户和配置命名空间运行一个服务，Chat、Studio、多项目共用。
 Host 使用统一 launcher 的 ensure-running；并发启动通过锁与端点探测保证只有一个
 owner。清理失效锁/端点前须确认服务已不存在；版本不兼容报错，不自动杀旧服务。
+启动失败或超时时，launcher 等待本次创建的候选进程退出，必要时强制终止；未确认退出
+时同时报告原始失败与清理失败，不留下可能延迟启动的候选进程。
 
 提供 start/status/stop。Host 断开不停止服务，最后一个 Host 退出后服务仍可驻留。
 服务启动配置及 bootstrap env 由 launcher 显式提供，不采用某次 Agent 调用的临时环境。
@@ -150,7 +152,11 @@ macOS companion 继续暂停，不参与本期实现。
 
 ## 4. 本机协议、故障与审核
 
-Unix socket / Windows named pipe 使用同用户访问控制及端点身份校验。
+Unix socket 放在临时目录下按用户和配置命名空间确定的短路径私有目录中（0700），
+socket 权限为 0600。客户端在连接与发送 token 前，校验目录及 socket 均属于当前用户，
+拒绝非私有目录、符号链接及非 socket 端点；已有不合规目录直接报错，不自动修改权限。
+Windows 使用 named pipe；两平台的服务端均验证命名空间 token。此处 Unix 文件归属校验
+以 OS 用户为信任边界，不用于区分同一用户运行的不同程序。
 协议只承载连接、请求、响应、取消和有界输出；一个 requestId 用于关联请求和取消。
 具体操作与错误由对应 Runtime 接口定义，原生进程对象、JS 回调和 Error 实例不跨进程。
 
@@ -199,6 +205,8 @@ cwd/路径，让审核和执行使用同一目标：绝对路径保持原值，�
   inspect_shell 准入、argv、timeout、取消、进程树、yield、退出码和输出限制。
 - 后台任务须通过 yield 返回 processId，供 wait/terminate 管理。POSIX 命令退出前清理
   同组无 handle 子进程，不把已退出命令的 PGID 长期保存到 Host 断连时再处理。
+  清理完成前 handle 保持未完成状态，wait、断连及实例关闭均等待清理结果；清理失败
+  必须报告，不能仅凭主进程退出宣告完成。
   Windows 使用 taskkill 管理仍存活的进程树；没有 OS Job 的情况下，不能保证父进程
   先退出后的孤儿子树清理，也不使用可能已复用的旧 PID 追杀。
 - rg：显式路径优先，否则 bundled rg。git/gh/jq：显式路径优先，否则服务配置的 PATH。
@@ -206,7 +214,8 @@ cwd/路径，让审核和执行使用同一目标：绝对路径保持原值，�
 - 成功解析的程序固定到实例，目标消失时报失效；缺失程序可按相同配置重新检查。
   相对/空 PATH 项使用配置中的明确基准，不使用某次调用 cwd。
 - 专用工具与 shell 中普通受管命令名命中同一程序。实例维护私有命令目录并加入 PATH；
-  POSIX 链接与 Windows 映射均须验证 argv、Unicode/空格、退出码和取消。
+  POSIX launcher 以原程序路径 exec，保留脚本通过 `$0` 查找相邻资源的语义；Windows
+  使用目录映射。两者均须验证 argv、Unicode/空格、退出码和取消。
   显式路径、调用中覆盖 PATH、内建命令和函数不属于这个保证。
 - 保留 git locale、jq 最小环境及输出限制、rg 的 --no-config/忽略/排序/截断语义。
   可选 gh/jq 缺失只影响对应操作，不使整个 Shell Toolkit 消失。
@@ -229,6 +238,9 @@ CDP 指托管进程直接连接 Chrome/Chromium 调试端点，管理连接、ta
 
 session 按 client、Toolkit 和 thread 归属，不再只按 threadId。CDP 断连、页面关闭使
 受影响操作明确失败；重建连接不得静默重用失效 ref/target 或重放点击。
+命名 session 的页面关闭后，再次打开沿用仍存活的 context，保留其登录及存储状态。
+取消包含排队中的调用：先关闭其所属 session，关闭完成前继续追踪资源；旧调用的取消
+不得删除同名新 session，Host 断连也须等待正在关闭的资源。
 导航、selector/ref、弹窗、提取、截图、取消、origin/review 继续接受实际操作验证。
 截图与 artifact 文件标明归属和有效期，Host 退出不能关闭其他 Host 或用户的浏览器。
 连接已有浏览器不支持的 profile/headless 等启动参数明确报错。
@@ -255,6 +267,8 @@ session 按 client、Toolkit 和 thread 归属，不再只按 threadId。CDP 断
 诊断直接查询服务和实例，显示连接、实例状态、Toolkit 映射和最近失败；
 共享实例只记录一份状态。Host 只补充自身连接状态，不维护另一份资源状态。
 静态 Tool inventory 不随连接或安装状态改变；诊断不输出凭据、env 值或其他 client 的资源。
+模型模态仍可过滤可用 Tools；误调用被过滤或未知的工具返回可恢复的 ToolMessage 错误，
+模型可以改用可用工具，不能因此中断整个 Capability。
 
 | 阶段 | 交付与验证 |
 | --- | --- |
@@ -298,7 +312,7 @@ session 按 client、Toolkit 和 thread 归属，不再只按 threadId。CDP 断
 | [search](../../../services/local-agent/src/toolkits/local/searchBackend.ts)、[JSON](../../../services/local-agent/src/toolkits/local/jsonTools.ts)、[Git](../../../services/local-agent/src/toolkits/local/gitTools.ts) | 外部命令统一交给 Shell |
 | [BrowserRuntime](../../../toolkits/browser/src/runtime.ts)、[toolkit](../../../toolkits/browser/src/toolkit.ts) | extension 状态和 thread-only session 改为 CDP 与客户端归属 |
 | [Host assembly](../../../services/local-agent/src/hostCapabilityAssembly.ts)、[coordinator](../../../services/local-agent/src/toolkits/hostToolkitCoordinator.ts) | 装配一个共享 client 与显式实例映射 |
-| [launcher 验证](../../../services/local-agent/src/runtimeService/launcher.test.ts)、[IPC 验证](../../../services/local-agent/src/runtimeService/server.test.ts)、[客户端验证](../../../services/local-agent/src/runtimeService/client.test.ts) | 独立服务、并发连接、归属、取消、断连及畸形响应 |
+| [launcher 验证](../../../services/local-agent/src/runtimeService/launcher.test.ts)、[IPC 验证](../../../services/local-agent/src/runtimeService/server.test.ts)、[端点验证](../../../services/local-agent/src/runtimeService/endpoint.test.ts)、[客户端验证](../../../services/local-agent/src/runtimeService/client.test.ts) | 独立服务、并发连接、私有端点、启动失败回收、归属、取消、断连及畸形响应 |
 | [真实 CDP 验证](../../../toolkits/browser/src/cdp.integration.test.ts) | 页面行为、origin 边界、已有/受管浏览器生命周期 |
 | [Host 到服务的联合验证](../../../services/local-agent/src/runtimeService/hostClient.test.ts) | 静态 Shell/Browser Tool、插件客户端、独立服务及真实 Chrome |
 

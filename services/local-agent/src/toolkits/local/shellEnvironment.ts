@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rgPath } from '@vscode/ripgrep';
@@ -135,7 +135,12 @@ export function createShellEnvironment(config: RuntimeInstanceConfig): HostedRun
         throw new Error(`Windows executable mapping must preserve its native filename: ${name}`);
       }
       windowsDirectories.add(dirname(target));
-    } else if (!existsSync(join(bin, name))) symlinkSync(target, join(bin, name));
+    } else if (!existsSync(join(bin, name))) {
+      // Execute the original path so script launchers can resolve helpers from
+      // their own $0 directory. A symlink here changes that directory to bin.
+      const quotedTarget = `'${target.replaceAll("'", "'\\''")}'`;
+      writeFileSync(join(bin, name), `#!/bin/sh\nexec ${quotedTarget} "$@"\n`, { mode: 0o700 });
+    }
   };
   try {
     for (const name of ['rg', 'git', 'gh', 'jq', ...Object.keys(programPaths)]) {
@@ -222,7 +227,7 @@ export function createShellEnvironment(config: RuntimeInstanceConfig): HostedRun
         if (method !== 'shell.run' && method !== 'shell.exec') throw new Error(`Unknown Shell operation: ${method}`);
         const args = method === 'shell.run' ? commandSchema.parse(input) : execSchema.parse(input);
         if (method === 'shell.run') {
-          // Validate pinned targets before a shell could skip a dangling PATH link.
+          // Validate pinned targets before invoking their PATH launchers.
           // Previously missing optional programs may be discovered from the same snapshot.
           for (const name of ['rg', 'git', 'gh', 'jq', ...Object.keys(programPaths)]) {
             const target = choose(name, name === 'rg');

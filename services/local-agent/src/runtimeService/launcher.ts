@@ -5,10 +5,12 @@ import { mkdir, open, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { RuntimeClient } from './client';
 import { runtimeServicePaths } from './config';
+import { ensureRuntimeEndpointDirectory } from './endpoint';
 import { RuntimeServiceError } from './protocol';
 
 async function serviceToken(directory?: string): Promise<string> {
   const paths = runtimeServicePaths(directory);
+  await ensureRuntimeEndpointDirectory(paths.endpoint);
   await mkdir(paths.root, { recursive: true, mode: 0o700 });
   try {
     const file = await open(paths.token, 'wx', 0o600);
@@ -48,6 +50,8 @@ export async function ensureRuntimeService(options: {
   toolkits?: Readonly<Record<string, string>>;
   administrative?: boolean;
   bootstrapEnv?: NodeJS.ProcessEnv;
+  /** Maximum time to establish the initial service connection. */
+  startupTimeoutMs?: number;
 } = {}): Promise<RuntimeClient> {
   const paths = runtimeServicePaths(options.directory);
   const token = await serviceToken(paths.root);
@@ -65,59 +69,73 @@ export async function ensureRuntimeService(options: {
     : ['--import', import.meta.resolve('tsx/esm'), sourceEntry, '--directory', paths.root];
   const log = await open(paths.log, 'a', 0o600);
   let launchError: Error | undefined;
-  let candidate: ReturnType<typeof spawn>;
-  let candidateExited: Promise<void>;
-  try {
-    const child = spawn(process.execPath, args, {
-      detached: true,
-      stdio: ['ignore', log.fd, log.fd],
-      env: { ...(options.bootstrapEnv ?? process.env) },
-      cwd: paths.root,
-    });
-    candidate = child;
-    candidateExited = new Promise<void>((resolve) => {
-      child.once('exit', () => resolve());
-      child.once('error', () => { if (!child.pid) resolve(); });
-    });
-    child.once('error', (error) => { launchError = error; });
-    child.unref();
-  } finally { await log.close(); }
-
-  const discardCandidate = async () => {
-    if (candidate.exitCode !== null || candidate.signalCode !== null) return;
+  let candidate: ReturnType<typeof spawn> | undefined;
+  let candidateExited: Promise<void> | undefined;
+  let discarded: Promise<void> | undefined;
+  const discardCandidate = () => discarded ??= (async () => {
+    const child = candidate;
+    if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
     const force = setTimeout(() => {
-      try { candidate.kill('SIGKILL'); } catch { /* the deadline reports unconfirmed cleanup */ }
+      try { child.kill('SIGKILL'); } catch { /* the deadline reports unconfirmed cleanup */ }
     }, 2000);
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-      candidate.kill('SIGTERM');
+      try { child.kill('SIGTERM'); } catch { /* still attempt forced cleanup */ }
       await Promise.race([
-        candidateExited,
+        candidateExited!,
         new Promise<never>((_resolve, reject) => {
           deadline = setTimeout(() => reject(new RuntimeServiceError(
-            'startup_cleanup_failed', 'A redundant Runtime startup process did not exit.',
+            'startup_cleanup_failed', 'The Runtime startup candidate did not exit; cleanup is unconfirmed.',
           )), 5000);
         }),
       ]);
     } finally { clearTimeout(force); clearTimeout(deadline); }
-  };
+  })();
 
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (launchError) throw launchError;
+  try {
     try {
-      const client = await connect();
+      const child = spawn(process.execPath, args, {
+        detached: true,
+        stdio: ['ignore', log.fd, log.fd],
+        env: { ...(options.bootstrapEnv ?? process.env) },
+        cwd: paths.root,
+      });
+      candidate = child;
+      candidateExited = new Promise<void>((resolve) => {
+        child.once('exit', () => resolve());
+        child.once('error', () => { if (!child.pid) resolve(); });
+      });
+      child.once('error', (error) => { launchError = error; });
+      child.unref();
+    } finally { await log.close(); }
+
+    const deadline = Date.now() + (options.startupTimeoutMs ?? 30_000);
+    while (Date.now() < deadline) {
+      if (launchError) throw launchError;
       try {
-        // A slower candidate must not outlive ensure-running and revive the
-        // service after an explicit stop. Only terminate our own child, never
-        // the established owner learned from the endpoint or a lock file.
-        if (candidate.pid !== client.pid) await discardCandidate();
-        if (!client.isConnected) throw new RuntimeServiceError('connection_lost', 'Runtime service stopped during startup.');
-        return client;
-      } catch (error) { await client.close(); throw error; }
+        const client = await connect();
+        try {
+          // Only terminate our own child, never an established owner learned
+          // from the endpoint or a lock file.
+          if (candidate.pid !== client.pid) await discardCandidate();
+          if (!client.isConnected) throw new RuntimeServiceError('connection_lost', 'Runtime service stopped during startup.');
+          return client;
+        } catch (error) { await client.close(); throw error; }
+      }
+      catch (error) { if (!isMissingService(error)) throw error; }
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    catch (error) { if (!isMissingService(error)) throw error; }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    throw new RuntimeServiceError('startup_failed', `Runtime service did not start. Inspect ${paths.log}.`);
+  } catch (error) {
+    // A failed launch must not remain detached and start a service after the
+    // caller has already been told startup failed.
+    try { await discardCandidate(); }
+    catch (cleanupError) {
+      const original = error instanceof Error ? error.message : 'Runtime service startup failed.';
+      throw Object.assign(new AggregateError(
+        [error, cleanupError], `${original} Startup candidate cleanup is unconfirmed.`, { cause: error },
+      ), { code: (error as NodeJS.ErrnoException)?.code });
+    }
+    throw error;
   }
-  throw new RuntimeServiceError('startup_failed', `Runtime service did not start. Inspect ${paths.log}.`);
 }

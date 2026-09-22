@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { connect, type Socket } from 'node:net';
+import { validateRuntimeEndpoint } from './endpoint';
 import { RUNTIME_PROTOCOL_VERSION, RuntimeServiceError, receive, record, send } from './protocol';
 import type { RuntimeCaller, RuntimeExecution } from './types';
 
@@ -65,6 +66,7 @@ export class RuntimeClient implements RuntimeCaller {
     administrative?: boolean;
     timeoutMs?: number;
   }): Promise<RuntimeClient> {
+    await validateRuntimeEndpoint(options.endpoint);
     const socket = connect(options.endpoint);
     const client = new RuntimeClient(socket);
     const timer = setTimeout(() => socket.destroy(), options.timeoutMs ?? 5000);

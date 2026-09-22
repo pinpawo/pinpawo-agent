@@ -4,7 +4,7 @@ import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
-import { supervisorPlanSnapshot, currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 
 export const submitPlanSchema = z.object({
   tasks: z.array(supervisorTaskSchema).min(1).max(24),
@@ -15,9 +15,8 @@ export function createSubmitPlanTool(context: SupervisorHandoffContext) {
     const state = submitPlan({ ...context, state: runtime.state.runSupervisorState }, args, runtime.toolCallId);
     return new Command({ update: {
       runSupervisorState: state,
-      reviewFeedback: null,
       messages: [new ToolMessage({ name: 'submit_plan', tool_call_id: runtime.toolCallId,
-        content: JSON.stringify({ plan: supervisorPlanSnapshot(state) }),
+        content: JSON.stringify({ plan: state }),
       })],
     } });
   }, {

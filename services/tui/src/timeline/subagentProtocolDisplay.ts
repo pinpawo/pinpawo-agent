@@ -17,17 +17,12 @@ function formatDelegationBriefing(text: string): string | null {
     || readAttribute(header, 'source') !== 'orchestrator'
   ) return null;
 
-  const mode = readAttribute(header, 'mode');
-  if (mode !== 'initial' && mode !== 'continue') return null;
-
   const task = readCdataElement(text, 'task');
   if (!task) return null;
-  const context = mode === 'continue'
-    ? readCdataElement(text, 'guidance')
-    : readCdataElement(text, 'essential_context');
+  const context = readCdataElement(text, 'briefing');
 
   return [
-    `**Delegating${mode === 'continue' ? ' · continuing' : ''}**`,
+    '**Delegating**',
     task,
     context ? `**Context**\n\n${context}` : null,
   ].filter((part): part is string => part !== null).join('\n\n');

@@ -30,7 +30,7 @@ function dispatchResult(input: SupervisorHandoffContext, id = 'execute-first') {
   return { runSupervisorState: input.state, messages: supervisorWorkMessages(input, [control('delegate_capability', { briefing: 'Execute the current objective.' }, id)], true) };
 }
 function resultFor(input: SupervisorHandoffContext, dispatch: AIMessage) {
-  const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' });
+  const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!);
   const metadata = getAgentMessageMetadata(dispatch);
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
     artifact: execution, content: JSON.stringify({ status: 'returned', delivery: {
@@ -67,38 +67,39 @@ test('acceptance uses the latest returned delivery and ignores mismatched or pri
   const dispatch = retry.messages.at(-1) as AIMessage;
   for (const status of ['missing_deliverable', 'paused']) {
     const failure = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
-      artifact: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }), content: JSON.stringify({ status, delivery: null, artifacts: [] }),
+      artifact: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!), content: JSON.stringify({ status, delivery: null, artifacts: [] }),
     }), getAgentMessageMetadata(dispatch));
     const input = { ...first, messages: [...first.messages, ...retry.messages, failure] };
     assert.throws(() => reviewCurrent(input, { completed: true, reason: 'Old evidence' }), /returned delivery/);
-    assert.ok(buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }));
+    assert.ok(buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, 'next-call'));
   }
 });
 
-test('same-run retries retain execution scope; new runs start a new delegation', () => {
+test('each tool call has its own execution identity and preserves the model briefing verbatim', () => {
   const input = returned();
   const before = readCapabilityExecutions(input.messages)[0].execution;
-  const retry = buildCapabilityExecutionInput(input, { briefing: 'Continue work.' }, 'Missing evidence');
-  const fresh = buildCapabilityExecutionInput({ ...input, runId: 'r2' }, { briefing: 'Continue work.' }, 'Missing evidence');
-  assert.equal(retry.mode, 'continue');
-  assert.equal(retry.delegationId, before.delegationId);
-  assert.equal(fresh.mode, 'initial');
-  assert.notEqual(fresh.delegationId, before.delegationId);
-  assert.equal(fresh.briefing, retry.briefing);
-  assert.equal(retry.briefing, 'Continue work.\n\nReview feedback:\nMissing evidence');
+  const args = { briefing: 'Use the returned evidence; verify the missing detail only.' };
+  const next = buildCapabilityExecutionInput(input, args, 'next-call');
+  const retry = buildCapabilityExecutionInput(input, args, 'next-call');
+  const fresh = buildCapabilityExecutionInput({ ...input, runId: 'r2' }, args, 'next-call');
+  assert.notEqual(next.delegationId, before.delegationId);
+  assert.equal(retry.delegationId, next.delegationId, 'native replay of the same call preserves identity');
+  assert.notEqual(fresh.delegationId, next.delegationId);
+  assert.equal(next.briefing, args.briefing);
+  assert.equal('mode' in next, false);
 });
 
 test('adjustment preserves completed work, supersedes replaced executions and checks goal changes', () => {
   const input = returned();
   const completed = reviewCurrent(input, { completed: true, reason: 'Verified' });
   const next = { ...input, state: completed, hasNewUserInput: false };
-  const args = { goal: input.userRequest, reason: 'Use A evidence', currentDelegation: 'continue' as const, tasks: [taskB] };
+  const args = { goal: input.userRequest, reason: 'Use A evidence', currentTask: 'keep' as const, tasks: [taskB] };
   const revised = adjustPlan(next, args, 'adjust');
   assert.equal(revised.plan[0].status, 'completed');
   assert.equal(revised.plan[1].id, completed.plan[1].id);
   assert.throws(() => adjustPlan(next, { ...args, goal: 'Different' }, 'adjust'), /fresh user/);
   assert.equal(adjustPlan({ ...next, hasNewUserInput: true }, { ...args, goal: 'Different' }, 'adjust').goal, 'Different');
-  const replaced = adjustPlan(input, { ...args, currentDelegation: 'replace' }, 'replace');
+  const replaced = adjustPlan(input, { ...args, currentTask: 'replace' }, 'replace');
   assert.deepEqual(replaced.plan.map(t => t.status), ['superseded', 'pending']);
   assert.equal(replaced.plan[0].id, input.state.plan[0].id);
 });
@@ -139,28 +140,28 @@ async function probe(input: SupervisorHandoffContext, responses: AIMessage[]) {
   return { result, model };
 }
 
-test('native parent handoff carries updated plan and feedback without a fake result', async () => {
+test('native parent handoff carries updated plan and model briefing without a fake result', async () => {
   const input = returned();
   const { result, model } = await probe(input, [
     control('review_current', { completed: false, reason: 'Verify missing evidence' }, 'review'),
     control('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
   ]);
   assert.equal(model.inputs.length, 2);
-  assert.equal(result.reviewFeedback, 'Verify missing evidence');
+  assert.ok(model.inputs.at(-1)!.some(message => AIMessage.isInstance(message)
+    && message.tool_calls?.some(call => call.name === 'review_current' && call.args.reason === 'Verify missing evidence')));
   assert.deepEqual(result.runSupervisorState, input.state);
   assert.equal(result.messages.some(m => ToolMessage.isInstance(m) && m.name === 'delegate_capability'), false);
   assert.equal(getAgentMessageMetadata(result.messages.at(-1)!).execution, undefined);
 });
 
-test('review then adjustment shares current state and clears feedback before native handoff', async () => {
+test('review then adjustment shares current plan state before native handoff', async () => {
   const input = returned();
   const { result } = await probe(input, [
     control('review_current', { completed: true, reason: 'A verified' }, 'review'),
-    control('adjust_plan', { goal: input.userRequest, reason: 'Use A evidence', currentDelegation: 'continue', tasks: [taskB] }, 'adjust'),
+    control('adjust_plan', { goal: input.userRequest, reason: 'Use A evidence', currentTask: 'keep', tasks: [taskB] }, 'adjust'),
     control('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
   ]);
   assert.deepEqual(result.runSupervisorState.plan.map(t => t.status), ['completed', 'pending']);
-  assert.equal(result.reviewFeedback, null);
 });
 
 test('a natural question commits the plan without dispatching it', async () => {
@@ -170,14 +171,15 @@ test('a natural question commits the plan without dispatching it', async () => {
   assert.deepEqual(queryAgentMessages(result.messages).main().select().messages.map(m => m.text), ['Which destination?']);
 });
 
-test('correcting delegation arguments preserves the rejected delivery feedback', async () => {
+test('correcting delegation arguments preserves the review conversation', async () => {
   const { result, model } = await probe(returned(), [
     control('review_current', { completed: false, reason: 'Verify missing evidence' }, 'review'),
     control('delegate_capability', { planItemId: 'invented' }, 'invalid'),
     control('delegate_capability', { briefing: 'Execute the current objective.' }, 'corrected'),
   ]);
   assert.equal(model.inputs.length, 3);
-  assert.equal(result.reviewFeedback, 'Verify missing evidence');
+  assert.ok(model.inputs.at(-1)!.some(message => AIMessage.isInstance(message)
+    && message.tool_calls?.some(call => call.name === 'review_current' && call.args.reason === 'Verify missing evidence')));
   const error = result.messages.find(m => ToolMessage.isInstance(m) && m.tool_call_id === identity('call', context().runId, 'invalid')) as ToolMessage;
   assert.equal(error.status, 'error');
 });
@@ -194,18 +196,4 @@ test('final publication preserves structured model content and usage without a p
   assert.equal(message.id, identity('supervisor-message', context().runId, 'final-model'));
   assert.equal(queryAgentMessages(result.messages).main().select().messages[0], message);
   assert.equal(queryAgentMessages(result.messages).supervisor(context().runId).select().messages.length, 0);
-});
-
-
-test('plan continuation retains task history and replacement starts without it', () => {
-  const input = returned();
-  const delegation = { id: 'd', runId: input.runId, taskId: input.taskId, messages: [new AIMessage('Private work')] };
-  input.state.plan[0].delegation = delegation;
-  const args = { goal: input.userRequest, reason: 'More verification', tasks: [taskA] };
-  const continued = adjustPlan(input, { ...args, currentDelegation: 'continue' }, 'continue');
-  assert.equal(continued.plan[0].delegation, delegation);
-  const replaced = adjustPlan(input, { ...args, currentDelegation: 'replace' }, 'replace');
-  assert.equal(replaced.plan[0].delegation, delegation);
-  assert.equal(replaced.plan[0].status, 'superseded');
-  assert.equal(replaced.plan[1].delegation, undefined);
 });

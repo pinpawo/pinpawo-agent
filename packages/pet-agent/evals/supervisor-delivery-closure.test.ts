@@ -10,7 +10,7 @@ const review: ScriptedSupervisorControl = { name: 'review_current', args: { comp
 const delegate: ScriptedSupervisorControl = { name: 'delegate_capability', args: { briefing: 'Execute the current objective.' } };
 const example = supervisorDeliveryClosureDataset.cases.find(c => c.name === 'review-text-is-not-submission')!;
 function adjustment(goal: string): ScriptedSupervisorControl {
-  return { name: 'adjust_plan', args: { goal, reason: 'Submission remains.', currentDelegation: 'replace',
+  return { name: 'adjust_plan', args: { goal, reason: 'Submission remains.', currentTask: 'replace',
     tasks: [{ capability: 'studio_reporting', objective: 'Submit the complete review.' }] } };
 }
 

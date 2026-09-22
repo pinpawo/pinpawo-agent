@@ -1,4 +1,3 @@
-import { supervisorPlanSnapshot } from '../runSupervisor/state';
 import type { RunSupervisorCapabilityDocument } from '../runSupervisor/capabilityDocuments';
 import type { RunSupervisorInput } from '../runSupervisor/runner';
 import type { CapabilityRoutingManifest } from '../runSupervisor/routingManifest';
@@ -53,7 +52,7 @@ function buildCapabilityRoutingManifest(
 }
 
 function buildSupervisionBoundary(input: RunSupervisorInput) {
-  return xmlTextBlock('supervisor_plan', JSON.stringify(supervisorPlanSnapshot(input.state)));
+  return xmlTextBlock('supervisor_plan', JSON.stringify(input.state));
 }
 
 export function buildRunSupervisorAgentSystemPrompt(
@@ -72,7 +71,7 @@ export function buildRunSupervisorAgentInput(
   const userRequest = buildRunUserRequestContext(input.userRequest);
   const routingContext = buildCapabilityRoutingManifest(routingManifest);
   const capabilityContext = buildCapabilityContext(disclosedCapabilities);
-  const remainingPlan = xmlTextBlock('remaining_plan', JSON.stringify(supervisorPlanSnapshot(input.state).plan));
+  const remainingPlan = xmlTextBlock('remaining_plan', JSON.stringify(input.state.plan));
   const turnContext = xmlTextBlock('invocation', input.inputId.startsWith('human:')
     ? input.mode === 'boundary'
       ? 'Fresh user input: interpret it before any execution. If it explicitly requests or confirms a change, use adjust_plan to update the goal and pending work, choosing whether to continue or replace the active delegation. Do not ask again for an adjustment the user already requested.'

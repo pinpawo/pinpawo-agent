@@ -574,30 +574,3 @@ test('FileSaver bounds long checkpoint path segments without losing logical iden
     checkpoint_id: 'cp-long',
   }]);
 });
-
-
-test('FileSaver restores Supervisor task delegation history independently of Root messages', async (t) => {
-  const filePath = join(createTempDir(t), 'checkpoints.json');
-  const saver = new FileSaver(filePath);
-  const config = { configurable: { thread_id: 'private-state' } };
-  const delegation = { id: 'delegation', runId: 'run', taskId: 'task', messages: [] as unknown[] };
-  const privateCall = new AIMessage({ id: 'private-call', content: '', tool_calls: [
-    { id: 'read', name: 'read_file', args: {} },
-  ] });
-  const privateResult = new ToolMessage({ id: 'private-result', content: 'Private evidence', tool_call_id: 'read' });
-  await saver.put(config, checkpoint('private-checkpoint', {
-    messages: [new HumanMessage({ id: 'user', content: 'Inspect it' })],
-    runSupervisorState: { runId: 'run', goal: 'Inspect it', plan: [{
-      id: 'planned-task', capability: 'general', objective: 'Inspect it', status: 'pending',
-      delegation: { ...delegation, messages: [privateCall, privateResult] },
-    }] },
-  }), { source: 'loop', step: 1, parents: {} });
-  const restored = (await new FileSaver(filePath).getTuple(config))!.checkpoint.channel_values;
-  const supervisor = restored.runSupervisorState as { plan: Array<{ delegation: typeof delegation }> };
-  const state = supervisor.plan[0].delegation;
-  assert.equal(state.id, delegation.id);
-  assert.ok(AIMessage.isInstance(state.messages[0]));
-  assert.ok(ToolMessage.isInstance(state.messages[1]));
-  assert.equal((state.messages[1] as ToolMessage).tool_call_id, 'read');
-  assert.equal((restored.messages as unknown[]).length, 1);
-});

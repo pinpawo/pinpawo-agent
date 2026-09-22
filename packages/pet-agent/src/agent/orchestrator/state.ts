@@ -31,7 +31,6 @@ export type OrchestratorTerminalErrorState = {
 };
 
 const orchestratorStateChannels = {
-  runSupervisorReviewFeedback: Annotation<string | null>({ reducer: (_prev, next) => next, default: () => null }),
   runSupervisorState: Annotation<RunSupervisorState>({
     reducer: (_prev, next) => next,
     default: () => ({ runId: null, goal: null, plan: [] }),
@@ -93,7 +92,6 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
-  | 'runSupervisorReviewFeedback'
   | 'runCapabilityDisclosure'
   | 'runSupervisorUserMessageId'
   | 'runUserRequest'
@@ -113,7 +111,6 @@ export function buildRunStateReset(
 ): OrchestratorRunState {
   return {
     runCapabilityDisclosure: null,
-    runSupervisorReviewFeedback: null,
     runSupervisorUserMessageId: null,
     runUserRequest: null,
     runIterationCount: 0,

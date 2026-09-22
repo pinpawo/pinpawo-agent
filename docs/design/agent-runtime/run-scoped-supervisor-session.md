@@ -32,10 +32,10 @@ Root 承载会话、整体执行流程和 checkpoint。Supervisor 在这个流�
 briefing → Toolkit 绑定 → createAgent 执行 → finalize → 交付，再返回对应 ToolMessage。
 这些步骤不是 Root 上的多次工具调用，也不需要因工具化拆掉原 executor 封装。
 
-Subagent 返回本次执行的 `output` 文本（无交付时为 `null`）、私有消息和产物；
+Subagent 向 Capability 返回本次执行的 `output` 文本（无交付时为 `null`）、原生消息和产物；
 finalize 可以直接替换 `output`，不必向私有历史追加一条消息再通过消息 ID 查找交付。
 executor 将 output 包装为交付事实，由 Root 写入配对的 ToolMessage；交付引用与
-私有消息 ID 不耦合。不再生成 Announce，不保留 `announceMessageId` 交付选择接口。
+内部消息 ID 不耦合。不再生成 Announce，不保留 `announceMessageId` 交付选择接口。
 Subagent 只从本次新增的有效回复提取 output，不能把旧回复、工具调用或预算停止提示
 当作本次交付；是否完成任务仍由 Supervisor 验收。
 
@@ -43,13 +43,12 @@ Subagent 只从本次新增的有效回复提取 output，不能把旧回复、�
 
 ## 状态：只保存必要事实
 
-Root 用 `runSupervisorState` 保存 Supervisor 的目标、计划、任务进度及各任务的
-delegation 执行记录。以下为[业务状态类型](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/state.ts)的简化示意：
+Root 用 `runSupervisorState` 保存 Supervisor 的目标、计划和任务进度。以下为[业务状态类型](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/state.ts)的简化示意：
 
 ```ts
 type RunSupervisorState = {
   goal: string | null;
-  plan: SupervisorPlan; // 每项包含业务进度，以及可选 delegation 执行记录
+  plan: SupervisorPlan; // 计划项及业务进度
 };
 ```
 
@@ -63,10 +62,10 @@ type RunSupervisorState = {
 当前任务由计划中首个未完成且未被替换的任务确定。
 delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不形成另一份当前任务容器。
 
-Supervisor 的 delegation 工具将执行记录保存在 `runSupervisorState.plan[].delegation`，
-按任务归属管理；Capability 只接收本次输入并返回消息与交付，不拥有独立 state。
-工具仅将配对的 ToolMessage 写入 Root `messages`，同时提交产物索引、授权记录、
-执行计数等程序拥有的运行事实。交付只保存在配对的 ToolMessage，
+每次 `delegate_capability` 都是独立执行，身份从本次工具调用 ID 派生。同一个调用的
+原生重放保持身份，不同调用不因计划项相同而复用 delegation ID。Capability 只通过
+配对 ToolMessage 返回交付、产物与执行状态，不把内部消息写回 Root 或 Supervisor。
+交付只保存在配对的 ToolMessage，
 删除重复的 `sessionDelegationResults`。验收必须依据当前任务最近一次执行的有效交付，
 不能在重试失败后回退到旧成功结果。无新交付以 `missing_deliverable` 错误 ToolMessage
 返回 Supervisor，由其决定补做或回复；真正的运行异常仍走框架错误出口。
@@ -78,38 +77,32 @@ Supervisor 的 delegation 工具将执行记录保存在 `runSupervisorState.pla
 | 目标、计划、任务进度 | Root 的 `runSupervisorState` 保存，Supervisor 决策；保存后的状态可供后续运行参考 |
 | Supervisor 工作消息 | 使用 Root 消息存储并保持工作归属；每个新 run 重置工作视图，不继承上轮工作现场 |
 | delegation 调用及结果 | Root 消息与 checkpoint 保存，作为实际执行记录 |
-| delegation 私有消息 | Supervisor 对应计划项的 `delegation = { id, runId, taskId, messages }`；不进入 Root `messages` |
+| Capability 内部消息 | LangGraph 子图 namespace/checkpoint 保存；不复制到 Root messages 或 Supervisor 计划 |
 | runId、traceId、预算、输入消费 | 复用 Root 必要运行字段；新 run 初始化，原生 interrupt 恢复时保留，不再复制一个 `runSupervisorState.run` |
 | 交付、产物、授权、运行出口 | 交付保存在工具结果中；产物索引、授权与运行出口复用必要字段，授权按当前 generation 校验，不由模型任意修改 |
 
-### Supervisor 管理任务的 delegation 执行记录（待 review）
+### 渐进披露与原生执行边界（待 review）
 
-每个计划项可保存自己的最新 delegation 身份和私有消息。Supervisor 统一拥有这些
-记录，不再建立独立 Capability state，也不另外复制计划、状态码、交付或产物索引。
-工具结果仍是 Supervisor 验收的唯一执行事实来源；模型可见计划只包含任务信息与
-业务进度，不序列化 delegation 私有记录，避免交付再次出现在模型上下文中。
+Supervisor 从实际 ToolMessage 获取结果，再决定验收、回复、调整计划或调用下一次
+Capability。每次调用前，根据已有交付写出本次 briefing：只披露接下来需要完成的
+工作、可复用结论和必要约束，不提前展开后续任务。模型通过 briefing 决定推进方式。
 
-Supervisor 的 delegation 工具选择与本轮 run、task 和 delegation 匹配的记录交给
-executor。executor 接收 Root history 和 previousMessages，返回本次完整私有消息；
-存取与生命周期由 Supervisor 工具管理。同一任务补做替换该任务记录，其他任务的
-记录保留；adjust_plan continue 保留当前记录，replace 创建无旧记录的新任务。
-新计划自然替换旧计划及其记录，不设置额外的 Capability 清理或迁移机制。
+不设置 Capability initial/continue 模式，不自动拼接 review feedback，不保存或回放
+第二份内部消息。review_current 记录计划验收；相关调用及工具结果已在 Supervisor
+工作历史中，下一次 briefing 由模型自己生成。adjust_plan 的 currentTask=keep/replace
+只决定是否保留计划项身份与验收依据，不决定是否恢复子图执行上下文。
 
-新 run 可以参考旧计划及公开交付，但不恢复旧 delegation 私有消息；实际再次执行时
-写入本轮新记录。Root checkpoint 持久化 Supervisor 状态，`messages` channel 和
-Host 的会话 snapshot 不混入这些私有历史。子图原生 checkpoint 负责在途工具审查
-的精确恢复；Supervisor 的任务记录负责已经返回/暂停后的下一次调用。
-本次新增私有消息的 provider token 用量汇总到返回 ToolMessage 的 `capabilityTokenUsage`
-元数据，用于会话/运行总量统计；不伪装成 Root 模型响应，也不参与 Root 上下文水位判断。
-交付正文留在实际 ToolMessage；禁止为聊天显示或历史传递再造 handoff AIMessage。
+lane 表达消息归属，LangGraph namespace/checkpoint 承担子图现场与原生 interrupt
+恢复。已返回后的再次委派是新调用，以 main ToolMessages 和当前 briefing 为输入，
+不自动续接上一个子图。任务暂停后，用户指导进入主会话，Supervisor 再决定下一步。
 
-不再读取或迁移 Root messages 中的旧 Capability lane 历史，也不生成 RemoveMessage
-补丁去回写私有消息。Supervisor 直接保存 executor 本次返回的完整私有消息，移除/压缩自然反映在
-替换后的快照中。旧混存格式的 checkpoint 不兼容本次状态边界，切换版本应新建会话。
+Capability 的 output 直接封装进 ToolMessage，不再生成 handoff AIMessage；内部消息
+不对外返回为执行快照。provider 用量由 Subagent 返回并汇总到工具消息元数据，不为
+统计恢复一份内部历史，也不参与 Root 上下文水位。原生 checkpoint 保留可追溯现场。
 
-验证覆盖：私有历史与工具结果分离、精确作用域、补做与暂停恢复、切换任务、新 run 隔离、
-快照序列化及子代理压缩。此次不改变 Supervisor 自身工作消息的归属：
-它们仍是编排器本轮的私有工作 lane，Capability 不会读取。
+删除旧 private history 拆分、scope 重打标、reconciliation/RemoveMessage 补丁以及
+重复状态字段，不迁移旧格式 checkpoint；切换此版本应新建会话。
+
 
 ### runSupervisorState 与 snapshot
 
@@ -158,9 +151,8 @@ Boundary 不以独立 active delegation 非空作为前提。例如 A 已验收�
 不复活 A、不重复验收 A，也不重交整份计划。
 Entry/Boundary 的校验以计划事实为准，不依赖旧 active delegation 字段。
 
-task 是计划任务，delegation 是具体执行实例。同一 run 内可以对同一 delegation 做多次 attempt；
-非原生新 run 若继续处理该任务，产生本轮执行实例，不自动续读旧 delegation 私有历史。
-旧任务记录可随计划保留，但只允许同一 run、task 和 delegation 续读。
+task 是计划任务，delegation 是一次工具调用的执行身份。Supervisor 可以为同一任务
+再次调用 Capability；每次是独立委派，下一步由新的 briefing 说明，不回放旧内部历史。
 
 入口不由 AIMessage/ToolMessage 是否存在或是否配对决定。原生 interrupt 可发生在不同位置；
 非原生取消或失败不能冒充原生恢复，也不自动重跑可能已产生副作用的执行。
@@ -194,9 +186,9 @@ ToolRuntime 注入当前 state，工具接收模型生成的 briefing、注入�
 自然回复。`delegate_capability` 通过 Command.PARENT 交接原调用，Root ToolNode 校验参数并注入执行上下文；
 参数错误返回 Supervisor 自纠，不启动 Capability。
 
-Supervisor 优先沿用适用的现有计划，非必要不重排。补做要求通过 `review_current(false)` 记录，随本次委派自动注入 briefing；只有新要求
+Supervisor 优先沿用适用的现有计划，非必要不重排。未完成原因通过 `review_current(false)` 记录，下一次 briefing 由 Supervisor 自行准备；只有新要求
 或具体证据表明原安排不适用、能力选错或存在遗漏时，才决定最小调整。`adjust_plan.tasks`
-只列剩余工作，运行时自动保留已完成事项。保留当前能力和交付身份使用 continue；replace
+只列剩余工作，运行时自动保留已完成事项。保留当前计划项和验收依据使用 keep；replace
 不携带旧交付作为新任务的验收依据。这是模型职责与工具语义，不新增强制路由或重排次数限制。
 
 工具自身校验参数，`wrapToolCall` 把框架抛出的参数解析错误转换为匹配 call ID 的
@@ -214,7 +206,7 @@ schema 与业务约束校验。无交付验收、非法能力等可纠正的决�
 
 ### 工具状态与 Root 提交
 
-每次 Supervisor invoke 用 Root 计划初始化内部 runSupervisorState，reviewFeedback 从空值开始。
+每次 Supervisor invoke 用 Root 计划初始化内部 runSupervisorState；反馈直接保留在工具对话中。
 内部工具读取最新 state 并通过 Command 更新它，在 ToolMessage 中返回计划事实供模型决策。
 这份 state 仅属于本次 invoke；不创建另一套持久会话、proposal 或 nextExecution 槽。
 
@@ -264,15 +256,15 @@ Middleware 检查调用协议与 schema；工具返回真实状态，供下一�
 | --- | --- |
 | 用户消息、主会话回复 | 原主会话 |
 | delegation 调用与结果 | 替代原来交给主会话的 Announce，作为主会话执行记录；来源 Capability 用 metadata 表示 |
-| Capability 内部执行消息 | 原 `capability:*` 私有 lane，不随结果一起公开 |
+| Capability 内部执行消息 | LangGraph 子图 namespace，不随工具结果一起公开 |
 | Supervisor 内部控制、确认及查询消息 | Supervisor 工作上下文，不因迁入 Root 就变成主会话消息 |
 
 Supervisor 工作消息已迁入 Root，使用 `supervisor` lane。
 [查询器](../../../packages/pet-agent/src/agent/messages/query.ts)按本轮 runId 精确选择工作历史，
 与主会话执行记录共同组成 Supervisor 模型上下文；不扩大 Capability 私有历史可见范围。
 压缩主会话时保留未完成计划任务的实际调用及结果；Capability 私有历史不参与 Root
-messages 的摘要或保留选择。Supervisor 每个任务只保存最新 delegation 的执行记录，
-子代理摘要同步替换该任务的消息；新计划替换旧记录，过去的 checkpoint 仍可用于追溯。
+messages 的摘要或保留选择。Capability 消息压缩留在子图的 namespace 中，
+不要求父图拆分或复制返回历史。
 
 每组调用与结果一起选入模型上下文。失败遗留的半组消息沿用
 [工具协议安全过滤](../../../packages/pet-agent/src/agent/messages/protocol.ts)处理输入；
@@ -311,7 +303,7 @@ messages 的摘要或保留选择。Supervisor 每个任务只保存最新 deleg
 - 新 run 重置 Supervisor 工作视图，但 Entry Answer 仍能参考业务状态和主会话结果；
   原生 interrupt 保留原身份、预算与调用现场。
 - A 已验收、B 待执行时能够继续或调整，不依赖独立 active delegation，不重复验收或提交计划。
-- 主会话执行记录、Supervisor 工作消息、Capability 私有消息的可见边界正确，
+- 主会话执行记录、Supervisor 工作消息、Capability 子图消息的可见边界正确，
   不自动继承旧 run 私有现场，不生成 Announce XML。
 - 交接提交、执行前后 checkpoint、审核拒绝、暂停、取消、失败及无执行分支正确；
   不丢已提交进度、不重放已提交调用、不恢复旧授权。
@@ -346,9 +338,8 @@ messages 的摘要或保留选择。Supervisor 每个任务只保存最新 deleg
 | Review 框架兼容代码 | [Toolkit Review](../../../packages/pet-agent/src/agent/orchestrator/toolkitReviewMiddleware.ts)为 #749 / langgraphjs#2667 读取私有 scratchpad，避免嵌套 interrupt 恢复时重复全局审核。删除前需在实际安装版本上复现并验证原生恢复；不能仅因标记 temporary 就删除。 |
 | 已废弃授权类型仍在使用 | [globalReviewPolicy.ts](../../../packages/pet-agent/src/agent/orchestrator/review/globalReviewPolicy.ts)仍导出 `BuiltinGlobalReviewPolicyMode` 别名，local-agent 有实际消费者。可逐步改用 agent-contracts 的 `ToolAuthorizationMode`，不能只删除 pet-agent 导出。 |
 
-历史 Announce 读取已移除；工具协议输入过滤和 Capability 私有消息留存仍承担当前职责。
-后两者承担模型输入配对安全和隔离历史保存；是否缩短
-留存周期应单独决定，不混入 Supervisor 调度重构。
+历史 Announce 读取已移除；工具协议输入过滤仍承担模型输入配对安全职责；子图历史由原生 checkpoint 保存。
+是否缩短留存周期应单独决定，不混入 Supervisor 调度重构。
 
 
 ## 回复与 Root 提交合并（2026-09-15 实施）
@@ -371,7 +362,7 @@ Entry 始终提供 plan_request 与 continue，并向模型展示完整的当前
 Supervisor 的 `delegate_capability`，由同一次模型工具调用交接 Root；不再生成第二次
 同义的 Root 工具调用，不保留旧工具别名或旧 checkpoint 参数兼容。
 
-模型调用参数为 `{ briefing }`。计划项以 objective 描述目标，完整说明仅在当前项即将执行时生成。Capability、taskId、delegationId 与 initial/continue 由运行时从 state 和实际执行记录确定。
+模型调用参数为 `{ briefing }`。计划项以 objective 描述目标，完整说明仅在当前项即将执行时生成。Capability 与当前目标取自计划；delegationId 由本次工具调用确定，不再设置 initial/continue。
 运行时保留已确定的 objective，模型只补充当前项的执行说明。
 
 计划和验收工具仍返回事实供模型继续决策。delegate_capability 校验成功后结束本次
@@ -386,7 +377,7 @@ delegation 身份、执行模式与 briefing；执行正文只从此快照读取
 
 执行历史读取与上下文压缩从实际结果 artifact 读取执行事实，暂停恢复由原生 checkpoint 管理，不能用现有计划反推旧任务。
 Host 的 readCapabilityExecutions 读取实际已返回的执行；原生待执行调用结合当前计划投影活跃任务。
-回归覆盖单次派发、错误自纠、验收、continue/replace、新 run、重复调用 id、篡改、
+回归覆盖单次派发、错误自纠、验收、keep/replace、新 run、重复调用 id、篡改、
 暂停恢复、压缩保留、Host 投影及 Studio 工作→反馈能力交接。旧协议 checkpoint 不迁移。
 
 ### 目标规划与执行时 briefing（2026-09-15）
@@ -397,7 +388,7 @@ submit_plan / adjust_plan 不提前写所有任务的完整执行说明。
 只有需要不同能力协作，或用户明确要求分开交付时才拆分。此原则由 Supervisor 提示词表达，不增加运行时合并或拦截逻辑。
 Supervisor 在调用 delegate_capability 时，结合 Root 消息与已返回交付为当前项生成
 briefing；运行时从 Root 实际调用与结果中提取已有交付目录，不要求模型填写 ID。
-新增执行说明或复用结论无需重排计划。运行时仍注入任务身份、Capability 与 review feedback。
+新增执行说明或复用结论无需重排计划。运行时只注入任务身份与 Capability；下一步要求与反馈由模型写入 briefing。
 
 工具仍只有一份定义，Supervisor 的原始调用原样交给 Root ToolNode 执行；不增加参数
 改写、中间提交状态或额外模型调用。执行快照的 task 保存当前 objective，briefing 保存
@@ -417,7 +408,7 @@ ToolMessage 中按 delivery.scope.delegationId 查找 delivery.text，复用已�
 ## 移除控制消息重放（2026-09-15）
 
 Supervisor 的 submit_plan、adjust_plan 和 review_current 各自通过原生 Command 更新
-本次 createAgent 的 runSupervisorState 与 reviewFeedback，同时返回模型可读的计划事实。
+本次 createAgent 的 runSupervisorState，同时返回模型可读的计划事实。
 失败不更新 state，参数及业务错误作为 ToolMessage 返回模型纠正。删除 toolSession、
 messageOffset 和 controlTranscript；历史工具消息仅是上下文，不再作为状态变更日志重放。
 
@@ -427,7 +418,7 @@ messageOffset 和 controlTranscript；历史工具消息仅是上下文，不再
 ## 原生工具执行替代手工委派协议（2026-09-15）
 
 Supervisor 与 Root 共享同一个 delegate_capability 工具对象。Supervisor 的 wrapToolCall
-只通过 Command.PARENT 将本次计划、工作消息和 reviewFeedback 交给 Root 的 capability
+只通过 Command.PARENT 将本次计划和工作消息 交给 Root 的 capability
 节点；该节点使用原生 ToolNode 调用该工具，框架负责 schema 校验和 ToolRuntime 注入。
 工具从 Root state 读取任务与反馈，运行 Capability，并通过原生 Command 更新业务状态。
 不再将执行输入编码到 AIMessage metadata，不再由 Root 解析自定义调用协议。

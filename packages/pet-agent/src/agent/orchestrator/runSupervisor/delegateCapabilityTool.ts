@@ -5,7 +5,6 @@ import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
 import { currentSupervisorTask } from './state';
-import { executionsForPlanItem } from '../executionMessages';
 import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
@@ -31,18 +30,13 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       messages: state.messages, mode: 'boundary', hasNewUserInput: false,
       allowedCapabilityNames: registry.capabilities.map(({ capability }) => capability.name)
         .filter(name => !invokeOptions.allowedCapabilityNames || invokeOptions.allowedCapabilityNames.includes(name)),
-    }, args, state.runSupervisorReviewFeedback ?? undefined);
+    }, args, runtime.toolCallId);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
-    const task = currentSupervisorTask(state.runSupervisorState)!;
-    const previous = task.delegation;
-    const previousMessages = previous?.id === input.delegationId
-      && previous.runId === state.runId && previous.taskId === state.taskId ? previous.messages : [];
     const execution = await executeCapability({
       capability: compiledCapability,
       delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId,
-        userRequest, task: input.task, mode: input.mode, briefing: input.briefing },
+        userRequest, task: input.task, briefing: input.briefing },
       history: state.messages,
-      previousMessages,
     }, {
       review: {
         authorizations: state.sessionToolAuthorizations.generation === registry.authorizationGeneration
@@ -63,12 +57,6 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     });
     return new Command({ update: {
       messages: [result],
-      runSupervisorState: {
-        ...state.runSupervisorState,
-        plan: state.runSupervisorState.plan.map(task => task.id === input.planItemId ? {
-          ...task, delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId, messages: execution.messages },
-        } : task),
-      },
       sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
@@ -79,18 +67,16 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
   });
 }
 
-export function buildCapabilityExecutionInput(context: SupervisorHandoffContext, args: DelegateCapabilityArgs, feedback?: string): CapabilityExecutionInput {
+export function buildCapabilityExecutionInput(context: SupervisorHandoffContext, args: DelegateCapabilityArgs, callId: string): CapabilityExecutionInput {
   const state = context.state;
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');
   if (!context.allowedCapabilityNames.includes(next.capability)) throw new SupervisorDecisionError('Capability is no longer available.');
-  const previous = executionsForPlanItem(context, next.id).filter(({ metadata }) => metadata.runId === context.runId).at(-1);
   return {
     planItemId: next.id,
-    delegationId: previous?.execution.delegationId ?? identity('delegation', context.runId, next.id),
+    delegationId: identity('delegation', context.runId, callId),
     capability: next.capability,
     task: next.objective,
-    mode: previous ? 'continue' as const : 'initial' as const,
-    briefing: feedback ? `${args.briefing}\n\nReview feedback:\n${feedback}` : args.briefing,
+    briefing: args.briefing,
   };
 }

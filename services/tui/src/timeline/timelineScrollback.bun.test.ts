@@ -177,7 +177,7 @@ test('subagent protocol briefings render as a readable delegation', async () => 
       type: 'message',
       role: 'subagent',
       text: [
-        '<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">',
+        '<delegation_briefing role="task_boundary" source="orchestrator">',
         '  <task><![CDATA[Review the current pull request.]]></task>',
         '  <essential_context><![CDATA[Preserve main behavior.]]></essential_context>',
         '</delegation_briefing>',

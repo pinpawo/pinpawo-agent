@@ -3636,32 +3636,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   assert.ok(previous);
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
-  const retainedLane = selectCapabilityHistory(
-    currentSupervisorTask(finalState.runSupervisorState)?.delegation?.messages ?? [],
-    activeDelegation.lane,
-    activeDelegation.runId,
-    activeDelegation.id,
-  );
-  assert.equal(
-    retainedLane.some((message) => ToolMessage.isInstance(message)),
-    true,
-  );
-  const rejectedToolResults = retainedLane
-    .filter((message): message is ToolMessage => ToolMessage.isInstance(message) && getAgentMessageLane(message) !== null)
-    .map((message) => JSON.parse(String(message.content)) as {
-      source?: string;
-      skipped?: boolean;
-    });
-  assert.equal(rejectedToolResults.length, 2);
-  assert.equal(rejectedToolResults[0]?.source, 'human_reject');
-  assert.equal(rejectedToolResults[1]?.skipped, true);
-  assert.equal(
-    retainedLane.some((message) =>
-      AIMessage.isInstance(message)
-      && (message.tool_calls ?? []).some((toolCall) =>
-        toolCall.id === 'call-rejected-first' || toolCall.id === 'call-rejected-second')),
-    true,
-  );
+  assert.equal(finalState.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
 
   const pauseInterruptId = finalState.__interrupt__?.[0]?.id;
   assert.ok(pauseInterruptId, 'pause interrupt must carry an id to continue by');
@@ -3688,7 +3663,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
   assert.equal(
     continuedSubagentInput.some((message) => ToolMessage.isInstance(message) && getAgentMessageLane(message) !== null),
-    true,
+    false,
   );
   assert.equal(
     continuedSubagentInput.some((message) =>
@@ -3836,22 +3811,7 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.ok(previous);
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
-  const retainedLane = selectCapabilityHistory(
-    currentSupervisorTask(finalState.runSupervisorState)?.delegation?.messages ?? [],
-    activeDelegation.lane,
-    activeDelegation.runId,
-    activeDelegation.id,
-  );
-  const cancelledToolResult = retainedLane.find((message) =>
-    message instanceof ToolMessage
-    && message.tool_call_id === 'call-interrupted');
-  assert.equal(cancelledToolResult, undefined);
-  assert.equal(
-    retainedLane.some((message) =>
-      AIMessage.isInstance(message)
-      && (message.tool_calls ?? []).some((toolCall) => toolCall.id === 'call-interrupted')),
-    false,
-  );
+  assert.equal(finalState.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
 
   const retainedDelegationId = activeDelegation.id;
   const continuedState = await graph.invoke(
@@ -3872,8 +3832,8 @@ test('toolkit review run interruption retains the delegation without another mod
       && getAgentMessageMetadata(message).lane === 'capability:general'),
     false,
   );
-  const resumedHandoff = readDelegationDeliveries(continuedState.messages).find((delivery) =>
-    delivery.scope.delegationId === retainedDelegationId);
+  const resumedHandoff = readDelegationDeliveries(continuedState.messages).at(-1);
+  assert.notEqual(resumedHandoff?.scope.delegationId, retainedDelegationId);
   assert.ok(resumedHandoff);
   assert.equal(currentSupervisorTask(continuedState.runSupervisorState), null);
 });
@@ -4052,7 +4012,7 @@ test('main conversation preserves accepted handoffs that begin with briefing for
       runId: 'turn-accepted-briefing',
       task: '返回简报格式示例',
       deliveryId: 'accepted-briefing-1',
-      result: '<delegation_briefing mode="initial">\n  <task>已验收结果</task>\n</delegation_briefing>',
+      result: '<delegation_briefing>\n  <task>已验收结果</task>\n</delegation_briefing>',
       createdAt: '2026-08-23T00:00:00.000Z',
     }),
   ];
@@ -4169,104 +4129,6 @@ function interruptedLaneMessages(params: {
 
 
 
-test('fresh delegated request replaces the previous private snapshot', async () => {
-  const oldDelegation = {
-    id: 'old-awaiting-delegation',
-    lane: 'capability:general',
-    task: '旧任务：检查历史 review 状态',
-    contextSummary: '这段上下文不得进入新任务。',
-    runId: 'old-awaiting-run',
-    taskId: 'old-awaiting-trace',
-    status: 'awaiting_decision',
-    resultPreview: '旧任务执行了一部分。',
-    userRequest: '检查历史 review 状态。',
-  };
-  const oldMessages: BaseMessage[] = interruptedLaneMessages({
-    delegationId: oldDelegation.id,
-    runId: oldDelegation.runId,
-  });
-  let structuredCallCount = 0;
-  let executedDelegation: { delegationId: string; runId: string } | null = null;
-  const actModel = {
-    invoke: async () => new AIMessage('新请求已经完成。'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        structuredCallCount += 1;
-        if (structuredCallCount === 1) {
-          return scriptedPlannerTask('执行全新的请求。');
-        }
-        if (structuredCallCount === 2) {
-          return scriptedSupervisorCapability('general');
-        }
-        return goalDoneDecision();
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const freshCapability: AgentCapability = {
-    ...capability('general', 'General-purpose capability.'),
-    lifecycle: {
-      finalize: (_result, context) => {
-        executedDelegation = {
-          delegationId: context.delegationId,
-          runId: context.runId,
-        };
-      },
-    },
-  };
-  const recorder = createSubagentInputRecorder();
-  const graph = createOrchestratorGraph({
-    models: {
-      act: actModel,
-      observe: actModel,
-      subagent: new FakeListChatModel({
-        responses: ['全新请求的执行结果。'],
-        sleep: 0,
-      }),
-    },
-    checkpoint: new MemorySaver(),
-  });
-  const config = {
-    configurable: {
-      thread_id: 'fresh-turn-supersedes-checkpointed-awaiting',
-      capabilities: [freshCapability],
-      toolkits: [],
-    },
-    callbacks: recorder.callbacks,
-  };
-  await graph.updateState(config, {
-    runSupervisorState: { goal: oldDelegation.userRequest, plan: [{
-      id: 'old-task', capability: 'general', objective: oldDelegation.task, status: 'pending',
-      delegation: { id: oldDelegation.id, runId: oldDelegation.runId, taskId: oldDelegation.taskId, messages: oldMessages },
-    }] },
-    runId: oldDelegation.runId,
-  });
-
-  const state = await graph.invoke(
-    buildOrchestratorRunInput([new HumanMessage('这是全新的请求')]),
-    config,
-  ) as OrchestratorStateType;
-
-  assert.equal(structuredCallCount, 3);
-  const observedFreshDelegation = executedDelegation as {
-    delegationId: string;
-    runId: string;
-  } | null;
-  assert.ok(observedFreshDelegation);
-  assert.notEqual(observedFreshDelegation.delegationId, oldDelegation.id);
-  assert.notEqual(observedFreshDelegation.runId, oldDelegation.runId);
-  assert.equal(
-    recorder.subagentInputs.flat().some((message) =>
-      message instanceof ToolMessage
-      && message.content === 'OLD_DELEGATION_TOOL_RESULT'),
-    false,
-  );
-  assert.equal(state.messages.some(message => String(getAgentMessageLane(message)).startsWith('capability:')), false);
-  assert.equal(state.runSupervisorState.plan[0]?.delegation?.runId, state.runId);
-});
-
-
-
 test('delegation briefing stays invocation-scoped across sequential tasks', async () => {
   let structuredCallCount = 0;
   const actModel = {
@@ -4345,7 +4207,6 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   }
   const briefingA = String(firstInput.find(isDelegationBriefingMessage)?.content ?? '');
   const briefingB = String(secondInput.filter(isDelegationBriefingMessage).at(-1)?.content ?? '');
-  assert.match(briefingA, /^<delegation_briefing[^>]*mode="initial">/);
   assert.match(briefingA, /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/);
   assert.match(briefingB, /<task>[\s\S]*删除 packages\/goat 目录。[\s\S]*<\/task>/);
   assert.doesNotMatch(briefingB, /<essential_context>/);
@@ -4357,7 +4218,7 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
   assert.equal(String(humanMessages[0].content), '关闭 issue #272，然后删除 packages/goat 目录。');
 
   // Subagent model input: the current Human briefing is appended after the
-  // selected canonical main and delegation private messages.
+  // main conversation tool results.
   assert.match(String(firstInput.at(-1)?.content), /<delegation_briefing[\s\S]*关闭 GitHub Issue #272/);
   assert.match(String(secondInput.at(-1)?.content), /<delegation_briefing[\s\S]*删除 packages\/goat 目录/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
@@ -4379,70 +4240,6 @@ test('delegation briefing stays invocation-scoped across sequential tasks', asyn
       assert.doesNotMatch(systemText, /上下文摘要/);
     }
   }
-});
-
-test('review_current projects a continuation briefing without rewriting the task', async () => {
-  let structuredCallCount = 0;
-  const actModel = {
-    invoke: async () => new AIMessage('issue 已确认关闭。'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        structuredCallCount += 1;
-        if (structuredCallCount === 1) {
-          return scriptedPlannerTask('关闭 GitHub Issue #272。');
-        }
-        if (structuredCallCount === 2) return scriptedSupervisorCapability('ops');
-        if (structuredCallCount === 3) return continueDecision('未验证 issue 状态，请确认已关闭。');
-        return goalDoneDecision();
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const subagentModel = new FakeListChatModel({
-    responses: ['已尝试关闭 issue。', 'issue 已确认关闭。'],
-    sleep: 0,
-  });
-  const recorder = createSubagentInputRecorder();
-  const graph = createOrchestratorGraph({
-    models: { act: actModel, observe: actModel, subagent: subagentModel },
-  });
-
-  const state = await graph.invoke(buildOrchestratorRunInput([
-    new HumanMessage('关闭 issue #272。'),
-  ]), {
-    configurable: {
-      thread_id: 'briefing-continue-gap',
-      capabilities: [capability('ops', '仓库运维：issue 操作。')],
-      allowedCapabilityNames: ['ops'],
-    },
-    callbacks: recorder.callbacks,
-  }) as OrchestratorStateType;
-
-  assert.equal(state.messages.filter(isDelegationBriefingMessage).length, 0);
-  assert.equal(recorder.subagentInputs.length, 2);
-  for (const input of recorder.subagentInputs) {
-    const briefings = input.filter(isDelegationBriefingMessage);
-    assert.equal(briefings.length, 1);
-    assert.match(String(briefings[0]?.content), /<run_user_request role="goal_context"/);
-  }
-  const continuation = String(
-    recorder.subagentInputs[1].filter(isDelegationBriefingMessage).at(-1)?.content ?? '',
-  );
-  assert.match(continuation, /^<delegation_briefing[^>]*mode="continue">/);
-  assert.match(
-    continuation,
-    /<task>[\s\S]*关闭 GitHub Issue #272。[\s\S]*<\/task>/,
-  );
-  assert.match(continuation, /未验证 issue 状态，请确认已关闭。/);
-
-  // The continuation run keeps the same delegation private messages and reads the
-  // continuation briefing as the latest message.
-  const secondInput = recorder.subagentInputs[1];
-  assert.match(String(secondInput.at(-1)?.content), /^<delegation_briefing[^>]*mode="continue">/);
-  const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
-  assert.equal(secondInput.some(readFixtureDelivery), true);
-  assert.equal(state.messages.some(message => String(getAgentMessageLane(message)).startsWith('capability:')), false);
-  assert.match(secondInputText, /已尝试关闭 issue。/);
 });
 
 test('Capability node inherits root system context into its executor without section forwarding', async () => {

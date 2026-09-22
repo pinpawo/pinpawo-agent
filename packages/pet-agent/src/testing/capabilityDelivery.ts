@@ -11,7 +11,7 @@ export function createDeliveryResult(data: {
   return setAgentMessageMetadata(new ToolMessage({ id: data.id, name: 'delegate_capability',
     tool_call_id: `call:${data.deliveryId}`, status: 'success',
     content: JSON.stringify({ status: 'returned', delivery: { id: data.deliveryId, task, text: data.result, scope } }),
-    artifact: { planItemId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, mode: 'initial', briefing: 'Fixture plan' },
+    artifact: { planItemId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, briefing: 'Fixture plan' },
   }), { runId: data.runId, taskId: data.runId, createdAt: data.createdAt });
 }
 

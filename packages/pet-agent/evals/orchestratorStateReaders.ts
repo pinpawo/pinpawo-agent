@@ -11,7 +11,7 @@ export function readPendingDelegation(result: EvalOrchestratorStateSnapshot) {
     const call = readCapabilityCall({ messages: result.messages, runId: result.runId, taskId: result.taskId,
       runSupervisorState: result.runSupervisorState });
     return { id: call.delegationId, lane: `capability:${call.capability}` as const, task: call.task,
-      mode: call.mode, contextSummary: call.briefing };
+      contextSummary: call.briefing };
   } catch { return null; }
 }
 export function routeModeFromResult(result: EvalOrchestratorStateSnapshot): 'answer' | 'capability' {

@@ -23,13 +23,8 @@ export type CapabilityExecutionInput = {
   /** Resolved by the caller's registry, never supplied directly by the model. */
   readonly capability: CompiledCapability;
   readonly delegation: CapabilityExecutionDelegation;
-  /**
-   * Root conversation snapshot; selected messages must already have stable IDs.
-   * Supervisor supplies private execution history separately.
-   */
+  /** Main conversation containing prior tool results; no child transcript replay. */
   readonly history: readonly BaseMessage[];
-  /** Private context selected and owned by Supervisor for this invocation. */
-  readonly previousMessages?: readonly BaseMessage[];
 };
 
 /** Host-supplied execution context, separate from the delegated task. */
@@ -61,9 +56,7 @@ export type CapabilityExecutionOptions = {
 export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
   readonly delivery: DelegationDelivery | null;
-  /** Complete private snapshot for this delegation; never appended to Root messages. */
-  readonly messages: BaseMessage[];
-  /** Provider usage from newly committed private messages in this attempt. */
+  /** Provider usage reported by this invocation. */
   readonly tokenUsage: ProviderTokenUsage | null;
   readonly artifacts: CapabilityArtifactRef[];
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */

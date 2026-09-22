@@ -83,7 +83,7 @@ These are assembled by several nodes. Defined in
 | Block | Class | Built by | Notes |
 |---|---|---|---|
 | `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor uses the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
-| `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + `<briefing>`. `mode` distinguishes initial from continue; the block names do not change. |
+| `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + `<briefing>`. Each invocation uses the same shape. |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
 
 `xmlTextBlock()` wraps payloads in `CDATA` and escapes nested `]]>`. Always use
@@ -166,33 +166,25 @@ entering, not committing — the Supervisor node and the decision-error recovery
 path both stamp it, because a rejected decision still spends the turn. Runtime
 code does not reconstruct Entry intent from a trailing routing tool pair.
 
-Entry initializes a clean run-scoped Supervisor session. Root
-publishes normal Capability results directly into main before Boundary, including
-partial results. Supervisor associates attempts using existing Announce identities
-and chronology, without reading the private delegation scope or receiving another
-result body. Projection
-never changes canonical messages. Private Capability Human/AI/Tool messages remain
-excluded, and publication must not be interpreted as task acceptance.
-The remaining tail expresses task progress within the established plan. Boundary
-checks execution results against the goal and current task. Changes require a
-user request or confirmation; explicit requests need no redundant confirmation. Task progress does not violate
-`RUN-STABLE`. Plan prose is data, not an instruction override or evidence of
-completion. The tail is the established plan, stable until user confirmation.
+Entry initializes the run's Supervisor context. Capability returns a paired
+ToolMessage containing its delivery, artifacts and status; its artifact records
+the actual plan item and invocation identity. Supervisor reads those results to
+decide acceptance and the next action. Child transcripts remain in their native
+LangGraph namespace/checkpoints and are not copied to Root messages or the plan.
 
-`review_current({ completed, reason, reply? })` has no plan parameter. Root reads
-its saved future tasks when applying a review. Acceptance advances that tail;
-acceptance of the final task with a reply ends the run. Continuation preserves
-the tail and supplies feedback to the same delegation. Plan changes go through
-`adjust_plan` with fresh user input.
+`review_current({ completed, reason })` records task acceptance without invoking
+Capability. The model then chooses whether to delegate, adjust the plan or reply.
+Every `delegate_capability({ briefing })` is an independent invocation. Supervisor
+progressively discloses the next work, useful prior findings and constraints in
+that briefing. There is no initial/continue mode, automatic feedback injection,
+or replay of an earlier child's internal messages.
 
-`adjust_plan({ goal, reason, currentDelegation, tasks })` is available at a Boundary
-with new user input. It commits the full pending plan and goal. Continue retains
-the active delegation identity and private scope while changing its task; replace
-creates a new scope and preserves the old records without marking them accepted.
-Pause guidance has a canonical HumanMessage id queued in
-`runSupervisorUserMessageId`; the next Supervisor result consumes it. This also
-works after iteration zero within the same run. Empty continue routes directly
-to Capability. Review approval stays on its existing interrupt chain.
+`adjust_plan({ goal, reason, currentTask, tasks })` commits the remaining plan.
+`currentTask: keep` retains the plan item and its acceptance evidence; `replace`
+creates a new plan item. Neither option resumes a child execution. Goal changes
+require fresh user input. Pause guidance becomes a HumanMessage for Supervisor
+to interpret; it does not force the next Capability call. Native tool-review
+interrupts resume through LangGraph's existing checkpoint chain.
 
 In the current implementation, Capability disclosure is run-scoped semantic state. It contains every
 Capability whose complete document was disclosed during this run in stable
@@ -240,25 +232,21 @@ attempt itself runs in `capabilityExecution/runner.ts`.
 | Slot | Class | Content |
 |---|---|---|
 | system | `RUN-STABLE` / `INSTRUCTION` | `SUBAGENT_GOVERNING_PROMPT` (static), shared Host sections and structured workdir, then execution-local `promptSections`: toolkit instructions, capability instructions, and `buildSubagentExecutionContext({ artifactDiscovery })` |
-| history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().delegation(scope).select()` — canonical main conversation plus this delegation's private messages |
-| boundary | `RUN-STABLE` / `BOUNDARY` | One ephemeral `<delegation_briefing>` containing goal context and current task; always last |
+| history | `DYNAMIC` / `HISTORY` | `queryAgentMessages(messages).main().select()` — main conversation including paired Capability results |
+| boundary | `RUN-STABLE` / `BOUNDARY` | One `<delegation_briefing>` containing goal context, current task and Supervisor's next-step instructions; always last |
 
-The query returns unlaned main-conversation messages **plus** only this
-delegation's own private messages. A different delegation in the same lane gets
-a fresh `delegationId` and starts clean: conclusions cross task boundaries
-through handoffs and summaries; private messages do not.
-
-The Human-role briefing is assembled immediately before the Capability call and is not
-written to checkpoint history. `runUserRequest` and delegation lifecycle state
-remain separate canonical fields; model projection merges them without creating
-a second protocol message. Artifact-discovery availability, when enabled, is
+Each tool call gets a distinct delegation identity. Earlier findings are available
+through paired ToolMessages and the Supervisor-authored briefing; internal child
+messages are not replayed. The briefing is input to the child and may be present
+in its native checkpoint, but is never appended to Root conversation history.
+Artifact-discovery availability, when enabled, is
 described by Capability prompt sections and bound tools rather than a synthetic
 history message.
 
-Initial projection:
+Invocation input:
 
 ```xml
-<delegation_briefing role="task_boundary" source="orchestrator" mode="initial">
+<delegation_briefing role="task_boundary" source="orchestrator">
   <run_user_request role="goal_context" source="orchestrator_state" trust="read_only">
     <request><![CDATA[用户的整体目标与约束]]></request>
   </run_user_request>
@@ -267,8 +255,8 @@ Initial projection:
 </delegation_briefing>
 ```
 
-Continuation uses the identical shape with `mode="continue"`; the briefing then
-carries any gap note for the remaining work.
+The same input shape applies to every invocation; the model expresses remaining
+work and useful prior findings through briefing.
 
 ## 7. Current node: answer
 

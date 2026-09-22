@@ -1,3 +1,4 @@
+import { readMessagesTokenUsage } from '../agent/tokenUsage';
 import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentRuntimeContext } from '../runtime/context';
 import {
@@ -108,13 +109,9 @@ function readMessageText(message: BaseMessage): string {
     .join('');
 }
 
-function readInvocationOutput(
-  messages: BaseMessage[],
-  inputMessageIds: ReadonlySet<string>,
-): string | null {
+function readInvocationOutput(messages: BaseMessage[]): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.id && inputMessageIds.has(message.id)) continue;
     if (message._getType() !== 'ai') continue;
     if (readSubagentGuardStopReason(message)) continue;
     if (messageHasToolCalls(message)) continue;
@@ -246,9 +243,7 @@ function writeSubagentRuntimeEvent(name: string, data: unknown) {
 
 export async function createSubagent(input: SubagentRunInput): Promise<SubagentResult> {
   const maxIterations = input.maxIterations ?? DEFAULT_SUBAGENT_MAX_ITERATIONS;
-  // Parent lane reconciliation is identity-based because summarization may
-  // replace or shrink the transcript. Stable ids distinguish preserved input
-  // messages from summaries and model responses returned by the child graph.
+  // Stable IDs distinguish this invocation's output and usage from its input.
   ensureSubagentMessageIds(input.messages);
   const inputState: SubagentInputState = {
     promptSections: input.promptSections,
@@ -337,10 +332,9 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   latestMessages = readResultMessages(result) ?? latestMessages;
   ensureSubagentMessageIds(latestMessages);
   const artifacts = inputState.artifacts ?? [];
-  propagatePauseTaskInterrupt(result, {
-    messages: latestMessages,
-    artifacts,
-  });
+  const invocationMessages = latestMessages.filter(message => !inputMessageIds.has(message.id!));
+  const tokenUsage = readMessagesTokenUsage(invocationMessages);
+  propagatePauseTaskInterrupt(result, { artifacts, tokenUsage });
 
-  return { messages: latestMessages, artifacts, output: readInvocationOutput(latestMessages, inputMessageIds) };
+  return { messages: latestMessages, artifacts, tokenUsage, output: readInvocationOutput(invocationMessages) };
 }

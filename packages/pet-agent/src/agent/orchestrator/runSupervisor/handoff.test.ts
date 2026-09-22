@@ -1,9 +1,9 @@
 import { readDelegationDeliveries, readCapabilityExecutions } from '../executionMessages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, ToolMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { Command, MemorySaver, interrupt } from '@langchain/langgraph';
+import { Command, MemorySaver, interrupt, REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createOrchestratorGraph } from '../runtime/graph';
@@ -11,7 +11,7 @@ import { buildOrchestratorRunInput } from '../state';
 import { compileAgentRegistry } from '../registry';
 import { defineInstructionDocument } from '../../../types/capability';
 
-import { getAgentMessageMetadata, queryAgentMessages } from '../../messages';
+import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages, setAgentMessageMetadata } from '../../messages';
 import { readCapabilityCall } from './testingExecution';
 
 class ScriptedModel extends BaseChatModel {
@@ -82,6 +82,12 @@ test('real control handoff returns evidence to main and retains separate Supervi
   assert.equal(readDelegationDeliveries(output.messages).length, 1);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');
   assert.equal(output.messages.at(-1)?.text, 'Inspection complete.');
+  assert.equal(output.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  assert.equal(output.runCapabilityState?.messages.at(-1)?.text, 'Repository inspection evidence.');
+  const saved = (await graph.getState({ configurable: { thread_id: 'real-handoff' } })).values;
+  assert.equal(saved.messages.some((message: BaseMessage) => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  assert.ok(AIMessage.isInstance(saved.runCapabilityState.messages.at(-1)));
+  assert.equal(saved.runCapabilityState.messages.at(-1).text, 'Repository inspection evidence.');
 });
 
 test('restart after dispatch restores pending call without repeating the planning model', async () => {
@@ -141,6 +147,7 @@ test('unfinished task resumes in a new run from Root evidence, not the old Super
   const second = await createOrchestratorGraph({ ...config, models: { ...config.models, act: nextSupervisor, answer: new ScriptedModel([call('continue', {}, 'continue-entry')]) } })
     .invoke(buildOrchestratorRunInput([new HumanMessage('Check compatibility next.')]), options);
   assert.notEqual(second.runId, first.runId);
+  assert.equal(second.runCapabilityState, null);
   assert.notEqual(second.taskId, first.taskId);
   // The plan facts survive the boundary; continue adopts them into the new run.
   assert.deepEqual({ goal: second.runSupervisorState.goal, plan: second.runSupervisorState.plan },
@@ -182,8 +189,8 @@ test('Entry continue executes unfinished work in a fresh private scope', async (
     const metadata = getAgentMessageMetadata(message);
     return metadata.lane === 'capability:general' && metadata.runId === before.runId;
   }), false);
-  assert.ok(second.messages.some((message) => getAgentMessageMetadata(message).lane === 'capability:general'
-    && getAgentMessageMetadata(message).runId === before.runId));
+  assert.equal(second.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  assert.equal(second.runCapabilityState?.scope.runId, second.runId);
 });
 
 test('root stream retains node-level Capability model visibility after tool handoff', async () => {
@@ -393,4 +400,25 @@ test('Entry retries a failed tool with the same provider call ID using full nati
   assert.notEqual(results[0].tool_call_id, (entry.inputs[1].at(-1) as ToolMessage).tool_call_id);
   assert.equal(executor.inputs.length, 1);
   assert.equal(supervisor.inputs.length, 2);
+});
+
+
+test('restart at a legacy Capability boundary migrates private history out of Root', async () => {
+  const { graph, config, executor } = setup();
+  const options = { configurable: { thread_id: 'legacy-private-migration', registry } };
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), {
+    ...options, interruptBefore: ['capability'],
+  });
+  const snapshot = await graph.getState(options);
+  const call = readCapabilityCall(snapshot.values as Parameters<typeof readCapabilityCall>[0]);
+  const work = setAgentMessageMetadata(new AIMessage({ id: 'legacy-work', content: 'Earlier private investigation' }), {
+    lane: 'capability:general', runId: snapshot.values.runId, taskId: snapshot.values.taskId, delegationId: call.delegationId,
+  });
+  await graph.updateState(options, { messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), work, ...snapshot.values.messages] }, 'runSupervisor');
+  const rebuilt = createOrchestratorGraph(config);
+  const output = await rebuilt.invoke(new Command({ goto: 'capability' }), options);
+  assert.ok(executor.inputs[0].some(message => message.id === 'legacy-work'));
+  assert.equal(output.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
+  assert.ok(output.runCapabilityState?.messages.some(message => message.id === 'legacy-work'));
+  assert.equal(readDelegationDeliveries(output.messages).length, 1);
 });

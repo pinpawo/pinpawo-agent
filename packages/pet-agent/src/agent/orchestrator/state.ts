@@ -14,6 +14,7 @@ import {
   type ToolAuthorizationRecord,
 } from '../../autoReview/reviewAuthorizations';
 import type { RunSupervisorState } from './runSupervisor/state';
+import type { CapabilityExecutionState } from './capabilityExecution/state';
 import type { CapabilityDisclosureState } from './runSupervisor/capabilityDisclosure';
 
 export type SessionToolAuthorizationState = {
@@ -31,6 +32,10 @@ export type OrchestratorTerminalErrorState = {
 };
 
 const orchestratorStateChannels = {
+  runCapabilityState: Annotation<CapabilityExecutionState | null>({
+    reducer: (_prev, next) => next,
+    default: () => null,
+  }),
   runSupervisorReviewFeedback: Annotation<string | null>({ reducer: (_prev, next) => next, default: () => null }),
   runSupervisorState: Annotation<RunSupervisorState>({
     reducer: (_prev, next) => next,
@@ -93,6 +98,7 @@ export type OrchestratorStateType = typeof OrchestratorState.State;
 
 export type OrchestratorRunState = Pick<
   OrchestratorStateType,
+  | 'runCapabilityState'
   | 'runSupervisorReviewFeedback'
   | 'runCapabilityDisclosure'
   | 'runSupervisorUserMessageId'
@@ -112,6 +118,7 @@ export function buildRunStateReset(
   options: BuildOrchestratorRunOptions = {},
 ): OrchestratorRunState {
   return {
+    runCapabilityState: null,
     runCapabilityDisclosure: null,
     runSupervisorReviewFeedback: null,
     runSupervisorUserMessageId: null,

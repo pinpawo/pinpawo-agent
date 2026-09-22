@@ -2,7 +2,7 @@ import { readFixtureDelivery, createDeliveryResult, withDeliveryCalls } from '..
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, RemoveMessage } from '@langchain/core/messages';
-import { messagesStateReducer } from '@langchain/langgraph';
+import { capabilityStateMessages } from './state';
 import { tool } from '@langchain/core/tools';
 import { FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
@@ -84,7 +84,7 @@ function runtimeToolkit(events: string[]): AgentToolkit {
   });
 }
 
-test('executor scopes history and returns an unapplied handoff without persisting the briefing', async () => {
+test('executor combines main history with explicit private state without persisting the briefing', async () => {
   const request = input();
   const own = setAgentMessageMetadata(new AIMessage({ id: 'own', content: 'Earlier attempt' }), messageScope(request));
   const foreign = setAgentMessageMetadata(new AIMessage({ id: 'foreign', content: 'Other private work' }), {
@@ -101,17 +101,17 @@ test('executor scopes history and returns an unapplied handoff without persistin
     assert.equal(run.runtimeContext?.executionScope?.delegationId, 'd1');
     return deliver(run);
   } });
-  const result = await execute({ ...request, history: messages }, { ...hostContext(), runnableConfig: config });
+  const result = await execute({ ...request, history: messages, state: { scope: messageScope(request), messages: [own] } }, { ...hostContext(), runnableConfig: config });
   assert.equal(result.status, 'returned');
   assert.equal(result.delivery?.scope.delegationId, 'd1');
   assert.equal(result.delivery?.text, 'Delivered');
-  assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
-  assert.equal(result.privateMessages.filter(readFixtureDelivery).length, 0);
-  assert.equal(result.privateMessages.some((message) => message instanceof RemoveMessage), false);
+  assert.equal(result.state.messages.some(isDelegationBriefingMessage), false);
+  assert.equal(result.state.messages.filter(readFixtureDelivery).length, 0);
+  assert.equal(result.state.messages.some((message) => message instanceof RemoveMessage), false);
   assert.deepEqual(messages.map((message) => message.toDict()), before);
 });
 
-test('continuation retains its private scope and returns only this attempt as a new patch', async () => {
+test('continuation returns a complete private snapshot without copying main history', async () => {
   const request = input();
   const prior = setAgentMessageMetadata(new AIMessage({ id: 'prior', content: 'First attempt' }), messageScope(request));
   const execute = createCapabilityExecutor({ models, runSubagent: async (run) => {
@@ -119,24 +119,24 @@ test('continuation retains its private scope and returns only this attempt as a 
     return deliver(run, 'Second attempt');
   } });
   const result = await execute({
-    ...request, history: [...request.history, prior],
+    ...request, state: { scope: messageScope(request), messages: [prior] },
     delegation: { ...request.delegation, mode: 'continue', briefing: 'Verify the document.' },
   }, hostContext());
   assert.equal(result.delivery?.task, request.delegation.task);
   assert.equal(result.delivery?.text, 'Second attempt');
-  assert.equal(result.privateMessages.some(({ id }) => id === 'prior'), false);
-  assert.deepEqual(result.scope, messageScope(request));
+  assert.equal(result.state.messages.some(({ id }) => id === 'prior'), true);
+  assert.deepEqual(result.state.scope, messageScope(request));
 });
 
 test('retained capability history is private to the exact delegation and run after delivery', async () => {
   const request = input();
   const result = await createCapabilityExecutor({ models, runSubagent: async (run) => deliver(run) })(request, hostContext());
-  const stored = messagesStateReducer([...request.history], result.privateMessages);
-  assert.equal(stored.length, request.history.length + 1);
-  assert.deepEqual(queryAgentMessages(stored).main().select().messages, request.history);
-  assert.equal(queryAgentMessages(stored).delegation(messageScope(request)).select().messages[0]?.text, 'Delivered');
-  assert.deepEqual(queryAgentMessages(stored).delegation({ ...messageScope(request), delegationId: 'd2' }).select().messages, []);
-  assert.deepEqual(queryAgentMessages(stored).delegation({ ...messageScope(request), runId: 'r2' }).select().messages, []);
+  assert.deepEqual(queryAgentMessages(result.state.messages).main().select().messages, []);
+  assert.equal(capabilityStateMessages(result.state, messageScope(request))[0]?.text, 'Delivered');
+  for (const different of [{ delegationId: 'd2' }, { runId: 'r2' }, { taskId: 't2' }, { lane: 'capability:other' as const }]) {
+    const next = { ...messageScope(request), ...different };
+    assert.deepEqual(capabilityStateMessages(result.state, next), []);
+  }
 });
 
 test('executor returns explicit output without requiring a matching private message', async () => {
@@ -147,7 +147,7 @@ test('executor returns explicit output without requiring a matching private mess
   const second = await execute(input(), hostContext());
   assert.equal(first.status, 'returned');
   assert.equal(first.delivery?.text, 'Final output independent of private history.');
-  assert.deepEqual(first.privateMessages, []);
+  assert.deepEqual(first.state.messages, []);
   assert.notEqual(first.delivery?.id, second.delivery?.id);
 });
 
@@ -158,8 +158,8 @@ for (const output of [null, '', '  ']) {
     );
     assert.equal(result.status, 'missing_deliverable');
     assert.equal(result.delivery, null);
-    assert.equal(result.privateMessages.length, 1);
-    assert.equal(result.privateMessages[0].text, 'Delivered');
+    assert.equal(result.state.messages.length, 1);
+    assert.equal(result.state.messages[0].text, 'Delivered');
   });
 }
 
@@ -216,7 +216,7 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
         const result = await execute(request, hostContext());
         assert.equal(result.status, outcome);
         assert.equal(result.delivery, null);
-        assert.ok(result.privateMessages.some(({ id }) => id === 'partial'));
+        assert.ok(result.state.messages.some(({ id }) => id === 'partial'));
         assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
       }
       assert.equal(finalized, outcome === 'missing_deliverable');
@@ -265,7 +265,7 @@ test('overlapping calls keep contexts, bindings, artifacts and authorizations se
     assert.deepEqual(b.toolAuthorizations, []);
     for (const [result, id] of [[a, 'd1'], [b, 'd2']] as const) {
       assert.equal(result.delivery?.scope.delegationId, id);
-      const privateMessage = result.privateMessages.find((message) => !readFixtureDelivery(message));
+      const privateMessage = result.state.messages.find((message) => !readFixtureDelivery(message));
       assert.equal(getAgentMessageMetadata(privateMessage!).delegationId, id);
       assert.equal(events.filter((event) => event === `release:${id}`).length, 1);
     }
@@ -286,7 +286,7 @@ test('default executor still invokes the existing createAgent-based subagent wra
   })(input(), hostContext());
   assert.equal(result.status, 'returned');
   assert.ok(result.delivery?.text);
-  assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
+  assert.equal(result.state.messages.some(isDelegationBriefingMessage), false);
 });
 
 test('runtime bindings, real tools and finalize share the host config identity', async () => {
@@ -340,7 +340,7 @@ test('real subagent execution accepts frozen history with stable IDs without cha
   const result = await execute({ ...input(), history: Object.freeze([message]) }, hostContext());
   assert.equal(result.status, 'returned');
   assert.deepEqual(message.toDict(), before);
-  assert.equal(result.privateMessages.some(({ id }) => id === 'frozen-user'), false);
+  assert.equal(result.state.messages.some(({ id }) => id === 'frozen-user'), false);
 });
 
 for (const id of [undefined, '', '   ']) {
@@ -370,7 +370,7 @@ for (const mode of ['initial', 'continue'] as const) {
     } });
     const result = await execute({ ...request, delegation: { ...request.delegation, mode, briefing } }, hostContext());
     assert.equal(result.status, 'returned');
-    assert.equal(result.privateMessages.some(isDelegationBriefingMessage), false);
+    assert.equal(result.state.messages.some(isDelegationBriefingMessage), false);
   });
 }
 
@@ -393,4 +393,49 @@ test('prior delivery directory derives from main history across runs without mod
     return deliver(run);
   } });
   await execute({ ...request, history: [...request.history, ...withDeliveryCalls([prior]), orphan] }, hostContext());
+});
+
+
+test('private compaction replaces prior work without removing Root history', async () => {
+  const request = input();
+  const prior = setAgentMessageMetadata(new AIMessage({ id: 'old-private', content: 'Old work' }), messageScope(request));
+  const execute = createCapabilityExecutor({ models, runSubagent: async () => ({
+    messages: [new AIMessage({ id: 'summary', content: 'Compacted private work' })],
+    output: 'Compacted private work', artifacts: [],
+  }) });
+  const result = await execute({ ...request, state: { scope: messageScope(request), messages: [prior] } }, hostContext());
+  assert.deepEqual(result.state.messages.map(message => message.id), ['summary']);
+  assert.deepEqual(request.history.map(message => message.id), ['user']);
+});
+
+for (const mismatch of ['runId', 'taskId', 'delegationId', 'lane'] as const) {
+  test(`executor excludes a private snapshot with a different ${mismatch}`, async () => {
+    const request = input();
+    const scope = messageScope(request);
+    const execute = createCapabilityExecutor({ models, runSubagent: async run => {
+      assert.equal(run.messages.some(message => message.id === 'foreign'), false);
+      return deliver(run);
+    } });
+    const result = await execute({ ...request, state: {
+      scope: { ...scope, [mismatch]: mismatch === 'lane' ? 'capability:other' : 'other' },
+      messages: [new AIMessage({ id: 'foreign', content: 'Other work' })],
+    } }, hostContext());
+    assert.equal(result.state.messages.some(message => message.id === 'foreign'), false);
+  });
+}
+
+
+test('continuation accounts only newly committed provider usage', async () => {
+  const request = input();
+  const prior = setAgentMessageMetadata(new AIMessage({ id: 'prior-usage', content: 'Prior work',
+    usage_metadata: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
+  }), messageScope(request));
+  const execute = createCapabilityExecutor({ models, runSubagent: async run => ({
+    messages: [...run.messages, new AIMessage({ id: 'new-usage', content: 'New work',
+      usage_metadata: { input_tokens: 30, output_tokens: 5, total_tokens: 35 },
+    })], artifacts: [], output: 'New work',
+  }) });
+  const result = await execute({ ...request, state: { scope: messageScope(request), messages: [prior] } }, hostContext());
+  assert.deepEqual(result.tokenUsage, { inputTokens: 30, outputTokens: 5, totalTokens: 35 });
+  assert.equal(result.state.messages.length, 2);
 });

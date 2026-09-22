@@ -1,10 +1,11 @@
+import type { ProviderTokenUsage } from '../../tokenUsage';
+import type { CapabilityExecutionState } from './state';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { LangGraphRunnableConfig } from '@langchain/langgraph';
 import type { createSubagent } from '../../../subagent/createSubagent';
 import type { AgentModels } from '../../../types/agent';
 import type { CapabilityArtifactRef, CapabilityArtifactStore } from '../../../types/artifact';
 import type { ModelInputModality, ToolkitReviewCapabilities } from '../../../types/toolkit';
-import type { DelegationMessageScope } from '../../messages';
 import type { DelegationSpec } from '../delegation';
 import type { DelegationDelivery } from '../delegation/delivery';
 import type { CompiledCapability } from '../registry';
@@ -24,10 +25,11 @@ export type CapabilityExecutionInput = {
   readonly capability: CompiledCapability;
   readonly delegation: CapabilityExecutionDelegation;
   /**
-   * Canonical history snapshot; selected messages must already have stable IDs.
-   * The executor selects only main + this delegation and never assigns input IDs.
+   * Root conversation snapshot; selected messages must already have stable IDs.
+   * Private execution history is supplied only through the dedicated state.
    */
   readonly history: readonly BaseMessage[];
+  readonly state?: CapabilityExecutionState | null;
 };
 
 /** Host-supplied execution context, separate from the delegated task. */
@@ -58,10 +60,11 @@ export type CapabilityExecutionOptions = {
 
 export type CapabilityExecutionResult = {
   readonly status: 'returned' | 'paused' | 'missing_deliverable';
-  readonly scope: DelegationMessageScope & { readonly taskId: string };
   readonly delivery: DelegationDelivery | null;
-  /** Unapplied private-history patch; contains no main ToolMessage. */
-  readonly privateMessages: BaseMessage[];
+  /** Complete private snapshot for this delegation; never appended to Root messages. */
+  readonly state: CapabilityExecutionState;
+  /** Provider usage from newly committed private messages in this attempt. */
+  readonly tokenUsage: ProviderTokenUsage | null;
   readonly artifacts: CapabilityArtifactRef[];
   /** Execution-local snapshot; a future parallel caller must merge, not overwrite. */
   readonly toolAuthorizations: ToolAuthorizationRecord[];

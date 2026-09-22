@@ -1,3 +1,4 @@
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { createHash } from 'node:crypto';
@@ -572,4 +573,27 @@ test('FileSaver bounds long checkpoint path segments without losing logical iden
     checkpoint_ns: namespace,
     checkpoint_id: 'cp-long',
   }]);
+});
+
+
+test('FileSaver restores Capability private state independently of Root messages', async (t) => {
+  const filePath = join(createTempDir(t), 'checkpoints.json');
+  const saver = new FileSaver(filePath);
+  const config = { configurable: { thread_id: 'private-state' } };
+  const scope = { lane: 'capability:general', runId: 'run', taskId: 'task', delegationId: 'delegation' };
+  const privateCall = new AIMessage({ id: 'private-call', content: '', tool_calls: [
+    { id: 'read', name: 'read_file', args: {} },
+  ] });
+  const privateResult = new ToolMessage({ id: 'private-result', content: 'Private evidence', tool_call_id: 'read' });
+  await saver.put(config, checkpoint('private-checkpoint', {
+    messages: [new HumanMessage({ id: 'user', content: 'Inspect it' })],
+    runCapabilityState: { scope, messages: [privateCall, privateResult] },
+  }), { source: 'loop', step: 1, parents: {} });
+  const restored = (await new FileSaver(filePath).getTuple(config))!.checkpoint.channel_values;
+  const state = restored.runCapabilityState as { scope: typeof scope; messages: unknown[] };
+  assert.deepEqual(state.scope, scope);
+  assert.ok(AIMessage.isInstance(state.messages[0]));
+  assert.ok(ToolMessage.isInstance(state.messages[1]));
+  assert.equal((state.messages[1] as ToolMessage).tool_call_id, 'read');
+  assert.equal((restored.messages as unknown[]).length, 1);
 });

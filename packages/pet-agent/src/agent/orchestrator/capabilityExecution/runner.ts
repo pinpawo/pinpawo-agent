@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { messagesStateReducer } from '@langchain/langgraph';
+import { readMessagesTokenUsage } from '../../tokenUsage';
+import { capabilityStateMessages, type CapabilityExecutionState } from './state';
 import { createSubagent } from '../../../subagent/createSubagent';
 import { getAgentRuntimeContext } from '../../../runtime/context';
 import type { CapabilityArtifactRef } from '../../../types/artifact';
@@ -43,7 +46,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const threadId = readThreadId(runnableConfig);
     const { delegation } = input;
     const { capability } = input.capability;
-    const scope: CapabilityExecutionResult['scope'] = {
+    const scope: CapabilityExecutionState['scope'] = {
       lane: `capability:${capability.name}`,
       delegationId: delegation.id,
       runId: delegation.runId,
@@ -55,9 +58,10 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const toolkitList = [...input.capability.toolkits];
     const { runId } = scope;
     const delegationBriefing = materializeDelegation(delegation);
+    const privateHistory = capabilityStateMessages(input.state, scope);
     const scopedQuery = queryAgentMessages(input.history)
       .main()
-      .delegation(scope);
+      .append(...privateHistory);
     const canonicalSelection = scopedQuery.select();
     const priorDeliveries = readCapabilityExecutions(canonicalSelection.messages)
       .flatMap(({ result }) => result?.status === 'returned' && result.delivery ? [{
@@ -246,9 +250,9 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     } : null;
     return {
       status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
-      scope,
       delivery,
-      privateMessages: [...reconciled.removed, ...reconciled.added],
+      state: { scope, messages: messagesStateReducer(privateHistory, [...reconciled.removed, ...reconciled.added]) },
+      tokenUsage: readMessagesTokenUsage(reconciled.added),
       artifacts: resultArtifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };

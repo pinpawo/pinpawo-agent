@@ -6,3 +6,4 @@ export type {
   CapabilityExecutionOptions,
   CapabilityExecutionResult,
 } from './types';
+export type { CapabilityExecutionState } from './state';

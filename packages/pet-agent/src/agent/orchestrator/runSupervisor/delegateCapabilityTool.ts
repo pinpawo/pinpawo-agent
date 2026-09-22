@@ -9,6 +9,7 @@ import { executionsForPlanItem } from '../executionMessages';
 import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
+import { restoreCapabilityState, removeLegacyCapabilityMessages } from '../capabilityExecution/state';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
 
 export const delegateCapabilitySchema = z.object({
@@ -38,6 +39,10 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       delegation: { id: input.delegationId, runId: state.runId, taskId: state.taskId,
         userRequest, task: input.task, mode: input.mode, briefing: input.briefing },
       history: state.messages,
+      state: restoreCapabilityState(state.runCapabilityState, state.messages, {
+        lane: `capability:${input.capability}`, delegationId: input.delegationId,
+        runId: state.runId, taskId: state.taskId,
+      }),
     }, {
       review: {
         authorizations: state.sessionToolAuthorizations.generation === registry.authorizationGeneration
@@ -53,9 +58,12 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       content: JSON.stringify({ status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts }),
       artifact: input,
     }), { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
-      sourceCapability: input.capability, runtimeGenerated: true });
+      sourceCapability: input.capability, runtimeGenerated: true,
+      ...(execution.tokenUsage ? { capabilityTokenUsage: execution.tokenUsage } : {}),
+    });
     return new Command({ update: {
-      messages: [...execution.privateMessages, result],
+      messages: [...removeLegacyCapabilityMessages(state.messages), result],
+      runCapabilityState: execution.state,
       sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },

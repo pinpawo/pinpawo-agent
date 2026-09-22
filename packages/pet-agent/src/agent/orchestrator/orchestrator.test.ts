@@ -3618,6 +3618,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     __interrupt__?: Array<{ id?: string; value?: { kind?: string } }>;
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
+    runCapabilityState: OrchestratorStateType['runCapabilityState'];
     runId: string;
   };
 
@@ -3640,7 +3641,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
   const retainedLane = selectCapabilityHistory(
-    finalState.messages,
+    finalState.runCapabilityState?.messages ?? [],
     activeDelegation.lane,
     activeDelegation.runId,
     activeDelegation.id,
@@ -3815,6 +3816,7 @@ test('toolkit review run interruption retains the delegation without another mod
     __interrupt__?: Array<{ id?: string; value?: { kind?: string } }>;
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
+    runCapabilityState: OrchestratorStateType['runCapabilityState'];
     runId: string;
   };
 
@@ -3840,7 +3842,7 @@ test('toolkit review run interruption retains the delegation without another mod
   const activeDelegation = { id: previous.execution.delegationId, lane: `capability:${task.capability}` as const, runId: String(previous.metadata.runId) };
   assert.ok(activeDelegation);
   const retainedLane = selectCapabilityHistory(
-    finalState.messages,
+    finalState.runCapabilityState?.messages ?? [],
     activeDelegation.lane,
     activeDelegation.runId,
     activeDelegation.id,
@@ -3863,6 +3865,7 @@ test('toolkit review run interruption retains the delegation without another mod
   ) as {
     messages: BaseMessage[];
     runSupervisorState: OrchestratorStateType['runSupervisorState'];
+    runCapabilityState: OrchestratorStateType['runCapabilityState'];
     runId: string;
   };
 
@@ -4204,7 +4207,7 @@ function interruptedLaneMessages(params: {
 
 
 
-test('fresh delegated request supersedes checkpointed work without deleting its lane', async () => {
+test('fresh delegated request removes legacy private messages from Root', async () => {
   const oldDelegation = {
     id: 'old-awaiting-delegation',
     lane: 'capability:general',
@@ -4296,15 +4299,8 @@ test('fresh delegated request supersedes checkpointed work without deleting its 
       && message.content === 'OLD_DELEGATION_TOOL_RESULT'),
     false,
   );
-  assert.equal(
-    selectCapabilityHistory(
-      state.messages,
-      'capability:general',
-      oldDelegation.runId,
-      oldDelegation.id,
-    ).some((message) => message instanceof ToolMessage),
-    true,
-  );
+  assert.equal(state.messages.some(message => String(getAgentMessageLane(message)).startsWith('capability:')), false);
+  assert.equal(state.runCapabilityState?.scope.runId, state.runId);
 });
 
 
@@ -4482,7 +4478,8 @@ test('review_current projects a continuation briefing without rewriting the task
   const secondInput = recorder.subagentInputs[1];
   assert.match(String(secondInput.at(-1)?.content), /^<delegation_briefing[^>]*mode="continue">/);
   const secondInputText = secondInput.map((message) => String(message.content)).join('\n');
-  assert.equal(secondInput.some(readFixtureDelivery), false);
+  assert.equal(secondInput.some(readFixtureDelivery), true);
+  assert.equal(state.messages.some(message => String(getAgentMessageLane(message)).startsWith('capability:')), false);
   assert.match(secondInputText, /已尝试关闭 issue。/);
 });
 

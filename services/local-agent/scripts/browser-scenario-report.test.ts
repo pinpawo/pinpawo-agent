@@ -47,7 +47,7 @@ test('browser scenario reporter records stable phase, recovery and error summari
 });
 
 test('browser scenario reporter preserves driver error codes without error text', async () => {
-  const reporter = new BrowserScenarioReporter('playwright', 'fixture', () => 10);
+  const reporter = new BrowserScenarioReporter('extension', 'fixture', () => 10);
   await assert.rejects(
     reporter.run('snapshot', 'first_pass', async () => {
       throw Object.assign(new Error('sensitive URL should not be reported'), { code: 'origin_changed' });

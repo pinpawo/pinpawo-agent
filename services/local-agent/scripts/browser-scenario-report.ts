@@ -1,4 +1,4 @@
-export type BrowserScenarioDriver = 'playwright' | 'extension';
+export type BrowserScenarioDriver = 'extension';
 export type BrowserScenarioPhaseKind = 'first_pass' | 'guard' | 'recovery';
 export type BrowserScenarioPhaseStatus = 'passed' | 'failed' | 'skipped';
 export type BrowserScenarioObservation = boolean | number | string;

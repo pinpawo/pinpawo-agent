@@ -39,7 +39,6 @@ import {
   findLegacyLocalAgentState,
   type LocalAgentRuntimeConfig,
 } from './config/runtimeConfig';
-import { getConfig } from './config/config';
 import { resolveHostExecutionConfig, type HostExecutionConfig } from './config/hostExecutionConfig';
 import { loadAgentContext } from './contextLoader';
 import {
@@ -140,7 +139,7 @@ export class HostCapabilityAssembly {
       createProjectInspectionToolkit(),
       createCapabilityCreatorToolkit(),
       ...(browserSelected
-        ? [createBrowserToolkit({ backend: () => getConfig().browserBackend })]
+        ? [createBrowserToolkit()]
         : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({

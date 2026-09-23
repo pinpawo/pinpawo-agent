@@ -70,7 +70,7 @@ This is the core responsibility of an agent harness: **keep the loop running sta
 - Reusable TypeScript runtime for agent orchestration and isolated Capability delegation.
 - Local HTTP/WebSocket or JSONL stdio host with checkpoint-backed sessions.
 - OpenTUI terminal client with tool activity and human-review flows.
-- Browser automation through Playwright or a Chrome Extension plus Native Messaging host.
+- Browser automation in your own Chrome through a Chrome Extension plus Native Messaging host.
 - Studio runtime for multi-Pet dispatch, read-only per-Pet dispatch-queue observation, and plugin-driven workflows.
 - Extensible local Capabilities and Toolkit-based plugins.
 
@@ -220,7 +220,6 @@ Never commit local credentials or generated runtime state.
 |---|---|
 | `PINPAWO_MODEL_PROFILE` | Stored model profile ID. |
 | `PINPAWO_WORKDIR` | Default runtime working directory. |
-| `PINPAWO_BROWSER_BACKEND` | `auto`, `playwright`, or `extension`. |
 | `LOCAL_SERVER_PORT` | Local HTTP/WebSocket port. |
 
 See [Model Profile Configuration](docs/guides/model-profiles.md) for the stored
@@ -283,7 +282,7 @@ Legacy top-level `tools` exports are ignored.
 
 ## Browser Toolkit
 
-Browser `auto` mode prefers a connected Chrome Extension for supported default-session operations and falls back to Playwright. Force a backend with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+Browser tools drive your own Chrome through the PinPawo Chrome Extension and its Native Messaging host; there is no other browser driver.
 
 For extension setup:
 
@@ -294,7 +293,7 @@ pinpawo browser extension repair --extension-id <id>
 pinpawo browser extension unregister
 ```
 
-See [Chrome Extension Browser Backend](docs/guides/browser-bridge.md) for the protocol, security model, and supported interaction scope.
+See [Chrome Extension Browser](docs/guides/browser-bridge.md) for the protocol, security model, and supported interaction scope.
 
 ## Runtime State
 

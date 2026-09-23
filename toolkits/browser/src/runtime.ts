@@ -9,7 +9,6 @@ import {
   BrowserSession,
   type BrowserElementTarget,
   type BrowserExtractOptions,
-  type BrowserOpenOptions,
   type BrowserScrollOptions,
   type BrowserWaitState,
 } from './session';
@@ -18,12 +17,6 @@ import type {
   BrowserRuntimeCallContext,
   BrowserRuntimePort,
 } from './runtimePort';
-import {
-  configuredBrowserBackend,
-  resolveBrowserToolkitOptions,
-  type BrowserToolkitOptions,
-  type ResolvedBrowserToolkitOptions,
-} from './options';
 
 export type BrowserExtensionRuntimeState =
   | 'stopped'
@@ -195,15 +188,10 @@ export class BrowserRuntime implements BrowserRuntimePort {
     session: BrowserSession;
     workdir: string;
   }>();
-  private readonly options: ResolvedBrowserToolkitOptions;
   private readonly bridge: BrowserExtensionBridge;
   private readonly bridgeCoordinator: BrowserExtensionBridgeCoordinator;
 
-  constructor(
-    options: BrowserToolkitOptions = {},
-    dependencies: BrowserRuntimeDependencies = {},
-  ) {
-    this.options = resolveBrowserToolkitOptions(options);
+  constructor(dependencies: BrowserRuntimeDependencies = {}) {
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
     this.bridgeCoordinator = coordinatorForBridge(this.bridge);
   }
@@ -218,11 +206,6 @@ export class BrowserRuntime implements BrowserRuntimePort {
       }
       return existing.session;
     }
-
-    const executionOptions = Object.freeze({
-      ...this.options,
-      workdir: () => workdir,
-    });
 
     // The extension receives only this opaque id; raw run/delegation tracing
     // metadata never crosses the native host boundary. Its lifetime is the
@@ -253,12 +236,10 @@ export class BrowserRuntime implements BrowserRuntimePort {
             if (!change.contextId || change.contextId === browserContextId) listener(change);
           }) }
         : {}),
-    }, executionOptions.workdir);
+    }, () => workdir);
     const session = new BrowserSession({
       requireExecutionOwner: true,
-      getRuntimeSnapshot: () => this.getSnapshot(),
       createChromeExtensionSession: () => extensionSession,
-      environment: executionOptions,
     });
     this.sessionsByThread.set(threadId, { session, workdir });
     return session;
@@ -278,23 +259,9 @@ export class BrowserRuntime implements BrowserRuntimePort {
     };
   }
 
-  async open(
-    context: BrowserRuntimeCallContext,
-    url: string,
-    options?: BrowserOpenOptions,
-  ) {
+  async open(context: BrowserRuntimeCallContext, url: string) {
     const { session, owner } = this.sessionForCall(context);
-    return session.open(url, options, owner, context.signal);
-  }
-
-  async openWithProfile(
-    context: BrowserRuntimeCallContext,
-    url: string,
-    userDataDir: string,
-    options?: Omit<BrowserOpenOptions, 'session' | 'userDataDir'>,
-  ) {
-    const { session, owner } = this.sessionForCall(context);
-    return session.openWithProfile(url, userDataDir, options, owner, context.signal);
+    return session.open(url, owner, context.signal);
   }
 
   async snapshot(context: BrowserRuntimeCallContext) {
@@ -356,13 +323,7 @@ export class BrowserRuntime implements BrowserRuntimePort {
     return session.close(owner, context.signal);
   }
 
-  async listSessions(context: BrowserRuntimeCallContext) {
-    const { session } = this.sessionForCall(context);
-    return session.listSessions();
-  }
-
   async start(): Promise<void> {
-    if (!shouldStartBrowserExtensionBridge(configuredBrowserBackend(this.options))) return;
     if (this.started) return;
     await this.bridgeCoordinator.acquire();
     this.started = true;
@@ -393,8 +354,4 @@ export class BrowserRuntime implements BrowserRuntimePort {
     // instead evaluated by the context-filtered ChromeExtensionBrowserSession.
     return projectBrowserRuntimeSnapshot(this.bridge.getStatus());
   }
-}
-
-export function shouldStartBrowserExtensionBridge(backend: string): boolean {
-  return backend === 'auto' || backend === 'extension';
 }

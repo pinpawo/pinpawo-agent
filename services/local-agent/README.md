@@ -28,7 +28,7 @@ npx pinpawo tui
 - `~/.pinpawo/capabilities/` for user capabilities.
 - `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
 
-Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. Credentials and endpoints are read only from the stored profile. `pinpawo init` creates an editable profile template and migrates a complete legacy `.env` model tuple when no `config.json` exists. Use `pinpawo setup` to check missing config and next steps. Browser `auto` mode prefers a connected Chrome extension for compatible default-session operations and otherwise uses Playwright; force either driver with `PINPAWO_BROWSER_BACKEND=extension` or `playwright`.
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. Credentials and endpoints are read only from the stored profile. `pinpawo init` creates an editable profile template and migrates a complete legacy `.env` model tuple when no `config.json` exists. Use `pinpawo setup` to check missing config and next steps. Browser tools drive your own Chrome through the PinPawo Chrome extension; register it with `pinpawo browser extension register`.
 
 Programmatic Chat and Studio Hosts resolve execution settings once with
 `resolveHostExecutionConfig(runtimeConfig, settings)`. The resolved settings own

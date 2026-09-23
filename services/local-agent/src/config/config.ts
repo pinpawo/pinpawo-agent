@@ -140,7 +140,6 @@ export type Config = Readonly<{
   globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
-  browserBackend: string;
   localServerPort: number;
 }>;
 
@@ -172,7 +171,6 @@ function readConfigDefaults(): Config {
     globalReviewPolicyMode: getGlobalReviewPolicyMode(),
     autoAuthorizationSafetyLevel: getAutoAuthorizationSafetyLevel(),
     workdir: get('PINPAWO_WORKDIR', 'workdir') || process.cwd() || homedir(),
-    browserBackend: get('PINPAWO_BROWSER_BACKEND', 'browser_backend') || 'auto',
     localServerPort: Number(process.env.LOCAL_SERVER_PORT ?? 3210),
   });
 }

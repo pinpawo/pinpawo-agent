@@ -117,7 +117,7 @@ defined in the [Capability directory protocol](../reference/extensions/capabilit
   build extensions safely.
 - [Model profile configuration](model-profiles.md) — configure
   multiple models or custom endpoints.
-- [Chrome extension browser backend](browser-bridge.md) — connect a
+- [Chrome extension browser](browser-bridge.md) — connect a
   browser session.
 - [Studio configuration](../studio/configuration.md) — configure multi-Pet
   dispatch and plugins.

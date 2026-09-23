@@ -9,13 +9,6 @@ const CJS_EXTERNALS = [
   // ripgrep: runtime-resolved platform package with a native binary
   '@vscode/ripgrep',
   '@vscode/ripgrep/*',
-  // playwright / chromium: native binaries, never bundle
-  'playwright-core',
-  'playwright-core/*',
-  'playwright',
-  'playwright/*',
-  'chromium-bidi',
-  'chromium-bidi/*',
 ];
 
 export default defineConfig({

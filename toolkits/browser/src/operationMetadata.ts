@@ -104,47 +104,10 @@ function browserExtractOutputSummary(output: unknown): ToolOperationSummary | nu
 function browserOpenInputSummary(input: unknown): ToolOperationSummary | null {
   const record = readJsonRecord(input);
   const url = readString(record, 'url');
-  const headless = readBoolean(record, 'headless');
   return url
     ? {
         target: url,
         summary: '打开网页',
-        details: {
-          headless,
-        },
-      }
-    : null;
-}
-
-function browserOpenWithSessionInputSummary(input: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(input);
-  const url = readString(record, 'url');
-  const session = readString(record, 'session');
-  const headless = readBoolean(record, 'headless');
-  return url || session
-    ? {
-        target: url,
-        summary: session ? `打开会话 ${session}` : '打开浏览器会话',
-        details: {
-          session,
-          headless,
-        },
-      }
-    : null;
-}
-
-function browserOpenWithProfileInputSummary(input: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(input);
-  const url = readString(record, 'url');
-  const headless = readBoolean(record, 'headless');
-  return url
-    ? {
-        target: url,
-        summary: '使用本机 profile 打开网页',
-        details: {
-          profile: 'provided',
-          headless,
-        },
       }
     : null;
 }
@@ -218,35 +181,10 @@ function scrollInputSummary(input: unknown): ToolOperationSummary | null {
   };
 }
 
-function browserSessionInputSummary(input: unknown): ToolOperationSummary | null {
-  const record = readJsonRecord(input);
-  const action = readString(record, 'action');
-  return action
-    ? {
-        summary: action === 'list' ? '列出浏览器会话' : action,
-        details: {
-          action,
-        },
-      }
-    : null;
-}
-
 export const browserOperationMetadata: Record<string, ToolOperationMetadata> = {
   browser_open: {
     title: '打开网页',
     summarizeInput: browserOpenInputSummary,
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
-  },
-  browser_open_with_session: {
-    title: '打开浏览器会话',
-    summarizeInput: browserOpenWithSessionInputSummary,
-    summarizeOutput: browserSnapshotSummary,
-    summarizeError: browserErrorSummary,
-  },
-  browser_open_with_profile: {
-    title: '打开浏览器 profile',
-    summarizeInput: browserOpenWithProfileInputSummary,
     summarizeOutput: browserSnapshotSummary,
     summarizeError: browserErrorSummary,
   },
@@ -295,12 +233,6 @@ export const browserOperationMetadata: Record<string, ToolOperationMetadata> = {
   browser_close: {
     title: '关闭浏览器',
     summarizeInput: () => ({ summary: '关闭当前浏览器会话' }),
-    summarizeOutput: rawStringOutputSummary,
-    summarizeError: browserErrorSummary,
-  },
-  browser_session: {
-    title: '管理浏览器会话',
-    summarizeInput: browserSessionInputSummary,
     summarizeOutput: rawStringOutputSummary,
     summarizeError: browserErrorSummary,
   },

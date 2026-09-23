@@ -2,7 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import { createBrowserToolkit } from './toolkit';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BrowserRuntime } from './runtime';
+import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
+
+/** Keep tests off the user's real bridge socket. */
+function isolatedToolkit() {
+  const dir = mkdtempSync(join(tmpdir(), 'ppb-'));
+  return createBrowserToolkit({
+    bridge: new BrowserExtensionBridge({
+      socketPath: join(dir, 'bridge.sock'),
+      tokenPath: join(dir, 'bridge.token'),
+    }),
+  });
+}
 
 test('only browser_screenshot requires image input', () => {
   const toolkit = createBrowserToolkit();
@@ -17,7 +32,7 @@ test('only browser_screenshot requires image input', () => {
 });
 
 test('Browser Runtime is exposed as a port without replacing static tools', async () => {
-  const toolkit = createBrowserToolkit({ backend: () => 'playwright' });
+  const toolkit = isolatedToolkit();
   const manager = new ToolkitRuntimeManager();
   const staticTools = toolkit.tools.map(({ tool }) => tool);
   const execution = await manager.resolve({
@@ -41,23 +56,12 @@ test('Browser Runtime is exposed as a port without replacing static tools', asyn
   await manager.stop();
 });
 
-test('browser availability describes structural backend support, not Host selection', async () => {
-  let backendReads = 0;
-  const toolkit = createBrowserToolkit({
-    backend: () => {
-      backendReads += 1;
-      return 'extension';
-    },
-  });
-
-  const availability = await toolkit.availability?.();
-
-  assert.deepEqual(availability, { available: true });
-  assert.equal(backendReads, 1);
+test('the extension-only Browser Toolkit has no backend availability gate', () => {
+  assert.equal(createBrowserToolkit().availability, undefined);
 });
 
 test('separate Host managers start independent Browser Runtime roots', async () => {
-  const toolkit = createBrowserToolkit({ backend: () => 'playwright' });
+  const toolkit = isolatedToolkit();
   const managerA = new ToolkitRuntimeManager();
   const managerB = new ToolkitRuntimeManager();
 

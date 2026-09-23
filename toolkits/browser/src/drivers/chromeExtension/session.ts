@@ -1,6 +1,5 @@
 import type {
   BrowserElementTarget,
-  BrowserOpenOptions,
   BrowserScrollOptions,
   BrowserWaitState,
 } from '../../session';
@@ -35,7 +34,6 @@ import {
 import type { BrowserRuntimeEvent } from '../../lifecycle/events';
 import type { NavigationPhase } from '../../lifecycle/navigation';
 
-const DEFAULT_SESSION = 'default';
 const DEFAULT_EXTENSION_COMMAND_TIMEOUT_MS = 30_000;
 const OPEN_READINESS_BUDGET_MS = 5_000;
 const MAX_EXTENSION_TYPE_TIMEOUT_MS = 300_000;
@@ -102,18 +100,6 @@ export class ChromeExtensionBrowserSession {
     }
   }
 
-  private validateOpenOptions(opts: BrowserOpenOptions) {
-    if (opts.headless === true) {
-      throw new Error('Chrome extension backend uses visible Chrome tabs and does not support headless mode.');
-    }
-    if (opts.userDataDir) {
-      throw new Error('Chrome extension backend cannot select a Chrome user-data-dir.');
-    }
-    if (opts.session && opts.session !== DEFAULT_SESSION) {
-      throw new Error('Chrome extension backend does not support named browser sessions.');
-    }
-  }
-
   private buildSnapshot(value: unknown, approvedOrigin: string): string {
     const snapshot = parseBrowserRawSnapshot(value);
     let snapshotOrigin: string;
@@ -158,12 +144,7 @@ export class ChromeExtensionBrowserSession {
       && error.code === 'navigation_timeout';
   }
 
-  async open(
-    url: string,
-    opts: BrowserOpenOptions = {},
-    signal?: AbortSignal,
-  ): Promise<string> {
-    this.validateOpenOptions(opts);
+  async open(url: string, signal?: AbortSignal): Promise<string> {
     const approvedOrigin = approvedOriginFor(url);
     return this.openAndAwaitReadiness(url, approvedOrigin, signal);
   }
@@ -545,9 +526,5 @@ export class ChromeExtensionBrowserSession {
     this.approvedOrigin = null;
     const result = await this.bridge.sendCommand('detach', {}, undefined, signal);
     return `Chrome extension browser detached: ${JSON.stringify(result)}`;
-  }
-
-  listSessions(): string[] {
-    return [];
   }
 }

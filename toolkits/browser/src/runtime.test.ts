@@ -40,14 +40,8 @@ test('independent BrowserRuntime roots lease one process extension bridge', asyn
       } satisfies BrowserBridgeStatus;
     },
   } as unknown as BrowserExtensionBridge;
-  const runtimeA = new BrowserRuntime(
-    { backend: () => 'extension' },
-    { bridge },
-  );
-  const runtimeB = new BrowserRuntime(
-    { backend: () => 'extension' },
-    { bridge },
-  );
+  const runtimeA = new BrowserRuntime({ bridge });
+  const runtimeB = new BrowserRuntime({ bridge });
 
   await Promise.all([runtimeA.start(), runtimeB.start()]);
   assert.deepEqual(lifecycle, ['start']);
@@ -89,7 +83,7 @@ test('BrowserRuntime binds each thread to its execution workdir', async (t) => {
       } satisfies BrowserBridgeStatus;
     },
   } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ backend: () => 'extension' }, { bridge });
+  const runtime = new BrowserRuntime({ bridge });
   t.after(async () => await runtime.stop());
 
   await runtime.open(call('thread-a', '/workspace/a'), 'https://example.com/a');
@@ -145,10 +139,7 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
       return status;
     },
   } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime(
-    { backend: () => 'extension' },
-    { bridge },
-  );
+  const runtime = new BrowserRuntime({ bridge });
   t.after(async () => await runtime.stop());
 
   await runtime.open(call('thread-1'), 'https://example.com/first');
@@ -220,7 +211,7 @@ test('BrowserRuntime broadcasts an unscoped reconnect to every thread workspace'
       return () => generationListeners.delete(listener);
     },
   } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ backend: () => 'extension' }, { bridge });
+  const runtime = new BrowserRuntime({ bridge });
   t.after(async () => await runtime.stop());
 
   await assert.rejects(

@@ -8,10 +8,7 @@ import { startBrowserScenarioFixture } from './browser-scenario-fixture';
 import { BrowserScenarioReporter } from './browser-scenario-report';
 
 const bridge = new BrowserExtensionBridge();
-const browserRuntime = new BrowserRuntime(
-  { backend: () => 'extension' },
-  { bridge },
-);
+const browserRuntime = new BrowserRuntime({ bridge });
 
 type Snapshot = {
   title: string;

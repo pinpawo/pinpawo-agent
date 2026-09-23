@@ -11,7 +11,7 @@ import { RuntimeServiceError } from './protocol';
 /** The persistent service must not inherit a Host project's loaded .env secrets. */
 export function runtimeServiceBootstrapEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const allowed = process.platform === 'win32'
-    ? ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH']
+    ? ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'TEMP', 'TMP', 'PATH']
     : ['HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XAUTHORITY'];
   const env: NodeJS.ProcessEnv = {};
   for (const key of allowed) if (source[key] !== undefined) env[key] = source[key];

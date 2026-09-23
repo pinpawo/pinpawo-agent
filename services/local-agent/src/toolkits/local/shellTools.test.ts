@@ -8,8 +8,7 @@ import type { AgentToolkit } from '@pinpawo/pet-agent';
 import {
   buildCurrentTimeSnapshot,
   getCurrentTimeTool,
-  normalizeShellActionInput,
-  normalizeShellAuthorizationInput,
+  normalizeShellInput,
   runShellTool,
   shellOperationMetadata,
   truncateShellOutput,
@@ -88,24 +87,16 @@ test('shell review policy reviews configured command execution', async () => {
   );
 });
 
-test('normalizeShellActionInput requires the prepared absolute cwd', () => {
-  assert.deepEqual(normalizeShellActionInput({ command: ' printf ok ', cwd: process.cwd() }), {
-    command: 'printf ok', cwd: process.cwd(),
-  });
-  assert.throws(() => normalizeShellActionInput({ command: 'pwd' }), /absolute path/);
-  assert.throws(() => normalizeShellActionInput({ command: 'pwd', cwd: 'src' }), /absolute path/);
-});
-
-test('normalizeShellAuthorizationInput preserves only model-provided cwd', () => {
+test('normalizeShellInput preserves the supplied cwd', () => {
   assert.deepEqual(
-    normalizeShellAuthorizationInput({ command: ' printf ok ', cwd: ' packages/pet-agent ' }),
+    normalizeShellInput({ command: ' printf ok ', cwd: ' packages/pet-agent ' }),
     {
       command: 'printf ok',
       cwd: ' packages/pet-agent ',
     },
   );
   assert.deepEqual(
-    normalizeShellAuthorizationInput({ command: 'pwd' }),
+    normalizeShellInput({ command: 'pwd' }),
     {
       command: 'pwd',
       cwd: null,

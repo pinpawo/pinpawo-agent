@@ -54,7 +54,6 @@ export async function loadPluginsFromDir(
       const mod = await import(pathToFileURL(filePath).href) as {
         default?: unknown;
         tools?: unknown;
-        toolkitRegistrations?: unknown;
         toolkits?: unknown;
         toolkitRuntimeRequirements?: unknown;
         runtimeClients?: Record<string, unknown>;
@@ -67,9 +66,6 @@ export async function loadPluginsFromDir(
       }
 
       const loadedPlugin = plugin as AgentPlugin;
-      if (mod.toolkitRegistrations !== undefined) {
-        throw new Error('Plugin export toolkitRegistrations was removed; use toolkitRuntimeRequirements.');
-      }
       const candidateRuntimeClients = mod.runtimeClients ?? {};
       for (const [kind, factory] of Object.entries(candidateRuntimeClients)) {
         if (typeof factory !== 'function' || Object.hasOwn(runtimeClients, kind)) {

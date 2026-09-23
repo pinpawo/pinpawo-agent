@@ -36,8 +36,6 @@ export type ToolAuthorizationContext = {
   operation?: ToolOperationMetadata;
 };
 
-export type ToolAutoAuthorizationContext = ToolAuthorizationContext;
-
 /** Reusable session authorization, independent of current-call approval. */
 export type ToolAuthorizationPolicy = {
   /** Build the identity used to reuse a prior authorization in this session. */
@@ -61,7 +59,7 @@ export type ToolReviewPolicy = {
   /** Auto-mode quick approval: true approves; false/errors defer, never reject.
    * Must be side-effect free. Not a mandatory validation or an approval event.
    */
-  canAutoApprove?: (ctx: ToolAutoAuthorizationContext) => boolean | Promise<boolean>;
+  canAutoApprove?: (ctx: ToolAuthorizationContext) => boolean | Promise<boolean>;
   /**
    * Produce the review requirement for one tool call.
    *

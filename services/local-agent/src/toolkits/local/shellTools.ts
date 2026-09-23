@@ -21,20 +21,11 @@ function readShellActionInput(input: unknown) {
   return { record, command };
 }
 
-export function normalizeShellAuthorizationInput(input: unknown) {
+export function normalizeShellInput(input: unknown) {
   const { record, command } = readShellActionInput(input);
   const cwd = typeof record.cwd === 'string' && record.cwd.trim()
     ? record.cwd
     : null;
-  return { command, cwd };
-}
-
-export function normalizeShellActionInput(input: unknown) {
-  const { record, command } = readShellActionInput(input);
-  const cwd = typeof record.cwd === 'string' && record.cwd.trim()
-    ? record.cwd
-    : null;
-  if (!cwd || !isAbsolute(cwd)) throw new Error('Shell cwd must be an absolute path prepared before review.');
   return { command, cwd };
 }
 
@@ -126,7 +117,11 @@ export function createRunShellTool(
       let shellAction: { command: string; cwd: string };
 
       try {
-        shellAction = normalizeShellActionInput(input);
+        const normalized = normalizeShellInput(input);
+        if (!normalized.cwd || !isAbsolute(normalized.cwd)) {
+          throw new Error('Shell cwd must be an absolute path prepared before review.');
+        }
+        shellAction = { command: normalized.command, cwd: normalized.cwd };
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : err}`;
       }
@@ -267,7 +262,7 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   run_shell: {
     title: '执行命令',
     summarizeInput: (input) => {
-      const shellAction = normalizeShellAuthorizationInput(input);
+      const shellAction = normalizeShellInput(input);
       return {
         target: shellAction.cwd ?? undefined,
         summary: shellAction.command,
@@ -277,7 +272,7 @@ export const shellOperationMetadata: Record<string, ToolOperationMetadata> = {
   inspect_shell: {
     title: '只读命令',
     summarizeInput: (input) => {
-      const shellAction = normalizeShellAuthorizationInput(input);
+      const shellAction = normalizeShellInput(input);
       return {
         target: shellAction.cwd ?? undefined,
         summary: shellAction.command,

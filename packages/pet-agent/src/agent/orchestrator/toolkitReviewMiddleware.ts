@@ -424,13 +424,12 @@ async function buildCandidateAuthorizationMatcher(params: {
     return null;
   }
   try {
-    const matcher = readToolAuthorizationMatcher(await buildMatcher({
+    return readToolAuthorizationMatcher(await buildMatcher({
       toolkitName: params.binding.toolkit.name,
       toolName: params.binding.toolName,
       input: params.input,
       operation: params.binding.operation,
     }));
-    return matcher;
   } catch {
     // Matcher construction is optional reuse metadata. A policy bug must fail
     // closed into the normal review path, never authorize the current call.

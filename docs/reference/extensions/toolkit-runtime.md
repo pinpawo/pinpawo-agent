@@ -45,15 +45,13 @@ clientId 重连，不重放旧调用或接管旧进程/页面 handle。实例初
 Toolkit 仍可使用；修复服务配置后重启 Host 重新装配。
 
 配置中 `instances.<id>.kind` 指定 Runtime kind，`toolkitBindings` 指定 Toolkit 到实例 ID
-的映射。插件的 Host 入口为 `toolkitRuntimeRequirements`。这些字段替代原来的
-`type` 和 `toolkitRegistrations`；IPC 协议版本为 2。升级已有安装时先停止旧版服务，
-将配置字段改为 `kind`，再启动新版 Host 和服务。
+的映射。插件的 Host 入口为 `toolkitRuntimeRequirements`。IPC 协议从版本 1 开始。
 
 ## 参数准备与审批
 
-`ToolDefinition.prepareInput(input, { context })` 是通用参数准备接口。
-框架不解释 context；具体 Toolkit 决定如何生成完整参数。比如本地 Toolkit 根据 Host
-提供的 workdir 解析 cwd 和路径。该函数必须纯且幂等，不创建资源。
+`ToolDefinition.prepareInput(input, { workdir })` 在审批前生成完整参数。
+`workdir` 来自本次执行上下文；本地 Toolkit 用它解析 cwd 和路径。该函数必须纯且幂等，
+不创建资源。
 
 参数准备独立于审批，在 full_access 下也运行。准备后的参数写回 Tool call，审批、
 authorization matcher 与执行使用同一份参数。服务不回退到自己的 process.cwd。
@@ -63,8 +61,7 @@ authorization matcher 与执行使用同一份参数。服务不回退到自己�
 审批只关注 Tool 及其有效参数。exact / url_origin 保持各自匹配语义，不附加 Toolkit
 环境、clientId、instanceId 或 workdir scope。改变环境但参数不变可以复用授权；改变
 已解析的路径或 cwd，则按参数匹配规则重新判断。审批恢复 ID 包含 Tool、调用 ID 和
-有效参数摘要，避免同一调用 ID 的参数变化误用旧批准。旧版本带环境 scope 的记录
-被丢弃，不把它静默转换为不受 scope 限制的授权。
+有效参数摘要，避免同一调用 ID 的参数变化误用旧批准。
 升级前已停在审批上的调用因恢复 ID 改为有效参数摘要，恢复时会重新请求一次审批。
 
 授权匹配、参数准备函数或自动审批策略变化仍影响 registry 的 authorization generation；

@@ -2,7 +2,7 @@ import type { NamedStructuredTool } from '@pinpawo/pet-agent';
 import type { RuntimeCaller, RuntimeExecution, RuntimeInstanceConfig } from '../../runtimeService/types';
 import { createShellEnvironment } from './shellEnvironment';
 import { createShellRuntimeClient } from './shellClient';
-import { prepareLocalToolInput } from './workdirBinding';
+import { prepareLocalToolInput } from './prepareLocalToolInput';
 
 export function testExecution(overrides: Partial<RuntimeExecution> = {}): RuntimeExecution {
   return {

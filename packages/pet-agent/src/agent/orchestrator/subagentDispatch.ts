@@ -3,6 +3,7 @@ import { createToolInputPreparationMiddleware } from './toolInputPreparation';
 import type {
   AgentToolkit,
   ModelInputModality,
+  ToolInputPreparationContext,
 } from '../../types/toolkit';
 import type { SubagentToolOperationMetadata } from '../../types/subagent';
 import {
@@ -56,7 +57,7 @@ export async function resolveToolkitExecution(
   toolkits: AgentToolkit[],
   names: string[] | undefined,
   ctx: ToolkitReviewRuntimeContext,
-  toolContext: Readonly<Record<string, unknown>> = {},
+  toolContext: ToolInputPreparationContext = { workdir: null },
 ) {
   const selectedToolkits = names === undefined
     ? toolkits

@@ -203,7 +203,7 @@ cwd/路径，让审核和执行使用同一目标：绝对路径保持原值，�
 服务只执行已确定的目标，不回退到服务 process.cwd，也不调用全局 process.chdir。
 
 [prepareInput](../../../packages/pet-agent/src/agent/orchestrator/toolInputPreparation.ts)
-在审核或 full_access 执行前调用；[本机路径解析](../../../services/local-agent/src/toolkits/local/workdirBinding.ts)
+在审核或 full_access 执行前调用；[本机路径解析](../../../services/local-agent/src/toolkits/local/prepareLocalToolInput.ts)
 是纯输入准备函数，覆盖 run_shell、inspect_shell、git/gh 与文件工具。
 [上位设计](../host-agent-capability-toolkit.md) 和 [workdir reference](../../reference/runtime/workdir.md)
 同步描述这一显式步骤，删除旧 binding 中的隐式执行期改写；相关授权上下文与 #658 协调。

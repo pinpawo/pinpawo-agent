@@ -186,7 +186,7 @@ bash 和 git 都使用 Shell，browser 当前使用 CDP。实际资源由独立�
 Agent 只接收已装配的静态 Tools。调用走原生 Tool 执行链，通用调用上下文和取消信号
 每次传入；客户端不进入 prompt 或 checkpoint。
 
-`prepareInput(input, { context })` 在审批前准备完整参数，
+`prepareInput(input, { workdir })` 在审批前准备完整参数，
 full_access 也运行。该函数必须纯且幂等。审批、授权匹配和执行使用同一份有效参数，
 不附加 Runtime 身份或工作目录审批 scope。详见 [Host Runtime 装配](toolkit-runtime.md)。
 

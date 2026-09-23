@@ -8,8 +8,8 @@ import { runShellTool, inspectShellTool } from './shellTools';
 import { writeFileTool } from './fileTools';
 import { gitStatusTool } from './gitTools';
 import { createLocalRuntimeFixture, testExecution } from './shellTestSupport';
-import { prepareLocalToolInput } from './workdirBinding';
-import { normalizeShellAuthorizationInput } from './shellTools';
+import { prepareLocalToolInput } from './prepareLocalToolInput';
+import { normalizeShellInput } from './shellTools';
 
 test('shared instance uses each invocation workdir without mutating shared cwd', async (t) => {
   const a = mkdtempSync(join(tmpdir(), 'shell-scope-a-'));
@@ -31,13 +31,10 @@ test('shared instance uses each invocation workdir without mutating shared cwd',
 
 test('Toolkit preparation resolves targets before review, including inspect_shell and Git', async () => {
   const workdir = process.cwd();
-  const executionScope = testExecution({ workdir });
   for (const [toolkit, name] of [[createBashToolkit(), 'inspect_shell'], [createGitToolkit(), 'git_status']] as const) {
     const definition = toolkit.tools.find(({ tool }) => tool.name === name)!;
     assert.ok(definition.prepareInput);
-    const input = await definition.prepareInput({ command: 'pwd', cwd: 'src' }, {
-      context: { workdir, executionScope },
-    });
+    const input = await definition.prepareInput({ command: 'pwd', cwd: 'src' }, { workdir });
     assert.equal((input as { cwd: string }).cwd, join(workdir, 'src'));
   }
   assert.deepEqual(prepareLocalToolInput('read_file', { path: 'README.md' }, workdir), { path: join(workdir, 'README.md') });
@@ -71,7 +68,7 @@ test('review and execution preserve spaces in a prepared cwd exactly', async (t)
   t.after(async () => { await fixture.close(); rmSync(root, { recursive: true, force: true }); });
   const command = `${JSON.stringify(process.execPath)} -e "console.log(JSON.stringify(process.cwd()))"`;
   const input = prepareLocalToolInput('run_shell', { cwd: 'repo ', command }, root);
-  assert.equal(normalizeShellAuthorizationInput(input).cwd, cwd);
+  assert.equal(normalizeShellInput(input).cwd, cwd);
   const result = await fixture.invoke(runShellTool, input, undefined, testExecution({ workdir: root }));
   assert.equal(JSON.parse(String(result)), realpathSync(cwd));
 });

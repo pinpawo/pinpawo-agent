@@ -70,7 +70,7 @@ for (const fullAccess of [false, true]) {
       name: 'consumer', description: 'Consumer',
       tools: [{ tool: staticTool, operation,
         prepareInput: (input, context) => {
-          const cwd = resolve(context.context.workdir as string, (input as { cwd: string }).cwd);
+          const cwd = resolve(context.workdir as string, (input as { cwd: string }).cwd);
           steps.push(`prepare:${cwd}`);
           return { cwd };
         },
@@ -150,9 +150,9 @@ test('prepared input, review and Tool execution retain literal workdir whitespac
   await invoke({ workdir, toolkit: { name: 'local', description: 'Local', tools: [{
     tool: action,
     prepareInput: (_input, context) => {
-      assert.equal(context.context.workdir, workdir);
+      assert.equal(context.workdir, workdir);
       observed.push('prepare');
-      return { cwd: context.context.workdir };
+      return { cwd: context.workdir };
     },
     review: { request: context => {
       assert.equal((context.input as { cwd: string }).cwd, workdir);

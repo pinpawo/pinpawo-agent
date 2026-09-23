@@ -178,8 +178,6 @@ new client identity; unfinished calls are never replayed and old handles expire.
 If the service cannot connect during Host startup, Runtime-dependent Toolkits are
 reported unavailable while Host-only Toolkits remain usable. Restart the Host
 after correcting the service configuration.
-Existing configurations must change each instance's `type` field to `kind`.
-Stop an older service before starting this version; the IPC protocol is version 2.
 
 Host Toolkit Runtime requirements declare `runtimeKind: 'shell'` or `runtimeKind: 'cdp'`; the
 `AgentToolkit` definitions carry no execution metadata. The Host

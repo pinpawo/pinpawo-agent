@@ -4,7 +4,7 @@ import { AuthorizationPolicies } from './reviewPolicies';
 import { canReuseAutoReviewAuthorization } from './authorizationReuse';
 import { exactAuthorization, urlOriginAuthorization, toolAuthorizationMatchersEqual } from './authorizationMatchers';
 
-test('automatic reuse requires exact scope and policy consent, not just an exact digest', () => {
+test('automatic reuse requires an exact matcher and policy consent', () => {
   const matcher = exactAuthorization({ path: '/repo/a' });
   assert.equal(canReuseAutoReviewAuthorization(AuthorizationPolicies.exact(), matcher), true);
   assert.equal(canReuseAutoReviewAuthorization(AuthorizationPolicies.exact({ subject: ({ input }) => input }), matcher), false);
@@ -25,15 +25,5 @@ test('exact matches projected identity; origin matches scheme host and effective
   assert.equal(toolAuthorizationMatchersEqual(origin, urlOriginAuthorization('https://example.com/b')!), true);
   for (const url of ['http://example.com/a', 'https://sub.example.com/a', 'https://example.com:444/a']) {
     assert.equal(toolAuthorizationMatchersEqual(origin, urlOriginAuthorization(url)!), false);
-  }
-});
-
-test('historical environment-scoped grants cannot become unscoped grants', async () => {
-  const { readToolAuthorizationMatcher } = await import('./authorizationMatchers');
-  const exact = exactAuthorization({ cwd: '/workspace', command: 'pwd' });
-  const origin = urlOriginAuthorization('https://example.com')!;
-  for (const matcher of [exact, origin]) {
-    assert.equal(readToolAuthorizationMatcher({ ...matcher, scope: 'old-environment' }), null);
-    assert.deepEqual(readToolAuthorizationMatcher(matcher), matcher);
   }
 });

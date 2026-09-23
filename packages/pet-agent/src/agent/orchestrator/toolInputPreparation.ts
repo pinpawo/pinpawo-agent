@@ -1,12 +1,12 @@
 import { AIMessage, ToolMessage, type ToolCall } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
-import type { ToolDefinition } from '../../types/toolkit';
+import type { ToolDefinition, ToolInputPreparationContext } from '../../types/toolkit';
 import { cloneAIMessageWithToolCalls, materializeToolCallIds, replaceMessageInState } from './toolCallMessages';
 
 /** Prepare the actual arguments once before review, including full-access calls. */
 export function createToolInputPreparationMiddleware(
   definitions: readonly ToolDefinition[],
-  context: Readonly<Record<string, unknown>>,
+  context: ToolInputPreparationContext,
 ) {
   const tools = new Map(definitions.filter((definition) => definition.prepareInput)
     .map(definition => [definition.tool.name, definition]));
@@ -28,7 +28,7 @@ export function createToolInputPreparationMiddleware(
           const definition = tools.get(call.name);
           if (!definition) { calls.push(call); continue; }
           try {
-            const args = await definition.prepareInput!(call.args, { context });
+            const args = await definition.prepareInput!(call.args, context);
             if (!args || typeof args !== 'object' || Array.isArray(args)) {
               throw new Error(`Tool "${call.name}" input preparation must return an argument object.`);
             }

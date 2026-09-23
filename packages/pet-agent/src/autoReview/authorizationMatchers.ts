@@ -112,8 +112,6 @@ export function readToolAuthorizationMatcher(value: unknown): ToolAuthorizationM
   if (!record) {
     return null;
   }
-  // Obsolete scoped records must not silently become broader grants.
-  if (record.scope !== undefined) return null;
   if (
     record.type === 'exact'
     && typeof record.key === 'string'

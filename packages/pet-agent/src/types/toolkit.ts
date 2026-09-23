@@ -13,7 +13,6 @@ export type {
   ToolOperationMetadata,
   ToolReviewContext,
   ToolAuthorizationContext,
-  ToolAutoAuthorizationContext,
   ToolAuthorizationPolicy,
   ToolReviewBlock,
   ToolReviewResult,
@@ -62,9 +61,9 @@ export type ToolkitAvailabilityCheck = () =>
   | ToolkitAvailability
   | Promise<ToolkitAvailability>;
 
-/** Tool-owned normalization receives opaque Host context before review. */
+/** Tool-owned normalization receives the execution workdir before review. */
 export type ToolInputPreparationContext = Readonly<{
-  context: Readonly<Record<string, unknown>>;
+  workdir: string | null;
 }>;
 
 export async function evaluateToolkitAvailability(

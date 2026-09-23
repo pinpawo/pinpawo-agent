@@ -4272,7 +4272,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
   }, { name: 'inspect_context', description: 'Inspect invocation context.', schema: z.object({ cwd: z.string() }) });
   const toolkit: AgentToolkit = {
     name: 'inspection', description: 'Inspect context',
-    tools: [{ ...reviewedTool(inspect, ReviewPolicies.localMutation()), prepareInput: (_input, ctx) => ({ cwd: ctx.context.workdir }) }],
+    tools: [{ ...reviewedTool(inspect, ReviewPolicies.localMutation()), prepareInput: (_input, ctx) => ({ cwd: ctx.workdir }) }],
   };
   const item = {
     ...capability('inspect', 'Inspect context', ['inspection']),

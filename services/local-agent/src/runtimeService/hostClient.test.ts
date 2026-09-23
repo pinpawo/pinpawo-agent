@@ -203,12 +203,9 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   };
   assert.equal(a.bindings.browser!.runtimeKind, b.bindings.browser!.runtimeKind);
   const openedA = JSON.parse(await invoke(a, 'browser_open', { url: origin }) as string);
-  const openedB = JSON.parse(await invoke(b, 'browser_open', { url: origin + '/b' }) as string);
   assert.equal(openedA.title, 'Host A');
-  assert.equal(openedB.title, 'Host B');
-  assert.equal(JSON.parse(await invoke(a, 'browser_snapshot') as string).title, 'Host A');
-  assert.equal(JSON.parse(await invoke(b, 'browser_snapshot') as string).title, 'Host B');
-
+  // Capture while A is foreground. Activating B first makes Windows Chrome
+  // intermittently reject Page.captureScreenshot for A's background page.
   const screenshot = await invoke(a, 'browser_screenshot');
   assert.ok(isCommand(screenshot));
   const messages = (screenshot.update as { messages: Array<{ content: unknown; contentBlocks: Array<{ type: string }> }> }).messages;
@@ -217,6 +214,11 @@ test('real CDP Static Browser Tools cross Host adapters and IPC with client isol
   const artifact = JSON.parse(serialized.slice(serialized.indexOf('{'))) as { path: string; byteLength: number };
   assert.equal((await stat(artifact.path)).size, artifact.byteLength);
   assert.ok((await readFile(artifact.path)).length > 0);
+
+  const openedB = JSON.parse(await invoke(b, 'browser_open', { url: origin + '/b' }) as string);
+  assert.equal(openedB.title, 'Host B');
+  assert.equal(JSON.parse(await invoke(a, 'browser_snapshot') as string).title, 'Host A');
+  assert.equal(JSON.parse(await invoke(b, 'browser_snapshot') as string).title, 'Host B');
 
   const crossOrigin = JSON.parse(await invoke(a, 'browser_click', { selector: '#cross' }, true) as string);
   assert.equal(crossOrigin.ok, false);

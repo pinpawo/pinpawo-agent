@@ -83,7 +83,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
     const artifactRefs: CapabilityArtifactRef[] = [];
     const executionScope = {
       threadId, taskId: scope.taskId, runId, delegationId: scope.delegationId,
-      workdir: workdir ?? null, signal: runnableConfig?.signal,
+      workdir: workdir ?? null,
     };
     const toolkitContext = {
       models: options.models,
@@ -109,7 +109,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       toolkitList,
       undefined,
       toolkitContext,
-      { ...(runnableConfig?.context ?? {}), executionScope },
+      { workdir: executionScope.workdir },
     );
     subagentInput = {
       model: options.models.subagent ?? options.models.act,
@@ -143,13 +143,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
         toolProtocolMiddleware,
       ],
       runtimeContext: {
-        executionScope: {
-          threadId,
-          taskId: scope.taskId,
-          runId,
-          delegationId: scope.delegationId,
-          workdir: workdir ?? null,
-        },
+        executionScope,
       },
       runnableConfig,
       signal: runnableConfig?.signal,

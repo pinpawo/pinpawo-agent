@@ -40,12 +40,12 @@ import {
 } from './processTools';
 import {
   getCurrentTimeTool,
-  normalizeShellAuthorizationInput,
+  normalizeShellInput,
   runShellTool,
   inspectShellTool,
   shellOperationMetadata,
 } from './shellTools';
-import { prepareLocalToolInput } from './workdirBinding';
+import { prepareLocalToolInput } from './prepareLocalToolInput';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -94,8 +94,8 @@ function createToolDefinitions(
     tool: toolItem,
     operation: operations[toolItem.name],
     review: reviews[toolItem.name],
-    prepareInput: (input: unknown, context: { context: Readonly<Record<string, unknown>> }) => (
-      prepareLocalToolInput(toolItem.name, input, typeof context.context.workdir === 'string' ? context.context.workdir : null)
+    prepareInput: (input: unknown, context: { workdir: string | null }) => (
+      prepareLocalToolInput(toolItem.name, input, context.workdir)
     ),
   }));
 }
@@ -182,7 +182,7 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
       authorization: AuthorizationPolicies.exact({
         // Timeout does not change the command/cwd authorization scope.
         reuseAutoReview: true,
-        subject: ({ input }) => normalizeShellAuthorizationInput(input),
+        subject: ({ input }) => normalizeShellInput(input),
       }),
     }),
     // The process tools carry no review policy on purpose. They only address

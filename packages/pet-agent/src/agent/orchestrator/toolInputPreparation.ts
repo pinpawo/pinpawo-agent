@@ -1,7 +1,7 @@
-import { AIMessage, type ToolCall } from '@langchain/core/messages';
+import { AIMessage, ToolMessage, type ToolCall } from '@langchain/core/messages';
 import { createMiddleware } from 'langchain';
 import type { ToolDefinition } from '../../types/toolkit';
-import { cloneAIMessageWithToolCalls, replaceMessageInState } from './toolCallMessages';
+import { cloneAIMessageWithToolCalls, materializeToolCallIds, replaceMessageInState } from './toolCallMessages';
 
 /** Prepare the actual arguments once before review, including full-access calls. */
 export function createToolInputPreparationMiddleware(
@@ -13,28 +13,50 @@ export function createToolInputPreparationMiddleware(
   if (!tools.size) return null;
   return createMiddleware({
     name: 'ToolInputPreparation',
-    afterModel: async (state) => {
-      const messages = state.messages;
-      let index = messages.length - 1;
-      while (index >= 0 && !AIMessage.isInstance(messages[index])) index -= 1;
-      if (index < 0) return;
-      const message = messages[index] as AIMessage;
-      if (!message.tool_calls?.length) return;
-      let changed = false;
-      const calls: ToolCall[] = [];
-      for (const call of message.tool_calls) {
-        const definition = tools.get(call.name);
-        if (!definition) { calls.push(call); continue; }
-        const args = await definition.prepareInput!(call.args, { context });
-        if (!args || typeof args !== 'object' || Array.isArray(args)) {
-          throw new Error(`Tool "${call.name}" input preparation must return an argument object.`);
+    afterModel: {
+      hook: async (state) => {
+        const messages = state.messages;
+        let index = messages.length - 1;
+        while (index >= 0 && !AIMessage.isInstance(messages[index])) index -= 1;
+        if (index < 0) return;
+        const message = messages[index] as AIMessage;
+        if (!message.tool_calls?.length) return;
+        let changed = false;
+        const calls: ToolCall[] = [];
+        const failures = new Map<number, string>();
+        for (const [callIndex, call] of message.tool_calls.entries()) {
+          const definition = tools.get(call.name);
+          if (!definition) { calls.push(call); continue; }
+          try {
+            const args = await definition.prepareInput!(call.args, { context });
+            if (!args || typeof args !== 'object' || Array.isArray(args)) {
+              throw new Error(`Tool "${call.name}" input preparation must return an argument object.`);
+            }
+            calls.push({ ...call, args: args as Record<string, unknown> });
+            changed = true;
+          } catch (error) {
+            calls.push(call);
+            failures.set(callIndex, error instanceof Error ? error.message : 'Input preparation failed.');
+          }
         }
-        calls.push({ ...call, args: args as Record<string, unknown> });
-        changed = true;
-      }
-      if (changed) return { messages: replaceMessageInState(
-        messages, index, cloneAIMessageWithToolCalls(message, calls), [],
-      ) };
+        if (failures.size) {
+          // No call in this batch may reach review or execution: a partial batch
+          // could produce side effects before the model sees the failed input.
+          const materialized = materializeToolCallIds(calls, index);
+          return { messages: replaceMessageInState(messages, index,
+            cloneAIMessageWithToolCalls(message, materialized),
+            materialized.map((call, callIndex) => new ToolMessage({
+              name: call.name, tool_call_id: call.id!, status: 'error',
+              content: failures.get(callIndex)
+                ?? 'This call was not executed because another call in the batch had invalid input. Retry it.',
+            })),
+          ), jumpTo: 'model' as const };
+        }
+        if (changed) return { messages: replaceMessageInState(
+          messages, index, cloneAIMessageWithToolCalls(message, calls), [],
+        ) };
+      },
+      canJumpTo: ['model'],
     },
   });
 }

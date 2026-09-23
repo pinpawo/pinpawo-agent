@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resolve } from 'node:path';
-import { HumanMessage, ToolMessage, type ToolCall } from '@langchain/core/messages';
+import { HumanMessage, ToolMessage, type BaseMessage, type ToolCall } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { createMiddleware, FakeToolCallingModel, type AnyAgentMiddleware } from 'langchain';
 import { createSubagent } from '../../subagent/createSubagent';
@@ -24,6 +24,7 @@ async function invoke(params: {
   signal?: AbortSignal;
   modelInputModalities?: readonly ModelInputModality[];
   toolCalls?: (ToolCall & { id: string })[][];
+  onSubagentMessages?: (messages: BaseMessage[]) => void;
 }) {
   const registry = compileAgentRegistry({ toolkits: [params.toolkit], capabilities: [{
     name: 'execute', description: 'Execute a tool.', uses: [params.toolkit.name],
@@ -31,15 +32,19 @@ async function invoke(params: {
   }] });
   return createCapabilityExecutor({
     modelInputModalities: params.modelInputModalities,
-    runSubagent: params.middleware ? input => createSubagent({ ...input,
-      middleware: [...(input.middleware ?? []), ...params.middleware!],
-    }) : undefined,
+    runSubagent: params.middleware || params.onSubagentMessages ? async input => {
+      const result = await createSubagent({ ...input,
+        middleware: [...(input.middleware ?? []), ...(params.middleware ?? [])],
+      });
+      params.onSubagentMessages?.(result.messages);
+      return result;
+    } : undefined,
     models: { act: new FakeToolCallingModel({ toolCalls: params.toolCalls ?? [
       [{ id: 'call', name: params.toolkit.tools[0].tool.name, args: params.args ?? {} }], [],
     ] }) },
   })({
     capability: registry.capabilities[0],
-    delegation: { id: 'delegation', runId: 'run', taskId: 'task', mode: 'initial',
+    delegation: { id: 'delegation', runId: 'run', taskId: 'task',
       userRequest: 'Execute', task: 'Execute', briefing: 'Use the tool.' },
     history: [new HumanMessage({ id: 'user', content: 'Execute' })],
   }, {
@@ -84,6 +89,7 @@ for (const fullAccess of [false, true]) {
 
 for (const unavailableToolName of ['read_image', 'unknown_tool']) {
   test(`Capability execution recovers from unavailable tool ${unavailableToolName}`, async () => {
+    const observed: BaseMessage[] = [];
     let imageExecutions = 0;
     let textExecutions = 0;
     const image = tool(() => {
@@ -100,6 +106,7 @@ for (const unavailableToolName of ['read_image', 'unknown_tool']) {
         { tool: text },
       ] },
       modelInputModalities: ['text'],
+      onSubagentMessages: messages => observed.push(...messages),
       toolCalls: [
         [{ id: 'unavailable-call', name: unavailableToolName, args: {} }],
         [{ id: 'recovery-call', name: 'read_text', args: {} }],
@@ -111,7 +118,7 @@ for (const unavailableToolName of ['read_image', 'unknown_tool']) {
     assert.ok(result.delivery?.text);
     assert.equal(imageExecutions, 0);
     assert.equal(textExecutions, 1, 'A model must be able to choose a supported tool after the error.');
-    const feedback = result.privateMessages.filter(ToolMessage.isInstance);
+    const feedback = observed.filter(ToolMessage.isInstance);
     assert.equal(feedback.length, 2);
     assert.equal(feedback[0].tool_call_id, 'unavailable-call');
     assert.equal(feedback[0].name, unavailableToolName);
@@ -177,15 +184,34 @@ test('session grants depend on Tool parameters and preserve URL origin semantics
   assert.equal(reviews, 2);
 });
 
-test('input preparation failures prevent review and execution', async () => {
-  let calls = 0;
+test('input preparation failures return Tool feedback and let the model retry without executing the batch', async () => {
+  const observed: BaseMessage[] = [];
+  let executions = 0;
+  let reviews = 0;
   const toolkit: AgentToolkit = { name: 'local', description: 'Local', tools: [{
-    tool: tool(() => { calls += 1; return 'done'; }, { name: 'action', description: 'Act.', schema: z.object({}) }),
-    prepareInput: () => { throw new Error('workdir required'); },
-    review: { request: () => { calls += 1; return null; } },
+    tool: tool(() => { executions += 1; return 'done'; }, { name: 'action', description: 'Act.', schema: z.object({ value: z.string() }) }),
+    prepareInput: input => {
+      if ((input as { value: string }).value === '') throw new Error('A file path must not be empty.');
+      return input as Record<string, unknown>;
+    },
+    review: { request: () => { reviews += 1; return null; } },
   }] };
-  await assert.rejects(invoke({ toolkit }), /workdir required/);
-  assert.equal(calls, 0);
+  const result = await invoke({ toolkit, onSubagentMessages: messages => observed.push(...messages), toolCalls: [
+    [{ id: 'invalid', name: 'action', args: { value: '' } }, { id: 'skipped', name: 'action', args: { value: 'valid' } }],
+    [{ id: 'corrected', name: 'action', args: { value: 'valid' } }], [],
+  ] });
+  assert.equal(result.status, 'returned');
+  assert.equal(executions, 1);
+  assert.equal(reviews, 1);
+  const feedback = observed.filter(ToolMessage.isInstance);
+  assert.equal(feedback[0].tool_call_id, 'invalid');
+  assert.equal(feedback[0].status, 'error');
+  assert.match(String(feedback[0].content), /file path must not be empty/);
+  assert.equal(feedback[1].tool_call_id, 'skipped');
+  assert.equal(feedback[1].status, 'error');
+  assert.match(String(feedback[1].content), /not executed/);
+  assert.equal(feedback[2].tool_call_id, 'corrected');
+  assert.equal(feedback[2].status, 'success');
 });
 
 for (const invalid of [false, true]) {
@@ -234,16 +260,17 @@ test('the final execution boundary propagates abort even when the tool returns n
 });
 
 test('native Tool execution reports invalid arguments and lets the model correct them', async () => {
+  const observed: BaseMessage[] = [];
   let calls = 0;
   const action = tool(({ value }) => { calls += 1; return value; }, {
     name: 'action', description: 'Act.', schema: z.object({ value: z.string() }),
   });
-  const result = await invoke({ toolkit: { name: 'example', description: 'Example', tools: [{ tool: action }] }, toolCalls: [
+  await invoke({ toolkit: { name: 'example', description: 'Example', tools: [{ tool: action }] }, onSubagentMessages: messages => observed.push(...messages), toolCalls: [
     [{ id: 'invalid', name: 'action', args: { value: 42 } }],
     [{ id: 'corrected', name: 'action', args: { value: 'valid' } }], [],
   ] });
   assert.equal(calls, 1);
-  const messages = result.privateMessages.filter(ToolMessage.isInstance);
+  const messages = observed.filter(ToolMessage.isInstance);
   assert.equal(messages[0].tool_call_id, 'invalid');
   assert.match(String(messages[0].content), /expected schema|Expected string/);
   assert.equal(messages[1].content, 'valid');

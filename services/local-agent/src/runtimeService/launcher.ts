@@ -8,6 +8,19 @@ import { runtimeServicePaths } from './config';
 import { ensureRuntimeEndpointDirectory } from './endpoint';
 import { RuntimeServiceError } from './protocol';
 
+/** The persistent service must not inherit a Host project's loaded .env secrets. */
+export function runtimeServiceBootstrapEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const allowed = process.platform === 'win32'
+    ? ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'PATH']
+    : ['HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XAUTHORITY'];
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of allowed) if (source[key] !== undefined) env[key] = source[key];
+  if (process.platform !== 'win32') {
+    env.PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin';
+  }
+  return env;
+}
+
 async function serviceToken(directory?: string): Promise<string> {
   const paths = runtimeServicePaths(directory);
   await ensureRuntimeEndpointDirectory(paths.endpoint);
@@ -97,7 +110,7 @@ export async function ensureRuntimeService(options: {
       const child = spawn(process.execPath, args, {
         detached: true,
         stdio: ['ignore', log.fd, log.fd],
-        env: { ...(options.bootstrapEnv ?? process.env) },
+        env: { ...(options.bootstrapEnv ?? runtimeServiceBootstrapEnvironment()) },
         cwd: paths.root,
       });
       candidate = child;

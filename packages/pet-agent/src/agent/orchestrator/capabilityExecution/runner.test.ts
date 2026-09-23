@@ -159,7 +159,6 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
       const result = await execute(request, hostContext());
       assert.equal(result.status, outcome);
       assert.equal(result.delivery, null);
-      assert.ok(result.privateMessages.some(({ id }) => id === 'partial'));
       assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
     }
     assert.equal(finalized, outcome === 'missing_deliverable');

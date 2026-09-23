@@ -4,12 +4,23 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { ensureRuntimeService, connectRuntimeService } from './launcher';
+import { ensureRuntimeService, connectRuntimeService, runtimeServiceBootstrapEnvironment } from './launcher';
 import { runtimeServicePaths } from './config';
 import type { RuntimeClient } from './client';
 import type { RuntimeExecution } from './types';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('persistent service bootstrap excludes Host secrets and Node preload hooks', () => {
+  const env = runtimeServiceBootstrapEnvironment({
+    HOME: '/home/test', PATH: '/project/bin', GH_TOKEN: 'project-secret',
+    NODE_OPTIONS: '--import=/project/preload.js', PINPAWO_TEST_PRIVATE_SECRET: 'project-secret',
+  });
+  assert.equal(env.GH_TOKEN, undefined);
+  assert.equal(env.NODE_OPTIONS, undefined);
+  assert.equal(env.PINPAWO_TEST_PRIVATE_SECRET, undefined);
+  if (process.platform !== 'win32') assert.notEqual(env.PATH, '/project/bin');
+});
 
 function isProcessAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) {
@@ -61,10 +72,19 @@ test('concurrent Hosts use one independent service, shared shell environments an
       toolkitBindings: { bash: 'shared', git: 'shared', inspection: 'isolated', extension: 'example' },
       modules: [modulePath],
     }));
-    const [a, b] = await Promise.all([
-      ensureRuntimeService({ directory, requirements: { bash: 'shell', git: 'shell', extension: 'example' } }),
-      ensureRuntimeService({ directory, requirements: { bash: 'shell', inspection: 'shell' } }),
-    ]);
+    const previousSecret = process.env.PINPAWO_TEST_PRIVATE_SECRET;
+    process.env.PINPAWO_TEST_PRIVATE_SECRET = 'must-not-cross-hosts';
+    let a: RuntimeClient;
+    let b: RuntimeClient;
+    try {
+      [a, b] = await Promise.all([
+        ensureRuntimeService({ directory, requirements: { bash: 'shell', git: 'shell', extension: 'example' } }),
+        ensureRuntimeService({ directory, requirements: { bash: 'shell', inspection: 'shell' } }),
+      ]);
+    } finally {
+      if (previousSecret === undefined) delete process.env.PINPAWO_TEST_PRIVATE_SECRET;
+      else process.env.PINPAWO_TEST_PRIVATE_SECRET = previousSecret;
+    }
     clients.push(a, b);
     assert.equal(a.pid, b.pid);
     assert.notEqual(a.pid, process.pid);
@@ -84,6 +104,10 @@ test('concurrent Hosts use one independent service, shared shell environments an
     assert.equal(gitA.stdout, shellA.stdout);
     assert.equal(shellB.stdout, shellA.stdout);
     assert.equal(isolated.stdout, 'isolated');
+    const secretCommand = process.platform === 'win32'
+      ? '[Console]::Write($env:PINPAWO_TEST_PRIVATE_SECRET)'
+      : 'printf "%s" "$PINPAWO_TEST_PRIVATE_SECRET"';
+    assert.equal((await a.call('bash', 'shell.run', { ...run, command: secretCommand }, scope) as { stdout: string }).stdout, '');
     const extension = await a.call('extension', 'identity', { result: 'ok' }, scope) as { pid: number; clientId: string };
     assert.equal(extension.pid, a.pid);
     assert.equal(extension.clientId, a.clientId);

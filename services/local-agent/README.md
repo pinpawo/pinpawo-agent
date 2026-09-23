@@ -170,6 +170,14 @@ startup environment; an instance can configure `shell`, `env`, absolute
 shell is bash or zsh on POSIX and PowerShell on Windows. Commands receive an
 explicit cwd from the current execution. Changes to service configuration or its
 startup environment require a service restart and fresh Host connections.
+The persistent service inherits only basic OS environment variables, not
+project `.env` secrets loaded by the first Host. Put required instance variables
+in the service config's `env`. A failed instance initialization can retry after
+a short delay. After a service disconnect, the next Tool call reconnects with a
+new client identity; unfinished calls are never replayed and old handles expire.
+If the service cannot connect during Host startup, Runtime-dependent Toolkits are
+reported unavailable while Host-only Toolkits remain usable. Restart the Host
+after correcting the service configuration.
 Existing configurations must change each instance's `type` field to `kind`.
 Stop an older service before starting this version; the IPC protocol is version 2.
 

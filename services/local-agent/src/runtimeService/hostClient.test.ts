@@ -149,6 +149,19 @@ export const runtimeFactories = {
   const afterDisconnect = JSON.parse(await echoB.invoke({ value: 'still-connected' }, { context: { executionScope: execution } }) as string);
   assert.equal(afterDisconnect.pid, second.pid);
   assert.equal(afterDisconnect.value, 'still-connected');
+  const admin = await connectRuntimeService({ directory: fixture.directory, administrative: true });
+  try { await admin.stopService(); } finally { await admin.close(); }
+  const paths = runtimeServicePaths(fixture.directory);
+  await eventually(async () => {
+    try { await stat(paths.lock); return false; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw error;
+    }
+  }, 'The stopped service did not release its lock.');
+  const recovered = JSON.parse(await echoB.invoke({ value: 'after-restart' }, { context: { executionScope: execution } }) as string);
+  assert.notEqual(recovered.pid, second.pid);
+  assert.notEqual(recovered.clientId, second.clientId);
+  assert.equal(recovered.value, 'after-restart');
 });
 test('real CDP Static Browser Tools cross Host adapters and IPC with client isolation and artifact cleanup', {
   skip: process.env.PINPAWO_TEST_CDP !== '1', timeout: 60_000,

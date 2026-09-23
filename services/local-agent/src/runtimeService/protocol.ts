@@ -39,24 +39,30 @@ export function send(socket: Socket, message: unknown): void {
 }
 
 export function receive(socket: Socket, onMessage: (message: Record<string, unknown>) => void): void {
-  let buffer = '';
-  socket.setEncoding('utf8');
-  socket.on('data', (chunk: string) => {
-    buffer += chunk;
-    if (Buffer.byteLength(buffer) > MAX_RUNTIME_MESSAGE_BYTES) {
-      socket.destroy(new RuntimeServiceError('message_too_large', 'Runtime message exceeded the transport limit.'));
-      return;
-    }
-    let newline: number;
-    while ((newline = buffer.indexOf('\n')) >= 0) {
-      const frame = buffer.slice(0, newline);
-      buffer = buffer.slice(newline + 1);
+  let parts: Buffer[] = [];
+  let pendingBytes = 0;
+  socket.on('data', (chunk: Buffer) => {
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf(10, offset);
+      const end = newline < 0 ? chunk.length : newline;
+      const part = chunk.subarray(offset, end);
+      parts.push(part);
+      pendingBytes += part.length;
+      if (pendingBytes + (newline < 0 ? 0 : 1) > MAX_RUNTIME_MESSAGE_BYTES) {
+        socket.destroy(new RuntimeServiceError('message_too_large', 'Runtime message exceeded the transport limit.'));
+        return;
+      }
+      if (newline < 0) return;
       try {
-        onMessage(record(JSON.parse(frame)));
+        onMessage(record(JSON.parse(Buffer.concat(parts, pendingBytes).toString('utf8'))));
       } catch (error) {
         socket.destroy(error instanceof Error ? error : new Error('Invalid runtime frame.'));
         return;
       }
+      parts = [];
+      pendingBytes = 0;
+      offset = newline + 1;
     }
   });
 }

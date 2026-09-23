@@ -2,6 +2,8 @@ import type { ToolkitRuntimeRequirement, ConnectedToolkitRuntime } from '../tool
 import { BROWSER_RUNTIME_METHODS, type BrowserRuntimeCallContext, type BrowserRuntimePort } from '@pinpawo-toolkit/browser';
 import { createShellRuntimeClient } from '../toolkits/local/shellClient';
 import { ensureRuntimeService } from './launcher';
+import { RuntimeServiceError } from './protocol';
+import type { RuntimeClient } from './client';
 import type { RuntimeCaller } from './types';
 
 export type RuntimeClientFactory = (caller: RuntimeCaller, toolkitName: string) => unknown;
@@ -43,16 +45,44 @@ export async function connectHostRuntimes(options: {
     requested[toolkit.name] = runtimeKind;
   }
   if (!Object.keys(requested).length) return { bindings: {}, close: async () => {} };
-  const connection = await ensureRuntimeService({ directory: options.directory, requirements: requested });
+  let connection = await ensureRuntimeService({ directory: options.directory, requirements: requested });
+  let reconnecting: Promise<RuntimeClient> | undefined;
+  let closed = false;
+  const currentConnection = async (): Promise<RuntimeClient> => {
+    if (closed) throw new RuntimeServiceError('connection_lost', 'Host Runtime connection is closed.');
+    if (connection.isConnected) return connection;
+    reconnecting ??= ensureRuntimeService({ directory: options.directory, requirements: requested })
+      .then(async (next) => {
+        if (closed) {
+          await next.close();
+          throw new RuntimeServiceError('connection_lost', 'Host Runtime connection is closed.');
+        }
+        connection = next;
+        return next;
+      }).finally(() => { reconnecting = undefined; });
+    return reconnecting;
+  };
+  const caller: RuntimeCaller = {
+    // Never replay a call that may have reached the old service. Only a later
+    // invocation can establish a new client identity after disconnection.
+    call: async (toolkitName, method, args, execution, signal) => {
+      if (signal?.aborted) throw new RuntimeServiceError('aborted', 'Runtime operation cancelled before execution.');
+      return (await currentConnection()).call(toolkitName, method, args, execution, signal);
+    },
+  };
   try {
     const bindings: Record<string, ConnectedToolkitRuntime> = Object.create(null);
     for (const [toolkitName, binding] of Object.entries(connection.bindings)) {
       bindings[toolkitName] = {
         runtimeKind: binding.runtimeKind,
-        client: factories[binding.runtimeKind](connection, toolkitName),
+        client: factories[binding.runtimeKind](caller, toolkitName),
       };
     }
-    return { bindings, close: () => connection.close() };
+    return { bindings, close: async () => {
+      closed = true;
+      await reconnecting?.catch(() => {});
+      await connection.close();
+    } };
   } catch (error) {
     await connection.close();
     throw error;

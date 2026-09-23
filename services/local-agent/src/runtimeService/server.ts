@@ -12,6 +12,7 @@ type Instance = {
   value?: RuntimeInstance;
   pending?: Promise<RuntimeInstance>;
   failed?: string;
+  retryAfter?: number;
 };
 
 type Connection = {
@@ -80,17 +81,24 @@ export async function startRuntimeService(options: {
       entry = {};
       instances.set(id, entry);
     }
-    if (entry.failed) throw new RuntimeServiceError('runtime_unavailable', entry.failed);
     if (entry.value) return entry.value;
+    if (entry.failed && (entry.retryAfter ?? 0) > Date.now()) {
+      throw new RuntimeServiceError('runtime_unavailable', entry.failed);
+    }
     if (!entry.pending) {
       const factory = options.factories[config.kind];
       if (!factory) throw new RuntimeServiceError('unknown_runtime_kind', `Unregistered Runtime kind: ${config.kind}`);
       const target = entry;
       target.pending = Promise.resolve().then(() => factory(config)).then((value) => {
         target.value = value;
+        target.pending = undefined;
+        target.failed = undefined;
+        target.retryAfter = undefined;
         return value;
       }, (error: unknown) => {
         target.failed = error instanceof Error ? error.message : 'Runtime initialization failed.';
+        target.retryAfter = Date.now() + 250;
+        target.pending = undefined;
         throw new RuntimeServiceError('runtime_unavailable', target.failed);
       });
     }
@@ -191,7 +199,9 @@ export async function startRuntimeService(options: {
         }
         if (message.op === 'status') return status(client);
         if (message.op === 'stop') {
-          if (!client.administrative) throw new RuntimeServiceError('forbidden', 'Only an explicit management connection can stop the service.');
+          // The token authenticates the caller; administrative is only an
+          // explicit intent marker on that authenticated connection.
+          if (!client.administrative) throw new RuntimeServiceError('forbidden', 'Use an explicit management connection to stop the service.');
           setImmediate(() => { void stop().catch(() => {
             process.stderr.write('[runtime] Service stopped with unconfirmed resource cleanup.\n');
             process.exitCode = 1;

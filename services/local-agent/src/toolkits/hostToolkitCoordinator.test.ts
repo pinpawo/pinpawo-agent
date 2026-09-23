@@ -4,6 +4,7 @@ import { tool } from '@langchain/core/tools';
 import { defineToolkit } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { HostToolkitCoordinator } from './hostToolkitCoordinator';
+import { RuntimeServiceError } from '../runtimeService/protocol';
 
 test('HostToolkitCoordinator connects one client, injects static bindings and closes only its connection', async () => {
   const events: string[] = [];
@@ -76,4 +77,29 @@ test('HostToolkitCoordinator connects one client, injects static bindings and cl
   assert.deepEqual(events, ['connect', 'disconnect']);
   await coordinator.shutdown();
   assert.deepEqual(events, ['connect', 'disconnect']);
+});
+
+test('a failed Runtime service leaves pure Toolkits available and marks dependent Toolkits unavailable', async () => {
+  const runtimeToolkit = defineToolkit({
+    name: 'shell', description: 'Needs service',
+    tools: [{ tool: tool(async () => 'shell', { name: 'shell_tool', description: 'Shell.', schema: z.object({}) }) }],
+  });
+  const pureToolkit = defineToolkit({
+    name: 'files', description: 'Works in Host',
+    tools: [{ tool: tool(async () => 'files', { name: 'files_tool', description: 'Files.', schema: z.object({}) }) }],
+  });
+  const coordinator = new HostToolkitCoordinator({
+    warn: () => {},
+    connectRuntimes: async () => { throw new RuntimeServiceError('startup_failed', 'Configuration is invalid.'); },
+  });
+  const snapshot = await coordinator.initialize([{
+    id: 'test-host', kind: 'host_builtin', definitions: [
+      { toolkit: runtimeToolkit, runtimeKind: 'shell' }, { toolkit: pureToolkit },
+    ],
+  }]);
+  assert.deepEqual(snapshot.effectiveToolkits.map(({ name }) => name), ['files']);
+  assert.equal(snapshot.entries[0]?.availability.available, false);
+  assert.equal(await snapshot.effectiveToolkits[0]?.tools[0]?.tool.invoke({}), 'files');
+  assert.equal((await coordinator.getInventoryStore().refresh('shell'))?.entries[0]?.availability.available, false);
+  await coordinator.shutdown();
 });

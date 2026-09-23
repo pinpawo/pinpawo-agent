@@ -14,13 +14,16 @@ const execution: RuntimeExecution = {
 };
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fixture() {
+async function fixture(failFirstInitialization = false) {
   const directory = await mkdtemp(join(tmpdir(), 'ppr-'));
   const endpoint = process.platform === 'win32' ? `\\\\.\\pipe\\test-${Date.now()}-${Math.random()}` : join(directory, 's');
   let created = 0;
+  let initializationAttempts = 0;
   const released: string[] = [];
   const resources = new Map<string, { client: string; toolkit: string }>();
   const factory: RuntimeFactory = () => {
+    initializationAttempts += 1;
+    if (failFirstInitialization && initializationAttempts === 1) throw new Error('temporary initialization failure');
     const environment = ++created;
     return {
       async call(method, args, context) {
@@ -71,6 +74,7 @@ async function fixture() {
   });
   const clients: RuntimeClient[] = [];
   return {
+    get initializationAttempts() { return initializationAttempts; },
     resources, released,
     async connect(requirements: Record<string, string>, administrative = false) {
       const client = await RuntimeClient.connect({ endpoint, token: 'test-token', requirements, administrative });
@@ -85,6 +89,19 @@ async function fixture() {
     },
   };
 }
+
+test('a failed instance initialization can recover on a later call without restarting the service', async () => {
+  const service = await fixture(true);
+  try {
+    const client = await service.connect({ bash: 'test' });
+    await assert.rejects(client.call('bash', 'environment', null, execution), {
+      code: 'runtime_unavailable', message: 'temporary initialization failure',
+    });
+    await delay(300);
+    assert.equal(await client.call('bash', 'environment', null, execution), 1);
+    assert.equal(service.initializationAttempts, 2);
+  } finally { await service.close(); }
+});
 
 test('two clients share configured instances but never resource ownership; separate IDs create separate environments', async () => {
   const service = await fixture();

@@ -22,7 +22,6 @@ function runtimePort(
   };
   return {
     open: result,
-    openWithProfile: result,
     snapshot: result,
     click: result,
     type: result,
@@ -31,10 +30,6 @@ function runtimePort(
     extract: result,
     screenshot: result,
     close: result,
-    listSessions: async (context) => {
-      onCall?.(context);
-      return [];
-    },
   };
 }
 

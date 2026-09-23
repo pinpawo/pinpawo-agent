@@ -131,7 +131,7 @@ for `lifecycle.finalize`. A Toolkit is always typed code. See the
   becoming ordinary conversation content.
 
 For Browser-specific setup and limits, read
-[Chrome extension browser backend](../guides/browser-bridge.md).
+[Chrome extension browser](../guides/browser-bridge.md).
 
 ## Next steps
 

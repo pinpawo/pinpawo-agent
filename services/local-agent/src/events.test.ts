@@ -255,8 +255,9 @@ test('createBrowserToolkit exposes browser operation metadata', () => {
   assert.equal(definition(toolkit, 'browser_click')?.operation?.title, '点击页面');
   assert.equal(definition(toolkit, 'browser_type')?.operation?.title, '输入文本');
   assert.equal(Boolean(definition(toolkit, 'browser_open')?.review), true);
-  assert.equal(Boolean(definition(toolkit, 'browser_open_with_session')?.review), true);
-  assert.equal(Boolean(definition(toolkit, 'browser_open_with_profile')?.review), true);
+  assert.equal(definition(toolkit, 'browser_open_with_session'), undefined);
+  assert.equal(definition(toolkit, 'browser_open_with_profile'), undefined);
+  assert.equal(definition(toolkit, 'browser_session'), undefined);
   assert.equal(definition(toolkit, 'browser_click')?.review, undefined);
   assert.equal(definition(toolkit, 'browser_type')?.review, undefined);
   assert.equal(definition(toolkit, 'browser_snapshot')?.review, undefined);
@@ -273,14 +274,14 @@ test('browser open review policy offers session authorization', async () => {
   const matcher = await buildMatcher({
     toolkitName: 'browser',
     toolName: 'browser_open',
-    input: { url: 'https://Example.test/path', headless: true },
+    input: { url: 'https://Example.test/path' },
     operation: definition(toolkit, 'browser_open')?.operation,
   });
 
   const review = await policy.request({
     toolkitName: 'browser',
     toolName: 'browser_open',
-    input: { url: 'https://example.test', headless: true },
+    input: { url: 'https://example.test' },
     operation: definition(toolkit, 'browser_open')?.operation,
     reviewCapabilities: {
       humanReview: true,
@@ -313,7 +314,7 @@ test('browser operation metadata summarizes page output', () => {
       event: 'on_tool_end',
       name: 'browser_open',
       toolCallId: 'call-1',
-      input: { url: 'https://example.com', headless: true },
+      input: { url: 'https://example.com' },
       output: JSON.stringify({
         title: 'Example Domain',
         url: 'https://example.com/',
@@ -361,14 +362,13 @@ test('browser operation metadata parses JSON-string inputs for input summaries',
       event: 'on_tool_start',
       name: 'browser_open',
       toolCallId: 'call-2',
-      input: '{"url":"https://example.com","headless":true}',
+      input: '{"url":"https://example.com"}',
     },
     registry,
   );
 
   assert.equal(startFromOpen.operation.target, 'https://example.com');
   assert.equal(startFromOpen.operation.summary, '打开网页');
-  assert.equal(startFromOpen.operation.details?.headless, true);
 });
 
 test('tool operation output summaries still receive raw output strings first', () => {

@@ -137,14 +137,13 @@ test('extension navigation timeout keeps the approved origin for browser_wait', 
   });
 });
 
-test('extension session rejects unsupported modes and requires an approved page for actions', async () => {
+test('extension session rejects non-http targets and requires an approved page for actions', async () => {
   const session = new ChromeExtensionBrowserSession({
     async sendCommand() {
       return rawSnapshot;
     },
   });
   await assert.rejects(session.open('file:///tmp/page.html'), /only supports http/);
-  await assert.rejects(session.open('https://example.com', { headless: true }), /does not support headless/);
   await assert.rejects(session.click('#submit'), /Use browser_open first/);
 });
 

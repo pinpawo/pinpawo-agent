@@ -2,11 +2,9 @@ export { createBrowserCapability } from './capability';
 export {
   BROWSER_TOOLKIT_NAME,
   createBrowserToolkit,
+  type BrowserToolkitOptions,
 } from './toolkit';
-export {
-  BrowserSession,
-  type BrowserBackend,
-} from './session';
+export { BrowserSession } from './session';
 export * from './lifecycle';
 export { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 export { browserTools } from './tools';
@@ -14,11 +12,9 @@ export { browserOperationMetadata } from './operationMetadata';
 export {
   BrowserRuntime,
   projectBrowserRuntimeSnapshot,
-  shouldStartBrowserExtensionBridge,
   type BrowserRuntimeSnapshot,
   type BrowserRuntimeDependencies,
 } from './runtime';
-export type { BrowserToolkitOptions } from './options';
 export {
   DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
   DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,

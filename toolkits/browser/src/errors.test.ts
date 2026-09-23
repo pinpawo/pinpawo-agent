@@ -23,7 +23,7 @@ test('browser errors preserve driver codes, retryability and safe details', () =
   });
 });
 
-test('browser errors classify common Playwright failures', () => {
+test('browser errors classify common failure messages', () => {
   assert.equal(
     normalizeBrowserError(new Error('Stale browser element reference. Take a new snapshot.')).code,
     'stale_element_reference',

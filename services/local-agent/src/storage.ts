@@ -15,7 +15,6 @@ export type StoredConfig = {
   /** Versioned multi-profile model configuration. */
   models?: StoredModelProfilesV1;
   workdir?: string;
-  browser_backend?: string;
   /** Retry the same structured-output LLM call after parse/schema failure. Default: false. */
   structured_output_auto_repair?: boolean;
   /** Additional repair retries after the initial structured-output call. Default: 1 when enabled. */

@@ -1,11 +1,11 @@
-# Chrome extension browser backend
+# Chrome extension browser
 
 **Audience:** operators and Toolkit implementers who need the agent to use an
 existing Chrome session. For the project-level boundaries, start with
 [Architecture](../concepts/architecture.md); for installation, use
 [Getting Started](getting-started.md).
 
-The Chrome extension backend uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). Named sessions, custom profiles and headless mode remain Playwright-only semantics.
+The Chrome extension uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). This is Browser's only execution path: there is no Playwright driver, backend selection, named session, custom profile or headless mode.
 
 Architecturally, the extension is a driver inside the Browser Toolkit Runtime,
 not a driver of the Browser Capability and not a top-level local-agent
@@ -18,11 +18,7 @@ each Capability subagent. The Browser Capability only declares
 Agent lifecycle. See the accepted
 [domain constraints](../design/host-agent-capability-toolkit.md).
 
-## Fixed backend selection
-
-Set `PINPAWO_BROWSER_BACKEND=extension` (or save `browser_backend: "extension"`) to force the extension. A `BrowserSession` still selects one implementation for its lifetime. There is no dynamic router, mid-session fallback or provider abstraction.
-
-In `auto`, local-agent listens for the installed extension and chooses it first for compatible default-session, visible-browser operations. If no extension is connected, or the initial open explicitly requires headless, a named session or a custom profile, selection uses Playwright. Selection is still one-time for that active `BrowserSession`.
+## Availability
 
 Toolkit availability is structural and cached when the runtime registry is built; transient extension connectivity does not remove the Browser Toolkit. Browser Runtime owns one live extension snapshot that distinguishes bridge listening, Native Host connectivity, extension registration and command readiness. Session selection and Browser-specific status views consume that projection instead of independently combining Bridge booleans. Under #645, a generic Toolkit Runtime diagnostics surface will carry the same state as Browser-owned details rather than creating a Browser-only diagnostics lifecycle. A listening bridge without a registered extension remains routable but is not command-ready, so a later reconnect can recover without rebuilding the agent registry.
 
@@ -77,7 +73,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Clicking the extension action explicitly binds the current user tab and approves only its current http(s) origin for the local-agent Browser session. The approval is held only in the live extension state, is not persisted by the extension, and is never updated by subsequent user navigation; after an extension/service-worker restart the user must click the action again. This Browser-only binding is unrelated to delegation execution ownership.
 - Browser commands and target-binding changes run through one extension-owned serial queue. The local-agent tool layer remains backend-neutral and does not impose extension scheduling semantics.
 - Tool cancellation propagates through the Browser session and local bridge as a connection-scoped `browser.cancel` message. The extension observes cancellation before a queued command begins and at bounded wait/type/action safe points; it does not undo an input event that Chrome has already dispatched, and cancelled commands are never retried or replayed. Take a fresh snapshot before deciding what, if anything, needs to happen next.
-- A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent; Playwright applies the same active-target behavior inside its own driver.
+- A popup/new tab whose `openerTabId` is the current target becomes the active browser target. The extension keeps a bounded in-memory target history so closing a popup can return to its live parent.
 - Same-origin popups remain fully readable and interactive. A cross-origin popup is followed only for lifecycle recovery: its content, screenshots and trusted input remain blocked, and the user must complete that step manually in visible Chrome. After the popup closes or returns to the previously approved origin, the agent can take a new snapshot and continue.
 - Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
 - Each navigation carries an origin already authorized by the local-agent review policy.
@@ -91,22 +87,20 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 
 ```bash
 npm run build
-npm run test:browser-smoke -w pinpawo
 npm run test:browser-extension-smoke -w pinpawo
 ```
 
-Both smoke tests use the same loopback-only fixture: delayed SPA-style content,
+The smoke test uses a loopback-only fixture: delayed SPA-style content,
 long-content extraction in consecutive chunks, opaque-ref form type/click, scrolling,
-and parent page → popup → parent fallback. The first runs headless with Playwright;
-the extension smoke requires the unpacked extension and registered Native Host in the
-user’s Chrome. The extension smoke also verifies the cross-origin popup safety path:
+and parent page → popup → parent fallback. It requires the unpacked extension and
+registered Native Host in the user’s Chrome. It also verifies the cross-origin popup safety path:
 the dispatched click reports manual takeover without exposing its URL path, then the
 fixture closes the popup so the agent can recover the original page, and restarts the
 local bridge to verify re-authentication and target recovery. It is the baseline
 regression set, not evidence that iframe, dialogs, file transfer, or shadow-DOM support
 is complete.
 
-Each smoke ends with one URL-free `[browser-evaluation]` JSON record. It includes the
+The smoke ends with one URL-free `[browser-evaluation]` JSON record. It includes the
 driver, scenario, overall status, first-pass and recovery outcomes, per-phase duration,
 and a stable final error code/category when a phase fails. Categories cover
 snapshot/content, ref/selector, frame/shadow, stability/wait, target lifecycle,
@@ -126,7 +120,7 @@ Then:
    pinpawo browser extension register --extension-id <id>
    ```
 
-5. Restart the agent. `auto` uses the connected extension first; set `PINPAWO_BROWSER_BACKEND=extension` when you want to require it.
+5. Restart the agent.
 
 Inspect host registration and bridge runtime-file diagnostics with:
 

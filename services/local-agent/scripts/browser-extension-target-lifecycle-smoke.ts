@@ -26,7 +26,9 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-async function waitForExtension(timeoutMs = 15_000): Promise<void> {
+// Longer than the Native Host's 30s maximum reconnect backoff: a host that has
+// been retrying against an absent bridge may not retry again for that long.
+async function waitForExtension(timeoutMs = 45_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (browserRuntime.getSnapshot().extension.commandReady) return;

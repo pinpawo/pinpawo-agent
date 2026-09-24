@@ -12,6 +12,7 @@ import { dirname, resolve } from 'node:path';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
+  BROWSER_LEGACY_CONTEXT_ID,
   type BrowserCommandMessage,
   type BrowserCancelMessage,
   type BrowserExtensionCapability,
@@ -280,7 +281,7 @@ export class BrowserExtensionBridge {
    * mis-scoped to the previous generation.
    */
   beginNavigation(contextId?: string): number {
-    if (!contextId) {
+    if (!contextId || contextId === BROWSER_LEGACY_CONTEXT_ID) {
       this.navigationGeneration += 1;
       return this.navigationGeneration;
     }
@@ -290,7 +291,9 @@ export class BrowserExtensionBridge {
   }
 
   private navigationGenerationFor(contextId?: string): number {
-    if (!contextId) return this.navigationGeneration;
+    // The extension stamps the legacy context on events from context-less
+    // commands, so it shares the context-less counter those commands advance.
+    if (!contextId || contextId === BROWSER_LEGACY_CONTEXT_ID) return this.navigationGeneration;
     return this.navigationGenerationsByContext.get(contextId) ?? 0;
   }
 

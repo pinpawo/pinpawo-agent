@@ -3,6 +3,10 @@
 > 2026-08-18：package extraction 与通用 Host/Runtime 装配迁移已完成。
 > Host、Agent、Capability、Toolkit 与通用 Runtime diagnostics 以
 > [领域关系与装配约束](../host-agent-capability-toolkit.md)为准。
+> 2026-09（#856）：`ToolkitRuntimeManager` 与 `BrowserRuntime` 已删除。Browser 包导出
+> BrowserRS 契约与 `ChromeExtensionBrowserRS`，由 Host 创建并注入
+> `createBrowserToolkit({ browser })`；见
+> [Toolkit 的 RS 依赖](../../reference/extensions/toolkit-rs.md)。下文保留为拆包时的设计背景。
 
 ## 状态
 

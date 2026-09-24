@@ -5,8 +5,8 @@ import { runShellCommand } from './processTree';
 
 const CWD = process.cwd();
 
-// These cases exercise the POSIX executor through sh, pgrep and pkill; the
-// Windows implementation has its own suite in windowsProcessExecutor.test.ts.
+// These cases exercise the POSIX executor through sh, pgrep and pkill. There
+// is no Windows ShellRS implementation yet.
 const isWindows = process.platform === 'win32';
 
 function descendantsAlive(marker: string) {

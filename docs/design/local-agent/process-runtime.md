@@ -4,6 +4,12 @@
 
 状态：待确认。确认后再写实现。
 
+> 2026-09：本文中的 Toolkit Runtime root / resolve / bindTools / release 装配已被
+> #856 取代：进程由 ShellRS（`PosixShellRS`）按 Agent session 持有，句柄对同一
+> session 的后续 run 与其他 delegation 可见。当前契约见
+> [Toolkit 的 RS 依赖](../../reference/extensions/toolkit-rs.md)。本文保留为 #513 的
+> 决策背景。
+
 ## 1. 问题
 
 `run_shell` 只有一种执行模型：同步等待，超时即失败。对于 `pnpm install`、构建、测试这类命令，框架的实际行为是**砍掉输出通道，但不砍掉任务，然后告诉模型"失败了"**。

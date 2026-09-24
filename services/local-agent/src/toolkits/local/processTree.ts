@@ -47,6 +47,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
   const {
     command,
     cwd,
+    env,
     timeoutMs,
     maxOutputChars,
     signal,
@@ -62,10 +63,14 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
 
     let child;
     try {
-      child = spawn('/bin/sh', ['-c', command], {
+      const [file, args] = typeof command === 'string'
+        ? ['/bin/sh', ['-c', command]]
+        : [command.argv[0], command.argv.slice(1)];
+      child = spawn(file, args, {
         cwd,
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        ...(env ? { env: { ...process.env, ...env } } : {}),
       });
     } catch (err) {
       resolve({

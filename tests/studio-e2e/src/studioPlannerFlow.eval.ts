@@ -8,11 +8,10 @@ import { MemorySaver } from '@langchain/langgraph';
 import {
   buildOrchestratorRunInput, compileAgentRegistry, createOrchestratorGraph,
   definePetDocument, petDocumentSystemPromptSection, readCapabilityExecutions,
-  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import { createInMemoryKanbanTaskService, createKanbanPlanningToolkit } from '@pinpawo-plugin/kanban';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
-import { createProjectInspectionToolkit } from '../../../services/local-agent/src/toolkits/local';
+import { createProjectInspectionToolkit, PosixShellRS } from '../../../services/local-agent/src/toolkits/local';
 import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
 import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
 
@@ -24,7 +23,7 @@ const subject = createDecisionEvalModel({ profileId, role: 'subject' });
 console.log(`Studio Planner flow model: ${subject.label}`);
 const root = await mkdtemp(join(tmpdir(), 'studio-planner-model-e2e-'));
 const service = createInMemoryKanbanTaskService();
-const runtimeManager = new ToolkitRuntimeManager();
+const shell = new PosixShellRS();
 await service.init();
 
 try {
@@ -34,13 +33,13 @@ try {
   const original = await readFile(join(root, 'src/task.css'), 'utf8');
   const loaded = await loadCapabilityDirectory(join(template, 'capabilities'));
   const capabilities = loaded.map(({ capability }) => capability);
-  const toolkits = [createProjectInspectionToolkit(), createKanbanPlanningToolkit(service),
+  const toolkits = [createProjectInspectionToolkit({ shell }), createKanbanPlanningToolkit(service),
     createStudioContextToolkit(() => ['planner', 'executor', 'reviewer', 'wiki'].map((petId) => ({ petId, name: petId })))];
   const registry = compileAgentRegistry({ capabilities, toolkits });
   assert.equal(registry.capabilities.length, 2, 'Both production Planner capabilities must compile');
   const graph = createOrchestratorGraph({
     models: { act: subject.model, subagent: subject.model }, defaultCapabilityName: 'studio_planning',
-    checkpoint: new MemorySaver(), toolkitRuntimeManager: runtimeManager,
+    checkpoint: new MemorySaver(),
   });
   const calls: Array<{ name: string; input: string }> = [];
   const turns = [
@@ -83,6 +82,6 @@ try {
   console.log('PASS: full Planner graph discovers Pets, explores evidence, drafts, and creates unassigned tasks after confirmation.');
 } finally {
   await service.close();
-  await runtimeManager.stop();
+  await shell.dispose();
   await rm(root, { recursive: true, force: true });
 }

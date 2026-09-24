@@ -3,7 +3,6 @@ import { test } from 'node:test';
 
 import type { DelegationScope, RunScope, SessionScope, TaskScope } from './scope';
 import type { SubagentExecutionScope, SubagentRuntimeContext } from './subagent';
-import type { ToolkitRuntimeExecutionScope } from './toolkit';
 import type { CapabilityFinalizeContext } from './capability';
 import { subagentRuntimeContextSchema } from '../subagent/runtimeContext';
 
@@ -34,12 +33,10 @@ test('execution structures derive their identity from DelegationScope', () => {
     threadId: null, taskId: 'task-1', runId: 'run-1', delegationId: 'delegation-1',
   };
   const subagent: SubagentExecutionScope = { ...base, workdir: null };
-  const toolkit: ToolkitRuntimeExecutionScope = { ...base, workdir: null };
   const finalize: CapabilityFinalizeContext = {
     ...base, capabilityId: 'general', models: {} as CapabilityFinalizeContext['models'], messages: [],
   };
   assert.equal(subagent.taskId, 'task-1');
-  assert.equal(toolkit.taskId, 'task-1');
   assert.equal(finalize.taskId, 'task-1');
 });
 

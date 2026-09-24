@@ -13,10 +13,13 @@ import {
   type BrowserWaitState,
 } from './session';
 import type { BrowserRuntimeEvent } from './lifecycle/events';
-import type {
-  BrowserRuntimeCallContext,
-  BrowserRuntimePort,
-} from './runtimePort';
+import type { ToolkitAvailability } from '@pinpawo/pet-agent';
+import {
+  BROWSER_RS_CONTRACT,
+  BROWSER_RS_VERSION,
+  type BrowserRS,
+  type BrowserRSCallContext,
+} from './browserRS';
 
 export type BrowserExtensionRuntimeState =
   | 'stopped'
@@ -56,7 +59,7 @@ export type BrowserReadinessSnapshot = Readonly<{
   error?: { code: string; message: string; retryable: boolean };
 }>;
 
-export type BrowserRuntimeDependencies = {
+export type ChromeExtensionBrowserRSDependencies = {
   bridge?: BrowserExtensionBridge;
 };
 
@@ -93,12 +96,12 @@ function describeBrowserExtensionStatus(
 }
 
 /**
- * Browser Runtime roots are isolated per Host manager, while the native-host
- * bridge is one process transport bound to a fixed socket. This coordinator
- * lets independent roots lease that transport without making either root own
- * another root's lifecycle.
+ * BrowserRS instances are isolated per Host, while the native-host bridge is
+ * one process transport bound to a fixed socket. This coordinator lets
+ * independent instances lease that transport without making either instance
+ * own another instance's lifecycle.
  *
- * This is a Browser provider detail, not a Host or framework-level Runtime.
+ * This is a Browser provider detail, not a Host or framework concern.
  */
 class BrowserExtensionBridgeCoordinator {
   readonly bridge: BrowserExtensionBridge;
@@ -181,35 +184,71 @@ export function projectBrowserRuntimeSnapshot(
   });
 }
 
-export class BrowserRuntime implements BrowserRuntimePort {
+function describeError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * {@link BrowserRS} over the Chrome extension and its native host.
+ *
+ * Each Agent session gets one logical session: an isolated browser context in
+ * the extension with its own explicitly bound tabs. Logical sessions are
+ * established on first use and are never closed by the Host or the Agent; the
+ * in-process instance does not outlive its Host process, whose `dispose`
+ * shuts the sessions and releases the bridge.
+ */
+export class ChromeExtensionBrowserRS implements BrowserRS {
+  readonly contract = BROWSER_RS_CONTRACT;
+  readonly version = BROWSER_RS_VERSION;
+
   private started = false;
-  /** One browser workspace per conversation thread. */
-  private readonly sessionsByThread = new Map<string, {
-    session: BrowserSession;
-    workdir: string;
-  }>();
+  private startError: string | null = null;
+  private startPromise: Promise<void> | null = null;
+  private disposed = false;
+  /** One logical session per Agent session. */
+  private readonly sessions = new Map<string, BrowserSession>();
   private readonly bridge: BrowserExtensionBridge;
   private readonly bridgeCoordinator: BrowserExtensionBridgeCoordinator;
 
-  constructor(dependencies: BrowserRuntimeDependencies = {}) {
+  constructor(dependencies: ChromeExtensionBrowserRSDependencies = {}) {
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
     this.bridgeCoordinator = coordinatorForBridge(this.bridge);
   }
 
-  private sessionForThread(threadId: string, workdir: string): BrowserSession {
-    const existing = this.sessionsByThread.get(threadId);
-    if (existing) {
-      if (existing.workdir !== workdir) {
-        throw new Error(
-          `Browser runtime thread "${threadId}" is already bound to workdir "${existing.workdir}".`,
-        );
-      }
-      return existing.session;
+  /**
+   * Available once the bridge is listening. Whether the extension is
+   * currently connected is not availability: operations report that as a
+   * structured, retryable Browser error.
+   */
+  status(): ToolkitAvailability {
+    if (this.disposed) {
+      return { available: false, reason: 'Browser RS instance has been disposed.' };
     }
+    if (this.startError) {
+      return {
+        available: false,
+        reason: `Browser extension bridge failed to start: ${this.startError}`,
+      };
+    }
+    return { available: true };
+  }
 
-    // The extension receives only this opaque id; raw run/delegation tracing
-    // metadata never crosses the native host boundary. Its lifetime is the
-    // local runtime, which is also the lifetime of the managed browser tabs.
+  ensureSession(agentSessionId: string): void {
+    this.sessionFor(agentSessionId);
+  }
+
+  private sessionFor(agentSessionId: string): BrowserSession {
+    if (this.disposed) {
+      throw new Error('Browser RS instance has been disposed.');
+    }
+    if (typeof agentSessionId !== 'string' || !agentSessionId.trim()) {
+      throw new Error('Browser RS requires an Agent session id.');
+    }
+    const existing = this.sessions.get(agentSessionId);
+    if (existing) return existing;
+
+    // The extension receives only this opaque id; the Agent session id and
+    // run/delegation tracing metadata never cross the native host boundary.
     const browserContextId = randomUUID();
     const extensionSession = new ChromeExtensionBrowserSession({
       sendCommand: async (command, params, timeoutMs, signal, commandOptions) => await this.bridge.sendCommand(
@@ -236,105 +275,124 @@ export class BrowserRuntime implements BrowserRuntimePort {
             if (!change.contextId || change.contextId === browserContextId) listener(change);
           }) }
         : {}),
-    }, () => workdir);
+    });
     const session = new BrowserSession({
       requireExecutionOwner: true,
       createChromeExtensionSession: () => extensionSession,
     });
-    this.sessionsByThread.set(threadId, { session, workdir });
+    this.sessions.set(agentSessionId, session);
     return session;
   }
 
-  private sessionForCall(context: BrowserRuntimeCallContext) {
-    if (!context.threadId.trim()) {
-      throw new Error('Browser runtime requires a threadId.');
-    }
-    if (!context.workdir.trim()) {
-      throw new Error('Browser runtime requires a workdir.');
-    }
-    const session = this.sessionForThread(context.threadId, context.workdir);
+  private async sessionForCall(context: BrowserRSCallContext) {
+    // Start lazily as well, so a bridge that failed to start with the Host
+    // can recover on a later call instead of staying down for the process.
+    await this.start();
+    const session = this.sessionFor(context.agentSessionId);
     return {
       session,
-      owner: { threadId: context.threadId },
+      owner: { threadId: context.agentSessionId },
     };
   }
 
-  async open(context: BrowserRuntimeCallContext, url: string) {
-    const { session, owner } = this.sessionForCall(context);
+  async open(context: BrowserRSCallContext, url: string) {
+    const { session, owner } = await this.sessionForCall(context);
     return session.open(url, owner, context.signal);
   }
 
-  async snapshot(context: BrowserRuntimeCallContext) {
-    const { session, owner } = this.sessionForCall(context);
+  async snapshot(context: BrowserRSCallContext) {
+    const { session, owner } = await this.sessionForCall(context);
     return session.snapshot(owner, context.signal);
   }
 
   async click(
-    context: BrowserRuntimeCallContext,
+    context: BrowserRSCallContext,
     target: string | BrowserElementTarget,
   ) {
-    const { session, owner } = this.sessionForCall(context);
+    const { session, owner } = await this.sessionForCall(context);
     return session.click(target, owner, context.signal);
   }
 
   async type(
-    context: BrowserRuntimeCallContext,
+    context: BrowserRSCallContext,
     target: string | BrowserElementTarget,
     text: string,
     submit?: boolean,
   ) {
-    const { session, owner } = this.sessionForCall(context);
+    const { session, owner } = await this.sessionForCall(context);
     return session.type(target, text, submit, owner, context.signal);
   }
 
   async scroll(
-    context: BrowserRuntimeCallContext,
+    context: BrowserRSCallContext,
     options?: BrowserScrollOptions,
   ) {
-    const { session, owner } = this.sessionForCall(context);
+    const { session, owner } = await this.sessionForCall(context);
     return session.scroll(options, owner, context.signal);
   }
 
   async wait(
-    context: BrowserRuntimeCallContext,
+    context: BrowserRSCallContext,
     target?: string | BrowserElementTarget,
     timeoutMs?: number,
     state?: BrowserWaitState,
   ) {
-    const { session, owner } = this.sessionForCall(context);
+    const { session, owner } = await this.sessionForCall(context);
     return session.wait(target, timeoutMs, state, owner, context.signal);
   }
 
   async extract(
-    context: BrowserRuntimeCallContext,
+    context: BrowserRSCallContext,
     options?: BrowserExtractOptions,
   ) {
-    const { session, owner } = this.sessionForCall(context);
+    const { session, owner } = await this.sessionForCall(context);
     return session.extract(options, owner, context.signal);
   }
 
-  async screenshot(context: BrowserRuntimeCallContext) {
-    const { session, owner } = this.sessionForCall(context);
-    return session.screenshot(owner, context.signal);
+  async screenshot(context: BrowserRSCallContext) {
+    const { session, owner } = await this.sessionForCall(context);
+    return session.screenshot(owner, context.signal, context.workdir);
   }
 
-  async close(context: BrowserRuntimeCallContext) {
-    const { session, owner } = this.sessionForCall(context);
+  async close(context: BrowserRSCallContext) {
+    const { session, owner } = await this.sessionForCall(context);
     return session.close(owner, context.signal);
   }
 
+  /**
+   * Lease the bridge transport. Idempotent; a failure is recorded as this
+   * instance's status instead of failing whoever started it, and the next
+   * call retries.
+   */
   async start(): Promise<void> {
     if (this.started) return;
-    await this.bridgeCoordinator.acquire();
-    this.started = true;
+    if (this.disposed) throw new Error('Browser RS instance has been disposed.');
+    this.startPromise ??= (async () => {
+      try {
+        await this.bridgeCoordinator.acquire();
+        this.started = true;
+        this.startError = null;
+      } catch (error) {
+        this.startError = describeError(error);
+        throw error;
+      } finally {
+        this.startPromise = null;
+      }
+    })();
+    await this.startPromise;
   }
 
-  async stop(): Promise<void> {
+  /**
+   * Shut every logical session and release the bridge. Owned by whoever
+   * created this in-process instance (the Host); not a session operation.
+   */
+  async dispose(): Promise<void> {
+    this.disposed = true;
     try {
-      await Promise.all([...this.sessionsByThread.values()].map(async ({ session }) => {
+      await Promise.all([...this.sessions.values()].map(async (session) => {
         await session.shutdown();
       }));
-      this.sessionsByThread.clear();
+      this.sessions.clear();
     } finally {
       if (this.started) {
         try {
@@ -347,8 +405,8 @@ export class BrowserRuntime implements BrowserRuntimePort {
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {
-    // Runtime state is intentionally not a navigation-state projection. A
-    // BrowserRuntime serves several thread-owned tabs, so one unscoped
+    // Instance state is intentionally not a navigation-state projection. One
+    // BrowserRS serves several session-owned tabs, so one unscoped
     // controller here would report the most recently observed thread's
     // readiness as if it described every caller. Per-operation readiness is
     // instead evaluated by the context-filtered ChromeExtensionBrowserSession.

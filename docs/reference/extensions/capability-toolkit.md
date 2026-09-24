@@ -133,7 +133,7 @@ type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
-  readonly runtime?: ToolkitRuntimeDefinition;
+  readonly requires?: Readonly<Record<string, ToolkitRSRequirement>>;
 };
 
 type ToolDefinition = {
@@ -151,7 +151,8 @@ type ToolDefinition = {
   system prompt。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
-- `runtime`：可选、由 Toolkit 自己实现的 root / execution binding 生命周期。
+- `requires`：可选的执行环境（RS）依赖声明，只供 Host 装配使用；见
+  [Toolkit 的 RS 依赖](toolkit-rs.md)。
 - `ToolDefinition.operation`：工具调用的展示和摘要 metadata。
 - `ToolDefinition.review`：单个工具的确定性 review policy。
 
@@ -162,11 +163,12 @@ const bash = defineToolkit({
   name: 'bash',
   description: '本地文件、搜索和受控 shell 工具。',
   tools: [{
-    tool: runShellTool,
+    tool: createRunShellTool(shell),
     operation: { title: '执行命令' },
     review: shellReviewPolicy,
   }],
   instructions: '优先使用语义具体的文件工具；shell 只作为兜底。',
+  requires: { shell: SHELL_RS_REQUIREMENT },
 });
 ```
 
@@ -174,63 +176,16 @@ LangChain Tool 可能包含可变运行时内部状态。registry 会冻结
 `ToolDefinition` 绑定和 metadata，但保留原始 Tool 实例身份；host 必须约定在
 一个 registry generation 内不修改已注册 Tool 的 `name`。
 
-### 3.2 可选 Runtime 生命周期
+### 3.2 执行环境依赖（RS）
 
-需要持久连接、共享进程、登录态或执行作用域绑定的 Toolkit 可以声明
-`runtime`；它不是另一套 Capability，也不改变 `uses`、tool permission、review
-或 instructions 的静态含义：
+需要实际执行环境和跨调用交互状态的 Toolkit（shell 进程、浏览器标签）不自己持有
+生命周期，而是通过类型化工厂接收 Host 注入的 RS 实例，并在 `requires` 中声明契约、
+版本和 `agent-session` 会话绑定。框架只校验声明格式，运行期不创建、识别或管理 RS；
+Tools 是静态的，每次调用从 `ToolRuntime.context.executionScope` 读取 Agent session
+（threadId）与 workdir，并把它们交给 RS。
 
-```ts
-type ToolkitRuntimeDefinition<TRoot, TBinding = TRoot> = {
-  start(context: { signal?: AbortSignal }): Promise<TRoot> | TRoot;
-  resolve?(root: TRoot, context: {
-    execution: {
-      threadId: string | null;
-      runId: string;
-      delegationId: string;
-      workdir: string | null;
-      signal?: AbortSignal;
-    };
-  }): Promise<TBinding> | TBinding;
-  bindTools?(binding: TBinding, context: ToolkitRuntimeResolveContext):
-    Promise<readonly NamedStructuredTool[]> | readonly NamedStructuredTool[];
-  release?(binding: TBinding, context: ToolkitRuntimeReleaseContext): Promise<void> | void;
-  diagnose?(root: TRoot): Promise<JsonValue> | JsonValue;
-  stop?(root: TRoot, context: { signal?: AbortSignal }): Promise<void> | void;
-};
-```
-
-Host 使用 `ToolkitRuntimeManager` 在启动期按 Toolkit 顺序启动 root；每个
-Capability subagent 开始时为其声明的 Toolkit resolve 不透明 binding，并在
-subagent 结束（成功、失败或取消）后逆序 release。host 关闭时先清理仍活动的
-binding，再逆序 stop root。并发 subagent 可以同时 resolve，但同一个 root 只会
-启动一次。
-
-未声明 `bindTools` 时，resolved binding 以 Toolkit name 为 key，作为 opaque Runtime
-port 放入 `ToolRuntime.context.toolkitRuntimes`。静态 Tool 可以在每次调用时把当前
-invocation identity 传给自己的 Runtime；Agent 和通用 manager 不解释 port 的具体
-接口。`bindTools` 是互斥的消费方式，只用于确实需要替换执行 implementation 的
-Toolkit，例如注入 process registry；这类 binding 不再额外暴露到 Tool runtime
-context。框架会验证工具数量和名称与静态 inventory 相同，并继续使用静态 Tool 的
-schema、description、response format，以及静态 `operation`、`review`、权限与
-instructions。runtime binding 不会进入 registry、Supervisor workspace、prompt 或
-checkpoint。
-
-通用 invocation identity 不经过 `bindTools`；Agent 把 `threadId`、`runId` 和
-`delegationId` 放入 `ToolRuntime.context.executionScope`。Host 将同一份 workdir
-snapshot 提供给 Agent prompt、Tool runtime context 与 review/authorization context。
-Tool input 中的相对
-路径、绝对路径或 cwd 由模型决定并原样执行；越出 workdir 的风险由 review /
-authorization 判断，而不是由 execution binding 改写参数。
-
-`ToolkitRuntimeManager` 是 host-owned：长期 local-agent 在进程启动/关闭时调用
-它；独立 `createResidentPetRuntime()` 使用的 manager 由 Host lifecycle 统一 `shutdown()`
-释放。若由 host 注入共享 manager，则由该 host 统一 stop，不能由单个 pet
-runtime 终止。
-
-`ToolkitRuntimeManager.diagnose()` 为所有声明 Runtime 的 Toolkit 返回同一份 lifecycle、
-active binding 数和最近错误。可选 `diagnose(root)` 只补充 JSON-safe、Toolkit-owned
-`details`；Host 不解释该结构，也不为 Browser 或其他 Toolkit 建第二份状态源。
+RS 的 `status()` 是依赖它的 Toolkit 的可用性来源。完整契约、ShellRS / BrowserRS
+语义与 Host 装配见 [Toolkit 的 RS 依赖](toolkit-rs.md)。
 
 ### 3.3 可用性
 
@@ -238,8 +193,8 @@ active binding 数和最近错误。可选 `diagnose(root)` 只补充 JSON-safe�
 `availability`。调用入口或 host 必须先解析可用性：
 
 ```text
-Toolkit definitions
-  -> start optional root runtimes
+Host RS instances started (failures stay in their status)
+  -> Toolkit definitions assembled with injected RS instances
   -> evaluate/filter availability for this generation
   -> compileAgentRegistry(effective Toolkits, Capabilities)
 ```

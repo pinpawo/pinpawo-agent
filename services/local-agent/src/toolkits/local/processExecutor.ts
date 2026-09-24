@@ -8,8 +8,8 @@
  *
  * The methods therefore name intent, not mechanism. `terminateGroup` means
  * "end this command and everything it started", which each platform answers in
- * its own way. That is what lets Windows arrive as an additional
- * implementation rather than a fork of the working one (#562).
+ * its own way. A future Windows ShellRS supplies its own executor behind the
+ * same interface rather than forking the registry.
  */
 
 /**
@@ -68,8 +68,14 @@ export type ShellRunOutcome =
   | { status: 'yielded'; handle: ShellRunHandle };
 
 export type ShellRunOptions = {
-  command: string;
+  /**
+   * A shell string, run through the platform shell, or an argv vector run
+   * directly with no shell in between.
+   */
+  command: string | { argv: readonly [string, ...string[]] };
   cwd: string;
+  /** Variables layered over the host process environment. */
+  env?: Readonly<Record<string, string>>;
   timeoutMs: number;
   /**
    * Cap on captured characters per stream. Counted in characters, not bytes,

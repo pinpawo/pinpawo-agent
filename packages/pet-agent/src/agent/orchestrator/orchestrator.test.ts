@@ -22,16 +22,15 @@ import type {
   ModelInputModality,
   ToolDefinition,
   ToolReviewPolicy,
-  ToolkitRuntimeResolveContext,
 } from '../../types/toolkit';
 import { createSubagent } from '../../subagent/createSubagent';
+import { readToolExecutionContext } from '../../types/toolExecution';
 import { runAgent } from '../runAgent';
 import {
   buildOrchestratorRunInput,
   createOrchestratorGraph as createRuntimeOrchestratorGraph,
 } from '../createAgentRuntime';
 import { compileAgentRegistry } from './registry';
-import { ToolkitRuntimeManager } from './toolkitRuntime';
 import {
   collectToolkitOperations,
   resolveToolkitExecution,
@@ -1139,7 +1138,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   let routeCallCount = 0;
   let capabilityToolNames: string[] = [];
   let capabilityTools: Array<{ name: string }> = [];
-  const runtimeEvents: string[] = [];
   const routeModel = {
     invoke: async () => new AIMessage('answered'),
     bindTools: () => ({
@@ -1168,8 +1166,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
     return bindTools(tools as never);
   };
   const staticReadFile = mockTool('read_file');
-  const boundReadFile = mockTool('read_file');
-  const toolkitRuntimeManager = new ToolkitRuntimeManager();
   const runtimeCapability: AgentCapability = {
     name: 'inspect_repo',
     description: 'Inspect repository with bash tools.',
@@ -1184,7 +1180,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
       observe: routeModel,
       subagent: subagentModel,
     },
-    toolkitRuntimeManager,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), {
@@ -1196,20 +1191,6 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
           name: 'bash',
           description: 'bash toolkit',
           tools: toolDefinitions(staticReadFile),
-          runtime: {
-            start: () => {
-              runtimeEvents.push('start');
-              return { host: 'local' };
-            },
-            resolve: (_root: unknown, context: ToolkitRuntimeResolveContext) => {
-              runtimeEvents.push(`resolve:${context.execution.delegationId}`);
-              return { host: 'local' };
-            },
-            bindTools: () => [boundReadFile],
-            release: () => {
-              runtimeEvents.push('release');
-            },
-          },
         },
         {
           name: 'browser',
@@ -1227,28 +1208,21 @@ test('capability receives tools only from Toolkits authorized by fixed uses', as
   });
 
   assert.deepEqual(capabilityToolNames, ['read_file']);
-  assert.notEqual(capabilityTools[0], staticReadFile);
-  assert.notEqual(capabilityTools[0], boundReadFile);
   assert.equal(
     (capabilityTools[0] as StructuredTool | undefined)?.schema,
     staticReadFile.schema,
   );
-  assert.equal(runtimeEvents[0], 'start');
-  assert.match(runtimeEvents[1] ?? '', /^resolve:/);
-  assert.equal(runtimeEvents[2], 'release');
-  await toolkitRuntimeManager.stop();
 });
 
-test('capability tools receive their Toolkit Runtime port with invocation identity', async () => {
+test('capability tools receive the Agent session and workdir as invocation context', async () => {
   let routeCallCount = 0;
-  let seenRuntime: unknown;
+  let seenContext: SubagentRuntimeContext | undefined;
   let seenExecutionScope: SubagentRuntimeContext['executionScope'];
-  const browserRuntime = Object.freeze({ kind: 'browser-runtime' });
   const inspectRuntime = tool(async (
     _input,
     runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
   ) => {
-    seenRuntime = runtime.context.toolkitRuntimes?.browser;
+    seenContext = runtime.context;
     seenExecutionScope = runtime.context.executionScope;
     return 'runtime inspected';
   }, {
@@ -1274,10 +1248,8 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
       [],
     ],
   });
-  const toolkitRuntimeManager = new ToolkitRuntimeManager();
   const graph = createOrchestratorGraph({
     models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    toolkitRuntimeManager,
   });
 
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage('inspect')]), { context: { workdir: '/workspace', systemPromptSections: [] },
@@ -1295,20 +1267,22 @@ test('capability tools receive their Toolkit Runtime port with invocation identi
         name: 'browser',
         description: 'browser toolkit',
         tools: toolDefinitions(inspectRuntime),
-        runtime: {
-          start: () => browserRuntime,
-        },
       }],
       allowedCapabilityNames: ['inspect_browser'],
     },
   });
 
-  assert.equal(seenRuntime, browserRuntime);
+  // The framework hands tools a fixed invocation context and nothing else:
+  // no Runtime ports, no environment identity.
+  assert.equal(seenContext?.toolkitRuntimes, undefined);
+  assert.deepEqual(readToolExecutionContext({ context: seenContext }), {
+    agentSessionId: 'browser-runtime-context',
+    workdir: '/workspace',
+  });
   assert.equal(seenExecutionScope?.threadId, 'browser-runtime-context');
   assert.equal(seenExecutionScope?.workdir, '/workspace');
   assert.ok(seenExecutionScope?.runId);
   assert.ok(seenExecutionScope?.delegationId);
-  await toolkitRuntimeManager.stop();
 });
 
 test('artifact discovery tools reach a selected capability only when declared in uses', async () => {
@@ -4298,17 +4272,13 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
   const inspect = tool(async (_args, runtime: ToolRuntime<unknown, SubagentRuntimeContext>) => {
     const scope = runtime.context.executionScope!;
     assert.equal(scope.workdir, runtime.context.workdir);
+    scopes.push(scope);
     toolsSeen.set(scope.threadId!, runtime.context.workdir);
     return 'inspected';
   }, { name: 'inspect_context', description: 'Inspect invocation context.', schema: z.object({}) });
   const toolkit: AgentToolkit = {
     name: 'inspection', description: 'Inspect context',
     tools: [reviewedTool(inspect, ReviewPolicies.localMutation())],
-    runtime: {
-      start: () => ({}),
-      resolve: (_root, context) => { scopes.push(context.execution); return {}; },
-      bindTools: () => [inspect],
-    },
   };
   const item = {
     ...capability('inspect', 'Inspect context', ['inspection']),
@@ -4317,10 +4287,9 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
       finalized.add(ctx.threadId!);
     } },
   };
-  const toolkitRuntimeManager = new ToolkitRuntimeManager();
   const answer = { invoke: async () => new AIMessage('done') } as unknown as AgentModels['act'];
   const graph = createOrchestratorGraph({
-    models: { act: answer, subagent: new Executor({}) }, toolkitRuntimeManager,
+    models: { act: answer, subagent: new Executor({}) },
     runSupervisorRunner: { async invoke(input) {
       return input.mode === 'entry'
         ? { name: 'submit_plan', args: { tasks: [{ capability: 'inspect', objective: 'Inspect context.' }] } }
@@ -4348,25 +4317,21 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
       },
     });
   };
-  try {
-    await Promise.all(cases.slice(0, 2).map(invoke));
-    await invoke(cases[2]);
-    assert.equal(finalized.size, 3);
-    assert.equal(reviews.size, 3);
-    for (const entry of cases) {
-      assert.ok(finalized.has(entry.threadId));
-      assert.ok(reviews.has(entry.workdir));
-      assert.equal(toolsSeen.get(entry.threadId), entry.workdir);
-      assert.equal(scopes.find(scope => scope.threadId === entry.threadId)?.workdir, entry.workdir);
-      const inputs = modelsSeen.filter(text => text.includes(entry.workdir));
-      assert.equal(inputs.length, 2);
-      for (const text of inputs) {
-        assert.equal(text.split(entry.workdir).length - 1, 1);
-        for (const other of cases.filter(value => value !== entry)) assert.equal(text.includes(other.workdir), false);
-      }
+  await Promise.all(cases.slice(0, 2).map(invoke));
+  await invoke(cases[2]);
+  assert.equal(finalized.size, 3);
+  assert.equal(reviews.size, 3);
+  for (const entry of cases) {
+    assert.ok(finalized.has(entry.threadId));
+    assert.ok(reviews.has(entry.workdir));
+    assert.equal(toolsSeen.get(entry.threadId), entry.workdir);
+    assert.equal(scopes.find(scope => scope.threadId === entry.threadId)?.workdir, entry.workdir);
+    const inputs = modelsSeen.filter(text => text.includes(entry.workdir));
+    assert.equal(inputs.length, 2);
+    for (const text of inputs) {
+      assert.equal(text.split(entry.workdir).length - 1, 1);
+      for (const other of cases.filter(value => value !== entry)) assert.equal(text.includes(other.workdir), false);
     }
-  } finally {
-    await toolkitRuntimeManager.stop();
   }
 });
 

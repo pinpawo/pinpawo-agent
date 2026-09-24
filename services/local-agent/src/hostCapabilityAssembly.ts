@@ -13,10 +13,9 @@
 import {
   type AgentToolkit,
   type CapabilityArtifactStore,
-  type ToolkitRuntimeDiagnostic,
-  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
+  ChromeExtensionBrowserRS,
   createBrowserCapability,
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
@@ -45,8 +44,14 @@ import {
   createBashToolkit,
   createGitToolkit,
   createProjectInspectionToolkit,
+  PosixShellRS,
 } from './toolkits/local';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
+import {
+  assembleToolkit,
+  HostRSInstances,
+  type HostRSStatus,
+} from './toolkits/hostRS';
 import type {
   HostToolkitInventoryStore,
   ToolkitDefinitionSource,
@@ -62,9 +67,9 @@ export type HostCapabilityAssemblyOptions = {
   /** Chat loads the global user registry; per-Pet hosts may own stricter sources. */
   loadUserCapabilities?: boolean;
   /**
-   * Whether this Host includes the local Browser runtime and its global bridge.
-   * Chat keeps the user-selected default; a Studio must opt in explicitly
-   * instead of inheriting a Chat-only process resource.
+   * Whether this Host creates a BrowserRS instance (and leases the global
+   * extension bridge). Chat keeps the user-selected default; a Studio must opt
+   * in explicitly instead of inheriting a Chat-only process resource.
    */
   includeBrowser?: boolean;
 };
@@ -117,6 +122,8 @@ export class HostCapabilityAssembly {
   private readonly sourceId: string;
   private modelProfiles: LocalModelProfileRegistry | null = null;
   private readonly toolkitCoordinator = new HostToolkitCoordinator();
+  /** In-process RS instances this Host created and injects into Toolkits. */
+  private readonly rsInstances = new HostRSInstances();
   private readonly hostBuiltInToolkits: readonly AgentToolkit[];
   private readonly capabilityCatalog: HostCapabilityCatalog;
   private readonly capabilityArtifactStore: FileCapabilityArtifactStore;
@@ -133,13 +140,19 @@ export class HostCapabilityAssembly {
     this.sourceId = options.sourceId;
     const browserSelected = options.includeBrowser
       ?? loadStoredConfig().capabilities?.browser !== false;
+    // Bash, Git and project-inspection share one ShellRS instance, and so one
+    // logical session per Agent session across them.
+    const shell = this.rsInstances.add('shell', new PosixShellRS());
+    const browser = browserSelected
+      ? this.rsInstances.add('browser', new ChromeExtensionBrowserRS())
+      : null;
     this.hostBuiltInToolkits = [
-      createBashToolkit(),
-      createGitToolkit(),
-      createProjectInspectionToolkit(),
+      assembleToolkit(createBashToolkit, { shell }),
+      assembleToolkit(createGitToolkit, { shell }),
+      assembleToolkit(createProjectInspectionToolkit, { shell }),
       createCapabilityCreatorToolkit(),
-      ...(browserSelected
-        ? [createBrowserToolkit()]
+      ...(browser
+        ? [assembleToolkit(createBrowserToolkit, { browser })]
         : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({
@@ -218,10 +231,14 @@ export class HostCapabilityAssembly {
     }
     const { toolkitSources } = await loadPlugins();
     this.modelProfiles = buildLocalModelProfileRegistry();
-    // Validate Capability sources before starting any Toolkit Runtime roots.
-    // A configured name collision must fail without acquiring dynamic
-    // resources or leaving a dirty Runtime manager behind.
+    // Validate Capability sources before starting any RS instance. A
+    // configured name collision must fail without acquiring dynamic resources.
     await this.capabilityCatalog.load();
+    // RS start failures stay in each instance's status, which the inventory
+    // then reads as the availability of the Toolkits built on it.
+    await this.rsInstances.start(
+      (message) => console.warn(`[${this.sourceId}] ${message}`),
+    );
     await this.toolkitCoordinator.initialize([
       ...toolkitSources,
       ...options.toolkitSources,
@@ -250,12 +267,9 @@ export class HostCapabilityAssembly {
     return this.getCheckpointer();
   }
 
-  getToolkitRuntimeManager(): ToolkitRuntimeManager {
-    return this.toolkitCoordinator.getRuntimeManager();
-  }
-
-  getToolkitRuntimeDiagnostics(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
-    return this.toolkitCoordinator.diagnose();
+  /** Availability of each RS instance this Host created. */
+  getRSStatus(): Promise<readonly HostRSStatus[]> {
+    return this.rsInstances.status();
   }
 
   getModelProfiles(): LocalModelProfileRegistry {
@@ -280,7 +294,7 @@ export class HostCapabilityAssembly {
 
   async shutdown(): Promise<void> {
     try {
-      await this.toolkitCoordinator.shutdown();
+      await this.rsInstances.dispose();
     } finally {
       this.initialized = false;
       this.initOptions = null;

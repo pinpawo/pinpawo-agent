@@ -36,25 +36,36 @@ import {
   normalizeHttpFetchAuthorizationInput,
 } from './networkTools';
 import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
-import { gitInspectionTools, gitTools, gitOperationMetadata } from './gitTools';
+import { createGitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
 import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
-import { ShellRuntime, type ShellRuntimeBinding } from './shellRuntime';
 import {
   createProcessTools,
   processOperationMetadata,
-  processTools,
 } from './processTools';
 import {
   createRunShellTool,
   getCurrentTimeTool,
   normalizeShellAuthorizationInput,
-  runShellTool,
-  inspectShellTool,
   createInspectShellTool,
   shellOperationMetadata,
 } from './shellTools';
-import { bindToolToExecutionWorkdir } from './workdirBinding';
+import { withExecutionWorkdir } from './executionContext';
+import { SHELL_RS_REQUIREMENT, type ShellRS } from './shellRS';
+
+export {
+  SHELL_RS_CONTRACT,
+  SHELL_RS_REQUIREMENT,
+  SHELL_RS_VERSION,
+  ShellRSError,
+  type ShellCommand,
+  type ShellExecRequest,
+  type ShellExecResult,
+  type ShellProcessOutput,
+  type ShellProcessSnapshot,
+  type ShellRS,
+} from './shellRS';
+export { PosixShellRS, type PosixShellRSOptions } from './posixShellRS';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,
@@ -74,25 +85,40 @@ const localUtilityTools: StructuredTool[] = [
   downloadFileTool,
 ];
 
-const bashToolkitTools: StructuredTool[] = [
-  inspectShellTool,
-  ...localUtilityTools,
-  getCurrentTimeTool,
-  runShellTool,
-  ...processTools,
-];
+function createBashToolkitTools(shell: ShellRS): StructuredTool[] {
+  return [
+    createInspectShellTool(shell),
+    ...localUtilityTools,
+    getCurrentTimeTool,
+    createRunShellTool(shell),
+    ...createProcessTools(shell),
+  ];
+}
 
-const projectInspectionTools: readonly NamedStructuredTool[] = [
-  readFileTool,
-  viewFileChunkTool,
-  statPathTool,
-  listDirTool,
-  jqQueryTool,
-  globSearchTool,
-  grepSearchTool,
-  getCurrentTimeTool,
-  ...gitInspectionTools,
-];
+function createProjectInspectionTools(shell: ShellRS): readonly NamedStructuredTool[] {
+  return [
+    readFileTool,
+    viewFileChunkTool,
+    statPathTool,
+    listDirTool,
+    jqQueryTool,
+    globSearchTool,
+    grepSearchTool,
+    getCurrentTimeTool,
+    ...createGitTools(shell).gitInspectionTools,
+  ];
+}
+
+/** Shell-dependent Toolkits depend on exactly one ShellRS, under this key. */
+const shellRequirement = Object.freeze({ shell: SHELL_RS_REQUIREMENT });
+
+function executionScoped(tools: readonly StructuredTool[]) {
+  return tools.map((toolItem) => withExecutionWorkdir(toolItem as NamedStructuredTool));
+}
+
+function shellAvailability(shell: ShellRS) {
+  return async () => await shell.status();
+}
 
 function createToolDefinitions(
   tools: readonly StructuredTool[],
@@ -134,7 +160,7 @@ const bashToolkitInstructions = [
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   '联网取内容优先用 http_fetch：静态页面、REST API、RSS、天气或汇率这类公开接口一次请求即可拿到结果，不要为此逐步驱动浏览器。只有确实需要登录态、页面交互或 JS 动态渲染时才用浏览器。同一站点首次获批后，后续同源同方法的请求不再重复审批。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
-  '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看本次执行启动的后台命令。不要因为超时就重复执行同一命令。',
+  '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看当前会话启动的后台命令。不要因为超时就重复执行同一命令。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
   '修改文件前先读取现状；修改后优先用 validate_structured_file、grep_search 或 run_shell 做必要验证。',
@@ -205,7 +231,13 @@ function authorizeApplyPatch(ctx: ToolAutoAuthorizationContext) {
   }
 }
 
-export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): AgentToolkit {
+export type ShellToolkitDependencies = Readonly<{
+  /** The ShellRS instance the Host selected for this Toolkit. */
+  shell: ShellRS;
+}>;
+
+export function createBashToolkit(deps: ShellToolkitDependencies): AgentToolkit {
+  const { shell } = deps;
   const reviews = {
     write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
     apply_patch: ReviewPolicies.localMutation({
@@ -230,48 +262,26 @@ export function createBashToolkit(tools: StructuredTool[] = bashToolkitTools): A
       }),
     }),
     // The process tools carry no review policy on purpose. They only address
-    // processes this same execution already started through an approved
-    // run_shell, so waiting on one, listing them, or stopping one grants no
+    // processes an approved run_shell already started in this same Agent
+    // session, so waiting on one, listing them, or stopping one grants no
     // authority the command did not already have — the same reasoning that
     // leaves browser_close unreviewed.
   };
   return defineToolkit({
     name: 'bash',
     description: '本地文件读写、目录操作、代码搜索、补丁应用、HTTP 下载，以及受控 shell 命令执行。',
-    tools: createToolDefinitions(tools, bashToolkitOperations, reviews),
+    tools: createToolDefinitions(
+      executionScoped(createBashToolkitTools(shell)),
+      bashToolkitOperations,
+      reviews,
+    ),
     instructions: bashToolkitInstructions.join('\n'),
-    runtime: {
-      start: () => {
-        const root = new ShellRuntime();
-        root.start();
-        return root;
-      },
-      resolve: (root, context) => (root as ShellRuntime).resolve(context.execution),
-      bindTools: (binding, context) => {
-        const shell = binding as ShellRuntimeBinding;
-        // The framework matches bound tools to the static inventory by
-        // position, so this must return the whole list in order. Only the
-        // process-aware tools get a bound implementation; the rest are handed
-        // back as they are.
-        const bound = new Map<string, StructuredTool>(
-          [
-            createRunShellTool(shell),
-            createInspectShellTool(shell),
-            ...createProcessTools(shell),
-          ]
-            .map((item) => [item.name, item]),
-        );
-        return tools.map((staticTool) => bindToolToExecutionWorkdir(
-          (bound.get(staticTool.name) ?? staticTool) as NamedStructuredTool,
-          context.execution.workdir,
-        ));
-      },
-      stop: async (root) => { await (root as ShellRuntime).stop(); },
-    },
+    requires: shellRequirement,
+    availability: shellAvailability(shell),
   });
 }
 
-export function createProjectInspectionToolkit(): AgentToolkit {
+export function createProjectInspectionToolkit(deps: ShellToolkitDependencies): AgentToolkit {
   const operations = {
     ...fileOperationMetadata,
     ...searchOperationMetadata,
@@ -283,18 +293,17 @@ export function createProjectInspectionToolkit(): AgentToolkit {
   return defineToolkit({
     name: 'project-inspection',
     description: '只读探索本地项目、Git 历史与 GitHub PR/issue，形成可用于规划的事实证据。',
-    tools: createToolDefinitions(projectInspectionTools, operations),
+    tools: createToolDefinitions(
+      executionScoped(createProjectInspectionTools(deps.shell)),
+      operations,
+    ),
     instructions: projectInspectionInstructions.join('\n'),
-    runtime: {
-      start: () => undefined,
-      bindTools: (_binding, context) => projectInspectionTools.map((toolItem) => (
-        bindToolToExecutionWorkdir(toolItem, context.execution.workdir)
-      )),
-    },
+    requires: shellRequirement,
+    availability: shellAvailability(deps.shell),
   });
 }
 
-export function createGitToolkit(): AgentToolkit {
+export function createGitToolkit(deps: ShellToolkitDependencies): AgentToolkit {
   const reviews = {
     git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
     git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
@@ -305,17 +314,17 @@ export function createGitToolkit(): AgentToolkit {
   return defineToolkit({
     name: 'git',
     description: '本地 git 仓库查看、暂存、提交和普通推送，以及 GitHub PR/issue 创建与查看工具。',
-    tools: createToolDefinitions(gitTools, gitOperationMetadata, reviews),
+    tools: createToolDefinitions(
+      executionScoped(createGitTools(deps.shell).gitTools),
+      gitOperationMetadata,
+      reviews,
+    ),
     instructions: gitToolkitInstructions.join('\n'),
     reviewGuidance: {
       allow: 'Local Git edits and ordinary remote collaboration can be recoverable; assess the actual target and effect.',
       ask: 'Shared-history rewrites, access changes, and releases require human review.',
     },
-    runtime: {
-      start: () => undefined,
-      bindTools: (_binding, context) => gitTools.map((toolItem) => (
-        bindToolToExecutionWorkdir(toolItem, context.execution.workdir)
-      )),
-    },
+    requires: shellRequirement,
+    availability: shellAvailability(deps.shell),
   });
 }

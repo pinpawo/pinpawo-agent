@@ -4,9 +4,8 @@ import { test } from 'node:test';
 import {
   MAX_ACTIVE_PROCESSES,
   ProcessRegistry,
-  ProcessRegistryError,
-  type ManagedProcessOwner,
 } from './processRegistry';
+import { ShellRSError } from './shellRS';
 import type { ShellRunHandle } from './processExecutor';
 import {
   isProcessGroupAlive,
@@ -16,17 +15,9 @@ import {
 
 const CWD = process.cwd();
 
-const OWNER: ManagedProcessOwner = {
-  threadId: 'thread-1',
-  runId: 'run-1',
-  delegationId: 'delegation-1',
-};
-
-const OTHER_OWNER: ManagedProcessOwner = {
-  threadId: 'thread-1',
-  runId: 'run-2',
-  delegationId: 'delegation-2',
-};
+/** Processes belong to an Agent session, not to one run or delegation. */
+const OWNER = 'session-1';
+const OTHER_OWNER = 'session-2';
 
 // POSIX executor integration: these run real sh commands and probe with
 // pgrep/pkill. Registry logic that does not need an OS is covered by the
@@ -46,7 +37,7 @@ async function yieldedHandle(command: string): Promise<ShellRunHandle> {
 }
 
 function register(registry: ProcessRegistry, handle: ShellRunHandle, owner = OWNER) {
-  return registry.register({ handle, owner, command: 'test', cwd: CWD });
+  return registry.register({ handle, sessionId: owner, command: 'test', cwd: CWD });
 }
 
 test('registers a yielded process and reports it as running', { skip: isWindows }, async () => {
@@ -123,7 +114,7 @@ test('terminate stops the process and records the outcome', { skip: isWindows },
   assert.ok(record.exitedAt);
 });
 
-test('another execution cannot touch a process it did not start', { skip: isWindows }, async () => {
+test('another session cannot touch a process it did not start', { skip: isWindows }, async () => {
   const registry = new ProcessRegistry(posixProcessExecutor);
   const { processId } = register(registry, await yieldedHandle('sleep 2'));
 
@@ -134,7 +125,7 @@ test('another execution cannot touch a process it did not start', { skip: isWind
   ]) {
     await assert.rejects(
       operation,
-      (err: unknown) => err instanceof ProcessRegistryError && err.code === 'not_owner',
+      (err: unknown) => err instanceof ShellRSError && err.code === 'other_session',
     );
   }
 
@@ -160,7 +151,7 @@ test('an unknown process id is reported as such', { skip: isWindows }, async () 
   const registry = new ProcessRegistry(posixProcessExecutor);
   await assert.rejects(
     () => registry.drain('does-not-exist', OWNER),
-    (err: unknown) => err instanceof ProcessRegistryError && err.code === 'unknown_process',
+    (err: unknown) => err instanceof ShellRSError && err.code === 'unknown_process',
   );
 });
 
@@ -177,7 +168,7 @@ test('refuses to register beyond the concurrency cap', { skip: isWindows }, asyn
   handles.push(overflow);
   assert.throws(
     () => register(registry, overflow),
-    (err: unknown) => err instanceof ProcessRegistryError && err.code === 'too_many_processes',
+    (err: unknown) => err instanceof ShellRSError && err.code === 'too_many_processes',
   );
 
   await registry.stopAll(200);

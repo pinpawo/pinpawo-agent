@@ -4,20 +4,26 @@ import {
   type BrowserBridgeStatus,
   type BrowserExtensionBridge,
 } from './drivers/chromeExtension/bridge';
-import { BrowserRuntime } from './runtime';
-import type { BrowserRuntimeCallContext } from './runtimePort';
+import { ChromeExtensionBrowserRS } from './chromeExtensionBrowserRS';
+import type { BrowserRSCallContext } from './browserRS';
 
 function call(
-  threadId: string,
+  agentSessionId: string,
   workdir = process.cwd(),
-): BrowserRuntimeCallContext {
+): BrowserRSCallContext {
   return {
-    threadId,
+    agentSessionId,
     workdir,
   };
 }
 
-test('independent BrowserRuntime roots lease one process extension bridge', async () => {
+/** Fake bridges accept the transport lease the RS takes before its first call. */
+const lease = {
+  async start() {},
+  async stop() {},
+};
+
+test('independent BrowserRS instances lease one process extension bridge', async () => {
   const lifecycle: string[] = [];
   const bridge = {
     async start() { lifecycle.push('start'); },
@@ -40,22 +46,25 @@ test('independent BrowserRuntime roots lease one process extension bridge', asyn
       } satisfies BrowserBridgeStatus;
     },
   } as unknown as BrowserExtensionBridge;
-  const runtimeA = new BrowserRuntime({ bridge });
-  const runtimeB = new BrowserRuntime({ bridge });
+  const runtimeA = new ChromeExtensionBrowserRS({ bridge });
+  const runtimeB = new ChromeExtensionBrowserRS({ bridge });
 
   await Promise.all([runtimeA.start(), runtimeB.start()]);
   assert.deepEqual(lifecycle, ['start']);
 
-  await runtimeA.stop();
+  await runtimeA.dispose();
   assert.deepEqual(lifecycle, ['start']);
 
-  await runtimeB.stop();
+  await runtimeB.dispose();
   assert.deepEqual(lifecycle, ['start', 'stop']);
 });
 
-test('BrowserRuntime binds each thread to its execution workdir', async (t) => {
+test('one Agent session keeps its Browser session when the call workdir changes', async (t) => {
+  const contexts: unknown[] = [];
   const bridge = {
+    ...lease,
     async sendCommand(command: string, params: Record<string, unknown>) {
+      contexts.push(params.browserContextId);
       if (command === 'navigate') return { ok: true };
       return {
         title: 'Example',
@@ -83,28 +92,41 @@ test('BrowserRuntime binds each thread to its execution workdir', async (t) => {
       } satisfies BrowserBridgeStatus;
     },
   } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ bridge });
-  t.after(async () => await runtime.stop());
+  const runtime = new ChromeExtensionBrowserRS({ bridge });
+  t.after(async () => await runtime.dispose());
 
   await runtime.open(call('thread-a', '/workspace/a'), 'https://example.com/a');
+  await runtime.snapshot(call('thread-a', '/workspace/other'));
+  const sessionA = new Set(contexts.splice(0));
   await runtime.open(call('thread-b', '/workspace/b'), 'https://example.com/b');
-  await assert.rejects(
-    runtime.snapshot(call('thread-a', '/workspace/other')),
-    /already bound to workdir/,
-  );
+  const sessionB = new Set(contexts.splice(0));
+
+  // Workdir is a per-call condition, not part of the session: thread-a kept
+  // one browser context across the workdir change; thread-b has its own.
+  assert.equal(sessionA.size, 1);
+  assert.equal(sessionB.size, 1);
+  assert.notDeepEqual([...sessionA], [...sessionB]);
 });
 
-test('BrowserRuntime refuses to create an unowned browser workspace', async (t) => {
-  const runtime = new BrowserRuntime();
-  t.after(async () => await runtime.stop());
+test('BrowserRS refuses to create a session without an Agent session id', async (t) => {
+  const runtime = new ChromeExtensionBrowserRS({ bridge: lease as unknown as BrowserExtensionBridge });
+  t.after(async () => await runtime.dispose());
 
   await assert.rejects(
     runtime.open(call(''), 'https://example.com'),
-    /requires a threadId/,
+    /requires an Agent session id/,
   );
 });
 
-test('BrowserRuntime routes separate thread workspaces with distinct opaque extension context ids', async (t) => {
+test('BrowserRS ensureSession is idempotent and never closed by use', async (t) => {
+  const runtime = new ChromeExtensionBrowserRS({ bridge: lease as unknown as BrowserExtensionBridge });
+  t.after(async () => await runtime.dispose());
+  runtime.ensureSession('thread-1');
+  runtime.ensureSession('thread-1');
+  assert.deepEqual(runtime.status(), { available: true });
+});
+
+test('BrowserRS routes separate Agent sessions with distinct opaque extension context ids', async (t) => {
   const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
   const status: BrowserBridgeStatus = {
     listening: true,
@@ -122,6 +144,7 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
     socketPath: '/tmp/browser.sock',
   };
   const bridge = {
+    ...lease,
     async sendCommand(command: string, params: Record<string, unknown>) {
       calls.push({ command, params });
       if (command === 'navigate') {
@@ -139,8 +162,8 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
       return status;
     },
   } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ bridge });
-  t.after(async () => await runtime.stop());
+  const runtime = new ChromeExtensionBrowserRS({ bridge });
+  t.after(async () => await runtime.dispose());
 
   await runtime.open(call('thread-1'), 'https://example.com/first');
   await runtime.open(call('thread-2'), 'https://example.com/second');
@@ -156,7 +179,7 @@ test('BrowserRuntime routes separate thread workspaces with distinct opaque exte
   assert.notEqual(secondContextId, 'thread-2');
 });
 
-test('BrowserRuntime broadcasts an unscoped reconnect to every thread workspace', async (t) => {
+test('BrowserRS broadcasts an unscoped reconnect to every session', async (t) => {
   const generationListeners = new Set<(change: {
     connectionGeneration: number;
     targetGeneration: number;
@@ -180,6 +203,7 @@ test('BrowserRuntime broadcasts an unscoped reconnect to every thread workspace'
     targetGeneration: 1,
   };
   const bridge = {
+    ...lease,
     beginNavigation() {
       return 1;
     },
@@ -211,8 +235,8 @@ test('BrowserRuntime broadcasts an unscoped reconnect to every thread workspace'
       return () => generationListeners.delete(listener);
     },
   } as unknown as BrowserExtensionBridge;
-  const runtime = new BrowserRuntime({ bridge });
-  t.after(async () => await runtime.stop());
+  const runtime = new ChromeExtensionBrowserRS({ bridge });
+  t.after(async () => await runtime.dispose());
 
   await assert.rejects(
     runtime.open(call('thread-1'), 'https://example.com/page'),

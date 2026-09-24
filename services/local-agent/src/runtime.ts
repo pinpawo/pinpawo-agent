@@ -113,14 +113,6 @@ export class AgentHost {
     return this.caps.getChatCheckpointer();
   }
 
-  getToolkitRuntimeManager() {
-    return this.caps.getToolkitRuntimeManager();
-  }
-
-  getToolkitRuntimeDiagnostics() {
-    return this.caps.getToolkitRuntimeDiagnostics();
-  }
-
   getModelProfiles() {
     return this.caps.getModelProfiles();
   }
@@ -156,7 +148,6 @@ export class AgentHost {
       modelProfiles: this.getModelProfiles(),
       ...this.caps.getExecutionConfig(),
       toolkitInventory: this.getToolkitInventoryStore(),
-      toolkitRuntimeManager: this.getToolkitRuntimeManager(),
       capabilityCatalog: this.getCapabilityCatalog(),
       ...(this.petDocument ? { petDocument: this.petDocument } : {}),
       capabilityArtifactStore: this.getCapabilityArtifactStore(),

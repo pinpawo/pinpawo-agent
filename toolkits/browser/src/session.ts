@@ -155,10 +155,15 @@ export class BrowserSession {
       ? this.ownership.runOwned(owner, operation, signal)
       : operation();
   }
-  async screenshot(owner: BrowserExecutionOwner | null = null, signal?: AbortSignal) {
+  async screenshot(
+    owner: BrowserExecutionOwner | null = null,
+    signal?: AbortSignal,
+    /** Where this call writes the screenshot; a per-call condition. */
+    workdir?: string,
+  ) {
     const operation = async () => {
       throwIfBrowserOperationAborted(signal);
-      return this.ensureImpl().screenshot(signal);
+      return this.ensureImpl().screenshot(signal, workdir);
     };
     return this.ownership
       ? this.ownership.runOwned(owner, operation, signal)

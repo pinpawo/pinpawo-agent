@@ -17,7 +17,7 @@
  */
 import { buildReviewSpec } from '../src/types/reviewSpec.ts';
 import { assessAutoReviewRisk } from '../src/autoReview/autoReviewer.ts';
-import { createBashToolkit } from '../../../services/local-agent/src/toolkits/local/index.ts';
+import { createBashToolkit, PosixShellRS } from '../../../services/local-agent/src/toolkits/local/index.ts';
 import { shellOperationMetadata } from '../../../services/local-agent/src/toolkits/local/shellTools.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 
@@ -297,7 +297,7 @@ async function main() {
     profileId,
     role: 'subject',
   });
-  const bashToolkit = createBashToolkit();
+  const bashToolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   console.log(`Model: ${modelConfig.label}`);
   const failures: Array<{ kind: string; name: string; riskScore: number }> = [];

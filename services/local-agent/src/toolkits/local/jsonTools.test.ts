@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit } from './index';
+import { createBashToolkit, PosixShellRS } from './index';
 import { runJqProcess, runJqQuery } from './jsonTools';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
@@ -12,7 +12,7 @@ function definition(toolkit: AgentToolkit, toolName: string) {
 }
 
 test('bash toolkit exposes jq_query as a read-only operation', () => {
-  const definitionItem = definition(createBashToolkit(), 'jq_query');
+  const definitionItem = definition(createBashToolkit({ shell: new PosixShellRS() }), 'jq_query');
   assert.ok(definitionItem?.operation);
   assert.equal(definitionItem?.review, undefined);
 });

@@ -120,18 +120,32 @@ test('toolkit registration rejects malformed static contract fields', () => {
     /operation\.summarizeInput must be a function/,
   );
 
-  assert.throws(
-    () => validateToolkitDefinition({
-      name: 'invalid_runtime_diagnostic',
-      description: 'Runtime diagnostic hooks must be callable.',
-      tools: [{ tool: alphaTool }],
-      runtime: {
-        start: () => ({}),
-        diagnose: 'not callable',
-      },
-    } as never),
-    /runtime\.diagnose must be a function/,
-  );
+  for (const [requires, message] of [
+    [[], /requires must be an object/],
+    [{ shell: null }, /requires\.shell must be an object/],
+    [{ shell: { contract: ' ', version: 1, session: 'agent-session' } }, /requires\.shell\.contract must not be empty/],
+    [{ shell: { contract: 'pinpawo.shell-rs', version: 0, session: 'agent-session' } }, /requires\.shell\.version must be a positive integer/],
+    [{ shell: { contract: 'pinpawo.shell-rs', version: 1, session: 'run' } }, /requires\.shell\.session must be "agent-session"/],
+  ] as const) {
+    assert.throws(
+      () => validateToolkitDefinition({
+        name: 'invalid_requirement',
+        description: 'RS requirements must be well formed.',
+        tools: [{ tool: alphaTool }],
+        requires,
+      } as never),
+      message,
+    );
+  }
+  // A well-formed declaration is accepted and carried through unchanged: the
+  // framework validates its shape only and never interprets it.
+  const requires = { shell: { contract: 'pinpawo.shell-rs', version: 1, session: 'agent-session' } } as const;
+  assert.equal(defineToolkit({
+    name: 'declares_rs',
+    description: 'Declares one RS dependency.',
+    tools: [{ tool: alphaTool }],
+    requires,
+  }).requires, requires);
 
   assert.throws(
     () => validateToolkitDefinition({

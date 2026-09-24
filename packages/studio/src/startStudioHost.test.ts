@@ -24,7 +24,6 @@ function fakeAssembly(events: string[]): HostCapabilityAssembly {
     getToolkitInventoryStore: () => ({
       getSnapshot: () => ({ effectiveToolkits: [] }),
     }) as never,
-    getToolkitRuntimeManager: () => ({}) as never,
     getCheckpointer: () => ({}) as never,
     getCapabilityArtifactStore: () => ({}) as never,
   } as unknown as HostCapabilityAssembly;

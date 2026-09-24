@@ -7,8 +7,8 @@
 本文固定 Host、Agent、Capability 与 Toolkit 的领域关系，并约束 Chat Host、
 Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当前公共类型
 仍以 [Capability / Toolkit V2 契约](../reference/extensions/capability-toolkit.md)
-为准；Toolkit Runtime 的已实现生命周期见
-[Toolkit 可选 Runtime 生命周期](../reference/extensions/toolkit-runtime.md)。
+为准；Toolkit 的执行环境依赖（ShellRS / BrowserRS）见
+[Toolkit 的 RS 依赖](../reference/extensions/toolkit-rs.md)（#856）。
 
 本文中的 inventory、execution boundary、Host Toolkit 协调器和统一诊断已按 #645
 进入当前实现。当历史设计中的 `local tools`、
@@ -28,23 +28,19 @@ dispatch，TUI 的直接对话通过独立 conversation adapter，不增加新�
 Host
   ├─ 读取配置并选择 Capability / Toolkit definitions
   ├─ 创建并持有一个或多个 Agent Runtime
-  └─ 持有 ToolkitRuntimeManager
-       └─ 管理每个 Toolkit 自己声明的可选 Runtime
+  └─ 创建并持有 RS 实例（ShellRS、BrowserRS）
+       └─ 按 Toolkit 的 requires 声明注入 Toolkit 工厂
 
 Agent Runtime
   └─ 编译并执行 Capability
        └─ Capability.uses 解析 Toolkit
             ├─ tools / instructions / operation metadata / review policy
-            ├─ availability
-            └─ optional Toolkit Runtime
-                 ├─ root lifecycle
-                 ├─ execution binding 与资源所有权
-                 └─ runtime diagnostics
+            └─ availability（依赖 RS 的 Toolkit 取自 RS.status()）
 ```
 
-Toolkit Runtime 不是与 Host、Agent、Capability、Toolkit 平级的第五个扩展概念。
-它属于 Toolkit 领域，是 Toolkit 在需要连接、进程、登录态或 execution-scoped
-binding 时使用的运行部分。
+RS 不是与 Host、Agent、Capability、Toolkit 平级的扩展概念，也不进入 Agent 运行期：
+Agent 只看到静态 Tool，Tool 在每次调用时用 Agent session（threadId）与 workdir
+访问 Host 注入的 RS 实例。
 
 ## 2. 领域职责
 
@@ -55,12 +51,13 @@ Host 是进程或产品入口的装配边界。它负责：
 - 读取 Host 配置，并据此选择 Capability 与 Toolkit definitions；
 - 定义 inventory 的来源、优先级、重复名称失败规则和 provenance；
 - 创建、持有和关闭 Agent Runtime；Studio Host 可以持有多个常驻 Agent Runtime；
-- 持有共享的 `ToolkitRuntimeManager`，启动/停止 Toolkit roots，并汇总诊断；
+- 创建并持有进程内 RS 实例，按 Toolkit 的 `requires` 声明注入；RS 启动失败只
+  影响依赖它的 Toolkit 的 availability；
 - 提供 transport、API、TUI/Web adapter、持久化 port 和全局 review mode 等
   Host concerns。
 
-Host 不解释某个 Toolkit 的 backend、连接协议、工具语义或资源所有权，也不按
-Toolkit 名称编写 start、resolve、stop 或 diagnostics 分支。
+Host 不解释某个 Toolkit 的 backend、连接协议、工具语义或资源所有权，也不复制
+RS 的内部状态（进程、输出、tab、target、CDP session）。
 
 ### Agent
 
@@ -74,9 +71,8 @@ Agent 是接收 invocation 并执行任务的运行单元。它负责：
 - 通过 Host 注入的通用 manager 获取 Toolkit execution bindings。
 
 Agent 不读取 Host 配置，不拥有 Browser、shell、git 等专属生命周期，也不在
-graph state 之外维护第二份 Toolkit 业务状态。独立 `createResidentPetRuntime()`
-在没有外部 Host 时可以创建私有 manager；这只是工厂代行最小 Host 所有权，
-不把 Toolkit Runtime 变成 Agent 领域概念。
+graph state 之外维护第二份 Toolkit 业务状态。Agent 运行期不创建、识别或管理
+RS；它只看到静态 Tool。
 
 ### Capability
 
@@ -98,7 +94,7 @@ Toolkit 是可执行能力和工具策略的唯一归属，负责：
 - operation metadata；
 - 单个工具的 review requirement / policy；
 - Toolkit availability；
-- 可选 Toolkit Runtime definition。
+- 可选的 RS 依赖声明（`requires`），仅供 Host 装配。
 
 Host 配置中的全局 review mode 仍属于 Host Configuration；Toolkit 只声明工具级
 规则。Human review 的请求/响应属于 Agent 与交互边界，不能因此把全局配置或
@@ -142,58 +138,26 @@ Toolkit definitions
 Inventory 合并必须是确定性的：来源和顺序可追溯，重复 Capability/Toolkit 名称
 必须显式失败，不能依赖“最后一个覆盖”或让不同入口各自重算。
 
-## 4. Toolkit Runtime 的统一诊断
+## 4. RS 状态
 
-所有声明 Runtime 的 Toolkit 都必须通过同一管理面被诊断。Browser 不是特殊诊断
-对象；被诊断的是 Browser Toolkit Runtime，和 shell、git 或未来第三方 Toolkit
-Runtime 使用相同契约。
-
-目标诊断最小形态如下：
-
-```ts
-type ToolkitRuntimeDiagnostic = {
-  toolkitName: string;
-  lifecycle:
-    | 'starting'
-    | 'ready'
-    | 'degraded'
-    | 'stopping'
-    | 'stopped'
-    | 'failed';
-  activeBindings: number;
-  lastError?: {
-    code?: string;
-    message: string;
-  };
-  details?: JsonValue;
-};
-```
-
-约束：
-
-- `ToolkitRuntimeManager` 为每个 Runtime 统一维护 lifecycle、active bindings 和
-  通用失败信息，因此每个 Toolkit Runtime 都有基础诊断；
-- Toolkit Runtime 可以通过通用 `diagnose(root)` hook 补充 `details`，但 Host
-  不解释其结构；
-- Host 只调用 manager 的聚合 diagnostics API，不检查 `toolkitName === 'browser'`；
-- diagnostics 是只读 snapshot，不负责配置变更、availability 选择或资源控制；
-- Toolkit 专属 CLI/API 可以展示 `details`，但它是通用诊断投影，不是另一套
-  lifecycle 或状态源。
+旧的 `ToolkitRuntimeManager` 统一诊断已随 #856 删除。每个 RS 实例通过
+`status()` 报告可用性与可诊断原因；Host 的 `getRSStatus()` 汇总其创建的实例，
+不按 Toolkit 名称分支。RS 内部的恢复策略与资源状态由 RS 自己管理。
 
 ## 5. Browser 与 local-machine Toolkit 的归位
 
 Browser、bash、git 都是普通 Toolkit：
 
-- Browser backend/driver、bridge、session、ownership 和 live state 属于 Browser
-  Toolkit Runtime；Browser Capability 只声明 `uses: ['browser']`。
-- Browser 包分别导出 Capability、Toolkit 和窄的管理接口。local-agent 的
-  composition root 只根据 Host 配置选择静态 definitions；不持有 Runtime root、
-  availability cache 或 diagnostics 状态。
+- Browser backend/driver、bridge、session、ownership 和 live state 属于
+  `ChromeExtensionBrowserRS`；Browser Capability 只声明 `uses: ['browser']`。
+- Browser 包分别导出 Capability、Toolkit 工厂、BrowserRS 契约与实现。local-agent 的
+  composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；bash、git、
+  project-inspection 共享一个 `PosixShellRS`。
 - 当前所谓 `local tools` 不是领域概念。它们是 local-machine / Node Host 提供的
   Toolkit definitions；CLI 只是其中一类 Host 入口。
 - `bash` 当前包含文件、搜索、JSON、网络、shell、process 等工具，`git` 同时包含
   本地 git 与 GitHub 操作。后续是否拆分必须按 authority、availability、review
-  policy 和 runtime lifecycle 决定，不能按目录或现有名称机械拆分。
+  policy 和 RS 依赖决定，不能按目录或现有名称机械拆分。
 - operation registry 必须由最终 Toolkit definitions 派生，不能维护一份平级的
   flat tools inventory。
 
@@ -212,9 +176,9 @@ Browser、bash、git 都是普通 Toolkit：
    统一定义。
 4. Host 将同一份 workdir snapshot 提供给 Agent prompt 与 review/authorization
    context。Tool 的 path、cwd、command 等参数由模型决定并保持原样；不得为了
-   workdir scoping 创建虚假 Toolkit Runtime，也不得由 binding 静默补全或改写输入。
-   Toolkit Runtime 只绑定 Toolkit 自己拥有的动态资源和 ownership。
-5. shutdown 一个 Host/manager 不能释放另一个 Host 的 roots、bindings、进程或连接。
+   workdir scoping 引入审核前改写 Tool 输入的阶段。Toolkit 在执行时用原始参数
+   与 Host 提供的执行上下文解释相对路径和默认 cwd。
+5. shutdown 一个 Host 只释放它自己创建的 RS 实例，不能释放另一个 Host 的进程或连接。
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。
    Chat Host (`LocalAgentHost`) 和 Studio Host (`StudioHost`) 是两个独立的
@@ -244,8 +208,9 @@ Browser、bash、git 都是普通 Toolkit：
 - `Host`：产品/进程装配与所有权边界；
 - `Agent Runtime`：常驻、可反复 invoke 的 Agent 执行单元；
 - `Capability`：业务行为与 `uses`；
-- `Toolkit`：tools、工具策略、availability 和可选 Runtime；
-- `Toolkit Runtime`：Toolkit 内部的动态资源与 execution binding；
+- `Toolkit`：tools、工具策略、availability 和可选的 RS 依赖声明；
+- `RS`（ShellRS、BrowserRS）：持有执行环境与按 Agent session 划分的交互状态，由 Host
+  创建并注入 Toolkit；
 - `local-machine Toolkit` 或 `local Host built-in Toolkit`：取代含糊的
   `local tools` / `CLI tools`。
 

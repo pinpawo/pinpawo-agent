@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  BrowserRuntime,
+  ChromeExtensionBrowserRS,
   ChromeExtensionBrowserSession,
   BrowserExtensionBridge,
 } from '@pinpawo-toolkit/browser';
@@ -8,7 +8,7 @@ import { startBrowserScenarioFixture } from './browser-scenario-fixture';
 import { BrowserScenarioReporter } from './browser-scenario-report';
 
 const bridge = new BrowserExtensionBridge();
-const browserRuntime = new BrowserRuntime({ bridge });
+let browserRuntime = new ChromeExtensionBrowserRS({ bridge });
 
 type Snapshot = {
   title: string;
@@ -173,8 +173,10 @@ try {
   });
 
   await reporter.run('bridge_restart_recovery', 'recovery', async () => {
-    await browserRuntime.stop();
+    await browserRuntime.dispose();
     extensionConnected = false;
+    // A disposed instance stays disposed; a restarted Host creates a new one.
+    browserRuntime = new ChromeExtensionBrowserRS({ bridge });
     await browserRuntime.start();
     await waitForExtension();
     extensionConnected = true;
@@ -188,6 +190,6 @@ try {
 } finally {
   console.log(`[browser-evaluation] ${JSON.stringify(reporter.finish(failure))}`);
   if (extensionConnected) await browser.close().catch(() => {});
-  await browserRuntime.stop();
+  await browserRuntime.dispose();
   await fixture.close();
 }

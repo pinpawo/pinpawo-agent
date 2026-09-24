@@ -10,7 +10,6 @@ import type { DelegationDelivery } from '../delegation/delivery';
 import type { CompiledCapability } from '../registry';
 import type { GlobalReviewPolicy } from '../review/globalReviewPolicy';
 import type { ToolAuthorizationRecord } from '../../../autoReview/reviewAuthorizations';
-import type { ToolkitRuntimeManager } from '../toolkitRuntime';
 
 /** Task data, not rendered briefing text or a graph routing command. */
 export type CapabilityExecutionDelegation = Readonly<DelegationSpec> & {
@@ -46,7 +45,6 @@ export type CapabilityExecutionOptions = {
   readonly models: AgentModels;
   readonly modelInputModalities?: readonly ModelInputModality[];
   readonly capabilityArtifactStore?: CapabilityArtifactStore;
-  readonly toolkitRuntimeManager?: ToolkitRuntimeManager;
   readonly subagentContextWindowTokens?: number;
   readonly subagentGenerationReserveTokens?: number;
   /** Internal execution seam; production uses the existing createSubagent wrapper. */

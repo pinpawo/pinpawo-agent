@@ -5,22 +5,27 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { isCommand } from '@langchain/langgraph';
 import { persistBrowserScreenshot } from './screenshot';
-import { BROWSER_TOOLKIT_NAME } from './constants';
 import { createBrowserTools } from './tools';
-import type {
-  BrowserRuntimeCallContext,
-  BrowserRuntimePort,
-} from './runtimePort';
+import {
+  BROWSER_RS_CONTRACT,
+  BROWSER_RS_VERSION,
+  type BrowserRS,
+  type BrowserRSCallContext,
+} from './browserRS';
 
-function runtimePort(
+function fakeBrowserRS(
   value: string,
-  onCall?: (context: BrowserRuntimeCallContext) => void,
-): BrowserRuntimePort {
-  const result = async (context: BrowserRuntimeCallContext) => {
+  onCall?: (context: BrowserRSCallContext) => void,
+): BrowserRS {
+  const result = async (context: BrowserRSCallContext) => {
     onCall?.(context);
     return value;
   };
   return {
+    contract: BROWSER_RS_CONTRACT,
+    version: BROWSER_RS_VERSION,
+    status: () => ({ available: true }),
+    ensureSession: () => undefined,
     open: result,
     snapshot: result,
     click: result,
@@ -34,7 +39,6 @@ function runtimePort(
 }
 
 function invocation(
-  browser: BrowserRuntimePort,
   threadId: string,
   workdir = process.cwd(),
 ) {
@@ -42,52 +46,51 @@ function invocation(
     context: {
       executionScope: {
         threadId,
+        taskId: 'task-1',
         runId: 'run-1',
         delegationId: 'delegation-1',
         workdir,
-      },
-      toolkitRuntimes: {
-        [BROWSER_TOOLKIT_NAME]: browser,
       },
     },
   };
 }
 
-test('static Browser tools pass thread identity to the active Runtime on every call', async () => {
-  const seen: BrowserRuntimeCallContext[] = [];
-  const tools = createBrowserTools();
+test('static Browser tools pass the Agent session to the injected BrowserRS on every call', async () => {
+  const seen: BrowserRSCallContext[] = [];
+  const tools = createBrowserTools(fakeBrowserRS('page', (context) => seen.push(context)));
   const snapshot = tools.find(({ name }) => name === 'browser_snapshot');
   assert.ok(snapshot);
 
-  assert.equal(
-    await snapshot.invoke({}, invocation(runtimePort('first', (context) => seen.push(context)), 'thread-1')),
-    'first',
-  );
-  assert.equal(
-    await snapshot.invoke({}, invocation(runtimePort('second', (context) => seen.push(context)), 'thread-2')),
-    'second',
-  );
+  assert.equal(await snapshot.invoke({}, invocation('thread-1')), 'page');
+  assert.equal(await snapshot.invoke({}, invocation('thread-2')), 'page');
   assert.deepEqual(
-    seen.map(({ threadId }) => threadId),
+    seen.map(({ agentSessionId }) => agentSessionId),
     ['thread-1', 'thread-2'],
   );
 });
 
-test('browser screenshot uses Runtime output and invocation workdir', async () => {
+test('a Browser tool call outside an Agent session is an ordinary tool error', async () => {
+  const snapshot = createBrowserTools(fakeBrowserRS('page'))
+    .find(({ name }) => name === 'browser_snapshot');
+  assert.ok(snapshot);
+  assert.match(String(await snapshot.invoke({})), /requires an Agent session/);
+});
+
+test('browser screenshot uses BrowserRS output and invocation workdir', async () => {
   const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-tool-'));
-  const browser = runtimePort('unused');
+  const browser = fakeBrowserRS('unused');
   browser.screenshot = async () => persistBrowserScreenshot({
     mimeType: 'image/png',
     data: Buffer.from('screenshot').toString('base64'),
   }, workdir);
-  const screenshotTool = createBrowserTools()
+  const screenshotTool = createBrowserTools(browser)
     .find((toolItem) => toolItem.name === 'browser_screenshot');
 
   assert.ok(screenshotTool);
 
   const result = await screenshotTool.invoke(
     {},
-    invocation(browser, 'thread-1', workdir),
+    invocation('thread-1', workdir),
   );
 
   assert.ok(isCommand(result));

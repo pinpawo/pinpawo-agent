@@ -11,8 +11,6 @@ import {
   type AgentCapability,
   type CapabilityArtifactStore,
   type PetDocument,
-  type ToolkitRuntimeDiagnostic,
-  type ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import {
   buildLocalAgentRuntimeConfig,
@@ -157,7 +155,6 @@ export class StudioHost {
         petCapabilities,
         petDocuments,
         toolkitInventory: this.caps.getToolkitInventoryStore(),
-        toolkitRuntimeManager: this.caps.getToolkitRuntimeManager(),
         capabilityArtifactStore: this.caps.getCapabilityArtifactStore(),
         checkpoint: this.getCheckpointer(),
         ...this.caps.getExecutionConfig(),
@@ -260,14 +257,6 @@ export class StudioHost {
 
   getCheckpointer(): FileSaver {
     return this.caps.getCheckpointer();
-  }
-
-  getToolkitRuntimeManager(): ToolkitRuntimeManager {
-    return this.caps.getToolkitRuntimeManager();
-  }
-
-  getToolkitRuntimeDiagnostics(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
-    return this.caps.getToolkitRuntimeDiagnostics();
   }
 
   getModelProfiles(): LocalModelProfileRegistry {

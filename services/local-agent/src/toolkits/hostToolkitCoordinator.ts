@@ -1,8 +1,4 @@
 import {
-  ToolkitRuntimeManager,
-  type ToolkitRuntimeDiagnostic,
-} from '@pinpawo/pet-agent';
-import {
   buildHostToolkitInventory,
   HostToolkitInventoryStore,
   reportUnavailableToolkitAvailability,
@@ -13,25 +9,23 @@ import {
 
 export type HostToolkitCoordinatorOptions = Readonly<{
   inventoryStore?: HostToolkitInventoryStore;
-  runtimeManager?: ToolkitRuntimeManager;
   resolveAvailability?: ToolkitAvailabilityResolver;
   warn?: (message: string) => void;
 }>;
 
 /**
- * Local Host owner of Toolkit definitions, availability projections, Runtime
- * roots, and their generic diagnostics. Toolkit-specific behavior stays in
- * each definition and never enters this coordinator.
+ * Local Host owner of Toolkit definitions and their availability projections.
+ * Toolkits arrive already assembled with their RS instances; the RS instances
+ * themselves are owned by the Host (see `HostRSInstances`), never by this
+ * coordinator or by the Agent framework.
  */
 export class HostToolkitCoordinator {
   private readonly inventoryStore: HostToolkitInventoryStore;
-  private readonly runtimeManager: ToolkitRuntimeManager;
   private readonly resolveAvailability: ToolkitAvailabilityResolver | undefined;
   private readonly warn: (message: string) => void;
 
   constructor(options: HostToolkitCoordinatorOptions = {}) {
     this.inventoryStore = options.inventoryStore ?? new HostToolkitInventoryStore();
-    this.runtimeManager = options.runtimeManager ?? new ToolkitRuntimeManager();
     this.resolveAvailability = options.resolveAvailability;
     this.warn = options.warn ?? console.warn;
   }
@@ -41,9 +35,6 @@ export class HostToolkitCoordinator {
   ): Promise<HostToolkitInventorySnapshot> {
     const snapshot = await buildHostToolkitInventory({
       sources,
-      startToolkitRuntimes: async (definitions) => {
-        await this.runtimeManager.start(definitions);
-      },
       ...(this.resolveAvailability
         ? { resolveAvailability: this.resolveAvailability }
         : {}),
@@ -55,17 +46,5 @@ export class HostToolkitCoordinator {
 
   getInventoryStore(): HostToolkitInventoryStore {
     return this.inventoryStore;
-  }
-
-  getRuntimeManager(): ToolkitRuntimeManager {
-    return this.runtimeManager;
-  }
-
-  diagnose(): Promise<readonly ToolkitRuntimeDiagnostic[]> {
-    return this.runtimeManager.diagnose();
-  }
-
-  shutdown(): Promise<void> {
-    return this.runtimeManager.stop();
   }
 }

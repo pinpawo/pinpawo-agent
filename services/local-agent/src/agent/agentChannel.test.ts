@@ -28,7 +28,7 @@ import {
 } from '../capabilities/capabilityCreator';
 import { createExploreCapability } from '../capabilities/explore';
 import { loadGeneralCapability } from '../capabilities/general';
-import { createBashToolkit, createGitToolkit } from '../toolkits/local';
+import { createBashToolkit, createGitToolkit, PosixShellRS } from '../toolkits/local';
 import { createTestModelProfiles } from '../testing/modelProfiles';
 
 function createContext(): AgentContext {
@@ -366,12 +366,13 @@ test('buildLocalChatAgentInput registers artifact discovery for an empty thread'
   const artifactRoot = mkdtempSync(resolve(tmpdir(), 'pinpawo-agent-channel-artifacts-'));
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }));
   const store = new FileCapabilityArtifactStore(artifactRoot);
+  const shell = new PosixShellRS();
   const setup = buildTestLocalChatAgentInput({
     context: createContext(),
     userMessage: 'hello',
     threadId: 'thread/with space',
     capabilityArtifactStore: store,
-    toolkits: [createBashToolkit(), createGitToolkit()],
+    toolkits: [createBashToolkit({ shell }), createGitToolkit({ shell })],
     capabilities: [createExploreCapability()],
   });
   const toolkit = setup.input.toolkits?.find(({ name }) => name === 'artifact_discovery');

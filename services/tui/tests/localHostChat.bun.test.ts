@@ -49,6 +49,7 @@ import {
 import {
   createBashToolkit,
   createGitToolkit,
+  PosixShellRS,
 } from '../../local-agent/src/toolkits/local/index';
 import {
   LocalHostConnection,
@@ -75,7 +76,8 @@ const USER_MESSAGE = 'Inspect the host integration.';
 const RECOVERY_MESSAGE = 'Verify the host recovers.';
 const ATTACHMENT_NAME = '资料 with spaces.txt';
 const ATTACHMENT_CONTENT = 'fixture contents must remain unread until a tool inspects this path';
-const REQUIRED_TOOLKITS = [createBashToolkit(), createGitToolkit()];
+const shell = new PosixShellRS();
+const REQUIRED_TOOLKITS = [createBashToolkit({ shell }), createGitToolkit({ shell })];
 
 test('production local-agent handlers drive the v2 host vertical slice', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-host-'));

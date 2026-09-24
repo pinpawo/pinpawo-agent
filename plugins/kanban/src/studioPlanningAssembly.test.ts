@@ -8,7 +8,6 @@ import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
   type AgentCapability,
-  ToolkitRuntimeManager,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 
@@ -61,7 +60,6 @@ async function residentBuildResources(workdir: string, plugins: ReturnType<typeo
   }));
   return {
     toolkitInventory,
-    toolkitRuntimeManager: new ToolkitRuntimeManager(),
     capabilityArtifactStore: artifactStore,
     checkpoint: new FileSaver(path.join(runtimeConfig.stateRoot, 'test-checkpoints.json')),
     runtimeConfig,

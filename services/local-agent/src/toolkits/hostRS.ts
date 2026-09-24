@@ -66,32 +66,113 @@ export function assembleToolkit<TDeps extends Readonly<Record<string, ToolkitRS>
   return toolkit;
 }
 
+export type HostRSStartOptions = Readonly<{
+  warn?: (message: string) => void;
+  /**
+   * Called after an instance that failed to start has started on a later
+   * attempt, with the names of the Toolkits assembled on it, so the Host can
+   * re-read their availability.
+   */
+  onRecovered?: (toolkitNames: readonly string[]) => void | Promise<void>;
+  /** First retry delay after a failed start; doubles up to `maxRetryMs`. */
+  initialRetryMs?: number;
+  maxRetryMs?: number;
+}>;
+
+const DEFAULT_INITIAL_RETRY_MS = 5_000;
+const DEFAULT_MAX_RETRY_MS = 60_000;
+
 /**
  * The in-process RS instances one Host owns.
  *
  * A start failure is not a Host failure: it stays in that instance's status,
  * which is the availability of the Toolkits built on it and of nothing else.
+ * The Host keeps retrying a failed start in the background, so an instance
+ * can recover without a tool call reaching it — a Toolkit whose RS is
+ * unavailable is not offered to the Agent, so no tool call would.
  */
 export class HostRSInstances {
   private readonly instances = new Map<string, HostOwnedRS>();
+  private readonly dependents = new Map<HostOwnedRS, string[]>();
+  private readonly retryTimers = new Set<NodeJS.Timeout>();
+  private disposed = false;
 
   add<T extends HostOwnedRS>(name: string, instance: T): T {
     if (this.instances.has(name)) {
       throw new Error(`Duplicate Host RS instance "${name}"`);
     }
     this.instances.set(name, instance);
+    this.dependents.set(instance, []);
     return instance;
   }
 
-  async start(warn: (message: string) => void = console.warn): Promise<void> {
+  /**
+   * {@link assembleToolkit}, also recording which Toolkits depend on which
+   * of this Host's instances.
+   */
+  assemble<TDeps extends Readonly<Record<string, ToolkitRS>>>(
+    create: (deps: TDeps) => AgentToolkit,
+    deps: TDeps,
+  ): AgentToolkit {
+    const toolkit = assembleToolkit(create, deps);
+    for (const instance of Object.values(deps)) {
+      this.dependents.get(instance as HostOwnedRS)?.push(toolkit.name);
+    }
+    return toolkit;
+  }
+
+  async start(options: HostRSStartOptions = {}): Promise<void> {
+    const warn = options.warn ?? console.warn;
+    const initialRetryMs = options.initialRetryMs ?? DEFAULT_INITIAL_RETRY_MS;
+    const maxRetryMs = options.maxRetryMs ?? DEFAULT_MAX_RETRY_MS;
     await Promise.all([...this.instances].map(async ([name, instance]) => {
       if (!instance.start) return;
       try {
         await instance.start();
       } catch (error) {
         warn(`[rs] ${name} (${instance.contract}) failed to start: ${describeError(error)}`);
+        this.scheduleRetry(name, instance, initialRetryMs, maxRetryMs, warn, options.onRecovered);
       }
     }));
+  }
+
+  private scheduleRetry(
+    name: string,
+    instance: HostOwnedRS,
+    delayMs: number,
+    maxRetryMs: number,
+    warn: (message: string) => void,
+    onRecovered: HostRSStartOptions['onRecovered'],
+  ): void {
+    if (this.disposed || !instance.start) return;
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(timer);
+      if (this.disposed) return;
+      void (async () => {
+        try {
+          await instance.start!();
+        } catch {
+          this.scheduleRetry(
+            name,
+            instance,
+            Math.min(delayMs * 2, maxRetryMs),
+            maxRetryMs,
+            warn,
+            onRecovered,
+          );
+          return;
+        }
+        if (this.disposed) return;
+        try {
+          await onRecovered?.([...(this.dependents.get(instance) ?? [])]);
+        } catch (error) {
+          warn(`[rs] ${name} recovered but refreshing its Toolkits failed: ${describeError(error)}`);
+        }
+      })();
+    }, delayMs);
+    // Retrying must never keep the Host process alive on its own.
+    timer.unref?.();
+    this.retryTimers.add(timer);
   }
 
   async status(): Promise<readonly HostRSStatus[]> {
@@ -114,10 +195,14 @@ export class HostRSInstances {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
     const results = await Promise.allSettled(
       [...this.instances.values()].map(async (instance) => await instance.dispose()),
     );
     this.instances.clear();
+    this.dependents.clear();
     const errors = results
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) => result.reason as unknown);

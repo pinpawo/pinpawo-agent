@@ -388,6 +388,11 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
    */
   async dispose(): Promise<void> {
     this.disposed = true;
+    // A start still in flight would otherwise complete after this check and
+    // leave a disposed instance holding a bridge lease. Let it settle first;
+    // if it succeeded, the lease is released below.
+    const pendingStart = this.startPromise;
+    if (pendingStart) await pendingStart.catch(() => undefined);
     try {
       await Promise.all([...this.sessions.values()].map(async (session) => {
         await session.shutdown();

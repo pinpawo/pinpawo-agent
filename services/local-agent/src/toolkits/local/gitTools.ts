@@ -144,10 +144,15 @@ export async function runGit(
   }
   switch (result.status) {
     case 'exited':
+      // Only exit code 0 is success. A null code means the process was ended
+      // by a signal, which is a failure even with no output.
       return formatGitResult({
         stdout: result.stdout,
         stderr: result.stderr,
         status: result.code,
+        ...(result.code === null
+          ? { error: new Error(`git ${args[0] ?? ''} was terminated by a signal`) }
+          : {}),
       });
     case 'timeout':
       return formatGitResult({
@@ -183,7 +188,9 @@ async function executeGh(cli: CliRunner, args: string[], cwd?: string) {
   switch (result.status) {
     case 'exited':
       if (result.code !== 0) {
-        throw formatGhError(Object.assign(new Error('gh command failed'), {
+        throw formatGhError(Object.assign(new Error(
+          result.code === null ? 'terminated by a signal' : 'gh command failed',
+        ), {
           stdout: result.stdout,
           stderr: result.stderr,
           code: result.code ?? undefined,

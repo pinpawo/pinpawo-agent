@@ -13,6 +13,7 @@ import {
   PosixShellRS,
 } from './index';
 import { createGitTools } from './gitTools';
+import type { ShellRS } from './shellRS';
 
 const sessionContext = {
   executionScope: {
@@ -578,4 +579,29 @@ test('project-inspection Toolkit exposes only read-only project evidence tools',
   ]) {
     assert.equal(names.includes(forbidden), false, `${forbidden} must remain outside read-only inspection`);
   }
+});
+
+test('git and gh ended by a signal report an error, not an empty success', async () => {
+  // ShellRS reports a signal-terminated process as exited with no code.
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs',
+    version: 1,
+    status: () => ({ available: true }),
+    ensureSession: () => undefined,
+    exec: async () => ({ status: 'exited', code: null, stdout: '', stderr: '' }),
+    wait: async () => { throw new Error('unused'); },
+    read: async () => { throw new Error('unused'); },
+    terminate: async () => { throw new Error('unused'); },
+    list: async () => [],
+  };
+  const tools = createGitTools(shell).gitTools;
+  const invoke = (name: string, input: Record<string, unknown>) => tools
+    .find((item) => item.name === name)!
+    .invoke(input as never, { context: sessionContext });
+
+  assert.equal(await invoke('git_status', {}), 'Error: git status was terminated by a signal');
+  await assert.rejects(
+    () => invoke('gh_pr_view', { pr: '1' }),
+    /gh command failed: terminated by a signal/,
+  );
 });

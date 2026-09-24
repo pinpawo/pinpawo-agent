@@ -71,3 +71,25 @@ test('separate Hosts create independent BrowserRS instances sharing one bridge',
   await browserB.dispose();
   assert.equal(bridge.getStatus().listening, false);
 });
+
+test('dispose during an in-flight start releases the bridge once the start settles', async () => {
+  const lifecycle: string[] = [];
+  let finishStart!: () => void;
+  const bridge = isolatedBridge();
+  bridge.start = async () => {
+    lifecycle.push('start');
+    await new Promise<void>((resolve) => { finishStart = resolve; });
+  };
+  bridge.stop = async () => { lifecycle.push('stop'); };
+  const browser = new ChromeExtensionBrowserRS({ bridge });
+
+  const starting = browser.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  const disposing = browser.dispose();
+  finishStart();
+  await starting;
+  await disposing;
+
+  assert.deepEqual(lifecycle, ['start', 'stop']);
+  assert.equal(browser.status().available, false);
+});

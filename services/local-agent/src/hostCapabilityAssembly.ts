@@ -48,7 +48,6 @@ import {
 } from './toolkits/local';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import {
-  assembleToolkit,
   HostRSInstances,
   type HostRSStatus,
 } from './toolkits/hostRS';
@@ -147,12 +146,12 @@ export class HostCapabilityAssembly {
       ? this.rsInstances.add('browser', new ChromeExtensionBrowserRS())
       : null;
     this.hostBuiltInToolkits = [
-      assembleToolkit(createBashToolkit, { shell }),
-      assembleToolkit(createGitToolkit, { shell }),
-      assembleToolkit(createProjectInspectionToolkit, { shell }),
+      this.rsInstances.assemble(createBashToolkit, { shell }),
+      this.rsInstances.assemble(createGitToolkit, { shell }),
+      this.rsInstances.assemble(createProjectInspectionToolkit, { shell }),
       createCapabilityCreatorToolkit(),
       ...(browser
-        ? [assembleToolkit(createBrowserToolkit, { browser })]
+        ? [this.rsInstances.assemble(createBrowserToolkit, { browser })]
         : []),
     ];
     this.capabilityCatalog = new HostCapabilityCatalog({
@@ -235,10 +234,16 @@ export class HostCapabilityAssembly {
     // configured name collision must fail without acquiring dynamic resources.
     await this.capabilityCatalog.load();
     // RS start failures stay in each instance's status, which the inventory
-    // then reads as the availability of the Toolkits built on it.
-    await this.rsInstances.start(
-      (message) => console.warn(`[${this.sourceId}] ${message}`),
-    );
+    // then reads as the availability of the Toolkits built on it. A failed
+    // instance keeps retrying; once it starts, its Toolkits are re-evaluated
+    // so later executions get them back.
+    await this.rsInstances.start({
+      warn: (message) => console.warn(`[${this.sourceId}] ${message}`),
+      onRecovered: async (toolkitNames) => {
+        const inventory = this.toolkitCoordinator.getInventoryStore();
+        for (const name of toolkitNames) await inventory.refresh(name);
+      },
+    });
     await this.toolkitCoordinator.initialize([
       ...toolkitSources,
       ...options.toolkitSources,

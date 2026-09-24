@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { connect, type Socket } from 'node:net';
 import test from 'node:test';
-import { BROWSER_EXTENSION_PROTOCOL_VERSION } from './protocol';
+import { BROWSER_EXTENSION_PROTOCOL_VERSION, BROWSER_LEGACY_CONTEXT_ID } from './protocol';
 import { BrowserBridgeError, BrowserExtensionBridge } from './bridge';
 import { BrowserLifecycleController } from '../../lifecycle/controller';
 
@@ -21,6 +21,59 @@ test('browser bridge tracks navigation generations independently per browser con
   assert.equal(bridge.beginNavigation('context-b'), 1);
   assert.equal(bridge.beginNavigation('context-a'), 2);
   assert.equal(bridge.beginNavigation(), 1);
+});
+
+test('local browser bridge stamps legacy-context events with the context-less navigation generation', async (t) => {
+  // A command sent without browserContextId runs in the extension's legacy
+  // context, whose events must match the generation that command advanced.
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-legacy-'));
+  const bridge = new BrowserExtensionBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+
+  const received: Array<Record<string, unknown>> = [];
+  t.after(bridge.onRuntimeEvent((event) => {
+    received.push(event as unknown as Record<string, unknown>);
+  }));
+
+  const peer = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => peer.socket.destroy());
+  peer.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await peer.nextLine();
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot'],
+    state: { revision: 1, debuggerAttached: false },
+  });
+  await waitUntil(() => bridge.getStatus().connectionId === 'connection-1');
+
+  bridge.beginNavigation('context-a');
+  const generation = bridge.beginNavigation();
+  peer.send({
+    type: 'browser.event',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    event: 'navigation.committed',
+    contextId: BROWSER_LEGACY_CONTEXT_ID,
+    tabId: 42,
+    url: 'https://example.com/',
+  });
+  await waitUntil(() => received.length === 1);
+  assert.equal(received[0].contextId, BROWSER_LEGACY_CONTEXT_ID);
+  assert.equal(received[0].navigationGeneration, generation);
 });
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 1_000) {

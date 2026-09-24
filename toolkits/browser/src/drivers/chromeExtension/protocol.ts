@@ -1,5 +1,10 @@
 export const BROWSER_EXTENSION_PROTOCOL_VERSION = 3 as const;
 export const BROWSER_NATIVE_HOST_NAME = 'com.pinpawo.browser_bridge';
+/**
+ * Browser context the extension uses for commands sent without a
+ * `browserContextId`, and stamps on the events those commands produce.
+ */
+export const BROWSER_LEGACY_CONTEXT_ID = 'legacy';
 
 export const BROWSER_EXTENSION_CAPABILITIES = [
   'navigate',

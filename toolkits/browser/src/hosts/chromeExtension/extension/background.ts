@@ -475,7 +475,10 @@ async function prepareNavigationTarget() {
 
   // A tab explicitly bound by the user remains their page. browser_open gets a
   // separate agent-owned tab instead of navigating the user's bound tab away.
-  const tab = await chrome.tabs.create({ active: true });
+  // The tab starts on about:blank because the debugger is attached before the
+  // URL is dispatched, and Chrome refuses to attach to its New Tab page
+  // (chrome://newtab). The navigation lifecycle ignores the about:blank commit.
+  const tab = await chrome.tabs.create({ url: 'about:blank', active: true });
   if (!Number.isInteger(tab.id)) {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }

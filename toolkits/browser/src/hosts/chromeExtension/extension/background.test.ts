@@ -211,7 +211,24 @@ test('missing targets fail without fabricating an about:blank tab', async () => 
 
   assert.match(ensureTarget, /'browser_not_open'/);
   assert.doesNotMatch(ensureTarget, /chrome\.tabs\.create/);
-  assert.doesNotMatch(source, /url: 'about:blank'/);
+  assert.doesNotMatch(ensureTarget, /about:blank/);
+});
+
+test('browser_open creates a debuggable blank tab, not the chrome:// New Tab page', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+  const prepareNavigationTarget = source.match(
+    /async function prepareNavigationTarget\(\) \{([\s\S]*?)\n\}/,
+  )?.[1] ?? '';
+
+  // The debugger attaches before the URL is dispatched; Chrome rejects
+  // attaching to chrome://newtab, which a URL-less tabs.create opens.
+  assert.match(
+    prepareNavigationTarget,
+    /chrome\.tabs\.create\(\{ url: 'about:blank', active: true \}\)/,
+  );
 });
 
 test('target activation does not focus the user\'s Chrome window', async () => {

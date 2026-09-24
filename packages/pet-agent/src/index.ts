@@ -97,13 +97,14 @@ export type {
   ToolkitAvailabilityCheck,
   ToolkitReviewCapabilities,
   ToolkitReviewGuidance,
-  ToolkitRuntimeDefinition,
-  ToolkitRuntimeExecutionScope,
-  ToolkitRuntimeReleaseContext,
-  ToolkitRuntimeResolveContext,
-  ToolkitRuntimeStartContext,
-  ToolkitRuntimeStopContext,
+  ToolkitRS,
+  ToolkitRSRequirement,
+  ToolkitRSSessionBinding,
 } from './types/toolkit';
+export {
+  readToolExecutionContext,
+  type ToolExecutionContext,
+} from './types/toolExecution';
 export {
   defineToolkit,
   evaluateToolkitAvailability,
@@ -153,15 +154,6 @@ export {
   createCapabilityCatalog,
   renderCapabilityDocument,
 } from './agent/orchestrator/runSupervisor/capabilityCatalog';
-export {
-  ToolkitRuntimeManager,
-} from './agent/orchestrator/toolkitRuntime';
-export type {
-  ToolkitRuntimeDiagnostic,
-  ToolkitRuntimeDiagnosticError,
-  ToolkitRuntimeExecution,
-  ToolkitRuntimeLifecycle,
-} from './agent/orchestrator/toolkitRuntime';
 export type {
   CapabilityCatalog,
   CapabilityCatalogEntry,

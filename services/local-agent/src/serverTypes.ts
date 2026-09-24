@@ -2,7 +2,6 @@ import type {
   BuiltinGlobalReviewPolicyMode,
   CapabilityArtifactStore,
   PetDocument,
-  ToolkitRuntimeManager,
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
@@ -37,7 +36,6 @@ export type ServerDeps = HostExecutionConfig & {
    */
   chatCheckpointer?: BaseCheckpointSaver;
   toolkitInventory: HostToolkitInventoryStore;
-  toolkitRuntimeManager?: ToolkitRuntimeManager;
   /** Host-owned Capability catalog; Chat consumes its configured snapshot. */
   capabilityCatalog: CapabilityCatalogReader;
   /** Capability preloaded by this resident Pet's entry Supervisor. */
@@ -79,7 +77,6 @@ export type ChatSetupDeps =
     | 'modelProfiles'
     | 'capabilityCatalog'
     | 'toolkitInventory'
-    | 'toolkitRuntimeManager'
     | 'defaultCapabilityName'
     | 'petDocument'
   >

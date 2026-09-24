@@ -8,7 +8,7 @@ import {
   sanitizeFilename,
   normalizeHttpFetchAuthorizationInput,
 } from './networkTools';
-import { createBashToolkit } from './index';
+import { createBashToolkit, PosixShellRS } from './index';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
@@ -49,7 +49,7 @@ test('httpFetchTool uses mocked fetch and returns readable text', async (t) => {
 });
 
 test('bash toolkit external access policy reviews configured network calls', async () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
   const httpPolicy = definition(toolkit, 'http_fetch')?.review;
   const downloadPolicy = definition(toolkit, 'download_file')?.review;
   assert.ok(httpPolicy);

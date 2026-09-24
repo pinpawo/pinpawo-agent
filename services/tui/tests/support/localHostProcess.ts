@@ -19,6 +19,7 @@ import {
 import {
   createBashToolkit,
   createGitToolkit,
+  PosixShellRS,
 } from '../../../local-agent/src/toolkits/local/index';
 import { createPersistentHostGraphService } from './persistentHostGraphService';
 import {
@@ -47,7 +48,8 @@ const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
 const graphService = fixture === 'toolkit'
   ? createProductionToolkitHostGraphService()
   : createPersistentHostGraphService();
-const toolkits = [createBashToolkit(), createGitToolkit()];
+const shell = new PosixShellRS();
+const toolkits = [createBashToolkit({ shell }), createGitToolkit({ shell })];
 const transport = await startLocalServer(requestedPort, {
   petId: 'pet-process-restart',
   petName: 'PinPawo',

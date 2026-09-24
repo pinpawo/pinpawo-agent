@@ -40,7 +40,7 @@ function assertSections(messages: BaseMessage[], expected: ReturnType<typeof com
   }
 }
 
-test('concurrent root streams propagate isolated context, callbacks and tool ports into dynamic children', async () => {
+test('concurrent root streams propagate isolated context, callbacks and invocation data into dynamic children', async () => {
   const invocations = new Map<string, BaseMessage[][]>();
   const runtimeContexts: SubagentRuntimeContext[] = [];
   const executionSection = { id: 'execution:test', content: randomUUID() };
@@ -57,7 +57,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
       promptSections: [executionSection], runnableConfig: config,
       runtimeContext: {
         executionScope: { threadId: null, taskId: key, runId: key, delegationId: key },
-        toolkitRuntimes: { example: { id: key } },
+        hostMarker: { id: key },
         workdir: '/forbidden-child-override',
         systemPromptSections: [{ id: 'host:forbidden-child-override', content: 'override' }],
       },
@@ -98,7 +98,7 @@ test('concurrent root streams propagate isolated context, callbacks and tool por
     const key = context.executionScope?.runId;
     assert.equal(context.parentMarker, key);
     assert.equal(context.workdir, `/workspace/${key}`);
-    assert.deepEqual(context.toolkitRuntimes, { example: { id: key } });
+    assert.deepEqual(context.hostMarker, { id: key });
     const index = key === 'pet-0' ? 0 : 1;
     assert.deepEqual(context.systemPromptSections, inputs[index]);
   }

@@ -34,7 +34,7 @@ export type ToolkitInventoryEntry = Readonly<{
 
 /**
  * Immutable Host projection shared by Chat, Studio, compiler diagnostics and
- * operation metadata. Runtime roots and execution bindings never enter it.
+ * operation metadata. RS instances never enter it.
  */
 export type HostToolkitInventorySnapshot = Readonly<{
   entries: readonly ToolkitInventoryEntry[];
@@ -47,7 +47,6 @@ export type ToolkitAvailabilityResolver = (
 
 export type BuildHostToolkitInventoryOptions = Readonly<{
   sources: readonly ToolkitDefinitionSource[];
-  startToolkitRuntimes?: (definitions: readonly AgentToolkit[]) => Promise<void>;
   resolveAvailability?: ToolkitAvailabilityResolver;
 }>;
 
@@ -145,11 +144,6 @@ export async function buildHostToolkitInventory(
   options: BuildHostToolkitInventoryOptions,
 ): Promise<HostToolkitInventorySnapshot> {
   const definitions = collectDefinitions(options.sources);
-  const toolkits = Object.freeze(definitions.map(({ toolkit }) => toolkit));
-
-  // Duplicate definitions and malformed contracts fail before any dynamic
-  // resource is acquired.
-  await options.startToolkitRuntimes?.(toolkits);
 
   const resolveAvailability = options.resolveAvailability
     ?? defaultAvailabilityResolver;
@@ -163,7 +157,7 @@ export async function buildHostToolkitInventory(
 
 /**
  * Report selected Toolkit definitions that are unavailable in the current
- * Host environment. This is static availability, not live Runtime diagnostics.
+ * Host environment, including Toolkits whose RS instance is unavailable.
  */
 export function reportUnavailableToolkitAvailability(
   inventory: HostToolkitInventorySnapshot,

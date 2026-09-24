@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
 import type { StructuredTool, ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
-import type { SubagentRuntimeContext } from '@pinpawo/pet-agent';
+import { readToolExecutionContext } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import type {
   BrowserExtractOptions,
@@ -9,12 +9,7 @@ import type {
 } from './session';
 import { formatBrowserToolError } from './errors';
 import { buildBrowserScreenshotMessages } from './screenshot';
-import { BROWSER_TOOLKIT_NAME } from './constants';
-import {
-  isBrowserRuntimePort,
-  type BrowserRuntimeCallContext,
-  type BrowserRuntimePort,
-} from './runtimePort';
+import type { BrowserRS, BrowserRSCallContext } from './browserRS';
 
 type BrowserTargetInput = { selector?: string; ref?: string };
 
@@ -30,34 +25,35 @@ function readBrowserTarget(input: BrowserTargetInput) {
   return { selector: input.selector, ref: input.ref };
 }
 
-type BrowserToolRuntime = ToolRuntime<unknown, SubagentRuntimeContext>;
+type BrowserToolRuntime = ToolRuntime;
 
+/**
+ * Build the Browser tools against one injected BrowserRS instance. The tools
+ * are static; each call names its Agent session and workdir from the fixed
+ * execution context the Host supplies.
+ */
+export function createBrowserTools(browserRS: BrowserRS): StructuredTool[] {
 function resolveBrowserCall(runtime: BrowserToolRuntime): {
-  browser: BrowserRuntimePort;
-  context: BrowserRuntimeCallContext;
+  browser: BrowserRS;
+  context: BrowserRSCallContext;
 } {
-  const scope = runtime.context?.executionScope;
-  if (!scope?.threadId) {
-    throw new Error('Browser tool call requires a threadId.');
+  const { agentSessionId, workdir } = readToolExecutionContext(runtime);
+  if (!agentSessionId) {
+    throw new Error('Browser tool call requires an Agent session (threadId).');
   }
-  if (!scope.workdir) {
+  if (!workdir) {
     throw new Error('Browser tool call requires a workdir.');
   }
-  const browser = runtime.context?.toolkitRuntimes?.[BROWSER_TOOLKIT_NAME];
-  if (!isBrowserRuntimePort(browser)) {
-    throw new Error('Browser tool call requires an active Browser Runtime.');
-  }
   return {
-    browser,
+    browser: browserRS,
     context: {
-      threadId: scope.threadId,
-      workdir: scope.workdir,
+      agentSessionId,
+      workdir,
       ...(runtime.signal ? { signal: runtime.signal } : {}),
     },
   };
 }
 
-export function createBrowserTools(): StructuredTool[] {
 const browserOpenTool = tool(
   async ({ url }: { url: string }, runtime: BrowserToolRuntime) => {
     try {
@@ -319,4 +315,3 @@ const browserScreenshotTool = tool(
   ];
 }
 
-export const browserTools = createBrowserTools();

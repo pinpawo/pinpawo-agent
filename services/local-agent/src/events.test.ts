@@ -11,17 +11,18 @@ import {
   createOperationRegistry,
   createOperationRegistryFromToolkits,
 } from './events/operationRegistry';
-import { createBrowserToolkit } from '@pinpawo-toolkit/browser';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { createBrowserToolkit, ChromeExtensionBrowserRS } from '@pinpawo-toolkit/browser';
+import { createBashToolkit, createGitToolkit, PosixShellRS } from './toolkits/local';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
 }
 
+const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
-  createBashToolkit(),
-  createGitToolkit(),
+  createBashToolkit({ shell: sharedShell }),
+  createGitToolkit({ shell: sharedShell }),
 ]);
 
 test('normalizes LangGraph tool stream events with toolkit operation metadata', () => {
@@ -231,7 +232,7 @@ test('buildToolOperationEvent uses git toolkit metadata', () => {
 });
 
 test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   assert.equal(definition(toolkit, 'read_file')?.operation?.title, '析文档');
   assert.equal(definition(toolkit, 'grep_search')?.operation?.title, '搜内容');
@@ -240,7 +241,7 @@ test('createBashToolkit exposes operation metadata with the toolkit definition',
 });
 
 test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {
-  const toolkit = createGitToolkit();
+  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
 
   assert.equal(definition(toolkit, 'git_status')?.operation?.title, '查看 git 状态');
   assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
@@ -249,7 +250,7 @@ test('createGitToolkit exposes git operation metadata with the toolkit definitio
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {
-  const toolkit = createBrowserToolkit();
+  const toolkit = createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() });
 
   assert.equal(definition(toolkit, 'browser_open')?.operation?.title, '打开网页');
   assert.equal(definition(toolkit, 'browser_click')?.operation?.title, '点击页面');
@@ -266,7 +267,7 @@ test('createBrowserToolkit exposes browser operation metadata', () => {
 });
 
 test('browser open review policy offers session authorization', async () => {
-  const toolkit = createBrowserToolkit();
+  const toolkit = createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() });
   const policy = definition(toolkit, 'browser_open')?.review;
   assert.ok(policy);
   const buildMatcher = policy.authorization?.buildMatcher;
@@ -304,7 +305,7 @@ test('browser open review policy offers session authorization', async () => {
 test('browser operation metadata summarizes page output', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolkits: [createBrowserToolkit()],
+      toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
     },
   } as never);
 
@@ -339,7 +340,7 @@ test('browser operation metadata summarizes page output', () => {
 test('browser operation metadata parses JSON-string inputs for input summaries', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolkits: [createBrowserToolkit()],
+      toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
     },
   } as never);
 
@@ -479,7 +480,7 @@ test('leaves plain string and plain record tool outputs untouched', () => {
 test('browser type operation metadata does not expose typed text in display fields', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolkits: [createBrowserToolkit()],
+      toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
     },
   } as never);
 
@@ -511,7 +512,7 @@ test('browser type operation metadata does not expose typed text in display fiel
 test('browser operation metadata accepts JSON string input and raw string output', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolkits: [createBrowserToolkit()],
+      toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
     },
   } as never);
 
@@ -543,7 +544,7 @@ test('browser operation metadata accepts JSON string input and raw string output
 test('browser operation metadata summarizes failed events without raw payload display', () => {
   const registry = createOperationRegistryForAgentSetup({
     input: {
-      toolkits: [createBrowserToolkit()],
+      toolkits: [createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() })],
     },
   } as never);
 

@@ -2,9 +2,7 @@ import {
   isStructuredTool,
   type StructuredTool,
 } from '@langchain/core/tools';
-import type { JsonValue } from '@pinpawo/agent-contracts';
 import { wrapToolCancellation } from './toolCancellation';
-import type { DelegationScope } from './scope';
 
 import type { ToolReviewPolicy, ToolOperationMetadata, ToolkitReviewGuidance } from '../autoReview/policy';
 import { TOOLKIT_REVIEW_GUIDANCE_FIELD_MAX_CHARS } from '../autoReview/policy';
@@ -60,66 +58,51 @@ export type ToolkitAvailabilityCheck = () =>
   | Promise<ToolkitAvailability>;
 
 /**
- * Generic identity supplied when a Toolkit resolves resources for one
- * subagent execution. It deliberately contains no provider/session/backend
- * concepts: those remain private to the Toolkit runtime implementation.
+ * How a Toolkit binds its calls to a logical session of an RS.
+ *
+ * `agent-session`: one RS logical session per Agent session (threadId). Finer
+ * execution layers — task, run, delegation — share that session.
  */
-export type ToolkitRuntimeExecutionScope = DelegationScope & {
-  workdir: string | null;
-  signal?: AbortSignal;
-};
-
-export type ToolkitRuntimeStartContext = {
-  signal?: AbortSignal;
-};
-
-export type ToolkitRuntimeResolveContext = {
-  execution: ToolkitRuntimeExecutionScope;
-};
-
-export type ToolkitRuntimeReleaseContext = ToolkitRuntimeResolveContext;
-
-export type ToolkitRuntimeStopContext = {
-  signal?: AbortSignal;
-};
+export type ToolkitRSSessionBinding = 'agent-session';
 
 /**
- * Optional Toolkit-owned execution lifecycle.
+ * One execution-environment dependency (RS) a Toolkit declares.
  *
- * The root may be shared across executions. A resolved binding is opaque to
- * the framework. A Toolkit with static Tools can consume it under its Toolkit
- * name in ToolRuntime context; a Toolkit with bindTools receives it through
- * that hook instead. release receives it in either mode. bindTools may replace
- * executable Tool instances, but the framework verifies that the static tool
- * inventory is unchanged.
+ * The declaration exists for Host assembly only: the Host selects an RS
+ * instance satisfying the contract and injects it through the Toolkit's own
+ * typed factory. The framework validates its shape and nothing else; registry
+ * compilation and execution never read it.
  */
-export type ToolkitRuntimeDefinition<TRoot = unknown, TBinding = TRoot> = {
-  start: (
-    context: ToolkitRuntimeStartContext,
-  ) => TRoot | Promise<TRoot>;
-  resolve?: (
-    root: TRoot,
-    context: ToolkitRuntimeResolveContext,
-  ) => TBinding | Promise<TBinding>;
-  bindTools?: (
-    binding: TBinding,
-    context: ToolkitRuntimeResolveContext,
-  ) => readonly NamedStructuredTool[] | Promise<readonly NamedStructuredTool[]>;
-  release?: (
-    binding: TBinding,
-    context: ToolkitRuntimeReleaseContext,
-  ) => void | Promise<void>;
+export type ToolkitRSRequirement = Readonly<{
+  /** Stable contract identifier, e.g. `pinpawo.shell-rs`. */
+  contract: string;
+  /** Contract major version; a positive integer. */
+  version: number;
+  session: ToolkitRSSessionBinding;
+}>;
+
+/**
+ * Minimal lifecycle every RS exposes to its Host.
+ *
+ * An RS holds a real execution environment and the interaction state Agent
+ * sessions leave in it. Its typed operations are its own; only these two are
+ * shared. There is deliberately no `closeSession`: tool calls, runs and Host
+ * disconnects never end an RS logical session.
+ */
+export type ToolkitRS = {
+  /** Contract this instance implements; matched against Toolkit requirements. */
+  readonly contract: string;
+  readonly version: number;
   /**
-   * Project Toolkit-owned live state into a JSON-safe diagnostic detail.
-   * The framework stores and transports the value without interpreting it.
+   * Availability of this instance. It is the availability source of every
+   * Toolkit that depends on it, and of nothing else.
    */
-  diagnose?: (
-    root: TRoot,
-  ) => JsonValue | Promise<JsonValue>;
-  stop?: (
-    root: TRoot,
-    context: ToolkitRuntimeStopContext,
-  ) => void | Promise<void>;
+  status(): ToolkitAvailability | Promise<ToolkitAvailability>;
+  /**
+   * Idempotently establish the logical session for one Agent session. The id
+   * is opaque to the RS. An RS may also establish it lazily on first use.
+   */
+  ensureSession(agentSessionId: string): void | Promise<void>;
 };
 
 export async function evaluateToolkitAvailability(
@@ -180,7 +163,11 @@ export type AgentToolkit = {
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
   readonly reviewGuidance?: ToolkitReviewGuidance;
-  readonly runtime?: ToolkitRuntimeDefinition;
+  /**
+   * Execution-environment dependencies, keyed by the Toolkit's own name for
+   * them. Host assembly metadata only; see {@link ToolkitRSRequirement}.
+   */
+  readonly requires?: Readonly<Record<string, ToolkitRSRequirement>>;
 };
 
 function assertToolkitReviewGuidance(
@@ -214,6 +201,34 @@ function assertOptionalFunction(
   }
 }
 
+function assertToolkitRequirements(
+  ownerName: string,
+  requires: AgentToolkit['requires'],
+) {
+  if (requires === undefined) return;
+  if (!requires || typeof requires !== 'object' || Array.isArray(requires)) {
+    throw new Error(`Toolkit "${ownerName}" requires must be an object`);
+  }
+  for (const [key, requirement] of Object.entries(requires)) {
+    const owner = `Toolkit "${ownerName}" requires.${key}`;
+    if (!key.trim()) {
+      throw new Error(`Toolkit "${ownerName}" requires contains an empty key`);
+    }
+    if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) {
+      throw new Error(`${owner} must be an object`);
+    }
+    if (typeof requirement.contract !== 'string' || !requirement.contract.trim()) {
+      throw new Error(`${owner}.contract must not be empty`);
+    }
+    if (!Number.isInteger(requirement.version) || requirement.version < 1) {
+      throw new Error(`${owner}.version must be a positive integer`);
+    }
+    if (requirement.session !== 'agent-session') {
+      throw new Error(`${owner}.session must be "agent-session"`);
+    }
+  }
+}
+
 export function validateToolkitDefinition(toolkit: AgentToolkit) {
   if (!toolkit || typeof toolkit !== 'object' || Array.isArray(toolkit)) {
     throw new Error('Toolkit definition must be an object');
@@ -233,20 +248,7 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   if (toolkit.availability !== undefined && typeof toolkit.availability !== 'function') {
     throw new Error(`Toolkit "${toolkit.name}" availability must be a function`);
   }
-  if (toolkit.runtime !== undefined) {
-    if (
-      typeof toolkit.runtime !== 'object'
-      || Array.isArray(toolkit.runtime)
-      || typeof toolkit.runtime.start !== 'function'
-    ) {
-      throw new Error(`Toolkit "${toolkit.name}" runtime must define start()`);
-    }
-    for (const hook of ['resolve', 'bindTools', 'release', 'diagnose', 'stop'] as const) {
-      if (toolkit.runtime[hook] !== undefined && typeof toolkit.runtime[hook] !== 'function') {
-        throw new Error(`Toolkit "${toolkit.name}" runtime.${hook} must be a function`);
-      }
-    }
-  }
+  assertToolkitRequirements(toolkit.name, toolkit.requires);
 
   assertToolkitReviewGuidance(toolkit.name, toolkit.reviewGuidance);
 

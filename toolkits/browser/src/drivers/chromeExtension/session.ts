@@ -502,7 +502,7 @@ export class ChromeExtensionBrowserSession {
     return JSON.stringify(buildBrowserExtractPayloadFromRaw(raw), null, 2);
   }
 
-  async screenshot(signal?: AbortSignal): Promise<string> {
+  async screenshot(signal?: AbortSignal, workdir?: string): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
     const value = await this.bridge.sendCommand('screenshot', { approvedOrigin }, undefined, signal);
     if (
@@ -518,7 +518,7 @@ export class ChromeExtensionBrowserSession {
         mimeType: 'image/jpeg',
         data: (value as Record<string, string>).data,
       },
-      this.workdir(),
+      workdir ?? this.workdir(),
     );
   }
 

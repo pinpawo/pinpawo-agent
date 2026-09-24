@@ -116,7 +116,7 @@ drives the navigation through `BrowserLifecycleController` + `driveOpenReadiness
 emits during the navigate round-trip through the controller bound to the
 bridge's own navigation generation. The extension emits `document.ready` /
 `dom.changed` (with the sampled body text) in the navigate handler so the
-reducer can reach `readable`; `BrowserRuntime` binds the bridge to the
+reducer can reach `readable`; `ChromeExtensionBrowserRS` binds the bridge to the
 controller via `bindBridgeToController` and exposes the current `readiness` on
 its snapshot. This lets the Runtime **confirm the readiness verdict
 post-hoc** and surface `origin_changed` / `navigation_timeout` deterministically.

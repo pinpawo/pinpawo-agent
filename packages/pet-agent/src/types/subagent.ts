@@ -16,8 +16,6 @@ export type SubagentExecutionScope = DelegationScope & {
 
 export type SubagentRuntimeContext = AgentRuntimeContext & {
   executionScope?: SubagentExecutionScope;
-  /** Opaque Toolkit Runtime ports, keyed by Toolkit name. */
-  toolkitRuntimes?: Readonly<Record<string, unknown>>;
   [key: string]: unknown;
 };
 

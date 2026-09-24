@@ -12,7 +12,7 @@ import {
   isHumanReviewInterruptError,
 } from './serverOperationEvents';
 import { createOperationRegistryFromToolkits } from './events/operationRegistry';
-import { createBashToolkit, createGitToolkit } from './toolkits/local';
+import { createBashToolkit, createGitToolkit, PosixShellRS } from './toolkits/local';
 import { buildReviewSpec } from '@pinpawo/pet-agent';
 
 test('serialized review batches are interrupted and hide internal error JSON', () => {
@@ -32,9 +32,10 @@ test('serialized review batches are interrupted and hide internal error JSON', (
   assert.equal(isHumanReviewInterruptError('ordinary tool error'), false);
 });
 
+const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
-  createBashToolkit(),
-  createGitToolkit(),
+  createBashToolkit({ shell: sharedShell }),
+  createGitToolkit({ shell: sharedShell }),
 ]);
 
 test('emitLocalServerToolOperationEvent emits one operation for a normal tool event', () => {

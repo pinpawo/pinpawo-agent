@@ -69,9 +69,9 @@ export function wrapToolCancellation<TTool extends StructuredTool>(tool: TTool):
           throw createAbortError();
         }
         try {
-          // A runtime binding may layer another Proxy around this cancellation
-          // guard to replace only the execution implementation. Preserve that
-          // outer receiver; only unwrap calls made directly on this guard.
+          // Another Proxy may be layered around this cancellation guard.
+          // Preserve that outer receiver; only unwrap calls made directly on
+          // this guard.
           const invocationReceiver = this === wrapped || this == null
             ? target
             : this;

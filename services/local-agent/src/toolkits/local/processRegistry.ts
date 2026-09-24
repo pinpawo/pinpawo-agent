@@ -1,20 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import type { ToolkitRuntimeExecutionScope } from '@pinpawo/pet-agent';
 import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
+import { ShellRSError } from './shellRS';
 
 /**
- * Session-lifetime registry for shell processes that outlive the tool call
- * that started them.
+ * The process handles of every ShellRS logical session in one RS instance.
  *
  * A timed-out command is slow, not failed. #554 lets such a command hand back
  * a handle instead of being killed; this registry is what holds that handle so
- * the model can wait on it, read from it, or terminate it later, and so host
- * shutdown can clean up whatever is still running.
+ * the model can wait on it, read from it, or terminate it later, and so the
+ * RS can clean up whatever is still running when it is disposed.
  *
- * Ownership follows the Toolkit runtime lifecycle (#543): processes live on
- * the runtime root, not on a per-execution binding, so releasing an execution
- * does not kill its long-running work. Access is still scoped — only the
- * execution that started a process may operate on it.
+ * Handles belong to the Agent session that started them (#856), not to one
+ * run or delegation: a later run of the same session, or another delegation
+ * within it, may wait on, read, terminate or list them. Another session may
+ * not, even through the same RS instance.
  */
 
 export type ManagedProcessStatus =
@@ -22,14 +21,10 @@ export type ManagedProcessStatus =
   | 'exited'
   | 'terminated';
 
-export type ManagedProcessOwner = Pick<
-  ToolkitRuntimeExecutionScope,
-  'threadId' | 'runId' | 'delegationId'
->;
-
 export type ManagedProcess = {
   processId: string;
-  owner: ManagedProcessOwner;
+  /** The Agent session whose logical session holds this process. */
+  sessionId: string;
   command: string;
   cwd: string;
   pid: number;
@@ -41,31 +36,12 @@ export type ManagedProcess = {
 
 export type ProcessSnapshot = Omit<ManagedProcess, never>;
 
-/**
- * What a tool needs to reach the registry on behalf of one execution: the
- * shared registry, plus the identity that scopes access to it.
- */
-export type ShellProcessBinding = {
-  registry: ProcessRegistry;
-  owner: ManagedProcessOwner;
-};
-
 export type DrainResult = {
   process: ProcessSnapshot;
   /** Output produced since the previous drain. */
   stdout: string;
   stderr: string;
 };
-
-export class ProcessRegistryError extends Error {
-  constructor(
-    readonly code: 'unknown_process' | 'not_owner' | 'too_many_processes',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ProcessRegistryError';
-  }
-}
 
 /**
  * Concurrency cap.
@@ -87,12 +63,6 @@ export const EXITED_PROCESS_TTL_MS = 5 * 60_000;
  * on a group that ignores a graceful signal.
  */
 const ORPHAN_GROUP_KILL_GRACE_MS = 1_000;
-
-function sameOwner(left: ManagedProcessOwner, right: ManagedProcessOwner) {
-  return left.threadId === right.threadId
-    && left.runId === right.runId
-    && left.delegationId === right.delegationId;
-}
 
 type Entry = {
   record: ManagedProcess;
@@ -124,8 +94,8 @@ export class ProcessRegistry {
    *
    * Required rather than defaulted on purpose: defaulting would let a caller
    * pick up POSIX behaviour without meaning to, and the registry is precisely
-   * the layer that should not know which platform it is on. `ShellRuntime`
-   * makes that choice once, for everyone.
+   * the layer that should not know which platform it is on. The ShellRS
+   * implementation makes that choice once, for everyone.
    */
   constructor(private readonly executor: ProcessExecutor) {}
 
@@ -153,7 +123,7 @@ export class ProcessRegistry {
    */
   register(params: {
     handle: ShellRunHandle;
-    owner: ManagedProcessOwner;
+    sessionId: string;
     command: string;
     cwd: string;
     /**
@@ -169,7 +139,7 @@ export class ProcessRegistry {
     const active = [...this.entries.values()]
       .filter((entry) => entry.record.status === 'running').length;
     if (active >= MAX_ACTIVE_PROCESSES) {
-      throw new ProcessRegistryError(
+      throw new ShellRSError(
         'too_many_processes',
         `Too many background processes (${MAX_ACTIVE_PROCESSES.toString()}).`
         + ' Terminate one before starting another.',
@@ -183,7 +153,7 @@ export class ProcessRegistry {
     const alreadyExited = params.handle.hasExited;
     const record: ManagedProcess = {
       processId,
-      owner: params.owner,
+      sessionId: params.sessionId,
       command: params.command,
       cwd: params.cwd,
       pid: params.handle.pid,
@@ -238,10 +208,10 @@ export class ProcessRegistry {
     return true;
   }
 
-  list(owner: ManagedProcessOwner): ProcessSnapshot[] {
+  list(sessionId: string): ProcessSnapshot[] {
     this.reapExpired();
     return [...this.entries.values()]
-      .filter((entry) => sameOwner(entry.record.owner, owner))
+      .filter((entry) => entry.record.sessionId === sessionId)
       .map((entry) => ({ ...entry.record }));
   }
 
@@ -251,8 +221,8 @@ export class ProcessRegistry {
    * Draining is destructive so repeated waits do not re-deliver the whole
    * history; each chunk reaches the caller exactly once.
    */
-  async drain(processId: string, owner: ManagedProcessOwner): Promise<DrainResult> {
-    const entry = this.require(processId, owner);
+  async drain(processId: string, sessionId: string): Promise<DrainResult> {
+    const entry = this.require(processId, sessionId);
     return await this.withLock(entry, () => {
       const stdout = entry.pendingStdout;
       const stderr = entry.pendingStderr;
@@ -265,10 +235,10 @@ export class ProcessRegistry {
   /** Wait for exit, or return the current state once `timeoutMs` elapses. */
   async wait(
     processId: string,
-    owner: ManagedProcessOwner,
+    sessionId: string,
     timeoutMs: number,
   ): Promise<DrainResult> {
-    const entry = this.require(processId, owner);
+    const entry = this.require(processId, sessionId);
     if (entry.record.status === 'running') {
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([
@@ -280,15 +250,15 @@ export class ProcessRegistry {
       ]);
       if (timer) clearTimeout(timer);
     }
-    return await this.drain(processId, owner);
+    return await this.drain(processId, sessionId);
   }
 
   async terminate(
     processId: string,
-    owner: ManagedProcessOwner,
+    sessionId: string,
     killGraceMs?: number,
   ): Promise<ProcessSnapshot> {
-    const entry = this.require(processId, owner);
+    const entry = this.require(processId, sessionId);
     return await this.withLock(entry, async () => {
       if (entry.record.status === 'running') {
         entry.record.status = 'terminated';
@@ -303,8 +273,8 @@ export class ProcessRegistry {
   /**
    * Terminate everything this registry knows about.
    *
-   * Called from the Toolkit runtime's `stop`, so host shutdown does not strand
-   * processes started on its behalf.
+   * Called when the owning RS instance is disposed, so tearing down an
+   * in-process RS does not strand processes started through it.
    */
   async stopAll(killGraceMs?: number) {
     const running = [...this.entries.values()]
@@ -330,18 +300,18 @@ export class ProcessRegistry {
     this.orphanGroups.clear();
   }
 
-  private require(processId: string, owner: ManagedProcessOwner): Entry {
+  private require(processId: string, sessionId: string): Entry {
     const entry = this.entries.get(processId);
     if (!entry) {
-      throw new ProcessRegistryError(
+      throw new ShellRSError(
         'unknown_process',
         `No such process: ${processId}. It may have already been reaped.`,
       );
     }
-    if (!sameOwner(entry.record.owner, owner)) {
-      throw new ProcessRegistryError(
-        'not_owner',
-        `Process ${processId} belongs to a different execution.`,
+    if (entry.record.sessionId !== sessionId) {
+      throw new ShellRSError(
+        'other_session',
+        `Process ${processId} belongs to a different session.`,
       );
     }
     return entry;

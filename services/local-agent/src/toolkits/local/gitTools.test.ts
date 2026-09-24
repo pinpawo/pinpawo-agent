@@ -10,23 +10,43 @@ import {
   createBashToolkit,
   createGitToolkit,
   createProjectInspectionToolkit,
+  PosixShellRS,
 } from './index';
-import {
-  gitAddTool,
-  gitCommitTool,
-  gitDiffTool,
-  gitPushTool,
-  ghIssueCreateTool,
-  ghIssueListTool,
-  ghIssueCommentsTool,
-  ghIssueViewTool,
-  ghPrCommentsTool,
-  ghPrCreateTool,
-  ghPrDiffTool,
-  ghPrViewTool,
-  ghReadContentTool,
-  gitStatusTool,
-} from './gitTools';
+import { createGitTools } from './gitTools';
+import type { ShellRS } from './shellRS';
+
+const sessionContext = {
+  executionScope: {
+    threadId: 'thread-git', taskId: 'task-1', runId: 'run-1', delegationId: 'delegation-1',
+  },
+};
+
+/** Git tools run through ShellRS on behalf of an Agent session. */
+function sessionTool(name: string) {
+  const found = createGitTools(new PosixShellRS()).gitTools.find((item) => item.name === name);
+  assert.ok(found, `missing ${name}`);
+  return {
+    invoke: (input: Record<string, unknown>, config: Record<string, unknown> = {}) => found.invoke(
+      input as never,
+      { ...config, context: sessionContext },
+    ),
+  };
+}
+
+const gitAddTool = sessionTool('git_add');
+const gitCommitTool = sessionTool('git_commit');
+const gitDiffTool = sessionTool('git_diff');
+const gitPushTool = sessionTool('git_push');
+const ghIssueCreateTool = sessionTool('gh_issue_create');
+const ghIssueListTool = sessionTool('gh_issue_list');
+const ghIssueCommentsTool = sessionTool('gh_issue_comments');
+const ghIssueViewTool = sessionTool('gh_issue_view');
+const ghPrCommentsTool = sessionTool('gh_pr_comments');
+const ghPrCreateTool = sessionTool('gh_pr_create');
+const ghPrDiffTool = sessionTool('gh_pr_diff');
+const ghPrViewTool = sessionTool('gh_pr_view');
+const ghReadContentTool = sessionTool('gh_read_content');
+const gitStatusTool = sessionTool('git_status');
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
@@ -460,7 +480,7 @@ esac`);
 });
 
 test('createBashToolkit does not own git tools or operation metadata', () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
   assert.equal(Array.isArray(toolkit.tools), true);
   const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
   assert.equal(tools.some((item) => item.tool.name === 'git_status'), false);
@@ -470,7 +490,7 @@ test('createBashToolkit does not own git tools or operation metadata', () => {
 });
 
 test('createGitToolkit exposes a dedicated git capability surface', async () => {
-  const toolkit = createGitToolkit();
+  const toolkit = createGitToolkit({ shell: new PosixShellRS() });
   assert.equal(toolkit.name, 'git');
   assert.equal(Array.isArray(toolkit.tools), true);
   const tools = Array.isArray(toolkit.tools) ? toolkit.tools : [];
@@ -537,7 +557,7 @@ test('createGitToolkit exposes a dedicated git capability surface', async () => 
 });
 
 test('project-inspection Toolkit exposes only read-only project evidence tools', () => {
-  const toolkit = createProjectInspectionToolkit();
+  const toolkit = createProjectInspectionToolkit({ shell: new PosixShellRS() });
   const names = toolkit.tools.map(({ tool }) => tool.name);
 
   assert.equal(toolkit.name, 'project-inspection');
@@ -559,4 +579,29 @@ test('project-inspection Toolkit exposes only read-only project evidence tools',
   ]) {
     assert.equal(names.includes(forbidden), false, `${forbidden} must remain outside read-only inspection`);
   }
+});
+
+test('git and gh ended by a signal report an error, not an empty success', async () => {
+  // ShellRS reports a signal-terminated process as exited with no code.
+  const shell: ShellRS = {
+    contract: 'pinpawo.shell-rs',
+    version: 1,
+    status: () => ({ available: true }),
+    ensureSession: () => undefined,
+    exec: async () => ({ status: 'exited', code: null, stdout: '', stderr: '' }),
+    wait: async () => { throw new Error('unused'); },
+    read: async () => { throw new Error('unused'); },
+    terminate: async () => { throw new Error('unused'); },
+    list: async () => [],
+  };
+  const tools = createGitTools(shell).gitTools;
+  const invoke = (name: string, input: Record<string, unknown>) => tools
+    .find((item) => item.name === name)!
+    .invoke(input as never, { context: sessionContext });
+
+  assert.equal(await invoke('git_status', {}), 'Error: git status was terminated by a signal');
+  await assert.rejects(
+    () => invoke('gh_pr_view', { pr: '1' }),
+    /gh command failed: terminated by a signal/,
+  );
 });

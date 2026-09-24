@@ -18,7 +18,6 @@ import {
   defineInstructionDocument,
   type AgentCapability,
   type AgentToolkit,
-  ToolkitRuntimeManager,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import type { StudioPlugin } from '../studioContract';
@@ -94,7 +93,6 @@ function residentBuildResources(workdir: string) {
   const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
   return {
     toolkitInventory: new HostToolkitInventoryStore(),
-    toolkitRuntimeManager: new ToolkitRuntimeManager(),
     capabilityArtifactStore: artifactStore,
     checkpoint: new FileSaver(path.join(runtimeConfig.stateRoot, 'test-checkpoints.json')),
     runtimeConfig,

@@ -35,8 +35,11 @@ import {
 import {
   createBashToolkit,
   createGitToolkit,
+  PosixShellRS,
 } from '../../../local-agent/src/toolkits/local/index';
 import { createHostGraphFixture } from './hostGraphFixture';
+
+const sharedShell = new PosixShellRS();
 
 const workdir = process.argv[2]?.trim();
 if (!workdir) {
@@ -61,8 +64,8 @@ const handlers = createLocalServerHandlers(
       contextWindowTokens: 32_000,
     }),
     toolkitInventory: createTestHostToolkitInventory([
-      createBashToolkit(),
-      createGitToolkit(),
+      createBashToolkit({ shell: sharedShell }),
+      createGitToolkit({ shell: sharedShell }),
     ]),
     capabilityArtifactStore: new FileCapabilityArtifactStore(
       runtimeConfig.capabilityArtifactRoot,

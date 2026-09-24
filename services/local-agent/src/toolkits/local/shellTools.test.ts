@@ -9,11 +9,21 @@ import {
   getCurrentTimeTool,
   normalizeShellActionInput,
   normalizeShellAuthorizationInput,
-  runShellTool,
+  createRunShellTool,
   shellOperationMetadata,
   truncateShellOutput,
 } from './shellTools';
-import { createBashToolkit } from './index';
+import { createBashToolkit, PosixShellRS } from './index';
+
+const runShellTool = createRunShellTool(new PosixShellRS());
+/** A call made within an Agent session, as the Host supplies it. */
+const inSession = {
+  context: {
+    executionScope: {
+      threadId: 'thread-shell', taskId: 'task-1', runId: 'run-1', delegationId: 'delegation-1',
+    },
+  },
+};
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);
@@ -48,7 +58,7 @@ test('get_current_time returns current time details for a requested timezone', a
 });
 
 test('bash toolkit exposes get_current_time without command review', () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   assert.equal(Array.isArray(toolkit.tools), true);
   assert.equal(
@@ -60,7 +70,7 @@ test('bash toolkit exposes get_current_time without command review', () => {
 });
 
 test('shell review policy reviews configured command execution', async () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
   const policy = definition(toolkit, 'run_shell')?.review;
   assert.ok(policy);
 
@@ -151,12 +161,12 @@ test('runShellTool executes commands and explicit output writes', async (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
   assert.equal(
-    await runShellTool.invoke({ command: 'printf ok' }),
+    await runShellTool.invoke({ command: 'printf ok' }, inSession),
     'ok',
   );
-  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }), '(no output)');
+  assert.equal(await runShellTool.invoke({ command: `printf written > ${file}` }, inSession), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'written');
-  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }), '(no output)');
+  assert.equal(await runShellTool.invoke({ command: `printf piped | cat > ${file}` }, inSession), '(no output)');
   assert.equal(readFileSync(file, 'utf-8'), 'piped');
 });
 
@@ -166,18 +176,18 @@ test('runShellTool relies on toolkit review instead of a second interface gate',
   writeFileSync(file, 'generated', 'utf-8');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 
-  assert.equal(await runShellTool.invoke({ command: `rm ${file}` }), '(no output)');
+  assert.equal(await runShellTool.invoke({ command: `rm ${file}` }, inSession), '(no output)');
   assert.equal(existsSync(file), false);
 });
 
 test('runShellTool separates stderr and reports exit codes', async () => {
   assert.equal(
-    await runShellTool.invoke({ command: 'printf out; printf err 1>&2' }),
+    await runShellTool.invoke({ command: 'printf out; printf err 1>&2' }, inSession),
     'out\n--- stderr ---\nerr',
   );
 
   assert.match(
-    String(await runShellTool.invoke({ command: 'printf boom 1>&2; exit 3' })),
+    String(await runShellTool.invoke({ command: 'printf boom 1>&2; exit 3' }, inSession)),
     /^Error \(exit 3\):\nboom/,
   );
 });
@@ -185,19 +195,22 @@ test('runShellTool separates stderr and reports exit codes', async () => {
 test('runShellTool truncates stdout larger than the old 64KB buffer limit', async () => {
   const output = String(await runShellTool.invoke({
     command: 'node -e "process.stdout.write(\'x\'.repeat(70 * 1024))"',
-  }));
+  }, inSession));
 
   assert.doesNotMatch(output, /ENOBUFS/);
   assert.match(output, /^x+/);
   assert.match(output, /\[\.\.\. truncated \d+ chars \.\.\.\]/);
 });
 
-test('runShellTool times out long-running commands', async () => {
-  const output = String(await runShellTool.invoke({
+test('runShellTool hands a long-running command to the session instead of killing it', async () => {
+  const shell = new PosixShellRS();
+  const output = String(await createRunShellTool(shell).invoke({
     command: 'sleep 5',
     timeoutSeconds: 1,
-  }));
-  assert.match(output, /timed out after 1s/);
+  }, inSession));
+  assert.match(output, /still running after 1s/);
+  assert.equal((await shell.list('thread-shell')).length, 1);
+  await shell.dispose();
 });
 
 test('truncateShellOutput keeps head and tail with a marker', () => {

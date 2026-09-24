@@ -87,13 +87,11 @@ test('createSubagent rejects duplicate prompt section ids before invoking the mo
 
 test('createSubagent exposes invocation context to tool runtime', async () => {
   let seenExecutionScope: SubagentRuntimeContext['executionScope'];
-  let seenToolkitRuntime: unknown;
   const inspectContext = tool(async (
     _input,
     runtime: ToolRuntime<unknown, SubagentRuntimeContext>,
   ) => {
     seenExecutionScope = runtime.context.executionScope;
-    seenToolkitRuntime = runtime.context.toolkitRuntimes?.example;
     return 'context inspected';
   }, {
     name: 'inspect_context',
@@ -123,9 +121,6 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
         delegationId: 'delegation-1',
         workdir: '/workspace',
       },
-      toolkitRuntimes: {
-        example: 'runtime-port',
-      },
     },
   });
 
@@ -136,7 +131,6 @@ test('createSubagent exposes invocation context to tool runtime', async () => {
     delegationId: 'delegation-1',
     workdir: '/workspace',
   });
-  assert.equal(seenToolkitRuntime, 'runtime-port');
 });
 
 /**

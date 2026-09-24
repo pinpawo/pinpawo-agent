@@ -1,17 +1,18 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import {
+  createAbortError,
   type NamedStructuredTool,
   type ToolOperationMetadata,
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
+import { requireAgentSession } from './executionContext';
 import { readTextFileChunkResult } from './fileTools';
+import type { ShellExecResult, ShellRS } from './shellRS';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
@@ -25,7 +26,38 @@ const MAX_GH_COMMENTS_PER_PAGE = 5;
 const MAX_GH_BUFFER_BYTES = 1024 * 1024 * 4;
 const DEFAULT_GIT_TIMEOUT_MS = 15_000;
 const GIT_PUSH_TIMEOUT_MS = 120_000;
-const execFileAsync = promisify(execFile);
+const MAX_GIT_CAPTURE_CHARS = 1024 * 256;
+const GH_TIMEOUT_MS = 20_000;
+
+/**
+ * Runs one CLI invocation as argv through ShellRS, on behalf of the Agent
+ * session of the calling tool. Git and gh never go through a shell string.
+ */
+type CliRunner = (
+  argv: readonly [string, ...string[]],
+  options: {
+    cwd: string;
+    timeoutMs: number;
+    maxOutputChars: number;
+    env?: Readonly<Record<string, string>>;
+  },
+) => Promise<ShellExecResult>;
+
+function createCliRunner(shell: ShellRS, runtime: ToolRuntime): CliRunner {
+  return async (argv, options) => await shell.exec(requireAgentSession(runtime), {
+    command: { argv },
+    cwd: options.cwd,
+    waitMs: options.timeoutMs,
+    onTimeout: 'terminate',
+    maxOutputChars: options.maxOutputChars,
+    ...(options.env ? { env: options.env } : {}),
+    ...(runtime.signal ? { signal: runtime.signal } : {}),
+  });
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
 type GitCommandResult = {
   stdout?: unknown;
@@ -93,36 +125,47 @@ function createGhToolError(name: string, error: unknown, runtime: ToolRuntime) {
 }
 
 export async function runGit(
+  cli: CliRunner,
   args: string[],
   cwd?: string,
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 ) {
   const repo = cwd?.trim() || process.cwd();
+  let result: ShellExecResult;
   try {
-    const result = await execFileAsync('git', args, {
+    result = await cli(['git', ...args], {
       cwd: repo,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        LC_ALL: 'C',
-      },
-      timeout: timeoutMs,
-      maxBuffer: 1024 * 256,
+      env: { LC_ALL: 'C' },
+      timeoutMs,
+      maxOutputChars: MAX_GIT_CAPTURE_CHARS,
     });
-    return formatGitResult(result);
   } catch (err) {
-    if (err instanceof Error && ('stdout' in err || 'stderr' in err)) {
-      const errorRecord = err as Error & { stdout?: unknown; stderr?: unknown; code?: unknown };
+    return formatGitResult({ error: toError(err) });
+  }
+  switch (result.status) {
+    case 'exited':
+      // Only exit code 0 is success. A null code means the process was ended
+      // by a signal, which is a failure even with no output.
       return formatGitResult({
-        stdout: errorRecord.stdout,
-        stderr: errorRecord.stderr,
-        status: typeof errorRecord.code === 'number'
-          ? errorRecord.code
-          : null,
-        error: errorRecord,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        status: result.code,
+        ...(result.code === null
+          ? { error: new Error(`git ${args[0] ?? ''} was terminated by a signal`) }
+          : {}),
       });
-    }
-    return formatGitResult({ error: err instanceof Error ? err : new Error(String(err)) });
+    case 'timeout':
+      return formatGitResult({
+        stdout: result.stdout,
+        stderr: result.stderr,
+        error: new Error(`git ${args[0] ?? ''} timed out after ${(timeoutMs / 1000).toString()}s`),
+      });
+    case 'aborted':
+      throw createAbortError();
+    case 'spawn_failed':
+      return formatGitResult({ error: result.error });
+    case 'yielded':
+      return formatGitResult({ error: new Error('git command unexpectedly kept running') });
   }
 }
 
@@ -130,25 +173,46 @@ function resolveGhWorkdir(cwd?: string) {
   return cwd?.trim() || process.cwd();
 }
 
-async function executeGh(args: string[], cwd?: string) {
+async function executeGh(cli: CliRunner, args: string[], cwd?: string) {
   const repo = resolveGhWorkdir(cwd);
-  let result: GitCommandResult;
+  let result: ShellExecResult;
   try {
-    result = await execFileAsync('gh', args, {
+    result = await cli(['gh', ...args], {
       cwd: repo,
-      encoding: 'utf-8',
-      timeout: 20_000,
-      maxBuffer: MAX_GH_BUFFER_BYTES,
+      timeoutMs: GH_TIMEOUT_MS,
+      maxOutputChars: MAX_GH_BUFFER_BYTES,
     });
   } catch (err) {
     throw formatGhError(err);
   }
-
-  return result;
+  switch (result.status) {
+    case 'exited':
+      if (result.code !== 0) {
+        throw formatGhError(Object.assign(new Error(
+          result.code === null ? 'terminated by a signal' : 'gh command failed',
+        ), {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          code: result.code ?? undefined,
+        }));
+      }
+      return { stdout: result.stdout, stderr: result.stderr } satisfies GitCommandResult;
+    case 'timeout':
+      throw formatGhError(Object.assign(
+        new Error(`timed out after ${(GH_TIMEOUT_MS / 1000).toString()}s`),
+        { stdout: result.stdout, stderr: result.stderr },
+      ));
+    case 'aborted':
+      throw createAbortError();
+    case 'spawn_failed':
+      throw formatGhError(result.error);
+    case 'yielded':
+      throw formatGhError(new Error('gh command unexpectedly kept running'));
+  }
 }
 
-async function runGh(args: string[], cwd?: string, emptyOutput?: string) {
-  const result = await executeGh(args, cwd);
+async function runGh(cli: CliRunner, args: string[], cwd?: string, emptyOutput?: string) {
+  const result = await executeGh(cli, args, cwd);
 
   const output = formatGitResult(result);
   if (output === '(no output)') {
@@ -158,8 +222,8 @@ async function runGh(args: string[], cwd?: string, emptyOutput?: string) {
   return output;
 }
 
-async function runGhJson(args: string[], cwd?: string) {
-  const result = await executeGh(args, cwd);
+async function runGhJson(cli: CliRunner, args: string[], cwd?: string) {
+  const result = await executeGh(cli, args, cwd);
   const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
   if (!stdout) {
     throw new Error('gh command returned no output');
@@ -194,7 +258,11 @@ function parseGhIssueUrl(value: string): ResolvedGhIssueTarget | null {
   }
 }
 
-async function resolveGhIssueTarget(issue: string, cwd?: string): Promise<ResolvedGhIssueTarget> {
+async function resolveGhIssueTarget(
+  cli: CliRunner,
+  issue: string,
+  cwd?: string,
+): Promise<ResolvedGhIssueTarget> {
   const target = normalizeGhTarget(issue, 'issue');
   const urlTarget = parseGhIssueUrl(target);
   if (urlTarget) return urlTarget;
@@ -202,7 +270,7 @@ async function resolveGhIssueTarget(issue: string, cwd?: string): Promise<Resolv
     throw new Error('issue must be an issue number or URL');
   }
 
-  const repository = readRecord(await runGhJson([
+  const repository = readRecord(await runGhJson(cli, [
     'repo',
     'view',
     '--json',
@@ -284,10 +352,10 @@ function normalizeGhComment(value: unknown) {
   };
 }
 
-async function loadGhIssue(issue: string, cwd?: string) {
-  const target = await resolveGhIssueTarget(issue, cwd);
+async function loadGhIssue(cli: CliRunner, issue: string, cwd?: string) {
+  const target = await resolveGhIssueTarget(cli, issue, cwd);
   const issueEndpoint = `repos/${target.repository}/issues/${target.issueNumber}`;
-  const issueRecord = readRecord(await runGhJson(ghApiArgs(target, issueEndpoint), cwd));
+  const issueRecord = readRecord(await runGhJson(cli, ghApiArgs(target, issueEndpoint), cwd));
   if (!issueRecord) throw new Error('gh issue response was not an object');
   return { target, issueEndpoint, issue: issueRecord };
 }
@@ -398,8 +466,8 @@ function writeGhCommentsContent(input: {
   };
 }
 
-async function viewGhIssue(input: { cwd?: string; issue: string }) {
-  const { target, issue } = await loadGhIssue(input.issue, input.cwd);
+async function viewGhIssue(cli: CliRunner, input: { cwd?: string; issue: string }) {
+  const { target, issue } = await loadGhIssue(cli, input.issue, input.cwd);
 
   const body = truncateBody(issue.body);
   const milestone = readRecord(issue.milestone);
@@ -423,17 +491,17 @@ async function viewGhIssue(input: { cwd?: string; issue: string }) {
   });
 }
 
-async function viewGhIssueComments(input: {
+async function viewGhIssueComments(cli: CliRunner, input: {
   cwd?: string;
   issue: string;
   page: number;
   perPage: number;
 }) {
-  const { target, issueEndpoint, issue } = await loadGhIssue(input.issue, input.cwd);
+  const { target, issueEndpoint, issue } = await loadGhIssue(cli, input.issue, input.cwd);
   const totalComments = typeof issue.comments === 'number' ? issue.comments : 0;
   const commentsEndpoint = `${issueEndpoint}/comments?per_page=${input.perPage}&page=${input.page}`;
   const rawComments = totalComments > 0
-    ? await runGhJson(ghApiArgs(target, commentsEndpoint), input.cwd)
+    ? await runGhJson(cli, ghApiArgs(target, commentsEndpoint), input.cwd)
     : [];
   if (!Array.isArray(rawComments)) throw new Error('gh issue comments response was not an array');
 
@@ -486,455 +554,466 @@ function normalizeGhTarget(value: string | undefined, label: string) {
 
 const gitPathspecSchema = z.array(z.string().min(1)).optional();
 
-export const gitStatusTool = tool(
-  async ({ cwd, short = true }: { cwd?: string; short?: boolean }) =>
-    runGit(['status', short ? '--short' : '--branch'], cwd),
-  {
-    name: 'git_status',
-    description: '查看当前 git 仓库状态。默认返回短格式；cwd 可指定仓库目录，默认当前 workdir。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      short: z.boolean().optional().describe('是否使用 git status --short，默认 true'),
-    }),
-  },
-);
+/**
+ * Git and GitHub tools, running every git/gh invocation as argv through the
+ * injected ShellRS. Several Toolkits may share one ShellRS instance or use
+ * separate ones; the tools behave the same either way.
+ */
+export function createGitTools(shell: ShellRS) {
+  const cliFor = (runtime: ToolRuntime) => createCliRunner(shell, runtime);
 
-export const gitDiffTool = tool(
-  async ({ cwd, pathspecs, staged = false, stat = false }: {
-    cwd?: string;
-    pathspecs?: string[];
-    staged?: boolean;
-    stat?: boolean;
-  }) => {
-    const args = ['diff'];
-    if (staged) args.push('--staged');
-    if (stat) args.push('--stat');
-    const paths = normalizePathspecs(pathspecs);
-    if (paths.length > 0) args.push('--', ...paths);
-    return runGit(args, cwd);
-  },
-  {
-    name: 'git_diff',
-    description: '查看工作区或暂存区 diff。支持限制 pathspecs；默认查看未暂存 diff。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      pathspecs: gitPathspecSchema.describe('可选路径列表，用于限制 diff 范围'),
-      staged: z.boolean().optional().describe('查看暂存区 diff，相当于 git diff --staged'),
-      stat: z.boolean().optional().describe('仅返回 diff 统计'),
-    }),
-  },
-);
+  const gitStatusTool = tool(
+    async ({ cwd, short = true }: { cwd?: string; short?: boolean }, runtime: ToolRuntime) =>
+      runGit(cliFor(runtime), ['status', short ? '--short' : '--branch'], cwd),
+    {
+      name: 'git_status',
+      description: '查看当前 git 仓库状态。默认返回短格式；cwd 可指定仓库目录，默认当前 workdir。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        short: z.boolean().optional().describe('是否使用 git status --short，默认 true'),
+      }),
+    },
+  );
 
-export const gitLogTool = tool(
-  async ({ cwd, maxCount = 10, oneline = true, pathspecs }: {
-    cwd?: string;
-    maxCount?: number;
-    oneline?: boolean;
-    pathspecs?: string[];
-  }) => {
-    const count = Math.max(1, Math.min(50, Math.trunc(maxCount)));
-    const args = ['log', `--max-count=${count}`];
-    if (oneline) args.push('--oneline', '--decorate');
-    const paths = normalizePathspecs(pathspecs);
-    if (paths.length > 0) args.push('--', ...paths);
-    return runGit(args, cwd);
-  },
-  {
-    name: 'git_log',
-    description: '查看 git 提交历史。默认返回最近 10 条 oneline 记录，可按路径过滤。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      maxCount: z.number().int().positive().max(50).optional().describe('最多返回提交数，默认 10，最大 50'),
-      oneline: z.boolean().optional().describe('是否使用 oneline 输出，默认 true'),
-      pathspecs: gitPathspecSchema.describe('可选路径列表，用于限制历史范围'),
-    }),
-  },
-);
+  const gitDiffTool = tool(
+    async ({ cwd, pathspecs, staged = false, stat = false }: {
+      cwd?: string;
+      pathspecs?: string[];
+      staged?: boolean;
+      stat?: boolean;
+    }, runtime: ToolRuntime) => {
+      const args = ['diff'];
+      if (staged) args.push('--staged');
+      if (stat) args.push('--stat');
+      const paths = normalizePathspecs(pathspecs);
+      if (paths.length > 0) args.push('--', ...paths);
+      return runGit(cliFor(runtime), args, cwd);
+    },
+    {
+      name: 'git_diff',
+      description: '查看工作区或暂存区 diff。支持限制 pathspecs；默认查看未暂存 diff。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        pathspecs: gitPathspecSchema.describe('可选路径列表，用于限制 diff 范围'),
+        staged: z.boolean().optional().describe('查看暂存区 diff，相当于 git diff --staged'),
+        stat: z.boolean().optional().describe('仅返回 diff 统计'),
+      }),
+    },
+  );
 
-export const gitBranchTool = tool(
-  async ({ cwd, all = false }: { cwd?: string; all?: boolean }) =>
-    runGit(['branch', all ? '--all' : '--list'], cwd),
-  {
-    name: 'git_branch',
-    description: '列出 git 分支。默认列出本地分支；all=true 时包含远端分支。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      all: z.boolean().optional().describe('是否包含远端分支'),
-    }),
-  },
-);
+  const gitLogTool = tool(
+    async ({ cwd, maxCount = 10, oneline = true, pathspecs }: {
+      cwd?: string;
+      maxCount?: number;
+      oneline?: boolean;
+      pathspecs?: string[];
+    }, runtime: ToolRuntime) => {
+      const count = Math.max(1, Math.min(50, Math.trunc(maxCount)));
+      const args = ['log', `--max-count=${count}`];
+      if (oneline) args.push('--oneline', '--decorate');
+      const paths = normalizePathspecs(pathspecs);
+      if (paths.length > 0) args.push('--', ...paths);
+      return runGit(cliFor(runtime), args, cwd);
+    },
+    {
+      name: 'git_log',
+      description: '查看 git 提交历史。默认返回最近 10 条 oneline 记录，可按路径过滤。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        maxCount: z.number().int().positive().max(50).optional().describe('最多返回提交数，默认 10，最大 50'),
+        oneline: z.boolean().optional().describe('是否使用 oneline 输出，默认 true'),
+        pathspecs: gitPathspecSchema.describe('可选路径列表，用于限制历史范围'),
+      }),
+    },
+  );
 
-export const gitShowTool = tool(
-  async ({ cwd, revision = 'HEAD', stat = false }: {
-    cwd?: string;
-    revision?: string;
-    stat?: boolean;
-  }) => {
-    const args = ['show', '--no-ext-diff'];
-    if (stat) args.push('--stat');
-    args.push(revision);
-    return runGit(args, cwd);
-  },
-  {
-    name: 'git_show',
-    description: '查看指定 revision 的提交、对象或 diff。默认 revision=HEAD；输出会截断。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      revision: z.string().optional().describe('git revision，例如 HEAD、提交 SHA 或 branch:path'),
-      stat: z.boolean().optional().describe('仅返回统计信息'),
-    }),
-  },
-);
+  const gitBranchTool = tool(
+    async ({ cwd, all = false }: { cwd?: string; all?: boolean }, runtime: ToolRuntime) =>
+      runGit(cliFor(runtime), ['branch', all ? '--all' : '--list'], cwd),
+    {
+      name: 'git_branch',
+      description: '列出 git 分支。默认列出本地分支；all=true 时包含远端分支。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        all: z.boolean().optional().describe('是否包含远端分支'),
+      }),
+    },
+  );
 
-export const gitAddTool = tool(
-  async ({ cwd, pathspecs }: { cwd?: string; pathspecs: string[] }) => {
-    const paths = normalizePathspecs(pathspecs);
-    if (paths.length === 0) return 'Error: git_add requires at least one pathspec';
-    return runGit(['add', '--', ...paths], cwd);
-  },
-  {
-    name: 'git_add',
-    description: '暂存指定文件或路径。必须显式传 pathspecs，不支持隐式 git add .。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      pathspecs: z.array(z.string().min(1)).min(1).describe('要暂存的文件或路径列表'),
-    }),
-  },
-);
+  const gitShowTool = tool(
+    async ({ cwd, revision = 'HEAD', stat = false }: {
+      cwd?: string;
+      revision?: string;
+      stat?: boolean;
+    }, runtime: ToolRuntime) => {
+      const args = ['show', '--no-ext-diff'];
+      if (stat) args.push('--stat');
+      args.push(revision);
+      return runGit(cliFor(runtime), args, cwd);
+    },
+    {
+      name: 'git_show',
+      description: '查看指定 revision 的提交、对象或 diff。默认 revision=HEAD；输出会截断。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        revision: z.string().optional().describe('git revision，例如 HEAD、提交 SHA 或 branch:path'),
+        stat: z.boolean().optional().describe('仅返回统计信息'),
+      }),
+    },
+  );
 
-export const gitCommitTool = tool(
-  async ({ cwd, message }: { cwd?: string; message: string }) => {
-    const trimmed = message.trim();
-    if (!trimmed) return 'Error: git_commit requires a non-empty message';
-    return runGit(['commit', '-m', trimmed], cwd);
-  },
-  {
-    name: 'git_commit',
-    description: '创建本地 git commit。只支持 -m message；不会 push，也不会自动 add 文件。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      message: z.string().min(1).describe('commit message'),
-    }),
-  },
-);
+  const gitAddTool = tool(
+    async ({ cwd, pathspecs }: { cwd?: string; pathspecs: string[] }, runtime: ToolRuntime) => {
+      const paths = normalizePathspecs(pathspecs);
+      if (paths.length === 0) return 'Error: git_add requires at least one pathspec';
+      return runGit(cliFor(runtime), ['add', '--', ...paths], cwd);
+    },
+    {
+      name: 'git_add',
+      description: '暂存指定文件或路径。必须显式传 pathspecs，不支持隐式 git add .。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        pathspecs: z.array(z.string().min(1)).min(1).describe('要暂存的文件或路径列表'),
+      }),
+    },
+  );
 
-export const gitPushTool = tool(
-  async ({
-    cwd,
-    remote = 'origin',
-    refspec = 'HEAD',
-    setUpstream = true,
-  }: {
-    cwd?: string;
-    remote?: string;
-    refspec?: string;
-    setUpstream?: boolean;
-  }) => {
-    const args = ['-c', 'protocol.ext.allow=never', 'push'];
-    if (setUpstream) args.push('--set-upstream');
-    args.push('--', remote.trim(), refspec.trim());
-    return runGit(args, cwd, GIT_PUSH_TIMEOUT_MS);
-  },
-  {
-    name: 'git_push',
-    description: '执行普通、非 force 的 git push。默认将当前 HEAD 推送到 origin 并设置 upstream；不提供 force、删除远端引用、ext command transport 或额外参数入口。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      remote: z.string().trim().min(1).optional().describe('远端名称或地址，默认 origin'),
-      refspec: z.string().trim().min(1).refine((value) => !value.startsWith('+') && !value.startsWith(':'), {
-        message: 'force and delete refspecs are not supported',
-      }).optional().describe('要推送的 refspec，默认 HEAD；不支持 force 或删除 refspec'),
-      setUpstream: z.boolean().optional().describe('是否设置 upstream，默认 true'),
-    }),
-  },
-);
+  const gitCommitTool = tool(
+    async ({ cwd, message }: { cwd?: string; message: string }, runtime: ToolRuntime) => {
+      const trimmed = message.trim();
+      if (!trimmed) return 'Error: git_commit requires a non-empty message';
+      return runGit(cliFor(runtime), ['commit', '-m', trimmed], cwd);
+    },
+    {
+      name: 'git_commit',
+      description: '创建本地 git commit。只支持 -m message；不会 push，也不会自动 add 文件。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        message: z.string().min(1).describe('commit message'),
+      }),
+    },
+  );
 
-export const ghPrCreateTool = tool(
-  async ({ cwd, title, body = '', base, head, repository, draft = false }: {
-    cwd?: string;
-    title: string;
-    body?: string;
-    base?: string;
-    head?: string;
-    repository?: string;
-    draft?: boolean;
-  }, runtime: ToolRuntime) => {
-    try {
-      const args = ['pr', 'create', '--title', title.trim(), '--body', body];
-      if (base?.trim()) args.push('--base', base.trim());
-      if (head?.trim()) args.push('--head', head.trim());
-      if (repository?.trim()) args.push('--repo', repository.trim());
-      if (draft) args.push('--draft');
-      return await runGh(args, cwd);
-    } catch (error) {
-      return createGhToolError('gh_pr_create', error, runtime);
-    }
-  },
-  {
-    name: 'gh_pr_create',
-    description: '使用 GitHub CLI 创建 pull request。必须显式提供标题，正文可为空；默认使用当前仓库、当前分支和仓库默认 base。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      title: z.string().trim().min(1).describe('PR 标题'),
-      body: z.string().optional().describe('PR 正文；默认空字符串'),
-      base: z.string().trim().min(1).optional().describe('目标分支；默认仓库默认分支'),
-      head: z.string().trim().min(1).optional().describe('来源分支；默认当前分支'),
-      repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
-      draft: z.boolean().optional().describe('是否创建为 draft PR，默认 false'),
-    }),
-  },
-);
+  const gitPushTool = tool(
+    async ({
+      cwd,
+      remote = 'origin',
+      refspec = 'HEAD',
+      setUpstream = true,
+    }: {
+      cwd?: string;
+      remote?: string;
+      refspec?: string;
+      setUpstream?: boolean;
+    }, runtime: ToolRuntime) => {
+      const args = ['-c', 'protocol.ext.allow=never', 'push'];
+      if (setUpstream) args.push('--set-upstream');
+      args.push('--', remote.trim(), refspec.trim());
+      return runGit(cliFor(runtime), args, cwd, GIT_PUSH_TIMEOUT_MS);
+    },
+    {
+      name: 'git_push',
+      description: '执行普通、非 force 的 git push。默认将当前 HEAD 推送到 origin 并设置 upstream；不提供 force、删除远端引用、ext command transport 或额外参数入口。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        remote: z.string().trim().min(1).optional().describe('远端名称或地址，默认 origin'),
+        refspec: z.string().trim().min(1).refine((value) => !value.startsWith('+') && !value.startsWith(':'), {
+          message: 'force and delete refspecs are not supported',
+        }).optional().describe('要推送的 refspec，默认 HEAD；不支持 force 或删除 refspec'),
+        setUpstream: z.boolean().optional().describe('是否设置 upstream，默认 true'),
+      }),
+    },
+  );
 
-export const ghIssueCreateTool = tool(
-  async ({ cwd, title, body = '', repository }: {
-    cwd?: string;
-    title: string;
-    body?: string;
-    repository?: string;
-  }, runtime: ToolRuntime) => {
-    try {
-      const args = ['issue', 'create', '--title', title.trim(), '--body', body];
-      if (repository?.trim()) args.push('--repo', repository.trim());
-      return await runGh(args, cwd);
-    } catch (error) {
-      return createGhToolError('gh_issue_create', error, runtime);
-    }
-  },
-  {
-    name: 'gh_issue_create',
-    description: '使用 GitHub CLI 创建 issue。必须显式提供标题，正文可为空；默认使用当前仓库。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      title: z.string().trim().min(1).describe('Issue 标题'),
-      body: z.string().optional().describe('Issue 正文；默认空字符串'),
-      repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
-    }),
-  },
-);
+  const ghPrCreateTool = tool(
+    async ({ cwd, title, body = '', base, head, repository, draft = false }: {
+      cwd?: string;
+      title: string;
+      body?: string;
+      base?: string;
+      head?: string;
+      repository?: string;
+      draft?: boolean;
+    }, runtime: ToolRuntime) => {
+      try {
+        const args = ['pr', 'create', '--title', title.trim(), '--body', body];
+        if (base?.trim()) args.push('--base', base.trim());
+        if (head?.trim()) args.push('--head', head.trim());
+        if (repository?.trim()) args.push('--repo', repository.trim());
+        if (draft) args.push('--draft');
+        return await runGh(cliFor(runtime), args, cwd);
+      } catch (error) {
+        return createGhToolError('gh_pr_create', error, runtime);
+      }
+    },
+    {
+      name: 'gh_pr_create',
+      description: '使用 GitHub CLI 创建 pull request。必须显式提供标题，正文可为空；默认使用当前仓库、当前分支和仓库默认 base。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        title: z.string().trim().min(1).describe('PR 标题'),
+        body: z.string().optional().describe('PR 正文；默认空字符串'),
+        base: z.string().trim().min(1).optional().describe('目标分支；默认仓库默认分支'),
+        head: z.string().trim().min(1).optional().describe('来源分支；默认当前分支'),
+        repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
+        draft: z.boolean().optional().describe('是否创建为 draft PR，默认 false'),
+      }),
+    },
+  );
 
-export const ghIssueListTool = tool(
-  async ({ cwd, repository, state = 'open', limit = 30, search }: {
-    cwd?: string;
-    repository?: string;
-    state?: 'open' | 'closed' | 'all';
-    limit?: number;
-    search?: string;
-  }, runtime: ToolRuntime) => {
-    try {
-      const args = [
-        'issue',
-        'list',
-        '--state',
-        state,
-        '--limit',
-        String(limit),
-        '--json',
-        'number,title,state,labels,assignees,author,url,updatedAt',
-      ];
-      if (repository?.trim()) args.push('--repo', repository.trim());
-      if (search?.trim()) args.push('--search', search.trim());
-      return await runGh(args, cwd, '[]');
-    } catch (error) {
-      return createGhToolError('gh_issue_list', error, runtime);
-    }
-  },
-  {
-    name: 'gh_issue_list',
-    description: '列出 GitHub issue 的结构化快照。可按状态、仓库和 GitHub 搜索表达式筛选；用于从尚未知晓编号的 issue 中发现候选，再用 gh_issue_view 读取选中项。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
-      state: z.enum(['open', 'closed', 'all']).optional().describe('Issue 状态，默认 open'),
-      limit: z.number().int().positive().max(100).optional().describe('最多返回条数，默认 30，最大 100'),
-      search: z.string().trim().min(1).optional().describe('可选 GitHub issue 搜索表达式，例如 label:priority-high 或 sort:updated-desc'),
-    }),
-  },
-);
+  const ghIssueCreateTool = tool(
+    async ({ cwd, title, body = '', repository }: {
+      cwd?: string;
+      title: string;
+      body?: string;
+      repository?: string;
+    }, runtime: ToolRuntime) => {
+      try {
+        const args = ['issue', 'create', '--title', title.trim(), '--body', body];
+        if (repository?.trim()) args.push('--repo', repository.trim());
+        return await runGh(cliFor(runtime), args, cwd);
+      } catch (error) {
+        return createGhToolError('gh_issue_create', error, runtime);
+      }
+    },
+    {
+      name: 'gh_issue_create',
+      description: '使用 GitHub CLI 创建 issue。必须显式提供标题，正文可为空；默认使用当前仓库。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        title: z.string().trim().min(1).describe('Issue 标题'),
+        body: z.string().optional().describe('Issue 正文；默认空字符串'),
+        repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
+      }),
+    },
+  );
 
-export const ghPrViewTool = tool(
-  async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
-    try {
-      return await runGh(['pr', 'view', normalizeGhTarget(pr, 'pr')], cwd);
-    } catch (error) {
-      return createGhToolError('gh_pr_view', error, runtime);
-    }
-  },
-  {
-    name: 'gh_pr_view',
-    description: '使用 GitHub CLI 查看 PR 概览、元数据和描述，不读取评论。pr 可为 PR 编号、URL 或分支名；默认当前 workdir 仓库。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
-    }),
-  },
-);
+  const ghIssueListTool = tool(
+    async ({ cwd, repository, state = 'open', limit = 30, search }: {
+      cwd?: string;
+      repository?: string;
+      state?: 'open' | 'closed' | 'all';
+      limit?: number;
+      search?: string;
+    }, runtime: ToolRuntime) => {
+      try {
+        const args = [
+          'issue',
+          'list',
+          '--state',
+          state,
+          '--limit',
+          String(limit),
+          '--json',
+          'number,title,state,labels,assignees,author,url,updatedAt',
+        ];
+        if (repository?.trim()) args.push('--repo', repository.trim());
+        if (search?.trim()) args.push('--search', search.trim());
+        return await runGh(cliFor(runtime), args, cwd, '[]');
+      } catch (error) {
+        return createGhToolError('gh_issue_list', error, runtime);
+      }
+    },
+    {
+      name: 'gh_issue_list',
+      description: '列出 GitHub issue 的结构化快照。可按状态、仓库和 GitHub 搜索表达式筛选；用于从尚未知晓编号的 issue 中发现候选，再用 gh_issue_view 读取选中项。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        repository: z.string().trim().min(1).optional().describe('目标仓库 owner/name；默认当前仓库'),
+        state: z.enum(['open', 'closed', 'all']).optional().describe('Issue 状态，默认 open'),
+        limit: z.number().int().positive().max(100).optional().describe('最多返回条数，默认 30，最大 100'),
+        search: z.string().trim().min(1).optional().describe('可选 GitHub issue 搜索表达式，例如 label:priority-high 或 sort:updated-desc'),
+      }),
+    },
+  );
 
-export const ghPrCommentsTool = tool(
-  async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
-    try {
-      return await runGh(
-        ['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'],
-        cwd,
-        '(no PR comments or reviews)',
-      );
-    } catch (error) {
-      return createGhToolError('gh_pr_comments', error, runtime);
-    }
-  },
-  {
-    name: 'gh_pr_comments',
-    description: '使用 GitHub CLI 查看 PR review 和评论；没有 review 或评论时返回明确的空结果。pr 可为 PR 编号、URL 或分支名；输出受统一长度上限约束。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
-    }),
-  },
-);
+  const ghPrViewTool = tool(
+    async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
+      try {
+        return await runGh(cliFor(runtime), ['pr', 'view', normalizeGhTarget(pr, 'pr')], cwd);
+      } catch (error) {
+        return createGhToolError('gh_pr_view', error, runtime);
+      }
+    },
+    {
+      name: 'gh_pr_view',
+      description: '使用 GitHub CLI 查看 PR 概览、元数据和描述，不读取评论。pr 可为 PR 编号、URL 或分支名；默认当前 workdir 仓库。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
+      }),
+    },
+  );
 
-export const ghPrDiffTool = tool(
-  async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
-    try {
-      return await runGh(
-        ['pr', 'diff', normalizeGhTarget(pr, 'pr'), '--patch'],
-        cwd,
-        '(empty diff)',
-      );
-    } catch (error) {
-      return createGhToolError('gh_pr_diff', error, runtime);
-    }
-  },
-  {
-    name: 'gh_pr_diff',
-    description: '使用 GitHub CLI 查看 PR patch diff。pr 可为 PR 编号、URL 或分支名；用于代码 review，不要用 browser/http_fetch 拉取 PR diff。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
-    }),
-  },
-);
+  const ghPrCommentsTool = tool(
+    async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
+      try {
+        return await runGh(cliFor(runtime), 
+          ['pr', 'view', normalizeGhTarget(pr, 'pr'), '--comments'],
+          cwd,
+          '(no PR comments or reviews)',
+        );
+      } catch (error) {
+        return createGhToolError('gh_pr_comments', error, runtime);
+      }
+    },
+    {
+      name: 'gh_pr_comments',
+      description: '使用 GitHub CLI 查看 PR review 和评论；没有 review 或评论时返回明确的空结果。pr 可为 PR 编号、URL 或分支名；输出受统一长度上限约束。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
+      }),
+    },
+  );
 
-export const ghIssueViewTool = tool(
-  async ({ cwd, issue }: { cwd?: string; issue: string }, runtime: ToolRuntime) => {
-    try {
-      return await viewGhIssue({ cwd, issue });
-    } catch (error) {
-      return createGhToolError('gh_issue_view', error, runtime);
-    }
-  },
-  {
-    name: 'gh_issue_view',
-    description: '使用 GitHub CLI 查看 issue 元数据、描述和评论总数，不自动读取评论正文。需要评论时继续调用 gh_issue_comments；issue 可为 issue 编号或 URL，默认当前 workdir 仓库。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      issue: z.string().min(1).describe('Issue 编号或 URL'),
-    }),
-  },
-);
+  const ghPrDiffTool = tool(
+    async ({ cwd, pr }: { cwd?: string; pr: string }, runtime: ToolRuntime) => {
+      try {
+        return await runGh(cliFor(runtime), 
+          ['pr', 'diff', normalizeGhTarget(pr, 'pr'), '--patch'],
+          cwd,
+          '(empty diff)',
+        );
+      } catch (error) {
+        return createGhToolError('gh_pr_diff', error, runtime);
+      }
+    },
+    {
+      name: 'gh_pr_diff',
+      description: '使用 GitHub CLI 查看 PR patch diff。pr 可为 PR 编号、URL 或分支名；用于代码 review，不要用 browser/http_fetch 拉取 PR diff。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        pr: z.string().min(1).describe('PR 编号、URL 或分支名'),
+      }),
+    },
+  );
 
-export const ghIssueCommentsTool = tool(
-  async ({
-    cwd,
-    issue,
-    page = 1,
-    perPage = DEFAULT_GH_COMMENTS_PER_PAGE,
-  }: {
-    cwd?: string;
-    issue: string;
-    page?: number;
-    perPage?: number;
-  }, runtime: ToolRuntime) => {
-    try {
-      return await viewGhIssueComments({ cwd, issue, page, perPage });
-    } catch (error) {
-      return createGhToolError('gh_issue_comments', error, runtime);
-    }
-  },
-  {
-    name: 'gh_issue_comments',
-    description: '分页读取 GitHub issue 评论，默认每页 3 条、最多 5 条。普通页面直接返回正文；页面过大时完整内容写入 Markdown，并返回可交给 gh_read_content 的路径。',
-    schema: z.object({
-      cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
-      issue: z.string().min(1).describe('Issue 编号或 URL'),
-      page: z.number().int().positive().optional()
-        .describe('评论页码，默认 1；根据 commentsPagination.hasNextPage 继续翻页'),
-      perPage: z.number().int().positive().max(MAX_GH_COMMENTS_PER_PAGE).optional()
-        .describe(`每页评论数，默认 ${DEFAULT_GH_COMMENTS_PER_PAGE}，最大 ${MAX_GH_COMMENTS_PER_PAGE}`),
-    }),
-  },
-);
+  const ghIssueViewTool = tool(
+    async ({ cwd, issue }: { cwd?: string; issue: string }, runtime: ToolRuntime) => {
+      try {
+        return await viewGhIssue(cliFor(runtime), { cwd, issue });
+      } catch (error) {
+        return createGhToolError('gh_issue_view', error, runtime);
+      }
+    },
+    {
+      name: 'gh_issue_view',
+      description: '使用 GitHub CLI 查看 issue 元数据、描述和评论总数，不自动读取评论正文。需要评论时继续调用 gh_issue_comments；issue 可为 issue 编号或 URL，默认当前 workdir 仓库。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        issue: z.string().min(1).describe('Issue 编号或 URL'),
+      }),
+    },
+  );
 
-export const ghReadContentTool = tool(
-  async ({
-    cwd,
-    path,
-    startLine = 1,
-    lineCount = DEFAULT_GH_CONTENT_LINE_COUNT,
-  }: {
-    cwd?: string;
-    path: string;
-    startLine?: number;
-    lineCount?: number;
-  }, runtime: ToolRuntime) => {
-    try {
-      const filePath = resolveGhContentPath(path, cwd);
-      const chunk = readTextFileChunkResult({
-        path: filePath,
-        startLine,
-        endLine: startLine + lineCount - 1,
-        maxBytes: MAX_GH_CONTENT_CHARS,
-      });
-      return JSON.stringify({ path: filePath, ...chunk });
-    } catch (error) {
-      return createGhToolError('gh_read_content', error, runtime);
-    }
-  },
-  {
-    name: 'gh_read_content',
-    description: `按行读取 gh_issue_comments 生成的临时 Markdown。默认请求 ${DEFAULT_GH_CONTENT_LINE_COUNT} 行、最多 ${MAX_GH_CONTENT_LINE_COUNT} 行，但每次正文最多返回 ${MAX_GH_CONTENT_CHARS} 字节；根据 nextStartLine 继续读取。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件。`,
-    schema: z.object({
-      cwd: z.string().optional().describe('生成内容时返回的 cwd；默认当前 workdir'),
-      path: z.string().min(1).describe('gh_issue_comments 返回的 commentsContent.path'),
-      startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
-      lineCount: z.number().int().positive().max(MAX_GH_CONTENT_LINE_COUNT).optional()
-        .describe(`读取行数，默认 ${DEFAULT_GH_CONTENT_LINE_COUNT}，最大 ${MAX_GH_CONTENT_LINE_COUNT}`),
-    }),
-  },
-);
+  const ghIssueCommentsTool = tool(
+    async ({
+      cwd,
+      issue,
+      page = 1,
+      perPage = DEFAULT_GH_COMMENTS_PER_PAGE,
+    }: {
+      cwd?: string;
+      issue: string;
+      page?: number;
+      perPage?: number;
+    }, runtime: ToolRuntime) => {
+      try {
+        return await viewGhIssueComments(cliFor(runtime), { cwd, issue, page, perPage });
+      } catch (error) {
+        return createGhToolError('gh_issue_comments', error, runtime);
+      }
+    },
+    {
+      name: 'gh_issue_comments',
+      description: '分页读取 GitHub issue 评论，默认每页 3 条、最多 5 条。普通页面直接返回正文；页面过大时完整内容写入 Markdown，并返回可交给 gh_read_content 的路径。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        issue: z.string().min(1).describe('Issue 编号或 URL'),
+        page: z.number().int().positive().optional()
+          .describe('评论页码，默认 1；根据 commentsPagination.hasNextPage 继续翻页'),
+        perPage: z.number().int().positive().max(MAX_GH_COMMENTS_PER_PAGE).optional()
+          .describe(`每页评论数，默认 ${DEFAULT_GH_COMMENTS_PER_PAGE}，最大 ${MAX_GH_COMMENTS_PER_PAGE}`),
+      }),
+    },
+  );
 
-export const gitTools = [
-  gitStatusTool as NamedStructuredTool<'git_status'>,
-  gitDiffTool as NamedStructuredTool<'git_diff'>,
-  gitLogTool as NamedStructuredTool<'git_log'>,
-  gitBranchTool as NamedStructuredTool<'git_branch'>,
-  gitShowTool as NamedStructuredTool<'git_show'>,
-  gitAddTool as NamedStructuredTool<'git_add'>,
-  gitCommitTool as NamedStructuredTool<'git_commit'>,
-  gitPushTool as NamedStructuredTool<'git_push'>,
-  ghPrCreateTool as NamedStructuredTool<'gh_pr_create'>,
-  ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
-  ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
-  ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
-  ghIssueCreateTool as NamedStructuredTool<'gh_issue_create'>,
-  ghIssueListTool as NamedStructuredTool<'gh_issue_list'>,
-  ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
-  ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
-  ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
-] as const;
+  const ghReadContentTool = tool(
+    async ({
+      cwd,
+      path,
+      startLine = 1,
+      lineCount = DEFAULT_GH_CONTENT_LINE_COUNT,
+    }: {
+      cwd?: string;
+      path: string;
+      startLine?: number;
+      lineCount?: number;
+    }, runtime: ToolRuntime) => {
+      try {
+        const filePath = resolveGhContentPath(path, cwd);
+        const chunk = readTextFileChunkResult({
+          path: filePath,
+          startLine,
+          endLine: startLine + lineCount - 1,
+          maxBytes: MAX_GH_CONTENT_CHARS,
+        });
+        return JSON.stringify({ path: filePath, ...chunk });
+      } catch (error) {
+        return createGhToolError('gh_read_content', error, runtime);
+      }
+    },
+    {
+      name: 'gh_read_content',
+      description: `按行读取 gh_issue_comments 生成的临时 Markdown。默认请求 ${DEFAULT_GH_CONTENT_LINE_COUNT} 行、最多 ${MAX_GH_CONTENT_LINE_COUNT} 行，但每次正文最多返回 ${MAX_GH_CONTENT_CHARS} 字节；根据 nextStartLine 继续读取。仅允许读取对应 cwd 下 .pinpawo/tmp/gh 中的文件。`,
+      schema: z.object({
+        cwd: z.string().optional().describe('生成内容时返回的 cwd；默认当前 workdir'),
+        path: z.string().min(1).describe('gh_issue_comments 返回的 commentsContent.path'),
+        startLine: z.number().int().positive().optional().describe('起始行号，默认 1'),
+        lineCount: z.number().int().positive().max(MAX_GH_CONTENT_LINE_COUNT).optional()
+          .describe(`读取行数，默认 ${DEFAULT_GH_CONTENT_LINE_COUNT}，最大 ${MAX_GH_CONTENT_LINE_COUNT}`),
+      }),
+    },
+  );
 
-export const gitInspectionTools = [
-  gitStatusTool as NamedStructuredTool<'git_status'>,
-  gitDiffTool as NamedStructuredTool<'git_diff'>,
-  gitLogTool as NamedStructuredTool<'git_log'>,
-  gitBranchTool as NamedStructuredTool<'git_branch'>,
-  gitShowTool as NamedStructuredTool<'git_show'>,
-  ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
-  ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
-  ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
-  ghIssueListTool as NamedStructuredTool<'gh_issue_list'>,
-  ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
-  ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
-  ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
-] as const;
+  const gitTools = [
+    gitStatusTool as NamedStructuredTool<'git_status'>,
+    gitDiffTool as NamedStructuredTool<'git_diff'>,
+    gitLogTool as NamedStructuredTool<'git_log'>,
+    gitBranchTool as NamedStructuredTool<'git_branch'>,
+    gitShowTool as NamedStructuredTool<'git_show'>,
+    gitAddTool as NamedStructuredTool<'git_add'>,
+    gitCommitTool as NamedStructuredTool<'git_commit'>,
+    gitPushTool as NamedStructuredTool<'git_push'>,
+    ghPrCreateTool as NamedStructuredTool<'gh_pr_create'>,
+    ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
+    ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
+    ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
+    ghIssueCreateTool as NamedStructuredTool<'gh_issue_create'>,
+    ghIssueListTool as NamedStructuredTool<'gh_issue_list'>,
+    ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
+    ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
+    ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
+  ] as const;
+
+  const gitInspectionTools = [
+    gitStatusTool as NamedStructuredTool<'git_status'>,
+    gitDiffTool as NamedStructuredTool<'git_diff'>,
+    gitLogTool as NamedStructuredTool<'git_log'>,
+    gitBranchTool as NamedStructuredTool<'git_branch'>,
+    gitShowTool as NamedStructuredTool<'git_show'>,
+    ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
+    ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
+    ghPrDiffTool as NamedStructuredTool<'gh_pr_diff'>,
+    ghIssueListTool as NamedStructuredTool<'gh_issue_list'>,
+    ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
+    ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
+    ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
+  ] as const;
+
+  return { gitTools, gitInspectionTools };
+}
 
 export const gitOperationMetadata = {
   git_status: {
@@ -1094,4 +1173,7 @@ export const gitOperationMetadata = {
       };
     },
   },
-} satisfies Record<(typeof gitTools)[number]['name'], ToolOperationMetadata>;
+} satisfies Record<
+  ReturnType<typeof createGitTools>['gitTools'][number]['name'],
+  ToolOperationMetadata
+>;

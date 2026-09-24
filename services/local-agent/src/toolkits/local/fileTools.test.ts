@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit } from './index';
+import { createBashToolkit, PosixShellRS } from './index';
 import {
   applyPatchTool as rawApplyPatchTool,
   copyPathTool,
@@ -41,13 +41,13 @@ function readJsonOutput(output: unknown) {
 const applyPatchTool = rawApplyPatchTool;
 
 function reviewPolicyFor(toolName: string) {
-  const policy = definition(createBashToolkit(), toolName)?.review;
+  const policy = definition(createBashToolkit({ shell: new PosixShellRS() }), toolName)?.review;
   assert.ok(policy);
   return policy;
 }
 
 function reviewContext(toolName: string, input: unknown) {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
   return {
     models: {} as never,
     messages: [],
@@ -268,7 +268,7 @@ test('auto review deterministically authorizes safe apply_patch execution', asyn
 });
 
 test('bash toolkit reviews local path mutations with presets', () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   assert.equal(Boolean(definition(toolkit, 'move_path')?.review), true);
   assert.equal(Boolean(definition(toolkit, 'copy_path')?.review), true);
@@ -285,7 +285,7 @@ test('file operation metadata preserves model-provided relative paths', () => {
 });
 
 test('bash toolkit leaves read-only file tools without review policy', () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   assert.equal(definition(toolkit, 'read_file')?.review, undefined);
   assert.equal(definition(toolkit, 'view_file_chunk')?.review, undefined);
@@ -931,7 +931,7 @@ test('parsePatch keeps an explicitly prefixed empty context line', () => {
 });
 
 test('createBashToolkit registers review policies for file mutation tools', () => {
-  const toolkit = createBashToolkit();
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   assert.equal(Boolean(definition(toolkit, 'write_file')?.review), true);
   assert.equal(Boolean(definition(toolkit, 'apply_patch')?.review), true);

@@ -5,10 +5,9 @@ import {
   type ToolReviewPolicy,
 } from '@pinpawo/pet-agent';
 import { BROWSER_TOOLKIT_NAME } from './constants';
-import { browserTools } from './tools';
+import { createBrowserTools } from './tools';
 import { browserOperationMetadata } from './operationMetadata';
-import { BrowserRuntime } from './runtime';
-import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
+import { BROWSER_RS_REQUIREMENT, type BrowserRS } from './browserRS';
 
 export { BROWSER_TOOLKIT_NAME } from './constants';
 
@@ -28,43 +27,20 @@ const browserToolkitInstructions = [
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 
-function projectBrowserRuntimeDetails(runtime: BrowserRuntime) {
-  const snapshot = runtime.getSnapshot();
-  return {
-    extension: {
-      ...snapshot.extension,
-      capabilities: [...snapshot.extension.capabilities],
-    },
-    readiness: snapshot.readiness
-      ? {
-          phase: snapshot.readiness.phase,
-          ready: snapshot.readiness.ready,
-          ...(snapshot.readiness.error
-            ? { error: { ...snapshot.readiness.error } }
-            : {}),
-        }
-      : null,
-  };
-}
+export type BrowserToolkitDependencies = Readonly<{
+  /** The BrowserRS instance the Host selected for this Toolkit. */
+  browser: BrowserRS;
+}>;
 
-export type BrowserToolkitOptions = {
-  /** Extension bridge transport; defaults to the per-user bridge socket. */
-  bridge?: BrowserExtensionBridge;
-};
-
-export function createBrowserToolkit(options: BrowserToolkitOptions = {}): AgentToolkit {
-  // One Toolkit definition may be started by independent Host managers. Each
-  // manager owns its BrowserRuntime root; roots share only the provider-level
-  // bridge transport through Browser's internal lease coordinator.
-  const bridge = options.bridge ?? new BrowserExtensionBridge();
-
+export function createBrowserToolkit(deps: BrowserToolkitDependencies): AgentToolkit {
+  const { browser } = deps;
   const reviews: Record<string, ToolReviewPolicy> = {
     browser_open: ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
   };
-  const toolkit = defineToolkit({
+  return defineToolkit({
     name: BROWSER_TOOLKIT_NAME,
     description: '浏览器网页访问、登录态复用、JS 渲染页面读取、点击输入等待和页面内容提取。',
-    tools: browserTools.map((toolItem) => ({
+    tools: createBrowserTools(browser).map((toolItem) => ({
       tool: toolItem,
       operation: browserOperationMetadata[toolItem.name],
       review: reviews[toolItem.name],
@@ -72,17 +48,9 @@ export function createBrowserToolkit(options: BrowserToolkitOptions = {}): Agent
         ? { requiresInputModalities: ['image'] as const }
         : {}),
     })),
-    runtime: {
-      start: async () => {
-        const root = new BrowserRuntime({ bridge });
-        await root.start();
-        return root;
-      },
-      diagnose: (root) => projectBrowserRuntimeDetails(root as BrowserRuntime),
-      stop: async (root) => await (root as BrowserRuntime).stop(),
-    },
+    requires: { browser: BROWSER_RS_REQUIREMENT },
+    // Browser unavailability reaches only this Toolkit.
+    availability: async () => await browser.status(),
     instructions: browserToolkitInstructions.join('\n'),
   });
-
-  return toolkit;
 }

@@ -8,7 +8,7 @@ import {
   HostToolkitInventoryStore,
   reportUnavailableToolkitAvailability,
 } from './toolkitInventory';
-import { createBashToolkit, createGitToolkit } from './local';
+import { createBashToolkit, createGitToolkit, PosixShellRS } from './local';
 import { createOperationRegistryForLocalServerDeps } from '../runtimeOperationRegistry';
 
 function toolkit(name: string, available = true): AgentToolkit {
@@ -79,59 +79,28 @@ test('buildHostToolkitInventory preserves source order and provenance', async ()
   assert.equal(Object.isFrozen(inventory.effectiveToolkits), true);
 });
 
-test('buildHostToolkitInventory rejects duplicate names before starting runtimes', async () => {
-  let started = false;
+test('buildHostToolkitInventory rejects duplicate names', async () => {
   await assert.rejects(
     () => buildHostToolkitInventory({
       sources: [
         { id: 'plugin-a', kind: 'plugin', definitions: [toolkit('shared')] },
         { id: 'local-agent', kind: 'host_builtin', definitions: [toolkit('shared')] },
       ],
-      startToolkitRuntimes: async () => {
-        started = true;
-      },
     }),
     /Duplicate Toolkit name "shared".*plugin source "plugin-a".*host_builtin source "local-agent"/,
   );
-  assert.equal(started, false);
 });
 
-test('buildHostToolkitInventory rejects duplicate source ids before starting runtimes', async () => {
-  let started = false;
+test('buildHostToolkitInventory rejects duplicate source ids', async () => {
   await assert.rejects(
     () => buildHostToolkitInventory({
       sources: [
         { id: 'plugin-a', kind: 'plugin', definitions: [toolkit('one')] },
         { id: 'plugin-a', kind: 'plugin', definitions: [toolkit('two')] },
       ],
-      startToolkitRuntimes: async () => {
-        started = true;
-      },
     }),
     /Duplicate Toolkit definition source id "plugin-a" at indexes 0 and 1/,
   );
-  assert.equal(started, false);
-});
-
-test('buildHostToolkitInventory starts all definitions before availability evaluation', async () => {
-  const events: string[] = [];
-  const definitions = [toolkit('plugin'), toolkit('bash')];
-  await buildHostToolkitInventory({
-    sources: [{ id: 'all', kind: 'host_builtin', definitions }],
-    startToolkitRuntimes: async (toolkits) => {
-      events.push(`start:${toolkits.map(({ name }) => name).join(',')}`);
-    },
-    resolveAvailability: async (definition) => {
-      events.push(`availability:${definition.name}`);
-      return { available: true };
-    },
-  });
-
-  assert.deepEqual(events, [
-    'start:plugin,bash',
-    'availability:plugin',
-    'availability:bash',
-  ]);
 });
 
 test('reports unavailable Toolkits uniformly with actionable provenance', async () => {
@@ -231,11 +200,12 @@ test('an in-flight refresh cannot overwrite a replacement inventory generation',
 });
 
 test('operation registry derives only from the effective Host inventory', async () => {
+  const shell = new PosixShellRS();
   const inventory = await buildHostToolkitInventory({
     sources: [{
       id: 'local-agent',
       kind: 'host_builtin',
-      definitions: [createBashToolkit(), createGitToolkit()],
+      definitions: [createBashToolkit({ shell }), createGitToolkit({ shell })],
     }],
     resolveAvailability: async (definition) => definition.name === 'bash'
       ? { available: true }

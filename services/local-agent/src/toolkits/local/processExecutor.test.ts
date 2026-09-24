@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ProcessExecutor, ShellRunHandle } from './processExecutor';
-import { ProcessRegistry, type ManagedProcessOwner } from './processRegistry';
+import { ProcessRegistry } from './processRegistry';
 
 /**
  * The registry against a stand-in executor.
@@ -12,11 +12,8 @@ import { ProcessRegistry, type ManagedProcessOwner } from './processRegistry';
  * not have been written — the registry called `process.kill` directly.
  */
 
-const OWNER: ManagedProcessOwner = {
-  threadId: 'thread-1',
-  runId: 'run-1',
-  delegationId: 'delegation-1',
-};
+/** The Agent session whose ShellRS logical session holds the process. */
+const OWNER = 'session-1';
 
 function fakeHandle(pid: number): ShellRunHandle & { finish: (code: number) => void } {
   let resolveExit!: (value: { code: number | null; stdout: string; stderr: string }) => void;
@@ -60,7 +57,7 @@ test('the registry asks the executor to signal, never the OS', async () => {
   const handle = fakeHandle(4242);
   const record = registry.register({
     handle,
-    owner: OWNER,
+    sessionId: OWNER,
     command: 'fake',
     cwd: '/tmp',
   });
@@ -94,23 +91,19 @@ test('a dead orphan group is neither tracked nor signalled', async () => {
   assert.deepEqual(terminated, [], 'nothing to signal');
 });
 
-test('ownership is enforced without touching a process', async () => {
+test('session ownership is enforced without touching a process', async () => {
   const { executor } = recordingExecutor();
   const registry = new ProcessRegistry(executor);
   const record = registry.register({
     handle: fakeHandle(1),
-    owner: OWNER,
+    sessionId: OWNER,
     command: 'fake',
     cwd: '/tmp',
   });
 
   await assert.rejects(
-    () => registry.drain(record.processId, {
-      threadId: 'thread-1',
-      runId: 'run-2',
-      delegationId: 'delegation-2',
-    }),
-    /different execution/,
+    () => registry.drain(record.processId, 'session-2'),
+    /different session/,
   );
 });
 
@@ -120,7 +113,7 @@ test('a finished process frees its slot without an OS call', async () => {
   const handle = fakeHandle(7);
   const record = registry.register({
     handle,
-    owner: OWNER,
+    sessionId: OWNER,
     command: 'fake',
     cwd: '/tmp',
   });

@@ -6,7 +6,7 @@ import { createKanbanPlugin } from '@pinpawo-plugin/kanban';
 import { createTriggerPlugin } from '@pinpawo-plugin/trigger';
 import { createStudio, type StudioPetBinding } from '@pinpawo/studio';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
-import { createBashToolkit, createGitToolkit } from '../../../services/local-agent/src/toolkits/local';
+import { createBashToolkit, createGitToolkit, PosixShellRS } from '../../../services/local-agent/src/toolkits/local';
 
 for (const [petId, workName] of [['executor', 'studio_execution'], ['reviewer', 'studio_review']]) {
   test(`${petId} works without completing Kanban; reporting publishes the final result to Wiki`, async (t) => {
@@ -34,9 +34,10 @@ for (const [petId, workName] of [['executor', 'studio_execution'], ['reviewer', 
     const loaded = await loadCapabilityDirectory(path.resolve(
       import.meta.dirname, `../../../packages/studio/templates/default/pets/${petId}/capabilities`,
     ));
+    const shell = new PosixShellRS();
     const registry = compileAgentRegistry({
       capabilities: loaded.map(({ capability }) => capability),
-      toolkits: [...kanban.toolkits, createBashToolkit(), createGitToolkit()],
+      toolkits: [...kanban.toolkits, createBashToolkit({ shell }), createGitToolkit({ shell })],
     });
     assert.deepEqual(registry.unavailableCapabilities, []);
     const work = registry.capabilities.find(({ capability }) => capability.name === workName)!;

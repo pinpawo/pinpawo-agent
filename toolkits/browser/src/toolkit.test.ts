@@ -1,100 +1,95 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ToolkitRuntimeManager } from '@pinpawo/pet-agent';
 import { createBrowserToolkit } from './toolkit';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BrowserRuntime } from './runtime';
+import { ChromeExtensionBrowserRS } from './chromeExtensionBrowserRS';
+import { BROWSER_RS_REQUIREMENT } from './browserRS';
 import { BrowserExtensionBridge } from './drivers/chromeExtension/bridge';
 
 /** Keep tests off the user's real bridge socket. */
-function isolatedToolkit() {
+function isolatedBridge() {
   const dir = mkdtempSync(join(tmpdir(), 'ppb-'));
-  return createBrowserToolkit({
-    bridge: new BrowserExtensionBridge({
-      socketPath: join(dir, 'bridge.sock'),
-      tokenPath: join(dir, 'bridge.token'),
-    }),
+  return new BrowserExtensionBridge({
+    socketPath: join(dir, 'bridge.sock'),
+    tokenPath: join(dir, 'bridge.token'),
   });
 }
 
 test('only browser_screenshot requires image input', () => {
-  const toolkit = createBrowserToolkit();
+  const toolkit = createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() });
   const requiringImage = toolkit.tools
     .filter((definition) => definition.requiresInputModalities?.includes('image'))
     .map((definition) => definition.tool.name);
 
   assert.deepEqual(requiringImage, ['browser_screenshot']);
-  assert.equal(toolkit.runtime?.resolve, undefined);
-  assert.equal(toolkit.runtime?.bindTools, undefined);
-  assert.equal(toolkit.runtime?.release, undefined);
 });
 
-test('Browser Runtime is exposed as a port without replacing static tools', async () => {
-  const toolkit = isolatedToolkit();
-  const manager = new ToolkitRuntimeManager();
-  const staticTools = toolkit.tools.map(({ tool }) => tool);
-  const execution = await manager.resolve({
-    toolkits: [toolkit],
-    execution: {
-      threadId: 'thread-1',
-      taskId: 'task-1',
-      runId: 'run-1',
-      delegationId: 'delegation-1',
-      workdir: process.cwd(),
-    },
-  });
-
-  assert.deepEqual(
-    execution.toolkits[0]?.tools.map(({ tool }) => tool),
-    staticTools,
-  );
-  assert.ok(execution.runtimes.browser instanceof BrowserRuntime);
-
-  await execution.release();
-  await manager.stop();
+test('the Browser Toolkit declares its BrowserRS dependency for Host assembly', () => {
+  const toolkit = createBrowserToolkit({ browser: new ChromeExtensionBrowserRS() });
+  assert.deepEqual(toolkit.requires, { browser: BROWSER_RS_REQUIREMENT });
+  assert.equal('runtime' in toolkit, false);
 });
 
-test('the extension-only Browser Toolkit has no backend availability gate', () => {
-  assert.equal(createBrowserToolkit().availability, undefined);
+test('Browser Toolkit availability follows its injected BrowserRS status', async () => {
+  const browser = new ChromeExtensionBrowserRS({ bridge: isolatedBridge() });
+  const toolkit = createBrowserToolkit({ browser });
+  assert.deepEqual(await toolkit.availability?.(), { available: true });
+
+  await browser.dispose();
+  const availability = await toolkit.availability?.();
+  assert.equal(availability?.available, false);
 });
 
-test('separate Host managers start independent Browser Runtime roots', async () => {
-  const toolkit = isolatedToolkit();
-  const managerA = new ToolkitRuntimeManager();
-  const managerB = new ToolkitRuntimeManager();
+test('a bridge that fails to start makes only the BrowserRS unavailable', async () => {
+  const bridge = isolatedBridge();
+  bridge.start = async () => { throw new Error('socket busy'); };
+  const browser = new ChromeExtensionBrowserRS({ bridge });
 
-  const executionA = await managerA.resolve({
-    toolkits: [toolkit],
-    execution: {
-      threadId: 'thread-a',
-      taskId: 'task-a',
-      runId: 'run-a',
-      delegationId: 'delegation-a',
-      workdir: process.cwd(),
-    },
+  await assert.rejects(browser.start(), /socket busy/);
+  assert.deepEqual(browser.status(), {
+    available: false,
+    reason: 'Browser extension bridge failed to start: socket busy',
   });
-  const executionB = await managerB.resolve({
-    toolkits: [toolkit],
-    execution: {
-      threadId: 'thread-b',
-      taskId: 'task-b',
-      runId: 'run-b',
-      delegationId: 'delegation-b',
-      workdir: process.cwd(),
-    },
-  });
-  const runtimeA = executionA.runtimes.browser;
-  const runtimeB = executionB.runtimes.browser;
+  const toolkit = createBrowserToolkit({ browser });
+  assert.equal((await toolkit.availability?.())?.available, false);
+});
 
-  assert.notEqual(runtimeA, runtimeB);
-  assert.equal((await managerA.diagnose())[0]?.lifecycle, 'ready');
-  assert.equal((await managerB.diagnose())[0]?.lifecycle, 'ready');
-  await executionA.release();
-  await managerA.stop();
-  assert.equal((await managerA.diagnose())[0]?.lifecycle, 'stopped');
-  assert.equal((await managerB.diagnose())[0]?.lifecycle, 'ready');
-  await executionB.release();
-  await managerB.stop();
+test('separate Hosts create independent BrowserRS instances sharing one bridge', async () => {
+  const bridge = isolatedBridge();
+  const browserA = new ChromeExtensionBrowserRS({ bridge });
+  const browserB = new ChromeExtensionBrowserRS({ bridge });
+  await browserA.start();
+  await browserB.start();
+  assert.equal(bridge.getStatus().listening, true);
+
+  await browserA.dispose();
+  // B still holds its lease on the shared transport.
+  assert.equal(bridge.getStatus().listening, true);
+  assert.equal(browserB.status().available, true);
+  await browserB.dispose();
+  assert.equal(bridge.getStatus().listening, false);
+});
+
+test('dispose during an in-flight start releases the bridge once the start settles', async () => {
+  const lifecycle: string[] = [];
+  let finishStart!: () => void;
+  const bridge = isolatedBridge();
+  bridge.start = async () => {
+    lifecycle.push('start');
+    await new Promise<void>((resolve) => { finishStart = resolve; });
+  };
+  bridge.stop = async () => { lifecycle.push('stop'); };
+  const browser = new ChromeExtensionBrowserRS({ bridge });
+
+  const starting = browser.start();
+  await new Promise((resolve) => setImmediate(resolve));
+  const disposing = browser.dispose();
+  finishStart();
+  await starting;
+  await disposing;
+
+  assert.deepEqual(lifecycle, ['start', 'stop']);
+  assert.equal(browser.status().available, false);
 });

@@ -27,10 +27,7 @@ const SINGLE_PATH_TOOLS = new Set([
   'validate_structured_file',
   'mkdir_path',
   'list_dir',
-  'jq_query',
 ]);
-
-const SEARCH_TOOLS = new Set(['glob_search', 'grep_search']);
 
 function resolveFromWorkdir(path: unknown, workdir: string) {
   if (typeof path !== 'string' || !path.trim()) return path;
@@ -60,9 +57,6 @@ function bindInput(toolName: string, input: unknown, workdir: string) {
 
   if (SINGLE_PATH_TOOLS.has(toolName)) {
     return { ...record, path: resolveFromWorkdir(record.path, workdir) };
-  }
-  if (SEARCH_TOOLS.has(toolName)) {
-    return { ...record, path: resolveFromWorkdir(record.path ?? '.', workdir) };
   }
   if (toolName === 'move_path' || toolName === 'copy_path') {
     return {

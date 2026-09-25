@@ -41,6 +41,11 @@ export type PosixShellRSOptions = Readonly<{
   executor?: ProcessExecutor;
   /** Overridable so the unavailable-platform path can be tested anywhere. */
   platform?: NodeJS.Platform;
+  /**
+   * Directory of commands this RS provides (see `prepareShellCommandDir`),
+   * put first on every command's PATH so they win over the caller's.
+   */
+  commandDir?: string;
 }>;
 
 /**
@@ -62,6 +67,7 @@ export class PosixShellRS implements ShellRS {
 
   private readonly registry: ProcessRegistry;
   private readonly platform: NodeJS.Platform;
+  private readonly commandDir: string | null;
   private readonly sessions = new Set<string>();
   private disposed = false;
   /** Aborted by `dispose` to end commands still inside their initial wait. */
@@ -72,6 +78,14 @@ export class PosixShellRS implements ShellRS {
   constructor(options: PosixShellRSOptions = {}) {
     this.registry = new ProcessRegistry(options.executor ?? posixProcessExecutor);
     this.platform = options.platform ?? process.platform;
+    this.commandDir = options.commandDir ?? null;
+  }
+
+  /** The request's environment with this RS's command directory first on PATH. */
+  private commandEnv(env: ShellExecRequest['env']): Readonly<Record<string, string>> | undefined {
+    if (!this.commandDir) return env;
+    const path = env?.PATH ?? process.env.PATH;
+    return { ...env, PATH: path ? `${this.commandDir}:${path}` : this.commandDir };
   }
 
   status(): ToolkitAvailability {
@@ -115,12 +129,13 @@ export class PosixShellRS implements ShellRS {
     const command = 'shell' in request.command
       ? request.command.shell
       : { argv: request.command.argv };
+    const env = this.commandEnv(request.env);
     const outcome = await this.registry.processExecutor.run({
       command,
       cwd: request.cwd,
       timeoutMs: request.waitMs,
       maxOutputChars: request.maxOutputChars,
-      ...(request.env ? { env: request.env } : {}),
+      ...(env ? { env } : {}),
       signal,
       yieldOnTimeout: request.onTimeout === 'yield',
     });

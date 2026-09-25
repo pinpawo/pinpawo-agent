@@ -35,10 +35,8 @@ import {
   networkOperationMetadata,
   normalizeHttpFetchAuthorizationInput,
 } from './networkTools';
-import { jqQueryTool, jsonOperationMetadata } from './jsonTools';
 import { createGitTools, gitOperationMetadata } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
-import { globSearchTool, grepSearchTool, searchOperationMetadata } from './searchTools';
 import {
   createProcessTools,
   processOperationMetadata,
@@ -83,9 +81,6 @@ const localUtilityTools: StructuredTool[] = [
   copyPathTool,
   mkdirPathTool,
   listDirTool,
-  jqQueryTool,
-  globSearchTool,
-  grepSearchTool,
   httpFetchTool,
   downloadFileTool,
 ];
@@ -106,9 +101,8 @@ function createProjectInspectionTools(shell: ShellRS): readonly NamedStructuredT
     viewFileChunkTool,
     statPathTool,
     listDirTool,
-    jqQueryTool,
-    globSearchTool,
-    grepSearchTool,
+    // Searching and JSON queries go through the RS like any other command.
+    createInspectShellTool(shell),
     getCurrentTimeTool,
     ...createGitTools(shell).gitInspectionTools,
   ];
@@ -159,8 +153,8 @@ const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
   '需要执行 shell 命令时先判断它是否修改状态：只查看不修改的（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道）一律用 inspect_shell，它免审批、明显更快；只有确实会写入、安装、删除、推送或需要内联执行时才用 run_shell。两者都能跑的命令永远选 inspect_shell。',
   '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
-  '优先使用语义具体的文件工具：view_file_chunk、read_file、jq_query、list_dir、glob_search、grep_search。',
-  '分析 JSON 文件的结构、字段、分组或计数时优先使用 jq_query；不要用 run_shell 或临时 Python 脚本包装 jq。',
+  '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir。',
+  '搜索代码和文件用 inspect_shell 运行 rg：`rg -n \'pattern\' src` 搜内容，`rg --files -g \'*.ts\'` 找文件，`rg -l` 只列文件名；分析 JSON 用 inspect_shell 运行 jq。不要用 run_shell 或临时 Python 脚本做这些查询。',
   '编辑已有文件一律使用 apply_patch（每次调用只更新一个已存在文件）；只有新建文件或完全重写整个文件时才用 write_file。',
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   '联网取内容优先用 http_fetch：静态页面、REST API、RSS、天气或汇率这类公开接口一次请求即可拿到结果，不要为此逐步驱动浏览器。只有确实需要登录态、页面交互或 JS 动态渲染时才用浏览器。同一站点首次获批后，后续同源同方法的请求不再重复审批。',
@@ -168,14 +162,12 @@ const bashToolkitInstructions = [
   '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看当前会话启动的后台命令。不要因为超时就重复执行同一命令。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
-  '修改文件前先读取现状；修改后优先用 validate_structured_file、grep_search 或 run_shell 做必要验证。',
+  '修改文件前先读取现状；修改后优先用 validate_structured_file、inspect_shell 或 run_shell 做必要验证。',
 ];
 
 const bashToolkitOperations = {
   ...fileOperationMetadata,
-  ...searchOperationMetadata,
   ...networkOperationMetadata,
-  ...jsonOperationMetadata,
   ...shellOperationMetadata,
   ...processOperationMetadata,
 };
@@ -195,7 +187,7 @@ const projectInspectionInstructions = [
   '你的目标是只读探索当前项目及其关联的 GitHub 事实，并交付足以支持后续规划的证据摘要。',
   '根据当前目标选择范围最小、语义最直接的文件、搜索、Git 或 GitHub 工具。',
   '读取代码、Markdown、JSON 与配置时优先使用 view_file_chunk；read_file 用于图片、PDF、Word、表格等非文本内容。',
-  '先从目录、搜索或列表结果定位候选，再读取与目标直接相关的内容。',
+  '先从目录、搜索或列表结果定位候选，再读取与目标直接相关的内容。搜索用 inspect_shell 运行 rg（例如 `rg -n \'pattern\'`、`rg --files -g \'*.ts\'`），JSON 用 jq。',
   '交付物包含已确认事实、关键来源、仍存在的不确定性，以及后续规划可直接使用的边界。',
 ];
 
@@ -289,9 +281,7 @@ export function createBashToolkit(deps: ShellToolkitDependencies): AgentToolkit 
 export function createProjectInspectionToolkit(deps: ShellToolkitDependencies): AgentToolkit {
   const operations = {
     ...fileOperationMetadata,
-    ...searchOperationMetadata,
     ...networkOperationMetadata,
-    ...jsonOperationMetadata,
     ...shellOperationMetadata,
     ...gitOperationMetadata,
   };

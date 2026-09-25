@@ -24,7 +24,7 @@ defaultEnabled: true
    `services/local-agent/examples/capabilities/web_research_brief/CAPABILITY.md` 和 README；如果本地路径不可用，使用 `http_fetch` 直接读取
    `https://raw.githubusercontent.com/pinpawo/pinpawo-agent/main/services/local-agent/examples/capabilities/web_research_brief/CAPABILITY.md`
    和 `https://raw.githubusercontent.com/pinpawo/pinpawo-agent/main/services/local-agent/examples/capabilities/web_research_brief/README.md`。
-   不要使用 `glob_search`、`grep_search` 或网络搜索去寻找其他示例；`manifest.json/index.js` 是已移除的旧格式。
+   不要搜索代码库（例如用 `inspect_shell` 运行 rg）或网络搜索去寻找其他示例；`manifest.json/index.js` 是已移除的旧格式。
 4. 调用 `scaffold_capability_plugin`。尽量在一次调用中传入定制的 `workflow`、`boundaries` 和 `outputRequirements`，生成的不应只是通用文件处理模板。
 5. 如果目标目录已存在，先用 `list_dir` 和 `view_file_chunk` 读取现状，做局部修改；不要未读取就使用 `overwrite`。
 6. scaffold 会自动做一次加载契约验证。手动修改后再调用 `validate_capability_plugin`，然后检查 description、执行流程、边界和输出要求是否一致。

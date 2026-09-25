@@ -114,6 +114,12 @@ Toolkit 用原始参数和该上下文在执行时解释目标：local 工具经
   交互 PTY 与显式托管进程在契约中预留，本阶段未实现。
 - bash、git、project-inspection 共享 Host 的同一个 ShellRS 实例。git/gh 以 argv
   经 ShellRS 运行。
+- 外部命令只经 ShellRS 执行。代码搜索和 JSON 查询没有专用工具（原 `grep_search` /
+  `glob_search` / `jq_query` 已删除），由 `inspect_shell` 运行 `rg` / `jq`；
+  project-inspection 也提供 `inspect_shell`。
+- RS 提供自己的命令目录，放在每条命令 PATH 的最前面：其中的 `rg` 是打包自带的
+  ripgrep，默认排除 `.pinpawo`（Agent 自己的 checkpoint 存储）并截断超过 2000 列的
+  长行，调用方参数追加在默认参数之后。因此 shell 里的 `rg` 总是可用、版本一致。
 - Windows：原 PowerShell 执行器已删除。`PosixShellRS.status()` 在 Windows 上报告
   不可用，shell 相关 Toolkit 随之不可用。未来的 Windows ShellRS 必须兼容同一接口与
   Tool 可观察语义（含 shell 字符串语法与 argv 行为）。

@@ -438,7 +438,7 @@ test('readRootStreamChatEvent maps tool lifecycle and filters non-AI message del
       data: {
         event: 'tool-started',
         tool_call_id: 'planner-call-1',
-        tool_name: 'glob_search',
+        tool_name: 'inspect_shell',
       },
     },
   }, state), null);

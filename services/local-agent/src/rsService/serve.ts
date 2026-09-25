@@ -118,6 +118,7 @@ export type ServeRSServiceResult =
 export async function serveRSService(options: Readonly<{
   paths: RSServicePaths;
   createHandlers: () => readonly RSServiceHandler[];
+  build?: string;
   log?: (message: string) => void;
 }>): Promise<ServeRSServiceResult> {
   const { paths } = options;
@@ -132,6 +133,7 @@ export async function serveRSService(options: Readonly<{
       endpoint: paths.endpoint,
       token,
       handlers: options.createHandlers(),
+      ...(options.build ? { build: options.build } : {}),
       ...(options.log ? { log: options.log } : {}),
     });
   } finally {

@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { type RSContractRef, RSServiceConnection } from './connection';
 import { ensureToken, readToken, type RSServicePaths } from './paths';
+import { endpointIsLive } from './serve';
+import type { RSServiceStatus } from './server';
 import { RSServiceError } from './transport';
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
@@ -27,14 +30,55 @@ export function rsServiceBootstrapEnvironment(
 }
 
 /**
+ * Identity of the service code in one entry file.
+ *
+ * The built entry bundles every module the service runs, so a rebuild or an
+ * upgrade changes it. From a source checkout only the entry file itself is
+ * hashed, which does not track its imports.
+ */
+export function rsServiceBuildId(entryFile: string): string {
+  return createHash('sha256').update(readFileSync(entryFile)).digest('hex').slice(0, 16);
+}
+
+/**
  * The service entry: the bundled `rsService.js` next to the built Host, or
  * the TypeScript source through tsx when running from a checkout.
  */
-function resolveServiceEntry(): { args: readonly string[] } {
+function resolveServiceEntry(): { args: readonly string[]; file: string } {
   const built = fileURLToPath(new URL('./rsService.js', import.meta.url));
-  if (existsSync(built)) return { args: [built] };
+  if (existsSync(built)) return { args: [built], file: built };
   const source = fileURLToPath(new URL('../rsServiceEntry.ts', import.meta.url));
-  return { args: ['--import', import.meta.resolve('tsx/esm'), source] };
+  return { args: ['--import', import.meta.resolve('tsx/esm'), source], file: source };
+}
+
+/** The build a service started by this Host would run. */
+export function currentRSServiceBuild(): string {
+  return rsServiceBuildId(resolveServiceEntry().file);
+}
+
+const warnedStaleBuilds = new Set<string>();
+
+/**
+ * Stop a service running other code, but only while stopping ends nothing:
+ * no running processes and no unanswered calls. Returns whether it stopped.
+ */
+async function stopIdleService(paths: RSServicePaths, token: string): Promise<boolean> {
+  const admin = await RSServiceConnection.open({ paths, token });
+  try {
+    const status = await admin.admin('status') as RSServiceStatus;
+    if (status.busy) return false;
+    await admin.admin('stop');
+  } finally {
+    await admin.close();
+  }
+  const deadline = Date.now() + 5_000;
+  while (await endpointIsLive(paths)) {
+    if (Date.now() > deadline) {
+      throw new RSServiceError('stop_timeout', 'The previous RS service did not stop in time.');
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+  }
+  return true;
 }
 
 function isNotRunning(error: unknown): boolean {
@@ -68,7 +112,12 @@ export async function connectRSService(options: Readonly<{
  * Concurrent callers may each start a candidate; candidates settle on one
  * owner among themselves, and every caller ends up connected to it. A caller
  * only ever terminates the candidate it started itself, and only when startup
- * failed.
+ * failed or another candidate won.
+ *
+ * A running service built from other code (after an upgrade or a rebuild) is
+ * replaced when that ends nothing; while it still has running work it is kept
+ * — the contract check already guarantees it speaks this Host's contract —
+ * and a warning says how to restart it.
  */
 export async function ensureRSService(options: Readonly<{
   paths: RSServicePaths;
@@ -76,21 +125,40 @@ export async function ensureRSService(options: Readonly<{
   startupTimeoutMs?: number;
   /** Test seam: how to run the service entry. */
   entryArgs?: readonly string[];
+  /** Test seam: the build this Host expects the service to run. */
+  expectedBuild?: string;
+  warn?: (message: string) => void;
 }>): Promise<RSServiceConnection> {
   const { paths } = options;
   const token = await ensureToken(paths);
+  const entry = options.entryArgs ? null : resolveServiceEntry();
+  const expectedBuild = options.expectedBuild ?? (entry ? rsServiceBuildId(entry.file) : null);
+  const warn = options.warn ?? ((message: string) => console.warn(message));
   const openConnection = () => RSServiceConnection.open({
     paths,
     token,
     ...(options.rs ? { rs: options.rs } : {}),
   });
   try {
-    return await openConnection();
+    const connection = await openConnection();
+    const build = connection.serviceBuild;
+    if (!expectedBuild || !build || build === expectedBuild) return connection;
+    await connection.close();
+    if (!await stopIdleService(paths, token)) {
+      if (!warnedStaleBuilds.has(build)) {
+        warnedStaleBuilds.add(build);
+        warn(
+          `[rs] The running RS service (build ${build}) differs from this Host (build ${expectedBuild}) `
+          + 'and still has running work, so it is kept. Run `pinpawo rs stop` once that work is done.',
+        );
+      }
+      return await openConnection();
+    }
   } catch (error) {
     if (!isNotRunning(error)) throw error;
   }
 
-  const entryArgs = options.entryArgs ?? resolveServiceEntry().args;
+  const entryArgs = options.entryArgs ?? entry!.args;
   const log = await open(paths.log, 'a', 0o600);
   let launchError: Error | undefined;
   let exited = false;

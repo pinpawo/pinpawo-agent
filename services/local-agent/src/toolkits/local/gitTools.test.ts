@@ -561,7 +561,7 @@ test('project-inspection Toolkit exposes only read-only project evidence tools',
   const names = toolkit.tools.map(({ tool }) => tool.name);
 
   assert.equal(toolkit.name, 'project-inspection');
-  assert.equal(names.includes('grep_search'), true);
+  assert.equal(names.includes('inspect_shell'), true);
   assert.equal(names.includes('git_diff'), true);
   assert.equal(names.includes('gh_issue_list'), true);
   assert.equal(names.includes('gh_issue_view'), true);

@@ -291,8 +291,8 @@ export class ProcessRegistry {
   /**
    * Terminate everything this registry knows about.
    *
-   * Called when the owning RS instance is disposed, so tearing down an
-   * in-process RS does not strand processes started through it.
+   * Called when the owning RS instance is disposed, so stopping the RS
+   * service does not strand processes started through it.
    */
   async stopAll(killGraceMs?: number) {
     const running = [...this.entries.values()]

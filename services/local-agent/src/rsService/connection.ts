@@ -31,6 +31,7 @@ export class RSServiceConnection {
   private readonly closeListeners = new Set<() => void>();
   private open = true;
   private pid = 0;
+  private build: string | null = null;
 
   private constructor(private readonly socket: Socket) {
     receiveFrames(socket, (message) => this.handleMessage(message));
@@ -79,6 +80,7 @@ export class RSServiceConnection {
         throw new RSServiceError('invalid_response', 'Invalid RS service handshake.');
       }
       connection.pid = hello.pid;
+      connection.build = typeof hello.build === 'string' ? hello.build : null;
       return connection;
     } catch (error) {
       socket.destroy();
@@ -90,6 +92,11 @@ export class RSServiceConnection {
 
   get servicePid(): number {
     return this.pid;
+  }
+
+  /** Identity of the code the service runs, when it reports one. */
+  get serviceBuild(): string | null {
+    return this.build;
   }
 
   get isOpen(): boolean {

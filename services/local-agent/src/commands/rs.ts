@@ -1,5 +1,6 @@
-import { connectRSService } from '../rsService/launcher';
+import { connectRSService, currentRSServiceBuild } from '../rsService/launcher';
 import { resolveRSServicePaths, type RSServicePaths } from '../rsService/paths';
+import type { RSServiceStatus } from '../rsService/server';
 import { SHELL_RS_CONTRACT } from '../toolkits/local/shellRS';
 import { SHELL_RS_MANAGEMENT } from '../toolkits/local/shellRSService';
 
@@ -14,6 +15,8 @@ import { SHELL_RS_MANAGEMENT } from '../toolkits/local/shellRSService';
 export type RSCommandOptions = Readonly<{
   session?: string;
   paths?: RSServicePaths;
+  /** Test seam: the build this CLI would start. */
+  hostBuild?: string;
   write?: (text: string) => void;
 }>;
 
@@ -41,7 +44,17 @@ export async function runRSCommand(
   }
   try {
     if (action === 'status') {
-      print({ running: true, endpoint: paths.endpoint, log: paths.log, ...await admin.admin('status') as object });
+      const status = await admin.admin('status') as RSServiceStatus;
+      const hostBuild = options.hostBuild ?? currentRSServiceBuild();
+      print({
+        running: true,
+        endpoint: paths.endpoint,
+        log: paths.log,
+        ...status,
+        // A service built from other code is replaced by the next Host start
+        // once it is idle; after `stop`, the next Host starts the current build.
+        upToDate: status.build === hostBuild,
+      });
       return;
     }
     if (action === 'processes') {

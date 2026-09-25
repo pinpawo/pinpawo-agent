@@ -41,6 +41,11 @@ export type PosixShellRSOptions = Readonly<{
   executor?: ProcessExecutor;
   /** Overridable so the unavailable-platform path can be tested anywhere. */
   platform?: NodeJS.Platform;
+  /**
+   * Directory of commands this RS provides (see `prepareShellCommandDir`),
+   * put first on every command's PATH so they win over the caller's.
+   */
+  commandDir?: string;
 }>;
 
 /**
@@ -51,9 +56,10 @@ export type PosixShellRSOptions = Readonly<{
  * session is the set of handles its Agent session has left running; it is
  * established lazily and never closed by the Host or the Agent.
  *
- * It lives in whichever process created it: normally the standalone RS
- * service (see `shellRSService.ts`), or a Host directly when it runs
- * in-process. `dispose` ends whatever it still holds when that owner stops.
+ * It runs in the standalone RS service (see `shellRSService.ts`); Hosts reach
+ * it through `ShellRSClient`. Tests may inject it into Toolkits directly as a
+ * stand-in. `dispose` ends whatever it still holds, including commands still
+ * inside their initial wait, when the service stops.
  */
 export class PosixShellRS implements ShellRS {
   readonly contract = SHELL_RS_CONTRACT;
@@ -61,12 +67,25 @@ export class PosixShellRS implements ShellRS {
 
   private readonly registry: ProcessRegistry;
   private readonly platform: NodeJS.Platform;
+  private readonly commandDir: string | null;
   private readonly sessions = new Set<string>();
   private disposed = false;
+  /** Aborted by `dispose` to end commands still inside their initial wait. */
+  private readonly shutdown = new AbortController();
+  /** `exec` calls that have not settled yet; `dispose` waits for them. */
+  private readonly inFlight = new Set<Promise<ShellExecResult>>();
 
   constructor(options: PosixShellRSOptions = {}) {
     this.registry = new ProcessRegistry(options.executor ?? posixProcessExecutor);
     this.platform = options.platform ?? process.platform;
+    this.commandDir = options.commandDir ?? null;
+  }
+
+  /** The request's environment with this RS's command directory first on PATH. */
+  private commandEnv(env: ShellExecRequest['env']): Readonly<Record<string, string>> | undefined {
+    if (!this.commandDir) return env;
+    const path = env?.PATH ?? process.env.PATH;
+    return { ...env, PATH: path ? `${this.commandDir}:${path}` : this.commandDir };
   }
 
   status(): ToolkitAvailability {
@@ -92,16 +111,32 @@ export class PosixShellRS implements ShellRS {
 
   async exec(agentSessionId: string, request: ShellExecRequest): Promise<ShellExecResult> {
     this.ensureSession(agentSessionId);
+    const running = this.runExec(agentSessionId, request);
+    this.inFlight.add(running);
+    try {
+      return await running;
+    } finally {
+      this.inFlight.delete(running);
+    }
+  }
+
+  private async runExec(agentSessionId: string, request: ShellExecRequest): Promise<ShellExecResult> {
+    // A command inside its initial wait is not in the registry yet, so
+    // `dispose` reaches it through this signal instead.
+    const signal = request.signal
+      ? AbortSignal.any([request.signal, this.shutdown.signal])
+      : this.shutdown.signal;
     const command = 'shell' in request.command
       ? request.command.shell
       : { argv: request.command.argv };
+    const env = this.commandEnv(request.env);
     const outcome = await this.registry.processExecutor.run({
       command,
       cwd: request.cwd,
       timeoutMs: request.waitMs,
       maxOutputChars: request.maxOutputChars,
-      ...(request.env ? { env: request.env } : {}),
-      ...(request.signal ? { signal: request.signal } : {}),
+      ...(env ? { env } : {}),
+      signal,
       yieldOnTimeout: request.onTimeout === 'yield',
     });
 
@@ -195,16 +230,24 @@ export class PosixShellRS implements ShellRS {
   }
 
   /**
-   * End every process this instance holds. Owned by whoever created the
-   * instance (an in-process Host, or the RS service when it stops); it is not
-   * a session operation.
+   * End every process this instance holds. Owned by the RS service, which
+   * calls it when it stops (tests call it directly); it is not a session
+   * operation.
    */
   async dispose(): Promise<{ terminated: number }> {
-    const terminated = this.registry.listAll()
-      .filter((record) => record.status === 'running').length;
     this.disposed = true;
+    // End commands still inside their initial wait, and let every exec settle
+    // first: one that yields in the meantime is then already registered, so
+    // the sweep below cannot miss it.
+    this.shutdown.abort();
+    const settled = await Promise.allSettled([...this.inFlight]);
+    const abortedInWait = settled.filter((result) => (
+      result.status === 'fulfilled' && result.value.status === 'aborted'
+    )).length;
+    const running = this.registry.listAll()
+      .filter((record) => record.status === 'running').length;
     this.sessions.clear();
     await this.registry.stopAll();
-    return { terminated };
+    return { terminated: abortedInWait + running };
   }
 }

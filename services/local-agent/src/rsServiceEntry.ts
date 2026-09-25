@@ -6,10 +6,13 @@
  * is the composition root: it is the one place that names which RS contracts
  * the service provides.
  */
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rsServiceBuildId } from './rsService/launcher';
 import { resolveRSServicePaths } from './rsService/paths';
 import { serveRSService } from './rsService/serve';
+import { PosixShellRS } from './toolkits/local/posixShellRS';
+import { prepareShellCommandDir } from './toolkits/local/shellCommandDir';
 import { createShellRSServiceHandler } from './toolkits/local/shellRSService';
 
 function readRoot(argv: readonly string[]): string | undefined {
@@ -18,9 +21,12 @@ function readRoot(argv: readonly string[]): string | undefined {
 }
 
 try {
+  const paths = resolveRSServicePaths(readRoot(process.argv));
+  // Commands this RS provides ahead of the caller's PATH (the bundled rg).
+  const commandDir = await prepareShellCommandDir(resolve(paths.root, 'bin'));
   const result = await serveRSService({
-    paths: resolveRSServicePaths(readRoot(process.argv)),
-    createHandlers: () => [createShellRSServiceHandler()],
+    paths,
+    createHandlers: () => [createShellRSServiceHandler(new PosixShellRS({ commandDir }))],
     // Hosts compare this with the entry they would start to spot stale code.
     build: rsServiceBuildId(fileURLToPath(import.meta.url)),
   });

@@ -143,7 +143,7 @@ function truncateUtf8(value: string, maxBytes: number) {
 
 export function formatTextFileChunkFooter(result: TextFileChunkResult) {
   if (result.limitReason === 'line_too_long') {
-    return `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}; incomplete: line ${result.truncatedLine} cannot fit within ${result.maxBytes}-byte result limit; nextStartLine=unavailable because this tool cannot resume within a line; use grep_search to locate an anchor or a byte-range reader]`;
+    return `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}; incomplete: line ${result.truncatedLine} cannot fit within ${result.maxBytes}-byte result limit; nextStartLine=unavailable because this tool cannot resume within a line; use inspect_shell with rg -n to locate an anchor or a byte-range reader]`;
   }
 
   const continuation = result.hasMore

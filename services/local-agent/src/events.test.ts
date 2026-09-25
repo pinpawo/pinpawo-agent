@@ -235,7 +235,7 @@ test('createBashToolkit exposes operation metadata with the toolkit definition',
   const toolkit = createBashToolkit({ shell: new PosixShellRS() });
 
   assert.equal(definition(toolkit, 'read_file')?.operation?.title, '析文档');
-  assert.equal(definition(toolkit, 'grep_search')?.operation?.title, '搜内容');
+  assert.equal(definition(toolkit, 'inspect_shell')?.operation?.title, '只读命令');
   assert.equal(definition(toolkit, 'run_shell')?.operation?.title, '执行命令');
   assert.equal(definition(toolkit, 'git_status'), undefined);
 });

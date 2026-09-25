@@ -56,22 +56,6 @@ test('a bridge that fails to start makes only the BrowserRS unavailable', async 
   assert.equal((await toolkit.availability?.())?.available, false);
 });
 
-test('separate Hosts create independent BrowserRS instances sharing one bridge', async () => {
-  const bridge = isolatedBridge();
-  const browserA = new ChromeExtensionBrowserRS({ bridge });
-  const browserB = new ChromeExtensionBrowserRS({ bridge });
-  await browserA.start();
-  await browserB.start();
-  assert.equal(bridge.getStatus().listening, true);
-
-  await browserA.dispose();
-  // B still holds its lease on the shared transport.
-  assert.equal(bridge.getStatus().listening, true);
-  assert.equal(browserB.status().available, true);
-  await browserB.dispose();
-  assert.equal(bridge.getStatus().listening, false);
-});
-
 test('dispose during an in-flight start releases the bridge once the start settles', async () => {
   const lifecycle: string[] = [];
   let finishStart!: () => void;

@@ -15,7 +15,6 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import {
-  ChromeExtensionBrowserRS,
   createBrowserCapability,
   createBrowserToolkit,
 } from '@pinpawo-toolkit/browser';
@@ -46,6 +45,7 @@ import {
   createProjectInspectionToolkit,
   ShellRSClient,
 } from './toolkits/local';
+import { BrowserRSClient } from './toolkits/browserRSClient';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import {
   HostRSInstances,
@@ -66,9 +66,9 @@ export type HostCapabilityAssemblyOptions = {
   /** Chat loads the global user registry; per-Pet hosts may own stricter sources. */
   loadUserCapabilities?: boolean;
   /**
-   * Whether this Host creates a BrowserRS instance (and leases the global
-   * extension bridge). Chat keeps the user-selected default; a Studio must opt
-   * in explicitly instead of inheriting a Chat-only process resource.
+   * Whether this Host offers the Browser Toolkit (through its client of the
+   * RS service's BrowserRS). Chat keeps the user-selected default; a Studio
+   * must opt in explicitly.
    */
   includeBrowser?: boolean;
 };
@@ -143,8 +143,10 @@ export class HostCapabilityAssembly {
     // it through one client. Bash, Git and project-inspection share that
     // client, and so one logical session per Agent session across them.
     const shell = this.rsInstances.add('shell', new ShellRSClient());
+    // BrowserRS also runs only in the RS service, which holds the one
+    // extension bridge for every Host (#862).
     const browser = browserSelected
-      ? this.rsInstances.add('browser', new ChromeExtensionBrowserRS())
+      ? this.rsInstances.add('browser', new BrowserRSClient())
       : null;
     this.hostBuiltInToolkits = [
       this.rsInstances.assemble(createBashToolkit, { shell }),

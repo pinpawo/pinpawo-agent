@@ -41,6 +41,7 @@
     "tui:v2": "tsx src/index.ts tui",
     "test:live": "node --import tsx --test tests/live-agent.test.ts",
     "test:browser-extension-smoke": "node --import tsx scripts/browser-extension-target-lifecycle-smoke.ts",
+    "test:browser-rs-service-smoke": "node --import tsx scripts/browser-rs-service-smoke.ts",
     "test:tui-install": "npm run build -w @pinpawo/agent-contracts && npm run build -w @pinpawo/agent-session && npm run build -w @pinpawo/pet-agent && npm run build && node --import tsx/esm scripts/tui-v2-install-smoke.ts",
     "test:unit": "node --import tsx --test $(find src -name '*.test.ts' | sort)",
     "eval:hitl": "node --env-file=.env --import tsx/esm evals/hitl-resume.eval.ts",

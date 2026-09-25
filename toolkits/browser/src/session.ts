@@ -59,6 +59,11 @@ export class BrowserSession {
     this.createChromeExtensionSession = options.createChromeExtensionSession;
   }
 
+  /** Whether this session has a page open (opened and not closed since). */
+  get isOpen(): boolean {
+    return this.impl !== null;
+  }
+
   private ensureImpl(): ChromeExtensionBrowserSession {
     this.impl ??= this.createChromeExtensionSession();
     return this.impl;

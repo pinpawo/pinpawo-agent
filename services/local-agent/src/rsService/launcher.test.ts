@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { PosixShellRS } from '../toolkits/local/posixShellRS';
 import { SHELL_RS_CONTRACT, SHELL_RS_VERSION } from '../toolkits/local/shellRS';
@@ -31,8 +31,22 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000) {
   }
 }
 
+/**
+ * A spawned service starts the Browser extension bridge under its HOME. Point
+ * HOME at the test's directory so it never touches the user's real bridge.
+ */
+function isolateHome(t: TestContext, home: string) {
+  const previous = process.env.HOME;
+  process.env.HOME = home;
+  t.after(() => {
+    if (previous === undefined) delete process.env.HOME;
+    else process.env.HOME = previous;
+  });
+}
+
 test('concurrent launches settle on one service, which a management stop ends', { skip: isWindows }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'pp-rs-'));
+  isolateHome(t, root);
   const paths = resolveRSServicePaths(root);
   let servicePid = 0;
   const opened: RSServiceConnection[] = [];
@@ -65,7 +79,7 @@ test('concurrent launches settle on one service, which a management stop ends', 
   assert.ok(admin);
   const status = await admin.admin('status') as { pid: number; rs: Array<{ contract: string }> };
   assert.equal(status.pid, servicePid);
-  assert.deepEqual(status.rs.map(({ contract }) => contract), [SHELL_RS_CONTRACT]);
+  assert.deepEqual(status.rs.map(({ contract }) => contract), [SHELL_RS_CONTRACT, 'pinpawo.browser-rs']);
 
   await admin.admin('stop');
   await admin.close();
@@ -107,6 +121,7 @@ const sourceEntryArgs = [
 
 test('an idle service built from other code is replaced', { skip: isWindows }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'pp-rs-'));
+  isolateHome(t, root);
   const { paths, service } = await startStaleService(root, 'old-build');
   let replacement: RSServiceConnection | null = null;
   t.after(async () => {

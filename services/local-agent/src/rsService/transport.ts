@@ -12,10 +12,17 @@ import type { Socket } from 'node:net';
 export const RS_SERVICE_PROTOCOL_VERSION = 1;
 export const MAX_RS_MESSAGE_BYTES = 32 * 1024 * 1024;
 
+/**
+ * An error as it crosses the transport. `retryable` and `details` carry a
+ * contract's own structured error fields (Browser errors use them to tell the
+ * model whether and how to recover); the transport does not interpret them.
+ */
 export class RSServiceError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly retryable?: boolean,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'RSServiceError';
@@ -83,12 +90,30 @@ export function receiveFrames(
   });
 }
 
-export type WireError = Readonly<{ code: string; message: string }>;
+export type WireError = Readonly<{
+  code: string;
+  message: string;
+  retryable?: boolean;
+  details?: Record<string, unknown>;
+}>;
+
+function plainDetails(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  try {
+    // Only what survives JSON crosses; anything else is dropped, not guessed.
+    return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
 
 export function toWireError(error: unknown): WireError {
-  const code = (error as { code?: unknown } | null)?.code;
+  const record = (error ?? {}) as { code?: unknown; retryable?: unknown; details?: unknown };
+  const details = plainDetails(record.details);
   return {
-    code: typeof code === 'string' && code ? code : 'internal',
+    code: typeof record.code === 'string' && record.code ? record.code : 'internal',
     message: error instanceof Error ? error.message : String(error),
+    ...(typeof record.retryable === 'boolean' ? { retryable: record.retryable } : {}),
+    ...(details ? { details } : {}),
   };
 }

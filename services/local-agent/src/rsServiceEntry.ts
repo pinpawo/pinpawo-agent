@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { rsServiceBuildId } from './rsService/launcher';
 import { resolveRSServicePaths } from './rsService/paths';
 import { serveRSService } from './rsService/serve';
+import { ChromeExtensionBrowserRS } from '@pinpawo-toolkit/browser';
+import { createBrowserRSServiceHandler } from './toolkits/browserRSService';
 import { PosixShellRS } from './toolkits/local/posixShellRS';
 import { prepareShellCommandDir } from './toolkits/local/shellCommandDir';
 import { createShellRSServiceHandler } from './toolkits/local/shellRSService';
@@ -26,7 +28,19 @@ try {
   const commandDir = await prepareShellCommandDir(resolve(paths.root, 'bin'));
   const result = await serveRSService({
     paths,
-    createHandlers: () => [createShellRSServiceHandler(new PosixShellRS({ commandDir }))],
+    createHandlers: () => {
+      // The service holds the one extension bridge for every Host. Start it
+      // now so the native host can connect; a failure stays in its status and
+      // the next call retries.
+      const browser = new ChromeExtensionBrowserRS();
+      void browser.start().catch((error: unknown) => {
+        process.stderr.write(`[rs] browser bridge did not start: ${error instanceof Error ? error.message : String(error)}\n`);
+      });
+      return [
+        createShellRSServiceHandler(new PosixShellRS({ commandDir })),
+        createBrowserRSServiceHandler(browser),
+      ];
+    },
     // Hosts compare this with the entry they would start to spot stale code.
     build: rsServiceBuildId(fileURLToPath(import.meta.url)),
   });

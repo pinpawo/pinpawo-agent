@@ -7,15 +7,16 @@ existing Chrome session. For the project-level boundaries, start with
 
 The Chrome extension uses an existing Chrome installation and its login state. Protocol v3 supports `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_scroll`, `browser_wait`, `browser_extract`, `browser_screenshot` and `browser_close` (debugger detach). This is Browser's only execution path: there is no Playwright driver, backend selection, named session, custom profile or headless mode.
 
-Architecturally, the extension is a driver inside the Browser Toolkit Runtime,
-not a driver of the Browser Capability and not a top-level local-agent
-subsystem. Its Native Messaging host is a private companion process of that
-Runtime. Browser Toolkit Runtime owns the bridge, its live snapshot and the
-`BrowserSession`; the generic Toolkit runtime lifecycle starts that root with
-the local-agent Host, then resolves an execution-bound Browser tool facade for
-each Capability subagent. The Browser Capability only declares
-`uses: ['browser']`. No Browser-specific branch belongs in the generic Host or
-Agent lifecycle. See the accepted
+Architecturally, the extension is a driver inside BrowserRS
+(`ChromeExtensionBrowserRS`), not a driver of the Browser Capability and not a
+top-level local-agent subsystem. Its Native Messaging host is a private
+companion process of that RS. BrowserRS runs in the local RS service (#862),
+which owns the one bridge, its live snapshot and every Agent session's
+`BrowserSession`; Hosts reach it through `BrowserRSClient`, so several Hosts
+share one extension connection and a Browser session survives a Host restart.
+The Browser Capability only declares `uses: ['browser']`. No Browser-specific
+branch belongs in the generic Host or Agent lifecycle. See
+[Toolkit RS](../reference/extensions/toolkit-rs.md) and the accepted
 [domain constraints](../design/host-agent-capability-toolkit.md).
 
 ## Availability
@@ -25,7 +26,10 @@ Toolkit availability is structural and cached when the runtime registry is built
 ## Process boundary
 
 ```text
-local-agent Browser runtime / BrowserSession
+Host (Chat / Studio) ── BrowserRSClient
+        │ RS service socket + token (~/.pinpawo/rs/rs.sock)
+        ▼
+RS service: ChromeExtensionBrowserRS / BrowserSession per Agent session
         │ versioned JSONL + per-run token
         ▼
 Unix socket (~/.pinpawo/run/browser-bridge.sock)
@@ -37,7 +41,7 @@ independent Native Messaging host (stdio framing only)
 MV3 service worker ── chrome.debugger / allowlisted CDP ── one Chrome tab
 ```
 
-The local-agent owns commands, deadlines, authorization context and final payload normalization. The native host only translates Chrome's length-prefixed messages to authenticated Unix-socket JSONL. The extension owns tab binding and the narrow CDP execution allowlist.
+The RS service owns commands, deadlines and final payload normalization; the Host keeps review and origin approval. The native host only translates Chrome's length-prefixed messages to authenticated Unix-socket JSONL. The extension owns tab binding and the narrow CDP execution allowlist.
 
 Only one native-host/extension connection is active. Once an extension is active, additional native-host connections are rejected until it disconnects; this prevents an unpacked development extension and the Web Store extension from displacing each other. A service-worker reconnection for the active extension replaces its old `connectionId` and rejects its pending requests; commands are never replayed across a connection change. Both the extension and Native Host use bounded exponential reconnect backoff with jitter, resetting only after a stable connection; extension diagnostics preserve Chrome's disconnect reason when available. If the local-agent bridge restarts while the native host remains alive, the host drops results and lifecycle events from the disconnected bridge epoch and replays only the latest extension registration so the new bridge can recover safely. Current registrations carry a complete target/debugger state snapshot with a connection-scoped monotonic revision; the bridge ignores duplicate or older revisions. Registrations without that snapshot remain readable for compatibility with an older installed extension.
 
@@ -79,7 +83,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Each navigation carries an origin already authorized by the local-agent review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
 - CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
-- The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the local-agent stops.
+- The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the RS service stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
 - Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.
 
@@ -87,16 +91,24 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 
 ```bash
 npm run build
-npm run test:browser-extension-smoke -w pinpawo
+npm run test:browser-rs-service-smoke -w pinpawo
 ```
+
+`test:browser-rs-service-smoke` drives the scenario the way a Host does: through
+`BrowserRSClient` and the RS service (started if none runs, and left running).
+Its last phase restarts the "Host" — a new client continues the same Agent
+session on the page opened before. `test:browser-extension-smoke` runs the same
+scenario straight against the bridge, and its last phase restarts the bridge to
+verify re-authentication; the RS service normally holds the bridge socket, so
+run `pinpawo rs stop` first.
 
 The smoke test uses a loopback-only fixture: delayed SPA-style content,
 long-content extraction in consecutive chunks, opaque-ref form type/click, scrolling,
 and parent page → popup → parent fallback. It requires the unpacked extension and
 registered Native Host in the user’s Chrome. It also verifies the cross-origin popup safety path:
 the dispatched click reports manual takeover without exposing its URL path, then the
-fixture closes the popup so the agent can recover the original page, and restarts the
-local bridge to verify re-authentication and target recovery. It is the baseline
+fixture closes the popup so the agent can recover the original page, and then proves one
+recovery (a Host restart through the service, or a bridge restart). It is the baseline
 regression set, not evidence that iframe, dialogs, file transfer, or shadow-DOM support
 is complete.
 
@@ -120,9 +132,9 @@ Then:
    pinpawo browser extension register --extension-id <id>
    ```
 
-5. Restart the agent.
+5. Reload the extension. The RS service keeps the bridge listening, so no agent restart is needed.
 
-Inspect host registration and bridge runtime-file diagnostics with:
+Inspect host registration and the RS service's bridge state with:
 
 ```bash
 pinpawo browser extension status
@@ -130,8 +142,9 @@ pinpawo browser extension status
 
 The `host.healthy` field verifies the Native Messaging wrapper is executable, its
 entry exists, and at least one installed manifest points at that wrapper with an
-allowed extension ID. If `host.repairRecommended` is true, repair the registration
-and restart the local agent:
+allowed extension ID. The `service` field reports whether the RS service runs and,
+for BrowserRS, the extension state and whether it is command-ready. If
+`host.repairRecommended` is true, repair the registration and reload the extension:
 
 ```bash
 pinpawo browser extension repair

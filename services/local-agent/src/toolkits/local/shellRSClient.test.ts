@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { RSServiceConnection } from '../../rsService/connection';
+import type { RSContractClient } from '../../rsService/contractClient';
 import { ensureToken, resolveRSServicePaths } from '../../rsService/paths';
 import { startRSService } from '../../rsService/server';
 import { createBashToolkit } from './index';
@@ -146,7 +147,7 @@ test('a lost connection reports an unknown result and keeps the started command'
   });
   // Drop this Host's connection while the command is running.
   setTimeout(() => {
-    void (shell as unknown as { connection: RSServiceConnection }).connection.close();
+    void (shell as unknown as { transport: RSContractClient }).transport.currentConnection!.close();
   }, 50);
   await assert.rejects(
     pending,

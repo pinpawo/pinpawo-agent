@@ -1,4 +1,5 @@
 import {
+  BROWSER_RS_CONTRACT,
   DEFAULT_BROWSER_BRIDGE_SOCKET_PATH,
   DEFAULT_BROWSER_BRIDGE_TOKEN_PATH,
   getBrowserExtensionHostStatus,
@@ -7,10 +8,25 @@ import {
   unregisterBrowserExtensionHost,
 } from '@pinpawo-toolkit/browser';
 import { existsSync } from 'node:fs';
+import { connectRSService } from '../rsService/launcher';
+import { resolveRSServicePaths, type RSServicePaths } from '../rsService/paths';
+import type { RSServiceStatus } from '../rsService/server';
 
 export type BrowserCommandOptions = {
   extensionId?: string;
 };
+
+async function readBrowserServiceStatus(paths: RSServicePaths = resolveRSServicePaths()) {
+  const admin = await connectRSService({ paths });
+  if (!admin) return { running: false };
+  try {
+    const status = await admin.admin('status') as RSServiceStatus;
+    const browser = status.rs.find(({ contract }) => contract === BROWSER_RS_CONTRACT);
+    return { running: true, pid: status.pid, browser: browser?.details ?? null };
+  } finally {
+    await admin.close();
+  }
+}
 
 export async function runBrowserCommand(
   target: string,
@@ -48,10 +64,12 @@ export async function runBrowserCommand(
   if (action === 'status') {
     process.stdout.write(JSON.stringify({
       host: await getBrowserExtensionHostStatus(),
+      // The bridge lives in the RS service (#862); ask it rather than infer
+      // from files. Management never starts the service.
+      service: await readBrowserServiceStatus(),
       runtimeFiles: {
         socketPresent: existsSync(DEFAULT_BROWSER_BRIDGE_SOCKET_PATH),
         tokenPresent: existsSync(DEFAULT_BROWSER_BRIDGE_TOKEN_PATH),
-        note: 'These files only show whether a running local-agent has created its bridge runtime; they do not prove that an extension is connected.',
       },
     }, null, 2) + '\n');
     return;

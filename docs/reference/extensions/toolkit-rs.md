@@ -15,7 +15,10 @@
   [`posixShellRS.ts`](../../../services/local-agent/src/toolkits/local/posixShellRS.ts)。
 - BrowserRS 契约与 Chrome Extension 实现：
   [`toolkits/browser/src/browserRS.ts`](../../../toolkits/browser/src/browserRS.ts)、
-  [`chromeExtensionBrowserRS.ts`](../../../toolkits/browser/src/chromeExtensionBrowserRS.ts)。
+  [`chromeExtensionBrowserRS.ts`](../../../toolkits/browser/src/chromeExtensionBrowserRS.ts)；
+  服务端 [`browserRSService.ts`](../../../services/local-agent/src/toolkits/browserRSService.ts)、
+  Host 端连接 [`browserRSClient.ts`](../../../services/local-agent/src/toolkits/browserRSClient.ts)。
+- Host 端连接的公共部分：[`rsService/contractClient.ts`](../../../services/local-agent/src/rsService/contractClient.ts)。
 - ShellRS 独立服务：服务框架
   [`services/local-agent/src/rsService/`](../../../services/local-agent/src/rsService/)、
   服务端 [`shellRSService.ts`](../../../services/local-agent/src/toolkits/local/shellRSService.ts)、
@@ -26,8 +29,8 @@
 
 ## 概念
 
-RS 是持有实际执行环境和交互状态的实例。ShellRS 只在本机独立服务中运行（#853），
-Host 经 `ShellRSClient` 访问它；BrowserRS 暂时仍在 Host 进程内，服务化是后续阶段。
+RS 是持有实际执行环境和交互状态的实例。ShellRS（#853）和 BrowserRS（#862）都只在
+本机独立服务中运行，Host 分别经 `ShellRSClient`、`BrowserRSClient` 访问。
 
 RS 只有"实现"一个维度（POSIX，以后的 Windows……），没有"部署"维度：Host 端的
 client 是传输，不是另一种 RS。每个 RS 只有一种生产部署方式，所以同一契约的 session
@@ -175,3 +178,22 @@ Host（Chat / Studio）── ShellRSClient ── 本机 socket + token ──>
 - RS 自己维护 extension bridge、target/ref 与 CDP 状态。bridge 启动失败只使 Browser
   Toolkit 不可用，下一次调用会重试启动。
 - 标签分组、跨 origin 审核之外的归属校验等留待后续阶段。
+
+### 独立服务部署（#862）
+
+- BrowserRS 运行在 RS 服务里，和 ShellRS 同一个服务。服务启动时由
+  `ChromeExtensionBrowserRS` 持有唯一的 extension bridge，监听
+  `~/.pinpawo/run/browser-bridge.sock`；Native Host 和 extension 不变。多个 Host
+  共用这一个 extension 连接，不再各自监听或互相抢连接。
+- Agent session 到 extension browser context 的映射在服务里，服务存活期间保持稳定：
+  Host 重启后用同一个 Agent session 继续操作原来的页面。extension 只看到不透明的
+  context id。服务停止时关闭所有 Browser session。
+- Host 注入 `BrowserRSClient`：转发 `{ agentSessionId, workdir }` 与参数，`signal`
+  映射为传输层取消。审核与 origin 批准仍在 Host 的工具层。
+- 错误跨进程保留 `code` / `retryable` / `details`，Browser Tools 给模型的结构化错误
+  与进程内一致。服务不可达返回 `runtime_disconnected`（retryable）；调用中途断连返回
+  `result_unknown`（不重放，先重新 snapshot）。
+- 有打开页面的 session 算"忙"：服务跑的是别的构建时，只要还有这样的 session 就不会
+  被自动替换。
+- 诊断：`pinpawo rs status` 的 BrowserRS 详情（extension 状态、`commandReady`、
+  session 数），`pinpawo browser extension status` 的 `service` 字段。

@@ -17,45 +17,23 @@ function call(
   };
 }
 
-/** Fake bridges accept the transport lease the RS takes before its first call. */
+/** Fake bridges accept the start the RS makes before its first call. */
 const lease = {
   async start() {},
   async stop() {},
 };
 
-test('independent BrowserRS instances lease one process extension bridge', async () => {
+test('the BrowserRS owns its bridge: start listens, dispose stops it', async () => {
   const lifecycle: string[] = [];
   const bridge = {
     async start() { lifecycle.push('start'); },
     async stop() { lifecycle.push('stop'); },
-    getStatus() {
-      return {
-        listening: lifecycle.includes('start') && !lifecycle.includes('stop'),
-        hostConnected: false,
-        extensionConnected: false,
-        debuggerAttached: false,
-        targetAlive: false,
-        connectionId: null,
-        extensionId: null,
-        activeTabId: null,
-        activeTabBinding: null,
-        userBoundOrigin: null,
-        stateRevision: null,
-        capabilities: [],
-        socketPath: '/tmp/browser.sock',
-      } satisfies BrowserBridgeStatus;
-    },
   } as unknown as BrowserExtensionBridge;
-  const runtimeA = new ChromeExtensionBrowserRS({ bridge });
-  const runtimeB = new ChromeExtensionBrowserRS({ bridge });
+  const runtime = new ChromeExtensionBrowserRS({ bridge });
 
-  await Promise.all([runtimeA.start(), runtimeB.start()]);
+  await Promise.all([runtime.start(), runtime.start()]);
   assert.deepEqual(lifecycle, ['start']);
-
-  await runtimeA.dispose();
-  assert.deepEqual(lifecycle, ['start']);
-
-  await runtimeB.dispose();
+  await runtime.dispose();
   assert.deepEqual(lifecycle, ['start', 'stop']);
 });
 

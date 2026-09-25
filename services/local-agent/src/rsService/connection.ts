@@ -174,6 +174,10 @@ export class RSServiceConnection {
     request.reject(new RSServiceError(
       typeof error.code === 'string' ? error.code : 'invalid_response',
       typeof error.message === 'string' ? error.message : 'Malformed RS service error response.',
+      typeof error.retryable === 'boolean' ? error.retryable : undefined,
+      error.details && typeof error.details === 'object' && !Array.isArray(error.details)
+        ? error.details as Record<string, unknown>
+        : undefined,
     ));
   }
 }

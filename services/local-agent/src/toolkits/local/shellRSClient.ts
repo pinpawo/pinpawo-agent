@@ -1,8 +1,7 @@
 import type { ToolkitAvailability } from '@pinpawo/pet-agent';
 import type { RSServiceConnection } from '../../rsService/connection';
-import { ensureRSService } from '../../rsService/launcher';
-import { resolveRSServicePaths, type RSServicePaths } from '../../rsService/paths';
-import { RSServiceError } from '../../rsService/transport';
+import { type RSCallFailure, RSContractClient } from '../../rsService/contractClient';
+import type { RSServicePaths } from '../../rsService/paths';
 import {
   SHELL_RS_CONTRACT,
   SHELL_RS_VERSION,
@@ -28,13 +27,6 @@ type WireSpawnFailed = Readonly<{
   status: 'spawn_failed';
   error: Readonly<{ message: string; code?: string }>;
 }>;
-
-/** Minimum gap between reconnect attempts made by `status()`. */
-const STATUS_RECONNECT_INTERVAL_MS = 3_000;
-
-function describeError(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** The calling Host's environment, which its commands run in. */
 function hostEnvironment(): Record<string, string> {
@@ -67,64 +59,57 @@ const WINDOWS_UNAVAILABLE = 'ShellRS has no Windows implementation yet; shell to
  * sessions and their processes running, and a later Host using the same Agent
  * session reaches them again.
  */
+function toShellRSError(failure: RSCallFailure): Error {
+  if (failure.kind === 'unavailable') return new ShellRSError('unavailable', failure.message);
+  if (failure.kind === 'result_unknown') {
+    return new ShellRSError(
+      'result_unknown',
+      'Lost the ShellRS service while this operation was running; its result is unknown and it was not retried.'
+      + ' A command that started stays in this session: list its processes to find it.',
+    );
+  }
+  const { error } = failure;
+  return SHELL_RS_ERROR_CODES.has(error.code)
+    ? new ShellRSError(error.code as ShellRSErrorCode, error.message)
+    : error;
+}
+
 export class ShellRSClient implements ShellRS {
   readonly contract = SHELL_RS_CONTRACT;
   readonly version = SHELL_RS_VERSION;
 
-  private readonly connectToService: () => Promise<RSServiceConnection>;
-  private connection: RSServiceConnection | null = null;
-  private connecting: Promise<RSServiceConnection> | null = null;
-  private lastError: string | null = null;
-  private lastStatusAttemptAt = 0;
-  private disposed = false;
+  private readonly transport: RSContractClient;
 
   constructor(options: ShellRSClientOptions = {}) {
     const platform = options.platform ?? process.platform;
-    this.connectToService = options.connect ?? (async () => {
+    this.transport = new RSContractClient({
+      rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
+      label: 'ShellRS',
+      ...(options.paths ? { paths: options.paths } : {}),
+      ...(options.connect ? { connect: options.connect } : {}),
       // The service has no Windows implementation (or endpoint) to start.
-      if (platform === 'win32') throw new ShellRSError('unavailable', WINDOWS_UNAVAILABLE);
-      return await ensureRSService({
-        paths: options.paths ?? resolveRSServicePaths(),
-        rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
-      });
+      ...(platform === 'win32' ? { unsupportedReason: WINDOWS_UNAVAILABLE } : {}),
+      toError: toShellRSError,
     });
   }
 
   /** Host startup: reach the service now so failures surface as status. */
   async start(): Promise<void> {
-    await this.connect();
+    await this.transport.start();
   }
 
   async status(): Promise<ToolkitAvailability> {
-    if (this.disposed) {
-      return { available: false, reason: 'ShellRS client has been disposed.' };
-    }
-    if (!this.connection?.isOpen) {
-      if (Date.now() - this.lastStatusAttemptAt < STATUS_RECONNECT_INTERVAL_MS) {
-        return this.unavailable();
-      }
-      this.lastStatusAttemptAt = Date.now();
-      try {
-        await this.connect();
-      } catch {
-        return this.unavailable();
-      }
-    }
-    try {
-      return await this.call('status', null) as ToolkitAvailability;
-    } catch (error) {
-      return { available: false, reason: describeError(error) };
-    }
+    return await this.transport.status();
   }
 
   async ensureSession(agentSessionId: string): Promise<void> {
-    await this.call('ensureSession', { agentSessionId });
+    await this.transport.call('ensureSession', { agentSessionId });
   }
 
   async exec(agentSessionId: string, request: ShellExecRequest): Promise<ShellExecResult> {
     const { signal, ...rest } = request;
     if (signal?.aborted) return { status: 'aborted', stdout: '', stderr: '' };
-    const result = await this.call(
+    const result = await this.transport.call(
       'exec',
       { agentSessionId, request: { ...rest, baseEnv: hostEnvironment() } },
       signal,
@@ -138,19 +123,19 @@ export class ShellRSClient implements ShellRS {
   }
 
   async wait(agentSessionId: string, processId: string, timeoutMs: number): Promise<ShellProcessOutput> {
-    return await this.call('wait', { agentSessionId, processId, timeoutMs }) as ShellProcessOutput;
+    return await this.transport.call('wait', { agentSessionId, processId, timeoutMs }) as ShellProcessOutput;
   }
 
   async read(agentSessionId: string, processId: string): Promise<ShellProcessOutput> {
-    return await this.call('read', { agentSessionId, processId }) as ShellProcessOutput;
+    return await this.transport.call('read', { agentSessionId, processId }) as ShellProcessOutput;
   }
 
   async terminate(agentSessionId: string, processId: string): Promise<ShellProcessSnapshot> {
-    return await this.call('terminate', { agentSessionId, processId }) as ShellProcessSnapshot;
+    return await this.transport.call('terminate', { agentSessionId, processId }) as ShellProcessSnapshot;
   }
 
   async list(agentSessionId: string): Promise<readonly ShellProcessSnapshot[]> {
-    return await this.call('list', { agentSessionId }) as readonly ShellProcessSnapshot[];
+    return await this.transport.call('list', { agentSessionId }) as readonly ShellProcessSnapshot[];
   }
 
   /**
@@ -158,68 +143,6 @@ export class ShellRSClient implements ShellRS {
    * processes keep running; stopping them is the service's own management.
    */
   async dispose(): Promise<void> {
-    this.disposed = true;
-    const connection = this.connection;
-    this.connection = null;
-    await connection?.close();
-  }
-
-  private unavailable(): ToolkitAvailability {
-    return {
-      available: false,
-      reason: `ShellRS service is unavailable${this.lastError ? `: ${this.lastError}` : '.'}`,
-    };
-  }
-
-  private async connect(): Promise<RSServiceConnection> {
-    if (this.disposed) throw new ShellRSError('unavailable', 'ShellRS client has been disposed.');
-    if (this.connection?.isOpen) return this.connection;
-    this.connecting ??= (async () => {
-      try {
-        const connection = await this.connectToService();
-        if (this.disposed) {
-          await connection.close();
-          throw new ShellRSError('unavailable', 'ShellRS client has been disposed.');
-        }
-        this.connection = connection;
-        this.lastError = null;
-        connection.onClose(() => {
-          if (this.connection === connection) this.connection = null;
-        });
-        return connection;
-      } catch (error) {
-        this.lastError = describeError(error);
-        throw error;
-      } finally {
-        this.connecting = null;
-      }
-    })();
-    return await this.connecting;
-  }
-
-  private async call(method: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
-    let connection: RSServiceConnection;
-    try {
-      connection = await this.connect();
-    } catch (error) {
-      if (error instanceof ShellRSError) throw error;
-      throw new ShellRSError('unavailable', `ShellRS service is unavailable: ${describeError(error)}`);
-    }
-    try {
-      return await connection.call(method, args, signal);
-    } catch (error) {
-      if (!(error instanceof RSServiceError)) throw error;
-      if (error.code === 'connection_lost') {
-        throw new ShellRSError(
-          'result_unknown',
-          'Lost the ShellRS service while this operation was running; its result is unknown and it was not retried.'
-          + ' A command that started stays in this session: list its processes to find it.',
-        );
-      }
-      if (SHELL_RS_ERROR_CODES.has(error.code)) {
-        throw new ShellRSError(error.code as ShellRSErrorCode, error.message);
-      }
-      throw error;
-    }
+    await this.transport.dispose();
   }
 }

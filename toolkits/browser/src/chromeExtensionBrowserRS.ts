@@ -95,67 +95,6 @@ function describeBrowserExtensionStatus(
   return 'browser extension bridge is not running';
 }
 
-/**
- * BrowserRS instances are isolated per Host, while the native-host bridge is
- * one process transport bound to a fixed socket. This coordinator lets
- * independent instances lease that transport without making either instance
- * own another instance's lifecycle.
- *
- * This is a Browser provider detail, not a Host or framework concern.
- */
-class BrowserExtensionBridgeCoordinator {
-  readonly bridge: BrowserExtensionBridge;
-  private activeLeases = 0;
-  private lifecycleTail: Promise<void> = Promise.resolve();
-
-  constructor(bridge: BrowserExtensionBridge = new BrowserExtensionBridge()) {
-    this.bridge = bridge;
-  }
-
-  acquire(): Promise<void> {
-    return this.queueLifecycle(async () => {
-      if (this.activeLeases === 0) {
-        await this.bridge.start();
-      }
-      this.activeLeases += 1;
-    });
-  }
-
-  release(): Promise<void> {
-    return this.queueLifecycle(async () => {
-      if (this.activeLeases === 0) return;
-      this.activeLeases -= 1;
-      if (this.activeLeases === 0) {
-        await this.bridge.stop();
-      }
-    });
-  }
-
-  private queueLifecycle(operation: () => Promise<void>): Promise<void> {
-    const queued = this.lifecycleTail.then(operation, operation);
-    this.lifecycleTail = queued.then(
-      () => undefined,
-      () => undefined,
-    );
-    return queued;
-  }
-}
-
-const bridgeCoordinators = new WeakMap<
-  BrowserExtensionBridge,
-  BrowserExtensionBridgeCoordinator
->();
-
-function coordinatorForBridge(
-  bridge: BrowserExtensionBridge,
-): BrowserExtensionBridgeCoordinator {
-  const existing = bridgeCoordinators.get(bridge);
-  if (existing) return existing;
-  const coordinator = new BrowserExtensionBridgeCoordinator(bridge);
-  bridgeCoordinators.set(bridge, coordinator);
-  return coordinator;
-}
-
 export function projectBrowserRuntimeSnapshot(
   status: BrowserBridgeStatus,
   readiness: BrowserReadinessSnapshot | null = null,
@@ -193,9 +132,12 @@ function describeError(error: unknown) {
  *
  * Each Agent session gets one logical session: an isolated browser context in
  * the extension with its own explicitly bound tabs. Logical sessions are
- * established on first use and are never closed by the Host or the Agent; the
- * in-process instance does not outlive its Host process, whose `dispose`
- * shuts the sessions and releases the bridge.
+ * established on first use and are never closed by the Host or the Agent.
+ *
+ * It runs in the RS service (#862), which holds the one extension bridge for
+ * every Host; Hosts reach it through `BrowserRSClient`. The instance owns its
+ * bridge outright: `start` listens, `dispose` shuts the sessions and stops it.
+ * Tests may use it directly as a stand-in.
  */
 export class ChromeExtensionBrowserRS implements BrowserRS {
   readonly contract = BROWSER_RS_CONTRACT;
@@ -208,11 +150,9 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
   /** One logical session per Agent session. */
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly bridge: BrowserExtensionBridge;
-  private readonly bridgeCoordinator: BrowserExtensionBridgeCoordinator;
 
   constructor(dependencies: ChromeExtensionBrowserRSDependencies = {}) {
     this.bridge = dependencies.bridge ?? new BrowserExtensionBridge();
-    this.bridgeCoordinator = coordinatorForBridge(this.bridge);
   }
 
   /**
@@ -360,16 +300,16 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
   }
 
   /**
-   * Lease the bridge transport. Idempotent; a failure is recorded as this
-   * instance's status instead of failing whoever started it, and the next
-   * call retries.
+   * Start listening for the native host. Idempotent; a failure is recorded as
+   * this instance's status instead of failing whoever started it, and the
+   * next call retries.
    */
   async start(): Promise<void> {
     if (this.started) return;
     if (this.disposed) throw new Error('Browser RS instance has been disposed.');
     this.startPromise ??= (async () => {
       try {
-        await this.bridgeCoordinator.acquire();
+        await this.bridge.start();
         this.started = true;
         this.startError = null;
       } catch (error) {
@@ -383,14 +323,14 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
   }
 
   /**
-   * Shut every logical session and release the bridge. Owned by whoever
-   * created this in-process instance (the Host); not a session operation.
+   * Shut every logical session and stop the bridge. Owned by the RS service,
+   * which calls it when it stops; not a session operation.
    */
   async dispose(): Promise<void> {
     this.disposed = true;
     // A start still in flight would otherwise complete after this check and
-    // leave a disposed instance holding a bridge lease. Let it settle first;
-    // if it succeeded, the lease is released below.
+    // leave a disposed instance holding a listening bridge. Let it settle
+    // first; if it succeeded, the bridge is stopped below.
     const pendingStart = this.startPromise;
     if (pendingStart) await pendingStart.catch(() => undefined);
     try {
@@ -401,12 +341,21 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
     } finally {
       if (this.started) {
         try {
-          await this.bridgeCoordinator.release();
+          await this.bridge.stop();
         } finally {
           this.started = false;
         }
       }
     }
+  }
+
+  /** Logical sessions that currently have a page open in the extension. */
+  get openSessionCount(): number {
+    return [...this.sessions.values()].filter((session) => session.isOpen).length;
+  }
+
+  get sessionCount(): number {
+    return this.sessions.size;
   }
 
   getSnapshot(): BrowserRuntimeSnapshot {

@@ -11,7 +11,13 @@ export {
   type BrowserRS,
   type BrowserRSCallContext,
 } from './browserRS';
-export { BrowserSession } from './session';
+export {
+  BrowserSession,
+  type BrowserElementTarget,
+  type BrowserExtractOptions,
+  type BrowserScrollOptions,
+  type BrowserWaitState,
+} from './session';
 export * from './lifecycle';
 export { ChromeExtensionBrowserSession } from './drivers/chromeExtension/session';
 export { createBrowserTools } from './tools';

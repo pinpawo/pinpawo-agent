@@ -6,6 +6,8 @@
  * is the composition root: it is the one place that names which RS contracts
  * the service provides.
  */
+import { fileURLToPath } from 'node:url';
+import { rsServiceBuildId } from './rsService/launcher';
 import { resolveRSServicePaths } from './rsService/paths';
 import { serveRSService } from './rsService/serve';
 import { createShellRSServiceHandler } from './toolkits/local/shellRSService';
@@ -19,6 +21,8 @@ try {
   const result = await serveRSService({
     paths: resolveRSServicePaths(readRoot(process.argv)),
     createHandlers: () => [createShellRSServiceHandler()],
+    // Hosts compare this with the entry they would start to spot stale code.
+    build: rsServiceBuildId(fileURLToPath(import.meta.url)),
   });
   if (result.status === 'already_running') {
     process.stderr.write('[rs] another RS service already owns the endpoint; exiting.\n');

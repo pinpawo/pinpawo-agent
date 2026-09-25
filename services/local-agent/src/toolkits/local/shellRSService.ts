@@ -149,6 +149,9 @@ export function createShellRSServiceHandler(
         running: processes.filter((process) => process.status === 'running').length,
       };
     },
+    busy() {
+      return rs.listAllProcesses().some((process) => process.status === 'running');
+    },
     async dispose() {
       return await rs.dispose();
     },

@@ -25,6 +25,8 @@ export type RSServiceHandler = Readonly<{
   manage?(action: string, args: unknown): Promise<unknown>;
   /** Contract-specific status details for `status`. */
   describe?(): Promise<Record<string, unknown>> | Record<string, unknown>;
+  /** Whether stopping the service now would end work this handler holds. */
+  busy?(): Promise<boolean> | boolean;
   /** End everything this handler holds; returns a report of what was cleaned up. */
   dispose(): Promise<Record<string, unknown>>;
 }>;
@@ -38,6 +40,10 @@ export type RSServiceStatus = Readonly<{
   pid: number;
   startedAt: number;
   protocol: number;
+  /** Identity of the code this service runs; see `rsServiceBuildId`. */
+  build: string | null;
+  /** Whether stopping it now would end work: running processes or unanswered calls. */
+  busy: boolean;
   rs: readonly Readonly<{ contract: string; version: number; details: Record<string, unknown> }>[];
 }>;
 
@@ -79,6 +85,7 @@ export async function startRSService(options: Readonly<{
   endpoint: string;
   token: string;
   handlers: readonly RSServiceHandler[];
+  build?: string;
   log?: (message: string) => void;
 }>): Promise<RunningRSService> {
   const log = options.log ?? ((message: string) => process.stderr.write(`[rs] ${message}\n`));
@@ -90,17 +97,29 @@ export async function startRSService(options: Readonly<{
     handlers.set(handler.contract, handler);
   }
   const startedAt = Date.now();
+  const build = options.build ?? null;
   const sockets = new Set<Socket>();
+  let activeCalls = 0;
   let stopping: Promise<RSServiceStopReport> | null = null;
   let resolveStopped!: (report: RSServiceStopReport) => void;
   const stopped = new Promise<RSServiceStopReport>((resolvePromise) => {
     resolveStopped = resolvePromise;
   });
 
+  const busy = async (): Promise<boolean> => {
+    if (activeCalls > 0) return true;
+    const handlerBusy = await Promise.all([...handlers.values()].map(async (handler) => (
+      (await handler.busy?.()) ?? false
+    )));
+    return handlerBusy.some(Boolean);
+  };
+
   const status = async (): Promise<RSServiceStatus> => ({
     pid: process.pid,
     startedAt,
     protocol: RS_SERVICE_PROTOCOL_VERSION,
+    build,
+    busy: await busy(),
     rs: await Promise.all([...handlers.values()].map(async (handler) => ({
       contract: handler.contract,
       version: handler.version,
@@ -162,7 +181,7 @@ export async function startRSService(options: Readonly<{
         }
         if (message.rs === undefined) {
           state = { kind: 'admin' };
-          reply(id, { ok: true, value: { pid: process.pid } });
+          reply(id, { ok: true, value: { pid: process.pid, build } });
           return;
         }
         let requested: Record<string, unknown>;
@@ -198,7 +217,7 @@ export async function startRSService(options: Readonly<{
           return;
         }
         state = { kind: 'rs', handler };
-        reply(id, { ok: true, value: { pid: process.pid } });
+        reply(id, { ok: true, value: { pid: process.pid, build } });
         return;
       }
 
@@ -220,6 +239,7 @@ export async function startRSService(options: Readonly<{
         const { handler } = state;
         const controller = new AbortController();
         inFlight.set(id, controller);
+        activeCalls += 1;
         void (async () => {
           try {
             const value = await handler.call(
@@ -232,6 +252,7 @@ export async function startRSService(options: Readonly<{
             reply(id, { ok: false, error });
           } finally {
             inFlight.delete(id);
+            activeCalls -= 1;
           }
         })();
         return;

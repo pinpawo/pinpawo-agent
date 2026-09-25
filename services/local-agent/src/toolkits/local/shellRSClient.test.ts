@@ -8,7 +8,7 @@ import { ensureToken, resolveRSServicePaths } from '../../rsService/paths';
 import { startRSService } from '../../rsService/server';
 import { createBashToolkit } from './index';
 import { PosixShellRS } from './posixShellRS';
-import { RemoteShellRS } from './remoteShellRS';
+import { ShellRSClient } from './shellRSClient';
 import { SHELL_RS_CONTRACT, SHELL_RS_VERSION, ShellRSError } from './shellRS';
 import { SHELL_RS_MANAGEMENT, createShellRSServiceHandler } from './shellRSService';
 
@@ -37,7 +37,7 @@ async function setup(t: TestContext) {
   });
   // A "Host": its own client of the shared service.
   const host = () => {
-    const rs = new RemoteShellRS({
+    const rs = new ShellRSClient({
       connect: async () => await RSServiceConnection.open({
         paths,
         token,
@@ -55,7 +55,7 @@ async function setup(t: TestContext) {
   return { host, admin, service };
 }
 
-test('remote ShellRS behaves like the in-process one for commands', { skip: isWindows }, async (t) => {
+test('the client runs commands exactly as the implementation does', { skip: isWindows }, async (t) => {
   const { host } = await setup(t);
   const shell = host();
   await shell.start();
@@ -162,7 +162,7 @@ test('a lost connection reports an unknown result and keeps the started command'
 });
 
 test('an unreachable service makes shell Toolkits unavailable without failing', { skip: isWindows }, async () => {
-  const shell = new RemoteShellRS({
+  const shell = new ShellRSClient({
     connect: async () => { throw Object.assign(new Error('no service'), { code: 'ECONNREFUSED' }); },
   });
   await assert.rejects(shell.start());
@@ -176,6 +176,14 @@ test('an unreachable service makes shell Toolkits unavailable without failing', 
     shell.exec('s1', { ...exec, command: { shell: 'true' } }),
     (error: unknown) => error instanceof ShellRSError && error.code === 'unavailable',
   );
+});
+
+test('on Windows the client reports ShellRS unavailable without starting a service', async () => {
+  const shell = new ShellRSClient({ platform: 'win32' });
+  await assert.rejects(shell.start(), /no Windows implementation/);
+  const availability = await shell.status();
+  assert.equal(availability.available, false);
+  assert.match(availability.available ? '' : availability.reason, /no Windows implementation/);
 });
 
 test('management lists and terminates processes across sessions', { skip: isWindows }, async (t) => {

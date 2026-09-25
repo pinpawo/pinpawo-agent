@@ -19,16 +19,19 @@
 - ShellRS 独立服务：服务框架
   [`services/local-agent/src/rsService/`](../../../services/local-agent/src/rsService/)、
   服务端 [`shellRSService.ts`](../../../services/local-agent/src/toolkits/local/shellRSService.ts)、
-  Host 端 [`remoteShellRS.ts`](../../../services/local-agent/src/toolkits/local/remoteShellRS.ts)、
+  Host 端连接 [`shellRSClient.ts`](../../../services/local-agent/src/toolkits/local/shellRSClient.ts)、
   入口 [`rsServiceEntry.ts`](../../../services/local-agent/src/rsServiceEntry.ts)、
   管理命令 [`commands/rs.ts`](../../../services/local-agent/src/commands/rs.ts)。
 - Host 装配：[`services/local-agent/src/toolkits/hostRS.ts`](../../../services/local-agent/src/toolkits/hostRS.ts)。
 
 ## 概念
 
-RS 是持有实际执行环境和交互状态的实例。它可以是 Host 进程内的对象，也可以在本机
-独立服务中：ShellRS 默认由独立服务提供（#853），BrowserRS 目前仍在 Host 进程内。
-部署方式不改变 Toolkit 的工具语义。
+RS 是持有实际执行环境和交互状态的实例。ShellRS 只在本机独立服务中运行（#853），
+Host 经 `ShellRSClient` 访问它；BrowserRS 暂时仍在 Host 进程内，服务化是后续阶段。
+
+RS 只有"实现"一个维度（POSIX，以后的 Windows……），没有"部署"维度：Host 端的
+client 是传输，不是另一种 RS。每个 RS 只有一种生产部署方式，所以同一契约的 session
+语义只有一种。
 
 ```text
 Agent session（threadId）──Host 装配──> RS 逻辑 session ──> RS 自己管理的资源
@@ -43,7 +46,7 @@ Agent session 与 RS 逻辑 session 描述同一段工作，分别位于 Agent �
   不可见，即使二者使用同一个 RS 实例。
 - 只在 session 层对齐：task、run、delegation 共享同一个 RS 逻辑 session。
 - 生命周期相互独立：Tool 调用、run 结束、Host 断连都不关闭逻辑 session；没有
-  `closeSession`。独立服务中的 session 跨 Host 重启存活；进程内 RS 随 Host 结束。
+  `closeSession`。独立服务中的 session 跨 Host 重启存活，随服务停止而结束。
 - workdir、Host、连接只是某次调用的执行条件，不属于 session 关系。
 
 ## Toolkit 声明
@@ -81,8 +84,8 @@ type ToolkitRS = {
 - `status()` 是依赖该 RS 的 Toolkit 的可用性来源；一个 RS 不可用只影响依赖它的
   Toolkit。
 - `ensureSession` 幂等；实现也在该 session 首次调用时惰性建立。
-- Host 所建实例另有 `start()` / `dispose()`，属于 Host 对自身实例的管理，不是
-  session 操作。对独立服务的客户端，`dispose()` 只关闭本 Host 的连接。启动失败记录在
+- Host 注入的实例另有 `start()` / `dispose()`，属于 Host 对自身所建对象的管理，不是
+  session 操作。对 `ShellRSClient`，`dispose()` 只关闭本 Host 的连接。启动失败记录在
   `status()` 中，不使 Host 初始化失败。
 
 每个 RS 按自己的语义定义类型化接口；Toolkit 面前不存在框架级 `call(method, args)`。
@@ -122,7 +125,7 @@ session"。
 ### 独立服务部署（#853）
 
 ```text
-Host（Chat / Studio）── RemoteShellRS ── 本机 socket + token ──> RS 服务
+Host（Chat / Studio）── ShellRSClient ── 本机 socket + token ──> RS 服务
                                                                  └─ PosixShellRS（按 agentSessionId 的逻辑 session）
 ```
 
@@ -134,6 +137,11 @@ Host（Chat / Studio）── RemoteShellRS ── 本机 socket + token ──>
   launcher 结束。
 - 握手核对传输协议版本和契约 `contract` / `version`；不一致时该 RS 不可用并提示
   `pinpawo rs stop` 重启服务，不自动杀旧服务，不热重载。
+- 构建标识：服务报告自己入口文件（构建产物 `rsService.js`）的哈希。Host 发现服务
+  跑的是别的构建（升级或重新 build 之后）时，若服务空闲（没有 running 进程、没有
+  未应答调用）就停掉它并启动当前构建；仍有工作时保留旧服务并警告一次，由用户在
+  工作结束后 `pinpawo rs stop`。`pinpawo rs status` 的 `upToDate` 显示是否一致。
+  从源码（tsx）运行时只哈希入口文件本身，不跟踪其依赖。
 - 环境：服务进程自身只保留最小环境。每次 `exec` 携带调用方 Host 当时的环境作为基础，
   请求的 `env` 叠加其上，所以命令看到的环境与在该 Host 内运行时一致，各 Host 互不
   串环境。`cwd` 由 Host 给出绝对路径，服务不使用自己的工作目录。
@@ -142,12 +150,14 @@ Host（Chat / Studio）── RemoteShellRS ── 本机 socket + token ──>
   `result_unknown`，不重放；已启动的命令仍在其 session 中，可用 `list` 找回。取消
   经传输层按请求取消。
 - Host 断开或退出不回收任何 session；服务停止（`pinpawo rs stop` 或信号）时结束
-  全部 session 与进程，并报告清理结果。不承诺跨服务重启恢复。
+  全部 session 与进程（包括仍在首次等待期、尚未转入后台的命令），并报告清理结果。
+  不承诺跨服务重启恢复。
 - 管理命令：`pinpawo rs status`、`pinpawo rs processes [--session <id>]`、
   `pinpawo rs terminate <processId>`、`pinpawo rs stop`，全部经 token 连接服务，
   从不启动服务。
-- `PINPAWO_SHELL_RS=in-process` 让 Host 改用进程内 `PosixShellRS`；测试用它避免启动
-  或依赖用户的后台服务。Windows 上 Host 始终使用进程内实例（报告不可用）。
+- 测试不经 Host 开关绕开服务：Toolkit 级测试把 `PosixShellRS` 作为替身直接注入
+  Toolkit 工厂；服务相关测试在临时目录启动服务。Windows 上 `ShellRSClient` 直接报告
+  不可用，不尝试启动服务。
 
 ## BrowserRS
 

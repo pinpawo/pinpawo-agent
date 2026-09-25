@@ -45,22 +45,29 @@ function hostEnvironment(): Record<string, string> {
   return env;
 }
 
-export type RemoteShellRSOptions = Readonly<{
+export type ShellRSClientOptions = Readonly<{
   paths?: RSServicePaths;
   /** How to reach the service; defaults to starting it when none runs. */
   connect?: () => Promise<RSServiceConnection>;
+  /** Overridable so the Windows path can be tested anywhere. */
+  platform?: NodeJS.Platform;
 }>;
 
+const WINDOWS_UNAVAILABLE = 'ShellRS has no Windows implementation yet; shell toolkits are unavailable on Windows.';
+
 /**
- * {@link ShellRS} backed by the standalone RS service.
+ * The Host's connection to ShellRS.
  *
- * Toolkits see the same interface as the in-process implementation. The
- * connection is re-established on demand, so a service restart only costs
- * the calls that were in flight. Logical sessions live in the service: this
- * Host disconnecting, or exiting, leaves them and their processes running,
- * and a later Host using the same Agent session reaches them again.
+ * ShellRS runs only in the standalone RS service, where `PosixShellRS` holds
+ * the environment and the logical sessions. This client is transport, not a
+ * second kind of ShellRS: it forwards each operation of the {@link ShellRS}
+ * interface, so Toolkits cannot tell it from the implementation. The
+ * connection is re-established on demand, so a service restart only costs the
+ * calls that were in flight. This Host disconnecting, or exiting, leaves the
+ * sessions and their processes running, and a later Host using the same Agent
+ * session reaches them again.
  */
-export class RemoteShellRS implements ShellRS {
+export class ShellRSClient implements ShellRS {
   readonly contract = SHELL_RS_CONTRACT;
   readonly version = SHELL_RS_VERSION;
 
@@ -71,11 +78,16 @@ export class RemoteShellRS implements ShellRS {
   private lastStatusAttemptAt = 0;
   private disposed = false;
 
-  constructor(options: RemoteShellRSOptions = {}) {
-    this.connectToService = options.connect ?? (async () => await ensureRSService({
-      paths: options.paths ?? resolveRSServicePaths(),
-      rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
-    }));
+  constructor(options: ShellRSClientOptions = {}) {
+    const platform = options.platform ?? process.platform;
+    this.connectToService = options.connect ?? (async () => {
+      // The service has no Windows implementation (or endpoint) to start.
+      if (platform === 'win32') throw new ShellRSError('unavailable', WINDOWS_UNAVAILABLE);
+      return await ensureRSService({
+        paths: options.paths ?? resolveRSServicePaths(),
+        rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
+      });
+    });
   }
 
   /** Host startup: reach the service now so failures surface as status. */

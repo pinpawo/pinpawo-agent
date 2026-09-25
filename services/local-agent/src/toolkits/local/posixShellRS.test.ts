@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { createBashToolkit, createGitToolkit, createProjectInspectionToolkit } from './index';
 import { PosixShellRS } from './posixShellRS';
@@ -88,4 +91,30 @@ test('ensureSession is idempotent and use never closes a session', { skip: isWin
   assert.throws(() => shell.ensureSession(' '), /requires an Agent session id/);
   await shell.exec('s1', { ...exec, command: { shell: 'true' } });
   assert.deepEqual(shell.status(), { available: true });
+});
+
+test('dispose also ends commands still inside their initial wait', { skip: isWindows }, async () => {
+  const shell = new PosixShellRS();
+  const dir = await mkdtemp(join(tmpdir(), 'pp-shell-'));
+  const pidFile = join(dir, 'pid');
+  try {
+    const pending = shell.exec('s1', {
+      ...exec,
+      waitMs: 30_000,
+      command: { shell: `echo $$ > '${pidFile}'; exec sleep 30` },
+    });
+    let pid = 0;
+    for (let attempt = 0; attempt < 100 && !pid; attempt += 1) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      pid = Number((await readFile(pidFile, 'utf8').catch(() => '')).trim()) || 0;
+    }
+    assert.ok(pid > 0);
+
+    // Not yielded yet, so not in the registry: only the shutdown reaches it.
+    assert.deepEqual(await shell.dispose(), { terminated: 1 });
+    assert.equal((await pending).status, 'aborted');
+    assert.throws(() => process.kill(pid, 0));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

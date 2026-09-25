@@ -70,7 +70,7 @@ export {
   type PosixShellRSOptions,
   type ShellManagedProcess,
 } from './posixShellRS';
-export { RemoteShellRS, type RemoteShellRSOptions } from './remoteShellRS';
+export { ShellRSClient, type ShellRSClientOptions } from './shellRSClient';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,

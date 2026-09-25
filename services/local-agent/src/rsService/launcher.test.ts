@@ -3,10 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { PosixShellRS } from '../toolkits/local/posixShellRS';
 import { SHELL_RS_CONTRACT, SHELL_RS_VERSION } from '../toolkits/local/shellRS';
+import { createShellRSServiceHandler } from '../toolkits/local/shellRSService';
 import type { RSServiceConnection } from './connection';
 import { connectRSService, ensureRSService, rsServiceBootstrapEnvironment } from './launcher';
-import { resolveRSServicePaths } from './paths';
+import { ensureToken, resolveRSServicePaths } from './paths';
+import { startRSService } from './server';
 
 const isWindows = process.platform === 'win32';
 
@@ -79,4 +83,89 @@ test('the service starts with a minimal environment of its own', () => {
     VIRTUAL_ENV: '/project/.venv',
   });
   assert.deepEqual(env, { HOME: '/home/u', PATH: '/usr/bin:/bin:/usr/sbin:/sbin' });
+});
+
+async function startStaleService(root: string, build: string) {
+  const paths = resolveRSServicePaths(root);
+  const token = await ensureToken(paths);
+  const shell = new PosixShellRS();
+  const service = await startRSService({
+    endpoint: paths.endpoint,
+    token,
+    build,
+    handlers: [createShellRSServiceHandler(shell)],
+    log: () => {},
+  });
+  return { paths, shell, service };
+}
+
+const sourceEntryArgs = [
+  '--import',
+  import.meta.resolve('tsx/esm'),
+  fileURLToPath(new URL('../rsServiceEntry.ts', import.meta.url)),
+];
+
+test('an idle service built from other code is replaced', { skip: isWindows }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pp-rs-'));
+  const { paths, service } = await startStaleService(root, 'old-build');
+  let replacement: RSServiceConnection | null = null;
+  t.after(async () => {
+    await service.stop();
+    if (replacement) {
+      const pid = replacement.servicePid;
+      await replacement.close();
+      if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+    }
+    await rm(root, { recursive: true, force: true });
+  });
+
+  replacement = await ensureRSService({
+    paths,
+    rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
+    expectedBuild: 'new-build',
+    entryArgs: sourceEntryArgs,
+    startupTimeoutMs: 20_000,
+  });
+  await service.stopped;
+  assert.notEqual(replacement.servicePid, process.pid);
+  const admin = await connectRSService({ paths });
+  assert.ok(admin);
+  await admin.admin('stop');
+  await admin.close();
+});
+
+test('a busy service built from other code is kept, with one warning', { skip: isWindows }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pp-rs-'));
+  const { paths, shell, service } = await startStaleService(root, 'old-build');
+  t.after(async () => {
+    await service.stop();
+    await rm(root, { recursive: true, force: true });
+  });
+  const running = await shell.exec('s1', {
+    command: { shell: 'sleep 5' },
+    cwd: process.cwd(),
+    waitMs: 50,
+    onTimeout: 'yield',
+    maxOutputChars: 1024,
+  });
+  assert.equal(running.status, 'yielded');
+
+  const warnings: string[] = [];
+  const connect = () => ensureRSService({
+    paths,
+    rs: { contract: SHELL_RS_CONTRACT, version: SHELL_RS_VERSION },
+    expectedBuild: 'newer-build',
+    entryArgs: sourceEntryArgs,
+    warn: (message) => warnings.push(message),
+  });
+  const first = await connect();
+  const second = await connect();
+  t.after(async () => {
+    await first.close();
+    await second.close();
+  });
+  assert.equal(first.servicePid, process.pid);
+  assert.equal(second.servicePid, process.pid);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /pinpawo rs stop/);
 });

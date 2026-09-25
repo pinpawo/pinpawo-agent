@@ -7,7 +7,7 @@ import { RSServiceConnection } from '../rsService/connection';
 import { ensureToken, resolveRSServicePaths } from '../rsService/paths';
 import { startRSService } from '../rsService/server';
 import { PosixShellRS } from '../toolkits/local/posixShellRS';
-import { RemoteShellRS } from '../toolkits/local/remoteShellRS';
+import { ShellRSClient } from '../toolkits/local/shellRSClient';
 import { SHELL_RS_CONTRACT, SHELL_RS_VERSION } from '../toolkits/local/shellRS';
 import { createShellRSServiceHandler } from '../toolkits/local/shellRSService';
 import { runRSCommand } from './rs';
@@ -39,7 +39,7 @@ test('rs management reports, lists, terminates and stops', { skip: isWindows }, 
     log: () => {},
   });
   t.after(async () => { await service.stop(); });
-  const shell = new RemoteShellRS({
+  const shell = new ShellRSClient({
     connect: async () => await RSServiceConnection.open({
       paths,
       token,

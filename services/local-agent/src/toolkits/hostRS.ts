@@ -5,8 +5,9 @@ import type {
 } from '@pinpawo/pet-agent';
 
 /**
- * An RS instance the Host created: an in-process implementation, or the
- * Host's client of a standalone RS service (#853).
+ * What the Host injects into Toolkits for one RS dependency: its client of
+ * the standalone RS service (ShellRS, #853), or an RS still hosted in the
+ * Host until it moves into the service (BrowserRS).
  *
  * `start` and `dispose` are the instance's own management, not session
  * operations: no logical session is closed by a tool call, a run, or a Host
@@ -85,7 +86,7 @@ const DEFAULT_INITIAL_RETRY_MS = 5_000;
 const DEFAULT_MAX_RETRY_MS = 60_000;
 
 /**
- * The in-process RS instances one Host owns.
+ * The RS instances (and RS clients) one Host owns.
  *
  * A start failure is not a Host failure: it stays in that instance's status,
  * which is the availability of the Toolkits built on it and of nothing else.

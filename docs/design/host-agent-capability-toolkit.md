@@ -152,7 +152,8 @@ Browser、bash、git 都是普通 Toolkit：
   `ChromeExtensionBrowserRS`；Browser Capability 只声明 `uses: ['browser']`。
 - Browser 包分别导出 Capability、Toolkit 工厂、BrowserRS 契约与实现。local-agent 的
   composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；bash、git、
-  project-inspection 共享一个 `PosixShellRS`。
+  project-inspection 共享一个 ShellRS 实例（默认是本机 RS 服务的客户端
+  `RemoteShellRS`，见 #853）。
 - 当前所谓 `local tools` 不是领域概念。它们是 local-machine / Node Host 提供的
   Toolkit definitions；CLI 只是其中一类 Host 入口。
 - `bash` 当前包含文件、搜索、JSON、网络、shell、process 等工具，`git` 同时包含
@@ -210,7 +211,7 @@ Browser、bash、git 都是普通 Toolkit：
 - `Capability`：业务行为与 `uses`；
 - `Toolkit`：tools、工具策略、availability 和可选的 RS 依赖声明；
 - `RS`（ShellRS、BrowserRS）：持有执行环境与按 Agent session 划分的交互状态，由 Host
-  创建并注入 Toolkit；
+  创建（或连接本机 RS 服务得到）并注入 Toolkit；
 - `local-machine Toolkit` 或 `local Host built-in Toolkit`：取代含糊的
   `local tools` / `CLI tools`。
 

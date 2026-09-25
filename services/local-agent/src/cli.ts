@@ -23,6 +23,11 @@ type LocalAgentCliHandlers = {
     action: string,
     opts: { extensionId?: string },
   ) => Promise<void> | void;
+  runRS?: (
+    action: string,
+    argument: string | undefined,
+    opts: { session?: string },
+  ) => Promise<void> | void;
 };
 
 function readErrorMessage(error: unknown): string {
@@ -202,6 +207,15 @@ export function createLocalAgentCli(handlers: LocalAgentCliHandlers = {}): Comma
       const runBrowser = handlers.runBrowser
         ?? (await import('./commands/browser')).runBrowserCommand;
       await runBrowser('extension', action, options);
+    });
+
+  program
+    .command('rs <action> [argument]')
+    .description('Manage the standalone RS service: status, processes [--session <id>], terminate <processId>, stop')
+    .option('--session <agentSessionId>', 'only list processes of this Agent session')
+    .action(async (action: string, argument: string | undefined, options: { session?: string }) => {
+      const runRS = handlers.runRS ?? (await import('./commands/rs')).runRSCommand;
+      await runRS(action, argument, options);
     });
 
   registerCapabilityCommand(program);

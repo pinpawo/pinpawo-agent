@@ -27,6 +27,9 @@ function snapshot(record: ProcessSnapshot): ShellProcessSnapshot {
   });
 }
 
+/** A process as RS management sees it: with the session that holds it. */
+export type ShellManagedProcess = ShellProcessSnapshot & Readonly<{ agentSessionId: string }>;
+
 function requireSessionId(agentSessionId: string) {
   if (typeof agentSessionId !== 'string' || !agentSessionId.trim()) {
     throw new ShellRSError('unavailable', 'ShellRS requires an Agent session id.');
@@ -41,14 +44,16 @@ export type PosixShellRSOptions = Readonly<{
 }>;
 
 /**
- * In-process POSIX implementation of {@link ShellRS}.
+ * POSIX implementation of {@link ShellRS}.
  *
  * Commands run as independent processes in their own process groups over
  * pipes (`/bin/sh -c` for shell strings, direct spawn for argv). A logical
  * session is the set of handles its Agent session has left running; it is
- * established lazily and never closed by the Host or the Agent. Being
- * in-process, it does not survive the Host process: `dispose` ends whatever it
- * still holds when the Host that created it shuts down.
+ * established lazily and never closed by the Host or the Agent.
+ *
+ * It lives in whichever process created it: normally the standalone RS
+ * service (see `shellRSService.ts`), or a Host directly when it runs
+ * in-process. `dispose` ends whatever it still holds when that owner stops.
  */
 export class PosixShellRS implements ShellRS {
   readonly contract = SHELL_RS_CONTRACT;
@@ -167,12 +172,39 @@ export class PosixShellRS implements ShellRS {
   }
 
   /**
-   * End every process this instance holds. Owned by whoever created the
-   * in-process instance (the Host); it is not a session operation.
+   * RS management, not part of {@link ShellRS}: every process this instance
+   * holds, with the session holding it.
    */
-  async dispose(): Promise<void> {
+  listAllProcesses(): readonly ShellManagedProcess[] {
+    return Object.freeze(this.registry.listAll().map((record) => Object.freeze({
+      ...snapshot(record),
+      agentSessionId: record.sessionId,
+    })));
+  }
+
+  /** RS management: terminate a process whichever session holds it. */
+  async terminateProcess(processId: string): Promise<ShellManagedProcess> {
+    const agentSessionId = this.registry.sessionOf(processId);
+    const record = await this.registry.terminate(processId, agentSessionId);
+    return Object.freeze({ ...snapshot(record), agentSessionId });
+  }
+
+  /** RS management: how many logical sessions this instance has seen. */
+  get sessionCount(): number {
+    return this.sessions.size;
+  }
+
+  /**
+   * End every process this instance holds. Owned by whoever created the
+   * instance (an in-process Host, or the RS service when it stops); it is not
+   * a session operation.
+   */
+  async dispose(): Promise<{ terminated: number }> {
+    const terminated = this.registry.listAll()
+      .filter((record) => record.status === 'running').length;
     this.disposed = true;
     this.sessions.clear();
     await this.registry.stopAll();
+    return { terminated };
   }
 }

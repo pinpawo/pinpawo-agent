@@ -215,6 +215,24 @@ export class ProcessRegistry {
       .map((entry) => ({ ...entry.record }));
   }
 
+  /** Every process across sessions; for RS management, never for a tool. */
+  listAll(): ProcessSnapshot[] {
+    this.reapExpired();
+    return [...this.entries.values()].map((entry) => ({ ...entry.record }));
+  }
+
+  /** The session holding a process; for RS management, never for a tool. */
+  sessionOf(processId: string): string {
+    const entry = this.entries.get(processId);
+    if (!entry) {
+      throw new ShellRSError(
+        'unknown_process',
+        `No such process: ${processId}. It may have already been reaped.`,
+      );
+    }
+    return entry.record.sessionId;
+  }
+
   /**
    * Take everything buffered since the last drain.
    *

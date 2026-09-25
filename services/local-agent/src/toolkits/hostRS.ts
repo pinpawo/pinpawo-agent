@@ -5,16 +5,18 @@ import type {
 } from '@pinpawo/pet-agent';
 
 /**
- * An RS instance the Host created in its own process (phase 2).
+ * An RS instance the Host created: an in-process implementation, or the
+ * Host's client of a standalone RS service (#853).
  *
- * `start` and `dispose` are the in-process instance's own management, not
- * session operations: no logical session is closed by a tool call, a run, or
- * a Host disconnect. A standalone RS (phase 3) is stopped by its own
- * management commands instead.
+ * `start` and `dispose` are the instance's own management, not session
+ * operations: no logical session is closed by a tool call, a run, or a Host
+ * disconnect. For a client, `dispose` only closes the Host's connection; the
+ * standalone RS is stopped by its own management commands.
  */
 export type HostOwnedRS = ToolkitRS & {
   start?(): Promise<void>;
-  dispose(): Promise<void>;
+  /** May resolve to a report of what was cleaned up; the Host ignores it. */
+  dispose(): Promise<unknown>;
 };
 
 export type HostRSStatus = Readonly<{

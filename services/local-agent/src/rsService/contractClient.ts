@@ -62,9 +62,15 @@ export class RSContractClient {
     });
   }
 
-  /** Host startup: reach the service now so failures surface as status. */
+  /**
+   * Host startup: reach the service and require the RS to be available. A
+   * failure is retried by the Host with backoff, which then re-reads the
+   * availability of the Toolkits built on this RS.
+   */
   async start(): Promise<void> {
     await this.connect();
+    const availability = await this.status();
+    if (!availability.available) throw new Error(availability.reason);
   }
 
   /** The RS's own availability, or why the service cannot be reached. */

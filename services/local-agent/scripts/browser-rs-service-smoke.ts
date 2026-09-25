@@ -49,6 +49,9 @@ function smokeBrowser(client: BrowserRSClient): SmokeBrowser {
 async function waitForExtension(timeoutMs = 45_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    // Asking for status is also what lets the service retry a bridge that
+    // could not start.
+    await client.status();
     const admin = await connectRSService({ paths });
     if (admin) {
       try {
@@ -79,7 +82,9 @@ try {
     reporter,
     fixture,
     connect: async () => {
-      await client.start();
+      // Not `start()`: the RS may be unavailable until the bridge gets its
+      // socket, which waitForExtension keeps retrying.
+      await client.status();
       await waitForExtension();
     },
     recovery: {

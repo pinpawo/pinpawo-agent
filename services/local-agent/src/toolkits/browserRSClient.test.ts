@@ -209,3 +209,41 @@ test('an open page keeps the service busy, and stopping it reports the closed se
     { rs: [{ contract: BROWSER_RS_CONTRACT, report: { closedSessions: 1 } }] },
   );
 });
+
+test('a bridge that could not start recovers when a Host asks again', { skip: isWindows }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'pp-rs-'));
+  const paths = resolveRSServicePaths(root);
+  const token = await ensureToken(paths);
+  const bridge = fakeBridge({ contexts: [] });
+  let socketTaken = true;
+  bridge.start = async () => {
+    if (socketTaken) throw new Error('another local-agent browser bridge is already listening');
+  };
+  const rs = new ChromeExtensionBrowserRS({ bridge });
+  await rs.start().catch(() => undefined);
+  const service = await startRSService({
+    endpoint: paths.endpoint,
+    token,
+    handlers: [createBrowserRSServiceHandler(rs)],
+    log: () => {},
+  });
+  t.after(async () => {
+    await service.stop();
+    await rm(root, { recursive: true, force: true });
+  });
+  const browser = new BrowserRSClient({
+    connect: async () => await RSServiceConnection.open({
+      paths,
+      token,
+      rs: { contract: BROWSER_RS_CONTRACT, version: BROWSER_RS_VERSION },
+    }),
+  });
+  t.after(async () => await browser.dispose());
+
+  // Startup fails, so the Host keeps retrying it.
+  await assert.rejects(browser.start(), /already listening/);
+  // The other process lets go of the socket; the next attempt recovers.
+  socketTaken = false;
+  await browser.start();
+  assert.deepEqual(await browser.status(), { available: true });
+});

@@ -51,7 +51,14 @@ export function createBrowserRSServiceHandler(
     contract: BROWSER_RS_CONTRACT,
     version: BROWSER_RS_VERSION,
     async call(method, args, { signal }) {
-      if (method === 'status') return rs.status();
+      if (method === 'status') {
+        // A bridge that could not start (say another process held its socket)
+        // is retried whenever a Host asks, so it recovers once the socket is
+        // free instead of waiting for a call no Host will make while the
+        // Browser Toolkit is unavailable.
+        if (!rs.status().available) await rs.start().catch(() => undefined);
+        return rs.status();
+      }
       const input = readRecord(args, 'arguments');
       if (method === 'ensureSession') {
         rs.ensureSession(readString(input.agentSessionId, 'agentSessionId'));

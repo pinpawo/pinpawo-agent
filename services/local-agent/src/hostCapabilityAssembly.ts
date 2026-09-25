@@ -45,6 +45,7 @@ import {
   createGitToolkit,
   createProjectInspectionToolkit,
   PosixShellRS,
+  RemoteShellRS,
 } from './toolkits/local';
 import { HostToolkitCoordinator } from './toolkits/hostToolkitCoordinator';
 import {
@@ -56,6 +57,22 @@ import type {
   ToolkitDefinitionSource,
 } from './toolkits/toolkitInventory';
 import { FileSaver } from './fileSaver';
+
+/**
+ * The ShellRS a Host uses: the standalone RS service (#853), so sessions and
+ * their processes outlive this Host and are shared with other Hosts.
+ *
+ * `PINPAWO_SHELL_RS=in-process` keeps an in-process instance instead; tests
+ * use it so they never start or depend on a user's background service.
+ * Windows has no ShellRS implementation yet, and the in-process instance is
+ * what reports that.
+ */
+function createHostShellRS(): PosixShellRS | RemoteShellRS {
+  if (process.env.PINPAWO_SHELL_RS === 'in-process' || process.platform === 'win32') {
+    return new PosixShellRS();
+  }
+  return new RemoteShellRS();
+}
 
 export type HostCapabilityAssemblyOptions = {
   runtimeConfig: LocalAgentRuntimeConfig;
@@ -141,7 +158,7 @@ export class HostCapabilityAssembly {
       ?? loadStoredConfig().capabilities?.browser !== false;
     // Bash, Git and project-inspection share one ShellRS instance, and so one
     // logical session per Agent session across them.
-    const shell = this.rsInstances.add('shell', new PosixShellRS());
+    const shell = this.rsInstances.add('shell', createHostShellRS());
     const browser = browserSelected
       ? this.rsInstances.add('browser', new ChromeExtensionBrowserRS())
       : null;

@@ -6,7 +6,8 @@
 
 > 2026-09：本文中的 Toolkit Runtime root / resolve / bindTools / release 装配已被
 > #856 取代：进程由 ShellRS（`PosixShellRS`）按 Agent session 持有，句柄对同一
-> session 的后续 run 与其他 delegation 可见。当前契约见
+> session 的后续 run 与其他 delegation 可见；#853 起默认在本机 RS 服务中持有，跨 Host
+> 重启存活。当前契约见
 > [Toolkit 的 RS 依赖](../../reference/extensions/toolkit-rs.md)。本文保留为 #513 的
 > 决策背景。
 

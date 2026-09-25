@@ -65,7 +65,12 @@ export {
   type ShellProcessSnapshot,
   type ShellRS,
 } from './shellRS';
-export { PosixShellRS, type PosixShellRSOptions } from './posixShellRS';
+export {
+  PosixShellRS,
+  type PosixShellRSOptions,
+  type ShellManagedProcess,
+} from './posixShellRS';
+export { RemoteShellRS, type RemoteShellRSOptions } from './remoteShellRS';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,

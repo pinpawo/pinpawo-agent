@@ -99,7 +99,14 @@ export type ShellRSErrorCode =
   | 'unknown_process'
   | 'other_session'
   | 'too_many_processes'
-  | 'unavailable';
+  /** The RS could not be reached; the operation did not start. */
+  | 'unavailable'
+  /**
+   * The RS was lost while the operation was in flight. It may or may not have
+   * taken effect, and it is never retried; a started command stays in the
+   * session and can be found with `list`.
+   */
+  | 'result_unknown';
 
 export class ShellRSError extends Error {
   constructor(

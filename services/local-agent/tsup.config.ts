@@ -18,6 +18,9 @@ export default defineConfig({
     // Entry key is the published artifact name; keep it stable so the
     // `pinpawo/local-server-transport` subpath keeps resolving after the move.
     localServerTransportApi: 'src/wire/index.ts',
+    // Started detached by the RS launcher, which resolves it next to the
+    // bundled Host entries; keep the name in sync with rsService/launcher.ts.
+    rsService: 'src/rsServiceEntry.ts',
   },
   format: ['esm'],
   platform: 'node',

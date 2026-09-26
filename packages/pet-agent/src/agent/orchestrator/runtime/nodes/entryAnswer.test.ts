@@ -353,6 +353,78 @@ test('Entry Answer retries when the model announces execution instead of calling
   );
 });
 
+function routingScript(turns: AIMessage[]) {
+  const seen: BaseMessage[][] = [];
+  const model = {
+    bindTools: () => ({
+      invoke: async (messages: BaseMessage[]) => {
+        seen.push(messages);
+        const next = turns[seen.length - 1];
+        if (!next) throw new Error('Unexpected Entry turn.');
+        return next;
+      },
+    }),
+    invoke: async () => new AIMessage('当前没有可用的 Capability。'),
+  } as unknown as BaseChatModel;
+  const requests: string[] = [];
+  const graph = createOrchestratorGraph({
+    models: { act: model, answer: model },
+    runSupervisorRunner: { async invoke(input) { requests.push(input.userRequest); return { reply: 'done' }; } },
+  });
+  return { graph, seen, requests };
+}
+
+test('Entry routing accepts a tool call whose provider omitted the id', async () => {
+  const { graph, seen, requests } = routingScript([new AIMessage({
+    content: '', tool_calls: [{ id: undefined, name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } }],
+  })]);
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
+  assert.equal(seen.length, 1);
+  assert.deepEqual(requests, ['截图所有页面']);
+});
+
+test('Entry routing collapses identical duplicate calls without a repair turn', async () => {
+  const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
+  const { graph, seen, requests } = routingScript([new AIMessage({
+    content: '', tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+  })]);
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
+  assert.equal(seen.length, 1);
+  assert.deepEqual(requests, ['截图所有页面']);
+});
+
+test('Entry routing repairs distinct parallel calls with one retry', async () => {
+  const { graph, seen, requests } = routingScript([
+    new AIMessage({ content: '', tool_calls: [
+      { id: 'a', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图首页' } },
+      { id: 'b', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图设置页' } },
+    ] }),
+    new AIMessage({ content: '', tool_calls: [
+      { id: 'c', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图首页和设置页' } },
+    ] }),
+  ]);
+  const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
+  assert.equal(seen.length, 2);
+  const retry = seen[1];
+  assert.match(retry.at(-1)!.text, /只能选择一个/);
+  assert.equal(retry.some((message) => AIMessage.isInstance(message) && (message.tool_calls?.length ?? 0) > 1), false);
+  assert.deepEqual(requests, ['截图首页和设置页']);
+  assert.equal(output.messages.filter((message: BaseMessage) => AIMessage.isInstance(message) && (message.tool_calls?.length ?? 0) > 1).length, 0);
+});
+
+test('Entry routing fails with the offending calls when the repair turn still fans out', async () => {
+  const fanOut = new AIMessage({ content: '', tool_calls: [
+    { id: 'a', name: 'continue', args: {} },
+    { id: 'b', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图' } },
+  ] });
+  const { graph, seen } = routingScript([fanOut, fanOut]);
+  await assert.rejects(
+    graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig()),
+    /requires one tool call, got 2: continue, plan_request/,
+  );
+  assert.equal(seen.length, 2);
+});
+
 test('Entry Answer leaves an ordinary reply untouched', async () => {
   const scripted = entryAnswerModel('direct');
   const graph = createOrchestratorGraph({

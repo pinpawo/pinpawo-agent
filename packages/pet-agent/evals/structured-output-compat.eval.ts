@@ -19,7 +19,7 @@
  *   npm run eval:structured-output -w @pinpawo/pet-agent
  *   LLM_MODELS=qwen3.5-plus,glm-5,kimi-k2.6,MiniMax-M2.6 npm run eval:structured-output -w @pinpawo/pet-agent
  */
-import { ChatOpenAI } from '@langchain/openai';
+import { createReasoningPassbackChatOpenAI } from '../../../services/local-agent/src/agent/reasoningPassback.ts';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -160,7 +160,7 @@ function buildModel(params: {
   model: string;
   timeoutMs: number;
 }) {
-  return new ChatOpenAI({
+  return createReasoningPassbackChatOpenAI({
     model: params.model,
     timeout: params.timeoutMs,
     maxRetries: 0,

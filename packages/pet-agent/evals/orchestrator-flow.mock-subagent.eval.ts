@@ -14,7 +14,7 @@ import { readFixtureDelivery } from '../src/testing/capabilityDelivery';
  */
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
-import { ChatOpenAI } from '@langchain/openai';
+import { createReasoningPassbackChatOpenAI } from '../../../services/local-agent/src/agent/reasoningPassback.ts';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { Command, MemorySaver } from '@langchain/langgraph';
@@ -254,7 +254,7 @@ function buildSubagentModel(inputs: Record<string, unknown>): ProbeSubagentModel
 }
 
 function buildModels(subagent: ProbeSubagentModel): AgentModels {
-  const routeModel = new ChatOpenAI({
+  const routeModel = createReasoningPassbackChatOpenAI({
     model: LLM_MODEL,
     temperature: 0.3,
     timeout: 180_000,

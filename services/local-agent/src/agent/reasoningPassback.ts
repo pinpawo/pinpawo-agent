@@ -1,4 +1,5 @@
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
+import type { ChatGenerationChunk, ChatResult } from '@langchain/core/outputs';
 import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   ChatOpenAI,
@@ -15,6 +16,9 @@ import {
 // stream) but never serializes it back, so the source messages ride along on
 // the call options and the request is rebuilt with the field restored.
 const SOURCE_MESSAGES = Symbol('pinpawo.reasoningPassback.sourceMessages');
+
+type CompletionsMessageParam = ReturnType<typeof convertMessagesToCompletionsMessageParams>[number];
+type ChatModelEvents = ReturnType<ChatOpenAICompletions['_streamChatModelEvents']>;
 
 type CallOptions = ChatOpenAICompletionsCallOptions & {
   [SOURCE_MESSAGES]?: BaseMessage[];
@@ -48,7 +52,7 @@ export function readReasoningContent(message: BaseMessage): string | undefined {
 export function buildCompletionsMessagesWithReasoning(
   messages: BaseMessage[],
   model: string,
-) {
+): CompletionsMessageParam[] {
   return messages.flatMap(message => {
     const [first, ...rest] = convertMessagesToCompletionsMessageParams({ messages: [message], model });
     const reasoning = readReasoningContent(message);
@@ -63,7 +67,7 @@ export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
     messages: BaseMessage[],
     options: CallOptions,
     runManager?: CallbackManagerForLLMRun,
-  ) {
+  ): Promise<ChatResult> {
     return super._generate(messages, withSourceMessages(options, messages), runManager);
   }
 
@@ -71,7 +75,7 @@ export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
     messages: BaseMessage[],
     options: CallOptions,
     runManager?: CallbackManagerForLLMRun,
-  ) {
+  ): AsyncGenerator<ChatGenerationChunk> {
     return super._streamResponseChunks(messages, withSourceMessages(options, messages), runManager);
   }
 
@@ -79,7 +83,7 @@ export class ReasoningPassbackCompletions extends ChatOpenAICompletions {
     messages: BaseMessage[],
     options: CallOptions,
     runManager?: CallbackManagerForLLMRun,
-  ) {
+  ): ChatModelEvents {
     return super._streamChatModelEvents(messages, withSourceMessages(options, messages), runManager);
   }
 

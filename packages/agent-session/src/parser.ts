@@ -1,3 +1,4 @@
+import { parseResultReferences } from './resultReferences';
 import {
   HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
   parseHumanReviewRequest,
@@ -304,6 +305,7 @@ function parseAgentTimelineEntry(
       type: 'message',
       role: value.role,
       text: value.text,
+      ...(value.resultReferences !== undefined ? { resultReferences: parseResultReferences(value.resultReferences) } : {}),
       status: value.status,
       ...(typeof value.requestId === 'string' ? { requestId: value.requestId } : {}),
       ...(typeof value.createdAt === 'string' ? { createdAt: value.createdAt } : {}),

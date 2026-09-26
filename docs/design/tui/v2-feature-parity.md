@@ -119,3 +119,17 @@ The feature-parity milestone is complete only when:
   workflows pass against a real local-agent host;
 - known terminal-specific gaps have an explicit fallback;
 - the legacy TUI remains available throughout the migration.
+
+
+## 执行结果仅在 transcript 查看（实现草稿，2026-09-27）
+
+默认 timeline 隐藏 subagent 文字块及成功委派的工具结果正文，只展示工具进度和
+Supervisor 的正式回复。不在回答下显示执行结果引用，不生成外部结果文件。
+用户主动打开 `/transcript` 时，在对应回答后查看 Capability 交付原文。
+
+Capability 的有效交付从 Root 原生调用/结果配对提取，作为回复的
+`resultReferences`（id/title/text）传输，仅供 transcript 详情使用；按 reply 的
+runId 和消息位置限定范围，不从子图最后一条流消息猜测交付，不改变运行时
+messages 或验收协议。完成事件与 checkpoint 回放使用同一提取逻辑，无交付的
+直接回复不带结果。沿用现有 transcript pager 的临时文件及退出清理机制，不另建
+持久文件、链接或详情面板。

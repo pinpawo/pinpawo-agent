@@ -1,3 +1,4 @@
+import { parseResultReferences } from './resultReferences';
 import type {
   JsonObject as ContractJsonObject,
   ToolAuthorizationMode,
@@ -591,6 +592,7 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
       requestId,
       messageId,
       ...(usage ? { usage } : {}),
+      ...(record.resultReferences !== undefined ? { resultReferences: parseResultReferences(record.resultReferences) } : {}),
       role,
       text,
     };

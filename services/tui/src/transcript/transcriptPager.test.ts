@@ -32,7 +32,7 @@ test('transcript pager resolves PAGER arguments and a platform fallback', () => 
   });
 });
 
-test('transcript pager text includes the complete ordered canonical timeline', () => {
+test('transcript pager shows ordered replies and reference bodies, excluding ambient child prose', () => {
   const content = formatTranscriptPagerText(createSession([{
     id: 'u1',
     type: 'message',
@@ -53,14 +53,19 @@ test('transcript pager text includes the complete ordered canonical timeline', (
     id: 'sub1',
     type: 'message',
     role: 'subagent',
-    text: 'done\u001b[31m',
+    text: 'hidden child prose',
     status: 'completed',
+  }, {
+    id: 'reply', type: 'message', role: 'assistant', text: 'Final answer', status: 'completed',
+    resultReferences: [{ id: 'result', title: 'Task', text: 'done\u001b[31m' }],
   }]));
 
   assert.ok(content.indexOf('[09:00:00]') < content.indexOf('Read'));
   assert.ok(content.indexOf('Read') < content.indexOf('done�[31m'));
   assert.doesNotMatch(content, /\u001b/);
   assert.match(content, /done�\[31m/);
+  assert.doesNotMatch(content, /hidden child prose/);
+  assert.ok(content.indexOf('Final answer') < content.indexOf('done�[31m'));
 });
 
 test('transcript pager receives a temporary snapshot and cleans it up', async () => {

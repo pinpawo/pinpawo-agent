@@ -208,7 +208,7 @@ function reduceRuntimeEvent(
         event.messageId,
         event.text,
         event.usage,
-        message,
+        { ...message, role: 'assistant', text: event.text, resultReferences: event.resultReferences },
         context,
       );
     case 'operation':
@@ -526,6 +526,7 @@ function appendMessage(
     type: 'message',
     role: message.role,
     text: message.text,
+    ...(message.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
     status: 'completed',
     ...(message.requestId ? { requestId: message.requestId } : {}),
     ...createdAtField(message.createdAt, context),
@@ -549,6 +550,7 @@ function finalizeAssistantMessage(
     role: 'assistant',
     requestId,
     text,
+    ...(message?.resultReferences ? { resultReferences: message.resultReferences.map(ref => ({ ...ref })) } : {}),
     status: 'completed',
     ...(previous
       ? {
@@ -692,7 +694,9 @@ function upsertTimelineEntry(
 }
 
 function cloneTimelineEntry(entry: AgentTimelineEntry): AgentTimelineEntry {
-  if (entry.type === 'message') return { ...entry };
+  if (entry.type === 'message') return { ...entry,
+    ...(entry.resultReferences ? { resultReferences: entry.resultReferences.map(ref => ({ ...ref })) } : {}),
+  };
   return {
     ...entry,
     ...(entry.details ? { details: { ...entry.details } } : {}),

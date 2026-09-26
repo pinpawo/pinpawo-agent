@@ -51,19 +51,8 @@ export function buildMessageDisplayLines(
           tone: 'assistant' as const,
         })),
       ];
-    case 'subagent': {
-      if (!entry.text.trim()) return [];
-      const text = subagentDisplayText(entry.text);
-      return [
-        ...timestampLine(timestampLabel, 'subagent'),
-        ...logicalLines(
-          normalizeAssistantMessageMarkdown(text),
-        ).map((line) => ({
-          text: line,
-          tone: 'subagent' as const,
-        })),
-      ];
-    }
+    case 'subagent':
+      return [];
   }
 }
 

@@ -1,12 +1,13 @@
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   mainConversationMessages,
+  readCapabilityExecutions,
   readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
-import type { AgentInputModality } from '@pinpawo/agent-session';
+import type { AgentInputModality, AgentResultReference } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
 import { readFinalMessageText } from '../agent/agentStreamEvents';
 
@@ -21,6 +22,7 @@ import { readFinalMessageText } from '../agent/agentStreamEvents';
 
 export type TuiCheckpointMessage = {
   role: 'user' | 'assistant';
+  resultReferences?: AgentResultReference[];
   text: string;
   createdAt?: string;
 };
@@ -39,9 +41,12 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       return [];
     }
     const createdAt = readAgentMessageCreatedAt(message);
+    const resultReferences = source.role === 'assistant' && AIMessage.isInstance(message) && !message.tool_calls?.length
+      ? readReplyResultReferences(messages, message) : [];
     return [{
       ...source,
       text,
+      ...(resultReferences.length ? { resultReferences } : {}),
       ...(createdAt ? { createdAt } : {}),
     }];
   });
@@ -110,4 +115,17 @@ export function summarizeTuiCheckpointMessages(
     messageCount: messages.length,
     updatedAt,
   };
+}
+
+/** Associate only preceding, validated deliveries from the reply's own run. */
+export function readReplyResultReferences(messages: BaseMessage[], reply: BaseMessage | undefined): AgentResultReference[] {
+  if (!reply) return [];
+  const metadata = reply.additional_kwargs?.pinpawo;
+  const runId = metadata && typeof metadata === 'object' && 'runId' in metadata ? metadata.runId : null;
+  if (!runId) return [];
+  const index = messages.indexOf(reply);
+  if (index < 0) return [];
+  return readCapabilityExecutions(messages.slice(0, index)).flatMap(({ metadata, result }) =>
+    metadata.runId === runId && result?.status === 'returned' && result.delivery
+      ? [{ id: result.delivery.id, title: result.delivery.task, text: result.delivery.text }] : []);
 }

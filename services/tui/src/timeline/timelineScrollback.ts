@@ -34,7 +34,6 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { subagentDisplayText } from './messageDisplay';
 import { isDelegationEntry } from './operationDisplay';
 
 const WELCOME_COLOR = '#69c0c8';
@@ -616,6 +615,7 @@ function populateTimelineRoot(
   let delegationScope: BoxRenderable | null = null;
 
   entries.forEach((entry, entryIndex) => {
+    if (entry.type === 'message' && entry.role === 'subagent') return;
     const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
       now,
@@ -641,20 +641,16 @@ function populateTimelineRoot(
     }
     if (
       entry.type === 'message'
-      && (entry.role === 'assistant' || entry.role === 'subagent')
+      && entry.role === 'assistant'
       && entry.text.trim()
       && assistantMarkdownStyle
     ) {
-      const detailSurface = entry.role === 'subagent'
-        ? createDetailEntrySurface(context, root, entryIndex, entry.id)
-        : root;
+      const detailSurface = root;
       const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
       if (label) addLine(label, detailSurface);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
-        content: entry.role === 'subagent'
-          ? subagentDisplayText(entry.text)
-          : entry.text,
+        content: entry.text,
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);

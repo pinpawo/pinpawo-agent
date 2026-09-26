@@ -1,7 +1,7 @@
 import type {
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
-import type { AgentPlan } from './domain';
+import type { AgentPlan, AgentResultReference } from './domain';
 import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
@@ -66,6 +66,7 @@ export type AgentSubagentMessageCompletedEvent = {
 };
 
 export type AgentMessageCompletedEvent = {
+  resultReferences?: AgentResultReference[];
   type: 'message.completed';
   requestId: string;
   /** Identifies the streamed message this completion finalizes. */

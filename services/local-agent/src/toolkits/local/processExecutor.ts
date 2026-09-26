@@ -34,7 +34,7 @@ export type ShellRunHandle = {
   stdout: string;
   stderr: string;
   /**
-   * Whether the process has already finished.
+   * Whether the direct child has exited; inherited output pipes may remain open.
    *
    * A handle can be taken over after its process exited — the gap between
    * yielding and being adopted is enough — so an owner needs to tell a live
@@ -49,7 +49,7 @@ export type ShellRunHandle = {
   onOutput: (
     listener: (stream: 'stdout' | 'stderr', chunk: string) => void,
   ) => () => void;
-  /** Resolves once the process exits on its own or is terminated. */
+  /** Resolves after output closes naturally or bounded termination finishes. */
   wait: () => Promise<{ code: number | null; stdout: string; stderr: string }>;
   terminate: (killGraceMs?: number) => void;
 };
@@ -62,7 +62,7 @@ export type ShellRunOutcome =
    * this to find and clean them up.
    */
   | { status: 'exited'; code: number | null; pid: number | undefined; stdout: string; stderr: string }
-  | { status: 'timeout'; termination: 'confirmed' | 'unconfirmed'; stdout: string; stderr: string }
+  | { status: 'timeout'; pid: number | undefined; termination: 'confirmed' | 'unconfirmed'; stdout: string; stderr: string }
   | { status: 'aborted'; stdout: string; stderr: string }
   | { status: 'spawn_failed'; error: Error }
   | { status: 'yielded'; handle: ShellRunHandle };

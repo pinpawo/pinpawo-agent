@@ -103,6 +103,11 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     let settled = false;
     let yielded = false;
     let exited = false;
+    let finished = false;
+    let exitCode: number | null = null;
+    let closed = false;
+    let resolveClosed!: () => void;
+    const closedPromise = new Promise<void>((resolve) => { resolveClosed = resolve; });
     let reason: 'timeout' | 'aborted' | null = null;
     let groupTermination: Promise<boolean> | null = null;
 
@@ -148,7 +153,31 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       if (pid === undefined) return;
       // Keep cleaning up even when the leader closes its output before its
       // children exit. A close event alone does not confirm group termination.
-      groupTermination ??= terminateAndConfirmGroup(pid, grace).catch(() => false);
+      if (groupTermination) return;
+      groupTermination = terminateAndConfirmGroup(pid, grace).catch(() => false);
+      void groupTermination.then(async (groupGone) => {
+        // Allow queued EOF/close events to drain, but never let an escaped
+        // descendant holding a pipe keep timeout, cancellation or stop pending.
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          closedPromise,
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, 100); }),
+        ]);
+        if (timer) clearTimeout(timer);
+        const confirmed = groupGone && closed;
+        if (!closed) {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref();
+        }
+        if (yielded) {
+          finishManaged();
+        } else if (reason === 'timeout') {
+          settle({ status: 'timeout', pid, termination: confirmed ? 'confirmed' : 'unconfirmed', stdout, stderr });
+        } else if (reason === 'aborted') {
+          settle({ status: 'aborted', stdout, stderr });
+        }
+      });
     };
 
     const terminate = (why: 'timeout' | 'aborted') => {
@@ -203,7 +232,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
         },
         wait: () => exitPromise,
         terminate: (grace = killGraceMs) => {
-          if (exited) return;
+          if (finished) return;
           terminateGroup(grace);
         },
       };
@@ -226,22 +255,29 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       settle({ status: 'spawn_failed', error: err });
     });
 
-    child.on('close', async (code) => {
-      const termination = groupTermination ? await groupTermination : null;
+    function finishManaged() {
+      if (finished) return;
+      finished = true;
+      resolveExit({ code: exitCode, stdout, stderr });
+      outputListeners.clear();
+    }
+
+    // Process exit and pipe closure are separate facts. Do not delay this
+    // flag while waiting for descendants or for the termination grace period.
+    child.once('exit', (code) => {
       exited = true;
+      exitCode = code;
+    });
+
+    child.on('close', (code) => {
+      closed = true;
+      exited = true;
+      exitCode = code;
+      resolveClosed();
+      // The bounded termination path owns completion, including pipe cleanup.
+      if (groupTermination) return;
       if (yielded) {
-        resolveExit({ code, stdout, stderr });
-        // Nothing more will be emitted; do not keep subscriber closures alive
-        // for as long as the handle is retained.
-        outputListeners.clear();
-        return;
-      }
-      if (reason === 'timeout') {
-        settle({ status: 'timeout', termination: termination ? 'confirmed' : 'unconfirmed', stdout, stderr });
-        return;
-      }
-      if (reason === 'aborted') {
-        settle({ status: 'aborted', stdout, stderr });
+        finishManaged();
         return;
       }
       settle({ status: 'exited', code, pid, stdout, stderr });
@@ -267,11 +303,10 @@ export function isProcessGroupAlive(pid: number) {
  * The forceful follow-up is unref'd: it must not hold the event loop open
  * merely to escalate a kill.
  *
- * `runShellCommand` has a near-identical closure rather than calling this one,
- * and the difference is not incidental: that one keeps the escalation timer so
- * `cleanup` can cancel it when the process exits on its own, which avoids
- * signalling a pid that may since have been reused. Here there is no exit to
- * observe — the caller holds no handle — so the timer simply expires.
+ * Managed calls use terminateAndConfirmGroup and await a bounded confirmation
+ * path. This fallback is for orphan groups with no live handle; it schedules
+ * a best-effort escalation without keeping the service alive. Group IDs can
+ * be reused, so probing liveness does not prove ownership of a recycled ID.
  */
 function terminateProcessGroup(pid: number, graceMs: number) {
   killProcessGroup(pid, 'SIGTERM');

@@ -118,3 +118,20 @@ test('dispose also ends commands still inside their initial wait', { skip: isWin
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('unconfirmed timeout groups remain eligible for service shutdown cleanup', async () => {
+  const signalled: number[] = [];
+  const shell = new PosixShellRS({
+    platform: 'darwin',
+    executor: {
+      run: async () => ({ status: 'timeout', pid: 12345, termination: 'unconfirmed', stdout: 'partial', stderr: '' }),
+      isGroupAlive: (pid) => pid === 12345,
+      terminateGroup: (pid) => { signalled.push(pid); },
+    },
+  });
+  const result = await shell.exec('s1', { ...exec, command: { shell: 'fake command' } });
+  assert.deepEqual(result, { status: 'timeout', termination: 'unconfirmed', stdout: 'partial', stderr: '' });
+  assert.deepEqual(signalled, []);
+  await shell.dispose();
+  assert.deepEqual(signalled, [12345]);
+});

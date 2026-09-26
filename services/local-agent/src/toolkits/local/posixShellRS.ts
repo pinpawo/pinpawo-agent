@@ -154,6 +154,13 @@ export class PosixShellRS implements ShellRS {
         stderr: outcome.stderr,
       };
     }
+    if (outcome.status === 'timeout') {
+      const { pid, ...result } = outcome;
+      if (outcome.termination === 'unconfirmed' && pid !== undefined) {
+        this.registry.trackOrphanGroup(pid);
+      }
+      return result;
+    }
     if (outcome.status !== 'yielded') return outcome;
 
     const { handle } = outcome;

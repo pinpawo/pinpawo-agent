@@ -260,7 +260,7 @@ export function createStartProcessTool(shell: ShellRS) {
     },
     {
       name: 'start_process',
-      description: '启动非交互长任务，启动成功即返回 processId，不等待完成。安装依赖、完整构建、长测试、开发服务器等用本工具。用 wait_process 读取进展和退出结果、list_processes 找回当前会话任务、terminate_process 停止任务。默认在当前 workdir 执行，可传 cwd 覆盖。任务跨调用和 Host 断连继续运行；不要重复启动同一任务。启动成功不表示命令成功，需查看退出结果。短命令用 run_shell，只读短查询用 inspect_shell。执行前需要命令审核。不支持交互输入或 TTY。',
+      description: '启动非交互长任务，启动成功即返回 processId，不等待完成。安装依赖、完整构建、长测试、开发服务器等用本工具。用 wait_process 读取进展和退出结果、list_processes 找回当前会话任务、terminate_process 停止任务。默认在当前 workdir 执行，可传 cwd 覆盖。任务跨调用和 Host 断连继续运行；不要重复启动同一任务。启动成功不表示命令成功，需查看退出结果。连接旧服务时，快速结束的命令可能直接返回 exited/timeout 结果而没有 processId，应按该结果处理，不要重复启动。短命令用 run_shell，只读短查询用 inspect_shell。执行前需要命令审核。不支持交互输入或 TTY。',
       schema: z.object({
         command: z.string().min(1).describe('要启动的 shell 命令；直接运行，不要加 & 或 nohup 脱离管理'),
         cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),

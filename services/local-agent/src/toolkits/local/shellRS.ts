@@ -23,8 +23,9 @@ import type {
  *   close all managed by the RS). Commands today run over pipes as independent
  *   processes; nothing here is a persistent interactive shell, and a command
  *   does not inherit a previous command's `cd` or `export`.
- * - explicitly managed processes that return a handle immediately. `exec` with
- *   `onTimeout: 'yield'` and `waitMs: 0` is the closest current behavior.
+ *
+ * Managed tasks use `exec` with `onTimeout: 'yield'` and `waitMs: 0`, which
+ * hands over a handle on successful spawn, including for fast commands.
  */
 
 export const SHELL_RS_CONTRACT = 'pinpawo.shell-rs';
@@ -47,7 +48,7 @@ export type ShellCommand =
 export type ShellExecRequest = Readonly<{
   command: ShellCommand;
   cwd: string;
-  /** How long to wait for the command to finish before `onTimeout` applies. */
+  /** Initial wait budget; zero with `yield` hands over on successful spawn. */
   waitMs: number;
   /**
    * `yield`: keep the command running as a handle in the logical session.
@@ -77,8 +78,8 @@ export type ShellProcessSnapshot = Readonly<{
 
 export type ShellExecResult =
   | Readonly<{ status: 'exited'; code: number | null; stdout: string; stderr: string }>
-  /** Waited past `waitMs` with `onTimeout: 'terminate'`; the command was ended. */
-  | Readonly<{ status: 'timeout'; stdout: string; stderr: string }>
+  /** Timeout requests group termination; older services may omit confirmation. */
+  | Readonly<{ status: 'timeout'; termination?: 'confirmed' | 'unconfirmed'; stdout: string; stderr: string }>
   | Readonly<{ status: 'aborted'; stdout: string; stderr: string }>
   | Readonly<{ status: 'spawn_failed'; error: Error }>
   /**
@@ -103,8 +104,8 @@ export type ShellRSErrorCode =
   | 'unavailable'
   /**
    * The RS was lost while the operation was in flight. It may or may not have
-   * taken effect, and it is never retried; a started command stays in the
-   * session and can be found with `list`.
+   * taken effect, and it is never retried. Managed tasks can be found with
+   * `list`; bounded calls do not retain a result handle.
    */
   | 'result_unknown';
 

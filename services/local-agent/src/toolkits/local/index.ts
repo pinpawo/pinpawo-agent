@@ -43,6 +43,7 @@ import {
 } from './processTools';
 import {
   createRunShellTool,
+  createStartProcessTool,
   getCurrentTimeTool,
   normalizeShellAuthorizationInput,
   createInspectShellTool,
@@ -91,6 +92,7 @@ function createBashToolkitTools(shell: ShellRS): StructuredTool[] {
     ...localUtilityTools,
     getCurrentTimeTool,
     createRunShellTool(shell),
+    createStartProcessTool(shell),
     ...createProcessTools(shell),
   ];
 }
@@ -151,7 +153,7 @@ export function createArtifactDiscoveryToolkit(params: {
 
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
-  '需要执行 shell 命令时先判断它是否修改状态：只查看不修改的（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道）一律用 inspect_shell，它免审批、明显更快；只有确实会写入、安装、删除、推送或需要内联执行时才用 run_shell。两者都能跑的命令永远选 inspect_shell。',
+  '短查询只查看不修改的（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道）用 inspect_shell，它免审批；短命令需要写入、删除、推送或内联执行时用 run_shell；安装依赖、完整构建、长测试和持续运行任务用 start_process。短查询优先 inspect_shell。',
   '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
   '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir。',
   '搜索代码和文件用 inspect_shell 运行 rg：`rg -n \'pattern\' src` 搜内容，`rg --files -g \'*.ts\'` 找文件，`rg -l` 只列文件名；分析 JSON 用 inspect_shell 运行 jq。不要用 run_shell 或临时 Python 脚本做这些查询。',
@@ -159,7 +161,7 @@ const bashToolkitInstructions = [
   '查询当前时间优先使用 get_current_time；不要用 run_shell 包装 date 命令。',
   '联网取内容优先用 http_fetch：静态页面、REST API、RSS、天气或汇率这类公开接口一次请求即可拿到结果，不要为此逐步驱动浏览器。只有确实需要登录态、页面交互或 JS 动态渲染时才用浏览器。同一站点首次获批后，后续同源同方法的请求不再重复审批。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
-  '命令超时不代表失败，它会转入后台并返回进程 id：用 wait_process 跟进进度，terminate_process 终止不再需要的命令，list_processes 查看当前会话启动的后台命令。不要因为超时就重复执行同一命令。',
+  'run_shell / inspect_shell 超时会终止进程组，返回超时结果，不转后台。超时不回滚副作用；确认终止并检查已有结果后再决定是否用 start_process 重试。start_process 启动即返回进程 id，用 wait_process 跟进、terminate_process 终止、list_processes 找回当前会话任务；不要重复启动。',
   '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
   '修改文件前先读取现状；修改后优先用 validate_structured_file、inspect_shell 或 run_shell 做必要验证。',
@@ -258,8 +260,14 @@ export function createBashToolkit(deps: ShellToolkitDependencies): AgentToolkit 
         subject: ({ input }) => normalizeShellAuthorizationInput(input),
       }),
     }),
+    start_process: ReviewPolicies.commandExecution({
+      authorization: AuthorizationPolicies.exact({
+        reuseAutoReview: true,
+        subject: ({ input }) => normalizeShellAuthorizationInput(input),
+      }),
+    }),
     // The process tools carry no review policy on purpose. They only address
-    // processes an approved run_shell already started in this same Agent
+    // processes an approved start_process already started in this same Agent
     // session, so waiting on one, listing them, or stopping one grants no
     // authority the command did not already have — the same reasoning that
     // leaves browser_close unreviewed.

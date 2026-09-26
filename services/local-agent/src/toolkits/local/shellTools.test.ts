@@ -202,15 +202,20 @@ test('runShellTool truncates stdout larger than the old 64KB buffer limit', asyn
   assert.match(output, /\[\.\.\. truncated \d+ chars \.\.\.\]/);
 });
 
-test('runShellTool hands a long-running command to the session instead of killing it', async () => {
+test('a short-command timeout preserves prior side effects without retrying', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pinpawo-short-timeout-'));
   const shell = new PosixShellRS();
-  const output = String(await createRunShellTool(shell).invoke({
-    command: 'sleep 5',
-    timeoutSeconds: 1,
-  }, inSession));
-  assert.match(output, /still running after 1s/);
-  assert.equal((await shell.list('thread-shell')).length, 1);
-  await shell.dispose();
+  t.after(async () => {
+    await shell.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const result = JSON.parse(String(await createRunShellTool(shell).invoke({
+    command: 'printf once >> effects; sleep 5', cwd: dir, timeoutSeconds: 1,
+  }, inSession)));
+  assert.equal(result.status, 'timeout');
+  assert.equal(result.termination, 'confirmed');
+  assert.equal(readFileSync(join(dir, 'effects'), 'utf8'), 'once');
+  assert.deepEqual(await shell.list('thread-shell'), []);
 });
 
 test('truncateShellOutput keeps head and tail with a marker', () => {
@@ -218,4 +223,64 @@ test('truncateShellOutput keeps head and tail with a marker', () => {
   const truncated = truncateShellOutput(long, 40);
   assert.match(truncated, /^a+\n\[\.\.\. truncated 60 chars \.\.\.\]\nb+$/);
   assert.equal(truncateShellOutput('short', 40), 'short');
+});
+
+test('start_process is reviewed with the original command and cwd', async () => {
+  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
+  const item = definition(toolkit, 'start_process');
+  assert.ok(item?.review);
+  assert.ok(item.operation);
+  assert.deepEqual(item.operation.summarizeInput?.({ command: ' npm test ', cwd: ' relative ' }), {
+    target: 'relative', summary: 'npm test',
+  });
+  const context = {
+    toolkitName: 'bash', toolName: 'start_process',
+    input: { command: 'npm test', cwd: 'relative' },
+    operation: item.operation,
+    reviewCapabilities: { humanReview: true, sessionAuthorization: true },
+  };
+  const buildMatcher = item.review.authorization?.buildMatcher;
+  assert.ok(buildMatcher);
+  const review = await item.review.request({ ...context, authorizationMatcher: await buildMatcher(context) });
+  assert.deepEqual(review && 'schemaVersion' in review ? review.options.map((option) => option.id) : [],
+    ['approve', 'approve-and-authorize-thread', 'reject', 'respond']);
+  for (const name of ['wait_process', 'list_processes', 'terminate_process']) {
+    assert.equal(definition(toolkit, name)?.review, undefined);
+  }
+});
+
+test('shell tools keep connection uncertainty distinct from timeout', async () => {
+  const { ShellRSError } = await import('./shellRS');
+  const { createStartProcessTool } = await import('./shellTools');
+  const shell = new PosixShellRS();
+  shell.exec = async () => { throw new ShellRSError('result_unknown', 'connection lost'); };
+  const outputs = await Promise.all([
+    createRunShellTool(shell).invoke({ command: 'true' }, inSession),
+    createStartProcessTool(shell).invoke({ command: 'true' }, inSession),
+  ]);
+  for (const output of outputs) {
+    const result = JSON.parse(String(output));
+    assert.equal(result.status, 'error');
+    assert.equal(result.code, 'result_unknown');
+    assert.equal(result.termination, undefined);
+  }
+});
+
+test('inspect_shell remains bounded and does not turn timeouts into background work', async () => {
+  const { createInspectShellTool } = await import('./shellTools');
+  const shell = new PosixShellRS();
+  let calls = 0;
+  shell.exec = async (_session, request) => {
+    calls += 1;
+    assert.equal(request.onTimeout, 'terminate');
+    assert.equal(request.waitMs, 1_000);
+    return { status: 'timeout', termination: 'unconfirmed', stdout: 'partial', stderr: '' };
+  };
+  const tool = createInspectShellTool(shell);
+  const result = JSON.parse(String(await tool.invoke({ command: 'ls', timeoutSeconds: 1 }, inSession)));
+  assert.equal(result.status, 'timeout');
+  assert.equal(result.termination, 'unconfirmed');
+  assert.equal(result.stdout, 'partial');
+  await tool.invoke({ command: 'npm install' }, inSession);
+  assert.equal(calls, 1, 'read-only admission still blocks mutation');
 });

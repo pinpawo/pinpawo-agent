@@ -70,6 +70,7 @@ function bindInput(toolName: string, input: unknown, workdir: string) {
   }
   if (
     toolName === 'run_shell'
+    || toolName === 'start_process'
     || toolName === 'inspect_shell'
     || toolName.startsWith('git_')
     || toolName.startsWith('gh_')

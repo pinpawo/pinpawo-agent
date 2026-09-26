@@ -355,3 +355,94 @@ test('abort still terminates a run that has not yielded', { skip: isWindows }, a
   killMarker(marker);
   assert.deepEqual(survivors, [], 'pre-yield abort must still kill the group');
 });
+
+test('timeout confirms cleanup even when a stubborn child has closed its output', { skip: isWindows }, async (t) => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'pinpawo-timeout-'));
+  const pidFile = join(dir, 'child.pid');
+  let childPid = 0;
+  t.after(async () => {
+    if (childPid) {
+      try { process.kill(childPid, 'SIGKILL'); } catch { /* already exited */ }
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const program = "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+  const outcome = await runShellCommand({
+    command: `${quote(process.execPath)} -e ${quote(program)} ${quote(pidFile)} >/dev/null 2>&1 & wait`,
+    cwd: CWD, timeoutMs: 1_000, maxOutputChars: 1024, killGraceMs: 100,
+  });
+  childPid = Number(await readFile(pidFile, 'utf8'));
+  assert.ok(childPid > 0);
+  assert.equal(outcome.status, 'timeout');
+  assert.equal(outcome.status === 'timeout' && outcome.termination, 'confirmed');
+  assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' });
+});
+
+for (const mode of ['timeout', 'abort', 'managed'] as const) {
+  test(`${mode} completes when an escaped descendant retains stdout`, { skip: isWindows }, async (t) => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'pinpawo-escaped-pipe-'));
+    const pidFile = join(dir, 'escaped.pid');
+    const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+    t.after(async () => {
+      const pid = Number(await readFile(pidFile, 'utf8').catch(() => ''));
+      if (pid > 0) {
+        try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+      await rm(dir, { recursive: true, force: true });
+    });
+    const escaped = 'setpgrp(0,0) or die "setpgrp failed"; open(my $f, ">", $ARGV[0]) or die $!; print $f $$; close($f); $|=1; print "before-timeout\\n"; sleep 30';
+    const controller = new AbortController();
+    const command = `/usr/bin/perl -e ${quote(escaped)} ${quote(pidFile)} & while [ ! -s ${quote(pidFile)} ]; do sleep 0.01; done; ${mode === 'managed' ? 'exit 0' : 'sleep 30'}`;
+    const pending = runShellCommand({
+      command, cwd: CWD, timeoutMs: mode === 'managed' ? 0 : mode === 'timeout' ? 700 : 30_000,
+      maxOutputChars: 1024, killGraceMs: 100, signal: controller.signal,
+      yieldOnTimeout: mode === 'managed',
+    });
+    t.after(async () => {
+      controller.abort();
+      const result = await pending;
+      if (result.status === 'yielded') {
+        result.handle.terminate(100);
+        await result.handle.wait();
+      }
+    });
+    for (let i = 0; i < 100; i += 1) {
+      if (await readFile(pidFile, 'utf8').catch(() => '')) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(Number(await readFile(pidFile, 'utf8')) > 0);
+    if (mode === 'abort') controller.abort();
+    let watchdog: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      watchdog = setTimeout(() => reject(new Error('completion waited for escaped pipe writer')), 3_000);
+    });
+    t.after(() => clearTimeout(watchdog));
+    const outcome = await Promise.race([pending, deadline]);
+    if (mode === 'managed') {
+      assert.equal(outcome.status, 'yielded');
+      if (outcome.status !== 'yielded') return;
+      for (let i = 0; i < 100 && !outcome.handle.hasExited; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(outcome.handle.hasExited, true, 'leader exit is independent of inherited pipe lifetime');
+      outcome.handle.terminate(100);
+      await Promise.race([outcome.handle.wait(), deadline]);
+    } else {
+      assert.equal(outcome.status, mode === 'abort' ? 'aborted' : 'timeout');
+      if (outcome.status === 'timeout') {
+        assert.equal(outcome.termination, 'unconfirmed');
+        assert.ok(outcome.pid);
+      }
+      assert.ok('stdout' in outcome && outcome.stdout.includes('before-timeout'));
+    }
+    // Closing the read side is not evidence that the escaped process died.
+    process.kill(Number(await readFile(pidFile, 'utf8')), 0);
+  });
+}

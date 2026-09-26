@@ -1,10 +1,10 @@
 import type { AgentModels } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from '../config/agentConfig';
-import { ChatOpenAI } from '@langchain/openai';
 import {
   requiresLlmStreaming,
   resolveLlmGenerationReserveTokens,
 } from '../config/llmModelPresets';
+import { createReasoningPassbackChatOpenAI } from './reasoningPassback';
 
 export { resolveLlmGenerationReserveTokens } from '../config/llmModelPresets';
 
@@ -18,7 +18,7 @@ export function buildLocalAgentModels(
       ? llmConfig.observeModel
       : llmConfig.model;
 
-    return new ChatOpenAI({
+    return createReasoningPassbackChatOpenAI({
       model,
       // Leave temperature to the provider; thinking and reasoning effort also use provider defaults.
       timeout: llmConfig.timeoutMs ?? 45000,

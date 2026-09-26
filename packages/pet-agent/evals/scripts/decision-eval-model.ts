@@ -1,4 +1,4 @@
-import { ChatOpenAI } from '@langchain/openai';
+import { createReasoningPassbackChatOpenAI } from '../../../../services/local-agent/src/agent/reasoningPassback.ts';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -220,7 +220,7 @@ export function createDecisionEvalModel(options: {
   const fingerprint = fingerprintModelProfile(profile).fingerprint;
 
   return {
-    model: new ChatOpenAI({
+    model: createReasoningPassbackChatOpenAI({
       model: profile.model,
       ...(temperature === null ? {} : { temperature }),
       timeout,

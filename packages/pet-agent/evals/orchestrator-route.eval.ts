@@ -16,7 +16,7 @@ import { createDeliveryResult, readFixtureDelivery, withDeliveryCalls } from '..
  */
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
-import { ChatOpenAI } from '@langchain/openai';
+import { createReasoningPassbackChatOpenAI } from '../../../services/local-agent/src/agent/reasoningPassback.ts';
 import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
@@ -129,7 +129,7 @@ function buildEvalModels(): AgentModels {
     : normalizedModel.includes('deepseek')
       ? { thinking: { type: 'disabled' } }
       : undefined;
-  const model = new ChatOpenAI({
+  const model = createReasoningPassbackChatOpenAI({
     model: LLM_MODEL,
     temperature: 0.3, // lower for more deterministic eval
     timeout: 180_000,

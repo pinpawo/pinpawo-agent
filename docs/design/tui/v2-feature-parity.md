@@ -119,3 +119,20 @@ The feature-parity milestone is complete only when:
   workflows pass against a real local-agent host;
 - known terminal-specific gaps have an explicit fallback;
 - the legacy TUI remains available throughout the migration.
+
+
+## 执行结果引用（实现草稿，2026-09-27）
+
+默认 timeline 隐藏 subagent 文字块及成功委派的工具结果正文，只展示工具进度和
+Supervisor 的正式回复。Capability 的有效交付从 Root 原生调用/结果配对提取，
+作为回复的 `resultReferences`（id/title/text）传输；按 reply 的 runId 和消息位置
+限定范围，不从子图最后一条流消息猜测交付，不改变运行时 messages 或验收协议。
+完成事件与 checkpoint 回放使用同一提取逻辑，无交付的直接回复不带引用。
+
+回答下显示“执行结果 N”引用。终端 scrollback 提交后不保留鼠标处理器，因此使用
+OSC 8 file 链接打开 TUI 本机生成的 HTML 详情，按终端约定点击或修饰键点击。
+详情是转义后的原文，禁用脚本及外部资源；目录为私有临时目录，文件权限 0600，
+内容哈希避免重复写入。文件保留至操作系统清理临时目录，避免退出后历史链接立即
+失效；重新加载会话可从 checkpoint 重新生成。支持远程 Host：文件在 TUI 本机生成。
+不支持终端链接或本机文件写入失败时，可通过 `/transcript` 查看引用正文。
+本次不增加 App 内弹窗、历史结果搜索或把引用解释成模型逐句标注的来源引用。

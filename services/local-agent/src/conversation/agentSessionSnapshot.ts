@@ -123,6 +123,7 @@ function timelineFromCheckpointMessages(messages: TuiCheckpointMessage[]): Agent
       type: 'message',
       role: message.role,
       text,
+      ...(message.resultReferences?.length ? { resultReferences: message.resultReferences } : {}),
       status: 'completed',
       ...(message.createdAt ? { createdAt: message.createdAt } : {}),
     } satisfies AgentTimelineEntry];

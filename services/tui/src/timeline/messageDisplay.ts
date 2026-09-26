@@ -50,20 +50,13 @@ export function buildMessageDisplayLines(
           text: `| ${line}`,
           tone: 'assistant' as const,
         })),
-      ];
-    case 'subagent': {
-      if (!entry.text.trim()) return [];
-      const text = subagentDisplayText(entry.text);
-      return [
-        ...timestampLine(timestampLabel, 'subagent'),
-        ...logicalLines(
-          normalizeAssistantMessageMarkdown(text),
-        ).map((line) => ({
-          text: line,
-          tone: 'subagent' as const,
+        ...(entry.resultReferences ?? []).map((ref, index) => ({
+          text: `  [执行结果 ${index + 1}] ${ref.title.replace(/\s+/g, ' ').trim()}`,
+          tone: 'assistant-label' as const,
         })),
       ];
-    }
+    case 'subagent':
+      return [];
   }
 }
 

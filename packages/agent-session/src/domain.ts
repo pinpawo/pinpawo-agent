@@ -11,11 +11,19 @@ import type { PendingInterruptProjection } from './review';
 
 export const AGENT_SESSION_SNAPSHOT_VERSION = 5 as const;
 
+/** Execution evidence attached to a reply; never additional assistant prose. */
+export type AgentResultReference = {
+  id: string;
+  title: string;
+  text: string;
+};
+
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
   role: 'user' | 'assistant' | 'system' | 'subagent';
   text: string;
+  resultReferences?: AgentResultReference[];
   status: 'streaming' | 'completed';
   requestId?: string;
   createdAt?: string;
@@ -51,6 +59,7 @@ export type AgentTimelineEntry =
   | AgentOperationEntry;
 
 export type AgentSessionMessageInput = {
+  resultReferences?: AgentResultReference[];
   id?: string;
   role: AgentMessageEntry['role'];
   text: string;

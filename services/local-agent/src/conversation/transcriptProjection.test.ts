@@ -160,3 +160,23 @@ test('summarizeTuiCheckpointMessages derives title from first user message', () 
   });
   assert.equal(summarizeTuiCheckpointMessages([], '2026-06-02T00:00:00.000Z').title, '空会话');
 });
+
+test('reply references contain only preceding paired deliveries from its own run, and survive replay', () => {
+  const delivery = (runId: string, id: string) => withDeliveryCalls([createDeliveryResult({
+    sourceLane: 'capability:general', delegationId: `delegation-${id}`, runId,
+    deliveryId: id, task: `Task ${id}`, result: `Evidence ${id}`, createdAt: '2026-09-27T00:00:00Z',
+  })]);
+  const reply = setAgentMessageMetadata(new AIMessage('final reply'), { runId: 'current' });
+  const messages = [
+    ...delivery('old', 'old'), ...delivery('current', 'one'), ...delivery('current', 'two'),
+    reply, ...delivery('future', 'future'),
+  ];
+  const projected = readTuiCheckpointMessages(messages);
+  const final = projected.find(message => message.text === 'final reply');
+  assert.deepEqual(final?.resultReferences, [
+    { id: 'one', title: 'Task one', text: 'Evidence one' },
+    { id: 'two', title: 'Task two', text: 'Evidence two' },
+  ]);
+  assert.equal(projected.some(message => message.text === 'Evidence one'), false);
+  assert.deepEqual(readTuiCheckpointMessages(messages), projected);
+});

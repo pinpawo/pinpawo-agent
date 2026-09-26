@@ -1,3 +1,4 @@
+import { createDeliveryResult, withDeliveryCalls } from '../../../../packages/pet-agent/src/testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -222,11 +223,13 @@ test('runAgentSessionTurn sources tool operations from the root protocol stream,
   );
 });
 
-test('runAgentSessionTurn falls back to checkpoint final message when stream values omit messages', async () => {
+test('runAgentSessionTurn falls back to checkpoint reply and its result references when stream values omit messages', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
   const finalMessages = [
     new HumanMessage('hello'),
-    new AIMessage('checkpoint answer'),
+    ...withDeliveryCalls([createDeliveryResult({ sourceLane: 'capability:general', delegationId: 'd1',
+      runId: 'r1', deliveryId: 'delivery', task: 'Inspect', result: 'Evidence', createdAt: '2026-09-27T00:00:00Z' })]),
+    new AIMessage({ content: 'checkpoint answer', additional_kwargs: { pinpawo: { runId: 'r1' } } }),
   ];
   const setup = {
     graphConfig: {},
@@ -271,6 +274,7 @@ test('runAgentSessionTurn falls back to checkpoint final message when stream val
       event.type === 'message.completed',
   ) ?? null;
   assert.equal(completed?.text, 'checkpoint answer');
+  assert.deepEqual(completed?.resultReferences, [{ id: 'delivery', title: 'Inspect', text: 'Evidence' }]);
 });
 
 test('runAgentSessionTurn replaces the current plan from root values and clears it at settlement', async () => {

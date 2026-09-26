@@ -1,3 +1,4 @@
+import { readReplyResultReferences } from '../conversation/transcriptProjection';
 import type { BaseMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
@@ -532,6 +533,10 @@ export async function runAgentSessionTurn(
     messageId: streamedReplyMessageId || requestId,
     role: 'assistant',
     text: finalReply,
+    resultReferences: readReplyResultReferences(
+      finalThreadState.messages.length ? finalThreadState.messages : finalMessages,
+      (finalThreadState.messages.length ? finalThreadState.messages : finalMessages).at(-1),
+    ),
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
 

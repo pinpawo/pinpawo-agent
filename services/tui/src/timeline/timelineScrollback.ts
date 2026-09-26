@@ -4,6 +4,7 @@ import {
   BoxRenderable,
   dim,
   fg,
+  link,
   parseColor,
   StyledText,
   TextAttributes,
@@ -34,7 +35,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { subagentDisplayText } from './messageDisplay';
+import { resultReferenceFiles } from './resultReferenceFiles';
 import { isDelegationEntry } from './operationDisplay';
 
 const WELCOME_COLOR = '#69c0c8';
@@ -490,6 +491,7 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       entry.role,
       normalizeText(entry.text),
       entry.status,
+      entry.resultReferences,
     ]);
   }
   return JSON.stringify([
@@ -616,6 +618,7 @@ function populateTimelineRoot(
   let delegationScope: BoxRenderable | null = null;
 
   entries.forEach((entry, entryIndex) => {
+    if (entry.type === 'message' && entry.role === 'subagent') return;
     const childCountBeforeEntry = root.getChildrenCount();
     const lines = buildTimelineDisplayLines(entry, {
       now,
@@ -641,23 +644,33 @@ function populateTimelineRoot(
     }
     if (
       entry.type === 'message'
-      && (entry.role === 'assistant' || entry.role === 'subagent')
+      && entry.role === 'assistant'
       && entry.text.trim()
       && assistantMarkdownStyle
     ) {
-      const detailSurface = entry.role === 'subagent'
-        ? createDetailEntrySurface(context, root, entryIndex, entry.id)
-        : root;
+      const detailSurface = root;
       const label = entry.updatedAt ?? entry.createdAt ? lines[0] : undefined;
       if (label) addLine(label, detailSurface);
       assistantMarkdown = createAssistantMarkdownSurface(context, {
         id: `${root.id}:${entry.role}:${entryIndex}:${entry.id}`,
-        content: entry.role === 'subagent'
-          ? subagentDisplayText(entry.text)
-          : entry.text,
+        content: entry.text,
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);
+      for (const [index, reference] of (entry.resultReferences ?? []).entries()) {
+        const label = `[执行结果 ${index + 1}] ${reference.title.replace(/\s+/g, ' ').trim()}`;
+        let content: string | StyledText = `  ${label}（/transcript 查看）`;
+        try {
+          content = new StyledText([link(resultReferenceFiles.url(reference))(`  ${label}`)]);
+        } catch {
+          // An unavailable local temp directory must not break the reply.
+        }
+        detailSurface.add(new TextRenderable(context, {
+          id: `${root.id}:result:${entryIndex}:${index}`,
+          width: '100%', height: 'auto', content, fg: '#69c0c8',
+          attributes: TextAttributes.UNDERLINE,
+        }));
+      }
       if (root.getChildrenCount() > childCountBeforeEntry) {
         addTimelineEntrySpacing(entry);
       }

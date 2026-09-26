@@ -136,7 +136,7 @@ test('completed assistant markdown renders rich blocks without source markers', 
   }
 });
 
-test('completed subagent messages render rich Markdown without an actor label', async () => {
+test('completed subagent messages do not render in scrollback', async () => {
   const setup = await createTimelineRenderer(64);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
@@ -157,18 +157,14 @@ test('completed subagent messages render rich Markdown without an actor label', 
     }]));
 
     const text = setup.cellOutput.takeText();
-    assert.match(text, /^  \| Result/m);
-    assert.match(text, /Use bold and docs \(https:\/\/example\.com\)\./);
-    assert.match(text, /Key\s+Value/);
-    assert.match(text, /mode\s+rich/);
-    assert.doesNotMatch(text, /subagent|\*\*|# Result|\| ---/);
+    assert.equal(text, '');
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
   }
 });
 
-test('subagent protocol briefings render as a readable delegation', async () => {
+test('subagent protocol briefings stay out of scrollback', async () => {
   const setup = await createTimelineRenderer(64);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
@@ -186,11 +182,7 @@ test('subagent protocol briefings render as a readable delegation', async () => 
     }]));
 
     const text = setup.cellOutput.takeText();
-    assert.match(text, /Delegating/);
-    assert.match(text, /Review the current pull request\./);
-    assert.match(text, /Context/);
-    assert.match(text, /Preserve main behavior\./);
-    assert.doesNotMatch(text, /delegation_briefing|CDATA|essential_context/);
+    assert.equal(text, '');
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
@@ -249,7 +241,7 @@ test('message timestamps align without actor labels', async () => {
     const text = setup.cellOutput.takeText();
     const headers = entries.map((entry) => (
       formatTimelineEntry(entry).split('\n')[0]
-    ));
+    )).filter(Boolean);
     const rows = text.split('\n').filter((row) => (
       headers.includes(row.trimStart())
     ));
@@ -560,6 +552,7 @@ async function createTimelineRenderer(width: number) {
     externalOutputMode: 'capture-stdout',
   });
   const commits: string[][] = [];
+  const linkedCells: number[] = [];
   const styleCommits: ReturnType<
     typeof setup.renderer.currentRenderBuffer.getSpanLines
   >[] = [];
@@ -575,9 +568,11 @@ async function createTimelineRenderer(width: number) {
         .map((line) => line.trimEnd()),
     );
     styleCommits.push(event.snapshot.getSpanLines());
+    linkedCells.push(...event.snapshot.buffers.attributes.filter((value: number) => value > 255));
   });
   return {
     ...setup,
+    linkedCells,
     cellOutput: {
       takeText() {
         const text = commits.flat().join('\n');
@@ -651,3 +646,31 @@ function assistantMessage(
     status,
   };
 }
+
+test('hidden subagent output becomes a linked reference after streamed answer completion', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    const child: AgentTimelineEntry = { id: 'child', type: 'message', role: 'subagent',
+      requestId: 'request-1', text: 'PRIVATE CAPABILITY RESULT', status: 'completed' };
+    timeline.render(session([child], 'request-1'));
+    assert.deepEqual(setup.externalOutput.take(), []);
+    const streaming = assistantMessage('Public answer.', 'streaming');
+    timeline.render(session([child, streaming], 'request-1'));
+    const completed = { ...streaming, status: 'completed' as const, resultReferences: [
+      { id: 'delivery-1', title: 'Inspect files', text: 'PRIVATE CAPABILITY RESULT' },
+    ] };
+    timeline.render(session([child, completed]));
+    const output = setup.externalOutput.take().flatMap(commit => commit.rows).join('\n');
+    assert.match(output, /Public answer\./);
+    assert.match(output, /执行结果 1/);
+    assert.ok(setup.linkedCells.length > 0,
+      'reference cells must retain a native hyperlink, not just a text label');
+    assert.doesNotMatch(output, /PRIVATE CAPABILITY RESULT/);
+    timeline.render(session([child, completed]));
+    assert.deepEqual(setup.externalOutput.take(), []);
+  } finally {
+    timeline.destroy();
+    setup.renderer.destroy();
+  }
+});

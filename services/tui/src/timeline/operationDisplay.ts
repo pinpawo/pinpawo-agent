@@ -221,6 +221,8 @@ function buildOperationOutputLines(
   entry: AgentOperationEntry,
   width: number,
 ): OperationDisplayLine[] {
+  // Delivery prose is linked from the final reply, never dumped under a task.
+  if (isDelegationEntry(entry) && entry.phase !== 'failed') return [];
   const isError = entry.phase === 'failed';
   const raw = isError
     ? entry.raw?.error ?? entry.raw?.output

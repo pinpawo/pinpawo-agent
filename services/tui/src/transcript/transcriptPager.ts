@@ -92,10 +92,17 @@ export function formatTranscriptPagerText(session: AgentSession) {
   }
 
   for (const entry of session.timeline) {
+    if (entry.type === 'message' && entry.role === 'subagent') continue;
     lines.push(
       sanitizePagerText(formatTimelineEntry(entry)),
       '',
     );
+    if (entry.type === 'message') {
+      for (const [index, reference] of (entry.resultReferences ?? []).entries()) {
+        lines.push(sanitizePagerText(`执行结果 ${index + 1} · ${reference.title}`),
+          sanitizePagerText(reference.text), '', '────────────────────────────────────────', '');
+      }
+    }
   }
   return lines.join('\n');
 }

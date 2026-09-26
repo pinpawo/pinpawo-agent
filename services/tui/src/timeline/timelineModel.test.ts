@@ -480,7 +480,7 @@ test('a pending operation keeps later settled entries in the live ordered tail',
     [
       '  hello\n  world',
       '  ◌ Read file（进行中）',
-      'progress',
+      '',
       '| done',
     ],
   );

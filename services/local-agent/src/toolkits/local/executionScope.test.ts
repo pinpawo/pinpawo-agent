@@ -103,3 +103,23 @@ test('an invalid path returns a recoverable tool error through the normal path',
   assert.equal(ToolMessage.isInstance(result), true);
   assert.match(String(ToolMessage.isInstance(result) ? result.content : result), /Error/);
 });
+
+test('start_process resolves default and relative cwd from the call workdir', async (t) => {
+  const { mkdirSync } = await import('node:fs');
+  const workdir = mkdtempSync(resolve(tmpdir(), 'pinpawo-start-workdir-'));
+  mkdirSync(resolve(workdir, 'child'));
+  const shell = new PosixShellRS();
+  t.after(async () => {
+    await shell.dispose();
+    rmSync(workdir, { recursive: true, force: true });
+  });
+  const toolkit = createBashToolkit({ shell });
+  for (const cwd of [undefined, 'child']) {
+    const result = JSON.parse(String(await toolFrom(toolkit, 'start_process').invoke({
+      command: 'pwd', ...(cwd ? { cwd } : {}),
+    }, call(workdir, 'start'))));
+    assert.equal(result.status, 'started');
+    const finished = await shell.wait('thread-start', result.processId, 5_000);
+    assert.equal((result.stdout + finished.stdout).trim(), realpathSync(resolve(workdir, cwd ?? '.')));
+  }
+});

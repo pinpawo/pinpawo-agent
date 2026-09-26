@@ -8,7 +8,7 @@ import {
   TERMINATE_PROCESS_TOOL_NAME,
   WAIT_PROCESS_TOOL_NAME,
 } from './processTools';
-import { createRunShellTool } from './shellTools';
+import { createRunShellTool, createStartProcessTool } from './shellTools';
 import { createBashToolkit, createGitToolkit, PosixShellRS } from './index';
 
 // End-to-end through the POSIX executor (sh commands, pgrep/pkill probes).
@@ -34,6 +34,7 @@ function setup(shell = new PosixShellRS()) {
   return {
     shell,
     runShell: createRunShellTool(shell),
+    startProcess: createStartProcessTool(shell),
     waitTool: waitTool!,
     terminateTool: terminateTool!,
     listTool: listTool!,
@@ -41,9 +42,10 @@ function setup(shell = new PosixShellRS()) {
 }
 
 function processIdFrom(output: string) {
-  const match = /Process id: (\S+)/.exec(output);
-  assert.ok(match, `expected a process id in:\n${output}`);
-  return match[1]!;
+  const result = JSON.parse(output);
+  assert.equal(result.status, 'started');
+  assert.equal(typeof result.processId, 'string');
+  return result.processId as string;
 }
 
 function toolFrom(toolkit: AgentToolkit, name: string) {
@@ -52,19 +54,46 @@ function toolFrom(toolkit: AgentToolkit, name: string) {
   return definition.tool;
 }
 
-test('run_shell hands a slow command to the background', { skip: isWindows }, async () => {
+test('run_shell times out without creating a background process', { skip: isWindows }, async (t) => {
   const { runShell, shell } = setup();
-  const output = String(await runShell.invoke({
-    command: 'echo starting; sleep 4',
-    timeoutSeconds: 1,
-  }, call()));
+  t.after(() => shell.dispose());
+  const result = JSON.parse(String(await runShell.invoke({
+    command: 'echo starting; sleep 4', timeoutSeconds: 1,
+  }, call())));
+  assert.equal(result.status, 'timeout');
+  assert.equal(result.termination, 'confirmed');
+  assert.equal(result.stdout, 'starting');
+  assert.deepEqual(await shell.list('thread-1'), []);
+});
 
-  assert.match(output, /still running/);
-  assert.match(output, /Process id: /);
-  assert.match(output, /starting/, 'output so far must be reported');
-  assert.match(output, /Do not rerun/, 'must steer the model away from a retry');
+test('start_process immediately returns a managed handle', { skip: isWindows }, async (t) => {
+  const { startProcess, shell } = setup();
+  t.after(() => shell.dispose());
+  const processId = processIdFrom(String(await startProcess.invoke({ command: 'sleep 30' }, call())));
+  assert.equal((await shell.list('thread-1'))[0]?.processId, processId);
+  assert.equal((await shell.list('thread-1'))[0]?.status, 'running');
+});
 
-  await shell.dispose();
+test('start_process preserves fast task output and exit status under a handle', { skip: isWindows }, async (t) => {
+  const { startProcess, shell } = setup();
+  t.after(() => shell.dispose());
+  const started = JSON.parse(String(await startProcess.invoke({ command: 'printf quick; exit 7' }, call())));
+  const processId = processIdFrom(JSON.stringify(started));
+  const result = await shell.wait('thread-1', processId, 5_000);
+  assert.equal(result.process.status, 'exited');
+  assert.equal(result.process.exitCode, 7);
+  assert.equal(started.stdout + result.stdout, 'quick');
+});
+
+test('start_process reports spawn failure without a success handle', { skip: isWindows }, async (t) => {
+  const { startProcess, shell } = setup();
+  t.after(() => shell.dispose());
+  const result = JSON.parse(String(await startProcess.invoke({
+    command: 'true', cwd: '/definitely/not/a/directory',
+  }, call())));
+  assert.equal(result.status, 'spawn_failed');
+  assert.equal(result.processId, undefined);
+  assert.deepEqual(await shell.list('thread-1'), []);
 });
 
 test('run_shell outside an Agent session is an ordinary tool error', { skip: isWindows }, async () => {
@@ -84,25 +113,23 @@ test('short commands are not held as processes', { skip: isWindows }, async () =
 });
 
 test('wait_process reports progress and then the exit code', { skip: isWindows }, async () => {
-  const { runShell, waitTool, shell } = setup();
-  const started = String(await runShell.invoke({
+  const { startProcess, waitTool, shell } = setup();
+  const started = String(await startProcess.invoke({
     command: 'echo one; sleep 1; echo two; exit 4',
-    timeoutSeconds: 1,
   }, call()));
   const processId = processIdFrom(started);
 
   const finished = String(await waitTool.invoke({ processId, waitSeconds: 5 }, call()));
   assert.match(finished, /exited with code 4/);
   assert.match(finished, /two/, 'output produced after the handover is delivered');
-  assert.doesNotMatch(finished, /one/, 'already-delivered output is not repeated');
+  assert.equal((await shell.read('thread-1', processId)).stdout, '', 'delivered output is not repeated');
   await shell.dispose();
 });
 
 test('wait_process returns early while the command is still running', { skip: isWindows }, async () => {
-  const { runShell, waitTool, shell } = setup();
-  const started = String(await runShell.invoke({
+  const { startProcess, waitTool, shell } = setup();
+  const started = String(await startProcess.invoke({
     command: 'sleep 6',
-    timeoutSeconds: 1,
   }, call()));
   const processId = processIdFrom(started);
 
@@ -117,11 +144,10 @@ test('wait_process returns early while the command is still running', { skip: is
 });
 
 test('terminate_process stops a background command', { skip: isWindows }, async () => {
-  const { runShell, terminateTool, shell } = setup();
+  const { startProcess, terminateTool, shell } = setup();
   const marker = `pinpawo-tools-terminate-${Date.now().toString()}`;
-  const started = String(await runShell.invoke({
+  const started = String(await startProcess.invoke({
     command: `node -e "process.title='${marker}'; setTimeout(() => {}, 10000)"`,
-    timeoutSeconds: 1,
   }, call()));
   const processId = processIdFrom(started);
 
@@ -149,10 +175,9 @@ test('an unknown process id is reported, not thrown', { skip: isWindows }, async
 });
 
 test('later runs and other delegations of the same session reach its processes', { skip: isWindows }, async () => {
-  const { runShell, waitTool, listTool, terminateTool, shell } = setup();
-  const started = String(await runShell.invoke({
+  const { startProcess, waitTool, listTool, terminateTool, shell } = setup();
+  const started = String(await startProcess.invoke({
     command: 'echo early; sleep 6',
-    timeoutSeconds: 1,
   }, call('thread-1', 'run-1', 'delegation-1')));
   const processId = processIdFrom(started);
 
@@ -169,10 +194,9 @@ test('later runs and other delegations of the same session reach its processes',
 });
 
 test('another session cannot reach or list a process it did not start', { skip: isWindows }, async () => {
-  const { runShell, waitTool, listTool, terminateTool, shell } = setup();
-  const started = String(await runShell.invoke({
+  const { startProcess, waitTool, listTool, terminateTool, shell } = setup();
+  const started = String(await startProcess.invoke({
     command: 'sleep 4',
-    timeoutSeconds: 1,
   }, call('thread-1')));
   const processId = processIdFrom(started);
 
@@ -188,9 +212,8 @@ test('Bash and Git sharing one ShellRS share one logical session per Agent sessi
   const shell = new PosixShellRS();
   const bash = createBashToolkit({ shell });
   const git = createGitToolkit({ shell });
-  const started = String(await toolFrom(bash, 'run_shell').invoke({
+  const started = String(await toolFrom(bash, 'start_process').invoke({
     command: 'sleep 4',
-    timeoutSeconds: 1,
   }, call('thread-shared')));
   const processId = processIdFrom(started);
 
@@ -211,9 +234,8 @@ test('Bash and Git on separate ShellRS instances are isolated', { skip: isWindow
   const gitShell = new PosixShellRS();
   const bash = createBashToolkit({ shell: bashShell });
   const git = createGitToolkit({ shell: gitShell });
-  const started = String(await toolFrom(bash, 'run_shell').invoke({
+  const started = String(await toolFrom(bash, 'start_process').invoke({
     command: 'sleep 4',
-    timeoutSeconds: 1,
   }, call('thread-split')));
   processIdFrom(started);
 

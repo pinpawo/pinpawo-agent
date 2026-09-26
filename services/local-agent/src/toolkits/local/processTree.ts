@@ -17,11 +17,28 @@ import type {
  * copy concurrently.
  *
  * Spawning detached puts the command in a new process group whose id equals
- * the child's pid, so `kill(-pid)` reaches every descendant.
+ * the child's pid. Signals reach members of that group; descendants that
+ * deliberately leave it are outside this executor's containment boundary.
  */
 
 
 const DEFAULT_KILL_GRACE_MS = 2_000;
+
+async function waitForGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isProcessGroupAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return true;
+}
+
+async function terminateAndConfirmGroup(pid: number, graceMs: number): Promise<boolean> {
+  killProcessGroup(pid, 'SIGTERM');
+  if (await waitForGroupExit(pid, graceMs)) return true;
+  killProcessGroup(pid, 'SIGKILL');
+  return await waitForGroupExit(pid, 1_000);
+}
 
 /**
  * Signal a whole process group, tolerating a group that is already gone.
@@ -87,7 +104,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
     let yielded = false;
     let exited = false;
     let reason: 'timeout' | 'aborted' | null = null;
-    let killTimer: NodeJS.Timeout | null = null;
+    let groupTermination: Promise<boolean> | null = null;
 
     const outputListeners = new Set<
       (stream: 'stdout' | 'stderr', chunk: string) => void
@@ -129,12 +146,9 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
 
     const terminateGroup = (grace: number) => {
       if (pid === undefined) return;
-      killProcessGroup(pid, 'SIGTERM');
-      killTimer = setTimeout(() => {
-        killProcessGroup(pid, 'SIGKILL');
-      }, grace);
-      // Do not hold the event loop open just to escalate a kill.
-      killTimer.unref?.();
+      // Keep cleaning up even when the leader closes its output before its
+      // children exit. A close event alone does not confirm group termination.
+      groupTermination ??= terminateAndConfirmGroup(pid, grace).catch(() => false);
     };
 
     const terminate = (why: 'timeout' | 'aborted') => {
@@ -143,7 +157,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       terminateGroup(killGraceMs);
     };
 
-    const timeoutTimer = setTimeout(() => {
+    const timeoutTimer = yieldOnTimeout && timeoutMs === 0 ? undefined : setTimeout(() => {
       if (yieldOnTimeout) {
         yieldOwnership();
         return;
@@ -155,7 +169,6 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
 
     const cleanup = () => {
       clearTimeout(timeoutTimer);
-      if (killTimer) clearTimeout(killTimer);
       signal?.removeEventListener('abort', onAbort);
     };
 
@@ -197,6 +210,12 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       settle({ status: 'yielded', handle });
     }
 
+    // Immediate managed starts must have a handle even if the program exits
+    // before a zero-delay timer would fire. Spawn errors still reject startup.
+    child.once('spawn', () => {
+      if (yieldOnTimeout && timeoutMs === 0) yieldOwnership();
+    });
+
     child.on('error', (err) => {
       if (yielded) {
         // The handle owns the outcome now; a late spawn error simply ends it.
@@ -207,10 +226,10 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
       settle({ status: 'spawn_failed', error: err });
     });
 
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
+      const termination = groupTermination ? await groupTermination : null;
       exited = true;
       if (yielded) {
-        if (killTimer) clearTimeout(killTimer);
         resolveExit({ code, stdout, stderr });
         // Nothing more will be emitted; do not keep subscriber closures alive
         // for as long as the handle is retained.
@@ -218,7 +237,7 @@ export function runShellCommand(options: ShellRunOptions): Promise<ShellRunOutco
         return;
       }
       if (reason === 'timeout') {
-        settle({ status: 'timeout', stdout, stderr });
+        settle({ status: 'timeout', termination: termination ? 'confirmed' : 'unconfirmed', stdout, stderr });
         return;
       }
       if (reason === 'aborted') {

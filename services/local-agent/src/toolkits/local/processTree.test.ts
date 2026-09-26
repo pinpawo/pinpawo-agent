@@ -355,3 +355,29 @@ test('abort still terminates a run that has not yielded', { skip: isWindows }, a
   killMarker(marker);
   assert.deepEqual(survivors, [], 'pre-yield abort must still kill the group');
 });
+
+test('timeout confirms cleanup even when a stubborn child has closed its output', { skip: isWindows }, async (t) => {
+  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'pinpawo-timeout-'));
+  const pidFile = join(dir, 'child.pid');
+  let childPid = 0;
+  t.after(async () => {
+    if (childPid) {
+      try { process.kill(childPid, 'SIGKILL'); } catch { /* already exited */ }
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const program = "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+  const outcome = await runShellCommand({
+    command: `${quote(process.execPath)} -e ${quote(program)} ${quote(pidFile)} >/dev/null 2>&1 & wait`,
+    cwd: CWD, timeoutMs: 1_000, maxOutputChars: 1024, killGraceMs: 100,
+  });
+  childPid = Number(await readFile(pidFile, 'utf8'));
+  assert.ok(childPid > 0);
+  assert.equal(outcome.status, 'timeout');
+  assert.equal(outcome.status === 'timeout' && outcome.termination, 'confirmed');
+  assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' });
+});

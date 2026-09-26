@@ -111,10 +111,15 @@ Toolkit 用原始参数和该上下文在执行时解释目标：local 工具经
   session，托管该 session 启动的命令、输出和进程句柄；内核进程组只是实现资源。
 - `exec(session, { command: { shell } | { argv }, cwd, waitMs, onTimeout, … })`：
   短命令等待完成；超过 `waitMs` 时 `onTimeout: 'yield'` 返回继续运行的句柄，
-  `'terminate'` 结束命令。另有 `wait` / `read` / `terminate` / `list`，句柄访问核对
+  `'terminate'` 结束命令并报告进程组终止是否确认。`waitMs: 0` 配合 `'yield'` 在
+  spawn 成功时立即交还句柄。另有 `wait` / `read` / `terminate` / `list`，句柄访问核对
   session。
 - 命令经 pipe 作为独立进程运行，不继承上次 `cd` / `export`；这不是持久交互 shell。
-  交互 PTY 与显式托管进程在契约中预留，本阶段未实现。
+  交互 PTY 尚未实现。`run_shell` / `inspect_shell` 执行有时限短命令，超时终止、
+  不自动转后台；`start_process` 显式启动受管任务并立即返回 processId，后续用
+  `wait_process` / `list_processes` / `terminate_process` 管理。超时不回滚副作用，
+  未确认终止或断连结果未知时不能直接重跑。设计迁移见
+  [Process Runtime 草稿](../../design/local-agent/process-runtime.md)。
 - bash、git、project-inspection 共享 Host 的同一个 ShellRS 实例。git/gh 以 argv
   经 ShellRS 运行。
 - 外部命令只经 ShellRS 执行。代码搜索和 JSON 查询没有专用工具（原 `grep_search` /
@@ -156,8 +161,8 @@ Host（Chat / Studio）── ShellRSClient ── 本机 socket + token ──>
   串环境。`cwd` 由 Host 给出绝对路径，服务不使用自己的工作目录。
 - 故障：服务不可达时 shell 相关 Toolkit 不可用、工具返回可恢复错误，Host 照常启动；
   下次调用或状态检查会重连（必要时重新拉起服务）。调用进行中连接断开返回
-  `result_unknown`，不重放；已启动的命令仍在其 session 中，可用 `list` 找回。取消
-  经传输层按请求取消。
+  `result_unknown`，不重放；受管任务可用 `list` 找回，短命令没有可重取结果的句柄，
+  需要检查已有副作用。取消经传输层按请求取消。
 - Host 断开或退出不回收任何 session；服务停止（`pinpawo rs stop` 或信号）时结束
   全部 session 与进程（包括仍在首次等待期、尚未转入后台的命令），并报告清理结果。
   不承诺跨服务重启恢复。

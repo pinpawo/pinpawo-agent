@@ -62,7 +62,7 @@ export type ShellRunOutcome =
    * this to find and clean them up.
    */
   | { status: 'exited'; code: number | null; pid: number | undefined; stdout: string; stderr: string }
-  | { status: 'timeout'; stdout: string; stderr: string }
+  | { status: 'timeout'; termination: 'confirmed' | 'unconfirmed'; stdout: string; stderr: string }
   | { status: 'aborted'; stdout: string; stderr: string }
   | { status: 'spawn_failed'; error: Error }
   | { status: 'yielded'; handle: ShellRunHandle };

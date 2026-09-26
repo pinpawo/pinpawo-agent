@@ -65,7 +65,7 @@ function toShellRSError(failure: RSCallFailure): Error {
     return new ShellRSError(
       'result_unknown',
       'Lost the ShellRS service while this operation was running; its result is unknown and it was not retried.'
-      + ' A command that started stays in this session: list its processes to find it.',
+      + ' Do not replay the command without checking its effects. For managed tasks, list the session processes to find them.',
     );
   }
   const { error } = failure;

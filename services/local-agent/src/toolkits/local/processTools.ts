@@ -7,8 +7,7 @@ import type { ShellProcessSnapshot, ShellRS } from './shellRS';
 import { truncateShellOutput } from './shellTools';
 
 /**
- * Tools for the processes `run_shell` hands back when a command outlives its
- * timeout.
+ * Tools for managed tasks explicitly launched by `start_process`.
  *
  * They address the ShellRS logical session of the calling Agent session, so
  * any run or delegation of that session can follow, stop or list what an
@@ -70,10 +69,10 @@ export function createProcessTools(shell: ShellRS): StructuredTool[] {
     {
       name: WAIT_PROCESS_TOOL_NAME,
       description: '等待一个后台进程并读取自上次查看以来的新增输出。'
-        + '命令超时转入后台后，用它继续跟进；进程未结束时会在等待若干秒后返回当前进度，可重复调用。'
+        + 'start_process 启动任务后，用它继续跟进；进程未结束时会在等待若干秒后返回当前进度，可重复调用。'
         + '每次只返回新增输出，不会重复历史内容。',
       schema: z.object({
-        processId: z.string().min(1).describe('run_shell 返回的进程 id'),
+        processId: z.string().min(1).describe('start_process 返回的进程 id'),
         waitSeconds: z.number().int().positive().max(MAX_WAIT_SECONDS).optional()
           .describe(`最多等待多少秒后返回当前进度，默认 ${DEFAULT_WAIT_SECONDS.toString()}`),
       }),
@@ -93,7 +92,7 @@ export function createProcessTools(shell: ShellRS): StructuredTool[] {
       name: TERMINATE_PROCESS_TOOL_NAME,
       description: '终止一个后台进程及其子进程。确认不再需要该命令继续运行时使用。',
       schema: z.object({
-        processId: z.string().min(1).describe('run_shell 返回的进程 id'),
+        processId: z.string().min(1).describe('start_process 返回的进程 id'),
       }),
     },
   );

@@ -230,3 +230,29 @@ test('stopping the service ends its sessions and reports what it cleaned up', { 
   const report = await (await admin()).admin('stop');
   assert.deepEqual(report, { rs: [{ contract: SHELL_RS_CONTRACT, report: { terminated: 1 } }] });
 });
+
+test('short and managed tools keep their semantics across the RS service', { skip: isWindows }, async (t) => {
+  const { host } = await setup(t);
+  const first = host();
+  const toolkit = createBashToolkit({ shell: first });
+  const config = { context: { executionScope: {
+    threadId: 'tool-session', taskId: 'task', runId: 'run', delegationId: 'delegation', workdir: process.cwd(),
+  } } };
+  const tool = (name: string) => toolkit.tools.find((item) => item.tool.name === name)!.tool;
+  const started = JSON.parse(String(await tool('start_process').invoke({ command: 'echo early; sleep 0.2; echo late' }, config)));
+  assert.equal(started.status, 'started');
+  await first.dispose();
+  const next = host();
+  const finished = await next.wait('tool-session', started.processId, 5_000);
+  assert.equal(finished.process.exitCode, 0);
+  assert.equal(started.stdout + finished.stdout, 'early\nlate\n');
+  await assert.rejects(next.read('other-session', started.processId), { code: 'other_session' });
+
+  const nextToolkit = createBashToolkit({ shell: next });
+  const run = nextToolkit.tools.find((item) => item.tool.name === 'run_shell')!.tool;
+  const timeout = JSON.parse(String(await run.invoke({ command: 'echo partial; sleep 30', timeoutSeconds: 1 }, config)));
+  assert.equal(timeout.status, 'timeout');
+  assert.equal(timeout.termination, 'confirmed');
+  assert.equal(timeout.stdout, 'partial');
+  assert.equal((await next.list('tool-session')).filter((item) => item.status === 'running').length, 0);
+});

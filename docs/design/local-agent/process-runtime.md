@@ -2,7 +2,7 @@
 
 对应 issue #513。本文档只覆盖**决策**，不重复 #513 已经写清楚的工具协议。
 
-状态：待确认。确认后再写实现。
+状态：最新拆分方案见下节实施草稿；#513 原始设计保留为历史背景。
 
 > 2026-09：本文中的 Toolkit Runtime root / resolve / bindTools / release 装配已被
 > #856 取代：进程由 ShellRS（`PosixShellRS`）按 Agent session 持有，句柄对同一
@@ -10,6 +10,39 @@
 > 重启存活。当前契约见
 > [Toolkit 的 RS 依赖](../../reference/extensions/toolkit-rs.md)。本文保留为 #513 的
 > 决策背景。
+
+## 2026-09-26：短命令与受管任务拆分（实施草稿）
+
+本节取代下文历史方案中的“超时自动转后台”工具语义。状态：方向经用户确认，
+已实现，相关行为回归验证通过，待代码评审；不涉及 BrowserRS、PTY 或输出游标重构。
+
+- `run_shell` / `inspect_shell`：有时限执行，默认 60 秒、上限 600 秒。等待超时后
+  终止 POSIX 进程组，返回结构化 `status: timeout`、输出及终止确认状态；不转后台。
+  超时不回滚副作用；改用长任务入口前应检查已有结果。断连保留 `result_unknown`，
+  不伪装成超时，不自动重放命令。
+- `start_process(command, cwd?)`：经过 commandExecution 审核，启动非交互受管任务，
+  不提供等待时限参数。启动成功即返回结构化 processId / process 状态，快速退出的
+  命令也有句柄。之后用 wait_process / list_processes / terminate_process 操作。
+  兼容尚在运行的旧 RS 服务：若旧实现零等待时已返回退出结果，保留该结果，不能
+  伪装成启动失败而诱发重跑；旧服务未报告终止确认时按 unconfirmed 处理。
+- 复用 ShellRS.exec 的 `waitMs: 0, onTimeout: yield`，POSIX executor 在 spawn
+  成功事件交还句柄，避免零毫秒定时器与快速退出竞争。缺失 session、无效 cwd、
+  spawn 失败不返回成功句柄。Host 断开不结束受管任务。
+- 超时终止使用 SIGTERM → 宽限期 → SIGKILL，并检查进程组是否消失。即使 shell
+  先退出、子进程关闭了输出通道，也不能撤销后续清理。确认范围是原 POSIX 进程组，
+  不是主动 setsid/setpgid 脱离该组的任意后代；无法确认时禁止建议直接重跑。
+- start_process 的默认/相对 cwd 在审核后按 execution workdir 解析；与 run_shell
+  一样以原始 command/cwd 形成审核主体。等待、查询、终止只操作本 session 的句柄。
+- 短命令在途执行仍由 RS 跟踪，以便服务停止时清理；只将长任务暴露为持久句柄。
+  当前输出保留和 wait 行为沿用已有实现，PTY、可重读输出和等待取消留待独立设计。
+
+迁移：更新工具描述、Toolkit instructions、workdir 绑定及依赖自动转后台的测试。
+验证覆盖短命令超时清理、快速任务句柄、长任务跨 Host/session 行为、审核与 cwd 边界、
+取消和启动失败；不以提示词字符串匹配作为验收。
+
+---
+
+以下为历史设计背景，不代表上述新工具语义。
 
 ## 1. 问题
 

@@ -552,7 +552,6 @@ async function createTimelineRenderer(width: number) {
     externalOutputMode: 'capture-stdout',
   });
   const commits: string[][] = [];
-  const linkedCells: number[] = [];
   const styleCommits: ReturnType<
     typeof setup.renderer.currentRenderBuffer.getSpanLines
   >[] = [];
@@ -568,11 +567,9 @@ async function createTimelineRenderer(width: number) {
         .map((line) => line.trimEnd()),
     );
     styleCommits.push(event.snapshot.getSpanLines());
-    linkedCells.push(...event.snapshot.buffers.attributes.filter((value: number) => value > 255));
   });
   return {
     ...setup,
-    linkedCells,
     cellOutput: {
       takeText() {
         const text = commits.flat().join('\n');
@@ -647,7 +644,7 @@ function assistantMessage(
   };
 }
 
-test('hidden subagent output becomes a linked reference after streamed answer completion', async () => {
+test('subagent results stay out of scrollback after streamed answer completion', async () => {
   const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
@@ -663,9 +660,7 @@ test('hidden subagent output becomes a linked reference after streamed answer co
     timeline.render(session([child, completed]));
     const output = setup.externalOutput.take().flatMap(commit => commit.rows).join('\n');
     assert.match(output, /Public answer\./);
-    assert.match(output, /执行结果 1/);
-    assert.ok(setup.linkedCells.length > 0,
-      'reference cells must retain a native hyperlink, not just a text label');
+    assert.doesNotMatch(output, /执行结果|Inspect files/);
     assert.doesNotMatch(output, /PRIVATE CAPABILITY RESULT/);
     timeline.render(session([child, completed]));
     assert.deepEqual(setup.externalOutput.take(), []);

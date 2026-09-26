@@ -36,12 +36,12 @@ test('message display uses timestamps without role labels', () => {
   );
 });
 
-test('subagent prose stays out of the timeline; replies show only result reference labels', () => {
+test('subagent prose and result references stay out of the main timeline', () => {
   assert.deepEqual(buildMessageDisplayLines(message({ role: 'subagent', text: 'private result' })), []);
   const lines = buildMessageDisplayLines(message({ text: 'done', resultReferences: [
     { id: 'delivery-1', title: 'Inspect files', text: 'private result' },
   ] }));
-  assert.match(lines.map(line => line.text).join('\n'), /执行结果 1/);
+  assert.deepEqual(lines, [{ text: '| done', tone: 'assistant' }]);
   assert.doesNotMatch(lines.map(line => line.text).join('\n'), /private result/);
 });
 

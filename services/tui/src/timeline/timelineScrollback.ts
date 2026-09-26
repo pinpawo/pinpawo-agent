@@ -4,7 +4,6 @@ import {
   BoxRenderable,
   dim,
   fg,
-  link,
   parseColor,
   StyledText,
   TextAttributes,
@@ -35,7 +34,6 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { resultReferenceFiles } from './resultReferenceFiles';
 import { isDelegationEntry } from './operationDisplay';
 
 const WELCOME_COLOR = '#69c0c8';
@@ -491,7 +489,6 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       entry.role,
       normalizeText(entry.text),
       entry.status,
-      entry.resultReferences,
     ]);
   }
   return JSON.stringify([
@@ -657,20 +654,6 @@ function populateTimelineRoot(
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);
-      for (const [index, reference] of (entry.resultReferences ?? []).entries()) {
-        const label = `[执行结果 ${index + 1}] ${reference.title.replace(/\s+/g, ' ').trim()}`;
-        let content: string | StyledText = `  ${label}（/transcript 查看）`;
-        try {
-          content = new StyledText([link(resultReferenceFiles.url(reference))(`  ${label}`)]);
-        } catch {
-          // An unavailable local temp directory must not break the reply.
-        }
-        detailSurface.add(new TextRenderable(context, {
-          id: `${root.id}:result:${entryIndex}:${index}`,
-          width: '100%', height: 'auto', content, fg: '#69c0c8',
-          attributes: TextAttributes.UNDERLINE,
-        }));
-      }
       if (root.getChildrenCount() > childCountBeforeEntry) {
         addTimelineEntrySpacing(entry);
       }

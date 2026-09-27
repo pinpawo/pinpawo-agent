@@ -8,6 +8,7 @@ import {
   successResult,
 } from './protocol.js';
 import type { BrowserTarget, JsonRecord, TargetBindOptions } from './types.js';
+import { isAccessibilityRef, parseAccessibilityRef } from './accessibilityRef.js';
 import {
   assertSnapshotApprovedOrigin,
   buildAccessibilitySnapshot,
@@ -46,6 +47,7 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'DOM.scrollIntoViewIfNeeded',
   'Network.enable',
   'Page.getNavigationHistory',
+  'Page.getFrameTree',
   'Page.enable',
   'Page.captureScreenshot',
   'Input.insertText',
@@ -672,8 +674,12 @@ async function readSnapshot(tabId, approvedOrigin) {
   } catch (runtimeError) {
     const fallbackUrl = await assertApprovedOrigin(tabId, approvedOrigin);
     try {
+      // Read the loader before the tree: if a navigation lands in between, the
+      // refs name the older document and are refused as stale, rather than
+      // labelling the new document's nodes with the old loader.
+      const loaderId = await mainFrameLoaderId(tabId);
       const tree = await cdp(tabId, 'Accessibility.getFullAXTree');
-      snapshot = buildAccessibilitySnapshot(tree.nodes || [], fallbackUrl);
+      snapshot = buildAccessibilitySnapshot(tree.nodes || [], fallbackUrl, loaderId);
     } catch (accessibilityError) {
       throw new ExtensionError(
         'snapshot_unavailable',
@@ -858,26 +864,55 @@ async function delay(ms, deadlineAt) {
   ensureCommandAlive(deadlineAt);
 }
 
+/** The main-frame document load, or null when it cannot be read. */
+async function mainFrameLoaderId(tabId) {
+  try {
+    const { frameTree } = await cdp(tabId, 'Page.getFrameTree');
+    return typeof frameTree?.frame?.loaderId === 'string' ? frameTree.frame.loaderId : null;
+  } catch {
+    return null;
+  }
+}
+
+function staleAccessibilityRef(reason) {
+  return new ExtensionError(
+    'stale_element_reference',
+    `The element reference is stale: ${reason}; take a new snapshot`,
+  );
+}
+
+async function resolveAccessibilityTarget(tabId, value) {
+  const ref = parseAccessibilityRef(value);
+  if (!ref || ref.loaderId !== await mainFrameLoaderId(tabId)) {
+    throw staleAccessibilityRef('it was read from another tab or an earlier page load');
+  }
+  let model;
+  try {
+    await cdp(tabId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId: ref.backendNodeId });
+    model = await cdp(tabId, 'DOM.getBoxModel', { backendNodeId: ref.backendNodeId });
+  } catch (error) {
+    if (/No node with given id/i.test(error instanceof Error ? error.message : String(error))) {
+      throw staleAccessibilityRef('the element is no longer in the page');
+    }
+    throw error;
+  }
+  const quad = model.model?.border;
+  if (!Array.isArray(quad) || quad.length !== 8) {
+    throw new ExtensionError('element_not_visible', 'The accessibility element has no visible box');
+  }
+  return {
+    ok: true,
+    x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
+    y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4,
+    tag: ref.role,
+    editable: ['textbox', 'searchbox', 'combobox', 'spinbutton'].includes(ref.role),
+  };
+}
+
 async function resolveTarget(tabId, target) {
   const normalized = normalizeElementTarget(target);
-  const accessibilityRef = 'ref' in normalized && normalized.ref
-    ? /^ax:(\d+):([a-z]+)$/.exec(normalized.ref)
-    : null;
-  if (accessibilityRef) {
-    const backendNodeId = Number(accessibilityRef[1]);
-    await cdp(tabId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId });
-    const model = await cdp(tabId, 'DOM.getBoxModel', { backendNodeId });
-    const quad = model.model?.border;
-    if (!Array.isArray(quad) || quad.length !== 8) {
-      throw new ExtensionError('element_not_visible', 'The accessibility element has no visible box');
-    }
-    return {
-      ok: true,
-      x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
-      y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4,
-      tag: accessibilityRef[2],
-      editable: ['textbox', 'searchbox', 'combobox', 'spinbutton'].includes(accessibilityRef[2]),
-    };
+  if ('ref' in normalized && isAccessibilityRef(normalized.ref)) {
+    return await resolveAccessibilityTarget(tabId, normalized.ref);
   }
   return requirePageResult(await evaluateValue(tabId, buildResolveTargetExpression(normalized)));
 }

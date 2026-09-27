@@ -46,17 +46,26 @@ test('runtime snapshot expression carries numbered interactive hints', () => {
   assert.doesNotMatch(expression, /element\.textContent \|\| element\.value/);
 });
 
+const axNodes = [
+  { role: { value: 'RootWebArea' }, name: { value: 'Page title' } },
+  { role: { value: 'StaticText' }, name: { value: 'Readable text' } },
+  { role: { value: 'button' }, name: { value: 'Continue' }, backendDOMNodeId: 9 },
+];
+
 test('accessibility fallback returns a raw backend snapshot', () => {
-  const result = buildAccessibilitySnapshot([
-    { role: { value: 'RootWebArea' }, name: { value: 'Page title' } },
-    { role: { value: 'StaticText' }, name: { value: 'Readable text' } },
-    { role: { value: 'button' }, name: { value: 'Continue' }, backendDOMNodeId: 9 },
-  ], 'https://example.com/');
+  const result = buildAccessibilitySnapshot(axNodes, 'https://example.com/', 'A1B2C3');
 
   assert.equal(result.title, 'Page title');
   assert.equal(result.text, 'Readable text');
   assert.equal(result.textSource, 'Accessibility.getFullAXTree');
   assert.equal(result.interactive[0].index, 1);
-  assert.equal(result.interactive[0].ref, 'ax:9:button');
+  assert.equal(result.interactive[0].ref, 'ax:A1B2C3:9:button');
   assert.equal(result.interactive[0].backendNodeId, 9);
+});
+
+test('accessibility fallback without a loader id offers no element refs (#869)', () => {
+  const result = buildAccessibilitySnapshot(axNodes, 'https://example.com/', null);
+
+  assert.equal(result.interactive[0].hint, '[1] button "Continue"');
+  assert.equal('ref' in result.interactive[0], false);
 });

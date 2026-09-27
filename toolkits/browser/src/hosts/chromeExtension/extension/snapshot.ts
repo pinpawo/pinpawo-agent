@@ -1,4 +1,5 @@
 import { ELEMENT_REGISTRY_KEY } from './interaction.js';
+import { formatAccessibilityRef } from './accessibilityRef.js';
 import type { JsonRecord } from './types.js';
 
 export const MAX_RAW_INTERACTIVE_ELEMENTS = 200;
@@ -129,7 +130,15 @@ function axValue(node: JsonRecord | undefined, key: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-export function buildAccessibilitySnapshot(nodes: JsonRecord[], url: string) {
+/**
+ * `loaderId` is the main-frame document the tree was read from; element refs
+ * are bound to it, and without it the elements carry no ref.
+ */
+export function buildAccessibilitySnapshot(
+  nodes: JsonRecord[],
+  url: string,
+  loaderId: string | null,
+) {
   const visibleNodes = nodes.filter((node) => !node.ignored);
   const root = visibleNodes.find((node) => axValue(node, 'role') === 'RootWebArea');
   const text = visibleNodes
@@ -157,11 +166,10 @@ export function buildAccessibilitySnapshot(nodes: JsonRecord[], url: string) {
     const index = offset + 1;
     const role = axValue(node, 'role');
     const name = axValue(node, 'name');
+    const ref = formatAccessibilityRef(loaderId, node.backendDOMNodeId, role);
     return {
       index,
-      ...(typeof node.backendDOMNodeId === 'number' && Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
-        ? { ref: `ax:${node.backendDOMNodeId}:${role}` }
-        : {}),
+      ...(ref ? { ref } : {}),
       tag: role,
       text: name,
       type: null,

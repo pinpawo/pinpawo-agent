@@ -312,3 +312,23 @@ test('network activity reports the inflight count before the reported fact', asy
   // finish and fail must stay distinguishable for the delta translator.
   assert.match(source, /'Network\.loadingFinished' \? 'finish' : 'fail'/);
 });
+
+test('accessibility refs are bound to the document they were read from (#869)', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+
+  assert.match(source, /'Page\.getFrameTree'/);
+  // The loader is read before the tree it labels.
+  assert.match(
+    source,
+    /const loaderId = await mainFrameLoaderId\(tabId\);\s*const tree = await cdp\(tabId, 'Accessibility\.getFullAXTree'\);\s*snapshot = buildAccessibilitySnapshot\(tree\.nodes \|\| \[\], fallbackUrl, loaderId\)/,
+  );
+  // Every ax: ref is checked against the current loader before its node is touched.
+  assert.match(source, /isAccessibilityRef\(normalized\.ref\)[\s\S]*?resolveAccessibilityTarget/);
+  assert.match(
+    source,
+    /async function resolveAccessibilityTarget[\s\S]*?ref\.loaderId !== await mainFrameLoaderId\(tabId\)[\s\S]*?staleAccessibilityRef[\s\S]*?DOM\.scrollIntoViewIfNeeded/,
+  );
+});

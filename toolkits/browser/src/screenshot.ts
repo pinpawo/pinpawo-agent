@@ -142,7 +142,7 @@ export async function buildBrowserScreenshotMessages(
       content: [
         {
           type: 'text',
-          text: 'Browser screenshot from the preceding tool result. Inspect the visible page using this image.',
+          text: 'Browser screenshot from the preceding tool result. Inspect the visible page using this image; to act on what you see, take a browser_snapshot and use its refs rather than coordinates from this image.',
         },
         { type: 'image', mimeType: image.mimeType, data: image.data },
       ],

@@ -53,7 +53,7 @@ The raw and final contracts are intentionally separate:
 
 - Raw extension text is UTF-8 bounded for IPC and includes `textLength` for the full source length.
 - Raw interactive elements are capped at 200 and may include CDP `backendNodeId` metadata.
-- Runtime snapshots assign opaque element `ref` values backed by a page-local registry; accessibility fallback refs use CDP backend node IDs.
+- Runtime snapshots assign opaque element `ref` values backed by a page-local registry that each snapshot replaces, so a ref cannot resolve in another tab or document. Accessibility fallback refs name a CDP backend node ID, which is only meaningful inside one document, so they also carry the main-frame `loaderId` (read through `Page.getFrameTree` before the tree). Chromium issues a browser-wide unique loader ID per document load, so the extension refuses a ref whose loader ID differs from the current one — another tab or an earlier load — as `stale_element_reference` before touching the node (#869). Without a loader ID the fallback returns elements without refs.
 - The shared final builder caps previews at 50,000 characters and 20 interactive elements.
 - The builder normalizes each hint to include its stable `[index]` prefix.
 - `Runtime.evaluate` is primary. `Accessibility.getFullAXTree` is the fallback when runtime evaluation is unavailable.
@@ -82,7 +82,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
 - Each navigation carries an origin already authorized by the local-agent review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
-- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot and DOM box/scroll commands required by the declared Browser operations; arbitrary CDP is never relayed.
+- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot, DOM box/scroll and read-only page identity (`Page.getFrameTree`, `Page.getNavigationHistory`) commands required by the declared Browser operations; arbitrary CDP is never relayed.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the RS service stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
 - Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.

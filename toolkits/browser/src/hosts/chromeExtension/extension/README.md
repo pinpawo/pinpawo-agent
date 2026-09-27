@@ -15,7 +15,7 @@ The extension is developed and versioned inside `@pinpawo-toolkit/browser`. A lo
 For the official Chrome Web Store build, `pinpawo browser extension register`
 uses the Store extension ID by default, so `--extension-id` is not required.
 
-`browser_open` creates a dedicated agent-owned tab by default. To bind a user tab explicitly, focus it and click the extension action. Chrome shows its debugger disclosure while PinPawo is attached.
+`browser_open` creates a dedicated agent-owned tab by default. Clicking the extension action binds the focused user tab, but Agent sessions cannot operate a bound tab yet (#867). Chrome shows its debugger disclosure while PinPawo is attached.
 
 The extension refuses to read or interact with a tab after it leaves the origin approved for the current browser operation. Interaction commands prefer the opaque `ref` returned by the latest snapshot and fall back to CSS or `text=...` selectors. Re-snapshot after a stale reference error.
 

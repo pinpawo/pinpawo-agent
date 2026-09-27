@@ -147,47 +147,18 @@ test('extension session rejects non-http targets and requires an approved page f
   await assert.rejects(session.click('#submit'), /Use browser_open first/);
 });
 
-test('extension session adopts an origin only from an explicit user tab binding', async () => {
+test('a user-bound tab in the bridge status never becomes a session\'s approved origin', async () => {
+  // The bridge status reports whichever browser context the extension
+  // activated last. A user-bound tab lives in the extension's legacy context,
+  // so it must not leak into an Agent session's approval (verified in real
+  // Chrome: binding a tab made another session's snapshot fail with
+  // origin_changed against the user's origin).
   const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
+  let userBoundOrigin: string | null = 'https://user.example';
   const session = new ChromeExtensionBrowserSession({
     getStatus() {
       return {
-        activeTabBinding: 'user',
-        userBoundOrigin: 'https://example.com',
-      } as BrowserBridgeStatus;
-    },
-    async sendCommand(command, params) {
-      calls.push({ command, params });
-      if (command === 'navigate') return { ok: true };
-      return rawSnapshot;
-    },
-  });
-
-  await session.snapshot();
-  assert.deepEqual(calls, [{
-    command: 'snapshot',
-    params: { approvedOrigin: 'https://example.com' },
-  }]);
-
-  const unapproved = new ChromeExtensionBrowserSession({
-    getStatus() {
-      return {
-        activeTabBinding: 'user',
-        userBoundOrigin: null,
-      } as BrowserBridgeStatus;
-    },
-    async sendCommand() { return rawSnapshot; },
-  });
-  await assert.rejects(unapproved.snapshot(), /Use browser_open first or click the extension action/);
-});
-
-test('extension session does not persist a live user-bound origin as agent approval', async () => {
-  const calls: Array<{ command: string; params: Record<string, unknown> }> = [];
-  let userBoundOrigin: string | null = null;
-  const session = new ChromeExtensionBrowserSession({
-    getStatus() {
-      return {
-        activeTabBinding: userBoundOrigin ? 'user' : null,
+        activeTabBinding: userBoundOrigin ? 'user' : 'agent',
         userBoundOrigin,
       } as BrowserBridgeStatus;
     },
@@ -199,8 +170,10 @@ test('extension session does not persist a live user-bound origin as agent appro
     },
   });
 
+  await assert.rejects(session.snapshot(), /No approved Chrome extension page\. Use browser_open first\./);
+  assert.equal(calls.length, 0);
+
   await session.open('https://agent.example/page');
-  userBoundOrigin = 'https://user.example';
   await session.snapshot();
   userBoundOrigin = null;
   await session.snapshot();
@@ -208,7 +181,7 @@ test('extension session does not persist a live user-bound origin as agent appro
   assert.deepEqual(calls.map((call) => call.params.approvedOrigin), [
     'https://agent.example', // navigate
     'https://agent.example', // snapshot from open() backward-compat path
-    'https://user.example',
+    'https://agent.example',
     'https://agent.example',
   ]);
 });

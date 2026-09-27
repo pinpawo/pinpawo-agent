@@ -24,6 +24,8 @@ const browserToolkitInstructions = [
   '只允许继续读取和操作同源 popup。遇到 origin_changed 且 manualActionRequired=true，表示跨源 popup 已打开但安全策略要求用户在可见 Chrome 中手动完成；不要重试 interactionDispatched=true 的原 click/type。用户确认 popup 关闭或返回原 approved origin 后，再调用 browser_snapshot。',
   '等待动态页面时，使用 browser_wait 的 visible/hidden 条件；等待 loading 或遮罩消失时用 hidden，不要只依赖固定 sleep。',
   '浏览器失败返回 ok=false 的结构化错误。retryable=true 时根据 code/details 重新 snapshot、等待或重新 open；不要盲目重复有副作用的操作。',
+  'details.dispatch="unknown" 表示 click/type/scroll 可能已经生效（超时、取消或连接中断）；先 browser_snapshot 确认页面状态，再决定是否重做。details.dispatch="not_dispatched" 表示操作没有发出，可以直接重试。',
+  '点击、输入等操作的结果里若有 settle.settled=false，说明操作已完成但页面仍在变化；不要重复该操作，用 browser_wait 或 browser_snapshot 观察结果。',
   '完成后返回你实际打开、操作或提取到的内容；不要声称完成未通过工具确认的页面操作。',
 ];
 

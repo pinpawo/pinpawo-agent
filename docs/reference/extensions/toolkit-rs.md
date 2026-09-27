@@ -198,6 +198,16 @@ Host（Chat / Studio）── ShellRSClient ── 本机 socket + token ──>
 - 错误跨进程保留 `code` / `retryable` / `details`，Browser Tools 给模型的结构化错误
   与进程内一致。服务不可达返回 `runtime_disconnected`（retryable）；调用中途断连返回
   `result_unknown`（不重放，先重新 snapshot）。
+- 作用于页面的命令（click / type / scroll）按"是否可能已派发"分类失败（#869）：
+  写到 extension 之前失败（已取消、extension 未连接、写 socket 失败）带
+  `details.dispatch: 'not_dispatched'`，保持可重试；写出之后 Host 超时、取消、连接断开或替换，
+  以及 extension 自身的 `browser_command_cancelled` / `command_expired`，一律
+  `retryable: false` + `details.dispatch: 'unknown'`，提示先 snapshot。`result_unknown` 同样带
+  `dispatch: 'unknown'`。navigate 与只读命令（snapshot / extract / screenshot / wait）保持原有
+  可重试语义：重新 open 同一 URL 是安全的恢复方式；
+  extension 对动作本身报告的错误（ref 失效、元素不存在、origin 变化等）原样透传。
+- 交互已执行、页面在 settle 截止时间内未稳定时不再报 `navigation_timeout`：返回已拿到的快照，
+  附 `settle: { settled: false, phase, note }`，提示不要重复该操作、用 `browser_wait` 继续观察。
 - 有打开页面的 session 算"忙"：服务跑的是别的构建时，只要还有这样的 session 就不会
   被自动替换。
 - 诊断：`pinpawo rs status` 的 BrowserRS 详情（extension 状态、`commandReady`、

@@ -841,3 +841,160 @@ test('bridge events drive a controller that binds the bridge navigation generati
   });
   await waitUntil(() => controller.getSnapshot().navigation?.readyState === 'complete');
 });
+
+async function startRegisteredBridge(t: { after: (fn: () => unknown) => void }) {
+  const root = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-bridge-dispatch-'));
+  const bridge = new BrowserExtensionBridge({
+    socketPath: resolve(root, 'bridge.sock'),
+    tokenPath: resolve(root, 'bridge.token'),
+    tokenFactory: () => 'test-token',
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await bridge.start();
+  t.after(async () => bridge.stop());
+  const peer = await connectLinePeer(bridge.getStatus().socketPath);
+  t.after(() => peer.socket.destroy());
+  peer.send({
+    type: 'bridge.hello',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    token: 'test-token',
+    hostPid: process.pid,
+  });
+  await peer.nextLine();
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot', 'click', 'type', 'scroll'],
+    state: { revision: 1, debuggerAttached: false },
+  });
+  await waitUntil(() => bridge.getStatus().extensionConnected);
+  return { bridge, peer };
+}
+
+function isBridgeError(
+  expected: { code: string; retryable: boolean; dispatch?: string },
+) {
+  return (error: unknown) => {
+    assert.ok(error instanceof BrowserBridgeError);
+    assert.equal(error.code, expected.code);
+    assert.equal(error.retryable, expected.retryable);
+    assert.equal(error.details?.dispatch, expected.dispatch);
+    return true;
+  };
+}
+
+test('a page-mutating command that times out after dispatch is not retryable (#869)', async (t) => {
+  const { bridge, peer } = await startRegisteredBridge(t);
+
+  const click = bridge.sendCommand('click', { target: { ref: 's:1' } }, 20);
+  await peer.nextLine();
+  await assert.rejects(click, isBridgeError({
+    code: 'browser_command_timeout',
+    retryable: false,
+    dispatch: 'unknown',
+  }));
+  await assert.rejects(
+    bridge.sendCommand('click', { target: { ref: 's:1' } }, 20),
+    (error: Error) => /may already have taken effect; take a browser_snapshot/.test(error.message),
+  );
+  await peer.nextLine();
+
+  // Read-only commands can be repeated safely, so they keep their retryable timeout.
+  const snapshot = bridge.sendCommand('snapshot', {}, 20);
+  await peer.nextLine();
+  await assert.rejects(snapshot, isBridgeError({
+    code: 'browser_command_timeout',
+    retryable: true,
+  }));
+});
+
+test('cancelling a page-mutating command distinguishes before and after dispatch (#869)', async (t) => {
+  const { bridge, peer } = await startRegisteredBridge(t);
+
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  await assert.rejects(
+    bridge.sendCommand('type', { text: 'hello' }, undefined, alreadyAborted.signal),
+    isBridgeError({
+      code: 'browser_command_cancelled',
+      retryable: true,
+      dispatch: 'not_dispatched',
+    }),
+  );
+
+  const controller = new AbortController();
+  const typed = bridge.sendCommand('type', { text: 'hello' }, undefined, controller.signal);
+  await peer.nextLine();
+  controller.abort();
+  await assert.rejects(typed, isBridgeError({
+    code: 'browser_command_cancelled',
+    retryable: false,
+    dispatch: 'unknown',
+  }));
+  assert.equal((await peer.nextLine()).type, 'browser.cancel');
+});
+
+test('extension interruption errors of a page-mutating command are reported as unknown dispatch (#869)', async (t) => {
+  const { bridge, peer } = await startRegisteredBridge(t);
+  const reply = (requestId: unknown, code: string, retryable: boolean) => peer.send({
+    type: 'browser.result',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    requestId,
+    ok: false,
+    error: { code, message: `${code} from extension`, retryable },
+  });
+
+  const expired = bridge.sendCommand('click', { target: { ref: 's:1' } });
+  reply((await peer.nextLine()).requestId, 'command_expired', true);
+  await assert.rejects(expired, isBridgeError({
+    code: 'command_expired',
+    retryable: false,
+    dispatch: 'unknown',
+  }));
+
+  // An error about the action itself is passed through unchanged.
+  const missing = bridge.sendCommand('click', { target: { ref: 's:1' } });
+  reply((await peer.nextLine()).requestId, 'stale_element_reference', true);
+  await assert.rejects(missing, isBridgeError({
+    code: 'stale_element_reference',
+    retryable: true,
+  }));
+
+  const snapshot = bridge.sendCommand('snapshot', {});
+  reply((await peer.nextLine()).requestId, 'command_expired', true);
+  await assert.rejects(snapshot, isBridgeError({
+    code: 'command_expired',
+    retryable: true,
+  }));
+});
+
+test('a page-mutating command in flight when the extension disconnects is reported as unknown dispatch (#869)', async (t) => {
+  const { bridge, peer } = await startRegisteredBridge(t);
+
+  const click = bridge.sendCommand('click', { target: { ref: 's:1' } });
+  const snapshot = bridge.sendCommand('snapshot', {});
+  await peer.nextLine();
+  await peer.nextLine();
+  peer.socket.destroy();
+  await assert.rejects(click, isBridgeError({
+    code: 'browser_extension_disconnected',
+    retryable: false,
+    dispatch: 'unknown',
+  }));
+  await assert.rejects(snapshot, isBridgeError({
+    code: 'browser_extension_disconnected',
+    retryable: true,
+  }));
+
+  await assert.rejects(
+    bridge.sendCommand('click', { target: { ref: 's:1' } }),
+    isBridgeError({
+      code: 'browser_extension_disconnected',
+      retryable: true,
+      dispatch: 'not_dispatched',
+    }),
+  );
+});

@@ -49,6 +49,77 @@ const NAVIGATION_SCOPED_EVENT_TYPES = new Set<BrowserRuntimeEventType>([
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const MAX_BRIDGE_LINE_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Commands that act on the page. Once one has been written to the extension,
+ * the extension may already have dispatched its input even if no result comes
+ * back, so an interruption must not invite a blind retry (issue #869).
+ * `navigate` is left out: re-opening the same URL is the safe recovery, and
+ * after an interrupted open the session owns no page to snapshot.
+ */
+const PAGE_MUTATING_COMMANDS: ReadonlySet<BrowserExtensionCommandName> = new Set([
+  'click',
+  'type',
+  'scroll',
+]);
+
+/**
+ * Extension errors raised by its own cancellation/deadline checkpoints. They
+ * can fire after a mutating command's input was dispatched, so for those
+ * commands they say no more than a Host-side timeout does.
+ */
+const EXTENSION_INTERRUPTION_CODES = new Set([
+  'browser_command_cancelled',
+  'command_expired',
+]);
+
+/**
+ * Whether a failed page-mutating command may have taken effect:
+ * `not_dispatched` when it never reached the extension, `unknown` when it did
+ * and ended without a result. Absent for read-only commands, and for errors
+ * the extension reports about the action itself.
+ */
+type BrowserCommandDispatch = 'not_dispatched' | 'unknown';
+
+/** A command failed before it was written to the extension. */
+function notDispatchedError(
+  command: BrowserExtensionCommandName,
+  code: string,
+  message: string,
+  retryable: boolean,
+): BrowserBridgeError {
+  return new BrowserBridgeError(
+    code,
+    message,
+    retryable,
+    PAGE_MUTATING_COMMANDS.has(command)
+      ? { dispatch: 'not_dispatched' satisfies BrowserCommandDispatch }
+      : undefined,
+  );
+}
+
+/**
+ * A command reached the extension and ended without a result. Read-only
+ * commands stay retryable; a page-mutating one is reported as not retryable,
+ * with guidance to observe the page first.
+ */
+function interruptedError(
+  command: BrowserExtensionCommandName,
+  code: string,
+  message: string,
+): BrowserBridgeError {
+  if (!PAGE_MUTATING_COMMANDS.has(command)) {
+    return new BrowserBridgeError(code, message, true);
+  }
+  const sentence = /[.!?]$/.test(message) ? message : `${message}.`;
+  return new BrowserBridgeError(
+    code,
+    `${sentence} The ${command} may already have taken effect; take a browser_snapshot`
+      + ` to check the page before repeating it.`,
+    false,
+    { dispatch: 'unknown' satisfies BrowserCommandDispatch },
+  );
+}
+
 export type BrowserExtensionCommandOptions = {
   /** The caller has already reserved the navigation generation before dispatch. */
   beginNavigation?: boolean;
@@ -88,6 +159,7 @@ export type BrowserBridgeStatus = {
 
 type PendingCommand = {
   connectionId: string;
+  command: BrowserExtensionCommandName;
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
@@ -394,11 +466,10 @@ export class BrowserExtensionBridge {
   }
 
   async stop(): Promise<void> {
-    this.rejectPending(new BrowserBridgeError(
+    this.rejectPending(
       'browser_bridge_stopped',
       'browser extension bridge stopped',
-      true,
-    ));
+    );
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
     this.activeSocket = null;
@@ -425,7 +496,8 @@ export class BrowserExtensionBridge {
     options: BrowserExtensionCommandOptions = {},
   ): Promise<unknown> {
     if (signal?.aborted) {
-      throw new BrowserBridgeError(
+      throw notDispatchedError(
+        command,
         'browser_command_cancelled',
         'Browser command was cancelled before dispatch.',
         true,
@@ -434,16 +506,19 @@ export class BrowserExtensionBridge {
     const socket = this.activeSocket;
     const registration = this.registration;
     if (!socket || socket.destroyed || !registration) {
-      throw new BrowserBridgeError(
+      throw notDispatchedError(
+        command,
         'browser_extension_disconnected',
         'Chrome extension is not connected. Install/enable the PinPawo extension and retry.',
         true,
       );
     }
     if (!registration.capabilities.includes(command)) {
-      throw new BrowserBridgeError(
+      throw notDispatchedError(
+        command,
         'browser_extension_unsupported',
         `Chrome extension does not support ${command}`,
+        false,
       );
     }
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -474,10 +549,10 @@ export class BrowserExtensionBridge {
     return await new Promise<unknown>((resolvePromise, rejectPromise) => {
       const timer = setTimeout(() => {
         this.removePending(requestId);
-        rejectPromise(new BrowserBridgeError(
+        rejectPromise(interruptedError(
+          command,
           'browser_command_timeout',
           `Chrome extension command ${command} timed out after ${timeoutMs}ms`,
-          true,
         ));
       }, timeoutMs);
       const abortHandler = () => {
@@ -492,14 +567,15 @@ export class BrowserExtensionBridge {
         if (!socket.destroyed) {
           socket.write(serializeLine(cancellation), () => {});
         }
-        pending.reject(new BrowserBridgeError(
+        pending.reject(interruptedError(
+          command,
           'browser_command_cancelled',
           'Browser command was cancelled.',
-          true,
         ));
       };
       this.pending.set(requestId, {
         connectionId: registration.connectionId,
+        command,
         resolve: resolvePromise,
         reject: rejectPromise,
         timer,
@@ -511,7 +587,9 @@ export class BrowserExtensionBridge {
         if (!error) return;
         const pending = this.removePending(requestId);
         if (!pending) return;
-        pending.reject(new BrowserBridgeError(
+        // A failed write never delivered a complete command line.
+        pending.reject(notDispatchedError(
+          command,
           'browser_bridge_write_failed',
           `failed to send Chrome extension command: ${error.message}`,
           true,
@@ -590,11 +668,10 @@ export class BrowserExtensionBridge {
         this.registration = null;
         this.debuggerAttached = false;
         this.targetAlive = false;
-        this.rejectPending(new BrowserBridgeError(
+        this.rejectPending(
           'browser_extension_disconnected',
           'Chrome extension disconnected while a command was running',
-          true,
-        ));
+        );
         this.logger.info('[browser-bridge] native host disconnected');
       }
     });
@@ -610,11 +687,10 @@ export class BrowserExtensionBridge {
     this.targetAlive = false;
     this.connectionGeneration += 1;
     this.notifyGenerationChanged();
-    this.rejectPending(new BrowserBridgeError(
+    this.rejectPending(
       'browser_connection_replaced',
       'Chrome extension connection was replaced',
-      true,
-    ));
+    );
     this.logger.info('[browser-bridge] native host authenticated');
   }
 
@@ -639,11 +715,10 @@ export class BrowserExtensionBridge {
 
     if (message.type === 'browser.register') {
       if (this.registration?.connectionId !== message.connectionId) {
-        this.rejectPending(new BrowserBridgeError(
+        this.rejectPending(
           'browser_connection_replaced',
           'Chrome extension service worker connection changed',
-          true,
-        ));
+        );
       }
       const previousRevision = this.registration?.state?.revision;
       const nextRevision = message.state?.revision;
@@ -718,6 +793,14 @@ export class BrowserExtensionBridge {
       pending.resolve(message.result);
       return;
     }
+    if (EXTENSION_INTERRUPTION_CODES.has(message.error!.code)) {
+      pending.reject(interruptedError(
+        pending.command,
+        message.error!.code,
+        message.error!.message,
+      ));
+      return;
+    }
     pending.reject(new BrowserBridgeError(
       message.error!.code,
       message.error!.message,
@@ -726,11 +809,12 @@ export class BrowserExtensionBridge {
     ));
   }
 
-  private rejectPending(error: Error) {
+  /** Every pending command was already written, so each is interrupted. */
+  private rejectPending(code: string, message: string) {
     for (const requestId of this.pending.keys()) {
       const pending = this.removePending(requestId);
       if (!pending) continue;
-      pending.reject(error);
+      pending.reject(interruptedError(pending.command, code, message));
     }
   }
 

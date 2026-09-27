@@ -101,6 +101,10 @@ export class ChromeExtensionBrowserSession {
   }
 
   private buildSnapshot(value: unknown, approvedOrigin: string): string {
+    return JSON.stringify(this.buildSnapshotPayload(value, approvedOrigin), null, 2);
+  }
+
+  private buildSnapshotPayload(value: unknown, approvedOrigin: string) {
     const snapshot = parseBrowserRawSnapshot(value);
     let snapshotOrigin: string;
     try {
@@ -121,7 +125,7 @@ export class ChromeExtensionBrowserSession {
         { approvedOrigin, actualOrigin: snapshotOrigin },
       );
     }
-    return JSON.stringify(buildBrowserSnapshotPayload(snapshot), null, 2);
+    return buildBrowserSnapshotPayload(snapshot);
   }
 
   private requireApprovedOrigin(): string {
@@ -300,8 +304,13 @@ export class ChromeExtensionBrowserSession {
    * Backward compatible: when the interaction did not produce a terminal
    * verdict (`pending`) or started a new navigation (`nav_generation`), the
    * already-returned snapshot is still honored — we do not regress a working
-   * interaction into a timeout. A deterministic failure (`failed`) or settle
-   * timeout (`timed_out`) surfaces the corresponding structured error.
+   * interaction into a timeout. A deterministic failure (`failed`) surfaces
+   * the corresponding structured error.
+   *
+   * A settle timeout (`timed_out`) is not a failure of the action: the
+   * extension already performed it and returned a snapshot. Reporting it as a
+   * retryable error would invite repeating the click or the typing (issue
+   * #869), so the snapshot is returned with a `settle` note instead.
    *
    * The `nav_generation` outcome's full readiness hand-off is intentionally
    * deferred: the extension has already returned a snapshot of the produced
@@ -329,7 +338,7 @@ export class ChromeExtensionBrowserSession {
     const startTime = Date.now();
     try {
       const raw = await this.bridge.sendCommand(command, params, timeoutMs, signal);
-      const snapshot = this.buildSnapshot(raw, approvedOrigin);
+      const snapshot = this.buildSnapshotPayload(raw, approvedOrigin);
 
       // Bind the controller to the bridge's *current* navigation generation. An
       // interaction does not dispatch `navigate`, so the counter is unchanged;
@@ -368,11 +377,17 @@ export class ChromeExtensionBrowserSession {
         throw this.readinessFailure(outcome.error, approvedOrigin);
       }
       if (outcome.status === 'timed_out') {
-        throw new BrowserOperationError(
-          'navigation_timeout',
-          `Page did not settle within ${INTERACTION_SETTLE_DEADLINE_MS}ms after ${command}.`,
-          true,
-        );
+        return JSON.stringify({
+          ...snapshot,
+          settle: {
+            settled: false,
+            phase: this.readinessPhase,
+            note: `The ${command} was performed, but the page did not settle within`
+              + ` ${INTERACTION_SETTLE_DEADLINE_MS}ms and may still be changing. Do not`
+              + ` repeat the ${command}; use browser_wait or browser_snapshot to observe`
+              + ` the result.`,
+          },
+        }, null, 2);
       }
 
       // settled / pending / nav_generation: honor the freshly captured snapshot.
@@ -381,7 +396,7 @@ export class ChromeExtensionBrowserSession {
       // it rather than regressing a working interaction into a timeout. Full
       // Runtime-owned readiness for post-action navigation is the follow-up once
       // the extension emits a live navigation event stream.
-      return snapshot;
+      return JSON.stringify(snapshot, null, 2);
     } finally {
       offEvents();
       offGenerations();

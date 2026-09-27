@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -38,15 +39,37 @@ test('defineToolkit rejects duplicate tool names at runtime', () => {
   );
 });
 
-test('defineToolkit requires a non-empty ToolDefinition list', () => {
-  assert.throws(
-    () => defineToolkit({
+test('defineToolkit requires tools or non-blank instructions', () => {
+  for (const instructions of [undefined, '', ' \n\t ']) {
+    assert.throws(() => defineToolkit({
       name: 'empty_tools',
-      description: 'Toolkits must own at least one tool.',
+      description: 'An empty toolkit contributes nothing.',
       tools: [],
-    }),
-    /must define at least one tool/,
-  );
+      instructions,
+    }), /must define at least one tool or non-empty instructions/);
+  }
+});
+
+test('defineToolkit accepts instructions without tools and preserves their content', () => {
+  const instructions = ` \n${randomUUID()}\n `;
+  const toolkit = defineToolkit({
+    name: 'context', description: 'Execution context.', tools: [], instructions,
+  });
+  assert.deepEqual(toolkit.tools, []);
+  assert.equal(toolkit.instructions, instructions);
+});
+
+test('instructions-only toolkits still require an array and string instructions', () => {
+  for (const tools of [undefined, null, {}]) {
+    assert.throws(() => validateToolkitDefinition({
+      name: 'context', description: 'Execution context.', tools, instructions: 'context',
+    } as never), /tools must be an array/);
+  }
+  for (const instructions of [null, 42, [], {}]) {
+    assert.throws(() => validateToolkitDefinition({
+      name: 'context', description: 'Execution context.', tools: [], instructions,
+    } as never), /instructions must be a string/);
+  }
 });
 
 test('toolkit registration rejects oversized review guidance', () => {

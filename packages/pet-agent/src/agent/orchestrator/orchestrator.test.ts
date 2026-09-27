@@ -4252,6 +4252,47 @@ test('Capability node inherits root system context into its executor without sec
   }
 });
 
+test('instructions-only toolkits reach only capabilities that use them', async () => {
+  const instructions = randomUUID();
+  const unselectedInstructions = randomUUID();
+  const toolkits: AgentToolkit[] = [
+    { name: 'context', description: 'Shared context.', tools: [], instructions },
+    { name: 'other', description: 'Unselected context.', tools: [], instructions: unselectedInstructions },
+  ];
+  const execution = await resolveToolkitExecution(toolkits, ['context'], {
+    models: {} as AgentModels, messages: [],
+  });
+  assert.deepEqual(execution.tools, []);
+  assert.deepEqual(execution.toolkits.map(({ name }) => name), ['context']);
+
+  for (const uses of [['context'], []]) {
+    const { subagentInputs, callbacks } = createSubagentInputRecorder();
+    const graph = createOrchestratorGraph({
+      models: {
+        act: { invoke: async () => new AIMessage('finished') } as unknown as AgentModels['act'],
+        subagent: new FakeListChatModel({ responses: ['execution complete'], sleep: 0 }),
+      },
+      runSupervisorRunner: {
+        async invoke(input) {
+          return input.mode === 'entry'
+            ? { name: 'submit_plan', args: { tasks: [{ capability: 'explore', objective: 'Inspect the request.' }] } }
+            : { name: 'review_current', args: { completed: true, reason: 'Delivered.', reply: 'Done.' } };
+        },
+      },
+    });
+    const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect this request.')]), {
+      callbacks,
+      configurable: { capabilities: [capability('explore', 'Inspect requests.', uses)], toolkits },
+    });
+    assert.equal(subagentInputs.length, 1);
+    const systems = subagentInputs[0].filter(SystemMessage.isInstance);
+    assert.equal(systems.length, 1);
+    assert.equal(systems[0].text.split(instructions).length - 1, uses.length);
+    assert.equal(systems[0].text.includes(unselectedInstructions), false);
+    assert.equal(JSON.stringify(result.messages).includes(instructions), false);
+  }
+});
+
 test('one compiled graph preserves execution scopes without actor metadata', async () => {
   const modelsSeen: string[] = [];
   const scopes: Array<{ threadId: string | null; workdir?: string | null }> = [];

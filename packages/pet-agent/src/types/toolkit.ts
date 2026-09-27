@@ -159,6 +159,7 @@ export async function filterAvailableToolkits(
 export type AgentToolkit = {
   readonly name: string;
   readonly description: string;
+  /** May be empty when non-blank instructions contribute execution context. */
   readonly tools: readonly ToolDefinition[];
   readonly instructions?: string;
   readonly availability?: ToolkitAvailabilityCheck;
@@ -239,11 +240,14 @@ export function validateToolkitDefinition(toolkit: AgentToolkit) {
   if (typeof toolkit.description !== 'string' || !toolkit.description.trim()) {
     throw new Error(`Toolkit "${toolkit.name}" description must not be empty`);
   }
-  if (!Array.isArray(toolkit.tools) || toolkit.tools.length === 0) {
-    throw new Error(`Toolkit "${toolkit.name}" must define at least one tool`);
+  if (!Array.isArray(toolkit.tools)) {
+    throw new Error(`Toolkit "${toolkit.name}" tools must be an array`);
   }
   if (toolkit.instructions !== undefined && typeof toolkit.instructions !== 'string') {
     throw new Error(`Toolkit "${toolkit.name}" instructions must be a string`);
+  }
+  if (toolkit.tools.length === 0 && !toolkit.instructions?.trim()) {
+    throw new Error(`Toolkit "${toolkit.name}" must define at least one tool or non-empty instructions`);
   }
   if (toolkit.availability !== undefined && typeof toolkit.availability !== 'function') {
     throw new Error(`Toolkit "${toolkit.name}" availability must be a function`);

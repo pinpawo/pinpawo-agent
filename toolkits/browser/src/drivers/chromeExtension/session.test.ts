@@ -748,3 +748,64 @@ test('a readiness timeout still leaves the session owning the page for browser_w
     'https://example.com',
   );
 });
+
+test('a performed interaction whose page does not settle in time returns its snapshot, not a retryable error (#869)', async (t) => {
+  const listeners: Array<(event: BrowserRuntimeEvent) => void> = [];
+  const status = {
+    activeTabId: 15,
+    connectionGeneration: 1,
+    targetGeneration: 1,
+    navigationGeneration: 1,
+  } as BrowserBridgeStatus;
+  // Long humanized typing outlasts the settle deadline: the command itself
+  // returns only after the deadline has passed.
+  const realNow = Date.now.bind(Date);
+  let elapsed = 0;
+  t.mock.method(Date, 'now', () => realNow() + elapsed);
+
+  const session = new ChromeExtensionBrowserSession({
+    getStatus() {
+      return status;
+    },
+    onRuntimeEvent(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    onGenerationChanged() {
+      return () => {};
+    },
+    async sendCommand(command) {
+      if (command === 'navigate') {
+        const gen = (status.navigationGeneration ?? 0) + 1;
+        status.navigationGeneration = gen;
+        setImmediate(() => {
+          const base = { tabId: 15, timestamp: Date.now() - 500, connectionGeneration: 1, targetGeneration: 1, navigationGeneration: gen };
+          listeners.forEach((l) => l({ ...base, type: 'navigation.committed', url: 'https://example.com/page' }));
+          listeners.forEach((l) => l({ ...base, type: 'document.ready', payload: { readyState: 'complete' } }));
+          listeners.forEach((l) => l({ ...base, timestamp: Date.now(), type: 'dom.changed', payload: { textLength: 42, textRevision: 1 } }));
+        });
+        return { ok: true };
+      }
+      if (command === 'snapshot') return rawSnapshot;
+      if (command !== 'type') throw new Error(`unexpected command: ${String(command)}`);
+      elapsed += 31_000;
+      listeners.forEach((l) => l({
+        tabId: 15,
+        timestamp: Date.now(),
+        connectionGeneration: 1,
+        targetGeneration: 1,
+        navigationGeneration: status.navigationGeneration,
+        type: 'dom.changed',
+        payload: { textLength: 0, textRevision: 2 },
+      }));
+      return rawSnapshot;
+    },
+  });
+
+  await session.open('https://example.com/page');
+  const result = JSON.parse(await session.type({ ref: 'snapshot-1:1' }, 'x'.repeat(200)));
+  assert.equal(result.url, 'https://example.com/page');
+  assert.equal(result.settle.settled, false);
+  assert.match(result.settle.note, /type was performed/);
+  assert.match(result.settle.note, /Do not repeat the type/);
+});

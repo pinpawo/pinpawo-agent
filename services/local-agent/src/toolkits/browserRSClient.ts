@@ -39,7 +39,7 @@ function toBrowserError(failure: RSCallFailure): Error {
       'Lost the RS service while this browser operation was running; whether it took effect is unknown'
       + ' and it was not retried. Take a new browser_snapshot before deciding what to do next.',
       false,
-      { resultUnknown: true },
+      { resultUnknown: true, dispatch: 'unknown' },
     );
   }
   return failure.error;

@@ -100,3 +100,13 @@ test('browser screenshot uses BrowserRS output and invocation workdir', async ()
   assert.deepEqual(messages.map((message) => message._getType()), ['tool', 'human']);
   assert.ok(messages[1]?.contentBlocks.some((block) => block.type === 'image'));
 });
+
+test('tool descriptions steer reading to snapshot and keep screenshots out of actions (#873)', () => {
+  const tools = createBrowserTools(fakeBrowserRS('unused'));
+  const describe = (name: string) => String(tools.find((item) => item.name === name)?.description);
+
+  assert.match(describe('browser_snapshot'), /读取当前页面的首选方式/);
+  assert.match(describe('browser_screenshot'), /只用于视觉确认/);
+  assert.match(describe('browser_screenshot'), /截图不能用来操作/);
+  assert.match(describe('browser_close'), /tab 不会被关闭/);
+});

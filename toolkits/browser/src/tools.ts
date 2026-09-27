@@ -86,7 +86,9 @@ const browserSnapshotTool = tool(
   {
     name: 'browser_snapshot',
     description:
-      '查看当前浏览器页面，返回标题、URL、文本预览、截断元数据和可交互元素概览。' +
+      '读取当前页面的首选方式：返回标题、URL、文本预览、截断元数据和可交互元素（带 ref）。' +
+      '点击、输入、等待前先 snapshot 取得 ref；页面变化后重新 snapshot。' +
+      '判断页面内容时优先用 snapshot 和 browser_extract，而不是截图。' +
       '如果 truncated/hasMore=true，使用 browser_extract({ offset, limit }) 分块读取全文。',
     schema: z.object({}),
   },
@@ -270,7 +272,7 @@ const browserCloseTool = tool(
   },
   {
     name: 'browser_close',
-    description: '关闭当前浏览器会话，释放资源。',
+    description: '结束对当前页面的控制（断开调试连接）；页面 tab 不会被关闭。',
     schema: z.object({}),
   },
 );
@@ -297,7 +299,11 @@ const browserScreenshotTool = tool(
   },
   {
     name: 'browser_screenshot',
-    description: '截取当前可见浏览器视口并保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。',
+    description:
+      '截取当前可见浏览器视口，图片会直接给到你，同时保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。' +
+      '只用于视觉确认：布局、图片/图表/canvas、颜色或样式状态等 snapshot 文本无法说明的内容。' +
+      '截图不能用来操作：点击和输入只使用 browser_snapshot 返回的 ref 或 selector，不要根据截图猜坐标或 selector。' +
+      '截图占用较多上下文，snapshot 或 browser_extract 能回答时不要截图。',
     schema: z.object({}),
   },
 );

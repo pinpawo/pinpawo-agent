@@ -112,6 +112,32 @@ const EXECUTION_ANNOUNCEMENT_REPAIR = [
   '现在重新处理这一轮：继续已有未完成计划就调用 continue；需要新规划就调用 plan_request；不需要执行就直接给出面向用户的最终回复。',
 ].join('\n');
 
+const MULTIPLE_ROUTING_CALLS_REPAIR = [
+  '你刚才在同一轮里发起了多个路由工具调用，路由每轮只能选择一个。',
+  '现在重新处理这一轮：继续已有未完成计划就只调用 continue；需要新规划就只调用一次 plan_request，把全部目标写进同一个 goal；不需要执行就直接给出面向用户的最终回复。',
+].join('\n');
+
+/**
+ * Collapse byte-identical duplicate routing calls.
+ *
+ * Some OpenAI-compatible providers occasionally repeat the same call in one
+ * turn (or split one call across stream indexes). Identical name+args carry one
+ * decision, so keeping the first is lossless; distinct calls stay distinct and
+ * go through the repair turn instead of being silently picked from.
+ */
+function dedupeRoutingCalls(response: AIMessage) {
+  const calls = response.tool_calls ?? [];
+  if (calls.length < 2) return response;
+  const seen = new Set<string>();
+  const unique = calls.filter((call) => {
+    const key = JSON.stringify([call.name, call.args]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return unique.length === calls.length ? response : new AIMessage({ ...response, tool_calls: unique });
+}
+
 function entryHandoff(
   runtime: ToolRuntime<OrchestratorStateType>,
   runUserRequest: string,
@@ -235,35 +261,39 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     );
     const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
-    let response = await invokeOrchestratorModel(model, {
-      systemMessage,
-      messages: [snapshot, ...mainSelection.messages],
-    }, runnableConfig);
-    if (!AIMessage.isInstance(response)) {
-      throw new Error('Entry Answer model must return an AIMessage.');
-    }
-    if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
-      const retrySelection = mainQuery
-        .append(response, new HumanMessage(EXECUTION_ANNOUNCEMENT_REPAIR))
-        .select();
-      const retried = await invokeOrchestratorModel(model, {
+    const invoke = async (messages: BaseMessage[]) => {
+      const result = await invokeOrchestratorModel(model, {
         systemMessage,
-        messages: [snapshot, ...retrySelection.messages],
+        messages: [snapshot, ...messages],
       }, runnableConfig);
-      if (!AIMessage.isInstance(retried)) {
+      if (!AIMessage.isInstance(result)) {
         throw new Error('Entry Answer model must return an AIMessage.');
       }
-      response = retried;
+      return dedupeRoutingCalls(result);
+    };
+    const repair = (previous: AIMessage, prompt: string) => invoke(mainQuery
+      .append(previous, new HumanMessage(prompt))
+      .select().messages);
+    let response = await invoke(mainSelection.messages);
+    if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
+      response = await repair(response, EXECUTION_ANNOUNCEMENT_REPAIR);
     }
-    if (response.tool_calls?.length && (response.tool_calls.length !== 1 || !response.tool_calls[0].id)) {
-      throw new Error('Entry routing requires one identified tool call.');
+    if ((response.tool_calls?.length ?? 0) > 1) {
+      // The rejected turn is replayed without its tool calls: an AIMessage with
+      // unanswered tool_calls is not a valid history for the repair turn.
+      response = await repair(new AIMessage({ content: response.content }), MULTIPLE_ROUTING_CALLS_REPAIR);
+    }
+    if ((response.tool_calls?.length ?? 0) > 1) {
+      const names = response.tool_calls!.map((call) => call.name).join(', ');
+      throw new Error(`Entry routing requires one tool call, got ${response.tool_calls!.length}: ${names}.`);
     }
     if (!response.tool_calls?.length && !response.text.trim()) {
       response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
     }
     // Scope provider call IDs to this model turn; history may reuse them across runs or retries.
-    const committed = new AIMessage({ ...response, tool_calls: response.tool_calls?.map(call => ({
-      ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id!),
+    // Some providers omit the ID entirely, so the position stands in for it.
+    const committed = new AIMessage({ ...response, tool_calls: response.tool_calls?.map((call, index) => ({
+      ...call, id: identity('entry-call', state.runId, String(state.messages.length), call.id || `index:${index}`),
     })) });
     return {
       messages: [setAgentMessageMetadata(stampAgentMessageCreatedAt(committed), { taskId: state.taskId, runId: state.runId })],

@@ -89,17 +89,6 @@ export class ChromeExtensionBrowserSession {
     private readonly workdir: () => string = () => process.cwd(),
   ) {}
 
-  private userBoundOrigin(): string | null {
-    const status = this.bridge.getStatus?.() as BrowserBridgeStatus | undefined;
-    if (status?.activeTabBinding !== 'user' || !status.userBoundOrigin) return null;
-    try {
-      const origin = approvedOriginFor(status.userBoundOrigin);
-      return origin === status.userBoundOrigin ? origin : null;
-    } catch {
-      return null;
-    }
-  }
-
   private buildSnapshot(value: unknown, approvedOrigin: string): string {
     return JSON.stringify(this.buildSnapshotPayload(value, approvedOrigin), null, 2);
   }
@@ -128,13 +117,19 @@ export class ChromeExtensionBrowserSession {
     return buildBrowserSnapshotPayload(snapshot);
   }
 
+  /**
+   * The origin this session's own `browser_open` approved. The bridge status
+   * also reports a tab the user bound with the extension action, but that
+   * describes whichever browser context the extension activated last, and
+   * the user-bound tab lives in the extension's legacy context, which no
+   * Agent session addresses. Adopting it here made one session read its own
+   * page against another tab's origin.
+   */
   private requireApprovedOrigin(): string {
-    const userBoundOrigin = this.userBoundOrigin();
-    if (userBoundOrigin) return userBoundOrigin;
     if (!this.approvedOrigin) {
       throw new BrowserOperationError(
         'browser_not_open',
-        'No approved Chrome extension page. Use browser_open first or click the extension action on the tab to bind it.',
+        'No approved Chrome extension page. Use browser_open first.',
         true,
       );
     }

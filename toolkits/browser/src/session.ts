@@ -26,6 +26,15 @@ export type BrowserScrollOptions = {
 
 export type BrowserWaitState = 'visible' | 'hidden';
 
+/**
+ * What a screenshot covers: the visible viewport by default, one element
+ * (`target`), or the whole scrollable page (`fullPage`). The two are exclusive.
+ */
+export type BrowserScreenshotOptions = {
+  target?: BrowserElementTarget;
+  fullPage?: boolean;
+};
+
 function throwIfBrowserOperationAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   throw new BrowserOperationError(
@@ -161,6 +170,7 @@ export class BrowserSession {
       : operation();
   }
   async screenshot(
+    options: BrowserScreenshotOptions = {},
     owner: BrowserExecutionOwner | null = null,
     signal?: AbortSignal,
     /** Where this call writes the screenshot; a per-call condition. */
@@ -168,7 +178,7 @@ export class BrowserSession {
   ) {
     const operation = async () => {
       throwIfBrowserOperationAborted(signal);
-      return this.ensureImpl().screenshot(signal, workdir);
+      return this.ensureImpl().screenshot(signal, workdir, options);
     };
     return this.ownership
       ? this.ownership.runOwned(owner, operation, signal)

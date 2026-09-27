@@ -110,3 +110,33 @@ test('tool descriptions steer reading to snapshot and keep screenshots out of ac
   assert.match(describe('browser_screenshot'), /截图不能用来操作/);
   assert.match(describe('browser_close'), /tab 不会被关闭/);
 });
+
+test('browser_screenshot forwards an element or full-page scope and rejects both at once (#873)', async () => {
+  const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-shot-tool-'));
+  const received: unknown[] = [];
+  const browser = fakeBrowserRS('unused');
+  browser.screenshot = async (_context, options) => {
+    received.push(options);
+    return persistBrowserScreenshot({
+      mimeType: 'image/png',
+      data: Buffer.from('screenshot').toString('base64'),
+    }, workdir);
+  };
+  const screenshotTool = createBrowserTools(browser)
+    .find((toolItem) => toolItem.name === 'browser_screenshot');
+  assert.ok(screenshotTool);
+
+  await screenshotTool.invoke({ ref: 's:2' }, invocation('thread-1', workdir));
+  await screenshotTool.invoke({ fullPage: true }, invocation('thread-1', workdir));
+  await screenshotTool.invoke({}, invocation('thread-1', workdir));
+  assert.deepEqual(received, [
+    { target: { selector: undefined, ref: 's:2' } },
+    { fullPage: true },
+    {},
+  ]);
+
+  await assert.rejects(
+    screenshotTool.invoke({ ref: 's:2', fullPage: true }, invocation('thread-1', workdir)),
+    /fullPage cannot be combined/,
+  );
+});

@@ -1,5 +1,6 @@
 import type {
   BrowserElementTarget,
+  BrowserScreenshotOptions,
   BrowserScrollOptions,
   BrowserWaitState,
 } from '../../session';
@@ -68,6 +69,18 @@ function normalizeTarget(target: string | BrowserElementTarget): BrowserElementT
     throw new Error('browser element target requires exactly one of selector or ref');
   }
   return normalized;
+}
+
+/** The capped part of a tall region, as the extension reports it. */
+function readScreenshotTruncation(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+  const { capturedHeight, regionHeight } = value as Record<string, unknown>;
+  if (typeof capturedHeight !== 'number' || typeof regionHeight !== 'number') return null;
+  return {
+    capturedHeight: Math.round(capturedHeight),
+    regionHeight: Math.round(regionHeight),
+    note: 'Only the top part of the region was captured; scroll or screenshot an element further down to see the rest.',
+  };
 }
 
 export class ChromeExtensionBrowserSession {
@@ -512,23 +525,45 @@ export class ChromeExtensionBrowserSession {
     return JSON.stringify(buildBrowserExtractPayloadFromRaw(raw), null, 2);
   }
 
-  async screenshot(signal?: AbortSignal, workdir?: string): Promise<string> {
+  async screenshot(
+    signal?: AbortSignal,
+    workdir?: string,
+    options: BrowserScreenshotOptions = {},
+  ): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
-    const value = await this.bridge.sendCommand('screenshot', { approvedOrigin }, undefined, signal);
-    if (
-      !value
-      || typeof value !== 'object'
-      || (value as Record<string, unknown>).mimeType !== 'image/jpeg'
-      || typeof (value as Record<string, unknown>).data !== 'string'
-    ) {
+    if (options.target && options.fullPage) {
+      throw new BrowserOperationError(
+        'invalid_screenshot_options',
+        'A screenshot takes either a target or fullPage, not both.',
+        false,
+      );
+    }
+    const scope = options.target ? 'element' : options.fullPage ? 'fullPage' : 'viewport';
+    const value = await this.bridge.sendCommand('screenshot', {
+      approvedOrigin,
+      ...(options.target ? { target: normalizeTarget(options.target) } : {}),
+      ...(options.fullPage ? { fullPage: true } : {}),
+    }, undefined, signal);
+    const record = value && typeof value === 'object' ? value as Record<string, unknown> : null;
+    if (!record || record.mimeType !== 'image/jpeg' || typeof record.data !== 'string') {
       throw new Error('Chrome extension returned an invalid screenshot');
     }
+    // An extension built before #873 ignores target/fullPage and captures the
+    // viewport; report that instead of passing it off as the requested region.
+    const returnedScope = record.scope ?? 'viewport';
+    if (returnedScope !== scope) {
+      throw new BrowserOperationError(
+        'browser_extension_outdated',
+        `The Chrome extension returned a ${String(returnedScope)} screenshot for a ${scope} request. `
+          + 'Reload the PinPawo extension to pick up element and full-page screenshots.',
+        false,
+      );
+    }
+    const truncated = readScreenshotTruncation(record.truncated);
     return persistBrowserScreenshot(
-      {
-        mimeType: 'image/jpeg',
-        data: (value as Record<string, string>).data,
-      },
+      { mimeType: 'image/jpeg', data: record.data },
       workdir ?? this.workdir(),
+      { scope, ...(truncated ? { truncated } : {}) },
     );
   }
 

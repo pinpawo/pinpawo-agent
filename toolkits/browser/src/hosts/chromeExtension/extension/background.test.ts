@@ -332,3 +332,29 @@ test('accessibility refs are bound to the document they were read from (#869)', 
     /async function resolveAccessibilityTarget[\s\S]*?ref\.loaderId !== await mainFrameLoaderId\(tabId\)[\s\S]*?staleAccessibilityRef[\s\S]*?DOM\.scrollIntoViewIfNeeded/,
   );
 });
+
+test('element and full-page screenshots clip in document coordinates within the size limit (#873)', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+
+  assert.match(source, /'Page\.getLayoutMetrics'/);
+  // The target is resolved (and scrolled into view) before the scroll offset is read.
+  assert.match(
+    source,
+    /async function screenshotClip[\s\S]*?resolveTarget\(tabId, params\.target\)[\s\S]*?Page\.getLayoutMetrics[\s\S]*?viewport\.pageX[\s\S]*?viewport\.pageY/,
+  );
+  assert.match(source, /MAX_SCREENSHOT_CSS_HEIGHT/);
+  // Scales are CSS output ratios divided by devicePixelRatio: clip.scale multiplies it.
+  assert.match(
+    source,
+    /async function screenshotScales[\s\S]*?devicePixelRatio[\s\S]*?scope === 'fullPage' \? \[1, 0\.5, 0\.25\][\s\S]*?cssScale \/ devicePixelRatio/,
+  );
+  assert.match(source, /for \(const scale of await screenshotScales\(tabId, scope\)\)/);
+  assert.match(
+    source,
+    /async function captureScreenshot[\s\S]*?assertApprovedOrigin[\s\S]*?clip: \{ \.\.\.region\.clip, scale \}, captureBeyondViewport: true[\s\S]*?assertApprovedOrigin[\s\S]*?scope,/,
+  );
+  assert.match(source, /captureScreenshot\(activeTarget\.tabId, approvedOrigin, command\.params\)/);
+});

@@ -73,3 +73,11 @@ test('trusted insertion chunks long text without splitting Unicode code points',
   assert.deepEqual(chunks.map((chunk) => Array.from(chunk).length), [2_000, 2_000, 2]);
   assert.equal(chunks.join(''), text);
 });
+
+test('resolved targets carry their viewport box for element screenshots (#873)', () => {
+  const expression = buildResolveTargetExpression({ ref: 's:1' });
+  assert.match(
+    expression,
+    /box: \{ x: rect\.left, y: rect\.top, width: rect\.width, height: rect\.height \}/,
+  );
+});

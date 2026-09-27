@@ -9,6 +9,7 @@ import {
   BrowserSession,
   type BrowserElementTarget,
   type BrowserExtractOptions,
+  type BrowserScreenshotOptions,
   type BrowserScrollOptions,
   type BrowserWaitState,
 } from './session';
@@ -289,9 +290,9 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
     return session.extract(options, owner, context.signal);
   }
 
-  async screenshot(context: BrowserRSCallContext) {
+  async screenshot(context: BrowserRSCallContext, options?: BrowserScreenshotOptions) {
     const { session, owner } = await this.sessionForCall(context);
-    return session.screenshot(owner, context.signal, context.workdir);
+    return session.screenshot(options, owner, context.signal, context.workdir);
   }
 
   async close(context: BrowserRSCallContext) {

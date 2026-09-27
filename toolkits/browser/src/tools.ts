@@ -278,10 +278,17 @@ const browserCloseTool = tool(
 );
 
 const browserScreenshotTool = tool(
-  async (_input, runtime: BrowserToolRuntime) => {
+  async (
+    { selector, ref, fullPage }: BrowserTargetInput & { fullPage?: boolean },
+    runtime: BrowserToolRuntime,
+  ) => {
     try {
+      const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
       const { browser, context } = resolveBrowserCall(runtime);
-      const result = await browser.screenshot(context);
+      const result = await browser.screenshot(context, {
+        ...(target ? { target } : {}),
+        ...(fullPage ? { fullPage: true } : {}),
+      });
       // The screenshot needs its own user message to carry the image, so this
       // tool writes the graph update itself instead of returning tool content.
       return new Command({
@@ -300,11 +307,22 @@ const browserScreenshotTool = tool(
   {
     name: 'browser_screenshot',
     description:
-      '截取当前可见浏览器视口，图片会直接给到你，同时保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。' +
+      '截取页面图片，图片会直接给到你，同时保存到当前 workdir 的 .pinpawo/browser/screenshots 目录。' +
+      '默认截当前可见视口；给 ref/selector 只截该元素；fullPage=true 截整个可滚动页面（过高的页面只截顶部，结果里会标注 truncated）。' +
+      '只需要看某个区域时优先截元素，图片更小也更清楚。' +
       '只用于视觉确认：布局、图片/图表/canvas、颜色或样式状态等 snapshot 文本无法说明的内容。' +
       '截图不能用来操作：点击和输入只使用 browser_snapshot 返回的 ref 或 selector，不要根据截图猜坐标或 selector。' +
       '截图占用较多上下文，snapshot 或 browser_extract 能回答时不要截图。',
-    schema: z.object({}),
+    schema: z.object({
+      ...browserTargetFields,
+      fullPage: z.boolean().optional().describe('截整个可滚动页面，默认 false；不能与 ref/selector 同时使用'),
+    }).refine(
+      (value) => !(value.selector && value.ref),
+      { message: 'selector and ref cannot both be provided' },
+    ).refine(
+      (value) => !(value.fullPage && (value.selector || value.ref)),
+      { message: 'fullPage cannot be combined with selector or ref' },
+    ),
   },
 );
 

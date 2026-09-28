@@ -31,28 +31,26 @@ function browserSnapshotSummary(output: unknown): ToolOperationSummary | null {
   if (!record) return rawStringOutputSummary(output);
   const title = readString(record, 'title');
   const url = readString(record, 'url');
-  const text = readString(record, 'text');
-  const textLength = readNumber(record, 'textLength') ?? text?.length;
-  const returnedTextLength = readNumber(record, 'returnedTextLength') ?? text?.length;
+  const tree = readString(record, 'tree');
+  const treeLength = readNumber(record, 'treeLength') ?? tree?.length;
+  const returnedTreeLength = readNumber(record, 'returnedTreeLength') ?? tree?.length;
   const truncated = readBoolean(record, 'truncated');
-  const hasMore = readBoolean(record, 'hasMore');
-  const nextTextOffset = readNumber(record, 'nextTextOffset');
-  if (!title && !url && !text) return null;
+  const refCount = readNumber(record, 'refCount');
+  if (!title && !url && !tree) return null;
   return {
     target: url,
     summary: title
-      ? `页面：${title}${truncated || hasMore ? '（文本已截断）' : ''}`
-      : text
-        ? compactText(text)
+      ? `页面：${title}${truncated ? '（快照已截断）' : ''}`
+      : tree
+        ? compactText(tree)
         : undefined,
     details: {
       title,
       url,
-      textLength,
-      returnedTextLength,
+      treeLength,
+      returnedTreeLength,
       truncated,
-      hasMore,
-      nextTextOffset,
+      refCount,
     },
   };
 }

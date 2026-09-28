@@ -760,6 +760,12 @@ export class BrowserExtensionBridge {
       this.targetAlive = true;
     } else if (message.event === 'debugger.detached') {
       this.debuggerAttached = false;
+      // Chrome detaches for reasons outside the Runtime's control (the user
+      // cancelling the debugging bar, the target being replaced); the reason
+      // is the only trace of why a later command found no debugger.
+      this.logger.info(
+        `[browser-bridge] debugger detached tab=${String(message.tabId)} reason=${message.reason ?? 'unknown'}`,
+      );
     } else if (message.event === 'target.closed') {
       this.debuggerAttached = false;
       this.targetAlive = false;

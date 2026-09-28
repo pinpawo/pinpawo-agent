@@ -47,16 +47,13 @@ Only one native-host/extension connection is active. Once an extension is active
 
 ## Snapshot contract
 
-The extension returns a bounded, backend-level raw snapshot. `parseBrowserRawSnapshot()` validates it before `buildBrowserSnapshotPayload()` creates the agent-facing payload.
+Snapshots follow the industry shape (#873): an accessibility-tree outline rather than flattened page text. The extension renders Chrome's `Accessibility.getFullAXTree` as indented lines, `- role "name" [state] [ref=…]` per meaningful node and `- text: "…"` for page text; `parseBrowserRawSnapshot()` validates it before `buildBrowserSnapshotPayload()` creates the agent-facing payload.
 
-The raw and final contracts are intentionally separate:
-
-- Raw extension text is UTF-8 bounded for IPC and includes `textLength` for the full source length.
-- Raw interactive elements are capped at 200 and may include CDP `backendNodeId` metadata.
-- Runtime snapshots assign opaque element `ref` values backed by a page-local registry that each snapshot replaces, so a ref cannot resolve in another tab or document. Accessibility fallback refs name a CDP backend node ID, which is only meaningful inside one document, so they also carry the main-frame `loaderId` (read through `Page.getFrameTree` before the tree). Chromium issues a browser-wide unique loader ID per document load, so the extension refuses a ref whose loader ID differs from the current one — another tab or an earlier load — as `stale_element_reference` before touching the node (#869). Without a loader ID the fallback returns elements without refs.
-- The shared final builder caps previews at 50,000 characters and 20 interactive elements.
-- The builder normalizes each hint to include its stable `[index]` prefix.
-- `Runtime.evaluate` is primary. `Accessibility.getFullAXTree` is the fallback when runtime evaluation is unavailable.
+- Roles, names and states (`checked`, `expanded`/`collapsed`, `disabled`, `selected`, `pressed`, `required`, `focused`, `level`) come from Chrome's own accessibility computation. The extension only prunes: ignored nodes and unnamed layout containers are dropped with their children lifted, inline text boxes, line breaks and list markers are skipped, text a named ancestor already carries (a link's or heading's own label) is not repeated, and adjacent text runs merge.
+- Interactive roles (links, buttons, form controls, options, tabs, …) carry accessibility refs bound to the document they were read from (see #869 P1): `ax:<first 8 characters of the main-frame loaderId>:<backendNodeId>:<role>`. The loader is read before the tree, so a navigation in between leaves refs stale rather than mislabelled.
+- Field values appear as `[value="…"]`. Values of passwords, card data and one-time codes are `[value=redacted]`: after reading the tree the extension asks the page for those inputs (including open shadow roots), maps each to its backend node through `Runtime.getProperties` and `DOM.describeNode`, and releases the handles. If the lookup fails or any input cannot be mapped, every field value is redacted.
+- When Chrome's tree is unavailable, the page-side DOM snapshot (body text plus interactive elements with page-registry refs) stands in, rendered in the same outline shape with `source: "dom"`.
+- The raw tree is UTF-8 bounded for IPC and reports its full `treeLength`. The final payload shows at most 50,000 characters of tree, cut at a line boundary, with `truncated`, `refCount` and a `note` that points to `browser_extract` for long text.
 
 These builders are a reusable normalization boundary, not a frozen cross-backend schema. New backend fields must be runtime-validated and covered by compatibility tests before being exposed in the final payload.
 
@@ -82,7 +79,7 @@ These builders are a reusable normalization boundary, not a frozen cross-backend
 - Cross-origin popup errors are non-retryable and include `manualActionRequired: true`; a post-click/type failure also includes `interactionDispatched: true` so callers do not replay an interaction that was already sent. There is intentionally no API for silently adopting the popup origin in this phase.
 - Each navigation carries an origin already authorized by the local-agent review policy.
 - Before and after every read, interaction result and screenshot, the extension reads the committed top-level URL through CDP and refuses access if the origin changed. Trusted mouse/key events and bulk text chunks also re-check the origin immediately before dispatch. The extension checks returned payload URLs, and local-agent repeats that check before building final payloads.
-- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot, DOM box/scroll and read-only page identity and layout (`Page.getFrameTree`, `Page.getNavigationHistory`, `Page.getLayoutMetrics`) commands required by the declared Browser operations; arbitrary CDP is never relayed.
+- CDP remains allowlisted. Protocol v3 permits only the `Input.dispatch*`, viewport screenshot, DOM box/scroll and read-only page identity, layout and node lookups (`Page.getFrameTree`, `Page.getNavigationHistory`, `Page.getLayoutMetrics`, `DOM.describeNode`, `Runtime.getProperties`, `Runtime.releaseObjectGroup`) commands required by the declared Browser operations; arbitrary CDP is never relayed.
 - The socket directory is mode `0700`; the socket and per-run random token file are mode `0600`. The token is removed when the RS service stops.
 - Protocol messages include `protocolVersion`, `connectionId`, `requestId` and `deadlineAt`; malformed, stale and oversized messages fail closed.
 - Driver failures retain structured `code`, `retryable` and safe `details` fields through the bridge. Cross-origin failures expose origins only, never an unapproved URL path or query.

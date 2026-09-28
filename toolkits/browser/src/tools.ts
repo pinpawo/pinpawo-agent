@@ -66,8 +66,8 @@ const browserOpenTool = tool(
   {
     name: 'browser_open',
     description:
-      '在用户的 Chrome 中打开一个网页 URL，返回页面标题、文本预览、截断元数据和可交互元素。\n' +
-      '- 如果返回 truncated/hasMore=true，先用 browser_extract({ offset, limit }) 分块读取全文，再总结或判断页面内容。',
+      '在用户的 Chrome 中打开一个网页 URL，返回页面快照（与 browser_snapshot 相同的页面树）。\n' +
+      '- 长文章或需要完整正文时，用 browser_extract({ offset, limit }) 分块读取全文，再总结或判断页面内容。',
     schema: z.object({
       url: z.string().url().describe('要打开的网页 URL'),
     }),
@@ -86,10 +86,12 @@ const browserSnapshotTool = tool(
   {
     name: 'browser_snapshot',
     description:
-      '读取当前页面的首选方式：返回标题、URL、文本预览、截断元数据和可交互元素（带 ref）。' +
-      '点击、输入、等待前先 snapshot 取得 ref；页面变化后重新 snapshot。' +
+      '读取当前页面的首选方式：返回页面的无障碍树 tree，每行是 `- role "名称" [状态] [ref=…]`，' +
+      '页面文字以 `- text: "…"` 行出现；状态包括 checked、expanded/collapsed、disabled、selected、level 等，' +
+      '输入框带 value（密码等敏感字段显示 redacted）。' +
+      '点击、输入、等待前先 snapshot 取得 ref；页面跳转后重新 snapshot。' +
       '判断页面内容时优先用 snapshot 和 browser_extract，而不是截图。' +
-      '如果 truncated/hasMore=true，使用 browser_extract({ offset, limit }) 分块读取全文。',
+      '如果 truncated=true，说明树被截断，按 note 的提示用 browser_extract 读正文或滚动后重新 snapshot。',
     schema: z.object({}),
   },
 );

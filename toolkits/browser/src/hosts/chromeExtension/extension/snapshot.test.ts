@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assertSnapshotApprovedOrigin,
-  buildAccessibilitySnapshot,
+  buildDomTreeSnapshot,
+  buildSensitiveInputsExpression,
   buildSnapshotExpression,
   originOf,
 } from './snapshot.js';
@@ -46,26 +47,35 @@ test('runtime snapshot expression carries numbered interactive hints', () => {
   assert.doesNotMatch(expression, /element\.textContent \|\| element\.value/);
 });
 
-const axNodes = [
-  { role: { value: 'RootWebArea' }, name: { value: 'Page title' } },
-  { role: { value: 'StaticText' }, name: { value: 'Readable text' } },
-  { role: { value: 'button' }, name: { value: 'Continue' }, backendDOMNodeId: 9 },
-];
+test('the DOM fallback renders in the accessibility snapshot shape (#873)', () => {
+  const result = buildDomTreeSnapshot({
+    title: 'Page title',
+    url: 'https://example.com/',
+    text: 'Readable   text',
+    textLength: 40,
+    interactive: [
+      { index: 1, ref: 'snap:1', tag: 'button', text: 'Continue', placeholder: null, hint: '[1] text=Continue' },
+      { index: 2, ref: 'snap:2', tag: 'input', text: '', placeholder: 'Email', hint: '[2] input' },
+    ],
+  });
 
-test('accessibility fallback returns a raw backend snapshot', () => {
-  const result = buildAccessibilitySnapshot(axNodes, 'https://example.com/', 'A1B2C3');
-
+  assert.equal(result.source, 'dom');
   assert.equal(result.title, 'Page title');
-  assert.equal(result.text, 'Readable text');
-  assert.equal(result.textSource, 'Accessibility.getFullAXTree');
-  assert.equal(result.interactive[0].index, 1);
-  assert.equal(result.interactive[0].ref, 'ax:A1B2C3:9:button');
-  assert.equal(result.interactive[0].backendNodeId, 9);
+  assert.equal(result.tree, [
+    '- text: "Readable text"',
+    '- button "Continue" [ref=snap:1]',
+    '- input "Email" [ref=snap:2]',
+  ].join('\n'));
+  assert.equal(result.refCount, 2);
+  // The text the page bounded before IPC still counts toward the full length.
+  assert.equal(result.treeLength, result.tree.length + 40 - 'Readable   text'.length);
 });
 
-test('accessibility fallback without a loader id offers no element refs (#869)', () => {
-  const result = buildAccessibilitySnapshot(axNodes, 'https://example.com/', null);
-
-  assert.equal(result.interactive[0].hint, '[1] button "Continue"');
-  assert.equal('ref' in result.interactive[0], false);
+test('sensitive inputs are found through open shadow roots with the shared predicate (#873)', () => {
+  const expression = buildSensitiveInputsExpression();
+  assert.match(expression, /isSensitiveInput\(element\)/);
+  assert.match(expression, /element\.shadowRoot/);
+  assert.match(expression, /current-password/);
+  assert.match(expression, /cc-number/);
+  assert.doesNotThrow(() => new Function(`return ${expression}`));
 });

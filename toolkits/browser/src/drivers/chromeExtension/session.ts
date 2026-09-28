@@ -107,6 +107,19 @@ export class ChromeExtensionBrowserSession {
   }
 
   private buildSnapshotPayload(value: unknown, approvedOrigin: string) {
+    // An extension built before #873 still returns flattened text plus an
+    // interactive list; say so instead of failing on the missing tree.
+    if (
+      value && typeof value === 'object'
+      && !('tree' in value) && 'interactive' in value
+    ) {
+      throw new BrowserOperationError(
+        'browser_extension_outdated',
+        'The Chrome extension returned a snapshot in the format used before accessibility-tree '
+          + 'snapshots. Reload the PinPawo extension.',
+        false,
+      );
+    }
     const snapshot = parseBrowserRawSnapshot(value);
     let snapshotOrigin: string;
     try {

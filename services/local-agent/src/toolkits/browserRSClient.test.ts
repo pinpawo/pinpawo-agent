@@ -48,9 +48,10 @@ function fakeBridge(state: FakeBridge): BrowserExtensionBridge {
       return {
         title: 'Example',
         url: urlByContext.get(params.browserContextId) ?? 'https://example.com/',
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
+        tree: '- text: "Readable page"',
+        treeLength: 23,
+        refCount: 0,
+        source: 'accessibility',
       };
     },
     getStatus() {

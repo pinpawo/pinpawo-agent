@@ -8,20 +8,14 @@ import { BrowserBridgeError, type BrowserBridgeStatus } from './bridge';
 import { BrowserOperationError } from '../../errors';
 import type { BrowserRuntimeEvent } from '../../lifecycle/events';
 
+const rawTree = '- text: "Readable page"\n- button "Continue" [ref=snapshot-1:1]';
 const rawSnapshot = {
   title: 'Example',
   url: 'https://example.com/page',
-  text: 'Readable page',
-  interactive: [{
-    index: 1,
-    ref: 'snapshot-1:1',
-    tag: 'button',
-    text: 'Continue',
-    type: null,
-    placeholder: null,
-    hint: 'button',
-  }],
-  interactiveCount: 1,
+  tree: rawTree,
+  treeLength: rawTree.length,
+  refCount: 1,
+  source: 'accessibility',
 };
 
 test('extension session uses one approved origin and the shared payload builder', async () => {
@@ -40,11 +34,11 @@ test('extension session uses one approved origin and the shared payload builder'
   });
 
   const opened = JSON.parse(await session.open('https://example.com/page')) as {
-    text: string;
-    interactive: Array<{ hint: string }>;
+    tree: string;
+    refCount: number;
   };
-  assert.equal(opened.text, 'Readable page');
-  assert.equal(opened.interactive[0]?.hint, '[1] button');
+  assert.equal(opened.tree, rawTree);
+  assert.equal(opened.refCount, 1);
   assert.deepEqual(calls[0], {
     command: 'navigate',
     params: {
@@ -842,5 +836,21 @@ test('an extension that ignores the screenshot scope is reported, not passed off
     session.screenshot(undefined, undefined, { fullPage: true, target: { ref: 's:1' } }),
     (error: unknown) => error instanceof BrowserOperationError
       && error.code === 'invalid_screenshot_options',
+  );
+});
+
+test('an extension that still returns the pre-#873 snapshot format is reported as outdated', async () => {
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command) {
+      if (command === 'navigate') return { ok: true };
+      return { title: 'Example', url: 'https://example.com/page', text: 'Readable page', interactive: [] };
+    },
+  }, () => '/tmp');
+
+  await assert.rejects(
+    session.open('https://example.com/page'),
+    (error: unknown) => error instanceof BrowserOperationError
+      && error.code === 'browser_extension_outdated'
+      && /Reload the PinPawo extension/.test(error.message),
   );
 });

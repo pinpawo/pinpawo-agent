@@ -5,54 +5,20 @@ import {
   buildBrowserSnapshotPayload,
 } from './session';
 
-test('browser snapshot payload returns more than 10000 characters when within the preview cap', () => {
-  const text = 'x'.repeat(10_050);
+test('browser snapshot payload keeps a tree within the cap whole', () => {
+  const tree = `- main\n  - text: "${'x'.repeat(10_050)}"`;
   const snapshot = buildBrowserSnapshotPayload({
     title: 'Long page',
     url: 'https://example.com/long',
-    text,
-    interactive: [{
-      index: 1,
-      tag: 'a',
-      text: 'first',
-      type: null,
-      placeholder: null,
-      hint: 'text=first',
-    }],
-    interactiveCount: 3,
+    tree,
+    treeLength: tree.length,
+    refCount: 0,
+    source: 'accessibility',
   });
 
-  assert.equal(snapshot.textLength, 10_050);
-  assert.equal(snapshot.returnedTextLength, 10_050);
-  assert.equal(snapshot.text.length, 10_050);
-  assert.equal(snapshot.textLimit, 50_000);
+  assert.equal(snapshot.tree, tree);
+  assert.equal(snapshot.returnedTreeLength, tree.length);
   assert.equal(snapshot.truncated, false);
-  assert.equal(snapshot.hasMore, false);
-  assert.equal(snapshot.nextTextOffset, null);
-  assert.equal(snapshot.interactiveCount, 3);
-  assert.equal(snapshot.returnedInteractiveCount, 1);
-  assert.equal(snapshot.interactiveTruncated, true);
-  assert.ok(
-    Object.keys(snapshot).indexOf('interactive') < Object.keys(snapshot).indexOf('text'),
-    'interactive hints should appear before large text previews',
-  );
-});
-
-test('browser snapshot payload exposes truncation metadata beyond the preview cap', () => {
-  const text = 'x'.repeat(50_050);
-  const snapshot = buildBrowserSnapshotPayload({
-    title: 'Very long page',
-    url: 'https://example.com/very-long',
-    text,
-    interactive: [],
-  });
-
-  assert.equal(snapshot.textLength, 50_050);
-  assert.equal(snapshot.returnedTextLength, 50_000);
-  assert.equal(snapshot.text.length, 50_000);
-  assert.equal(snapshot.truncated, true);
-  assert.equal(snapshot.hasMore, true);
-  assert.equal(snapshot.nextTextOffset, 50_000);
 });
 
 test('browser extract payload chunks full page text by offset and limit', () => {

@@ -782,3 +782,65 @@ test('a performed interaction whose page does not settle in time returns its sna
   assert.match(result.settle.note, /type was performed/);
   assert.match(result.settle.note, /Do not repeat the type/);
 });
+
+test('element and full-page screenshots pass their scope and report truncation (#873)', async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const workdir = await mkdtemp(resolve(tmpdir(), 'pinpawo-browser-shot-scope-'));
+  let reply: Record<string, unknown> = {};
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params) {
+      if (command === 'navigate') return { ok: true };
+      if (command === 'screenshot') {
+        calls.push(params);
+        return { mimeType: 'image/jpeg', data: 'AQ==', ...reply };
+      }
+      return rawSnapshot;
+    },
+  }, () => workdir);
+  await session.open('https://example.com/page');
+
+  reply = { scope: 'element' };
+  const element = JSON.parse(await session.screenshot(undefined, undefined, { target: { ref: 's:3' } }));
+  assert.equal(element.scope, 'element');
+  assert.deepEqual(calls[0], {
+    approvedOrigin: 'https://example.com',
+    target: { selector: undefined, ref: 's:3' },
+  });
+
+  reply = { scope: 'fullPage', truncated: { capturedHeight: 8000, regionHeight: 12000.4 } };
+  const fullPage = JSON.parse(await session.screenshot(undefined, undefined, { fullPage: true }));
+  assert.deepEqual(calls[1], { approvedOrigin: 'https://example.com', fullPage: true });
+  assert.equal(fullPage.scope, 'fullPage');
+  assert.equal(fullPage.truncated.capturedHeight, 8000);
+  assert.equal(fullPage.truncated.regionHeight, 12000);
+  assert.match(fullPage.truncated.note, /Only the top part/);
+
+  reply = {};
+  const viewport = JSON.parse(await session.screenshot());
+  assert.deepEqual(calls[2], { approvedOrigin: 'https://example.com' });
+  assert.equal(viewport.scope, 'viewport');
+});
+
+test('an extension that ignores the screenshot scope is reported, not passed off as the region (#873)', async () => {
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command) {
+      if (command === 'navigate') return { ok: true };
+      // An extension built before #873 returns a viewport image without a scope.
+      if (command === 'screenshot') return { mimeType: 'image/jpeg', data: 'AQ==' };
+      return rawSnapshot;
+    },
+  }, () => '/tmp');
+  await session.open('https://example.com/page');
+
+  await assert.rejects(
+    session.screenshot(undefined, undefined, { fullPage: true }),
+    (error: unknown) => error instanceof BrowserOperationError
+      && error.code === 'browser_extension_outdated'
+      && /Reload the PinPawo extension/.test(error.message),
+  );
+  await assert.rejects(
+    session.screenshot(undefined, undefined, { fullPage: true, target: { ref: 's:1' } }),
+    (error: unknown) => error instanceof BrowserOperationError
+      && error.code === 'invalid_screenshot_options',
+  );
+});

@@ -15,6 +15,7 @@ export {
   BrowserSession,
   type BrowserElementTarget,
   type BrowserExtractOptions,
+  type BrowserScreenshotOptions,
   type BrowserScrollOptions,
   type BrowserWaitState,
 } from './session';

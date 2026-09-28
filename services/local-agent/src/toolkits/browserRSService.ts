@@ -91,7 +91,7 @@ export function createBrowserRSServiceHandler(
         case 'extract':
           return await rs.extract(context, optional(input.options));
         case 'screenshot':
-          return await rs.screenshot(context);
+          return await rs.screenshot(context, optional(input.options));
         case 'close':
           return await rs.close(context);
         default:

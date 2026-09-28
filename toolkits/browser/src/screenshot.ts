@@ -151,9 +151,11 @@ export async function buildBrowserScreenshotMessages(
   ];
 }
 
+/** `details` describes what was captured and is shown with the saved file. */
 export async function persistBrowserScreenshot(
   input: BrowserScreenshotData,
   workdir = process.cwd(),
+  details: Record<string, unknown> = {},
 ): Promise<string> {
   if (input.mimeType !== 'image/jpeg' && input.mimeType !== 'image/png') {
     throw new Error('browser screenshot mimeType must be image/jpeg or image/png');
@@ -176,5 +178,6 @@ export async function persistBrowserScreenshot(
     mimeType: input.mimeType,
     byteLength: bytes.length,
     sha256: digest(bytes),
+    ...details,
   }, null, 2);
 }

@@ -140,6 +140,7 @@ export function buildResolveTargetExpression(value: unknown): string {
       ok: true,
       x: Math.max(0, Math.min(innerWidth - 1, rect.left + rect.width / 2)),
       y: Math.max(0, Math.min(innerHeight - 1, rect.top + rect.height / 2)),
+      box: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
       tag: element.tagName.toLowerCase(),
       editable: element.matches('input,textarea,[contenteditable="true"],[role="textbox"]'),
     };

@@ -6,6 +6,7 @@ import {
   type BrowserExtractOptions,
   type BrowserRS,
   type BrowserRSCallContext,
+  type BrowserScreenshotOptions,
   type BrowserScrollOptions,
   type BrowserWaitState,
 } from '@pinpawo-toolkit/browser';
@@ -129,8 +130,11 @@ export class BrowserRSClient implements BrowserRS {
     return await this.operation('extract', context, { options });
   }
 
-  async screenshot(context: BrowserRSCallContext): Promise<string> {
-    return await this.operation('screenshot', context, {});
+  async screenshot(
+    context: BrowserRSCallContext,
+    options?: BrowserScreenshotOptions,
+  ): Promise<string> {
+    return await this.operation('screenshot', context, { options });
   }
 
   async close(context: BrowserRSCallContext): Promise<string> {

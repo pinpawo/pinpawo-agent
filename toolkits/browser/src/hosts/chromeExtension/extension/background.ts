@@ -48,6 +48,7 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Network.enable',
   'Page.getNavigationHistory',
   'Page.getFrameTree',
+  'Page.getLayoutMetrics',
   'Page.enable',
   'Page.captureScreenshot',
   'Input.insertText',
@@ -900,10 +901,18 @@ async function resolveAccessibilityTarget(tabId, value) {
   if (!Array.isArray(quad) || quad.length !== 8) {
     throw new ExtensionError('element_not_visible', 'The accessibility element has no visible box');
   }
+  const xs = [quad[0], quad[2], quad[4], quad[6]];
+  const ys = [quad[1], quad[3], quad[5], quad[7]];
   return {
     ok: true,
     x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
     y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4,
+    box: {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    },
     tag: ref.role,
     editable: ['textbox', 'searchbox', 'combobox', 'spinbutton'].includes(ref.role),
   };
@@ -1150,28 +1159,110 @@ async function readExtract(tabId, params, approvedOrigin) {
   return raw;
 }
 
-async function captureScreenshot(tabId, approvedOrigin) {
+/** A result must stay under the Native Messaging message limit. */
+const MAX_SCREENSHOT_BYTES = 700_000;
+/** Taller regions are cut: past this a model cannot read the downscaled image. */
+const MAX_SCREENSHOT_CSS_HEIGHT = 8_000;
+
+function screenshotScope(params) {
+  const fullPage = params.fullPage === true;
+  if (params.fullPage !== undefined && typeof params.fullPage !== 'boolean') {
+    throw new ExtensionError('invalid_screenshot_options', 'fullPage must be a boolean');
+  }
+  if (fullPage && params.target) {
+    throw new ExtensionError('invalid_screenshot_options', 'A screenshot takes either a target or fullPage, not both');
+  }
+  if (params.target) return 'element';
+  return fullPage ? 'fullPage' : 'viewport';
+}
+
+/** The document-coordinate region for an element or the whole page. */
+async function screenshotClip(tabId, scope, params) {
+  // Resolving the target scrolls it into view, so metrics are read after it.
+  const box = scope === 'element' ? (await resolveTarget(tabId, params.target)).box : null;
+  const metrics = await cdp(tabId, 'Page.getLayoutMetrics');
+  const content = metrics.cssContentSize;
+  const viewport = metrics.cssVisualViewport;
+  if (!content || !viewport) {
+    throw new ExtensionError('screenshot_unavailable', 'Chrome returned no layout metrics', true);
+  }
+  let region;
+  if (!box) {
+    region = { x: 0, y: 0, width: content.width, height: content.height };
+  } else {
+    // Target boxes are viewport-relative; the clip is in document coordinates.
+    region = {
+      x: box.x + viewport.pageX,
+      y: box.y + viewport.pageY,
+      width: box.width,
+      height: box.height,
+    };
+  }
+  const x = Math.max(0, region.x);
+  const y = Math.max(0, region.y);
+  const width = Math.min(region.width - (x - region.x), content.width - x);
+  const fullHeight = Math.min(region.height - (y - region.y), content.height - y);
+  if (!(width > 0) || !(fullHeight > 0)) {
+    throw new ExtensionError('element_not_visible', 'The screenshot region is empty');
+  }
+  const height = Math.min(fullHeight, MAX_SCREENSHOT_CSS_HEIGHT);
+  return {
+    clip: { x, y, width, height },
+    ...(height < fullHeight ? { truncated: { capturedHeight: height, regionHeight: fullHeight } } : {}),
+  };
+}
+
+/**
+ * Output pixels per CSS pixel to try, largest first. `clip.scale` multiplies
+ * the device pixel ratio, so the ladder is expressed in CSS pixels and divided
+ * by it: on a 2x display a full page at scale 1 would render twice as wide and
+ * tall as its CSS size. An element starts at native sharpness; a full page is
+ * a layout overview, so it starts at one output pixel per CSS pixel.
+ */
+async function screenshotScales(tabId, scope) {
+  if (scope === 'viewport') return [1];
+  // Page scripts may be unavailable (the accessibility-fallback case); the
+  // ladder still ends small enough if the ratio is taken as 1.
+  const ratio = await evaluateValue(tabId, 'window.devicePixelRatio').catch(() => 1);
+  const devicePixelRatio = typeof ratio === 'number' && ratio > 0 ? ratio : 1;
+  const cssScales = scope === 'fullPage' ? [1, 0.5, 0.25] : [devicePixelRatio, 1, 0.5];
+  return [...new Set(cssScales.map((cssScale) => cssScale / devicePixelRatio))];
+}
+
+async function captureScreenshot(tabId, approvedOrigin, params = {}) {
+  const scope = screenshotScope(params);
   await assertApprovedOrigin(tabId, approvedOrigin);
-  for (const quality of [75, 55, 35]) {
-    const result = await cdp(tabId, 'Page.captureScreenshot', {
-      format: 'jpeg',
-      quality,
-      fromSurface: true,
-      captureBeyondViewport: false,
-      optimizeForSpeed: true,
-    });
-    if (typeof result.data !== 'string') {
-      throw new ExtensionError('screenshot_unavailable', 'Chrome returned no screenshot data', true);
-    }
-    const estimatedBytes = Math.floor(result.data.length * 3 / 4);
-    if (estimatedBytes <= 700_000) {
-      await assertApprovedOrigin(tabId, approvedOrigin);
-      return { mimeType: 'image/jpeg', data: result.data };
+  const region = scope === 'viewport' ? null : await screenshotClip(tabId, scope, params);
+  // A large region is scaled down before quality drops too far to read.
+  for (const scale of await screenshotScales(tabId, scope)) {
+    for (const quality of [75, 55, 35]) {
+      const result = await cdp(tabId, 'Page.captureScreenshot', {
+        format: 'jpeg',
+        quality,
+        fromSurface: true,
+        optimizeForSpeed: true,
+        ...(region
+          ? { clip: { ...region.clip, scale }, captureBeyondViewport: true }
+          : { captureBeyondViewport: false }),
+      });
+      if (typeof result.data !== 'string') {
+        throw new ExtensionError('screenshot_unavailable', 'Chrome returned no screenshot data', true);
+      }
+      const estimatedBytes = Math.floor(result.data.length * 3 / 4);
+      if (estimatedBytes <= MAX_SCREENSHOT_BYTES) {
+        await assertApprovedOrigin(tabId, approvedOrigin);
+        return {
+          mimeType: 'image/jpeg',
+          data: result.data,
+          scope,
+          ...(region?.truncated ? { truncated: region.truncated } : {}),
+        };
+      }
     }
   }
   throw new ExtensionError(
     'screenshot_too_large',
-    'The viewport screenshot exceeds the Native Messaging safety limit',
+    `The ${scope} screenshot exceeds the Native Messaging safety limit`,
     true,
   );
 }
@@ -1221,7 +1312,7 @@ async function executeCommandBody(command) {
     return await readExtract(activeTarget.tabId, command.params, approvedOrigin);
   }
   if (command.command === 'screenshot') {
-    return await captureScreenshot(activeTarget.tabId, approvedOrigin);
+    return await captureScreenshot(activeTarget.tabId, approvedOrigin, command.params);
   }
   if (command.command === 'click') {
     await assertApprovedOrigin(activeTarget.tabId, approvedOrigin);

@@ -5,6 +5,7 @@ import type {
 import type {
   BrowserElementTarget,
   BrowserExtractOptions,
+  BrowserScreenshotOptions,
   BrowserScrollOptions,
   BrowserWaitState,
 } from './session';
@@ -67,6 +68,9 @@ export type BrowserRS = ToolkitRS & {
     context: BrowserRSCallContext,
     options?: BrowserExtractOptions,
   ): Promise<string>;
-  screenshot(context: BrowserRSCallContext): Promise<string>;
+  screenshot(
+    context: BrowserRSCallContext,
+    options?: BrowserScreenshotOptions,
+  ): Promise<string>;
   close(context: BrowserRSCallContext): Promise<string>;
 };

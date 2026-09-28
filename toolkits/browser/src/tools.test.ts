@@ -140,3 +140,31 @@ test('browser_screenshot forwards an element or full-page scope and rejects both
     /fullPage cannot be combined/,
   );
 });
+
+test('browser_snapshot forwards scope, depth and interactive-only options (#873 3b)', async () => {
+  const received: unknown[] = [];
+  const browser = fakeBrowserRS('unused');
+  browser.snapshot = async (_context, options) => {
+    received.push(options);
+    return '{}';
+  };
+  const snapshotTool = createBrowserTools(browser)
+    .find((toolItem) => toolItem.name === 'browser_snapshot');
+  assert.ok(snapshotTool);
+
+  await snapshotTool.invoke({ selector: 'main', depth: 3 }, invocation('thread-1', '/tmp'));
+  await snapshotTool.invoke({ interactiveOnly: true }, invocation('thread-1', '/tmp'));
+  await snapshotTool.invoke({}, invocation('thread-1', '/tmp'));
+  assert.deepEqual(received, [
+    { target: { selector: 'main', ref: undefined }, depth: 3 },
+    { interactiveOnly: true },
+    {},
+  ]);
+  await assert.rejects(
+    snapshotTool.invoke({ selector: 'main', ref: 'ax:6A1F0C3E:5:main' }, invocation('thread-1', '/tmp')),
+    /cannot both be provided/,
+  );
+  await assert.rejects(
+    snapshotTool.invoke({ depth: 0 }, invocation('thread-1', '/tmp')),
+  );
+});

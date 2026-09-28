@@ -11,6 +11,7 @@ import {
   type BrowserExtractOptions,
   type BrowserScreenshotOptions,
   type BrowserScrollOptions,
+  type BrowserSnapshotOptions,
   type BrowserWaitState,
 } from './session';
 import type { BrowserRuntimeEvent } from './lifecycle/events';
@@ -241,9 +242,9 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
     return session.open(url, owner, context.signal);
   }
 
-  async snapshot(context: BrowserRSCallContext) {
+  async snapshot(context: BrowserRSCallContext, options?: BrowserSnapshotOptions) {
     const { session, owner } = await this.sessionForCall(context);
-    return session.snapshot(owner, context.signal);
+    return session.snapshot(options, owner, context.signal);
   }
 
   async click(

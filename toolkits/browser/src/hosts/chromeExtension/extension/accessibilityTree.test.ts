@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildAccessibilityTreeSnapshot } from './accessibilityTree';
+import {
+  AccessibilityScopeNotFoundError,
+  buildAccessibilityTreeSnapshot,
+} from './accessibilityTree';
 
 const loaderId = '6A1F0C3E9B7D41C2A0E5F3B8C1D2E4F6';
 
@@ -190,4 +193,57 @@ test('matches real Chrome shapes: no value text under fields, no formatting or l
     '  - listitem',
     '    - text: "First item"',
   ].join('\n'));
+});
+
+const base = { loaderId, sensitiveNodeIds: new Set<number>() };
+
+test('scopes the tree to one element\'s subtree, keeping the page title (#873 3b)', () => {
+  const nodes = axNodes({
+    role: 'RootWebArea',
+    name: 'Page',
+    children: [
+      { role: 'navigation', name: 'Site', backend: 5, children: [
+        { role: 'link', name: 'Home', backend: 10 },
+      ] },
+      { role: 'main', backend: 6, children: [{ role: 'heading', name: 'Body', properties: { level: 1 } }] },
+    ],
+  });
+  const snapshot = buildAccessibilityTreeSnapshot(nodes, 'https://x/', { ...base, rootBackendNodeId: 5 });
+
+  assert.equal(snapshot.title, 'Page');
+  assert.equal(snapshot.tree, [
+    '- navigation "Site"',
+    '  - link "Home" [ref=ax:6A1F0C3E:10:link]',
+  ].join('\n'));
+  assert.throws(
+    () => buildAccessibilityTreeSnapshot(nodes, 'https://x/', { ...base, rootBackendNodeId: 999 }),
+    AccessibilityScopeNotFoundError,
+  );
+});
+
+test('limits depth and reports that nodes were left out (#873 3b)', () => {
+  const snapshot = buildAccessibilityTreeSnapshot(axNodes(page), 'https://example.com/login', {
+    ...base,
+    maxDepth: 1,
+  });
+  assert.equal(snapshot.tree, '- banner\n- main');
+  assert.equal(snapshot.depthLimited, true);
+  const whole = buildAccessibilityTreeSnapshot(axNodes(page), 'https://example.com/login', base);
+  assert.equal(whole.depthLimited, false);
+});
+
+test('lists only interactive nodes, flat and without page text (#873 3b)', () => {
+  const snapshot = buildAccessibilityTreeSnapshot(axNodes(page), 'https://example.com/login', {
+    ...base,
+    interactiveOnly: true,
+  });
+  assert.equal(snapshot.tree, [
+    '- link "Home" [ref=ax:6A1F0C3E:10:link]',
+    '- textbox "Email" [value="barry@example.com"] [ref=ax:6A1F0C3E:20:textbox]',
+    '- textbox "Password" [value="hunter2"] [ref=ax:6A1F0C3E:21:textbox]',
+    '- checkbox "Remember me" [checked] [ref=ax:6A1F0C3E:22:checkbox]',
+    '- button "Menu" [collapsed] [ref=ax:6A1F0C3E:23:button]',
+    '- button "Continue" [disabled] [ref=ax:6A1F0C3E:24:button]',
+  ].join('\n'));
+  assert.equal(snapshot.refCount, 6);
 });

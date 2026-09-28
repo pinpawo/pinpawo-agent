@@ -35,6 +35,8 @@ export type BrowserRawSnapshot = {
   treeLength: number;
   refCount: number;
   source: 'accessibility' | 'dom';
+  /** Nodes below a requested depth were left out. */
+  depthLimited?: boolean;
 };
 
 type TextWindow = {
@@ -72,7 +74,7 @@ export function parseBrowserRawSnapshot(value: unknown): BrowserRawSnapshot {
   if (!isRecord(value)) {
     throw new Error('browser snapshot result must be an object');
   }
-  const { title, url, tree, treeLength, refCount, source } = value;
+  const { title, url, tree, treeLength, refCount, source, depthLimited } = value;
   if (typeof title !== 'string' || typeof url !== 'string' || typeof tree !== 'string') {
     throw new Error('browser snapshot title, url and tree must be strings');
   }
@@ -88,6 +90,9 @@ export function parseBrowserRawSnapshot(value: unknown): BrowserRawSnapshot {
   if (source !== 'accessibility' && source !== 'dom') {
     throw new Error('browser snapshot source must be accessibility or dom');
   }
+  if (depthLimited !== undefined && typeof depthLimited !== 'boolean') {
+    throw new Error('browser snapshot depthLimited must be a boolean');
+  }
   return {
     title,
     url,
@@ -95,6 +100,7 @@ export function parseBrowserRawSnapshot(value: unknown): BrowserRawSnapshot {
     treeLength: treeLength as number,
     refCount: refCount as number,
     source,
+    ...(depthLimited ? { depthLimited: true } : {}),
   };
 }
 
@@ -148,6 +154,17 @@ export function buildBrowserSnapshotPayload(input: BrowserRawSnapshot) {
     tree = tree.slice(0, cut > 0 ? cut : MAX_BROWSER_SNAPSHOT_TREE_LENGTH);
   }
   const truncated = tree.length < input.treeLength;
+  const notes: string[] = [];
+  if (truncated) {
+    notes.push(
+      `Showing the first ${tree.length} of ${input.treeLength} characters of the page tree. `
+        + 'Snapshot one region with ref/selector, limit depth, or use interactiveOnly; '
+        + 'read long text with browser_extract.',
+    );
+  }
+  if (input.depthLimited) {
+    notes.push('Nodes below the requested depth were left out; snapshot a ref with more depth to see them.');
+  }
   return {
     title: input.title,
     url: input.url,
@@ -157,12 +174,8 @@ export function buildBrowserSnapshotPayload(input: BrowserRawSnapshot) {
     returnedTreeLength: tree.length,
     truncated,
     refCount: input.refCount,
-    ...(truncated
-      ? {
-          note: `Showing the first ${tree.length} of ${input.treeLength} characters of the page tree. `
-            + 'Read long text with browser_extract; elements further down need a new snapshot after scrolling.',
-        }
-      : {}),
+    ...(input.depthLimited ? { depthLimited: true } : {}),
+    ...(notes.length ? { note: notes.join(' ') } : {}),
   };
 }
 

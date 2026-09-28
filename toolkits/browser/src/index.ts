@@ -17,6 +17,7 @@ export {
   type BrowserExtractOptions,
   type BrowserScreenshotOptions,
   type BrowserScrollOptions,
+  type BrowserSnapshotOptions,
   type BrowserWaitState,
 } from './session';
 export * from './lifecycle';

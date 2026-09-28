@@ -88,7 +88,21 @@ export type AccessibilityTreeOptions = Readonly<{
    * then every field value is withheld.
    */
   sensitiveNodeIds: ReadonlySet<number> | null;
+  /** Render only this element's subtree (its backend node id). */
+  rootBackendNodeId?: number;
+  /** Render nodes up to this many levels deep; deeper ones are left out. */
+  maxDepth?: number;
+  /** Render only interactive nodes, as a flat list without page text. */
+  interactiveOnly?: boolean;
 }>;
+
+/** A scope target that has no node in the accessibility tree. */
+export class AccessibilityScopeNotFoundError extends Error {
+  constructor() {
+    super('The snapshot target is not in the accessibility tree');
+    this.name = 'AccessibilityScopeNotFoundError';
+  }
+}
 
 export type AccessibilityTreeSnapshot = {
   title: string;
@@ -98,6 +112,8 @@ export type AccessibilityTreeSnapshot = {
   treeLength: number;
   refCount: number;
   source: 'accessibility';
+  /** Some nodes sat below `maxDepth` and were left out. */
+  depthLimited: boolean;
 };
 
 type Entry =
@@ -207,11 +223,23 @@ export function buildAccessibilityTreeSnapshot(
       byId.set(String(node.nodeId), node);
     }
   }
-  const root = nodes.find((node) => axValue(node, 'role') === 'RootWebArea')
+  const page = nodes.find((node) => axValue(node, 'role') === 'RootWebArea')
     ?? nodes.find((node) => node && !node.parentId);
+  let root = page;
+  if (options.rootBackendNodeId !== undefined) {
+    root = nodes.find((node) => node?.backendDOMNodeId === options.rootBackendNodeId);
+    if (!root) throw new AccessibilityScopeNotFoundError();
+  }
+  const { maxDepth, interactiveOnly = false } = options;
   const entries: Entry[] = [];
   let refCount = 0;
+  let omittedByDepth = 0;
   const visited = new Set<JsonRecord>();
+  const beyondDepth = (depth: number) => {
+    if (maxDepth === undefined || depth < maxDepth) return false;
+    omittedByDepth += 1;
+    return true;
+  };
 
   const childrenOf = (node: JsonRecord) => (Array.isArray(node.childIds) ? node.childIds : [])
     .map((id) => byId.get(String(id)))
@@ -234,7 +262,7 @@ export function buildAccessibilityTreeSnapshot(
     if (SKIPPED_ROLES.has(role)) return;
     const name = axString(node, 'name');
     if (role === 'StaticText') {
-      if (name && !dropText && !nameOfParent.includes(name)) {
+      if (name && !interactiveOnly && !dropText && !nameOfParent.includes(name) && !beyondDepth(depth)) {
         entries.push({ kind: 'text', depth, text: name });
       }
       return;
@@ -244,7 +272,14 @@ export function buildAccessibilityTreeSnapshot(
       return;
     }
     const refRole = role.toLowerCase();
-    const ref = INTERACTIVE_ROLES.has(refRole)
+    const interactive = INTERACTIVE_ROLES.has(refRole);
+    // The interactive-only list is flat: structure is walked but not shown.
+    if (interactiveOnly && !interactive) {
+      walkChildren(depth, name, dropText);
+      return;
+    }
+    if (beyondDepth(depth)) return;
+    const ref = interactive
       ? formatAccessibilityRef(options.loaderId, node.backendDOMNodeId, refRole)
       : null;
     if (ref) refCount += 1;
@@ -252,20 +287,25 @@ export function buildAccessibilityTreeSnapshot(
       + `${stateSuffix(node, role)}${valueSuffix(node, role, options)}${ref ? ` [ref=${ref}]` : ''}`;
     const index = entries.push({ kind: 'node', depth, line }) - 1;
     if (VALUE_LEAF_ROLES.has(role)) return;
-    walkChildren(depth + 1, name, role === 'combobox');
+    const omittedBefore = omittedByDepth;
+    walkChildren(interactiveOnly ? depth : depth + 1, name, role === 'combobox');
     // An unnamed, non-interactive container whose children all pruned away
-    // (a collapsed sublist, an empty group) says nothing.
-    if (!name && !ref && entries.length === index + 1) entries.pop();
+    // (a collapsed sublist, an empty group) says nothing — unless they were
+    // only cut by the depth limit.
+    if (!name && !ref && entries.length === index + 1 && omittedByDepth === omittedBefore) {
+      entries.pop();
+    }
   };
 
   if (root) walk(root, 0, '', false);
   const full = render(entries);
   return {
-    title: axString(root, 'name'),
+    title: axString(page, 'name'),
     url,
     tree: truncateUtf8(full, maxBytes),
     treeLength: full.length,
     refCount,
     source: 'accessibility',
+    depthLimited: omittedByDepth > 0,
   };
 }

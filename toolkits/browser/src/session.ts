@@ -30,6 +30,16 @@ export type BrowserWaitState = 'visible' | 'hidden';
  * What a screenshot covers: the visible viewport by default, one element
  * (`target`), or the whole scrollable page (`fullPage`). The two are exclusive.
  */
+/**
+ * What a snapshot covers (#873 3b): the whole page by default, one element's
+ * subtree (`target`), down to `depth` levels, or only interactive elements.
+ */
+export type BrowserSnapshotOptions = {
+  target?: BrowserElementTarget;
+  depth?: number;
+  interactiveOnly?: boolean;
+};
+
 export type BrowserScreenshotOptions = {
   target?: BrowserElementTarget;
   fullPage?: boolean;
@@ -91,10 +101,14 @@ export class BrowserSession {
       ? this.ownership.runOpen(owner, operation, signal)
       : operation();
   }
-  async snapshot(owner: BrowserExecutionOwner | null = null, signal?: AbortSignal) {
+  async snapshot(
+    options: BrowserSnapshotOptions = {},
+    owner: BrowserExecutionOwner | null = null,
+    signal?: AbortSignal,
+  ) {
     const operation = async () => {
       throwIfBrowserOperationAborted(signal);
-      return this.ensureImpl().snapshot(signal);
+      return this.ensureImpl().snapshot(signal, options);
     };
     return this.ownership
       ? this.ownership.runOwned(owner, operation, signal)

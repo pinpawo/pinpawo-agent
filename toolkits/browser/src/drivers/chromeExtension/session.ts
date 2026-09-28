@@ -2,6 +2,7 @@ import type {
   BrowserElementTarget,
   BrowserScreenshotOptions,
   BrowserScrollOptions,
+  BrowserSnapshotOptions,
   BrowserWaitState,
 } from '../../session';
 import {
@@ -466,11 +467,27 @@ export class ChromeExtensionBrowserSession {
     );
   }
 
-  async snapshot(signal?: AbortSignal): Promise<string> {
+  async snapshot(signal?: AbortSignal, options: BrowserSnapshotOptions = {}): Promise<string> {
     const approvedOrigin = this.requireApprovedOrigin();
-    return this.buildSnapshot(await this.bridge.sendCommand('snapshot', {
+    const scoped = options.target !== undefined
+      || options.depth !== undefined
+      || options.interactiveOnly === true;
+    const raw = await this.bridge.sendCommand('snapshot', {
       approvedOrigin,
-    }, undefined, signal), approvedOrigin);
+      ...(options.target ? { target: normalizeTarget(options.target) } : {}),
+      ...(options.depth !== undefined ? { depth: options.depth } : {}),
+      ...(options.interactiveOnly ? { interactiveOnly: true } : {}),
+    }, undefined, signal);
+    // An extension built before #873 3b ignores the options and returns the
+    // whole page; report that instead of passing it off as the scoped view.
+    if (scoped && raw && typeof raw === 'object' && !('applied' in raw)) {
+      throw new BrowserOperationError(
+        'browser_extension_outdated',
+        'The Chrome extension ignored the snapshot options. Reload the PinPawo extension.',
+        false,
+      );
+    }
+    return this.buildSnapshot(raw, approvedOrigin);
   }
 
   async click(target: string | BrowserElementTarget, signal?: AbortSignal): Promise<string> {

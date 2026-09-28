@@ -854,3 +854,37 @@ test('an extension that still returns the pre-#873 snapshot format is reported a
       && /Reload the PinPawo extension/.test(error.message),
   );
 });
+
+test('snapshot options reach the extension, and an extension ignoring them is reported (#873 3b)', async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  let applied = true;
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params) {
+      if (command === 'navigate') return { ok: true };
+      if (command === 'snapshot') sent.push(params);
+      return applied ? { ...rawSnapshot, applied: {} } : rawSnapshot;
+    },
+  }, () => '/tmp');
+  await session.open('https://example.com/page');
+  sent.length = 0;
+
+  await session.snapshot(undefined, { target: { ref: 'ax:6A1F0C3E:5:navigation' }, depth: 2, interactiveOnly: true });
+  await session.snapshot();
+  assert.deepEqual(sent, [
+    {
+      approvedOrigin: 'https://example.com',
+      target: { selector: undefined, ref: 'ax:6A1F0C3E:5:navigation' },
+      depth: 2,
+      interactiveOnly: true,
+    },
+    { approvedOrigin: 'https://example.com' },
+  ]);
+
+  applied = false;
+  await session.snapshot();
+  await assert.rejects(
+    session.snapshot(undefined, { depth: 1 }),
+    (error: unknown) => error instanceof BrowserOperationError
+      && error.code === 'browser_extension_outdated',
+  );
+});

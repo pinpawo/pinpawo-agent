@@ -86,3 +86,11 @@ test('raw snapshot parser rejects malformed backend data', () => {
     treeLength: 2_000_001,
   }), /exceeds/);
 });
+
+test('a depth-limited snapshot says how to see the omitted nodes (#873 3b)', () => {
+  const payload = buildBrowserSnapshotPayload(parseBrowserRawSnapshot({ ...rawTree, depthLimited: true }));
+  assert.equal(payload.depthLimited, true);
+  assert.match(String(payload.note), /requested depth/);
+  assert.equal('depthLimited' in buildBrowserSnapshotPayload(parseBrowserRawSnapshot(rawTree)), false);
+  assert.throws(() => parseBrowserRawSnapshot({ ...rawTree, depthLimited: 'yes' }), /depthLimited/);
+});

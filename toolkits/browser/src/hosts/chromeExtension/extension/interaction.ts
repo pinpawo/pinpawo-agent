@@ -98,10 +98,13 @@ export function normalizeElementTarget(value: unknown): { ref: string } | { sele
   return ref ? { ref } : { selector };
 }
 
-export function buildResolveTargetExpression(value: unknown): string {
-  const target = normalizeElementTarget(value);
-  return `(() => {
-    const target = ${JSON.stringify(target)};
+/**
+ * Page-side statements that find the target element: by snapshot ref through
+ * the page registry, or by CSS / `text=` selector. They leave it in `element`
+ * and return `invalidSelector` early on a malformed selector.
+ */
+function elementLookupSource(target: { ref: string } | { selector: string }, invalidSelector: string): string {
+  return `const target = ${JSON.stringify(target)};
     const registry = globalThis[${JSON.stringify(ELEMENT_REGISTRY_KEY)}];
     let element = target.ref ? registry?.get(target.ref) : null;
     if (!element && target.selector) {
@@ -118,13 +121,31 @@ export function buildResolveTargetExpression(value: unknown): string {
           return text.includes(needle);
         });
       } else {
-        try { element = document.querySelector(target.selector); } catch { return {
-          ok: false,
-          code: 'invalid_selector',
-          message: 'The CSS selector is invalid',
-        }; }
+        try { element = document.querySelector(target.selector); } catch { return ${invalidSelector}; }
       }
     }
+`;
+}
+
+/**
+ * The target element itself, for callers that map it to a backend node
+ * (evaluated without `returnByValue`); a failure is a string error code.
+ */
+export function buildTargetElementExpression(value: unknown): string {
+  const target = normalizeElementTarget(value);
+  return `(() => {
+    ${elementLookupSource(target, "'invalid_selector'")}
+    if (!element || !element.isConnected) {
+      return target.ref ? 'stale_element_reference' : 'element_not_found';
+    }
+    return element;
+  })()`;
+}
+
+export function buildResolveTargetExpression(value: unknown): string {
+  const target = normalizeElementTarget(value);
+  return `(() => {
+    ${elementLookupSource(target, "{ ok: false, code: 'invalid_selector', message: 'The CSS selector is invalid' }")}
     if (!element || !element.isConnected) return {
       ok: false,
       code: target.ref ? 'stale_element_reference' : 'element_not_found',

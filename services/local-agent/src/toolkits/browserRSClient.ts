@@ -8,6 +8,7 @@ import {
   type BrowserRSCallContext,
   type BrowserScreenshotOptions,
   type BrowserScrollOptions,
+  type BrowserSnapshotOptions,
   type BrowserWaitState,
 } from '@pinpawo-toolkit/browser';
 import type { RSServiceConnection } from '../rsService/connection';
@@ -96,8 +97,8 @@ export class BrowserRSClient implements BrowserRS {
     return await this.operation('open', context, { url });
   }
 
-  async snapshot(context: BrowserRSCallContext): Promise<string> {
-    return await this.operation('snapshot', context, {});
+  async snapshot(context: BrowserRSCallContext, options?: BrowserSnapshotOptions): Promise<string> {
+    return await this.operation('snapshot', context, { options });
   }
 
   async click(context: BrowserRSCallContext, target: string | BrowserElementTarget): Promise<string> {

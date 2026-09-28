@@ -69,7 +69,7 @@ export function createBrowserRSServiceHandler(
         case 'open':
           return await rs.open(context, readString(input.url, 'url'));
         case 'snapshot':
-          return await rs.snapshot(context);
+          return await rs.snapshot(context, optional(input.options));
         case 'click':
           return await rs.click(context, input.target as never);
         case 'type':

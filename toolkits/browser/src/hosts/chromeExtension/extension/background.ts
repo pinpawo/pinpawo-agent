@@ -20,11 +20,15 @@ import {
   buildSnapshotExpression,
   originOf,
 } from './snapshot.js';
-import { buildAccessibilityTreeSnapshot } from './accessibilityTree.js';
+import {
+  AccessibilityScopeNotFoundError,
+  buildAccessibilityTreeSnapshot,
+} from './accessibilityTree.js';
 import {
   HUMANIZED_TYPE_CHARACTER_LIMIT,
   buildExtractExpression,
   buildResolveTargetExpression,
+  buildTargetElementExpression,
   chunkTrustedInsertText,
   createSerialExecutor,
   normalizeElementTarget,
@@ -704,16 +708,93 @@ async function sensitiveInputNodeIds(tabId) {
   }
 }
 
-async function readAccessibilitySnapshot(tabId, url) {
+const MAX_SNAPSHOT_DEPTH = 50;
+
+/** `browser_snapshot` options (#873 3b); interactions always take a full snapshot. */
+function readSnapshotOptions(params) {
+  const { target, depth, interactiveOnly } = params ?? {};
+  if (depth !== undefined && (!Number.isInteger(depth) || depth < 1 || depth > MAX_SNAPSHOT_DEPTH)) {
+    throw new ExtensionError('invalid_snapshot_options', `depth must be an integer from 1 to ${MAX_SNAPSHOT_DEPTH}`);
+  }
+  if (interactiveOnly !== undefined && typeof interactiveOnly !== 'boolean') {
+    throw new ExtensionError('invalid_snapshot_options', 'interactiveOnly must be a boolean');
+  }
+  return {
+    target: target === undefined ? undefined : normalizeElementTarget(target),
+    maxDepth: depth,
+    interactiveOnly: interactiveOnly === true,
+  };
+}
+
+/** The backend node a snapshot scope target names in the current document. */
+async function snapshotTargetNodeId(tabId, target, loaderId) {
+  if ('ref' in target && isAccessibilityRef(target.ref)) {
+    const ref = parseAccessibilityRef(target.ref);
+    if (!ref || ref.loaderKey !== accessibilityLoaderKey(loaderId)) {
+      throw staleAccessibilityRef('it was read from another tab or an earlier page load');
+    }
+    return ref.backendNodeId;
+  }
+  try {
+    const evaluation = await cdp(tabId, 'Runtime.evaluate', {
+      expression: buildTargetElementExpression(target),
+      returnByValue: false,
+      objectGroup: SNAPSHOT_OBJECT_GROUP,
+    });
+    const result = evaluation.result;
+    if (evaluation.exceptionDetails || !result) {
+      throw new ExtensionError('runtime_evaluation_failed', 'Could not resolve the snapshot target', true);
+    }
+    if (result.type === 'string') {
+      const code = String(result.value);
+      throw new ExtensionError(
+        code,
+        code === 'stale_element_reference'
+          ? 'The element reference is stale; take a new snapshot'
+          : code === 'invalid_selector' ? 'The CSS selector is invalid' : 'No element matched the selector',
+        code === 'element_not_found',
+      );
+    }
+    const { node } = await cdp(tabId, 'DOM.describeNode', { objectId: result.objectId });
+    if (!Number.isInteger(node?.backendNodeId)) {
+      throw new ExtensionError('element_not_found', 'The snapshot target has no page node');
+    }
+    return node.backendNodeId;
+  } finally {
+    await cdp(tabId, 'Runtime.releaseObjectGroup', { objectGroup: SNAPSHOT_OBJECT_GROUP })
+      .catch(() => {});
+  }
+}
+
+async function readAccessibilitySnapshot(tabId, url, options = readSnapshotOptions({})) {
   // Read the loader before the tree: if a navigation lands in between, the
   // refs name the older document and are refused as stale, rather than
   // labelling the new document's nodes with the old loader.
   const loaderId = await mainFrameLoaderId(tabId);
+  const rootBackendNodeId = options.target
+    ? await snapshotTargetNodeId(tabId, options.target, loaderId)
+    : undefined;
   const tree = await cdp(tabId, 'Accessibility.getFullAXTree');
   // Read the sensitive inputs after the tree, so every input the tree holds
   // already exists in the page when they are looked up.
   const sensitiveNodeIds = await sensitiveInputNodeIds(tabId);
-  return buildAccessibilityTreeSnapshot(tree.nodes || [], url, { loaderId, sensitiveNodeIds });
+  try {
+    return buildAccessibilityTreeSnapshot(tree.nodes || [], url, {
+      loaderId,
+      sensitiveNodeIds,
+      ...(rootBackendNodeId !== undefined ? { rootBackendNodeId } : {}),
+      ...(options.maxDepth !== undefined ? { maxDepth: options.maxDepth } : {}),
+      interactiveOnly: options.interactiveOnly,
+    });
+  } catch (error) {
+    if (error instanceof AccessibilityScopeNotFoundError) {
+      throw new ExtensionError(
+        'element_not_found',
+        'The snapshot target is not in the accessibility tree (it may be hidden or decorative)',
+      );
+    }
+    throw error;
+  }
 }
 
 async function readDomSnapshot(tabId) {
@@ -732,12 +813,17 @@ async function readDomSnapshot(tabId) {
  * Chrome's accessibility tree is the snapshot (#873); the page-side DOM
  * snapshot, in the same shape, covers a tree Chrome cannot provide.
  */
-async function readSnapshot(tabId, approvedOrigin) {
+async function readSnapshot(tabId, approvedOrigin, params = {}) {
+  const options = readSnapshotOptions(params);
   const url = await assertApprovedOrigin(tabId, approvedOrigin);
   let snapshot;
   try {
-    snapshot = await readAccessibilitySnapshot(tabId, url);
+    snapshot = await readAccessibilitySnapshot(tabId, url, options);
   } catch (accessibilityError) {
+    // A scoped, depth-limited or interactive-only request has no DOM
+    // equivalent; report the failure rather than a different snapshot.
+    const scoped = options.target !== undefined || options.maxDepth !== undefined || options.interactiveOnly;
+    if (scoped) throw accessibilityError;
     try {
       snapshot = await readDomSnapshot(tabId);
     } catch (runtimeError) {
@@ -750,7 +836,16 @@ async function readSnapshot(tabId, approvedOrigin) {
   }
   validateSnapshotOrigin(snapshot, approvedOrigin, tabId);
   await assertApprovedOrigin(tabId, approvedOrigin);
-  return snapshot;
+  // Echoes what was applied, so a Host can tell this build from one that
+  // ignores snapshot options.
+  return {
+    ...snapshot,
+    applied: {
+      target: options.target !== undefined,
+      depth: options.maxDepth ?? null,
+      interactiveOnly: options.interactiveOnly,
+    },
+  };
 }
 
 /** Post a unified `browser.event` to the native host (no-op when disconnected). */
@@ -1365,7 +1460,7 @@ async function executeCommandBody(command) {
   const activeTarget = await ensureTarget();
   await attach(activeTarget.tabId);
   if (command.command === 'snapshot') {
-    return await readSnapshot(activeTarget.tabId, approvedOrigin);
+    return await readSnapshot(activeTarget.tabId, approvedOrigin, command.params);
   }
   if (command.command === 'extract') {
     return await readExtract(activeTarget.tabId, command.params, approvedOrigin);

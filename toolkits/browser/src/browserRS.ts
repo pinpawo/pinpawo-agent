@@ -7,6 +7,7 @@ import type {
   BrowserExtractOptions,
   BrowserScreenshotOptions,
   BrowserScrollOptions,
+  BrowserSnapshotOptions,
   BrowserWaitState,
 } from './session';
 
@@ -43,7 +44,7 @@ export type BrowserRSCallContext = Readonly<{
 
 export type BrowserRS = ToolkitRS & {
   open(context: BrowserRSCallContext, url: string): Promise<string>;
-  snapshot(context: BrowserRSCallContext): Promise<string>;
+  snapshot(context: BrowserRSCallContext, options?: BrowserSnapshotOptions): Promise<string>;
   click(
     context: BrowserRSCallContext,
     target: string | BrowserElementTarget,

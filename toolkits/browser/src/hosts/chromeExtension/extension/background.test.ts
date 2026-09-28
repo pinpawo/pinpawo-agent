@@ -20,7 +20,7 @@ test('snapshot reads enforce snapshot URL and post-read committed origin checks'
     'utf8',
   );
   const readSnapshot = source.match(
-    /async function readSnapshot\(tabId, approvedOrigin\) \{([\s\S]*?)\n\}/,
+    /async function readSnapshot\(tabId, approvedOrigin, params = \{\}\) \{([\s\S]*?)\n\}/,
   )?.[1] ?? '';
 
   assert.match(readSnapshot, /validateSnapshotOrigin\(snapshot, approvedOrigin, tabId\)/);
@@ -323,7 +323,7 @@ test('accessibility refs are bound to the document they were read from (#869)', 
   // The loader is read before the tree it labels.
   assert.match(
     source,
-    /async function readAccessibilitySnapshot[\s\S]*?const loaderId = await mainFrameLoaderId\(tabId\);\s*const tree = await cdp\(tabId, 'Accessibility\.getFullAXTree'\);/,
+    /async function readAccessibilitySnapshot[\s\S]*?const loaderId = await mainFrameLoaderId\(tabId\);[\s\S]*?const tree = await cdp\(tabId, 'Accessibility\.getFullAXTree'\);/,
   );
   // Every ax: ref is checked against the current loader before its node is touched.
   assert.match(source, /isAccessibilityRef\(normalized\.ref\)[\s\S]*?resolveAccessibilityTarget/);
@@ -341,12 +341,12 @@ test('snapshots come from the accessibility tree, with the DOM snapshot as fallb
 
   assert.match(
     source,
-    /async function readSnapshot[\s\S]*?readAccessibilitySnapshot\(tabId, url\)[\s\S]*?catch \(accessibilityError\)[\s\S]*?readDomSnapshot\(tabId\)/,
+    /async function readSnapshot[\s\S]*?readAccessibilitySnapshot\(tabId, url, options\)[\s\S]*?catch \(accessibilityError\)[\s\S]*?readDomSnapshot\(tabId\)/,
   );
   // Sensitive inputs are looked up after the tree, so every input it holds exists.
   assert.match(
     source,
-    /'Accessibility\.getFullAXTree'\);[\s\S]*?const sensitiveNodeIds = await sensitiveInputNodeIds\(tabId\);[\s\S]*?buildAccessibilityTreeSnapshot\(tree\.nodes \|\| \[\], url, \{ loaderId, sensitiveNodeIds \}\)/,
+    /'Accessibility\.getFullAXTree'\);[\s\S]*?const sensitiveNodeIds = await sensitiveInputNodeIds\(tabId\);[\s\S]*?buildAccessibilityTreeSnapshot\(tree\.nodes \|\| \[\], url, \{\s*loaderId,\s*sensitiveNodeIds,/,
   );
   // An input that cannot be mapped withholds every value rather than none.
   assert.match(
@@ -382,4 +382,25 @@ test('element and full-page screenshots clip in document coordinates within the 
     /async function captureScreenshot[\s\S]*?assertApprovedOrigin[\s\S]*?clip: \{ \.\.\.region\.clip, scale \}, captureBeyondViewport: true[\s\S]*?assertApprovedOrigin[\s\S]*?scope,/,
   );
   assert.match(source, /captureScreenshot\(activeTarget\.tabId, approvedOrigin, command\.params\)/);
+});
+
+test('snapshot options scope the tree without falling back to a different snapshot (#873 3b)', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+
+  assert.match(source, /readSnapshot\(activeTarget\.tabId, approvedOrigin, command\.params\)/);
+  // The scope target is resolved in the document the loader names, before the tree is read.
+  assert.match(
+    source,
+    /async function readAccessibilitySnapshot[\s\S]*?mainFrameLoaderId[\s\S]*?snapshotTargetNodeId\(tabId, options\.target, loaderId\)[\s\S]*?Accessibility\.getFullAXTree/,
+  );
+  assert.match(
+    source,
+    /async function snapshotTargetNodeId[\s\S]*?ref\.loaderKey !== accessibilityLoaderKey\(loaderId\)[\s\S]*?buildTargetElementExpression[\s\S]*?DOM\.describeNode[\s\S]*?Runtime\.releaseObjectGroup/,
+  );
+  // A scoped request never silently becomes a whole-page DOM snapshot.
+  assert.match(source, /if \(scoped\) throw accessibilityError;[\s\S]*?readDomSnapshot\(tabId\)/);
+  assert.match(source, /applied: \{/);
 });

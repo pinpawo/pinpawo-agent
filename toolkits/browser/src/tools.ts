@@ -75,10 +75,21 @@ const browserOpenTool = tool(
 );
 
 const browserSnapshotTool = tool(
-  async (_input, runtime: BrowserToolRuntime) => {
+  async (
+    { selector, ref, depth, interactiveOnly }: BrowserTargetInput & {
+      depth?: number;
+      interactiveOnly?: boolean;
+    },
+    runtime: BrowserToolRuntime,
+  ) => {
     try {
+      const target = selector || ref ? readBrowserTarget({ selector, ref }) : undefined;
       const { browser, context } = resolveBrowserCall(runtime);
-      return await browser.snapshot(context);
+      return await browser.snapshot(context, {
+        ...(target ? { target } : {}),
+        ...(depth !== undefined ? { depth } : {}),
+        ...(interactiveOnly ? { interactiveOnly: true } : {}),
+      });
     } catch (err) {
       return formatBrowserToolError(err);
     }
@@ -91,8 +102,17 @@ const browserSnapshotTool = tool(
       '输入框带 value（密码等敏感字段显示 redacted）。' +
       '点击、输入、等待前先 snapshot 取得 ref；页面跳转后重新 snapshot。' +
       '判断页面内容时优先用 snapshot 和 browser_extract，而不是截图。' +
-      '如果 truncated=true，说明树被截断，按 note 的提示用 browser_extract 读正文或滚动后重新 snapshot。',
-    schema: z.object({}),
+      '页面很大时缩小范围：ref/selector 只看该元素的子树（例如某个 main、form、dialog），' +
+      'depth 限制层级，interactiveOnly=true 只列出可交互元素（不含页面文字）。' +
+      '如果 truncated=true，说明树被截断，按 note 的提示缩小范围或用 browser_extract 读正文。',
+    schema: z.object({
+      ...browserTargetFields,
+      depth: z.number().int().min(1).max(50).optional().describe('只展开到这一层，更深的节点省略'),
+      interactiveOnly: z.boolean().optional().describe('只列出可交互元素（链接、按钮、输入框等），不含页面文字'),
+    }).refine(
+      (value) => !(value.selector && value.ref),
+      { message: 'selector and ref cannot both be provided' },
+    ),
   },
 );
 

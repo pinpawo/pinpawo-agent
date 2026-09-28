@@ -26,13 +26,13 @@ ToolDefinition
 只有两个扩展概念：
 
 - **Capability**：面向业务目标的可委派执行单元。
-- **Toolkit**：编码实现的工具、工具说明和工具级策略集合。
+- **Toolkit**：编码实现的工具、共享说明和工具级策略集合；可仅提供说明。
 
 Capability 不继承或调用另一个 Capability。多个场景需要复用工具能力时，
 通过 `uses` 组合 Toolkit；多个 Capability 的先后关系由 orchestrator 编排。
 
 组合只复用工具能力，不继承其他 Capability 的 instructions、权限或结果生命周期。
-Toolkit instructions 描述工具族的使用方式，Capability instructions 描述任务约束和
+Toolkit instructions 描述工具族的使用方式或共享上下文指引，Capability instructions 描述任务约束和
 结果要求；具体任务通过 delegation briefing 传入。Toolkit 不拥有业务交付生命周期。
 这样避免修改一个 Capability 时隐式改变其他 Capability 的提示或权限。
 
@@ -146,15 +146,32 @@ type ToolDefinition = {
 字段语义：
 
 - `name` / `description`：Toolkit 的稳定身份和能力范围。
-- `tools`：至少一个可执行的 LangChain Structured Tool。
-- `instructions`：工具族的使用规则，会进入使用该 Toolkit 的 subagent
-  system prompt。
+- `tools`：可执行的 LangChain Structured Tool 数组，必须显式提供；有非空白
+  `instructions` 时允许为 `[]`。工具与说明不能同时为空。
+- `instructions`：工具族的使用规则或共享上下文指引，会进入使用该 Toolkit 的
+  subagent system prompt。仅提供说明不会授予文件读取或其他工具能力。
 - `availability`：host 组装本次 registry generation 前执行的可用性检查。
 - `reviewGuidance`：Toolkit 提供给全局 review 判断的允许/询问边界。
 - `requires`：可选的执行环境（RS）依赖声明，只供 Host 装配使用；见
   [Toolkit 的 RS 依赖](toolkit-rs.md)。
 - `ToolDefinition.operation`：工具调用的展示和摘要 metadata。
 - `ToolDefinition.review`：单个工具的确定性 review policy。
+
+仅贡献说明的 Toolkit 可用于提供 Wiki 入口等阅读约定：
+
+```ts
+const projectKnowledge = defineToolkit({
+  name: 'project-knowledge',
+  description: '项目知识入口与阅读约定。',
+  tools: [],
+  instructions: '需要项目背景时，先阅读当前工作目录下的 wiki/PROJECT.md，再按链接阅读相关页面。',
+});
+```
+
+Plugin 将它加入 `toolkits`，目标 Pet 的 Capability 在 `uses` 中引用
+`project-knowledge`，并同时引用提供文件读取能力的 Toolkit。只有引用它的
+Capability 执行时才注入说明；不会自动读取入口文件，也不会将说明提升为 Pet
+全局上下文。方案边界见[设计草案](../../design/toolkits/instructions-only.md)。
 
 Toolkit 必须由代码定义；它不是 Markdown skill，也不是 orchestrator 的委派目标。
 

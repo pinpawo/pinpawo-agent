@@ -323,14 +323,39 @@ test('accessibility refs are bound to the document they were read from (#869)', 
   // The loader is read before the tree it labels.
   assert.match(
     source,
-    /const loaderId = await mainFrameLoaderId\(tabId\);\s*const tree = await cdp\(tabId, 'Accessibility\.getFullAXTree'\);\s*snapshot = buildAccessibilitySnapshot\(tree\.nodes \|\| \[\], fallbackUrl, loaderId\)/,
+    /async function readAccessibilitySnapshot[\s\S]*?const loaderId = await mainFrameLoaderId\(tabId\);\s*const tree = await cdp\(tabId, 'Accessibility\.getFullAXTree'\);/,
   );
   // Every ax: ref is checked against the current loader before its node is touched.
   assert.match(source, /isAccessibilityRef\(normalized\.ref\)[\s\S]*?resolveAccessibilityTarget/);
   assert.match(
     source,
-    /async function resolveAccessibilityTarget[\s\S]*?ref\.loaderId !== await mainFrameLoaderId\(tabId\)[\s\S]*?staleAccessibilityRef[\s\S]*?DOM\.scrollIntoViewIfNeeded/,
+    /async function resolveAccessibilityTarget[\s\S]*?ref\.loaderKey !== accessibilityLoaderKey\(await mainFrameLoaderId\(tabId\)\)[\s\S]*?staleAccessibilityRef[\s\S]*?DOM\.scrollIntoViewIfNeeded/,
   );
+});
+
+test('snapshots come from the accessibility tree, with the DOM snapshot as fallback (#873)', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+
+  assert.match(
+    source,
+    /async function readSnapshot[\s\S]*?readAccessibilitySnapshot\(tabId, url\)[\s\S]*?catch \(accessibilityError\)[\s\S]*?readDomSnapshot\(tabId\)/,
+  );
+  // Sensitive inputs are looked up after the tree, so every input it holds exists.
+  assert.match(
+    source,
+    /'Accessibility\.getFullAXTree'\);[\s\S]*?const sensitiveNodeIds = await sensitiveInputNodeIds\(tabId\);[\s\S]*?buildAccessibilityTreeSnapshot\(tree\.nodes \|\| \[\], url, \{ loaderId, sensitiveNodeIds \}\)/,
+  );
+  // An input that cannot be mapped withholds every value rather than none.
+  assert.match(
+    source,
+    /async function sensitiveInputNodeIds[\s\S]*?if \(!Number\.isInteger\(node\?\.backendNodeId\)\) return null;[\s\S]*?catch \{\s*return null;[\s\S]*?Runtime\.releaseObjectGroup/,
+  );
+  for (const method of ['DOM.describeNode', 'Runtime.getProperties', 'Runtime.releaseObjectGroup']) {
+    assert.match(source, new RegExp(`'${method.replace('.', '\\.')}'`));
+  }
 });
 
 test('element and full-page screenshots clip in document coordinates within the size limit (#873)', async () => {

@@ -47,9 +47,10 @@ test('one Agent session keeps its Browser session when the call workdir changes'
       return {
         title: 'Example',
         url: String(params.url ?? 'https://example.com/page'),
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
+        tree: '- text: "Readable page"',
+        treeLength: 23,
+        refCount: 0,
+        source: 'accessibility',
       };
     },
     getStatus() {
@@ -131,9 +132,10 @@ test('BrowserRS routes separate Agent sessions with distinct opaque extension co
       return {
         title: 'Example',
         url: String(params.url ?? 'https://example.com/page'),
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
+        tree: '- text: "Readable page"',
+        treeLength: 23,
+        refCount: 0,
+        source: 'accessibility',
       };
     },
     getStatus() {
@@ -193,9 +195,10 @@ test('BrowserRS broadcasts an unscoped reconnect to every session', async (t) =>
       return {
         title: 'Example',
         url: 'https://example.com/page',
-        text: 'Readable page',
-        interactive: [],
-        interactiveCount: 0,
+        tree: '- text: "Readable page"',
+        treeLength: 23,
+        refCount: 0,
+        source: 'accessibility',
       };
     },
     getStatus() {

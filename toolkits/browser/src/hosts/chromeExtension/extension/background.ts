@@ -8,13 +8,19 @@ import {
   successResult,
 } from './protocol.js';
 import type { BrowserTarget, JsonRecord, TargetBindOptions } from './types.js';
-import { isAccessibilityRef, parseAccessibilityRef } from './accessibilityRef.js';
+import {
+  accessibilityLoaderKey,
+  isAccessibilityRef,
+  parseAccessibilityRef,
+} from './accessibilityRef.js';
 import {
   assertSnapshotApprovedOrigin,
-  buildAccessibilitySnapshot,
+  buildDomTreeSnapshot,
+  buildSensitiveInputsExpression,
   buildSnapshotExpression,
   originOf,
 } from './snapshot.js';
+import { buildAccessibilityTreeSnapshot } from './accessibilityTree.js';
 import {
   HUMANIZED_TYPE_CHARACTER_LIMIT,
   buildExtractExpression,
@@ -43,6 +49,7 @@ import {
 const CDP_VERSION = '1.3';
 const ALLOWED_CDP_COMMANDS = new Set([
   'Accessibility.getFullAXTree',
+  'DOM.describeNode',
   'DOM.getBoxModel',
   'DOM.scrollIntoViewIfNeeded',
   'Network.enable',
@@ -55,6 +62,8 @@ const ALLOWED_CDP_COMMANDS = new Set([
   'Input.dispatchKeyEvent',
   'Input.dispatchMouseEvent',
   'Runtime.evaluate',
+  'Runtime.getProperties',
+  'Runtime.releaseObjectGroup',
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
 const CONTEXT_TARGETS_KEY = 'pinpawoBrowserTargetsByContext';
@@ -659,32 +668,82 @@ async function waitForTab(tabId, deadlineAt) {
   throw new ExtensionError('navigation_timeout', 'Navigation did not finish before the command deadline', true);
 }
 
-async function readSnapshot(tabId, approvedOrigin) {
-  await assertApprovedOrigin(tabId, approvedOrigin);
-  let snapshot;
+const SNAPSHOT_OBJECT_GROUP = 'pinpawo-snapshot';
+
+/**
+ * Backend ids of the page's sensitive inputs, or null when they cannot be
+ * determined (page scripts unavailable, or a node could not be mapped); the
+ * tree then withholds every field value.
+ */
+async function sensitiveInputNodeIds(tabId) {
   try {
     const evaluation = await cdp(tabId, 'Runtime.evaluate', {
-      expression: buildSnapshotExpression(),
-      returnByValue: true,
-      awaitPromise: true,
+      expression: buildSensitiveInputsExpression(),
+      returnByValue: false,
+      objectGroup: SNAPSHOT_OBJECT_GROUP,
     });
-    if (evaluation.exceptionDetails || !evaluation.result?.value) {
-      throw new Error(evaluation.exceptionDetails?.text || 'Runtime.evaluate returned no value');
+    const arrayId = evaluation.result?.objectId;
+    if (evaluation.exceptionDetails || typeof arrayId !== 'string') return null;
+    const { result: properties = [] } = await cdp(tabId, 'Runtime.getProperties', {
+      objectId: arrayId,
+      ownProperties: true,
+    });
+    const ids = new Set<number>();
+    for (const property of properties) {
+      if (!/^\d+$/.test(property?.name) || typeof property.value?.objectId !== 'string') continue;
+      const { node } = await cdp(tabId, 'DOM.describeNode', { objectId: property.value.objectId });
+      if (!Number.isInteger(node?.backendNodeId)) return null;
+      ids.add(node.backendNodeId);
     }
-    snapshot = evaluation.result.value;
-  } catch (runtimeError) {
-    const fallbackUrl = await assertApprovedOrigin(tabId, approvedOrigin);
+    return ids;
+  } catch {
+    return null;
+  } finally {
+    await cdp(tabId, 'Runtime.releaseObjectGroup', { objectGroup: SNAPSHOT_OBJECT_GROUP })
+      .catch(() => {});
+  }
+}
+
+async function readAccessibilitySnapshot(tabId, url) {
+  // Read the loader before the tree: if a navigation lands in between, the
+  // refs name the older document and are refused as stale, rather than
+  // labelling the new document's nodes with the old loader.
+  const loaderId = await mainFrameLoaderId(tabId);
+  const tree = await cdp(tabId, 'Accessibility.getFullAXTree');
+  // Read the sensitive inputs after the tree, so every input the tree holds
+  // already exists in the page when they are looked up.
+  const sensitiveNodeIds = await sensitiveInputNodeIds(tabId);
+  return buildAccessibilityTreeSnapshot(tree.nodes || [], url, { loaderId, sensitiveNodeIds });
+}
+
+async function readDomSnapshot(tabId) {
+  const evaluation = await cdp(tabId, 'Runtime.evaluate', {
+    expression: buildSnapshotExpression(),
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  if (evaluation.exceptionDetails || !evaluation.result?.value) {
+    throw new Error(evaluation.exceptionDetails?.text || 'Runtime.evaluate returned no value');
+  }
+  return buildDomTreeSnapshot(evaluation.result.value);
+}
+
+/**
+ * Chrome's accessibility tree is the snapshot (#873); the page-side DOM
+ * snapshot, in the same shape, covers a tree Chrome cannot provide.
+ */
+async function readSnapshot(tabId, approvedOrigin) {
+  const url = await assertApprovedOrigin(tabId, approvedOrigin);
+  let snapshot;
+  try {
+    snapshot = await readAccessibilitySnapshot(tabId, url);
+  } catch (accessibilityError) {
     try {
-      // Read the loader before the tree: if a navigation lands in between, the
-      // refs name the older document and are refused as stale, rather than
-      // labelling the new document's nodes with the old loader.
-      const loaderId = await mainFrameLoaderId(tabId);
-      const tree = await cdp(tabId, 'Accessibility.getFullAXTree');
-      snapshot = buildAccessibilitySnapshot(tree.nodes || [], fallbackUrl, loaderId);
-    } catch (accessibilityError) {
+      snapshot = await readDomSnapshot(tabId);
+    } catch (runtimeError) {
       throw new ExtensionError(
         'snapshot_unavailable',
-        `Runtime and accessibility snapshot failed: ${runtimeError}; ${accessibilityError}`,
+        `Accessibility and runtime snapshot failed: ${accessibilityError}; ${runtimeError}`,
         true,
       );
     }
@@ -884,7 +943,7 @@ function staleAccessibilityRef(reason) {
 
 async function resolveAccessibilityTarget(tabId, value) {
   const ref = parseAccessibilityRef(value);
-  if (!ref || ref.loaderId !== await mainFrameLoaderId(tabId)) {
+  if (!ref || ref.loaderKey !== accessibilityLoaderKey(await mainFrameLoaderId(tabId))) {
     throw staleAccessibilityRef('it was read from another tab or an earlier page load');
   }
   let model;

@@ -1,6 +1,51 @@
 import { ELEMENT_REGISTRY_KEY } from './interaction.js';
-import { formatAccessibilityRef } from './accessibilityRef.js';
 import type { JsonRecord } from './types.js';
+
+/**
+ * Page-side predicate for inputs whose value must never leave the page:
+ * passwords, card data and one-time codes. Shared by the DOM snapshot, which
+ * redacts them in place, and the accessibility snapshot, which cannot see
+ * `autocomplete` and asks the page which nodes they are.
+ */
+const SENSITIVE_INPUT_PREDICATE = `const sensitiveInputTokens = new Set([
+      'cc-csc',
+      'cc-exp',
+      'cc-exp-month',
+      'cc-exp-year',
+      'cc-number',
+      'current-password',
+      'new-password',
+      'one-time-code',
+    ]);
+    const isSensitiveInput = (element) => {
+      if (element.tagName.toLowerCase() !== 'input') return false;
+      if ((element.getAttribute('type') || '').toLowerCase() === 'password') return true;
+      const autocomplete = (element.getAttribute('autocomplete') || '')
+        .toLowerCase()
+        .split(/\\s+/)
+        .filter(Boolean);
+      return autocomplete.some((token) => sensitiveInputTokens.has(token));
+    };`;
+
+/**
+ * An array of the page's sensitive inputs, including those inside open shadow
+ * roots (the accessibility tree includes shadow content). Evaluated without
+ * `returnByValue`, so the caller can map each element to its backend node.
+ */
+export function buildSensitiveInputsExpression(): string {
+  return `(() => {
+    ${SENSITIVE_INPUT_PREDICATE}
+    const found = [];
+    const visit = (root) => {
+      for (const element of root.querySelectorAll('*')) {
+        if (isSensitiveInput(element)) found.push(element);
+        if (element.shadowRoot) visit(element.shadowRoot);
+      }
+    };
+    visit(document);
+    return found;
+  })()`;
+}
 
 export const MAX_RAW_INTERACTIVE_ELEMENTS = 200;
 export const MAX_RAW_TEXT_BYTES = 1_000_000;
@@ -45,25 +90,7 @@ export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELE
       }
       return value.slice(0, low);
     };
-    const sensitiveInputTokens = new Set([
-      'cc-csc',
-      'cc-exp',
-      'cc-exp-month',
-      'cc-exp-year',
-      'cc-number',
-      'current-password',
-      'new-password',
-      'one-time-code',
-    ]);
-    const isSensitiveInput = (element) => {
-      if (element.tagName.toLowerCase() !== 'input') return false;
-      if ((element.getAttribute('type') || '').toLowerCase() === 'password') return true;
-      const autocomplete = (element.getAttribute('autocomplete') || '')
-        .toLowerCase()
-        .split(/\\s+/)
-        .filter(Boolean);
-      return autocomplete.some((token) => sensitiveInputTokens.has(token));
-    };
+    ${SENSITIVE_INPUT_PREDICATE}
     const textFor = (element) => {
       const text = (element.textContent || '').trim();
       if (text) return text;
@@ -122,72 +149,34 @@ export function buildSnapshotExpression(maxInteractive = MAX_RAW_INTERACTIVE_ELE
   })()`;
 }
 
-function axValue(node: JsonRecord | undefined, key: string): string {
-  const property = node?.[key];
-  const value = property && typeof property === 'object'
-    ? (property as JsonRecord).value
-    : undefined;
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-/**
- * `loaderId` is the main-frame document the tree was read from; element refs
- * are bound to it, and without it the elements carry no ref.
- */
-export function buildAccessibilitySnapshot(
-  nodes: JsonRecord[],
-  url: string,
-  loaderId: string | null,
-) {
-  const visibleNodes = nodes.filter((node) => !node.ignored);
-  const root = visibleNodes.find((node) => axValue(node, 'role') === 'RootWebArea');
-  const text = visibleNodes
-    .filter((node) => ['StaticText', 'heading', 'paragraph'].includes(axValue(node, 'role')))
-    .map((node) => axValue(node, 'name'))
-    .filter(Boolean)
-    .filter((value, index, values) => index === 0 || value !== values[index - 1])
-    .join('\n');
-  const interactiveRoles = new Set([
-    'button',
-    'checkbox',
-    'combobox',
-    'link',
-    'menuitem',
-    'radio',
-    'searchbox',
-    'slider',
-    'spinbutton',
-    'switch',
-    'tab',
-    'textbox',
-  ]);
-  const candidates = visibleNodes.filter((node) => interactiveRoles.has(axValue(node, 'role')));
-  const interactive = candidates.slice(0, MAX_RAW_INTERACTIVE_ELEMENTS).map((node, offset) => {
-    const index = offset + 1;
-    const role = axValue(node, 'role');
-    const name = axValue(node, 'name');
-    const ref = formatAccessibilityRef(loaderId, node.backendDOMNodeId, role);
-    return {
-      index,
-      ...(ref ? { ref } : {}),
-      tag: role,
-      text: name,
-      type: null,
-      placeholder: null,
-      hint: `[${index}] ${role}${name ? ` "${name}"` : ''}`,
-      ...(typeof node.backendDOMNodeId === 'number' && Number.isInteger(node.backendDOMNodeId) && node.backendDOMNodeId > 0
-        ? { backendNodeId: node.backendDOMNodeId }
-        : {}),
-    };
-  });
+/** The DOM snapshot in the accessibility snapshot's shape, for when Chrome's tree is unavailable. */
+export function buildDomTreeSnapshot(raw: JsonRecord) {
+  const interactive = Array.isArray(raw.interactive) ? raw.interactive as JsonRecord[] : [];
+  const lines: string[] = [];
+  if (typeof raw.text === 'string' && raw.text.trim()) {
+    lines.push(`- text: ${JSON.stringify(raw.text.replace(/\s+/g, ' ').trim())}`);
+  }
+  let refCount = 0;
+  for (const element of interactive) {
+    const tag = typeof element.tag === 'string' ? element.tag : 'element';
+    const text = typeof element.text === 'string' && element.text
+      ? ` ${JSON.stringify(element.text)}`
+      : typeof element.placeholder === 'string' && element.placeholder
+        ? ` ${JSON.stringify(element.placeholder)}`
+        : '';
+    const ref = typeof element.ref === 'string' ? element.ref : null;
+    if (ref) refCount += 1;
+    lines.push(`- ${tag}${text}${ref ? ` [ref=${ref}]` : ''}`);
+  }
+  const tree = lines.join('\n');
+  const textLength = typeof raw.textLength === 'number' ? raw.textLength : 0;
+  const returnedText = typeof raw.text === 'string' ? raw.text.length : 0;
   return {
-    title: axValue(root, 'name'),
-    url,
-    text,
-    textLength: text.length,
-    textSource: 'Accessibility.getFullAXTree',
-    textUnavailableReason: text ? undefined : 'No readable accessibility text was returned',
-    interactive,
-    interactiveCount: candidates.length,
+    title: typeof raw.title === 'string' ? raw.title : '',
+    url: raw.url,
+    tree,
+    treeLength: tree.length + Math.max(0, textLength - returnedText),
+    refCount,
+    source: 'dom' as const,
   };
 }

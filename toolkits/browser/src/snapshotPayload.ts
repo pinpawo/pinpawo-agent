@@ -1,9 +1,8 @@
-export const MAX_BROWSER_SNAPSHOT_TEXT_LENGTH = 50_000;
-export const MAX_BROWSER_INTERACTIVE_ELEMENTS = 20;
+/** Characters of the page tree a snapshot shows the model. */
+export const MAX_BROWSER_SNAPSHOT_TREE_LENGTH = 50_000;
 export const DEFAULT_BROWSER_EXTRACT_TEXT_LIMIT = 50_000;
 export const MAX_BROWSER_EXTRACT_TEXT_LIMIT = 100_000;
-const MAX_RAW_INTERACTIVE_ELEMENTS = 200;
-const MAX_RAW_TEXT_LENGTH = 2_000_000;
+const MAX_RAW_TREE_LENGTH = 2_000_000;
 
 export interface BrowserExtractOptions {
   selector?: string;
@@ -22,29 +21,20 @@ export type BrowserRawExtract = {
   textSource?: string;
 };
 
-export type BrowserInteractiveElement = {
-  index: number;
-  /** Opaque reference valid until the next page-changing operation or snapshot. */
-  ref?: string;
-  tag: string;
-  text: string;
-  type: string | null;
-  placeholder: string | null;
-  hint: string;
-  backendNodeId?: number;
-  frameId?: string;
-};
-
+/**
+ * A page snapshot as the extension returns it (#873): an indented outline of
+ * the page's accessibility tree, `- role "name" [state] [ref=…]` per node and
+ * `- text: "…"` for page text. `source` is `dom` when Chrome's tree was
+ * unavailable and the page-side snapshot stood in, in the same shape.
+ */
 export type BrowserRawSnapshot = {
   title: string;
   url: string;
-  text: string;
-  /** Full source length when the backend had to bound the raw IPC text. */
-  textLength?: number;
-  interactive: BrowserInteractiveElement[];
-  interactiveCount?: number;
-  textSource?: string;
-  textUnavailableReason?: string;
+  tree: string;
+  /** Full rendered length when the backend had to bound the raw IPC tree. */
+  treeLength: number;
+  refCount: number;
+  source: 'accessibility' | 'dom';
 };
 
 type TextWindow = {
@@ -78,87 +68,33 @@ function readOptionalString(
   return value;
 }
 
-function readNullableString(record: Record<string, unknown>, key: string): string | null {
-  const value = record[key];
-  if (value === null || value === undefined) return null;
-  if (typeof value !== 'string') {
-    throw new Error(`browser snapshot interactive.${key} must be a string or null`);
-  }
-  return value;
-}
-
-function parseInteractiveElement(value: unknown): BrowserInteractiveElement {
-  if (!isRecord(value)) {
-    throw new Error('browser snapshot interactive entry must be an object');
-  }
-  const { index, ref, tag, text, hint, backendNodeId, frameId } = value;
-  if (!Number.isInteger(index) || (index as number) <= 0) {
-    throw new Error('browser snapshot interactive.index must be a positive integer');
-  }
-  if (typeof tag !== 'string' || typeof text !== 'string' || typeof hint !== 'string') {
-    throw new Error('browser snapshot interactive tag, text and hint must be strings');
-  }
-  if (ref !== undefined && (typeof ref !== 'string' || !ref.trim() || ref.length > 200)) {
-    throw new Error('browser snapshot interactive.ref must be a non-empty bounded string');
-  }
-  if (backendNodeId !== undefined && (!Number.isInteger(backendNodeId) || (backendNodeId as number) <= 0)) {
-    throw new Error('browser snapshot interactive.backendNodeId must be a positive integer');
-  }
-  if (frameId !== undefined && typeof frameId !== 'string') {
-    throw new Error('browser snapshot interactive.frameId must be a string');
-  }
-  return {
-    index: index as number,
-    ref: ref as string | undefined,
-    tag,
-    text,
-    type: readNullableString(value, 'type'),
-    placeholder: readNullableString(value, 'placeholder'),
-    hint,
-    backendNodeId: backendNodeId as number | undefined,
-    frameId: frameId as string | undefined,
-  };
-}
-
 export function parseBrowserRawSnapshot(value: unknown): BrowserRawSnapshot {
   if (!isRecord(value)) {
     throw new Error('browser snapshot result must be an object');
   }
-  const { title, url, text, textLength, interactive, interactiveCount } = value;
-  if (typeof title !== 'string' || typeof url !== 'string' || typeof text !== 'string') {
-    throw new Error('browser snapshot title, url and text must be strings');
+  const { title, url, tree, treeLength, refCount, source } = value;
+  if (typeof title !== 'string' || typeof url !== 'string' || typeof tree !== 'string') {
+    throw new Error('browser snapshot title, url and tree must be strings');
   }
-  if (text.length > MAX_RAW_TEXT_LENGTH) {
-    throw new Error(`browser snapshot text exceeds ${MAX_RAW_TEXT_LENGTH} characters`);
+  if (tree.length > MAX_RAW_TREE_LENGTH) {
+    throw new Error(`browser snapshot tree exceeds ${MAX_RAW_TREE_LENGTH} characters`);
   }
-  if (
-    textLength !== undefined
-    && (!Number.isInteger(textLength) || (textLength as number) < text.length)
-  ) {
-    throw new Error('browser snapshot textLength must cover the returned text');
+  if (!Number.isInteger(treeLength) || (treeLength as number) < tree.length) {
+    throw new Error('browser snapshot treeLength must cover the returned tree');
   }
-  if (!Array.isArray(interactive) || interactive.length > MAX_RAW_INTERACTIVE_ELEMENTS) {
-    throw new Error(`browser snapshot interactive must contain at most ${MAX_RAW_INTERACTIVE_ELEMENTS} entries`);
+  if (!Number.isInteger(refCount) || (refCount as number) < 0) {
+    throw new Error('browser snapshot refCount must be a non-negative integer');
   }
-  if (
-    interactiveCount !== undefined
-    && (!Number.isInteger(interactiveCount) || (interactiveCount as number) < interactive.length)
-  ) {
-    throw new Error('browser snapshot interactiveCount must cover returned interactive entries');
-  }
-  const parsedInteractive = interactive.map(parseInteractiveElement);
-  if (new Set(parsedInteractive.map((element) => element.index)).size !== parsedInteractive.length) {
-    throw new Error('browser snapshot interactive indexes must be unique');
+  if (source !== 'accessibility' && source !== 'dom') {
+    throw new Error('browser snapshot source must be accessibility or dom');
   }
   return {
     title,
     url,
-    text,
-    textLength: textLength as number | undefined,
-    interactive: parsedInteractive,
-    interactiveCount: interactiveCount as number | undefined,
-    textSource: readOptionalString(value, 'textSource'),
-    textUnavailableReason: readOptionalString(value, 'textUnavailableReason'),
+    tree,
+    treeLength: treeLength as number,
+    refCount: refCount as number,
+    source,
   };
 }
 
@@ -201,47 +137,32 @@ export function buildBrowserTextChunk(
   };
 }
 
-function buildSnapshotTextFields(text: string, fullTextLength = text.length) {
-  const chunk = buildBrowserTextChunk(text, {
-    offset: 0,
-    limit: MAX_BROWSER_SNAPSHOT_TEXT_LENGTH,
-  });
-  return {
-    text: chunk.text,
-    textLength: fullTextLength,
-    returnedTextLength: chunk.returnedTextLength,
-    textOffset: chunk.offset,
-    textEndOffset: chunk.textEndOffset,
-    textLimit: MAX_BROWSER_SNAPSHOT_TEXT_LENGTH,
-    truncated: chunk.hasMore || fullTextLength > text.length,
-    hasMore: chunk.hasMore || fullTextLength > text.length,
-    nextTextOffset: chunk.hasMore || fullTextLength > text.length
-      ? chunk.textEndOffset
-      : null,
-  };
-}
-
+/**
+ * The model-facing snapshot. The tree is cut at a line boundary within
+ * {@link MAX_BROWSER_SNAPSHOT_TREE_LENGTH}; a cut tree says how to see more.
+ */
 export function buildBrowserSnapshotPayload(input: BrowserRawSnapshot) {
-  const interactive = input.interactive
-    .slice(0, MAX_BROWSER_INTERACTIVE_ELEMENTS)
-    .map((element) => {
-      const hint = element.hint.replace(/^\[\d+\]\s*/, '').trim();
-      return {
-        ...element,
-        hint: `[${element.index}]${hint ? ` ${hint}` : ''}`,
-      };
-    });
-  const interactiveCount = input.interactiveCount ?? input.interactive.length;
+  let tree = input.tree;
+  if (tree.length > MAX_BROWSER_SNAPSHOT_TREE_LENGTH) {
+    const cut = tree.lastIndexOf('\n', MAX_BROWSER_SNAPSHOT_TREE_LENGTH);
+    tree = tree.slice(0, cut > 0 ? cut : MAX_BROWSER_SNAPSHOT_TREE_LENGTH);
+  }
+  const truncated = tree.length < input.treeLength;
   return {
     title: input.title,
     url: input.url,
-    interactive,
-    interactiveCount,
-    returnedInteractiveCount: interactive.length,
-    interactiveTruncated: interactiveCount > interactive.length,
-    ...buildSnapshotTextFields(input.text, input.textLength),
-    textSource: input.textSource,
-    textUnavailableReason: input.textUnavailableReason,
+    source: input.source,
+    tree,
+    treeLength: input.treeLength,
+    returnedTreeLength: tree.length,
+    truncated,
+    refCount: input.refCount,
+    ...(truncated
+      ? {
+          note: `Showing the first ${tree.length} of ${input.treeLength} characters of the page tree. `
+            + 'Read long text with browser_extract; elements further down need a new snapshot after scrolling.',
+        }
+      : {}),
   };
 }
 

@@ -1871,33 +1871,11 @@ test('conflicting controls return tool errors without changing state and allow c
   }
 });
 
-test('repeated empty final output follows the protocol error path without a fallback reply', async (t) => {
+test('empty final output follows the protocol error path without a fallback reply', async (t) => {
   const catalog = createTestCatalog({});
-  const model = new ScriptedSupervisorModel([{ content: ' ' }, { content: '' }]);
+  const model = new ScriptedSupervisorModel([{ content: ' ' }]);
   await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /must reply or explicitly request execution/);
-  assert.equal(model.invocations.length, 2);
-});
-
-test('an empty final output is retried once without persisting the empty turn or the nudge', async (t) => {
-  const catalog = createTestCatalog({ general: capabilityDocument({
-    name: 'general', description: 'Execute work.', instructions: 'Execute work.',
-  }) });
-  const model = new ScriptedSupervisorModel([
-    { toolCalls: [{ id: 'details', name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, args: { names: ['general'] } }] },
-    { content: '' },
-    { content: 'Which repository should I inspect?' },
-  ]);
-  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
-  assert.equal(supervisorReply(result), 'Which repository should I inspect?');
-  assert.equal(model.invocations.length, 3);
-  const retry = model.invocations[2];
-  assert.equal(retry.some((message) => AIMessage.isInstance(message) && !message.tool_calls?.length && !message.text.trim()), false);
-  assert.ok(HumanMessage.isInstance(retry.at(-1)) && retry.at(-1)!.text.includes('输出为空'));
-  // The disclosure work before the empty turn survives; the retry artifacts do not.
-  assert.ok(result.messages.some((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'details'));
-  assert.equal(result.messages.some((message) => HumanMessage.isInstance(message)), false);
-  assert.equal(result.messages.some((message) => AIMessage.isInstance(message) && !message.tool_calls?.length && !message.text.trim()), false);
-  assert.deepEqual(result.capabilityDisclosure.disclosedCapabilityNames, ['general']);
+  assert.equal(model.invocations.length, 1);
 });
 
 test('a runaway Supervisor tool loop stops with a notice and keeps the invocation facts', async (t) => {

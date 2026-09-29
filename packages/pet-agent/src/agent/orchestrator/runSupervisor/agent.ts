@@ -1,4 +1,4 @@
-import { createSupervisorControlValidationMiddleware, supervisorEmptyReplyRepairMiddleware } from './controlMiddleware';
+import { createSupervisorControlValidationMiddleware } from './controlMiddleware';
 import { createSubmitPlanTool } from './submitPlanTool';
 import { createReviewCurrentTool } from './reviewCurrentTool';
 import { createAdjustPlanTool } from './adjustPlanTool';
@@ -22,8 +22,8 @@ import { supervisorWorkMessages } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
 
 /**
- * Graph steps, roughly 14 model turns with the afterModel repair hook. A healthy
- * invocation uses 2-6 turns; this only stops a runaway tool loop.
+ * Graph steps, roughly 20 model turns. A healthy invocation uses 2-6 turns; this
+ * only stops a runaway tool loop.
  */
 export const RUN_SUPERVISOR_RECURSION_LIMIT = 40;
 
@@ -70,7 +70,6 @@ export function createRunSupervisorAgent(params: {
         systemPrompt: buildRunSupervisorAgentSystemPrompt(input.mode),
         middleware: [
           createSupervisorControlValidationMiddleware(input, agentMessages.length),
-          supervisorEmptyReplyRepairMiddleware,
           systemPromptMiddleware,
           toolProtocolMiddleware,
         ],

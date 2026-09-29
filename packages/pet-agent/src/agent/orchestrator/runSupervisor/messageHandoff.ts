@@ -15,13 +15,10 @@ export function supervisorWorkMessages(
   messages: readonly BaseMessage[],
   dispatching = false,
 ) {
-  // Work is the Supervisor's own turns and tool results; invocation-only
-  // prompts (the input frame, a repair nudge) never become records.
-  const work = messages.filter((message): message is AIMessage | ToolMessage =>
-    AIMessage.isInstance(message) || ToolMessage.isInstance(message));
-  return work.map((message, index) => {
-    const copy = AIMessage.isInstance(message) ? new AIMessage({ ...message }) : new ToolMessage({ ...message });
-    const dispatch = dispatching && index === work.length - 1
+  return messages.map((message, index) => {
+    const copy = AIMessage.isInstance(message) ? new AIMessage({ ...message })
+      : ToolMessage.isInstance(message) ? new ToolMessage({ ...message }) : message;
+    const dispatch = dispatching && index === messages.length - 1
       && AIMessage.isInstance(copy) && Boolean(copy.tool_calls?.length);
     // Root history spans runs; native ToolNode requires globally distinct call IDs.
     if (dispatch) copy.tool_calls = copy.tool_calls!.map(call => ({ ...call, id: identity('call', context.runId, call.id!) }));

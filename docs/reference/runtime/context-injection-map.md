@@ -264,9 +264,8 @@ The terminal node `runtime/nodes/answer.ts` reads the committed current-run
 Supervisor reply from its messages and emits it exactly
 once and clears run-scoped state. It does not invoke a model. Root iteration
 limits, the Supervisor invocation step limit and incompatible checkpoints have
-deterministic notices. An empty Supervisor turn gets one real retry with an
-invocation-only nudge; neither the empty turn nor the nudge is persisted. A second
-empty turn is a protocol error, not a request for a fallback answer.
+deterministic notices. An empty reply without a runtime stop is a protocol error,
+not a request for a fallback answer or a retry.
 
 Natural Supervisor replies retain the active delegation and remaining plan.
 `review_current({ completed: true, reason, reply? })` accepts the active task before terminal

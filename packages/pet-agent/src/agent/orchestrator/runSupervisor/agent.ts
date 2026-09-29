@@ -4,6 +4,7 @@ import { createReviewCurrentTool } from './reviewCurrentTool';
 import { createAdjustPlanTool } from './adjustPlanTool';
 import { createDelegateCapabilityTool } from './delegateCapabilityTool';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { GraphRecursionError } from '@langchain/langgraph';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
@@ -19,6 +20,14 @@ import { createSupervisorCapabilityDetailsTool } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
 import { supervisorWorkMessages } from './messageHandoff';
 import { supervisorHandoffContext } from './input';
+
+/**
+ * Graph steps, roughly 20 model turns. A healthy invocation uses 2-6 turns; this
+ * only stops a runaway tool loop.
+ */
+export const RUN_SUPERVISOR_RECURSION_LIMIT = 40;
+
+export const RUN_SUPERVISOR_STEP_LIMIT_NOTICE = '本轮规划的决策步数已达到上限，任务尚未完成，当前计划已保留。你可以继续当前任务。';
 
 export function createRunSupervisorAgent(params: {
   model: BaseChatModel;
@@ -65,29 +74,49 @@ export function createRunSupervisorAgent(params: {
           toolProtocolMiddleware,
         ],
       });
-      const result = await agent.invoke({
-        messages: agentMessages,
-        runSupervisorState: input.state,
-        disclosedCapabilityNames: [...input.capabilityDisclosure.disclosedCapabilityNames],
-      }, {
-        ...runnableConfig,
-        runName: 'framework.run_supervisor',
-        tags: [...(runnableConfig?.tags ?? []), 'framework.run_supervisor'],
-        metadata: {
-          ...runnableConfig?.metadata,
-          frameworkComponent: 'run_supervisor',
-          taskId: input.taskId,
-          runId: input.runId,
-          supervisorInputId: input.inputId,
-          registryDigest: input.catalog.registryDigest,
-          supervisorMode: input.mode,
-        },
-      }).finally(() => {
-        // Preserve cancellation and the document-budget error code even when
-        // LangChain wraps a tool failure in a middleware error.
-        signal?.throwIfAborted();
-        documents.assertWithinBudget();
-      });
+      // A stricter caller limit stays the caller's hard breaker; only this
+      // invocation's own limit is a runtime stop with a notice.
+      const callerRecursionLimit = runnableConfig?.recursionLimit;
+      const ownsRecursionLimit = callerRecursionLimit === undefined || RUN_SUPERVISOR_RECURSION_LIMIT < callerRecursionLimit;
+      let result;
+      try {
+        result = await agent.invoke({
+          messages: agentMessages,
+          runSupervisorState: input.state,
+          disclosedCapabilityNames: [...input.capabilityDisclosure.disclosedCapabilityNames],
+        }, {
+          ...runnableConfig,
+          recursionLimit: ownsRecursionLimit ? RUN_SUPERVISOR_RECURSION_LIMIT : callerRecursionLimit,
+          runName: 'framework.run_supervisor',
+          tags: [...(runnableConfig?.tags ?? []), 'framework.run_supervisor'],
+          metadata: {
+            ...runnableConfig?.metadata,
+            frameworkComponent: 'run_supervisor',
+            taskId: input.taskId,
+            runId: input.runId,
+            supervisorInputId: input.inputId,
+            registryDigest: input.catalog.registryDigest,
+            supervisorMode: input.mode,
+          },
+        }).finally(() => {
+          // Preserve cancellation and the document-budget error code even when
+          // LangChain wraps a tool failure in a middleware error.
+          signal?.throwIfAborted();
+          documents.assertWithinBudget();
+        });
+      } catch (error) {
+        if (!(error instanceof GraphRecursionError) || !ownsRecursionLimit) throw error;
+        // A runtime stop, like the Root iteration limit: keep the facts this
+        // invocation started from and hand the user a deterministic notice.
+        result = {
+          runSupervisorState: input.state,
+          disclosedCapabilityNames: [],
+          messages: [...agentMessages, new AIMessage({
+            id: `supervisor-step-limit:${input.runId}:${input.inputId}`,
+            content: RUN_SUPERVISOR_STEP_LIMIT_NOTICE,
+          })],
+        };
+      }
 
       // createAgent returns its input too. Persist only this invocation's new work;
       // never retag canonical main messages or the temporary catalog frame.

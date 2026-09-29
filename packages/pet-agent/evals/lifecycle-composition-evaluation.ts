@@ -65,8 +65,8 @@ export function evaluateLifecycleCompositionInvariants(params: {
   const cleanCheckpoint = current === null;
   const resumableCheckpoint = current !== null;
   const checkpointStateMatches = params.expectedCheckpointState === 'clean' ? cleanCheckpoint : resumableCheckpoint;
-  // Older private scopes may remain physically stored. Isolation means every
-  // private record retains its owner, not that old execution history is erased.
+  // Earlier runs' Supervisor work is pruned when the next run starts. Isolation
+  // means every retained private record keeps its owner.
   const laneIsolationMatches = retainedLaneMessages.every((message) =>
     getAgentMessageLane(message) === 'supervisor' ? Boolean(getAgentMessageRunId(message))
       : Boolean(getAgentMessageRunId(message) && getAgentMessageDelegationId(message)));

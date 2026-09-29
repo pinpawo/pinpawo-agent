@@ -26,6 +26,8 @@ import {
 } from './detailsTool';
 import type { CapabilityCatalog } from './capabilityCatalog';
 import { createRunSupervisorProbe as createRunSupervisorAgent } from './testing';
+import { RUN_SUPERVISOR_RECURSION_LIMIT, RUN_SUPERVISOR_STEP_LIMIT_NOTICE } from './agent';
+import { ORCHESTRATOR_RECURSION_LIMIT } from '../controlPrimitives';
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { parseSupervisorControl } from './testing';
@@ -1881,6 +1883,24 @@ test('empty final output follows the protocol error path without a fallback repl
   const model = new ScriptedSupervisorModel([{ content: ' ' }]);
   await assert.rejects(createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog)), /must reply or explicitly request execution/);
   assert.equal(model.invocations.length, 1);
+});
+
+test('a runaway Supervisor tool loop stops with a notice and keeps the invocation facts', async (t) => {
+  const catalog = createTestCatalog({ general: capabilityDocument({
+    name: 'general', description: 'Execute work.', instructions: 'Execute work.',
+  }) });
+  const model = new ScriptedSupervisorModel(Array.from({ length: RUN_SUPERVISOR_RECURSION_LIMIT }, (_, index) => ({
+    toolCalls: [{ id: `details-${index}`, name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, args: { names: ['general'] } }],
+  })));
+  const input = supervisorInput(catalog);
+  // Hosts run with the Root breaker; LangGraph's default 25 would stay the caller's hard limit.
+  const result = await createRunSupervisorAgent({ model }).invoke(input, { recursionLimit: ORCHESTRATOR_RECURSION_LIMIT });
+  assert.equal(supervisorReply(result), RUN_SUPERVISOR_STEP_LIMIT_NOTICE);
+  assert.ok(model.invocations.length >= 10, `expected a usable turn budget, got ${model.invocations.length}`);
+  assert.ok(model.invocations.length < RUN_SUPERVISOR_RECURSION_LIMIT);
+  assert.deepEqual(result.runSupervisorState, input.state);
+  assert.deepEqual(result.capabilityDisclosure, input.capabilityDisclosure);
+  assert.equal(result.messages.length, 1);
 });
 
 test('details uses exact manifest names and distinguishes new, known, and unknown names', async (t) => {

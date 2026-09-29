@@ -344,7 +344,9 @@ messages 的摘要或保留选择。Capability 消息压缩留在子图的 names
 
 ## 回复与 Root 提交合并（2026-09-15 实施）
 
-Supervisor 原生工具循环正常结束后，将最后一个无工具调用、非空的 AIMessage 作为主会话回复；保留其内容、消息身份与模型元数据，补齐时间并移除私有 lane。其余工作消息留在 Supervisor lane。Root 一次提交计划和消息后直接 END；用户提问可以保留 pending 计划。
+Supervisor 原生工具循环正常结束后，将最后一个无工具调用、非空的 AIMessage 作为主会话回复；保留其内容、消息身份与模型元数据，补齐时间并移除私有 lane。其余工作消息留在 Supervisor lane，只在本 run 内可见；下一个 run 的 prepare 会删除更早 run 的 Supervisor lane 消息，Entry continue 只沿用计划事实，不读旧工作记录。Root 一次提交计划和消息后直接 END；用户提问可以保留 pending 计划。
+
+Supervisor 输出为空属于协议错误，直接失败，不重试也不生成兜底回复。每次 Supervisor 调用有自己的步数上限（`RUN_SUPERVISOR_RECURSION_LIMIT`，约 20 轮模型调用）；超限视为运行时停止，保留调用前的计划与披露并提交确定性提示。调用方传入更严的 `recursionLimit` 时仍以其为硬上限并抛错。
 
 删除 answer 节点、回复扫描器和 RunSupervisorResult.reply 字段，不复制一份回复消息，也不增加 pending reply 状态。迭代预算停止由 runSupervisor 节点提交程序生成的状态消息后 END；真正异常保持 runTermination 失败通道。Entry 仍负责直答和新请求/继续计划的路由。
 

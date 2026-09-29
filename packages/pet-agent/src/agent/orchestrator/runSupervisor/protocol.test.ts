@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { capabilityExecutionSnapshotSchema } from './protocol';
+import { MAX_OBJECTIVE_CHARS, capabilityExecutionSnapshotSchema } from './protocol';
 import { submitPlanSchema } from './submitPlanTool';
 import { adjustPlanSchema } from './adjustPlanTool';
 import { reviewCurrentSchema } from './reviewCurrentTool';
@@ -20,6 +20,7 @@ test('control schemas describe plan, review, adjustment and explicit execution w
 test('control schemas reject unknown fields, empty tasks and invalid review values', () => {
   for (const control of [
     { schema: submitPlanSchema, args: { tasks: [] } },
+    { schema: submitPlanSchema, args: { tasks: [{ capability: 'general', objective: 'x'.repeat(MAX_OBJECTIVE_CHARS + 1) }] } },
     { schema: reviewCurrentSchema, args: { reason: ' ' } },
     { schema: reviewCurrentSchema, args: { reason: 'Review', completed: 'false' } },
     { schema: reviewCurrentSchema, args: { reason: 'Review', reply: ' ' } },

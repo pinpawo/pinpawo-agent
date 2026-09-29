@@ -384,6 +384,8 @@ Host 的 readCapabilityExecutions 读取实际已返回的执行；原生待执�
 
 计划项保存 `{ id, capability, objective, status }`。objective 只描述要达成的结果；
 submit_plan / adjust_plan 不提前写所有任务的完整执行说明。
+objective 同时是 TUI 计划面板的展示文本，写成一句任务标题式的短句（提示约 30 字）；
+schema 以 120 字符为硬上限，超长时作为工具错误返回模型重写，不截断落库。
 一个 Capability 能完整完成的工作放在同一个任务中，调查、执行、验证等内部步骤由执行方安排；
 只有需要不同能力协作，或用户明确要求分开交付时才拆分。此原则由 Supervisor 提示词表达，不增加运行时合并或拦截逻辑。
 Supervisor 在调用 delegate_capability 时，结合 Root 消息与已返回交付为当前项生成

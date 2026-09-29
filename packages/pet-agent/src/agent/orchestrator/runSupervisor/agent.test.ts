@@ -29,6 +29,7 @@ import { createRunSupervisorProbe as createRunSupervisorAgent } from './testing'
 import type { RunSupervisorInput } from './runner';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
 import { parseSupervisorControl } from './testing';
+import { MAX_OBJECTIVE_CHARS } from './protocol';
 type SupervisorDelegationInput = { delegationId: string; runId: string; capability: string; task: string };
 type CapabilityPlanTask = { capability: string; objective: string };
 import {
@@ -659,7 +660,7 @@ test('entry mode forms one executable task after Capability exploration', async 
   assert.equal(decision.args.tasks.length, 1);
 });
 
-test('Supervisor accepts a detailed task beyond the legacy 500-character limit', async (t) => {
+test('an oversized objective returns feedback and a concise plan can be committed', async (t) => {
   const catalog = createTestCatalog({
     general: capabilityDocument({
       name: 'general',
@@ -667,30 +668,36 @@ test('Supervisor accepts a detailed task beyond the legacy 500-character limit',
       instructions: 'Complete the requested work.',
     }),
   });
-  const detailedTask = 'x'.repeat(501);
-  const model = new ScriptedSupervisorModel([{
-    structuredOutput: {
-      kind: 'plan',
-      args: {
-        tasks: [{
-          capability: 'general',
-          objective: detailedTask,
-        }],
+  const model = new ScriptedSupervisorModel([
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            objective: 'x'.repeat(MAX_OBJECTIVE_CHARS + 1),
+          }],
+        },
       },
     },
-  }]);
+    {
+      structuredOutput: {
+        kind: 'plan',
+        args: {
+          tasks: [{
+            capability: 'general',
+            objective: 'Review the repository.',
+          }],
+        },
+      },
+    },
+  ]);
 
   const result = await createRunSupervisorAgent({ model })
     .invoke(supervisorInput(catalog));
-
-  assert.deepEqual(commandOnly(result), {
-    name: 'submit_plan', args: {
-      tasks: [{
-        capability: 'general',
-        objective: detailedTask,
-      }]
-    }
-  });
+  assert.ok(result.messages.some(m => ToolMessage.isInstance(m) && m.status === 'error'));
+  assert.equal(result.runSupervisorState.plan[0].objective, 'Review the repository.');
+  assert.equal(model.invocations.length, 2);
 });
 
 test('Supervisor accepts consecutive tasks from one Capability when the model keeps distinct boundaries', async (t) => {

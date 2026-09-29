@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
+export const MAX_OBJECTIVE_CHARS = 120;
+
 export const supervisorTaskSchema = z.object({
   capability: z.string().trim().min(1).max(200),
-  objective: z.string().trim().min(1).describe('本项要达成的目标。只描述结果，不提前展开背景、执行步骤或完整交付要求。'),
+  // Plan items are displayed as a task list; the full instructions belong to the briefing.
+  objective: z.string().trim().min(1).max(MAX_OBJECTIVE_CHARS).describe('本项交付的结果，一句话，像任务标题，尽量不超过 30 字。背景、步骤、约束和交付要求留到委派时写进 briefing。'),
 }).strict();
 
 /** Only classifies state-changing tools for sequential invocation and message identity. */

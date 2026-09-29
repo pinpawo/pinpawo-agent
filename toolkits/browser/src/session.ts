@@ -70,10 +70,12 @@ export class BrowserSession {
 
   constructor(options: {
     requireExecutionOwner?: boolean;
+    /** The workspace belongs to one Agent session; see BrowserContextOwnershipOptions. */
+    claimOnUse?: boolean;
     createChromeExtensionSession: ChromeExtensionSessionFactory;
   }) {
     this.ownership = options.requireExecutionOwner
-      ? new BrowserContextOwnership()
+      ? new BrowserContextOwnership({ claimOnUse: options.claimOnUse === true })
       : null;
     this.createChromeExtensionSession = options.createChromeExtensionSession;
   }

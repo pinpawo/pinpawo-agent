@@ -15,3 +15,12 @@ test('manifest grants browser_open access to ordinary web origins', async () => 
     'https://*/*',
   ]);
 });
+
+test('manifest can manage the tab groups that scope each Agent session (#867)', async () => {
+  const manifest = JSON.parse(await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'manifest.json'),
+    'utf8',
+  ));
+
+  assert.ok(manifest.permissions.includes('tabGroups'));
+});

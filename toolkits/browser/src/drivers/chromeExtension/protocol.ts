@@ -35,7 +35,19 @@ export type BrowserExtensionStateSnapshot = {
     tabId: number;
     binding: 'agent' | 'user';
   };
-  /** Origin explicitly approved by the user clicking the extension action. */
+  /** Origin the user approved for the active context's user-bound tab. */
+  userBoundOrigin?: string;
+  /**
+   * Every Agent session context's current tab (#867), keyed by browser
+   * context id. A user-granted tab carries the origin the user approved by
+   * dragging it into the session's tab group.
+   */
+  contexts?: Record<string, BrowserContextTargetState>;
+};
+
+export type BrowserContextTargetState = {
+  tabId: number;
+  binding: 'agent' | 'user';
   userBoundOrigin?: string;
 };
 
@@ -213,6 +225,56 @@ function parseActiveTab(
   };
 }
 
+const MAX_STATE_CONTEXTS = 1_000;
+
+function parseHttpOrigin(value: unknown, field: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`browser.register ${field} must be a string`);
+  }
+  let parsedOrigin: URL;
+  try {
+    parsedOrigin = new URL(value);
+  } catch {
+    throw new Error(`browser.register ${field} must be an http(s) origin`);
+  }
+  if (
+    (parsedOrigin.protocol !== 'http:' && parsedOrigin.protocol !== 'https:')
+    || parsedOrigin.origin !== value
+  ) {
+    throw new Error(`browser.register ${field} must be an http(s) origin`);
+  }
+  return value;
+}
+
+function parseContextTargets(value: unknown): Record<string, BrowserContextTargetState> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error('browser.register state.contexts must be an object');
+  }
+  const entries = Object.entries(value);
+  if (entries.length > MAX_STATE_CONTEXTS) {
+    throw new Error(`browser.register state.contexts must hold at most ${MAX_STATE_CONTEXTS} contexts`);
+  }
+  const contexts: Record<string, BrowserContextTargetState> = {};
+  for (const [contextId, candidate] of entries) {
+    if (!contextId || contextId.length > 128) {
+      throw new Error('browser.register state.contexts keys must be browser context ids');
+    }
+    const field = `state.contexts.${contextId}`;
+    const target = parseActiveTab(candidate, field)!;
+    if (!target) throw new Error(`browser.register ${field} must be a target`);
+    const origin = (candidate as Record<string, unknown>).userBoundOrigin;
+    if (origin !== undefined && target.binding !== 'user') {
+      throw new Error(`browser.register ${field}.userBoundOrigin requires a user-bound tab`);
+    }
+    contexts[contextId] = {
+      ...target,
+      ...(origin !== undefined ? { userBoundOrigin: parseHttpOrigin(origin, `${field}.userBoundOrigin`) } : {}),
+    };
+  }
+  return contexts;
+}
+
 function parseStateSnapshot(value: unknown): BrowserExtensionStateSnapshot | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) {
@@ -250,11 +312,13 @@ function parseStateSnapshot(value: unknown): BrowserExtensionStateSnapshot | und
     }
     userBoundOrigin = value.userBoundOrigin;
   }
+  const contexts = parseContextTargets(value.contexts);
   return {
     revision: value.revision as number,
     debuggerAttached: value.debuggerAttached,
     activeTab,
     ...(userBoundOrigin ? { userBoundOrigin } : {}),
+    ...(contexts ? { contexts } : {}),
   };
 }
 

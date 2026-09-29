@@ -59,7 +59,8 @@ test('commands and target changes share the extension-owned serial queue', async
   );
 
   assert.match(source, /onMessage\.addListener[\s\S]*?enqueueExtensionWork\(\(\) => handleCommand\(message\)\)/);
-  assert.match(source, /action\.onClicked\.addListener[\s\S]*?enqueueExtensionWork/);
+  assert.match(source, /tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{\s*if \(changeInfo\.groupId === undefined\) return;[\s\S]*?enqueueExtensionWork/);
+  assert.match(source, /tabGroups\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
   assert.match(source, /tabs\.onCreated\.addListener[\s\S]*?enqueueExtensionWork/);
   assert.match(source, /tabs\.onRemoved\.addListener[\s\S]*?enqueueExtensionWork/);
 });
@@ -91,18 +92,48 @@ test('native host reconnect uses bounded backoff and reports Chrome disconnect e
   assert.match(source, /chrome\.runtime\.lastError\?\.message/);
 });
 
-test('explicit user tab binding reports only the origin approved by the action click', async () => {
+test('a tab is handed to a session by its tab group, not the extension action (#867)', async () => {
   const source = await readFile(
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
-  const actionHandler = source.match(
-    /chrome\.action\.onClicked\.addListener\(async \(tab\) => \{([\s\S]*?)\n\}\);/,
+  const handler = source.match(
+    /async function handleGroupMembership\(tabId, groupId\) \{([\s\S]*?)\n\}/,
   )?.[1] ?? '';
 
-  assert.match(actionHandler, /originOf\(tab\.url\)/);
-  assert.match(actionHandler, /userBoundOrigin: approvedOrigin/);
-  assert.doesNotMatch(actionHandler, /chrome\.storage\.local\.set\([^)]*userBoundOrigin/);
+  // The legacy action binding reached no Agent session (#871).
+  assert.doesNotMatch(source, /action\.onClicked/);
+  // Leaving a group releases the tab from the context that held it.
+  assert.match(handler, /releaseTarget\(tabId\)/);
+  // Joining approves only the tab's current http(s) origin, and makes it current.
+  assert.match(handler, /originOf\(tab\.url \?\? tab\.pendingUrl\)/);
+  assert.match(handler, /if \(!origin\) return;/);
+  assert.match(
+    handler,
+    /saveTarget\(\{ tabId, binding: 'user' \}, \{ rememberCurrent: true, userBoundOrigin: origin \}\)/,
+  );
+  // Grants are not persisted, like the approval they replace.
+  assert.doesNotMatch(source, /chrome\.storage\.local\.set\([^)]*grantsByTab/);
+});
+
+test('sessions put their tabs in their own group (#867)', async () => {
+  const source = await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
+    'utf8',
+  );
+
+  assert.match(source, /prepareNavigationTarget\(\);[\s\S]*?await joinContextGroup\(activeTarget\.tabId, url\);/);
+  assert.match(source, /async function switchToPopup[\s\S]*?saveTarget\([\s\S]*?await joinContextGroup\(tabId\);/);
+  assert.match(
+    source,
+    /async function joinContextGroup[\s\S]*?LEGACY_BROWSER_CONTEXT_ID\) return;[\s\S]*?chrome\.tabs\.group\(\{ tabIds: tabId \}\)[\s\S]*?title: contextGroupTitle\(url\)/,
+  );
+  // browser_open keeps the tabs the session holds instead of resetting them.
+  const prepare = source.match(/async function prepareNavigationTarget\(\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.doesNotMatch(prepare, /resetHistory/);
+  assert.match(source, /async function initialize\(\) \{[\s\S]*?restoreContextGroups\(\)/);
+  // The title is set once, when the group is created.
+  assert.doesNotMatch(source, /retitle/);
 });
 
 test('popup tabs are followed inside the extension target lifecycle', async () => {
@@ -270,9 +301,9 @@ test('tab-complete readiness resolves a real URL instead of posting an empty one
     resolve(dirname(fileURLToPath(import.meta.url)), 'background.ts'),
     'utf8',
   );
-  const handler = source.match(
-    /chrome\.tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{([\s\S]*?)\n\}\);/,
-  )?.[1] ?? '';
+  const handler = [...source.matchAll(
+    /chrome\.tabs\.onUpdated\.addListener\(\(tabId, changeInfo\) => \{([\s\S]*?)\n\}\);/g,
+  )].map((match) => match[1]).find((body) => /changeInfo\.status/.test(body)) ?? '';
 
   assert.match(handler, /liveTabUrl\(tabId\)/);
   assert.match(handler, /if \(!url\) return;/);

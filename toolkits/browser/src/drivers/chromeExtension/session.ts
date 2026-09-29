@@ -18,6 +18,7 @@ import {
   type BrowserExtensionBridge,
   type BrowserBridgeStatus,
 } from './bridge';
+import type { BrowserContextTargetState } from './protocol';
 import type { BrowserExtensionCommandName } from './protocol';
 import { persistBrowserScreenshot } from '../../screenshot';
 import { BrowserOperationError } from '../../errors';
@@ -84,8 +85,17 @@ function readScreenshotTruncation(value: unknown) {
   };
 }
 
+/** Told to the model once, on the first result after a hand-off. */
+const HANDOFF_NOTE = 'The user handed a tab to this session by dragging it into its PinPawo tab group; '
+  + 'it is now the current page.';
+
 export class ChromeExtensionBrowserSession {
   private approvedOrigin: string | null = null;
+
+  /** The user-granted tab last seen as current, to notice a new hand-off. */
+  private handedOverTabId: number | null = null;
+
+  private handoffPending = false;
 
   private readinessPhase: NavigationPhase | null = null;
 
@@ -99,7 +109,11 @@ export class ChromeExtensionBrowserSession {
 
   constructor(
     private readonly bridge: Pick<BrowserExtensionBridge, 'sendCommand'>
-      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged' | 'beginNavigation'>>,
+      & Partial<Pick<BrowserExtensionBridge, 'getStatus' | 'onRuntimeEvent' | 'onGenerationChanged' | 'beginNavigation'>>
+      & {
+        /** This session's current tab as the extension reports it (#867). */
+        contextTarget?: () => BrowserContextTargetState | null;
+      },
     private readonly workdir: () => string = () => process.cwd(),
   ) {}
 
@@ -122,6 +136,8 @@ export class ChromeExtensionBrowserSession {
       );
     }
     const snapshot = parseBrowserRawSnapshot(value);
+    const handoff = this.handoffPending;
+    this.handoffPending = false;
     let snapshotOrigin: string;
     try {
       snapshotOrigin = approvedOriginFor(snapshot.url);
@@ -141,18 +157,30 @@ export class ChromeExtensionBrowserSession {
         { approvedOrigin, actualOrigin: snapshotOrigin },
       );
     }
-    return buildBrowserSnapshotPayload(snapshot);
+    const payload = buildBrowserSnapshotPayload(snapshot);
+    return handoff ? { ...payload, handoff: HANDOFF_NOTE } : payload;
   }
 
   /**
-   * The origin this session's own `browser_open` approved. The bridge status
-   * also reports a tab the user bound with the extension action, but that
-   * describes whichever browser context the extension activated last, and
-   * the user-bound tab lives in the extension's legacy context, which no
-   * Agent session addresses. Adopting it here made one session read its own
-   * page against another tab's origin.
+   * The origin the current page is approved for: the user's grant when the
+   * current tab is one they handed over, else what this session's own
+   * `browser_open` approved. The grant is read for this session's context
+   * only; the global bridge status describes whichever context the extension
+   * activated last, and adopting it made one session read its own page
+   * against another tab's origin (#871).
    */
   private requireApprovedOrigin(): string {
+    // A tab the user dragged into this session's group is its current page,
+    // approved for the origin it had at that moment.
+    const current = this.bridge.contextTarget?.() ?? null;
+    if (current?.binding === 'user' && current.userBoundOrigin) {
+      if (this.handedOverTabId !== current.tabId) {
+        this.handedOverTabId = current.tabId;
+        this.handoffPending = true;
+      }
+      return current.userBoundOrigin;
+    }
+    this.handedOverTabId = null;
     if (!this.approvedOrigin) {
       throw new BrowserOperationError(
         'browser_not_open',

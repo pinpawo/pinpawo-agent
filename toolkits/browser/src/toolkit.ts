@@ -15,6 +15,7 @@ const browserToolkitInstructions = [
   '你负责需要真实浏览器参与的网页访问、页面交互、登录态复用、JS 渲染内容读取和页面内容提取。',
   '优先使用 browser_open 打开目标页面，再根据页面状态使用 browser_snapshot、browser_click、browser_type、browser_scroll、browser_wait、browser_extract 或 browser_screenshot。',
   '浏览器操作通过 Chrome 扩展在用户自己的 Chrome 中进行，沿用其登录状态；需要登录、验证码或用户手动操作时，请用户在该 Chrome 中完成。',
+  '你打开的页面都在 Chrome 里一个以 🐾 开头、以你打开的第一个网站命名的标签页分组中（如 "🐾 github.com"）。用户可以把自己已登录的页面拖进这个分组交给你操作；结果里出现 handoff 时，说明当前页面已换成用户交来的 tab，先看快照再继续。',
   '使用 snapshot 树里的 ref 进行 click/type/wait 最稳定；页面跳转或元素被移除后 ref 会失效，遇到 stale_element_reference 时重新 snapshot。',
   'browser_open、browser_snapshot、点击、输入和等待返回的是页面树快照；如果结果里的 truncated 为 true，说明只看到了树的前一部分；可用 browser_snapshot 的 ref/selector（只看某个区域）、depth 或 interactiveOnly 缩小范围。',
   '读页面优先用 browser_snapshot 和 browser_extract。只有需要视觉确认（布局、图片/图表/canvas、颜色或样式状态）且文本无法说明时，才用 browser_screenshot；截图会直接作为图片给到你。',

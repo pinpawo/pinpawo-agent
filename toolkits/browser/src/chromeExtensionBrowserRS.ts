@@ -201,6 +201,7 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
         commandOptions,
       ),
       getStatus: () => this.bridge.getStatus(),
+      contextTarget: () => this.bridge.getStatus().contextTargets?.[browserContextId] ?? null,
       ...(typeof this.bridge.beginNavigation === 'function'
         ? { beginNavigation: () => this.bridge.beginNavigation(browserContextId) }
         : {}),
@@ -220,6 +221,9 @@ export class ChromeExtensionBrowserRS implements BrowserRS {
     });
     const session = new BrowserSession({
       requireExecutionOwner: true,
+      // A BrowserRS session is one Agent session's; a tab the user hands it
+      // makes it usable before any browser_open (#867).
+      claimOnUse: true,
       createChromeExtensionSession: () => extensionSession,
     });
     this.sessions.set(agentSessionId, session);

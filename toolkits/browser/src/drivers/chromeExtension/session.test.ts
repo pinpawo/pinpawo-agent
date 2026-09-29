@@ -888,3 +888,40 @@ test('snapshot options reach the extension, and an extension ignoring them is re
       && error.code === 'browser_extension_outdated',
   );
 });
+
+test('a tab the user handed to this session is its current page, announced once (#867)', async () => {
+  const sent: string[] = [];
+  let current: { tabId: number; binding: 'agent' | 'user'; userBoundOrigin?: string } | null = {
+    tabId: 42,
+    binding: 'user',
+    userBoundOrigin: 'https://mail.example',
+  };
+  const session = new ChromeExtensionBrowserSession({
+    async sendCommand(command, params) {
+      sent.push(String(params.approvedOrigin));
+      if (command === 'navigate') return { ok: true };
+      return { ...rawSnapshot, url: `${String(params.approvedOrigin)}/inbox` };
+    },
+    contextTarget: () => current,
+  }, () => '/tmp');
+
+  // No browser_open: the hand-off alone makes the session usable.
+  const first = JSON.parse(await session.snapshot()) as { url: string; handoff?: string };
+  assert.equal(first.url, 'https://mail.example/inbox');
+  assert.match(String(first.handoff), /dragging it into its PinPawo tab group/);
+  const second = JSON.parse(await session.snapshot()) as { handoff?: string };
+  assert.equal(second.handoff, undefined);
+
+  // An agent tab as current falls back to the session's own approval.
+  await session.open('https://agent.example/page');
+  current = { tabId: 9, binding: 'agent' };
+  await session.snapshot();
+  assert.equal(sent.at(-1), 'https://agent.example');
+
+  // Without a hand-off or an open there is still no page.
+  const fresh = new ChromeExtensionBrowserSession({
+    async sendCommand() { return rawSnapshot; },
+    contextTarget: () => null,
+  }, () => '/tmp');
+  await assert.rejects(fresh.snapshot(), /Use browser_open first/);
+});

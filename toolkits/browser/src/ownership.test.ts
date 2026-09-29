@@ -213,3 +213,13 @@ test('only the current thread can close the browser', async () => {
       && error.code === 'browser_not_open',
   );
 });
+
+test('a context owned by one session can be claimed by its first operation (#867)', async () => {
+  const ownership = new BrowserContextOwnership({ claimOnUse: true });
+
+  assert.equal(await ownership.runOwned(owner('thread-1'), async () => 'snapshot of a handed-over tab'), 'snapshot of a handed-over tab');
+  await assert.rejects(
+    ownership.runOwned(owner('thread-2'), async () => 'other thread'),
+    (error: unknown) => error instanceof Error && 'code' in error && error.code === 'browser_context_conflict',
+  );
+});

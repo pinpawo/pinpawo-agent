@@ -115,11 +115,10 @@ async function summarizeMessages(params: {
   model: BaseChatModel;
   messages: BaseMessage[];
   runnableConfig?: RunnableConfig;
-}): Promise<string> {
+}): Promise<string | null> {
   const renderedMessages = renderMessagesForSummary(params.messages);
-  if (!renderedMessages.trim()) {
-    return '更早的私有执行上下文已压缩；没有需要摘要的主线消息。';
-  }
+  // Nothing readable to carry forward: record no summary rather than a placeholder.
+  if (!renderedMessages.trim()) return null;
 
   const response = await params.model.invoke(
     [
@@ -178,6 +177,7 @@ export async function compactOrchestratorMessages(params: {
   for (const group of groups) {
     if (group.length === 0) continue;
     const summary = await summarizeMessages({ model, messages: group, runnableConfig: params.runnableConfig });
+    if (summary === null) continue;
     const message = createContextCompactionMessage(summary, mainConversationMessages(group).length);
     if (taskId && group === groups[1]) setAgentMessageMetadata(message, { taskId });
     summaries.push(message);

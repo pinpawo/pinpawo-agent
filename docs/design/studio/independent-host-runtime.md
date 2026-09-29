@@ -84,7 +84,7 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 ### 2.2 持久化所有权
 
 - Chat 与 Studio 使用不同的 checkpoint root：
-  `checkpoints-capability-v2` 与 `checkpoints-studio-capability-v2`。
+  `checkpoints-capability-v3` 与 `checkpoints-studio-capability-v3`。
 - 每个 Host 在 Capability assembly 初始化前取得 checkpoint root 的生命周期 writer lease；
   已有存活 owner 时启动直接失败。dead-owner 恢复由独占 recovery guard 串行，不能让两个
   恢复者同时成为 owner。

@@ -71,32 +71,30 @@ test('loadUserCapabilities loads a code-free CAPABILITY.md', async () => {
   }
 });
 
-test('loadUserCapabilities preserves legacy v1 description and list syntax', async () => {
+test('loadUserCapabilities reports legacy v1 YAML as invalid and keeps loading the rest', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pinpawo-caps-v1-yaml-'));
   const previousDirs = process.env.PINPAWO_CAPABILITY_DIRS;
   process.env.PINPAWO_CAPABILITY_DIRS = root;
+  const warn = t.mock.method(console, 'warn', () => {});
   try {
     await mkCapability(root, 'legacy_yaml_capability', {
       description: 'Handles API: requests for budget #1',
       usesIndent: '\t',
     });
+    await mkCapability(root, 'strict_yaml_capability', {
+      description: JSON.stringify('Handles API: requests for budget #1'),
+    });
 
-    const { loadUserCapabilities, readUserCapabilityManifests } = await import('./capabilityLoader');
+    const { loadUserCapabilities } = await import('./capabilityLoader');
     const loaded = await loadUserCapabilities();
-    const manifests = readUserCapabilityManifests();
-    const item = loaded.find(
-      ({ activation }) => activation.id === 'legacy_yaml_capability',
-    );
 
+    assert.equal(loaded.some(({ activation }) => activation.id === 'legacy_yaml_capability'), false);
     assert.equal(
-      item?.capability.description,
+      loaded.find(({ activation }) => activation.id === 'strict_yaml_capability')?.capability.description,
       'Handles API: requests for budget #1',
     );
-    assert.deepEqual(item?.capability.uses, ['bash']);
-    assert.equal(
-      manifests.find(({ id }) => id === 'legacy_yaml_capability')?.description,
-      'Handles API: requests for budget #1',
-    );
+    assert.ok(warn.mock.calls.some(({ arguments: [message] }) =>
+      String(message).includes('"legacy_yaml_capability" invalid')));
   } finally {
     if (previousDirs === undefined) {
       delete process.env.PINPAWO_CAPABILITY_DIRS;

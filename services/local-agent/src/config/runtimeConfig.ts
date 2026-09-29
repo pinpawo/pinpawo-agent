@@ -23,11 +23,12 @@ export type LocalAgentRuntimeConfig = Readonly<{
 }>;
 
 /**
- * The Capability V2 graph changed serialized lane semantics. Local state uses
- * a new durable namespace instead of interpreting pre-V2 checkpoints through
- * the new graph. Capability artifacts keep their existing thread-scoped root.
+ * Serialized graph state is versioned by namespace instead of migrated: a
+ * contract change starts a new durable namespace rather than interpreting older
+ * checkpoints through the new graph. v3 makes the Supervisor snapshot's `runId`
+ * required. Capability artifacts keep their existing thread-scoped root.
  */
-export const LOCAL_AGENT_CHECKPOINT_CONTRACT = 'capability-v2';
+export const LOCAL_AGENT_CHECKPOINT_CONTRACT = 'capability-v3';
 
 /** Independent local Hosts must use distinct FileSaver writer roots. */
 export function resolveHostCheckpointPath(

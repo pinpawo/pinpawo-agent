@@ -57,10 +57,10 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
 }
 
 /**
- * Resolve the authoritative run goal from the plan_request argument, falling
- * back to the provisional capture when the model supplies nothing usable.
- * Supervisor input and Capability execution read this resolved run request;
- * accepted planning decisions retain the goal in runSupervisorState.
+ * Resolve the authoritative run goal from the plan_request argument, which the
+ * tool schema has already trimmed and bounded. Supervisor input and Capability
+ * execution read this resolved run request; accepted planning decisions retain
+ * the goal in runSupervisorState.
  *
  * When the resolved goal is just the current message again, the original is kept
  * byte-for-byte. The verbatim guarantee matters for requests whose formatting is
@@ -70,15 +70,7 @@ export function captureRunUserRequest(state: OrchestratorStateType) {
  */
 function resolveRunUserRequest(state: OrchestratorStateType, goal: string) {
   const provisional = state.runUserRequest;
-  const resolved = goal.trim();
-  if (!resolved) {
-    if (!provisional?.trim()) {
-      throw new Error('Entry Answer requires a current user request.');
-    }
-    return provisional;
-  }
-  if (provisional && provisional.trim() === resolved) return provisional;
-  return resolved.slice(0, MAX_PLAN_REQUEST_GOAL_CHARS);
+  return provisional?.trim() === goal ? provisional : goal;
 }
 
 function requireRunUserRequest(state: OrchestratorStateType) {
@@ -87,55 +79,6 @@ function requireRunUserRequest(state: OrchestratorStateType) {
     throw new Error('Entry Answer requires a current user request.');
   }
   return request;
-}
-
-/**
- * Detect a reply that announces execution instead of performing it.
- *
- * A model can emit a textual execution declaration with no tool call, leaving
- * the user with a claim that work started when no work actually ran.
- *
- * Prompt wording alone cannot guarantee this, so the shape is also checked here.
- */
-const EXECUTION_ANNOUNCEMENT_PATTERNS = [
-  /^\s*开始执行计划任务/,
-  /^\s*(我)?(这就|马上|现在)(去|来)?(执行|处理|开始)/,
-  /^\s*正在(执行|处理)/,
-];
-
-export function isExecutionAnnouncement(text: string) {
-  return EXECUTION_ANNOUNCEMENT_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-const EXECUTION_ANNOUNCEMENT_REPAIR = [
-  '你刚才只是用文字宣告要执行，但没有发起路由工具调用，因此不会有任何事情发生。',
-  '现在重新处理这一轮：继续已有未完成计划就调用 continue；需要新规划就调用 plan_request；不需要执行就直接给出面向用户的最终回复。',
-].join('\n');
-
-const MULTIPLE_ROUTING_CALLS_REPAIR = [
-  '你刚才在同一轮里发起了多个路由工具调用，路由每轮只能选择一个。',
-  '现在重新处理这一轮：继续已有未完成计划就只调用 continue；需要新规划就只调用一次 plan_request，把全部目标写进同一个 goal；不需要执行就直接给出面向用户的最终回复。',
-].join('\n');
-
-/**
- * Collapse byte-identical duplicate routing calls.
- *
- * Some OpenAI-compatible providers occasionally repeat the same call in one
- * turn (or split one call across stream indexes). Identical name+args carry one
- * decision, so keeping the first is lossless; distinct calls stay distinct and
- * go through the repair turn instead of being silently picked from.
- */
-function dedupeRoutingCalls(response: AIMessage) {
-  const calls = response.tool_calls ?? [];
-  if (calls.length < 2) return response;
-  const seen = new Set<string>();
-  const unique = calls.filter((call) => {
-    const key = JSON.stringify([call.name, call.args]);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  return unique.length === calls.length ? response : new AIMessage({ ...response, tool_calls: unique });
 }
 
 function entryHandoff(
@@ -252,8 +195,7 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     state: OrchestratorStateType,
     runnableConfig?: RunnableConfig,
   ) => {
-    const mainQuery = queryAgentMessages(state.messages).main();
-    const mainSelection = mainQuery.select();
+    const mainSelection = queryAgentMessages(state.messages).main().select();
     observeAgentMessageSelection(
       'entry_answer.main',
       mainSelection.diagnostics,
@@ -261,34 +203,21 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     );
     const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
-    const invoke = async (messages: BaseMessage[]) => {
-      const result = await invokeOrchestratorModel(model, {
-        systemMessage,
-        messages: [snapshot, ...messages],
-      }, runnableConfig);
-      if (!AIMessage.isInstance(result)) {
-        throw new Error('Entry Answer model must return an AIMessage.');
-      }
-      return dedupeRoutingCalls(result);
-    };
-    const repair = (previous: AIMessage, prompt: string) => invoke(mainQuery
-      .append(previous, new HumanMessage(prompt))
-      .select().messages);
-    let response = await invoke(mainSelection.messages);
-    if (!response.tool_calls?.length && isExecutionAnnouncement(response.text)) {
-      response = await repair(response, EXECUTION_ANNOUNCEMENT_REPAIR);
+    const response = await invokeOrchestratorModel(model, {
+      systemMessage,
+      messages: [snapshot, ...mainSelection.messages],
+    }, runnableConfig);
+    if (!AIMessage.isInstance(response)) {
+      throw new Error('Entry Answer model must return an AIMessage.');
     }
-    if ((response.tool_calls?.length ?? 0) > 1) {
-      // The rejected turn is replayed without its tool calls: an AIMessage with
-      // unanswered tool_calls is not a valid history for the repair turn.
-      response = await repair(new AIMessage({ content: response.content }), MULTIPLE_ROUTING_CALLS_REPAIR);
-    }
+    // Routing picks one path per turn and a reply must say something; any other
+    // output is a protocol error, not something to repair or paper over.
     if ((response.tool_calls?.length ?? 0) > 1) {
       const names = response.tool_calls!.map((call) => call.name).join(', ');
       throw new Error(`Entry routing requires one tool call, got ${response.tool_calls!.length}: ${names}.`);
     }
     if (!response.tool_calls?.length && !response.text.trim()) {
-      response.content = '我这边暂时没有可展示的回复，麻烦你再说一下需要我做什么。';
+      throw new Error('Entry Answer must reply or request routing.');
     }
     // Scope provider call IDs to this model turn; history may reuse them across runs or retries.
     // Some providers omit the ID entirely, so the position stands in for it.

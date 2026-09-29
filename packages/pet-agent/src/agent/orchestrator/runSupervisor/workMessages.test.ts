@@ -8,8 +8,8 @@ import { submitPlan } from './submitPlanTool';
 import { reviewCurrent } from './reviewCurrentTool';
 import { adjustPlan } from './adjustPlanTool';
 import { buildCapabilityExecutionInput } from './delegateCapabilityTool';
-import { identity, type SupervisorHandoffContext } from './controlContext';
-import { supervisorWorkMessages } from './messageHandoff';
+import { identity, type SupervisorControlContext } from './controlContext';
+import { supervisorWorkMessages } from './workMessages';
 import { readCapabilityExecutions } from '../executionMessages';
 import { createRunSupervisorProbe } from './testing';
 import { createCapabilityCatalog } from './capabilityCatalog';
@@ -19,17 +19,17 @@ import { defineInstructionDocument } from '../../../types/capability';
 
 const taskA = { capability: 'general', objective: 'Inspect A.' };
 const taskB = { capability: 'general', objective: 'Inspect B.' };
-function context(overrides: Partial<SupervisorHandoffContext> = {}): SupervisorHandoffContext {
+function context(overrides: Partial<SupervisorControlContext> = {}): SupervisorControlContext {
   return { state: { runId: null, goal: null, plan: [] }, runId: 'r1', taskId: 't1', userRequest: 'Inspect the project.',
     mode: 'entry', hasNewUserInput: true, allowedCapabilityNames: ['general'], messages: [], ...overrides };
 }
 function control(name: string, args: Record<string, unknown>, id: string) {
   return new AIMessage({ id: `request:${id}`, content: '', tool_calls: [{ name, args, id, type: 'tool_call' }] });
 }
-function dispatchResult(input: SupervisorHandoffContext, id = 'execute-first') {
+function dispatchResult(input: SupervisorControlContext, id = 'execute-first') {
   return { runSupervisorState: input.state, messages: supervisorWorkMessages(input, [control('delegate_capability', { briefing: 'Execute the current objective.' }, id)], true) };
 }
-function resultFor(input: SupervisorHandoffContext, dispatch: AIMessage) {
+function resultFor(input: SupervisorControlContext, dispatch: AIMessage) {
   const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!);
   const metadata = getAgentMessageMetadata(dispatch);
   return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
@@ -131,7 +131,7 @@ class Model extends BaseChatModel {
 const catalog = createCapabilityCatalog({ registry: compileAgentRegistry({ toolkits: [], capabilities: [{
   name: 'general', description: 'Inspect', uses: [], instructions: defineInstructionDocument({ content: 'Inspect and report.' }),
 }] }) });
-async function probe(input: SupervisorHandoffContext, responses: AIMessage[]) {
+async function probe(input: SupervisorControlContext, responses: AIMessage[]) {
   const model = new Model(responses);
   const result = await createRunSupervisorProbe({ model }).invoke({
     ...input, inputId: input.hasNewUserInput ? 'human:input' : 'boundary:input', catalog,

@@ -1,7 +1,7 @@
 import { getAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import type { RunSupervisorInput } from './runner';
-import type { SupervisorHandoffContext } from './controlContext';
+import type { SupervisorControlContext } from './controlContext';
 
 /**
  * Entry means this run has not reached Supervisor yet; Boundary means it is
@@ -14,7 +14,7 @@ export function readSupervisorMode(root: OrchestratorStateType): RunSupervisorIn
   return root.runSupervisorState.runId === root.runId ? 'boundary' : 'entry';
 }
 
-export function supervisorHandoffContext(input: RunSupervisorInput): SupervisorHandoffContext {
+export function supervisorControlContext(input: RunSupervisorInput): SupervisorControlContext {
   return {
     state: input.state, runId: input.runId, taskId: input.taskId,
     userRequest: input.userRequest, mode: input.mode,

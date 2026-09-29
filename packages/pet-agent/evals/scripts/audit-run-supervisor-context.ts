@@ -22,7 +22,7 @@ import {
   createCapabilityRoutingManifest,
 } from '../../src/agent/orchestrator/runSupervisor/routingManifest.ts';
 import { supervisorFixture } from '../supervisor-fixtures';
-import { supervisorHandoffContext } from '../../src/agent/orchestrator/runSupervisor/input';
+import { supervisorControlContext } from '../../src/agent/orchestrator/runSupervisor/input';
 import { createSubmitPlanTool } from '../../src/agent/orchestrator/runSupervisor/submitPlanTool';
 import { createReviewCurrentTool } from '../../src/agent/orchestrator/runSupervisor/reviewCurrentTool';
 import { createAdjustPlanTool } from '../../src/agent/orchestrator/runSupervisor/adjustPlanTool';
@@ -129,7 +129,7 @@ async function renderMode(mode: RunSupervisorMode) {
   const detailsTool = createSupervisorCapabilityDetailsTool({
     documents: createSupervisorDocumentReader(catalog), capabilityNames: catalog.capabilityNames,
   });
-  const context = supervisorHandoffContext(input);
+  const context = supervisorControlContext(input);
   const tools = [
     ...(mode === 'entry' ? [detailsTool] : []),
     createSubmitPlanTool(context),

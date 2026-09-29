@@ -51,7 +51,7 @@ function commandOnly(value: unknown) {
 }
 
 // Actual call derivation, exclusivity and duplicate settlement are tested in
-// messageHandoff.test.ts and the production graph's handoff.test.ts.
+// workMessages.test.ts and the production graph's handoff.test.ts.
 type ScriptedToolCall = {
   id?: string;
   name: string;

@@ -3,14 +3,14 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
-import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
+import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
 import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 
 export const submitPlanSchema = z.object({
   tasks: z.array(supervisorTaskSchema).min(1).max(24),
 }).strict();
 
-export function createSubmitPlanTool(context: SupervisorHandoffContext) {
+export function createSubmitPlanTool(context: SupervisorControlContext) {
   return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
     const state = submitPlan({ ...context, state: runtime.state.runSupervisorState }, args, runtime.toolCallId);
     return new Command({ update: {
@@ -30,7 +30,7 @@ export function createSubmitPlanTool(context: SupervisorHandoffContext) {
 export type SubmitPlanArgs = z.infer<typeof submitPlanSchema>;
 
 export function submitPlan(
-  context: SupervisorHandoffContext,
+  context: SupervisorControlContext,
   args: SubmitPlanArgs,
   callId: string,
 ): RunSupervisorState {

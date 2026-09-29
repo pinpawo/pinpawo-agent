@@ -3,7 +3,7 @@ import test from 'node:test';
 import { AIMessage, ToolMessage, HumanMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata } from '../src/agent/messages';
 import { executionsForPlanItem } from '../src/agent/orchestrator/executionMessages';
-import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input';
+import { supervisorControlContext } from '../src/agent/orchestrator/runSupervisor/input';
 import { projectHistoryEvidence, toolHistoryInput } from './supervisor-tool-history';
 
 for (const mode of ['entry', 'boundary'] as const) {
@@ -13,7 +13,7 @@ for (const mode of ['entry', 'boundary'] as const) {
     assert.equal(calls.length, 120 + (mode === 'boundary' ? 1 : 0));
     assert.equal(new Set(calls.map(c => c.id)).size, calls.length);
     assert.equal(input.state.plan.length, mode === 'boundary' ? 2 : 0);
-    assert.equal(executionsForPlanItem(supervisorHandoffContext(input), 'current').length, mode === 'boundary' ? 1 : 0);
+    assert.equal(executionsForPlanItem(supervisorControlContext(input), 'current').length, mode === 'boundary' ? 1 : 0);
   });
 }
 
@@ -52,5 +52,5 @@ test('resume fixture ends with fresh continue input and keeps the saved pending 
   assert.equal(input.messages.at(-1)?.text, '继续');
   assert.equal(input.state.plan.length, 2);
   assert.equal(input.state.plan.every(t => t.status === 'pending'), true);
-  assert.equal(executionsForPlanItem(supervisorHandoffContext(input), 'current').length, 0);
+  assert.equal(executionsForPlanItem(supervisorControlContext(input), 'current').length, 0);
 });

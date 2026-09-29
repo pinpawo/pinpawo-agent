@@ -3,7 +3,7 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { supervisorTaskSchema } from './protocol';
-import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
+import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
 import { currentSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForPlanItem } from '../executionMessages';
 
@@ -14,7 +14,7 @@ export const adjustPlanSchema = z.object({
   tasks: z.array(supervisorTaskSchema).min(1).max(24).describe('调整后的剩余工作。已完成事项由运行时保留，不重新提交；keep 时第一项对应保留身份与交付的当前任务。'),
 }).strict();
 
-export function createAdjustPlanTool(context: SupervisorHandoffContext) {
+export function createAdjustPlanTool(context: SupervisorControlContext) {
   return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
     const state = adjustPlan({ ...context, state: runtime.state.runSupervisorState }, args, runtime.toolCallId);
     return new Command({ update: {
@@ -34,7 +34,7 @@ export function createAdjustPlanTool(context: SupervisorHandoffContext) {
 export type AdjustPlanArgs = z.infer<typeof adjustPlanSchema>;
 
 export function adjustPlan(
-  context: SupervisorHandoffContext,
+  context: SupervisorControlContext,
   args: AdjustPlanArgs,
   callId: string,
 ): RunSupervisorState {

@@ -18,8 +18,8 @@ import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 import { createSupervisorCapabilityDetailsTool } from './detailsTool';
 import { createCapabilityRoutingManifest } from './routingManifest';
-import { supervisorWorkMessages } from './messageHandoff';
-import { supervisorHandoffContext } from './input';
+import { supervisorWorkMessages } from './workMessages';
+import { supervisorControlContext } from './input';
 
 /**
  * Graph steps, roughly 20 model turns. A healthy invocation uses 2-6 turns; this
@@ -41,7 +41,7 @@ export function createRunSupervisorAgent(params: {
       signal?.throwIfAborted();
 
       // Project Root history and read-only facts for this invocation.
-      const context = supervisorHandoffContext(input);
+      const context = supervisorControlContext(input);
       const documents = createSupervisorDocumentReader(input.catalog, params.maxDocumentReadBytes);
       const routing = createCapabilityRoutingManifest({
         catalog: input.catalog,
@@ -122,13 +122,13 @@ export function createRunSupervisorAgent(params: {
       // never retag canonical main messages or the temporary catalog frame.
       const work = result.messages.slice(agentMessages.length);
       const capabilityDisclosure = mergeCapabilityDisclosure(input.capabilityDisclosure, result.disclosedCapabilityNames ?? []);
-      const handoff = supervisorWorkMessages(context, work);
-      const last = handoff.at(-1);
+      const records = supervisorWorkMessages(context, work);
+      const last = records.at(-1);
       if (AIMessage.isInstance(last) && !last.tool_calls?.length && last.text.trim()) {
         // Publish the final message itself; private tool-loop work stays in its lane.
         delete getAgentMessageMetadata(last).lane;
         stampAgentMessageCreatedAt(last);
-        return { runSupervisorState: result.runSupervisorState, capabilityDisclosure, messages: handoff };
+        return { runSupervisorState: result.runSupervisorState, capabilityDisclosure, messages: records };
       }
       throw new Error('Supervisor must reply or explicitly request execution.');
     },

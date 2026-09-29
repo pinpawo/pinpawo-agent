@@ -67,8 +67,14 @@ The manifest and documents always come from the same catalog for an invocation.
 
 Each Supervisor invocation owns a document reader. The existing 64 KiB document
 budget counts both previously disclosed documents injected into context and newly
-read details. Complete documents are never truncated to fit. Parallel tool results
-merge disclosed names through the existing reducer. Detail availability continues
+read details. Complete documents are never truncated to fit. A details request
+that would exceed the budget discloses none of its documents and returns an error
+tool result naming them, so the Supervisor continues from the manifest and the
+details already in context; the run does not fail. Because every persisted
+disclosure was admitted within one invocation's budget, re-reading it at the next
+invocation stays within budget; exceeding it there is an invariant violation and
+still fails. Parallel tool results merge disclosed names through the existing
+reducer. Detail availability continues
 to follow the existing Entry/Boundary middleware policy.
 
 There is no elapsed-time deadline owned by Supervisor. Caller cancellation is

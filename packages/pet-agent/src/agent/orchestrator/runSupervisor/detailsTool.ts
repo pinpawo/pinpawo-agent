@@ -2,7 +2,7 @@ import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { Command } from '@langchain/langgraph';
-import type { SupervisorDocumentReader } from './capabilityDocuments';
+import { SupervisorDocumentError, type SupervisorDocumentReader } from './capabilityDocuments';
 
 export const RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME = 'capability_details';
 
@@ -18,7 +18,22 @@ export function createSupervisorCapabilityDetailsTool(params: {
     const unknownNames = requested.filter((name) => !params.capabilityNames.includes(name));
     const pending = requested.filter((name) => params.capabilityNames.includes(name)
       && !disclosedNames.includes(name));
-    const documents = params.documents.readCapabilities(pending, runtime.signal);
+    let documents;
+    try {
+      documents = params.documents.readCapabilities(pending, runtime.signal);
+    } catch (error) {
+      if (!(error instanceof SupervisorDocumentError) || error.code !== 'supervisor_discovery_limit_reached') throw error;
+      // A resource limit on a valid request, not a failed run: nothing is
+      // disclosed and the model plans from what it already has.
+      return new ToolMessage({
+        name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, tool_call_id: runtime.toolCallId, status: 'error',
+        content: JSON.stringify({
+          error: error.message,
+          notDisclosed: pending,
+          guidance: 'None of the requested documents were disclosed. Plan from the manifest and the details already in context, or request fewer capabilities.',
+        }),
+      });
+    }
     const newNames = documents.map(({ capabilityName }) => capabilityName);
     const content = JSON.stringify({
       documents,

@@ -1659,7 +1659,7 @@ test('boundary Supervisor exposes plan, review, adjustment and execution tools',
   assert.equal(model.boundToolNameHistory[0]?.includes('advance_plan'), false);
 });
 
-test('oversized discovery is reported as supervisor_discovery_limit_reached', async (t) => {
+test('oversized discovery returns a tool error and the Supervisor continues from the manifest', async (t) => {
   const catalog = createTestCatalog({
     explore: capabilityDocument({
       name: 'explore',
@@ -1673,17 +1673,19 @@ test('oversized discovery is reported as supervisor_discovery_limit_reached', as
       name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME,
       args: { names: ['explore'] },
     }],
-  }, { content: '' }]);
+  }, { content: 'I will plan from the manifest.' }]);
 
-  await assert.rejects(
-    createRunSupervisorAgent({
-      model,
-      maxDocumentReadBytes: 1,
-    }).invoke(supervisorInput(catalog)),
-    (error: unknown) =>
-      error instanceof Error && 'code' in error
-      && error.code === 'supervisor_discovery_limit_reached',
-  );
+  const result = await createRunSupervisorAgent({
+    model,
+    maxDocumentReadBytes: 1,
+  }).invoke(supervisorInput(catalog));
+
+  assert.equal(supervisorReply(result), 'I will plan from the manifest.');
+  const feedback = model.invocations[1].find((message) => ToolMessage.isInstance(message) && message.tool_call_id === 'grep');
+  assert.ok(ToolMessage.isInstance(feedback));
+  assert.equal(feedback.status, 'error');
+  assert.deepEqual(JSON.parse(feedback.text).notDisclosed, ['explore']);
+  assert.deepEqual(result.capabilityDisclosure.disclosedCapabilityNames, []);
 });
 
 test('oversized persisted disclosure stops without dropping documents or retrying', async (t) => {

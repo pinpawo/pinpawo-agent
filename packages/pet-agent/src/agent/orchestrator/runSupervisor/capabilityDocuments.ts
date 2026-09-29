@@ -21,11 +21,8 @@ export function createSupervisorDocumentReader(catalog: CapabilityCatalog, maxBy
   }
   const entries = new Map(catalog.entries.map((entry) => [entry.capabilityName, entry]));
   let consumedBytes = 0;
-  let budgetError: SupervisorDocumentError | null = null;
   return {
-    assertWithinBudget() {
-      if (budgetError) throw budgetError;
-    },
+    /** A read over budget discloses nothing and leaves the accounting unchanged. */
     readCapabilities(names: readonly string[], signal?: AbortSignal): RunSupervisorCapabilityDocument[] {
       signal?.throwIfAborted();
       const documents = [...new Set(names)].map((name) => {
@@ -35,8 +32,7 @@ export function createSupervisorDocumentReader(catalog: CapabilityCatalog, maxBy
       });
       const bytes = documents.reduce((sum, document) => sum + Buffer.byteLength(document.content, 'utf8'), 0);
       if (consumedBytes + bytes > maxBytes) {
-        budgetError = new SupervisorDocumentError('supervisor_discovery_limit_reached', 'Capability documents exceed the Supervisor document byte budget.');
-        throw budgetError;
+        throw new SupervisorDocumentError('supervisor_discovery_limit_reached', 'Capability documents exceed the Supervisor document byte budget.');
       }
       consumedBytes += bytes;
       return documents;

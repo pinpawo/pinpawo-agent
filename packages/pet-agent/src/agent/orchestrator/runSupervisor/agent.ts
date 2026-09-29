@@ -99,10 +99,9 @@ export function createRunSupervisorAgent(params: {
             supervisorMode: input.mode,
           },
         }).finally(() => {
-          // Preserve cancellation and the document-budget error code even when
-          // LangChain wraps a tool failure in a middleware error.
+          // Preserve cancellation even when LangChain wraps a tool failure in a
+          // middleware error.
           signal?.throwIfAborted();
-          documents.assertWithinBudget();
         });
       } catch (error) {
         if (!(error instanceof GraphRecursionError) || !ownsRecursionLimit) throw error;

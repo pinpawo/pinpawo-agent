@@ -3,7 +3,7 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
-import { SupervisorDecisionError, identity, type SupervisorHandoffContext } from './controlContext';
+import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
 import { currentSupervisorTask } from './state';
 import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
@@ -67,7 +67,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
   });
 }
 
-export function buildCapabilityExecutionInput(context: SupervisorHandoffContext, args: DelegateCapabilityArgs, callId: string): CapabilityExecutionInput {
+export function buildCapabilityExecutionInput(context: SupervisorControlContext, args: DelegateCapabilityArgs, callId: string): CapabilityExecutionInput {
   const state = context.state;
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');

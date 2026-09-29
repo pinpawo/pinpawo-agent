@@ -6,8 +6,8 @@ import { SupervisorDecisionError } from './controlContext';
 import { isSupervisorControlTool } from './protocol';
 import { Command } from '@langchain/langgraph';
 import type { RunSupervisorInput } from './runner';
-import { supervisorHandoffContext } from './input';
-import { supervisorWorkMessages } from './messageHandoff';
+import { supervisorControlContext } from './input';
+import { supervisorWorkMessages } from './workMessages';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
 
 export function createSupervisorControlValidationMiddleware(input: RunSupervisorInput, messageCount: number) {
@@ -15,7 +15,7 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
     name: 'SupervisorControlValidation',
     stateSchema: supervisorAgentStateSchema,
     wrapToolCall: async (request, handler) => {
-      // Plan changes and handoff depend on the preceding tool result.
+      // Plan changes and delegation depend on the preceding tool result.
       const message = request.state.messages.at(-1);
       const calls = AIMessage.isInstance(message) ? message.tool_calls ?? [] : [];
       if (calls.length > 1 && calls.some(call => isSupervisorControlTool(call.name))) {
@@ -28,7 +28,7 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
           runCapabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure,
             request.state.disclosedCapabilityNames ?? []),
           ...(input.inputId.startsWith('human:') ? { runSupervisorUserMessageId: input.inputId } : {}),
-          messages: supervisorWorkMessages(supervisorHandoffContext(input), request.state.messages.slice(messageCount), true),
+          messages: supervisorWorkMessages(supervisorControlContext(input), request.state.messages.slice(messageCount), true),
         } });
       }
       try {

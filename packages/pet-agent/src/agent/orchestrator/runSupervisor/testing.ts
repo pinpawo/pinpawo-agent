@@ -10,8 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { supervisorWorkMessages } from './messageHandoff';
-import { supervisorHandoffContext } from './input';
+import { supervisorWorkMessages } from './workMessages';
+import { supervisorControlContext } from './input';
 import { submitPlan, submitPlanSchema } from './submitPlanTool';
 import { adjustPlan, adjustPlanSchema } from './adjustPlanTool';
 import { reviewCurrent, reviewCurrentSchema } from './reviewCurrentTool';
@@ -67,7 +67,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
   decisions: readonly (ScriptedSupervisorControl | { reply: string })[]): RunSupervisorResult {
   const id = `scripted:${randomUUID()}`;
   const messages: BaseMessage[] = [];
-  const context = supervisorHandoffContext(input);
+  const context = supervisorControlContext(input);
   let state = input.state;
   let dispatching = false;
   const call = (control: ScriptedSupervisorControl) => {
@@ -91,7 +91,7 @@ export function scriptedSupervisorSequence(input: RunSupervisorInput,
   }
   if (reply !== undefined) messages.push(new AIMessage({ id: `${id}:reply`, content: reply }));
   return { runSupervisorState: state, capabilityDisclosure: input.capabilityDisclosure,
-    messages: supervisorWorkMessages(supervisorHandoffContext(input), messages, dispatching) };
+    messages: supervisorWorkMessages(supervisorControlContext(input), messages, dispatching) };
 }
 
 /** Script only model outputs; real agent tools and parent handoff perform all state changes. */
@@ -121,7 +121,7 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
   const runner = createRunSupervisorAgent(params);
   return { invoke: async (input, config) => {
     const capture = tool((args, runtime: ToolRuntime<typeof OrchestratorState.State>) => {
-      buildCapabilityExecutionInput({ ...supervisorHandoffContext(input), state: runtime.state.runSupervisorState,
+      buildCapabilityExecutionInput({ ...supervisorControlContext(input), state: runtime.state.runSupervisorState,
         messages: [...input.messages, ...runtime.state.messages] }, args, runtime.toolCallId);
       return new Command({ update: {} });
     }, { name: 'delegate_capability', description: 'Capture a valid execution decision without executing Capability.', schema: delegateCapabilitySchema });

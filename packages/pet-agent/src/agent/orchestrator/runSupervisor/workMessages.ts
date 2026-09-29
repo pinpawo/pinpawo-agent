@@ -1,6 +1,6 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { setAgentMessageMetadata } from '../../messages';
-import { identity, type SupervisorHandoffContext } from './controlContext';
+import { identity, type SupervisorControlContext } from './controlContext';
 
 /**
  * Select the main delegation request and preserve private Supervisor work.
@@ -11,7 +11,7 @@ import { identity, type SupervisorHandoffContext } from './controlContext';
  * dispatching batch carries the request into main.
  */
 export function supervisorWorkMessages(
-  context: SupervisorHandoffContext,
+  context: SupervisorControlContext,
   messages: readonly BaseMessage[],
   dispatching = false,
 ) {

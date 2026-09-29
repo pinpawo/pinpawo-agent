@@ -9,7 +9,7 @@ import { compileAgentRegistry } from '../src/agent/orchestrator/registry.ts';
 import { createCapabilityCatalog } from '../src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
 import { createCapabilityDisclosureState } from '../src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
 import { createRunSupervisorProbe as createRunSupervisorAgent } from '../src/agent/orchestrator/runSupervisor/testing.ts';
-import { supervisorHandoffContext } from '../src/agent/orchestrator/runSupervisor/input.ts';
+import { supervisorControlContext } from '../src/agent/orchestrator/runSupervisor/input.ts';
 import { supervisorFixture, readSupervisorDecision } from './supervisor-fixtures';
 import type { RunSupervisorInput } from '../src/agent/orchestrator/runSupervisor/runner.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';

@@ -168,7 +168,7 @@ Supervisor 显式注册。工具直接执行自己的变更函数，不经过统
 三个计划工具通过 Command 直接更新本次 LangGraph state，并返回模型可读的计划事实；
 delegateCapabilityTool 是 Supervisor 和 Root 共享的同一个可执行工具。controlMiddleware
 通过 Command.PARENT 把计划与工作消息提交给 Root，Root 的 ToolNode 校验并执行原调用。
-ToolRuntime 注入当前 state，工具接收模型生成的 briefing、注入执行身份并运行 Capability。messageHandoff 仅标注
+ToolRuntime 注入当前 state，工具接收模型生成的 briefing、注入执行身份并运行 Capability。workMessages 仅标注
 消息可见性与身份，不参与工具定义、参数搬运或执行协议。
 
 本次调整依据 [Studio E2E #803](https://github.com/pinpawo/pinpawo-agent/issues/803)：
@@ -274,7 +274,7 @@ messages 的摘要或保留选择。Capability 消息压缩留在子图的 names
 
 
 [控制协议](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/protocol.ts)、
-[消息交接](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/messageHandoff.ts)、
+[工作消息](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/workMessages.ts)、
 [Supervisor agent](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/agent.ts)、
 [Root 适配](../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/runSupervisor.ts)、
 [Capability 节点](../../../packages/pet-agent/src/agent/orchestrator/runtime/graph.ts)（`runSupervisor/delegateCapabilityTool.ts` 提供其工具）、
@@ -313,7 +313,7 @@ messages 的摘要或保留选择。Capability 消息压缩留在子图的 names
   最新失败不能被旧成功结果掩盖，授权与产物事实仍独立提交。
 - 当前拓扑内恢复正确；不要求跨协议或跨拓扑兼容旧 checkpoint，不静默迁移或重跑副作用。
 
-[新的消息交接测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/messageHandoff.test.ts)
+[工作消息测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/workMessages.test.ts)
 覆盖控制校验、单次委派配对和计划推进；
 [生产图调用与恢复测试](../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/handoff.test.ts)
 使用真实 createAgent、Root 图与 Capability executor，覆盖显式执行后的直接交接、

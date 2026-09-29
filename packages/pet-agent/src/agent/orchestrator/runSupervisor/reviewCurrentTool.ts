@@ -2,7 +2,7 @@ import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
-import { SupervisorDecisionError, type SupervisorHandoffContext } from './controlContext';
+import { SupervisorDecisionError, type SupervisorControlContext } from './controlContext';
 import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForPlanItem } from '../executionMessages';
 
@@ -11,7 +11,7 @@ export const reviewCurrentSchema = z.object({
   reason: z.string().trim().min(1).max(2_000).describe('验收依据或尚需补齐的工作。'),
 }).strict();
 
-export function createReviewCurrentTool(context: SupervisorHandoffContext) {
+export function createReviewCurrentTool(context: SupervisorControlContext) {
   return tool((args, runtime: ToolRuntime<SupervisorAgentState>) => {
     const state = reviewCurrent({ ...context, state: runtime.state.runSupervisorState }, args);
     return new Command({ update: {
@@ -31,10 +31,10 @@ export function createReviewCurrentTool(context: SupervisorHandoffContext) {
 export type ReviewCurrentArgs = z.infer<typeof reviewCurrentSchema>;
 
 export function reviewCurrent(
-  context: SupervisorHandoffContext,
+  context: SupervisorControlContext,
   args: ReviewCurrentArgs,
 ): RunSupervisorState {
-  let state: SupervisorHandoffContext['state'] = { runId: context.runId,
+  let state: SupervisorControlContext['state'] = { runId: context.runId,
     goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');

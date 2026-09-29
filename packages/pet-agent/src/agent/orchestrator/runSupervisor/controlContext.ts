@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { RunSupervisorState } from './state';
 
-export type SupervisorHandoffContext = {
+export type SupervisorControlContext = {
   state: RunSupervisorState;
   runId: string;
   taskId: string;

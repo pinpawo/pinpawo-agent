@@ -16,7 +16,7 @@ const ENTRY_FILE = 'main.js';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const tuiRoot = resolve(scriptDir, '..');
-const defaultOutputDir = resolve(tuiRoot, '..', 'local-agent', 'dist', 'tui');
+const defaultOutputDir = resolve(tuiRoot, '..', 'host', 'dist', 'tui');
 const outputDir = resolveOutputDir(process.argv.slice(2));
 const entryPath = resolve(outputDir, ENTRY_FILE);
 const manifestPath = resolve(outputDir, 'manifest.json');

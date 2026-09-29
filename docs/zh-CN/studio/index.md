@@ -3,7 +3,7 @@
 [English](../../studio/index.md)
 
 > **状态：当前契约。** `@pinpawo/studio` 是独立 Studio Host/runtime package；
-> 它通过 local-agent 的公共 `host-runtime` surface 复用本机 Host 装配能力；具体的
+> 它通过 host 的公共 `host-runtime` surface 复用本机 Host 装配能力；具体的
 > Pet Agent Session adapter 来自独立的 `local-server-transport` surface，不进入 Chat 启动链路。
 > `pinpawo-studio` 可执行入口也直接位于 `packages/studio`；具体 Plugin
 > 仍通过 `StudioPluginResolver` 从外部注入。
@@ -22,7 +22,7 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
 - [Independent Host runtime](../../design/studio/independent-host-runtime.md) —
   Host、进程、Plugin、dispatch 与 interaction 所有权。
 - [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) —
-  Studio dispatch 与 Pet 直接对话之间的 local-agent 装配边界。
+  Studio dispatch 与 Pet 直接对话之间的 host 装配边界。
 - [配置](configuration.md) — `studio.json`、Pet 文件、校验与 Plugin 注入。
 - [Studio API](../../reference/api/studio.md) — 导出的类型和精确语义。
 - [HTTP Plugin 设计](../../design/studio/http-plugin.md) — 唯一 HTTP/SSE control plane
@@ -36,7 +36,7 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
 
 任务如何拆分、依赖和进度如何保存、何时重试、scheduler / webhook / UI / 传输如何
 工作，都不属于 Studio。Pet 直接对话、Agent Session projection 与 TUI transport 也由
-local-agent 负责。可选 `@pinpawo-plugin/kanban` package 提供一个 Plugin：它定义供 Pet
+host 负责。可选 `@pinpawo-plugin/kanban` package 提供一个 Plugin：它定义供 Pet
 使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
 不是 Toolkit。
 
@@ -47,7 +47,7 @@ local-agent 负责。可选 `@pinpawo-plugin/kanban` package 提供一个 Plugin
 
 Host 只注册当前存活且 eager-start 的 Pet；Studio 不报告
 lazy/disabled Pet，也不公开 Agent Session active thread identity。HTTP Plugin 成为 Studio
-control-plane transport；同一 Host 进程内另行运行 local-agent Agent Session WebSocket，
+control-plane transport；同一 Host 进程内另行运行 host Agent Session WebSocket，
 负责直接 Pet conversation，但不进入 Studio core。
 
 ## 运行限制

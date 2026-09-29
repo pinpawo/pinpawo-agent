@@ -398,7 +398,7 @@ writable truth source。
 
 ## 11. 验收标准
 
-- Kanban domain/service/repository 不 import Studio、pet-agent 或 local-agent。
+- Kanban domain/service/repository 不 import Studio、pet-agent 或 host。
 - 每个 mutation 与 task event 原子提交；commit 失败不发布成功 event、不执行外部动作。
 - 同一 `todo` task 只能被一次有效 assignment 转成 `assigned`。
 - Studio 事件投射不枚举或隐式选择 Pet；外部路由必须通过显式 Trigger rule。

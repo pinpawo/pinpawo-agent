@@ -213,7 +213,7 @@ export class EmbeddedHostConnection implements AgentHostConnection {
     if (!message) {
       this.failChild(
         child,
-        new Error('local-agent sent an invalid protocol message'),
+        new Error('host sent an invalid protocol message'),
       );
       return;
     }
@@ -271,7 +271,7 @@ function describeStartupError(
   error: unknown,
 ) {
   return new Error([
-    `could not start the local-agent Host (${options.command}):`,
+    `could not start the Host (${options.command}):`,
     `${toError(error).message}.`,
     'Start `pinpawo tui` so the launcher can pass the Host runtime,',
     'or set PINPAWO_EMBED_HOST_COMMAND and PINPAWO_EMBED_HOST_ARGS.',

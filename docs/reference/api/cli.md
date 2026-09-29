@@ -1,7 +1,7 @@
 # CLI Reference
 
 > **Status: current contract.** Command registration is implemented in
-> [`services/local-agent/src/cli.ts`](../../../services/local-agent/src/cli.ts).
+> [`services/host/src/cli.ts`](../../../services/host/src/cli.ts).
 
 [简体中文](../../zh-CN/reference/api/cli.md)
 
@@ -32,7 +32,7 @@
   server for the Chat Host; reserve standard output for protocol messages in that mode.
 - `pinpawo-studio --pet-port` optionally fixes the resident Pet conversation listener;
   if omitted, Studio selects an available loopback port.
-- `pinpawo tui` starts the Chat/local-agent conversation client. It does not
+- `pinpawo tui` starts the Chat/host conversation client. It does not
   connect to the Studio control plane or send Studio dispatch messages. By default
   it starts its own local agent as a stdio child process, so no separately running
   Host is needed. The launcher forwards the resolved Host runtime through
@@ -46,7 +46,7 @@
   `--embed-host` is mutually exclusive with `--server-port`, `--pet-port`/`--pet-id`,
   `--check`, and `--qa`; passing it only restates the default.
 - The paired `--pet-port` and `--pet-id` options select one resident Pet's
-  local-agent Agent Session endpoint instead. Pet connection mode does not accept
+  host Agent Session endpoint instead. Pet connection mode does not accept
   `--workdir` or `--server-port`: the Studio Host already resolved and owns the
   resident Pet workdir. `--check` and `--qa` cannot be used together.
 - `--workdir` is resolved to an absolute path before the host starts. It scopes

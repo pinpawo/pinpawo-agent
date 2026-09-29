@@ -10,14 +10,14 @@ on:
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'packages/studio/**'
-      - 'services/local-agent/**'
-      # local-agent bundles the Browser Toolkit; Studio also packs the plugins.
+      - 'services/host/**'
+      # host bundles the Browser Toolkit; Studio also packs the plugins.
       - 'toolkits/**'
       - 'plugins/**'
       # Tests, docs and unrelated scripts never reach a packed package.
       - '!**/*.test.ts'
       - '!**/*.md'
-      - '!services/local-agent/scripts/**'
+      - '!services/host/scripts/**'
   push:
     branches:
       - main
@@ -29,14 +29,14 @@ on:
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'packages/studio/**'
-      - 'services/local-agent/**'
-      # local-agent bundles the Browser Toolkit; Studio also packs the plugins.
+      - 'services/host/**'
+      # host bundles the Browser Toolkit; Studio also packs the plugins.
       - 'toolkits/**'
       - 'plugins/**'
       # Tests, docs and unrelated scripts never reach a packed package.
       - '!**/*.test.ts'
       - '!**/*.md'
-      - '!services/local-agent/scripts/**'
+      - '!services/host/scripts/**'
   workflow_dispatch:
 
 permissions:

@@ -80,7 +80,7 @@ This is the core responsibility of an agent harness: **keep the loop running sta
 User / TUI / desktop app
         |
         v
-local-agent host ---- browser and local Toolkits
+Host ---- browser and local Toolkits
         |
         v
 pet-agent orchestrator
@@ -111,7 +111,7 @@ The main boundaries are:
 | `packages/agent-session/` | Session domain, projection, snapshots, parsers, and protocol types. |
 | `packages/pet-agent/` | Core agent runtime, orchestrator, Capability contracts, and evaluations. |
 | `packages/studio/` | Published `@pinpawo/studio` Host/runtime library and CLI. |
-| `services/local-agent/` | Published `pinpawo` CLI, local host, configuration, and integrations. |
+| `services/host/` | Published `pinpawo` CLI, local host, configuration, and integrations. |
 | `services/tui/` | OpenTUI client and distribution bundle. |
 | `tests/studio-e2e/` | Cross-package Studio dispatch/event acceptance tests. |
 | `plugins/studio-http/` | Optional Studio HTTP dispatch and SSE event Plugin. |
@@ -174,7 +174,7 @@ Validate the generated example with:
 pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
 ```
 
-See [services/local-agent/README.md](services/local-agent/README.md) for TUI v2, stdio, extension setup, and package-level release details.
+See [services/host/README.md](services/host/README.md) for TUI v2, stdio, extension setup, and package-level release details.
 
 ## Local Development
 
@@ -188,15 +188,15 @@ npm run build
 Start the local TUI from source:
 
 ```bash
-cd services/local-agent
+cd services/host
 npm run tui
 ```
 
 Smoke-test the built CLI:
 
 ```bash
-node services/local-agent/dist/index.js init --dir /tmp/pinpawo-demo
-node services/local-agent/dist/index.js capability validate /tmp/pinpawo-demo/capabilities/hello-pinpawo
+node services/host/dist/index.js init --dir /tmp/pinpawo-demo
+node services/host/dist/index.js capability validate /tmp/pinpawo-demo/capabilities/hello-pinpawo
 ```
 
 ## Configuration

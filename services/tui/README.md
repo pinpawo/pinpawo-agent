@@ -6,10 +6,10 @@ The package now contains the Phase 2–4 vertical slice and the first Phase 5
 dogfood entrypoint from issue #454:
 
 - it imports the canonical projection from `@pinpawo/agent-session`;
-- it does not import `services/local-agent/src/*`;
+- it does not import `services/host/src/*`;
 - it is launched by `pinpawo tui` — the only terminal client;
 - it starts its own local agent as a stdio child by default, and dials the
-  authenticated loopback local-agent WebSocket only when `--server-port` names a
+  authenticated loopback host WebSocket only when `--server-port` names a
   running Host;
 - it decodes asynchronous WebSocket payloads on one per-socket queue, so a
   slower Blob/binary frame cannot be overtaken by a later event and change
@@ -47,7 +47,7 @@ dogfood entrypoint from issue #454:
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
 - it commits a borderless, terminal-rasterized paw welcome with the TUI and
-  local-agent versions, actor, model, workdir, and loaded capabilities before
+  host versions, actor, model, workdir, and loaded capabilities before
   the first timeline rows.
 - it keeps run/connection state and session token/context facts in a compact
   two-line status area, with width-priority degradation.
@@ -63,7 +63,7 @@ dogfood entrypoint from issue #454:
 - it can suspend OpenTUI, hand the terminal to `$VISUAL` or `$EDITOR`, and load
   the edited multiline draft back into the composer.
 - it exports completed canonical user/assistant messages as a local Markdown
-  transcript without adding a host protocol or depending on local-agent code.
+  transcript without adding a host protocol or depending on host code.
 - it opens the complete ordered canonical timeline in `$PAGER` (or `less`) by
   temporarily handing over the TTY, instead of maintaining a second viewport.
 
@@ -134,7 +134,7 @@ implementation differs. Three consequences are worth knowing:
 - disconnecting ends the Host, so there is no reconnect — a new `connect()`
   starts a new Host process, and the synchronization timeout is disabled;
 - Host-level facts that only the HTTP surface reports degrade: the welcome block
-  shows `local-agent unknown`.
+  shows `host unknown`.
 
 Exactly one transport owns a session, so the embedded default and the connect
 targets are mutually exclusive: `--embed-host` (which only restates the default)
@@ -311,7 +311,7 @@ startup remains the production path. Direct workspace
 development is still available through `npm run dev:qa -w @pinpawo/tui`.
 
 The TUI has no Studio mode and sends no `studio_request` messages. It consumes
-the local-agent Agent Session protocol for the focused conversation. A resident
+the host Agent Session protocol for the focused conversation. A resident
 Pet may later be exposed through that same conversation adapter, but Studio
 dispatch, invocation progress, and Studio transports remain outside the TUI.
 See the accepted
@@ -333,7 +333,7 @@ npm run dev:probe -w @pinpawo/tui
 ```
 
 `dev:split` remains a compatibility alias. Both commands run an interaction
-probe with no local-agent host or session functionality; use `npm run dev -w
+probe with no Host or session functionality; use `npm run dev -w
 @pinpawo/tui` for the production v2 client.
 
 Split-footer commits settled timeline rows to terminal scrollback and keeps only
@@ -368,15 +368,15 @@ npm run build:spike -w @pinpawo/tui
 Platform-specific executables are written to `services/tui/dist/`, which is
 ignored by Git.
 
-Build the npm distribution payload used by the local-agent package with:
+Build the npm distribution payload used by the host package with:
 
 ```sh
 npm run build:distribution -w @pinpawo/tui
 ```
 
 This writes `main.js` and a checked `manifest.json` to
-`services/local-agent/dist/tui/`. The normal `pinpawo` build runs this step
-after the local-agent bundle is created.
+`services/host/dist/tui/`. The normal `pinpawo` build runs this step
+after the host bundle is created.
 
 Verify that a freshly built bundle can load its external OpenTUI runtime and
 execute outside the source entrypoint with:

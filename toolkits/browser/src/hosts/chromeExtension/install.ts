@@ -65,7 +65,7 @@ function defaultNativeHostEntryPath(): string {
     resolve(moduleDirectory, 'hosts', 'chrome-extension', 'native-host.js'),
     resolve(moduleDirectory, 'toolkits', 'browser', 'native-host.js'),
     resolve(process.cwd(), 'dist', 'toolkits', 'browser', 'native-host.js'),
-    resolve(process.cwd(), 'services', 'local-agent', 'dist', 'toolkits', 'browser', 'native-host.js'),
+    resolve(process.cwd(), 'services', 'host', 'dist', 'toolkits', 'browser', 'native-host.js'),
   ];
   return candidates.find(existsSync) ?? candidates[0]!;
 }

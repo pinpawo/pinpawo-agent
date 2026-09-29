@@ -2,7 +2,7 @@
  * #643: Studio Host — independent Studio package entry point.
  *
  * Studio is no longer a branch of the Chat Host. It has its own entry and
- * lifecycle. The package composition root uses local-agent to build both
+ * lifecycle. The package composition root uses host to build both
  * resident dispatch and Agent Session interaction surfaces, while Studio core
  * receives only dispatch ports.
  */
@@ -13,12 +13,12 @@ import {
   type PetDocument,
 } from '@pinpawo/pet-agent';
 import {
-  buildLocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
   FileSaver,
   HostCapabilityAssembly,
   resolveHostCheckpointPath,
   type HostToolkitInventoryStore,
-  type LocalAgentRuntimeConfig,
+  type HostRuntimeConfig,
   type LocalModelProfileRegistry,
   type ToolkitDefinitionSource,
 } from 'pinpawo/host-runtime';
@@ -37,7 +37,7 @@ import {
 } from 'pinpawo/host-runtime';
 
 export type StudioHostOptions = {
-  runtimeConfig?: LocalAgentRuntimeConfig;
+  runtimeConfig?: HostRuntimeConfig;
   resolvePlugin?: StudioPluginResolver;
   /** Composition hook for lifecycle tests and embedded hosts. */
   capabilityAssembly?: HostCapabilityAssembly;
@@ -50,7 +50,7 @@ export type StudioHostOptions = {
 /**
  * Studio Host.
  *
- * It delegates capability and resident Pet construction to local-agent. This
+ * It delegates capability and resident Pet construction to host. This
  * outer composition owner retains the local Agent Session adapters; the
  * resident Studio built at init time never sees them.
  *
@@ -73,7 +73,7 @@ export class StudioHost {
   private shutdownRequested = false;
 
   constructor(options: StudioHostOptions = {}) {
-    const runtimeConfig = options.runtimeConfig ?? buildLocalAgentRuntimeConfig();
+    const runtimeConfig = options.runtimeConfig ?? buildHostRuntimeConfig();
     this.caps = options.capabilityAssembly ?? new HostCapabilityAssembly({
       runtimeConfig,
       sourceId: 'studio-host',
@@ -182,7 +182,7 @@ export class StudioHost {
     return pending;
   }
 
-  /** Activate Plugin listeners after the outer local-agent interaction transport is ready. */
+  /** Activate Plugin listeners after the outer host interaction transport is ready. */
   async activatePlugins(): Promise<void> {
     if (this.shutdownRequested) {
       throw new Error('StudioHost.activatePlugins() called after shutdown started');
@@ -239,7 +239,7 @@ export class StudioHost {
     return this.studio.studio;
   }
 
-  /** Pet-scoped Agent Session adapters owned by local-agent, not Studio core. */
+  /** Pet-scoped Agent Session adapters owned by host, not Studio core. */
   getResidentPetInteractions(): ReadonlyMap<string, ResidentPetInteraction> {
     if (!this.studio) {
       throw new Error('StudioHost.getResidentPetInteractions() called before init()');
@@ -251,7 +251,7 @@ export class StudioHost {
 
   // ---- Capability supply delegation ----
 
-  getRuntimeConfig(): LocalAgentRuntimeConfig {
+  getRuntimeConfig(): HostRuntimeConfig {
     return this.caps.getRuntimeConfig();
   }
 

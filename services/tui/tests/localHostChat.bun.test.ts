@@ -20,37 +20,37 @@ import {
 } from '@pinpawo/agent-session';
 import {
   FileCapabilityArtifactStore,
-} from '../../local-agent/src/capabilityArtifactStore';
+} from '../../host/src/capabilityArtifactStore';
 import {
   buildAgentContext,
-} from '../../local-agent/src/contextLoader';
+} from '../../host/src/contextLoader';
 import {
   readLocalChatDisplayText,
-} from '../../local-agent/src/agent/chatMessageInput';
+} from '../../host/src/agent/chatMessageInput';
 import {
   createLocalServerHandlers,
-} from '../../local-agent/src/serverHandlers';
-import { createLocalServerRuntimeDepsStore } from '../../local-agent/src/serverTypes';
+} from '../../host/src/serverHandlers';
+import { createLocalServerRuntimeDepsStore } from '../../host/src/serverTypes';
 import type {
   LocalServerPeerHandlers,
-} from '../../local-agent/src/wire/messageDispatcher';
+} from '../../host/src/wire/messageDispatcher';
 import {
   attachLocalServerWebSocketTransport,
-} from '../../local-agent/src/serverWsTransport';
+} from '../../host/src/serverWsTransport';
 import {
-  buildLocalAgentRuntimeConfig,
-} from '../../local-agent/src/config/runtimeConfig';
+  buildHostRuntimeConfig,
+} from '../../host/src/config/runtimeConfig';
 import {
   createTestModelServerDeps,
-} from '../../local-agent/src/testing/modelProfiles';
+} from '../../host/src/testing/modelProfiles';
 import {
   createTestHostToolkitInventory,
-} from '../../local-agent/src/testing/toolkitInventory';
+} from '../../host/src/testing/toolkitInventory';
 import {
   createBashToolkit,
   createGitToolkit,
   PosixShellRS,
-} from '../../local-agent/src/toolkits/local/index';
+} from '../../host/src/toolkits/local/index';
 import {
   LocalHostConnection,
 } from '../src/client/localHostConnection';
@@ -79,11 +79,11 @@ const ATTACHMENT_CONTENT = 'fixture contents must remain unread until a tool ins
 const shell = new PosixShellRS();
 const REQUIRED_TOOLKITS = [createBashToolkit({ shell }), createGitToolkit({ shell })];
 
-test('production local-agent handlers drive the v2 host vertical slice', async () => {
+test('production host handlers drive the v2 host vertical slice', async () => {
   const workdir = mkdtempSync(join(tmpdir(), 'pinpawo-tui-v2-host-'));
   const attachmentPath = join(workdir, ATTACHMENT_NAME);
   writeFileSync(attachmentPath, ATTACHMENT_CONTENT);
-  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const runtimeConfig = buildHostRuntimeConfig(workdir);
   const graphFixture = createHostGraphFixture();
   const localServerHandlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore({
     serverMode: 'chat',

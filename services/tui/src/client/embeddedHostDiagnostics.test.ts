@@ -16,14 +16,14 @@ test('embedded host diagnostics append timestamped lines to the log file', () =>
   try {
     const sink = createEmbeddedHostDiagnosticsSink(path);
     sink('[local-server] stdio JSONL transport ready');
-    sink('[local-agent] stopping');
+    sink('[host] stopping');
 
     const lines = readFileSync(path, 'utf8').trim().split('\n');
     assert.equal(lines.length, 2);
     for (const line of lines) {
       assert.match(
         line,
-        /^\d{4}-\d{2}-\d{2}T[\d:.]+Z \[local-(server|agent)\]/,
+        /^\d{4}-\d{2}-\d{2}T[\d:.]+Z \[(local-server|host)\]/,
       );
     }
     assert.equal(
@@ -43,8 +43,8 @@ test('embedded host diagnostics stay silent when the log cannot be written', () 
     // degrade to a no-op instead of failing the terminal UI.
     writeFileSync(blocked, 'not a directory\n');
     const sink = createEmbeddedHostDiagnosticsSink(join(blocked, 'log'));
-    assert.doesNotThrow(() => sink('[local-agent] first'));
-    assert.doesNotThrow(() => sink('[local-agent] second'));
+    assert.doesNotThrow(() => sink('[host] first'));
+    assert.doesNotThrow(() => sink('[host] second'));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

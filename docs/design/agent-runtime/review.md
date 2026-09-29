@@ -65,7 +65,7 @@ orchestrator 负责模式选择、授权持久化与执行/人工交互；Review
 模型对待评估动作评分，程序按 strict ≤ 2、relaxed ≤ 9 放行。
 模型失败、10 分或完整证据超出预算时转人工，不裁掉执行参数后放行。
 具体风险边界见[系统提示](../../../packages/pet-agent/src/autoReview/prompts/templates.ts)，
-由 [auto-review eval](../../../packages/pet-agent/evals/auto-review-risk.eval.ts) 验证。
+由 [auto-review eval](../../../tests/agent-evals/src/auto-review-risk.eval.ts) 验证。
 
 ## Decisions
 

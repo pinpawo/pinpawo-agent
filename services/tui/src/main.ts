@@ -196,13 +196,13 @@ const embeddedHostDiagnostics = createEmbeddedHostDiagnosticsSink();
 const port = agentSession?.port ?? launchOptions.serverPort ?? readLocalServerPort();
 const hostMetadata: LocalHostMetadata = launchOptions.useDemoConnection
   ? {
-      localAgentVersion: 'demo',
+      hostVersion: 'demo',
     }
   : agentSession || embeddedHost
     // A Pet-scoped Agent Session and an embedded Host both skip the loopback
     // `/runtime` probe: the former is observed through its own route, and the
     // latter does not start an HTTP side channel at all.
-    ? { localAgentVersion: null }
+    ? { hostVersion: null }
     : await loadLocalHostMetadata({ port });
 const renderer = await createCliRenderer({
   exitOnCtrlC: false,
@@ -259,8 +259,8 @@ const status = new TextRenderable(renderer, {
   content: agentSession
     ? `agent-session ${agentSession.petId} :${port}`
     : embeddedHost
-      ? 'local-agent stdio'
-      : `local-agent :${port}`,
+      ? 'host stdio'
+      : `host :${port}`,
   fg: '#8a8a8a',
   bg: RGBA.defaultBackground(),
   height: 2,
@@ -1365,7 +1365,7 @@ function openPolicyPickerUi() {
   const state = controller.getState();
   const currentMode = state.session.runtime?.globalReviewPolicyMode;
   if (state.connection !== 'ready') {
-    showErrorNotice('local-agent is not connected');
+    showErrorNotice('host is not connected');
     return;
   }
   if (state.session.activeRun) {
@@ -1373,7 +1373,7 @@ function openPolicyPickerUi() {
     return;
   }
   if (!currentMode) {
-    showErrorNotice('local-agent does not expose review policy state; upgrade the host');
+    showErrorNotice('host does not expose review policy state; upgrade the host');
     return;
   }
   commandOverlay = closeCommandOverlay();
@@ -1486,7 +1486,7 @@ function openModelPickerUi() {
   if (terminalHandoffOpen || modelPicker.phase !== 'closed') return;
   const state = controller.getState();
   if (state.connection !== 'ready') {
-    showErrorNotice('local-agent is not connected');
+    showErrorNotice('host is not connected');
     return;
   }
   if (state.session.activeRun) {
@@ -2065,7 +2065,7 @@ function submitFailureText(
 ) {
   switch (reason) {
     case 'not-ready':
-      return 'local-agent is not connected';
+      return 'host is not connected';
     case 'busy':
       return 'wait for the current response to finish';
     case 'empty':
@@ -2082,7 +2082,7 @@ function interruptFailureText(
 ) {
   switch (reason) {
     case 'not-ready':
-      return 'local-agent is not connected';
+      return 'host is not connected';
     case 'idle':
       return 'no active response to interrupt';
     case 'review-active':

@@ -339,7 +339,7 @@ test('welcome uses visual hierarchy for identity, metadata, and shortcuts', asyn
       width: 80,
       connection: 'connected',
       hostMetadata: {
-        localAgentVersion: '0.2.0',
+        hostVersion: '0.2.0',
       },
     }));
     const text = setup.cellOutput.takeText();

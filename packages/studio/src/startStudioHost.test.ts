@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  buildLocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
   type HostCapabilityAssembly,
 } from 'pinpawo/host-runtime';
 import type { Studio } from './studioContract';
@@ -9,7 +9,7 @@ import type { BuildStudioResult, ResolvedStudioHostConfig } from './host/buildSt
 import { startStudioHost } from './startStudioHost';
 
 function fakeAssembly(events: string[]): HostCapabilityAssembly {
-  const runtimeConfig = buildLocalAgentRuntimeConfig('/tmp/pinpawo-start-studio-host-test');
+  const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-start-studio-host-test');
   return {
     acquireWriterLease: () => undefined,
     init: async () => { events.push('caps:init'); },

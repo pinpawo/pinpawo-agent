@@ -40,7 +40,7 @@ type WriterCapableConfig = RunnableConfig & {
  *
  * - the LangGraph custom stream (`streamMode: 'custom'`, via the node
  *   config's `writer`) — this is how records surface as root custom protocol
- *   events for local-agent stream consumers;
+ *   events for host stream consumers;
  * - `dispatchCustomEvent` — this is how records reach LangGraph
  *   `streamEvents` (`on_custom_event`) consumers and the LangSmith trace.
  *

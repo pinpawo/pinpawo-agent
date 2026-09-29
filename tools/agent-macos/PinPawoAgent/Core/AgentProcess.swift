@@ -80,7 +80,7 @@ final class AgentProcess: ObservableObject {
     // 3. Well-known dev fallback (same repo layout)
     if let bundlePath = Bundle.main.bundlePath
       .components(separatedBy: "/tools/agent-macos/").first {
-      let candidate = "\(bundlePath)/services/local-agent/dist/index.js"
+      let candidate = "\(bundlePath)/services/host/dist/index.js"
       if FileManager.default.fileExists(atPath: candidate) { return candidate }
     }
     return nil

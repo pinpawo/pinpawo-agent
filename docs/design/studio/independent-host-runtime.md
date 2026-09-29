@@ -14,7 +14,7 @@ Host / Agent / Capability / Toolkit 领域关系；该关系以
 Chat Host                         Studio Host process
   Chat/TUI session stack            resident Pet runtime(s)
           \                         /       │
-             pinpawo/host-runtime           ├─ local-agent Agent Session WebSocket
+             pinpawo/host-runtime           ├─ host Agent Session WebSocket
              HostCapabilityAssembly         │      (只与内部 Pet 交互)
                                             └─ Studio core + HTTP Plugin
                                                    dispatch/event/hook
@@ -23,26 +23,26 @@ Chat Host                         Studio Host process
 两个 Host 可作为独立 CLI、systemd unit 或容器启动。共享的是 Capability、Toolkit、
 模型和 checkpointer 的**装配方式**，不是 Chat session、transport handler、进程内锁，
 也不是同一个 checkpoint writer root。Studio Host process 内可以同时运行两种入口，但
-Studio control plane 只有 HTTP；Agent Session WebSocket 属于 local-agent interaction
+Studio control plane 只有 HTTP；Agent Session WebSocket 属于 host interaction
 adapter，不是 Studio transport，也不进入 Studio core。
 
 `host-runtime` 是按 Host 职责划分的中性公共面，不是为了 Studio 建立的 support
-facade。local-agent 分开暴露 resident runtime builder 与 Agent Session interaction
+facade。host 分开暴露 resident runtime builder 与 Agent Session interaction
 builder；两者可以独立使用，也可以在 Studio Host process 内配套构造。interaction
 transport 直接复用 `@pinpawo/agent-session` contract，不再为 Studio 定义第二套 Agent
 message contract。
-Pet graph/runtime 的构造也属于 `host-runtime`。local-agent 分别构造 `ResidentPet` 与
+Pet graph/runtime 的构造也属于 `host-runtime`。host 分别构造 `ResidentPet` 与
 `ResidentPetInteraction`，再由 `ResidentPetHost` 配套持有；Studio package 的外层 Host
 composition 可以持有完整资源句柄，但 Studio core 只取得并保存 `PetDispatchPort`，
 不取得 interaction、不读取 checkpoint，也不构造 LangGraph command。
-TUI 通过 local-agent 的 Agent Session adapter 消费 conversation，不连接 Studio
+TUI 通过 host 的 Agent Session adapter 消费 conversation，不连接 Studio
 control plane。完整契约见
 [Resident Pet Host Ports](../agent-runtime/resident-pet-host-ports.md)。
 
 package 依赖方向固定为：
 
 ```text
-local-agent (Chat + shared surface)  ←  @pinpawo/studio  ←  concrete Plugins
+host (Chat + shared surface)  ←  @pinpawo/studio  ←  concrete Plugins
                                       ↑ resolver 注入
                               application composition root
 ```
@@ -100,10 +100,10 @@ Studio。每个 Pet 的 Capability 目录也必须在 resident runtime 构建前
 ### 2.3 Transport、registry 与关联
 
 - Studio core 不构造 Agent Session service 或 conversation handler。Studio Host 的外层
-  composition 使用 local-agent interaction builder 为每个 resident Pet 配套构造并启动
+  composition 使用 host interaction builder 为每个 resident Pet 配套构造并启动
   Agent Session WebSocket；该 listener 只与内部 Pet runtime 交互。
 - Studio registry 只持有 `PetDispatchPort`。Resident Pet 的 conversation surface 与
-  Agent Session adapter 由 local-agent 装配，不进入 Studio package 或 Plugin context。
+  Agent Session adapter 由 host 装配，不进入 Studio package 或 Plugin context。
 - Studio control plane 通过 HTTP Plugin 暴露 dispatch、event 与 Plugin hook；不保留
   内置 Studio WebSocket/stdio transport。
 - `listPets()` 只返回 Host runtime registry 中当前存活的 Pet，并把 Studio 配置中的
@@ -135,7 +135,7 @@ completion、status、output、error 或 caller cancellation。dispatch 真正�
   transport 私有状态。
 - Plugin event 保持进程内全局总线语义，request transport 不隐式把它归到某个
   peer/delivery。未来的外部 event feed 需要显式 subscription/replay 契约。
-- Agent 的消息、工具进度、review 与执行结果仍走 local-agent Agent Session event；Studio core
+- Agent 的消息、工具进度、review 与执行结果仍走 host Agent Session event；Studio core
   不复制这条 conversation stream。resident runtime 可以额外发布与 dispatch receipt 关联的
   无内容 lifecycle observation（queued/running/waiting/completed/interrupted/failed），供
   Console 呈现状态；Console 仅能为其直接通过 HTTP 发起的失败输入创建新的 retry dispatch。
@@ -165,7 +165,7 @@ Studio HTTP transport 与 Plugin 都不解释 continuation，不构造 LangGraph
 checkpoint。checkpoint 持久化保证等待状态不依赖 Host 内存；重连后的用户投射由 Agent
 Session snapshot 恢复。
 
-多 Pet 路由由 local-agent Agent Session listener 在 connection 建立阶段完成。listener 从
+多 Pet 路由由 host Agent Session listener 在 connection 建立阶段完成。listener 从
 Pet-scoped URL/endpoint 选择对应的 `ResidentPetInteraction`，之后继续使用原样的
 `AgentClientMessage` / `AgentServerMessage`，不向 message schema 增加 `petId`。该 route
 已通过多 Pet waiting/snapshot/typed resume/reconnect 验收。具体迁移记录见
@@ -181,12 +181,12 @@ Pet-scoped URL/endpoint 选择对应的 `ResidentPetInteraction`，之后继续�
    import concrete Plugin；
 2. 在监听前完成 Toolkit inventory、全部 resident Pet 与配套 Agent Session interaction
    的 all-or-nothing 初始化；
-3. 启动 local-agent Agent Session WebSocket，供 TUI 与指定 Pet conversation 交互；
+3. 启动 host Agent Session WebSocket，供 TUI 与指定 Pet conversation 交互；
 4. 通过 HTTP Plugin 暴露 Studio dispatch、event 与 Plugin-contributed route；
 5. SIGINT/SIGTERM 只关闭本 Host，并等待全部 lifecycle resource settle。
 
 HTTP Plugin 是唯一 Studio control-plane listener。其他 Plugin 可以向它贡献 route，但不能
-启动第二个 Studio control-plane listener。Agent Session WebSocket 是同进程 local-agent
+启动第二个 Studio control-plane listener。Agent Session WebSocket 是同进程 host
 interaction transport，不是 Studio protocol；Studio 不再提供内建 WebSocket/stdio
 invocation transport。
 

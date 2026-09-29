@@ -1,26 +1,26 @@
 import {
   FileCapabilityArtifactStore,
-} from '../../../local-agent/src/capabilityArtifactStore';
+} from '../../../host/src/capabilityArtifactStore';
 import {
   buildAgentContext,
-} from '../../../local-agent/src/contextLoader';
+} from '../../../host/src/contextLoader';
 import {
   startLocalServer,
-} from '../../../local-agent/src/server';
+} from '../../../host/src/server';
 import {
-  buildLocalAgentRuntimeConfig,
-} from '../../../local-agent/src/config/runtimeConfig';
+  buildHostRuntimeConfig,
+} from '../../../host/src/config/runtimeConfig';
 import {
   createTestModelServerDeps,
-} from '../../../local-agent/src/testing/modelProfiles';
+} from '../../../host/src/testing/modelProfiles';
 import {
   createTestHostToolkitInventory,
-} from '../../../local-agent/src/testing/toolkitInventory';
+} from '../../../host/src/testing/toolkitInventory';
 import {
   createBashToolkit,
   createGitToolkit,
   PosixShellRS,
-} from '../../../local-agent/src/toolkits/local/index';
+} from '../../../host/src/toolkits/local/index';
 import { createPersistentHostGraphService } from './persistentHostGraphService';
 import {
   createProductionToolkitHostGraphService,
@@ -44,7 +44,7 @@ if (
   );
 }
 
-const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+const runtimeConfig = buildHostRuntimeConfig(workdir);
 const graphService = fixture === 'toolkit'
   ? createProductionToolkitHostGraphService()
   : createPersistentHostGraphService();

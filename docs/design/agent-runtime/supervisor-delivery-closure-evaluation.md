@@ -7,7 +7,7 @@
 
 本评估只调用真实 Supervisor 模型；Capability 交付使用合成 fixture，不能代替真实 Studio E2E。
 不访问业务仓库，不执行实际看板操作。example 和预期输出保存在
-`packages/pet-agent/evals/datasets/supervisor-delivery-closure.ts`。
+`tests/agent-evals/src/datasets/supervisor-delivery-closure.ts`。
 
 ## 可观察判定
 
@@ -145,7 +145,7 @@ Wiki 的后续入口均出现过 `Supervisor called a tool unavailable in this i
 
 针对 #813 的另一假设：Supervisor 看到大量 `delegate_capability` 历史调用，是否会
 模仿这些记录而调用未提供的工具。新增独立 runner
-`packages/pet-agent/evals/supervisor-tool-history.eval.ts`，通过真实 Supervisor graph
+`tests/agent-evals/src/supervisor-tool-history.eval.ts`，通过真实 Supervisor graph
 与本机已配置的 DeepSeek V4.1 Flash（API 模型名 `deepseek-flash`）运行合成场景。
 只模拟交付证据，不调用 Capability 执行方，也不访问真实仓库或看板。
 

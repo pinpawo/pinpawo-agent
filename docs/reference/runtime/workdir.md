@@ -3,7 +3,7 @@
 [简体中文](../../zh-CN/reference/runtime/workdir.md)
 
 > **Status: current local-host configuration.** Path resolution is implemented
-> in [`services/local-agent/src/config/runtimeConfig.ts`](../../../services/local-agent/src/config/runtimeConfig.ts).
+> in [`services/host/src/config/runtimeConfig.ts`](../../../services/host/src/config/runtimeConfig.ts).
 
 The local host runs against one effective workdir. It resolves the default in
 this order: `PINPAWO_WORKDIR`, the stored `workdir` setting, then the current
@@ -21,7 +21,7 @@ process directory. Relative and `~/` values are normalized to an absolute path.
     └── tui-sessions-capability-v3.json
 ```
 
-`LocalAgentRuntimeConfig` derives these paths before runtime assembly. Studio
+`HostRuntimeConfig` derives these paths before runtime assembly. Studio
 uses `studio.json` and `pets/` from that state root. Capability artifacts and
 checkpoint/session files are separate host-owned state. A Studio shared wiki,
 due-run store, run identity, and scheduler policy are not part of the current
@@ -52,8 +52,8 @@ project-inspection and Git Toolkit bindings resolve supported relative paths and
 relative or omitted `cwd` against the execution workdir. Absolute paths remain
 absolute. These bindings do not change the process-wide cwd; independent Hosts
 can therefore keep separate execution scopes in one process. The implementation
-is [workdirBinding.ts](../../../services/local-agent/src/toolkits/local/workdirBinding.ts).
+is [workdirBinding.ts](../../../services/host/src/toolkits/local/workdirBinding.ts).
 
 See [Studio configuration](../../studio/configuration.md) for the files Studio
-actually reads, and [the workspace proposal](../../design/local-agent/workspace-runtime-config.md)
+actually reads, and [the workspace proposal](../../design/host/workspace-runtime-config.md)
 for unshipped workspace ideas.

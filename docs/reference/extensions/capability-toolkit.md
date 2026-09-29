@@ -217,7 +217,7 @@ Host RS instances started (failures stay in their status)
 ```
 
 `runAgent()` 和 pet runtime 会为各自的异步 registry generation 调用
-`filterAvailableToolkits()`；local-agent 可以对同一个 Toolkit 实例缓存检查结果，
+`filterAvailableToolkits()`；host 可以对同一个 Toolkit 实例缓存检查结果，
 并通过显式 refresh 重新检查。无论 host 采用哪种刷新策略，编译器看到的都必须是
 本次 generation 的完整有效 Toolkit 集合。
 
@@ -318,15 +318,15 @@ effective workspace，路由清单会将它标为默认候选；其完整文档�
 可用的 Capability 设为默认候选；这只改变路由清单中的候选偏好，不会强制路由或创建独立 executor。代码没有 general fallback executor、
 独立 lane 或单独的 General terminal action。
 
-local-agent 的内建 General 位于：
+host 的内建 General 位于：
 
 ```text
-services/local-agent/src/capabilities/general/
+services/host/src/capabilities/general/
 ├── CAPABILITY.md
 └── index.ts
 ```
 
-`general` 是 local-agent host 的保留名，用户 Capability 不能覆盖。local-agent
+`general` 是 Host 的保留名，用户 Capability 不能覆盖。host
 把它作为 host baseline；内建文档缺失或无效时 registry 初始化失败。pet-agent
 core 仍允许显式受限 workspace 不包含 General，且不会凭空构造一个实现。
 

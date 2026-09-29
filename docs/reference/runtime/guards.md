@@ -153,7 +153,7 @@ results cross boundaries and private control detail does not:
 - **Ephemeral channel**: orchestrator positions emit each record twice — onto
   the LangGraph custom stream (`streamMode: 'custom'`, via the node config's
   `writer`), which is how records surface as root `custom` protocol events for
-  local-agent stream consumers, and via `dispatchCustomEvent`, which is how
+  host stream consumers, and via `dispatchCustomEvent`, which is how
   they reach LangGraph `streamEvents` consumers and the LangSmith trace.
   Subagent middlewares emit runtime records through the shared stream-writer
   envelope so they surface as root `custom` protocol events.

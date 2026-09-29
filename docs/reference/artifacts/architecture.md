@@ -48,7 +48,7 @@ Artifact payload 不进入 LangGraph state。需要完整内容时，消费者�
 
 ### Host store
 
-`services/local-agent/src/capabilityArtifactStore.ts` 实现本地持久化：
+`services/host/src/capabilityArtifactStore.ts` 实现本地持久化：
 
 - 写入内容并返回稳定 `CapabilityArtifactRef`；
 - 按 thread scope 解析 `capability-artifact://` URI；
@@ -57,7 +57,7 @@ Artifact payload 不进入 LangGraph state。需要完整内容时，消费者�
 
 ## 历史 Artifact 发现
 
-历史 artifact 读取不是 Capability 的隐式能力。local-agent 按当前 thread 创建
+历史 artifact 读取不是 Capability 的隐式能力。host 按当前 thread 创建
 `artifact_discovery` Toolkit：
 
 ```text

@@ -1,6 +1,6 @@
 import {
-  buildLocalAgentRuntimeConfig,
-  type LocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
+  type HostRuntimeConfig,
 } from 'pinpawo/host-runtime';
 import {
   startResidentPetAgentSessionTransport,
@@ -10,8 +10,8 @@ import { StudioHost, type StudioHostOptions } from './host/StudioHost';
 
 export type StartStudioHostOptions = Omit<StudioHostOptions, 'runtimeConfig'> & {
   workdir?: string;
-  runtimeConfig?: LocalAgentRuntimeConfig;
-  /** Local-agent Agent Session listener; 0 selects an available loopback port. */
+  runtimeConfig?: HostRuntimeConfig;
+  /** Host Agent Session listener; 0 selects an available loopback port. */
   agentSessionPort?: number;
   agentSessionTransport?: ResidentPetAgentSessionTransportOptions;
   /** Composition hook for deterministic lifecycle tests and embedded Hosts. */
@@ -27,7 +27,7 @@ export type RunningStudioHost = {
 
 function createHost(options: StartStudioHostOptions) {
   const runtimeConfig = options.runtimeConfig
-    ?? buildLocalAgentRuntimeConfig(options.workdir);
+    ?? buildHostRuntimeConfig(options.workdir);
   return new StudioHost({
     runtimeConfig,
     ...(options.resolvePlugin ? { resolvePlugin: options.resolvePlugin } : {}),
@@ -48,7 +48,7 @@ async function initializeHost(options: StartStudioHostOptions) {
 }
 
 /**
- * Start the resident Host and its local-agent conversation listener.
+ * Start the resident Host and its host conversation listener.
  * Studio dispatch/event HTTP is started only by configured Studio Plugins.
  */
 export async function startStudioHost(

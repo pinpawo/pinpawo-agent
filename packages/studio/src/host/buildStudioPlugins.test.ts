@@ -12,7 +12,7 @@ import {
   resolveStudioHostConfig,
   selectStudioPetCapabilities,
 } from './buildStudio';
-import { createTestModelProfileRegistry } from '../../../../services/local-agent/src/testing/modelProfiles';
+import { createTestModelProfileRegistry } from '../../../../services/host/src/testing/modelProfiles';
 import {
   GENERAL_CAPABILITY_NAME,
   defineInstructionDocument,
@@ -22,10 +22,10 @@ import {
 } from '@pinpawo/pet-agent';
 import type { StudioPlugin } from '../studioContract';
 import {
-  buildLocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
   FileSaver,
 } from 'pinpawo/host-runtime';
-import { HostToolkitInventoryStore } from '../../../../services/local-agent/src/toolkits/toolkitInventory';
+import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
 
 function fakePlugin(name = 'kanban'): StudioPlugin {
   const toolkit: AgentToolkit = {
@@ -90,7 +90,7 @@ const artifactStore: CapabilityArtifactStore = {
 };
 
 function residentBuildResources(workdir: string) {
-  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const runtimeConfig = buildHostRuntimeConfig(workdir);
   return {
     toolkitInventory: new HostToolkitInventoryStore(),
     capabilityArtifactStore: artifactStore,

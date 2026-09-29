@@ -11,21 +11,21 @@
   [`types/toolExecution.ts`](../../../packages/pet-agent/src/types/toolExecution.ts)
   （`readToolExecutionContext`）。
 - ShellRS 契约与 POSIX 实现：
-  [`services/local-agent/src/toolkits/local/shellRS.ts`](../../../services/local-agent/src/toolkits/local/shellRS.ts)、
-  [`posixShellRS.ts`](../../../services/local-agent/src/toolkits/local/posixShellRS.ts)。
+  [`services/host/src/toolkits/local/shellRS.ts`](../../../services/host/src/toolkits/local/shellRS.ts)、
+  [`posixShellRS.ts`](../../../services/host/src/toolkits/local/posixShellRS.ts)。
 - BrowserRS 契约与 Chrome Extension 实现：
   [`toolkits/browser/src/browserRS.ts`](../../../toolkits/browser/src/browserRS.ts)、
   [`chromeExtensionBrowserRS.ts`](../../../toolkits/browser/src/chromeExtensionBrowserRS.ts)；
-  服务端 [`browserRSService.ts`](../../../services/local-agent/src/toolkits/browserRSService.ts)、
-  Host 端连接 [`browserRSClient.ts`](../../../services/local-agent/src/toolkits/browserRSClient.ts)。
-- Host 端连接的公共部分：[`rsService/contractClient.ts`](../../../services/local-agent/src/rsService/contractClient.ts)。
+  服务端 [`browserRSService.ts`](../../../services/host/src/toolkits/browserRSService.ts)、
+  Host 端连接 [`browserRSClient.ts`](../../../services/host/src/toolkits/browserRSClient.ts)。
+- Host 端连接的公共部分：[`rsService/contractClient.ts`](../../../services/host/src/rsService/contractClient.ts)。
 - ShellRS 独立服务：服务框架
-  [`services/local-agent/src/rsService/`](../../../services/local-agent/src/rsService/)、
-  服务端 [`shellRSService.ts`](../../../services/local-agent/src/toolkits/local/shellRSService.ts)、
-  Host 端连接 [`shellRSClient.ts`](../../../services/local-agent/src/toolkits/local/shellRSClient.ts)、
-  入口 [`rsServiceEntry.ts`](../../../services/local-agent/src/rsServiceEntry.ts)、
-  管理命令 [`commands/rs.ts`](../../../services/local-agent/src/commands/rs.ts)。
-- Host 装配：[`services/local-agent/src/toolkits/hostRS.ts`](../../../services/local-agent/src/toolkits/hostRS.ts)。
+  [`services/host/src/rsService/`](../../../services/host/src/rsService/)、
+  服务端 [`shellRSService.ts`](../../../services/host/src/toolkits/local/shellRSService.ts)、
+  Host 端连接 [`shellRSClient.ts`](../../../services/host/src/toolkits/local/shellRSClient.ts)、
+  入口 [`rsServiceEntry.ts`](../../../services/host/src/rsServiceEntry.ts)、
+  管理命令 [`commands/rs.ts`](../../../services/host/src/commands/rs.ts)。
+- Host 装配：[`services/host/src/toolkits/hostRS.ts`](../../../services/host/src/toolkits/hostRS.ts)。
 
 ## 概念
 
@@ -119,7 +119,7 @@ Toolkit 用原始参数和该上下文在执行时解释目标：local 工具经
   不自动转后台；`start_process` 显式启动受管任务并立即返回 processId，后续用
   `wait_process` / `list_processes` / `terminate_process` 管理。超时不回滚副作用，
   未确认终止或断连结果未知时不能直接重跑。设计迁移见
-  [Process Runtime 草稿](../../design/local-agent/process-runtime.md)。
+  [Process Runtime 草稿](../../design/host/process-runtime.md)。
 - bash、git、project-inspection 共享 Host 的同一个 ShellRS 实例。git/gh 以 argv
   经 ShellRS 运行。
 - 外部命令只经 ShellRS 执行。代码搜索和 JSON 查询没有专用工具（原 `grep_search` /

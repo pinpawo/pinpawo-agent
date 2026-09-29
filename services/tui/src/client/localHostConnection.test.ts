@@ -75,7 +75,7 @@ test('LocalHostConnection authenticates, parses shared messages, and sends share
   socket.emit('message', { data: '{invalid' });
   await flushTasks();
   assert.deepEqual(events.slice(-2), [
-    'error:local-agent sent an invalid protocol message',
+    'error:host sent an invalid protocol message',
     'close',
   ]);
   assert.equal(socket.closed, true);
@@ -124,7 +124,7 @@ test('LocalHostConnection reports a missing auth token without opening a socket'
 
   assert.equal(factoryCalled, false);
   assert.deepEqual(events, [
-    'error:local-agent auth token is unavailable; start `pinpawo run` first',
+    'error:host auth token is unavailable; start `pinpawo run` first',
     'close',
   ]);
 });

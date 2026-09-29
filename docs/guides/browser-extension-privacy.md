@@ -28,7 +28,7 @@ native host installed on the same computer. The native host forwards the data
 to the locally running PinPawo agent so it can complete the browser task
 requested by the user.
 
-Depending on the user's local-agent configuration, the local agent may send
+Depending on the user's host configuration, the local agent may send
 page content or screenshots to the model provider selected by the user to
 interpret the page and decide the requested browser actions. Processing by that
 provider is governed by the provider configuration and terms selected by the

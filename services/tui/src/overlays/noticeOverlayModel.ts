@@ -55,7 +55,7 @@ export function syncNoticeOverlay(
     )
   ) {
     const message = sessionState.connectionDetail
-      ?? 'local-agent is unavailable';
+      ?? 'host is unavailable';
     if (state.dismissedConnectionError === message) {
       return state;
     }

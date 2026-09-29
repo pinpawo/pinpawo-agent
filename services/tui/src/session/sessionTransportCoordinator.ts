@@ -64,7 +64,7 @@ export class SessionTransportCoordinator {
     if (this.started) return;
     this.started = true;
     this.reconnectAttempt = 0;
-    this.options.onConnection('connecting', 'connecting to local-agent');
+    this.options.onConnection('connecting', 'connecting to host');
     this.connection.connect();
   }
 

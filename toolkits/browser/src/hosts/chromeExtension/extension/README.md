@@ -2,12 +2,12 @@
 
 This MV3 extension is the Browser Toolkit's Chrome companion. It connects one Chrome tab to a running PinPawo local agent through Chrome Native Messaging. Protocol v3 supports navigation, snapshot, trusted click/type/scroll input, wait, chunked text extraction, viewport screenshots and debugger detach.
 
-The extension is developed and versioned inside `@pinpawo-toolkit/browser`. A local-agent build bundles its output beside the Browser Toolkit native host at `dist/toolkits/browser`.
+The extension is developed and versioned inside `@pinpawo-toolkit/browser`. A host build bundles its output beside the Browser Toolkit native host at `dist/toolkits/browser`.
 
 ## Development setup
 
 1. Run the repository `npm run build` (or `npm run build -w @pinpawo-toolkit/browser`).
-2. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `toolkits/browser/dist/hosts/chrome-extension/extension`. A packaged local-agent also reports its `bundledExtensionPath` through `pinpawo browser extension status`.
+2. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `toolkits/browser/dist/hosts/chrome-extension/extension`. A packaged host also reports its `bundledExtensionPath` through `pinpawo browser extension status`.
 3. Copy the extension ID shown by Chrome.
 4. Run `pinpawo browser extension register --extension-id <id>`. Registration preserves previously approved development and Web Store extension IDs.
 5. Set `PINPAWO_BROWSER_BACKEND=extension` and start the local agent.

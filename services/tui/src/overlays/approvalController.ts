@@ -239,7 +239,7 @@ function reviewFailureText(
 ) {
   switch (reason) {
     case 'not-ready':
-      return 'local-agent is not connected';
+      return 'host is not connected';
     case 'closed':
       return 'this review is already closed';
     case 'stale':

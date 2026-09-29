@@ -3,7 +3,7 @@
 状态：Draft，2026-09-16。
 
 为外部 coding agent 的 Studio skill 提供会话观察和审批入口。实现放在
-local-agent 的 Agent Session listener，与 WebSocket 共用 Pet registry、鉴权、
+host 的 Agent Session listener，与 WebSocket 共用 Pet registry、鉴权、
 协议解析、snapshot、审批校验和 conversation coordinator。Studio Plugin 不依赖会话协议。
 
 ## 接口

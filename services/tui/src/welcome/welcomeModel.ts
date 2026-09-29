@@ -46,8 +46,8 @@ export function buildWelcomeLines(input: {
   const model = formatRuntimeModel(input.session) || 'model loading';
   const cwd = input.session.runtime?.cwd?.trim() || 'workspace loading';
   const version = input.version ?? TUI_VERSION;
-  const localAgentVersion = formatVersion(
-    input.hostMetadata?.localAgentVersion,
+  const hostVersion = formatVersion(
+    input.hostMetadata?.hostVersion,
   );
   const shortcuts = contentWidth >= 54
     ? [
@@ -64,7 +64,7 @@ export function buildWelcomeLines(input: {
   const sideBySide = contentWidth >= 64;
   const details = [
     `PinPawo TUI v2 · ${actor}`,
-    `v${version} · local-agent ${localAgentVersion}`,
+    `v${version} · host ${hostVersion}`,
     input.connection,
     '',
     `model         ${model}`,

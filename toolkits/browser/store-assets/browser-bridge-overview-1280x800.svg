@@ -101,7 +101,7 @@
         <circle cx="17" cy="17" r="17" fill="#eaf9ef"/>
         <path d="M10 17h14M13 12l-5 5 5 5M21 12l5 5-5 5" fill="none" stroke="#38a164" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
         <text x="48" y="14" font-size="13" font-weight="700" fill="#33265c">Local Native Messaging</text>
-        <text x="48" y="34" font-size="12" fill="#756b89">The bridge talks to your local-agent.</text>
+        <text x="48" y="34" font-size="12" fill="#756b89">The bridge talks to your host.</text>
       </g>
     </g>
   </g>

@@ -85,7 +85,7 @@ export class LocalHostConnection implements AgentHostConnection {
     const token = this.tokenProvider();
     if (!token) {
       this.handlers.onError(new Error(
-        'local-agent auth token is unavailable; start `pinpawo run` first',
+        'host auth token is unavailable; start `pinpawo run` first',
       ));
       this.handlers.onClose();
       return;
@@ -123,7 +123,7 @@ export class LocalHostConnection implements AgentHostConnection {
           } else {
             this.failSocket(
               socket,
-              new Error('local-agent sent an invalid protocol message'),
+              new Error('host sent an invalid protocol message'),
             );
           }
         })
@@ -142,7 +142,7 @@ export class LocalHostConnection implements AgentHostConnection {
       if (this.socket === socket) {
         this.failSocket(
           socket,
-          new Error(event.message || 'local-agent websocket error'),
+          new Error(event.message || 'host websocket error'),
         );
       }
     };

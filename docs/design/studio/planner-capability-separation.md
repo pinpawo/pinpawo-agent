@@ -17,7 +17,7 @@ Supervisor 根据当前输入和已有事实选择 Capability；不增加固定�
 
 ## 供给边界
 
-`studio-context` 属于 Studio Host 的装配层，和 local-agent 提供的项目只读工具同样通过
+`studio-context` 属于 Studio Host 的装配层，和 host 提供的项目只读工具同样通过
 Host inventory 供给，由 Capability.uses 选择。它在调用时读取当前 Studio registry，
 只返回 `petId/name`，不暴露配置凭据、其他 Pet 文档、工具、会话或 checkpoint。
 

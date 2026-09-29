@@ -15,7 +15,7 @@ import { isHumanReviewBatchInterruptPayload } from '../types/reviewSpec';
  *   tool; the interrupt surfaces through the run's interrupt channel.
  *
  * One reader instance per run: the name memory and dedup sets span the run.
- * Used by the subagent bridge today and by the local-agent root-stream
+ * Used by the subagent bridge today and by the host root-stream
  * operation projection (#322 Phase 3).
  */
 

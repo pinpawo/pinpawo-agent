@@ -26,9 +26,9 @@ the Store item.
 1. Add the tester account or a tester-owned Google Group in the Web Store
    publisher settings.
 2. Install the Private Store item while signed in as that tester.
-3. Install PinPawo local-agent and run
+3. Install PinPawo host and run
    `pinpawo browser extension register`.
-4. Start local-agent with the extension browser backend enabled.
+4. Start host with the extension browser backend enabled.
 5. Bind a safe test tab through the extension action and verify snapshot,
    navigation, click, type, scroll, screenshot, popup recovery, and detach.
 

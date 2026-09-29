@@ -425,7 +425,7 @@ export class BrowserExtensionBridge {
       if (await isSocketAcceptingConnections(this.socketPath)) {
         throw new BrowserBridgeError(
           'browser_bridge_already_running',
-          `another local-agent browser bridge is already listening at ${this.socketPath}`,
+          `another host browser bridge is already listening at ${this.socketPath}`,
         );
       }
       await unlinkIfPresent(this.socketPath);

@@ -1,11 +1,11 @@
 # TUI v2 feature parity
 
 > **Status: historical record.** 这里描述的 legacy Ink 客户端
-> (`services/local-agent/src/tui`) 已删除,`pinpawo tui` 现在是唯一的终端
+> (`services/host/src/tui`) 已删除,`pinpawo tui` 现在是唯一的终端
 > 客户端。本页保留当时的迁移对照,不代表当前行为。
 
 Issue: #454
-Legacy baseline: `services/local-agent/src/tui`
+Legacy baseline: `services/host/src/tui`
 OpenTUI implementation: `services/tui/src`
 
 ## Purpose
@@ -63,7 +63,7 @@ Status meanings:
    - confirm operation output, errors, and `apply_patch` diffs;
    - confirm scrollback-safe assistant Markdown during streaming;
    - confirm subagent progress remains distinct from main-assistant messages.
-2. Exercise a real local-agent run containing:
+2. Exercise a real host run containing:
    user message → streaming assistant/tool activity → subagent output →
    completed assistant message. The deterministic production host and no-smoke
    `main.ts` PTY now cover this exact ordering, including a tool-output update
@@ -116,7 +116,7 @@ The feature-parity milestone is complete only when:
 - the real chat loop presents messages, operations, and subagents in canonical
   order with useful live and completed detail;
 - core composer, attachment, review, session, interrupt, reconnect, and error
-  workflows pass against a real local-agent host;
+  workflows pass against a real Host;
 - known terminal-specific gaps have an explicit fallback;
 - the legacy TUI remains available throughout the migration.
 

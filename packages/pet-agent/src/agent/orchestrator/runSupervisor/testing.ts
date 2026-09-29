@@ -11,6 +11,7 @@ import { AIMessage, AIMessageChunk, ToolMessage, type BaseMessage } from '@langc
 import type { RunnableConfig } from '@langchain/core/runnables';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
 import { supervisorWorkMessages } from './workMessages';
+import { createCapabilityExecutionMessage, type CapabilityExecutionResultRecord } from '../executionMessages';
 import { supervisorControlContext } from './input';
 import { submitPlan, submitPlanSchema } from './submitPlanTool';
 import { adjustPlan, adjustPlanSchema } from './adjustPlanTool';
@@ -154,10 +155,10 @@ export function capabilityResultMessage(state: { runId: string; taskId: string }
   call: { id: string; planItemId: string; delegationId: string; capability: string; task: string; briefing?: string },
   result: { status: string; delivery: unknown; artifacts: unknown[] }) {
   const { id, ...input } = call;
-  return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id,
-    content: JSON.stringify(result), artifact: { ...input, briefing: input.briefing ?? JSON.stringify({ plan: [] }) },
-    status: result.status === 'missing_deliverable' ? 'error' : 'success',
-  }), { runId: state.runId, taskId: state.taskId });
+  return createCapabilityExecutionMessage({ callId: id,
+    execution: { ...input, briefing: input.briefing ?? 'Execute the current objective.' },
+    result: result as CapabilityExecutionResultRecord,
+    metadata: { runId: state.runId, taskId: state.taskId } });
 }
 
 /** Evaluation convenience; production replies exist only as committed messages. */

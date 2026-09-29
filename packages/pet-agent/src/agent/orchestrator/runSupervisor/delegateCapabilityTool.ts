@@ -1,14 +1,13 @@
-import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
 import { currentSupervisorTask } from './state';
-import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
+import { createCapabilityExecutionMessage, DELEGATE_CAPABILITY_TOOL_NAME } from '../executionMessages';
 import { createCapabilityCatalog } from './capabilityCatalog';
 
 export const delegateCapabilitySchema = z.object({
@@ -48,14 +47,13 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       runnableConfig: runtime.config,
     });
     // Native Command tool pattern: use the injected call ID for the actual result.
-    const result = setAgentMessageMetadata(new ToolMessage({
-      name: 'delegate_capability', tool_call_id: runtime.toolCallId,
-      status: execution.status === 'missing_deliverable' ? 'error' : 'success',
-      content: JSON.stringify({ status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts }),
-      artifact: input,
-    }), { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
-      sourceCapability: input.capability, runtimeGenerated: true,
-      ...(execution.tokenUsage ? { capabilityTokenUsage: execution.tokenUsage } : {}),
+    const result = createCapabilityExecutionMessage({
+      callId: runtime.toolCallId,
+      execution: input,
+      result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts },
+      metadata: { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
+        sourceCapability: input.capability, runtimeGenerated: true,
+        ...(execution.tokenUsage ? { capabilityTokenUsage: execution.tokenUsage } : {}) },
     });
     return new Command({ update: {
       messages: [result],
@@ -64,7 +62,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },
     } });
   }, {
-    name: 'delegate_capability', schema: delegateCapabilitySchema, verboseParsingErrors: true,
+    name: DELEGATE_CAPABILITY_TOOL_NAME, schema: delegateCapabilitySchema, verboseParsingErrors: true,
     description: '为当前计划项准备 briefing 并引用相关的已有交付，交给 Capability 执行。运行时确定任务身份与能力；返回后由你继续判断。',
   });
 }

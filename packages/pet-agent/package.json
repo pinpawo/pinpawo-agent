@@ -21,6 +21,11 @@
       "types": "./dist/protocolValidation.d.ts",
       "import": "./dist/protocolValidation.js",
       "default": "./dist/protocolValidation.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
     }
   },
   "files": [
@@ -29,7 +34,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts src/protocolValidation.ts --format esm --dts --clean --out-dir dist --platform node --target node24",
+    "build": "tsup src/index.ts src/protocolValidation.ts src/testing/index.ts --format esm --dts --clean --out-dir dist --platform node --target node24",
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test",
     "typecheck": "tsc --noEmit",

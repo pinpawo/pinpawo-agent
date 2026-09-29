@@ -1,3 +1,4 @@
+import { createCapabilityExecutionMessage } from '@pinpawo/pet-agent/testing';
 import { createDeliveryResult, withDeliveryCalls } from '../../../../packages/pet-agent/src/testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -46,10 +47,9 @@ test('readTuiCheckpointMessages hides paired, private and unmatched Capability d
   const call = setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
     id: 'dispatch-1', name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
   }] }), { ...metadata, source: 'supervisor' });
-  const result = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: 'dispatch-1', artifact: execution,
-    content: JSON.stringify({ status: 'returned', delivery: { id: 'delivery-1', task: execution.task,
-      text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } }),
-  }), metadata);
+  const result = createCapabilityExecutionMessage({ callId: 'dispatch-1', execution, metadata,
+    result: { status: 'returned', artifacts: [], delivery: { id: 'delivery-1', task: execution.task,
+      text: 'Verified delivery', scope: { ...metadata, delegationId: execution.delegationId, lane: 'capability:general' } } } });
   assert.deepEqual(readTuiCheckpointMessages([call, result]), []);
   assert.deepEqual(readTuiCheckpointMessages([result]), []);
   for (const overrides of [{ lane: 'capability:general' as const }, { runId: 'other-run' }]) {

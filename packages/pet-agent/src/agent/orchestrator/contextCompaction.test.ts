@@ -1,3 +1,4 @@
+import { createCapabilityExecutionMessage } from './executionMessages';
 import { createDeliveryResult, withDeliveryCalls } from '../../testing/capabilityDelivery';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,10 +36,14 @@ function executionCall(id: string, planItemId: string) {
     id, name: 'delegate_capability', args: { briefing: 'Execute the current objective.' },
   }] }), { runId: 'run', taskId: 'trace', source: 'supervisor' });
 }
-function executionResult(id: string, planItemId: string, content: string) {
-  return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: id, content,
-    artifact: { planItemId, delegationId: `delegation:${planItemId}`, capability: 'general', task: `Work on ${planItemId}`, briefing: 'Execute the confirmed task.' },
-  }), { runId: 'run', taskId: 'trace' });
+function executionResult(id: string, planItemId: string, text: string, taskId = 'trace') {
+  const delegationId = `delegation:${planItemId}`;
+  const task = `Work on ${planItemId}`;
+  return createCapabilityExecutionMessage({ callId: id,
+    execution: { planItemId, delegationId, capability: 'general', task, briefing: 'Execute the confirmed task.' },
+    result: { status: 'returned', artifacts: [], delivery: { id: `delivery:${id}`, task, text,
+      scope: { lane: 'capability:general', runId: 'run', taskId, delegationId } } },
+    metadata: { runId: 'run', taskId } });
 }
 
 test('compaction retains unfinished execution pairs and private lanes without exposing them to the summary', async () => {
@@ -379,7 +384,7 @@ test('aggressive compaction keeps all main attempts of unfinished work and summa
 test('compaction separates current-task evidence from older history and folds each summary on resume', async () => {
   const task = (message: BaseMessage) => setAgentMessageMetadata(message, { taskId: 'current-goal' });
   const call = task(executionCall('active-evidence', 'active'));
-  const evidence = task(executionResult('active-evidence', 'active', 'KEEP_VERBATIM'));
+  const evidence = executionResult('active-evidence', 'active', 'KEEP_VERBATIM', 'current-goal');
   const requests: string[] = [];
   const model = { invoke: async (messages: BaseMessage[]) => {
     const text = String(messages.at(-1)?.content); requests.push(text);

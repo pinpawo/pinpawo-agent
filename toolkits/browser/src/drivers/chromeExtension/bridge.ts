@@ -14,6 +14,7 @@ import {
   BROWSER_EXTENSION_PROTOCOL_VERSION,
   BROWSER_LEGACY_CONTEXT_ID,
   type BrowserCommandMessage,
+  type BrowserContextTargetState,
   type BrowserCancelMessage,
   type BrowserExtensionCapability,
   type BrowserExtensionCommandName,
@@ -149,6 +150,8 @@ export type BrowserBridgeStatus = {
   activeTabId: number | null;
   activeTabBinding: 'agent' | 'user' | null;
   userBoundOrigin: string | null;
+  /** Each Agent session context's current tab and user grant (#867). */
+  contextTargets?: Record<string, BrowserContextTargetState>;
   stateRevision: number | null;
   capabilities: BrowserExtensionCapability[];
   connectionGeneration?: number;
@@ -276,6 +279,7 @@ export class BrowserExtensionBridge {
       activeTabId: activeTab?.tabId ?? null,
       activeTabBinding: activeTab?.binding ?? null,
       userBoundOrigin: this.registration?.state?.userBoundOrigin ?? null,
+      contextTargets: { ...(this.registration?.state?.contexts ?? {}) },
       stateRevision: this.registration?.state?.revision ?? null,
       capabilities: [...(this.registration?.capabilities ?? [])],
       connectionGeneration: this.connectionGeneration,

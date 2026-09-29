@@ -41,7 +41,14 @@ import {
   selectNavigationTarget,
   shouldTrackPopup,
 } from './targetLifecycle.js';
-import { createBrowserStateTracker } from './browserState.js';
+import { createBrowserStateTracker, type ContextTargetState } from './browserState.js';
+import {
+  contextForGroup,
+  contextGroupColor,
+  contextGroupLabel,
+  parsePersistedContextGroups,
+  type ContextGroup,
+} from './tabGroups.js';
 import { calculateReconnectDelay } from './reconnect.js';
 import {
   documentReadyEvent,
@@ -71,6 +78,7 @@ const ALLOWED_CDP_COMMANDS = new Set([
 ]);
 const SESSION_KEY = 'pinpawoBrowserTarget';
 const CONTEXT_TARGETS_KEY = 'pinpawoBrowserTargetsByContext';
+const CONTEXT_GROUPS_KEY = 'pinpawoTabGroupsByContext';
 const RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const STABLE_CONNECTION_RESET_MS = 10_000;
@@ -111,6 +119,14 @@ type BrowserTargetContext = {
 };
 
 const targetContexts = new Map<string, BrowserTargetContext>();
+/** Each Agent session context's tab group (#867). */
+const groupsByContext = new Map<string, ContextGroup>();
+let groupSequence = 0;
+/**
+ * Origins the user approved by dragging a tab into a session's group, per tab.
+ * Like the approval they replace, they live only in the running extension.
+ */
+const grantsByTab = new Map<number, string>();
 let activeBrowserContextId = LEGACY_BROWSER_CONTEXT_ID;
 let targets = createTargetStack();
 let userBoundOrigin: string | null = null;
@@ -264,8 +280,12 @@ async function saveTarget(nextTarget: BrowserTarget | null, options: TargetBindO
   const target = targets.bind(nextTarget, options);
   if (Object.hasOwn(options, 'userBoundOrigin')) {
     userBoundOrigin = options.userBoundOrigin;
+    if (target && options.userBoundOrigin) grantsByTab.set(target.tabId, options.userBoundOrigin);
   } else if (target?.binding !== 'user') {
     userBoundOrigin = null;
+  } else if (grantsByTab.has(target.tabId)) {
+    // Falling back to an earlier user-granted tab restores its own grant.
+    userBoundOrigin = grantsByTab.get(target.tabId) ?? null;
   }
   persistActiveBrowserContext();
   const stored = await chrome.storage.local.get(CONTEXT_TARGETS_KEY);
@@ -287,9 +307,26 @@ async function saveTarget(nextTarget: BrowserTarget | null, options: TargetBindO
   publishBrowserStateChange();
 }
 
+function contextTargetStates(): Record<string, ContextTargetState> {
+  persistActiveBrowserContext();
+  const states: Record<string, ContextTargetState> = {};
+  for (const [contextId, context] of targetContexts) {
+    if (contextId === LEGACY_BROWSER_CONTEXT_ID) continue;
+    const current = context.targets.current();
+    if (!current) continue;
+    states[contextId] = {
+      ...current,
+      ...(current.binding === 'user' && context.userBoundOrigin
+        ? { userBoundOrigin: context.userBoundOrigin }
+        : {}),
+    };
+  }
+  return states;
+}
+
 function registerMessage() {
   const target = targets.current();
-  const state = browserState.snapshot(target, attachedTabId, userBoundOrigin);
+  const state = browserState.snapshot(target, attachedTabId, userBoundOrigin, contextTargetStates());
   return {
     type: 'browser.register',
     protocolVersion: PROTOCOL_VERSION,
@@ -463,6 +500,12 @@ async function ensureTarget() {
   );
 }
 
+/**
+ * The tab browser_open navigates. Tabs the session already holds (a tab the
+ * user handed over, earlier popups) stay in its fallback chain rather than
+ * being dropped: they remain in the session's tab group, and the group is
+ * what the session holds (#867).
+ */
 async function prepareNavigationTarget() {
   const existing = targets.current();
   let existingTab = null;
@@ -470,22 +513,19 @@ async function prepareNavigationTarget() {
     try {
       existingTab = await chrome.tabs.get(existing.tabId);
     } catch {
-      await saveTarget(null, { resetHistory: true });
+      targets.remove(existing.tabId);
     }
   }
   if (
     selectNavigationTarget(existing) === 'reuse_agent_tab'
     && isWebTab(existingTab)
   ) {
-    await saveTarget(
-      { tabId: existing.tabId, binding: 'agent' },
-      { resetHistory: true },
-    );
+    await saveTarget({ tabId: existing.tabId, binding: 'agent' });
     return targets.current();
   }
 
   if (existing?.binding === 'agent' && existingTab) {
-    await saveTarget(null, { resetHistory: true });
+    targets.remove(existing.tabId);
     await chrome.tabs.remove(existing.tabId).catch(() => {});
   }
 
@@ -498,7 +538,7 @@ async function prepareNavigationTarget() {
   if (!Number.isInteger(tab.id)) {
     throw new ExtensionError('target_create_failed', 'Chrome did not return a tab id');
   }
-  await saveTarget({ tabId: tab.id, binding: 'agent' }, { resetHistory: true });
+  await saveTarget({ tabId: tab.id, binding: 'agent' }, { rememberCurrent: true });
   return targets.current();
 }
 
@@ -524,6 +564,7 @@ async function switchToPopup(tabId, parentTarget, deadlineAt) {
       { tabId, binding: parentTarget.binding },
       { rememberCurrent: true },
     );
+    await joinContextGroup(tabId);
     await waitForTab(tabId, deadlineAt);
     await activateTarget(tabId);
     await attach(tabId);
@@ -539,6 +580,101 @@ async function switchToPopup(tabId, parentTarget, deadlineAt) {
     }
     throw error;
   }
+}
+
+async function persistContextGroups() {
+  await chrome.storage.local.set({
+    [CONTEXT_GROUPS_KEY]: { sequence: groupSequence, groups: Object.fromEntries(groupsByContext) },
+  });
+}
+
+/** Groups outlive the service worker; ids of groups Chrome no longer has are dropped. */
+async function restoreContextGroups() {
+  const stored = parsePersistedContextGroups(
+    (await chrome.storage.local.get(CONTEXT_GROUPS_KEY))[CONTEXT_GROUPS_KEY],
+  );
+  groupSequence = stored.sequence;
+  for (const [contextId, group] of Object.entries(stored.groups)) {
+    try {
+      await chrome.tabGroups.get(group.groupId);
+      groupsByContext.set(contextId, group);
+    } catch {
+      // Closed groups, or ids from an earlier browser session, are gone.
+    }
+  }
+  await persistContextGroups();
+}
+
+/**
+ * Put a tab the active context holds into that context's group, creating the
+ * group on first use. Grouping is presentation and the hand-off channel, not
+ * what makes the tab the context's: a tab Chrome refuses to group (one in a
+ * popup window) stays usable.
+ */
+async function joinContextGroup(tabId) {
+  const contextId = activeBrowserContextId;
+  if (contextId === LEGACY_BROWSER_CONTEXT_ID) return;
+  try {
+    const existing = groupsByContext.get(contextId);
+    if (existing) {
+      try {
+        await chrome.tabs.group({ groupId: existing.groupId, tabIds: tabId });
+        return;
+      } catch {
+        groupsByContext.delete(contextId);
+      }
+    }
+    const groupId = await chrome.tabs.group({ tabIds: tabId });
+    groupSequence += 1;
+    const label = contextGroupLabel(groupSequence);
+    await chrome.tabGroups.update(groupId, { title: label, color: contextGroupColor(groupSequence) });
+    groupsByContext.set(contextId, { groupId, label });
+    await persistContextGroups();
+  } catch (error) {
+    console.warn(
+      '[pinpawo-extension] tab was not grouped:',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/**
+ * A tab left the context that held it: forget it there, and if it was the
+ * current tab fall back to the previous one without focusing it — the user is
+ * working in the tab they just moved.
+ */
+async function releaseTarget(tabId) {
+  const removed = targets.remove(tabId);
+  grantsByTab.delete(tabId);
+  if (attachedTabId === tabId) await detach();
+  await saveTarget(removed.current);
+}
+
+async function handleGroupMembership(tabId, groupId) {
+  const holder = browserContextForTab(tabId);
+  const joined = groupId === chrome.tabGroups.TAB_GROUP_ID_NONE
+    ? null
+    : contextForGroup(groupsByContext, groupId);
+  if (holder === joined) return;
+  if (holder && holder !== LEGACY_BROWSER_CONTEXT_ID) {
+    activateBrowserContext(holder);
+    await releaseTarget(tabId);
+  }
+  if (!joined) return;
+  let origin = null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    origin = isWebTab(tab) ? originOf(tab.url ?? tab.pendingUrl) : null;
+  } catch {
+    return;
+  }
+  // Only an http(s) page can be approved; anything else stays in the group
+  // without becoming the session's tab.
+  if (!origin) return;
+  activateBrowserContext(joined);
+  // The user's hand-off becomes the session's current tab (#867); the tab it
+  // replaces stays reachable as the fallback.
+  await saveTarget({ tabId, binding: 'user' }, { rememberCurrent: true, userBoundOrigin: origin });
 }
 
 async function handleRemovedTarget(tabId) {
@@ -1445,6 +1581,7 @@ async function executeCommandBody(command) {
     if (!activeTarget) {
       throw new ExtensionError('target_create_failed', 'Chrome did not provide a navigation target');
     }
+    await joinContextGroup(activeTarget.tabId);
     await activateTarget(activeTarget.tabId);
     await attach(activeTarget.tabId);
     emitLifecycleEvent('navigation.requested', activeTarget.tabId, { url });
@@ -1559,22 +1696,27 @@ async function handleCommand(value) {
   }
 }
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!Number.isInteger(tab.id)) return;
-  let approvedOrigin = null;
-  try {
-    approvedOrigin = typeof tab.url === 'string' ? originOf(tab.url) : null;
-  } catch {
-    // The binding remains visible, but only an http(s) user gesture can
-    // authorize browser reads or interactions.
-  }
-  await enqueueExtensionWork(async () => {
-    activateBrowserContext(LEGACY_BROWSER_CONTEXT_ID);
-    await detach();
-    await saveTarget(
-      { tabId: tab.id, binding: 'user' },
-      { resetHistory: true, userBoundOrigin: approvedOrigin },
-    );
+// A tab is handed to an Agent session by dragging it into that session's
+// PinPawo group, and taken back by dragging it out (#867). Group changes the
+// extension makes itself land on a tab the session already holds, so they
+// are no-ops here.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.groupId === undefined) return;
+  void enqueueExtensionWork(() => handleGroupMembership(tabId, changeInfo.groupId))
+    .catch((error) => {
+      console.warn(
+        '[pinpawo-extension] tab group change was not applied:',
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+});
+
+chrome.tabGroups.onRemoved.addListener((group) => {
+  void enqueueExtensionWork(async () => {
+    const contextId = contextForGroup(groupsByContext, group.id);
+    if (!contextId) return;
+    groupsByContext.delete(contextId);
+    await persistContextGroups();
   });
 });
 
@@ -1589,6 +1731,7 @@ chrome.tabs.onCreated.addListener((tab) => {
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await enqueueExtensionWork(async () => {
+    grantsByTab.delete(tabId);
     const contextId = browserContextForTab(tabId);
     if (!contextId) return;
     activateBrowserContext(contextId);
@@ -1682,6 +1825,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 async function initialize() {
   await restoreTarget();
+  await restoreContextGroups();
   connectNativeHost();
 }
 

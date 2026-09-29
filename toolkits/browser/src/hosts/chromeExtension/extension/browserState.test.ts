@@ -40,3 +40,13 @@ test('browser state exposes an origin only for an explicit user binding', () => 
     activeTab: agentTarget,
   });
 });
+
+test('browser state reports every context\'s current tab and user grant (#867)', () => {
+  const state = createBrowserStateTracker();
+  const contexts = {
+    'context-a': { tabId: 42, binding: 'user' as const, userBoundOrigin: 'https://mail.example' },
+    'context-b': { tabId: 7, binding: 'agent' as const },
+  };
+  assert.deepEqual(state.snapshot(null, null, null, contexts).contexts, contexts);
+  assert.equal('contexts' in state.snapshot(null, null), false);
+});

@@ -40,9 +40,20 @@ function retainsOwnerAfterOpenFailure(error: unknown): boolean {
     && error.code === 'navigation_timeout';
 }
 
+export type BrowserContextOwnershipOptions = {
+  /**
+   * Let an operation claim a context no thread owns yet. For a context that
+   * belongs to one Agent session (BrowserRS), where the user can hand the
+   * session a tab through its tab group before it ever opened one (#867).
+   */
+  claimOnUse?: boolean;
+};
+
 export class BrowserContextOwnership {
   private owner: BrowserExecutionOwner | null = null;
   private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(private readonly options: BrowserContextOwnershipOptions = {}) {}
 
   private enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const result = this.operationTail.then(async () => {
@@ -68,6 +79,12 @@ export class BrowserContextOwnership {
   }
 
   private assertCurrentOwner(owner: BrowserExecutionOwner): void {
+    if (!this.owner && this.options.claimOnUse) {
+      // Whether there is a page to act on is the page's question: without a
+      // hand-off or an open, the session itself reports browser_not_open.
+      this.owner = owner;
+      return;
+    }
     if (!this.owner) {
       throw new BrowserOperationError(
         'browser_not_open',

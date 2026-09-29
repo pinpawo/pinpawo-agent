@@ -280,3 +280,35 @@ test('browser extension protocol rejects a malformed event payload', () => {
     payload: 'not-an-object',
   }), /payload must be an object/);
 });
+
+test('browser extension protocol carries each context\'s current tab and user grant (#867)', () => {
+  const register = (contexts: unknown) => parseExtensionToAgentMessage({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'extension-1',
+    capabilities: ['snapshot'],
+    state: { revision: 1, debuggerAttached: false, contexts },
+  });
+
+  const message = register({
+    'context-a': { tabId: 42, binding: 'user', userBoundOrigin: 'https://mail.example' },
+    'context-b': { tabId: 7, binding: 'agent' },
+  });
+  assert.equal(message.type, 'browser.register');
+  assert.deepEqual(message.state?.contexts, {
+    'context-a': { tabId: 42, binding: 'user', userBoundOrigin: 'https://mail.example' },
+    'context-b': { tabId: 7, binding: 'agent' },
+  });
+
+  assert.throws(
+    () => register({ 'context-a': { tabId: 7, binding: 'agent', userBoundOrigin: 'https://x.example' } }),
+    /requires a user-bound tab/,
+  );
+  assert.throws(
+    () => register({ 'context-a': { tabId: 42, binding: 'user', userBoundOrigin: 'https://x.example/path' } }),
+    /must be an http\(s\) origin/,
+  );
+  assert.throws(() => register({ 'context-a': { tabId: -1, binding: 'user' } }), /non-negative integer/);
+  assert.throws(() => register([]), /must be an object/);
+});

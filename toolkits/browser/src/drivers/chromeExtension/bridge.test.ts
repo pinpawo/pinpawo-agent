@@ -998,3 +998,25 @@ test('a page-mutating command in flight when the extension disconnects is report
     }),
   );
 });
+
+test('bridge status exposes each context\'s current tab and user grant (#867)', async (t) => {
+  const { bridge, peer } = await startRegisteredBridge(t);
+  assert.deepEqual(bridge.getStatus().contextTargets, {});
+
+  peer.send({
+    type: 'browser.register',
+    protocolVersion: BROWSER_EXTENSION_PROTOCOL_VERSION,
+    connectionId: 'connection-1',
+    extensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    capabilities: ['navigate', 'snapshot', 'click', 'type', 'scroll'],
+    state: {
+      revision: 2,
+      debuggerAttached: false,
+      contexts: { 'context-a': { tabId: 42, binding: 'user', userBoundOrigin: 'https://mail.example' } },
+    },
+  });
+  await waitUntil(() => bridge.getStatus().stateRevision === 2);
+  assert.deepEqual(bridge.getStatus().contextTargets, {
+    'context-a': { tabId: 42, binding: 'user', userBoundOrigin: 'https://mail.example' },
+  });
+});

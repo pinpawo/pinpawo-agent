@@ -1,5 +1,4 @@
 import type { BaseMessage } from '@langchain/core/messages';
-import { randomUUID } from 'node:crypto';
 
 export type CapabilityMessageLane = `capability:${string}`;
 
@@ -27,11 +26,6 @@ export function setAgentMessageMetadata(
     pinpawo: { ...getAgentMessageMetadata(message), ...patch },
   };
   return message;
-}
-
-export function ensureAgentMessageId(message: BaseMessage): string {
-  message.id ??= randomUUID();
-  return message.id;
 }
 
 export function getAgentMessageLane(message: BaseMessage): string | null {

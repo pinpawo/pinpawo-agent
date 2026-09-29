@@ -236,12 +236,10 @@ export type {
   OrchestratorInvokeOptions,
   OrchestratorGraph,
   OrchestratorStateType,
-  OrchestrationDecisionStructuredOutputConfig,
 } from './agent/createAgentRuntime';
 export {
   resolveHumanReviewBatchResponse,
   resolveHumanReviewBatchResume,
-  resolveHumanReviewResume,
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './agent/orchestrator/review/reviewResponseResolver';
@@ -275,7 +273,6 @@ export {
   AuthorizationPolicies,
   buildStandardReviewOptions,
   ReviewPolicies,
-  reviewPolicies,
 } from './autoReview/reviewPolicies';
 export type {
   AuthorizationMode,
@@ -285,7 +282,6 @@ export type {
   ReviewUnavailableBehavior,
 } from './autoReview/reviewPolicies';
 export type {
-  ResolveGlobalReviewPolicyOptions,
   BuiltinGlobalReviewPolicyMode,
   GlobalReviewPolicy,
   GlobalReviewPolicyContext,
@@ -369,5 +365,4 @@ export {
 export { isGraphRecursionLimitError } from './utils/graphErrors';
 export { clipForPrompt } from './agent/orchestrator/utils';
 export { createAutoReviewer } from './autoReview';
-export { ReviewPolicyPresets } from './autoReview';
 export type { AutoReviewer, AutoReviewInput, AutoReviewAction, AutoReviewResult, ReviewAssessment } from './autoReview';

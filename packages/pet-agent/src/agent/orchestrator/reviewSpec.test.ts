@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  resolveHumanReviewResume,
+  resolveHumanReviewBatchResume,
   resolveHumanReviewResponse,
   ReviewResponseResolutionError,
 } from './review/reviewResponseResolver';
@@ -222,9 +222,13 @@ test('resolveHumanReviewResponse resolves respond input into decision and displa
   });
 });
 
-test('resolveHumanReviewResume resolves canonical responses only', () => {
+function resumeOne(response: unknown) {
+  return resolveHumanReviewBatchResume([samplePendingReview()], { decisions: [response] })[0];
+}
+
+test('batch resume resolves canonical responses only', () => {
   assert.deepEqual(
-    resolveHumanReviewResume(samplePendingReview(), {
+    resumeOne({
       reviewId: 'review-1',
       selectedOptionId: 'approve-with-auth',
     }).effects,
@@ -245,15 +249,15 @@ test('resolveHumanReviewResponse rejects stale review responses', () => {
   );
 });
 
-test('resolveHumanReviewResume rejects legacy decisions and extra response fields', () => {
+test('batch resume rejects legacy decisions and extra response fields', () => {
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       decisions: [{ type: 'approve' }],
     }),
     'invalid_response',
   );
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       reviewId: 'old-review',
       selectedOptionId: 'approve',
       decisions: [{ type: 'approve' }],
@@ -261,14 +265,14 @@ test('resolveHumanReviewResume rejects legacy decisions and extra response field
     'invalid_response',
   );
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       selectedOptionId: 'approve',
       decisions: [{ type: 'approve' }],
     }),
     'invalid_response',
   );
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       reviewId: 'review-1',
       selectedOptionId: 'approve',
       decision: { type: 'approve' },
@@ -276,7 +280,7 @@ test('resolveHumanReviewResume rejects legacy decisions and extra response field
     'invalid_response',
   );
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       reviewId: 'review-1',
       selectedOptionId: 'approve',
       effects: [],
@@ -284,7 +288,7 @@ test('resolveHumanReviewResume rejects legacy decisions and extra response field
     'invalid_response',
   );
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       type: 'human_review_response',
       reviewId: 'review-1',
       selectedOptionId: 'approve',
@@ -292,7 +296,7 @@ test('resolveHumanReviewResume rejects legacy decisions and extra response field
     'invalid_response',
   );
   assertResolutionError(
-    () => resolveHumanReviewResume(samplePendingReview(), {
+    () => resumeOne({
       reviewId: 'review-1',
       selectedOptionId: 'respond',
       input: 'please continue',

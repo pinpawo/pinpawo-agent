@@ -1,16 +1,10 @@
-import type { OrchestratorStateType } from './state';
-
 /**
  * Orchestrator control-flow primitives.
  *
  * Guard rules live in `agent/orchestrator/guardDefinitions` and are evaluated
  * by their owning positions via `evaluateGuard` (see docs/reference/runtime/guards.md).
- * This module keeps the remaining graph-local primitives: state patches and
- * recursion limits.
+ * This module keeps the remaining graph-local primitive: the recursion limit.
  */
-
-/** A patch returned by a guard/decision; merged into orchestrator state by the graph. */
-export type OrchestratorStatePatch = Partial<OrchestratorStateType>;
 
 /**
  * The orchestrator graph's hard `recursionLimit` — a last-resort breaker for a

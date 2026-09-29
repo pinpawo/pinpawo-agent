@@ -12,21 +12,37 @@ import {
 } from '../review/globalReviewPolicy';
 import type { OrchestratorConfig, OrchestratorInvokeOptions } from '../types';
 
+/**
+ * Invoke options arrive through the untyped `configurable` bag. An absent
+ * option keeps its default; a present but malformed one is a Host error and
+ * fails the run instead of being dropped or coerced.
+ */
 export function getInvokeOptions(runnableConfig?: RunnableConfig): OrchestratorInvokeOptions {
   const cfg = runnableConfig?.configurable ?? {};
-  const registry = cfg.registry as CompiledAgentRegistry | undefined;
   return {
-    registry,
-    reviewCapabilities: readToolkitReviewCapabilities(cfg.reviewCapabilities),
-    globalReviewPolicy: readGlobalReviewPolicy(cfg.globalReviewPolicy),
-    allowedCapabilityNames: Array.isArray(
-      (cfg as { allowedCapabilityNames?: unknown }).allowedCapabilityNames,
-    )
-      ? (cfg as { allowedCapabilityNames: unknown[] }).allowedCapabilityNames.filter(
-          (name): name is string => typeof name === 'string' && name.length > 0,
-      )
-      : undefined,
+    registry: cfg.registry as CompiledAgentRegistry | undefined,
+    reviewCapabilities: cfg.reviewCapabilities === undefined
+      ? undefined : readToolkitReviewCapabilities(cfg.reviewCapabilities),
+    globalReviewPolicy: cfg.globalReviewPolicy === undefined
+      ? undefined : readGlobalReviewPolicy(cfg.globalReviewPolicy),
+    allowedCapabilityNames: cfg.allowedCapabilityNames === undefined
+      ? undefined : readAllowedCapabilityNames(cfg.allowedCapabilityNames),
   };
+}
+
+function invalidInvokeOption(name: string, expected: string): never {
+  throw new Error(`Invalid configurable.${name}: expected ${expected}.`);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readAllowedCapabilityNames(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((name) => typeof name === 'string' && name.length > 0)) {
+    invalidInvokeOption('allowedCapabilityNames', 'an array of non-empty Capability names');
+  }
+  return value;
 }
 
 export function getInvokeRegistry(runnableConfig?: RunnableConfig): CompiledAgentRegistry {
@@ -39,76 +55,41 @@ export function getInvokeRegistry(runnableConfig?: RunnableConfig): CompiledAgen
   return registry;
 }
 
-function readGlobalReviewPolicyMode(value: unknown): GlobalReviewPolicyMode | null {
-  if (
-    value === GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION
-    || value === GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION
-    || value === GLOBAL_REVIEW_POLICY_MODE.FULL_ACCESS
-    || value === GLOBAL_REVIEW_POLICY_MODE.CUSTOM
-  ) {
-    return value;
-  }
-  if (value === 'ask') {
-    return GLOBAL_REVIEW_POLICY_MODE.REQUIRE_AUTHORIZATION;
-  }
-  if (value === 'auto') {
-    return GLOBAL_REVIEW_POLICY_MODE.AUTO_AUTHORIZATION;
-  }
-  return null;
-}
+const GLOBAL_REVIEW_POLICY_MODES: readonly GlobalReviewPolicyMode[] = Object.values(GLOBAL_REVIEW_POLICY_MODE);
 
-function warnBareCustomGlobalReviewPolicy() {
-  console.warn(
-    '[pet-agent] custom global review policy requires a resolver; falling back to require_authorization.',
-  );
-}
-
-function readGlobalReviewPolicy(value: unknown): GlobalReviewPolicy | undefined {
-  const directMode = readGlobalReviewPolicyMode(value);
-  if (directMode) {
-    if (directMode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
-      warnBareCustomGlobalReviewPolicy();
-      return undefined;
-    }
-    return { mode: directMode };
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const mode = readGlobalReviewPolicyMode(record.mode);
-  if (!mode) {
-    return undefined;
+function readGlobalReviewPolicy(value: unknown): GlobalReviewPolicy {
+  const expected = 'a GlobalReviewPolicy object';
+  if (!isPlainRecord(value)) invalidInvokeOption('globalReviewPolicy', expected);
+  const mode = value.mode;
+  if (!GLOBAL_REVIEW_POLICY_MODES.includes(mode as GlobalReviewPolicyMode)) {
+    invalidInvokeOption('globalReviewPolicy.mode', `one of ${GLOBAL_REVIEW_POLICY_MODES.join(', ')}`);
   }
   if (mode === GLOBAL_REVIEW_POLICY_MODE.CUSTOM) {
-    if (typeof record.resolve !== 'function') {
-      warnBareCustomGlobalReviewPolicy();
-      return undefined;
+    if (typeof value.resolve !== 'function') invalidInvokeOption('globalReviewPolicy.resolve', 'a function for custom mode');
+    if (value.resolveBatch !== undefined && typeof value.resolveBatch !== 'function') {
+      invalidInvokeOption('globalReviewPolicy.resolveBatch', 'a function');
+    }
+    if (value.reuseAutoAuthorizations !== undefined && typeof value.reuseAutoAuthorizations !== 'boolean') {
+      invalidInvokeOption('globalReviewPolicy.reuseAutoAuthorizations', 'a boolean');
     }
     return {
       mode,
-      resolve: record.resolve as GlobalReviewPolicyResolver,
-      ...(typeof record.resolveBatch === 'function'
-        ? { resolveBatch: record.resolveBatch as GlobalReviewPolicyBatchResolver }
-        : {}),
-      ...(record.reuseAutoAuthorizations === true
-        ? { reuseAutoAuthorizations: true }
-        : {}),
+      resolve: value.resolve as GlobalReviewPolicyResolver,
+      ...(value.resolveBatch ? { resolveBatch: value.resolveBatch as GlobalReviewPolicyBatchResolver } : {}),
+      ...(value.reuseAutoAuthorizations ? { reuseAutoAuthorizations: true } : {}),
     };
   }
-  const structuredOutput = record.structuredOutput
-    && typeof record.structuredOutput === 'object'
-    && !Array.isArray(record.structuredOutput)
-    ? record.structuredOutput as GlobalReviewPolicyStructuredOutputConfig
-    : undefined;
-  const safetyLevel = isToolAuthorizationSafetyLevel(record.safetyLevel)
-    ? record.safetyLevel
-    : undefined;
+  if (value.safetyLevel !== undefined && !isToolAuthorizationSafetyLevel(value.safetyLevel)) {
+    invalidInvokeOption('globalReviewPolicy.safetyLevel', 'a ToolAuthorizationSafetyLevel');
+  }
+  if (value.structuredOutput !== undefined && !isPlainRecord(value.structuredOutput)) {
+    invalidInvokeOption('globalReviewPolicy.structuredOutput', 'an object');
+  }
   return {
-    mode,
-    ...(safetyLevel ? { safetyLevel } : {}),
-    ...(structuredOutput ? { structuredOutput } : {}),
-  };
+    mode: mode as Exclude<GlobalReviewPolicyMode, typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM>,
+    ...(value.safetyLevel ? { safetyLevel: value.safetyLevel } : {}),
+    ...(value.structuredOutput ? { structuredOutput: value.structuredOutput as GlobalReviewPolicyStructuredOutputConfig } : {}),
+  } as GlobalReviewPolicy;
 }
 
 export function readThreadId(runnableConfig?: RunnableConfig): string | null {
@@ -116,17 +97,14 @@ export function readThreadId(runnableConfig?: RunnableConfig): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilities | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (typeof record.humanReview !== 'boolean' || typeof record.sessionAuthorization !== 'boolean') {
-    return undefined;
+function readToolkitReviewCapabilities(value: unknown): ToolkitReviewCapabilities {
+  if (!isPlainRecord(value)
+    || typeof value.humanReview !== 'boolean' || typeof value.sessionAuthorization !== 'boolean') {
+    invalidInvokeOption('reviewCapabilities', '{ humanReview: boolean, sessionAuthorization: boolean }');
   }
   return {
-    humanReview: record.humanReview,
-    sessionAuthorization: record.sessionAuthorization,
+    humanReview: value.humanReview,
+    sessionAuthorization: value.sessionAuthorization,
   };
 }
 

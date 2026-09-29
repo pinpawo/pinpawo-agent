@@ -10,14 +10,11 @@ import type {
 import type { CompiledAgentRegistry } from './registry';
 import type { RunSupervisorRunner } from './runSupervisor/runner';
 import type { GlobalReviewPolicy } from './review/globalReviewPolicy';
-import type { StructuredOutputAutoRepairConfig, StructuredOutputMethod } from '../../utils/structuredOutput';
 import type { CapabilityMessageLane } from '../messages';
 
 export type { CapabilityMessageLane };
 /** Current user goal, including an explicitly requested Supervisor adjustment. */
 export type UserRequest = string;
-
-export type DecisionMode = 'answer' | 'capability';
 
 export type OrchestratorConfig = {
   models: AgentModels;
@@ -71,15 +68,3 @@ export type OrchestratorInvokeOptions = {
    */
   allowedCapabilityNames?: string[];
 };
-
-export type OrchestrationDecisionStructuredOutputOptions = {
-  name: string;
-  method?: StructuredOutputMethod;
-  strict?: boolean;
-  autoRepair?: StructuredOutputAutoRepairConfig;
-};
-
-export type OrchestrationDecisionStructuredOutputConfig = Omit<
-  OrchestrationDecisionStructuredOutputOptions,
-  'name'
->;

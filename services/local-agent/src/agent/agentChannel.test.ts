@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { buildDecisionStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
+import { buildReviewStructuredOutput, buildLocalChatAgentInput } from './agentChannel';
 import type { AgentContext } from '../contextLoader';
 import {
   defineInstructionDocument,
@@ -236,7 +236,7 @@ test('buildLocalChatAgentInput retains the host baseline general Capability', ()
   );
 });
 
-test('buildDecisionStructuredOutput selects structured output strategy by provider model family and version', () => {
+test('buildReviewStructuredOutput selects structured output strategy by provider model family and version', () => {
   const jsonModeCases = [
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.5-plus'],
     ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.7-plus'],
@@ -253,7 +253,7 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     ['https://workspace-id.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', 'provider-model-with-json-mode'],
   ] as const;
   for (const [baseUrl, model] of jsonModeCases) {
-    assert.deepEqual(buildDecisionStructuredOutput({
+    assert.deepEqual(buildReviewStructuredOutput({
       apiKey: 'test-key',
       baseUrl,
       model,
@@ -264,7 +264,7 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
   }
 
   for (const model of ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']) {
-    assert.deepEqual(buildDecisionStructuredOutput({
+    assert.deepEqual(buildReviewStructuredOutput({
       apiKey: 'test-key',
       baseUrl: 'https://api.deepseek.com',
       model,
@@ -280,7 +280,7 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     ['https://api.openai.com/v1', 'gpt-5.5'],
     ['https://example-gemini-compatible.test/v1', 'gemini-3.5-flash'],
   ] as const) {
-    assert.deepEqual(buildDecisionStructuredOutput({
+    assert.deepEqual(buildReviewStructuredOutput({
       apiKey: 'test-key',
       baseUrl,
       model,
@@ -290,13 +290,13 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     });
   }
 
-  assert.equal(buildDecisionStructuredOutput({
+  assert.equal(buildReviewStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://example.test/v1',
     model: 'gpt-4o',
   }), undefined);
 
-  assert.deepEqual(buildDecisionStructuredOutput({
+  assert.deepEqual(buildReviewStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen3.7-max',
@@ -307,7 +307,7 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
     autoRepair: { maxRetries: 2 },
   });
 
-  assert.deepEqual(buildDecisionStructuredOutput({
+  assert.deepEqual(buildReviewStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen3.7-max',
@@ -315,8 +315,8 @@ test('buildDecisionStructuredOutput selects structured output strategy by provid
   }), { method: 'jsonMode' });
 });
 
-test('buildDecisionStructuredOutput honors the resolved profile strategy before inference', () => {
-  assert.deepEqual(buildDecisionStructuredOutput({
+test('buildReviewStructuredOutput honors the resolved profile strategy before inference', () => {
+  assert.deepEqual(buildReviewStructuredOutput({
     apiKey: 'test-key',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'custom-model',

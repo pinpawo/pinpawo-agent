@@ -259,7 +259,7 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
   };
 }
 
-export const ReviewPolicyPresets = {
+export const ReviewPolicies = {
   localMutation(options: HitlPresetOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
@@ -303,7 +303,3 @@ export const ReviewPolicyPresets = {
     return policy;
   },
 };
-
-// Public compatibility names refer to the same factory object, not extra policy layers.
-export const ReviewPolicies = ReviewPolicyPresets;
-export const reviewPolicies = ReviewPolicyPresets;

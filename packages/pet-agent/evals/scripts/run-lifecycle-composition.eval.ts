@@ -28,7 +28,6 @@ import {
   getAgentMessageLane,
   mainConversationMessages,
 } from '../../src/agent/messages/index.ts';
-import { readLatestHumanRequest } from '../../src/agent/orchestrator/conversationMessages.ts';
 import { isDelegationBriefingMessage } from '../../src/agent/orchestrator/delegation/index.ts';
 import type { OrchestratorStateType } from '../../src/agent/orchestrator/state.ts';
 import { readMessageText } from '../../src/agent/orchestrator/utils.ts';
@@ -360,6 +359,16 @@ class ControlledExecutorExhaustedError extends Error {
     super(message);
     this.name = 'ControlledExecutorExhaustedError';
   }
+}
+
+function readLatestHumanRequest(messages: readonly BaseMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message._getType() !== 'human') continue;
+    const text = readMessageText(message);
+    if (text) return text;
+  }
+  return null;
 }
 
 function createControlledExecutor(turns: LifecycleCompositionTurn[]) {

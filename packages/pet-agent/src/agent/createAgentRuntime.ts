@@ -1,7 +1,6 @@
 export type {
   OrchestratorConfig,
   OrchestratorInvokeOptions,
-  OrchestrationDecisionStructuredOutputConfig,
 } from './orchestrator/types';
 export type { OrchestratorStateType } from './orchestrator/state';
 export type {

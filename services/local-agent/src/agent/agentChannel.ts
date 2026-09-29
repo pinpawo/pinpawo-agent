@@ -10,7 +10,7 @@ import {
   type CompiledAgentRegistry,
   type PetDocument,
   type OrchestratorConfig,
-  type OrchestrationDecisionStructuredOutputConfig,
+  type GlobalReviewPolicyStructuredOutputConfig,
 } from '@pinpawo/pet-agent';
 import {
   buildLocalAgentModels,
@@ -43,9 +43,9 @@ export type AgentChannelSetup = {
   interfaceContext?: AgentInterfaceContext;
 };
 
-export function buildDecisionStructuredOutput(
+export function buildReviewStructuredOutput(
   llmConfig: AgentLlmConfig,
-): OrchestrationDecisionStructuredOutputConfig | undefined {
+): GlobalReviewPolicyStructuredOutputConfig | undefined {
   const method = llmConfig.structuredOutputMethod
     ?? inferLlmStructuredOutputMethod(llmConfig.model, llmConfig.baseUrl);
   if (!method) return undefined;
@@ -100,7 +100,7 @@ export function buildLocalChatAgentInput(params: {
     throw new Error('Local chat requires a capability artifact store');
   }
   const { llmConfig, hostConfig } = params;
-  const decisionStructuredOutput = buildDecisionStructuredOutput(llmConfig);
+  const reviewStructuredOutput = buildReviewStructuredOutput(llmConfig);
   const workdir = hostConfig.runtimeConfig.workdir;
   const models = buildLocalAgentModels(llmConfig);
   const generationReserveTokens = resolveLlmGenerationReserveTokens(llmConfig);
@@ -155,7 +155,7 @@ export function buildLocalChatAgentInput(params: {
       globalReviewPolicy: {
         mode: hostConfig.globalReviewPolicyMode,
         safetyLevel: hostConfig.autoAuthorizationSafetyLevel,
-        ...(decisionStructuredOutput ? { structuredOutput: decisionStructuredOutput } : {}),
+        ...(reviewStructuredOutput ? { structuredOutput: reviewStructuredOutput } : {}),
       },
     },
     interfaceContext: buildLocalAgentInterfaceContext({

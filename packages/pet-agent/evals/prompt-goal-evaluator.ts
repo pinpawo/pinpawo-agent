@@ -2,9 +2,6 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { toJsonSchema } from '@langchain/core/utils/json_schema';
 import { z } from 'zod';
-import {
-  buildOrchestrationDecisionStructuredOutputOptions,
-} from '../src/agent/orchestrator/schemas.ts';
 import type { AgentModels } from '../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../src/utils/structuredOutput.ts';
 import type { DecisionContractScore } from './decision-contract-scorers.ts';
@@ -72,7 +69,7 @@ export async function evaluatePromptGoal(params: {
   try {
     const raw = await params.judge.model.withStructuredOutput(
       schema,
-      buildOrchestrationDecisionStructuredOutputOptions({ method: params.judge.method }),
+      { name: 'prompt_goal_evaluation', ...(params.judge.method ? { method: params.judge.method } : {}) },
     ).invoke([
       new SystemMessage(buildPromptGoalEvaluatorPrompt(params.judge.method, criterionIds)),
       new HumanMessage(JSON.stringify({

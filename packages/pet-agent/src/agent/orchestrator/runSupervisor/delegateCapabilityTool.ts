@@ -9,6 +9,7 @@ import { setAgentMessageMetadata } from '../../messages';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
+import { createCapabilityCatalog } from './capabilityCatalog';
 
 export const delegateCapabilitySchema = z.object({
   briefing: z.string().refine(text => text.trim().length > 0).describe('只为当前计划项准备执行说明。结合用户要求与已返回交付，说明要完成的工作、可复用结论和必要约束；不复制历史交付全文，不展开后续任务。'),
@@ -25,11 +26,12 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const invokeOptions = getInvokeOptions(runtime.config);
     const userRequest = state.runSupervisorState.goal ?? state.runUserRequest;
     if (!userRequest) throw new Error('Capability execution requires a goal.');
+    // The same catalog the Supervisor planned from decides what may execute.
+    const catalog = createCapabilityCatalog({ registry, allowedCapabilityNames: invokeOptions.allowedCapabilityNames });
     const input = buildCapabilityExecutionInput({
       state: state.runSupervisorState, runId: state.runId, taskId: state.taskId, userRequest,
       messages: state.messages, mode: 'boundary', hasNewUserInput: false,
-      allowedCapabilityNames: registry.capabilities.map(({ capability }) => capability.name)
-        .filter(name => !invokeOptions.allowedCapabilityNames || invokeOptions.allowedCapabilityNames.includes(name)),
+      allowedCapabilityNames: catalog.capabilityNames,
     }, args, runtime.toolCallId);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({

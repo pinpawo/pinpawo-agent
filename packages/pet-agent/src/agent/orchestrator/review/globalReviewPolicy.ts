@@ -80,10 +80,6 @@ export type GlobalReviewPolicy =
       reuseAutoAuthorizations?: boolean;
     };
 
-export type ResolveGlobalReviewPolicyOptions = GlobalReviewPolicyContext & {
-  policy?: GlobalReviewPolicy;
-};
-
 export type ResolveGlobalReviewBatchPolicyOptions = GlobalReviewPolicyBatchContext & {
   policy?: GlobalReviewPolicy;
 };
@@ -203,25 +199,4 @@ export async function resolveGlobalReviewBatchPolicy(
     }
   }
   return { type: GLOBAL_REVIEW_POLICY_RESOLUTION.REQUIRE_AUTHORIZATION };
-}
-
-export async function resolveGlobalReviewPolicy(
-  options: ResolveGlobalReviewPolicyOptions,
-): Promise<GlobalReviewPolicyResolution> {
-  const {
-    policy,
-    models,
-    messages,
-    task,
-    workdir,
-    ...review
-  } = options;
-  return resolveGlobalReviewBatchPolicy({
-    policy,
-    models,
-    messages,
-    task,
-    workdir,
-    reviews: [review],
-  });
 }

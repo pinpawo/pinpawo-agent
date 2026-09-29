@@ -145,18 +145,6 @@ function readReviewBatchResponse(value: unknown): ReviewBatchResponse | null {
   };
 }
 
-function hasCanonicalReviewResponseFields(value: unknown) {
-  const record = readRecord(value);
-  return Boolean(
-    record
-      && (
-        Object.prototype.hasOwnProperty.call(record, 'reviewId')
-        || Object.prototype.hasOwnProperty.call(record, 'selectedOptionId')
-        || Object.prototype.hasOwnProperty.call(record, 'input')
-      ),
-  );
-}
-
 function hasCanonicalReviewBatchResponseFields(value: unknown) {
   const record = readRecord(value);
   return Boolean(
@@ -254,28 +242,8 @@ export function resolveHumanReviewBatchResponse(
   });
 }
 
-export function resolveHumanReviewResume(
-  pendingReview: ReviewResolutionContext,
-  resume: unknown,
-): ReviewResponseResolution {
-  const response = readReviewResponse(resume);
-  if (response) {
-    return resolveHumanReviewResponse(pendingReview, response);
-  }
-
-  throw new ReviewResponseResolutionError(
-    'invalid_response',
-    hasCanonicalReviewResponseFields(resume)
-      ? `Review resume for pending review "${pendingReview.reviewSpec.id}" is an invalid canonical response.`
-      : `Review resume for pending review "${pendingReview.reviewSpec.id}" is not a canonical response.`,
-  );
-}
-
-// Only the batch shape `{ decisions: [...] }` is accepted. The legacy single
-// response shape `{ reviewId, selectedOptionId }` is deprecated: it fails here
-// and drives the middleware's invalid-decision re-interrupt loop. All
-// first-party clients (TUI, local server, app chat handler) already send the
-// batch shape, so this path is only reached by out-of-date clients.
+// Only the batch shape `{ decisions: [...] }` is accepted; any other resume
+// fails here and drives the middleware's invalid-decision re-interrupt loop.
 export function resolveHumanReviewBatchResume(
   pendingReviews: ReviewResolutionContext[],
   resume: unknown,

@@ -20,17 +20,25 @@ export type SmokeBrowser = {
   close(): Promise<string>;
 };
 
+/** The accessibility-tree snapshot (#873): `- role "name" [state] [ref=…]` lines. */
 type Snapshot = {
   title: string;
   url: string;
-  text: string;
-  interactive: Array<{ ref?: string; placeholder: string | null; hint: string }>;
+  tree: string;
 };
 type Extract = { text: string; textLength: number; returnedTextLength: number; hasMore: boolean; nextOffset: number | null };
 type BrowserCommandError = Error & {
   code?: string;
   details?: Record<string, unknown>;
 };
+
+/** The ref of the first node with this role and name in a snapshot tree. */
+function refFor(snapshot: Snapshot, role: string, name: string): string | undefined {
+  const line = snapshot.tree.split('\n').find((candidate) => (
+    candidate.trimStart().startsWith(`- ${role} ${JSON.stringify(name)}`)
+  ));
+  return line ? /\[ref=([^\]]+)\]/.exec(line)?.[1] : undefined;
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -83,29 +91,29 @@ export async function runBrowserSmokeScenario(options: Readonly<{
 
   await options.reporter.run('opaque_ref_form_and_scroll', 'first_pass', async () => {
     const formSnapshot = JSON.parse(await options.browser().snapshot()) as Snapshot;
-    const taskName = formSnapshot.interactive.find((element) => element.placeholder === 'Task name');
-    assert.ok(taskName?.ref, 'snapshot must expose an opaque ref for the form field');
-    const typed = JSON.parse(await options.browser().type({ ref: taskName.ref }, 'Browser fixture')) as Snapshot;
-    const save = typed.interactive.find((element) => element.hint.includes('#save'));
-    assert.ok(save?.ref, 'snapshot must expose an opaque ref for the save button');
-    const saved = JSON.parse(await options.browser().click({ ref: save.ref })) as Snapshot;
-    assert.match(saved.text, /Saved: Browser fixture/);
+    const taskName = refFor(formSnapshot, 'textbox', 'Task name');
+    assert.ok(taskName, 'snapshot must expose an opaque ref for the form field');
+    const typed = JSON.parse(await options.browser().type({ ref: taskName }, 'Browser fixture')) as Snapshot;
+    const save = refFor(typed, 'button', 'Save task');
+    assert.ok(save, 'snapshot must expose an opaque ref for the save button');
+    const saved = JSON.parse(await options.browser().click({ ref: save })) as Snapshot;
+    assert.match(saved.tree, /Saved: Browser fixture/);
     await options.browser().scroll({ deltaY: 800 });
-    assert.match((JSON.parse(await options.browser().snapshot()) as Snapshot).text, /Scrolled/);
+    assert.match((JSON.parse(await options.browser().snapshot()) as Snapshot).tree, /Scrolled/);
     log('opaque-ref form and scroll passed');
   });
 
   await options.reporter.run('frame_and_shadow_snapshot_observation', 'first_pass', async () => {
     const snapshot = JSON.parse(await options.browser().snapshot()) as Snapshot;
-    options.reporter.observe('sameOriginIframeTextVisible', snapshot.text.includes('Same-origin iframe fixture content'));
-    options.reporter.observe('crossOriginIframeTextVisible', snapshot.text.includes('Cross-origin iframe fixture content'));
-    options.reporter.observe('openShadowTextVisible', snapshot.text.includes('Open shadow fixture content'));
-    options.reporter.observe('closedShadowTextVisible', snapshot.text.includes('Closed shadow fixture content'));
+    options.reporter.observe('sameOriginIframeTextVisible', snapshot.tree.includes('Same-origin iframe fixture content'));
+    options.reporter.observe('crossOriginIframeTextVisible', snapshot.tree.includes('Cross-origin iframe fixture content'));
+    options.reporter.observe('openShadowTextVisible', snapshot.tree.includes('Open shadow fixture content'));
+    options.reporter.observe('closedShadowTextVisible', snapshot.tree.includes('Closed shadow fixture content'));
   });
   await options.reporter.run('open_shadow_selector_observation', 'first_pass', async () => {
     try {
       const snapshot = JSON.parse(await options.browser().click('#open-shadow-button')) as Snapshot;
-      options.reporter.observe('openShadowSelectorClickSucceeded', snapshot.text.includes('Open shadow clicked'));
+      options.reporter.observe('openShadowSelectorClickSucceeded', snapshot.tree.includes('Open shadow clicked'));
       options.reporter.observe('openShadowSelectorErrorCode', 'none');
     } catch (error) {
       options.reporter.observe('openShadowSelectorClickSucceeded', false);

@@ -1,0 +1,196 @@
+import { supervisorReply } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+
+import assert from 'node:assert/strict';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { defineInstructionDocument } from '../../../packages/pet-agent/src/types/capability.ts';
+import { compileAgentRegistry } from '../../../packages/pet-agent/src/agent/orchestrator/registry.ts';
+import { createCapabilityCatalog } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
+import { createCapabilityDisclosureState } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
+import { supervisorFixture, readSupervisorDecision, type SupervisorDecision } from './supervisor-fixtures';
+import { supervisorControlContext } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/input';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing.ts';
+import type { RunSupervisorInput, RunSupervisorResult } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/runner.ts';
+import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
+
+const configPath = process.env.PROMPT_EVAL_CONFIG_PATH ?? join(homedir(), '.pinpawo', 'config.json');
+const profileId = process.env.PROMPT_EVAL_PROFILE_ID
+  ?? (JSON.parse(readFileSync(configPath, 'utf8')) as { models: { defaultProfileId: string } }).models.defaultProfileId;
+const subject = createDecisionEvalModel({ profileId, role: 'subject' });
+// Disclosure only: this eval never dispatches a Capability or runs external work.
+const executionTool = tool(() => { throw new Error('Eval must not execute real work.'); }, {
+  name: 'execute_workspace_task',
+  description: 'Inspect and edit workspace files, run tests, and publish release notes through the configured authenticated GitHub integration. Credentials are already available; the user chooses the destination.',
+  schema: z.object({ task: z.string() }),
+});
+const registry = compileAgentRegistry({ toolkits: [{ name: 'workspace', description: 'Authenticated workspace execution and release publication.', tools: [{ tool: executionTool }] }], capabilities: [{
+  name: 'general', description: 'Inspect files, implement changes, run tests, and publish to a user-selected destination.', uses: ['workspace'],
+  instructions: defineInstructionDocument({ content: 'Execute repository work and verify results. Publication requires a destination selected by the user. Report completed operations, verification evidence, and any missing inputs.' }),
+}] });
+let failures = 0;
+const catalog = createCapabilityCatalog({ registry });
+const disclosure = { ...createCapabilityDisclosureState({ catalog }), disclosedCapabilityNames: ['general'] };
+const supervisor = createRunSupervisorAgent({ model: subject.model });
+const publicationPlan = [{ capability: 'general', objective: 'Publish the prepared release notes after the user selects a destination.' }];
+const cases: Array<{ name: string; goal: string; task?: string; evidence?: string;
+  remaining?: Array<{ capability: string; objective: string }>;
+  pendingDispatch?: boolean;
+  supplement?: string;
+  checkFollowUp?: (result: SupervisorDecision) => void;
+  check: (result: SupervisorDecision) => void }> = [
+  { name: 'entry-execution', goal: 'Inspect the repository and fix the failing unit test.', check: (result) => {
+    assert.equal(result.name, 'submit_plan');
+    if (result.name === 'submit_plan') { assert.ok(result.args.tasks.length > 0); }
+  } },
+  { name: 'continue-missing-verification', goal: 'Fix the bug and confirm the tests pass.',
+    task: 'Fix the bug and run the test suite.', evidence: 'The patch is saved. Tests have not been run. Test tools are available; no user input or permission is needed.',
+    check: (result) => { assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') { assert.equal(result.args.completed, false); assert.ok(result.args.reason.trim()); } } },
+  { name: 'dispatch-pending-capability', goal: 'Fix the bug and confirm the tests pass.',
+    task: 'Fix the bug and run the test suite.', pendingDispatch: true,
+    check: (result) => { assert.equal(result.name, 'delegate_capability');
+    } },
+  { name: 'complete-current-while-goal-has-future-work', goal: 'Investigate the bug, fix it, and verify the fix.',
+    task: 'Investigate the bug and identify its cause.', evidence: 'The bug is reproduced. The cause is an off-by-one check at src/range.ts:42, confirmed by a failing regression test. The code fix is left to the next planned task.',
+    remaining: [{ capability: 'general', objective: 'Fix the identified off-by-one check and run the regression suite.' }],
+    check: (result) => {
+      assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') {
+        assert.equal(result.args.completed, true); assert.ok(result.args.reason.trim());
+        assert.equal(decisionReply(result), undefined); assert.equal('remainingPlan' in result.args, false);
+      }
+    } },
+  { name: 'completed-task-can-ask-before-or-after-acceptance', goal: 'Prepare the release notes and publish them to a destination I will select.',
+    task: 'Prepare release notes.', evidence: 'Release notes are saved to RELEASE.md and verified against the commits. Preparation is complete. Nothing has been published. The user has not selected the destination.',
+    remaining: publicationPlan,
+    supplement: 'Publish the prepared RELEASE.md as the GitHub release notes for pinpawo/example tag v1.2.3. I authorize publication; no further confirmation is needed.',
+    check: (result) => {
+      assert.ok(decisionReply(result)?.trim(), 'Ask the user for the missing destination.');
+      if (result.name !== undefined) {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') {
+          assert.equal(result.args.completed, true);
+          assert.ok(result.args.reason.trim());
+          assert.equal('remainingPlan' in result.args, false);
+        }
+      }
+    },
+    checkFollowUp: (result) => {
+      if (result.name === 'adjust_plan') {
+        assert.equal(result.args.tasks.length, 1, 'Resume the remaining publication, without repeating preparation.');
+        assert.equal(result.args.tasks[0].capability, 'general');
+        assert.match(result.args.tasks[0].objective, /publish|发布/i);
+      } else if (result.name !== 'delegate_capability') {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') {
+          assert.notEqual(result.args.completed, false);
+          assert.equal(decisionReply(result), undefined, 'Proceed now that the destination is supplied.');
+          assert.equal('remainingPlan' in result.args, false);
+        }
+      }
+    } },
+  { name: 'unfinished-task-asks-then-continues', goal: 'Publish the release notes to a destination I will choose.',
+    task: 'Publish the release notes after the user selects the destination.',
+    evidence: 'RELEASE.md is ready. No publication has occurred: only the user can choose the destination.',
+    supplement: 'Publish RELEASE.md as the GitHub release notes for pinpawo/example tag v1.2.3. I authorize publication; no further confirmation is needed.',
+    check: (result) => {
+      assert.ok(decisionReply(result)?.trim());
+      if (result.name !== undefined) {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') assert.equal(result.args.completed, false);
+      }
+    },
+    checkFollowUp: (result) => {
+      assert.equal(result.name, 'adjust_plan');
+      if (result.name === 'adjust_plan') {
+        assert.equal(result.args.currentTask, 'keep');
+        assert.equal(result.args.tasks.length, 1);
+        assert.equal(result.args.tasks[0].capability, 'general');
+        assert.match(result.args.tasks[0].objective, /pinpawo\/example/);
+        assert.match(result.args.tasks[0].objective, /v1\.2\.3/);
+      }
+    } },
+  { name: 'entry-asks-for-user-owned-choice', goal: 'Before doing any work, ask me which release destination to use. Only I can choose it.',
+    check: (result) => { assert.equal(result.name, undefined); assert.ok(decisionReply(result)?.trim()); } },
+  { name: 'boundary-without-evidence-asks-user', goal: 'Publish release notes to a destination I will choose.',
+    task: 'Publish the release notes to the user-selected destination.',
+    check: (result) => {
+      assert.ok(decisionReply(result)?.trim());
+      if (result.name !== undefined) {
+        assert.equal(result.name, 'review_current');
+        if (result.name === 'review_current') assert.equal(result.args.completed, false);
+      }
+    } },
+  { name: 'accept-and-finish', goal: 'Fix the bug and confirm the tests pass.', task: 'Fix the bug and run the test suite.',
+    evidence: 'The bug is fixed. The regression test and the full test suite passed: 42 tests, zero failures. No requested work remains.',
+    check: (result) => {
+      assert.equal(result.name, 'review_current');
+      if (result.name === 'review_current') { assert.equal(result.args.completed, true); assert.ok(result.args.reason.trim()); assert.ok(decisionReply(result)?.trim()); assert.equal('remainingPlan' in result.args, false); }
+    } },
+];
+const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? []);
+assert.ok(selected.size === 0 || [...selected].every((name) => cases.some((scenario) => scenario.name === name)), 'Unknown EVAL_CASES entry.');
+for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
+  const input: RunSupervisorInput = { ...supervisorFixture({ catalog, runId: scenario.name, goal: scenario.goal,
+    task: scenario.task, evidence: scenario.evidence, remaining: scenario.remaining,
+    freshUserInput: Boolean(scenario.task && !scenario.evidence && !scenario.pendingDispatch),
+  }), capabilityDisclosure: disclosure };
+  let result: SupervisorDecision | undefined;
+  let followUp: SupervisorDecision | undefined;
+  try {
+    const actual = await supervisor.invoke(input);
+    result = readSupervisorDecision(actual);
+    scenario.check(result);
+    const accepted = actual;
+    const dispatched = accepted.messages.some((message) => AIMessage.isInstance(message)
+      && message.tool_calls?.some((call) => call.name === 'delegate_capability'));
+    assert.equal(dispatched, !decisionReply(result), 'Only the explicit execution branch dispatches a Capability.');
+    if (scenario.name === 'accept-and-finish') {
+      assert.ok(accepted.runSupervisorState.plan.every((task) => task.status === 'completed'));
+    }
+    if (['boundary-without-evidence-asks-user', 'unfinished-task-asks-then-continues'].includes(scenario.name)
+      && supervisorReply(actual) !== undefined) {
+      const accepted = actual;
+      assert.deepEqual(accepted.runSupervisorState, input.state);
+      assert.ok(!accepted.messages.some((message) => AIMessage.isInstance(message)
+        && message.tool_calls?.some((call) => call.name === 'delegate_capability')), 'A question must not dispatch execution.');
+    }
+    if (scenario.supplement) {
+      assert.ok(decisionReply(result)?.trim(), 'A question must precede the user supplement.');
+      const saved = actual.runSupervisorState;
+      const resumed: RunSupervisorInput = {
+        ...input, state: saved, mode: 'boundary',
+        runId: `${scenario.name}:resume`, taskId: `${scenario.name}:resume`, inputId: `human:${scenario.name}:resume`,
+        messages: [...input.messages, ...actual.messages, new AIMessage(decisionReply(result)!), new HumanMessage(scenario.supplement)],
+        capabilityDisclosure: createCapabilityDisclosureState({ catalog }),
+      };
+      followUp = readSupervisorDecision(await supervisor.invoke(resumed));
+      scenario.checkFollowUp!(followUp);
+    }
+    console.log(JSON.stringify({ case: scenario.name, passed: true, decision: decision(result), followUp: decision(followUp) }));
+  } catch (error) {
+    failures += 1;
+    // Only surface known local validation messages, never raw provider errors.
+    const runtimeError = error instanceof Error && [
+      'Ask directly', 'Review must', 'Supervisor called', 'No planned work',
+      'Accepting a task', 'Plan adjustment', 'Supervisor control',
+    ].some((prefix) => error.message.startsWith(prefix)) ? error.message : undefined;
+    console.log(JSON.stringify({ case: scenario.name, passed: false, runtimeError,
+      error: error instanceof assert.AssertionError ? error.message : error instanceof Error ? error.name : 'UnknownError',
+      decision: decision(result), followUp: decision(followUp) }));
+  }
+}
+process.exitCode = failures ? 1 : 0;
+
+function decision(result: SupervisorDecision | undefined) {
+  if (!result) return undefined;
+  return result;
+}
+
+function decisionReply(result: SupervisorDecision): string | undefined {
+  return result.name === undefined ? result.reply : result.name === 'review_current' ? result.args.reply : undefined;
+}

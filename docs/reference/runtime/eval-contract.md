@@ -1,6 +1,6 @@
 # Eval Contract
 
-> Scope: how an eval in `packages/pet-agent/evals/` is structured, executed, and
+> Scope: how an eval in `tests/agent-evals/src/` is structured, executed, and
 > kept honest.
 > Audience: written to be read by an LLM working in this repo.
 

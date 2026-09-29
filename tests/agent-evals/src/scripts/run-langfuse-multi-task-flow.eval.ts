@@ -1,0 +1,314 @@
+import { AIMessage, AIMessageChunk, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { FakeListChatModel } from '@langchain/core/utils/testing';
+import { tool } from '@langchain/core/tools';
+import { z } from 'zod';
+import {
+  buildOrchestratorRunInput,
+  createOrchestratorGraph,
+  ORCHESTRATOR_RECURSION_LIMIT,
+} from '../../../../packages/pet-agent/src/agent/createAgentRuntime.ts';
+import { getAgentMessageLane } from '../../../../packages/pet-agent/src/agent/messages/index.ts';
+import {
+  defineInstructionDocument,
+  type AgentCapability,
+} from '../../../../packages/pet-agent/src/types/capability.ts';
+import { defineToolkit } from '../../../../packages/pet-agent/src/types/toolkit.ts';
+import type { AgentModels } from '../../../../packages/pet-agent/src/types/agent.ts';
+import type { ScriptedSupervisorRunner as RunSupervisorRunner } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing.ts';
+import { withScriptedDelegation } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing.ts';
+import { PLAN_REQUEST_TOOL_NAME } from '../../../../packages/pet-agent/src/agent/orchestrator/runtime/nodes/entryAnswer.ts';
+import { compileAgentRegistry } from '../../../../packages/pet-agent/src/agent/orchestrator/registry.ts';
+import { multiTaskFlowBasicsDataset } from '../datasets/multi-task-flow-basics.ts';
+import { readRunDelegationSummaries, routeModeFromResult } from '../orchestratorStateReaders.ts';
+import { writeLangfuseEvalResult, type LangfuseEvalScore } from './langfuse-eval-writer.ts';
+import { resolveLangfuseConfig } from './langfuse-api.ts';
+import { createLangfuseV4Runtime } from './langfuse-v4-runtime.ts';
+
+const generalToolkit = defineToolkit({
+  name: 'multi_task_eval_general',
+  description: 'General capability marker for deterministic multi-task flow evaluation.',
+  tools: [{
+    tool: tool(async () => 'ok', {
+      name: 'eval_noop',
+      description: 'No-op tool used only to make the general capability available.',
+      schema: z.object({}),
+    }),
+  }],
+});
+
+const capabilities: AgentCapability[] = [
+  {
+    name: 'explore',
+    description: '代码库调查、结构分析、依赖和风险探索。Keywords: 代码库|auth|调查|结构',
+    uses: ['multi_task_eval_general'],
+    instructions: defineInstructionDocument({
+      content: 'Investigate the requested codebase task.',
+    }),
+  },
+  {
+    name: 'code_modify',
+    description: '代码修改与重构。Keywords: 代码修改|auth|重构|token validation',
+    uses: ['multi_task_eval_general'],
+    instructions: defineInstructionDocument({
+      content: 'Implement the requested code changes.',
+    }),
+  },
+];
+
+const registry = compileAgentRegistry({
+  toolkits: [generalToolkit],
+  capabilities,
+});
+
+function buildRecordingSubagent(responses: string[]) {
+  const model = new FakeListChatModel({ responses: ['unused'], sleep: 0 });
+  const laneMessageCounts: number[] = [];
+  let responseIndex = 0;
+  const bindTools = model.bindTools.bind(model);
+  model.bindTools = ((tools) => {
+    const runnable = bindTools(tools);
+    runnable.invoke = async (input) => {
+      const messages = Array.isArray(input) ? input : [];
+      laneMessageCounts.push(messages.filter((message) => getAgentMessageLane(message as never) !== null).length);
+      const response = responses[responseIndex] ?? responses.at(-1) ?? '';
+      responseIndex += 1;
+      return new AIMessageChunk(response);
+    };
+    return runnable;
+  }) as typeof model.bindTools;
+  return { model, laneMessageCounts };
+}
+
+function buildScriptedAnswerModel(goal: string) {
+  const model = {
+    invoke: async () => new AIMessage(
+      'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。',
+    ),
+    bindTools: () => ({
+      invoke: async () => new AIMessage({
+        content: '',
+        tool_calls: [{
+          id: 'multi-task-eval-plan-request',
+          name: PLAN_REQUEST_TOOL_NAME,
+          args: { goal },
+        }],
+      }),
+    }),
+  } as unknown as AgentModels['act'];
+  return { model };
+}
+
+function buildScriptedSupervisorRunner() {
+  let supervisorDecisionCount = 0;
+  const selectedCapabilityNames: string[] = [];
+  const plannedObjectives: string[] = [];
+  let secondTaskSawHandoff = false;
+  const runner: RunSupervisorRunner = {
+    async invoke(input) {
+      supervisorDecisionCount += 1;
+      if (supervisorDecisionCount === 1) {
+        const objective = '调查 auth 模块的结构、依赖和风险';
+        plannedObjectives.push(objective);
+        selectedCapabilityNames.push('explore');
+        return {
+          name: 'submit_plan', args: {
+            tasks: [{
+              capability: 'explore',
+              objective: objective,
+            }, {
+              capability: 'code_modify',
+              objective: '根据调查结论重构 auth 模块',
+            }]
+          }
+        };
+      }
+      if (supervisorDecisionCount > 2) {
+        return {
+          name: 'review_current', args: {
+            completed: true,
+            reason: 'Current task delivery is evidenced.',
+            reply: 'auth 重构已经完成：token validation 已提取，循环依赖已移除，公开接口保持不变，测试通过。'
+          }
+        };
+      }
+      secondTaskSawHandoff = /循环依赖|token validation/.test(
+        input.messages.filter((message) => ToolMessage.isInstance(message) && message.name === 'delegate_capability')
+          .map((message) => String(message.content)).join('\n'),
+      );
+      const objective = input.state.plan.find((task) => task.status === 'pending')?.objective ?? '';
+      plannedObjectives.push(objective);
+      selectedCapabilityNames.push('code_modify');
+      return {
+        name: 'review_current', args: {
+          completed: true,
+          reason: 'Current task delivery is evidenced.'
+        }
+      };
+    },
+  };
+  return {
+    runner,
+    stats: () => ({
+      supervisorDecisionCount,
+      plannedObjectives,
+      selectedCapabilityNames,
+      secondTaskSawHandoff,
+    }),
+  };
+}
+
+function taskMatches(actual: string, expectedTerms: string[]) {
+  return expectedTerms.every((term) => actual.toLowerCase().includes(term.toLowerCase()));
+}
+
+async function runCase(testCase: typeof multiTaskFlowBasicsDataset.cases[number]) {
+  const answers = buildScriptedAnswerModel(testCase.input.userMessage);
+  const supervisor = buildScriptedSupervisorRunner();
+  const subagent = buildRecordingSubagent(testCase.input.subagentResults);
+  const graph = createOrchestratorGraph({
+    models: {
+      act: answers.model,
+      answer: answers.model,
+      observe: answers.model,
+      subagent: subagent.model,
+    },
+    runSupervisorRunner: withScriptedDelegation(supervisor.runner),
+  });
+  const result = await graph.invoke(
+    buildOrchestratorRunInput([new HumanMessage(testCase.input.userMessage)]),
+    { context: { workdir: '/mock/project', systemPromptSections: [] },
+      recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
+      configurable: {
+        thread_id: `multi-task-flow-${Date.now()}`,
+        registry,
+      },
+    },
+  ) as Record<string, unknown>;
+  const summaries = readRunDelegationSummaries(result);
+  const tasks = summaries.map((summary) => summary.task);
+  const statuses = summaries.map((summary) => summary.status);
+  const acceptedResultText = summaries
+    .map((summary) => summary.resultPreview ?? '')
+    .join('\n');
+  const stats = {
+    ...supervisor.stats(),
+  };
+  const messages = Array.isArray(result.messages) ? result.messages : [];
+  const finalText = String((messages.at(-1) as { content?: unknown } | undefined)?.content ?? '');
+  const remainingLaneMessageCount = messages.filter((message) => getAgentMessageLane(message as never) !== null).length;
+  const expected = testCase.expected;
+  const scores: LangfuseEvalScore[] = [
+    {
+      key: 'task_order_correct',
+      score: tasks.length === expected.expectedTaskTerms.length
+        && tasks.every((task, index) => taskMatches(task, expected.expectedTaskTerms[index] ?? [])) ? 1 : 0,
+      comment: `tasks=${JSON.stringify(tasks)}`,
+    },
+    {
+      key: 'delegation_count_correct',
+      score: summaries.length === expected.expectedDelegationCount ? 1 : 0,
+      comment: `delegations=${summaries.length}`,
+    },
+    {
+      key: 'per_task_pipeline_correct',
+      score: stats.plannedObjectives.length === expected.expectedPlannedObjectiveTerms.length
+        && stats.plannedObjectives.every((objective, index) =>
+          (expected.expectedPlannedObjectiveTerms[index] ?? []).every((term) => objective.includes(term)))
+        && stats.supervisorDecisionCount === expected.expectedDelegationCount + 1
+        && JSON.stringify(stats.selectedCapabilityNames) === JSON.stringify(expected.expectedCapabilityNames)
+        && summaries.length === expected.expectedTaskTerms.length ? 1 : 0,
+      comment: `plannedObjectives=${JSON.stringify(stats.plannedObjectives)}, supervisorDecisions=${stats.supervisorDecisionCount}, selected=${JSON.stringify(stats.selectedCapabilityNames)}`,
+    },
+    {
+      key: 'handoff_consumed_by_next_task_correct',
+      score: stats.secondTaskSawHandoff ? 1 : 0,
+      comment: `secondTaskSawHandoff=${String(stats.secondTaskSawHandoff)}`,
+    },
+    {
+      key: 'lane_isolation_correct',
+      score: remainingLaneMessageCount === 0
+        && subagent.laneMessageCounts.length === expected.expectedDelegationCount
+        && subagent.laneMessageCounts.every((count) => count === 0) ? 1 : 0,
+      comment: `subagentInputLaneMessages=${JSON.stringify(subagent.laneMessageCounts)}, remainingLaneMessages=${remainingLaneMessageCount}`,
+    },
+    {
+      key: 'handoff_completion_correct',
+      score: statuses.every((status) => status === 'completed') ? 1 : 0,
+      comment: `statuses=${statuses.join(',')}`,
+    },
+    {
+      key: 'result_evidence_retained_correct',
+      score: expected.expectedResultTerms.every((term) =>
+        acceptedResultText.includes(term)) ? 1 : 0,
+      comment: `acceptedResultTermsPresent=${String(
+        expected.expectedResultTerms.every((term) => acceptedResultText.includes(term)),
+      )}`,
+    },
+    {
+      key: 'final_answer_correct',
+      score: routeModeFromResult(result) === expected.expectedFinalMode
+        && expected.expectedResultTerms.every((term) => finalText.includes(term)) ? 1 : 0,
+      comment: `final=${finalText}`,
+    },
+  ];
+  return {
+    output: {
+      tasks,
+      statuses,
+      resultPreviews: summaries.map((summary) => summary.resultPreview),
+      delegationCount: summaries.length,
+      ...stats,
+      finalMode: routeModeFromResult(result),
+      finalText,
+      remainingLaneMessageCount,
+      subagentInputLaneMessageCounts: subagent.laneMessageCounts,
+    },
+    scores,
+  };
+}
+
+async function main() {
+  const config = resolveLangfuseConfig();
+  const runtime = createLangfuseV4Runtime(config);
+  const runName = process.env.LANGFUSE_RUN_NAME
+    || `multi-task-flow-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  console.log(`Running ${multiTaskFlowBasicsDataset.name}: ${runName}`);
+  let passed = 0;
+  let uploadFailures = 0;
+  for (const testCase of multiTaskFlowBasicsDataset.cases) {
+    const started = performance.now();
+    try {
+      const { output, scores } = await runCase(testCase);
+      const ok = scores.every((score) => score.score === 1);
+      if (ok) passed += 1;
+      console.log(`[${ok ? 'PASS' : 'FAIL'}] ${testCase.name}: ${scores.map((score) => `${score.key}=${score.score}`).join(' ')}`);
+      if (!ok) console.log(`  output=${JSON.stringify(output)}`);
+      try {
+        await writeLangfuseEvalResult({
+          runtime,
+          datasetName: multiTaskFlowBasicsDataset.name,
+          runName,
+          traceName: 'multi-task-flow-eval',
+          testCase,
+          output,
+          scores,
+          durationMs: Math.round(performance.now() - started),
+        });
+      } catch (error) {
+        uploadFailures += 1;
+        console.log(`[UPLOAD ERROR] ${testCase.name}: ${String(error)}`);
+      }
+    } catch (error) {
+      console.log(`[ERROR] ${testCase.name}: ${String(error)}`);
+    }
+  }
+  await runtime.shutdown();
+  console.log(`Cases: ${passed}/${multiTaskFlowBasicsDataset.cases.length} passed`);
+  console.log(`Uploads: ${multiTaskFlowBasicsDataset.cases.length - uploadFailures}/${multiTaskFlowBasicsDataset.cases.length} succeeded`);
+  if (passed !== multiTaskFlowBasicsDataset.cases.length || uploadFailures > 0) process.exitCode = 1;
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

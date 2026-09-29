@@ -10,6 +10,7 @@ npm workspaces monorepo (Node.js >=24, validated on Node 24, ESM-only, TypeScrip
 - `packages/studio/` → `@pinpawo/studio` — Studio Host/runtime library and the `pinpawo-studio` executable entry.
 - `services/host/` → `pinpawo` (bin: `pinpawo`) — depends on pet-agent. Hosts the CLI and the OpenTUI client launcher, the local HTTP+WebSocket server (`server*.ts`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), and browser tools.
 - `services/tui/` → `@pinpawo/tui` — the OpenTUI (Bun-targeted) terminal client.
+- `tests/agent-evals/` → `@pinpawo-tests/agent-evals` — repository-level Agent evals (real-model and scripted). Depends on both pet-agent and the Host so that pet-agent itself never imports Host code; eval scripts read `tests/agent-evals/.env`.
 - `tools/agent-macos/` — macOS desktop companion (not part of the npm workspaces root).
 
 The architectural boundary is enforced by convention: anything that touches the machine (FS, shell, network, browser, ~/.pinpawo) belongs in `services/host` or `tools/agent-macos`; anything reusable on a server belongs in `packages/pet-agent`.
@@ -25,7 +26,7 @@ Run from repo root:
 
 - `npm install` — install all workspaces.
 - `npm run typecheck` — typecheck every workspace.
-- `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: kanban, scheduler, notice, trigger, project-files, studio-http; then studio-e2e) and ends with host `test:unit`.
+- `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: kanban, scheduler, notice, trigger, project-files, studio-http; then studio-e2e and agent-evals) and ends with host `test:unit`.
 - `npm run build` — tsup-bundles `pinpawo` into `services/host/dist/` and generates manifest.
 
 Per-workspace (use `-w <pkg>` or `cd`):

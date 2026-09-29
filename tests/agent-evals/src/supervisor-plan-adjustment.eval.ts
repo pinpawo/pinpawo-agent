@@ -1,0 +1,84 @@
+import { supervisorReply } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { HumanMessage } from '@langchain/core/messages';
+import { defineInstructionDocument } from '../../../packages/pet-agent/src/types/capability.ts';
+import { compileAgentRegistry } from '../../../packages/pet-agent/src/agent/orchestrator/registry.ts';
+import { createCapabilityCatalog } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/capabilityCatalog.ts';
+import { createCapabilityDisclosureState } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/capabilityDisclosure.ts';
+import { createRunSupervisorProbe as createRunSupervisorAgent } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing.ts';
+import { supervisorControlContext } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/input.ts';
+import { supervisorFixture, readSupervisorDecision } from './supervisor-fixtures';
+import type { RunSupervisorInput } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/runner.ts';
+import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
+
+// Synthetic decisions only: no Capability is dispatched and no work is executed.
+const configPath = process.env.PROMPT_EVAL_CONFIG_PATH ?? join(homedir(), '.pinpawo', 'config.json');
+const profileId = process.env.PROMPT_EVAL_PROFILE_ID
+  ?? (JSON.parse(readFileSync(configPath, 'utf8')) as { models: { defaultProfileId: string } }).models.defaultProfileId;
+const subject = createDecisionEvalModel({ profileId, role: 'subject' });
+const catalog = createCapabilityCatalog({ registry: compileAgentRegistry({ toolkits: [], capabilities: [
+  { name: 'general', description: 'Inspect and modify repositories.', uses: [],
+    instructions: defineInstructionDocument({ content: 'Inspect and modify repository files and verify the results.' }) },
+  { name: 'writer', description: 'Write reports from supplied evidence.', uses: [],
+    instructions: defineInstructionDocument({ content: 'Write private reports from supplied evidence.' }) },
+] }) });
+const disclosure = { ...createCapabilityDisclosureState({ catalog }), disclosedCapabilityNames: catalog.capabilityNames };
+const supervisor = createRunSupervisorAgent({ model: subject.model });
+const goal = 'Inspect the example/old repository and publish the findings.';
+const cases = [
+  { name: 'autonomous', goal: '检查仓库迁移并交付内部报告，不发布。', guidance: '', strategy: 'replace', capability: 'writer',
+    evidence: '仓库迁移检查已完成：配置迁移完成，42 项回归通过，线上压测尚未做。原计划后续错误地安排了再次调查相同仓库和对外发布；没有发布授权。内部报告尚未撰写，应依据现有检查证据交付，避免重复调查。' },
+  { name: 'entry',
+    goal: '根据已提供的迁移检查结果撰写中文内部报告，以 Markdown 正文交付。已确认：配置文件迁移完成；42 项回归测试全部通过；尚未进行线上压测。报告包含迁移结论、验证证据及待验证风险，明确区分已验证和未验证事项。',
+    guidance: '检查结果已经完整提供，不需要再调查仓库。请开始撰写内部报告，仅在当前对话交付正文，不涉及保存文件或发布。' },
+  { name: 'continue', guidance: '项目看错了。改为 example/correct；使用当前 general 任务已有的交付，修正当前任务和计划，只检查迁移说明，然后写内部报告，不要发布。', strategy: 'keep', capability: 'general' },
+  { name: 'replace', guidance: '停止旧项目调查，保留旧任务记录但不要再使用其结果。我已提供结论：迁移已完成、测试通过。请安排 writer 任务，直接据此写内部报告。不要发布，也不需要再确认。', strategy: 'replace', capability: 'writer' },
+  { name: 'clarify', guidance: '计划改一下，目标换成另外那个，具体选哪个我等下告诉你。现在先问我，不要继续执行。' },
+];
+let failures = 0;
+const selected = new Set(process.env.EVAL_CASES?.split(',').filter(Boolean) ?? []);
+assert.ok([...selected].every((name) => cases.some((scenario) => scenario.name === name)), 'Unknown EVAL_CASES entry.');
+for (const scenario of cases.filter(({ name }) => selected.size === 0 || selected.has(name))) {
+  const userRequest = scenario.goal ?? goal;
+  const remainingPlan = scenario.name === 'entry' ? [] : [{ capability: 'general', objective: 'Publish the findings.' }];
+  const fixture = supervisorFixture({ catalog, runId: scenario.name, goal: userRequest, freshUserInput: scenario.name !== 'autonomous',
+    evidence: scenario.evidence,
+    task: scenario.name === 'entry' ? undefined : 'Inspect the example/old repository.', remaining: remainingPlan });
+  const input: RunSupervisorInput = { ...fixture, capabilityDisclosure: disclosure,
+    messages: scenario.guidance ? [...fixture.messages, new HumanMessage(scenario.guidance)] : fixture.messages };
+  try {
+    const actual = await supervisor.invoke(input);
+    const result = readSupervisorDecision(actual);
+    console.log(JSON.stringify({ case: scenario.name, decision: result }));
+    if (scenario.name === 'entry') {
+      assert.equal(result.name, 'submit_plan');
+      if (result.name === 'submit_plan') {
+        assert.ok(result.args.tasks.length > 0);
+        assert.equal(result.args.tasks[0].capability, 'writer');
+      }
+    } else if (scenario.strategy) {
+      assert.equal(result.name, 'adjust_plan');
+      if (result.name === 'adjust_plan') {
+        if (scenario.name === 'autonomous') assert.equal(result.args.goal, userRequest);
+        assert.equal(result.args.currentTask, scenario.strategy);
+        assert.equal(result.args.tasks[0].capability, scenario.capability);
+        assert.ok(result.args.tasks.length > 0);
+      }
+    } else {
+      const reply = result.name === undefined ? result.reply : result.name === 'review_current' ? result.args.reply : undefined;
+      assert.ok(reply?.trim());
+      // A clarification preserves pending work regardless of preceding control calls.
+      assert.deepEqual(actual.runSupervisorState, input.state);
+      assert.ok(supervisorReply(actual)?.trim());
+    }
+    console.log(JSON.stringify({ case: scenario.name, passed: true }));
+  } catch (error) {
+    failures++;
+    console.log(JSON.stringify({ case: scenario.name, passed: false,
+      error: error instanceof assert.AssertionError ? error.message : error instanceof Error ? error.name : 'UnknownError' }));
+  }
+}
+process.exitCode = failures ? 1 : 0;

@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
+import { createDecisionEvalModel } from '../../agent-evals/src/scripts/decision-eval-model';
 
 import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
 

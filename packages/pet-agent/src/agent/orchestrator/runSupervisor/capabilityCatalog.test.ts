@@ -65,7 +65,10 @@ test('document accounting is isolated per invocation and never truncates a docum
   assert.deepEqual(reader.readCapabilities(['general', 'general']), [{ capabilityName: 'general', content: entry.content }]);
   assert.throws(() => reader.readCapabilities(['explore']),
     (error: unknown) => error instanceof SupervisorDocumentError && error.code === 'supervisor_discovery_limit_reached');
-  assert.throws(() => reader.assertWithinBudget(), SupervisorDocumentError);
+  // A rejected read consumes nothing, so a later read that fits still succeeds.
+  const fresh = createSupervisorDocumentReader(visible, bytes);
+  assert.throws(() => fresh.readCapabilities(['general', 'explore']), SupervisorDocumentError);
+  assert.equal(fresh.readCapabilities(['general'])[0].content, entry.content);
   assert.equal(createSupervisorDocumentReader(visible, bytes).readCapabilities(['general'])[0].content, entry.content);
 });
 

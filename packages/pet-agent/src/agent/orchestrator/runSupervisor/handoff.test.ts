@@ -372,19 +372,19 @@ test('Entry and preparation failures use the same checkpointed error exit as exe
   }
 });
 
-test('Entry announcement repair can continue the saved plan instead of replacing it', async () => {
+test('Entry continue adopts the saved plan and its earlier evidence instead of replacing it', async () => {
   const { graph, config } = setup();
-  const options = { configurable: { thread_id: 'repair-entry-continue', registry } };
+  const options = { configurable: { thread_id: 'entry-continue-saved-plan', registry } };
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), { ...options, interruptAfter: ['capability'] });
   const saved = await graph.getState(options);
   const executor = new ScriptedModel([]);
-  const entry = new ScriptedModel([new AIMessage('我现在处理剩余任务。'), call('continue', {}, 'entry-repair-continue')]);
+  const entry = new ScriptedModel([call('continue', {}, 'entry-continue')]);
   const supervisor = new ScriptedModel([
     call('review_current', { completed: true, reason: 'Previous evidence verified.', reply: 'Done.' }, 'accept-old-evidence'),
   ]);
   const output = await createOrchestratorGraph({ ...config, models: { act: supervisor, answer: entry, subagent: executor } })
     .invoke(buildOrchestratorRunInput([new HumanMessage('Continue.')]), options);
-  assert.equal(entry.inputs.length, 2);
+  assert.equal(entry.inputs.length, 1);
   assert.equal(executor.inputs.length, 0);
   assert.equal(output.runSupervisorState.plan[0].id, saved.values.runSupervisorState.plan[0].id);
   assert.equal(output.runSupervisorState.plan[0].status, 'completed');

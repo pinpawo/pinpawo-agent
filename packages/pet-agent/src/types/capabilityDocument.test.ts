@@ -73,7 +73,7 @@ test('parseCapabilityDocument supports YAML block scalars and single-quote escap
   assert.equal(parsed.frontmatter.icon, "it's-visible");
 });
 
-test('parseCapabilityDocument preserves v1 plain descriptions containing YAML delimiters', () => {
+test('parseCapabilityDocument keeps quoted descriptions containing YAML delimiters', () => {
   for (const description of [
     'Handles API: requests',
     'Fixes budget #1 item',
@@ -81,7 +81,7 @@ test('parseCapabilityDocument preserves v1 plain descriptions containing YAML de
     const parsed = parseCapabilityDocument(
       SOURCE.replace(
         'description: "Inspect a repository."',
-        `description: ${description}`,
+        `description: ${JSON.stringify(description)}`,
       ),
       '/tmp/inspect/CAPABILITY.md',
     );
@@ -90,16 +90,15 @@ test('parseCapabilityDocument preserves v1 plain descriptions containing YAML de
   }
 });
 
-test('parseCapabilityDocument preserves v1 tab-indented Toolkit lists', () => {
-  const parsed = parseCapabilityDocument(
-    SOURCE.replace(
-      'uses:\n  - git\n  - bash',
-      'uses:\n\t- git\n\t- bash',
-    ),
+test('parseCapabilityDocument applies strict YAML to plain delimiters and tab indentation', () => {
+  assert.throws(() => parseCapabilityDocument(
+    SOURCE.replace('description: "Inspect a repository."', 'description: Handles API: requests'),
     '/tmp/inspect/CAPABILITY.md',
-  );
-
-  assert.deepEqual(parsed.frontmatter.uses, ['git', 'bash']);
+  ), /invalid YAML frontmatter/);
+  assert.throws(() => parseCapabilityDocument(
+    SOURCE.replace('uses:\n  - git\n  - bash', 'uses:\n\t- git\n\t- bash'),
+    '/tmp/inspect/CAPABILITY.md',
+  ), /invalid YAML frontmatter/);
 });
 
 test('parseCapabilityDocument rejects duplicate frontmatter fields', () => {

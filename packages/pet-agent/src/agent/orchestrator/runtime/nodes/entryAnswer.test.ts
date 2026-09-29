@@ -304,55 +304,6 @@ test('Entry Answer receives an accepted delegation result as execution data, not
 
 });
 
-test('Entry Answer retries when the model announces execution instead of calling plan_request', async () => {
-  const goal = 'review https://github.com/pinpawo/pinpawo-agent/pull/667';
-  let invocations = 0;
-  let repairPrompt = '';
-  const model = {
-    bindTools: () => ({
-      invoke: async (messages: BaseMessage[]) => {
-        invocations += 1;
-        if (invocations === 1) {
-          return new AIMessage('开始执行计划任务：对 Pull Request #667 进行代码审查。');
-        }
-        repairPrompt = String(messages.at(-1)?.content ?? '');
-        return new AIMessage({
-          content: '',
-          tool_calls: [{ id: 'call-plan', name: PLAN_REQUEST_TOOL_NAME, args: { goal } }],
-        });
-      },
-    }),
-    invoke: async () => new AIMessage('当前没有可用的 Capability。'),
-  } as unknown as BaseChatModel;
-
-  let plannerRequest = '';
-  const graph = createOrchestratorGraph({
-    models: { act: model, answer: model },
-    runSupervisorRunner: {
-      async invoke(input) {
-        plannerRequest = input.userRequest;
-        return {
-          reply: '当前没有可用的 Capability。',
-        };
-      },
-    },
-  });
-
-  const result = await graph.invoke(
-    buildOrchestratorRunInput([new HumanMessage('你自己review一下这个pr')]),
-    invokeConfig(),
-  );
-
-  assert.equal(invocations, 2, 'the faked announcement must trigger exactly one retry');
-  assert.match(repairPrompt, /plan_request/);
-  assert.equal(plannerRequest, goal, 'the retry must reach the Supervisor');
-  assert.equal(
-    result.messages.some((message) => String(message.content).startsWith('开始执行计划任务')),
-    false,
-    'the faked announcement must never reach the user',
-  );
-});
-
 function routingScript(turns: AIMessage[]) {
   const seen: BaseMessage[][] = [];
   const model = {
@@ -383,46 +334,29 @@ test('Entry routing accepts a tool call whose provider omitted the id', async ()
   assert.deepEqual(requests, ['截图所有页面']);
 });
 
-test('Entry routing collapses identical duplicate calls without a repair turn', async () => {
+test('Entry routing fails on multiple calls without a repair turn, identical ones included', async () => {
   const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
-  const { graph, seen, requests } = routingScript([new AIMessage({
-    content: '', tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
-  })]);
-  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
-  assert.equal(seen.length, 1);
-  assert.deepEqual(requests, ['截图所有页面']);
+  for (const tool_calls of [
+    [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+    [{ id: 'a', name: 'continue', args: {} }, { ...call, id: 'b' }],
+  ]) {
+    const { graph, seen, requests } = routingScript([new AIMessage({ content: '', tool_calls })]);
+    await assert.rejects(
+      graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig()),
+      /requires one tool call, got 2/,
+    );
+    assert.equal(seen.length, 1);
+    assert.deepEqual(requests, []);
+  }
 });
 
-test('Entry routing repairs distinct parallel calls with one retry', async () => {
-  const { graph, seen, requests } = routingScript([
-    new AIMessage({ content: '', tool_calls: [
-      { id: 'a', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图首页' } },
-      { id: 'b', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图设置页' } },
-    ] }),
-    new AIMessage({ content: '', tool_calls: [
-      { id: 'c', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图首页和设置页' } },
-    ] }),
-  ]);
-  const output = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
-  assert.equal(seen.length, 2);
-  const retry = seen[1];
-  assert.match(retry.at(-1)!.text, /只能选择一个/);
-  assert.equal(retry.some((message) => AIMessage.isInstance(message) && (message.tool_calls?.length ?? 0) > 1), false);
-  assert.deepEqual(requests, ['截图首页和设置页']);
-  assert.equal(output.messages.filter((message: BaseMessage) => AIMessage.isInstance(message) && (message.tool_calls?.length ?? 0) > 1).length, 0);
-});
-
-test('Entry routing fails with the offending calls when the repair turn still fans out', async () => {
-  const fanOut = new AIMessage({ content: '', tool_calls: [
-    { id: 'a', name: 'continue', args: {} },
-    { id: 'b', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图' } },
-  ] });
-  const { graph, seen } = routingScript([fanOut, fanOut]);
+test('Entry Answer fails on an empty reply instead of inventing one', async () => {
+  const { graph, seen } = routingScript([new AIMessage({ content: ' ' })]);
   await assert.rejects(
     graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig()),
-    /requires one tool call, got 2: continue, plan_request/,
+    /must reply or request routing/,
   );
-  assert.equal(seen.length, 2);
+  assert.equal(seen.length, 1);
 });
 
 test('Entry Answer leaves an ordinary reply untouched', async () => {

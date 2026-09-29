@@ -16,9 +16,9 @@ process directory. Relative and `~/` values are normalized to an absolute path.
     ├── studio.json
     ├── pets/
     ├── capability-artifacts/
-    ├── checkpoints-capability-v2.json
-    ├── checkpoints-tui-capability-v2.json
-    └── tui-sessions-capability-v2.json
+    ├── checkpoints-capability-v3.json
+    ├── checkpoints-tui-capability-v3.json
+    └── tui-sessions-capability-v3.json
 ```
 
 `LocalAgentRuntimeConfig` derives these paths before runtime assembly. Studio

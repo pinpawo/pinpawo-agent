@@ -3,14 +3,14 @@
  *
  * The group is where a session's tabs live and how the user hands a tab to a
  * session: dragging a tab into the group grants that session its current
- * origin, dragging it out revokes the grant. Groups are named by sequence
- * ("PinPawo 1", "PinPawo 2", …) with rotating colors, since the extension
- * never learns which conversation a context belongs to.
+ * origin, dragging it out revokes the grant. A group is titled once, after
+ * the site the session first opens ("🐾 github.com"), since the extension
+ * never learns which conversation a context belongs to; colors rotate in
+ * creation order, so two sessions on one site still look different.
  */
 
 export type ContextGroup = Readonly<{
   groupId: number;
-  label: string;
 }>;
 
 export type PersistedContextGroups = Readonly<{
@@ -21,10 +21,19 @@ export type PersistedContextGroups = Readonly<{
 const GROUP_COLORS = ['blue', 'green', 'purple', 'cyan', 'orange', 'pink', 'red', 'yellow', 'grey'] as const;
 export type ContextGroupColor = typeof GROUP_COLORS[number];
 
+const GROUP_MARK = '🐾';
 const MAX_CONTEXT_ID_LENGTH = 128;
 
-export function contextGroupLabel(sequence: number): string {
-  return `PinPawo ${sequence}`;
+/** The group title for a session on `url`: the paw mark and the site. */
+export function contextGroupTitle(url: string | null | undefined): string {
+  if (!url) return GROUP_MARK;
+  try {
+    const { protocol, hostname } = new URL(url);
+    if ((protocol !== 'http:' && protocol !== 'https:') || !hostname) return GROUP_MARK;
+    return `${GROUP_MARK} ${hostname.replace(/^www\./, '')}`;
+  } catch {
+    return GROUP_MARK;
+  }
 }
 
 export function contextGroupColor(sequence: number): ContextGroupColor {
@@ -46,9 +55,9 @@ export function parsePersistedContextGroups(value: unknown): PersistedContextGro
   for (const [contextId, candidate] of Object.entries(stored)) {
     if (!contextId || contextId.length > MAX_CONTEXT_ID_LENGTH) continue;
     if (!candidate || typeof candidate !== 'object') continue;
-    const { groupId, label } = candidate as Record<string, unknown>;
-    if (!Number.isSafeInteger(groupId) || (groupId as number) < 0 || typeof label !== 'string') continue;
-    groups[contextId] = { groupId: groupId as number, label };
+    const { groupId } = candidate as Record<string, unknown>;
+    if (!Number.isSafeInteger(groupId) || (groupId as number) < 0) continue;
+    groups[contextId] = { groupId: groupId as number };
   }
   return { sequence, groups };
 }

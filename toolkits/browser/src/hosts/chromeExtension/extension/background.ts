@@ -45,7 +45,7 @@ import { createBrowserStateTracker, type ContextTargetState } from './browserSta
 import {
   contextForGroup,
   contextGroupColor,
-  contextGroupLabel,
+  contextGroupTitle,
   parsePersistedContextGroups,
   type ContextGroup,
 } from './tabGroups.js';
@@ -609,9 +609,10 @@ async function restoreContextGroups() {
  * Put a tab the active context holds into that context's group, creating the
  * group on first use. Grouping is presentation and the hand-off channel, not
  * what makes the tab the context's: a tab Chrome refuses to group (one in a
- * popup window) stays usable.
+ * popup window) stays usable. A new group is titled once, after the site of
+ * the page the session first opens (`url`); later pages leave it as it is.
  */
-async function joinContextGroup(tabId) {
+async function joinContextGroup(tabId, url?: string) {
   const contextId = activeBrowserContextId;
   if (contextId === LEGACY_BROWSER_CONTEXT_ID) return;
   try {
@@ -626,9 +627,11 @@ async function joinContextGroup(tabId) {
     }
     const groupId = await chrome.tabs.group({ tabIds: tabId });
     groupSequence += 1;
-    const label = contextGroupLabel(groupSequence);
-    await chrome.tabGroups.update(groupId, { title: label, color: contextGroupColor(groupSequence) });
-    groupsByContext.set(contextId, { groupId, label });
+    await chrome.tabGroups.update(groupId, {
+      title: contextGroupTitle(url),
+      color: contextGroupColor(groupSequence),
+    });
+    groupsByContext.set(contextId, { groupId });
     await persistContextGroups();
   } catch (error) {
     console.warn(
@@ -1581,7 +1584,7 @@ async function executeCommandBody(command) {
     if (!activeTarget) {
       throw new ExtensionError('target_create_failed', 'Chrome did not provide a navigation target');
     }
-    await joinContextGroup(activeTarget.tabId);
+    await joinContextGroup(activeTarget.tabId, url);
     await activateTarget(activeTarget.tabId);
     await attach(activeTarget.tabId);
     emitLifecycleEvent('navigation.requested', activeTarget.tabId, { url });

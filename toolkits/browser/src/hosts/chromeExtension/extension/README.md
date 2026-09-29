@@ -15,7 +15,7 @@ The extension is developed and versioned inside `@pinpawo-toolkit/browser`. A lo
 For the official Chrome Web Store build, `pinpawo browser extension register`
 uses the Store extension ID by default, so `--extension-id` is not required.
 
-Each Agent session's tabs live in a Chrome tab group (`PinPawo 1`, `PinPawo 2`, …). `browser_open` creates a dedicated agent-owned tab in that group. To hand a tab you are already signed in on to a session, drag it into the session's group; drag it out to take it back (#867). Chrome shows its debugger disclosure while PinPawo is attached.
+Each Agent session's tabs live in a Chrome tab group titled after the first site it opens (`🐾 github.com`). `browser_open` creates a dedicated agent-owned tab in that group. To hand a tab you are already signed in on to a session, drag it into the session's group; drag it out to take it back (#867). Chrome shows its debugger disclosure while PinPawo is attached.
 
 The extension refuses to read or interact with a tab after it leaves the origin approved for the current browser operation. Interaction commands prefer the opaque `ref` returned by the latest snapshot and fall back to CSS or `text=...` selectors. Re-snapshot after a stale reference error.
 

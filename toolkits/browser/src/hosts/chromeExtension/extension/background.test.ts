@@ -122,16 +122,18 @@ test('sessions put their tabs in their own group (#867)', async () => {
     'utf8',
   );
 
-  assert.match(source, /prepareNavigationTarget\(\);[\s\S]*?await joinContextGroup\(activeTarget\.tabId\);/);
+  assert.match(source, /prepareNavigationTarget\(\);[\s\S]*?await joinContextGroup\(activeTarget\.tabId, url\);/);
   assert.match(source, /async function switchToPopup[\s\S]*?saveTarget\([\s\S]*?await joinContextGroup\(tabId\);/);
   assert.match(
     source,
-    /async function joinContextGroup[\s\S]*?LEGACY_BROWSER_CONTEXT_ID\) return;[\s\S]*?chrome\.tabs\.group\(\{ tabIds: tabId \}\)[\s\S]*?contextGroupLabel\(groupSequence\)/,
+    /async function joinContextGroup[\s\S]*?LEGACY_BROWSER_CONTEXT_ID\) return;[\s\S]*?chrome\.tabs\.group\(\{ tabIds: tabId \}\)[\s\S]*?title: contextGroupTitle\(url\)/,
   );
   // browser_open keeps the tabs the session holds instead of resetting them.
   const prepare = source.match(/async function prepareNavigationTarget\(\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.doesNotMatch(prepare, /resetHistory/);
   assert.match(source, /async function initialize\(\) \{[\s\S]*?restoreContextGroups\(\)/);
+  // The title is set once, when the group is created.
+  assert.doesNotMatch(source, /retitle/);
 });
 
 test('popup tabs are followed inside the extension target lifecycle', async () => {

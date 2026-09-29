@@ -6,10 +6,18 @@ on:
       - '.github/workflows/tui-v2-install-smoke.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'packages/agent-contracts/**'
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'services/local-agent/**'
       - 'services/tui/**'
+      # local-agent bundles the Browser Toolkit.
+      - 'toolkits/**'
+      # Tests, docs and unrelated scripts never reach a packed package.
+      - '!**/*.test.ts'
+      - '!**/*.md'
+      - '!services/local-agent/scripts/**'
+      - 'services/local-agent/scripts/tui-v2-install-smoke.ts'
   push:
     branches:
       - main
@@ -17,14 +25,28 @@ on:
       - '.github/workflows/tui-v2-install-smoke.yml'
       - 'package.json'
       - 'package-lock.json'
+      - 'packages/agent-contracts/**'
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
       - 'services/local-agent/**'
       - 'services/tui/**'
+      # local-agent bundles the Browser Toolkit.
+      - 'toolkits/**'
+      # Tests, docs and unrelated scripts never reach a packed package.
+      - '!**/*.test.ts'
+      - '!**/*.md'
+      - '!services/local-agent/scripts/**'
+      - 'services/local-agent/scripts/tui-v2-install-smoke.ts'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer commit on the same pull request supersedes the run for an older one;
+# runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   install-smoke:
@@ -34,10 +56,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
+        # Pull requests pack and install on Linux only; the full OS matrix runs
+        # after merge, where a macOS or Windows break still surfaces. Windows
+        # alone took ~9 minutes per job and gated every pull request.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6

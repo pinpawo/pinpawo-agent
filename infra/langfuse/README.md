@@ -68,7 +68,7 @@ LANGFUSE_PUBLIC_KEY=<value from infra/langfuse/.env>
 LANGFUSE_SECRET_KEY=<value from infra/langfuse/.env>
 ```
 
-For the current repo, the existing eval scripts under `packages/pet-agent/evals/` and `services/host/evals/` are LangSmith evals because they import `langsmith/evaluation`. Use this Langfuse stack for local trace inspection first; migrate those evals separately if you want the result storage and scoring to live entirely in Langfuse.
+For the current repo, the existing eval scripts under `tests/agent-evals/src/` and `services/host/evals/` are LangSmith evals because they import `langsmith/evaluation`. Use this Langfuse stack for local trace inspection first; migrate those evals separately if you want the result storage and scoring to live entirely in Langfuse.
 
 ## Useful Commands
 

@@ -1,0 +1,52 @@
+import { supervisorReply } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { defineInstructionDocument } from '../../../packages/pet-agent/src/types/capability';
+import { compileAgentRegistry } from '../../../packages/pet-agent/src/agent/orchestrator/registry';
+import { createCapabilityCatalog } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/capabilityCatalog';
+import { supervisorFixture } from './supervisor-fixtures';
+import { supervisorControlContext } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/input';
+import { currentSupervisorTask } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/state';
+import { buildCapabilityExecutionInput, delegateCapabilitySchema } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/delegateCapabilityTool';
+import { readCapabilityExecutionCall } from '../../../packages/pet-agent/src/agent/orchestrator/executionMessages';
+import type { RunSupervisorInput, RunSupervisorResult } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/runner';
+import type { ClosureExample, ClosureExpected } from './datasets/supervisor-delivery-closure';
+
+const registry = compileAgentRegistry({ toolkits: [], capabilities: [
+  { name: 'studio_review', description: '独立审查代码与交付证据，产出供检查与看板反馈使用的审查结论。', uses: [], instructions: defineInstructionDocument({ content: '使用只读文件工具和 task_list/task_start 进行独立核验，返回具体结论与证据。审查没有提交结果的工具。结果返回后由 Supervisor 判断后续安排。' }) },
+  { name: 'studio_reporting', description: '将已检查的完整交付或明确阻塞反馈到看板，供用户及后续工作读取。', uses: [], instructions: defineInstructionDocument({ content: '使用 task_list 确认目标，使用 task_complete 提交完整结果或 task_block 报告阻塞。按实际回执报告写入结果。不执行文件核验。' }) },
+] });
+const catalog = createCapabilityCatalog({ registry });
+export function closureInput(example: ClosureExample, id: string): RunSupervisorInput {
+  const input = supervisorFixture({ catalog, runId: id, ...example });
+  // All responsibilities are disclosed: isolates goal closure from document retrieval.
+  return { ...input, capabilityDisclosure: { ...input.capabilityDisclosure, disclosedCapabilityNames: example.disclosure === 'manifest' ? [] : [...catalog.capabilityNames] },
+    state: { ...input.state, plan: [
+      ...(example.capability === 'studio_reporting' ? [{ id: 'review-accepted', capability: 'studio_review', objective: '独立复核三个配置文件并返回完整结论。', status: 'completed' as const }] : []),
+      ...(example.staleCompletion ? [{ id: 'old-review', capability: 'studio_review', objective: '复核任务 T-OLD 并将结果提交看板。', status: 'completed' as const }] : []),
+      ...input.state.plan,
+    ] },
+    messages: example.staleCompletion ? [
+    new HumanMessage('上一轮任务 T-OLD 的审阅结果需要写入看板。'),
+    new AIMessage('上一轮 T-OLD 已成功写入看板，状态 done。'),
+    ...input.messages,
+  ] : input.messages };
+}
+export function scoreClosure(input: RunSupervisorInput, result: RunSupervisorResult, expected: ClosureExpected) {
+  const accepted = result;
+  const dispatch = result.messages.map(readCapabilityExecutionCall).find(record => record !== null);
+  const execution = dispatch && currentSupervisorTask(result.runSupervisorState)
+    ? buildCapabilityExecutionInput({ ...supervisorControlContext(input), state: result.runSupervisorState }, delegateCapabilitySchema.parse(dispatch.call.args), dispatch.call.id!) : null;
+  const actual = dispatch ? execution?.capability === 'studio_reporting' ? 'report' : 'review' : supervisorReply(result)?.trim() ? 'reply' : 'none';
+  const adjustmentCalls = result.messages.flatMap(m => AIMessage.isInstance(m) ? m.tool_calls ?? [] : []).filter(c => c.name === 'adjust_plan');
+  const successfulAdjustments = new Set(result.messages.filter(m => ToolMessage.isInstance(m)
+    && m.name === 'adjust_plan' && m.status !== 'error').map(m => (m as ToolMessage).tool_call_id));
+  const adjustments = adjustmentCalls.filter(c => c.id && successfulAdjustments.has(c.id)).length;
+  const completed = input.state.plan.filter(t => t.status === 'completed');
+  const reintroducedCompleted = accepted.runSupervisorState.plan.some(t => t.status === 'pending'
+    && completed.some(old => old.capability === t.capability && old.objective === t.objective));
+  return { passed: actual === expected.action && !reintroducedCompleted
+      && (expected.maxAdjustments === undefined || adjustments <= expected.maxAdjustments),
+    actual, expected: expected.action, adjustments, adjustmentAttempts: adjustmentCalls.length, maxAdjustments: expected.maxAdjustments, reintroducedCompleted,
+    plan: accepted.runSupervisorState.plan, reply: supervisorReply(result),
+    dispatch: execution };
+}

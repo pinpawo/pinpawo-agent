@@ -1,0 +1,68 @@
+import { supervisorReply } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import type { RunSupervisorInput, RunSupervisorResult } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/runner';
+import { isSupervisorControlTool } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/protocol';
+import { parseSupervisorControl } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
+import { createCapabilityDisclosureState } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/capabilityDisclosure';
+import { setAgentMessageMetadata } from '../../../packages/pet-agent/src/agent/messages';
+
+/** Read the original model decision, not the programmatically derived execution call. */
+export function readSupervisorDecision(result: RunSupervisorResult) {
+  const message = result.messages.filter((message) => AIMessage.isInstance(message)
+    && message.tool_calls?.some((call) => isSupervisorControlTool(call.name) && call.name !== 'delegate_capability')).at(-1) as AIMessage | undefined;
+  const call = message?.tool_calls?.[0];
+  if (!call) {
+    if (supervisorReply(result) !== undefined) return { reply: supervisorReply(result), name: undefined };
+    // A resumed pending task can be executed without another plan/review decision.
+    const execute = result.messages.flatMap((message) => AIMessage.isInstance(message) ? message.tool_calls ?? [] : [])
+      .find((call) => call.name === 'delegate_capability');
+    if (execute) {
+      const control = parseSupervisorControl({ name: execute.name, args: execute.args });
+      if (control.name === 'delegate_capability') return control;
+    }
+    throw new Error('Evaluation result has no internal control decision.');
+  }
+  const control = parseSupervisorControl({ name: call.name, args: call.args });
+  // Evaluation projection only: the reply comes from the final AIMessage, never review args.
+  return control.name === 'review_current' ? { ...control, args: { ...control.args, reply: supervisorReply(result) } } : control;
+}
+export type SupervisorDecision = ReturnType<typeof readSupervisorDecision>;
+
+/** Evaluation-only factual checkpoint, without invoking any executor. */
+export function supervisorFixture(params: {
+  catalog: RunSupervisorInput['catalog'];
+  runId: string;
+  goal: string;
+  task?: string;
+  capability?: string;
+  evidence?: string;
+  remaining?: Array<{ capability: string; objective: string }>;
+  freshUserInput?: boolean;
+}): RunSupervisorInput {
+  const capability = params.capability ?? 'general';
+  const messages = [new HumanMessage(params.goal)];
+  const input: RunSupervisorInput = {
+    mode: params.task ? 'boundary' : 'entry',
+    inputId: !params.task || params.freshUserInput ? `human:${params.runId}` : params.runId,
+    runId: params.runId, taskId: params.runId, userRequest: params.goal, messages,
+    catalog: params.catalog, capabilityDisclosure: createCapabilityDisclosureState({ catalog: params.catalog }),
+    state: { runId: params.task ? params.runId : null, goal: params.goal, plan: [
+      ...(params.task ? [{ id: 'current', objective: params.task, capability, status: 'pending' as const }] : []),
+      ...(params.remaining ?? []).map((task, i) => ({ ...task, id: `next:${i}`, status: 'pending' as const })),
+    ] },
+  };
+  if (!params.task || !params.evidence) return input;
+  const id = `execute-fixture:${params.runId}`;
+  const metadata = { runId: params.runId, taskId: params.runId };
+  return { ...input, messages: [...messages,
+    setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
+      id, name: 'delegate_capability', type: 'tool_call', args: {},
+    }] }), { ...metadata, source: 'supervisor' }),
+    setAgentMessageMetadata(new ToolMessage({ artifact: {
+      planItemId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, briefing: 'Execute the confirmed task.',
+    },  name: 'delegate_capability', tool_call_id: id, content: JSON.stringify({
+      status: 'returned', delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
+        scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } },
+    }) }), metadata),
+  ] };
+}

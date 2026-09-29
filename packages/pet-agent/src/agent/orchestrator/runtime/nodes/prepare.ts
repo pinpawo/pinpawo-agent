@@ -1,4 +1,4 @@
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, RemoveMessage, type BaseMessage } from '@langchain/core/messages';
 import { Command } from '@langchain/langgraph';
 import { getAgentMessageLane, getAgentMessageRunId, setAgentMessageMetadata } from '../../../messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
@@ -21,9 +21,16 @@ export function createPrepareNode() {
       && !getAgentMessageLane(message) && getAgentMessageRunId(message) === state.runId);
     if (!freshMessages.length) throw new Error('Fresh run requires a HumanMessage bound to its runId.');
     const taskId = state.taskId;
-    const messages = freshMessages.map((message) =>
+    const messages: BaseMessage[] = freshMessages.map((message) =>
       setAgentMessageMetadata(new HumanMessage({ ...message }), { taskId }));
-    return new Command({ update: { messages }, goto: 'compactContext' });
+    // Supervisor work is selected only by its own run, and Entry continue adopts
+    // plan facts rather than transcript, so earlier runs' work is unreachable.
+    const staleSupervisorWork = state.messages.filter((message) => message.id
+      && getAgentMessageLane(message) === 'supervisor' && getAgentMessageRunId(message) !== state.runId);
+    return new Command({
+      update: { messages: [...staleSupervisorWork.map(({ id }) => new RemoveMessage({ id: id! })), ...messages] },
+      goto: 'compactContext',
+    });
   };
 }
 

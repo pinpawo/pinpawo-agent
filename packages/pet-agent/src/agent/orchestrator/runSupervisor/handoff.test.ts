@@ -135,6 +135,8 @@ test('fresh run preserves Root facts without inheriting Supervisor work or dedup
   assert.ok(second.supervisor.inputs[0].some((message) => message.text === 'Inspection complete.'));
   assert.equal(second.supervisor.inputs[0].some((message) => getAgentMessageMetadata(message).lane === 'supervisor'
     && getAgentMessageMetadata(message).runId === firstOutput.runId), false);
+  assert.equal(secondOutput.messages.some((message) => getAgentMessageMetadata(message).lane === 'supervisor'
+    && getAgentMessageMetadata(message).runId === firstOutput.runId), false, 'earlier Supervisor work is not retained');
   assert.equal(second.supervisor.inputs[0].some((message) => AIMessage.isInstance(message)
     && message.tool_calls?.some((call) => call.name === 'delegate_capability')), true);
 });

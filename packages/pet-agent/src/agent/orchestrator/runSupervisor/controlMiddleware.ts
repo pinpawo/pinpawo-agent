@@ -1,4 +1,4 @@
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, RemoveMessage, ToolMessage } from '@langchain/core/messages';
 import { ToolInputParsingException } from '@langchain/core/tools';
 import { createMiddleware, ToolInvocationError } from 'langchain';
 import { currentSupervisorTask, supervisorAgentStateSchema } from './state';
@@ -47,3 +47,37 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
     },
   });
 }
+
+export const SUPERVISOR_EMPTY_REPLY_REPAIR_ID = 'supervisor-empty-reply-repair';
+
+const EMPTY_REPLY_REPAIR = [
+  '你上一轮的输出为空：既没有回复，也没有调用工具，因此不会有任何事情发生。',
+  '现在重新处理这一轮：需要执行就调用相应的工具；需要用户补充信息或确认就直接提问；否则给出面向用户的最终回复。',
+].join('\n');
+
+/**
+ * One real retry for an empty turn, never a fabricated answer. The empty turn is
+ * removed (providers reject empty assistant content) and the nudge is not a work
+ * record, so neither reaches the Supervisor lane. A second empty turn stays a
+ * protocol error.
+ */
+export const supervisorEmptyReplyRepairMiddleware = createMiddleware({
+  name: 'SupervisorEmptyReplyRepair',
+  afterModel: {
+    hook: (state) => {
+      const last = state.messages.at(-1);
+      // A malformed tool call is not an empty turn; it keeps its own protocol path.
+      if (!AIMessage.isInstance(last) || last.tool_calls?.length || last.invalid_tool_calls?.length
+        || last.text.trim() || !last.id) return undefined;
+      if (state.messages.some((message) => message.id === SUPERVISOR_EMPTY_REPLY_REPAIR_ID)) return undefined;
+      return {
+        messages: [
+          new RemoveMessage({ id: last.id }),
+          new HumanMessage({ id: SUPERVISOR_EMPTY_REPLY_REPAIR_ID, content: EMPTY_REPLY_REPAIR }),
+        ],
+        jumpTo: 'model' as const,
+      };
+    },
+    canJumpTo: ['model'],
+  },
+});

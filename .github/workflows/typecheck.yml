@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# A newer commit on the same pull request supersedes the run for an older one;
+# runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   typecheck:
     name: workspaces

@@ -19,13 +19,13 @@ import { z } from 'zod';
 import { withScriptedDelegation } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import type {
   AgentChannelSetup,
-} from '../../../local-agent/src/agent/agentChannel';
+} from '../../../host/src/agent/agentChannel';
 import {
-  LocalAgentGraphService,
+  HostGraphService,
   type InterruptResume,
-  type LocalAgentGraphEventStream,
-  type LocalAgentGraphThreadState,
-} from '../../../local-agent/src/agent/agentGraphService';
+  type HostGraphEventStream,
+  type HostGraphThreadState,
+} from '../../../host/src/agent/agentGraphService';
 
 export const GUARDED_HOST_INPUT =
   'Run the guarded production toolkit action.';
@@ -66,17 +66,17 @@ type ProductionToolkitFixture = {
 
 export function createProductionToolkitHostGraphService() {
   return new class ProductionToolkitHostGraphService
-    extends LocalAgentGraphService {
+    extends HostGraphService {
     override async streamEvents(
       setup: AgentChannelSetup,
       resume?: InterruptResume,
-    ): Promise<LocalAgentGraphEventStream> {
+    ): Promise<HostGraphEventStream> {
       return super.streamEvents(buildFixture(setup).setup, resume);
     }
 
     override async readThreadState(
       setup: AgentChannelSetup,
-    ): Promise<LocalAgentGraphThreadState> {
+    ): Promise<HostGraphThreadState> {
       return super.readThreadState(buildFixture(setup).setup);
     }
   }();

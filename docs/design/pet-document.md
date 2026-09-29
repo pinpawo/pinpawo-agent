@@ -134,18 +134,18 @@ these deterministic checks.
 - [Context schema and root accessor](../../packages/pet-agent/src/runtime/context.ts)
 - [Shared SystemMessage composer and middleware](../../packages/pet-agent/src/prompts/systemPrompt.ts)
 - [Root context propagation into dynamic children](../../packages/pet-agent/src/subagent/systemContext.test.ts)
-- [Host invocation and graph reuse tests](../../services/local-agent/src/agent/agentGraphService.test.ts)
+- [Host invocation and graph reuse tests](../../services/host/src/agent/agentGraphService.test.ts)
 
 Validation on 2026-09-05: pet-agent 482 tests passed; Studio 90 passed;
-local-agent 606 passed with 5 skipped. Local-agent's full suite requires local
+host 606 passed with 5 skipped. Host's full suite requires local
 port binding and process inspection and passed outside the filesystem/network
-sandbox. Typechecks passed for pet-agent (including eval types), local-agent,
+sandbox. Typechecks passed for pet-agent (including eval types), host,
 and Studio. External tracing was disabled for deterministic unit tests; no live
 model evals were run.
 
 
 The subsequent actor-identity cleanup passed the same 482 pet-agent tests,
-90 Studio tests, and 36 targeted local-agent tests. These include executor
+90 Studio tests, and 36 targeted host tests. These include executor
 workdir injection and isolation of equal actor profiles with different Host Pet
 ids. The three package typechecks, including pet-agent eval types, passed.
 
@@ -180,7 +180,7 @@ existing owners. The unread Studio `role`/`serviceSummary` metadata is removed.
 
 
 Validation of #760–#763 and complete AgentActor removal on 2026-09-05:
-pet-agent full suite 484 passed; Studio full suite 90 passed; local-agent full
+pet-agent full suite 484 passed; Studio full suite 90 passed; host full
 suite 609 passed, 5 skipped. Regression coverage verifies concurrent execution
 scope isolation, Host-only tracing attribution, and fresh workdir on checkpoint
 resume while preserving the original trace identity. Explicit null continuation
@@ -220,10 +220,10 @@ Validation must cover conflicting process defaults versus explicit Host values,
 independent Host directories and policies, and a policy change followed by both
 conversation and background dispatch on the same resident.
 
-Validation on 2026-09-06: local-agent 611 passed / 5 skipped; Studio 90 passed;
+Validation on 2026-09-06: host 611 passed / 5 skipped; Studio 90 passed;
 Studio cross-package acceptance 5 passed. The final affected channel/handler
-suite passed 38 tests. Local-agent, Studio and acceptance-project typechecks
-passed; local-agent runtime and Studio ESM/declaration builds passed. No live
+suite passed 38 tests. Host, Studio and acceptance-project typechecks
+passed; host runtime and Studio ESM/declaration builds passed. No live
 model calls or macOS companion checks were involved.
 
 The model-configuration audit follow-up removes the external `temperature` and
@@ -231,12 +231,12 @@ The model-configuration audit follow-up removes the external `temperature` and
 Provider defaults for temperature, thinking and reasoning effort determine
 model construction. This removes these two mutable inputs from graph cache
 identity concerns; other graph dependency/cache concerns remain separate.
-Validation for this follow-up: 63 model/config/channel tests and local-agent
+Validation for this follow-up: 63 model/config/channel tests and host
 TypeScript checking passed; live-model smoke was updated but not executed.
 
 ## Graph lifetime and internal iteration guard (2026-09-06 draft)
 
-LocalAgentGraphService builds a graph from the supplied Host configuration for
+HostGraphService builds a graph from the supplied Host configuration for
 each execution or checkpoint operation. It no longer caches graphs using a
 manually assembled model/session key. This removes stale model credentials,
 endpoints, request settings and runtime adapters from graph reuse decisions.
@@ -258,10 +258,10 @@ rejection settlement. This change does not restore the removed Host-side
 checkpoint/abort workaround. TUI fixtures use the current Host config store,
 invocation context, required planning goal and checkpoint stream lifetime.
 
-Validation after merging main: 489 core tests, 609 local-agent tests (5 skipped),
+Validation after merging main: 489 core tests, 609 host tests (5 skipped),
 90 Studio tests,
 5 Studio acceptance tests and 8 TUI Host tests passed. Core (including evals),
-local-agent, Studio and TUI TypeScript checks passed, as did core and local-agent
+host, Studio and TUI TypeScript checks passed, as did core and host
 ESM/declaration builds. Resume coverage includes explicit null continuation,
 review approval/cancellation, streamed task-pause projection, repeated suspension,
 model/checkpointer replacement, and process restart with persisted history.

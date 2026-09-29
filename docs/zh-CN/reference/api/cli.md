@@ -1,6 +1,6 @@
 # CLI 参考
 
-> **状态：当前契约。** 命令注册以 [`services/local-agent/src/cli.ts`](../../../../services/local-agent/src/cli.ts) 为准。
+> **状态：当前契约。** 命令注册以 [`services/host/src/cli.ts`](../../../../services/host/src/cli.ts) 为准。
 
 [English](../../../reference/api/cli.md)
 
@@ -18,7 +18,7 @@
 
 `run` 是 `server` 的别名，两者只启动 Chat，不再接受 Studio mode。`--stdio` 使用单 peer
 JSONL，标准输出仅用于协议。Studio 通过独立的 `pinpawo-studio` 进程启动，不复用 Chat
-server 启动链。`pinpawo tui` 消费 local-agent conversation，不连接 Studio 或发送 Studio
+server 启动链。`pinpawo tui` 消费 host conversation，不连接 Studio 或发送 Studio
 dispatch；`--check` 与 `--qa` 不能同时使用。Studio 没有内建的 WebSocket 或 stdio
 dispatch 协议，控制面由已配置的 Plugin 提供。
 

@@ -60,7 +60,7 @@ test('session transport owns snapshot correlation and forwards application messa
   connection.receive(snapshot('completion'));
   assert.deepEqual(snapshots, ['startup', 'completion']);
   assert.deepEqual(connections.slice(0, 2), [
-    ['connecting', 'connecting to local-agent'],
+    ['connecting', 'connecting to host'],
     ['connecting', 'synchronizing session'],
   ]);
   transport.stop();
@@ -195,7 +195,7 @@ test('a null snapshot timeout keeps a slow Host connected', () => {
 
   connection.receive(snapshot('startup'));
   assert.deepEqual(connections, [
-    ['connecting', 'connecting to local-agent'],
+    ['connecting', 'connecting to host'],
     ['connecting', 'synchronizing session'],
   ]);
   transport.stop();

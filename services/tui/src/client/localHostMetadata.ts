@@ -4,7 +4,7 @@ const DEFAULT_LOCAL_SERVER_PORT = 3210;
 const DEFAULT_TIMEOUT_MS = 1_500;
 
 export type LocalHostMetadata = {
-  localAgentVersion: string | null;
+  hostVersion: string | null;
 };
 
 type FetchLike = (
@@ -25,7 +25,7 @@ export async function loadLocalHostMetadata(
   const token = (options.tokenProvider ?? readLocalServerToken)();
   if (!token) {
     return {
-      localAgentVersion: null,
+      hostVersion: null,
     };
   }
 
@@ -48,7 +48,7 @@ export async function loadLocalHostMetadata(
       fetchJson(fetcher, `http://127.0.0.1:${port}/runtime`, init),
     ]);
     return {
-      localAgentVersion: runtime.status === 'fulfilled'
+      hostVersion: runtime.status === 'fulfilled'
         ? readOptionalString(runtime.value, 'local_agent_version')
         : null,
     };
@@ -64,7 +64,7 @@ async function fetchJson(
 ): Promise<unknown> {
   const response = await fetcher(url, init);
   if (!response.ok) {
-    throw new Error(`local-agent metadata request failed (${response.status})`);
+    throw new Error(`host metadata request failed (${response.status})`);
   }
   return response.json();
 }

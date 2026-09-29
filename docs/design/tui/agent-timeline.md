@@ -2,7 +2,7 @@
 
 > **Historical design record — superseded 2026-07-14.** Type names and state
 > boundaries in this proposal describe an earlier TUI implementation. Use
-> [`LOCAL_AGENT_SESSION_PROJECTION.md`](../../reference/runtime/session-projection.md)
+> [`HOST_SESSION_PROJECTION.md`](../../reference/runtime/session-projection.md)
 > for the current canonical timeline/session contract.
 
 > 状态：Draft v1
@@ -11,7 +11,7 @@
 
 ## 1. 文档目标
 
-本文定义 local-agent TUI 中 **AgentTimeline** 的重构方向。
+本文定义 host TUI 中 **AgentTimeline** 的重构方向。
 
 这里的 timeline 不是单纯的 message list，也不是单纯的 tool operation list。它表示一次 agent run 在用户眼前发生的真实执行顺序：
 
@@ -35,7 +35,7 @@ user message
 - human review waits
 - system notice / error / studio progress
 
-AgentTimeline 的职责是**渲染 agent 执行过程**。它不替代 `LocalAgentEvent` 协议，也不重新解析 raw tool payload；它消费已经归一化后的 event display fields，并把它们按 run 顺序组织成用户可读的 timeline。
+AgentTimeline 的职责是**渲染 agent 执行过程**。它不替代 `HostEvent` 协议，也不重新解析 raw tool payload；它消费已经归一化后的 event display fields，并把它们按 run 顺序组织成用户可读的 timeline。
 
 ---
 
@@ -160,7 +160,7 @@ tui/timeline/agentTimelineSelectors.ts
 `Operation Presentation Contract` 是 operation display fields 的 producer/consumer 契约，覆盖：
 
 - toolkit/toolset `ToolOperationMetadata`
-- local-agent `LocalAgentOperationEvent`
+- host `HostOperationEvent`
 - TUI operation item rendering
 - context rewrite / review policy 中对 operation summary 的安全使用
 
@@ -168,7 +168,7 @@ tui/timeline/agentTimelineSelectors.ts
 
 ```txt
 ToolOperationMetadata
-  -> LocalAgentOperationEvent.operation.{title,target,summary,details}
+  -> HostOperationEvent.operation.{title,target,summary,details}
   -> AgentTimelineEntry(type: 'operation')
   -> AgentOperationItem
 ```
@@ -247,7 +247,7 @@ export type AgentOperationEntry = {
 - start event append entry。
 - update/end/error event update same entry。
 - 如果 terminal event 先到或 start 缺失，reducer 可以在 terminal event 位置创建 entry。
-- operation 的展示信息来自 `LocalAgentOperationEvent.operation`，不从 raw payload 推断。
+- operation 的展示信息来自 `HostOperationEvent.operation`，不从 raw payload 推断。
 
 #### Review / notice / error / studio progress
 
@@ -530,7 +530,7 @@ details = 受控结构化补充，必须适合展示或审核
 
 ### 7.3 lifecycle merge 应在 normalizer/tracker 层完成
 
-TUI timeline reducer 只接受已经归一化的 `LocalAgentOperationEvent`。
+TUI timeline reducer 只接受已经归一化的 `HostOperationEvent`。
 
 这些规则应在 event 层完成：
 
@@ -550,9 +550,9 @@ TUI 只负责把 event update 到 timeline entry。
 新增：
 
 ```txt
-services/local-agent/src/tui/timeline/agentTimeline.ts
-services/local-agent/src/tui/timeline/agentTimelineSelectors.ts
-services/local-agent/src/tui/timeline/operationPresentation.ts
+services/host/src/tui/timeline/agentTimeline.ts
+services/host/src/tui/timeline/agentTimelineSelectors.ts
+services/host/src/tui/timeline/operationPresentation.ts
 ```
 
 内容：
@@ -644,7 +644,7 @@ tui/components/AgentOperationItem.tsx
 3. TUI 不再把 completed operation 强行降级为 `system` text cell。
 4. active operation UI 可以由 timeline selector 派生。
 5. TUI component 不读取 raw tool payload。
-6. `LocalAgentEvent` 协议不需要为第一阶段 timeline 重构破坏性改动。
+6. `HostEvent` 协议不需要为第一阶段 timeline 重构破坏性改动。
 7. browser tool call 的 URL / selector / page title 等关键上下文能稳定展示。
 8. message export/resume/history load 有 legacy adapter，不丢旧会话。
 
@@ -654,7 +654,7 @@ tui/components/AgentOperationItem.tsx
 
 本次重构不做：
 
-- 不重写 local-agent wire protocol。
+- 不重写 host wire protocol。
 - 不把 raw tool payload 暴露给 TUI component。
 - 不立即引入 OpenTUI。
 - 不把所有 studio progress 设计成完整 timeline DAG。
@@ -666,7 +666,7 @@ tui/components/AgentOperationItem.tsx
 
 ### 11.1 Timeline 是 presentation model，不是 event log
 
-`LocalAgentEvent` 是协议事件；`AgentTimelineEntry` 是 TUI presentation state。
+`HostEvent` 是协议事件；`AgentTimelineEntry` 是 TUI presentation state。
 
 同一个 protocol event 可以：
 

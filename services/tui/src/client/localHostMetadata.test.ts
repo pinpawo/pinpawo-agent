@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadLocalHostMetadata } from './localHostMetadata';
 
-test('local host metadata reads the local-agent version', async () => {
+test('local host metadata reads the host version', async () => {
   const requests: Array<{
     url: string;
     authorization: string | null;
@@ -23,7 +23,7 @@ test('local host metadata reads the local-agent version', async () => {
   });
 
   assert.deepEqual(metadata, {
-    localAgentVersion: '0.2.0',
+    hostVersion: '0.2.0',
   });
   assert.deepEqual(requests, [{
     url: 'http://127.0.0.1:4321/runtime',
@@ -40,7 +40,7 @@ test('local host metadata degrades when runtime metadata is unavailable', async 
   });
 
   assert.deepEqual(metadata, {
-    localAgentVersion: null,
+    hostVersion: null,
   });
 });
 
@@ -56,6 +56,6 @@ test('local host metadata skips requests when auth is unavailable', async () => 
 
   assert.equal(requested, false);
   assert.deepEqual(metadata, {
-    localAgentVersion: null,
+    hostVersion: null,
   });
 });

@@ -398,7 +398,7 @@ function styleWelcomeText(text: string): TextChunk[] {
     chunks.push(bold(fg(WELCOME_TITLE_COLOR)(value)));
     return chunks;
   }
-  if (/^v\S+\s+·\s+local-agent\b/.test(value)) {
+  if (/^v\S+\s+·\s+host\b/.test(value)) {
     chunks.push(dim(fg(WELCOME_MUTED_COLOR)(value)));
     return chunks;
   }

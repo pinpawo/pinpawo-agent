@@ -1,7 +1,7 @@
 # TUI v2 OpenTUI Phase 1 capability matrix
 
 > **Status: historical record.** 这里描述的 legacy Ink 客户端
-> (`services/local-agent/src/tui`) 已删除,`pinpawo tui` 现在是唯一的终端
+> (`services/host/src/tui`) 已删除,`pinpawo tui` 现在是唯一的终端
 > 客户端。本页保留当时的迁移对照,不代表当前行为。
 
 Issue: #454
@@ -13,8 +13,8 @@ Runtime target: Bun 1.3.14
 
 This work validates the terminal-dependent risks before the production TUI is
 migrated. It is not yet a replacement for the existing Ink TUI. The production
-v2 client now connects to the local-agent host, and a deterministic native
-integration smoke exercises the production local-agent handler/session/runtime
+v2 client now connects to the Host, and a deterministic native
+integration smoke exercises the production host handler/session/runtime
 chain over the real authenticated WebSocket transport without requiring a live
 LLM.
 
@@ -24,7 +24,7 @@ The probe covers:
 - split-footer settled output in terminal scrollback with a live footer;
 - terminal-owned wheel and selection input in split-footer mode;
 - split-footer streaming through `ScrollbackSurface` stable-row commits;
-- authenticated local-agent WebSocket transport through projection and native
+- authenticated host WebSocket transport through projection and native
   scrollback;
 - terminal selection while mouse input is enabled;
 - `TextareaRenderable` multiline editing, selection, paste, and undo/redo;
@@ -37,9 +37,9 @@ The probe covers:
 
 | Check | Expected | Status |
 | --- | --- | --- |
-| shared projection import | no `services/local-agent/src/*` import | implemented |
-| local-agent host integration | production session, chat adapter, inflight operation, snapshot, and authenticated WebSocket handlers drive chat submission, operation/subagent/delta/completion events, completion rehydration, and duplicate-free native scrollback | Bun native integration test |
-| local-agent reconnect integration | a transport/protocol failure triggers v2 backoff/reconnect and checkpoint rehydration; after the fast retry sequence the client keeps retrying at the capped interval until the host returns, while live-only operation/subagent state is intentionally omitted and committed terminal rows are not replayed | unit + Bun native integration test |
+| shared projection import | no `services/host/src/*` import | implemented |
+| Host integration | production session, chat adapter, inflight operation, snapshot, and authenticated WebSocket handlers drive chat submission, operation/subagent/delta/completion events, completion rehydration, and duplicate-free native scrollback | Bun native integration test |
+| host reconnect integration | a transport/protocol failure triggers v2 backoff/reconnect and checkpoint rehydration; after the fast retry sequence the client keeps retrying at the capped interval until the host returns, while live-only operation/subagent state is intentionally omitted and committed terminal rows are not replayed | unit + Bun native integration test |
 | embedded stdio host transport | `pinpawo tui` starts its own local agent as a piped stdio child by default and drives the same session controller over the shared JSONL protocol with no port, bearer token, or loopback origin check; the Host's stdout carries frames only, its stderr is appended to `~/.pinpawo/logs/embedded-host.log`, disconnecting ends the child, and the synchronization timeout is disabled because this transport cannot re-dial a running Host. `--server-port <port>` opts back into the authenticated loopback WebSocket instead, and the two targets are mutually exclusive | unit + Bun child-process integration test |
 | local attachment host boundary | structured local attachments traverse the authenticated production protocol with full paths available only to model context and no eager file-content read; a production-toolkit PTY then parses the selected Unicode path from actual subagent context, calls a real read-only tool, renders the returned file content in operation order, and keeps the terminal plus restarted checkpoint filename-only | Bun native + child-process production PTY test |
 | production multi-path paste | the production attachment reducer and OpenTUI paste callback separate quoted multi-path input into distinct attachments, keep path text out of the composer, preserve ordinary multiline paste, and report duplicates/protocol limits; the parser preserves Windows drive, UNC, and `file:///C:/...` paths without consuming separator backslashes, while a real macOS PTY pastes three paths with spaces and Unicode, removes the last with Backspace, and proves only the selected paths reach model input and filename-only recovery | unit + Bun native + child-process PTY test |
@@ -47,14 +47,14 @@ The probe covers:
 | production interruption | a v2 interrupt traverses the authenticated host, aborts the graph signal, settles partial assistant output, appends the terminal notice in canonical order, and releases native scrollback for later rows | shared projection unit + Bun native integration test |
 | production review resolution | canonical review interrupts reach v2 as waiting-review state; approval continues execution, text response continues planning, and both rejection and cancellation roll back the complete unexecuted AI tool-call action, interrupt the run, and leave the active delegation pending without synthetic `ToolMessage`; `/continue <guidance>` sends `resume_active` and replans from the prior complete boundary, with checkpoint-bound resume detection preventing repeated auto-review while allowing later new reviews to evaluate normally | Bun native + child-process production PTY test |
 | production failure recovery | a graph failure after assistant delta settles the partial message, appends the canonical error in order, releases the active run, and permits the next authenticated host request to complete normally | shared projection unit + Bun native integration test |
-| production runtime stop | `requestStop()` aborts the runtime's keepalive wait immediately instead of delaying shutdown by the configured polling interval | local-agent lifecycle unit |
-| production process restart | the local HTTP/WebSocket transport exposes an idempotent close lifecycle; two independent Bun host processes reuse one port and production FileSaver state while v2 reconnects, restores non-empty history/token usage, and continues the same session | local-agent lifecycle unit + Bun child-process integration test |
+| production runtime stop | `requestStop()` aborts the runtime's keepalive wait immediately instead of delaying shutdown by the configured polling interval | host lifecycle unit |
+| production process restart | the local HTTP/WebSocket transport exposes an idempotent close lifecycle; two independent Bun host processes reuse one port and production FileSaver state while v2 reconnects, restores non-empty history/token usage, and continues the same session | host lifecycle unit + Bun child-process integration test |
 | production TUI process entry | the real `main.ts` process runs inside expect-managed macOS PTYs with `--server-port` pinned to independent production hosts, authenticates to them, applies snapshots, accepts attachment paste/removal, composer/history/`@path` flows, renders updated operation/subagent/multi-delta Markdown, resolves both a direct checkpoint review and an actual reviewed toolkit call, consumes a structured attachment with a real read tool, and performs real `$VISUAL` plus `$PAGER` handoffs; an active response also survives a live 80×24 → 44×18 → 96×28 resize while preserving and later submitting a multiline CJK draft; pager return, Markdown export, guarded write/read execution, `/quit`, privacy boundaries, and ordered checkpoint rehydration are verified across host restarts | Bun child-process PTY integration test |
 | repeatable cross-terminal QA entry | `pinpawo tui --v2 --qa` follows the normal workspace/binary/packaged-bundle launcher and runs the production `main.ts` UI with an explicit deterministic transport, preloaded native history, immediate thinking feedback, timed operation/subagent/multi-delta/completion events, and stable token usage; its macOS expect PTY test enters through the public CLI and proves the production waiting, ordered timeline, completion status, and `/quit` path without a host or model account | CLI + launcher unit tests and child-process PTY test |
 | canonical timeline order | message/operation/subagent/message order is retained through the production host and settles in the same order on the real terminal surface | automated + Bun native + child-process production PTY test |
 | operation raw payload | shared projection retains transient raw data | automated test |
 | live ordered operation tail | running/updated operations remain visible with later subagent/message rows on one transient surface, then commit atomically in canonical order; a no-smoke production PTY observes started, output-delta, completed output, distinct subagent progress, multiple assistant deltas, and the final rich-text commit | Bun native + child-process production PTY test |
-| operation detail rendering | bounded output/error text and `apply_patch` payload lines are visible without importing local-agent implementation code | automated test |
+| operation detail rendering | bounded output/error text and `apply_patch` payload lines are visible without importing host implementation code | automated test |
 | legacy display-rule reuse | assistant Markdown normalization, subagent paragraph grouping, and `toolName(args)` operation presentation are shared as runtime-independent v2 formatters | automated test |
 | scrollback-safe assistant Markdown | headings, inline emphasis and links, lists, blockquotes, code, and tables render without changing canonical message text; mutable table tails remain transient until completion | Bun native test |
 | new-turn row emission | after previously committed history, an accepted new user turn is emitted immediately before the active response; this proves row emission, not the terminal emulator's current viewport position | Bun native test; bottom-follow remains a manual terminal check |
@@ -80,7 +80,7 @@ The probe covers:
 | Studio mode | `/studio [task]` and `/chat` keep composer mode local while projecting user/progress/reply/error rows through the shared ordered Session timeline | automated test + OpenTUI PTY |
 | external editor lifecycle | `/edit [text]` suspends OpenTUI, gives the TTY to `$VISUAL`/`$EDITOR`, resumes on success or failure, and restores the multiline draft without submitting; the production process then submits that exact restored draft through the host, and Windows quoted executable paths retain backslash separators | automated + smoke PTY + child-process production PTY test |
 | keyboard transcript browsing | PageUp from an empty composer or `/transcript` hands the full ordered canonical timeline to `$PAGER`, buffers projection rendering while suspended, and reconciles after return; the production PTY verifies all seven ordered turns plus operation/subagent rows, filename-only attachments, restored composer ownership, and Windows pager command parsing preserves quoted executable separators | automated test + interactive pager PTY + child-process production PTY test |
-| transcript export | `/export [path]` writes completed canonical user/assistant messages locally without a new host protocol or local-agent implementation import; the production PTY reads the resulting Markdown and verifies message order plus local-path privacy, while Windows drive, directory, and `~\` home paths resolve with win32 semantics | automated + child-process PTY test |
+| transcript export | `/export [path]` writes completed canonical user/assistant messages locally without a new host protocol or host implementation import; the production PTY reads the resulting Markdown and verifies message order plus local-path privacy, while Windows drive, directory, and `~\` home paths resolve with win32 semantics | automated + child-process PTY test |
 | composer keyboard editing | Cmd+A, Cmd+Z/Shift+Cmd+Z, Option+arrows, Shift selection, Home/End, Ctrl+A/E, and forward Delete preserve multiline, Markdown source, CJK, and emoji input under Kitty keyboard input; the OpenTUI 0.4.5 reverse-selection Right-collapse bug is repaired at the textarea boundary | Bun native test |
 | composer token decoration | Markdown headings/lists/quotes/strong/code/links, slash commands, and standalone `@path` tokens receive terminal-cell-aware style ranges; completed Unicode paths containing spaces retain one stable visual range as preceding edits move them, disappear when their `@` marker is deleted, and return on undo; decoration never rewrites source text, cursor offsets, undo/redo history, or the submitted protocol payload, including CJK and emoji prefixes | unit + Bun native + child-process PTY test |
 | composer prompt history | plain Up/Down routes to a bounded 100-entry history only at the first/last total visual row, preserves exact multiline prompts, restores the in-progress draft, and can resubmit the restored text through the production host | automated + Bun native soft-wrap + child-process PTY test |
@@ -91,7 +91,7 @@ The probe covers:
 | error notice ownership | connection/local errors remain width-safe and dismissible without editing the composer | automated + Bun native test |
 | post-submit activity feedback | an accepted request continuously animates the live indicator with the canonical session actor at a bounded 240 ms cadence while the run remains active; thinking, tool use, streaming, review pause, and interruption have distinct labels, the empty composer remains available for drafting and advertises Esc interruption, and only the fixed footer row is repainted; the same terminal-safe actor label reaches settled timeline rows, pager, and export metadata | automated model test + child-process PTY regression; continuous-animation browse anchoring remains in the cross-terminal matrix |
 | two-line status | run/connection/notice and session in/out/context/workspace facts remain separate with narrow-width degradation | automated test |
-| borderless welcome | terminal-raster paw, TUI/local-agent versions, actor, model, workdir, loaded capabilities, and shortcuts commit once before timeline history | automated + Bun native test |
+| borderless welcome | terminal-raster paw, TUI/host versions, actor, model, workdir, loaded capabilities, and shortcuts commit once before timeline history | automated + Bun native test |
 | Phase 5 CLI entry | `pinpawo tui --v2` selects a bundled/workspace OpenTUI executable or workspace source while `--legacy` remains an explicit rollback | automated test + compiled PTY |
 | npm distribution payload | one Bun-targeted JS bundle and versioned manifest ship in `pinpawo`; npm selects Bun/OpenTUI platform packages | automated manifest tests + installed-tarball PTY |
 | distribution integrity and platform launch | launcher verifies the bundle byte count/SHA-256 before execution and resolves package-local Bun runtimes for darwin/Linux/Windows on x64/arm64; Windows uses the direct `bun.exe` rather than a command shim | automated test matrix |
@@ -113,7 +113,7 @@ The probe covers:
 | transcript pager PTY flow | `npm run smoke:transcript -w @pinpawo/tui` plus interactive `less` | passed; full ordered timeline is readable, `q` exits, split footer resumes, and terminal state is restored |
 | standalone executable | `npm run build -w @pinpawo/tui` | passed for darwin-arm64; normal and approval compiled PTY smokes passed |
 | root typecheck | `npm run typecheck` | passed |
-| root tests | `npm test` | passed on current macOS with local-agent 789/789 and Chrome extension 22/22; the preceding 787-test baseline also passed after a clean Linux arm64 `npm ci`, with the two newer cases isolated to CLI/launcher argument forwarding |
+| root tests | `npm test` | passed on current macOS with host 789/789 and Chrome extension 22/22; the preceding 787-test baseline also passed after a clean Linux arm64 `npm ci`, with the two newer cases isolated to CLI/launcher argument forwarding |
 | root build | `npm run build` | passed |
 | CLI package dry-run | `npm run pack:dry -w pinpawo` | passed; `dist/tui/main.js` and its manifest are included |
 | installed tarball v2 startup | `npm run test:tui-install -w pinpawo` installs generated local tarballs in an empty project and runs the installed `pinpawo tui --v2 --check` path | passed with package-local Bun/OpenTUI on local darwin-arm64 and Linux arm64/x64, plus GitHub-hosted macOS, Ubuntu, and Windows; interactive PTY remains separately covered |

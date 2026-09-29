@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import type { LocalAgentRuntimeConfig } from 'pinpawo/host-runtime';
+import type { HostRuntimeConfig } from 'pinpawo/host-runtime';
 import type { StudioPluginResolver } from './host/buildStudio';
 import type { RunningStudioHost, StartStudioHostOptions } from './startStudioHost';
 import { runStudioHostProcess } from './studioHostProcess';
 
-function runtimeConfig(workdir: string): LocalAgentRuntimeConfig {
-  return { workdir } as LocalAgentRuntimeConfig;
+function runtimeConfig(workdir: string): HostRuntimeConfig {
+  return { workdir } as HostRuntimeConfig;
 }
 
 function completedHost(): RunningStudioHost {

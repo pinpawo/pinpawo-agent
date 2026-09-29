@@ -7,7 +7,7 @@
 
 > 状态：Implemented
 > 日期：2026-08-09
-> 范围：`services/local-agent` 的本地 `apply_patch` 工具
+> 范围：`services/host` 的本地 `apply_patch` 工具
 
 ## 1. 目标
 
@@ -149,18 +149,18 @@ V4A 先完整解析，再按 hunk 顺序在同一份内存内容上匹配：
 
 ## 9. 代码所有权与验证
 
-- `services/local-agent/src/toolkits/local/applyPatch.ts`：V4A 解析、匹配和部分应用。
-- `services/local-agent/src/toolkits/local/fileTools.ts`：工具 schema、目标校验、原子写入和结构化输出。
-- `services/local-agent/src/toolkits/local/index.ts`：工具包级模型使用说明。
+- `services/host/src/toolkits/local/applyPatch.ts`：V4A 解析、匹配和部分应用。
+- `services/host/src/toolkits/local/fileTools.ts`：工具 schema、目标校验、原子写入和结构化输出。
+- `services/host/src/toolkits/local/index.ts`：工具包级模型使用说明。
 - `services/tui/src/timeline/operationDisplay.ts`：生产 TUI 的输入 patch 预览和通用工具输出渲染。
-- `services/local-agent/src/localToolsFile.test.ts`：协议、匹配、部分应用、错误结构和工具注册测试。
+- `services/host/src/localToolsFile.test.ts`：协议、匹配、部分应用、错误结构和工具注册测试。
 - `services/tui/src/timeline/operationDisplay.test.ts`：当前 TUI 的输入 diff 与原始结果输出测试。
-- `services/local-agent/evals/apply-patch-protocol.eval.ts`：真实模型的 V4A 生成和完成率评估。
+- `services/host/evals/apply-patch-protocol.eval.ts`：真实模型的 V4A 生成和完成率评估。
 
 实现变更至少应运行：
 
 ```bash
-node --import tsx --test services/local-agent/src/localToolsFile.test.ts
+node --import tsx --test services/host/src/localToolsFile.test.ts
 npm run test -w @pinpawo/tui
 npm run typecheck -w pinpawo
 ```

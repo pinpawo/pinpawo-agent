@@ -19,7 +19,7 @@ cross-host ownership rules are recorded in
 | **Studio runtime** | `@pinpawo/studio` | You need multi-Pet one-way dispatch admission or Plugins. |
 | **Capability / Toolkit contract** | `@pinpawo/pet-agent` | You are adding a task boundary, tools, review policy, or Toolkit runtime. |
 | **Local agent host** | `pinpawo` CLI package | You need local configuration, Capability loading, HTTP/WebSocket, or stdio transport. |
-| **Session projection** | `@pinpawo/agent-session` | You are building a client adapter that renders local-agent conversations, runs, and review state; it is not a Studio dispatch protocol. |
+| **Session projection** | `@pinpawo/agent-session` | You are building a client adapter that renders host conversations, runs, and review state; it is not a Studio dispatch protocol. |
 
 ## Boundary rules
 
@@ -30,7 +30,7 @@ cross-host ownership rules are recorded in
    worker internals.** It validates live Pets, forwards accepted dispatches,
    allocates receipt identities, and fans out Plugin events. Queue/gate ownership,
    active-thread selection, execution events, and continuation recovery belong
-   to the local-agent resident runtime and Agent Session interaction.
+   to the host resident runtime and Agent Session interaction.
 3. **Capabilities own task intent; Toolkits own executable behavior.** A
    Capability declares a static Toolkit allowlist. A Toolkit provides typed
    tools, availability checks, operation metadata, and policy.

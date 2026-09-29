@@ -6,11 +6,11 @@ import {
 import type { ReviewSpec } from '@pinpawo/pet-agent';
 import type {
   AgentChannelSetup,
-} from '../../../local-agent/src/agent/agentChannel';
+} from '../../../host/src/agent/agentChannel';
 import type {
   InterruptResume,
-  LocalAgentGraphService,
-} from '../../../local-agent/src/agent/agentGraphService';
+  HostGraphService,
+} from '../../../host/src/agent/agentGraphService';
 
 export const ASSISTANT_MESSAGE = '# Result\n\nThe **host transport** is aligned.';
 export const INTERRUPT_MESSAGE = 'Start a long host task.';
@@ -246,7 +246,7 @@ export function createHostGraphFixture() {
         yield protocolEvent('values', { messages });
       })();
     },
-  } as unknown as LocalAgentGraphService;
+  } as unknown as HostGraphService;
 
   return {
     service,

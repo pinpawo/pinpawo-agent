@@ -32,7 +32,7 @@ systems:
 
 ```mermaid
 flowchart TB
-  U["User, TUI, desktop app, or stdio client"] --> H["Local agent host\nservices/local-agent"]
+  U["User, TUI, desktop app, or stdio client"] --> H["Local Host\nservices/host"]
   H --> O["Pet-agent orchestrator\npackages/pet-agent"]
   H --> S["Session projection\npackages/agent-session"]
   O --> C["Capability lane"]
@@ -64,7 +64,7 @@ layer. See the accepted
 | Orchestration | `packages/pet-agent/` | Agent graph, Capability planning, lane isolation, review integration, and artifact references. |
 | Session state | `packages/agent-session/` | Client-neutral session model, reducers, versioned snapshots, and parsers. |
 | Collaboration | `packages/studio/` | Studio Host, dispatch, read-only per-Pet dispatch-queue observation (including admission state), and the standalone process entry. |
-| Local host | `services/local-agent/` | CLI, configuration, runtime composition, and local transports. |
+| Local host | `services/host/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
 | Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/kanban/`, including their runtime lifecycles. |
 | Desktop companion | `tools/agent-macos/` | macOS supervision and configuration UI. |

@@ -67,7 +67,7 @@ The fingerprint covers provider, model, sanitized endpoint, context/output limit
 
 ## Runtime and session ownership
 
-The local-agent host loads one immutable profile-registry snapshot. Local chat,
+The Host loads one immutable profile-registry snapshot. Local chat,
 hosted chat, Studio, and scheduled Studio work all resolve complete profiles
 from that registry; they do not keep separate model/endpoint/key tuples.
 

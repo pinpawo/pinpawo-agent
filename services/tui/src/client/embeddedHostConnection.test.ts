@@ -159,7 +159,7 @@ test('embedded host reports an invalid protocol line as a closed connection', as
 
   assert.deepEqual(events, [
     'open',
-    'error:local-agent sent an invalid protocol message',
+    'error:host sent an invalid protocol message',
     'close',
   ]);
   assert.equal(connection.isConnected(), false);
@@ -202,17 +202,17 @@ test('embedded host collects stderr without writing it to the terminal', async (
   connection.connect();
   child.emitSpawn();
   child.writeStderr('[local-server] stdio JSONL transport ready\n');
-  child.writeStderr('[local-agent] first\n[local-agent] second\n\n');
+  child.writeStderr('[host] first\n[host] second\n\n');
   await flushTasks();
 
   assert.deepEqual(diagnostics, [
     '[local-server] stdio JSONL transport ready',
-    '[local-agent] first',
-    '[local-agent] second',
+    '[host] first',
+    '[host] second',
   ]);
   assert.deepEqual(connection.readDiagnostics(), [
-    '[local-agent] first',
-    '[local-agent] second',
+    '[host] first',
+    '[host] second',
   ]);
   // The terminal UI only ever sees connection lifecycle events.
   assert.deepEqual(events, ['open']);
@@ -233,7 +233,7 @@ test('embedded host explains a Host that cannot be started', () => {
   connection.connect();
 
   assert.deepEqual(events, [
-    'error:could not start the local-agent Host (missing-pinpawo):'
+    'error:could not start the Host (missing-pinpawo):'
       + ' spawn missing-pinpawo ENOENT.'
       + ' Start `pinpawo tui` so the launcher can pass the Host runtime,'
       + ' or set PINPAWO_EMBED_HOST_COMMAND and PINPAWO_EMBED_HOST_ARGS.',
@@ -255,7 +255,7 @@ test('embedded host treats a pre-spawn child error as a startup failure', () => 
   child.emit('error', new Error('spawn missing-pinpawo ENOENT'));
 
   assert.deepEqual(events.slice(-2), [
-    'error:could not start the local-agent Host (missing-pinpawo):'
+    'error:could not start the Host (missing-pinpawo):'
       + ' spawn missing-pinpawo ENOENT.'
       + ' Start `pinpawo tui` so the launcher can pass the Host runtime,'
       + ' or set PINPAWO_EMBED_HOST_COMMAND and PINPAWO_EMBED_HOST_ARGS.',

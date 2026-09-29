@@ -8,12 +8,12 @@ ARCHIVE_XCODE_ARGS ?= -allowProvisioningUpdates
 generate:
 	xcodegen generate
 
-# Build local-agent dist first, then generate Xcode project and open
+# Build host dist first, then generate Xcode project and open
 open: build-agent generate
 	open PinPawoAgent.xcodeproj
 
 build-agent:
-	cd ../../services/local-agent && npm run build
+	cd ../../services/host && npm run build
 
 build: build-agent generate
 	xcodebuild \

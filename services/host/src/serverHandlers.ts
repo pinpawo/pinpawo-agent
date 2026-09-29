@@ -1,0 +1,770 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { compactOrchestratorMessages } from '@pinpawo/pet-agent';
+import type { AgentLlmConfig } from './config/agentConfig';
+import { HostGraphService } from './agent/agentGraphService';
+import { InflightRequestController } from './inflightRequestController';
+import { buildHostSessionSnapshot } from './conversation/agentSessionSnapshot';
+import type {
+  AgentModelProfileSummary,
+  AgentRuntimeEvent,
+  AgentSessionSummary,
+} from '@pinpawo/agent-session';
+import { ActiveRunRegister } from './agent/activeRunRegister';
+import type {
+  HostSessionServerMessage,
+} from './wire/protocol';
+import { handleLocalHttpRequest } from './httpHandlers';
+import { sendLocalServerPeerEvent, type ServerPeer } from './wire/peer';
+import type { LocalServerPeerHandlers } from './wire/messageDispatcher';
+import { SessionAdmission } from './session/sessionAdmission';
+import { SessionCommandQueue } from './session/sessionCommandQueue';
+import { ServerChatHandler } from './agent/serverChatHandler';
+import type {
+  AgentSessionTurnOptions,
+  AgentSessionTurnResult,
+} from './agent/chatSessionAdapter';
+import { ServerTuiSessionService } from './session/serverTuiSessions';
+import { persistGlobalReviewPolicyMode } from './config/globalReviewPolicyConfig';
+import { loadAgentContext } from './contextLoader';
+import {
+  missingInputModalities,
+  supportsInputModalities,
+} from './config/modelProfiles';
+import {
+  type ServerRuntimeDepsStore,
+  type ServerDeps,
+} from './serverTypes';
+
+export type ServerHandlers = {
+  interruptRun: (requestId: string) => boolean;
+  peerHandlers: LocalServerPeerHandlers;
+  handleHttpRequest: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    authToken: string,
+  ) => boolean;
+  close: () => void;
+};
+
+export type ServerHandlerOptions = {
+  persistGlobalReviewPolicyMode?: typeof persistGlobalReviewPolicyMode;
+  /** Composition hook for embedded hosts and deterministic integration tests. */
+  chatGraphService?: HostGraphService;
+  /** Host-owned session service shared with another surface of the same resident Pet. */
+  tuiSessions?: ServerTuiSessionService;
+  /** Must be shared by chat execution and checkpoint-backed session reads. */
+  loadContext?: typeof loadAgentContext;
+  /** Deterministic run-boundary hook for embedded hosts and tests. */
+  runAgentTurn?: (
+    options: AgentSessionTurnOptions,
+  ) => Promise<AgentSessionTurnResult>;
+  /** Publish one run event to every observer of the resident Agent Session. */
+  publishRuntimeEvent?: (origin: ServerPeer, event: AgentRuntimeEvent) => void;
+  /** Optional Host-owned run control used by resident headless inputs. */
+  interruptHostRun?: (requestId: string) => boolean;
+  /**
+   * The Host's run register, shared when the Host also dispatches.
+   *
+   * A resident Host runs turns from two sources — this handler's conversation
+   * and its own dispatch queue — and both must claim the same register, or a
+   * snapshot cannot say which run is live. Left unset (the local CLI), the
+   * handler owns a register of its own.
+   */
+  activeRuns?: ActiveRunRegister;
+};
+
+type SessionSummarySource = Pick<
+  AgentSessionSummary,
+  'id' | 'title' | 'messageCount' | 'createdAt' | 'updatedAt' | 'active'
+>;
+
+/** Shown whenever a command is refused because a run holds the session. */
+const RUN_IN_FLIGHT_MESSAGE = 'wait for the current response to finish';
+
+function projectChatSessionSummary(session: SessionSummarySource): AgentSessionSummary {
+  return {
+    id: session.id,
+    kind: 'chat',
+    title: session.title,
+    messageCount: session.messageCount,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    active: session.active,
+  };
+}
+
+/**
+ * Compose the shared host handlers once, then attach any transport at
+ * the outer boundary. HTTP endpoints and stdio session commands call the same
+ * checkpoint-backed operations below.
+ */
+export function createLocalServerHandlers(
+  runtimeDeps: ServerRuntimeDepsStore,
+  options: ServerHandlerOptions = {},
+): ServerHandlers {
+  const initialDeps = runtimeDeps.get();
+  const effectiveRuntimeConfig = initialDeps.runtimeConfig;
+  const chatGraphService = options.chatGraphService ?? new HostGraphService();
+  const tuiSessions = options.tuiSessions ?? new ServerTuiSessionService({
+    graphService: chatGraphService,
+    ...(options.loadContext ? { loadContext: options.loadContext } : {}),
+    runtimeConfig: effectiveRuntimeConfig,
+    ...(initialDeps.chatCheckpointer ? { checkpointer: initialDeps.chatCheckpointer } : {}),
+    defaultModelProfileId: initialDeps.modelProfiles.defaultProfileId,
+  });
+  const publishRuntimeEvent = options.publishRuntimeEvent
+    ?? ((peer: ServerPeer, event: AgentRuntimeEvent) => {
+      sendLocalServerPeerEvent(peer, event);
+    });
+  const inflightRequests = new InflightRequestController<ServerPeer>({
+    // Local TUI / companion / spawned stdio peer: trusted local transports.
+    emitOperation: publishRuntimeEvent,
+    sendControl: (peer, message) => peer.send(message),
+  });
+  const chatHandler = new ServerChatHandler({
+    graphService: chatGraphService,
+    tuiSessions,
+    inflightRequests,
+    publishRuntimeEvent,
+    ...(options.interruptHostRun ? { interruptHostRun: options.interruptHostRun } : {}),
+    ...(options.loadContext ? { loadContext: options.loadContext } : {}),
+    ...(options.runAgentTurn ? { runAgentTurn: options.runAgentTurn } : {}),
+  });
+  const sessionAdmission = new SessionAdmission();
+  const sessionCommands = new SessionCommandQueue();
+  /**
+   * Commands are refused while a run is in flight.
+   *
+   * Every command either changes what the run is writing to (`/new`,
+   * `/resume`, `/model`, `/compact`, `/policy`) or reports state the run is
+   * still producing (`/refresh`, whose purpose is to re-read the UI *after* a
+   * run settles). Admitting any of them mid-run means acting on a session
+   * that is about to change under the caller.
+   *
+   * The rule lives at this boundary so a new command cannot be added without
+   * it, and on the server because that is the only place the invariant can be
+   * held — a client blocking its command panel is feedback, not enforcement.
+   */
+  const runSessionCommand = (
+    command: () => Promise<void>,
+    refuse: () => void,
+  ) => sessionCommands.enqueue(async () => {
+    if (sessionAdmission.hasActiveRun()) {
+      refuse();
+      return;
+    }
+    await command();
+  });
+  const refuseSessionCommand = (
+    peer: ServerPeer,
+    requestId: string,
+    // Not 'snapshot': an observation is never refused.
+    operation: 'list' | 'new' | 'resume' | 'compact',
+  ) => () => {
+    peer.send({
+      type: 'session.error',
+      requestId,
+      operation,
+      message: RUN_IN_FLIGHT_MESSAGE,
+    });
+  };
+  const activeRuns = options.activeRuns ?? new ActiveRunRegister();
+
+  const loadSnapshot = async (peer?: ServerPeer) => {
+    const requestDeps = runtimeDeps.get();
+    const checkpoint = await tuiSessions.readActiveCheckpointPoint(requestDeps);
+    const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
+      requestDeps,
+      checkpoint.pendingInterrupt,
+    );
+    const activeRun = activeRuns.read();
+    return buildHostSessionSnapshot({
+      sessionId: checkpoint.sessionId,
+      kind: 'chat',
+      messages: checkpoint.messages,
+      deps: requestDeps,
+      modelProfileId: checkpoint.modelProfileId,
+      requiredInputModalities: checkpoint.requiredInputModalities,
+      sessionTokenUsage: checkpoint.sessionTokenUsage,
+      pendingInterrupt,
+      activeRun,
+      currentPlan: checkpoint.currentPlan,
+    });
+  };
+
+  const listSessions = async () => {
+    const sessions = await tuiSessions.listSessions(runtimeDeps.get());
+    return sessions.map(projectChatSessionSummary);
+  };
+
+  const listModelProfiles = async (sessionId: string) => {
+    const requestDeps = runtimeDeps.get();
+    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+    if (!tuiSessions.getSession(requestDeps.petId, sessionId)) {
+      throw Object.assign(
+        new Error('session not found'),
+        { code: 'session_not_found' },
+      );
+    }
+    if (activeSession.id !== sessionId) {
+      throw Object.assign(
+        new Error('model listing requires the active session'),
+        { code: 'session_not_active' },
+      );
+    }
+    // Read the modalities off the transcript rather than a stored counter, so a
+    // session that was rolled back or repaired reports what it actually holds.
+    const { requiredInputModalities } = await tuiSessions.readSessionCheckpointPoint(
+      requestDeps,
+      activeSession,
+    );
+    const profiles: AgentModelProfileSummary[] = [
+      ...requestDeps.modelProfiles.listAvailable().map((profile) => {
+        const compatible = supportsInputModalities(
+          requiredInputModalities,
+          profile.inputModalities,
+        );
+        return {
+          ...profile,
+          inputModalities: [...profile.inputModalities],
+          available: true,
+          compatible,
+          issues: compatible
+            ? []
+            : [
+                `Session requires ${requiredInputModalities.join(', ')} input; model is missing ${
+                  missingInputModalities(
+                    requiredInputModalities,
+                    profile.inputModalities,
+                  ).join(', ')
+                }`,
+              ],
+        };
+      }),
+      ...Object.entries(
+        requestDeps.modelProfiles.snapshot.unavailableProfiles,
+      ).map(([id, issues]) => ({
+        id,
+        label: id,
+        inputModalities: ['text' as const],
+        available: false,
+        compatible: false,
+        issues: issues.map((issue) => issue.message),
+      })),
+    ];
+    if (!profiles.some((profile) => profile.id === activeSession.modelProfileId)) {
+      profiles.push({
+        id: activeSession.modelProfileId,
+        label: activeSession.modelProfileId,
+        inputModalities: ['text'],
+        available: false,
+        compatible: false,
+        issues: [
+          `Selected model profile "${activeSession.modelProfileId}" is no longer configured`,
+        ],
+      });
+    }
+    return {
+      sessionId,
+      defaultProfileId: requestDeps.modelProfiles.defaultProfileId,
+      selectedProfileId: activeSession.modelProfileId,
+      requiredInputModalities: [...requiredInputModalities],
+      profiles,
+    };
+  };
+
+  const sendModelSelectionError = (
+    peer: ServerPeer,
+    message: {
+      requestId: string;
+      sessionId: string;
+      modelProfileId?: string;
+    },
+    code:
+      | 'session_not_found'
+      | 'session_not_active'
+      | 'run_active'
+      | 'review_pending'
+      | 'profile_unavailable'
+      | 'profile_incompatible'
+      | 'selection_failed',
+    detail: string,
+  ) => {
+    peer.send({
+      type: 'model.select.error',
+      requestId: message.requestId,
+      sessionId: message.sessionId,
+      ...(message.modelProfileId
+        ? { modelProfileId: message.modelProfileId }
+        : {}),
+      code,
+      message: detail,
+    });
+  };
+
+  const selectModelProfile = async (
+    peer: ServerPeer,
+    message: {
+      requestId: string;
+      sessionId: string;
+      modelProfileId: string;
+    },
+  ) => sessionAdmission.transact(async () => {
+    let selectionCommitted = false;
+    try {
+      const requestDeps = runtimeDeps.get();
+      const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+      if (!tuiSessions.getSession(requestDeps.petId, message.sessionId)) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'session_not_found',
+          'session not found',
+        );
+        return;
+      }
+      if (activeSession.id !== message.sessionId) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'session_not_active',
+          'model selection requires the active session',
+        );
+        return;
+      }
+      let selectedProfile: Readonly<AgentLlmConfig>;
+      try {
+        selectedProfile = requestDeps.modelProfiles.resolve(message.modelProfileId);
+      } catch (error) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'profile_unavailable',
+          error instanceof Error ? error.message : 'model profile is unavailable',
+        );
+        return;
+      }
+      const candidateSession = {
+        ...activeSession,
+        modelProfileId: message.modelProfileId,
+      };
+      const checkpoint = await tuiSessions.readSessionCheckpointPoint(
+        requestDeps,
+        candidateSession,
+      );
+      // The transcript is the authority on which modalities the session holds,
+      // so a profile is rejected only when the history really needs more than
+      // it accepts.
+      if (!supportsInputModalities(
+        checkpoint.requiredInputModalities,
+        selectedProfile.inputModalities ?? ['text'],
+      )) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'profile_incompatible',
+          `Session requires ${checkpoint.requiredInputModalities.join(', ')} input; model is missing ${
+            missingInputModalities(
+              checkpoint.requiredInputModalities,
+              selectedProfile.inputModalities ?? ['text'],
+            ).join(', ')
+          }`,
+        );
+        return;
+      }
+      if (checkpoint.pendingInterrupt) {
+        sendModelSelectionError(
+          peer,
+          message,
+          'review_pending',
+          'cannot switch models while human review is pending',
+        );
+        return;
+      }
+      const snapshot = buildHostSessionSnapshot({
+        sessionId: candidateSession.id,
+        kind: 'chat',
+        messages: checkpoint.messages,
+        deps: requestDeps,
+        modelProfileId: candidateSession.modelProfileId,
+        requiredInputModalities: checkpoint.requiredInputModalities,
+        sessionTokenUsage: checkpoint.sessionTokenUsage,
+        pendingInterrupt: null,
+        currentPlan: checkpoint.currentPlan,
+      });
+      const session = tuiSessions.selectModelProfile(
+        requestDeps.petId,
+        message.sessionId,
+        message.modelProfileId,
+      );
+      selectionCommitted = true;
+      peer.send({
+        type: 'model.select.result',
+        requestId: message.requestId,
+        sessionId: session.id,
+        selectedProfileId: session.modelProfileId,
+        snapshot,
+      });
+    } catch (error) {
+      if (selectionCommitted) {
+        console.warn(
+          '[local-server] model selection was committed but acknowledgement failed:',
+          error instanceof Error ? error.message : error,
+        );
+        return;
+      }
+      sendModelSelectionError(
+        peer,
+        message,
+        'selection_failed',
+        error instanceof Error ? error.message : 'model selection failed',
+      );
+    }
+  }, () => {
+    sendModelSelectionError(
+      peer,
+      message,
+      'run_active',
+      'cannot switch models while a session run is active',
+    );
+  });
+
+  const createSession = () => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.createNewSession(requestDeps.petId);
+    return {
+      session: projectChatSessionSummary({
+        ...session,
+        active: true,
+      }),
+      snapshot: buildHostSessionSnapshot({
+        sessionId: session.id,
+        kind: 'chat',
+        messages: [],
+        deps: requestDeps,
+        modelProfileId: session.modelProfileId,
+        requiredInputModalities: session.requiredInputModalities,
+        sessionTokenUsage: null,
+        pendingInterrupt: null,
+        currentPlan: null,
+      }),
+    };
+  }, () => {
+    throw Object.assign(
+      new Error('cannot create a session while a run is active'),
+      { code: 'session_new_conflict' },
+    );
+  });
+
+  // Disconnect aborts active runs but deliberately leaves ownership with their
+  // invocation owners until graph output settles. That brief settlement window
+  // still counts as an active run here, so a session switch cannot race the
+  // old thread's final checkpoint write.
+  const resumeSession = (sessionId: string) => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const result = await tuiSessions.resumeSession(requestDeps, sessionId);
+    const pendingInterrupt = chatHandler.buildPendingInterruptSnapshot(
+      requestDeps,
+      result.pendingInterrupt,
+    );
+    return {
+      session: projectChatSessionSummary(result.session),
+      snapshot: buildHostSessionSnapshot({
+        sessionId: result.session.id,
+        kind: 'chat',
+        messages: result.messages,
+        deps: requestDeps,
+        modelProfileId: result.session.modelProfileId,
+        requiredInputModalities: result.session.requiredInputModalities,
+        sessionTokenUsage: result.sessionTokenUsage,
+        pendingInterrupt,
+        currentPlan: result.currentPlan,
+      }),
+    };
+  }, () => {
+    throw Object.assign(
+      new Error('cannot resume a session while a run is active'),
+      { code: 'session_resume_conflict' },
+    );
+  });
+
+  const compactSession = (sessionId: string) => sessionAdmission.transact(async () => {
+    const requestDeps = runtimeDeps.get();
+    const session = tuiSessions.getSession(requestDeps.petId, sessionId);
+    if (!session) {
+      throw new Error('session not found');
+    }
+    const activeSession = tuiSessions.getActiveSession(requestDeps.petId);
+    if (activeSession.id !== session.id) {
+      throw new Error('context compaction requires the active session');
+    }
+    const ctx = await (options.loadContext ?? loadAgentContext)(requestDeps.petId);
+    const setup = tuiSessions.buildChatSetup(requestDeps, ctx, session.threadId);
+    const state = await chatGraphService.readThreadState(setup);
+    if (state.pendingInterrupt) {
+      throw new Error('cannot compact context while human review is pending');
+    }
+    const result = await compactOrchestratorMessages({
+      messages: state.messages,
+      model: setup.graphConfig.models.observe ?? setup.graphConfig.models.act,
+    });
+    if (result.compacted) {
+      await chatGraphService.updateState(setup, { messages: result.messages });
+      await tuiSessions.refreshActiveSessionSummary(requestDeps);
+    }
+    return {
+      compacted: result.compacted,
+      snapshot: await loadSnapshot(),
+    };
+  }, () => {
+    throw new Error('cannot compact context while a session run is active');
+  });
+
+  const respondToSessionRequest = async (
+    peer: ServerPeer,
+    requestId: string,
+    operation: 'snapshot' | 'list' | 'new' | 'resume' | 'compact',
+    load: () => Promise<HostSessionServerMessage>,
+  ) => {
+    try {
+      peer.send(await load());
+    } catch (error) {
+      peer.send({
+        type: 'session.error',
+        requestId,
+        operation,
+        message: error instanceof Error ? error.message : `${operation} failed`,
+      });
+    }
+  };
+
+  /**
+   * Admit one human message — a chat request, or a reply to a pending
+   * interrupt.
+   *
+   * A message is not a command: it does not queue with `/new`, `/compact` and
+   * the rest. It waits for queued commands to drain so it runs against
+   * settled session state, then Session admits it for the duration of the run.
+   */
+  const admitHumanMessage = async (
+    peer: ServerPeer,
+    requestId: string,
+    admit: () => Promise<void>,
+  ) => {
+    // A human message is not a command: it waits for queued commands to
+    // drain, then Session admits it.
+    await sessionCommands.waitForIdle();
+    if (!peer.isConnected()) {
+      return;
+    }
+    await sessionAdmission.runInSession(async () => {
+      if (!peer.isConnected()) {
+        return;
+      }
+      const activeRun = activeRuns.begin(requestId);
+      try {
+        await admit();
+      } finally {
+        activeRuns.finish(activeRun);
+      }
+    });
+  };
+
+  const peerHandlers: LocalServerPeerHandlers = {
+    onChatRequest: (client, message) => {
+      return admitHumanMessage(
+        client,
+        message.requestId,
+        () => chatHandler.handleChatRequest(
+          client,
+          message,
+          runtimeDeps.get(),
+        ),
+      );
+    },
+    onInterruptResume: (client, message) => admitHumanMessage(
+      client,
+      message.requestId,
+      () => chatHandler.handleInterruptResume(
+        client,
+        message,
+        runtimeDeps.get(),
+      ),
+    ),
+    onRunInterrupt: async (client, message) => {
+      const inflight = await chatHandler.handleRunInterrupt(
+        client,
+        message,
+        runtimeDeps.get(),
+      );
+      if (inflight) {
+        console.log(`[local-server] interrupt requestId=${inflight.requestId}`);
+      }
+    },
+    onNewSession: () => {
+      const petId = runtimeDeps.get().petId;
+      tuiSessions.createNewSession(petId);
+      console.log(`[local-server] new session created for pet ${petId}`);
+    },
+    onRuntimeConfigUpdate: (client, message) => runSessionCommand(
+      async () => {
+        try {
+          const autoAuthorizationSafetyLevel = message.autoAuthorizationSafetyLevel
+            ?? runtimeDeps.get().autoAuthorizationSafetyLevel;
+          (options.persistGlobalReviewPolicyMode ?? persistGlobalReviewPolicyMode)(
+            message.globalReviewPolicyMode,
+            autoAuthorizationSafetyLevel,
+          );
+          runtimeDeps.updateReviewPolicy(message.globalReviewPolicyMode, autoAuthorizationSafetyLevel);
+          if (message.requestId) {
+            client.send({
+              type: 'runtime_config.result',
+              requestId: message.requestId,
+              globalReviewPolicyMode: message.globalReviewPolicyMode,
+              autoAuthorizationSafetyLevel,
+            });
+          }
+          console.log(
+            `[local-server] global review policy set to ${message.globalReviewPolicyMode}`
+              + ` (${autoAuthorizationSafetyLevel})`,
+          );
+        } catch (error) {
+          if (!message.requestId) throw error;
+          client.send({
+            type: 'runtime_config.error',
+            requestId: message.requestId,
+            message: error instanceof Error
+              ? error.message
+              : 'global review policy could not be saved',
+          });
+        }
+      },
+      () => {
+        if (!message.requestId) return;
+        client.send({
+          type: 'runtime_config.error',
+          requestId: message.requestId,
+          message: RUN_IN_FLIGHT_MESSAGE,
+        });
+      },
+    ),
+    /**
+     * A snapshot is an observation, not a command.
+     *
+     * It changes nothing a run is writing to, so it does not queue with
+     * `/new`, `/model` and the rest, and it is not refused mid-run. A client
+     * attaching or reconnecting has no state of its own: the snapshot is the
+     * only way it learns a run is live, since the run has not written a
+     * checkpoint yet. Refusing it there would leave a reconnecting TUI unable
+     * to tell a working Agent from an idle one.
+     *
+     * `/refresh` reaches the same handler, and re-reading half-finished state
+     * is not what a user wants mid-run — but that is a question of what the
+     * client offers, which the TUI already handles by closing its command
+     * palette during a run. Serving the live state is not harmful; refusing
+     * an attach is.
+     */
+    onSessionSnapshotGet: (client, message) => respondToSessionRequest(
+      client,
+      message.requestId,
+      'snapshot',
+      async () => ({
+        type: 'session.snapshot.result',
+        requestId: message.requestId,
+        snapshot: await loadSnapshot(client),
+      }),
+    ),
+    onSessionList: (client, message) => runSessionCommand(
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'list',
+        async () => ({
+          type: 'session.list.result',
+          requestId: message.requestId,
+          sessions: await listSessions(),
+        }),
+      ),
+      refuseSessionCommand(client, message.requestId, 'list'),
+    ),
+    onSessionNew: (client, message) => runSessionCommand(
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'new',
+        async () => ({
+          type: 'session.new.result',
+          requestId: message.requestId,
+          ...await createSession(),
+        }),
+      ),
+      refuseSessionCommand(client, message.requestId, 'new'),
+    ),
+    onSessionResume: (client, message) => runSessionCommand(
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'resume',
+        async () => {
+          return {
+            type: 'session.resume.result',
+            requestId: message.requestId,
+            ...await resumeSession(message.sessionId),
+          };
+        },
+      ),
+      refuseSessionCommand(client, message.requestId, 'resume'),
+    ),
+    onSessionCompact: (client, message) => runSessionCommand(
+      () => respondToSessionRequest(
+        client,
+        message.requestId,
+        'compact',
+        async () => ({
+          type: 'session.compact.result',
+          requestId: message.requestId,
+          ...await compactSession(message.sessionId),
+        }),
+      ),
+      refuseSessionCommand(client, message.requestId, 'compact'),
+    ),
+    onModelList: (client, message) => runSessionCommand(
+      async () => {
+        try {
+          client.send({
+            type: 'model.list.result',
+            requestId: message.requestId,
+            ...(await listModelProfiles(message.sessionId)),
+          });
+        } catch (error) {
+          sendModelSelectionError(
+            client,
+            message,
+            (error as { code?: string }).code === 'session_not_active'
+              ? 'session_not_active'
+              : 'session_not_found',
+            error instanceof Error ? error.message : 'session not found',
+          );
+        }
+      },
+      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
+    ),
+    onModelSelect: (client, message) => runSessionCommand(
+      () => selectModelProfile(client, message),
+      () => sendModelSelectionError(client, message, 'run_active', RUN_IN_FLIGHT_MESSAGE),
+    ),
+    onClose: (client) => {
+      inflightRequests.abortAll(client);
+    },
+  };
+
+  return {
+    peerHandlers,
+    interruptRun: (requestId: string) => inflightRequests.interruptById(requestId) !== null,
+    close: () => {},
+    handleHttpRequest: (req, res, authToken) => {
+      const requestDeps = runtimeDeps.get();
+      return handleLocalHttpRequest(req, res, requestDeps, { authToken });
+    },
+  };
+}

@@ -43,7 +43,7 @@ surfaces. It is reference material: for the system model and architecture, read
 
 ## Related current contracts
 
-- [Local-agent session projection](../runtime/session-projection.md) — shared
+- [Host session projection](../runtime/session-projection.md) — shared
   checkpoint-to-client session contract.
 - [Capability Artifact Pipeline](../artifacts/index.md) —
   durable Capability output contract.

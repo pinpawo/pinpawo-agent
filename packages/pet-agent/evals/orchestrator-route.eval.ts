@@ -16,7 +16,7 @@ import { createDeliveryResult, readFixtureDelivery, withDeliveryCalls } from '..
  */
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
-import { createReasoningPassbackChatOpenAI } from '../../../services/local-agent/src/agent/reasoningPassback.ts';
+import { createReasoningPassbackChatOpenAI } from '../../../services/host/src/agent/reasoningPassback.ts';
 import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,

@@ -15,8 +15,8 @@ Studio Host 和未来 Host surface 的装配方式。Capability / Toolkit 的当
 `host tools`、`capability-private tools`、Browser 专属 lifecycle/diagnostics 或
 `BrowserIntegration` 与本文冲突时，只能把这些表述作为历史实现背景，不能据此
 新增公共架构层。
-Studio Host 已按 #643 提取为独立入口，不再嵌入 Chat Host (`LocalAgentHost`)。
-Resident Pet 的双访问面及 local-agent 装配边界另见
+Studio Host 已按 #643 提取为独立入口，不再嵌入 Chat Host (`AgentHost`)。
+Resident Pet 的双访问面及 host 装配边界另见
 [Resident Pet Host Ports](agent-runtime/resident-pet-host-ports.md)：Studio 只消费
 dispatch，TUI 的直接对话通过独立 conversation adapter，不增加新的 Agent 领域角色。
 
@@ -150,7 +150,7 @@ Browser、bash、git 都是普通 Toolkit：
 
 - Browser backend/driver、bridge、session、ownership 和 live state 属于
   `ChromeExtensionBrowserRS`；Browser Capability 只声明 `uses: ['browser']`。
-- Browser 包分别导出 Capability、Toolkit 工厂、BrowserRS 契约与实现。local-agent 的
+- Browser 包分别导出 Capability、Toolkit 工厂、BrowserRS 契约与实现。host 的
   composition root 根据 Host 配置创建 RS 实例并装配 Toolkit；bash、git、
   project-inspection 共享 Host 到本机 RS 服务的同一个 ShellRS 连接
   （`ShellRSClient`，见 #853）。
@@ -182,15 +182,15 @@ Browser、bash、git 都是普通 Toolkit：
 5. shutdown 一个 Host 只释放它自己创建的 RS 实例，不能释放另一个 Host 的进程或连接。
 6. Chat 与 Studio 使用相同领域模型。Studio 只改变 Host 如何配置、持有和 invoke
    多个常驻 Agent Runtime，不创造 Studio 专属 Tool/Toolkit/Runtime 体系。
-   Chat Host (`LocalAgentHost`) 和 Studio Host (`StudioHost`) 是两个独立的
+   Chat Host (`AgentHost`) 和 Studio Host (`StudioHost`) 是两个独立的
    package / 装配入口；Chat CLI 不再通过 `--mode` 分流创建 Studio。
    两个 Host 共享能力供给（toolkit / capability / model）以及 checkpointer 的装配方式。
-   local-agent 通过中性的 `host-runtime` 子路径暴露 `HostCapabilityAssembly`，Studio
+   host 通过中性的 `host-runtime` 子路径暴露 `HostCapabilityAssembly`，Studio
    复用该 Host 装配能力而不复制代码；具体 local wire adapter 则通过独立的
    `local-server-transport` 子路径暴露，不属于 Host runtime，也不是 Studio core API。
    两个 Host 各自持有独立 checkpoint root，不共享 writer ownership、transport
-   composition 或 Chat session state。依赖方向只能是 Studio → local-agent public
-   surfaces；local-agent Chat 路径不得反向 import Studio。
+   composition 或 Chat session state。依赖方向只能是 Studio → host public
+   surfaces；host Chat 路径不得反向 import Studio。
 7. Studio Host 只声明 `StudioPluginResolver` port，不静态 import kanban、scheduler
    或其他具体 Plugin。Plugin 实现可以依赖 Studio contract，并由应用 composition root
    注入；“配置中出现 Plugin id”不等于 Studio package 依赖该 Plugin。Resolver 只返回

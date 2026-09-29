@@ -133,11 +133,11 @@ const cases: AgentEvalCase<
     suite: SUITE,
     tags: ['interruption_recovery', 'capability_discovery', 'delegation_control', 'context_synthesis'],
     input: {
-      user_message: '帮我调查 pinpawo-agent 仓库里 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      user_message: '帮我调查 pinpawo-agent 仓库里 host 的 capability 注册链路，列出关键文件和证据。',
       capability_pack: 'explore',
       allowed_capability_names: ['explore'],
       subagent_script: 'tool_calls_until_carryover',
-      subagent_final_response: '已完成 local-agent capability 注册链路调查：入口在 localAgentCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
+      subagent_final_response: '已完成 host capability 注册链路调查：入口在 hostCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
       max_iterations: 1,
       auto_resume_iteration_limit: true,
     },

@@ -20,19 +20,19 @@ contracts in [reference/](../reference/index.md).
 
 ## Local host and interfaces
 
-- [Local-agent architecture refactor](local-agent/architecture-refactor.md),
-  [process runtime](local-agent/process-runtime.md),
-  [workspace runtime configuration](local-agent/workspace-runtime-config.md), and
-  [app chat UI](local-agent/app-chat-runtime-ui.md)
+- [Host architecture refactor](host/architecture-refactor.md),
+  [process runtime](host/process-runtime.md),
+  [workspace runtime configuration](host/workspace-runtime-config.md), and
+  [app chat UI](host/app-chat-runtime-ui.md)
 - [TUI textarea](tui/textarea.md), [timeline](tui/agent-timeline.md), and the
   [OpenTUI capability matrix](tui/v2-capability-matrix.md)
 - [Browser Toolkit package](toolkits/browser-package.md)
 - [Resident Pet Host ports](agent-runtime/resident-pet-host-ports.md) — canonical
-  local-agent boundary for resident runtime, Agent Session interaction, and
+  host boundary for resident runtime, Agent Session interaction, and
   conversation-priority dispatch coordination
 - [Studio Independent Host runtime](studio/independent-host-runtime.md) — Studio
   process, dispatch mapping, Plugin boundary, persistence, and lifecycle
-- [Pending interrupt in Chat](local-agent/pending-interrupt-chat.md) — draft
+- [Pending interrupt in Chat](host/pending-interrupt-chat.md) — draft
   checkpoint/projection/resume boundary for PR #682, explicitly excluding
   Studio dispatch identity
 

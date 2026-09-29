@@ -8,7 +8,7 @@
   "workspaces": [
     "packages/*",
     "plugins/*",
-    "services/local-agent",
+    "services/host",
     "apps/*",
     "services/tui",
     "tests/*",

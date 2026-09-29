@@ -1,7 +1,7 @@
 /**
  * Deterministic stdio Host fixture for the embedded transport test.
  *
- * It composes the production local-agent handlers around a scripted graph
+ * It composes the production host handlers around a scripted graph
  * service and attaches the real JSONL stdio transport to this process, so the
  * test exercises the actual child-process pipe instead of a fake.
  *
@@ -9,34 +9,34 @@
  */
 import {
   FileCapabilityArtifactStore,
-} from '../../../local-agent/src/capabilityArtifactStore';
+} from '../../../host/src/capabilityArtifactStore';
 import {
   buildAgentContext,
-} from '../../../local-agent/src/contextLoader';
+} from '../../../host/src/contextLoader';
 import {
   createLocalServerHandlers,
-} from '../../../local-agent/src/serverHandlers';
+} from '../../../host/src/serverHandlers';
 import {
   createLocalServerRuntimeDepsStore,
-} from '../../../local-agent/src/serverTypes';
+} from '../../../host/src/serverTypes';
 import {
   attachLocalServerStdioTransport,
   redirectConsoleToStdioDiagnostics,
-} from '../../../local-agent/src/wire/stdioTransport';
+} from '../../../host/src/wire/stdioTransport';
 import {
-  buildLocalAgentRuntimeConfig,
-} from '../../../local-agent/src/config/runtimeConfig';
+  buildHostRuntimeConfig,
+} from '../../../host/src/config/runtimeConfig';
 import {
   createTestModelServerDeps,
-} from '../../../local-agent/src/testing/modelProfiles';
+} from '../../../host/src/testing/modelProfiles';
 import {
   createTestHostToolkitInventory,
-} from '../../../local-agent/src/testing/toolkitInventory';
+} from '../../../host/src/testing/toolkitInventory';
 import {
   createBashToolkit,
   createGitToolkit,
   PosixShellRS,
-} from '../../../local-agent/src/toolkits/local/index';
+} from '../../../host/src/toolkits/local/index';
 import { createHostGraphFixture } from './hostGraphFixture';
 
 const sharedShell = new PosixShellRS();
@@ -49,7 +49,7 @@ if (!workdir) {
 // Mirror `pinpawo run --stdio`: stdout is reserved for protocol frames.
 redirectConsoleToStdioDiagnostics();
 
-const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+const runtimeConfig = buildHostRuntimeConfig(workdir);
 const graphFixture = createHostGraphFixture();
 const handlers = createLocalServerHandlers(
   createLocalServerRuntimeDepsStore({

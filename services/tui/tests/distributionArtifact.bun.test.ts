@@ -13,10 +13,10 @@ import { TUI_VERSION } from '../src/version';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const tuiRoot = resolve(testDir, '..');
-const localAgentRoot = resolve(tuiRoot, '..', 'local-agent');
+const hostRoot = resolve(tuiRoot, '..', 'host');
 
 test('distribution bundle builds and boots its external runtime dependencies', async () => {
-  const cacheDir = join(localAgentRoot, 'node_modules', '.cache');
+  const cacheDir = join(hostRoot, 'node_modules', '.cache');
   await mkdir(cacheDir, { recursive: true });
   const outputDir = await mkdtemp(join(
     cacheDir,
@@ -70,7 +70,7 @@ test('distribution bundle builds and boots its external runtime dependencies', a
       entryPath,
       '--version',
     ], {
-      cwd: localAgentRoot,
+      cwd: hostRoot,
       stdout: 'pipe',
       stderr: 'pipe',
     });

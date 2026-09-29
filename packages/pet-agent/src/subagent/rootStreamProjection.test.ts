@@ -27,7 +27,7 @@ import { createAgent, createMiddleware, FakeToolCallingModel } from 'langchain';
  * `createSubagent()` → `onToolEvent` bridge. If these tests hold, the child
  * no longer needs to consume its own `agent.streamEvents()` (the root cause
  * of the double-tracer bugs fixed symptomatically in #313/#316), and
- * local-agent can consume one native root stream.
+ * host can consume one native root stream.
  */
 
 const echoTool = tool(async ({ text }) => `echo:${text}`, {

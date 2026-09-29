@@ -50,7 +50,7 @@ targets:
     postBuildScripts:
       - name: Copy agent runtime into bundle
         script: |
-          AGENT_SRC="${SRCROOT}/../../services/local-agent"
+          AGENT_SRC="${SRCROOT}/../../services/host"
           WORKSPACE_ROOT="$(cd "$AGENT_SRC/../.." && pwd)"
           RES_DIR="${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
           RELEASE_ENV_FILE="${SRCROOT}/release.env"
@@ -155,7 +155,7 @@ targets:
           mkdir -p "$DIST_DST"
           rsync -a --delete "$AGENT_SRC/dist/" "$DIST_DST/"
 
-          # node_modules: copy local-agent runtime deps plus explicitly externalized
+          # node_modules: copy host runtime deps plus explicitly externalized
           # workspace-root packages. Do not copy the complete workspace dependency tree.
           NM_DST="${RES_DIR}/node_modules"
           mkdir -p "$NM_DST"

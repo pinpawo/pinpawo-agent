@@ -6,7 +6,7 @@
 > [Agent Session projection](../../reference/runtime/session-projection.md)
 
 本文固化 resident Pet 在本地 Host 中的两个访问面，以及 Studio、TUI 与
-`local-agent` 之间的所有权边界。它替代“一个 `PetAgentRuntime.invoke()` 同时代表
+`host` 之间的所有权边界。它替代“一个 `PetAgentRuntime.invoke()` 同时代表
 Pet 的全部外部入口”这一隐含假设。
 
 HTTP/SSE 扩展草案见 [Agent Session HTTP](../studio/agent-session-http.md)：
@@ -18,7 +18,7 @@ WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Ho
 同一个 resident Pet 可以同时被两类调用者使用，但两类调用不是同一个概念：
 
 ```text
-                         local-agent composition
+                         host composition
                                   │
                          ResidentPetHost
                          ┌────────┴─────────┐
@@ -33,14 +33,14 @@ WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Ho
 ```
 
 - `PetDispatchPort` 是工作派发面。Studio 只持有这一面。
-- `ResidentPetInteraction` 是人与同一个 Pet 持续对话的 adapter。TUI 通过 local-agent
+- `ResidentPetInteraction` 是人与同一个 Pet 持续对话的 adapter。TUI 通过 host
   已有的 Agent Session projection 与 wire adapter 使用它。
 - 两个入口不是平级能力：conversation 在功能上覆盖 dispatch，并额外拥有观察、控制、
   session/thread 切换与中断；调度上 conversation 永远高于 dispatch。
 - 两个 surface 共享 Agent Session 当前选择的 thread。Resident Pet 不绑定一条永不变化
   的 thread；conversation 切换 session/thread 后，后续 dispatch 沿用新的 active thread。
 - 两个 port 的创建、共享 Agent runtime、线程隔离和整体关闭均由
-  `pinpawo/host-runtime`（位于 `services/local-agent`）封装。
+  `pinpawo/host-runtime`（位于 `services/host`）封装。
 - `@pinpawo/studio` 不拥有 conversation registry，不注册 TUI，不依赖
   `@pinpawo/agent-session`，也不向 TUI 暴露 Studio WebSocket。Studio control plane
   只通过 HTTP Plugin 暴露 dispatch、event 与其他 Plugin route。
@@ -49,9 +49,9 @@ WebSocket 仍单客户端；同一 interaction 另外提供非独占观察和 Ho
 - 配置中的 Pet 在对应 Host 启动时全部构造成 resident runtime；port contract 不表达
   `lazy` 或 `disabled`。
 
-`ResidentPetHost` 是 local-agent 的装配结果，不是 Studio 的新领域对象。Studio Host
-启动时可以调用 local-agent 工厂完成装配，但只能把 `resident.dispatch` 交给 Studio
-registry；`interaction` 留在 local-agent 的 Agent Session adapter/registry 中。
+`ResidentPetHost` 是 host 的装配结果，不是 Studio 的新领域对象。Studio Host
+启动时可以调用 host 工厂完成装配，但只能把 `resident.dispatch` 交给 Studio
+registry；`interaction` 留在 host 的 Agent Session adapter/registry 中。
 
 ## 2. 词汇约束
 
@@ -134,20 +134,20 @@ reply/event routing，不定义新 wire message；因此带 `requestId` 的 resp
 广播给其他 TUI connection。
 
 多 Pet Host 在 **connection 建立阶段**选择 interaction，而不是在
-`AgentClientMessage` 中增加 `petId`。local-agent Agent Session listener 使用
+`AgentClientMessage` 中增加 `petId`。host Agent Session listener 使用
 `/agent-session/pets/:petId` route 解析并校验 `petId`，从 Host-owned
 registry 取得当前存活 Pet 的 `ResidentPetInteraction`，再把该 connection 绑定给它。
 connection 建立后不能切换 Pet；未知或未存活的 Pet 在 upgrade/bind 阶段拒绝。后续所有
 message 和 server projection 继续原样复用 `@pinpawo/agent-session` contract。这个 route
-属于 local-agent transport，不属于 Studio protocol，也不进入 Studio config 或 Plugin
+属于 host transport，不属于 Studio protocol，也不进入 Studio config 或 Plugin
 hook。
 
 `ResidentPet` 与 `ResidentPetInteraction` 必须由两个独立 factory 构造，`ResidentPetHost`
 只是 Host composition 持有的配套资源句柄；不能要求构造 runtime 时必须先构造 transport。
-两个 factory 共享一个 local-agent 私有的 Coordinator/session service 引用，不把该引用
+两个 factory 共享一个 host 私有的 Coordinator/session service 引用，不把该引用
 暴露给 Studio。
 
-Thread identity、session registry 与 active thread pointer 沿用 local-agent 现有 Agent
+Thread identity、session registry 与 active thread pointer 沿用 host 现有 Agent
 Session service。Host 启动 interaction 时提供中性的 Host/Pet namespace，并在进入 ready
 之前复用现有 `ensureActiveTuiSession()` 的语义：恢复持久化的 active session；不存在时
 立即创建默认 session，而不是等第一个 TUI 连接。目标 Host service 可以收敛该名称，但
@@ -204,7 +204,7 @@ Resident Pet 使用 Agent Session 当前选择的 thread，而不是每个 Pet �
 thread：
 
 - thread registry、active thread pointer、`session.new` 与 `session.resume` 都由
-  `@pinpawo/agent-session` 对应的 local-agent service 管理；
+  `@pinpawo/agent-session` 对应的 host service 管理；
 - active pointer 是 Host 内 Pet-scoped 状态，不是某个 WebSocket peer 的 UI focus。多个
   Agent Session client 连接同一 Pet 时，共享并观察同一个 active selection；切换操作按
   conversation FIFO 串行；
@@ -250,7 +250,7 @@ dispatch 调用方不持有 Agent execution。Promise resolve 只表示 request 
 runtime 投射成 Agent Session runtime event；Studio 仅将相同 dispatch 的失败事实作为
 live observation 转发，不把它重新包装成 invocation result。
 
-resident runtime 内部的所有 Agent turn 统一经过 local-agent Agent Session turn runner。
+resident runtime 内部的所有 Agent turn 统一经过 host Agent Session turn runner。
 无论输入来自 conversation peer 还是 Host 持有的单向 dispatch，runner 都产生相同的
 message/tool/plan/review runtime event。已连接同一 Pet interaction 的 Agent Session peer
 是当前 session 的观察者：idle 连接不阻塞 dispatch，但会从 `run.started` 开始实时投射
@@ -264,14 +264,14 @@ control/history 处理。它不替代 Agent Session stream，也不提供执行�
 
 ## 6. 生命周期与所有权
 
-local-agent 必须把 resident runtime 构造与 interaction adapter 构造拆成两个可组合步骤。
+host 必须把 resident runtime 构造与 interaction adapter 构造拆成两个可组合步骤。
 普通 Chat Host 可以只选用它需要的组合；Studio Host composition 则为每个配置 Pet 同时：
 
 1. 完成模型、Capability、Toolkit、Toolkit Runtime 与 checkpointer 装配；
 2. 创建并持有 resident runtime/Coordinator；
 3. 基于同一个 resident runtime 创建 Agent Session interaction adapter；
 4. 只把 `PetDispatchPort` 注册给 Studio core；
-5. 由 local-agent 启动独立的 Agent Session WebSocket listener，供 TUI 与内部 Pet 交互；
+5. 由 host 启动独立的 Agent Session WebSocket listener，供 TUI 与内部 Pet 交互；
 6. 由 Studio HTTP Plugin 启动 control-plane HTTP route，承载 dispatch、event 与 Plugin hook。
 
 第 5 步的 WebSocket 可以与 Studio Host 运行在同一进程，但它不是 Studio protocol，也不经过
@@ -283,7 +283,7 @@ Studio core。Studio 对外没有另一个内置 WebSocket/stdio conversation tr
 
 创建 Resident Pet 的 Host 是其唯一 lifecycle owner。Studio Host 可以持有完整
 `ResidentPetHost` 资源句柄，但 Studio core 只借用 dispatch port；conversation 的装配仍
-封装在 local-agent adapter 中，Studio core 不解释它。关闭时 owner 先停止接受新请求，
+封装在 host adapter 中，Studio core 不解释它。关闭时 owner 先停止接受新请求，
 再关闭全部 `ResidentPetHost`；不同 Pet 之间不要求顺序，但必须等待全部 close settle。单个
 Pet 内部 interaction/runtime 如何释放由 `ResidentPetHost.close()` 封装，不成为外层 Host
 contract。任一 consumer 都不能自行关闭底层 runtime。
@@ -299,7 +299,7 @@ target 返回。Capability inventory 不进入该列表。
 | --- | --- | --- |
 | `pinpawo/host-runtime` | resident Pet、两个访问面、Coordinator、graph/checkpoint/toolkit 装配 | Studio registration metadata、Studio Plugin、TUI view、具体 wire route |
 | `@pinpawo/studio` | `PetDispatchPort`、Pet registry、dispatch admission、Plugin event | conversation、Agent Session、Chat/TUI message |
-| `services/local-agent` Agent Session adapter | resident interaction 构造、`@pinpawo/agent-session` contract 与 WebSocket listener | Studio dispatch/invocation、Plugin hook |
+| `services/host` Agent Session adapter | resident interaction 构造、`@pinpawo/agent-session` contract 与 WebSocket listener | Studio dispatch/invocation、Plugin hook |
 | TUI | Agent Session wire/projection | Studio protocol、Pet graph/checkpoint |
 | Studio Plugin | Studio dispatch/event/hook、可定义 Toolkit | Pet construction、conversation、Agent Session |
 
@@ -307,20 +307,20 @@ target 返回。Capability inventory 不进入该列表。
 
 以下顺序已经落地；它同时保留为后续变更不得回退的验收清单：
 
-1. 在 `pinpawo/host-runtime` 定义上述共享类型，消除 Studio 与 local-agent 的重复类型。
+1. 在 `pinpawo/host-runtime` 定义上述共享类型，消除 Studio 与 host 的重复类型。
 2. 把 resident runtime/Coordinator 构造与 Agent Session interaction 构造收进公共
-   host-runtime/local-agent surface，并保持两者可独立组合；不再由 Studio 构造固定 Pet
+   host-runtime/host surface，并保持两者可独立组合；不再由 Studio 构造固定 Pet
    thread identity。
 3. Studio 构造改为注入 `PetDispatchPort`，不再读取 `threadId`、构造 Pet graph/runtime
    或解析 checkpoint identity。
 4. 从两个访问面移除 `descriptor()`；Studio registration 留在 Studio binding，
    Capability inventory/diagnostics 留在 Agent Host diagnostics，并移除 resident Pet
    的 `lazy/disabled` runtime binding。
-5. 从通用 `LocalAgentRuntimeConfig`、diagnostics 与 local HTTP projection 移出
+5. 从通用 `HostRuntimeConfig`、diagnostics 与 local HTTP projection 移出
    `studioConfigPath`；Studio Host 自己从 workdir 解析其配置位置。
 6. 在 `ResidentPetHost` 中收敛一个共享的非抢占 Coordinator；conversation 队列严格优先
    于 dispatch 队列，移除各入口对 graph 互斥的独立所有权。
-7. local-agent 提供可独立构造的 Agent Session interaction adapter 与 Pet-scoped WebSocket
+7. host 提供可独立构造的 Agent Session interaction adapter 与 Pet-scoped WebSocket
    route；Studio Host composition 将它与 resident runtime 配套启动，但 Studio core
    不可见。route 在 connection 建立时选择 Pet，不修改 Agent Session message schema。
 8. 把历史 `studio:<studioId>:pet:<petId>` fixed checkpoint namespace 显式迁移到 Host/Pet
@@ -362,7 +362,7 @@ target 返回。Capability inventory 不进入该列表。
 - 运行中接入的 peer 从 startup snapshot 取得当前 `activeRun` 并继续投射后续 event；不要求
   Studio 保存或重放 Agent event；
 - Studio Host 任一 Pet 启动失败时整体失败；`listPets()` 只包含当前存活 Pet；
-- Studio control plane 只有 HTTP，Agent Session WebSocket 属于同进程 local-agent
+- Studio control plane 只有 HTTP，Agent Session WebSocket 属于同进程 host
   interaction adapter 而非 Studio protocol；
 - 任一 surface 的连接断开不关闭 resident Pet，Host shutdown 只关闭一次；
 - Plugin 不通过 Toolkit、hook 或 event 获得 Pet runtime/conversation 引用。

@@ -42,13 +42,13 @@ hook installation. A Plugin may define Toolkits, but it cannot construct a Pet,
 inspect a runtime, or participate in Agent Session conversation.
 
 `StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls
-the whole Host back. `startStudioHost()` also starts the local-agent Pet-scoped
+the whole Host back. `startStudioHost()` also starts the host Pet-scoped
 Agent Session listener. Configured HTTP Plugins provide the Studio control plane;
 Studio has no built-in WebSocket or stdio dispatch protocol.
 
 ## Host Agent Session HTTP
 
-The local-agent listener also exposes HTTP/SSE alongside its WebSocket, on the
+The host listener also exposes HTTP/SSE alongside its WebSocket, on the
 Pet port (default `3212`). This is separate from the Studio HTTP Plugin (`3211`).
 All routes require the existing Bearer token; they share the WebSocket Origin
 policy, protocol parser and runtime handlers.

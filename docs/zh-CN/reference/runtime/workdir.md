@@ -3,7 +3,7 @@
 [English](../../../reference/runtime/workdir.md)
 
 > **状态：当前 local-host 配置。** 路径解析实现位于
-> [`services/local-agent/src/config/runtimeConfig.ts`](../../../../services/local-agent/src/config/runtimeConfig.ts)。
+> [`services/host/src/config/runtimeConfig.ts`](../../../../services/host/src/config/runtimeConfig.ts)。
 
 本地宿主一次运行使用一个 effective workdir。默认优先级为
 `PINPAWO_WORKDIR`、已保存的 `workdir` 配置、当前进程目录；相对路径和 `~/`
@@ -21,7 +21,7 @@
     └── tui-sessions-capability-v3.json
 ```
 
-`LocalAgentRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取其中的
+`HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取其中的
 `studio.json` 与 `pets/`；Capability artifact、checkpoint 和 session 文件由宿主
 分别管理。shared wiki、due-run store、run identity 与 scheduler policy 都不是当前
 Studio 契约的一部分。
@@ -46,7 +46,7 @@ workdir 是路径解析基准，不是文件系统 sandbox。本地 bash、proje
 Toolkit 的绑定会将受支持的相对路径，以及相对或省略的 `cwd`，解析到执行目录下；绝对
 路径保持绝对路径。绑定不会修改进程 cwd，因此同一进程里的不同 Host 可以保持各自的
 执行范围。实现见
-[workdirBinding.ts](../../../../services/local-agent/src/toolkits/local/workdirBinding.ts)。
+[workdirBinding.ts](../../../../services/host/src/toolkits/local/workdirBinding.ts)。
 
 Studio 实际读取的文件见 [Studio 配置](../../studio/configuration.md)；未交付的设计见
-[workspace proposal（英文）](../../../design/local-agent/workspace-runtime-config.md)。
+[workspace proposal（英文）](../../../design/host/workspace-runtime-config.md)。

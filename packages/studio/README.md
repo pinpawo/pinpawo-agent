@@ -53,7 +53,7 @@ import { StudioHost, runStudioHostProcess } from '@pinpawo/studio';
 ```
 
 Studio dispatch/event HTTP is provided by the configured HTTP Plugin. The
-local-agent Agent Session listener is only for direct conversation with a
+host Agent Session listener is only for direct conversation with a
 resident Pet. The workdir must contain
 `.pinpawo/studio.json` and the referenced `.pinpawo/pets/*.json` files.
 Each Pet's authored identity and working conventions belong in

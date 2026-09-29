@@ -1,0 +1,212 @@
+# PinPawo CLI
+
+CLI, terminal UI, and local agent runtime for PinPawo.
+
+## Quick Install
+
+Requires Node.js 24 or newer. Node 24 is validated for this release.
+
+```bash
+npm install -g pinpawo
+pinpawo init
+pinpawo setup
+pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
+pinpawo tui
+```
+
+For one-off usage without a global install:
+
+```bash
+npx pinpawo init
+npx pinpawo tui
+```
+
+`pinpawo init` creates the quick-start scaffold:
+
+- `~/.pinpawo/.env` with optional local runtime settings.
+- `~/.pinpawo/config.json` with an editable default model profile.
+- `~/.pinpawo/capabilities/` for user capabilities.
+- `~/.pinpawo/capabilities/hello-pinpawo/` as a minimal capability that validates and loads.
+
+Configuration is read from `~/.pinpawo/config.json`, `~/.pinpawo/.env`, and environment variables. Runnable models are stored as versioned profiles under `config.json#models`; use `PINPAWO_MODEL_PROFILE` to select a stored profile. Credentials and endpoints are read only from the stored profile. `pinpawo init` creates an editable profile template and migrates a complete legacy `.env` model tuple when no `config.json` exists. Use `pinpawo setup` to check missing config and next steps. Browser tools drive your own Chrome through the PinPawo Chrome extension; register it with `pinpawo browser extension register`.
+
+Programmatic Chat and Studio Hosts resolve execution settings once with
+`resolveHostExecutionConfig(runtimeConfig, settings)`. The resolved settings own
+runtime paths, review mode, authorization safety level and registry backend.
+Agent input construction receives these settings explicitly. Model profiles no
+longer carry review policy. Temperature, thinking and reasoning effort use provider defaults for every role.
+The former `temperature` / `subagentThinking` inputs and stored `subagent_thinking`
+setting are no longer consumed. Conversation and background dispatch share the same
+Host policy store, so changes apply consistently to subsequent runs.
+
+For a local repository smoke test:
+
+```bash
+npm install
+npm run build
+node services/host/dist/index.js init --dir /tmp/pinpawo-demo
+node services/host/dist/index.js capability validate /tmp/pinpawo-demo/capabilities/hello-pinpawo
+```
+
+## External Plugins
+
+Local external plugins are loaded from `~/.pinpawo/plugins/*.mjs` or `*.js`.
+Each plugin module must export a default object with `{ name }`.
+
+Plugins must export `toolkits`; this keeps tools, operation metadata, and review policy under one owner. A legacy `tools` export is ignored.
+
+```js
+import { defineToolkit } from '@pinpawo/pet-agent';
+
+// Use a real LangChain StructuredTool instance here. Its name must match the
+// operation metadata key below.
+const sampleTool = createYourStructuredTool({ name: 'sample_tool' });
+
+export const toolkits = [
+  defineToolkit({
+    name: 'sample_plugin',
+    description: 'Sample local plugin toolkit',
+    tools: [sampleTool],
+    operations: {
+      sample_tool: {
+        kind: 'sample.tool',
+        title: 'Sample tool',
+      },
+    },
+  }),
+];
+
+export default {
+  name: 'sample-plugin',
+};
+```
+
+## Commands
+
+```bash
+pinpawo init
+pinpawo setup
+pinpawo server
+pinpawo run
+pinpawo server --stdio
+pinpawo tui
+pinpawo tui --server-port 3210
+pinpawo browser extension status
+pinpawo browser extension register --extension-id <id>
+pinpawo browser extension repair --extension-id <id>
+pinpawo browser extension unregister
+pinpawo capability list
+pinpawo capability validate ./my-capability
+pinpawo capability install ./my-capability
+```
+
+Studio is an independent Host exposed through `@pinpawo/studio`, not a mode of
+this Chat server command. The `pinpawo-studio` process entry lives directly in
+`packages/studio`.
+
+`pinpawo tui` launches the OpenTUI client. Installed packages use the
+Bun-targeted bundle in `dist/tui` together with npm-selected Bun and OpenTUI
+platform packages. Source checkouts prefer their workspace Bun dependency and
+current TUI source, with a compiled workspace binary, packaged bundle, or global
+Bun as fallbacks. `PINPAWO_TUI_V2_BIN` selects an explicit standalone build and
+`PINPAWO_BUN_BIN` selects a Bun runtime.
+
+`pinpawo tui --check` walks the same launch-plan, integrity, and
+package-local runtime path without entering terminal mode. It prints the v2
+version only after the selected bundle and external OpenTUI runtime load
+successfully.
+
+By default the terminal client starts its own local agent as a stdio child
+process and speaks the same JSONL protocol over the pipe, so `pinpawo tui` needs
+no separately started Host. The launcher resolves the Host runtime and forwards it
+as `PINPAWO_EMBED_HOST_COMMAND` / `PINPAWO_EMBED_HOST_ARGS`; without them the
+client falls back to `pinpawo` on `PATH`. This default needs no port, auth token,
+or loopback origin check, and the Host's stderr is appended to
+`~/.pinpawo/logs/embedded-host.log` instead of the terminal. Quitting the client
+ends the Host, so this mode cannot attach to an already running Host.
+
+`pinpawo tui --server-port <port>` switches the client back to dialing a
+separately running Host instead, which is why it requires `pinpawo run` to be
+started first. `LOCAL_SERVER_PORT` supplies the default port for connection modes
+that do not name one. `--workdir` selects the child client's working directory;
+the host's canonical snapshot remains authoritative for the runtime workspace.
+
+Because one session has exactly one transport owner, `--embed-host` (which only
+restates the default) is mutually exclusive with `--server-port`,
+`--pet-port`/`--pet-id`, `--check`, and `--qa`.
+
+The packaged extension directory is printed by `browser extension status`. Load it through `chrome://extensions` in Developer mode, copy its ID, register that exact ID, and restart the agent. The Chrome extension is a Browser capability driver, with its Native Messaging host kept as a driver-private companion process. Protocol v2 supports open, snapshot, click, type, scroll, wait, extract, screenshot and detach on one approved Chrome tab.
+
+For the official Chrome Web Store build, run
+`pinpawo browser extension register` without `--extension-id`. The option
+is only needed for an unpacked development build. Registration preserves the
+official Store ID and any previously registered development IDs.
+
+`pinpawo browser extension status` reports whether the Native Messaging setup is
+healthy, including the wrapper, native-host entry, and manifest consistency. If it
+reports `repairRecommended: true`, run `pinpawo browser extension repair` (with an
+unpacked extension ID when applicable) and restart the local agent.
+
+`pinpawo run --stdio` starts one logical host peer over newline-delimited
+JSON. It reads one `HostClientMessage` per stdin line and writes one
+`HostServerMessage` per stdout line. Stdout is reserved for protocol messages;
+diagnostics go to stderr. Stdin EOF closes the peer and aborts its active work before
+the process exits. Input framing rejects a JSONL line larger than 8 MiB so malformed
+input cannot grow process memory without bound.
+
+The stdio process is self-contained and does not start an HTTP side channel. Use
+`ping` / `pong` for liveness. Checkpoint-backed session operations use correlated
+request/result messages:
+
+- `session.snapshot.get` → `session.snapshot.result`
+- `session.list` → `session.list.result`
+- `session.resume` → `session.resume.result`
+- failures return `session.error` with the same `requestId`
+
+Session commands from one peer execute in wire arrival order. Chat and review-run
+admission waits for preceding session commands, while interrupts remain immediate.
+`session.resume` fails with `session.error` if that peer already owns an active run.
+
+Chat execution is serialized by graph thread, not by connection. A replacement
+request signals the preceding invocation to abort, then waits for that invocation's
+`streamEvents` run to settle before starting another run on the same thread.
+Different threads may continue concurrently on one transport. The client remains
+busy until the server reports the actual terminal state; there is no local or
+server-side timeout that pretends an invocation has stopped.
+
+These messages only transport the existing session summary and point-in-time
+`AgentSessionSnapshot`. They do not introduce another timeline, recovery model,
+or source of authority; LangGraph checkpoints remain authoritative.
+
+## Publishing
+
+From the repository root:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run test:distribution -w @pinpawo/tui
+npm run test:tui-install -w pinpawo
+npm run pack:dry -w @pinpawo/agent-session
+npm pack --dry-run -w @pinpawo/pet-agent
+npm run pack:dry -w pinpawo
+npm publish -w @pinpawo/agent-session --access public
+npm publish -w @pinpawo/pet-agent --access public
+npm publish -w pinpawo --access public
+```
+
+The packaged OpenTUI launcher verifies `dist/tui/main.js` against the byte
+count and SHA-256 recorded in its versioned manifest before starting Bun.
+The prepublish gate also builds a fresh payload and executes its non-interactive
+version probe, proving that the bundle can load the package's external OpenTUI
+runtime without entering terminal mode.
+The separate `test:tui-install` release smoke packs the local runtime and CLI,
+installs both tarballs with normal dependency lifecycle scripts in an empty
+project, then runs the installed CLI's `tui --check` path. It uses a bounded
+workspace cache and per-stage timeouts so registry or install failures remain
+diagnosable; unlike the prepublish gate, it requires registry access.
+Launcher tests cover the package-local Bun runtime on darwin, Linux, and
+Windows for x64 and arm64. Windows starts the direct `bun.exe` instead of an
+npm command shim. Executable smoke tests still need to run on each target OS
+before changing the default TUI.

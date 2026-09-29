@@ -9,7 +9,7 @@ import { prepareStudio } from '../createStudio';
 import type { Studio, StudioPlugin } from '../studioContract';
 import type { StudioPetBinding } from '../types';
 import {
-  buildLocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
   createResidentPetHost,
   type FileSaver,
   type HostToolkitInventoryStore,
@@ -119,7 +119,7 @@ function validateResolvedPlugins(studioId: string, plugins: readonly StudioPlugi
 export async function resolveStudioHostConfig(
   input: ResolveStudioHostConfigInput,
 ): Promise<ResolvedStudioHostConfig> {
-  const workdir = input.workdir ?? buildLocalAgentRuntimeConfig().workdir;
+  const workdir = input.workdir ?? buildHostRuntimeConfig().workdir;
   const workdirStateRoot = path.join(workdir, '.pinpawo');
   const studioConfigPath = input.studioConfigPath
     ?? path.join(workdirStateRoot, 'studio.json');

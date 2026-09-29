@@ -133,9 +133,9 @@ export class TuiSessionController {
       },
       onMessage: (message) => this.handleMessage(message),
       onDisconnected: () => {
-        this.sessionCommands.cancelAll('local-agent disconnected');
-        this.modelProfiles.cancelAll('local-agent disconnected');
-        this.runtimeConfig.cancel('local-agent disconnected');
+        this.sessionCommands.cancelAll('host disconnected');
+        this.modelProfiles.cancelAll('host disconnected');
+        this.runtimeConfig.cancel('host disconnected');
       },
     });
     this.sessionCommands = new SessionCommandCoordinator({
@@ -601,7 +601,7 @@ export class TuiSessionController {
 
   private sessionCommandUnavailable() {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
-      return 'local-agent is not connected';
+      return 'host is not connected';
     }
     if (
       this.state.session.activeRun
@@ -620,7 +620,7 @@ export class TuiSessionController {
 
   private runtimeConfigUpdateUnavailable() {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
-      return 'local-agent is not connected';
+      return 'host is not connected';
     }
     if (
       this.state.session.activeRun
@@ -643,7 +643,7 @@ export class TuiSessionController {
 
   private modelCommandUnavailable() {
     if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
-      return 'local-agent is not connected';
+      return 'host is not connected';
     }
     if (this.state.session.sessionId === 'pending') {
       return 'wait for session synchronization';

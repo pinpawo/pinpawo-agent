@@ -18,13 +18,13 @@ PinPawo Agent 将编排、任务权限、工具执行、人工审核和持久状
 
 ```text
 用户 / TUI / desktop / stdio client
-  → local-agent host
+  → Host
   → pet-agent orchestrator → Capability lane → Toolkit tools
   → checkpoint + artifact refs
   → 可选 Studio runtime（多 Pet 协调）
 ```
 
-local-agent host 是机器集成边界：解析配置、启动 Toolkit runtime、暴露 HTTP/WebSocket 或 JSONL stdio，并组装 Capability registry。与机器无关的编排在 `packages/pet-agent/`；本地集成留在 `services/` 与 `toolkits/`。
+Host 是机器集成边界：解析配置、启动 Toolkit runtime、暴露 HTTP/WebSocket 或 JSONL stdio，并组装 Capability registry。与机器无关的编排在 `packages/pet-agent/`；本地集成留在 `services/` 与 `toolkits/`。
 
 独立 Studio 进程入口 `pinpawo-studio` 也位于 `packages/studio/`；具体 Plugin 仍通过
 `StudioPluginResolver` 从外部注入，因此 Studio 不依赖 Kanban。Plugin 可以定义

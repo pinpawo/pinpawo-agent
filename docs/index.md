@@ -66,10 +66,10 @@ categorized, lowercase paths directly; obsolete implementations are retained
 only under `history/`.
 
 Interrupt and Resident Pet design work is split by boundary. [Pending interrupt
-in Chat](design/local-agent/pending-interrupt-chat.md) defines the checkpoint,
+in Chat](design/host/pending-interrupt-chat.md) defines the checkpoint,
 projection, and resume boundary for Agent Session conversation. [Resident Pet
 Host ports](design/agent-runtime/resident-pet-host-ports.md) defines the shared
-local-agent runtime boundary, while [Studio Independent Host Runtime](design/studio/independent-host-runtime.md)
+host runtime boundary, while [Studio Independent Host Runtime](design/studio/independent-host-runtime.md)
 defines how Studio consumes dispatch and composes its process. Together they make
 dispatch one-way, leave active-thread/continuation ownership in Agent Session,
 and give conversation non-preemptive scheduling priority.

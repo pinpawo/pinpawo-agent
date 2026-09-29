@@ -1,0 +1,19 @@
+/** Chat handler composition for the shared host stdio adapter. */
+import { createLocalServerHandlers } from './serverHandlers';
+import {
+  attachLocalServerStdioTransport,
+  type ServerStdioTransportOptions,
+} from './wire/stdioTransport';
+import { createLocalServerRuntimeDepsStore, type ServerDeps } from './serverTypes';
+
+export function startLocalStdioServer(
+  deps: ServerDeps,
+  options: ServerStdioTransportOptions = {},
+) {
+  const handlers = createLocalServerHandlers(createLocalServerRuntimeDepsStore(deps));
+  const transport = attachLocalServerStdioTransport(handlers.peerHandlers, options);
+  return {
+    ...transport,
+    closed: transport.closed.finally(handlers.close),
+  };
+}

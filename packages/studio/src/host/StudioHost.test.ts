@@ -10,7 +10,7 @@ import {
   type AgentCapability,
 } from '@pinpawo/pet-agent';
 import {
-  buildLocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
   loadCapabilityDirectory,
   type HostCapabilityAssembly,
   type HostCapabilityAssemblyInitOptions,
@@ -39,7 +39,7 @@ function fakeCapabilityAssembly(
     onInit?: (input: HostCapabilityAssemblyInitOptions) => void;
   } = {},
 ): HostCapabilityAssembly {
-  const runtimeConfig = buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test');
+  const runtimeConfig = buildHostRuntimeConfig('/tmp/pinpawo-studio-host-test');
   const hostCapabilities = [agentCapability('general')];
   let initialized = false;
   const capabilityCatalog = {
@@ -116,7 +116,7 @@ test('StudioHost owns resident Studio lifecycle and shuts it down before capabil
   const events: string[] = [];
   const studio = fakeStudio(() => { events.push('studio:shutdown'); });
   const host = new StudioHost({
-    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test'),
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-studio-host-test'),
     capabilityAssembly: fakeCapabilityAssembly(events),
     resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {
@@ -141,7 +141,7 @@ test('StudioHost owns resident Studio lifecycle and shuts it down before capabil
 test('StudioHost rolls back capability assembly when resident Studio build fails', async () => {
   const events: string[] = [];
   const host = new StudioHost({
-    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test'),
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-studio-host-test'),
     capabilityAssembly: fakeCapabilityAssembly(events),
     resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {
@@ -176,7 +176,7 @@ test('StudioHost releases early writer ownership when configuration resolution f
 test('StudioHost rolls back a partially initialized capability assembly', async () => {
   const events: string[] = [];
   const host = new StudioHost({
-    runtimeConfig: buildLocalAgentRuntimeConfig('/tmp/pinpawo-studio-host-test'),
+    runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-studio-host-test'),
     capabilityAssembly: fakeCapabilityAssembly(events, { failInit: true }),
     resolveStudioHostConfig: async () => configuration(),
     buildStudio: async () => {

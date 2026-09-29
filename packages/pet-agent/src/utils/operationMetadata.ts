@@ -1,6 +1,6 @@
 /**
  * Shared operation-metadata helpers for capability and toolkit metadata consumers
- * outside local-agent runtime.
+ * outside host runtime.
  *
  * NOTE:
  *  - This file owns schema-safe readers and common capability-host summaries.

@@ -362,10 +362,10 @@ export const examples: Example[] = [
     name: 'resume-progress-capability-lane',
     inputs: {
       user_message: '继续',
-      resume_original_user_message: '帮我调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
+      resume_original_user_message: '帮我调查 pet-app 仓库中 host 的 capability 注册链路，列出关键文件和证据。',
       resume_progress_lane: 'capability:explore',
-      resume_progress_task: '调查 pet-app 仓库中 local-agent 的 capability 注册链路，列出关键文件和证据。',
-      resume_progress_result: '已定位到部分 local-agent capability registry 文件，但调查还没有完成，需要继续读取注册链路和调用路径。',
+      resume_progress_task: '调查 pet-app 仓库中 host 的 capability 注册链路，列出关键文件和证据。',
+      resume_progress_result: '已定位到部分 host capability registry 文件，但调查还没有完成，需要继续读取注册链路和调用路径。',
       resume_progress_completion_reason: 'limit_reached',
       capability_pack: 'explore',
     },

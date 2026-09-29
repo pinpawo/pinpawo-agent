@@ -9,15 +9,15 @@ on:
       - 'packages/agent-contracts/**'
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
-      - 'services/local-agent/**'
+      - 'services/host/**'
       - 'services/tui/**'
-      # local-agent bundles the Browser Toolkit.
+      # host bundles the Browser Toolkit.
       - 'toolkits/**'
       # Tests, docs and unrelated scripts never reach a packed package.
       - '!**/*.test.ts'
       - '!**/*.md'
-      - '!services/local-agent/scripts/**'
-      - 'services/local-agent/scripts/tui-v2-install-smoke.ts'
+      - '!services/host/scripts/**'
+      - 'services/host/scripts/tui-v2-install-smoke.ts'
   push:
     branches:
       - main
@@ -28,15 +28,15 @@ on:
       - 'packages/agent-contracts/**'
       - 'packages/agent-session/**'
       - 'packages/pet-agent/**'
-      - 'services/local-agent/**'
+      - 'services/host/**'
       - 'services/tui/**'
-      # local-agent bundles the Browser Toolkit.
+      # host bundles the Browser Toolkit.
       - 'toolkits/**'
       # Tests, docs and unrelated scripts never reach a packed package.
       - '!**/*.test.ts'
       - '!**/*.md'
-      - '!services/local-agent/scripts/**'
-      - 'services/local-agent/scripts/tui-v2-install-smoke.ts'
+      - '!services/host/scripts/**'
+      - 'services/host/scripts/tui-v2-install-smoke.ts'
   workflow_dispatch:
 
 permissions:

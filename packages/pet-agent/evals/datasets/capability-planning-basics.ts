@@ -208,13 +208,13 @@ const messageCases: AgentEvalCase<CapabilityPlanningMessageInput, CapabilityPlan
     tags: ['capability_planning', 'entry_answer', 'context_synthesis'],
     input: {
       mode: 'entry',
-      userRequest: '确认刚才对 studio 结构和 local-agent 层 studio 概念侵入的评估是基于最新 main 分支的版本。',
+      userRequest: '确认刚才对 studio 结构和 host 层 studio 概念侵入的评估是基于最新 main 分支的版本。',
       messages: [{
         role: 'user',
-        content: '看下最新的 studio 结构，然后评估目前还有哪些 studio 概念侵入到了 local-agent 这一层。',
+        content: '看下最新的 studio 结构，然后评估目前还有哪些 studio 概念侵入到了 host 这一层。',
       }, {
         role: 'assistant',
-        content: '已根据当前工作区源码完成 studio 结构和 local-agent 概念侵入评估，但尚未核对当前 HEAD 是否与远程最新 main 一致。',
+        content: '已根据当前工作区源码完成 studio 结构和 host 概念侵入评估，但尚未核对当前 HEAD 是否与远程最新 main 一致。',
       }, {
         role: 'user',
         content: '你看的是最新的 main 的版本么？',

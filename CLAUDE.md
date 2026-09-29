@@ -8,11 +8,11 @@ npm workspaces monorepo (Node.js >=24, validated on Node 24, ESM-only, TypeScrip
 
 - `packages/pet-agent/` → `@pinpawo/pet-agent` — runtime-independent agent core: orchestrator graph, subagent, capability registry, built-in tools. No CLI, no filesystem, no network beyond what LangChain models need.
 - `packages/studio/` → `@pinpawo/studio` — Studio Host/runtime library and the `pinpawo-studio` executable entry.
-- `services/local-agent/` → `pinpawo` (bin: `pinpawo`) — depends on pet-agent. Hosts the CLI and the OpenTUI client launcher, the local HTTP+WebSocket server (`server*.ts`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), and browser tools.
+- `services/host/` → `pinpawo` (bin: `pinpawo`) — depends on pet-agent. Hosts the CLI and the OpenTUI client launcher, the local HTTP+WebSocket server (`server*.ts`), capability/plugin loader for `~/.pinpawo/capabilities/`, local tool implementations (file/git/shell/network/search), and browser tools.
 - `services/tui/` → `@pinpawo/tui` — the OpenTUI (Bun-targeted) terminal client.
 - `tools/agent-macos/` — macOS desktop companion (not part of the npm workspaces root).
 
-The architectural boundary is enforced by convention: anything that touches the machine (FS, shell, network, browser, ~/.pinpawo) belongs in `services/local-agent` or `tools/agent-macos`; anything reusable on a server belongs in `packages/pet-agent`.
+The architectural boundary is enforced by convention: anything that touches the machine (FS, shell, network, browser, ~/.pinpawo) belongs in `services/host` or `tools/agent-macos`; anything reusable on a server belongs in `packages/pet-agent`.
 
 ## Wiki ingest
 
@@ -25,18 +25,18 @@ Run from repo root:
 
 - `npm install` — install all workspaces.
 - `npm run typecheck` — typecheck every workspace.
-- `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: kanban, scheduler, notice, trigger, project-files, studio-http; then studio-e2e) and ends with local-agent `test:unit`.
-- `npm run build` — tsup-bundles `pinpawo` into `services/local-agent/dist/` and generates manifest.
+- `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: kanban, scheduler, notice, trigger, project-files, studio-http; then studio-e2e) and ends with host `test:unit`.
+- `npm run build` — tsup-bundles `pinpawo` into `services/host/dist/` and generates manifest.
 
 Per-workspace (use `-w <pkg>` or `cd`):
 
-- Local-agent live test (hits real services): `cd services/local-agent && npm run test:live`
-- TUI dev: `cd services/local-agent && npm run tui`.
+- Host live test (hits real services): `cd services/host && npm run test:live`
+- TUI dev: `cd services/host && npm run tui`.
 
 ## Conventions
 
 - ESM-only (`"type": "module"`), TypeScript with 2-space indent, semicolons, single quotes in imports/strings.
-- Tests use `node --test` (no Jest/Vitest). Co-located `*.test.ts` next to source. Local-agent's `test:unit` finds every `src/**/*.test.ts`, so tests in subdirectories do run.
+- Tests use `node --test` (no Jest/Vitest). Co-located `*.test.ts` next to source. Host's `test:unit` finds every `src/**/*.test.ts`, so tests in subdirectories do run.
 - `npm` overrides pin `langsmith` and `uuid` repo-wide; don't bump them in a workspace `package.json` without updating the root override.
 
 ## Capability plugins

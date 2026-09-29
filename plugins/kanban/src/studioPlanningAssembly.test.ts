@@ -13,15 +13,15 @@ import {
 
 import { buildStudio, resolveStudioHostConfig } from '@pinpawo/studio';
 import {
-  buildLocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
   FileSaver,
   loadCapabilityDirectory,
 } from 'pinpawo/host-runtime';
-import { createTestModelProfileRegistry } from '../../../services/local-agent/src/testing/modelProfiles';
+import { createTestModelProfileRegistry } from '../../../services/host/src/testing/modelProfiles';
 import {
   buildHostToolkitInventory,
   HostToolkitInventoryStore,
-} from '../../../services/local-agent/src/toolkits/toolkitInventory';
+} from '../../../services/host/src/toolkits/toolkitInventory';
 import { createKanbanPlugin } from './kanbanPlugin';
 
 /**
@@ -49,7 +49,7 @@ const artifactStore: CapabilityArtifactStore = {
 };
 
 async function residentBuildResources(workdir: string, plugins: ReturnType<typeof createKanbanPlugin>[]) {
-  const runtimeConfig = buildLocalAgentRuntimeConfig(workdir);
+  const runtimeConfig = buildHostRuntimeConfig(workdir);
   const toolkitInventory = new HostToolkitInventoryStore(await buildHostToolkitInventory({
     sources: [{
       id: 'plugins',

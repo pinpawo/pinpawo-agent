@@ -1,4 +1,4 @@
-# Local-agent session projection
+# Host session projection
 
 > **Current authority for this topic.** This document is the canonical contract for
 > the topic; the synthesized wiki page that used to summarize it was removed with
@@ -11,12 +11,12 @@
 `AgentSession` is the client-neutral, in-memory projection consumed by the local TUI and hosted chat adapter. It is not a second durable conversation store.
 
 The canonical implementation lives in the runtime-neutral
-`@pinpawo/agent-session` workspace package. `services/local-agent` produces and
+`@pinpawo/agent-session` workspace package. `services/host` produces and
 serves the projection; clients such as the existing TUI consume it. Neither
 transport nor UI implementation owns the domain model.
 
 For a resident Pet, this package is the client projection/wire adapter over the
-local-agent-owned conversation surface. It is not the Pet's dispatch port and
+host-owned conversation surface. It is not the Pet's dispatch port and
 does not connect the TUI to Studio. See
 [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md).
 
@@ -29,7 +29,7 @@ The four terms below describe different things and must not be used interchangea
 - **Timeline** is the ordered UI container used to present a session.
 - **Timeline state** is the current mutable instance of that container. Runtime and control events may update it between checkpoint points.
 
-The current local-agent snapshot endpoint selects a session/thread and materializes its latest checkpoint point together with current local runtime facts. Its checkpoint coordinate is implicit in that endpoint today. Historical point lookup may expose an explicit checkpoint coordinate later, but that is not part of this contract.
+The current host snapshot endpoint selects a session/thread and materializes its latest checkpoint point together with current local runtime facts. Its checkpoint coordinate is implicit in that endpoint today. Historical point lookup may expose an explicit checkpoint coordinate later, but that is not part of this contract.
 
 ## Lifecycle
 
@@ -94,13 +94,13 @@ package does not maintain a second `Wire` object graph or a general-purpose JSON
 serializer.
 
 Disclosure policy belongs to the endpoint that knows its trust boundary. The
-current local-agent remote adapter preserves native events and snapshots,
+current host remote adapter preserves native events and snapshots,
 including deltas and operation `raw`, and only redacts obvious local path
 fragments in main-agent `message.completed.text`. Trusted local transports
 retain the canonical data unchanged. A future public API may use the same
 snapshot contract while applying a stricter API-specific disclosure policy.
 
-Runtime/checkpoint-to-snapshot materialization remains a local-agent adapter.
+Runtime/checkpoint-to-snapshot materialization remains a host adapter.
 WebSocket, stdio, HTTP, future API routes, authentication, persistence and
 pagination remain outside the shared package. Remote APIs adapt the shared
 snapshot contract instead of defining a third session model.
@@ -144,7 +144,7 @@ TUI actions. Separate TUI action vocabulary remains for TUI-only state and where
 a domain intent also changes composer, review-draft, ownership, or status-copy
 state.
 
-The TUI routes composer submissions to the focused local-agent conversation.
+The TUI routes composer submissions to the focused host conversation.
 It has no `studio` composer target and sends no Studio dispatch messages.
 Selecting or restoring a conversation is an Agent Session concern; Studio Pet
 selection and Studio dispatch remain separate control-plane operations.
@@ -277,7 +277,7 @@ existing event and control wire protocol remains compatible and does not add
 session patches or revision numbers.
 
 Before a completed main-agent message reaches the current remote transport, the
-local-agent adapter redacts obvious local path fragments in its `text`. This
+host adapter redacts obvious local path fragments in its `text`. This
 narrow endpoint rule is not part of the shared projection contract. Other
 events and snapshots retain their canonical payload, including operation
 `raw`, title, summary, source, target, and details fields.

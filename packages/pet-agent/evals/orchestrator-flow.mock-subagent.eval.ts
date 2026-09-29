@@ -14,7 +14,7 @@ import { readFixtureDelivery } from '../src/testing/capabilityDelivery';
  */
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
-import { createReasoningPassbackChatOpenAI } from '../../../services/local-agent/src/agent/reasoningPassback.ts';
+import { createReasoningPassbackChatOpenAI } from '../../../services/host/src/agent/reasoningPassback.ts';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { Command, MemorySaver } from '@langchain/langgraph';

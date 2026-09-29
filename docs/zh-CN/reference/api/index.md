@@ -15,4 +15,4 @@
 
 Resident Pet runtime 拥有 Agent 执行、Capability 选择、工具调用与 checkpoint；Studio
 只提供单向 dispatch、每 Pet invocation 串行、live invocation 投射和 Plugin 事件总线。
-active thread 与审核恢复属于 local-agent Agent Session，任务依赖、重试和持久化属于 Plugin。
+active thread 与审核恢复属于 host Agent Session，任务依赖、重试和持久化属于 Plugin。

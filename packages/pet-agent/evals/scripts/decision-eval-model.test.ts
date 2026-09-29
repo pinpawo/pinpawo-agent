@@ -7,8 +7,8 @@ import {
   buildModelProfileRegistry,
   fingerprintModelProfile,
   resolveModelProfile,
-} from '../../../../services/local-agent/src/config/modelProfiles.ts';
-import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
+} from '../../../../services/host/src/config/modelProfiles.ts';
+import type { StoredConfig } from '../../../../services/host/src/storage.ts';
 import { createDecisionEvalModel } from './decision-eval-model.ts';
 
 function writeProfiles() {
@@ -112,7 +112,7 @@ test('eval model profiles preserve stable identities without projecting secrets'
   }
 });
 
-test('eval model identity uses the canonical local-agent profile contract', () => {
+test('eval model identity uses the canonical host profile contract', () => {
   const { root, configPath, stored } = writeProfiles();
   try {
     const evaluated = createDecisionEvalModel({

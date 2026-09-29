@@ -11,8 +11,8 @@ import {
   withTimeout,
 } from './support/localHostProcessHarness';
 
-const LOCAL_AGENT_ENTRY = fileURLToPath(
-  new URL('../../local-agent/src/index.ts', import.meta.url),
+const HOST_ENTRY = fileURLToPath(
+  new URL('../../host/src/index.ts', import.meta.url),
 );
 const TSX_BIN = fileURLToPath(
   new URL('../../../node_modules/.bin/tsx', import.meta.url),
@@ -30,7 +30,7 @@ test('public v2 QA entry drives the production waiting and timeline UI', {
     [
       'spawn -noecho',
       JSON.stringify(TSX_BIN),
-      JSON.stringify(LOCAL_AGENT_ENTRY),
+      JSON.stringify(HOST_ENTRY),
       'tui',
       '--qa',
     ].join(' '),

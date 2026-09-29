@@ -5,7 +5,7 @@
 - `packages/pet-agent/` contains the shared agent runtime, orchestrator, capability contracts, and examples.
 - `packages/studio/` contains the independent Studio Host/runtime contracts and CLI.
 - `plugins/` contains optional concrete Studio Plugins; Studio must not import them.
-- `services/local-agent/` contains the local CLI/TUI, local server, plugin loading, browser tools, and local config.
+- `services/host/` contains the local CLI/TUI, local server, plugin loading, browser tools, and local config.
 - `tests/studio-e2e/` contains cross-package Studio acceptance tests; concrete Plugins must remain independent of each other.
 - `toolkits/` contains concrete Agent Toolkits and Toolkit-owned runtimes.
 - `tools/agent-macos/` contains the macOS desktop companion.
@@ -20,17 +20,17 @@
 ## Commands
 
 - `npm install` installs workspace dependencies.
-- `npm run typecheck` checks the local agent TypeScript project.
-- `npm test` runs pet-agent unit tests and local-agent unit tests.
-- `npm run build` builds the local agent bundle.
-- `cd services/local-agent && npm run tui` starts the local TUI.
+- `npm run typecheck` checks the Host TypeScript project.
+- `npm test` runs pet-agent unit tests and host unit tests.
+- `npm run build` builds the Host bundle.
+- `cd services/host && npm run tui` starts the local TUI.
 
 ## Style
 
 - TypeScript uses 2-space indentation and semicolons.
 - Prefer single quotes in TS/TSX imports and strings.
 - Keep runtime-independent agent logic in `packages/pet-agent/`.
-- Keep local machine, CLI, browser, and desktop integration in `services/local-agent/` or `tools/agent-macos/`.
+- Keep local machine, CLI, browser, and desktop integration in `services/host/` or `tools/agent-macos/`.
 
 ## Testing
 

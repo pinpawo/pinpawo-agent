@@ -116,7 +116,7 @@ These terms are deliberately different:
 - A **timeline** is a UI structure that can show live operations between
   checkpoints.
 
-The [Local-agent session projection](../reference/runtime/session-projection.md) defines
+The [Host session projection](../reference/runtime/session-projection.md) defines
 the current protocol and replacement rules in detail.
 
 ## Studio collaboration
@@ -138,5 +138,5 @@ Read the [Studio overview](../studio/index.md) for the current runtime boundary.
   and run the local agent.
 - [Capability / Toolkit V2 contract](../reference/extensions/capability-toolkit.md) —
   build a Capability or Toolkit.
-- [Local-agent session projection](../reference/runtime/session-projection.md) — build a
+- [Host session projection](../reference/runtime/session-projection.md) — build a
   client or understand recovery behavior.

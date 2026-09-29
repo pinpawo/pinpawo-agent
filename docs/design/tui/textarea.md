@@ -6,7 +6,7 @@
 
 ## 1. 文档目标
 
-这份文档用于指导 PinPawo local-agent TUI textarea 的系统性重构。目标不是继续逐个修 Delete、Shift+Enter、粘贴等零散 bug，而是先把 input 组织成一个边界清晰、可测试、可演进的子系统。
+这份文档用于指导 PinPawo host TUI textarea 的系统性重构。目标不是继续逐个修 Delete、Shift+Enter、粘贴等零散 bug，而是先把 input 组织成一个边界清晰、可测试、可演进的子系统。
 
 本文回答这些问题：
 
@@ -22,22 +22,22 @@
 
 当前 input 链路分布在这些位置：
 
-- `services/local-agent/src/tui/TuiApp.tsx`
+- `services/host/src/tui/TuiApp.tsx`
   - 调用 Ink `useInput`
   - 维护 input buffer ref
   - 根据 ready/busy/approval/resume 状态路由按键
   - 调用 textarea reducer
   - 触发 app 命令，例如 submit、interrupt、approval submit
-- `services/local-agent/src/tui/input/keymap.ts`
+- `services/host/src/tui/input/keymap.ts`
   - 缓冲分段 terminal control sequence
   - 判断 Return / Shift+Return / control sequence
   - 同时做全局、approval、resume picker、composer action routing
-- `services/local-agent/src/tui/input/textareaModel.ts`
+- `services/host/src/tui/input/textareaModel.ts`
   - 维护纯文本和 `cursorOffset`
   - 实现基础编辑命令
   - 同时处理部分 terminal sequence，例如 Shift+Enter、bracketed paste marker
   - 同时承担简单 layout wrapping
-- `services/local-agent/src/tui/components/Composer.tsx`
+- `services/host/src/tui/components/Composer.tsx`
   - 根据 textarea rows 渲染文本和反色 cursor
 
 这些模块都不是“错”的，但边界不够硬。典型问题是 #144：
@@ -229,16 +229,16 @@ opencode 对这些边界给了清晰位置：
 
 - UI runtime 从 Ink/React 迁到 OpenTUI/Solid。
 - 组件、布局、测试工具都要换。
-- 现有 `TuiApp`、state reducer、local-agent event 消费会被大范围影响。
+- 现有 `TuiApp`、state reducer、host event 消费会被大范围影响。
 
 因此建议短中期保留 Ink，把 opencode 的结构思想移植过来。
 
-### 4.2 LocalAgentRuntimeEvent 协议不应受 textarea 重构影响
+### 4.2 HostRuntimeEvent 协议不应受 textarea 重构影响
 
 textarea 是 terminal client 内部交互层，不应改变：
 
-- `LocalAgentRuntimeEvent`
-- local-agent WebSocket message
+- `HostRuntimeEvent`
+- host WebSocket message
 - chat/studio run model
 - human review protocol
 
@@ -304,7 +304,7 @@ Ink useInput
 建议文件：
 
 ```txt
-services/local-agent/src/tui/input/terminalInput.ts
+services/host/src/tui/input/terminalInput.ts
 ```
 
 建议类型：
@@ -343,7 +343,7 @@ export type TerminalInputEvent =
 建议文件：
 
 ```txt
-services/local-agent/src/tui/input/canonicalInput.ts
+services/host/src/tui/input/canonicalInput.ts
 ```
 
 建议类型：
@@ -409,7 +409,7 @@ shift+up       -> selection.up
 建议文件：
 
 ```txt
-services/local-agent/src/tui/input/inputRouter.ts
+services/host/src/tui/input/inputRouter.ts
 ```
 
 建议类型：
@@ -463,7 +463,7 @@ routing helper，而不是散在 `TuiApp` 或主 router switch 中。
 建议目录：
 
 ```txt
-services/local-agent/src/tui/input/textarea/
+services/host/src/tui/input/textarea/
   engine.ts
   layout.ts
   renderModel.ts
@@ -716,11 +716,11 @@ input: {
 新增测试文件建议：
 
 ```txt
-services/local-agent/src/tui/input/terminalInput.test.ts
-services/local-agent/src/tui/input/canonicalInput.test.ts
-services/local-agent/src/tui/input/inputRouter.test.ts
-services/local-agent/src/tui/input/textarea/engine.test.ts
-services/local-agent/src/tui/input/textarea/layout.test.ts
+services/host/src/tui/input/terminalInput.test.ts
+services/host/src/tui/input/canonicalInput.test.ts
+services/host/src/tui/input/inputRouter.test.ts
+services/host/src/tui/input/textarea/engine.test.ts
+services/host/src/tui/input/textarea/layout.test.ts
 ```
 
 测试矩阵至少覆盖：
@@ -955,7 +955,7 @@ CanonicalInputEvent + InputOwner -> RoutedInputCommand
 Spike 不直接替换生产 TUI，先做独立 prototype：
 
 ```txt
-services/local-agent/experiments/opentui-textarea/
+services/host/experiments/opentui-textarea/
 ```
 
 验收：

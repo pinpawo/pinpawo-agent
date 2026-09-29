@@ -29,7 +29,7 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
     width: 80,
     connection: 'connected',
     hostMetadata: {
-      localAgentVersion: '0.2.0',
+      hostVersion: '0.2.0',
     },
   });
   assert.equal(lines[0], ' '.repeat(80));
@@ -37,7 +37,7 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
   assert.ok(lines.some((line) => line.includes('████████████')));
   assert.ok(lines.some((line) => line.includes('PinPawo TUI v2')));
   assert.ok(lines.some((line) => line.includes('v0.1.0')));
-  assert.ok(lines.some((line) => line.includes('local-agent v0.2.0')));
+  assert.ok(lines.some((line) => line.includes('host v0.2.0')));
   assert.ok(
     lines.some((line) => line.includes('Primary coding (gpt-test)')),
   );

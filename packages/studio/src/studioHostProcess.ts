@@ -1,6 +1,6 @@
 import {
-  buildLocalAgentRuntimeConfig,
-  type LocalAgentRuntimeConfig,
+  buildHostRuntimeConfig,
+  type HostRuntimeConfig,
 } from 'pinpawo/host-runtime';
 import { ensureLocalServerAuthToken } from 'pinpawo/local-server-transport';
 import type { StudioPluginResolver } from './host/buildStudio';
@@ -23,7 +23,7 @@ type SignalTarget = {
 };
 
 export type StudioHostProcessDependencies = {
-  buildRuntimeConfig?: (workdir?: string) => LocalAgentRuntimeConfig;
+  buildRuntimeConfig?: (workdir?: string) => HostRuntimeConfig;
   ensureAuthToken?: () => string;
   createPluginResolver?: typeof createInstalledStudioPluginResolver;
   startHost?: (
@@ -39,7 +39,7 @@ export async function runStudioHostProcess(
   options: StudioHostProcessOptions,
   dependencies: StudioHostProcessDependencies = {},
 ): Promise<void> {
-  const runtimeConfig = (dependencies.buildRuntimeConfig ?? buildLocalAgentRuntimeConfig)(
+  const runtimeConfig = (dependencies.buildRuntimeConfig ?? buildHostRuntimeConfig)(
     options.workdir,
   );
   const authToken = (dependencies.ensureAuthToken ?? ensureLocalServerAuthToken)();

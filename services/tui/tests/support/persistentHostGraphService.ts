@@ -19,13 +19,13 @@ import {
 } from '@pinpawo/pet-agent';
 import type {
   AgentChannelSetup,
-} from '../../../local-agent/src/agent/agentChannel';
+} from '../../../host/src/agent/agentChannel';
 import type {
   InterruptResume,
-  LocalAgentGraphEventStream,
-  LocalAgentGraphService,
-  LocalAgentGraphThreadState,
-} from '../../../local-agent/src/agent/agentGraphService';
+  HostGraphEventStream,
+  HostGraphService,
+  HostGraphThreadState,
+} from '../../../host/src/agent/agentGraphService';
 
 export const PERSISTENT_HOST_INPUT = 'Persist this host conversation.';
 export const PERSISTENT_HOST_CONTINUATION = 'Continue after the host restart.';
@@ -127,13 +127,13 @@ export function createPersistentHostGraphService() {
       const input = String(setup.input.messages.at(-1)?.content ?? '');
       return input === PERSISTENT_HOST_TIMELINE_INPUT
         ? withTimelineFixtureEvents(
-            stream as unknown as LocalAgentGraphEventStream,
+            stream as unknown as HostGraphEventStream,
           )
         : stream;
     },
     async readThreadState(
       setup: AgentChannelSetup,
-    ): Promise<LocalAgentGraphThreadState> {
+    ): Promise<HostGraphThreadState> {
       const snapshot = await graphFor(setup).getState({
         configurable: configurable(setup),
       });
@@ -149,7 +149,7 @@ export function createPersistentHostGraphService() {
         currentPlan: null,
       };
     },
-  } as unknown as LocalAgentGraphService;
+  } as unknown as HostGraphService;
 }
 
 function createGraph(setup: AgentChannelSetup) {
@@ -225,7 +225,7 @@ function selectReply(input: string, workdir?: string) {
   return PERSISTENT_HOST_REPLY;
 }
 
-function withTimelineFixtureEvents(stream: LocalAgentGraphEventStream) {
+function withTimelineFixtureEvents(stream: HostGraphEventStream) {
   const wrapped = (async function* () {
     const toolNamespace = ['general:persistent', 'tools:read'];
     yield protocolEvent('tools', {
@@ -293,7 +293,7 @@ function withTimelineFixtureEvents(stream: LocalAgentGraphEventStream) {
     for await (const event of stream) {
       yield event;
     }
-  })() as unknown as LocalAgentGraphEventStream;
+  })() as unknown as HostGraphEventStream;
   Object.defineProperty(wrapped, 'output', {
     configurable: true,
     value: stream.output,

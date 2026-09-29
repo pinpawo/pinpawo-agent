@@ -11,7 +11,7 @@ import {
 } from '@pinpawo/pet-agent';
 import { createInMemoryKanbanTaskService, createKanbanPlanningToolkit } from '@pinpawo-plugin/kanban';
 import { loadCapabilityDirectory } from 'pinpawo/host-runtime';
-import { createProjectInspectionToolkit, PosixShellRS } from '../../../services/local-agent/src/toolkits/local';
+import { createProjectInspectionToolkit, PosixShellRS } from '../../../services/host/src/toolkits/local';
 import { createStudioContextToolkit } from '../../../packages/studio/src/host/studioContextToolkit';
 import { createDecisionEvalModel } from '../../../packages/pet-agent/evals/scripts/decision-eval-model';
 

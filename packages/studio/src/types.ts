@@ -6,7 +6,7 @@ export type StudioPetRegistration = {
   name: string;
 };
 
-/** Studio combines its own registration with a borrowed local-agent port. */
+/** Studio combines its own registration with a borrowed host port. */
 export type StudioPetBinding = {
   registration: StudioPetRegistration;
   dispatch: PetDispatchPort;

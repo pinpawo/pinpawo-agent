@@ -171,11 +171,11 @@ lint passes, and documentation migrations.
 - Kept the change within the existing `answer.user-visible-close` contract and
   prompt knowledge layers rather than adding another Wiki concept.
 
-## [2026-07-23] ingest | Local-agent session projection
+## [2026-07-23] ingest | Host session projection
 
-- Registered `LOCAL_AGENT_SESSION_PROJECTION.md` as the canonical topic contract
-  and the projection implementation (`localAgentSession.ts`,
-  `localAgentSessionReducer.ts`, `localAgentSessionParser.ts`,
+- Registered `HOST_SESSION_PROJECTION.md` as the canonical topic contract
+  and the projection implementation (`hostSession.ts`,
+  `hostSessionReducer.ts`, `hostSessionParser.ts`,
   `reviewResolutionLifecycle.ts`, `localServerStdioTransport.ts`) as authoritative
   for runtime behavior.
 - Ingested the closed issue history for the refactor line: umbrella #355 and
@@ -395,7 +395,7 @@ lint passes, and documentation migrations.
 ## [2026-08-07] ingest | Agent boundary contracts
 
 - Registered accepted issue #570 and merged PR #572 with the current
-  `agent-contracts`, pet-agent projection, agent-session, and local-agent
+  `agent-contracts`, pet-agent projection, agent-session, and host
   implementations as the authoritative contract-layer evidence.
 - Added a validated system page for the four transport-neutral boundary ports:
   Configuration, Invocation, Interaction, and State. Recorded the leaf-package

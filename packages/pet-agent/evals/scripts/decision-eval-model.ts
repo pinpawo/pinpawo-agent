@@ -1,8 +1,8 @@
-import { createReasoningPassbackChatOpenAI } from '../../../../services/local-agent/src/agent/reasoningPassback.ts';
+import { createReasoningPassbackChatOpenAI } from '../../../../services/host/src/agent/reasoningPassback.ts';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-// These repository-only eval scripts consume local-agent's stored Profile
+// These repository-only eval scripts consume host's stored Profile
 // contract. Reuse the host parser and fingerprint instead of maintaining a
 // second interpretation inside the published pet-agent runtime.
 import {
@@ -12,11 +12,11 @@ import {
   resolveModelProfile,
   type ModelInputModality,
   type ModelProfileV1,
-} from '../../../../services/local-agent/src/config/modelProfiles.ts';
+} from '../../../../services/host/src/config/modelProfiles.ts';
 import {
   inferLlmStructuredOutputMethod,
-} from '../../../../services/local-agent/src/config/llmModelPresets.ts';
-import type { StoredConfig } from '../../../../services/local-agent/src/storage.ts';
+} from '../../../../services/host/src/config/llmModelPresets.ts';
+import type { StoredConfig } from '../../../../services/host/src/storage.ts';
 import type { AgentModels } from '../../src/types/agent.ts';
 import type { StructuredOutputMethod } from '../../src/utils/structuredOutput.ts';
 import type {

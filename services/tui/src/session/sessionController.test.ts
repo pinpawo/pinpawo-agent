@@ -698,7 +698,7 @@ test('starting a new session rejects unavailable and busy states', async () => {
   });
   await assert.rejects(
     controller.startNewSession(),
-    /local-agent is not connected/,
+    /host is not connected/,
   );
   controller.start();
   connection.open();

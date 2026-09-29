@@ -33,7 +33,7 @@ export type AgentEvalDataset<Input, Expected> = {
   description: string;
   cases: AgentEvalCase<Input, Expected>[];
   metadata: {
-    owner: 'pet-agent' | 'local-agent';
+    owner: 'pet-agent' | 'host';
     areas: AgentEvalArea[];
   };
 };

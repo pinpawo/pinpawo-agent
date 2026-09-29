@@ -719,7 +719,7 @@ private struct CapabilitiesSettingsPane: View {
       } header: {
         Text("插件目录")
       } footer: {
-        Text("默认目录：~/.pinpawo/capabilities/。可添加多个目录，方便管理 local-agent 项目中的自定义插件。点击重新扫描可刷新列表；能力开关仍需重启 Agent 后生效。")
+        Text("默认目录：~/.pinpawo/capabilities/。可添加多个目录，方便管理 host 项目中的自定义插件。点击重新扫描可刷新列表；能力开关仍需重启 Agent 后生效。")
       }
     }
     .formStyle(.grouped)

@@ -5,8 +5,8 @@
 > **Status: current contract.** Studio is implemented by
 > [`@pinpawo/studio`](../../packages/studio/src/index.ts), which owns its Host,
 > runtime assembly, and Plugin composition. It reuses local Host assembly
-> through the public local-agent
-> [`host-runtime`](../../services/local-agent/src/hostRuntime.ts) surface; the
+> through the public host
+> [`host-runtime`](../../services/host/src/hostRuntime.ts) surface; the
 > Pet Agent Session adapter is a separate `local-server-transport` surface.
 > The `pinpawo-studio` executable entry also lives in this package. Concrete
 > Plugins remain externally injected through `StudioPluginResolver`.
@@ -31,7 +31,7 @@ Toolkits and state.
 - [Independent Host runtime](../design/studio/independent-host-runtime.md) — Host,
   process, Plugin, dispatch, and interaction ownership.
 - [Resident Pet Host ports](../design/agent-runtime/resident-pet-host-ports.md) —
-  local-agent assembly between Studio dispatch and direct Pet conversation.
+  host assembly between Studio dispatch and direct Pet conversation.
 - [Configuration](configuration.md) — `studio.json`, per-pet files, validation,
   and Plugin injection.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
@@ -72,7 +72,7 @@ event queue, or domain history.
 The Host registers only currently live, eagerly started
 Pets. Studio neither reports lazy/disabled Pets nor publishes active Agent
 Session thread identity. The HTTP Plugin becomes the Studio control-plane
-transport; a separate local-agent Agent Session WebSocket in the same Host
+transport; a separate host Agent Session WebSocket in the same Host
 process handles direct Pet conversation without entering Studio core.
 
 ## Operational limits
@@ -80,7 +80,7 @@ process handles direct Pet conversation without entering Studio core.
 Idempotency records and event subscriptions are process-local and in memory.
 Studio dispatch has no execution result, automatic retry, timeout, or durable
 event replay. Resident queue/gate state, Pet checkpoints, and active Agent
-Session threads belong to local-agent rather than those Studio projections.
+Session threads belong to host rather than those Studio projections.
 
 The former run-controller, due-run scheduler, and shared-wiki designs are kept
 only in [Studio history](../history/studio/) and do not define present behavior.

@@ -13,7 +13,7 @@ const plan = {
 test('builds an expanded current plan when terminal space allows', () => {
   assert.deepEqual(buildCurrentPlanPanel(plan, { width: 100, terminalHeight: 40 }), {
     content: [
-      '当前计划 · 2/3',
+      '第 2 项／共 3 项 · 进行中',
       '  ✓ Understand request',
       '  → Inspect code',
       '  · Verify result',
@@ -43,7 +43,7 @@ test('temporarily compacts the plan while an overlay is open', () => {
   });
   assert.equal(panel.mode, 'compact');
   assert.equal(panel.height, 1);
-  assert.match(panel.content, /^计划 2\/3 · → Inspect code/);
+  assert.match(panel.content, /^第 2 项／共 3 项 · 进行中 · → Inspect code/);
 });
 
 test('keeps the plan visible between delegations when no item is active', () => {
@@ -55,7 +55,7 @@ test('keeps the plan visible between delegations when no item is active', () => 
   };
   const panel = buildCurrentPlanPanel(betweenSteps, { width: 100, terminalHeight: 40 });
   assert.equal(panel.mode, 'expanded');
-  assert.match(panel.content, /当前计划 · 2\/2/);
+  assert.match(panel.content, /第 2 项／共 2 项 · 待执行/);
   assert.match(panel.content, /Inspect code/);
 });
 
@@ -77,8 +77,8 @@ test('shows the first active task as step one instead of zero completed', () => 
     overlayOpen: true,
   });
 
-  assert.match(expanded.content, /^当前计划 · 1\/2/);
-  assert.match(compact.content, /^计划 1\/2/);
+  assert.match(expanded.content, /^第 1 项／共 2 项 · 进行中/);
+  assert.match(compact.content, /^第 1 项／共 2 项 · 进行中/);
 });
 
 test('wraps complete plan tasks instead of truncating them', () => {

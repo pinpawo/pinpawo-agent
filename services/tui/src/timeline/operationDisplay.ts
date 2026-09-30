@@ -10,7 +10,6 @@ export type OperationDisplayLine = {
 };
 
 export const OPERATION_OUTPUT_MAX_LINES = 6;
-const SUCCESS_OUTPUT_MAX_LINES = 1;
 const OPERATION_PATCH_MAX_LINES = 24;
 const OPERATION_PAYLOAD_DETAIL_KEYS = new Set([
   'after',
@@ -105,7 +104,48 @@ function buildOperationHeader(
   now: number,
   width: number,
 ) {
-  return buildOperationHeaderText(operationBody(entry), entry, now, width);
+  // Keep tool activity readable even in very wide terminals.
+  const limit = Math.min(width, 104);
+  let body = operationActivityText(entry);
+  const suffix = `（${operationStatus(entry, now)}）`;
+  const target = entry.target?.trim();
+  if (stringWidth(body + suffix) > limit && target?.includes('/')
+    && !target.includes(' ') && !target.includes('://')
+    && !['run_shell', 'inspect_shell', 'start_process'].includes(operationToolLabel(entry))) {
+    body = `${operationToolLabel(entry)} · …/${target.split('/').at(-1)}`;
+  }
+  return buildOperationHeaderText(body, entry, now, limit);
+}
+
+/** Compact, factual activity label; full arguments remain in the pager. */
+export function operationActivityText(entry: AgentOperationEntry) {
+  const label = operationToolLabel(entry);
+  const shell = ['run_shell', 'inspect_shell', 'start_process'].includes(label);
+  let argument = shell ? entry.summary?.trim() || entry.target?.trim() : entry.target?.trim() || entry.summary?.trim();
+  if (argument && shell) {
+    // Shorten only a leading working-directory setup; do not interpret shell
+    // semantics or claim that a compound command is a single action.
+    argument = argument.replace(/^cd\s+(?:'[^']*'|"[^"]*"|[^\s;&|]+)\s*&&\s*/, '');
+  } else if (argument?.startsWith('/') && !argument.includes(' ')) {
+    const segments = argument.split('/').filter(Boolean);
+    if (segments.length > 3) argument = `…/${segments.slice(-3).join('/')}`;
+  }
+  return argument && argument !== label ? `${label} · ${argument.replace(/\s+/g, ' ')}` : label;
+}
+
+/** Full canonical operation detail, used only in the scrollable transcript. */
+export function buildOperationDetailText(entry: AgentOperationEntry) {
+  const sections = [buildOperationHeaderText(operationBody(entry), entry, 0, Infinity)];
+  for (const [label, value] of [
+    ['输入', entry.raw?.input],
+    ['详情', entry.details],
+    ['输出', entry.raw?.output],
+    ['错误', entry.raw?.error],
+  ] as const) {
+    const text = stringifyOutput(value);
+    if (text) sections.push(`${label}\n${normalizeMultilineTerminalText(text)}`);
+  }
+  return sections.join('\n\n');
 }
 
 function buildOperationHeaderText(
@@ -130,6 +170,9 @@ function buildAuthorizationDisplayLines(
   headerWidth: number,
 ): OperationDisplayLine[] | null {
   if (entry.kind !== 'runtime.authorization') return null;
+  if (entry.phase === 'completed') {
+    return [{ text: buildOperationHeaderText(entry.title, entry, now, headerWidth), tone: 'muted' }];
+  }
   const toolLabels = readDetailStrings(entry.details?.toolLabels);
   const reason = readDetailText(entry.details?.reason);
   return [{
@@ -223,7 +266,10 @@ function buildOperationOutputLines(
 ): OperationDisplayLine[] {
   // Delivery prose is linked from the final reply, never dumped under a task.
   if (isDelegationEntry(entry) && entry.phase !== 'failed') return [];
-  const isError = entry.phase === 'failed';
+  // Successful operations are one-line receipts. PageUp retains their full
+  // output; patches keep their existing bounded diff above this section.
+  const isError = entry.phase === 'failed' || hasReturnedError(entry);
+  if (entry.phase === 'completed' && !isError) return [];
   const raw = isError
     ? entry.raw?.error ?? entry.raw?.output
     : entry.raw?.output;
@@ -235,9 +281,7 @@ function buildOperationOutputLines(
   // reader works through line by line — and inside a delegation there are many
   // of them, so a full dump buries the task. Failures keep their room: that
   // output is the reason the run stopped.
-  const budget = isError
-    ? OPERATION_OUTPUT_MAX_LINES
-    : SUCCESS_OUTPUT_MAX_LINES;
+  const budget = OPERATION_OUTPUT_MAX_LINES;
   const visible = lines.slice(0, budget);
   const hidden = lines.length - visible.length;
   const tone: OperationDisplayTone = isError ? 'removed' : 'muted';
@@ -252,6 +296,18 @@ function buildOperationOutputLines(
     });
   }
   return output;
+}
+
+function hasReturnedError(entry: AgentOperationEntry) {
+  // Some tools return an error payload through a completed tool invocation.
+  // Keep those visible without changing the canonical lifecycle phase.
+  if (entry.raw?.error != null) return true;
+  const output = entry.raw?.output;
+  if (typeof output === 'string' && /^Error:/i.test(output.trimStart())) return true;
+  const record = asRecord(output) ?? asRecord(parseJson(output));
+  return record?.ok === false || record?.success === false
+    || record?.status === 'error' || record?.status === 'timeout'
+    || record?.status === 'spawn_failed';
 }
 
 function buildPatchLines(

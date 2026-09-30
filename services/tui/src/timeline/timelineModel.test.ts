@@ -58,7 +58,7 @@ test('live delegation shows only its objective and disappears after the run ends
   assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
-  }] }), '  ◌ Read file（进行中）');
+  }] }), 'Read file');
 });
 
 test('a delegation is headed by its task and keeps its failure reason', () => {
@@ -158,7 +158,7 @@ test('timeline formatting keeps multiline messages and operation state readable'
   assert.equal(formatTimelineEntry(user), '  hello\n  world');
   assert.equal(
     formatTimelineEntry({ ...operation, phase: 'completed', summary: 'ok' }),
-    '  ● Read file(ok)（完成）',
+    '  ✓ Read file · ok（完成）',
   );
 });
 
@@ -171,12 +171,7 @@ test('timeline formatting includes bounded tool output and errors', () => {
         output: ['line 1', 'line 2'].join('\n'),
       },
     }),
-    // Successful output collapses to one row plus the elision marker.
-    [
-      '  ● Read file（完成）',
-      '  ⎿ line 1',
-      '    … +1 lines',
-    ].join('\n'),
+    '  ✓ Read file（完成）',
   );
   assert.equal(
     formatTimelineEntry({
@@ -200,7 +195,7 @@ test('timeline formatting includes bounded tool output and errors', () => {
         output: Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n'),
       },
     }),
-    /… \+9 lines$/,
+    /Read file（完成）$/,
   );
 });
 
@@ -240,7 +235,7 @@ test('timeline formatting exposes apply_patch details without wrapper markers', 
       },
     }),
     [
-      '  ● apply_patch（完成）',
+      '  ✓ apply_patch（完成）',
       '  patch',
       '  *** Update File: src/example.ts',
       '  @@',
@@ -267,9 +262,9 @@ test('live timeline shows the newest streaming tail within its footer budget', (
     pendingInterrupt: null,
   };
   assert.equal(formatLiveSession(session, 20), 'PinPawo  …qrstuvwxyz');
-  assert.equal(formatLiveActivity(session, 0, 20), 'PinPawo  …uvwxyz');
-  assert.equal(formatLiveActivity(session, 1, 20), 'PinPawo  …uvwxyz');
-  assert.equal(formatLiveActivity(session, 10, 20), 'PinPawo  …uvwxyz');
+  assert.equal(formatLiveActivity(session, 0, 20), 'PinPawo is resp…');
+  assert.equal(formatLiveActivity(session, 1, 20), 'PinPawo is resp…');
+  assert.equal(formatLiveActivity(session, 10, 20), 'PinPawo is resp…');
   assert.equal(
     formatLiveActivity({
       ...session,
@@ -278,7 +273,7 @@ test('live timeline shows the newest streaming tail within its footer budget', (
         summary: 'Local helper',
       },
     }, 0, 20),
-    '豆包  …pqrstuvwxyz',
+    '豆包 is respond…',
   );
 });
 
@@ -310,7 +305,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
         startedAt: 1_000,
       },
     }, 0, 80, false, 66_500),
-    'PinPawo is thinking · 1m 5s',
+    'PinPawo is thinking · 本轮 1m 5s',
   );
   assert.equal(
     formatLiveActivity({
@@ -320,7 +315,7 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
         startedAt: 1_000,
       },
     }, 0, 20, false, 66_500),
-    'PinPawo… · 1m 5s',
+    'PinPawo is thin…',
   );
   assert.equal(
     formatLiveActivity({
@@ -379,6 +374,20 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
     }),
     '◌ stopping response',
   );
+});
+
+test('live footer respects terminal cells for CJK labels and narrow windows', () => {
+  const session: AgentSession = {
+    sessionId: 's', kind: 'chat', pendingInterrupt: null,
+    actor: { label: '豆包助手', summary: 'helper' },
+    activeRun: { requestId: 'r', state: 'running', activity: 'using_tool', startedAt: 0 },
+    timeline: [{ ...operation, title: '读取配置与检查实现边界'.repeat(10) }],
+  };
+  for (const width of [4, 12, 20, 40, 80]) {
+    const text = formatLiveActivity(session, 0, width, false, 158_000);
+    assert.ok(stringWidth(text) + 4 <= width, `${width}: ${text}`);
+    if (width >= 40) assert.match(text, /本轮 2m 38s$/);
+  }
 });
 
 test('scrollback reconciliation tolerates snapshot IDs and omitted live operations', () => {

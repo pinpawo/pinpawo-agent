@@ -230,14 +230,15 @@ const header = new TextRenderable(renderer, {
 });
 const live = new TextRenderable(renderer, {
   id: 'live',
-  content: 'live · idle',
+  content: 'idle',
+  fg: '#69c0c8',
   bg: RGBA.defaultBackground(),
   height: 1,
 });
 const currentPlan = new TextRenderable(renderer, {
   id: 'current-plan',
   content: '',
-  fg: '#a8b6c5',
+  fg: '#d3dce5',
   bg: RGBA.defaultBackground(),
   height: 0,
   overflow: 'hidden',
@@ -261,7 +262,7 @@ const status = new TextRenderable(renderer, {
     : embeddedHost
       ? 'host stdio'
       : `host :${port}`,
-  fg: '#8a8a8a',
+  fg: '#8f9ba8',
   bg: RGBA.defaultBackground(),
   height: 2,
 });
@@ -411,6 +412,7 @@ const composer = new TextareaRenderable(renderer, {
   focusedBackgroundColor: COMPOSER_BACKGROUND,
   syntaxStyle: composerDecorationStyle,
   placeholder: COMPOSER_PLACEHOLDER,
+  placeholderColor: '#8f9ba8',
   keyBindings: COMPOSER_KEY_BINDINGS,
   onSubmit: () => submitComposerInput(),
   onCursorChange: () => syncComposerInputOverlays(),
@@ -833,7 +835,7 @@ function refreshLive() {
     live.content = buildLoadingCellLine(
       'compacting older context · request sent',
       overlayLoadingController.frame,
-      { prefix: 'live · ' },
+      { prefix: '' },
     );
     return;
   }
@@ -841,7 +843,7 @@ function refreshLive() {
   const activity = formatLiveActivity(
     session,
     liveActivityController.frame,
-    Math.max(1, renderer.width - 7),
+    Math.max(1, renderer.width),
     liveActivityController.longWaiting,
     Date.now(),
   );
@@ -850,9 +852,9 @@ function refreshLive() {
     liveActivityController.frame,
   )
     ? buildLoadingCellLine(activity, liveActivityController.frame, {
-        prefix: 'live · ',
+        prefix: '',
       })
-    : truncateTerminalLine(`live · ${activity}`, renderer.width);
+    : truncateTerminalLine(activity, renderer.width);
 }
 
 function refreshStatus() {

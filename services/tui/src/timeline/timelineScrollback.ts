@@ -687,6 +687,7 @@ function populateTimelineRoot(
 
   function addTimelineEntrySpacing(entry: AgentTimelineEntry) {
     if (!isSettledTimelineEntry(entry)) return;
+    if (entry.type === 'operation' && !isDelegationEntry(entry)) return;
     addLine({ text: ' ', tone: 'muted' });
   }
 }
@@ -767,8 +768,9 @@ function lineStyle(line: TimelineDisplayLine): {
         bg: USER_MESSAGE_BACKGROUND,
       };
     case 'added':
+      return { fg: '#7fcf9b' };
     case 'operation-completed':
-      return { fg: '#5fd75f' };
+      return { fg: '#a8b6c5' };
     case 'system':
     case 'subagent':
     case 'operation-interrupted':
@@ -780,9 +782,10 @@ function lineStyle(line: TimelineDisplayLine): {
     case 'operation-failed':
       return { fg: '#ff5f5f' };
     case 'muted':
+      return { fg: '#8f9ba8' };
     case 'operation-started':
     case 'operation-updated':
-      return { attributes: TextAttributes.DIM };
+      return { fg: '#69c0c8' };
     case 'assistant':
       return {};
   }

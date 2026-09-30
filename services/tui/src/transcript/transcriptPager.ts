@@ -9,6 +9,7 @@ import {
   type TerminalCommand,
 } from '../terminal/commandLine';
 import { formatTimelineEntry } from '../timeline/timelineModel';
+import { buildOperationDetailText } from '../timeline/operationDisplay';
 
 export type TranscriptPagerSpawn = (
   command: string,
@@ -94,7 +95,7 @@ export function formatTranscriptPagerText(session: AgentSession) {
   for (const entry of session.timeline) {
     if (entry.type === 'message' && entry.role === 'subagent') continue;
     lines.push(
-      sanitizePagerText(formatTimelineEntry(entry)),
+      sanitizePagerText(entry.type === 'operation' ? buildOperationDetailText(entry) : formatTimelineEntry(entry)),
       '',
     );
     if (entry.type === 'message') {

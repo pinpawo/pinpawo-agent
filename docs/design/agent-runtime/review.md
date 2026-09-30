@@ -40,8 +40,8 @@ review policy 决定是否需要审核。[Toolkit 绑定](../../../packages/pet-
 不为每个工具增加执行 wrapper。
 
 [ReviewPolicies](../../../packages/pet-agent/src/autoReview/reviewPolicies.ts)
-提供 `localMutation`、`commandExecution`、`externalAccess` 和 `requireHitl`；
-这些 preset 都要求审核，默认在 Host 不支持 human review 时阻止执行，默认不启用授权复用。
+提供 `required()`：要求审核（由谁审核取决于全局策略：人工、自动或自定义），默认在 Host 不支持 human review 时阻止执行，默认不启用授权复用。
+工具的类别语义由它自己的 operation 元数据表达，不再用多个行为相同的 preset 名称区分。
 `never()` 返回无需审核，`custom()` 接受自定义策略；preset 不负责按命令名称推断安全性。
 Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow'` 显式选择无审核时放行，
 不能将其当作默认降级行为。

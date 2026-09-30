@@ -1,20 +1,20 @@
 import type {
   AgentClientMessage,
   AgentServerMessage,
-  BuiltinGlobalReviewPolicyMode,
   ToolAuthorizationSafetyLevel,
+  ToolAuthorizationMode,
 } from '@pinpawo/agent-session';
 
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 export type UpdateGlobalReviewPolicyResult = {
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 };
 
 type PendingRuntimeConfigUpdate = {
   requestId: string;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   timer: TimerHandle | null;
   resolve: (result: UpdateGlobalReviewPolicyResult) => void;
@@ -31,7 +31,7 @@ export type RuntimeConfigCoordinatorOptions = {
   send: (message: AgentClientMessage) => boolean;
   getUnavailableReason: () => string | null;
   onUpdated: (
-    globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+    globalReviewPolicyMode: ToolAuthorizationMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
   ) => void;
   timeoutMs: number;
@@ -49,7 +49,7 @@ export class RuntimeConfigCoordinator {
   }
 
   updateGlobalReviewPolicy(
-    globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+    globalReviewPolicyMode: ToolAuthorizationMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
   ): Promise<UpdateGlobalReviewPolicyResult> {
     const unavailable = this.options.getUnavailableReason();

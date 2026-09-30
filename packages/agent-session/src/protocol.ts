@@ -1,3 +1,4 @@
+import { isToolAuthorizationMode } from '@pinpawo/agent-contracts';
 import { parseResultReferences } from './resultReferences';
 import type {
   JsonObject as ContractJsonObject,
@@ -31,7 +32,6 @@ import {
 import {
   isAgentReviewSpecValue,
   isAutoAuthorizationSafetyLevel,
-  isBuiltinGlobalReviewPolicyMode,
   parseAgentPlan,
   parseAgentTokenUsageSnapshot,
 } from './validation';
@@ -479,12 +479,12 @@ function readReviewResponses(record: Record<string, unknown>, key: string): Revi
   return responses as ReviewResponse[];
 }
 
-function readBuiltinGlobalReviewPolicyMode(
+function readToolAuthorizationMode(
   record: Record<string, unknown>,
   key: string,
 ): ToolAuthorizationMode | null {
   const value = readString(record, key);
-  return isBuiltinGlobalReviewPolicyMode(value) ? value : null;
+  return isToolAuthorizationMode(value) ? value : null;
 }
 
 function readAutoAuthorizationSafetyLevel(
@@ -822,7 +822,7 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     ])) return null;
     const requestId = readOptionalString(record, 'requestId');
     if ('requestId' in record && !requestId) return null;
-    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(record, 'globalReviewPolicyMode');
+    const globalReviewPolicyMode = readToolAuthorizationMode(record, 'globalReviewPolicyMode');
     const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
       ? readAutoAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
       : undefined;
@@ -996,7 +996,7 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       'globalReviewPolicyMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
-    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(
+    const globalReviewPolicyMode = readToolAuthorizationMode(
       record,
       'globalReviewPolicyMode',
     );

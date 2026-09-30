@@ -31,14 +31,14 @@ export type ExactAuthorizationPolicyOptions = {
   reuseAutoReview?: boolean;
 };
 
-export type HitlPresetOptions = {
+export type RequiredReviewOptions = {
   canAutoApprove?: ToolReviewPolicy['canAutoApprove'];
   authorization?: AuthorizationMode | ToolAuthorizationPolicy;
   unavailable?: ReviewUnavailableBehavior;
 };
 
-type PresetOptions = HitlPresetOptions & {
-  requiresHitl: boolean;
+type PresetOptions = RequiredReviewOptions & {
+  requiresReview: boolean;
   defaultUnavailable: ReviewUnavailableBehavior;
 };
 
@@ -204,7 +204,7 @@ export const AuthorizationPolicies = {
 };
 
 function resolveAuthorizationPolicy(
-  authorization: HitlPresetOptions['authorization'],
+  authorization: RequiredReviewOptions['authorization'],
 ): ToolAuthorizationPolicy | undefined {
   if (authorization === 'exact') {
     return AuthorizationPolicies.exact();
@@ -229,7 +229,7 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
   return {
     ...(options.canAutoApprove ? { canAutoApprove: options.canAutoApprove } : {}),
     request: (ctx) => {
-      if (!options.requiresHitl) {
+      if (!options.requiresReview) {
         return null;
       }
 
@@ -260,41 +260,22 @@ function createPresetPolicy(options: PresetOptions): ToolReviewPolicy {
 }
 
 export const ReviewPolicies = {
-  localMutation(options: HitlPresetOptions = {}): ToolReviewPolicy {
+  /**
+   * The call must be reviewed; the global policy decides who reviews it (human,
+   * auto review or a custom resolver). Blocks by default when the Host cannot
+   * collect human review.
+   */
+  required(options: RequiredReviewOptions = {}): ToolReviewPolicy {
     return createPresetPolicy({
       ...options,
-      requiresHitl: true,
-      defaultUnavailable: 'block',
-    });
-  },
-
-  commandExecution(options: HitlPresetOptions = {}): ToolReviewPolicy {
-    return createPresetPolicy({
-      ...options,
-      requiresHitl: true,
-      defaultUnavailable: 'block',
-    });
-  },
-
-  externalAccess(options: HitlPresetOptions = {}): ToolReviewPolicy {
-    return createPresetPolicy({
-      ...options,
-      requiresHitl: true,
-      defaultUnavailable: 'block',
-    });
-  },
-
-  requireHitl(options: HitlPresetOptions = {}): ToolReviewPolicy {
-    return createPresetPolicy({
-      ...options,
-      requiresHitl: true,
+      requiresReview: true,
       defaultUnavailable: 'block',
     });
   },
 
   never(): ToolReviewPolicy {
     return createPresetPolicy({
-      requiresHitl: false,
+      requiresReview: false,
       defaultUnavailable: 'allow',
     });
   },

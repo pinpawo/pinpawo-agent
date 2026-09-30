@@ -213,13 +213,27 @@ decision, including in Boundary mode. It then resumes execution with stable
 disclosure. No separate replanning stage, disclosure registry, or fallback is
 needed; receiving input alone does not end or replace the delegation.
 
-Supervisor provider messages, detail ToolMessages, and terminal ToolMessages do not
-belong in root `messages`. Only the final reply reaches main through the terminal
-node. Committed transitions are recovered from graph checkpoints; raw invocation
-detail belongs to tracing. No Supervisor provider lane is persisted
-in the root conversation checkpoint.
+Each Supervisor invocation receives two input messages around the selected
+history (main plus this run's `supervisor` lane):
 
-Run `npm run supervisor:context-audit` to inspect the complete static provider
+```
+system prompt (stable per mode)
+earlier runs' history                      ← unchanged across the run
+<run context>  run request, routing manifest, disclosed documents
+this run's messages and Supervisor work
+<turn>         remaining plan / supervisor_plan, invocation instruction
+```
+
+The run context is placed immediately before this run's first message and only
+changes when disclosure grows, so the prefix through it is identical across the
+run's invocations and can be served from provider prefix caches; only the turn
+message is new each time. Neither input message is persisted. Supervisor work is
+persisted in the `supervisor` lane of the current run (earlier runs' lanes are
+pruned when the next run starts). A persisted `capability_details` result keeps
+only the disclosed, already-disclosed and unknown names: the documents themselves
+are rendered once, in the run context, rather than repeated in work records.
+
+Run `npm run supervisor:context-audit -w @pinpawo-tests/agent-evals` to inspect the complete static provider
 contract for both modes. It renders the production system/input builders,
 projected history, tool descriptions, and argument schemas together.
 

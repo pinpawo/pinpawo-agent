@@ -3,8 +3,9 @@ import { createDeliveryResult } from '../../testing/capabilityDelivery';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildRunSupervisorAgentInput,
   buildRunSupervisorAgentSystemPrompt,
+  buildRunSupervisorContextInput,
+  buildRunSupervisorTurnInput,
 } from './prompts/runSupervisorAgent';
 import type { RunSupervisorInput } from './runSupervisor/runner';
 
@@ -53,8 +54,40 @@ const routingManifest = {
 };
 
 
+function renderSupervisorInput(
+  input: RunSupervisorInput,
+  documents: Parameters<typeof buildRunSupervisorContextInput>[1],
+  manifest: Parameters<typeof buildRunSupervisorContextInput>[2],
+) {
+  return `${buildRunSupervisorContextInput(input, documents, manifest)}\n\n${buildRunSupervisorTurnInput(input)}`;
+}
+
+test('run context carries only run-stable facts; the turn carries plan and invocation', () => {
+  const input: RunSupervisorInput = {
+    mode: 'boundary', inputId: 'boundary:run-1:1', taskId: 'trace-1', runId: 'run-1',
+    catalog: plannerPromptCatalog, userRequest: 'Stable request.', messages: [],
+    state: { runId: 'run-1', goal: 'Stable request.', plan: [
+      { id: 'task-1', capability: 'browser', objective: 'Volatile objective', status: 'pending' },
+    ] },
+    capabilityDisclosure: plannerDisclosure,
+  };
+  const context = buildRunSupervisorContextInput(input, disclosedDocuments, routingManifest);
+  const turn = buildRunSupervisorTurnInput(input);
+  assert.match(context, /<run_user_request/);
+  assert.match(context, /<capability_routing_manifest/);
+  assert.match(context, /<capability_context/);
+  assert.doesNotMatch(context, /Volatile objective|<invocation|<supervisor_plan/);
+  assert.match(turn, /Volatile objective/);
+  assert.match(turn, /<invocation/);
+  assert.doesNotMatch(turn, /<capability_context|<capability_routing_manifest|<run_user_request/);
+  // Plan progress changes the turn, never the cacheable run context.
+  const later = { ...input, state: { ...input.state, plan: [{ ...input.state.plan[0], status: 'completed' as const }] } };
+  assert.equal(buildRunSupervisorContextInput(later, disclosedDocuments, routingManifest), context);
+  assert.notEqual(buildRunSupervisorTurnInput(later), turn);
+});
+
 test('Run Supervisor entry input represents an empty disclosure explicitly', () => {
-  const input = buildRunSupervisorAgentInput({
+  const input = renderSupervisorInput({
     mode: 'entry',
     inputId: 'trace_started:trace-1',
     taskId: 'trace-1',
@@ -77,7 +110,7 @@ test('dynamic capability documents remain data and do not enter the system promp
     catalog: plannerPromptCatalog, userRequest: request, messages: [],
     state: { runId: null, goal: null, plan: [] }, capabilityDisclosure: plannerDisclosure,
   };
-  const rendered = buildRunSupervisorAgentInput(input, disclosedDocuments, routingManifest);
+  const rendered = renderSupervisorInput(input, disclosedDocuments, routingManifest);
   assert.ok(rendered.includes(request));
   assert.ok(rendered.includes(']]]]><![CDATA[>'));
   assert.ok(rendered.includes(routingManifest.capabilities[1].purpose));
@@ -85,7 +118,7 @@ test('dynamic capability documents remain data and do not enter the system promp
     assert.ok(rendered.includes(document.capabilityName));
     assert.ok(!buildRunSupervisorAgentSystemPrompt('entry').includes(document.content));
   }
-  const escaped = buildRunSupervisorAgentInput(input, [{
+  const escaped = renderSupervisorInput(input, [{
     capabilityName: 'name\"<>&', content: 'unique capability data',
   }], routingManifest);
   assert.ok(escaped.includes('name&quot;&lt;&gt;&amp;'));
@@ -93,7 +126,7 @@ test('dynamic capability documents remain data and do not enter the system promp
 });
 
 test('Run Supervisor boundary input carries the run user request and boundary facts', () => {
-  const input = buildRunSupervisorAgentInput({
+  const input = renderSupervisorInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
     taskId: 'trace-1',
@@ -122,7 +155,7 @@ test('Run Supervisor boundary input carries the run user request and boundary fa
 });
 
 test('Run Supervisor boundary input omits the follow-up section once the plan is exhausted', () => {
-  const input = buildRunSupervisorAgentInput({
+  const input = renderSupervisorInput({
     mode: 'boundary',
     inputId: 'announce:delegation-1:1',
     taskId: 'trace-1',

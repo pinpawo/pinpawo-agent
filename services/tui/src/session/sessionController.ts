@@ -5,10 +5,10 @@ import {
   type ChatRequestMessage,
   type AgentSession,
   type AgentSessionSnapshot,
-  type BuiltinGlobalReviewPolicyMode,
   readHumanReviewPendingInterrupt,
   type ReviewResponse,
   type ToolAuthorizationSafetyLevel,
+  type ToolAuthorizationMode,
 } from '@pinpawo/agent-session';
 import { formatAttachmentDisplayText } from '../attachments/attachmentModel';
 import { prepareReviewDecision } from './reviewDecision';
@@ -369,7 +369,7 @@ export class TuiSessionController {
   }
 
   updateGlobalReviewPolicy(
-    globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+    globalReviewPolicyMode: ToolAuthorizationMode,
     autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
   ): Promise<UpdateGlobalReviewPolicyResult> {
     return this.runtimeConfig.updateGlobalReviewPolicy(

@@ -146,7 +146,7 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
             summary: GUARDED_HOST_TOOL_OUTPUT,
           }),
         },
-        review: ReviewPolicies.localMutation(),
+        review: ReviewPolicies.required(),
       },
       {
         tool: attachmentTool,

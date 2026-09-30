@@ -24,15 +24,16 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const state = runtime.state;
     const registry = getInvokeRegistry(runtime.config);
     const invokeOptions = getInvokeOptions(runtime.config);
-    const userRequest = state.runSupervisorState.goal ?? state.runUserRequest;
-    if (!userRequest) throw new Error('Capability execution requires a goal.');
     // The same catalog the Supervisor planned from decides what may execute.
     const catalog = createCapabilityCatalog({ registry, allowedCapabilityNames: invokeOptions.allowedCapabilityNames });
+    // Plan checks first: delegating without an executable task is a correctable decision.
     const input = buildCapabilityExecutionInput({
-      state: state.runSupervisorState, runId: state.runId, taskId: state.taskId, userRequest,
-      messages: state.messages, mode: 'boundary', hasNewUserInput: false,
-      allowedCapabilityNames: catalog.capabilityNames,
+      state: state.runSupervisorState, runId: state.runId, allowedCapabilityNames: catalog.capabilityNames,
     }, args, runtime.toolCallId);
+    // Every path that writes a plan also writes its goal, so a plan without one
+    // is an invariant violation rather than something to fall back from.
+    const userRequest = state.runSupervisorState.goal;
+    if (!userRequest) throw new Error('Capability execution requires the plan goal.');
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,
@@ -71,7 +72,11 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
   });
 }
 
-export function buildCapabilityExecutionInput(context: SupervisorControlContext, args: DelegateCapabilityArgs, callId: string): CapabilityExecutionInput {
+export function buildCapabilityExecutionInput(
+  context: Pick<SupervisorControlContext, 'state' | 'runId' | 'allowedCapabilityNames'>,
+  args: DelegateCapabilityArgs,
+  callId: string,
+): CapabilityExecutionInput {
   const state = context.state;
   const next = currentSupervisorTask(state);
   if (!next) throw new SupervisorDecisionError('There is no planned task to execute.');

@@ -1,12 +1,11 @@
-import type { BuiltinGlobalReviewPolicyMode } from '@pinpawo/pet-agent';
-import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
+import type { ToolAuthorizationSafetyLevel, ToolAuthorizationMode } from '@pinpawo/agent-contracts';
 import { getConfig } from './config';
 import type { HostRuntimeConfig } from './runtimeConfig';
 
 /** Resolved Host settings. Consumers never consult process defaults. */
 export type HostExecutionConfig = Readonly<{
   runtimeConfig: HostRuntimeConfig;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
 }>;
 

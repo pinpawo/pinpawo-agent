@@ -39,7 +39,7 @@ export type BrowserToolkitDependencies = Readonly<{
 export function createBrowserToolkit(deps: BrowserToolkitDependencies): AgentToolkit {
   const { browser } = deps;
   const reviews: Record<string, ToolReviewPolicy> = {
-    browser_open: ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
+    browser_open: ReviewPolicies.required({ authorization: 'url_origin' }),
   };
   return defineToolkit({
     name: BROWSER_TOOLKIT_NAME,

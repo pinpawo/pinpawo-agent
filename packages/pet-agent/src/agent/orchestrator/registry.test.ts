@@ -170,7 +170,7 @@ test('authorization generation is stable across rebuilds and changes with policy
       description: 'Local tools.',
       tools: [{
         tool: executable,
-        review: ReviewPolicies.commandExecution({
+        review: ReviewPolicies.required({
           authorization: projected
             ? AuthorizationPolicies.exact({ subject: ({ input }) => input })
             : AuthorizationPolicies.exact(),
@@ -197,7 +197,7 @@ test('authorization generation ignores display metadata', () => {
       tools: [{
         tool: mockTool('run_shell', `Run shell ${suffix}`),
         operation: { title: `Shell operation ${suffix}` },
-        review: ReviewPolicies.commandExecution({ authorization: 'exact' }),
+        review: ReviewPolicies.required({ authorization: 'exact' }),
       }],
     })],
     capabilities: [capability('general', ['local'])],
@@ -212,7 +212,7 @@ test('authorization generation ignores display metadata', () => {
 test('authorization generation includes automatic grant reuse policy', () => {
   const build = (reuseAutoReview: boolean) => compileAgentRegistry({
     toolkits: [defineToolkit({ name: 'local', description: 'Local', tools: [{
-      tool: mockTool('write'), review: ReviewPolicies.localMutation({ authorization: AuthorizationPolicies.exact({ reuseAutoReview }) }),
+      tool: mockTool('write'), review: ReviewPolicies.required({ authorization: AuthorizationPolicies.exact({ reuseAutoReview }) }),
     }] })], capabilities: [capability('general', ['local'])],
   });
   assert.notEqual(build(true).authorizationGeneration, build(false).authorizationGeneration);
@@ -225,7 +225,7 @@ test('authorization generation includes deterministic authorization policy', () 
       description: 'Local tools',
       tools: [{
         tool: mockTool('apply_patch'),
-        review: ReviewPolicies.localMutation({
+        review: ReviewPolicies.required({
           canAutoApprove: allow ? (() => true) : (() => false),
         }),
       }],
@@ -261,7 +261,7 @@ test('authorization generation is scoped to authorization policy, not tool imple
       description: 'Local tools',
       tools: [{
         tool: executable(result),
-        review: ReviewPolicies.commandExecution({ authorization: 'exact' }),
+        review: ReviewPolicies.required({ authorization: 'exact' }),
       }],
     })],
     capabilities: [capability('general', ['local'])],
@@ -275,8 +275,8 @@ test('authorization generation is scoped to authorization policy, not tool imple
 
 test('compiled registry snapshots authorization policy functions for its generation', () => {
   const authorize = () => true;
-  const matcherReview = ReviewPolicies.commandExecution({ authorization: 'exact' });
-  const authorizeReview = ReviewPolicies.localMutation({
+  const matcherReview = ReviewPolicies.required({ authorization: 'exact' });
+  const authorizeReview = ReviewPolicies.required({
     canAutoApprove: authorize,
   });
   const originalBuilder = matcherReview.authorization?.buildMatcher;

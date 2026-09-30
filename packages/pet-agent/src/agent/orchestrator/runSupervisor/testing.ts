@@ -122,8 +122,8 @@ export function createRunSupervisorProbe(params: Parameters<typeof createRunSupe
   const runner = createRunSupervisorAgent(params);
   return { invoke: async (input, config) => {
     const capture = tool((args, runtime: ToolRuntime<typeof OrchestratorState.State>) => {
-      buildCapabilityExecutionInput({ ...supervisorControlContext(input), state: runtime.state.runSupervisorState,
-        messages: [...input.messages, ...runtime.state.messages] }, args, runtime.toolCallId);
+      buildCapabilityExecutionInput({ ...supervisorControlContext(input), state: runtime.state.runSupervisorState },
+        args, runtime.toolCallId);
       return new Command({ update: {} });
     }, { name: 'delegate_capability', description: 'Capture a valid execution decision without executing Capability.', schema: delegateCapabilitySchema });
     const graph = new StateGraph(OrchestratorState)

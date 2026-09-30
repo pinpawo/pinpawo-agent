@@ -25,9 +25,7 @@ export const GLOBAL_REVIEW_POLICY_RUNTIME_EVENT = {
   CUSTOM_AUTHORIZED: 'global_review_policy_custom_authorized',
 } as const;
 
-/** @deprecated Use ToolAuthorizationMode from @pinpawo/agent-contracts. */
-export type BuiltinGlobalReviewPolicyMode = ToolAuthorizationMode;
-export type GlobalReviewPolicyMode = BuiltinGlobalReviewPolicyMode | typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM;
+export type GlobalReviewPolicyMode = ToolAuthorizationMode | typeof GLOBAL_REVIEW_POLICY_MODE.CUSTOM;
 
 export type GlobalReviewPolicyStructuredOutputConfig = AutoReviewStructuredOutputConfig;
 
@@ -67,7 +65,7 @@ export type GlobalReviewPolicyBatchResolver = (
 
 export type GlobalReviewPolicy =
   | {
-      mode: BuiltinGlobalReviewPolicyMode;
+      mode: ToolAuthorizationMode;
       /** Controls the automatic-review threshold; ignored by non-auto modes. */
       safetyLevel?: ToolAuthorizationSafetyLevel;
       structuredOutput?: GlobalReviewPolicyStructuredOutputConfig;

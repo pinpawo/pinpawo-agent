@@ -6,6 +6,26 @@ import { SupervisorDocumentError, type SupervisorDocumentReader } from './capabi
 
 export const RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME = 'capability_details';
 
+export type CapabilityDetailsRecord = {
+  disclosed: string[];
+  alreadyDisclosed: string[];
+  unknownNames: string[];
+};
+
+/**
+ * The persisted form of a details result. Disclosed documents are rendered in
+ * the run's capability_context on every later invocation, so work records keep
+ * only which names were disclosed instead of a second copy of each document.
+ */
+export function capabilityDetailsWorkRecord(message: ToolMessage): ToolMessage {
+  if (message.name !== RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME || !message.artifact) return message;
+  const record = message.artifact as CapabilityDetailsRecord;
+  return new ToolMessage({ ...message, content: JSON.stringify({
+    ...record,
+    guidance: 'Documents for disclosed names are provided in capability_context.',
+  }) });
+}
+
 /** Exact-name disclosure; all state changes still use the existing parallel-safe reducer. */
 export function createSupervisorCapabilityDetailsTool(params: {
   documents: SupervisorDocumentReader;
@@ -41,8 +61,9 @@ export function createSupervisorCapabilityDetailsTool(params: {
       unknownNames,
       guidance: 'documents contains new details; alreadyDisclosed lists names whose details are already in context; unknownNames lists names absent from the manifest.',
     });
+    const record: CapabilityDetailsRecord = { disclosed: newNames, alreadyDisclosed, unknownNames };
     return new Command({ update: {
-      messages: [new ToolMessage({ content, name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, tool_call_id: runtime.toolCallId })],
+      messages: [new ToolMessage({ content, name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, tool_call_id: runtime.toolCallId, artifact: record })],
       disclosedCapabilityNames: newNames,
     } });
   }, {

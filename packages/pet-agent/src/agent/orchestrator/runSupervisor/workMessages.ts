@@ -1,6 +1,7 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { setAgentMessageMetadata } from '../../messages';
 import { identity, type SupervisorControlContext } from './controlContext';
+import { capabilityDetailsWorkRecord } from './detailsTool';
 
 /**
  * Select the main delegation request and preserve private Supervisor work.
@@ -17,7 +18,7 @@ export function supervisorWorkMessages(
 ) {
   return messages.map((message, index) => {
     const copy = AIMessage.isInstance(message) ? new AIMessage({ ...message })
-      : ToolMessage.isInstance(message) ? new ToolMessage({ ...message }) : message;
+      : ToolMessage.isInstance(message) ? capabilityDetailsWorkRecord(new ToolMessage({ ...message })) : message;
     const dispatch = dispatching && index === messages.length - 1
       && AIMessage.isInstance(copy) && Boolean(copy.tool_calls?.length);
     // Root history spans runs; native ToolNode requires globally distinct call IDs.

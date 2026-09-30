@@ -10,9 +10,9 @@ import type { RunnableConfig } from '@langchain/core/runnables';
 import type { StructuredTool } from '@langchain/core/tools';
 import { createAgent } from 'langchain';
 import { createSupervisorDocumentReader } from './capabilityDocuments';
-import { buildRunSupervisorAgentInput, buildRunSupervisorAgentSystemPrompt } from '../prompts/runSupervisorAgent';
+import { buildRunSupervisorAgentSystemPrompt, buildRunSupervisorContextInput, buildRunSupervisorTurnInput } from '../prompts/runSupervisorAgent';
 import type { RunSupervisorInput, RunSupervisorResult, RunSupervisorRunner } from './runner';
-import { queryAgentMessages, getAgentMessageMetadata, stampAgentMessageCreatedAt } from '../../messages';
+import { queryAgentMessages, getAgentMessageMetadata, getAgentMessageRunId, stampAgentMessageCreatedAt } from '../../messages';
 import { toolProtocolMiddleware } from '../modelInvocation';
 import { systemPromptMiddleware } from '../../../prompts/systemPrompt';
 import { mergeCapabilityDisclosure } from './capabilityDisclosure';
@@ -48,12 +48,21 @@ export function createRunSupervisorAgent(params: {
         defaultCapabilityName: params.defaultCapabilityName,
       });
       const disclosedDocuments = documents.readCapabilities(input.capabilityDisclosure.disclosedCapabilityNames, signal);
-      const frame = new HumanMessage({
-        id: `supervisor-input:${input.runId}:${input.inputId}`,
-        content: buildRunSupervisorAgentInput(input, disclosedDocuments, routing),
-      });
       const selected = queryAgentMessages(input.messages).main().supervisor(input.runId).select().messages;
-      const agentMessages = [...selected, frame];
+      // Run-stable facts sit right before this run's messages: earlier history
+      // and this context stay a cacheable prefix across the run's invocations,
+      // and only the turn message changes at the end.
+      const runStart = selected.findIndex((message) => getAgentMessageRunId(message) === input.runId);
+      const at = runStart < 0 ? selected.length : runStart;
+      const runContext = new HumanMessage({
+        id: `supervisor-context:${input.runId}`,
+        content: buildRunSupervisorContextInput(input, disclosedDocuments, routing),
+      });
+      const turn = new HumanMessage({
+        id: `supervisor-input:${input.runId}:${input.inputId}`,
+        content: buildRunSupervisorTurnInput(input),
+      });
+      const agentMessages = [...selected.slice(0, at), runContext, ...selected.slice(at), turn];
       const tools: StructuredTool[] = [
         ...(input.mode === 'entry' || context.hasNewUserInput ? [createSupervisorCapabilityDetailsTool({
           documents, capabilityNames: input.catalog.capabilityNames,

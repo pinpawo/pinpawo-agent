@@ -34,7 +34,8 @@ import {
 } from '../../../../packages/pet-agent/src/agent/messages/index.ts';
 import { invokeOrchestratorModel } from '../../../../packages/pet-agent/src/agent/orchestrator/modelInvocation.ts';
 import {
-  buildRunSupervisorAgentInput,
+  buildRunSupervisorContextInput,
+  buildRunSupervisorTurnInput,
   buildRunSupervisorAgentSystemPrompt,
 } from '../../../../packages/pet-agent/src/agent/orchestrator/prompts/runSupervisorAgent.ts';
 
@@ -147,7 +148,8 @@ async function renderMode(mode: RunSupervisorMode) {
     console.log(messageText(message));
   });
   console.log('\n### INVOCATION INPUT');
-  console.log(buildRunSupervisorAgentInput(input, documents, routingManifest));
+  console.log(buildRunSupervisorContextInput(input, documents, routingManifest));
+  console.log(buildRunSupervisorTurnInput(input));
   console.log('\n### PROVIDER TOOLS');
   tools.forEach((tool) => {
     console.log(`\n${renderTool(tool)}`);

@@ -889,13 +889,14 @@ test('boundary projects the current lane announce into the standard model-visibl
   assert.equal(model.invocations[0]?.includes(priorMainReply), true);
   assert.equal(model.invocations[0]?.includes(currentMainRequest), true);
   assert.equal(model.invocations[0]?.includes(currentMainContext), true);
-  const boundaryInput = [...(model.invocations[0] ?? [])].reverse().find(
-    (message) => message instanceof HumanMessage,
-  );
-  assert.ok(boundaryInput instanceof HumanMessage);
-  assert.match(readMessageText(boundaryInput), /<run_user_request[^>]*>/);
-  assert.match(readMessageText(boundaryInput), /<capability_context[^>]*>/);
-  assert.ok(readMessageText(boundaryInput).includes('Implement the verified dependency changes.'));
+  const runContext = model.invocations[0]?.find((message) => message.id?.startsWith('supervisor-context:'));
+  assert.ok(runContext instanceof HumanMessage);
+  assert.match(readMessageText(runContext), /<run_user_request[^>]*>/);
+  assert.match(readMessageText(runContext), /<capability_context[^>]*>/);
+  const turn = [...(model.invocations[0] ?? [])].reverse().find((message) => message instanceof HumanMessage);
+  assert.ok(turn instanceof HumanMessage && turn.id?.startsWith('supervisor-input:'));
+  assert.match(readMessageText(turn), /<supervisor_plan>|<invocation>/);
+  assert.ok(readMessageText(turn).includes('Implement the verified dependency changes.'));
 });
 
 test('Supervisor identifies the configured default without preloading its document', async (t) => {
@@ -2020,4 +2021,44 @@ test('adjust_plan is available at every Boundary but changing the goal requires 
     assert.equal(model.boundToolNames.includes('adjust_plan'), true);
     assert.ok(model.invocations.length >= 1);
   }
+});
+
+test('run context sits before this run\'s messages and stays identical across invocations of the run', async (t) => {
+  const catalog = createTestCatalog({ general: capabilityDocument({
+    name: 'general', description: 'Execute work.', instructions: 'Execute work.',
+  }) });
+  const prior = setAgentMessageMetadata(new HumanMessage({ id: 'prior', content: 'Earlier request.' }), { runId: 'run-old' });
+  const current = setAgentMessageMetadata(new HumanMessage({ id: 'current', content: 'Current request.' }), { runId: 'run-test' });
+  const model = new ScriptedSupervisorModel([{ content: 'First reply.' }, { content: 'Second reply.' }]);
+  const runner = createRunSupervisorAgent({ model });
+  await runner.invoke(supervisorInput(catalog, { messages: [prior, current] }));
+  await runner.invoke(supervisorInput(catalog, { messages: [prior, current], inputId: 'boundary:run-test:1', mode: 'boundary' }));
+  const [first, second] = model.invocations.map((messages) => messages.filter((message) => message._getType() !== 'system'));
+  for (const messages of [first, second]) {
+    assert.deepEqual(messages.slice(0, 3).map((message) => message.id?.split(':')[0] ?? message.id),
+      ['prior', 'supervisor-context', 'current']);
+    assert.ok(messages.at(-1)!.id?.startsWith('supervisor-input:'));
+  }
+  // The run context is byte-identical across invocations, so the prefix up to
+  // this run's messages can be served from the provider cache.
+  assert.equal(readMessageText(first[1]), readMessageText(second[1]));
+});
+
+test('persisted details work keeps disclosed names, not a second copy of the documents', async (t) => {
+  const catalog = createTestCatalog({ general: capabilityDocument({
+    name: 'general', description: 'Execute work.', instructions: 'UNIQUE_GENERAL_DOCUMENT_BODY',
+  }) });
+  const model = new ScriptedSupervisorModel([
+    { toolCalls: [{ id: 'details', name: RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME, args: { names: ['general'] } }] },
+    { content: 'Which folder should I use?' },
+  ]);
+  const result = await createRunSupervisorAgent({ model }).invoke(supervisorInput(catalog));
+  // The model still saw the full document inside this invocation.
+  assert.ok(model.invocations[1].some((message) => ToolMessage.isInstance(message)
+    && message.tool_call_id === 'details' && readMessageText(message).includes('UNIQUE_GENERAL_DOCUMENT_BODY')));
+  const persisted = result.messages.find((message) => ToolMessage.isInstance(message) && message.name === RUN_SUPERVISOR_CAPABILITY_DETAILS_TOOL_NAME);
+  assert.ok(persisted);
+  assert.equal(readMessageText(persisted).includes('UNIQUE_GENERAL_DOCUMENT_BODY'), false);
+  assert.deepEqual(JSON.parse(readMessageText(persisted)).disclosed, ['general']);
+  assert.deepEqual(result.capabilityDisclosure.disclosedCapabilityNames, ['general']);
 });

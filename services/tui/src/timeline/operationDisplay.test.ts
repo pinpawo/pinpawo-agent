@@ -4,10 +4,11 @@ import stringWidth from 'string-width';
 import type { AgentOperationEntry } from '@pinpawo/agent-session';
 import {
   buildOperationDisplayLines,
+  operationActivityText,
   OPERATION_OUTPUT_MAX_LINES,
 } from './operationDisplay';
 
-test('operation display reuses the legacy toolName(args) header model', () => {
+test('compact operation display uses a target without payload details', () => {
   const lines = buildOperationDisplayLines(operation({
     phase: 'completed',
     title: '打开网页',
@@ -22,13 +23,33 @@ test('operation display reuses the legacy toolName(args) header model', () => {
     raw: { output: 'Example Domain loaded' },
   }), 2_500, 120);
 
-  assert.match(lines[0]!.text, /^打开网页\(/);
-  assert.match(lines[0]!.text, /status=200/);
+  assert.match(lines[0]!.text, /^打开网页 · https:\/\/example.com/);
+  assert.doesNotMatch(lines[0]!.text, /status=200/);
   assert.match(lines[0]!.text, /（完成）$/);
-  assert.ok(lines.some((line) => (
-    line.text.includes('⎿')
-    && line.text.includes('Example Domain loaded')
-  )));
+  assert.equal(lines.length, 1);
+});
+
+test('compact shell activity prefers command over cwd without changing canonical input', () => {
+  const command = 'cd "/Users/me/project with spaces" && rg -n "SupervisorDecisionError" src';
+  const entry = operation({
+    phase: 'completed', target: '/Users/me/project with spaces', summary: command,
+    operationSource: { provider: 'toolkit', name: 'local', toolName: 'run_shell' },
+    raw: { input: { command }, output: 'evidence' },
+  });
+  assert.equal(operationActivityText(entry), 'run_shell · rg -n "SupervisorDecisionError" src');
+  assert.equal((entry.raw?.input as { command: string }).command, command);
+  const line = buildOperationDisplayLines({ ...entry, summary: command.repeat(10) }, 0, 240)[0]!;
+  assert.ok(stringWidth(line.text) <= 104);
+  assert.match(line.text, /（完成）$/);
+});
+
+test('failed authorization keeps its tools and explanation visible', () => {
+  const lines = buildOperationDisplayLines(operation({
+    kind: 'runtime.authorization', phase: 'failed', title: '授权失败',
+    details: { toolLabels: ['run_shell'], reason: 'Authorization service unavailable' },
+  }), 0, 100);
+  assert.ok(lines.some(line => line.text.includes('run_shell')));
+  assert.ok(lines.some(line => line.text.includes('Authorization service unavailable')));
 });
 
 test('operation display bounds output, surfaces errors, and sanitizes controls', () => {
@@ -46,10 +67,7 @@ test('operation display bounds output, surfaces errors, and sanitizes controls',
     raw: { error: 'permission\tdenied\x1B' },
   }), 3_500, 40);
 
-  // A successful tool collapses to one output row plus the elision marker; the
-  // full dump would bury the delegation that owns it.
-  assert.equal(completed.slice(1).length, 2);
-  assert.match(completed.at(-1)!.text, /… \+9 lines$/);
+  assert.equal(completed.length, 1);
   assert.ok(failed.some((line) => (
     line.text.includes('permission  denied�')
     && line.tone === 'removed'
@@ -87,11 +105,15 @@ test('operation display exposes bounded apply_patch lines with tones', () => {
     line.text === '  +const value = 2;'
     && line.tone === 'added'
   )));
-  assert.ok(lines.some((line) => (
-    line.text.includes('{"ok":true,"appliedHunks":[1]}')
-    && line.tone === 'muted'
-  )));
   assert.ok(lines.every((line) => stringWidth(line.text) <= 80));
+});
+
+test('completed tools that return errors still show their diagnostic payload', () => {
+  for (const output of ['Error: file not found', JSON.stringify({ status: 'timeout', message: 'Process terminated' }), { ok: false, message: 'Patch failed' }]) {
+    const lines = buildOperationDisplayLines(operation({ phase: 'completed', raw: { output } }), 0, 100);
+    assert.ok(lines.length > 1);
+    assert.ok(lines.slice(1).every(line => line.tone === 'removed'));
+  }
 });
 
 test('operation display exposes raw apply_patch failures after the diff', () => {
@@ -155,15 +177,7 @@ test('operation display renders structured authorization details without raw fie
     },
   }), 3_500, 100);
 
-  assert.deepEqual(lines, [{
-    text: '自动授权 · 2 项操作（完成）',
-  }, {
-    text: '  涉及工具：shell · which · shell · version',
-    tone: 'muted',
-  }, {
-    text: '  原因：Both actions are read-only observations.',
-    tone: 'muted',
-  }]);
+  assert.deepEqual(lines, [{ text: '自动授权 · 2 项操作（完成）', tone: 'muted' }]);
 });
 
 function operation(

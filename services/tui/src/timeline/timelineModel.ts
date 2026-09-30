@@ -3,12 +3,14 @@ import type {
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
+import stringWidth from 'string-width';
 import { sessionActorLabel } from '../session/sessionDisplay';
 import { LOADING_CELL_WIDTH } from '../visuals/loadingCells';
 import { buildMessageDisplayLines } from './messageDisplay';
 import {
   buildOperationDisplayLines,
   isDelegationEntry,
+  operationActivityText,
 } from './operationDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
 
@@ -111,7 +113,7 @@ export function buildTimelineDisplayLines(
       index === 0
         ? {
             text: `  ${operationMark(entry.phase)} ${line.text}`,
-            tone: `operation-${entry.phase}` as const,
+            tone: line.tone === 'muted' ? 'muted' : `operation-${entry.phase}` as const,
           }
         : {
             text: line.text,
@@ -144,7 +146,7 @@ export function formatLiveSession(
         ?? session.currentPlan?.items.find(item => item.status === 'pending');
       return current ? truncateTerminalLine(singleLine(current.task), maxCodePoints) : 'using tool';
     }
-    return singleLine(formatTimelineEntry(pending));
+    return singleLine(operationActivityText(pending));
   }
   if (!run) {
     if (session.pendingInterrupt?.payload.kind === 'human_review') {
@@ -177,13 +179,13 @@ export function formatLiveActivity(
       : formatLiveSession(session, maxCodePoints);
   }
   const elapsed = formatElapsed(run.startedAt, now);
-  const suffix = elapsed ? ` · ${elapsed}` : '';
+  const suffix = elapsed && maxCodePoints >= 40 ? ` · 本轮 ${elapsed}` : '';
   const activityWidth = Math.max(
     1,
-    Math.floor(maxCodePoints) - [...suffix].length,
+    Math.floor(maxCodePoints) - stringWidth(suffix),
   );
   if (run.state === 'interrupting') {
-    return appendElapsed('◌ stopping response', suffix, activityWidth);
+    return truncateTerminalLine(appendElapsed('◌ stopping response', suffix, activityWidth), maxCodePoints - LOADING_CELL_WIDTH - 1);
   }
 
   const loadingTextWidth = Math.max(
@@ -196,7 +198,8 @@ export function formatLiveActivity(
   );
   const actor = sessionActorLabel(session);
   let activity: string;
-  switch (detail) {
+  // Streamed text already has its own transcript surface.
+  switch (run.activity === 'streaming' ? 'streaming response' : detail) {
     case 'thinking':
       activity = `${actor} is ${longWaiting ? 'still ' : ''}thinking`;
       break;
@@ -209,7 +212,7 @@ export function formatLiveActivity(
     default:
       activity = detail;
   }
-  return appendElapsed(activity, suffix, loadingTextWidth);
+  return truncateTerminalLine(appendElapsed(activity, suffix, loadingTextWidth), maxCodePoints - LOADING_CELL_WIDTH - 1);
 }
 
 export function isLiveActivityPulseActive(
@@ -245,7 +248,7 @@ export function operationMark(phase: AgentOperationEntry['phase']) {
     case 'updated':
       return '◌';
     case 'completed':
-      return '●';
+      return '✓';
     case 'failed':
       return '×';
     case 'interrupted':
@@ -272,10 +275,7 @@ function formatElapsed(startedAt: number | undefined, now: number) {
 }
 
 function appendElapsed(activity: string, suffix: string, activityWidth: number) {
-  const characters = [...activity];
-  if (characters.length <= activityWidth) return `${activity}${suffix}`;
-  if (activityWidth === 1) return `…${suffix}`;
-  return `${characters.slice(0, activityWidth - 1).join('')}…${suffix}`;
+  return `${truncateTerminalLine(activity, activityWidth)}${suffix}`;
 }
 
 function findLastPendingEntry(timeline: readonly AgentTimelineEntry[]) {

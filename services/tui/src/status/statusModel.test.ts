@@ -68,7 +68,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
 
   assert.equal(
     formatComposerPlaceholder(session),
-    'Message · Enter to send · Shift+Enter newline',
+    'Message · Enter to send · Shift+Enter newline · PageUp 详情',
   );
   assert.equal(
     formatComposerPlaceholder({
@@ -86,7 +86,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
         activity: 'thinking',
       },
     }),
-    'Waiting for PinPawo · draft next message · Esc interrupt',
+    '输入下一条消息… · Esc 中断 · PageUp 详情',
   );
   assert.equal(
     formatComposerPlaceholder({
@@ -101,7 +101,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
         activity: 'using_tool',
       },
     }),
-    '豆包 ↵ 助手 is using a tool · draft next message · Esc interrupt',
+    '输入下一条消息… · Esc 中断 · PageUp 详情',
   );
   assert.equal(
     formatComposerPlaceholder({
@@ -116,7 +116,7 @@ test('composer placeholder acknowledges active work without blocking drafting', 
         activity: 'streaming',
       },
     }),
-    '豆包 is responding · draft next message · Esc interrupt',
+    '输入下一条消息… · Esc 中断 · PageUp 详情',
   );
   assert.equal(
     formatComposerPlaceholder({

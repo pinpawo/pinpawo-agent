@@ -593,6 +593,44 @@ async function createTimelineRenderer(width: number) {
   };
 }
 
+test('quiet operation receipts render tightly with neutral success and visible failures', async () => {
+  for (const width of [40, 120]) {
+    const setup = await createTimelineRenderer(width);
+    const timeline = new TimelineScrollback(setup.renderer);
+    try {
+      const entries: AgentTimelineEntry[] = [{
+        id: 'auth', type: 'operation', requestId: 'r', operationKey: 'auth',
+        kind: 'runtime.authorization', title: '自动授权', phase: 'completed',
+        details: { reason: 'Long explanation stays in the pager' },
+      }, {
+        id: 'shell', type: 'operation', requestId: 'r', operationKey: 'shell',
+        kind: 'tool', title: 'run_shell', phase: 'completed',
+        summary: 'cd /Users/me/project && rg -n "needle" src',
+        raw: { output: 'Raw evidence stays in the pager' },
+      }, {
+        id: 'error', type: 'operation', requestId: 'r', operationKey: 'error',
+        kind: 'tool', title: 'read_file', phase: 'failed',
+        raw: { error: 'Permission denied' },
+      }];
+      timeline.render(session(entries));
+      const text = setup.cellOutput.takeText();
+      assert.match(text, /自动授权/);
+      assert.match(text, /run_shell · rg/);
+      assert.match(text, /Permission denied/);
+      assert.doesNotMatch(text, /Long explanation|Raw evidence|\/Users\/me|\n\s*\n/);
+      const spans = setup.styleOutput.take().flatMap(lines => lines.flatMap(line => line.spans));
+      assert.ok(spans.some(span => span.text.includes('run_shell') && span.fg.equals(RGBA.fromHex('#a8b6c5'))));
+      assert.ok(spans.some(span => span.text.includes('自动授权') && span.fg.equals(RGBA.fromHex('#8f9ba8'))));
+      assert.ok(spans.some(span => span.text.includes('Permission denied') && span.fg.equals(RGBA.fromHex('#ff5f5f'))));
+      timeline.render(session(entries));
+      assert.equal(setup.cellOutput.takeText(), '');
+    } finally {
+      timeline.destroy();
+      setup.renderer.destroy();
+    }
+  }
+});
+
 function session(
   timeline: AgentTimelineEntry[],
   activeRequestId?: string,

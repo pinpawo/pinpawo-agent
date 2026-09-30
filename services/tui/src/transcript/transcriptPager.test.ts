@@ -139,3 +139,22 @@ function createSession(
     pendingInterrupt: null,
   };
 }
+
+test('pager preserves compacted commands, authorization reasons, and complete output', () => {
+  const command = 'cd /Users/me/project && rg -n "needle" src';
+  const output = Array.from({ length: 30 }, (_, i) => `evidence ${i}`).join('\n');
+  const content = formatTranscriptPagerText(createSession([{
+    id: 'auth', type: 'operation', requestId: 'r', operationKey: 'auth',
+    kind: 'runtime.authorization', phase: 'completed', title: '自动授权',
+    details: { toolLabels: ['run_shell'], reason: 'Read-only search approved' },
+  }, {
+    id: 'shell', type: 'operation', requestId: 'r', operationKey: 'shell',
+    kind: 'tool', phase: 'completed', title: 'run_shell', target: '/Users/me/project',
+    summary: command, raw: { input: { command }, output: `${output}\nunsafe\x1B[31m` },
+  }]));
+  assert.ok(content.includes(command));
+  assert.ok(content.includes('Read-only search approved'));
+  assert.ok(content.includes(output));
+  assert.ok(content.includes('unsafe�[31m'));
+  assert.doesNotMatch(content, /\x1B/);
+});

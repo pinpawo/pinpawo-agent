@@ -8,7 +8,6 @@ import type {
   TuiConnectionStatus,
   TuiSessionState,
 } from '../session/sessionController';
-import { sessionActorLabel } from '../session/sessionDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
 
 const COUNT_FORMATTER = new Intl.NumberFormat('en-US');
@@ -109,7 +108,6 @@ export function formatComposerPlaceholder(
     pausedTask?: boolean;
   } = {},
 ) {
-  const actor = sessionActorLabel(session);
   const run = session.activeRun;
   if (session.pendingInterrupt?.payload.kind === 'human_review') {
     return 'Review required · use the approval panel';
@@ -117,19 +115,13 @@ export function formatComposerPlaceholder(
   if (run?.state === 'interrupting') {
     return 'Stopping response…';
   }
-  if (run?.activity === 'using_tool') {
-    return `${actor} is using a tool · draft next message · Esc interrupt`;
-  }
-  if (run?.activity === 'streaming') {
-    return `${actor} is responding · draft next message · Esc interrupt`;
-  }
   if (run) {
-    return `Waiting for ${actor} · draft next message · Esc interrupt`;
+    return '输入下一条消息… · Esc 中断 · PageUp 详情';
   }
   if (options.pausedTask) {
     return 'Task paused · Enter to continue · Esc starts a new task';
   }
-  return COMPOSER_PLACEHOLDER;
+  return `${COMPOSER_PLACEHOLDER} · PageUp 详情`;
 }
 
 export function formatUsage(session: AgentSession) {

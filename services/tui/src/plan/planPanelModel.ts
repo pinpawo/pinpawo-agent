@@ -26,11 +26,12 @@ export function buildCurrentPlanPanel(
     ?? plan.items.find((item) => item.status === 'pending');
   if (!active) return { content: '', height: 0, mode: 'hidden' };
   const currentStep = plan.items.indexOf(active) + 1;
+  const progress = `第 ${currentStep} 项／共 ${plan.items.length} 项 · ${active.status === 'active' ? '进行中' : '待执行'}`;
 
   if (options.overlayOpen) {
     return {
       content: truncateTerminalLine(
-        `计划 ${currentStep}/${plan.items.length} · ${formatItem(active)}`,
+        `${progress} · ${formatItem(active)}`,
         options.width,
       ),
       height: 1,
@@ -47,7 +48,7 @@ export function buildCurrentPlanPanel(
   const visibleItems = selectVisibleItems(plan.items, maxVisible, currentStep - 1);
   const omitted = plan.items.length - visibleItems.length;
   const lines = [
-    ...wrapTerminalText(`当前计划 · ${currentStep}/${plan.items.length}`, options.width),
+    ...wrapTerminalText(progress, options.width),
     ...visibleItems.flatMap((item) => formatItemLines(item, options.width)),
     ...(omitted > 0
       ? wrapTerminalText(`  … 还有 ${omitted} 项`, options.width)

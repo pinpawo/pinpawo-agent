@@ -2,7 +2,7 @@ import { supervisorReply } from './testing';
 import { createDeliveryResult, readFixtureDelivery } from '../../../testing/capabilityDelivery';
 
 import assert from 'node:assert/strict';
-import { readCapabilityExecutionCall } from '../executionMessages';
+import { createCapabilityExecutionMessage, readCapabilityExecutionCall } from '../executionMessages';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import {
@@ -335,14 +335,13 @@ function supervisorInput(
     messages.push(setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id: callId, name: 'delegate_capability', type: 'tool_call', args: {},
     }] }), { ...metadata, source: 'supervisor' }));
-    messages.push(setAgentMessageMetadata(new ToolMessage({ artifact: {
-      planItemId: current!.delegationId, delegationId: current!.delegationId,
-      capability: current!.capability, task: current!.task, briefing: 'Execute the confirmed task.',
-    },  name: 'delegate_capability', tool_call_id: callId,
-      content: JSON.stringify({ status: 'returned', delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
+    messages.push(createCapabilityExecutionMessage({ callId, metadata,
+      execution: { planItemId: current!.delegationId, delegationId: current!.delegationId,
+        capability: current!.capability, task: current!.task, briefing: 'Execute the confirmed task.' },
+      result: { status: 'returned', artifacts: [], delivery: { id: `delivery:${callId}`, task: current!.task, text: report.result, scope: {
         runId: report.runId, taskId: input.taskId, delegationId: report.delegationId, lane: report.sourceLane,
-      } } }),
-    }), metadata));
+      } } },
+    }));
   }
   const boundaryNames = plan.map((task) => task.capability).filter((name) => catalog.capabilityNames.includes(name));
   return { ...input, messages,

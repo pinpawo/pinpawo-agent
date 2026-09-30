@@ -1,3 +1,4 @@
+import { createCapabilityExecutionMessage } from '../../../packages/pet-agent/src/agent/orchestrator/executionMessages.ts';
 import { supervisorReply } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
 import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { RunSupervisorInput, RunSupervisorResult } from '../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/runner';
@@ -58,11 +59,9 @@ export function supervisorFixture(params: {
     setAgentMessageMetadata(new AIMessage({ content: '', tool_calls: [{
       id, name: 'delegate_capability', type: 'tool_call', args: {},
     }] }), { ...metadata, source: 'supervisor' }),
-    setAgentMessageMetadata(new ToolMessage({ artifact: {
-      planItemId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, briefing: 'Execute the confirmed task.',
-    },  name: 'delegate_capability', tool_call_id: id, content: JSON.stringify({
-      status: 'returned', delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
-        scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } },
-    }) }), metadata),
+    createCapabilityExecutionMessage({ callId: id, metadata,
+      execution: { planItemId: 'current', delegationId: 'delegation-fixture', capability, task: params.task, briefing: 'Execute the confirmed task.' },
+      result: { status: 'returned', artifacts: [], delivery: { id: `delivery:${id}`, task: params.task, text: params.evidence,
+        scope: { ...metadata, lane: `capability:${capability}`, delegationId: 'delegation-fixture' } } } }),
   ] };
 }

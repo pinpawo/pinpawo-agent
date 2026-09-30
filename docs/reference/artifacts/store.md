@@ -156,6 +156,8 @@ await sink.recordCapabilityArtifact?.(ref);
 `ToolMessage.artifact` 不是 store 边界：它只适合把结构化片段挂到单次工具调用事件中。
 任何“后续 run/跨任务可读”的内容必须落到 `CapabilityArtifactStore`。
 
+例外：`delegate_capability` 结果的 `ToolMessage.artifact` 是运行时自己写入的**执行记录**（`kind: executed | rejected`，含委派输入与结果），随 checkpoint 持久化，Supervisor 验收、上下文压缩和 Host 投影都通过 `readCapabilityExecutions` 读取它。它的兼容边界是 checkpoint 命名空间版本（`HOST_CHECKPOINT_CONTRACT`），不是 `CapabilityArtifactStore`；Capability 产物仍只进入 store。
+
 ## 9. 与 `head`/`summary` 的关系（给你刚才的疑问）
 
 - ref 没有 `head` 字段；有 `preview`。

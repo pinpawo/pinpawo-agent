@@ -16,9 +16,9 @@
     ├── studio.json
     ├── pets/
     ├── capability-artifacts/
-    ├── checkpoints-capability-v3.json
-    ├── checkpoints-tui-capability-v3.json
-    └── tui-sessions-capability-v3.json
+    ├── checkpoints-capability-v4.json
+    ├── checkpoints-tui-capability-v4.json
+    └── tui-sessions-capability-v4.json
 ```
 
 `HostRuntimeConfig` 在装配 runtime 前派生这些路径。Studio 读取其中的

@@ -24,12 +24,19 @@
       ],
       "@pinpawo/studio": [
         "../../packages/studio/src/index.ts"
+      ],
+      "@pinpawo/pet-agent/testing": [
+        "../../packages/pet-agent/src/testing/index.ts"
       ]
     },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

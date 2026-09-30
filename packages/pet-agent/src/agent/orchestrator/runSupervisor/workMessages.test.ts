@@ -10,7 +10,7 @@ import { adjustPlan } from './adjustPlanTool';
 import { buildCapabilityExecutionInput } from './delegateCapabilityTool';
 import { identity, type SupervisorControlContext } from './controlContext';
 import { supervisorWorkMessages } from './workMessages';
-import { readCapabilityExecutions } from '../executionMessages';
+import { createCapabilityExecutionMessage, readCapabilityExecutions, type CapabilityExecutionRecord } from '../executionMessages';
 import { createRunSupervisorProbe } from './testing';
 import { createCapabilityCatalog } from './capabilityCatalog';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
@@ -32,13 +32,12 @@ function dispatchResult(input: SupervisorControlContext, id = 'execute-first') {
 function resultFor(input: SupervisorControlContext, dispatch: AIMessage) {
   const execution = buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!);
   const metadata = getAgentMessageMetadata(dispatch);
-  return setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
-    artifact: execution, content: JSON.stringify({ status: 'returned', delivery: {
+  return createCapabilityExecutionMessage({ callId: dispatch.tool_calls![0].id!, execution, metadata,
+    result: { status: 'returned', artifacts: [], delivery: {
       id: 'delivery', task: execution.task, text: 'Verified execution evidence.', scope: {
-        runId: metadata.runId, taskId: metadata.taskId, delegationId: execution.delegationId, lane: `capability:${execution.capability}`,
+        runId: metadata.runId as string, taskId: metadata.taskId as string, delegationId: execution.delegationId, lane: `capability:${execution.capability}`,
       },
-    }, artifacts: [] }),
-  }), metadata);
+    } } });
 }
 function returned() {
   const initial = context();
@@ -47,28 +46,37 @@ function returned() {
   return { ...input, mode: 'boundary' as const, messages: [dispatch, resultFor(input, dispatch)] };
 }
 
-test('acceptance uses the latest returned delivery and ignores mismatched or private evidence', () => {
+test('acceptance ignores results that are not this call\'s main record and rejects corrupted ones', () => {
   const first = returned();
   const original = first.messages.at(-1) as ToolMessage;
+  const withResult = (mutate: (m: ToolMessage) => void) => {
+    const message = new ToolMessage({ ...original });
+    mutate(message);
+    return { ...first, messages: [...first.messages.slice(0, -1), message] };
+  };
   for (const mutate of [
     (m: ToolMessage) => { setAgentMessageMetadata(m, { lane: 'capability:general' }); },
     (m: ToolMessage) => { setAgentMessageMetadata(m, { runId: 'other-run' }); },
     (m: ToolMessage) => { m.tool_call_id = 'other-call'; },
-    (m: ToolMessage) => { m.status = 'error'; },
-    (m: ToolMessage) => { m.content = '{invalid'; },
-    (m: ToolMessage) => { const data = JSON.parse(m.text); data.delivery.scope.delegationId = 'other'; m.content = JSON.stringify(data); },
   ]) {
-    const message = new ToolMessage({ ...original });
-    mutate(message);
-    assert.throws(() => reviewCurrent({ ...first, messages: [...first.messages.slice(0, -1), message] },
-      { completed: true, reason: 'Accept' }), /returned delivery/);
+    assert.throws(() => reviewCurrent(withResult(mutate), { completed: true, reason: 'Accept' }), /returned delivery/);
   }
+  const record = original.artifact as CapabilityExecutionRecord & { kind: 'executed' };
+  for (const mutate of [
+    (m: ToolMessage) => { m.status = 'error'; },
+    (m: ToolMessage) => { m.artifact = { ...record, execution: { ...record.execution, delegationId: 'other' } }; },
+    (m: ToolMessage) => { m.artifact = record.execution; },
+  ]) {
+    assert.throws(() => reviewCurrent(withResult(mutate), { completed: true, reason: 'Accept' }), /Corrupted delegate_capability record/);
+  }
+  // Content is only the model-facing rendering; readers never depend on it.
+  assert.ok(reviewCurrent(withResult((m) => { m.content = '{invalid'; }), { completed: true, reason: 'Accept' }));
   const retry = dispatchResult(first, 'retry');
   const dispatch = retry.messages.at(-1) as AIMessage;
-  for (const status of ['missing_deliverable', 'paused']) {
-    const failure = setAgentMessageMetadata(new ToolMessage({ name: 'delegate_capability', tool_call_id: dispatch.tool_calls![0].id!,
-      artifact: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!), content: JSON.stringify({ status, delivery: null, artifacts: [] }),
-    }), getAgentMessageMetadata(dispatch));
+  for (const status of ['missing_deliverable', 'paused'] as const) {
+    const failure = createCapabilityExecutionMessage({ callId: dispatch.tool_calls![0].id!,
+      execution: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!),
+      result: { status, delivery: null, artifacts: [] }, metadata: getAgentMessageMetadata(dispatch) });
     const input = { ...first, messages: [...first.messages, ...retry.messages, failure] };
     assert.throws(() => reviewCurrent(input, { completed: true, reason: 'Old evidence' }), /returned delivery/);
     assert.ok(buildCapabilityExecutionInput(input, { briefing: 'Execute current objective.' }, 'next-call'));

@@ -87,7 +87,7 @@ test('another delegation creates a new execution without rewriting the model bri
   const command = await node({ name: 'review_current', args: { completed: false, reason: 'Verify the document.' } })(input, options);
   const call = readCapabilityCall(apply(input, command));
   const previous = input.messages.filter((m) => AIMessage.isInstance(m) && m.tool_calls?.[0]?.name === 'delegate_capability').at(-1) as AIMessage;
-  assert.notEqual(call.delegationId, (input.messages.at(-1) as ToolMessage).artifact.delegationId);
+  assert.notEqual(call.delegationId, (input.messages.at(-1) as ToolMessage).artifact.execution.delegationId);
   assert.equal(call.briefing, 'Execute the current objective.');
 });
 

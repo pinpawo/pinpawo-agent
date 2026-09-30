@@ -1,5 +1,6 @@
 import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { getAgentMessageMetadata, setAgentMessageMetadata } from '../agent/messages';
+import { createCapabilityExecutionMessage, readCapabilityExecutionRecord } from '../agent/orchestrator/executionMessages';
 
 /** Native Capability result fixture; pair it with a call before using as main history. */
 export function createDeliveryResult(data: {
@@ -8,23 +9,22 @@ export function createDeliveryResult(data: {
 }) {
   const task = data.task ?? 'Fixture task';
   const scope = { lane: data.sourceLane, delegationId: data.delegationId, runId: data.runId, taskId: data.runId };
-  return setAgentMessageMetadata(new ToolMessage({ id: data.id, name: 'delegate_capability',
-    tool_call_id: `call:${data.deliveryId}`, status: 'success',
-    content: JSON.stringify({ status: 'returned', delivery: { id: data.deliveryId, task, text: data.result, scope } }),
-    artifact: { planItemId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, briefing: 'Fixture plan' },
-  }), { runId: data.runId, taskId: data.runId, createdAt: data.createdAt });
+  const message = createCapabilityExecutionMessage({
+    callId: `call:${data.deliveryId}`,
+    execution: { planItemId: data.delegationId, delegationId: data.delegationId, capability: data.sourceLane.slice(11), task, briefing: 'Fixture plan' },
+    result: { status: 'returned', delivery: { id: data.deliveryId, task, text: data.result, scope }, artifacts: [] },
+    metadata: { runId: data.runId, taskId: data.runId, createdAt: data.createdAt },
+  });
+  if (data.id) message.id = data.id;
+  return message;
 }
 
 export function readFixtureDelivery(message: BaseMessage) {
-  if (!ToolMessage.isInstance(message) || message.name !== 'delegate_capability') return null;
-  try {
-    const value = JSON.parse(message.text);
-    if (!value.delivery) return null;
-    const delivery = value.delivery;
-    return { result: delivery.text as string, task: delivery.task as string,
-      deliveryId: delivery.id as string, sourceLane: delivery.scope.lane as `capability:${string}`,
-      runId: delivery.scope.runId as string, delegationId: delivery.scope.delegationId as string };
-  } catch { return null; }
+  if (!ToolMessage.isInstance(message)) return null;
+  const record = readCapabilityExecutionRecord(message);
+  const delivery = record?.kind === 'executed' ? record.result.delivery : null;
+  return delivery ? { result: delivery.text, task: delivery.task, deliveryId: delivery.id,
+    sourceLane: delivery.scope.lane, runId: delivery.scope.runId, delegationId: delivery.scope.delegationId } : null;
 }
 
 /** Fill native request/result pairs in static fixtures, preserving existing calls. */

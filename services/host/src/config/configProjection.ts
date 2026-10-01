@@ -1,9 +1,9 @@
 import {
   resolveProviderInputWatermarkTokens,
-  type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import {
   type ToolAuthorizationSafetyLevel,
+  type ToolAuthorizationMode,
 } from '@pinpawo/agent-contracts';
 import { readHostPackageVersion } from '../packageVersion';
 import type { RuntimeProjectionDeps } from '../serverTypes';
@@ -20,7 +20,7 @@ export type RuntimeProjection = {
   modelProfileIssues: readonly string[];
   model?: string;
   inputModalities?: readonly ModelInputModality[];
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   contextWindow?: number;
   contextCompactionWatermarkTokens?: number;

@@ -4,8 +4,8 @@ import {
   reduceSession,
   type AgentRuntimeEvent,
   type AgentSession,
-  type BuiltinGlobalReviewPolicyMode,
   type ToolAuthorizationSafetyLevel,
+  type ToolAuthorizationMode,
 } from '@pinpawo/agent-session';
 import type { AgentHostConnectionFactory } from '../client/agentHostConnection';
 import {
@@ -37,7 +37,7 @@ export function createDemoConnectionFactory(
     let connected = false;
     let newSessionIndex = 0;
     let observedAt = 1_000;
-    let globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode =
+    let globalReviewPolicyMode: ToolAuthorizationMode =
       'require_authorization';
     let autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict';
     let session = createDemoSession(
@@ -315,7 +315,7 @@ export function createDemoConnectionFactory(
 
 function createDemoSession(
   options: DemoConnectionOptions,
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode,
+  globalReviewPolicyMode: ToolAuthorizationMode,
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
 ): AgentSession {
   return {

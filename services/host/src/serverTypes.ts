@@ -1,10 +1,9 @@
 import type {
-  BuiltinGlobalReviewPolicyMode,
   CapabilityArtifactStore,
   PetDocument,
 } from '@pinpawo/pet-agent';
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import type { ToolAuthorizationSafetyLevel } from '@pinpawo/agent-contracts';
+import type { ToolAuthorizationSafetyLevel, ToolAuthorizationMode } from '@pinpawo/agent-contracts';
 import type { HostCapabilityCatalog } from './hostCapabilityCatalog';
 import type { LocalModelProfileRegistry } from './config/llmConfig';
 import type { HostExecutionConfig } from './config/hostExecutionConfig';
@@ -86,7 +85,7 @@ export type ChatSetupDeps =
 export type ServerRuntimeDepsStore = Readonly<{
   get: () => Readonly<ServerDeps>;
   updateReviewPolicy: (
-    mode: BuiltinGlobalReviewPolicyMode,
+    mode: ToolAuthorizationMode,
     safetyLevel: ToolAuthorizationSafetyLevel,
   ) => Readonly<ServerDeps>;
 }>;

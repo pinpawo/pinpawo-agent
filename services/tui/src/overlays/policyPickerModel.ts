@@ -1,12 +1,12 @@
 import type {
-  BuiltinGlobalReviewPolicyMode,
   ToolAuthorizationSafetyLevel,
+  ToolAuthorizationMode,
 } from '@pinpawo/agent-session';
 import stringWidth from 'string-width';
 import { truncateTerminalLine } from '../text/terminalText';
 
 export type PolicyPickerOption = {
-  mode: BuiltinGlobalReviewPolicyMode;
+  mode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel?: ToolAuthorizationSafetyLevel;
   label: string;
   detail: string;
@@ -34,7 +34,7 @@ export const POLICY_PICKER_OPTIONS: readonly PolicyPickerOption[] = [{
 
 export type PolicyPickerState = {
   phase: 'closed' | 'ready' | 'saving' | 'error';
-  currentMode: BuiltinGlobalReviewPolicyMode;
+  currentMode: ToolAuthorizationMode;
   currentAutoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   selectedIndex: number;
   message?: string;
@@ -53,7 +53,7 @@ export type PolicyPickerKey = {
 };
 
 export function createPolicyPickerState(
-  currentMode: BuiltinGlobalReviewPolicyMode = 'require_authorization',
+  currentMode: ToolAuthorizationMode = 'require_authorization',
   currentAutoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict',
 ): PolicyPickerState {
   return {
@@ -66,7 +66,7 @@ export function createPolicyPickerState(
 
 export function openPolicyPicker(
   state: PolicyPickerState,
-  currentMode: BuiltinGlobalReviewPolicyMode,
+  currentMode: ToolAuthorizationMode,
   currentAutoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict',
 ): PolicyPickerState {
   return {
@@ -180,7 +180,7 @@ export function formatPolicyPicker(
 }
 
 export function formatPolicyMode(
-  mode: BuiltinGlobalReviewPolicyMode,
+  mode: ToolAuthorizationMode,
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel = 'strict',
 ) {
   switch (mode) {
@@ -194,7 +194,7 @@ export function formatPolicyMode(
 }
 
 function optionIndex(
-  mode: BuiltinGlobalReviewPolicyMode,
+  mode: ToolAuthorizationMode,
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel,
 ) {
   const index = POLICY_PICKER_OPTIONS.findIndex((option) => (

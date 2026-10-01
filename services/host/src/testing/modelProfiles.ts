@@ -1,10 +1,10 @@
 import {
   DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
   type ToolAuthorizationSafetyLevel,
+  type ToolAuthorizationMode,
 } from '@pinpawo/agent-contracts';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  type BuiltinGlobalReviewPolicyMode,
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import type { AgentLlmConfig } from '../config/agentConfig';
@@ -133,7 +133,7 @@ export function createTestModelServerDeps(
   input: Partial<AgentLlmConfig & HostExecutionConfig> = {},
 ): {
   modelProfiles: ReturnType<typeof createTestModelProfiles>;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   toolkitInventory: HostToolkitInventoryStore;
   capabilityCatalog: CapabilityCatalogReader;

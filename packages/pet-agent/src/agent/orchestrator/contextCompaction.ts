@@ -173,15 +173,16 @@ export async function compactOrchestratorMessages(params: {
     messagesToSummarize.filter((message) => getAgentMessageMetadata(message).taskId !== taskId),
     messagesToSummarize.filter((message) => getAgentMessageMetadata(message).taskId === taskId),
   ] : [messagesToSummarize];
-  const summaries: BaseMessage[] = [];
-  for (const group of groups) {
-    if (group.length === 0) continue;
+  // The groups are independent, so their summaries are generated concurrently;
+  // output keeps the group order (older history first, then the current task).
+  const summaries = (await Promise.all(groups.map(async (group, index) => {
+    if (group.length === 0) return null;
     const summary = await summarizeMessages({ model, messages: group, runnableConfig: params.runnableConfig });
-    if (summary === null) continue;
+    if (summary === null) return null;
     const message = createContextCompactionMessage(summary, mainConversationMessages(group).length);
-    if (taskId && group === groups[1]) setAgentMessageMetadata(message, { taskId });
-    summaries.push(message);
-  }
+    if (taskId && index === 1) setAgentMessageMetadata(message, { taskId });
+    return message;
+  }))).filter((message): message is AIMessage => message !== null);
 
   return {
     messages: [

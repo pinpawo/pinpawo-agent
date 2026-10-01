@@ -1,3 +1,4 @@
+import { isDelegationBriefingMessage } from '../delegation';
 import { readDelegationDeliveries, readCapabilityExecutions } from '../executionMessages';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -194,6 +195,13 @@ test('Entry continue executes unfinished work in a fresh private scope', async (
   assert.equal(second.runSupervisorState.plan[0].id, first.runSupervisorState.plan[0].id);
   assert.equal(second.runSupervisorState.plan[0].status, 'completed');
   assert.equal(executor.inputs.length, 1);
+  // The executor's goal context is the plan goal carried by continue, not this
+  // run's continuation utterance.
+  const briefing = executor.inputs[0].find(isDelegationBriefingMessage);
+  assert.ok(briefing);
+  const goalContext = briefing.text.slice(briefing.text.indexOf('<run_user_request'), briefing.text.indexOf('</run_user_request>'));
+  assert.ok(goalContext.includes(first.runSupervisorState.goal!));
+  assert.equal(goalContext.includes('Continue with verification.'), false);
   assert.equal(executor.inputs[0].some((message) => {
     const metadata = getAgentMessageMetadata(message);
     return metadata.lane === 'capability:general' && metadata.runId === before.runId;

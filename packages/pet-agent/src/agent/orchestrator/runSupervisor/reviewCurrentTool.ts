@@ -34,8 +34,9 @@ export function reviewCurrent(
   context: SupervisorControlContext,
   args: ReviewCurrentArgs,
 ): RunSupervisorState {
+  // A plan always carries its goal; review only advances progress.
   let state: SupervisorControlContext['state'] = { runId: context.runId,
-    goal: context.state.goal ?? context.userRequest, plan: [...context.state.plan] };
+    goal: context.state.goal, plan: [...context.state.plan] };
   const current = currentSupervisorTask(state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');
   if (args.completed) {

@@ -284,3 +284,22 @@ test('inspect_shell remains bounded and does not turn timeouts into background w
   await tool.invoke({ command: 'npm install' }, inSession);
   assert.equal(calls, 1, 'read-only admission still blocks mutation');
 });
+
+
+test('inspect_shell forwards unfamiliar inspection commands but never executes blocked batches', async () => {
+  const { createInspectShellTool } = await import('./shellTools');
+  const shell = new PosixShellRS();
+  const commands: string[] = [];
+  shell.exec = async (_session, request) => {
+    assert.ok('shell' in request.command);
+    commands.push(request.command.shell);
+    return { status: 'exited', code: 0, stdout: 'ok', stderr: '' };
+  };
+  const inspect = createInspectShellTool(shell);
+  await inspect.invoke({ command: 'nc -vz -w 5 example.com 443' }, inSession);
+  await inspect.invoke({ command: "jq '.events | map(.type)' state.json | head" }, inSession);
+  for (const command of ['ls; rm file', '(rm file)', 'if true; then rm file; fi']) {
+    assert.match(String(await inspect.invoke({ command }, inSession)), /run_shell/);
+  }
+  assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head"]);
+});

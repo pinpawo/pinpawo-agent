@@ -134,7 +134,7 @@ export function createRunShellTool(
       if (variant) {
         const verdict = variant.admit(shellAction.command);
         if (!verdict.allowed) {
-          return `Error: ${variant.name} 只接受可静态判定为只读的命令（${verdict.reason}）。`
+          return `Error: ${variant.name} 拦截了需要审批的操作（${verdict.reason}）。`
             + '需要执行该命令时改用 run_shell，它会走工具审批。';
         }
       }
@@ -275,13 +275,13 @@ export function createStartProcessTool(shell: ShellRS) {
  * `run_shell` costs a model-driven review on every call, and most of what an
  * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
  * This tool carries no review policy, so `classifyReadOnlyShellCommand` is the
- * whole safety boundary: anything it does not positively recognise as
- * read-only is refused and the agent falls back to `run_shell`.
+ * admission check blocks known dangerous operations, while trusting unfamiliar
+ * inspection commands. It is a best-effort denylist, not a shell sandbox.
  */
 export function createInspectShellTool(shell: ShellRS) {
   return createRunShellTool(shell, {
     name: 'inspect_shell',
-    description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，因此比 run_shell 快得多，应作为查看类命令的默认选择。支持 cd、管道与 && 串联，例如 `cd src && rg -n "foo" | head -20`。搜索代码和文件优先用 rg：`rg -n "pattern" [path]` 搜内容（加 -F 按字面匹配、-i 忽略大小写、-C 2 带上下文、-g "*.ts" 限定文件），`rg --files -g "*.ts"` 按文件名找文件，`rg -l` 只列文件名；rg 默认遵守 .gitignore、排除 .pinpawo、截断超长行。查 JSON 用 jq，例如 `jq ".scripts" package.json`。只接受白名单内的只读命令（cat/head/tail/ls/find/grep/rg/sed -n/awk/cut/sort/uniq/wc/jq/diff/stat/file/env/date/git log|status|diff|show|branch|blame|rev-parse 等）；不支持输出重定向、命令替换、heredoc、后台执行，也不支持 bash -c、node -e、python -c 这类内联执行。任何写入、安装、删除、推送或不在白名单内的命令都要改用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。执行超时会终止进程组，不转后台；预计耗时的任务用需要审批的 start_process。',
+    description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，因此比 run_shell 快得多，应作为查看类命令的默认选择。支持 cd、管道与 && 串联，例如 `cd src && rg -n "foo" | head -20`。搜索代码和文件优先用 rg：`rg -n "pattern" [path]` 搜内容（加 -F 按字面匹配、-i 忽略大小写、-C 2 带上下文、-g "*.ts" 限定文件），`rg --files -g "*.ts"` 按文件名找文件，`rg -l` 只列文件名；rg 默认遵守 .gitignore、排除 .pinpawo、截断超长行。查 JSON 用 jq，例如 `jq ".scripts" package.json`。采用明确危险操作黑名单：拦截已知写入、删除、安装、推送、权限修改、内联执行和隐藏执行语法；不因命令名未知而拒绝。支持引号内的查询表达式和 2>&1、2>/dev/null。黑名单是尽力检查，不保证命令只读；你应确认命令用于检查，修改状态时用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。执行超时会终止进程组，不转后台；预计耗时的任务用需要审批的 start_process。',
     admit: classifyReadOnlyShellCommand,
   });
 }

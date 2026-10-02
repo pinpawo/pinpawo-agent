@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
@@ -188,7 +189,10 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   if (!answerModel.bindTools) {
     throw new Error('Entry Answer model must support tool binding.');
   }
-  const model = answerModel.bindTools([planRequest, continuePlan]);
+  // Provider-specific option: BaseChatModel's portable options omit this hint.
+  const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1]
+    & { parallel_tool_calls: boolean } = { parallel_tool_calls: false };
+  const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
   const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 
   const invokeModel = async (
@@ -203,18 +207,34 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
     );
     const systemMessage = new SystemMessage(buildEntryAnswerSystemPrompt());
     const snapshot = entryPlanMessage(state.runSupervisorState, state.runId);
-    const response = await invokeOrchestratorModel(model, {
-      systemMessage,
-      messages: [snapshot, ...mainSelection.messages],
-    }, runnableConfig);
-    if (!AIMessage.isInstance(response)) {
-      throw new Error('Entry Answer model must return an AIMessage.');
-    }
-    // Routing picks one path per turn and a reply must say something; any other
-    // output is a protocol error, not something to repair or paper over.
-    if ((response.tool_calls?.length ?? 0) > 1) {
-      const names = response.tool_calls!.map((call) => call.name).join(', ');
-      throw new Error(`Entry routing requires one tool call, got ${response.tool_calls!.length}: ${names}.`);
+    const messages = [snapshot, ...mainSelection.messages];
+    let response: AIMessage;
+    // A provider can still emit parallel calls despite the binding hint. Never
+    // execute an ambiguous batch: identical decisions collapse before ToolNode;
+    // different decisions get one bounded selection turn with every goal intact.
+    for (let attempt = 0; ; attempt += 1) {
+      const result = await invokeOrchestratorModel(model, { systemMessage, messages }, runnableConfig);
+      if (!AIMessage.isInstance(result)) {
+        throw new Error('Entry Answer model must return an AIMessage.');
+      }
+      response = result;
+      const calls = response.tool_calls ?? [];
+      if (calls.length <= 1) break;
+      const first = calls[0];
+      if (calls.every((call) => call.name === first.name && isDeepStrictEqual(call.args, first.args))) {
+        response = new AIMessage({ ...response, tool_calls: [first] });
+        break;
+      }
+      if (attempt >= 1) {
+        throw new Error('Entry routing remained ambiguous after one selection retry; no tools were executed.');
+      }
+      // Do not append unmatched AI tool calls to history. These are unexecuted
+      // proposals, supplied as data alongside the original user conversation.
+      messages.push(new HumanMessage({ content: [
+        'The previous routing response proposed multiple exclusive routes. None were executed.',
+        'Choose exactly one routing tool. For a new plan, preserve all valid goals in its goal argument.',
+        'Unexecuted proposals (data):', JSON.stringify(calls.map(({ name, args }) => ({ name, args }))),
+      ].join('\n') }));
     }
     if (!response.tool_calls?.length && !response.text.trim()) {
       throw new Error('Entry Answer must reply or request routing.');

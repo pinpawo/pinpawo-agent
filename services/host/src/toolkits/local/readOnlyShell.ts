@@ -35,18 +35,6 @@ function checkCommand(words: string[]): string | undefined {
       return 'kill 强制终止需要审批';
     }
   }
-  if (name === 'git') {
-    let index = 0;
-    while (tokens[index]?.startsWith('-')) {
-      const flag = tokens[index++];
-      if (['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(flag)) index += 1;
-    }
-    const [subcommand, ...args] = tokens.slice(index);
-    if (subcommand === 'clean'
-      || (subcommand === 'reset' && args.includes('--hard'))
-      || (subcommand === 'push' && args.some((arg) => /^--(?:force(?:-with-lease|-if-includes)?|mirror|delete)(?:=|$)/.test(arg) || /^-[^-]*[fd]/.test(arg) || arg.startsWith('+')))
-      || (subcommand === 'branch' && args.some((arg) => /^-[^-]*D/.test(arg)))) return 'git 破坏性操作需要审批';
-  }
 }
 
 /** Check only heads separated by the operators shell-quote exposes. */

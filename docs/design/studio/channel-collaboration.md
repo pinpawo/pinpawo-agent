@@ -3,6 +3,35 @@
 状态：实现草案，2026-10-03。依据 [#892](https://github.com/pinpawo/pinpawo-agent/issues/892)
 与[产品方向补充](https://github.com/pinpawo/pinpawo-agent/issues/892#issuecomment-5921068589)。
 
+## 用户修订与当前实施边界（2026-10-03）
+
+最新确定方向是 `(channelId, petId)` 对应固定持久的 session/thread。同一 Channel
+四个 Pet 分别使用四个会话；新任务与普通回复复用，不按任务重建，不同 Channel 隔离。
+下面描述的第一片代码尚未实现这一绑定，不能把 dispatch scope 当成持久 session 路由。
+
+Supervisor 普通反问目前写入回复并结束当轮，保留计划；Channel 应记录回复来源
+Pet/session/消息标识，用户通过 replyTo 回到原会话，走普通输入路径。
+授权 human_review 继续走原 Pet TUI。本轮不增加 HTTP resume、审批绑定、消费集合或
+审批持久化。f531a14 的额外审批恢复包装已撤除；不以其测试作为设计成立的依据。
+
+计划在 Channel 独立 SQLite 中持久唯一 pair 映射，事务预留固定身份后由 Host 幂等
+注册，随后严格按 session 路由。沿用现有 Pet session 身份约束与 checkpoint 存储，
+不复用 Kanban 业务表，不迁移历史。Channel 创建与执行启动分开。
+
+实施前进一步核对发现以下既有活动会话假设，需要先明确最小改动边界：
+
+- residentPetHost 的 readSettledState 读取活动 session；Coordinator 按 Pet 全局
+  open/waiting 状态出队。仅指定 dispatch thread 不能保证按目标会话判断等待。
+- publishRuntimeEvent 向同一 Pet 全部订阅者与活动 TUI 广播；serverHandlers 的
+  loadSnapshot 将活动 session checkpoint 与不带 session 身份的 ActiveRunRegister
+  合并。后台指定会话执行需要事件与快照归属处理，不能只改 setup。
+- 原 serverChatHandler 在工具协议历史错误时 resetSession(deletePrevious: true)，
+  会删除旧 session/checkpoint。固定 Channel 绑定不能静默重建或漂移，也不能未经
+  评审改变原 TUI 错误恢复语义。需明确遇到此种删除时保持绑定并报失效，还是保护会话。
+
+按“发现必须扩大架构先报告”的实施约束，已完成审批包装撤除；pair 路由改动暂未写入。
+下一步应核定目标会话 admission、事件/快照归属以及绑定失效规则，再继续实现与验证。
+
 长期方向：人向 Bot 表达目标与授权范围，Bot 关注多个 Channel，Pet 执行当前一轮工作并
 通过消息、文档、PR 交付。Channel 是及时共享依据，Wiki 是共同参考。交付不等于目标完成，
 Pet 反馈不构成新的用户授权。本片不实现 Bot 产品、跨 Channel 协调、Trigger 派发、

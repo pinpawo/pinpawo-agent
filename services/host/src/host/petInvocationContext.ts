@@ -5,6 +5,7 @@ export type PetInvocationScope = Readonly<{ namespace: string; id: string }>;
 export type PetInvocationContext = Readonly<{
   petId: string;
   dispatchId: string;
+  sessionId?: string;
   scope?: PetInvocationScope;
 }>;
 
@@ -33,6 +34,7 @@ export async function withPetInvocationContext<T>(
   const entry = { active: true, value: Object.freeze({
     petId: context.petId,
     dispatchId: context.dispatchId,
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
     ...(context.scope ? { scope: copyPetInvocationScope(context.scope) } : {}),
   }) };
   return invocations.run(entry, async () => {

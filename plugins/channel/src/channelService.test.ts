@@ -118,3 +118,30 @@ test('two connections reject stale goal updates and channel listing has a stable
     assert.equal(one.readHistory(a.channelId).entries.length, 2);
   } finally { one.close(); two.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('pair reservation and output identity are shared across SQLite connections and preserve existing history', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-binding-'));
+  const file = path.join(root, 'channel.sqlite');
+  const one = new ChannelService(file); const two = new ChannelService(file);
+  try {
+    one.init();
+    const channel = one.createChannel(goal, human);
+    const old = one.sendMessage(channel.channelId, { body: 'existing history' }, human);
+    one.close();
+    const previous = new DatabaseSync(file);
+    previous.exec('DROP TABLE channel_sessions; DROP TABLE channel_outputs; PRAGMA user_version=1;');
+    previous.close();
+    one.init(); two.init();
+    const binding = one.reserveBinding(channel.channelId, 'executor', () => 'executor:12345678');
+    assert.deepEqual(two.reserveBinding(channel.channelId, 'executor', () => { throw Error('must reuse'); }), binding);
+    two.confirmBinding(binding);
+    assert.equal(one.getBinding(channel.channelId, 'executor')!.registered, true);
+    const other = one.createChannel(goal, human);
+    assert.throws(() => two.reserveBinding(other.channelId, 'executor', () => binding.sessionId), /UNIQUE/);
+    const source = { petId: 'executor', sessionId: binding.sessionId, invocationId: 'turn' };
+    const output = one.recordOutput(source, 'Which destination?')!;
+    assert.deepEqual(two.recordOutput(source, 'Which destination?'), output);
+    assert.throws(() => one.sendMessage(other.channelId, { body: 'wrong scope' }, pet, source), /binding/);
+    assert.deepEqual(one.getMessage(channel.channelId, old.messageId), old);
+  } finally { one.close(); two.close(); rmSync(root, { recursive: true, force: true }); }
+});

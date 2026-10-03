@@ -912,3 +912,18 @@ test('interactive roots never inherit another dispatch invocation context', asyn
     assert.deepEqual(seen, [undefined]);
   } finally { await host.close(); }
 });
+
+test('targeted waiting work does not strand a legacy dispatch on an open active session', async () => {
+  const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+  let targetReady = false;
+  const events: string[] = [];
+  const target = coordinator.enqueueDispatch(async () => { events.push('target'); }, async () => targetReady);
+  await waitFor(() => coordinator.getState() === 'waiting', 'target was not reported waiting');
+  await coordinator.enqueueDispatch(async () => { events.push('legacy'); });
+  assert.deepEqual(events, ['legacy']);
+  targetReady = true;
+  await coordinator.refreshState();
+  await target;
+  assert.deepEqual(events, ['legacy', 'target']);
+  await coordinator.close();
+});

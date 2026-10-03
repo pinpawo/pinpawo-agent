@@ -40,7 +40,10 @@ export type ChannelRevision = z.infer<typeof channelGoalSchema> & {
   kind: 'revision'; channelId: string; sequence: number; author: ChannelAuthor;
   occurredAt: string; reason: string; sourceMessageId?: string;
 };
+export type ChannelSessionBinding = { channelId: string; petId: string; sessionId: string; registered: boolean };
+export type ChannelMessageSource = { petId: string; sessionId: string; invocationId: string };
 export type ChannelMessage = z.infer<typeof channelMessageSchema> & {
+  source?: ChannelMessageSource;
   kind: 'message'; channelId: string; sequence: number; messageId: string;
   author: ChannelAuthor; occurredAt: string; revision: number;
 };
@@ -64,7 +67,7 @@ export class ChannelService {
       if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
       db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
       const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (version !== 0 && version !== 1) throw new Error(`Unsupported Channel schema version ${version}.`);
+      if (version !== 0 && version !== 1 && version !== 2) throw new Error(`Unsupported Channel schema version ${version}.`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS channel_entries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +78,17 @@ export class ChannelService {
         );
         CREATE INDEX IF NOT EXISTS channel_history ON channel_entries(channel_id, sequence);
         CREATE INDEX IF NOT EXISTS channel_revisions ON channel_entries(channel_id, kind, sequence);
-        PRAGMA user_version=1;
+        CREATE TABLE IF NOT EXISTS channel_sessions (
+          channel_id TEXT NOT NULL, pet_id TEXT NOT NULL, session_id TEXT NOT NULL,
+          registered INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(channel_id, pet_id), UNIQUE(pet_id, session_id)
+        );
+        CREATE TABLE IF NOT EXISTS channel_outputs (
+          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          PRIMARY KEY(pet_id, session_id, invocation_id)
+        );
+        PRAGMA user_version=2;
       `);
       this.db = db;
     } catch (error) { db.close(); throw error; }
@@ -159,7 +172,7 @@ export class ChannelService {
     if (!entry) throw new Error('Message reference does not exist in this Channel.');
     return entry as ChannelMessage;
   }
-  sendMessage(channelId: string, input: unknown, author: ChannelAuthor): ChannelMessage {
+  sendMessage(channelId: string, input: unknown, author: ChannelAuthor, source?: ChannelMessageSource): ChannelMessage {
     const message = channelMessageSchema.parse(input);
     const trustedAuthor = channelAuthorSchema.parse(author);
     const seen = new Set<string>();
@@ -167,11 +180,65 @@ export class ChannelService {
     const entry = this.transaction(() => {
       const channel = this.getChannel(channelId);
       if (message.replyTo) this.getMessage(channel.channelId, message.replyTo);
-      return this.append({ ...message, kind: 'message', channelId: channel.channelId,
+      if (source && (source.petId !== trustedAuthor.id || trustedAuthor.kind !== 'pet'
+        || this.getBinding(channelId, source.petId)?.sessionId !== source.sessionId)) throw new Error('Message source does not match Channel binding.');
+      return this.append({ ...message, ...(source ? { source } : {}), kind: 'message', channelId: channel.channelId,
         messageId: randomUUID(), revision: channel.sequence, author: trustedAuthor, occurredAt: new Date().toISOString(),
       });
     }) as ChannelMessage;
     return this.publish(entry);
+  }
+  private decodeBinding(row: unknown): ChannelSessionBinding | null {
+    if (!row) return null;
+    const value = row as { channel_id: string; pet_id: string; session_id: string; registered: number };
+    return { channelId: value.channel_id, petId: value.pet_id, sessionId: value.session_id, registered: !!value.registered };
+  }
+  getBinding(channelId: string, petId: string): ChannelSessionBinding | null {
+    return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? AND pet_id=?').get(channelId, petId));
+  }
+  listBindings(channelId: string): ChannelSessionBinding[] {
+    this.getChannel(channelId);
+    return this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? ORDER BY pet_id')
+      .all(channelId).map(row => this.decodeBinding(row)!);
+  }
+  findBinding(petId: string, sessionId: string): ChannelSessionBinding | null {
+    return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE pet_id=? AND session_id=?').get(petId, sessionId));
+  }
+  reserveBinding(channelId: string, petId: string, allocate: () => string): ChannelSessionBinding {
+    return this.transaction(() => {
+      this.getChannel(channelId);
+      identifier.parse(petId);
+      const existing = this.getBinding(channelId, petId);
+      if (existing) return existing;
+      const sessionId = identifier.parse(allocate());
+      this.database().prepare('INSERT INTO channel_sessions(channel_id, pet_id, session_id) VALUES (?, ?, ?)').run(channelId, petId, sessionId);
+      return this.getBinding(channelId, petId)!;
+    });
+  }
+  confirmBinding(binding: ChannelSessionBinding): void {
+    const result = this.database().prepare('UPDATE channel_sessions SET registered=1 WHERE channel_id=? AND pet_id=? AND session_id=?')
+      .run(binding.channelId, binding.petId, binding.sessionId);
+    if (result.changes !== 1) throw new Error('Channel session binding changed.');
+  }
+  recordOutput(source: ChannelMessageSource, body: string): ChannelMessage | null {
+    const binding = this.findBinding(source.petId, source.sessionId);
+    if (!binding) return null;
+    let created = false;
+    const entry = this.transaction(() => {
+      const saved = this.database().prepare('SELECT message_id FROM channel_outputs WHERE pet_id=? AND session_id=? AND invocation_id=?')
+        .get(source.petId, source.sessionId, source.invocationId) as { message_id: string } | undefined;
+      if (saved) return this.getMessage(binding.channelId, saved.message_id);
+      const channel = this.getChannel(binding.channelId);
+      const message = this.append({ ...channelMessageSchema.parse({ body }), kind: 'message',
+        channelId: binding.channelId, messageId: randomUUID(), revision: channel.sequence,
+        author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
+      }) as ChannelMessage;
+      this.database().prepare('INSERT INTO channel_outputs VALUES (?, ?, ?, ?)')
+        .run(source.petId, source.sessionId, source.invocationId, message.messageId);
+      created = true;
+      return message;
+    });
+    return created ? this.publish(entry) : entry;
   }
   readHistory(channelId: string, page: unknown = {}): ChannelPage {
     const { after, limit } = channelPageSchema.parse(page);
@@ -183,6 +250,6 @@ export class ChannelService {
     return { entries, nextAfter: entries.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
   }
   readContext(channelId: string, page: unknown = {}) {
-    return this.transaction(() => ({ channel: this.getChannel(channelId), history: this.readHistory(channelId, page) }), true);
+    return this.transaction(() => ({ channel: this.getChannel(channelId), history: this.readHistory(channelId, page), sessions: this.listBindings(channelId) }), true);
   }
 }

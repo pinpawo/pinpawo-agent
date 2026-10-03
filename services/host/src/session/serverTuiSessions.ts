@@ -34,6 +34,7 @@ import { ImageAttachmentAdmission } from '../agent/attachmentAdmission';
 import type { HostRuntimeConfig } from '../config/runtimeConfig';
 import {
   createTuiSession,
+  ensureDispatchSession,
   createTuiSessionForThread,
   ensureActiveTuiSession,
   listTuiSessions,
@@ -159,6 +160,23 @@ export class ServerTuiSessionService {
   getSession(petId: string, sessionId: string) {
     const session = this.state.sessions[sessionId];
     return session?.petId === petId ? session : null;
+  }
+
+  ensureDispatchSession(petId: string, sessionId: string, create = false) {
+    const previous = this.state.sessions[sessionId];
+    const record = ensureDispatchSession(this.state, petId, sessionId, this.defaultModelProfileId, create);
+    try { this.save(); }
+    catch (error) {
+      if (!previous) delete this.state.sessions[sessionId];
+      throw error;
+    }
+    return record;
+  }
+
+  buildSessionSetup(deps: ServerDeps, ctx: Awaited<ReturnType<typeof loadAgentContext>>, sessionId: string) {
+    const session = this.getSession(deps.petId, sessionId);
+    if (!session) throw new Error('Target session does not exist or belongs to another Pet.');
+    return this.buildChatSetup(deps, ctx, session.threadId);
   }
 
   createNewSession(petId: string) {

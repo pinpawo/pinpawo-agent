@@ -12,3 +12,13 @@ test('dispatch parses an explicit domain scope separately from metadata and reje
     assert.equal(parseStudioDispatchRequest({ petId: 'worker', request: 'respond', scope }), null);
   }
 });
+
+test('dispatch preserves an explicit session target and rejects malformed or injected session fields', () => {
+  const input = { petId: 'worker', request: 'work', session: { id: 'worker:12345678', create: true } };
+  const parsed = parseStudioDispatchRequest(input);
+  input.session.id = 'changed';
+  assert.deepEqual(parsed?.session, { id: 'worker:12345678', create: true });
+  for (const session of [{ id: '' }, { id: 's', create: 'yes' }, { id: 's', petId: 'other' }, ['s']]) {
+    assert.equal(parseStudioDispatchRequest({ petId: 'worker', request: 'work', session }), null);
+  }
+});

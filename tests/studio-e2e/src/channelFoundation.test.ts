@@ -59,6 +59,13 @@ test('HTTP authenticates operators, preserves replies, validates mentions and ne
     assert.equal(result.history.entries.length, 2);
     assert.equal(result.history.hasMore, true);
     assert.equal(dispatches, 0, 'neither creation nor explicit mentions dispatch in this foundation slice');
+    assert.equal((await fetch(base + '/channels/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelId, petId: 'reviewer', body: 'start' }) })).status, 401);
+    assert.equal((await post('/channels/execute', { channelId, petId: 'reviewer', body: 'start', sessionId: 'forged' })).status, 400);
+    const execution = await post('/channels/execute', { channelId, petId: 'reviewer', body: 'start explicitly' });
+    assert.equal(execution.status, 202);
+    assert.equal(dispatches, 1);
+    assert.ok(channel.service.getBinding(channelId, 'reviewer')?.registered);
   } finally { await studio.shutdown(); }
 });
 

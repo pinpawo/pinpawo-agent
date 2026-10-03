@@ -2,12 +2,12 @@ import path from 'node:path';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import type { StudioPlugin, StudioPluginContext } from '@pinpawo/studio';
+import type { StudioPlugin, StudioPluginContext, StudioDispatchReceipt } from '@pinpawo/studio';
 import type { StudioHttpRoute, StudioHttpRoutesHook } from '@pinpawo-plugin/studio-http';
-import { readPetInvocationContext } from 'pinpawo/host-runtime';
+import { allocatePetSessionId, readPetInvocationContext } from 'pinpawo/host-runtime';
 import {
   ChannelService, channelGoalSchema, channelMessageSchema, channelPageSchema, channelRevisionSchema,
-  type ChannelAuthor,
+  type ChannelAuthor, type ChannelMessageSource, type ChannelMessage, type ChannelSessionBinding,
 } from './channelService';
 
 function requireChannelInvocation() {
@@ -25,7 +25,11 @@ export type CreateChannelPluginOptions = {
   /** Identity of the local Studio Bearer-token authority, not a claimed request-body author. */
   operatorId?: string;
 };
-export type ChannelPlugin = StudioPlugin & { service: ChannelService };
+export type ChannelExecutionInput = { body: string; petId?: string; replyTo?: string };
+export type ChannelPlugin = StudioPlugin & {
+  service: ChannelService;
+  execute: (channelId: string, input: ChannelExecutionInput) => Promise<{ message: ChannelMessage; receipt: StudioDispatchReceipt; binding: ChannelSessionBinding }>;
+};
 
 export function createChannelPlugin(options: CreateChannelPluginOptions = {}): ChannelPlugin {
   const service = options.service ?? new ChannelService(options.databasePath);
@@ -33,18 +37,44 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   let context: StudioPluginContext | undefined;
   let unsubscribe: (() => void) | undefined;
   let removeHttp: (() => void) | undefined;
-  function send(channelId: string, value: unknown, author: ChannelAuthor) {
+  function send(channelId: string, value: unknown, author: ChannelAuthor, source?: ChannelMessageSource) {
     if (!context) throw new Error('Channel Plugin is not started.');
     const input = channelMessageSchema.parse(value);
     const pets = new Set(context.listPets().map((pet) => pet.petId));
     for (const { petId } of input.mentions) {
       if (!pets.has(petId)) throw new Error(`Unknown mentioned Pet "${petId}".`);
     }
-    return service.sendMessage(channelId, input, author);
+    return service.sendMessage(channelId, input, author, source);
+  }
+  async function execute(channelId: string, input: ChannelExecutionInput) {
+    if (!context) throw new Error('Channel Plugin is not started.');
+    const value = z.object({ body: z.string().trim().min(1).max(100_000), petId: z.string().min(1).optional(), replyTo: z.string().min(1).optional() }).strict().parse(input);
+    const original = value.replyTo ? service.getMessage(channelId, value.replyTo) : undefined;
+    const source = original?.source;
+    if (value.replyTo && !source) throw new Error('Reply target has no execution session.');
+    if (source && value.petId && source.petId !== value.petId) throw new Error('Reply Pet does not match its source.');
+    const petId = source?.petId ?? value.petId;
+    if (!petId || !context.listPets().some((pet) => pet.petId === petId)) throw new Error('Select an existing Pet explicitly.');
+    const binding = source ? service.getBinding(channelId, petId)
+      : service.reserveBinding(channelId, petId, () => allocatePetSessionId(petId));
+    if (!binding || (source && source.sessionId !== binding.sessionId)) throw new Error('Reply session binding does not match.');
+    const message = send(channelId, { body: value.body, ...(value.replyTo ? { replyTo: value.replyTo } : {}) }, operator);
+    const request = original
+      ? `Reply to Channel message ${original.messageId}:\n${original.body}\n\nUser reply:\n${value.body}`
+      : value.body;
+    const receipt = await context.dispatch({ petId, request,
+      session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
+      scope: { namespace: 'channel', id: channelId },
+    });
+    service.confirmBinding(binding);
+    return { message, receipt, binding: service.getBinding(channelId, petId)! };
   }
   const sendMessage = tool(async (input) => {
     const { channelId, author } = requireChannelInvocation();
-    return JSON.stringify(send(channelId, input, author));
+    const invocation = readPetInvocationContext()!;
+    return JSON.stringify(send(channelId, input, author, invocation.sessionId ? {
+      petId: invocation.petId, sessionId: invocation.sessionId, invocationId: invocation.dispatchId,
+    } : undefined));
   }, {
     name: 'channel_send_message',
     description: '在本次执行所属 Channel 发言，记录交付、反馈或问题。可引用同 Channel 消息和带版本的产物；mentions 是显式 Pet 身份，正文中的 @ 只是文本。当前基础版本只保存和通知，不启动接收者。作者及 Channel 由 Host 提供。',
@@ -67,10 +97,18 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     ],
   };
   return {
-    name: 'channel', service, toolkits: [toolkit],
+    name: 'channel', service, execute, toolkits: [toolkit],
     start: (host) => {
       service.init();
       context = host;
+      host.subscribe((event) => {
+        if (event.source !== 'resident-pet' || event.type !== 'dispatch.completed') return;
+        const value = z.object({ petId: z.string(), sessionId: z.string(), invocationId: z.string(), reply: z.string().trim().min(1) }).safeParse(event.payload);
+        if (value.success) {
+          const { reply, ...source } = value.data;
+          service.recordOutput(source, reply);
+        }
+      });
       unsubscribe = service.subscribe((entry) => {
         host.notify({
           type: entry.kind === 'message' ? 'channel.message.created' : 'channel.revised',
@@ -96,6 +134,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           register('POST', '/channels/revisions', async ({ readJson }) => {
             const { channelId, ...revision } = channelRevisionSchema.extend({ channelId: z.string().min(1) }).strict().parse(await readJson());
             return { kind: 'json', status: 201, body: service.reviseChannel(channelId, revision, operator) };
+          }),
+          register('POST', '/channels/execute', async ({ readJson }) => {
+            const { channelId, ...input } = z.object({ channelId: z.string().min(1), body: z.string(), petId: z.string().optional(), replyTo: z.string().optional() }).strict().parse(await readJson());
+            return { kind: 'json', status: 202, body: await execute(channelId, input) };
           }),
           register('POST', '/channels/messages', async ({ readJson }) => {
             const { channelId, ...message } = channelMessageSchema.extend({ channelId: z.string().min(1) }).strict().parse(await readJson());

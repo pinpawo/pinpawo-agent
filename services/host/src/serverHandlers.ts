@@ -177,7 +177,7 @@ export function createLocalServerHandlers(
       requestDeps,
       checkpoint.pendingInterrupt,
     );
-    const activeRun = activeRuns.read();
+    const activeRun = activeRuns.read(checkpoint.sessionId);
     return buildHostSessionSnapshot({
       sessionId: checkpoint.sessionId,
       kind: 'chat',

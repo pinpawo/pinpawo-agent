@@ -3,6 +3,7 @@ import { isJsonObject, isJsonValue, type JsonObject } from '@pinpawo/agent-contr
 
 export type StudioDispatchRequest = {
   petId: string;
+  session?: { id: string; create?: boolean };
   request: string;
   /** Producer-owned correlation data echoed by Studio; never passed to the Pet. */
   metadata?: JsonObject;
@@ -38,8 +39,12 @@ export function parseStudioDispatchRequest(value: unknown): StudioDispatchReques
     : readNonEmptyString(value, 'idempotencyKey');
   if (
     !petId
+    || (value.session !== undefined && (!isJsonObject(value.session)
+      || !hasOnlyKeys(value.session, ['id', 'create'])
+      || typeof value.session.id !== 'string' || !value.session.id.trim()
+      || (value.session.create !== undefined && typeof value.session.create !== 'boolean')))
     || request === null
-    || !hasOnlyKeys(value, ['petId', 'request', 'metadata', 'idempotencyKey', 'scope'])
+    || !hasOnlyKeys(value, ['petId', 'request', 'metadata', 'idempotencyKey', 'scope', 'session'])
     || (value.scope !== undefined && (!isJsonObject(value.scope)
       || !hasOnlyKeys(value.scope, ['namespace', 'id'])
       || typeof value.scope.namespace !== 'string' || !value.scope.namespace.trim()
@@ -50,6 +55,7 @@ export function parseStudioDispatchRequest(value: unknown): StudioDispatchReques
   return {
     petId,
     request,
+    ...(value.session ? { session: { ...(value.session as { id: string; create?: boolean }) } } : {}),
     ...(value.metadata !== undefined ? { metadata: value.metadata as JsonObject } : {}),
     ...(value.scope !== undefined ? { scope: { ...(value.scope as PetInvocationScope) } } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),

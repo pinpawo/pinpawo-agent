@@ -1,3 +1,4 @@
+import type { PetInvocationApprovals } from './petInvocationApprovals';
 import type {
   AgentCapability,
   CapabilityArtifactStore,
@@ -73,6 +74,7 @@ export interface ResidentPetRuntime {
 
 export type ResidentPetRuntimeContext = {
   runtime: ResidentPetRuntime;
+  invocationApprovals: PetInvocationApprovals;
   runtimeDeps: ServerRuntimeDepsStore;
   graphService: HostGraphService;
   runAgentTurn: (options: AgentSessionTurnOptions) => Promise<AgentSessionTurnResult>;

@@ -246,6 +246,10 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
   await runToCompletion(service, input);
   const continued = await service.readThreadState(input);
   assert.equal(continued.messages.at(-1)?.text, 'replacement');
+  assert.equal(continued.checkpointId, (await firstCheckpoint.getTuple({
+    configurable: { thread_id: input.input.threadId },
+  }))?.checkpoint.id);
+  assert.ok(continued.checkpointId);
   assert.ok(continued.messages.some(message => message.text === 'first request'));
 
   input.graphConfig.checkpoint = secondCheckpoint;
@@ -253,11 +257,13 @@ test('graph execution uses replacement models and checkpoint adapters for the sa
   await runToCompletion(service, input);
   const isolated = await service.readThreadState(input);
   assert.equal(isolated.messages.at(-1)?.text, 'replacement');
+  assert.notEqual(isolated.checkpointId, continued.checkpointId);
   assert.equal(isolated.messages.some(message => message.text === 'first request'), false);
   assert.equal(isolated.messages.some(message => message.text === 'second request'), false);
 
   input.graphConfig.checkpoint = firstCheckpoint;
   const restored = await service.readThreadState(input);
+  assert.equal(restored.checkpointId, continued.checkpointId);
   assert.ok(restored.messages.some(message => message.text === 'first request'));
   assert.ok(restored.messages.some(message => message.text === 'second request'));
   assert.equal(restored.messages.some(message => message.text === 'separate store'), false);

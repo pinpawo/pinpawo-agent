@@ -42,9 +42,15 @@ AsyncLocalStorage 暴露只读调用上下文。Channel 工具不读取模型参
 
 安全边界：这是可信 Host 扩展环境，不是隔离恶意 Node 插件的沙箱。HTTP bearer 权限拥有者
 本来即可派发任意已配置 Pet；scope 不增加作者冒充权。缺少本轮上下文时工具失败关闭。
-本片不跨进程/interrupt resume 恢复上下文；审批恢复或显式 continue 若调用 Channel 工具，
-需要后续设计可验证的本轮绑定，目前会拒绝，不从长期 Session 猜测。与 Trigger 接入时
-应一起明确排队输入、恢复与版本变化处理；不把缺少上下文默认为用户授权。
+Host 在 scoped dispatch 实际进入 human_review 等待后保存原 invocation 与审批的关联，
+校验依据包括 checkpointId、interruptId、原始 review 内容及所属 thread（thread 只做隔离
+校验，不产生身份）。现有审批入口先校验当前审批与决定；恢复前再次核对关联并一次性消费，
+以原 petId/dispatchId/scope 运行。若再次等待审批，绑定新的审批关联（interrupt 或
+review 内容须变化；仅移动 checkpoint 不能重装已消费的相同审批）；完成、异常、
+取消或 Host 关闭不保留可重放的关联。普通消息不能创建或接管关联。
+关联目前仅在 resident Host 生命周期内保留，支持客户端断线重连；Host 进程重启后的
+恢复及普通 continue 不从长期 Session 猜测身份，缺少关联时 Channel 工具仍会拒绝。
+跨进程持久化恢复与 Trigger delivery 的契约后续评审，不把缺少上下文默认为用户授权。
 
 ## 事件边界与剩余工作
 
@@ -61,7 +67,8 @@ bus 仅驻留内存。未来需选择逐接收者通知或通用 fan-out，按�
 
 仓库构建后可分别运行 `npm test -w @pinpawo-plugin/channel`（SQLite 领域测试）、
 `npm test -w @pinpawo-tests/studio-e2e`（真实 HTTP 与 resident 队列/工具调用）。
-这些测试无需模型凭据；resident 执行回调为确定性替身，尚未验证真实模型自主交接。
+这些测试无需模型凭据；基础队列测试使用确定性执行回调，审批测试使用生产 turn runner
+与确定性 LangGraph 节点。尚未验证真实模型自主交接。
 
 显式启用时，在实验 Studio 配置的 plugins 数组加入
 `{"id":"@pinpawo-plugin/channel"}`，并在试验 Pet capability 的 uses 中加入 channel。
@@ -77,3 +84,7 @@ bus 仅驻留内存。未来需选择逐接收者通知或通用 fan-out，按�
 ```
 
 不得以配置示例作为启动实际工作的授权。本次未改已有运行配置或启动 Studio。
+
+审批验收使用真实 LangGraph interrupt、FileSaver checkpoint 和生产审批校验/turn runner，
+覆盖连续两次审批、断线重连、错误决定、跨 Pet/Channel、取消及旧审批重放；图中执行节点
+为确定性测试工作，不调用外部模型。

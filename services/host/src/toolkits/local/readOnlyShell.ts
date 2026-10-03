@@ -1,14 +1,9 @@
 /**
- * Best-effort high-risk-operation denylist for the unreviewed inspection path.
- * Unknown commands are trusted; this is neither a sandbox nor proof of read-only
- * behavior. The caller must still use run_shell for intentional state changes.
+ * Heuristic guard against obvious high-risk mistakes, not a shell parser or
+ * sandbox. Unknown commands and indirect code are trusted. Intentional writes
+ * belong in run_shell; admission never proves a command read-only.
  */
-const DANGEROUS_COMMANDS = new Set([
-  'rm', 'rmdir', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas',
-  'chmod', 'chown', 'chgrp', 'kill', 'killall', 'pkill', 'shutdown', 'reboot',
-]);
-// These execute text/files that this shell-syntax check cannot inspect.
-const OPAQUE_EXECUTORS = new Set(['eval', 'source', '.', 'bash', 'sh', 'zsh', 'fish', 'xargs']);
+const DANGEROUS_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
 export type ReadOnlyShellVerdict = { allowed: true } | { allowed: false; reason: string };
 type Token = { text: string; kind: 'word' | 'syntax' | 'operator' };
 
@@ -27,10 +22,9 @@ function tokenize(command: string): Token[] {
     const c = command[i];
     if (c === "'" && quote !== '"') { quote = quote ? '' : "'"; started = true; quoted = true; continue; }
     if (c === '"' && quote !== "'") { quote = quote ? '' : '"'; started = true; quoted = true; continue; }
-    if (quote !== "'" && (c === '`' || (c === '$' && command[i + 1] === '('))) throw new Error('命令替换');
     if (c === '\\' && quote !== "'") {
       const next = command[++i];
-      if (next === undefined) throw new Error('未完成的转义');
+      if (next === undefined) break;
       if (next !== '\n') {
         // Inside double quotes, backslash only escapes these four characters.
         if (quote === '"' && !'$`"\\'.includes(next)) text += '\\';
@@ -45,11 +39,11 @@ function tokenize(command: string): Token[] {
       continue;
     }
     if ('<>'.includes(c)) {
-      // Keep diagnostic redirections transparent to command-head detection.
-      const safe = command.slice(i).match(/^>&[012](?=\s|$|[;|&])|^>\s*\/dev\/null(?=\s|$|[;|&])/);
-      if (!safe) throw new Error('文件重定向、heredoc 或进程替换');
       if (/^\d+$/.test(text) && !quoted) { text = ''; started = false; }
-      flush(); i += safe[0].length - 1; continue;
+      flush();
+      const redirect = command.slice(i).match(/^[<>]+(?:&[0-9-]+)?/)![0];
+      tokens.push({ text: redirect, kind: 'operator' });
+      i += redirect.length - 1; continue;
     }
     if (';|&\n()'.includes(c)) {
       flush();
@@ -60,103 +54,8 @@ function tokenize(command: string): Token[] {
     if (/\s/.test(c)) { flush(); continue; }
     text += c; started = true;
   }
-  if (quote) throw new Error('未闭合引号');
   flush();
   return tokens;
-}
-
-/**
- * Walk shell command positions, including every compound-command body. Words
- * in for-lists, case patterns and test expressions are data, not command heads.
- * Unsupported/unfinished syntax goes to review rather than skipping a body.
- */
-function shellCommands(tokens: Token[]): string[][] {
-  let index = 0;
-  const commands: string[][] = [];
-  const at = (...words: string[]) => tokens[index]?.kind !== 'word' && words.includes(tokens[index]?.text);
-  const take = (word: string) => { if (!at(word)) throw new Error(`未完成的 shell 语法：${word}`); index += 1; };
-  const word = () => {
-    const token = tokens[index++];
-    if (!token || token.kind === 'operator') throw new Error('缺少 shell 词');
-    return token.text;
-  };
-  const list = (stops: string[] = []) => {
-    while (index < tokens.length && !at(...stops)) {
-      if (at(';', '\n', '&&', '||', '|', '|&', '&')) { index += 1; continue; }
-      statement();
-    }
-  };
-  const statement = () => {
-    if (at('!', 'time')) {
-      index += 1;
-      if (at('-p')) index += 1;
-      statement(); return;
-    }
-    if (at('if')) {
-      index += 1; list(['then']); take('then'); list(['elif', 'else', 'fi']);
-      while (at('elif')) { index += 1; list(['then']); take('then'); list(['elif', 'else', 'fi']); }
-      if (at('else')) { index += 1; list(['fi']); }
-      take('fi'); return;
-    }
-    if (at('while', 'until')) {
-      index += 1; list(['do']); take('do'); list(['done']); take('done'); return;
-    }
-    if (at('for', 'select')) {
-      index += 1;
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(word())) throw new Error('不支持的循环变量');
-      while (at('\n')) index += 1;
-      if (at('in')) {
-        index += 1;
-        while (index < tokens.length && !at(';', '\n')) word();
-      }
-      if (at(';')) index += 1;
-      while (at('\n')) index += 1;
-      take('do'); list(['done']); take('done'); return;
-    }
-    if (at('case')) {
-      index += 1; word();
-      while (at('\n')) index += 1;
-      take('in');
-      while (index < tokens.length) {
-        while (at('\n')) index += 1;
-        if (at('esac')) break;
-        if (at('(')) index += 1;
-        while (index < tokens.length && !at(')')) {
-          if (at('|')) index += 1; else word();
-        }
-        take(')'); list([';;', ';&', ';;&', 'esac']);
-        if (at(';;', ';&', ';;&')) index += 1;
-      }
-      take('esac'); return;
-    }
-    if (at('(', '{')) {
-      const close = at('(') ? ')' : '}';
-      index += 1; list([close]); take(close); return;
-    }
-    if (at('[[')) {
-      index += 1;
-      while (index < tokens.length && !at(']]')) index += 1;
-      take(']]'); return;
-    }
-    // Function definitions are inspected even if they are never called.
-    if (at('function') || (tokens[index + 1]?.text === '(' && tokens[index + 1]?.kind === 'operator')) {
-      if (at('function')) index += 1;
-      word();
-      if (at('(')) { index += 1; take(')'); }
-      while (at('\n')) index += 1;
-      if (!at('{', '(')) throw new Error('不支持的函数体');
-      statement(); return;
-    }
-    if (at('then', 'elif', 'else', 'fi', 'do', 'done', 'esac', '}', ')', ';;', ';&', ';;&')) {
-      throw new Error('意外的 shell 控制语法');
-    }
-    const words: string[] = [];
-    while (index < tokens.length && tokens[index].kind !== 'operator') words.push(word());
-    if (!words.length) throw new Error('不支持的 shell 语法');
-    commands.push(words);
-  };
-  list();
-  return commands;
 }
 
 const basename = (word: string = '') => word.replace(/^.*\//, '');
@@ -172,18 +71,14 @@ function checkCommand(words: string[]): string | undefined {
     if (wrapper === 'command' && ['-v', '-V'].includes(tokens[0])) return;
     while (tokens[0]?.startsWith('-') || assignment(tokens[0])) {
       const flag = tokens.shift()!;
-      if (wrapper === 'env' && (/^-S/.test(flag) || flag.startsWith('--split-string'))) return 'env 内联执行需要审批';
       if ((wrapper === 'env' && ['-u', '--unset', '-C', '--chdir'].includes(flag)) || (wrapper === 'exec' && flag === '-a')) tokens.shift();
       if (flag === '--') break;
     }
   }
   const name = basename(tokens.shift());
-  if (name !== '[' && /[$*?\[\]{}]/.test(name)) return '动态命令名需要审批';
-  if (DANGEROUS_COMMANDS.has(name) || /^mkfs\./.test(name)) return `命令 "${name}" 需要审批`;
-  if (OPAQUE_EXECUTORS.has(name)) return `"${name}" 的间接执行需要审批`;
-  if ((name === 'node' && tokens.some((arg) => /^-(?:[ep]|-(?:eval|print)(?:=|$))/.test(arg)))
-    || (/^python(?:\d+(?:\.\d+)*)?$/.test(name) && tokens.some((arg) => /^-c/.test(arg)))) return '内联代码需要审批';
-  if (name === 'find' && tokens.some((arg) => ['-delete', '-exec', '-execdir', '-ok', '-okdir'].includes(arg))) return 'find 删除或间接执行需要审批';
+  if ((DANGEROUS_COMMANDS.has(name) || /^mkfs\./.test(name))
+    && !tokens.slice(0, tokens.includes('--') ? tokens.indexOf('--') : tokens.length)
+      .some((arg) => ['--help', '--version'].includes(arg))) return `命令 "${name}" 需要审批`;
   if (name === 'git') {
     let index = 0;
     while (tokens[index]?.startsWith('-')) {
@@ -198,16 +93,37 @@ function checkCommand(words: string[]): string | undefined {
   }
 }
 
+/** Scan common command positions without validating or pairing shell grammar. */
 export function classifyReadOnlyShellCommand(command: string): ReadOnlyShellVerdict {
-  try {
-    const tokens = tokenize(command.trim());
-    if (!tokens.length) return { allowed: false, reason: '空命令' };
-    for (const words of shellCommands(tokens)) {
-      const reason = checkCommand(words);
+  if (!command.trim()) return { allowed: false, reason: '空命令' };
+  let words: string[] = [];
+  let data: '' | 'loop' | 'pattern' | 'test' = '';
+  let redirectTarget = false;
+  const flush = () => { const reason = checkCommand(words); words = []; return reason; };
+  for (const token of tokenize(command)) {
+    const { text, kind } = token;
+    const plain = kind === 'syntax';
+    // Only skip data regions we can recognize locally; no nested grammar stack.
+    if (data === 'test') { if (plain && text === ']]') data = ''; continue; }
+    if (data === 'pattern') { if ((text === ')' && kind === 'operator') || (plain && text === 'esac')) data = ''; continue; }
+    if (kind === 'operator') {
+      if (/^[<>]/.test(text)) { redirectTarget = !text.includes('&'); continue; }
+      const reason = flush();
       if (reason) return { allowed: false, reason };
+      if (data === 'loop' && [';', '\n'].includes(text)) data = '';
+      if ([';;', ';&', ';;&'].includes(text)) data = 'pattern';
+      continue;
     }
-    return { allowed: true };
-  } catch (error) {
-    return { allowed: false, reason: `需要审批：${(error as Error).message}` };
+    if (redirectTarget) { redirectTarget = false; continue; }
+    if (data === 'loop') continue;
+    if (!words.length && plain) {
+      if (['if', 'then', 'else', 'elif', 'while', 'until', 'do', 'done', 'fi', '{', '}', '!', 'time', '-p'].includes(text)) continue;
+      if (text === 'for' || text === 'in') { data = 'loop'; continue; }
+      if (text === 'case') { data = 'pattern'; continue; }
+      if (text === '[[') { data = 'test'; continue; }
+    }
+    words.push(text);
   }
+  const reason = flush();
+  return reason ? { allowed: false, reason } : { allowed: true };
 }

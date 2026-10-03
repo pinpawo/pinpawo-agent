@@ -270,7 +270,7 @@ export function createStartProcessTool(shell: ShellRS) {
 }
 
 /**
- * Read-only shell, admitted by rule instead of by review.
+ * Inspection shell with a heuristic high-risk mistake check, without review.
  *
  * `run_shell` costs a model-driven review on every call, and most of what an
  * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
@@ -281,7 +281,7 @@ export function createStartProcessTool(shell: ShellRS) {
 export function createInspectShellTool(shell: ShellRS) {
   return createRunShellTool(shell, {
     name: 'inspect_shell',
-    description: '只读 shell：执行不会修改任何状态的检查类命令，无需审批，因此比 run_shell 快得多，应作为查看类命令的默认选择。支持 cd、管道与 && 串联，例如 `cd src && rg -n "foo" | head -20`。搜索代码和文件优先用 rg：`rg -n "pattern" [path]` 搜内容（加 -F 按字面匹配、-i 忽略大小写、-C 2 带上下文、-g "*.ts" 限定文件），`rg --files -g "*.ts"` 按文件名找文件，`rg -l` 只列文件名；rg 默认遵守 .gitignore、排除 .pinpawo、截断超长行。查 JSON 用 jq，例如 `jq ".scripts" package.json`。采用明确危险操作黑名单：仅拦截删除、提权、权限修改、终止进程、磁盘破坏、破坏性 Git 操作，以及无法静态检查的间接执行和文件重定向；不枚举普通命令或一般写入子命令。支持 if/then/else、循环、case、分组、分号、换行、&&/||、管道、引号内查询表达式和 2>&1、2>/dev/null，检查各分支中的实际命令。黑名单是尽力检查，不保证命令只读；你应确认命令用于检查，修改状态时用 run_shell。默认在当前 workdir 执行，可传 cwd 覆盖。执行超时会终止进程组，不转后台；预计耗时的任务用需要审批的 start_process。',
+    description: '检查用途 shell：执行短检查命令，无需工具审批。搜索代码和文件优先用 rg，查询 JSON 用 jq。支持常见 shell 组合，例如 `if test -f package.json; then cat package.json; else ls; fi` 和 `cd src && rg -n "foo" | head -20`。仅用少数高危规则提醒明显误操作，如删除、提权、磁盘破坏和破坏性 Git 操作；命中时拒绝本次执行，改用 run_shell 审批。检查采用轻量扫描，不验证 shell 语法，不保证识别复杂语法、动态命令或脚本内部的危险行为，也不保证只读。放行后直接在 Host 执行环境运行，本工具不提供额外沙箱。你应确认命令用于检查；主动修改状态时用 run_shell，长任务用 start_process。默认在当前 workdir 执行，可传 cwd 覆盖。超时会终止进程组，不转后台。',
     admit: classifyReadOnlyShellCommand,
   });
 }

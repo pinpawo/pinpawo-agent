@@ -1,70 +1,16 @@
-/**
- * Heuristic guard against obvious high-risk mistakes, not a shell parser or
- * sandbox. Unknown commands and indirect code are trusted. Intentional writes
- * belong in run_shell; admission never proves a command read-only.
- */
-const DANGEROUS_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
-export type ReadOnlyShellVerdict = { allowed: true } | { allowed: false; reason: string };
-type Token = { text: string; kind: 'word' | 'syntax' | 'operator' };
+import { parse } from 'shell-quote';
 
-/** Keep quote provenance: a quoted keyword is an ordinary command/argument. */
-function tokenize(command: string): Token[] {
-  const tokens: Token[] = [];
-  let text = '';
-  let quoted = false;
-  let quote = '';
-  const flush = () => {
-    if (text !== '' || quoted) tokens.push({ text, kind: quoted ? 'word' : 'syntax' });
-    text = ''; quoted = false;
-  };
-  for (let i = 0; i < command.length; i += 1) {
-    const c = command[i];
-    if ((c === "'" || c === '"') && (!quote || quote === c)) {
-      quote = quote ? '' : c;
-      quoted = true;
-      continue;
-    }
-    if (c === '\\' && quote !== "'") {
-      const next = command[++i];
-      if (next === undefined) break;
-      if (next !== '\n') {
-        // Inside double quotes, backslash only escapes these four characters.
-        if (quote === '"' && !'$`"\\'.includes(next)) text += '\\';
-        text += next; quoted = true;
-      }
-      continue;
-    }
-    if (quote) { text += c; continue; }
-    if (c === '#' && text === '' && !quoted) {
-      while (i < command.length && command[i] !== '\n') i += 1;
-      if (i < command.length) tokens.push({ text: '\n', kind: 'operator' });
-      continue;
-    }
-    if ('<>'.includes(c)) {
-      if (/^\d+$/.test(text) && !quoted) { text = ''; }
-      flush();
-      const redirect = command.slice(i).match(/^[<>]+(?:&[0-9-]+)?/)![0];
-      tokens.push({ text: redirect, kind: 'operator' });
-      i += redirect.length - 1; continue;
-    }
-    if (';|&\n()'.includes(c)) {
-      flush();
-      const operator = command.slice(i).match(/^(;;&|;;|;&)/)?.[0] ?? c;
-      tokens.push({ text: operator, kind: 'operator' });
-      i += operator.length - 1; continue;
-    }
-    if (/\s/.test(c)) { flush(); continue; }
-    text += c;
-  }
-  flush();
-  return tokens;
-}
+/** A small command-head heuristic, not shell validation or a security boundary. */
+const DANGEROUS_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
+const SEPARATORS = new Set(['|', '&&', '||', ';', '&', '|&']);
+export type ReadOnlyShellVerdict = { allowed: true } | { allowed: false; reason: string };
 
 const basename = (word: string = '') => word.replace(/^.*\//, '');
 const assignment = (word: string = '') => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
 
 function checkCommand(words: string[]): string | undefined {
   const tokens = [...words];
+  while (['if', 'then', 'else', 'elif', '!'].includes(tokens[0])) tokens.shift();
   // Resolve transparent wrappers repeatedly; quoted arguments remain arguments.
   while (true) {
     while (assignment(tokens[0])) tokens.shift();
@@ -81,6 +27,14 @@ function checkCommand(words: string[]): string | undefined {
   if ((DANGEROUS_COMMANDS.has(name) || /^mkfs\./.test(name))
     && !tokens.slice(0, tokens.includes('--') ? tokens.indexOf('--') : tokens.length)
       .some((arg) => ['--help', '--version'].includes(arg))) return `命令 "${name}" 需要审批`;
+  if (name === 'kill') {
+    const flags = tokens.slice(0, tokens.includes('--') ? tokens.indexOf('--') : tokens.length);
+    if (flags.some((arg, index) => /^-(?:9|(?:sig)?kill)$/i.test(arg)
+      || /^--signal=(?:9|(?:sig)?kill)$/i.test(arg)
+      || (['-s', '--signal'].includes(arg) && /^(?:9|(?:sig)?kill)$/i.test(flags[index + 1] ?? '')))) {
+      return 'kill 强制终止需要审批';
+    }
+  }
   if (name === 'git') {
     let index = 0;
     while (tokens[index]?.startsWith('-')) {
@@ -95,37 +49,29 @@ function checkCommand(words: string[]): string | undefined {
   }
 }
 
-/** Scan common command positions without validating or pairing shell grammar. */
+/** Check only heads separated by the operators shell-quote exposes. */
 export function classifyReadOnlyShellCommand(command: string): ReadOnlyShellVerdict {
   if (!command.trim()) return { allowed: false, reason: '空命令' };
+  let tokens: ReturnType<typeof parse<never>>;
+  try {
+    // Never expand from Host env or erase unknown variables into different heads.
+    tokens = parse(command, (name) => '${' + name + '}');
+  } catch {
+    // Syntax validity belongs to the executing shell, not this heuristic.
+    return { allowed: true };
+  }
   let words: string[] = [];
-  let data: '' | 'loop' | 'pattern' | 'test' = '';
-  let redirectTarget = false;
-  const flush = () => { const reason = checkCommand(words); words = []; return reason; };
-  for (const token of tokenize(command)) {
-    const { text, kind } = token;
-    const plain = kind === 'syntax';
-    // Only skip data regions we can recognize locally; no nested grammar stack.
-    if (data === 'test') { if (plain && text === ']]') data = ''; continue; }
-    if (data === 'pattern') { if ((text === ')' && kind === 'operator') || (plain && text === 'esac')) data = ''; continue; }
-    if (kind === 'operator') {
-      if (/^[<>]/.test(text)) { redirectTarget = !text.includes('&'); continue; }
-      const reason = flush();
-      if (reason) return { allowed: false, reason };
-      if (data === 'loop' && [';', '\n'].includes(text)) data = '';
-      if ([';;', ';&', ';;&'].includes(text)) data = 'pattern';
+  for (const token of tokens) {
+    if (typeof token === 'string') { words.push(token); continue; }
+    if ('comment' in token) break;
+    if (!SEPARATORS.has(token.op)) {
+      words.push(token.op === 'glob' && 'pattern' in token ? token.pattern : token.op);
       continue;
     }
-    if (redirectTarget) { redirectTarget = false; continue; }
-    if (data === 'loop') continue;
-    if (!words.length && plain) {
-      if (['if', 'then', 'else', 'elif', 'while', 'until', 'do', 'done', 'fi', '{', '}', '!', 'time', '-p'].includes(text)) continue;
-      if (text === 'for' || text === 'in') { data = 'loop'; continue; }
-      if (text === 'case') { data = 'pattern'; continue; }
-      if (text === '[[') { data = 'test'; continue; }
-    }
-    words.push(text);
+    const reason = checkCommand(words);
+    if (reason) return { allowed: false, reason };
+    words = [];
   }
-  const reason = flush();
+  const reason = checkCommand(words);
   return reason ? { allowed: false, reason } : { allowed: true };
 }

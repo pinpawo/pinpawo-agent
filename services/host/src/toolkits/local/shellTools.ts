@@ -281,7 +281,7 @@ export function createStartProcessTool(shell: ShellRS) {
 export function createInspectShellTool(shell: ShellRS) {
   return createRunShellTool(shell, {
     name: 'inspect_shell',
-    description: '检查用途 shell：执行短检查命令，无需工具审批。搜索代码和文件优先用 rg，查询 JSON 用 jq。支持常见 shell 组合，例如 `if test -f package.json; then cat package.json; else ls; fi` 和 `cd src && rg -n "foo" | head -20`。仅用少数高危规则提醒明显误操作，如删除、提权、磁盘破坏和破坏性 Git 操作；命中时拒绝本次执行，改用 run_shell 审批。检查采用轻量扫描，不验证 shell 语法，不保证识别复杂语法、动态命令或脚本内部的危险行为，也不保证只读。放行后直接在 Host 执行环境运行，本工具不提供额外沙箱。你应确认命令用于检查；主动修改状态时用 run_shell，长任务用 start_process。默认在当前 workdir 执行，可传 cwd 覆盖。超时会终止进程组，不转后台。',
+    description: '检查用途 shell：执行短检查命令，无需工具审批。搜索代码和文件优先用 rg，查询 JSON 用 jq。支持常见 shell 组合，例如 `if test -f package.json; then cat package.json; else ls; fi` 和 `cd src && rg -n "foo" | head -20`。仅用少数高危规则提醒明显误操作，如删除、提权、磁盘破坏和破坏性 Git 操作；命中时拒绝本次执行，改用 run_shell 审批。由 shell-quote 分词，仅检查 |、&&、||、; 等连接符分隔的命令头及简单 if/then/else 前缀；包括 kill 的 SIGKILL 强制终止。不验证语法，不逐条审查完整脚本；换行、注释跨行、前置文件描述符、循环和嵌套语法可能漏检，quoted 关键字可能误判。变量保留为占位符，不读取 Host 环境展开。动态命令与脚本内部行为不保证识别，也不保证只读。放行后直接在 Host 执行环境运行，本工具不提供额外沙箱。你应确认命令用于检查；主动修改状态时用 run_shell，长任务用 start_process。默认在当前 workdir 执行，可传 cwd 覆盖。超时会终止进程组，不转后台。',
     admit: classifyReadOnlyShellCommand,
   });
 }

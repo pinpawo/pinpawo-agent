@@ -1,5 +1,6 @@
 import type { PetInvocationScope } from './petInvocationContext';
 import type {
+  PendingInterruptProjection,
   AgentClientMessage,
   AgentServerMessage,
 } from '@pinpawo/agent-session';
@@ -59,6 +60,8 @@ export type PetDispatchLifecycleEvent = {
   error?: string;
   sessionId?: string;
   reply?: string;
+  scope?: PetInvocationScope;
+  pendingInterrupt?: PendingInterruptProjection;
 };
 
 export interface PetDispatchPort {

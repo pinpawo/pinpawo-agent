@@ -32,8 +32,9 @@ async function fixture(root: string, pets = ['one']) {
     const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
     const graph = new StateGraph(State).addNode('reply', async (state) => {
       const last = state.messages.at(-1)!.text;
+      if (last === 'pause') interrupt({ kind: 'pause_task' });
       if (last === 'approval') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'approval',
-        view: { kind: 'plain', body: 'Authorize?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        view: { kind: 'plain', body: 'Authorize?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' }, effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
       }) });
       active++; maxActive = Math.max(maxActive, active);
       try {
@@ -130,6 +131,14 @@ test('waiting target is skipped; background execution does not pollute active TU
     const stop = host.resident.dispatch.onDispatchLifecycle(e => { if (e.state === 'waiting') waiting.push(e.sessionId!); });
     await waitFor(() => waiting.length === 1);
     const binding = f.channel.service.getBinding(a, 'one')!;
+    await waitFor(() => f.channel.service.readInterruptNotifications(a).notifications.length === 1);
+    const notice = f.channel.service.readInterruptNotifications(a).notifications[0]!;
+    assert.equal(notice.source.sessionId, binding.sessionId);
+    assert.equal(notice.pendingInterrupt.payload.kind, 'human_review');
+    assert.ok(!JSON.stringify(notice).includes('graph.authorize_tool_action'));
+    const read = f.channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context');
+    assert.ok(read);
+    assert.ok(!JSON.stringify(f.channel.service.readContext(a)).includes('Authorize?'));
     await f.channel.execute(a, { petId: 'one', body: 'after approval' });
     await f.channel.execute(b, { petId: 'one', body: 'other session' });
     await waitFor(() => outputs(f, b).length === 1);
@@ -213,7 +222,33 @@ test('failed first admission keeps the reserved identity for retry; completed ou
     assert.deepEqual(targets, [reserved.sessionId, reserved.sessionId]);
     assert.equal(channel.service.getBinding(id, 'one')!.registered, true);
     const source = { petId: 'one', sessionId: reserved.sessionId, invocationId: 'completed' };
-    const first = channel.service.recordOutput(source, 'Which destination?');
-    assert.deepEqual(channel.service.recordOutput(source, 'Which destination?'), first);
+    const first = channel.service.recordOutput(id, source, 'Which destination?');
+    assert.deepEqual(channel.service.recordOutput(id, source, 'Which destination?'), first);
   } finally { await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('a bound session alone does not publish; scope mismatch reports failure; pause_task is a read-only notice', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-destination-'));
+  const f = await fixture(root);
+  const events: Array<{ type: string; payload?: unknown }> = [];
+  f.studio.subscribe(event => { events.push(event); });
+  try {
+    assert.ok(!f.channel.toolkits.flatMap(t => t.tools).some(t => t.tool.name === 'channel_send_message'));
+    const a = f.channel.service.createChannel(goal, human).channelId;
+    const b = f.channel.service.createChannel(goal, human).channelId;
+    const { binding } = await f.channel.execute(a, { petId: 'one', body: 'ask' });
+    await waitFor(() => outputs(f, a).length === 1);
+    const receipt = await f.studio.dispatch({ petId: 'one', request: 'not public', session: { id: binding.sessionId }, metadata: { channelId: a } });
+    await waitFor(() => events.some(e => e.type === 'dispatch.completed' && (e.payload as any).invocationId === receipt.invocationId));
+    assert.equal(outputs(f, a).length, 1);
+    await f.studio.dispatch({ petId: 'one', request: 'wrong destination', session: { id: binding.sessionId }, scope: { namespace: 'channel', id: b } });
+    await waitFor(() => events.some(e => e.type === 'channel.delivery_failed'));
+    assert.equal(outputs(f, b).length, 0);
+    assert.equal(outputs(f, a).length, 1);
+    await f.channel.execute(b, { petId: 'one', body: 'pause' });
+    await waitFor(() => f.channel.service.readInterruptNotifications(b).notifications.length === 1);
+    assert.deepEqual(f.channel.service.readInterruptNotifications(b).notifications[0]?.pendingInterrupt.payload, { kind: 'pause_task' });
+    assert.equal(outputs(f, b).length, 0);
+    assert.ok(!JSON.stringify(f.channel.service.readContext(b)).includes('interruptId'));
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });

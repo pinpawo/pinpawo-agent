@@ -55,8 +55,8 @@ Channel 按 (petId,sessionId,invocationId) 去重保存完成回复及来源，�
 Studio metadata 仍仅为相关数据，不能提供工具身份。通用 scope:{namespace,id} 明确传到
 Host；Host admission 复制 scope，运行时以 resident Pet 身份提供 petId、dispatchId 和可选
 sessionId。ALS 上下文只在本轮执行中有效，结束即失效。模型不能设置作者或当前 Channel。
-显式 session 中工具发言附带 Host 来源，并检查其 Channel pair 绑定；普通回复来源来自
-Host dispatch 生命周期。HTTP 作者为配置 operatorId（默认 studio-operator），代表本地
+模型仅保留读取上下文工具；普通回复来源来自本次带 Channel scope 的
+Host dispatch 生命周期，并检查其 Channel pair 绑定。HTTP 作者为配置 operatorId（默认 studio-operator），代表本地
 Studio Bearer 权限，不能据此识别不同自然人。本实现不隔离恶意 Node 插件。
 
 f531a14 的审批关联表、消费集合及恢复包装已完整撤除。授权 human_review 仍由用户通过
@@ -69,7 +69,7 @@ TUI 审批恢复不会继承 Channel ALS，恢复执行中的 Channel 工具目�
 
 Studio Bearer 保护 GET /channels、GET /channels/context，POST /channels、
 /channels/revisions、/channels/messages、/channels/execute；历史支持 after/limit。
-模型工具 channel_read_context / channel_send_message 不接受作者或 Channel 参数。
+模型工具 channel_read_context 不接受作者或 Channel 参数；普通公开回复自动保存。
 默认模板不启用该插件；显式启用配置为 {"id":"@pinpawo-plugin/channel"}，Pet capability
 的 uses 中按需加入 channel。
 
@@ -89,3 +89,20 @@ replyTo、重启续用、同 Pet 串行、等待绕行、原 TUI 授权恢复、
 执行 npm test -w @pinpawo-plugin/channel、npm test -w @pinpawo-tests/studio-e2e；
 同时运行相关 Host 测试与聚合 typecheck/test/build。构建产物应另外检验跨包导出可用。
 本轮只提交本地代码，不推送、创建 PR、合并或部署。
+
+### 本轮收敛：completed / waiting（2026-10-03）
+
+普通对话仅通过 `dispatch.completed.reply` 保存，包括 Supervisor 的自然追问。
+移除模型 `channel_send_message`；operator HTTP 消息写入保持不变。Host 只发布本轮新的公开 AI reply，
+不把最后工具结果、私有 lane 或旧 checkpoint 回复当作答复。
+输出依据 Host 捕获的本次 scope，Session 绑定仅校验目的地，不再反向推导发布意图。
+
+`dispatch.waiting` 直接携带既有 `PendingInterruptProjection`，捕获发生在活动 Session 的显示过滤之前。
+schema v3 增加 channel_interrupt_notifications；Channel 将该公开投影保存为独立的只读历史通知，`GET /channels/interrupts?channelId=...` 分页读取；
+通知不进入普通消息历史、`channel_read_context` 或自动组装的 replyTo 请求。
+通知中的 source 提供 Pet/Session 定位，需在原 TUI 选择对应 Session 处理；没有新增 Channel UI 或深链接。
+这是发生过的 waiting 通知，不表示当前仍待审批。options 不作为 Channel 操作入口，
+不复制 checkpoint、审批状态或恢复映射；TUI resume 仍无 Channel 回程。
+
+`channel.delivery_failed` 加错误日志报告异步保存失败；它不把 dispatch.completed 改成执行失败。
+总线没有持久补投，断线/进程退出可能丢通知，此轮不引入 outbox。

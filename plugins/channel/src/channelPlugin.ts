@@ -70,17 +70,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     service.confirmBinding(binding);
     return { message, receipt, binding: service.getBinding(channelId, petId)! };
   }
-  const sendMessage = tool(async (input) => {
-    const { channelId, author } = requireChannelInvocation();
-    const invocation = readPetInvocationContext()!;
-    return JSON.stringify(send(channelId, input, author, invocation.sessionId ? {
-      petId: invocation.petId, sessionId: invocation.sessionId, invocationId: invocation.dispatchId,
-    } : undefined));
-  }, {
-    name: 'channel_send_message',
-    description: '在本次执行所属 Channel 发言，记录交付、反馈或问题。可引用同 Channel 消息和带版本的产物；mentions 是显式 Pet 身份，正文中的 @ 只是文本。当前基础版本只保存和通知，不启动接收者。作者及 Channel 由 Host 提供。',
-    schema: channelMessageSchema,
-  });
   const readContext = tool(async (input) => {
     const { channelId } = requireChannelInvocation();
     return JSON.stringify(service.readContext(channelId, input));
@@ -91,10 +80,9 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   });
   const toolkit: AgentToolkit = {
     name: 'channel',
-    description: '长期目标 Channel 的上下文与统一发言接口。',
+    description: '读取长期目标 Channel 上下文；本轮公开答复由 Host 自动保存。',
     tools: [
       { tool: readContext, operation: { title: '读取 Channel' } },
-      { tool: sendMessage, operation: { title: 'Channel 发言' } },
     ],
   };
   return {
@@ -103,11 +91,28 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       service.init();
       context = host;
       host.subscribe((event) => {
-        if (event.source !== 'resident-pet' || event.type !== 'dispatch.completed') return;
-        const value = z.object({ petId: z.string(), sessionId: z.string(), invocationId: z.string(), reply: z.string().trim().min(1) }).safeParse(event.payload);
-        if (value.success) {
-          const { reply, ...source } = value.data;
-          service.recordOutput(source, reply);
+        if (event.source !== 'resident-pet' || !['dispatch.completed', 'dispatch.waiting'].includes(event.type)) return;
+        // Scope is captured by Host for this invocation, never inferred from a bound session.
+        const envelope = z.object({ scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }) }).safeParse(event.payload);
+        if (!envelope.success) return;
+        const channelId = envelope.data.scope.id;
+        try {
+          const { petId, sessionId, invocationId } = z.object({ petId: z.string().min(1), sessionId: z.string().min(1), invocationId: z.string().min(1) }).parse(event.payload);
+          const source = { petId, sessionId, invocationId };
+          if (event.type === 'dispatch.completed') {
+            const { reply } = z.object({ reply: z.string() }).parse(event.payload);
+            if (reply.trim()) service.recordOutput(channelId, source, reply);
+          } else {
+            const { pendingInterrupt } = z.object({ pendingInterrupt: z.unknown() }).parse(event.payload);
+            service.recordInterrupt(channelId, source, pendingInterrupt);
+          }
+        } catch (error) {
+          // Event delivery is asynchronous. Expose persistence failure to observers;
+          // a completed run is not a receipt for successful Channel storage.
+          const identity = z.object({ petId: z.string().optional(), sessionId: z.string().optional(), invocationId: z.string().optional() }).safeParse(event.payload);
+          host.notify({ type: 'channel.delivery_failed', payload: { channelId, ...(identity.success ? identity.data : {}), eventType: event.type,
+            error: error instanceof Error ? error.message : String(error) } });
+          throw error;
         }
       });
       unsubscribe = service.subscribe((entry) => {
@@ -130,6 +135,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         });
         const remove = [
           register('GET', '/channels', ({ url }) => ({ kind: 'json', body: service.listChannels(page(url)) })),
+          register('GET', '/channels/interrupts', ({ url }) => ({ kind: 'json', body: service.readInterruptNotifications(url.searchParams.get('channelId') ?? '', page(url)) })),
           register('GET', '/channels/context', ({ url }) => ({ kind: 'json', body: service.readContext(url.searchParams.get('channelId') ?? '', page(url)) })),
           register('POST', '/channels', async ({ readJson }) => ({ kind: 'json', status: 201, body: service.createChannel(channelGoalSchema.parse(await readJson()), operator) })),
           register('POST', '/channels/revisions', async ({ readJson }) => {

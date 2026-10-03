@@ -1,3 +1,4 @@
+import { parsePendingInterruptProjection, type PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -47,6 +48,11 @@ export type ChannelMessage = z.infer<typeof channelMessageSchema> & {
   kind: 'message'; channelId: string; sequence: number; messageId: string;
   author: ChannelAuthor; occurredAt: string; revision: number;
 };
+/** Historical observation only, never an authoritative approval state. */
+export type ChannelInterruptNotification = {
+  sequence: number; channelId: string; source: ChannelMessageSource;
+  occurredAt: string; pendingInterrupt: PendingInterruptProjection;
+};
 export type ChannelEntry = ChannelRevision | ChannelMessage;
 export type ChannelPage = { entries: ChannelEntry[]; nextAfter: number; hasMore: boolean };
 
@@ -67,7 +73,7 @@ export class ChannelService {
       if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
       db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
       const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (version !== 0 && version !== 1 && version !== 2) throw new Error(`Unsupported Channel schema version ${version}.`);
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error(`Unsupported Channel schema version ${version}.`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS channel_entries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +94,14 @@ export class ChannelService {
           message_id TEXT NOT NULL,
           PRIMARY KEY(pet_id, session_id, invocation_id)
         );
-        PRAGMA user_version=2;
+        CREATE TABLE IF NOT EXISTS channel_interrupt_notifications (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT, channel_id TEXT NOT NULL,
+          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
+          interrupt_id TEXT NOT NULL, data TEXT NOT NULL,
+          UNIQUE(pet_id, session_id, invocation_id, interrupt_id)
+        );
+        CREATE INDEX IF NOT EXISTS channel_interrupt_history ON channel_interrupt_notifications(channel_id, sequence);
+        PRAGMA user_version=3;
       `);
       this.db = db;
     } catch (error) { db.close(); throw error; }
@@ -220,9 +233,13 @@ export class ChannelService {
       .run(identifier.parse(binding.channelId), binding.petId, binding.sessionId);
     if (result.changes !== 1) throw new Error('Channel session binding changed.');
   }
-  recordOutput(source: ChannelMessageSource, body: string): ChannelMessage | null {
-    const binding = this.findBinding(source.petId, source.sessionId);
-    if (!binding) return null;
+  private requireOutputBinding(channelId: string, source: ChannelMessageSource): ChannelSessionBinding {
+    const binding = this.getBinding(channelId, source.petId);
+    if (!binding || binding.sessionId !== source.sessionId) throw new Error('Output destination does not match Channel binding.');
+    return binding;
+  }
+  recordOutput(channelId: string, source: ChannelMessageSource, body: string): ChannelMessage {
+    const binding = this.requireOutputBinding(channelId, source);
     let created = false;
     const entry = this.transaction(() => {
       const saved = this.database().prepare('SELECT message_id FROM channel_outputs WHERE pet_id=? AND session_id=? AND invocation_id=?')
@@ -239,6 +256,30 @@ export class ChannelService {
       return message;
     });
     return created ? this.publish(entry) : entry;
+  }
+  recordInterrupt(channelId: string, source: ChannelMessageSource, value: unknown): ChannelInterruptNotification {
+    const binding = this.requireOutputBinding(channelId, source);
+    const pendingInterrupt = parsePendingInterruptProjection(value);
+    if (!pendingInterrupt) throw new Error('Invalid public pending interrupt projection.');
+    return this.transaction(() => {
+      const data = { channelId: binding.channelId, source, occurredAt: new Date().toISOString(), pendingInterrupt };
+      this.database().prepare(`INSERT OR IGNORE INTO channel_interrupt_notifications
+        (channel_id, pet_id, session_id, invocation_id, interrupt_id, data) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(binding.channelId, source.petId, source.sessionId, source.invocationId, pendingInterrupt.interruptId, JSON.stringify(data));
+      const row = this.database().prepare(`SELECT sequence, data FROM channel_interrupt_notifications
+        WHERE pet_id=? AND session_id=? AND invocation_id=? AND interrupt_id=?`)
+        .get(source.petId, source.sessionId, source.invocationId, pendingInterrupt.interruptId) as { sequence: number; data: string };
+      return { ...JSON.parse(row.data), sequence: row.sequence };
+    });
+  }
+  /** Operator-only history: deliberately absent from readContext and message history. */
+  readInterruptNotifications(channelId: string, page: unknown = {}) {
+    const { after, limit } = channelPageSchema.parse(page);
+    const channel = this.getChannel(channelId);
+    const rows = this.database().prepare(`SELECT sequence, data FROM channel_interrupt_notifications
+      WHERE channel_id=? AND sequence>? ORDER BY sequence LIMIT ?`).all(channel.channelId, after, limit + 1) as { sequence: number; data: string }[];
+    const notifications: ChannelInterruptNotification[] = rows.slice(0, limit).map(row => ({ ...JSON.parse(row.data), sequence: row.sequence }));
+    return { notifications, nextAfter: notifications.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
   }
   readHistory(channelId: string, page: unknown = {}): ChannelPage {
     const { after, limit } = channelPageSchema.parse(page);

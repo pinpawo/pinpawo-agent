@@ -1388,3 +1388,31 @@ test('committed Supervisor reply uses one message identity for delta and complet
     ['message.delta', reply.id, 'Inspection\ncomplete.'], ['message.completed', reply.id, 'Inspection\ncomplete.'],
   ]);
 });
+
+test('final reply accepts a new public AI question but excludes tools, private work and old checkpoint text', async () => {
+  const old = new AIMessage({ id: 'old', content: 'Previous answer' });
+  const cases = [
+    { message: new AIMessage({ id: 'question', content: 'Which destination?' }), reply: 'Which destination?' },
+    { message: new ToolMessage({ content: 'private tool output', tool_call_id: 'tool' }), reply: '' },
+    { message: new HumanMessage('user input'), reply: '' },
+    { message: new AIMessage({ content: 'private reasoning', additional_kwargs: { pinpawo: { lane: 'supervisor' } } }), reply: '' },
+    { message: new AIMessage({ content: 'bookkeeping', additional_kwargs: { pinpawo: { synthetic: true } } }), reply: '' },
+    { message: new AIMessage({ content: 'tool request', tool_calls: [{ id: 'call', name: 'tool', args: {} }] }), reply: '' },
+    { message: old, reply: '' },
+  ];
+  for (const { message, reply } of cases) {
+    const events: AgentRuntimeEvent[] = [];
+    const result = await runAgentSessionTurn({
+      request: { kind: 'user_message', requestId: 'public-check', message: 'hello' },
+      setup: { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup,
+      graphService: {
+        readThreadState: async () => ({ messages: [old], pendingInterrupt: null, acceptsResume: false }),
+        streamEvents: () => (async function* () { yield protocolEvent('values', { messages: [message] }); })(),
+      } as unknown as HostGraphService,
+      isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+    });
+    assert.deepEqual(result, { status: 'completed', reply });
+    const completed = events.find(event => event.type === 'message.completed');
+    assert.equal(completed?.type === 'message.completed' ? completed.text : undefined, reply);
+  }
+});

@@ -1,11 +1,11 @@
+import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import { readReplyResultReferences } from '../conversation/transcriptProjection';
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
   NamespacedProtocolToolEventReader,
-  projectHumanReviewRequest,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   readPendingInterrupt,
@@ -101,19 +101,10 @@ function emitInterruptRequested(params: {
   requestId: string;
   emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
-  const { interruptId, payload } = params.pendingInterrupt;
   params.emitEvent({
     type: 'interrupt.requested',
     requestId: params.requestId,
-    pendingInterrupt: {
-      interruptId,
-      payload: payload.kind === 'human_review'
-        ? {
-            kind: 'human_review',
-            interactions: payload.reviews.map(projectHumanReviewRequest),
-          }
-        : { kind: 'pause_task' },
-    },
+    pendingInterrupt: projectPendingInterrupt(params.pendingInterrupt),
   });
 }
 
@@ -516,11 +507,15 @@ export async function runAgentSessionTurn(
     return { status: 'waiting' };
   }
 
-  const streamedFinalReply = finalMessages.length > 0
-    ? readFinalMessageText(finalMessages.at(-1) ?? {})
-    : '';
-  const checkpointFinalReply = readFinalMessageText(finalThreadState.messages.at(-1) ?? {});
-  const finalReply = streamedFinalReply || checkpointFinalReply;
+  // Only new public AI text can become a conversation reply. Tool results,
+  // private lanes and an old checkpoint reply are not publishable fallbacks.
+  const finalMessage = finalMessages.at(-1) ?? finalThreadState.messages.at(-1);
+  const metadata = finalMessage?.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
+  const isOldMessage = finalMessage && initialThreadState.messages.some(message =>
+    message === finalMessage || (!!message.id && message.id === finalMessage.id));
+  const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
+    && !finalMessage.tool_calls?.length && !metadata?.lane && !metadata?.synthetic && !isOldMessage
+    ? readFinalMessageText(finalMessage) : '';
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const finalUsage = readRunTokenUsage({
     initialMessages: initialThreadState.messages,
@@ -533,10 +528,10 @@ export async function runAgentSessionTurn(
     messageId: streamedReplyMessageId || requestId,
     role: 'assistant',
     text: finalReply,
-    resultReferences: readReplyResultReferences(
+    resultReferences: finalReply ? readReplyResultReferences(
       finalThreadState.messages.length ? finalThreadState.messages : finalMessages,
-      (finalThreadState.messages.length ? finalThreadState.messages : finalMessages).at(-1),
-    ),
+      finalMessage,
+    ) : [],
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
 

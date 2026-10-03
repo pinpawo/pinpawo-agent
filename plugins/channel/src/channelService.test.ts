@@ -129,7 +129,7 @@ test('pair reservation and output identity are shared across SQLite connections 
     const old = one.sendMessage(channel.channelId, { body: 'existing history' }, human);
     one.close();
     const previous = new DatabaseSync(file);
-    previous.exec('DROP TABLE channel_sessions; DROP TABLE channel_outputs; PRAGMA user_version=1;');
+    previous.exec('DROP TABLE channel_sessions; DROP TABLE channel_outputs; DROP TABLE channel_interrupt_notifications; PRAGMA user_version=1;');
     previous.close();
     one.init(); two.init();
     const binding = one.reserveBinding(channel.channelId, 'executor', () => 'executor:12345678');
@@ -139,8 +139,8 @@ test('pair reservation and output identity are shared across SQLite connections 
     const other = one.createChannel(goal, human);
     assert.throws(() => two.reserveBinding(other.channelId, 'executor', () => binding.sessionId), /UNIQUE/);
     const source = { petId: 'executor', sessionId: binding.sessionId, invocationId: 'turn' };
-    const output = one.recordOutput(source, 'Which destination?')!;
-    assert.deepEqual(two.recordOutput(source, 'Which destination?'), output);
+    const output = one.recordOutput(channel.channelId, source, 'Which destination?')!;
+    assert.deepEqual(two.recordOutput(channel.channelId, source, 'Which destination?'), output);
     assert.throws(() => one.sendMessage(other.channelId, { body: 'wrong scope' }, pet, source), /binding/);
     assert.deepEqual(one.getMessage(channel.channelId, old.messageId), old);
   } finally { one.close(); two.close(); rmSync(root, { recursive: true, force: true }); }
@@ -157,7 +157,7 @@ test('whitespace Channel aliases share one binding and keep output history and r
     assert.deepEqual(service.getBinding(alias, pet.id), binding);
     assert.deepEqual(service.listBindings(alias), [binding]);
     service.confirmBinding({ ...binding, channelId: alias });
-    const output = service.recordOutput({ petId: pet.id, sessionId: binding.sessionId, invocationId: 'question' }, 'Which destination?')!;
+    const output = service.recordOutput(alias, { petId: pet.id, sessionId: binding.sessionId, invocationId: 'question' }, 'Which destination?')!;
     assert.equal(output.channelId, channel.channelId);
     assert.equal(service.readHistory(channel.channelId).entries.at(-1)?.sequence, output.sequence);
     assert.deepEqual(service.getMessage(alias, output.messageId), output);
@@ -165,4 +165,42 @@ test('whitespace Channel aliases share one binding and keep output history and r
     assert.deepEqual(service.getMessage(channel.channelId, reply.messageId), reply);
     assert.equal(service.readContext(alias).sessions.length, 1);
   } finally { service.close(); }
+});
+
+test('interrupt notifications reuse the public projection, persist and deduplicate without entering model context', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-interrupt-'));
+  const file = path.join(root, 'channels.sqlite');
+  let service = new ChannelService(file); service.init();
+  try {
+    const channelId = service.createChannel(goal, human).channelId;
+    const other = service.createChannel(goal, human).channelId;
+    const binding = service.reserveBinding(channelId, pet.id, () => 'executor:12345678');
+    const oldMessage = service.sendMessage(channelId, { body: 'existing v2 message' }, human);
+    service.close();
+    const previous = new DatabaseSync(file);
+    previous.exec('DROP TABLE channel_interrupt_notifications; PRAGMA user_version=2;');
+    previous.close();
+    service.init();
+    assert.deepEqual(service.getMessage(channelId, oldMessage.messageId), oldMessage);
+    const source = { petId: pet.id, sessionId: binding.sessionId, invocationId: 'review-turn' };
+    const pending = { interruptId: 'review-id', payload: { kind: 'human_review', interactions: [{
+      interactionId: 'review', schemaVersion: 2,
+      view: { kind: 'diff', title: 'Review change', patch: 'private-review-patch', summary: 'Change' },
+      options: [{ id: 'approve', label: 'Approve', batchSubmission: 'defer' }],
+    }] } };
+    const saved = service.recordInterrupt(channelId, source, pending);
+    assert.deepEqual(service.recordInterrupt(channelId, source, pending), saved);
+    assert.throws(() => service.recordInterrupt(other, source, pending), /binding/);
+    assert.throws(() => service.recordOutput(other, source, 'misdirected'), /binding/);
+    const unsafe = structuredClone(pending) as any;
+    unsafe.payload.interactions[0].options[0].effects = [{ type: 'graph.authorize_tool_action', scope: 'thread' }];
+    assert.throws(() => service.recordInterrupt(channelId, source, unsafe), /Invalid/);
+    service.recordInterrupt(channelId, { ...source, invocationId: 'paused' }, { interruptId: 'pause-id', payload: { kind: 'pause_task' } });
+    service.close(); service = new ChannelService(file); service.init();
+    const page = service.readInterruptNotifications(channelId, { limit: 1 });
+    assert.deepEqual(page.notifications, [saved]); assert.equal(page.hasMore, true);
+    assert.equal(service.readInterruptNotifications(channelId, { after: page.nextAfter }).notifications[0]?.pendingInterrupt.payload.kind, 'pause_task');
+    assert.ok(!JSON.stringify(service.readContext(channelId)).includes('private-review-patch'));
+    assert.equal(service.readHistory(channelId).entries.length, 2);
+  } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
 });

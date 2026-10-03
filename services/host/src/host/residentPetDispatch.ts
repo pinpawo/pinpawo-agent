@@ -1,3 +1,4 @@
+import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
@@ -64,11 +65,15 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       const target = suppliedSession
         ? sessions.ensureDispatchSession(petId, suppliedSession.id, suppliedSession.create === true)
         : undefined;
+      let pendingInterrupt: PendingInterruptProjection | undefined;
       const publishRuntimeEvent: typeof publishActiveSessionEvent = (event) => {
+        if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
         if (!target || sessions.getActiveSessionId(petId) === target.id) publishActiveSessionEvent(event);
       };
       const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
-        ...event, ...(target ? { sessionId: target.id } : {}),
+        ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
+        ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
+        ...(target ? { sessionId: target.id } : {}),
       });
       const readTargetSetup = async () => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(petId), target!.id);
 

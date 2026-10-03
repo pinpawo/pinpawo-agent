@@ -1,4 +1,4 @@
-import { PetInvocationApprovals } from './host/petInvocationApprovals';
+import { withoutPetInvocationContext } from './host/petInvocationContext';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
 import { runAgentSessionTurn } from './agent/chatSessionAdapter';
@@ -224,13 +224,12 @@ export async function createResidentPetRuntime(
     }
   };
   const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
-  const invocationApprovals = new PetInvocationApprovals();
   const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    runAgentTurn: (input) => invocationApprovals.runInteraction(input, runAgentTurn),
+    runAgentTurn: (input) => withoutPetInvocationContext(() => runAgentTurn(input)),
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
     activeRuns,
     interruptHostRun: (requestId) => {
@@ -255,7 +254,6 @@ export async function createResidentPetRuntime(
       if (peer) await peerHandlers.onClose(peer);
       await peerHandlers.onClose(hostPeer);
       await coordinator.close();
-      invocationApprovals.clear();
       messageListeners.clear();
       localHandlers.close();
     })();
@@ -264,7 +262,6 @@ export async function createResidentPetRuntime(
 
   const context: ResidentPetRuntimeContext = {
     runtime,
-    invocationApprovals,
     runtimeDeps,
     graphService,
     runAgentTurn,

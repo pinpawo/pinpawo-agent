@@ -59,8 +59,6 @@ export type InterruptResume = {
 };
 
 export type HostGraphThreadState = {
-  /** Authoritative checkpoint identity used to bind Host-owned pending approvals. */
-  checkpointId?: string;
   messages: BaseMessage[];
   /**
    * The interrupt this thread is waiting on, of any kind, decoded by the
@@ -171,8 +169,6 @@ export class HostGraphService {
     const snapshot = await this.getRawState(setup);
     const values = readSnapshotValues(snapshot);
     return {
-      ...(typeof snapshot.config?.configurable?.checkpoint_id === 'string'
-        ? { checkpointId: snapshot.config.configurable.checkpoint_id } : {}),
       messages: readSnapshotMessages(snapshot),
       pendingInterrupt: readPendingInterrupt(snapshot),
       acceptsResume: acceptsResume(snapshot),

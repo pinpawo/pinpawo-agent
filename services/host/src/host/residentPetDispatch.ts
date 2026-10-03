@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { copyPetInvocationScope } from './petInvocationContext';
+import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
@@ -36,7 +36,6 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
   const context = readResidentPetRuntimeContext(runtime);
   const {
     coordinator,
-    invocationApprovals,
     runtimeDeps,
     graphService,
     runAgentTurn,
@@ -122,7 +121,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               initiator: 'host',
               input: { role: 'user', text: request },
             });
-            const result = await invocationApprovals.runDispatch({
+            const result = await withPetInvocationContext({ petId, dispatchId, scope }, () => runAgentTurn({
               request: { kind: 'user_message', requestId, message: request },
               setup,
               graphService,
@@ -138,7 +137,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               acceptDelegationOperations: (operations) => {
                 overlayInflightDelegationOperations(run, operations);
               },
-            }, { petId, dispatchId, scope }, runAgentTurn);
+            }));
             if (result.status === 'waiting') {
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
               publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });

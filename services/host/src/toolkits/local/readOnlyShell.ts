@@ -11,35 +11,37 @@ type Token = { text: string; kind: 'word' | 'syntax' | 'operator' };
 function tokenize(command: string): Token[] {
   const tokens: Token[] = [];
   let text = '';
-  let started = false;
   let quoted = false;
   let quote = '';
   const flush = () => {
-    if (started) tokens.push({ text, kind: quoted ? 'word' : 'syntax' });
-    text = ''; started = false; quoted = false;
+    if (text !== '' || quoted) tokens.push({ text, kind: quoted ? 'word' : 'syntax' });
+    text = ''; quoted = false;
   };
   for (let i = 0; i < command.length; i += 1) {
     const c = command[i];
-    if (c === "'" && quote !== '"') { quote = quote ? '' : "'"; started = true; quoted = true; continue; }
-    if (c === '"' && quote !== "'") { quote = quote ? '' : '"'; started = true; quoted = true; continue; }
+    if ((c === "'" || c === '"') && (!quote || quote === c)) {
+      quote = quote ? '' : c;
+      quoted = true;
+      continue;
+    }
     if (c === '\\' && quote !== "'") {
       const next = command[++i];
       if (next === undefined) break;
       if (next !== '\n') {
         // Inside double quotes, backslash only escapes these four characters.
         if (quote === '"' && !'$`"\\'.includes(next)) text += '\\';
-        text += next; started = true; quoted = true;
+        text += next; quoted = true;
       }
       continue;
     }
-    if (quote) { text += c; started = true; continue; }
-    if (c === '#' && !started) {
+    if (quote) { text += c; continue; }
+    if (c === '#' && text === '' && !quoted) {
       while (i < command.length && command[i] !== '\n') i += 1;
       if (i < command.length) tokens.push({ text: '\n', kind: 'operator' });
       continue;
     }
     if ('<>'.includes(c)) {
-      if (/^\d+$/.test(text) && !quoted) { text = ''; started = false; }
+      if (/^\d+$/.test(text) && !quoted) { text = ''; }
       flush();
       const redirect = command.slice(i).match(/^[<>]+(?:&[0-9-]+)?/)![0];
       tokens.push({ text: redirect, kind: 'operator' });
@@ -47,12 +49,12 @@ function tokenize(command: string): Token[] {
     }
     if (';|&\n()'.includes(c)) {
       flush();
-      const operator = command.slice(i).match(/^(;;&|;;|;&|&&|\|\||\|&)/)?.[0] ?? c;
+      const operator = command.slice(i).match(/^(;;&|;;|;&)/)?.[0] ?? c;
       tokens.push({ text: operator, kind: 'operator' });
       i += operator.length - 1; continue;
     }
     if (/\s/.test(c)) { flush(); continue; }
-    text += c; started = true;
+    text += c;
   }
   flush();
   return tokens;

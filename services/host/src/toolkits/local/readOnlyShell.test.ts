@@ -128,3 +128,19 @@ test('syntax and indirect code are left to the shell and model, not blanket-revi
   assert.match(verdict.allowed ? '' : verdict.reason, /rm/);
   allows('   ', false);
 });
+
+
+test('token boundaries preserve empty words, quote provenance, comments and redirections', () => {
+  for (const command of [
+    "'' rm file", '"" rm file', "'if' rm file", "i'f' rm file",
+    '"r\\m" file', "echo 'a\\b | rm file'", 'echo "it\'s | rm file"',
+    'echo ok # ; rm file', 'echo "line one\nline two | rm file"',
+    "jq '.events\n| map(.type)' state.json | head", 'echo ""#text',
+    'echo 2 > /dev/null rm file', 'echo \\| rm file',
+  ]) allows(command);
+  for (const command of [
+    'ls # comment\nrm file', "echo ''#text; rm file", '2>&1 rm file',
+    '2>/dev/null rm file', 'ls 2>&1 && rm file', 'ls || rm file',
+    'ls |& rm file', 'ls && rm file', 'r\\\nm file',
+  ]) allows(command, false);
+});

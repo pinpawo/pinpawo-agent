@@ -32,19 +32,13 @@ test('inspection trusts common and unfamiliar commands without enumerating ordin
   ]) allows(command);
 });
 
-test('inspection blocks the small set of high-risk operations and opaque execution', () => {
+test('inspection blocks a few obvious high-risk operations', () => {
   for (const command of [
-    'rm -rf /', 'rmdir dir', 'shred file', 'dd if=image of=/dev/disk0',
-    'mkfs.ext4 /dev/sda', 'sudo ls', 'chmod +x f', 'kill -9 1', 'reboot',
-    'bash -c "rm x"', 'sh evil.sh', 'node -e "process.exit()"',
-    'python3 -c "import os"', 'eval "rm x"', 'source file',
-    'echo `whoami`', 'echo $(rm -rf /)', 'cat <(rm x)',
-    'find . -exec rm {} \\;', 'find . -delete',
+    'rm -rf /', 'rm -- --help', 'shred file', 'dd if=image of=/dev/disk0',
+    'mkfs.ext4 /dev/sda', 'sudo ls', 'reboot',
     'git clean -fd', 'git reset --hard', 'git -C /repo reset --hard',
     'git push --force', 'git push --force-with-lease=main:abc', 'git push -f',
     'git push origin +main', 'git branch -D main',
-    'echo hi > /tmp/f', 'cat a >> b', 'cat <<EOF', 'ls > >(tee out)',
-    'env -S "rm file"', 'node -econsole.log(1)', 'python3 -cprint(1)',
   ]) allows(command, false);
 });
 
@@ -66,7 +60,7 @@ test('control syntax and command grouping admit ordinary inspections', () => {
   ]) allows(command);
 });
 
-// Every body/condition is inspected regardless of which path would run.
+// Recognizable static bodies/conditions are checked regardless of which path runs.
 const positions = [
   (c: string) => `if ${c}; then ls; fi`,
   (c: string) => `if true; then ${c}; fi`,
@@ -112,16 +106,24 @@ test('quoted payloads, loop values, patterns and test operands are not commands'
   for (const command of ["'r'm file", 'r\\m file', 'r\\\nm file',
     'FOO=1 rm file', 'env FOO=1 /bin/rm file', 'command rm file',
     'env -- FOO=1 command rm file', 'builtin exec rm file', 'exec -a name rm file', 'nohup rm file',
-    "$'rm' file", '${CMD} file', 'r{m,mdir} file', 'if true; then "rm" file; fi', 'echo "$(rm file)"',
+    'if true; then "rm" file; fi', '2>/dev/null rm file',
   ]) allows(command, false);
 });
 
-test('unsupported or unfinished syntax goes to review without skipping a body', () => {
+test('syntax and indirect code are left to the shell and model, not blanket-reviewed', () => {
   for (const command of [
-    'if true; then rm file', 'for ((i=0;i<2;i++)); do rm file; done',
-    'case x in x) rm file', 'echo "unterminated', 'echo \\', 'fi; rm file',
-    'for f in a; ls', '(ls', 'function inspect ls',
-  ]) allows(command, false);
+    'if true; then ls', 'for f in a; ls', '(ls', 'function inspect ls',
+    'echo "unterminated', 'echo \\', 'cat < README.md', 'echo hi > /tmp/f',
+    'cat <<EOF', 'echo $(pwd)', 'echo `whoami`', 'cat <(ls)',
+    'bash -c "rm file"', 'node -e "process.exit()"', 'python3 -c "import os"',
+    'eval "rm file"', 'source file', 'env -S "rm file"',
+    'node cleanup.js', 'npm run cleanup', '${CMD} file', 'r{m,mdir} file',
+    'echo "$(rm file)"', 'find . -exec rm {} \\;', 'find . -delete',
+    'rm --help', 'chmod +x file', 'kill -9 1', 'rmdir dir',
+  ]) allows(command);
+  // This is deliberately not a proof against indirect execution. Conversely,
+  // obvious heads are still checked without requiring a well-formed program.
+  allows('if true; then rm file', false);
   const verdict = classifyReadOnlyShellCommand('cd /repo && rm -rf build');
   assert.match(verdict.allowed ? '' : verdict.reason, /rm/);
   allows('   ', false);

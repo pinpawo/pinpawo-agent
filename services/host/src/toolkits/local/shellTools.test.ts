@@ -281,8 +281,8 @@ test('inspect_shell remains bounded and does not turn timeouts into background w
   assert.equal(result.status, 'timeout');
   assert.equal(result.termination, 'unconfirmed');
   assert.equal(result.stdout, 'partial');
-  await tool.invoke({ command: 'npm install' }, inSession);
-  assert.equal(calls, 1, 'read-only admission still blocks mutation');
+  await tool.invoke({ command: 'rm -rf build' }, inSession);
+  assert.equal(calls, 1, 'inspection admission still blocks high-risk operations');
 });
 
 
@@ -298,8 +298,12 @@ test('inspect_shell forwards unfamiliar inspection commands but never executes b
   const inspect = createInspectShellTool(shell);
   await inspect.invoke({ command: 'nc -vz -w 5 example.com 443' }, inSession);
   await inspect.invoke({ command: "jq '.events | map(.type)' state.json | head" }, inSession);
-  for (const command of ['ls; rm file', '(rm file)', 'if true; then rm file; fi']) {
+  const control = 'if test -f package.json; then cat package.json; else ls; fi';
+  await inspect.invoke({ command: control }, inSession);
+  for (const command of ['ls; rm file', '(rm file)', 'if true; then rm file; fi',
+    'if rm file; then ls; fi', 'for f in a; do rm file; done',
+    'case x in x) rm file ;; esac', 'ls | rm file', 'ls\nrm file']) {
     assert.match(String(await inspect.invoke({ command }, inSession)), /run_shell/);
   }
-  assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head"]);
+  assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head", control]);
 });

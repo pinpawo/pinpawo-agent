@@ -24,7 +24,7 @@ for (const separator of ['|', '&&', '||', ';', '&', '|&']) {
   test(`checks both sides of ${separator} without interpreting quoted operators`, () => {
     allows(`printf ok ${separator} stat file`);
     for (const dangerous of ['rm file', '/bin/rm file', 'env FOO=1 command rm file',
-      'git -C /repo reset --hard', 'kill -9 123']) {
+      'kill -9 123']) {
       allows(`printf ok ${separator} ${dangerous}`, false);
       allows(`${dangerous} ${separator} head`, false);
     }
@@ -37,7 +37,6 @@ test('small dangerous-operation rules apply at direct and common prefixed heads'
     'rm file', 'rm -- --help', 'shred file', 'dd if=image of=/dev/disk0',
     'mkfs.ext4 /dev/sda', 'sudo ls', 'reboot', 'FOO=1 rm file',
     "'r'm file", 'r\\m file', 'env -u FOO /bin/rm file', 'exec -a label rm file',
-    'git clean -fd', 'git push --force-with-lease', 'git push origin +main', 'git branch -D main',
     'kill -KILL 123', 'kill -SIGKILL 123', 'kill -s KILL 123', 'kill --signal=9 123',
     'if rm file; then ls; fi', 'if true; then rm file; else ls; fi',
     'if false; then ls; else rm file; fi',
@@ -67,4 +66,13 @@ test('library information loss and indirect execution are explicit out-of-scope 
   // shell-quote removes quote provenance; the cheap prefix handling may reject
   // a quoted keyword as well. Do not claim complete shell semantics.
   allows("'if' rm file", false);
+});
+
+
+test('Git semantics are a model tool-selection responsibility, not admission rules', () => {
+  for (const command of ['git status', 'git log', 'git diff', 'git reset --hard',
+    'git -C /repo reset --hard', 'git clean -fd', 'git push --force', 'git branch -D main']) {
+    allows(command);
+  }
+  allows('git status | rm file', false);
 });

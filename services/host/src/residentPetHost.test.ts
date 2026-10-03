@@ -927,3 +927,42 @@ test('targeted waiting work does not strand a legacy dispatch on an open active 
   assert.deepEqual(events, ['legacy', 'target']);
   await coordinator.close();
 });
+
+for (const wakeup of ['enqueue', 'refresh'] as const) {
+  test(`target scan retains a ${wakeup} wakeup before releasing its active slot`, async () => {
+    const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+    const checked = deferred();
+    const release = deferred();
+    const calls: string[] = [];
+    let ready = false;
+    let checks = 0;
+    let incoming: Promise<void> | undefined;
+    let triggered = false;
+    coordinator.onStateChange(state => {
+      if (state !== 'waiting' || triggered) return;
+      triggered = true;
+      // The scan has exhausted its candidates but still owns `active`.
+      if (wakeup === 'enqueue') {
+        incoming = coordinator.enqueueDispatch(async () => { calls.push('new'); }, async () => true);
+      } else {
+        ready = true;
+        void coordinator.refreshState();
+      }
+    });
+    const waiting = coordinator.enqueueDispatch(async () => { calls.push('waiting'); }, async () => {
+      checks++; checked.resolve(); await release.promise; return ready;
+    });
+    // Close may cancel the intentionally waiting job.
+    void waiting.catch(() => {});
+    try {
+      await checked.promise;
+      release.resolve();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.deepEqual(calls, [wakeup === 'enqueue' ? 'new' : 'waiting']);
+      await incoming;
+      const settledChecks = checks;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(checks, settledChecks, 'an unchanged all-waiting queue must not spin');
+    } finally { release.resolve(); await coordinator.close(); }
+  });
+}

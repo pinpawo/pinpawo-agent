@@ -25,6 +25,8 @@ export class ResidentPetCoordinator {
   private activeOperation: PetDispatchQueueSnapshot['activeOperation'] = null;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
+  /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
+  private schedulingVersion = 0;
 
   constructor(options: ResidentPetCoordinatorOptions) {
     this.state = options.initialState ?? 'open';
@@ -136,6 +138,7 @@ export class ResidentPetCoordinator {
   }
 
   async refreshState(): Promise<PetDispatchState> {
+    this.schedulingVersion++;
     if (this.active) return this.state;
     if (this.refreshing) return this.refreshing;
     const refreshing = Promise.resolve().then(async () => {
@@ -170,6 +173,7 @@ export class ResidentPetCoordinator {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
     return new Promise<T>((resolve, reject) => {
+      this.schedulingVersion++;
       this.dispatchQueue.push({
         kind: 'dispatch',
         ready,
@@ -189,6 +193,7 @@ export class ResidentPetCoordinator {
     if (this.dispatchQueue.some((entry) => entry.ready)) {
       // Own the single slot while checking targets. Waiting sessions stay queued;
       // another session may run, but no two executions overlap.
+      const schedulingVersion = this.schedulingVersion;
       let ran = false;
       const active = Promise.resolve().then(async () => {
         for (let index = 0; index < this.dispatchQueue.length;) {
@@ -216,7 +221,7 @@ export class ResidentPetCoordinator {
       void active.finally(() => {
         if (this.active === active) { this.active = null; this.activeOperation = null; }
         this.publishQueueSnapshot();
-        if (ran) this.drain();
+        if (ran || this.schedulingVersion !== schedulingVersion) this.drain();
       });
       return;
     }

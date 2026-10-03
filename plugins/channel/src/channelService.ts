@@ -194,19 +194,19 @@ export class ChannelService {
     return { channelId: value.channel_id, petId: value.pet_id, sessionId: value.session_id, registered: !!value.registered };
   }
   getBinding(channelId: string, petId: string): ChannelSessionBinding | null {
-    return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? AND pet_id=?').get(channelId, petId));
+    return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? AND pet_id=?').get(identifier.parse(channelId), petId));
   }
   listBindings(channelId: string): ChannelSessionBinding[] {
-    this.getChannel(channelId);
+    const channel = this.getChannel(channelId);
     return this.database().prepare('SELECT * FROM channel_sessions WHERE channel_id=? ORDER BY pet_id')
-      .all(channelId).map(row => this.decodeBinding(row)!);
+      .all(channel.channelId).map(row => this.decodeBinding(row)!);
   }
   findBinding(petId: string, sessionId: string): ChannelSessionBinding | null {
     return this.decodeBinding(this.database().prepare('SELECT * FROM channel_sessions WHERE pet_id=? AND session_id=?').get(petId, sessionId));
   }
   reserveBinding(channelId: string, petId: string, allocate: () => string): ChannelSessionBinding {
     return this.transaction(() => {
-      this.getChannel(channelId);
+      channelId = this.getChannel(channelId).channelId;
       identifier.parse(petId);
       const existing = this.getBinding(channelId, petId);
       if (existing) return existing;
@@ -217,7 +217,7 @@ export class ChannelService {
   }
   confirmBinding(binding: ChannelSessionBinding): void {
     const result = this.database().prepare('UPDATE channel_sessions SET registered=1 WHERE channel_id=? AND pet_id=? AND session_id=?')
-      .run(binding.channelId, binding.petId, binding.sessionId);
+      .run(identifier.parse(binding.channelId), binding.petId, binding.sessionId);
     if (result.changes !== 1) throw new Error('Channel session binding changed.');
   }
   recordOutput(source: ChannelMessageSource, body: string): ChannelMessage | null {
@@ -230,7 +230,7 @@ export class ChannelService {
       if (saved) return this.getMessage(binding.channelId, saved.message_id);
       const channel = this.getChannel(binding.channelId);
       const message = this.append({ ...channelMessageSchema.parse({ body }), kind: 'message',
-        channelId: binding.channelId, messageId: randomUUID(), revision: channel.sequence,
+        channelId: channel.channelId, messageId: randomUUID(), revision: channel.sequence,
         author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
       }) as ChannelMessage;
       this.database().prepare('INSERT INTO channel_outputs VALUES (?, ?, ?, ?)')

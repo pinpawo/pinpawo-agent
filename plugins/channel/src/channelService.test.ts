@@ -145,3 +145,24 @@ test('pair reservation and output identity are shared across SQLite connections 
     assert.deepEqual(one.getMessage(channel.channelId, old.messageId), old);
   } finally { one.close(); two.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test('whitespace Channel aliases share one binding and keep output history and replyTo visible', () => {
+  const service = new ChannelService(); service.init();
+  try {
+    const channel = service.createChannel(goal, human);
+    const alias = ` \t${channel.channelId}\n `;
+    const binding = service.reserveBinding(alias, pet.id, () => 'executor:12345678');
+    assert.equal(binding.channelId, channel.channelId);
+    assert.deepEqual(service.reserveBinding(channel.channelId, pet.id, () => { throw Error('duplicate allocation'); }), binding);
+    assert.deepEqual(service.getBinding(alias, pet.id), binding);
+    assert.deepEqual(service.listBindings(alias), [binding]);
+    service.confirmBinding({ ...binding, channelId: alias });
+    const output = service.recordOutput({ petId: pet.id, sessionId: binding.sessionId, invocationId: 'question' }, 'Which destination?')!;
+    assert.equal(output.channelId, channel.channelId);
+    assert.equal(service.readHistory(channel.channelId).entries.at(-1)?.sequence, output.sequence);
+    assert.deepEqual(service.getMessage(alias, output.messageId), output);
+    const reply = service.sendMessage(alias, { body: 'staging', replyTo: output.messageId }, human);
+    assert.deepEqual(service.getMessage(channel.channelId, reply.messageId), reply);
+    assert.equal(service.readContext(alias).sessions.length, 1);
+  } finally { service.close(); }
+});

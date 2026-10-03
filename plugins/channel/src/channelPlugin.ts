@@ -48,6 +48,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
   }
   async function execute(channelId: string, input: ChannelExecutionInput) {
     if (!context) throw new Error('Channel Plugin is not started.');
+    channelId = service.getChannel(channelId).channelId;
     const value = z.object({ body: z.string().trim().min(1).max(100_000), petId: z.string().min(1).optional(), replyTo: z.string().min(1).optional() }).strict().parse(input);
     const original = value.replyTo ? service.getMessage(channelId, value.replyTo) : undefined;
     const source = original?.source;

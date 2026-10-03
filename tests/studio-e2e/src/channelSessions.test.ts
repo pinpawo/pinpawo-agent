@@ -81,13 +81,13 @@ test('Channel pair sessions survive new tasks, replies and restart; four Pets ke
   try {
     const a = f.channel.service.createChannel(goal, human).channelId;
     const b = f.channel.service.createChannel(goal, human).channelId;
-    await Promise.all(['one', 'two', 'three', 'four'].map(petId => f.channel.execute(a, { petId, body: 'ask' })));
+    await Promise.all(['one', 'two', 'three', 'four'].map(petId => f.channel.execute(petId === 'one' ? ` \t${a}\n ` : a, { petId, body: 'ask' })));
     await waitFor(() => outputs(f, a).length === 4);
     const bindings = ['one', 'two', 'three', 'four'].map(p => f.channel.service.getBinding(a, p)!);
     assert.equal(new Set(bindings.map(b => b.sessionId)).size, 4);
     assert.ok(f.maxActive() > 1, 'different Pets retain parallel execution');
     const question = outputs(f, a).find(m => m.author.id === 'one')!;
-    await f.channel.execute(a, { replyTo: question.messageId, body: 'staging' });
+    await f.channel.execute(` ${a} `, { replyTo: question.messageId, body: 'staging' });
     await waitFor(() => outputs(f, a).length === 5);
     assert.match(outputs(f, a).at(-1)!.body, /^Answer 2: Reply to Channel message/);
     assert.ok(outputs(f, a).at(-1)!.body.includes(question.messageId));

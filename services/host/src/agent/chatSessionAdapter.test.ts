@@ -1,8 +1,13 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
+import { FileSaver } from '../fileSaver';
 import { createDeliveryResult, withDeliveryCalls } from '../../../../packages/pet-agent/src/testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ToolMessage, AIMessage, HumanMessage } from '@langchain/core/messages';
+  ToolMessage, AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
@@ -1415,4 +1420,45 @@ test('final reply accepts a new public AI question but excludes tools, private w
     const completed = events.find(event => event.type === 'message.completed');
     assert.equal(completed?.type === 'message.completed' ? completed.text : undefined, reply);
   }
+});
+
+test('live reply references survive FileSaver deserialization in the production turn runner', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'reply-references-'));
+  try {
+    const checkpointPath = join(root, 'checkpoints');
+    const reply = new AIMessage({ id: 'public-reply', content: 'Inspection complete.',
+      additional_kwargs: { pinpawo: { runId: 'reference-run' } } });
+    const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({
+      reducer: (previous, next) => [...previous, ...next], default: () => [],
+    }) });
+    const buildGraph = (saver: FileSaver) => new StateGraph(State).addNode('reply', () => ({ messages: [
+      ...withDeliveryCalls([createDeliveryResult({ sourceLane: 'capability:general', delegationId: 'delegation',
+        runId: 'reference-run', deliveryId: 'delivery', task: 'Inspect', result: 'Evidence', createdAt: '2026-10-03T00:00:00Z' })]),
+      reply,
+    ] })).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer: saver });
+    const graph = buildGraph(new FileSaver(checkpointPath));
+    const config = { configurable: { thread_id: 'reference-thread' } };
+    let persistedReply: unknown;
+    const events: AgentRuntimeEvent[] = [];
+    const result = await runAgentSessionTurn({
+      request: { kind: 'user_message', requestId: 'references', message: 'Inspect' },
+      setup: { graphConfig: {}, input: { messages: [new HumanMessage('Inspect')] } } as unknown as AgentChannelSetup,
+      graphService: {
+        async readThreadState() {
+          // A fresh saver forces disk deserialization rather than shared message instances.
+          const snapshot = await buildGraph(new FileSaver(checkpointPath)).getState(config);
+          persistedReply = snapshot.values.messages?.at(-1);
+          return { messages: snapshot.values.messages ?? [], pendingInterrupt: null, acceptsResume: false };
+        },
+        streamEvents: (setup: AgentChannelSetup) => graph.streamEvents({ messages: setup.input.messages }, { ...config, version: 'v3' }),
+      } as unknown as HostGraphService,
+      isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+    });
+    assert.notEqual(persistedReply, reply);
+    assert.equal((persistedReply as AIMessage).id, reply.id);
+    assert.deepEqual(result, { status: 'completed', reply: 'Inspection complete.' });
+    const completed = events.find(event => event.type === 'message.completed');
+    assert.deepEqual(completed?.type === 'message.completed' ? completed.resultReferences : undefined,
+      [{ id: 'delivery', title: 'Inspect', text: 'Evidence' }]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

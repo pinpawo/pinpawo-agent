@@ -516,6 +516,10 @@ export async function runAgentSessionTurn(
   const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
     && !finalMessage.tool_calls?.length && !metadata?.lane && !metadata?.synthetic && !isOldMessage
     ? readFinalMessageText(finalMessage) : '';
+  // FileSaver reloads different objects. Resolve the same reply by stable ID
+  // inside the checkpoint collection before projecting its preceding deliveries.
+  const checkpointReply = finalThreadState.messages.find(message =>
+    message === finalMessage || (!!finalMessage?.id && message.id === finalMessage.id));
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const finalUsage = readRunTokenUsage({
     initialMessages: initialThreadState.messages,
@@ -529,8 +533,8 @@ export async function runAgentSessionTurn(
     role: 'assistant',
     text: finalReply,
     resultReferences: finalReply ? readReplyResultReferences(
-      finalThreadState.messages.length ? finalThreadState.messages : finalMessages,
-      finalMessage,
+      checkpointReply ? finalThreadState.messages : finalMessages,
+      checkpointReply ?? finalMessage,
     ) : [],
     ...(finalUsage ? { usage: finalUsage } : {}),
   });

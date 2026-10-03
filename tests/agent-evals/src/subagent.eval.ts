@@ -28,6 +28,8 @@ import { resolveLangfuseConfig } from './scripts/langfuse-api';
 import { writeLangfuseEvalResult } from './scripts/langfuse-eval-writer';
 import { createLangfuseV4Runtime } from './scripts/langfuse-v4-runtime';
 
+import { buildShellSelectionMockTools, shellToolSelectionExamples, shellToolChoiceEvaluator } from './shell-tool-selection';
+
 const DATASET_NAME = 'subagent-execution';
 const DATASET_DESCRIPTION = [
   'Evaluates Capability subagent execution against delegated task boundaries,',
@@ -175,6 +177,7 @@ const examples = [
       reason: 'Subagent should report the evidence gap instead of inventing file contents.',
     },
   },
+  ...shellToolSelectionExamples,
 ];
 
 const testCases = examples.map((example, index) => ({
@@ -183,7 +186,7 @@ const testCases = examples.map((example, index) => ({
   suite: 'subagent-execution',
   input: example.inputs,
   expected: example.outputs,
-  tags: ['delegation_control'],
+  tags: example.inputs.shell_tool_selection ? ['permission_control'] : ['delegation_control'],
   metadata: {
     difficulty: index < 3 ? 'easy' : 'medium',
     reason: example.outputs.reason,
@@ -244,6 +247,7 @@ function readFinalText(messages: unknown[]): string {
 }
 
 function buildMockTools(inputs: Record<string, unknown>) {
+  if (inputs.shell_tool_selection) return buildShellSelectionMockTools(inputs.shell_outputs as Record<string, unknown>);
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const files = new Map<string, string>(
     Object.entries(inputs.files && typeof inputs.files === 'object' ? inputs.files : {})
@@ -512,6 +516,7 @@ function fileContainsEvaluator({ outputs, referenceOutputs }) {
 }
 
 const evaluators = [
+  shellToolChoiceEvaluator,
   exactFieldEvaluator('has_deliverable', 'expected_has_deliverable'),
   requiredToolsEvaluator,
   forbiddenToolsEvaluator,
@@ -523,6 +528,7 @@ const evaluators = [
 ];
 
 const scoreKeys = [
+  'shell_tool_choice',
   'has_deliverable_correct',
   'required_tools_called',
   'forbidden_tools_avoided',

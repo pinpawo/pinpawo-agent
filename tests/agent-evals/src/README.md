@@ -498,3 +498,25 @@ documentation-only commit. Once available, it uses the configured default profil
 (override with `PROMPT_EVAL_PROFILE_ID`) and disables tracing. It sends framework
 prompts and synthetic Capability documents to that model. The proposed checks
 remain unverified.
+
+## Git shell tool selection
+
+The existing `eval:subagent` runner includes six real-model cases for choosing
+`inspect_shell` for status/log/diff and `run_shell` for hard reset/clean/force push.
+They use production shell tool descriptions and schemas in a shell-only fixture,
+with deterministic tool outputs. No shell command is executed, and runtime
+admission does not filter mistakes before scoring. The scorer checks the tool
+and the explicitly requested command, including wrong-tool negative controls;
+preparatory inspection is allowed for mutation cases.
+
+```sh
+SUBAGENT_EVAL_WRITE_LANGFUSE=false \
+SUBAGENT_EVAL_CASES=git-status-inspect,git-log-inspect,git-diff-inspect,git-reset-run,git-clean-run,git-force-push-run \
+  npm run eval:subagent -w @pinpawo-tests/agent-evals
+```
+
+This needs a configured Host model profile and credentials; set
+`SUBAGENT_EVAL_PROFILE` to select a profile. Real model calls may incur provider
+charges. Disabling Langfuse avoids dataset/trace storage, not the model call.
+The fixture/scorer unit tests run offline and are **not** model eval results.
+These evals measure tool choice, not runtime prevention or approval behavior.

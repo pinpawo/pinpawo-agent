@@ -334,20 +334,46 @@ test('Entry routing accepts a tool call whose provider omitted the id', async ()
   assert.deepEqual(requests, ['截图所有页面']);
 });
 
-test('Entry routing fails on multiple calls without a repair turn, identical ones included', async () => {
+test('Entry routing collapses repeated identical decisions before handing off once', async () => {
   const call = { name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图所有页面' } };
-  for (const tool_calls of [
-    [{ ...call, id: 'a' }, { ...call, id: 'b' }],
-    [{ id: 'a', name: 'continue', args: {} }, { ...call, id: 'b' }],
-  ]) {
-    const { graph, seen, requests } = routingScript([new AIMessage({ content: '', tool_calls })]);
-    await assert.rejects(
-      graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig()),
-      /requires one tool call, got 2/,
-    );
-    assert.equal(seen.length, 1);
-    assert.deepEqual(requests, []);
-  }
+  const { graph, seen, requests } = routingScript([new AIMessage({
+    content: '', tool_calls: [{ ...call, id: 'a' }, { ...call, id: 'b' }],
+  })]);
+  const result = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('其他截图也截下来')]), invokeConfig());
+  assert.equal(seen.length, 1);
+  assert.deepEqual(requests, ['截图所有页面']);
+  const routed = result.messages.filter((message: BaseMessage) => AIMessage.isInstance(message) && message.tool_calls?.length);
+  assert.equal(routed.length, 1);
+  assert.ok(AIMessage.isInstance(routed[0]));
+  assert.equal(routed[0].tool_calls?.length, 1);
+});
+
+test('Entry routing repairs distinct goals without executing or discarding either proposal', async () => {
+  const { graph, seen, requests } = routingScript([
+    new AIMessage({ content: '', tool_calls: [
+      { id: 'a', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图首页' } },
+      { id: 'b', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图设置页' } },
+    ] }),
+    new AIMessage({ content: '', tool_calls: [
+      { id: 'c', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '截图首页和设置页' } },
+    ] }),
+  ]);
+  await graph.invoke(buildOrchestratorRunInput([new HumanMessage('截图全部页面')]), invokeConfig());
+  assert.equal(seen.length, 2);
+  assert.deepEqual(requests, ['截图首页和设置页']);
+  assert.ok(seen[1].some((message) => message.text.includes('截图首页') && message.text.includes('截图设置页')));
+  assert.ok(!seen[1].some((message) => AIMessage.isInstance(message) && message.tool_calls?.length));
+});
+
+test('Entry routing bounds ambiguous selection retries without executing any route', async () => {
+  const batch = new AIMessage({ content: '', tool_calls: [
+    { id: 'a', name: 'continue', args: {} },
+    { id: 'b', name: PLAN_REQUEST_TOOL_NAME, args: { goal: '新任务' } },
+  ] });
+  const { graph, seen, requests } = routingScript([batch, batch]);
+  await assert.rejects(graph.invoke(buildOrchestratorRunInput([new HumanMessage('做新任务')]), invokeConfig()), /remained ambiguous/);
+  assert.equal(seen.length, 2);
+  assert.deepEqual(requests, []);
 });
 
 test('Entry Answer fails on an empty reply instead of inventing one', async () => {

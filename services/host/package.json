@@ -71,6 +71,7 @@
     "@vscode/ripgrep": "1.18.0",
     "commander": "^12.1.0",
     "openai": "^4.77.0",
+    "shell-quote": "1.12.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

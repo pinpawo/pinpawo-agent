@@ -888,3 +888,27 @@ test('a refused connection cannot release the interactive client it was refused 
     await host.close();
   }
 });
+
+test('interactive roots never inherit another dispatch invocation context', async () => {
+  const { readPetInvocationContext, withPetInvocationContext } = await import('./host/petInvocationContext');
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-interaction-context-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const seen: unknown[] = [];
+  const host = await createResidentPetHost({
+    petId: 'interactive-pet', petName: 'Interactive', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    runAgentTurn: async () => { seen.push(readPetInvocationContext()); return { status: 'completed', reply: 'done' }; },
+  });
+  const connection = peer([]);
+  try {
+    await host.interaction.connect(connection);
+    await withPetInvocationContext({ petId: 'parent-pet', dispatchId: 'parent', scope: { namespace: 'channel', id: 'parent-channel' } }, async () => {
+      await host.interaction.handle(connection, { type: 'chat_request', requestId: 'chat', message: 'independent conversation' });
+      assert.equal(readPetInvocationContext()?.petId, 'parent-pet');
+    });
+    assert.deepEqual(seen, [undefined]);
+  } finally { await host.close(); }
+});

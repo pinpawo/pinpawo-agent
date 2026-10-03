@@ -125,6 +125,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     await pet.dispatch.dispatch({
       request: request.request,
       dispatchId: invocationId,
+      ...(request.scope ? { scope: { ...request.scope } } : {}),
     });
 
     const receipt: StudioDispatchReceipt = Object.freeze({

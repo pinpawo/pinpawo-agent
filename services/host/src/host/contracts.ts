@@ -1,3 +1,4 @@
+import type { PetInvocationScope } from './petInvocationContext';
 import type {
   AgentClientMessage,
   AgentServerMessage,
@@ -32,6 +33,8 @@ export type PetDispatchQueueSnapshot = {
 export type PetDispatchRequest = {
   request: string;
   dispatchId?: string;
+  /** Explicit Host-admitted domain scope, independent of the Agent Session. */
+  scope?: PetInvocationScope;
 };
 
 export type PetDispatchLifecycleState =

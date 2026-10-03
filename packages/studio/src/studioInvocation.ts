@@ -1,3 +1,4 @@
+import type { PetInvocationScope } from 'pinpawo/host-runtime';
 import { isJsonObject, isJsonValue, type JsonObject } from '@pinpawo/agent-contracts';
 
 export type StudioDispatchRequest = {
@@ -6,6 +7,8 @@ export type StudioDispatchRequest = {
   /** Producer-owned correlation data echoed by Studio; never passed to the Pet. */
   metadata?: JsonObject;
   idempotencyKey?: string;
+  /** Explicit domain scope admitted by the Host, separate from correlation metadata. */
+  scope?: PetInvocationScope;
 };
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
@@ -36,7 +39,11 @@ export function parseStudioDispatchRequest(value: unknown): StudioDispatchReques
   if (
     !petId
     || request === null
-    || !hasOnlyKeys(value, ['petId', 'request', 'metadata', 'idempotencyKey'])
+    || !hasOnlyKeys(value, ['petId', 'request', 'metadata', 'idempotencyKey', 'scope'])
+    || (value.scope !== undefined && (!isJsonObject(value.scope)
+      || !hasOnlyKeys(value.scope, ['namespace', 'id'])
+      || typeof value.scope.namespace !== 'string' || !value.scope.namespace.trim()
+      || typeof value.scope.id !== 'string' || !value.scope.id.trim()))
     || (value.metadata !== undefined && (!isJsonObject(value.metadata) || !isJsonValue(value.metadata)))
     || (value.idempotencyKey !== undefined && !idempotencyKey)
   ) return null;
@@ -44,6 +51,7 @@ export function parseStudioDispatchRequest(value: unknown): StudioDispatchReques
     petId,
     request,
     ...(value.metadata !== undefined ? { metadata: value.metadata as JsonObject } : {}),
+    ...(value.scope !== undefined ? { scope: { ...(value.scope as PetInvocationScope) } } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
   };
 }

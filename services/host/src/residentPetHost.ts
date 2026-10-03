@@ -1,3 +1,4 @@
+import { withoutPetInvocationContext } from './host/petInvocationContext';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
 import { runAgentSessionTurn } from './agent/chatSessionAdapter';
@@ -228,7 +229,7 @@ export async function createResidentPetRuntime(
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    runAgentTurn,
+    runAgentTurn: (input) => withoutPetInvocationContext(() => runAgentTurn(input)),
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
     activeRuns,
     interruptHostRun: (requestId) => {

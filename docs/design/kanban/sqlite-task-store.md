@@ -38,8 +38,9 @@ Kanban 可以被 CLI、Web、Studio adapter 或其他 application composition �
 `brief` 拆分为供列表识别的 `title` 与承载完整执行输入的 `detail`。Studio
 dispatch receipt 只表示 resident 已接纳输入，不产生 Kanban task transition。
 
-仍未实现独立 Kanban CLI/Web composition。Studio Console 已通过 Kanban HTTP command 做用户
-assignment；其他 UI 不能通过绕开 service 或直接读写 SQLite 来临时补齐。
+仍未实现独立 Kanban CLI/Web composition。Studio Console 原有 Kanban HTTP assignment
+入口已于 2026-10-04 退役；后端 service、默认模板消费者和已有数据仍保留。
+其他 UI 不能通过绕开 service 或直接读写 SQLite 来临时补齐。
 
 ## 1. 领域边界
 
@@ -302,9 +303,9 @@ Kanban CLI/Web 属于 Kanban application，可以：
 - 或通过 Kanban-owned HTTP adapter 调用远端 service；
 - 订阅 committed domain event 更新 UI。
 
-独立前端的最小信息结构、read recovery 和 MVP 交互见
-[Studio Console](../studio/console.md)。它只消费 service/adapter，不改变 Kanban task
-storage 或 domain event 的所有权。
+原 Console 前端边界的历史依据见 [Studio Console](../studio/console.md)，该文档已记录
+Kanban 入口退役。后续 Kanban adapter 仍只消费 service/adapter，不改变 task storage
+或 domain event 的所有权。
 
 它们不能直接执行 SQL，是为了保持 Kanban 自己的 transaction 和状态机，不是因为必须
 通过 Studio。Studio、HTTP Plugin、桌面应用等都只是可选 adapter。

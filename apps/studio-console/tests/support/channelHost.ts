@@ -33,9 +33,12 @@ for (const petId of ['alpha', 'beta']) {
         effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
     }) });
     await new Promise(resolve => setTimeout(resolve, 300));
+    const invocation = readPetInvocationContext()!;
+    if (invocation.scope?.namespace !== 'channel') {
+      return { messages: [new AIMessage('Standalone deterministic reply. Inspect this Pet session for the result.')] };
+    }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string);
     const prior = snapshot.history.entries.filter((entry: { kind: string; source?: unknown }) => entry.kind === 'message' && entry.source);
-    const invocation = readPetInvocationContext()!;
     return { messages: [new AIMessage(`Public delivery from ${petId}.\n\nRequest: ${last}\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the current Channel goal and scope. Remaining work: user acceptance.`)] };
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });

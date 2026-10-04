@@ -70,13 +70,21 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
+  const retiredRequests = [];
+  const standaloneRequests = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (path === '/kanban' || path.startsWith('/kanban/')) retiredRequests.push(path);
+    if (path === '/dispatch' && request.method() === 'POST') standaloneRequests.push(request.postDataJSON());
+  });
   await page.goto('http://127.0.0.1:5199');
   await page.getByLabel('Studio HTTP URL').fill(first.url);
   await page.getByLabel('Studio bearer token').fill(first.token);
   await page.getByRole('button', { name: 'CONNECT', exact: true }).click();
   await page.locator('.connection-state.connected').waitFor();
-  await page.getByRole('button', { name: 'channel', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'channel', exact: true }).getAttribute('class'), 'active', 'Channel is the default page');
+  assert.deepEqual(await page.getByRole('navigation', { name: 'Studio pages' }).getByRole('button').allTextContents(), ['channel', 'scheduler', 'notice', 'trigger', 'knowledge']);
   await page.getByRole('heading', { name: channel.title, exact: true }).waitFor();
   const input = page.getByLabel('Message', { exact: true });
   await input.waitFor();
@@ -110,7 +118,7 @@ try {
   await fits();
   await page.screenshot({ path: resolve(screenshots, '01-desktop-long-code.png'), fullPage: true });
   const readingPosition = await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop);
-  await page.getByRole('button', { name: 'kanban', exact: true }).click();
+  await page.getByRole('button', { name: 'knowledge', exact: true }).click();
   await page.getByRole('button', { name: 'channel', exact: true }).click();
   assert.equal(await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop), readingPosition, 'global navigation preserves an older reading position');
   await message(output.messageId).getByRole('button', { name: 'View execution', exact: true }).click();
@@ -178,6 +186,25 @@ try {
     await page.screenshot({ path: resolve(screenshots, '03-conversation-' + width + '.png'), fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
+  const historyBeforeDispatch = (await context()).history.entries.length;
+  for (const name of ['scheduler', 'notice', 'trigger', 'knowledge']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'kanban', exact: true }).count(), 0);
+  }
+  await page.getByRole('button', { name: '+ DISPATCH', exact: true }).click();
+  const direct = page.getByRole('dialog', { name: 'Dispatch to Pet', exact: true });
+  await direct.getByRole('combobox').selectOption('alpha');
+  await direct.getByLabel('MESSAGE', { exact: true }).fill('Standalone dispatch remains available.');
+  await direct.locator('form').evaluate(form => { form.requestSubmit(); form.requestSubmit(); });
+  await direct.waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '+ DISPATCH', exact: true }).click();
+  await direct.getByText('invocation ended', { exact: true }).waitFor();
+  assert.equal(standaloneRequests.length, 1, 'standalone dispatch retains its duplicate guard');
+  assert.deepEqual(standaloneRequests[0], { petId: 'alpha', request: 'Standalone dispatch remains available.' });
+  assert.equal(await direct.getByText('Check the Pet session for its reply and verify the requested outcome.', { exact: true }).count(), 1);
+  assert.equal((await context()).history.entries.length, historyBeforeDispatch, 'standalone dispatch cannot publish into Channel');
+  await direct.getByRole('button', { name: 'Close dispatch', exact: true }).click();
+  await page.getByRole('button', { name: 'channel', exact: true }).click();
   let rejectedWrites = 0;
   await page.route(first.url + '/channels/execute', route => {
     rejectedWrites++;
@@ -227,11 +254,13 @@ try {
   assert.equal(await page.getByRole('button', { name: '+ New Channel', exact: true }).isDisabled(), true);
   await page.screenshot({ path: resolve(screenshots, '05-plugin-unavailable.png'), fullPage: true });
   assert.deepEqual(errors, []);
+  assert.deepEqual(retiredRequests, [], 'Console never requests retired Kanban API routes');
   console.log(JSON.stringify({ result: 'passed', modelCalls: 0, screenshots,
     coverage: ['long Markdown and internal code scrolling', 'fixed composer and independent timeline', 'SSE preserves older reading position',
       'duplicate Pet names and removed Pet', 'real request/output association', 'reply cancel retains draft and focus', 'one-level quote location',
       'copy stored message ID', 'global navigation retains reading position', 'create modal keyboard focus', 'collapsible activity', '900/390/320px drawers and focus/Escape/backdrop',
-      'drawer execution/output focus', '401 retains draft without retry', 'Channel and Host switch clear history/reply/draft/target', '404 plugin unavailable'] }));
+      'drawer execution/output focus', '401 retains draft without retry', 'Channel and Host switch clear history/reply/draft/target', '404 plugin unavailable',
+      'Channel default and navigation without Kanban', 'no Kanban API requests across pages/reload/Host switch', 'standalone dispatch duplicate guard and Channel isolation'] }));
 } finally {
   await browser?.close();
   for (const child of children) if (child.exitCode === null) child.kill('SIGTERM');

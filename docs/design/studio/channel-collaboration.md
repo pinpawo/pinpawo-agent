@@ -127,6 +127,8 @@ Channel 尚未正式运行；旧 pause 检查点及旧 Channel 绑定不在兼�
 归属关联；技术 id 收在详情/复制操作，不新增工具日志、审批动作或执行语义。
 
 在 `apps/studio-console` 增加固定 Channel 页面，复用原连接、Bearer、SSE 和样式；
+2026-10-04 后续片将其作为默认页面并退役 Console Kanban 入口及专属代码；
+后端 Kanban 的默认模板、Capability、Trigger 和历史消费者仍保留，须另行迁移。
 不建立第二套 UI。提供目标列表/创建、完整分页消息时间线、公开产物引用、明确选择
 Pet 的单轮执行、针对公开回复的 replyTo。replyTo 由后端解析原 Pet/session，不能改为
 另一位 Pet；给其他 Pet 的交接使用新的显式请求。公开正文完整显示，不只显示摘要，

@@ -1,7 +1,7 @@
 # Studio Console
 
 > 状态：Draft implementation contract
-> 更新：2026-08-29
+> 更新：2026-10-04
 
 Studio Console 是独立的纯前端应用，不是 Studio Plugin，也不由任何 Plugin 打包或托管。
 它只消费 HTTP Plugin 及领域 Plugin 贡献的 API：
@@ -9,7 +9,8 @@ Studio Console 是独立的纯前端应用，不是 Studio Plugin，也不由任
 ```text
 apps/studio-console
   ├─ Studio     -> /pets /dispatch /events
-  ├─ Kanban     -> /kanban /kanban/events /kanban/control
+  ├─ Channel    -> /channels /channels/context /channels/execute /channels/executions /channels/interrupts
+  ├─ Notice     -> /notices
   ├─ Scheduler  -> /scheduler /scheduler/events
   ├─ Trigger    -> /triggers /triggers/events
   └─ Knowledge  -> /knowledge /knowledge/document (Project Files Plugin)
@@ -27,10 +28,8 @@ Console 使用固定页面，不实现前端 Plugin 系统。后端没有装配�
 - Studio：列出存活 Pet、提交单向 dispatch，并以 live `dispatch.queued`、`running`、
   `waiting`、`completed`、`interrupted`、`failed` 显示该次 dispatch 的生命周期。`accepted`
   仍只说明 admission；Console 只对自己通过 HTTP 直接发起的失败 dispatch，以保存的
-  Pet/request 创建一次全新的 retry dispatch，不恢复、取消或控制原运行。Kanban、Scheduler
+  Pet/request 创建一次全新的 retry dispatch，不恢复、取消或控制原运行。Scheduler
   与 Trigger 的失败由各自的领域 control/history 处理；
-- Kanban：读取 task snapshot/history，以 active/queue/needs-attention/completed 连续状态流展示
-  任务、依赖和结果；ready/blocked task 可通过 Kanban 自己的 control route 手工启动或重试；
 - Scheduler：查看 schedule、创建一次性 schedule、取消尚未触发的 schedule；
 - Trigger：查看 trigger 定义和 delivery history、复制外部接收说明；
 - Knowledge：通过 Project Files Plugin 的独立只读 API 列出和读取受限 Markdown；不实现
@@ -47,7 +46,7 @@ Agent completion。
 
 领域页面先读取 snapshot/history，再订阅 live `/events`。Studio dispatch lifecycle（包括
 `dispatch.accepted`）是 live-only；
-Kanban、Scheduler 和 Trigger 各自的 SQLite history 才是断线恢复事实源。Console 不用
+Channel、Scheduler 和 Trigger 各自的 SQLite history 才是断线恢复事实源。Console 不用
 Studio SSE 重建领域状态。
 
 ## 安全
@@ -98,3 +97,14 @@ known terminal facts remain visible. Review history guides the user to the origi
 Pet TUI/session and does not offer approval or infer a current pending review.
 The default template still requires explicit Channel Plugin enablement. No separate
 viewer, frontend Plugin system, identity scheme or automatic Pet scheduler is added.
+
+## Console Kanban 入口退役（2026-10-04）
+
+Channel 为默认页面；Console 移除 Kanban 导航、任务流/关联/分配 UI、专属类型/状态/
+样式/测试和 `/kanban` snapshot/history/control 请求。通用 dispatch、SSE、Scheduler、
+Notice、Trigger、Knowledge 与 Channel 保留，不将它们当作 Kanban 专属能力删除。
+
+此片仅退役 Console 入口。默认 Studio 模板仍装配 `@pinpawo-plugin/kanban`，其 Planner/
+Executor/Reviewer Capability、任务分配 Trigger 和 task.done → Wiki 流程仍是实际消费者。
+后端 Plugin、CLI/template 与相关测试/安装验收需要单独迁移后才能删除。
+现有 Kanban SQLite、历史和其他用户/测试数据不迁移、不删除，不执行 schema/table 清理。

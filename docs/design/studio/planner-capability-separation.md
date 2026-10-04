@@ -26,8 +26,9 @@ Plugin 的接口注入其他 Plugin。名录查询不推断 Pet 的业务职责�
 
 ## 默认模板的执行交接
 
-Kanban 创建的 task 尚未分配执行者。用户在 Console 中选择 executor 或 reviewer，
-默认 Trigger 消费 `task.assigned` 后派发。Wiki 由默认 `task.done` Trigger 驱动。
+Kanban 创建的 task 尚未分配执行者。默认 Trigger 仍消费 `task.assigned` 后派发，
+Wiki 仍由默认 `task.done` Trigger 驱动。2026-10-04 Console 已移除 Kanban assignment
+入口；这些默认模板 Capability/Trigger 尚未迁移，不能再通过 Console 分配旧 task。
 这些是默认模板的装配事实，不是通用 Studio 或 Kanban 的内建规则。任务关联只是上下文
 关联，不是自动执行依赖。旧草稿描述的 Planner 自行分配、依赖 claim 流程已不适用。
 

@@ -62,8 +62,9 @@ dispatch；Console 只重试自己经 HTTP 直接发起的请求，Plugin-owned 
 
 这是 live-only projection：不生成 durable event id，不实现 `Last-Event-ID` replay，断线
 期间的 event 会丢失。heartbeat 只是 HTTP transport 保活，不进入 Studio event bus。
-Kanban Console 每次重连都重新读取 Kanban 自己的 snapshot/history；Kanban 的 SQLite
-仍是 task 事实源，HTTP Plugin 不拥有数据库或领域 history。
+Console 每次重连都重新读取当前领域自己的 snapshot/history；Channel 的 SQLite
+是 Channel 事实源，HTTP Plugin 不拥有数据库或领域 history。2026-10-04 Console
+已移除 Kanban 入口和请求；后端 Kanban SQLite 及其其他消费者仍保留。
 
 Studio core 为每个 subscriber 隔离 FIFO delivery；HTTP 的异步 SSE 写入只阻塞 HTTP
 subscriber 自己，不阻塞其他 Plugin。Studio 还会按 Plugin lifecycle owner 自动释放该

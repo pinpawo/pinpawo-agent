@@ -73,8 +73,8 @@ delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不�
 `reviewDecision` 事实，Root 输出明确的未执行说明后直接 END，不再进入 Supervisor
 或 Capability finalize。没有暂停信号、pauseGate、空输入继续或持久恢复现场。
 下一条明确输入从 Entry 开始，只有 Entry 选择继续时才把保留计划带入新 run。
-`human_review` 原生审批 interrupt 与批准恢复保持不变；旧暂停检查点明确拒绝，
-要求新建会话，原检查点及未执行操作不被删除或改写。
+`human_review` 原生审批 interrupt 与批准恢复保持不变；Channel 尚未正式运行，
+旧暂停检查点及旧 Channel 绑定不做兼容迁移，不新增恢复入口，也不删除或改写存量数据。
 
 | 信息 | 保存与生命周期 |
 | --- | --- |

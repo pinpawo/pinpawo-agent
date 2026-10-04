@@ -46,7 +46,7 @@ test('readPendingInterrupt decodes a review batch as one interrupt carrying ever
 test('readPendingInterrupt rejects legacy pause checkpoints without changing their data', () => {
   const snapshot = snapshotWith({ kind: 'pause_task' }, 'old-pause');
   const original = structuredClone(snapshot);
-  assert.throws(() => readPendingInterrupt(snapshot), /Start a new session.*preserved/);
+  assert.throws(() => readPendingInterrupt(snapshot), UnknownInterruptPayloadError);
   assert.deepEqual(snapshot, original);
 });
 

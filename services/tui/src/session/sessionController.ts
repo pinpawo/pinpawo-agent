@@ -140,7 +140,7 @@ export class TuiSessionController {
     this.sessionCommands = new SessionCommandCoordinator({
       requestIdFactory: this.requestIdFactory,
       send: (message) => this.transport.send(message),
-      getUnavailableReason: operation => this.sessionCommandUnavailable(operation === 'new'),
+      getUnavailableReason: () => this.sessionCommandUnavailable(),
       getSessionId: () => this.state.session.sessionId,
       onSnapshot: (snapshot) => {
         this.transport.clearSnapshotRequests();
@@ -149,7 +149,6 @@ export class TuiSessionController {
           snapshot,
           { observedAt: this.now() },
         ));
-        if (this.state.connection === 'error' && this.transport.isConnected()) this.setConnection('ready');
       },
       timeoutMs: sessionCommandTimeoutMs,
       compactTimeoutMs: options.sessionCompactTimeoutMs
@@ -547,9 +546,8 @@ export class TuiSessionController {
     assertNever(message);
   }
 
-  private sessionCommandUnavailable(allowNewAfterSnapshotError = false) {
-    if (!this.transport.isConnected() || (this.state.connection !== 'ready'
-      && !(allowNewAfterSnapshotError && this.state.connection === 'error'))) {
+  private sessionCommandUnavailable() {
+    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
       return 'host is not connected';
     }
     if (

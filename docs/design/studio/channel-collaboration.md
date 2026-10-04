@@ -112,4 +112,6 @@ schema v3 增加 channel_interrupt_notifications；Channel 将该公开投影保
 仅原生 human_review 审批保持 waiting。拒绝/取消直接结束本轮，明确说明操作未执行，
 保留目标与计划；无 pause_task 二次暂停，队列收到终态后可继续接纳同会话明确输入。
 后续输入从 Entry 进入新 run，只有用户指示支持继续时才由 Supervisor 重评计划。
-旧暂停检查点保留数据但明确拒绝恢复，要求新建会话；不引入兼容恢复状态机。
+Channel 尚未正式运行；旧 pause 检查点及旧 Channel 绑定不在兼容范围，不新增迁移、
+重绑或恢复 API，不删除或改写存量数据。未知/非法原生 interrupt 仍明确报错，
+真实 human_review 不得绕过授权。

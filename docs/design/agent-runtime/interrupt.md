@@ -34,11 +34,13 @@ settles as completed and releases the queue. Channel stores historical review
 notifications separately from message context; the existing TUI approval surface
 resumes human review. A TUI-origin restored run has no Channel publication scope.
 
-Legacy pause checkpoints are unsupported. The Runtime reports a clear error
-instructing the user to start a new session, preserving the checkpoint and its
-unexecuted action. Raw checkpoint interrupts and the obsolete non-null task-pause state are validated before graph reconstruction: LangGraph
-otherwise omits removed nodes from its state view. Session/protocol parsers reject legacy pause projections;
-they never silently reinterpret them as idle. No migration deletes stored data.
+Channel has not entered production. Old pause checkpoints and Channel bindings
+are outside the compatibility scope; no migration or recovery API is provided.
+Raw checkpoint interrupts are validated before graph reconstruction because
+LangGraph can omit unknown nodes from its state view. Unknown or invalid review
+payloads fail explicitly rather than being treated as idle. Session/protocol
+parsers likewise reject unsupported projections. Stored data is not deleted or
+rewritten.
 
 Implementation: `reviewInterrupt.ts`, `reviewStop.ts`, `readPendingInterrupt.ts`,
 `createSubagent.ts`, `capabilityExecution/runner.ts`, `afterCapability.ts` and the

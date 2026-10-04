@@ -29,7 +29,7 @@ export class UnknownInterruptPayloadError extends Error {
 
   constructor(interruptId: string) {
     super(
-      `Interrupt ${interruptId} is unsupported by this Runtime. Start a new session; the existing checkpoint and unexecuted action have been preserved.`,
+      `Interrupt ${interruptId} carries a payload this Runtime cannot decode.`,
     );
     this.name = 'UnknownInterruptPayloadError';
     this.interruptId = interruptId;

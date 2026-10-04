@@ -1,5 +1,5 @@
 import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
-import { readPendingInterrupt, UnknownInterruptPayloadError } from './readPendingInterrupt';
+import { readPendingInterrupt } from './readPendingInterrupt';
 
 /**
  * Validate stored interrupts before LangGraph interprets the checkpoint using
@@ -11,9 +11,6 @@ export function validateCheckpointInterrupts(checkpointer: BaseCheckpointSaver):
     get(target, property, receiver) {
       if (property === 'getTuple') return async (...args: Parameters<BaseCheckpointSaver['getTuple']>) => {
         const tuple = await target.getTuple(...args);
-        if (tuple?.checkpoint.channel_values.taskPauseInterrupt != null) {
-          throw new UnknownInterruptPayloadError('legacy-task-pause');
-        }
         for (const [, channel, value] of tuple?.pendingWrites ?? []) {
           if (channel === '__interrupt__') readPendingInterrupt({ tasks: [{ interrupts: [value] }] });
         }

@@ -13,7 +13,7 @@ import {
   ServerTuiSessionService,
   type TuiSessionCheckpointer,
 } from './session/serverTuiSessions';
-import { UnknownInterruptPayloadError, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
   createLocalServerRuntimeDepsStore,
   type ServerDeps,
@@ -281,14 +281,7 @@ export async function createResidentPetRuntime(
     isClosing: () => closing !== null,
   };
   registerResidentPetRuntimeContext(runtime, context);
-  try {
-    await coordinator.refreshState();
-  } catch (error) {
-    if (!(error instanceof UnknownInterruptPayloadError)) throw error;
-    // Keep the old session blocked and intact while allowing the operator to
-    // create a new session through the existing interaction surface.
-    console.error('[resident-pet] active session is unsupported:', error.message);
-  }
+  await coordinator.refreshState();
   return runtime;
 }
 

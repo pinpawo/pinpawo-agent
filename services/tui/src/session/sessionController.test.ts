@@ -1258,27 +1258,3 @@ test('review cancellation completes; the next explicit chat can carry attachment
     message: 'Continue with these constraints.', attachments });
   controller.stop();
 });
-
-test('a connected TUI can create a new session after an unsupported startup checkpoint', async () => {
-  const requestIds = ['startup', 'new', 'chat'];
-  let connection!: FakeConnection;
-  const controller = new TuiSessionController({
-    connectionFactory: handlers => { connection = new FakeConnection(handlers); return connection; },
-    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
-  });
-  controller.start();
-  connection.open();
-  connection.receive({ type: 'session.error', requestId: 'startup', operation: 'snapshot',
-    message: 'Unsupported interrupt. Start a new session; checkpoint preserved.' });
-  assert.equal(controller.getState().connection, 'error');
-  assert.deepEqual(controller.submitChat('Must not use the old session.'), { ok: false, reason: 'not-ready' });
-  const fresh = controller.startNewSession();
-  assert.deepEqual(connection.sent.at(-1), { type: 'session.new', requestId: 'new' });
-  connection.receive({ type: 'session.new.result', requestId: 'new', session: sessionSummary('chat:fresh', true),
-    snapshot: createAgentSessionSnapshot({ sessionId: 'chat:fresh', kind: 'chat', timeline: [], activeRun: null, pendingInterrupt: null }),
-  });
-  await fresh;
-  assert.equal(controller.getState().connection, 'ready');
-  assert.deepEqual(controller.submitChat('New explicit request.'), { ok: true, requestId: 'chat' });
-  controller.stop();
-});

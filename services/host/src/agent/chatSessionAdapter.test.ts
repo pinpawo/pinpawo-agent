@@ -14,6 +14,7 @@ import {
   projectHumanReviewRequest,
   readAgentMessageCreatedAt,
   SUBAGENT_OPERATIONS_EVENT,
+  UnknownInterruptPayloadError,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
@@ -1255,20 +1256,20 @@ test('runAgentSessionTurn emits provider token usage from new state messages', a
   assert.equal(typeof completed.usage?.updatedAt, 'string');
 });
 
-test('runAgentSessionTurn refuses a legacy pause emitted by a rebuilt graph', async () => {
+test('runAgentSessionTurn refuses an unknown interrupt emitted by a graph', async () => {
   const setup = { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup;
   const events: AgentRuntimeEvent[] = [];
   const graphService = {
     readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: true }),
     streamEvents: () => (async function* () {
-      yield protocolEvent('values', { __interrupt__: [{ id: 'old-pause', value: { kind: 'pause_task' } }] });
+      yield protocolEvent('values', { __interrupt__: [{ id: 'unknown-review', value: { kind: 'unsupported_review' } }] });
     })(),
   };
   await assert.rejects(runAgentSessionTurn({
     request: { kind: 'resume', requestId: 'r', resume: { interruptId: 'review', value: { action: 'cancel' } } },
     setup, graphService: graphService as unknown as HostGraphService,
     isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
-  }), /Start a new session.*preserved/);
+  }), UnknownInterruptPayloadError);
 
   assert.equal(events.some(event => event.type === 'interrupt.requested'), false);
 });

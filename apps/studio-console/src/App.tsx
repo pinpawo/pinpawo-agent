@@ -124,6 +124,7 @@ export function App() {
   const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState(storedToken ? 'Connecting…' : 'Enter the Studio HTTP token, then connect.');
   const [pets, setPets] = useState<Pet[]>([]);
+  const [petsReady, setPetsReady] = useState(false);
   const [channelVersion, setChannelVersion] = useState(0);
   const [channelFailures, setChannelFailures] = useState<{ channelId: string; invocationId?: string; error: string }[]>([]);
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
@@ -172,6 +173,7 @@ export function App() {
   useEffect(() => {
     if (!token || connectionKey === 0) return undefined;
     const abort = new AbortController();
+    setPetsReady(false);
     const read = async <T,>(path: string): Promise<Resource<T>> => {
       const response = await fetch(`${normalizedUrl}${path}`, { headers, signal: abort.signal });
       if (response.status === 404) return { value: null, unavailable: true };
@@ -193,6 +195,7 @@ export function App() {
       if (abort.signal.aborted) return;
       const nextPets = petResponse.value?.pets ?? [];
       setPets(nextPets);
+      setPetsReady(true);
       setDispatchPet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
       setSchedulePet((current) => nextPets.some(({ petId }) => petId === current) ? current : nextPets[0]?.petId || '');
       setTasks({ ...kanban, value: kanban.value?.tasks ?? null });
@@ -511,7 +514,7 @@ export function App() {
   );
 
   return (
-    <main className="shell">
+    <main className={'shell' + (page === 'channel' ? ' channel-shell' : '')}>
       <header>
         <div className="brand">◎ PINPAWO <span>/ STUDIO CONSOLE</span></div>
         <div className="connection">
@@ -525,15 +528,15 @@ export function App() {
           </span>
         </div>
       </header>
-      <nav>
+      <nav aria-label="Studio pages">
         {(['channel', 'kanban', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
-      <section className="content">
-        <div hidden={page !== 'channel'}>
+      <section className={'content' + (page === 'channel' ? ' channel-content' : '')}>
+        <div className="channel-page" hidden={page !== 'channel'}>
           <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
-            connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} failures={channelFailures} />
+            active={page === 'channel'} connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} petsReady={petsReady} failures={channelFailures} />
         </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>CONNECTION FAILED</strong>
@@ -602,9 +605,9 @@ export function App() {
           </div>
         </> : unavailable(knowledge, 'Project Files'))}
       </section>
-      <button className="dispatch-launcher" disabled={connectionState !== 'connected'} onClick={() => openDispatch()} type="button">
+      {page !== 'channel' && <button className="dispatch-launcher" disabled={connectionState !== 'connected'} onClick={() => openDispatch()} type="button">
         <span>+</span> DISPATCH
-      </button>
+      </button>}
       {dispatchDrawerOpen && <div className="drawer-layer" role="presentation" onMouseDown={(event) => {
         if (event.target === event.currentTarget && !dispatchSubmitting) setDispatchDrawerOpen(false);
       }}>

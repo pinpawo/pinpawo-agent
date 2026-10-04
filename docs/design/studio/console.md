@@ -80,3 +80,21 @@ connection instructions; direct interrupt rendering and approval remain deferred
 
 Verification covers receipt/lifecycle ordering, loss of observation, fragmented
 SSE frames, transient retry, authentication failure and abort without reconnect.
+
+## Channel integration (2026-10-04)
+
+The existing Console adds one fixed Channel page against the optional Channel
+Plugin APIs. It lists and creates long-term goals, reads the full paginated
+message/revision timeline, saves notes without execution, and explicitly sends
+one round to a selected Pet. Reply uses the source message's original Pet/session;
+it is not cross-Pet routing. Full public Markdown and artifact references remain
+visible for handoff and inspection.
+
+The same Console SSE connection refreshes Channel snapshots. Execution history
+comes from `/channels/executions`, a SQLite observation record including admission
+and execution failures. It is not a durable queue or a recovery API. Unfinished
+records from a restarted service and disconnected live observations are unknown;
+known terminal facts remain visible. Review history guides the user to the original
+Pet TUI/session and does not offer approval or infer a current pending review.
+The default template still requires explicit Channel Plugin enablement. No separate
+viewer, frontend Plugin system, identity scheme or automatic Pet scheduler is added.

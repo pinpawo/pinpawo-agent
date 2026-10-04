@@ -10,6 +10,86 @@ const human = { kind: 'human', id: 'owner' } as const;
 const pet = { kind: 'pet', id: 'executor' } as const;
 const goal = { title: 'CRM', goal: 'Improve CRM', scope: 'Single record update only' };
 
+test('execution observations survive restart, preserve failures, reconcile early lifecycle and isolate Channels', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-executions-'));
+  const file = path.join(root, 'channels.sqlite');
+  let service = new ChannelService(file);
+  try {
+    service.init();
+    const a = service.createChannel(goal, human).channelId;
+    const b = service.createChannel(goal, human).channelId;
+    const binding = service.reserveBinding(a, 'executor', () => 'executor:12345678');
+    const first = service.sendMessage(a, { body: 'start' }, human);
+    service.beginExecution(a, binding, first.messageId);
+    const source = { petId: 'executor', sessionId: binding.sessionId, invocationId: 'first' };
+    service.recordExecution(a, source, 'running', '2026-10-04T00:00:00Z');
+    service.recordExecution(a, source, 'failed', '2026-10-04T00:00:01Z', 'Provider denied request (403).');
+    const accepted = service.acceptExecution(first.messageId, 'first');
+    assert.equal(accepted.state, 'failed', 'late receipt cannot regress a real failure');
+    assert.equal(service.readExecutions(a).executions.length, 1, 'early observation and request reconcile into one row');
+    assert.equal(accepted.messageId, first.messageId);
+    service.recordExecution(a, source, 'queued', '2026-10-04T00:00:02Z');
+    assert.equal(service.readExecutions(a).executions[0]?.state, 'failed');
+    const next = service.sendMessage(a, { body: 'continue' }, human);
+    service.beginExecution(a, binding, next.messageId);
+    service.acceptExecution(next.messageId, 'second');
+    service.recordExecution(a, { ...source, invocationId: 'second' }, 'running', '2026-10-04T00:00:03Z');
+    assert.throws(() => service.recordExecution(b, source, 'completed', 'now'), /binding/);
+    const otherBinding = service.reserveBinding(b, 'executor', () => 'executor:87654321');
+    assert.throws(() => service.recordExecution(b, { ...source, sessionId: otherBinding.sessionId }, 'completed', 'now'), /identity/);
+    assert.deepEqual(service.readExecutions(b).executions, []);
+    const page = service.readExecutions(a, { limit: 1 });
+    assert.equal(page.hasMore, true);
+    assert.equal(service.readExecutions(a, { after: page.nextAfter }).executions.length, 1);
+    service.close(); service = new ChannelService(file); service.init();
+    const restored = service.readExecutions(a).executions;
+    assert.equal(restored[0]?.state, 'failed');
+    assert.equal(restored[0]?.error, 'Provider denied request (403).');
+    assert.equal(restored[0]?.observationLost, false);
+    assert.equal(restored[1]?.state, 'running');
+    assert.equal(restored[1]?.observationLost, true, 'restart cannot claim the old invocation is still executing');
+    assert.ok(!JSON.stringify(service.readContext(a)).includes('Provider denied'));
+  } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('admission failure and output storage failure remain visible without creating a replay queue', () => {
+  const service = new ChannelService(); service.init();
+  try {
+    const id = service.createChannel(goal, human).channelId;
+    const binding = service.reserveBinding(id, 'executor', () => 'executor:12345678');
+    const message = service.sendMessage(id, { body: 'work' }, human);
+    service.beginExecution(id, binding, message.messageId);
+    service.failExecution(message.messageId, 'Host unavailable.');
+    const failed = service.readExecutions(id).executions[0]!;
+    assert.equal(failed.state, 'failed'); assert.equal(failed.invocationId, undefined);
+    const source = { petId: 'executor', sessionId: binding.sessionId, invocationId: 'done' };
+    service.recordExecution(id, source, 'completed', '2026-10-04T00:00:00Z');
+    service.recordDeliveryFailure('done', 'disk unavailable');
+    const done = service.readExecutions(id).executions[1]!;
+    assert.equal(done.state, 'completed'); assert.equal(done.deliveryError, 'disk unavailable');
+  } finally { service.close(); }
+});
+
+test('schema v3 upgrade preserves Channel history and session bindings while adding empty observation history', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-v4-upgrade-'));
+  const file = path.join(root, 'channels.sqlite');
+  let service = new ChannelService(file); service.init();
+  try {
+    const id = service.createChannel(goal, human).channelId;
+    const message = service.sendMessage(id, { body: 'Existing delivery history.' }, human);
+    const binding = service.reserveBinding(id, 'executor', () => 'executor:12345678');
+    service.confirmBinding(binding);
+    service.close();
+    const previous = new DatabaseSync(file);
+    previous.exec('DROP TABLE channel_executions; PRAGMA user_version=3;'); previous.close();
+    service = new ChannelService(file); service.init();
+    assert.equal(service.getMessage(id, message.messageId).body, message.body);
+    assert.equal(service.getBinding(id, 'executor')?.sessionId, binding.sessionId);
+    assert.equal(service.getBinding(id, 'executor')?.registered, true);
+    assert.deepEqual(service.readExecutions(id).executions, []);
+  } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test('durable revisions and versioned deliveries preserve two rounds and paginate in order', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'channel-history-'));
   const file = path.join(root, 'channels.sqlite');

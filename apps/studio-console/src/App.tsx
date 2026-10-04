@@ -10,8 +10,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { appendDispatchRecord, dispatchRecordFromEvent, markObservationLost, type DispatchRecord } from './dispatchActivity';
 import { observeStudioEvents } from './studioEvents';
+import { ChannelPanel } from './ChannelPanel';
 
-type Page = 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
+type Page = 'channel' | 'kanban' | 'scheduler' | 'notice' | 'trigger' | 'knowledge';
 type ConnectionState = 'idle' | 'connecting' | 'reconnecting' | 'connected' | 'error';
 type Pet = { petId: string; name: string; role?: string | null; serviceSummary?: string | null };
 type Task = {
@@ -123,6 +124,8 @@ export function App() {
   const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState(storedToken ? 'Connecting…' : 'Enter the Studio HTTP token, then connect.');
   const [pets, setPets] = useState<Pet[]>([]);
+  const [channelVersion, setChannelVersion] = useState(0);
+  const [channelFailures, setChannelFailures] = useState<{ channelId: string; invocationId?: string; error: string }[]>([]);
   const [tasks, setTasks] = useState<Resource<Task[]>>(empty);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [schedules, setSchedules] = useState<Resource<Schedule[]>>(empty);
@@ -246,6 +249,14 @@ export function App() {
         const record = dispatchRecordFromEvent(event);
         if (record) setDispatches((current) => appendDispatchRecord(current, record));
         if (['kanban', 'scheduler', 'notice', 'trigger'].includes(event.source)) refreshInBackground();
+        const payload = event.payload as { channelId?: string; invocationId?: string; error?: string; scope?: { namespace?: string } } | undefined;
+        if (event.source === 'channel' || (event.source === 'resident-pet' && payload?.scope?.namespace === 'channel')) {
+          setChannelVersion(value => value + 1);
+        }
+        if (event.source === 'channel' && event.type === 'channel.delivery_failed' && payload?.channelId && payload.error) {
+          const failure = { channelId: payload.channelId, invocationId: payload.invocationId, error: payload.error };
+          setChannelFailures(current => [...current.slice(-19), failure]);
+        }
       },
     });
     return () => {
@@ -278,6 +289,7 @@ export function App() {
     activeHost.current = nextUrl;
     if (nextUrl !== normalizedUrl) {
       setPets([]);
+      setChannelFailures([]);
       setTasks(empty());
       setRelationships([]);
       setSchedules(empty());
@@ -514,11 +526,15 @@ export function App() {
         </div>
       </header>
       <nav>
-        {(['kanban', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
+        {(['channel', 'kanban', 'scheduler', 'notice', 'trigger', 'knowledge'] as const).map((item) => (
           <button className={page === item ? 'active' : ''} key={item} onClick={() => setPage(item)}>{item}</button>
         ))}
       </nav>
       <section className="content">
+        <div hidden={page !== 'channel'}>
+          <ChannelPanel key={`${normalizedUrl}:${token}`} url={normalizedUrl} token={token}
+            connected={connectionState === 'connected'} refreshVersion={channelVersion} pets={pets} failures={channelFailures} />
+        </div>
         {connectionError && <div className="connection-alert" role="alert">
           <strong>CONNECTION FAILED</strong>
           <span>{connectionError}</span>

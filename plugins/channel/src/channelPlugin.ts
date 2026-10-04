@@ -63,10 +63,18 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const request = original
       ? `Reply to Channel message ${original.messageId}:\n${original.body}\n\nUser reply:\n${value.body}`
       : value.body;
-    const receipt = await context.dispatch({ petId, request,
-      session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
-      scope: { namespace: 'channel', id: channelId },
-    });
+    service.beginExecution(channelId, binding, message.messageId);
+    let receipt: StudioDispatchReceipt;
+    try {
+      receipt = await context.dispatch({ petId, request,
+        session: { id: binding.sessionId, ...(!binding.registered ? { create: true } : {}) },
+        scope: { namespace: 'channel', id: channelId },
+      });
+    } catch (error) {
+      service.failExecution(message.messageId, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+    service.acceptExecution(message.messageId, receipt.invocationId);
     service.confirmBinding(binding);
     return { message, receipt, binding: service.getBinding(channelId, petId)! };
   }
@@ -91,7 +99,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       service.init();
       context = host;
       host.subscribe((event) => {
-        if (event.source !== 'resident-pet' || !['dispatch.completed', 'dispatch.waiting'].includes(event.type)) return;
+        if (event.source !== 'resident-pet' || !['dispatch.queued', 'dispatch.running', 'dispatch.completed', 'dispatch.waiting', 'dispatch.failed', 'dispatch.interrupted'].includes(event.type)) return;
         // Scope is captured by Host for this invocation, never inferred from a bound session.
         const envelope = z.object({ scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }) }).safeParse(event.payload);
         if (!envelope.success) return;
@@ -99,10 +107,13 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         try {
           const { petId, sessionId, invocationId } = z.object({ petId: z.string().min(1), sessionId: z.string().min(1), invocationId: z.string().min(1) }).parse(event.payload);
           const source = { petId, sessionId, invocationId };
+          const state = event.type.slice('dispatch.'.length) as 'queued' | 'running' | 'completed' | 'waiting' | 'failed' | 'interrupted';
+          const error = z.object({ error: z.string().optional() }).parse(event.payload).error;
+          service.recordExecution(channelId, source, state, event.occurredAt, error);
           if (event.type === 'dispatch.completed') {
             const { reply } = z.object({ reply: z.string() }).parse(event.payload);
             if (reply.trim()) service.recordOutput(channelId, source, reply);
-          } else {
+          } else if (event.type === 'dispatch.waiting') {
             const { pendingInterrupt } = z.object({ pendingInterrupt: z.unknown() }).parse(event.payload);
             service.recordInterrupt(channelId, source, pendingInterrupt);
           }
@@ -110,6 +121,10 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
           // Event delivery is asynchronous. Expose persistence failure to observers;
           // a completed run is not a receipt for successful Channel storage.
           const identity = z.object({ petId: z.string().optional(), sessionId: z.string().optional(), invocationId: z.string().optional() }).safeParse(event.payload);
+          if (identity.success && identity.data.invocationId) {
+            try { service.recordDeliveryFailure(identity.data.invocationId, error instanceof Error ? error.message : String(error)); }
+            catch { /* Storage may be unavailable; the live failure notification remains necessary. */ }
+          }
           host.notify({ type: 'channel.delivery_failed', payload: { channelId, ...(identity.success ? identity.data : {}), eventType: event.type,
             error: error instanceof Error ? error.message : String(error) } });
           throw error;
@@ -135,6 +150,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         });
         const remove = [
           register('GET', '/channels', ({ url }) => ({ kind: 'json', body: service.listChannels(page(url)) })),
+          register('GET', '/channels/executions', ({ url }) => ({ kind: 'json', body: service.readExecutions(url.searchParams.get('channelId') ?? '', page(url)) })),
           register('GET', '/channels/interrupts', ({ url }) => ({ kind: 'json', body: service.readInterruptNotifications(url.searchParams.get('channelId') ?? '', page(url)) })),
           register('GET', '/channels/context', ({ url }) => ({ kind: 'json', body: service.readContext(url.searchParams.get('channelId') ?? '', page(url)) })),
           register('POST', '/channels', async ({ readJson }) => ({ kind: 'json', status: 201, body: service.createChannel(channelGoalSchema.parse(await readJson()), operator) })),

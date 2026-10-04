@@ -39,6 +39,10 @@ route 背后的领域。
 }
 ```
 
+`StudioDispatchRequest` 的 `session` 与 `scope` 是 Host 信任的定向字段，只允许进程内
+Plugin 直接设置；wire 形态不接受它们，携带即 `400`，否则 HTTP 调用方可借已知 session
+把回复发布到其他 Plugin 的领域（如 Channel）。
+
 HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202` 和
 `petId/invocationId`；仅当调用方显式提供可选 `metadata` 时才原样回显它。
 Plugin 不为 HTTP、前端或 Kanban 生成额外关联字段，也不等待 Agent execution；Studio

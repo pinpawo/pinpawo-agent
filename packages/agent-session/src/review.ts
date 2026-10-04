@@ -1,3 +1,4 @@
+import { parseHumanReviewRequest } from '@pinpawo/agent-contracts';
 import type {
   HumanReviewOption,
   HumanReviewOptionInput,
@@ -22,13 +23,7 @@ export type HumanReviewInterruptProjection = {
   interactions: HumanReviewRequest[];
 };
 
-export type PauseTaskInterruptProjection = {
-  kind: 'pause_task';
-};
-
-export type InterruptPayloadProjection =
-  | HumanReviewInterruptProjection
-  | PauseTaskInterruptProjection;
+export type InterruptPayloadProjection = HumanReviewInterruptProjection;
 
 /**
  * Every pending interrupt carries its id, whatever the kind. Interfaces
@@ -50,4 +45,19 @@ export function readHumanReviewPendingInterrupt(
   return value?.payload.kind === 'human_review'
     ? value as HumanReviewPendingInterruptProjection
     : null;
+}
+
+/** Validate the existing public projection without accepting runtime decisions/effects. */
+export function parsePendingInterruptProjection(value: unknown): PendingInterruptProjection | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const pending = value as Record<string, unknown>;
+  if (Object.keys(pending).some(key => !['interruptId', 'payload'].includes(key))
+    || typeof pending.interruptId !== 'string' || !pending.interruptId.trim()) return null;
+  if (!pending.payload || typeof pending.payload !== 'object' || Array.isArray(pending.payload)) return null;
+  const payload = pending.payload as Record<string, unknown>;
+  if (payload.kind !== 'human_review' || Object.keys(payload).some(key => !['kind', 'interactions'].includes(key))
+    || !Array.isArray(payload.interactions) || !payload.interactions.length) return null;
+  const interactions = payload.interactions.map(parseHumanReviewRequest);
+  if (interactions.some(item => item === null)) return null;
+  return { interruptId: pending.interruptId, payload: { kind: 'human_review', interactions: interactions as HumanReviewRequest[] } };
 }

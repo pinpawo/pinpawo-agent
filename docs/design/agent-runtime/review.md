@@ -1,3 +1,9 @@
+> Current behavior update (2026-10-04): the task-pause sections below describe
+> historical compatibility behavior. Review reject/cancel now ends the round with
+> an explicit unexecuted-action explanation, preserves the plan, and skips further
+> models/tools/finalize. Only native human review remains resumable. See
+> [interrupt.md](interrupt.md) for the current boundary and legacy-checkpoint policy.
+
 # Review and Interrupt Runtime Design
 
 > Status: Draft

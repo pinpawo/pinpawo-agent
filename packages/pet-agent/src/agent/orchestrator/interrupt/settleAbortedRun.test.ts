@@ -28,7 +28,7 @@ test('settleAbortedRun reports an interrupt that was already pending', async () 
   const { graph } = graphOf({
     ...pendingDelegation,
     next: ['capability'],
-    tasks: [{ interrupts: [{ id: 'interrupt-1', value: { kind: 'pause_task' } }] }],
+    tasks: [{ interrupts: [{ id: 'interrupt-1', value: { kind: 'review', review: { id: 'r', schemaVersion: 1, view: { kind: 'plain', body: 'Approve?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] } } }] }],
   });
 
   // An interrupt raised before the abort landed owns the boundary.

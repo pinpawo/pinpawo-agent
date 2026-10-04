@@ -69,8 +69,12 @@ delegation ID、调用 ID、交付引用仍用于执行校验与追溯，但不�
 删除重复的 `sessionDelegationResults`。验收必须依据当前任务最近一次执行的有效交付，
 不能在重试失败后回退到旧成功结果。无新交付以 `missing_deliverable` 错误 ToolMessage
 返回 Supervisor，由其决定补做或回复；真正的运行异常仍走框架错误出口。
-暂停路由读取本轮最新执行结果的 `paused`，不另存 Root `taskPauseInterrupt` 标志；
-原生 interrupt 及 Capability 内部暂停机制不变。
+审批拒绝或取消以普通终态结束本轮，保留目标与计划；执行结果携带已发生的
+`reviewDecision` 事实，Root 输出明确的未执行说明后直接 END，不再进入 Supervisor
+或 Capability finalize。没有暂停信号、pauseGate、空输入继续或持久恢复现场。
+下一条明确输入从 Entry 开始，只有 Entry 选择继续时才把保留计划带入新 run。
+`human_review` 原生审批 interrupt 与批准恢复保持不变；Channel 尚未正式运行，
+旧暂停检查点及旧 Channel 绑定不做兼容迁移，不新增恢复入口，也不删除或改写存量数据。
 
 | 信息 | 保存与生命周期 |
 | --- | --- |

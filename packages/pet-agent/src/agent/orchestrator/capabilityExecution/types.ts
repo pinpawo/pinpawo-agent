@@ -52,7 +52,8 @@ export type CapabilityExecutionOptions = {
 };
 
 export type CapabilityExecutionResult = {
-  readonly status: 'returned' | 'paused' | 'missing_deliverable';
+  readonly status: 'returned' | 'missing_deliverable';
+  readonly reviewDecision?: 'reject' | 'cancel';
   readonly delivery: DelegationDelivery | null;
   /** Provider usage reported by this invocation. */
   readonly tokenUsage: ProviderTokenUsage | null;

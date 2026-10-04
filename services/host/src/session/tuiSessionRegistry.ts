@@ -73,6 +73,34 @@ export function ensureActiveTuiSession(
   return createTuiSession(state, petId, defaultModelProfileId, now);
 }
 
+/** Reserve an identity without selecting or creating a session. */
+export function allocatePetSessionId(petId: string): string {
+  return `${petId}:${randomUUID().slice(0, 8)}`;
+}
+
+/** Register a reserved dispatch session without changing the TUI selection. */
+export function ensureDispatchSession(state: TuiSessionState, petId: string,
+  sessionId: string, defaultModelProfileId: string, create = false): TuiSessionRecord {
+  const existing = state.sessions[sessionId];
+  if (existing) {
+    if (existing.petId !== petId) throw new Error('Session belongs to another Pet.');
+    return existing;
+  }
+  if (!create) throw new Error('Target session no longer exists; binding must be repaired explicitly.');
+  const suffix = sessionId.slice(petId.length + 1);
+  if (!sessionId.startsWith(`${petId}:`) || !/^[a-f0-9]{8}$/.test(suffix)) {
+    throw new Error('Invalid reserved Pet session identity.');
+  }
+  const timestamp = new Date().toISOString();
+  const record: TuiSessionRecord = {
+    id: sessionId, petId, suffix, threadId: buildTuiChatThreadId({ petId, sessionSuffix: suffix }),
+    modelProfileId: defaultModelProfileId, requiredInputModalities: ['text'],
+    title: '新会话', messageCount: 0, createdAt: timestamp, updatedAt: timestamp,
+  };
+  state.sessions[sessionId] = record;
+  return record;
+}
+
 export function createTuiSession(
   state: TuiSessionState,
   petId: string,

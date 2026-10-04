@@ -8,6 +8,7 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 import test from 'node:test';
+import { MemorySaver } from '@langchain/langgraph';
 import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
 import { createEmptyTuiSessionState } from './tuiSessionRegistry';
 import {
@@ -285,4 +286,26 @@ test('ServerTuiSessionService reads one checkpoint point for messages and pendin
   assert.equal(checkpoint.sessionTokenUsage, null);
   assert.equal(capturedThreadId, session.threadId);
   assert.equal(readCount, 1);
+});
+
+test('reserved dispatch sessions retry failed persistence without changing the active TUI session', () => {
+  const state = createEmptyTuiSessionState();
+  let fail = false;
+  const service = new ServerTuiSessionService({ state, runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-reserved-test'),
+    saveState: () => { if (fail) throw Error('disk unavailable'); },
+    checkpointer: new MemorySaver(),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const active = service.getActiveSession('pet-a');
+  const id = 'pet-a:12345678';
+  fail = true;
+  assert.throws(() => service.ensureDispatchSession('pet-a', id, true), /disk/);
+  assert.equal(state.sessions[id], undefined);
+  fail = false;
+  const reserved = service.ensureDispatchSession('pet-a', id, true);
+  assert.equal(service.ensureDispatchSession('pet-a', id, true), reserved);
+  assert.equal(service.getActiveSessionId('pet-a'), active.id);
+  assert.throws(() => service.ensureDispatchSession('pet-b', id), /another Pet/);
+  delete state.sessions[id];
+  assert.throws(() => service.ensureDispatchSession('pet-a', id), /no longer exists/);
 });

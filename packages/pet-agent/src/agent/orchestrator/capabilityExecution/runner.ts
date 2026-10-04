@@ -16,7 +16,6 @@ import { createToolAuthorizationRecorder } from '../runtime/authorization';
 import { CAPABILITY_SUBAGENT_MAX_ITERATIONS } from '../runtime/constants';
 import { readThreadId } from '../runtime/config';
 import { hasArtifactDiscoveryToolkit } from '../artifacts/discovery';
-import { readPauseTaskInterruptSignal, type PausedSubagentState } from '../interrupt';
 import type {
   CapabilityExecutionContext,
   CapabilityExecutionInput,
@@ -26,7 +25,7 @@ import type {
 
 /**
  * One Capability attempt: briefing -> isolated execution -> evidence handoff.
- * The caller owns scheduling, state application, acceptance and pause policy.
+ * The caller owns scheduling, state application, acceptance and terminal review handling.
  * No mutable execution state is retained between calls.
  */
 export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
@@ -99,8 +98,6 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       // middleware, where the writer is reachable at call time.
       emitRuntimeEvent: emitRuntimeEventToStreamWriter,
     };
-    let result: Awaited<ReturnType<typeof createSubagent>> | null = null;
-    let pausedSubagentState: PausedSubagentState | null = null;
     const usedResolvedToolkitExecution = await resolveToolkitExecution(
       toolkitList,
       undefined,
@@ -163,17 +160,9 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       signal: runnableConfig?.signal,
       artifacts: artifactRefs,
     };
-    try {
-      result = await runSubagent(subagentInput);
-    } catch (error) {
-      const pauseSignal = readPauseTaskInterruptSignal(error);
-      if (!pauseSignal) {
-        throw error;
-      }
-      pausedSubagentState = pauseSignal.state;
-    }
+    let result = await runSubagent(subagentInput);
 
-    if (result && capability.lifecycle?.finalize) {
+    if (!result.reviewDecision && capability.lifecycle?.finalize) {
       const finalized = await capability.lifecycle.finalize(result, {
         models: options.models,
         messages: scopedMessages,
@@ -201,11 +190,7 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       };
     }
 
-    if (!result && !pausedSubagentState) {
-      throw new Error('Capability subagent produced neither a result nor a pause signal.');
-    }
-    const resultArtifacts = pausedSubagentState?.artifacts ?? result!.artifacts;
-    const output = result?.output ?? null;
+    const output = result.reviewDecision ? null : result.output;
     const delivery = output?.trim() ? {
       id: `delivery:${scope.runId}:${scope.delegationId}:${randomUUID()}`,
       scope,
@@ -213,10 +198,11 @@ export function createCapabilityExecutor(options: CapabilityExecutionOptions) {
       text: output,
     } : null;
     return {
-      status: pausedSubagentState ? 'paused' : delivery ? 'returned' : 'missing_deliverable',
+      status: delivery ? 'returned' : 'missing_deliverable',
+      ...(result.reviewDecision ? { reviewDecision: result.reviewDecision } : {}),
       delivery,
-      tokenUsage: result?.tokenUsage ?? pausedSubagentState?.tokenUsage ?? null,
-      artifacts: resultArtifacts,
+      tokenUsage: result.tokenUsage ?? null,
+      artifacts: result.artifacts,
       toolAuthorizations: [...authorizationRecorder.active],
     };
   };

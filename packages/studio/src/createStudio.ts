@@ -90,6 +90,10 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           petId: pet.registration.petId,
           request: event.request,
           ...(event.requestId ? { requestId: event.requestId } : {}),
+          ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+          ...(event.scope ? { scope: { ...event.scope } } : {}),
+          ...(event.pendingInterrupt ? { pendingInterrupt: event.pendingInterrupt } : {}),
+          ...(event.reply !== undefined ? { reply: event.reply } : {}),
           ...(event.error ? { error: event.error } : {}),
         },
       });
@@ -125,6 +129,8 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
     await pet.dispatch.dispatch({
       request: request.request,
       dispatchId: invocationId,
+      ...(request.session ? { session: { ...request.session } } : {}),
+      ...(request.scope ? { scope: { ...request.scope } } : {}),
     });
 
     const receipt: StudioDispatchReceipt = Object.freeze({

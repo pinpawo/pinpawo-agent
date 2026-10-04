@@ -23,8 +23,8 @@ import {
   createPrepareNode,
 } from './nodes/prepare';
 import { afterCapability } from './routes/afterCapability';
-import { pauseGate } from './nodes/pauseGate';
 import { createRunTerminationHandlers } from './runTermination';
+import { validateCheckpointInterrupts } from '../interrupt/validateCheckpointInterrupts';
 
 // --- Graph builder ---
 
@@ -58,20 +58,18 @@ export function createOrchestratorGraph(config: OrchestratorConfig) {
       errorHandler: (state: typeof OrchestratorState.State, error) => recoverCapabilityError(state, error) ?? runTermination.onNodeError(state, error),
     })
     .addNode('throwRunFailure', runTermination.throwRunFailure)
-    .addNode('pauseGate', pauseGate, { ends: ['throwRunFailure'], errorHandler: runTermination.onNodeError })
     .addEdge(START, 'prepare')
     // Every fresh run enters Entry Answer. Native resume uses its checkpoint.
     .addEdge('compactContext', 'captureUserRequest')
     .addEdge('captureUserRequest', 'entryAnswer')
     .addEdge('entryAnswer', END)
     .addConditionalEdges('capability', afterCapability, {
-      pauseGate: 'pauseGate',
+      [END]: END,
       runSupervisor: 'runSupervisor',
-    })
-    .addEdge('pauseGate', 'runSupervisor');
+    });
 
   return graph.compile({
-    checkpointer: config.checkpoint,
+    checkpointer: config.checkpoint ? validateCheckpointInterrupts(config.checkpoint) : undefined,
   });
 }
 

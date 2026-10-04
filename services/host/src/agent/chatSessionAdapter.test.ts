@@ -1,14 +1,20 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
+import { FileSaver } from '../fileSaver';
 import { createDeliveryResult, withDeliveryCalls } from '../../../../packages/pet-agent/src/testing/capabilityDelivery';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ToolMessage, AIMessage, HumanMessage } from '@langchain/core/messages';
+  ToolMessage, AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   projectHumanReviewRequest,
   readAgentMessageCreatedAt,
   SUBAGENT_OPERATIONS_EVENT,
+  UnknownInterruptPayloadError,
 } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import type { AgentRuntimeEvent } from '@pinpawo/agent-session';
@@ -1250,114 +1256,23 @@ test('runAgentSessionTurn emits provider token usage from new state messages', a
   assert.equal(typeof completed.usage?.updatedAt, 'string');
 });
 
-test('runAgentSessionTurn reports a task pause without turning its bookkeeping into an assistant reply', async () => {
-  // Regression: after a Review reject the run settles into a task pause. The
-  // checkpoint's last message is the rejected tool result — it is not a reply,
-  // and the run must not be reported as completed.
-  const review = {
-    id: 'review-1',
-    schemaVersion: 1,
-    view: { kind: 'plain' as const, body: 'Approve?' },
-    options: [
-      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
-      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const, message: 'no' } },
-    ],
-  };
-  const rejectedResult = new ToolMessage({
-    content: JSON.stringify({ source: 'human_reject', message: 'no' }),
-    tool_call_id: 'call-1',
-    name: 'run_shell',
-  });
-  const setup = {
-    graphConfig: {},
-    input: { messages: [] },
-  } as unknown as AgentChannelSetup;
-  let reads = 0;
-  const emittedEvents: AgentRuntimeEvent[] = [];
+test('runAgentSessionTurn refuses an unknown interrupt emitted by a graph', async () => {
+  const setup = { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup;
+  const events: AgentRuntimeEvent[] = [];
   const graphService = {
-    async readThreadState() {
-      reads += 1;
-      return reads === 1
-        ? {
-          messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } },
-        acceptsResume: true,
-        }
-        : {
-          // The reject settled into a task pause, which is a pending
-          // interrupt with an id like any other.
-          messages: [rejectedResult],
-          pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-          acceptsResume: true,
-        };
-    },
-    streamEvents() {
-      return (async function* () {})();
-    },
+    readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: true }),
+    streamEvents: () => (async function* () {
+      yield protocolEvent('values', { __interrupt__: [{ id: 'unknown-review', value: { kind: 'unsupported_review' } }] });
+    })(),
   };
+  await assert.rejects(runAgentSessionTurn({
+    request: { kind: 'resume', requestId: 'r', resume: { interruptId: 'review', value: { action: 'cancel' } } },
+    setup, graphService: graphService as unknown as HostGraphService,
+    isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+  }), UnknownInterruptPayloadError);
 
-  const result = await runAgentSessionTurn({
-    request: {
-      kind: 'resume',
-      requestId: 'req-1',
-      resume: {
-        interruptId: 'interrupt-1',
-        value: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
-      },
-    },
-    setup,
-    graphService: graphService as unknown as HostGraphService,
-    isCurrent: () => true,
-    emitEvent: (event) => {
-      emittedEvents.push(event);
-    },
-    emitToolEvent: () => {},
-  });
-
-  assert.deepEqual(result, { status: 'waiting' });
-  assert.equal(emittedEvents.some((event) => event.type === 'message.completed'), false);
-  assert.equal(JSON.stringify(emittedEvents).includes('human_reject'), false);
-  // The pause is announced by id, so the interface can continue it without
-  // inferring anything from the run's ending.
-  const requested = emittedEvents.find((event) => event.type === 'interrupt.requested');
-  assert.deepEqual(
-    requested?.type === 'interrupt.requested' ? requested.pendingInterrupt : null,
-    { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-  );
+  assert.equal(events.some(event => event.type === 'interrupt.requested'), false);
 });
-
-test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt graph', async () => {
-  const setup = {
-    graphConfig: {},
-    input: { messages: [] },
-  } as unknown as AgentChannelSetup;
-  const graphService = {
-    async readThreadState() {
-      return {
-        messages: [],
-        pendingInterrupt: null,
-        acceptsResume: true,
-      };
-    },
-    streamEvents() {
-      return (async function* () {
-        yield protocolEvent('values', {
-          __interrupt__: [{ id: 'pause-1', value: { kind: 'pause_task' } }],
-        });
-      })();
-    },
-  };
-
-  assert.deepEqual(await runAgentSessionTurn({
-    request: { kind: 'resume', requestId: 'req-1', resume: { interruptId: 'interrupt-1', value: { action: 'cancel' } } },
-    setup,
-    graphService: graphService as unknown as HostGraphService,
-    isCurrent: () => true,
-    emitEvent: () => {},
-    emitToolEvent: () => {},
-  }), { status: 'waiting' });
-});
-
 
 test('committed Supervisor reply uses one message identity for delta and completion', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];
@@ -1387,4 +1302,73 @@ test('committed Supervisor reply uses one message identity for delta and complet
   assert.deepEqual(messages.map(e => [e.type, e.messageId, e.text]), [
     ['message.delta', reply.id, 'Inspection\ncomplete.'], ['message.completed', reply.id, 'Inspection\ncomplete.'],
   ]);
+});
+
+test('final reply accepts a new public AI question but excludes tools, private work and old checkpoint text', async () => {
+  const old = new AIMessage({ id: 'old', content: 'Previous answer' });
+  const cases = [
+    { message: new AIMessage({ id: 'question', content: 'Which destination?' }), reply: 'Which destination?' },
+    { message: new ToolMessage({ content: 'private tool output', tool_call_id: 'tool' }), reply: '' },
+    { message: new HumanMessage('user input'), reply: '' },
+    { message: new AIMessage({ content: 'private reasoning', additional_kwargs: { pinpawo: { lane: 'supervisor' } } }), reply: '' },
+    { message: new AIMessage({ content: 'bookkeeping', additional_kwargs: { pinpawo: { synthetic: true } } }), reply: '' },
+    { message: new AIMessage({ content: 'tool request', tool_calls: [{ id: 'call', name: 'tool', args: {} }] }), reply: '' },
+    { message: old, reply: '' },
+  ];
+  for (const { message, reply } of cases) {
+    const events: AgentRuntimeEvent[] = [];
+    const result = await runAgentSessionTurn({
+      request: { kind: 'user_message', requestId: 'public-check', message: 'hello' },
+      setup: { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup,
+      graphService: {
+        readThreadState: async () => ({ messages: [old], pendingInterrupt: null, acceptsResume: false }),
+        streamEvents: () => (async function* () { yield protocolEvent('values', { messages: [message] }); })(),
+      } as unknown as HostGraphService,
+      isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+    });
+    assert.deepEqual(result, { status: 'completed', reply });
+    const completed = events.find(event => event.type === 'message.completed');
+    assert.equal(completed?.type === 'message.completed' ? completed.text : undefined, reply);
+  }
+});
+
+test('live reply references survive FileSaver deserialization in the production turn runner', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'reply-references-'));
+  try {
+    const checkpointPath = join(root, 'checkpoints');
+    const reply = new AIMessage({ id: 'public-reply', content: 'Inspection complete.',
+      additional_kwargs: { pinpawo: { runId: 'reference-run' } } });
+    const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({
+      reducer: (previous, next) => [...previous, ...next], default: () => [],
+    }) });
+    const buildGraph = (saver: FileSaver) => new StateGraph(State).addNode('reply', () => ({ messages: [
+      ...withDeliveryCalls([createDeliveryResult({ sourceLane: 'capability:general', delegationId: 'delegation',
+        runId: 'reference-run', deliveryId: 'delivery', task: 'Inspect', result: 'Evidence', createdAt: '2026-10-03T00:00:00Z' })]),
+      reply,
+    ] })).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer: saver });
+    const graph = buildGraph(new FileSaver(checkpointPath));
+    const config = { configurable: { thread_id: 'reference-thread' } };
+    let persistedReply: unknown;
+    const events: AgentRuntimeEvent[] = [];
+    const result = await runAgentSessionTurn({
+      request: { kind: 'user_message', requestId: 'references', message: 'Inspect' },
+      setup: { graphConfig: {}, input: { messages: [new HumanMessage('Inspect')] } } as unknown as AgentChannelSetup,
+      graphService: {
+        async readThreadState() {
+          // A fresh saver forces disk deserialization rather than shared message instances.
+          const snapshot = await buildGraph(new FileSaver(checkpointPath)).getState(config);
+          persistedReply = snapshot.values.messages?.at(-1);
+          return { messages: snapshot.values.messages ?? [], pendingInterrupt: null, acceptsResume: false };
+        },
+        streamEvents: (setup: AgentChannelSetup) => graph.streamEvents({ messages: setup.input.messages }, { ...config, version: 'v3' }),
+      } as unknown as HostGraphService,
+      isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+    });
+    assert.notEqual(persistedReply, reply);
+    assert.equal((persistedReply as AIMessage).id, reply.id);
+    assert.deepEqual(result, { status: 'completed', reply: 'Inspection complete.' });
+    const completed = events.find(event => event.type === 'message.completed');
+    assert.deepEqual(completed?.type === 'message.completed' ? completed.resultReferences : undefined,
+      [{ id: 'delivery', title: 'Inspect', text: 'Evidence' }]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

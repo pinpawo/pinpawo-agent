@@ -69,3 +69,8 @@ export {
 } from './config/petConfig';
 export type { PetConfig } from './config/petConfig';
 export { isSafePetPathSegment } from './petId';
+
+export { readPetInvocationContext } from './host/petInvocationContext';
+export type { PetInvocationContext, PetInvocationScope } from './host/petInvocationContext';
+
+export { allocatePetSessionId } from './session/tuiSessionRegistry';

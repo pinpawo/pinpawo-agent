@@ -116,23 +116,21 @@ response or cancel, an `interrupt.resume.accepted` reduction creates a new
 unchanged until server-observed progress clears or replaces it. This models two
 facts directly instead of making invocation ownership optional on a wait.
 
-Delegation continuation is checkpoint-owned rather than inferred from a
-particular client's review-cancellation history. The checkpoint's
-`taskActiveDelegation` and saved `taskRunContinuation` determine available work;
-the latter also supports remaining tasks without an active delegation.
-After an authoritative `interrupted` event, the TUI may temporarily enter a
-local paused mode: Enter sends `resume_active`, while a second Esc leaves that
-mode and makes the following submission `supersede_active`. This local mode is
-not projected, persisted, or used to infer delegation availability.
+Plan continuation is checkpoint-owned. `runSupervisorState` retains the goal and
+plan facts; completed Capability results live in actual Root ToolMessages. The
+session's `currentPlan` is a read-only projection of those facts, not another
+scheduling authority. Retained pending plan items alone do not create an active
+run or interrupt.
 
-Under the [Supervisor interaction target (historical)](https://github.com/pinpawo/pinpawo-agent/blob/10b886aa1af41d3322ba652b680a78a65a721c39/docs/design/agent-runtime/delegation-boundary-protocol.md#supervisor-asks-the-user-directly),
-normal questions with saved work also expose continuation without an interrupted
-event. Append the user's answer or explicit plan adjustment to main while keeping
-the active delegation, then invoke Supervisor before execution. Receiving that
-input does not accept, end, or replace the task. With only a remaining plan,
-continue through Supervisor Entry; with neither a plan nor a delegation, process
-the answer through ordinary `entryAnswer` using main context. The normal-question
-UI integration is pending; this adds no new wait object or independent lifecycle.
+Rejection or cancellation resolves the human-review interrupt and completes the
+round with an unexecuted-action explanation, preserving the goal and plan.
+Ordinary questions and budget stops likewise end normally. A later explicit
+ordinary chat enters a fresh run through Entry: `continue` adopts the unfinished
+plan into that run before Supervisor reassesses it; `plan_request` hands a new
+goal to Supervisor. No client-side paused mode or empty-input resume exists.
+Native `interrupt.resume` is reserved for a concrete pending human review; fresh
+chat cannot bypass it. Cancelling an active invocation creates no synthetic
+task-pause interrupt, and an already-pending review remains authoritative.
 
 Live TUI actions carry `AgentSessionMessageInput` directly. The TUI no
 longer defines a separate `MessageCell` model. Message `createdAt` / `updatedAt`

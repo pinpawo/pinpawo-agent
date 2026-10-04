@@ -66,6 +66,7 @@ import {
   INTERRUPT_PARTIAL,
   REVIEW_APPROVE_MESSAGE,
   REVIEW_APPROVED_REPLY,
+  REVIEW_REJECTED_REPLY,
   REVIEW_CANCEL_MESSAGE,
   REVIEW_CONTINUE_GUIDANCE,
   REVIEW_SPEC,
@@ -171,7 +172,6 @@ test('production host handlers drive the v2 host vertical slice', async () => {
     'review-cancel',
     'snapshot-review-cancel',
     'chat-review-continue',
-    'review-response-continue',
     'snapshot-review-continue',
     'chat-error',
     'snapshot-error',
@@ -515,53 +515,17 @@ test('production host handlers drive the v2 host vertical slice', async () => {
         action: 'interrupt_run',
       },
     });
-    assert.deepEqual(
-      controller.continuePausedTask(REVIEW_CONTINUE_GUIDANCE),
-      {
-        ok: true,
-        requestId: 'chat-review-continue',
-      },
-    );
-    await waitFor(() => (
-      controller.getState().session.pendingInterrupt !== null
-    ));
-    const continuedInterrupt = readHumanReviewPendingInterrupt(
-      controller.getState().session.pendingInterrupt,
-    );
-    assert.ok(continuedInterrupt);
-    assert.equal(
-      continuedInterrupt.interruptId,
-      'review-interrupt-cancel',
-    );
-    const continuedApproval = controller.submitReviewResponse({
-      interruptId: continuedInterrupt.interruptId,
-      responses: [],
-      optionId: 'approve',
+    assert.equal(controller.getState().session.pendingInterrupt, null);
+    assert.deepEqual(controller.submitChat(REVIEW_CONTINUE_GUIDANCE), {
+      ok: true, requestId: 'chat-review-continue',
     });
-    assert.equal(continuedApproval.ok, true);
-    await waitFor(() => (
-      snapshotRequestCount === 7
+    await waitFor(() => snapshotRequestCount === 7
       && controller.getState().session.activeRun === null
-      && hasCompletedRequestMessage(
-        controller.getState().session,
-        'review-response-continue',
-        REVIEW_APPROVED_REPLY,
-      )
-    ));
-    assert.deepEqual(graphFixture.reviewResumes()[2], {
-      'review-interrupt-cancel': {
-        decisions: [{
-          reviewId: REVIEW_SPEC.id,
-          selectedOptionId: 'approve',
-        }],
-      },
-    });
+      && hasCompletedRequestMessage(controller.getState().session, 'chat-review-continue', ASSISTANT_MESSAGE));
+    assert.equal(graphFixture.reviewResumes().length, 2);
     const cancelledOutput = committedRows.join('\n');
     assertOrdered(cancelledOutput.slice(approvedOutput.length), [
-      REVIEW_CANCEL_MESSAGE,
-      'interrupted',
-      REVIEW_CONTINUE_GUIDANCE,
-      REVIEW_APPROVED_REPLY,
+      REVIEW_CANCEL_MESSAGE, REVIEW_REJECTED_REPLY, REVIEW_CONTINUE_GUIDANCE, ASSISTANT_MESSAGE,
     ]);
 
     assert.deepEqual(controller.submitChat(ERROR_MESSAGE), {

@@ -43,7 +43,7 @@ jobs:
           npm run build -w pinpawo
       # The root `typecheck` script ends by chaining `test:unit -w pinpawo`,
       # which hangs on a Linux runner and does not belong in a typecheck job.
-      # Run the fourteen workspace typechecks it covers, and nothing else.
+      # Run workspace typechecks without the chained Host unit tests.
       - name: Typecheck all workspaces
         run: |
           npm run typecheck -w @pinpawo/agent-contracts
@@ -53,6 +53,7 @@ jobs:
           npm run typecheck -w @pinpawo/tui
           npm run typecheck -w @pinpawo-toolkit/browser
           npm run typecheck -w @pinpawo-plugin/kanban
+          npm run typecheck -w @pinpawo-plugin/channel
           npm run typecheck -w @pinpawo-plugin/scheduler
           npm run typecheck -w @pinpawo-plugin/notice
           npm run typecheck -w @pinpawo-plugin/trigger

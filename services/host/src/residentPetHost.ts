@@ -1,3 +1,4 @@
+import { withoutPetInvocationContext } from './host/petInvocationContext';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
 import { runAgentSessionTurn } from './agent/chatSessionAdapter';
@@ -182,9 +183,8 @@ export async function createResidentPetRuntime(
     const context = await loadContext(deps.petId);
     const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
-    // Any pending interrupt holds dispatch, whatever its kind. Resumability
-    // is not consulted: it cannot tell a paused task from ordinary retained
-    // work, and the interrupt is the authoritative signal.
+    // Only a pending native review holds dispatch. Retained plans alone
+    // do not block new input or require recovery.
     if (state.pendingInterrupt) return 'waiting';
     return 'open';
   };
@@ -228,7 +228,7 @@ export async function createResidentPetRuntime(
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    runAgentTurn,
+    runAgentTurn: (input) => withoutPetInvocationContext(() => runAgentTurn(input)),
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
     activeRuns,
     interruptHostRun: (requestId) => {

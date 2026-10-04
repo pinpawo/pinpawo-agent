@@ -35,9 +35,11 @@ export type ActiveRun = Extract<AgentRunView, { state: 'running' }>;
  */
 export class ActiveRunRegister {
   private current: ActiveRun | null = null;
+  private sessionId: string | undefined;
 
   /** The run in flight, or null. */
-  read(): ActiveRun | null {
+  read(sessionId?: string): ActiveRun | null {
+    if (sessionId && this.sessionId && sessionId !== this.sessionId) return null;
     return this.current;
   }
 
@@ -48,7 +50,7 @@ export class ActiveRunRegister {
    * a second claim means an admission was bypassed rather than a race to
    * tolerate.
    */
-  begin(requestId: string): ActiveRun {
+  begin(requestId: string, sessionId?: string): ActiveRun {
     if (this.current) {
       throw new Error(`This Agent already has an active run "${this.current.requestId}".`);
     }
@@ -59,6 +61,7 @@ export class ActiveRunRegister {
       startedAt: Date.now(),
     };
     this.current = run;
+    this.sessionId = sessionId;
     return run;
   }
 

@@ -1212,7 +1212,7 @@ test('manual compaction binds the active session and uses its model-call timeout
       kind: 'chat',
       timeline: [],
       activeRun: null,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+      pendingInterrupt: null,
     }),
   });
   assert.equal((await compacted).compacted, true);
@@ -1232,175 +1232,29 @@ test('manual compaction binds the active session and uses its model-call timeout
   controller.stop();
 });
 
-test('continuing a paused task refuses attachments instead of dropping them', () => {
-  const requestIds = ['startup', 'continue-attempt'];
+test('review cancellation completes; the next explicit chat can carry attachments and empty input does not resume', () => {
+  const requestIds = ['startup', 'cancel', 'refresh', 'fresh'];
   let connection!: FakeConnection;
   const controller = new TuiSessionController({
-    connectionFactory: (handlers) => {
-      connection = new FakeConnection(handlers);
-      return connection;
-    },
+    connectionFactory: handlers => { connection = new FakeConnection(handlers); return connection; },
     requestIdFactory: () => requestIds.shift() ?? 'unexpected',
   });
   controller.start();
   connection.open();
-  connection.receive({
-    type: 'session.snapshot.result',
-    requestId: 'startup',
-    snapshot: createAgentSessionSnapshot({
-      sessionId: 'chat:one',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-    }),
-  });
-
-  const sentBefore = connection.sent.length;
-  // The resume value has nowhere to carry an attachment, so reporting success
-  // would silently discard it once the composer clears.
-  assert.deepEqual(
-    controller.continuePausedTask('use this diagram', [{
-      id: 'attachment-1',
-      source: 'local-path',
-      kind: 'file',
-      path: '/tmp/diagram.png',
-      name: 'diagram.png',
-    }]),
-    { ok: false, reason: 'attachments-unsupported' },
-  );
-  assert.equal(connection.sent.length, sentBefore, 'nothing is sent');
-  // The pause is untouched, so the person can drop the attachment and continue,
-  // or press Esc and start a new task that carries it.
-  assert.equal(controller.getState().session.pendingInterrupt?.payload.kind, 'pause_task');
-  controller.stop();
-});
-
-test('delegation continuation resumes the pause by id and permits an empty resume', async () => {
-  const requestIds = [
-    'startup',
-    'review-cancel',
-    'interrupted-refresh',
-    'resume-other',
-    'resume-original',
-    'continue-failed',
-    'continue-empty',
-    'continue-refresh',
-  ];
-  let connection!: FakeConnection;
-  const controller = new TuiSessionController({
-    connectionFactory: (handlers) => {
-      connection = new FakeConnection(handlers);
-      return connection;
-    },
-    requestIdFactory: () => requestIds.shift() ?? 'unexpected',
-  });
-  controller.start();
-  connection.open();
-  connection.receive(reviewSnapshotResult('startup', [
-    reviewSpec('review-1', [{
-      id: 'approve',
-      label: 'Approve',
-      batchSubmission: 'immediate',
-    }]),
-  ]));
-
-  assert.deepEqual(controller.cancelReview({
-    interruptId: 'review-action',
-  }), { ok: true });
-  connection.receive(eventMessage({
-    type: 'run.interrupted',
-    requestId: 'review-cancel',
-    message: 'review interrupted',
+  connection.receive(reviewSnapshotResult('startup', [reviewSpec('review-1', [{
+    id: 'approve', label: 'Approve', batchSubmission: 'immediate',
+  }])]));
+  assert.deepEqual(controller.cancelReview({ interruptId: 'review-action' }), { ok: true });
+  connection.receive(eventMessage({ type: 'message.completed', requestId: 'cancel', messageId: 'stop',
+    role: 'assistant', text: 'Action not executed. Round ended.',
   }));
-  assert.deepEqual(connection.sent.at(-1), {
-    type: 'session.snapshot.get',
-    requestId: 'interrupted-refresh',
-  });
-  connection.receive({
-    type: 'session.snapshot.result',
-    requestId: 'interrupted-refresh',
-    snapshot: createAgentSessionSnapshot({
-      sessionId: 'chat:one',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-    }),
-  });
-
-  const resumeOther = controller.resumeSession('chat:two');
-  connection.receive({
-    type: 'session.resume.result',
-    requestId: 'resume-other',
-    session: sessionSummary('chat:two', true),
-    snapshot: createAgentSessionSnapshot({
-      sessionId: 'chat:two',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-      pendingInterrupt: null,
-    }),
-  });
-  await resumeOther;
-
-  const resumeOriginal = controller.resumeSession('chat:one');
-  connection.receive({
-    type: 'session.resume.result',
-    requestId: 'resume-original',
-    session: sessionSummary('chat:one', true),
-    snapshot: createAgentSessionSnapshot({
-      sessionId: 'chat:one',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-    }),
-  });
-  await resumeOriginal;
-
-  connection.failNextSend = true;
-  assert.deepEqual(
-    controller.continuePausedTask('apply the new constraints'),
-    { ok: false, reason: 'send-failed' },
-  );
-
-  // An empty continue is valid: it resumes the delegation with no guidance.
-  assert.deepEqual(controller.continuePausedTask(''), {
-    ok: true,
-    requestId: 'continue-empty',
-  });
-  assert.deepEqual(connection.sent.at(-1), {
-    type: 'interrupt.resume',
-    requestId: 'continue-empty',
-    interruptId: 'interrupt-pause',
-    value: { action: 'continue' },
-  });
-  assert.deepEqual(
-    controller.continuePausedTask('cannot overlap the active run'),
-    { ok: false, reason: 'busy' },
-  );
-  connection.receive(eventMessage({
-    type: 'message.completed',
-    requestId: 'continue-empty',
-    messageId: 'continue-empty:assistant',
-    role: 'assistant',
-    text: 'continued',
-  }));
-  assert.deepEqual(connection.sent.at(-1), {
-    type: 'session.snapshot.get',
-    requestId: 'continue-refresh',
-  });
-  connection.receive({
-    type: 'session.snapshot.result',
-    requestId: 'continue-refresh',
-    snapshot: createAgentSessionSnapshot({
-      sessionId: 'chat:one',
-      kind: 'chat',
-      timeline: [],
-      activeRun: null,
-      pendingInterrupt: null,
-    }),
-  });
+  connection.receive(snapshotResult('refresh', 'chat:one'));
+  assert.equal(controller.getState().session.pendingInterrupt, null);
+  assert.deepEqual(controller.submitChat(''), { ok: false, reason: 'empty' });
+  const attachments = [{ id: 'file', source: 'local-path' as const, kind: 'file' as const,
+    path: '/tmp/constraints.txt', name: 'constraints.txt' }];
+  assert.deepEqual(controller.submitChat('Continue with these constraints.', attachments), { ok: true, requestId: 'fresh' });
+  assert.deepEqual(connection.sent.at(-1), { type: 'chat_request', requestId: 'fresh',
+    message: 'Continue with these constraints.', attachments });
   controller.stop();
 });

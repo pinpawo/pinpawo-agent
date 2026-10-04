@@ -352,17 +352,17 @@ test('live activity distinguishes progress from paused and stopping runs', () =>
     formatLiveSession({
       ...session,
       activeRun: null,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+      pendingInterrupt: null,
     }),
-    'task paused',
+    'idle',
   );
   assert.equal(
     formatLiveActivity({
       ...session,
       activeRun: null,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
+      pendingInterrupt: null,
     }),
-    '◌ task paused',
+    formatLiveSession({ ...session, activeRun: null, pendingInterrupt: null }),
   );
   assert.equal(
     formatLiveActivity({

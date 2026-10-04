@@ -1,5 +1,6 @@
 import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
+import { buildReviewStopMessage } from '../interrupt/reviewStop';
 import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
@@ -50,13 +51,16 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const result = createCapabilityExecutionMessage({
       callId: runtime.toolCallId,
       execution: input,
-      result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts },
+      result: { status: execution.status, delivery: execution.delivery, artifacts: execution.artifacts,
+        ...(execution.reviewDecision ? { reviewDecision: execution.reviewDecision } : {}) },
       metadata: { runId: state.runId, taskId: state.taskId, delegationId: input.delegationId,
         sourceCapability: input.capability, runtimeGenerated: true,
         ...(execution.tokenUsage ? { capabilityTokenUsage: execution.tokenUsage } : {}) },
     });
     return new Command({ update: {
-      messages: [result],
+      messages: [result, ...(execution.reviewDecision ? [buildReviewStopMessage(execution.reviewDecision, {
+        runId: state.runId, taskId: state.taskId,
+      })] : [])],
       sessionCapabilityArtifacts: execution.artifacts,
       runIterationCount: state.runIterationCount + 1,
       sessionToolAuthorizations: { generation: registry.authorizationGeneration, records: execution.toolAuthorizations },

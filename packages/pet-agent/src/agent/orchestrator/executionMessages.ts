@@ -6,7 +6,8 @@ import { capabilityExecutionSnapshotSchema, type CapabilityExecutionInput } from
 export const DELEGATE_CAPABILITY_TOOL_NAME = 'delegate_capability';
 
 const executionResultSchema = z.object({
-  status: z.enum(['returned', 'paused', 'missing_deliverable']),
+  status: z.enum(['returned', 'missing_deliverable']),
+  reviewDecision: z.enum(['reject', 'cancel']).optional(),
   delivery: z.object({
     id: z.string().min(1), task: z.string(), text: z.string().refine((text) => text.trim().length > 0),
     scope: z.object({
@@ -15,7 +16,10 @@ const executionResultSchema = z.object({
     }).strict(),
   }).strict().nullable(),
   artifacts: z.array(z.record(z.string(), z.unknown())),
-}).strict();
+}).strict().refine(result => !result.reviewDecision
+  || (result.status === 'missing_deliverable' && result.delivery === null), {
+  message: 'A declined review cannot be a returned delivery.',
+});
 
 /**
  * The typed record a delegate_capability result carries in its artifact. The

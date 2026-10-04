@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@pinpawo/agent-contracts": ["../../packages/agent-contracts/src/index.ts"],
+      "@pinpawo/agent-session": ["../../packages/agent-session/src/index.ts"],
+      "@pinpawo-plugin/studio-http": ["../../plugins/studio-http/src/index.ts"],
+      "@pinpawo/pet-agent": ["../../packages/pet-agent/src/index.ts"],
+      "@pinpawo/studio": ["../../packages/studio/src/index.ts"],
+      "pinpawo/host-runtime": ["../../services/host/src/hostRuntime.ts"],
+      "pinpawo/local-server-transport": ["../../services/host/src/wire/index.ts"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

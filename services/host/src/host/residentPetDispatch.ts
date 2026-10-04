@@ -1,4 +1,6 @@
+import type { PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
+import { copyPetInvocationScope, withPetInvocationContext } from './petInvocationContext';
 import { AsyncLocalStorageProviderSingleton } from '@langchain/core/singletons';
 
 import type { AgentChannelSetup } from '../agent/agentChannel';
@@ -22,9 +24,8 @@ import {
  * The dispatch surface: one-way input, observed rather than steered.
  *
  * A dispatch run is not a conversation turn. It has no interactive client to
- * answer, so it publishes its progress to whoever is observing and settles a
- * cancellation into a pause the same way a Chat run does — that is what makes
- * resident runs continuable by id.
+ * answer, so it publishes its progress to whoever is observing. Cancellation
+ * preserves an already-pending native review, just as a Chat run does.
  */
 
 function isAbortError(error: unknown): boolean {
@@ -40,7 +41,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
     runAgentTurn,
     loadContext,
     sessions,
-    publishRuntimeEvent,
+    publishRuntimeEvent: publishActiveSessionEvent,
     dispatchLifecycleListeners,
     publishDispatchLifecycle,
     activeHostRuns,
@@ -54,8 +55,27 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
       dispatchLifecycleListeners.add(listener);
       return () => dispatchLifecycleListeners.delete(listener);
     },
-    dispatch: async ({ request, dispatchId: suppliedDispatchId }) => {
+    dispatch: async ({ request, dispatchId: suppliedDispatchId, scope: suppliedScope, session: suppliedSession }) => {
       const dispatchId = suppliedDispatchId?.trim() || randomUUID();
+      const scope = suppliedScope ? copyPetInvocationScope(suppliedScope) : undefined;
+      const petId = runtime.petId;
+      // Resolve and persist before admission; neither queue time nor a TUI switch
+      // may change the target. Legacy callers retain active-session behavior.
+      const target = suppliedSession
+        ? sessions.ensureDispatchSession(petId, suppliedSession.id, suppliedSession.create === true)
+        : undefined;
+      let pendingInterrupt: PendingInterruptProjection | undefined;
+      const publishRuntimeEvent: typeof publishActiveSessionEvent = (event) => {
+        if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
+        if (!target || sessions.getActiveSessionId(petId) === target.id) publishActiveSessionEvent(event);
+      };
+      const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
+        ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
+        ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
+        ...(target ? { sessionId: target.id } : {}),
+      });
+      const readTargetSetup = async () => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(petId), target!.id);
+
       coordinator.submitDispatch(() => AsyncLocalStorageProviderSingleton.runWithConfig(
         { callbacks: [] },
         async () => {
@@ -68,8 +88,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           let activeRun: ActiveRun | null = null;
           let abortedSetup: AgentChannelSetup | null = null;
           /**
-           * A cancelled dispatch that left work behind becomes a task pause,
-           * so resident runs are continuable by id exactly like Chat runs.
+           * Cancellation creates no synthetic interrupt. Report a native
+           * review only if it was already pending.
            */
           const settleInterruptedDispatch = async (params: {
             setup: AgentChannelSetup | null;
@@ -88,7 +108,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                 requestId,
                 pendingInterrupt: projectPendingInterrupt(settled),
               });
-              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
+              publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
             }
             if (params.announce !== false) {
@@ -98,11 +118,12 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                 message: 'Run interrupted.',
               });
             }
-            publishDispatchLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
+            publishLifecycle({ dispatchId, request, requestId, state: 'interrupted' });
           };
           try {
             const context = await loadContext(runtimeDeps.get().petId);
-            const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
+            const setup = target ? sessions.buildSessionSetup(runtimeDeps.get(), context, target.id)
+              : sessions.buildChatSetup(runtimeDeps.get(), context);
             abortedSetup = setup;
             configureInflightOperationRegistry(
               run,
@@ -110,15 +131,15 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
             );
             setup.input.signal = run.controller.signal;
             activeHostRuns.set(requestId, run.controller);
-            activeRun = activeRuns.begin(requestId);
-            publishDispatchLifecycle({ dispatchId, request, requestId, state: 'running' });
+            activeRun = activeRuns.begin(requestId, target?.id);
+            publishLifecycle({ dispatchId, request, requestId, state: 'running' });
             publishRuntimeEvent({
               type: 'run.started',
               requestId,
               initiator: 'host',
               input: { role: 'user', text: request },
             });
-            const result = await runAgentTurn({
+            const result = await withPetInvocationContext({ petId, dispatchId, scope, sessionId: target?.id }, () => runAgentTurn({
               request: { kind: 'user_message', requestId, message: request },
               setup,
               graphService,
@@ -134,10 +155,10 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               acceptDelegationOperations: (operations) => {
                 overlayInflightDelegationOperations(run, operations);
               },
-            });
+            }));
             if (result.status === 'waiting') {
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
-              publishDispatchLifecycle({ dispatchId, request, requestId, state: 'waiting' });
+              publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
             }
             if (result.status === 'interrupted') {
@@ -145,7 +166,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               return;
             }
             finishInflightOperations(run, 'completed', publishRuntimeEvent);
-            publishDispatchLifecycle({ dispatchId, request, requestId, state: 'completed' });
+            publishLifecycle({ dispatchId, request, requestId, state: 'completed', reply: result.reply });
           } catch (error) {
             let failure = error;
             if (run.controller.signal.aborted || isAbortError(error)) {
@@ -174,7 +195,7 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
                 message,
               });
             }
-            publishDispatchLifecycle({
+            publishLifecycle({
               dispatchId,
               request,
               requestId,
@@ -190,8 +211,14 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           }
         },
         true,
-      ));
-      publishDispatchLifecycle({ dispatchId, request, state: 'queued' });
+      ), target ? async () => {
+        try { return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt; }
+        catch (error) {
+          publishLifecycle({ dispatchId, request, state: 'failed', error: error instanceof Error ? error.message : String(error) });
+          throw error;
+        }
+      } : undefined);
+      publishLifecycle({ dispatchId, request, state: 'queued' });
     },
   };
 

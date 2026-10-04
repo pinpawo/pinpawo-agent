@@ -30,17 +30,13 @@ export {
 } from './orchestrator/runtime/graph';
 export {
   HUMAN_REVIEW_INTERRUPT_KIND,
-  readPauseTaskInterrupt,
   readPendingInterrupt,
-  readPendingInterruptInputPolicy,
   settleAbortedRun,
   UnknownInterruptPayloadError,
 } from './orchestrator/interrupt';
 export type {
   AbortSettlementGraph,
-  PauseTaskInterruptPayload,
   PendingInterrupt,
-  PendingInterruptInputPolicy,
   PendingInterruptPayload,
 } from './orchestrator/interrupt';
 export {

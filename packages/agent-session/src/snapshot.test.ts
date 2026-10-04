@@ -81,22 +81,14 @@ test('snapshot parser accepts JSON session data and rejects invalid boundaries',
   }), null);
 });
 
-test('snapshot parser requires an interrupt id for a task pause, as for a review', () => {
-  const snapshot = createAgentSessionSnapshot({
-    ...createSession(),
-    pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-  });
-
-  assert.deepEqual(parseAgentSessionSnapshot(snapshot), snapshot);
-  // A pause without an id cannot be continued, so it is not a valid pending
-  // interrupt at all.
-  assert.equal(parseAgentSessionSnapshot({
-    ...snapshot,
-    session: {
-      ...snapshot.session,
-      pendingInterrupt: { payload: { kind: 'pause_task' } },
-    },
-  }), null);
+test('snapshot parser refuses legacy pause projections and never turns them into idle', () => {
+  const snapshot = createAgentSessionSnapshot(createSession());
+  for (const pendingInterrupt of [
+    { interruptId: 'old-pause', payload: { kind: 'pause_task' } },
+    { payload: { kind: 'pause_task' } },
+  ]) {
+    assert.equal(parseAgentSessionSnapshot({ ...snapshot, session: { ...snapshot.session, pendingInterrupt } }), null);
+  }
 });
 
 test('snapshot parser migrates legacy V3 reviews to the V5 interrupt boundary', () => {

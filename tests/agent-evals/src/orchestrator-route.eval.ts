@@ -1,5 +1,6 @@
 // @ts-nocheck — eval script, types from langsmith barrel are incomplete
-import { createDeliveryResult, readFixtureDelivery, withDeliveryCalls } from '../../../packages/pet-agent/src/testing/capabilityDelivery';
+import { readFixtureDelivery } from '../../../packages/pet-agent/src/testing/capabilityDelivery';
+import { buildRouteEvalInput } from './orchestrator-eval-fixtures';
 /**
  * LangSmith evaluation: orchestrator route decision
  *
@@ -17,10 +18,10 @@ import { createDeliveryResult, readFixtureDelivery, withDeliveryCalls } from '..
 import { evaluate } from 'langsmith/evaluation';
 import { Client } from 'langsmith';
 import { createReasoningPassbackChatOpenAI } from '../../../services/host/src/agent/reasoningPassback.ts';
-import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 import {
   createOrchestratorGraph,
-  buildOrchestratorRunInput,
+  compileAgentRegistry,
+  ORCHESTRATOR_RECURSION_LIMIT,
 } from '../../../packages/pet-agent/src/agent/createAgentRuntime';
 import type { AgentModels } from '../../../packages/pet-agent/src/types/agent';
 import {
@@ -29,7 +30,7 @@ import {
 } from '../../../packages/pet-agent/src/types/capability';
 import { defineToolkit } from '../../../packages/pet-agent/src/types/toolkit';
 
-import { setAgentMessageDelegationScope } from '../../../packages/pet-agent/src/agent/messages';
+import { getAgentMessageMetadata } from '../../../packages/pet-agent/src/agent/messages';
 import {
   activeCapabilityFromResult,
   hasObservedDelegation,
@@ -44,34 +45,6 @@ import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 export const DATASET_NAME = 'orchestrator-route-decision';
-
-function evalAnnounce(params: {
-  lane: `capability:${string}`;
-  runId: string;
-  delegationId: string;
-  task: string;
-  result: string;
-  accepted?: boolean;
-}) {
-  const deliveryId = `announce:${params.runId}:${params.delegationId}`;
-  const message = createDeliveryResult({
-    id: `${params.accepted ? 'accepted' : 'private'}:${deliveryId}`,
-    sourceLane: params.lane,
-    runId: params.runId,
-    delegationId: params.delegationId,
-    deliveryId: deliveryId,
-    task: params.task,
-    result: params.result,
-    createdAt: '2026-08-31T00:00:00.000Z',
-  });
-  return params.accepted
-    ? message
-    : setAgentMessageDelegationScope(message, {
-        lane: params.lane,
-        runId: params.runId,
-        delegationId: params.delegationId,
-      });
-}
 
 // ── Model setup (env vars → ~/.pinpawo/config.json fallback) ──
 
@@ -178,7 +151,7 @@ const mockTools = [
 const mockGeneralToolkit = defineToolkit({
   name: 'eval_general',
   description: 'Mock general tools for route evaluation.',
-  tools: mockTools,
+  tools: mockTools.map(tool => ({ tool })),
 });
 
 function evalCapability(
@@ -263,113 +236,23 @@ export async function target(
   const compiled = await graph;
   const threadId = `eval-${Date.now()}-${++evalCounter}`;
 
-  const userMessage = inputs.user_message as string;
   const capabilityList = resolveCapabilityList(inputs.capability_pack);
 
-  const resumeProgressLane = typeof inputs.resume_progress_lane === 'string'
-    && inputs.resume_progress_lane.trim()
-    ? inputs.resume_progress_lane.trim()
-    : null;
-  const turnInput = buildOrchestratorRunInput(resumeProgressLane
-    ? [
-        new HumanMessage(String(inputs.resume_original_user_message ?? userMessage)),
-        evalAnnounce({
-          lane: resumeProgressLane,
-          runId: 'previous-turn',
-          delegationId: 'resume-progress-1',
-          task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
-          result: String(inputs.resume_progress_result ?? ''),
-        }),
-        new HumanMessage(userMessage),
-      ]
-    : [new HumanMessage(userMessage)]);
-  if (resumeProgressLane) {
-    turnInput.taskActiveDelegation = {
-      id: 'resume-progress-1',
-      lane: resumeProgressLane,
-      task: String(inputs.resume_progress_task ?? inputs.resume_original_user_message ?? userMessage),
-      contextSummary: null,
-      runId: 'previous-turn',
-      status: 'awaiting_decision',
-      resultPreview: String(inputs.resume_progress_result ?? ''),
-    };
-  }
-  const completedResults = Array.isArray(inputs.completed_results)
-    ? inputs.completed_results.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    : [];
-  const completedTasks = Array.isArray(inputs.completed_tasks)
-    ? inputs.completed_tasks.map((item) => typeof item === 'string' && item.trim().length > 0 ? item : null)
-    : [];
-  const progressResults = Array.isArray(inputs.progress_results)
-    ? inputs.progress_results.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    : [];
-  if (completedResults.length > 0) {
-    turnInput.runDelegationSummaries = completedResults.map((text, index) => ({
-      id: `eval-${index + 1}`,
-      lane: 'capability:general',
-      task: completedTasks[index] ?? userMessage,
-      status: 'completed',
-      resultPreview: text,
-    }));
-    turnInput.messages.push(
-      ...completedResults.map((text, index) => evalAnnounce({
-        lane: 'capability:general',
-        runId: turnInput.runId,
-        delegationId: `eval-${index + 1}`,
-        task: completedTasks[index] ?? userMessage,
-        result: text,
-        accepted: true,
-      })),
-    );
-  }
-  if (progressResults.length > 0) {
-    const offset = turnInput.runDelegationSummaries.length;
-    const progressSummaries = progressResults.map((text, index) => ({
-      id: `eval-${offset + index + 1}`,
-      lane: 'capability:general',
-      task: userMessage,
-      status: 'progress',
-      resultPreview: text,
-    }));
-    turnInput.runDelegationSummaries.push(...progressSummaries);
-    const latestProgress = progressSummaries.at(-1);
-    if (latestProgress) {
-      turnInput.taskActiveDelegation = {
-        id: latestProgress.id,
-        lane: latestProgress.lane,
-        task: latestProgress.task,
-        contextSummary: null,
-        runId: turnInput.runId,
-        status: 'awaiting_decision',
-        resultPreview: latestProgress.resultPreview,
-      };
-    }
-    turnInput.messages.push(
-      ...progressResults.map((text, index) => evalAnnounce({
-        lane: 'capability:general',
-        runId: turnInput.runId,
-        delegationId: `eval-${offset + index + 1}`,
-        task: userMessage,
-        result: text,
-      })),
-    );
-  }
+  const turnInput = buildRouteEvalInput(inputs);
   const allowedCapabilityNames = Array.isArray(inputs.allowed_capability_names)
     ? inputs.allowed_capability_names.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     : null;
 
-  // Evaluate through task/search + route decision, but stop before executing subagents.
-  turnInput.messages = withDeliveryCalls(turnInput.messages);
+  // Evaluate Entry and Supervisor decisions, stopping before Capability execution.
   const result = await compiled.invoke(turnInput, {
     interruptBefore: ['capability'],
+    recursionLimit: ORCHESTRATOR_RECURSION_LIMIT,
     configurable: {
       thread_id: threadId,
-      toolkits: [mockGeneralToolkit],
-      capabilities: capabilityList,
+      registry: compileAgentRegistry({ toolkits: [mockGeneralToolkit], capabilities: capabilityList }),
       ...(allowedCapabilityNames
         ? { allowedCapabilityNames }
         : {}),
-      maxIterations: 1,
     },
   });
   return extractResult(result);
@@ -381,7 +264,8 @@ function hasCurrentSubagentObservation(result: Record<string, unknown>): boolean
 }
 
 function latestAnnounceFromResult(result: Record<string, unknown>) {
-  const messages = Array.isArray(result.messages) ? result.messages : [];
+  const messages = (Array.isArray(result.messages) ? result.messages : [])
+    .filter(message => getAgentMessageMetadata(message).runId === result.runId);
   return messages.flatMap((message) => {
     const announce = readFixtureDelivery(message);
     return announce ? [announce] : [];

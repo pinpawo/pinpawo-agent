@@ -19,7 +19,7 @@ export type TokenUsageSnapshot = {
   scope?: TokenUsageScope;
 };
 
-export type AgentWorkStatus = 'running' | 'waiting_interaction' | 'paused';
+export type AgentWorkStatus = 'running' | 'waiting_interaction';
 
 /** Observable, resumable work. It does not expose a runtime state transition. */
 export type AgentWorkSnapshot = {
@@ -79,7 +79,7 @@ export function parseAgentWorkSnapshot(value: unknown): AgentWorkSnapshot | null
   const id = readNonEmptyString(value.id);
   if (
     id === null
-    || (value.status !== 'running' && value.status !== 'waiting_interaction' && value.status !== 'paused')
+    || (value.status !== 'running' && value.status !== 'waiting_interaction')
     || typeof value.resumable !== 'boolean'
     || typeof value.cancellable !== 'boolean'
   ) {

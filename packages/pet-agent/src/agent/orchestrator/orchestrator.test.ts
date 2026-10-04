@@ -3578,9 +3578,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   for await (const _event of resumedRun) {
     // Drain the root stream so the final output is materialized.
   }
-  // The run now suspends on a pause interrupt instead of ending, so the
-  // stream output carries the interrupt, not the channel values. Read state
-  // from the checkpoint, as the Host does.
+  // Read the completed checkpoint as the Host does.
   const resumedOutput = await resumedRun.output as { __interrupt__?: unknown };
   const finalState = {
     ...(await graph.getState(config)).values,
@@ -3592,7 +3590,8 @@ test('toolkit review rejection records terminal tool results and retains the del
     runId: string;
   };
 
-  assert.equal(finalState.__interrupt__?.[0]?.value?.kind, 'pause_task', 'a task pause suspends the run as a real interrupt');
+  assert.equal(finalState.__interrupt__, undefined, 'review decline completes without a second interrupt');
+  assert.deepEqual((await graph.getState(config)).next, []);
   assert.equal(runCount, 0);
   assert.equal(reviewCount, 6);
   assert.equal(autoReviewCount, 1, 'pending review resume must reuse its checkpointed auto-review');
@@ -3602,7 +3601,7 @@ test('toolkit review rejection records terminal tool results and retains the del
     .find((message) => Boolean(readFixtureDelivery(message)));
   assert.equal(handoffCopy, undefined);
   assert.equal(currentSupervisorTask(finalState.runSupervisorState)?.status, 'pending');
-  assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.status, 'paused');
+  assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.reviewDecision, 'reject');
 
   const task = currentSupervisorTask(finalState.runSupervisorState);
   assert.ok(task);
@@ -3612,39 +3611,7 @@ test('toolkit review rejection records terminal tool results and retains the del
   assert.ok(activeDelegation);
   assert.equal(finalState.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
 
-  const pauseInterruptId = finalState.__interrupt__?.[0]?.id;
-  assert.ok(pauseInterruptId, 'pause interrupt must carry an id to continue by');
-  const nextReview = await graph.invoke(
-    new Command({
-      resume: {
-        [pauseInterruptId]: {
-          action: 'continue',
-          guidance: 'continue without the rejected action',
-        },
-      },
-    }),
-    config,
-  ) as {
-    __interrupt__?: Array<{ id?: string; value?: unknown }>;
-  };
-  const nextPayload = nextReview.__interrupt__?.[0]?.value as {
-    reviews?: Array<{ review?: { id?: string } }>;
-  } | undefined;
-  assert.deepEqual(nextPayload?.reviews?.map((item) => item.review?.id), [
-    'tool-review:run_shell:call-after-continue',
-  ]);
-  assert.equal(autoReviewCount, 2, 'a later capability review must run auto-review normally');
-  const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
-  assert.equal(
-    continuedSubagentInput.some((message) => ToolMessage.isInstance(message) && getAgentMessageLane(message) !== null),
-    false,
-  );
-  assert.equal(
-    continuedSubagentInput.some((message) =>
-      HumanMessage.isInstance(message)
-      && String(message.content).includes('continue without the rejected action')),
-    true,
-  );
+
 });
 
 test('toolkit review run interruption retains the delegation without another model call or handoff', async () => {
@@ -3750,9 +3717,7 @@ test('toolkit review run interruption retains the delegation without another mod
   for await (const _event of resumedRun) {
     // Drain the root stream so the retained delegation checkpoint is materialized.
   }
-  // The run now suspends on a pause interrupt instead of ending, so the
-  // stream output carries the interrupt, not the channel values. Read state
-  // from the checkpoint, as the Host does.
+  // Read the completed checkpoint as the Host does.
   const resumedOutput = await resumedRun.output as { __interrupt__?: unknown };
   const finalState = {
     ...(await graph.getState(config)).values,
@@ -3764,7 +3729,8 @@ test('toolkit review run interruption retains the delegation without another mod
     runId: string;
   };
 
-  assert.equal(finalState.__interrupt__?.[0]?.value?.kind, 'pause_task', 'a task pause suspends the run as a real interrupt');
+  assert.equal(finalState.__interrupt__, undefined, 'review decline completes without a second interrupt');
+  assert.deepEqual((await graph.getState(config)).next, []);
   assert.equal(runCount, 0);
   assert.equal(reviewCount, 2);
   assert.equal(routeCallCount, 2);
@@ -3787,29 +3753,8 @@ test('toolkit review run interruption retains the delegation without another mod
   assert.ok(activeDelegation);
   assert.equal(finalState.messages.some(message => getAgentMessageLane(message)?.startsWith('capability:')), false);
 
-  const retainedDelegationId = activeDelegation.id;
-  const continuedState = await graph.invoke(
-    new Command({ resume: { [finalState.__interrupt__![0].id!]: { action: 'continue' } } }),
-    config,
-  ) as {
-    messages: BaseMessage[];
-    runSupervisorState: OrchestratorStateType['runSupervisorState'];
-    runId: string;
-  };
+  assert.equal(readCapabilityExecutions(finalState.messages).at(-1)?.result?.reviewDecision, 'cancel');
 
-  assert.equal(routeCallCount, 4);
-  assert.equal(recorder.subagentInputs.length, 2);
-  assert.equal(finalizeCallCount, 1);
-  const continuedSubagentInput = recorder.subagentInputs.at(-1) ?? [];
-  assert.equal(
-    continuedSubagentInput.some((message) => ToolMessage.isInstance(message)
-      && getAgentMessageMetadata(message).lane === 'capability:general'),
-    false,
-  );
-  const resumedHandoff = readDelegationDeliveries(continuedState.messages).at(-1);
-  assert.notEqual(resumedHandoff?.scope.delegationId, retainedDelegationId);
-  assert.ok(resumedHandoff);
-  assert.equal(currentSupervisorTask(continuedState.runSupervisorState), null);
 });
 
 test('toolkit review resumes multiple reviewed tool calls in one model response', async () => {
@@ -4382,106 +4327,6 @@ function announces(input: RunSupervisorInput | undefined) {
     && delivery.scope.delegationId === active.delegationId && delivery.scope.runId === active.runId)
     .map((delivery) => ({ messageId: delivery.id, result: delivery.text }));
 }
-test('a review-origin task pause consults Supervisor on guided continue by id', async () => {
-  let runCount = 0;
-  const rawTool = tool(async ({ command }: { command: string }) => {
-    runCount += 1;
-    return `ran ${command}`;
-  }, {
-    name: 'run_shell',
-    description: 'run shell',
-    schema: z.object({ command: z.string() }),
-  });
-  const toolkits: AgentToolkit[] = [{
-    name: 'local',
-    description: 'local tools',
-    tools: [reviewedTool(rawTool, {
-      request: () => buildReviewSpec({
-        view: { kind: 'plain', body: 'Approve shell?' },
-        options: [
-          { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
-          { id: 'reject', label: 'Reject', decision: { type: 'reject', message: 'no' } },
-        ],
-      }),
-    })],
-  }];
-  let routeCallCount = 0;
-  const routeModel = {
-    invoke: async () => new AIMessage('answered'),
-    bindTools: () => ({ invoke: async () => new AIMessage('') }),
-    withStructuredOutput: () => ({
-      invoke: async () => {
-        routeCallCount += 1;
-        if (routeCallCount === 1) return scriptedPlannerTask('run shell');
-        if (routeCallCount === 2) return scriptedSupervisorCapability('general');
-        if (routeCallCount === 3) return continueDecision('Inspect recent commits as requested.');
-        return goalDoneDecision();
-      },
-    }),
-  } as unknown as AgentModels['act'];
-  const subagentModel = new FakeToolCallingModel({
-    toolCalls: [
-      [{ id: 'call-first', name: 'run_shell', args: { command: 'git status' } }],
-      [{ id: 'call-after-continue', name: 'run_shell', args: { command: 'git log -1' } }],
-      [],
-    ],
-  });
-  const graph = createOrchestratorGraph({
-    models: { act: routeModel, observe: routeModel, subagent: subagentModel },
-    checkpoint: new MemorySaver(),
-  });
-  const recorder = createSubagentInputRecorder();
-  const config = {
-    callbacks: recorder.callbacks,
-    configurable: {
-      thread_id: 'experiment-pause-as-interrupt',
-      capabilities: [capability('general', 'General-purpose capability.', ['local'])],
-      toolkits,
-      reviewCapabilities: { humanReview: true, sessionAuthorization: false },
-      globalReviewPolicy: { mode: 'custom', resolve: () => ({ type: 'require_authorization' as const }) },
-    },
-  };
-  type Out = { __interrupt__?: Array<{ id?: string; value?: { kind?: string } }> };
-
-  // 1. run until the review interrupt
-  const reviewed = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('run git status')]), config) as Out;
-  const reviewId = reviewed.__interrupt__?.[0]?.id;
-  assert.equal(reviewed.__interrupt__?.[0]?.value?.kind, 'review_batch');
-  assert.ok(reviewId);
-
-  // 2. reject → the run must SUSPEND on a pause_task interrupt, not end
-  const paused = await graph.invoke(new Command({
-    resume: { [reviewId]: { decisions: [{ reviewId: 'tool-review:run_shell:call-first', selectedOptionId: 'reject' }] } },
-  }), config) as Out;
-  const pauseId = paused.__interrupt__?.[0]?.id;
-  assert.equal(paused.__interrupt__?.[0]?.value?.kind, 'pause_task', 'pause must surface as a real interrupt');
-  assert.ok(pauseId, 'pause interrupt must carry an id');
-  const pausedState = await graph.getState(config);
-  assert.equal(pausedState.next?.[0], 'pauseGate');
-  assert.equal(currentSupervisorTask(pausedState.values.runSupervisorState)?.status, 'pending');
-  assert.equal(readCapabilityExecutions(pausedState.values.messages).at(-1)?.result?.status, 'paused', 'result committed before suspension');
-  assert.equal(runCount, 0);
-  assert.equal(routeCallCount, 2);
-  assert.equal(recorder.subagentInputs.length, 1);
-
-  // 3. continue by id → Supervisor considers guidance before re-entering the delegation
-  const continued = await graph.invoke(new Command({ resume: { [pauseId]: { action: 'continue', guidance: 'Skip git status; inspect recent commits.' } } }), config) as Out;
-  assert.equal(continued.__interrupt__?.[0]?.value?.kind, 'review_batch', 'the continued subagent reaches its next reviewed tool call');
-  assert.equal(recorder.subagentInputs.length, 2, 'continue is one fresh subagent invocation');
-  assert.equal(routeCallCount, 3, 'guidance must reach Supervisor before continuing');
-  assert.equal(runCount, 0);
-  const continuedState = await graph.getState(config);
-  const pendingCall = continuedState.values.messages.at(-1) as AIMessage;
-  assert.equal(pendingCall.tool_calls?.[0]?.name, 'delegate_capability');
-  assert.ok(!continuedState.values.messages.some((message: BaseMessage) => ToolMessage.isInstance(message)
-    && message.tool_call_id === pendingCall.tool_calls![0].id), 'continued call awaits its own result');
-  const guidance = (continuedState.values.messages as BaseMessage[]).find((message) =>
-    HumanMessage.isInstance(message) && message.text === 'Skip git status; inspect recent commits.');
-  assert.ok(guidance);
-  assert.equal(getAgentMessageMetadata(guidance).taskId, continuedState.values.taskId);
-  assert.equal(getAgentMessageRunId(guidance), continuedState.values.runId);
-  assert.equal(currentSupervisorTask(continuedState.values.runSupervisorState)?.id, currentSupervisorTask(pausedState.values.runSupervisorState)?.id);
-});
 
 for (const continuePlan of [false, true]) {
   test(`cancelled work stays factual and the next run enters Entry before ${continuePlan ? 'continuing' : 'answering'}`, async () => {
@@ -4545,5 +4390,75 @@ for (const continuePlan of [false, true]) {
       { goal: cancelled.values.runSupervisorState.goal, plan: cancelled.values.runSupervisorState.plan });
     assert.equal(next.runSupervisorState.runId,
       continuePlan ? next.runId : cancelled.values.runSupervisorState.runId);
+  });
+}
+
+for (const decision of ['reject', 'cancel'] as const) {
+  test(`review ${decision} ends the round; explicit input enters Entry and continues the preserved plan`, async () => {
+    let toolRuns = 0;
+    let entryCalls = 0;
+    let supervisorCalls = 0;
+    let finalizes = 0;
+    const rawTool = tool(async () => { toolRuns++; return 'executed'; }, {
+      name: 'reviewed_action', description: 'Reviewed action.', schema: z.object({}),
+    });
+    const registry = compileAgentRegistry({
+      toolkits: [{ name: 'local', description: 'Local.', tools: [reviewedTool(rawTool, {
+        request: () => buildReviewSpec({
+          view: { kind: 'plain', body: 'Authorize action?' }, options: [
+            { id: 'approve', label: 'Approve', decision: { type: 'approve' } },
+            { id: 'reject', label: 'Reject', decision: { type: 'reject', message: 'Do not execute.' } },
+          ],
+        }),
+      })] }],
+      capabilities: [{ ...capability('general', 'General work.', ['local']),
+        lifecycle: { finalize: () => { finalizes++; } },
+      }],
+    });
+    const entry = { bindTools: () => ({ invoke: async () => {
+      entryCalls++;
+      return new AIMessage({ content: '', tool_calls: [{
+        id: `review-entry-${entryCalls}`, name: entryCalls === 1 ? 'plan_request' : 'continue',
+        args: entryCalls === 1 ? { goal: 'Inspect and report.' } : {},
+      }] });
+    } }) } as unknown as AgentModels['act'];
+    const graph = createRuntimeOrchestratorGraph({
+      models: { act: entry, answer: entry, subagent: new FakeToolCallingModel({
+        toolCalls: [[{ id: 'reviewed-action', name: 'reviewed_action', args: {} }], []],
+      }) },
+      checkpoint: new MemorySaver(),
+      runSupervisorRunner: withScriptedDelegation({ invoke: async (input) => {
+        supervisorCalls++;
+        if (supervisorCalls === 1) return { name: 'submit_plan', args: { tasks: [
+          { capability: 'general', objective: 'Inspect.' }, { capability: 'general', objective: 'Report.' },
+        ] } };
+        assert.deepEqual(input.state.plan.map(item => item.objective), ['Inspect.', 'Report.']);
+        if (supervisorCalls === 2) return { name: 'delegate_capability', args: { briefing: 'Use the new constraints.' } };
+        return { reply: 'Continued under the new instructions.' };
+      } }),
+    });
+    const config = { configurable: { thread_id: `review-stop-${decision}`, registry,
+      reviewCapabilities: { humanReview: true, sessionAuthorization: false },
+      globalReviewPolicy: { mode: 'require_authorization' },
+    } };
+    const reviewed = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Inspect and report.')]), config) as OrchestratorStateType & { __interrupt__?: Array<{ id?: string }> };
+    const pending = reviewed.__interrupt__?.[0];
+    assert.ok(pending);
+    const stopped = await graph.invoke(new Command({ resume: { [pending.id!]: decision === 'cancel'
+      ? { action: 'cancel' }
+      : { decisions: [{ reviewId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId: 'reject' }] },
+    } }), config);
+    assert.equal((stopped as { __interrupt__?: unknown }).__interrupt__, undefined);
+    assert.deepEqual((await graph.getState(config)).next, []);
+    assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [1, 1, 0, 0]);
+    assert.equal(readCapabilityExecutions(stopped.messages).at(-1)?.result?.reviewDecision, decision);
+    assert.equal(getAgentMessageMetadata(stopped.messages.at(-1)!).reviewDecision, decision);
+    assert.ok(AIMessage.isInstance(stopped.messages.at(-1)));
+    assert.equal(currentSupervisorTask(stopped.runSupervisorState)?.status, 'pending');
+    const continued = await graph.invoke(buildOrchestratorRunInput([new HumanMessage('Continue with the new constraints.')]), config);
+    assert.notEqual(continued.runId, stopped.runId);
+    assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [2, 3, 0, 1]);
+    assert.deepEqual(continued.runSupervisorState.plan.map(item => ({ id: item.id, objective: item.objective, status: item.status })),
+      stopped.runSupervisorState.plan.map(item => ({ id: item.id, objective: item.objective, status: item.status })));
   });
 }

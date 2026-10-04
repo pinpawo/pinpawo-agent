@@ -64,7 +64,7 @@ START
                                                             └─> answer ─> END
       entryAnswer ─(direct reply)─> END
       capability ─(result)─> runSupervisor
-      capability ─(paused)─> pauseGate ─(native resume)─> runSupervisor
+      capability ─(review reject/cancel)─> explicit terminal reply ─> END
 ```
 
 Model-invoking nodes: **entryAnswer**, **runSupervisor**, **capability**

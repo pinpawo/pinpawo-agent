@@ -724,7 +724,7 @@ test('resident policy updates reach conversation and dispatch without changing a
   }
 });
 
-test('an aborted resident dispatch is continuable by id, like an aborted Chat run', async () => {
+test('an aborted resident dispatch preserves a native review by id', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-abort-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   let settleCalls = 0;
@@ -732,7 +732,7 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: settleCalls > 0
-        ? { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' as const } }
+        ? { interruptId: 'interrupt-pause', payload: { kind: 'human_review' as const, reviews: [] } }
         : null,
       acceptsResume: false,
       currentPlan: null,
@@ -741,7 +741,7 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
       settleCalls += 1;
       return {
         interruptId: 'interrupt-pause',
-        payload: { kind: 'pause_task' as const },
+        payload: { kind: 'human_review' as const, reviews: [] },
       };
     },
   };
@@ -777,7 +777,7 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
   }
 });
 
-test('a task pause holds dispatch as waiting through the same interrupt any kind uses', async () => {
+test('a native review holds dispatch waiting without a resumability guess', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   let paused = false;
@@ -787,7 +787,7 @@ test('a task pause holds dispatch as waiting through the same interrupt any kind
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: paused
-        ? { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' as const } }
+        ? { interruptId: 'interrupt-pause', payload: { kind: 'human_review' as const, reviews: [] } }
         : null,
       acceptsResume: false,
       currentPlan: null,
@@ -888,3 +888,81 @@ test('a refused connection cannot release the interactive client it was refused 
     await host.close();
   }
 });
+
+test('interactive roots never inherit another dispatch invocation context', async () => {
+  const { readPetInvocationContext, withPetInvocationContext } = await import('./host/petInvocationContext');
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-interaction-context-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const seen: unknown[] = [];
+  const host = await createResidentPetHost({
+    petId: 'interactive-pet', petName: 'Interactive', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    runAgentTurn: async () => { seen.push(readPetInvocationContext()); return { status: 'completed', reply: 'done' }; },
+  });
+  const connection = peer([]);
+  try {
+    await host.interaction.connect(connection);
+    await withPetInvocationContext({ petId: 'parent-pet', dispatchId: 'parent', scope: { namespace: 'channel', id: 'parent-channel' } }, async () => {
+      await host.interaction.handle(connection, { type: 'chat_request', requestId: 'chat', message: 'independent conversation' });
+      assert.equal(readPetInvocationContext()?.petId, 'parent-pet');
+    });
+    assert.deepEqual(seen, [undefined]);
+  } finally { await host.close(); }
+});
+
+test('targeted waiting work does not strand a legacy dispatch on an open active session', async () => {
+  const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+  let targetReady = false;
+  const events: string[] = [];
+  const target = coordinator.enqueueDispatch(async () => { events.push('target'); }, async () => targetReady);
+  await waitFor(() => coordinator.getState() === 'waiting', 'target was not reported waiting');
+  await coordinator.enqueueDispatch(async () => { events.push('legacy'); });
+  assert.deepEqual(events, ['legacy']);
+  targetReady = true;
+  await coordinator.refreshState();
+  await target;
+  assert.deepEqual(events, ['legacy', 'target']);
+  await coordinator.close();
+});
+
+for (const wakeup of ['enqueue', 'refresh'] as const) {
+  test(`target scan retains a ${wakeup} wakeup before releasing its active slot`, async () => {
+    const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open' });
+    const checked = deferred();
+    const release = deferred();
+    const calls: string[] = [];
+    let ready = false;
+    let checks = 0;
+    let incoming: Promise<void> | undefined;
+    let triggered = false;
+    coordinator.onStateChange(state => {
+      if (state !== 'waiting' || triggered) return;
+      triggered = true;
+      // The scan has exhausted its candidates but still owns `active`.
+      if (wakeup === 'enqueue') {
+        incoming = coordinator.enqueueDispatch(async () => { calls.push('new'); }, async () => true);
+      } else {
+        ready = true;
+        void coordinator.refreshState();
+      }
+    });
+    const waiting = coordinator.enqueueDispatch(async () => { calls.push('waiting'); }, async () => {
+      checks++; checked.resolve(); await release.promise; return ready;
+    });
+    // Close may cancel the intentionally waiting job.
+    void waiting.catch(() => {});
+    try {
+      await checked.promise;
+      release.resolve();
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.deepEqual(calls, [wakeup === 'enqueue' ? 'new' : 'waiting']);
+      await incoming;
+      const settledChecks = checks;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(checks, settledChecks, 'an unchanged all-waiting queue must not spin');
+    } finally { release.resolve(); await coordinator.close(); }
+  });
+}

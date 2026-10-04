@@ -1,15 +1,14 @@
+import { projectPendingInterrupt } from '../conversation/pendingInterruptProjection';
 import { readReplyResultReferences } from '../conversation/transcriptProjection';
-import type { BaseMessage } from '@langchain/core/messages';
+import { AIMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   createTokenUsageSnapshot,
   GLOBAL_REVIEW_POLICY_RUNTIME_EVENT,
   isGraphRecursionLimitError,
   NamespacedProtocolToolEventReader,
-  projectHumanReviewRequest,
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   readPendingInterrupt,
-  readPendingInterruptInputPolicy,
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
   type SubagentToolOperationMetadata,
@@ -101,19 +100,10 @@ function emitInterruptRequested(params: {
   requestId: string;
   emitEvent: (event: AgentRuntimeEvent) => void;
 }) {
-  const { interruptId, payload } = params.pendingInterrupt;
   params.emitEvent({
     type: 'interrupt.requested',
     requestId: params.requestId,
-    pendingInterrupt: {
-      interruptId,
-      payload: payload.kind === 'human_review'
-        ? {
-            kind: 'human_review',
-            interactions: payload.reviews.map(projectHumanReviewRequest),
-          }
-        : { kind: 'pause_task' },
-    },
+    pendingInterrupt: projectPendingInterrupt(params.pendingInterrupt),
   });
 }
 
@@ -310,12 +300,8 @@ export async function runAgentSessionTurn(
   if (
     initialThreadState.pendingInterrupt
     && !isResumeRequest
-    && readPendingInterruptInputPolicy(
-      initialThreadState.pendingInterrupt.payload,
-    ) === 'refuse'
   ) {
-    // The kind owns this decision. A review holds a tool call open, so new
-    // input cannot be admitted; a pause supersedes and falls through.
+    // A review holds a tool call open; ordinary input cannot bypass it.
     if (message.trim() || attachments.length > 0) {
       emitEvent({
         type: 'system.notice',
@@ -505,9 +491,7 @@ export async function runAgentSessionTurn(
   }
 
   if (finalThreadState.pendingInterrupt) {
-    // Whatever the kind, the run is waiting for a person. A pause's last
-    // checkpoint message is its own bookkeeping — a rejected tool result, a
-    // cancelled action — and is never reported as the assistant's reply.
+    // A native review remains pending until its explicit approval response.
     emitInterruptRequested({
       pendingInterrupt: finalThreadState.pendingInterrupt,
       requestId,
@@ -516,11 +500,19 @@ export async function runAgentSessionTurn(
     return { status: 'waiting' };
   }
 
-  const streamedFinalReply = finalMessages.length > 0
-    ? readFinalMessageText(finalMessages.at(-1) ?? {})
-    : '';
-  const checkpointFinalReply = readFinalMessageText(finalThreadState.messages.at(-1) ?? {});
-  const finalReply = streamedFinalReply || checkpointFinalReply;
+  // Only new public AI text can become a conversation reply. Tool results,
+  // private lanes and an old checkpoint reply are not publishable fallbacks.
+  const finalMessage = finalMessages.at(-1) ?? finalThreadState.messages.at(-1);
+  const metadata = finalMessage?.additional_kwargs?.pinpawo as Record<string, unknown> | undefined;
+  const isOldMessage = finalMessage && initialThreadState.messages.some(message =>
+    message === finalMessage || (!!message.id && message.id === finalMessage.id));
+  const finalReply = finalMessage && AIMessage.isInstance(finalMessage)
+    && !finalMessage.tool_calls?.length && !metadata?.lane && !metadata?.synthetic && !isOldMessage
+    ? readFinalMessageText(finalMessage) : '';
+  // FileSaver reloads different objects. Resolve the same reply by stable ID
+  // inside the checkpoint collection before projecting its preceding deliveries.
+  const checkpointReply = finalThreadState.messages.find(message =>
+    message === finalMessage || (!!finalMessage?.id && message.id === finalMessage.id));
   const contextWindow = setup.graphConfig.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
   const finalUsage = readRunTokenUsage({
     initialMessages: initialThreadState.messages,
@@ -533,10 +525,10 @@ export async function runAgentSessionTurn(
     messageId: streamedReplyMessageId || requestId,
     role: 'assistant',
     text: finalReply,
-    resultReferences: readReplyResultReferences(
-      finalThreadState.messages.length ? finalThreadState.messages : finalMessages,
-      (finalThreadState.messages.length ? finalThreadState.messages : finalMessages).at(-1),
-    ),
+    resultReferences: finalReply ? readReplyResultReferences(
+      checkpointReply ? finalThreadState.messages : finalMessages,
+      checkpointReply ?? finalMessage,
+    ) : [],
     ...(finalUsage ? { usage: finalUsage } : {}),
   });
 

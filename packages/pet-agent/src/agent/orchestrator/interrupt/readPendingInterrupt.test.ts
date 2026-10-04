@@ -43,17 +43,11 @@ test('readPendingInterrupt decodes a review batch as one interrupt carrying ever
   );
 });
 
-test('readPendingInterrupt decodes a task pause through the same shape as a review', () => {
-  const pending = readPendingInterrupt(
-    snapshotWith({ kind: 'pause_task' }, 'interrupt-pause'),
-  );
-
-  // The pause carries an id exactly like a review does; nothing above the
-  // Runtime needs a second way to learn a task is paused.
-  assert.deepEqual(pending, {
-    interruptId: 'interrupt-pause',
-    payload: { kind: 'pause_task' },
-  });
+test('readPendingInterrupt rejects legacy pause checkpoints without changing their data', () => {
+  const snapshot = snapshotWith({ kind: 'pause_task' }, 'old-pause');
+  const original = structuredClone(snapshot);
+  assert.throws(() => readPendingInterrupt(snapshot), UnknownInterruptPayloadError);
+  assert.deepEqual(snapshot, original);
 });
 
 test('readPendingInterrupt reports nothing for a snapshot with no pending interrupt', () => {
@@ -66,7 +60,7 @@ test('readPendingInterrupt finds the interrupt a later task carries', () => {
   const pending = readPendingInterrupt({
     tasks: [
       { interrupts: [] },
-      { interrupts: [{ id: 'interrupt-2', value: { kind: 'pause_task' } }] },
+      { interrupts: [{ id: 'interrupt-2', value: { kind: 'review', review } }] },
     ],
   });
 
@@ -85,7 +79,7 @@ test('readPendingInterrupt throws on a payload it cannot decode', () => {
 
 test('readPendingInterrupt refuses an interrupt with no usable id', () => {
   assert.equal(
-    readPendingInterrupt({ tasks: [{ interrupts: [{ value: { kind: 'pause_task' } }] }] }),
+    readPendingInterrupt({ tasks: [{ interrupts: [{ value: { kind: 'review', review } }] }] }),
     null,
   );
 });

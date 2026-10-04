@@ -21,6 +21,7 @@
     "@pinpawo/studio": "*",
     "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "@pinpawo-plugin/channel": "*"
   }
 }

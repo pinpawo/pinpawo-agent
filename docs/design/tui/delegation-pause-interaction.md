@@ -1,3 +1,8 @@
+> Historical design, superseded 2026-10-04 by
+> [native human review interrupts](../agent-runtime/interrupt.md).
+> Task pause modes, empty-input continue and Esc leaving mode have been removed.
+> Review rejection/cancellation completes the round; explicit ordinary input enters Entry.
+
 # Delegation pause interaction (draft)
 
 Updated integration, 2026-09-08: explicit pauses retain their interrupt

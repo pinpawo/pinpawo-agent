@@ -104,9 +104,6 @@ export function formatConnection(status: TuiConnectionStatus) {
 export function formatComposerPlaceholder(
   session: AgentSession,
   composerMode: AgentSession['kind'] = session.kind,
-  options: {
-    pausedTask?: boolean;
-  } = {},
 ) {
   const run = session.activeRun;
   if (session.pendingInterrupt?.payload.kind === 'human_review') {
@@ -117,9 +114,6 @@ export function formatComposerPlaceholder(
   }
   if (run) {
     return '输入下一条消息… · Esc 中断 · PageUp 详情';
-  }
-  if (options.pausedTask) {
-    return 'Task paused · Enter to continue · Esc starts a new task';
   }
   return `${COMPOSER_PLACEHOLDER} · PageUp 详情`;
 }

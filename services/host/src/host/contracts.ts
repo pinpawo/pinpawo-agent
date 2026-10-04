@@ -1,4 +1,6 @@
+import type { PetInvocationScope } from './petInvocationContext';
 import type {
+  PendingInterruptProjection,
   AgentClientMessage,
   AgentServerMessage,
 } from '@pinpawo/agent-session';
@@ -32,6 +34,10 @@ export type PetDispatchQueueSnapshot = {
 export type PetDispatchRequest = {
   request: string;
   dispatchId?: string;
+  /** Explicit durable session; create only when registering a reserved identity. */
+  session?: { id: string; create?: boolean };
+  /** Explicit Host-admitted domain scope, independent of the Agent Session. */
+  scope?: PetInvocationScope;
 };
 
 export type PetDispatchLifecycleState =
@@ -52,6 +58,10 @@ export type PetDispatchLifecycleEvent = {
   state: PetDispatchLifecycleState;
   requestId?: string;
   error?: string;
+  sessionId?: string;
+  reply?: string;
+  scope?: PetInvocationScope;
+  pendingInterrupt?: PendingInterruptProjection;
 };
 
 export interface PetDispatchPort {
@@ -100,6 +110,7 @@ export type ResidentPetCoordinatorOptions = {
 
 export type QueuedOperation = {
   kind: 'conversation' | 'dispatch';
+  ready?: () => Promise<boolean>;
   run: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;

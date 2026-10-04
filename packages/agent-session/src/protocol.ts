@@ -1,3 +1,4 @@
+import { parsePendingInterruptProjection } from './review';
 import { parseResultReferences } from './resultReferences';
 import type {
   JsonObject as ContractJsonObject,
@@ -444,14 +445,6 @@ function readReviewSpec(record: Record<string, unknown>, key: string): ReviewSpe
   return isAgentReviewSpecValue(review) ? review : null;
 }
 
-function readReviewSpecs(record: Record<string, unknown>, key: string): ReviewSpec[] | null {
-  const value = record[key];
-  if (value === undefined) return null;
-  if (!Array.isArray(value)) return null;
-  const reviews = value.filter(isAgentReviewSpecValue);
-  return reviews.length === value.length && reviews.length > 0 ? reviews : null;
-}
-
 function readReviewResponse(value: unknown): ReviewResponse | null {
   const record = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -653,39 +646,8 @@ function readAgentEvent(record: Record<string, unknown>): AgentRuntimeEvent | nu
   }
   if (type === 'interrupt.requested') {
     if (!hasOnlyKeys(record, ['type', 'requestId', 'pendingInterrupt'])) return null;
-    const pending = readRecord(record, 'pendingInterrupt');
-    const pendingPayload = pending ? readRecord(pending, 'payload') : null;
-    const interruptId = pending ? readString(pending, 'interruptId') : null;
-    if (
-      !pending
-      || !pendingPayload
-      || !interruptId
-      || !hasOnlyKeys(pending, ['interruptId', 'payload'])
-    ) return null;
-    // Every kind carries an id; only the payload differs.
-    if (pendingPayload.kind === 'pause_task') {
-      return hasOnlyKeys(pendingPayload, ['kind'])
-        ? {
-            type,
-            requestId,
-            pendingInterrupt: { interruptId, payload: { kind: 'pause_task' } },
-          }
-        : null;
-    }
-    const interactions = readReviewSpecs(pendingPayload, 'interactions');
-    if (
-      pendingPayload.kind !== 'human_review'
-      || !hasOnlyKeys(pendingPayload, ['kind', 'interactions'])
-      || !interactions
-    ) return null;
-    return {
-      type,
-      requestId,
-      pendingInterrupt: {
-        interruptId,
-        payload: { kind: 'human_review', interactions },
-      },
-    };
+    const pendingInterrupt = parsePendingInterruptProjection(record.pendingInterrupt);
+    return pendingInterrupt ? { type, requestId, pendingInterrupt } : null;
   }
   if (type === 'system.notice' || type === 'error') {
     const message = readString(record, 'message');

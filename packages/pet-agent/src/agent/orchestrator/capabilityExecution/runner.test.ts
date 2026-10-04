@@ -13,7 +13,6 @@ import type { SubagentRunInput } from '../../../types/subagent';
 import { setAgentMessageMetadata } from '../../messages';
 import { isDelegationBriefingMessage } from '../delegation/briefing';
 
-import { PauseTaskInterruptSignal } from '../interrupt/pauseTaskInterrupt';
 import { compileAgentRegistry } from '../registry';
 import { exactAuthorization } from '../../../autoReview/reviewAuthorizations';
 import { createCapabilityExecutor, type CapabilityExecutionContext, type CapabilityExecutionInput } from './index';
@@ -136,7 +135,7 @@ test('finalize can replace delivery and merge artifacts', async () => {
   assert.deepEqual(result.artifacts, [ref]);
 });
 
-for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as const) {
+for (const outcome of ['reject', 'cancel', 'missing_deliverable', 'error', 'aborted'] as const) {
   test(`${outcome} preserves the outcome`, async () => {
     const toolkit = staticToolkit();
     let finalized = false;
@@ -150,16 +149,18 @@ for (const outcome of ['paused', 'missing_deliverable', 'error', 'aborted'] as c
         run.signal?.throwIfAborted();
       }
       const messages = [...run.messages, new AIMessage({ id: 'partial', content: 'Partial work' })];
-      if (outcome === 'paused') throw new PauseTaskInterruptSignal({ kind: 'pause_task' }, { artifacts: [artifact('d1')] });
-      return { messages, artifacts: [], output: null };
+      return { messages, artifacts: [artifact('d1')], output: null,
+        ...(outcome === 'reject' || outcome === 'cancel' ? { reviewDecision: outcome } : {}),
+      };
     } });
     if (outcome === 'error' || outcome === 'aborted') {
       await assert.rejects(execute(request, { ...hostContext(), runnableConfig: { signal: controller.signal } }), (error) => error === failure);
     } else {
       const result = await execute(request, hostContext());
-      assert.equal(result.status, outcome);
+      assert.equal(result.status, 'missing_deliverable');
+      assert.equal(result.reviewDecision, outcome === 'reject' || outcome === 'cancel' ? outcome : undefined);
       assert.equal(result.delivery, null);
-      assert.equal(result.artifacts.length, outcome === 'paused' ? 1 : 0);
+      assert.equal(result.artifacts.length, 1);
     }
     assert.equal(finalized, outcome === 'missing_deliverable');
   });

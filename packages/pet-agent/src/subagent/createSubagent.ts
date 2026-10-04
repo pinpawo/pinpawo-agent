@@ -33,7 +33,7 @@ import {
   readSubagentGuardStopReason,
 } from './guardStop';
 import { Command, END } from '@langchain/langgraph';
-import { propagatePauseTaskInterrupt } from '../agent/orchestrator/interrupt';
+import { readReviewStopDecision } from '../agent/orchestrator/interrupt/reviewStop';
 import { emitRuntimeEventToStreamWriter } from '../utils/streamWriterEvents';
 import {
   SUBAGENT_CONTEXT_SUMMARY_GOVERNING_PROMPT,
@@ -334,7 +334,10 @@ export async function createSubagent(input: SubagentRunInput): Promise<SubagentR
   const artifacts = inputState.artifacts ?? [];
   const invocationMessages = latestMessages.filter(message => !inputMessageIds.has(message.id!));
   const tokenUsage = readMessagesTokenUsage(invocationMessages);
-  propagatePauseTaskInterrupt(result, { artifacts, tokenUsage });
-
-  return { messages: latestMessages, artifacts, tokenUsage, output: readInvocationOutput(invocationMessages) };
+  const reviewDecision = readReviewStopDecision(invocationMessages.at(-1));
+  return {
+    messages: latestMessages, artifacts, tokenUsage,
+    output: reviewDecision ? null : readInvocationOutput(invocationMessages),
+    ...(reviewDecision ? { reviewDecision } : {}),
+  };
 }

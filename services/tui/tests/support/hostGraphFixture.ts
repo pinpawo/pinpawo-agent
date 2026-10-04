@@ -51,10 +51,6 @@ export function createHostGraphFixture() {
     interruptId: string;
     review: ReviewSpec;
   }>();
-  const suspendedReviews = new Map<string, {
-    interruptId: string;
-    review: ReviewSpec;
-  }>();
   const reviewResumes: unknown[] = [];
   let inputMessages: BaseMessage[] = [];
   let observedInterrupt = false;
@@ -63,9 +59,6 @@ export function createHostGraphFixture() {
     async readThreadState(setup: AgentChannelSetup) {
       const threadKey = readThreadKey(setup);
       const pendingInterrupt = pendingInterrupts.get(threadKey) ?? null;
-      const pauseTaskInterrupt = suspendedReviews.has(threadKey)
-        ? { kind: 'pause_task' as const }
-        : null;
       return {
         messages: messagesByThread.get(threadKey) ?? [],
         pendingInterrupt: pendingInterrupt
@@ -78,7 +71,7 @@ export function createHostGraphFixture() {
             }
           : null,
         acceptsResume:
-          pendingInterrupt !== null || suspendedReviews.has(readThreadKey(setup)),
+          pendingInterrupt !== null,
       };
     },
     streamEvents(setup: AgentChannelSetup, resume?: InterruptResume) {
@@ -94,16 +87,8 @@ export function createHostGraphFixture() {
         );
         reviewResumes.push({ [resume.interruptId]: resume.value });
         pendingInterrupts.delete(threadKey);
-        if (isInterruptRunResume(resume.value)) {
-          suspendedReviews.set(threadKey, pendingInterrupt);
-          return checkpointStream(
-            messagesByThread.get(threadKey) ?? [],
-          );
-        }
-        const selectedOptionId = readSelectedOptionId(resume.value);
-        const reply = selectedOptionId === 'approve'
-          ? REVIEW_APPROVED_REPLY
-          : REVIEW_REJECTED_REPLY;
+        const selectedOptionId = isInterruptRunResume(resume.value) ? 'cancel' : readSelectedOptionId(resume.value);
+        const reply = selectedOptionId === 'approve' ? REVIEW_APPROVED_REPLY : REVIEW_REJECTED_REPLY;
         const finalReply = new AIMessage({
           content: reply,
           usage_metadata: {
@@ -127,9 +112,6 @@ export function createHostGraphFixture() {
         ...(messagesByThread.get(threadKey) ?? []),
         ...inputMessages,
       ];
-      // A suspended review is re-raised by resuming its interrupt, not by a
-      // transition flag on the next chat request.
-      suspendedReviews.delete(threadKey);
       if (
         typeof inputText === 'string'
         && (
@@ -271,12 +253,6 @@ function reviewInterruptStream(pending: {
         },
       }],
     });
-  })();
-}
-
-function checkpointStream(messages: BaseMessage[]) {
-  return (async function* () {
-    yield protocolEvent('values', { messages });
   })();
 }
 

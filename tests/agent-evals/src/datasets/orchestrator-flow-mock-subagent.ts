@@ -1,4 +1,5 @@
 import { AgentEvalCase, AgentEvalDataset } from './types.ts';
+import { ORCHESTRATOR_MAX_ITERATIONS } from '../../../../packages/pet-agent/src/agent/orchestrator/runtime/constants';
 
 type OrchestratorFlowMockSubagentInput = {
   user_message: string;
@@ -6,10 +7,7 @@ type OrchestratorFlowMockSubagentInput = {
   allowed_capability_names?: string[];
   subagent_response?: string;
   subagent_responses?: string[];
-  subagent_script?: 'tool_calls_until_carryover';
-  subagent_final_response?: string;
-  max_iterations?: number;
-  auto_resume_iteration_limit?: boolean;
+  follow_up_message?: string;
 };
 
 type OrchestratorFlowMockSubagentExpected = {
@@ -20,7 +18,11 @@ type OrchestratorFlowMockSubagentExpected = {
   expected_latest_announce_lane?: string | null;
   expected_delegation_count?: number;
   expected_carryover_seen?: boolean;
-  expected_iteration_limit_interrupt_count?: number;
+  expected_follow_up_run_count?: number;
+  expected_follow_up_previous_iterations?: number;
+  expected_follow_up_fresh_run?: boolean;
+  expected_follow_up_plan_preserved?: boolean;
+  expected_follow_up_prior_delivery_seen?: boolean;
   reason: string;
 };
 
@@ -103,43 +105,46 @@ const cases: AgentEvalCase<
     },
   },
   {
-    id: `${SUITE}.limit-reached-continuation-carries-private-messages`,
-    name: 'limit-reached-continuation-carries-private-messages',
+    id: `${SUITE}.partial-result-starts-independent-invocation`,
+    name: 'partial-result-starts-independent-invocation',
     suite: SUITE,
     tags: ['interruption_recovery', 'delegation_control', 'context_synthesis'],
     input: {
       user_message: '帮我把 data/items.csv 里的所有分片都处理完，全部处理完成后告诉我结果',
-      subagent_script: 'tool_calls_until_carryover',
-      subagent_final_response: '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
+      subagent_responses: [
+        '已处理前 60 条，结果已保存。第 61 至 120 条仍需处理。',
+        '已处理完 data/items.csv 的全部分片，共 120 条记录，没有失败项。',
+      ],
     },
     expected: {
       expected_route: 'answer',
       expected_mode: 'answer',
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
-      expected_delegation_count: 1,
-      expected_carryover_seen: true,
-      reason: 'A limit-reached continuation must reuse the delegation id, carry the prior private messages, then answer after natural completion.',
+      expected_delegation_count: 2,
+      expected_carryover_seen: false,
+      reason: 'Supervisor reads the first ToolMessage and prepares a new invocation for remaining work, without replaying private child messages.',
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Covers the interrupted subagent private messages carryover path.',
+      reason: 'Covers remaining work through independent Capability invocations.',
       source: SOURCE_FILE,
     },
   },
   {
-    id: `${SUITE}.capability-limit-orchestrator-resume-stays-on-explore-lane`,
-    name: 'capability-limit-orchestrator-resume-stays-on-explore-lane',
+    id: `${SUITE}.capability-budget-stop-explicit-input-continues-plan`,
+    name: 'capability-budget-stop-explicit-input-continues-plan',
     suite: SUITE,
     tags: ['interruption_recovery', 'capability_discovery', 'delegation_control', 'context_synthesis'],
     input: {
       user_message: '帮我调查 pinpawo-agent 仓库里 host 的 capability 注册链路，列出关键文件和证据。',
       capability_pack: 'explore',
       allowed_capability_names: ['explore'],
-      subagent_script: 'tool_calls_until_carryover',
-      subagent_final_response: '已完成 host capability 注册链路调查：入口在 hostCapabilityRegistry，channel 装配后传入 pet-agent orchestrator。',
-      max_iterations: 1,
-      auto_resume_iteration_limit: true,
+      subagent_responses: [
+        ...Array.from({ length: ORCHESTRATOR_MAX_ITERATIONS }, () => '已记录一部分注册链路证据，调查尚未完成，仍需补齐。'),
+        '已完成 host capability 注册链路调查，关键文件与调用证据均已核验。',
+      ],
+      follow_up_message: '继续原计划，复用已有证据并完成调查。',
     },
     expected: {
       expected_route: 'answer',
@@ -147,14 +152,18 @@ const cases: AgentEvalCase<
       expected_phase: 'after_subagent',
       expected_latest_announce_kind: 'completed',
       expected_latest_announce_lane: 'capability:explore',
-      expected_delegation_count: 1,
-      expected_carryover_seen: true,
-      expected_iteration_limit_interrupt_count: 2,
-      reason: 'Capability progress caused by subagent limit plus orchestrator iteration-limit resume should continue the same lane, then answer.',
+      expected_delegation_count: ORCHESTRATOR_MAX_ITERATIONS + 1,
+      expected_carryover_seen: false,
+      expected_follow_up_run_count: 1,
+      expected_follow_up_previous_iterations: ORCHESTRATOR_MAX_ITERATIONS,
+      expected_follow_up_fresh_run: true,
+      expected_follow_up_plan_preserved: true,
+      expected_follow_up_prior_delivery_seen: true,
+      reason: 'Root budget stops normally; an explicit new chat enters Entry, continues the plan and reuses prior ToolMessage evidence in a fresh invocation.',
     },
     metadata: {
       difficulty: 'hard',
-      reason: 'Covers capability-lane interruption recovery through final answer.',
+      reason: 'Covers real budget termination and explicit new-run continuation without a pause interrupt.',
       source: SOURCE_FILE,
     },
   },

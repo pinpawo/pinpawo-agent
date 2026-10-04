@@ -25,6 +25,8 @@ export class ResidentPetCoordinator {
   private activeOperation: PetDispatchQueueSnapshot['activeOperation'] = null;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
+  /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
+  private schedulingVersion = 0;
 
   constructor(options: ResidentPetCoordinatorOptions) {
     this.state = options.initialState ?? 'open';
@@ -114,16 +116,16 @@ export class ResidentPetCoordinator {
     return value;
   }
 
-  enqueueDispatch<T>(operation: () => Promise<T>): Promise<T> {
-    return this.enqueue(operation);
+  enqueueDispatch<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
+    return this.enqueue(operation, ready);
   }
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
-  submitDispatch(operation: () => Promise<void>): void {
+  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>): void {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    void this.enqueue(operation).catch((error) => {
+    void this.enqueue(operation, ready).catch((error) => {
       if (error instanceof ResidentPetOperationCancelledError) return;
       this.logError('[resident-pet] dispatch execution failed:', error);
     });
@@ -136,6 +138,7 @@ export class ResidentPetCoordinator {
   }
 
   async refreshState(): Promise<PetDispatchState> {
+    this.schedulingVersion++;
     if (this.active) return this.state;
     if (this.refreshing) return this.refreshing;
     const refreshing = Promise.resolve().then(async () => {
@@ -165,13 +168,15 @@ export class ResidentPetCoordinator {
     await Promise.all([this.active, this.refreshing]);
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
     if (this.closing) {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
     return new Promise<T>((resolve, reject) => {
+      this.schedulingVersion++;
       this.dispatchQueue.push({
         kind: 'dispatch',
+        ready,
         run: operation,
         resolve: (value) => resolve(value as T),
         reject,
@@ -185,6 +190,41 @@ export class ResidentPetCoordinator {
     // A conversation holding the gate keeps dispatch waiting, same as an
     // active dispatch does.
     if (this.active || this.refreshing || this.closing || this.conversations > 0) return;
+    if (this.dispatchQueue.some((entry) => entry.ready)) {
+      // Own the single slot while checking targets. Waiting sessions stay queued;
+      // another session may run, but no two executions overlap.
+      const schedulingVersion = this.schedulingVersion;
+      let ran = false;
+      const active = Promise.resolve().then(async () => {
+        for (let index = 0; index < this.dispatchQueue.length;) {
+          if (this.closing || this.conversations > 0) return;
+          const candidate = this.dispatchQueue[index]!;
+          let ready: boolean;
+          try { ready = candidate.ready ? await candidate.ready() : (await this.readNextSettledState()) === 'open'; }
+          catch (error) {
+            const position = this.dispatchQueue.indexOf(candidate);
+            if (position >= 0) { this.dispatchQueue.splice(position, 1); candidate.reject(error); }
+            continue;
+          }
+          if (this.closing || this.conversations > 0) return;
+          if (!ready) { index++; continue; }
+          this.dispatchQueue.splice(index, 1);
+          ran = true;
+          this.activeOperation = candidate.kind;
+          this.setState('busy');
+          await this.run(candidate);
+          return;
+        }
+        if (this.dispatchQueue.length) this.setState('waiting');
+      });
+      this.active = active;
+      void active.finally(() => {
+        if (this.active === active) { this.active = null; this.activeOperation = null; }
+        this.publishQueueSnapshot();
+        if (ran || this.schedulingVersion !== schedulingVersion) this.drain();
+      });
+      return;
+    }
     const entry = this.state === 'open' ? this.dispatchQueue.shift() : undefined;
     if (!entry) return;
     this.activeOperation = entry.kind;

@@ -232,6 +232,29 @@ test('HTTP Plugin validates media type, body size, dispatch shape, and domain re
   assert.deepEqual(await rejected.json(), { error: 'unknown pet' });
 });
 
+test('HTTP Plugin rejects Host-trusted session and scope fields from the wire', async (t) => {
+  const harness = createContext();
+  const plugin = createStudioHttpPlugin({ port: 0, authToken: AUTH_TOKEN });
+  await plugin.start(harness.context);
+  t.after(() => plugin.stop());
+  const address = plugin.address();
+  assert.ok(address);
+
+  for (const claim of [
+    { scope: { namespace: 'channel', id: 'channel-1' } },
+    { session: { id: 'planner:12345678' } },
+    { session: { id: 'planner:12345678', create: true }, scope: { namespace: 'channel', id: 'channel-1' } },
+  ]) {
+    const response: Response = await fetch(pluginUrl(address.port, '/dispatch'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ petId: 'planner', request: 'publish elsewhere', ...claim }),
+    });
+    assert.equal(response.status, 400);
+  }
+  assert.deepEqual(harness.requests, []);
+});
+
 test('HTTP Plugin dispatches contributed routes through its shared Hono middleware', async (t) => {
   const harness = createContext();
   let routes: StudioHttpRoutesHook | undefined;

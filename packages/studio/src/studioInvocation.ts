@@ -3,14 +3,21 @@ import { isJsonObject, isJsonValue, type JsonObject } from '@pinpawo/agent-contr
 
 export type StudioDispatchRequest = {
   petId: string;
+  /** In-process Plugin only: a reserved session target, never accepted from the wire. */
   session?: { id: string; create?: boolean };
   request: string;
   /** Producer-owned correlation data echoed by Studio; never passed to the Pet. */
   metadata?: JsonObject;
   idempotencyKey?: string;
-  /** Explicit domain scope admitted by the Host, separate from correlation metadata. */
+  /**
+   * In-process Plugin only: domain scope the Host admits as trusted. A wire
+   * caller cannot claim it, or it could publish into another Plugin's domain.
+   */
   scope?: PetInvocationScope;
 };
+
+/** The public wire form: Host-trusted targeting fields are deliberately absent. */
+export type StudioWireDispatchRequest = Omit<StudioDispatchRequest, 'session' | 'scope'>;
 
 /** Proof that Studio accepted the one-way dispatch; not an Agent execution handle. */
 export type StudioDispatchReceipt = {
@@ -30,7 +37,7 @@ function readNonEmptyString(record: Record<string, unknown>, key: string): strin
 }
 
 /** Parse the transport-neutral JSON form of one Studio dispatch request. */
-export function parseStudioDispatchRequest(value: unknown): StudioDispatchRequest | null {
+export function parseStudioDispatchRequest(value: unknown): StudioWireDispatchRequest | null {
   if (!isJsonObject(value)) return null;
   const petId = readNonEmptyString(value, 'petId');
   const request = typeof value.request === 'string' ? value.request : null;
@@ -39,25 +46,15 @@ export function parseStudioDispatchRequest(value: unknown): StudioDispatchReques
     : readNonEmptyString(value, 'idempotencyKey');
   if (
     !petId
-    || (value.session !== undefined && (!isJsonObject(value.session)
-      || !hasOnlyKeys(value.session, ['id', 'create'])
-      || typeof value.session.id !== 'string' || !value.session.id.trim()
-      || (value.session.create !== undefined && typeof value.session.create !== 'boolean')))
     || request === null
-    || !hasOnlyKeys(value, ['petId', 'request', 'metadata', 'idempotencyKey', 'scope', 'session'])
-    || (value.scope !== undefined && (!isJsonObject(value.scope)
-      || !hasOnlyKeys(value.scope, ['namespace', 'id'])
-      || typeof value.scope.namespace !== 'string' || !value.scope.namespace.trim()
-      || typeof value.scope.id !== 'string' || !value.scope.id.trim()))
+    || !hasOnlyKeys(value, ['petId', 'request', 'metadata', 'idempotencyKey'])
     || (value.metadata !== undefined && (!isJsonObject(value.metadata) || !isJsonValue(value.metadata)))
     || (value.idempotencyKey !== undefined && !idempotencyKey)
   ) return null;
   return {
     petId,
     request,
-    ...(value.session ? { session: { ...(value.session as { id: string; create?: boolean }) } } : {}),
     ...(value.metadata !== undefined ? { metadata: value.metadata as JsonObject } : {}),
-    ...(value.scope !== undefined ? { scope: { ...(value.scope as PetInvocationScope) } } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
   };
 }

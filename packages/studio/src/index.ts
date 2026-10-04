@@ -20,6 +20,7 @@ export type {
   StudioPluginHooks,
 } from './studioContract';
 export { parseStudioDispatchRequest } from './studioInvocation';
+export type { StudioWireDispatchRequest } from './studioInvocation';
 
 export {
   resolveStudio,

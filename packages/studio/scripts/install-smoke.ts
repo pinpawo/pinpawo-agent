@@ -24,6 +24,7 @@ const packageRoots = [
   studioRoot,
   resolve(workspaceRoot, 'plugins', 'studio-http'),
   resolve(workspaceRoot, 'plugins', 'kanban'),
+  resolve(workspaceRoot, 'plugins', 'channel'),
   resolve(workspaceRoot, 'plugins', 'scheduler'),
   resolve(workspaceRoot, 'plugins', 'notice'),
   resolve(workspaceRoot, 'plugins', 'project-files'),
@@ -107,6 +108,17 @@ try {
     "const studio = await import('@pinpawo/studio'); if (typeof studio.StudioHost !== 'function') throw new Error('StudioHost export missing');",
   ], consumerDir, 'import installed @pinpawo/studio', 30_000);
   assert.equal(imported.stderr, '');
+
+  const installedChannel = join(consumerDir, 'node_modules', '@pinpawo-plugin', 'channel');
+  await Promise.all([
+    access(join(installedChannel, 'dist', 'index.js')),
+    access(join(installedChannel, 'dist', 'index.d.ts')),
+  ]);
+  await runProcess(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    "const channel = await import('@pinpawo-plugin/channel'); if (typeof channel.createChannelPlugin !== 'function' || typeof channel.ChannelService !== 'function') throw new Error('Channel exports missing');",
+  ], consumerDir, 'import installed @pinpawo-plugin/channel', 30_000);
 
   const cli = process.platform === 'win32'
     ? await runProcess(

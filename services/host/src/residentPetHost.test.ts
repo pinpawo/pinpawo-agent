@@ -14,8 +14,11 @@ import {
   type CapabilityArtifactStore,
 } from '@pinpawo/pet-agent';
 
+import { createResidentPet } from './host/residentPetDispatch';
+import { readResidentPetRuntimeContext } from './host/runtimeContext';
 import {
   createResidentPetHost,
+  createResidentPetRuntime,
   ResidentPetCoordinator,
   ResidentPetInteractionBusyError,
   type AgentSessionPeer,
@@ -926,6 +929,120 @@ test('targeted waiting work does not strand a legacy dispatch on an open active 
   await target;
   assert.deepEqual(events, ['legacy', 'target']);
   await coordinator.close();
+});
+
+test('a failed readiness read keeps targeted work queued and blocks the gate until the next scan', async () => {
+  const errors: unknown[] = [];
+  const coordinator = new ResidentPetCoordinator({ readSettledState: () => 'open', logError: (_message, error) => errors.push(error) });
+  let fail = true;
+  const ran: string[] = [];
+  let settled = false;
+  const target = coordinator.enqueueDispatch(async () => { ran.push('target'); }, async () => {
+    if (fail) throw new Error('checkpoint unavailable');
+    return true;
+  });
+  void target.finally(() => { settled = true; });
+  try {
+    await waitFor(() => coordinator.getState() === 'blocked', 'a failed readiness read did not block the gate');
+    assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 1);
+    assert.equal(settled, false, 'a read failure must not settle the queued work');
+    assert.deepEqual(ran, []);
+    assert.match(String(errors[0]), /checkpoint unavailable/);
+    fail = false;
+    await coordinator.refreshState();
+    await target;
+    assert.deepEqual(ran, ['target']);
+  } finally { await coordinator.close(); }
+});
+
+test('a failed settled-state read during a target scan keeps legacy work queued', async () => {
+  let fail = false;
+  const coordinator = new ResidentPetCoordinator({
+    readSettledState: () => { if (fail) throw new Error('state unavailable'); return 'open'; },
+    logError: () => undefined,
+  });
+  const ran: string[] = [];
+  const target = coordinator.enqueueDispatch(async () => { ran.push('target'); }, async () => false);
+  void target.catch(() => undefined);
+  try {
+    await waitFor(() => coordinator.getState() === 'waiting', 'target was not reported waiting');
+    fail = true;
+    const legacy = coordinator.enqueueDispatch(async () => { ran.push('legacy'); });
+    await waitFor(() => coordinator.getState() === 'blocked', 'a failed settled-state read did not block the gate');
+    assert.equal(coordinator.getQueueSnapshot().queuedDispatches, 2);
+    fail = false;
+    await coordinator.refreshState();
+    await legacy;
+    assert.deepEqual(ran, ['legacy']);
+  } finally { await coordinator.close(); }
+});
+
+test('targeted dispatch survives a transient checkpoint read and fails visibly once its session is gone', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-target-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const petId = 'pet-target';
+  const sessionId = `${petId}:abcdef12`;
+  let readFails = false;
+  let reviewing = false;
+  const turns: string[] = [];
+  const graphService = {
+    readThreadState: async (setup: { input: { threadId: string } }) => {
+      const isTarget = setup.input.threadId.endsWith(':abcdef12');
+      if (isTarget && readFails) throw new Error('checkpoint unavailable');
+      return {
+        messages: [],
+        pendingInterrupt: isTarget && reviewing
+          ? { interruptId: 'interrupt-review', payload: { kind: 'human_review' as const, reviews: [] } }
+          : null,
+        acceptsResume: false,
+        currentPlan: null,
+      };
+    },
+  };
+  const runtime = await createResidentPetRuntime({
+    petId,
+    petName: 'Target Pet',
+    modelProfiles: createTestModelProfiles(),
+    globalReviewPolicyMode: 'require_authorization',
+    autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [],
+    toolkitInventory: new HostToolkitInventoryStore(),
+    capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath),
+    runtimeConfig,
+    sessionStatePath: join(runtimeConfig.stateRoot, 'pet-target-sessions.json'),
+    graphService: graphService as never,
+    runAgentTurn: async ({ request }) => {
+      turns.push(request.kind === 'user_message' ? request.message : request.kind);
+      return { status: 'completed', reply: '' };
+    },
+  });
+  const context = readResidentPetRuntimeContext(runtime);
+  const resident = createResidentPet(runtime);
+  const lifecycle: string[] = [];
+  resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(`${event.request}:${event.state}`));
+  try {
+    readFails = true;
+    await resident.dispatch.dispatch({ request: 'transient', session: { id: sessionId, create: true } });
+    await waitFor(() => resident.dispatch.getQueueSnapshot().state === 'blocked', 'a failed target read did not block the gate');
+    assert.deepEqual(lifecycle, ['transient:queued']);
+    readFails = false;
+    await context.coordinator.refreshState();
+    await waitFor(() => lifecycle.includes('transient:completed'), 'retained work did not run after the next scan');
+    assert.deepEqual(turns, ['transient']);
+
+    reviewing = true;
+    await resident.dispatch.dispatch({ request: 'orphaned', session: { id: sessionId } });
+    await waitFor(() => resident.dispatch.getQueueSnapshot().state === 'waiting', 'a reviewed target did not wait');
+    await context.sessions.resumeSession(context.runtimeDeps.get(), sessionId);
+    await context.sessions.resetSession(petId, { deletePrevious: true });
+    await context.coordinator.refreshState();
+    await waitFor(() => lifecycle.includes('orphaned:failed'), 'work for a deleted session stayed parked');
+    assert.equal(resident.dispatch.getQueueSnapshot().queuedDispatches, 0);
+    assert.deepEqual(turns, ['transient']);
+  } finally {
+    await context.close();
+  }
 });
 
 for (const wakeup of ['enqueue', 'refresh'] as const) {

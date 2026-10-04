@@ -212,11 +212,11 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         },
         true,
       ), target ? async () => {
-        try { return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt; }
-        catch (error) {
-          publishLifecycle({ dispatchId, request, state: 'failed', error: error instanceof Error ? error.message : String(error) });
-          throw error;
-        }
+        // A vanished target is not held by a review. Admit it so the run fails
+        // through its own failed lifecycle instead of parking forever.
+        if (!sessions.getSession(petId, target.id)) return true;
+        // Read failures propagate: the Coordinator keeps this work queued.
+        return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
       } : undefined);
       publishLifecycle({ dispatchId, request, state: 'queued' });
     },

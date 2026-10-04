@@ -195,6 +195,7 @@ export class ResidentPetCoordinator {
       // another session may run, but no two executions overlap.
       const schedulingVersion = this.schedulingVersion;
       let ran = false;
+      let blocked = false;
       const active = Promise.resolve().then(async () => {
         for (let index = 0; index < this.dispatchQueue.length;) {
           if (this.closing || this.conversations > 0) return;
@@ -202,8 +203,12 @@ export class ResidentPetCoordinator {
           let ready: boolean;
           try { ready = candidate.ready ? await candidate.ready() : (await this.readNextSettledState()) === 'open'; }
           catch (error) {
-            const position = this.dispatchQueue.indexOf(candidate);
-            if (position >= 0) { this.dispatchQueue.splice(position, 1); candidate.reject(error); }
+            // A failed read says nothing about the work itself. Keep it queued and
+            // report the gate blocked, as a failed settled-state refresh does; the
+            // next admission or refresh scans again.
+            blocked = true;
+            this.logError('[resident-pet] failed to read dispatch readiness:', error);
+            index++;
             continue;
           }
           if (this.closing || this.conversations > 0) return;
@@ -215,7 +220,7 @@ export class ResidentPetCoordinator {
           await this.run(candidate);
           return;
         }
-        if (this.dispatchQueue.length) this.setState('waiting');
+        if (this.dispatchQueue.length) this.setState(blocked ? 'blocked' : 'waiting');
       });
       this.active = active;
       void active.finally(() => {

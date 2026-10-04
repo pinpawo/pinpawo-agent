@@ -40,9 +40,9 @@ dogfood entrypoint from issue #454:
 - it restores canonical pending reviews from snapshots and provides an
   OpenTUI-owned approval overlay for single or batched approve, reject, respond,
   and cancel flows.
-- after an authoritative interrupted event it enters a local paused mode:
-  ordinary Enter sends `resume_active`; Esc leaves paused mode and the next
-  ordinary message sends `supersede_active`.
+- review rejection or cancellation completes the current round with an
+  unexecuted-action explanation. A later explicit chat enters Entry and can
+  continue the retained plan; empty Enter does not resume work.
 - it provides a compact cursor-aware slash command palette above the visible
   composer, plus a separate pageable help overlay for the commands currently
   implemented by the v2 client.
@@ -214,15 +214,18 @@ Late completion snapshots from the previous session are ignored.
 Approval selection, paging, batch decisions, and text drafts are local overlay
 state rather than Session projection fields. The controller validates each
 response against the currently focused canonical review action before sending
-`human_review_response` or `review.cancel`. Once transport accepts a resolution,
+`interrupt.resume` with the pending interrupt ID and a response or cancel value.
+Once transport accepts a resolution,
 the local one-shot marker continues to gate duplicate decisions across timeout
 and reconnect; only a server-observed review or run transition clears it.
 Esc or Ctrl+C after that marker sends an ordered `run.interrupt`, while another
-Ctrl+C exits. Cancellation does not masquerade as rejection. After the
-authoritative `interrupted` event, the TUI enters local paused mode: Enter sends
-`resume_active`; a second Esc leaves that mode, so the next ordinary message
-sends `supersede_active`. The orchestrator remains authoritative for the
-checkpoint pointer; the TUI never owns it.
+Ctrl+C exits. Rejection and cancellation keep their distinct message transitions
+and end the current round. Interrupting an active run reports its authoritative
+terminal state; it creates no task-pause mode or synthetic interrupt. An existing
+human review stays pending and must be resolved before ordinary chat is admitted.
+With no pending review, explicit chat enters a fresh run through Entry, which can
+choose to continue retained plan facts. The TUI owns neither the plan nor the
+checkpoint and does not offer empty-input continuation.
 
 The policy picker also remains view-local, but its current value does not. The
 host exposes the process-wide policy in snapshot runtime metadata, persists

@@ -17,7 +17,9 @@ import { Client } from 'langsmith';
 import { createReasoningPassbackChatOpenAI } from '../../../services/host/src/agent/reasoningPassback.ts';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { Command, MemorySaver } from '@langchain/langgraph';
+import { MemorySaver } from '@langchain/langgraph';
+import { pathToFileURL } from 'node:url';
+import { orchestratorFlowMockSubagentDataset } from './datasets/orchestrator-flow-mock-subagent';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { readFileSync } from 'node:fs';
@@ -25,6 +27,9 @@ import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import {
   buildOrchestratorRunInput,
+  compileAgentRegistry,
+  readPendingInterrupt,
+  ORCHESTRATOR_RECURSION_LIMIT,
   createOrchestratorGraph,
 } from '../../../packages/pet-agent/src/agent/createAgentRuntime';
 import type { AgentModels } from '../../../packages/pet-agent/src/types/agent';
@@ -156,6 +161,10 @@ const examples = [
   },
 ];
 
+const continuationCase = orchestratorFlowMockSubagentDataset.cases
+  .find(item => item.name === 'capability-budget-stop-explicit-input-continues-plan')!;
+examples.push({ name: continuationCase.name, inputs: continuationCase.input, outputs: continuationCase.expected });
+
 function loadPinpetConfig(): Record<string, string> {
   try {
     const raw = readFileSync(resolve(homedir(), '.pinpawo', 'config.json'), 'utf8');
@@ -169,11 +178,6 @@ const pinpawoConfig = loadPinpetConfig();
 const LLM_API_KEY = process.env.LLM_API_KEY || pinpawoConfig.llm_api_key;
 const LLM_BASE_URL = process.env.LLM_BASE_URL || pinpawoConfig.llm_base_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const LLM_MODEL = process.env.LLM_MODEL || pinpawoConfig.llm_model || 'qwen3.5-plus';
-
-if (!LLM_API_KEY) {
-  console.error('Missing LLM_API_KEY — set env var or configure ~/.pinpawo/config.json');
-  process.exit(1);
-}
 
 function buildModelKwargs(model: string) {
   const normalizedModel = model.toLowerCase();
@@ -194,9 +198,10 @@ function requiresStreaming(model: string): boolean {
   return model.toLowerCase().includes('glm-4.5');
 }
 
-function messageHasLaneMeta(message: unknown): boolean {
+export function messageHasLaneMeta(message: unknown): boolean {
   const pinpawo = (message as { additional_kwargs?: { pinpawo?: unknown } })?.additional_kwargs?.pinpawo;
-  return Boolean(pinpawo && typeof pinpawo === 'object' && 'lane' in pinpawo);
+  const lane = pinpawo && typeof pinpawo === 'object' ? (pinpawo as { lane?: unknown }).lane : null;
+  return typeof lane === 'string' && lane.length > 0;
 }
 
 /**
@@ -229,6 +234,10 @@ class ProbeSubagentModel extends BaseChatModel {
     const nonSystem = messages.filter((message) => message?._getType?.() !== 'system');
     this.invocationStats.push({
       sawLaneMeta: nonSystem.some(messageHasLaneMeta),
+      deliveryIds: nonSystem.flatMap(message => {
+        const delivery = readFixtureDelivery(message);
+        return delivery ? [delivery.deliveryId] : [];
+      }),
       nonSystemTexts: nonSystem.filter((message) => AIMessage.isInstance(message)).map((message) =>
         typeof message?.content === 'string' ? message.content : ''),
     });
@@ -254,6 +263,7 @@ function buildSubagentModel(inputs: Record<string, unknown>): ProbeSubagentModel
 }
 
 function buildModels(subagent: ProbeSubagentModel): AgentModels {
+  if (!LLM_API_KEY) throw new Error('Missing LLM_API_KEY — set env var or configure ~/.pinpawo/config.json');
   const routeModel = createReasoningPassbackChatOpenAI({
     model: LLM_MODEL,
     temperature: 0.3,
@@ -307,7 +317,7 @@ const mockTools = [
 const mockGeneralToolkit = defineToolkit({
   name: 'eval_general',
   description: 'Mock general tools for flow evaluation.',
-  tools: mockTools,
+  tools: mockTools.map(tool => ({ tool })),
 });
 
 function evalCapability(
@@ -379,27 +389,15 @@ function resolveCapabilityList(pack: unknown): AgentCapability[] {
   return general;
 }
 
-function readInterruptPayload(result: Record<string, unknown>): Record<string, unknown> | null {
-  const interrupts = Array.isArray(result.__interrupt__) ? result.__interrupt__ : [];
-  const first = interrupts[0];
-  return first && typeof first === 'object' && first.value && typeof first.value === 'object'
-    ? first.value as Record<string, unknown>
-    : null;
-}
-
-function readReviewId(payload: Record<string, unknown> | null): string | null {
-  const review = payload?.review && typeof payload.review === 'object'
-    ? payload.review as Record<string, unknown>
-    : null;
-  return typeof review?.id === 'string' ? review.id : null;
-}
-
 let evalCounter = 0;
 
-async function target(inputs: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function target(
+  inputs: Record<string, unknown>,
+  modelOverride?: Omit<AgentModels, 'subagent'>,
+): Promise<Record<string, unknown>> {
   const userMessage = inputs.user_message as string;
   const subagentModel = buildSubagentModel(inputs);
-  const models = buildModels(subagentModel);
+  const models = modelOverride ? { ...modelOverride, subagent: subagentModel } : buildModels(subagentModel);
   const checkpointer = new MemorySaver();
   const graph = createOrchestratorGraph({
     models,
@@ -414,46 +412,47 @@ async function target(inputs: Record<string, unknown>): Promise<Record<string, u
 
   const configurable = {
     thread_id: `eval-flow-${Date.now()}-${++evalCounter}`,
-    toolkits: [mockGeneralToolkit],
-    capabilities: capabilityList,
+    registry: compileAgentRegistry({ toolkits: [mockGeneralToolkit], capabilities: capabilityList }),
     ...(allowedCapabilityNames
       ? { allowedCapabilityNames }
       : {}),
-    maxIterations: typeof inputs.max_iterations === 'number' ? inputs.max_iterations : 3,
-    workdir: '/mock/project',
   };
-  let result = await compiled.invoke(turnInput, {
-    configurable: {
-      ...configurable,
-    },
-  });
-  let iterationLimitInterruptCount = 0;
-  if (inputs.auto_resume_iteration_limit === true) {
-    for (let i = 0; i < 5; i += 1) {
-      const payload = readInterruptPayload(result as Record<string, unknown>);
-      const reviewId = readReviewId(payload);
-      if (!reviewId?.startsWith('iteration-limit:')) break;
-      iterationLimitInterruptCount += 1;
-      result = await compiled.invoke(
-        new Command({
-          resume: {
-            reviewId,
-            selectedOptionId: 'approve',
-          },
-        }),
-        { configurable },
-      );
+  const invocationConfig = { configurable, context: { workdir: '/mock/project' },
+    recursionLimit: ORCHESTRATOR_RECURSION_LIMIT };
+  let result = await compiled.invoke(turnInput, invocationConfig);
+  let followUp = null;
+  const followUpMessage = typeof inputs.follow_up_message === 'string' ? inputs.follow_up_message.trim() : '';
+  if (followUpMessage) {
+    const stopped = await compiled.getState(invocationConfig);
+    // Explicit chat starts a new run only after this round has actually ended.
+    if (stopped.next.length || readPendingInterrupt(stopped)) {
+      throw new Error('A follow-up chat cannot bypass an active round or pending review.');
     }
+    const previousRunId = result.runId;
+    const previousPlanIds = stopped.values.runSupervisorState.plan.map(item => item.id);
+    if (!stopped.values.runSupervisorState.plan.some(item => item.status === 'pending')) {
+      throw new Error('The continuation fixture requires an unfinished plan.');
+    }
+    const previousDeliveryIds = readCapabilityExecutions(result.messages ?? [])
+      .flatMap(({ result }) => result.delivery ? [result.delivery.id] : []);
+    const priorInvocations = subagentModel.invocationStats.length;
+    result = await compiled.invoke(buildOrchestratorRunInput([new HumanMessage(followUpMessage)]), invocationConfig);
+    followUp = {
+      previousIterations: stopped.values.runIterationCount,
+      freshRun: result.runId !== previousRunId,
+      planPreserved: previousPlanIds.every(id => result.runSupervisorState.plan.some(item => item.id === id)),
+      priorDeliverySeen: subagentModel.invocationStats.slice(priorInvocations)
+        .some(stat => stat.deliveryIds.some(id => previousDeliveryIds.includes(id))),
+    };
   }
-
-  return extractResult(result, inputs, subagentModel, iterationLimitInterruptCount);
+  return extractResult(result, inputs, subagentModel, followUp);
 }
 
 function extractResult(
   result: Record<string, unknown>,
   inputs: Record<string, unknown>,
   subagentModel: ProbeSubagentModel,
-  iterationLimitInterruptCount: number,
+  followUp: { previousIterations: number; freshRun: boolean; planPreserved: boolean; priorDeliverySeen: boolean } | null,
 ): Record<string, unknown> {
   const routeMode = routeModeFromResult(result);
   const finalRoute = routeMode === 'answer' ? 'answer' : 'delegate';
@@ -505,7 +504,11 @@ function extractResult(
     subagent_invocation_count: invocationStats.length,
     private_message_leak: privateMessageLeak,
     carryover_seen: carryoverSeen,
-    iteration_limit_interrupt_count: iterationLimitInterruptCount,
+    follow_up_run_count: followUp ? 1 : 0,
+    follow_up_previous_iterations: followUp?.previousIterations ?? null,
+    follow_up_fresh_run: followUp?.freshRun ?? null,
+    follow_up_plan_preserved: followUp?.planPreserved ?? null,
+    follow_up_prior_delivery_seen: followUp?.priorDeliverySeen ?? null,
   };
 }
 
@@ -568,6 +571,7 @@ async function ensureDataset() {
 }
 
 async function main() {
+  if (!LLM_API_KEY) throw new Error('Missing LLM_API_KEY — set env var or configure ~/.pinpawo/config.json');
   await ensureDataset();
   console.log(`Running orchestrator flow mock-subagent evaluation against "${DATASET_NAME}"...`);
   console.log(`Route model: ${LLM_MODEL} @ ${LLM_BASE_URL}`);
@@ -583,7 +587,8 @@ async function main() {
       exactFieldEvaluator('latest_announce_lane', 'expected_latest_announce_lane'),
       exactFieldEvaluator('private_message_leak', 'expected_private_message_leak'),
       exactFieldEvaluator('carryover_seen', 'expected_carryover_seen'),
-      exactFieldEvaluator('iteration_limit_interrupt_count', 'expected_iteration_limit_interrupt_count'),
+      ...['follow_up_run_count', 'follow_up_previous_iterations', 'follow_up_fresh_run', 'follow_up_plan_preserved', 'follow_up_prior_delivery_seen']
+        .map(field => exactFieldEvaluator(field, `expected_${field}`)),
       delegationCountEvaluator,
     ],
     experimentPrefix: 'orchestrator-flow-mock-subagent',
@@ -599,7 +604,11 @@ async function main() {
     'latest_announce_lane_correct',
     'private_message_leak_correct',
     'carryover_seen_correct',
-    'iteration_limit_interrupt_count_correct',
+    'follow_up_run_count_correct',
+    'follow_up_previous_iterations_correct',
+    'follow_up_fresh_run_correct',
+    'follow_up_plan_preserved_correct',
+    'follow_up_prior_delivery_seen_correct',
     'delegation_count_correct',
   ];
   console.log('\n=== Evaluation complete ===');
@@ -619,7 +628,6 @@ async function main() {
   console.log('View results in LangSmith dashboard.');
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => { console.error(error); process.exit(1); });
+}

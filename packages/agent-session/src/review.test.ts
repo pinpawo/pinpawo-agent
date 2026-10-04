@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parsePendingInterruptProjection } from './review';
 
-test('public interrupt parser preserves both kinds and rejects internal review decisions/effects', () => {
+test('public interrupt parser preserves human reviews and refuses legacy pauses and rejects internal review decisions/effects', () => {
   const pause = { interruptId: 'pause', payload: { kind: 'pause_task' } };
-  assert.deepEqual(parsePendingInterruptProjection(pause), pause);
+  assert.equal(parsePendingInterruptProjection(pause), null);
   const review = { interruptId: 'review', payload: { kind: 'human_review', interactions: [{
     interactionId: 'interaction', schemaVersion: 2,
     view: { kind: 'diff', patch: '+ change', summary: 'Summary' },

@@ -112,7 +112,7 @@ test('ReviewInterrupt encapsulates reject resolution without removing the action
   });
 
   assert.equal(result.type, 'reject');
-  assert.equal(result.next, 'pause_task');
+  assert.equal(result.next, 'end');
   assert.ok(result.type === 'reject' && result.messages.every(ToolMessage.isInstance));
   assert.match(String(result.type === 'reject' && result.messages[0]?.content), /Do not run/);
 });
@@ -121,7 +121,7 @@ test('ReviewInterrupt encapsulates cancel resolution by removing the proposed ac
   const result = await createReviewInterrupt().resume({ action: 'cancel' });
 
   assert.equal(result.type, 'cancel');
-  assert.equal(result.next, 'pause_task');
+  assert.equal(result.next, 'end');
   assert.equal(result.type === 'cancel' && result.messages.length, 1);
   assert.ok(result.type === 'cancel' && result.messages[0] instanceof RemoveMessage);
 });

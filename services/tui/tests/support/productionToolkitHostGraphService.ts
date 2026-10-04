@@ -8,7 +8,6 @@ import { basename, resolve } from 'node:path';
 import {
   compileAgentRegistry,
   defineInstructionDocument,
-  readCapabilityExecutions,
   ReviewPolicies,
   type AgentCapability,
   type AgentModels,
@@ -212,14 +211,6 @@ function buildFixture(setup: AgentChannelSetup): ProductionToolkitFixture {
   const runSupervisorRunner: RunSupervisorRunner = withScriptedDelegation({
     async invoke(input) {
       if (input.mode === 'boundary') {
-        const latest = readCapabilityExecutions(input.messages)
-          .filter(({ metadata }) => metadata.runId === input.runId).at(-1);
-        if (latest?.result?.status === 'paused') {
-          return {
-            name: 'review_current',
-            args: { completed: false, reason: 'Resume the paused fixture action after user guidance.' },
-          };
-        }
         return {
           name: 'review_current',
           args: {

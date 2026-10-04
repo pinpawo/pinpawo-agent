@@ -13,7 +13,7 @@ import {
   ServerTuiSessionService,
   type TuiSessionCheckpointer,
 } from './session/serverTuiSessions';
-import type { CapabilityArtifactStore } from '@pinpawo/pet-agent';
+import { UnknownInterruptPayloadError, type CapabilityArtifactStore } from '@pinpawo/pet-agent';
 import {
   createLocalServerRuntimeDepsStore,
   type ServerDeps,
@@ -183,9 +183,8 @@ export async function createResidentPetRuntime(
     const context = await loadContext(deps.petId);
     const setup = sessions.buildChatSetup(runtimeDeps.get(), context);
     const state = await graphService.readThreadState(setup);
-    // Any pending interrupt holds dispatch, whatever its kind. Resumability
-    // is not consulted: it cannot tell a paused task from ordinary retained
-    // work, and the interrupt is the authoritative signal.
+    // Only a pending native review holds dispatch. Retained plans alone
+    // do not block new input or require recovery.
     if (state.pendingInterrupt) return 'waiting';
     return 'open';
   };
@@ -282,7 +281,14 @@ export async function createResidentPetRuntime(
     isClosing: () => closing !== null,
   };
   registerResidentPetRuntimeContext(runtime, context);
-  await coordinator.refreshState();
+  try {
+    await coordinator.refreshState();
+  } catch (error) {
+    if (!(error instanceof UnknownInterruptPayloadError)) throw error;
+    // Keep the old session blocked and intact while allowing the operator to
+    // create a new session through the existing interaction surface.
+    console.error('[resident-pet] active session is unsupported:', error.message);
+  }
   return runtime;
 }
 

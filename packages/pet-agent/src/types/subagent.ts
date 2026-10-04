@@ -86,6 +86,8 @@ export type SubagentRunInput = SubagentInputState & {
 };
 
 export type SubagentResult = {
+  /** Terminal review outcome for this invocation; no retained execution or resume state. */
+  reviewDecision?: 'reject' | 'cancel';
   /** Usage reported by this invocation, independent of transcript storage. */
   tokenUsage?: ProviderTokenUsage | null;
   messages: BaseMessage[];

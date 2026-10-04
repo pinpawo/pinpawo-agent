@@ -24,11 +24,7 @@ import {
   type ReviewResponseResolution,
 } from '../../../types/reviewSpec';
 import type { AgentInterrupt } from './agentInterrupt';
-import {
-  PAUSE_TASK_INTERRUPT_STATE_KEY,
-  pauseTaskInterrupt,
-  type PauseTaskInterruptPayload,
-} from './pauseTaskInterrupt';
+import { buildReviewStopMessage } from './reviewStop';
 
 export type ReviewInterruptReview = {
   toolCall: ToolCall;
@@ -54,12 +50,12 @@ export type ReviewInterruptResolution =
   | {
       type: 'reject';
       messages: BaseMessage[];
-      next: 'pause_task';
+      next: 'end';
     }
   | {
       type: 'cancel';
       messages: BaseMessage[];
-      next: 'pause_task';
+      next: 'end';
     };
 
 export type ReviewInterruptOptions = {
@@ -73,7 +69,6 @@ export type ReviewInterruptOptions = {
 export type ReviewInterruptStateUpdate = {
   messages?: BaseMessage[];
   jumpTo?: 'model' | 'end';
-  [PAUSE_TASK_INTERRUPT_STATE_KEY]?: PauseTaskInterruptPayload;
 };
 
 export type ReviewInterruptTransition = {
@@ -239,7 +234,7 @@ export class ReviewInterrupt implements AgentInterrupt<
       return {
         type: 'cancel',
         messages: [new RemoveMessage({ id: aiMessageId }) as BaseMessage],
-        next: 'pause_task',
+        next: 'end',
       };
     }
 
@@ -278,7 +273,7 @@ export class ReviewInterrupt implements AgentInterrupt<
           review,
           decision,
         }),
-        next: 'pause_task',
+        next: 'end',
       };
     }
 
@@ -338,7 +333,10 @@ export class ReviewInterrupt implements AgentInterrupt<
       type: resolution.type,
       authorizations: [],
       approvedReviewIds: [],
-      stateUpdate: pauseTaskInterrupt.enter({ messages }),
+      stateUpdate: {
+        messages: [...messages, buildReviewStopMessage(resolution.type)],
+        jumpTo: 'end',
+      },
     };
   }
 

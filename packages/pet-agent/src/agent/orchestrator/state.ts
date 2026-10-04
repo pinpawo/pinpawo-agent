@@ -43,8 +43,8 @@ const orchestratorStateChannels = {
     reducer: messagesStateReducer,
     default: () => [],
   }),
-  // A pause resume can add user input within the same run, after iteration zero.
-  // Consume this message identity in the next Supervisor decision only.
+  // Consume this run’s explicit user input once, including Entry’s decision
+  // to continue a retained plan into this fresh run.
   runSupervisorUserMessageId: Annotation<string | null>({
     reducer: (_prev, next) => next,
     default: () => null,

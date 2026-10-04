@@ -84,6 +84,7 @@ test('state makes work commands explicit and keeps token usage observational', (
     workId: 'work-1',
   });
   assert.equal(parseAgentWorkCommand({ type: 'supersede_active', workId: 'work-1' }), null);
+  assert.equal(parseAgentStateSnapshot({ activeWork: { id: 'old', status: 'paused', resumable: true, cancellable: true } }), null);
   assert.deepEqual(parseAgentStateSnapshot({
     activeWork: {
       id: 'work-1',

@@ -1,4 +1,3 @@
-import { hasUnfinishedTask } from './taskPause';
 import {
   applySessionSnapshot,
   reduceSession,
@@ -141,7 +140,7 @@ export class TuiSessionController {
     this.sessionCommands = new SessionCommandCoordinator({
       requestIdFactory: this.requestIdFactory,
       send: (message) => this.transport.send(message),
-      getUnavailableReason: () => this.sessionCommandUnavailable(),
+      getUnavailableReason: operation => this.sessionCommandUnavailable(operation === 'new'),
       getSessionId: () => this.state.session.sessionId,
       onSnapshot: (snapshot) => {
         this.transport.clearSnapshotRequests();
@@ -150,6 +149,7 @@ export class TuiSessionController {
           snapshot,
           { observedAt: this.now() },
         ));
+        if (this.state.connection === 'error' && this.transport.isConnected()) this.setConnection('ready');
       },
       timeoutMs: sessionCommandTimeoutMs,
       compactTimeoutMs: options.sessionCompactTimeoutMs
@@ -225,58 +225,6 @@ export class TuiSessionController {
     attachments: readonly AgentLocalAttachment[] = [],
   ): SubmitChatResult {
     return this.submitChatWithTransition(message, attachments);
-  }
-
-  /**
-   * Continue the pending task pause by its interrupt id. Optional text becomes
-   * guidance for the delegation the Runtime is already holding, which is why
-   * this is a resume and not a new chat request.
-   */
-  continuePausedTask(
-    message: string,
-    attachments: readonly AgentLocalAttachment[] = [],
-  ): SubmitChatResult {
-    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
-      return { ok: false, reason: 'not-ready' };
-    }
-    // A continue carries guidance for work the Runtime already holds, and the
-    // resume value has nowhere to put an attachment. Refuse rather than report
-    // success and drop it: the caller keeps the attachment either way.
-    if (attachments.length > 0) {
-      return { ok: false, reason: 'attachments-unsupported' };
-    }
-    const pendingInterrupt = this.state.session.pendingInterrupt;
-    if (
-      pendingInterrupt?.payload.kind !== 'pause_task'
-      || this.state.session.activeRun
-    ) {
-      return { ok: false, reason: 'busy' };
-    }
-    const guidance = message.trim();
-    const requestId = this.requestIdFactory();
-    if (!this.transport.send({
-      type: 'interrupt.resume',
-      requestId,
-      interruptId: pendingInterrupt.interruptId,
-      value: { action: 'continue', ...(guidance ? { guidance } : {}) },
-    })) {
-      return { ok: false, reason: 'send-failed' };
-    }
-    this.transport.invalidateCompletionSnapshotState();
-    // The resume owns the run whether or not it carried guidance, so a second
-    // continue cannot overlap it.
-    this.updateSession(reduceSession(this.state.session, {
-      type: 'interrupt.resume.accepted',
-      requestId,
-      interruptId: pendingInterrupt.interruptId,
-    }, { observedAt: this.now() }));
-    if (guidance) {
-      this.updateSession(reduceSession(this.state.session, {
-        type: 'message.appended',
-        message: { role: 'user', requestId, text: guidance },
-      }, { observedAt: this.now() }));
-    }
-    return { ok: true, requestId };
   }
 
   refreshSession(): { ok: true } | { ok: false; reason: 'not-ready' } {
@@ -599,8 +547,9 @@ export class TuiSessionController {
     assertNever(message);
   }
 
-  private sessionCommandUnavailable() {
-    if (this.state.connection !== 'ready' || !this.transport.isConnected()) {
+  private sessionCommandUnavailable(allowNewAfterSnapshotError = false) {
+    if (!this.transport.isConnected() || (this.state.connection !== 'ready'
+      && !(allowNewAfterSnapshotError && this.state.connection === 'error'))) {
       return 'host is not connected';
     }
     if (

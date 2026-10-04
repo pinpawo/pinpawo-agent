@@ -73,13 +73,6 @@ test('composer placeholder acknowledges active work without blocking drafting', 
   assert.equal(
     formatComposerPlaceholder({
       ...session,
-      pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-    }, 'chat', { pausedTask: true }),
-    'Task paused · Enter to continue · Esc starts a new task',
-  );
-  assert.equal(
-    formatComposerPlaceholder({
-      ...session,
       activeRun: {
         requestId: 'request',
         state: 'running',

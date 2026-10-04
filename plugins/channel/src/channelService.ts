@@ -278,7 +278,14 @@ export class ChannelService {
     const channel = this.getChannel(channelId);
     const rows = this.database().prepare(`SELECT sequence, data FROM channel_interrupt_notifications
       WHERE channel_id=? AND sequence>? ORDER BY sequence LIMIT ?`).all(channel.channelId, after, limit + 1) as { sequence: number; data: string }[];
-    const notifications: ChannelInterruptNotification[] = rows.slice(0, limit).map(row => ({ ...JSON.parse(row.data), sequence: row.sequence }));
+    const notifications: ChannelInterruptNotification[] = rows.slice(0, limit).map(row => {
+      const data = JSON.parse(row.data);
+      const pendingInterrupt = parsePendingInterruptProjection(data.pendingInterrupt);
+      if (!pendingInterrupt) {
+        throw new Error(`Unsupported Channel interrupt notification ${row.sequence}. The original record has been preserved.`);
+      }
+      return { ...data, pendingInterrupt, sequence: row.sequence };
+    });
     return { notifications, nextAfter: notifications.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
   }
   readHistory(channelId: string, page: unknown = {}): ChannelPage {

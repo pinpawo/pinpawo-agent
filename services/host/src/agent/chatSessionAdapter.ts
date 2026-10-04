@@ -9,7 +9,6 @@ import {
   readLatestProviderInputTokens,
   readMessagesTokenUsage,
   readPendingInterrupt,
-  readPendingInterruptInputPolicy,
   SUBAGENT_OPERATIONS_EVENT,
   type PendingInterrupt,
   type SubagentToolOperationMetadata,
@@ -301,12 +300,8 @@ export async function runAgentSessionTurn(
   if (
     initialThreadState.pendingInterrupt
     && !isResumeRequest
-    && readPendingInterruptInputPolicy(
-      initialThreadState.pendingInterrupt.payload,
-    ) === 'refuse'
   ) {
-    // The kind owns this decision. A review holds a tool call open, so new
-    // input cannot be admitted; a pause supersedes and falls through.
+    // A review holds a tool call open; ordinary input cannot bypass it.
     if (message.trim() || attachments.length > 0) {
       emitEvent({
         type: 'system.notice',
@@ -496,9 +491,7 @@ export async function runAgentSessionTurn(
   }
 
   if (finalThreadState.pendingInterrupt) {
-    // Whatever the kind, the run is waiting for a person. A pause's last
-    // checkpoint message is its own bookkeeping — a rejected tool result, a
-    // cancelled action — and is never reported as the assistant's reply.
+    // A native review remains pending until its explicit approval response.
     emitInterruptRequested({
       pendingInterrupt: finalThreadState.pendingInterrupt,
       requestId,

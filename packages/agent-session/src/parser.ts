@@ -483,14 +483,6 @@ function parsePendingInterrupt(
   if (!isRecord(value)) return null;
   const payload = value.payload;
   if (!isRecord(payload)) return null;
-  if (payload.kind === 'pause_task') {
-    return typeof value.interruptId === 'string'
-      && value.interruptId
-      && Object.keys(value).every((key) => key === 'interruptId' || key === 'payload')
-      && Object.keys(payload).every((key) => key === 'kind')
-      ? { interruptId: value.interruptId, payload: { kind: 'pause_task' } }
-      : null;
-  }
   if (payload.kind !== 'human_review') return null;
   const interactions = readReviews(payload.interactions);
   if (typeof value.interruptId !== 'string' || !interactions) {

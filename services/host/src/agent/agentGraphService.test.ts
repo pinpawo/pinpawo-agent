@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { MemorySaver, interrupt } from '@langchain/langgraph';
-import { buildOrchestratorRunInput, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
+import { buildOrchestratorRunInput, buildReviewSpec, compileAgentRegistry, getAgentRuntimeContext, createOrchestratorGraph, defineInstructionDocument, runAgent, type AgentModels, type OrchestratorGraph, type RunSupervisorRunner } from '@pinpawo/pet-agent';
 import type { AgentChannelSetup } from './agentChannel';
 import { buildAgentGraphConfigurable, HostGraphService, type InterruptResume } from './agentGraphService';
 import { scriptedSupervisorResult } from '../../../../packages/pet-agent/src/agent/orchestrator/runSupervisor/testing';
@@ -152,7 +152,10 @@ test('local stream resume refreshes invocation metadata while preserving the che
         seen.push({ taskId: input.taskId,
           workdir: getAgentRuntimeContext(config).workdir });
         assert.deepEqual(config?.configurable?.allowedCapabilityNames, []);
-        interrupt({ kind: 'invocation-refresh-test' });
+        interrupt({ kind: 'review', review: buildReviewSpec({ id: 'invocation-review',
+          view: { kind: 'plain', body: 'Review invocation?' },
+          options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+        }) });
         return scriptedSupervisorResult(input, { reply: 'No execution available.' });
       } },
     },
@@ -166,8 +169,7 @@ test('local stream resume refreshes invocation metadata while preserving the che
   const resumed: AgentChannelSetup = { ...input,
     input: { ...input.input, taskId: randomUUID(), context: { workdir: workdirs[1] } },
   };
-  // This fixture raises a payload the Runtime deliberately cannot decode, so
-  // the id is read from the checkpoint rather than through readThreadState.
+  // Read the original native review identity from the rebuilt checkpoint.
   const graph = createOrchestratorGraph(input.graphConfig);
   const snapshot = await graph.getState({
     configurable: buildAgentGraphConfigurable(input),

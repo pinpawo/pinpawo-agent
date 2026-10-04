@@ -68,14 +68,6 @@ import {
 } from './input/inputRouter';
 import { shouldOpenTranscriptPager } from './input/transcriptShortcut';
 import { latestCompletedAssistantReply } from './timeline/timelineModel';
-import {
-  isTaskPaused,
-  hasUnfinishedTask,
-  leaveTaskPauseMode,
-  resumesPausedTaskOnEmptySubmit,
-  syncTaskPauseMode,
-  type TaskPauseMode,
-} from './session/taskPause';
 import { TuiSessionController } from './session/sessionController';
 import {
   APPROVAL_FOOTER_ROWS,
@@ -292,13 +284,11 @@ let policyPickerGeneration = 0;
 let modelPickerGeneration = 0;
 let sessionListRequest: ReturnType<TuiSessionController['listSessions']> | null = null;
 const composerMode = 'chat' as const;
-let focusedSessionId = 'pending';
 let terminalHandoffOpen = false;
 let composerHistory = createComposerHistoryState();
 let timelineReplayPending = false;
 let timelineResizeReplayTimer: ReturnType<typeof setTimeout> | null = null;
 let timelineWidth = renderer.width;
-let taskPauseMode: TaskPauseMode = 'ordinary';
 const connectionFactory = launchOptions.useDemoConnection
   ? createDemoConnectionFactory({
       review: smoke.review || demo.review,
@@ -483,14 +473,6 @@ const unsubscribe = controller.subscribe((state) => {
   }
   liveActivityController.sync(state.session.activeRun);
   syncOverlayLoading();
-  if (state.session.sessionId !== focusedSessionId) {
-    focusedSessionId = state.session.sessionId;
-    taskPauseMode = 'ordinary';
-  }
-  taskPauseMode = syncTaskPauseMode(
-    taskPauseMode,
-    state.session,
-  );
   syncApprovalFromSession();
   syncNoticeFromSession();
   syncComposerInputOverlays();
@@ -669,21 +651,6 @@ renderer.keyInput.on('keypress', (key) => {
     return;
   }
   if (
-    owner.type === 'composer'
-    && key.name === 'escape'
-    && !controller.getState().session.activeRun
-    && (isTaskPaused(taskPauseMode) || (!controller.getState().session.pendingInterrupt
-      && hasUnfinishedTask(controller.getState().session)))
-  ) {
-    key.preventDefault();
-    key.stopPropagation();
-    taskPauseMode = leaveTaskPauseMode(taskPauseMode);
-    localNotice = 'task left · next message starts a new task';
-    syncComposerModeUi();
-    refreshStatus();
-    return;
-  }
-  if (
     key.name === 'escape'
     && controller.getState().session.activeRun
   ) {
@@ -822,9 +789,6 @@ function syncComposerModeUi() {
   composer.placeholder = formatComposerPlaceholder(
     controller.getState().session,
     composerMode,
-    {
-      pausedTask: isTaskPaused(taskPauseMode),
-    },
   );
   refreshHeader();
 }
@@ -1719,13 +1683,6 @@ function submitComposerInput(input = composer.plainText) {
 
   switch (intent.type) {
     case 'none':
-      if (resumesPausedTaskOnEmptySubmit(
-        taskPauseMode,
-        input,
-        attachments.length,
-      )) {
-        submitChatInput('');
-      }
       return;
     case 'notice':
       clearComposerPreservingNotice();
@@ -1826,9 +1783,7 @@ function copyLatestAssistantReply() {
 }
 
 function submitChatInput(text: string) {
-  const result = isTaskPaused(taskPauseMode)
-    ? controller.continuePausedTask(text, attachments)
-    : controller.submitChat(text, attachments);
+  const result = controller.submitChat(text, attachments);
   if (result.ok) {
     if (text.trim() || attachments.length > 0) {
       composerHistory = recordComposerHistoryEntry(composerHistory, text);
@@ -2062,7 +2017,6 @@ function submitFailureText(
     | 'not-ready'
     | 'busy'
     | 'empty'
-    | 'attachments-unsupported'
     | 'send-failed',
 ) {
   switch (reason) {
@@ -2072,8 +2026,6 @@ function submitFailureText(
       return 'wait for the current response to finish';
     case 'empty':
       return 'message is empty';
-    case 'attachments-unsupported':
-      return 'attachments cannot be sent while a task is paused; press Esc to start a new task';
     case 'send-failed':
       return 'message could not be sent';
   }

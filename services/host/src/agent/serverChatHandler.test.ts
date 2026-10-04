@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectHumanReviewRequest } from '@pinpawo/pet-agent';
+import { buildReviewSpec, projectHumanReviewRequest } from '@pinpawo/pet-agent';
 import type { HumanReviewResponse, InterruptResumeMessage } from '@pinpawo/agent-session';
 import { isToolProtocolHistoryError, ServerChatHandler } from './serverChatHandler';
 import { InflightRequestController } from '../inflightRequestController';
@@ -1120,7 +1120,7 @@ test('a review decision resume does not validate authorization effect context in
   assert.equal(sentEvents.length, 0);
 });
 
-test('an aborted run that left work behind is finalized as a pause, not an interruption', async () => {
+test('an aborted run preserves a native review that was already pending', async () => {
   const controls: unknown[] = [];
   const sent: unknown[] = [];
   const fakePeer = createFakePeer(sent);
@@ -1131,7 +1131,7 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
         settleCalls += 1;
         return {
           interruptId: 'interrupt-pause',
-          payload: { kind: 'pause_task' as const },
+          payload: { kind: 'human_review' as const, reviews: [buildReviewSpec({ id: 'r', view: { kind: 'plain', body: 'Approve?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }] })] },
         };
       },
     } as never,
@@ -1163,7 +1163,7 @@ test('an aborted run that left work behind is finalized as a pause, not an inter
     (item as { event?: { type?: string } }).event?.type === 'interrupt.requested'
   )) as { event?: { pendingInterrupt?: { interruptId?: string; payload?: { kind?: string } } } } | undefined;
   assert.equal(announced?.event?.pendingInterrupt?.interruptId, 'interrupt-pause');
-  assert.equal(announced?.event?.pendingInterrupt?.payload?.kind, 'pause_task');
+  assert.equal(announced?.event?.pendingInterrupt?.payload?.kind, 'human_review');
 });
 
 test('an aborted run with nothing to continue still reports an interruption', async () => {

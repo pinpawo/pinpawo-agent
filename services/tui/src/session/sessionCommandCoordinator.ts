@@ -66,7 +66,7 @@ type SessionCommandServerMessage = Extract<
 export type SessionCommandCoordinatorOptions = {
   requestIdFactory: () => string;
   send: (message: AgentClientMessage) => boolean;
-  getUnavailableReason: () => string | null;
+  getUnavailableReason: (operation?: 'new') => string | null;
   getSessionId: () => string;
   onSnapshot: (snapshot: AgentSessionSnapshot) => void;
   timeoutMs: number;
@@ -85,7 +85,7 @@ export class SessionCommandCoordinator {
   }
 
   startNewSession(): Promise<StartNewSessionResult> {
-    const unavailable = this.unavailableReason();
+    const unavailable = this.unavailableReason('new');
     if (unavailable) return Promise.reject(new Error(unavailable));
 
     const requestId = this.options.requestIdFactory();
@@ -245,8 +245,8 @@ export class SessionCommandCoordinator {
     }
   }
 
-  private unavailableReason() {
-    const unavailable = this.options.getUnavailableReason();
+  private unavailableReason(operation?: 'new') {
+    const unavailable = this.options.getUnavailableReason(operation);
     if (unavailable) return unavailable;
     if (this.commands.size > 0) {
       return 'another session command is already in progress';

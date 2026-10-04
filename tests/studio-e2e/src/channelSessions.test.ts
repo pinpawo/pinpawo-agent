@@ -32,7 +32,6 @@ async function fixture(root: string, pets = ['one']) {
     const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
     const graph = new StateGraph(State).addNode('reply', async (state) => {
       const last = state.messages.at(-1)!.text;
-      if (last === 'pause') interrupt({ kind: 'pause_task' });
       if (last === 'approval') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'approval',
         view: { kind: 'plain', body: 'Authorize?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' }, effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
       }) });
@@ -227,7 +226,7 @@ test('failed first admission keeps the reserved identity for retry; completed ou
   } finally { await studio.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
-test('a bound session alone does not publish; scope mismatch reports failure; pause_task is a read-only notice', async () => {
+test('a bound session alone does not publish; scope mismatch reports failure; native review is a read-only notice', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-destination-'));
   const f = await fixture(root);
   const events: Array<{ type: string; payload?: unknown }> = [];
@@ -245,9 +244,9 @@ test('a bound session alone does not publish; scope mismatch reports failure; pa
     await waitFor(() => events.some(e => e.type === 'channel.delivery_failed'));
     assert.equal(outputs(f, b).length, 0);
     assert.equal(outputs(f, a).length, 1);
-    await f.channel.execute(b, { petId: 'one', body: 'pause' });
+    await f.channel.execute(b, { petId: 'one', body: 'approval' });
     await waitFor(() => f.channel.service.readInterruptNotifications(b).notifications.length === 1);
-    assert.deepEqual(f.channel.service.readInterruptNotifications(b).notifications[0]?.pendingInterrupt.payload, { kind: 'pause_task' });
+    assert.equal(f.channel.service.readInterruptNotifications(b).notifications[0]?.pendingInterrupt.payload.kind, 'human_review');
     assert.equal(outputs(f, b).length, 0);
     assert.ok(!JSON.stringify(f.channel.service.readContext(b)).includes('interruptId'));
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }

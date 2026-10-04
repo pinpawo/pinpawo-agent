@@ -1255,114 +1255,23 @@ test('runAgentSessionTurn emits provider token usage from new state messages', a
   assert.equal(typeof completed.usage?.updatedAt, 'string');
 });
 
-test('runAgentSessionTurn reports a task pause without turning its bookkeeping into an assistant reply', async () => {
-  // Regression: after a Review reject the run settles into a task pause. The
-  // checkpoint's last message is the rejected tool result — it is not a reply,
-  // and the run must not be reported as completed.
-  const review = {
-    id: 'review-1',
-    schemaVersion: 1,
-    view: { kind: 'plain' as const, body: 'Approve?' },
-    options: [
-      { id: 'approve', label: 'Approve', decision: { type: 'approve' as const } },
-      { id: 'reject', label: 'Reject', decision: { type: 'reject' as const, message: 'no' } },
-    ],
-  };
-  const rejectedResult = new ToolMessage({
-    content: JSON.stringify({ source: 'human_reject', message: 'no' }),
-    tool_call_id: 'call-1',
-    name: 'run_shell',
-  });
-  const setup = {
-    graphConfig: {},
-    input: { messages: [] },
-  } as unknown as AgentChannelSetup;
-  let reads = 0;
-  const emittedEvents: AgentRuntimeEvent[] = [];
+test('runAgentSessionTurn refuses a legacy pause emitted by a rebuilt graph', async () => {
+  const setup = { graphConfig: {}, input: { messages: [] } } as unknown as AgentChannelSetup;
+  const events: AgentRuntimeEvent[] = [];
   const graphService = {
-    async readThreadState() {
-      reads += 1;
-      return reads === 1
-        ? {
-          messages: [],
-          pendingInterrupt: { interruptId: 'interrupt-1', payload: { kind: 'human_review', reviews: [review] } },
-        acceptsResume: true,
-        }
-        : {
-          // The reject settled into a task pause, which is a pending
-          // interrupt with an id like any other.
-          messages: [rejectedResult],
-          pendingInterrupt: { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-          acceptsResume: true,
-        };
-    },
-    streamEvents() {
-      return (async function* () {})();
-    },
+    readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: true }),
+    streamEvents: () => (async function* () {
+      yield protocolEvent('values', { __interrupt__: [{ id: 'old-pause', value: { kind: 'pause_task' } }] });
+    })(),
   };
+  await assert.rejects(runAgentSessionTurn({
+    request: { kind: 'resume', requestId: 'r', resume: { interruptId: 'review', value: { action: 'cancel' } } },
+    setup, graphService: graphService as unknown as HostGraphService,
+    isCurrent: () => true, emitEvent: event => events.push(event), emitToolEvent: () => {},
+  }), /Start a new session.*preserved/);
 
-  const result = await runAgentSessionTurn({
-    request: {
-      kind: 'resume',
-      requestId: 'req-1',
-      resume: {
-        interruptId: 'interrupt-1',
-        value: { decisions: [{ reviewId: 'review-1', selectedOptionId: 'reject' }] },
-      },
-    },
-    setup,
-    graphService: graphService as unknown as HostGraphService,
-    isCurrent: () => true,
-    emitEvent: (event) => {
-      emittedEvents.push(event);
-    },
-    emitToolEvent: () => {},
-  });
-
-  assert.deepEqual(result, { status: 'waiting' });
-  assert.equal(emittedEvents.some((event) => event.type === 'message.completed'), false);
-  assert.equal(JSON.stringify(emittedEvents).includes('human_reject'), false);
-  // The pause is announced by id, so the interface can continue it without
-  // inferring anything from the run's ending.
-  const requested = emittedEvents.find((event) => event.type === 'interrupt.requested');
-  assert.deepEqual(
-    requested?.type === 'interrupt.requested' ? requested.pendingInterrupt : null,
-    { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' } },
-  );
+  assert.equal(events.some(event => event.type === 'interrupt.requested'), false);
 });
-
-test('runAgentSessionTurn accepts a streamed task-pause interrupt from a rebuilt graph', async () => {
-  const setup = {
-    graphConfig: {},
-    input: { messages: [] },
-  } as unknown as AgentChannelSetup;
-  const graphService = {
-    async readThreadState() {
-      return {
-        messages: [],
-        pendingInterrupt: null,
-        acceptsResume: true,
-      };
-    },
-    streamEvents() {
-      return (async function* () {
-        yield protocolEvent('values', {
-          __interrupt__: [{ id: 'pause-1', value: { kind: 'pause_task' } }],
-        });
-      })();
-    },
-  };
-
-  assert.deepEqual(await runAgentSessionTurn({
-    request: { kind: 'resume', requestId: 'req-1', resume: { interruptId: 'interrupt-1', value: { action: 'cancel' } } },
-    setup,
-    graphService: graphService as unknown as HostGraphService,
-    isCurrent: () => true,
-    emitEvent: () => {},
-    emitToolEvent: () => {},
-  }), { status: 'waiting' });
-});
-
 
 test('committed Supervisor reply uses one message identity for delta and completion', async () => {
   const emittedEvents: AgentRuntimeEvent[] = [];

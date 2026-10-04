@@ -152,9 +152,7 @@ export function formatLiveSession(
     if (session.pendingInterrupt?.payload.kind === 'human_review') {
       return 'waiting for review';
     }
-    return session.pendingInterrupt?.payload.kind === 'pause_task'
-      ? 'task paused'
-      : 'idle';
+    return 'idle';
   }
   if (run.state === 'interrupting') return 'interrupting';
   if (run.activity === 'using_tool') return 'using tool';
@@ -174,9 +172,7 @@ export function formatLiveActivity(
     if (session.pendingInterrupt?.payload.kind === 'human_review') {
       return '! waiting for review';
     }
-    return session.pendingInterrupt?.payload.kind === 'pause_task'
-      ? '◌ task paused'
-      : formatLiveSession(session, maxCodePoints);
+    return formatLiveSession(session, maxCodePoints);
   }
   const elapsed = formatElapsed(run.startedAt, now);
   const suffix = elapsed && maxCodePoints >= 40 ? ` · 本轮 ${elapsed}` : '';

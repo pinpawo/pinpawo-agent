@@ -124,9 +124,7 @@ export {
   isOrchestratorInternalAiStreamNode,
   ORCHESTRATOR_RECURSION_LIMIT,
   HUMAN_REVIEW_INTERRUPT_KIND,
-  readPauseTaskInterrupt,
   readPendingInterrupt,
-  readPendingInterruptInputPolicy,
   settleAbortedRun,
   UnknownInterruptPayloadError,
   streamOrchestratorGraph,
@@ -136,10 +134,8 @@ export {
   validateUniqueToolkitNames,
 } from './agent/createAgentRuntime';
 export type {
-  PauseTaskInterruptPayload,
   AbortSettlementGraph,
   PendingInterrupt,
-  PendingInterruptInputPolicy,
   PendingInterruptPayload,
   RunSupervisorInput,
   RunSupervisorMode,

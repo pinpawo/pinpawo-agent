@@ -724,7 +724,7 @@ test('resident policy updates reach conversation and dispatch without changing a
   }
 });
 
-test('an aborted resident dispatch is continuable by id, like an aborted Chat run', async () => {
+test('an aborted resident dispatch preserves a native review by id', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-abort-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   let settleCalls = 0;
@@ -732,7 +732,7 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: settleCalls > 0
-        ? { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' as const } }
+        ? { interruptId: 'interrupt-pause', payload: { kind: 'human_review' as const, reviews: [] } }
         : null,
       acceptsResume: false,
       currentPlan: null,
@@ -741,7 +741,7 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
       settleCalls += 1;
       return {
         interruptId: 'interrupt-pause',
-        payload: { kind: 'pause_task' as const },
+        payload: { kind: 'human_review' as const, reviews: [] },
       };
     },
   };
@@ -777,7 +777,7 @@ test('an aborted resident dispatch is continuable by id, like an aborted Chat ru
   }
 });
 
-test('a task pause holds dispatch as waiting through the same interrupt any kind uses', async () => {
+test('a native review holds dispatch waiting without a resumability guess', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pinpawo-resident-pause-'));
   const runtimeConfig = buildHostRuntimeConfig(root);
   let paused = false;
@@ -787,7 +787,7 @@ test('a task pause holds dispatch as waiting through the same interrupt any kind
     readThreadState: async () => ({
       messages: [],
       pendingInterrupt: paused
-        ? { interruptId: 'interrupt-pause', payload: { kind: 'pause_task' as const } }
+        ? { interruptId: 'interrupt-pause', payload: { kind: 'human_review' as const, reviews: [] } }
         : null,
       acceptsResume: false,
       currentPlan: null,

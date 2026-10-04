@@ -3,10 +3,6 @@ import {
   isHumanReviewInterruptPayload,
   type ReviewSpec,
 } from '../../../types/reviewSpec';
-import {
-  isPauseTaskInterruptPayload,
-  PAUSE_TASK_INTERRUPT_KIND,
-} from './pauseTaskInterrupt';
 
 export const HUMAN_REVIEW_INTERRUPT_KIND = 'human_review' as const;
 
@@ -16,9 +12,7 @@ export const HUMAN_REVIEW_INTERRUPT_KIND = 'human_review' as const;
  * interpret the payload. Reviews stay in their stored `ReviewSpec` form —
  * projecting them onto the wire is the Host's job, not the decoder's.
  */
-export type PendingInterruptPayload =
-  | { kind: typeof HUMAN_REVIEW_INTERRUPT_KIND; reviews: ReviewSpec[] }
-  | { kind: typeof PAUSE_TASK_INTERRUPT_KIND };
+export type PendingInterruptPayload = { kind: typeof HUMAN_REVIEW_INTERRUPT_KIND; reviews: ReviewSpec[] };
 
 export type PendingInterrupt = {
   interruptId: string;
@@ -35,7 +29,7 @@ export class UnknownInterruptPayloadError extends Error {
 
   constructor(interruptId: string) {
     super(
-      `Interrupt ${interruptId} carries a payload this Runtime cannot decode.`,
+      `Interrupt ${interruptId} is unsupported by this Runtime. Start a new session; the existing checkpoint and unexecuted action have been preserved.`,
     );
     this.name = 'UnknownInterruptPayloadError';
     this.interruptId = interruptId;
@@ -76,9 +70,6 @@ function decodePayload(value: unknown): PendingInterruptPayload | null {
   if (isHumanReviewInterruptPayload(value)) {
     return { kind: HUMAN_REVIEW_INTERRUPT_KIND, reviews: [value.review] };
   }
-  if (isPauseTaskInterruptPayload(value)) {
-    return { kind: PAUSE_TASK_INTERRUPT_KIND };
-  }
   return null;
 }
 
@@ -98,20 +89,4 @@ export function readPendingInterrupt(snapshot: unknown): PendingInterrupt | null
     throw new UnknownInterruptPayloadError(raw.id);
   }
   return { interruptId: raw.id, payload };
-}
-
-/**
- * What a kind does when fresh user input arrives while it is pending.
- *
- * - `refuse`: the interaction must be answered first. A review holds a tool
- *   call open, so a new message cannot be admitted without stranding it.
- * - `supersede`: the input starts a new task and the unfinished work is
- *   detached. A paused task is resumable, not owed an answer.
- */
-export type PendingInterruptInputPolicy = 'refuse' | 'supersede';
-
-export function readPendingInterruptInputPolicy(
-  payload: PendingInterruptPayload,
-): PendingInterruptInputPolicy {
-  return payload.kind === HUMAN_REVIEW_INTERRUPT_KIND ? 'refuse' : 'supersede';
 }

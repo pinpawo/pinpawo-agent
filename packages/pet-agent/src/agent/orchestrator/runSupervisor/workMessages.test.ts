@@ -73,7 +73,7 @@ test('acceptance ignores results that are not this call\'s main record and rejec
   assert.ok(reviewCurrent(withResult((m) => { m.content = '{invalid'; }), { completed: true, reason: 'Accept' }));
   const retry = dispatchResult(first, 'retry');
   const dispatch = retry.messages.at(-1) as AIMessage;
-  for (const status of ['missing_deliverable', 'paused'] as const) {
+  for (const status of ['missing_deliverable'] as const) {
     const failure = createCapabilityExecutionMessage({ callId: dispatch.tool_calls![0].id!,
       execution: buildCapabilityExecutionInput(first, { briefing: 'Execute current objective.' }, dispatch.tool_calls![0].id!),
       result: { status, delivery: null, artifacts: [] }, metadata: getAgentMessageMetadata(dispatch) });

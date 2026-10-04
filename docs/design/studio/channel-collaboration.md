@@ -106,3 +106,10 @@ schema v3 增加 channel_interrupt_notifications；Channel 将该公开投影保
 
 `channel.delivery_failed` 加错误日志报告异步保存失败；它不把 dispatch.completed 改成执行失败。
 总线没有持久补投，断线/进程退出可能丢通知，此轮不引入 outbox。
+
+### 审批终态（2026-10-04）
+
+仅原生 human_review 审批保持 waiting。拒绝/取消直接结束本轮，明确说明操作未执行，
+保留目标与计划；无 pause_task 二次暂停，队列收到终态后可继续接纳同会话明确输入。
+后续输入从 Entry 进入新 run，只有用户指示支持继续时才由 Supervisor 重评计划。
+旧暂停检查点保留数据但明确拒绝恢复，要求新建会话；不引入兼容恢复状态机。

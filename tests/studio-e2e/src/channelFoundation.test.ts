@@ -146,7 +146,10 @@ test('storage failure is observable and interrupt history is operator-only, read
     const id = channel.service.createChannel({ title: 'Goal', goal: 'Long term', scope: 'Round' }, { kind: 'human', id: 'owner' }).channelId;
     const binding = channel.service.reserveBinding(id, 'one', () => 'one:12345678');
     const source = { petId: 'one', sessionId: binding.sessionId, invocationId: 'waiting' };
-    const pendingInterrupt = { interruptId: 'i', payload: { kind: 'pause_task' } };
+    const pendingInterrupt = { interruptId: 'i', payload: { kind: 'human_review', interactions: [{
+      interactionId: 'review', schemaVersion: 2, view: { kind: 'plain', body: 'Approve?' },
+      options: [{ id: 'approve', label: 'Approve', batchSubmission: 'immediate' }],
+    }] } };
     studio.notify({ source: 'resident-pet', type: 'dispatch.waiting', occurredAt: new Date().toISOString(),
       payload: { ...source, scope: { namespace: 'channel', id }, pendingInterrupt } });
     await waitFor(() => channel.service.readInterruptNotifications(id).notifications.length === 1);

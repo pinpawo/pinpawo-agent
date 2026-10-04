@@ -23,13 +23,7 @@ export type HumanReviewInterruptProjection = {
   interactions: HumanReviewRequest[];
 };
 
-export type PauseTaskInterruptProjection = {
-  kind: 'pause_task';
-};
-
-export type InterruptPayloadProjection =
-  | HumanReviewInterruptProjection
-  | PauseTaskInterruptProjection;
+export type InterruptPayloadProjection = HumanReviewInterruptProjection;
 
 /**
  * Every pending interrupt carries its id, whatever the kind. Interfaces
@@ -61,9 +55,6 @@ export function parsePendingInterruptProjection(value: unknown): PendingInterrup
     || typeof pending.interruptId !== 'string' || !pending.interruptId.trim()) return null;
   if (!pending.payload || typeof pending.payload !== 'object' || Array.isArray(pending.payload)) return null;
   const payload = pending.payload as Record<string, unknown>;
-  if (payload.kind === 'pause_task' && Object.keys(payload).length === 1) {
-    return { interruptId: pending.interruptId, payload: { kind: 'pause_task' } };
-  }
   if (payload.kind !== 'human_review' || Object.keys(payload).some(key => !['kind', 'interactions'].includes(key))
     || !Array.isArray(payload.interactions) || !payload.interactions.length) return null;
   const interactions = payload.interactions.map(parseHumanReviewRequest);

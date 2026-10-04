@@ -41,7 +41,6 @@ import {
   type GlobalReviewPolicyResolution,
 } from './review/globalReviewPolicy';
 import {
-  PauseTaskInterruptStateSchema,
   ReviewInterrupt,
   type ReviewInterruptTransition,
   type ReviewInterruptReview,
@@ -442,7 +441,7 @@ type ToolkitReviewResults = Omit<ReviewInterruptTransition, 'type'> & {
 
 const ToolkitReviewStateSchema = z.object({
   toolkitReviewApprovals: z.record(z.boolean()).default({}),
-}).merge(PauseTaskInterruptStateSchema);
+});
 
 type ToolkitReviewState = z.infer<typeof ToolkitReviewStateSchema>;
 

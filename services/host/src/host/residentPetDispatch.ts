@@ -24,9 +24,8 @@ import {
  * The dispatch surface: one-way input, observed rather than steered.
  *
  * A dispatch run is not a conversation turn. It has no interactive client to
- * answer, so it publishes its progress to whoever is observing and settles a
- * cancellation into a pause the same way a Chat run does — that is what makes
- * resident runs continuable by id.
+ * answer, so it publishes its progress to whoever is observing. Cancellation
+ * preserves an already-pending native review, just as a Chat run does.
  */
 
 function isAbortError(error: unknown): boolean {
@@ -89,8 +88,8 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
           let activeRun: ActiveRun | null = null;
           let abortedSetup: AgentChannelSetup | null = null;
           /**
-           * A cancelled dispatch that left work behind becomes a task pause,
-           * so resident runs are continuable by id exactly like Chat runs.
+           * Cancellation creates no synthetic interrupt. Report a native
+           * review only if it was already pending.
            */
           const settleInterruptedDispatch = async (params: {
             setup: AgentChannelSetup | null;

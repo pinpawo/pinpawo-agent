@@ -135,8 +135,7 @@ export class ServerChatHandler {
   ) {
     try {
       const pending = await this.tuiSessions.readActivePendingInterrupt(deps);
-      // Review resolution needs the reviews themselves. A pause has none and
-      // is continued by id instead, so it is not a route.
+      // Recover only the pending native review and its original action identity.
       if (!pending || pending.payload.kind !== 'human_review') {
         return null;
       }
@@ -289,9 +288,8 @@ export class ServerChatHandler {
     let runStarted = false;
     let interruptedFinalized = false;
     /**
-     * A cancelled run that left unfinished work becomes a task pause, so it is
-     * continued by id like any other interrupt. The Runtime owns whether that
-     * applies and how; the Host only asks and reports what came back.
+     * Cancellation creates no interrupt. Preserve only a native review
+     * that was already pending when the interruption arrived.
      */
     const settleInterrupted = async (): Promise<ChatRunOutcome> => {
       // A settlement that fails leaves the thread in an unknown state, so it
@@ -314,8 +312,8 @@ export class ServerChatHandler {
       return 'interrupted';
     };
     // The one interrupted finalization for this request. An abort, a
-    // superseding request, and a run that settled into a task pause all end
-    // here: open operations close first, then the run reports interrupted.
+    // superseding request ends here: open operations close first, then the
+    // run reports interrupted.
     const finalizeInterrupted = () => {
       if (interruptedFinalized) return;
       interruptedFinalized = true;

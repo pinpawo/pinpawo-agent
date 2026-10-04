@@ -195,12 +195,32 @@ test('interrupt notifications reuse the public projection, persist and deduplica
     const unsafe = structuredClone(pending) as any;
     unsafe.payload.interactions[0].options[0].effects = [{ type: 'graph.authorize_tool_action', scope: 'thread' }];
     assert.throws(() => service.recordInterrupt(channelId, source, unsafe), /Invalid/);
-    service.recordInterrupt(channelId, { ...source, invocationId: 'paused' }, { interruptId: 'pause-id', payload: { kind: 'pause_task' } });
+    assert.throws(() => service.recordInterrupt(channelId, source, { interruptId: 'old-pause', payload: { kind: 'pause_task' } } as any), /Invalid/);
+    service.recordInterrupt(channelId, { ...source, invocationId: 'second-review' }, { ...pending, interruptId: 'second-review-id' });
     service.close(); service = new ChannelService(file); service.init();
     const page = service.readInterruptNotifications(channelId, { limit: 1 });
     assert.deepEqual(page.notifications, [saved]); assert.equal(page.hasMore, true);
-    assert.equal(service.readInterruptNotifications(channelId, { after: page.nextAfter }).notifications[0]?.pendingInterrupt.payload.kind, 'pause_task');
+    assert.equal(service.readInterruptNotifications(channelId, { after: page.nextAfter }).notifications[0]?.pendingInterrupt.payload.kind, 'human_review');
     assert.ok(!JSON.stringify(service.readContext(channelId)).includes('private-review-patch'));
     assert.equal(service.readHistory(channelId).entries.length, 2);
   } finally { service.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test('legacy pause notification data is preserved and explicitly refused rather than projected as a review', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'channel-old-notice-'));
+  const file = path.join(root, 'channels.sqlite');
+  const service = new ChannelService(file);
+  let database: DatabaseSync | undefined;
+  try {
+    service.init();
+    const id = service.createChannel(goal, human).channelId;
+    const original = JSON.stringify({ channelId: id, source: { petId: 'one', sessionId: 'one:12345678', invocationId: 'old' },
+      occurredAt: '2026-10-01T00:00:00.000Z', pendingInterrupt: { interruptId: 'old', payload: { kind: 'pause_task' } } });
+    database = new DatabaseSync(file);
+    database.prepare('INSERT INTO channel_interrupt_notifications (channel_id, pet_id, session_id, invocation_id, interrupt_id, data) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, 'one', 'one:12345678', 'old', 'old', original);
+    assert.throws(() => service.readInterruptNotifications(id), /Unsupported.*preserved/);
+    assert.equal((database.prepare('SELECT data FROM channel_interrupt_notifications').get() as { data: string }).data, original);
+    assert.equal(service.readContext(id).history.entries.length, 1);
+  } finally { database?.close(); service.close(); rmSync(root, { recursive: true, force: true }); }
 });

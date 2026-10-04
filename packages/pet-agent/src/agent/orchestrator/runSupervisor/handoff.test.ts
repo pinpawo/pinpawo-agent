@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { Command, MemorySaver, interrupt } from '@langchain/langgraph';
+import { Command, MemorySaver } from '@langchain/langgraph';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createOrchestratorGraph } from '../runtime/graph';
 import { buildOrchestratorRunInput } from '../state';
 import { compileAgentRegistry } from '../registry';
+import { buildReviewSpec } from '../../../types/reviewSpec';
 import { defineInstructionDocument } from '../../../types/capability';
 
 import { getAgentMessageMetadata, getAgentMessageLane, queryAgentMessages } from '../../messages';
@@ -236,13 +237,14 @@ test('Capability interrupt resumes the same pending tool call through a rebuilt 
   const { config, supervisor } = setup();
   let effects = 0;
   const checked = tool(() => {
-    const approved = interrupt({ kind: 'handoff_test_review' });
-    assert.equal(approved, 'approved');
     effects += 1;
     return 'Checked once.';
   }, { name: 'check_repository', description: 'Check with approval.', schema: z.object({}) });
   const reviewedRegistry = compileAgentRegistry({
-    toolkits: [{ name: 'checks', description: 'Checks.', tools: [{ tool: checked }] }],
+    toolkits: [{ name: 'checks', description: 'Checks.', tools: [{ tool: checked, review: { request: () => buildReviewSpec({
+      view: { kind: 'plain', body: 'Approve inspection?' },
+      options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' } }],
+    }) } }] }],
     capabilities: [{ name: 'general', description: 'Inspect.', uses: ['checks'],
       instructions: defineInstructionDocument({ content: 'Inspect with check_repository.' }) }],
   });
@@ -251,14 +253,15 @@ test('Capability interrupt resumes the same pending tool call through a rebuilt 
   ]);
   const graphConfig = { ...config, models: { ...config.models, subagent: executor } };
   const graph = createOrchestratorGraph(graphConfig);
-  const options = { configurable: { thread_id: 'review-handoff', registry: reviewedRegistry } };
+  const options = { configurable: { thread_id: 'review-handoff', registry: reviewedRegistry, reviewCapabilities: { humanReview: true, sessionAuthorization: false },
+    globalReviewPolicy: { mode: 'require_authorization' } } };
   await graph.invoke(buildOrchestratorRunInput([new HumanMessage(task.objective)]), options);
   const paused = await graph.getState(options);
   const dispatched = readCapabilityCall(paused.values);
   assert.ok(dispatched.id);
   assert.equal(effects, 0);
   assert.equal(supervisor.inputs.length, 1);
-  const output = await createOrchestratorGraph(graphConfig).invoke(new Command({ resume: 'approved' }), options);
+  const output = await createOrchestratorGraph(graphConfig).invoke(new Command({ resume: { decisions: [{ reviewId: 'tool-review:check_repository:inner-check', selectedOptionId: 'approve' }] } }), options);
   assert.equal(effects, 1);
   assert.equal(supervisor.inputs.length, 2);
   assert.equal(readDelegationDeliveries(output.messages).length, 1);

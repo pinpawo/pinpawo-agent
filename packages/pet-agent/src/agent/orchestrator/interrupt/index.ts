@@ -1,30 +1,11 @@
 export type { AgentInterrupt } from './agentInterrupt';
 export {
-  PAUSE_TASK_INTERRUPT_KIND,
-  PAUSE_TASK_INTERRUPT_STATE_KEY,
-  PauseTaskInterruptStateSchema,
-  PauseTaskInterrupt,
-  isPauseTaskInterruptPayload,
-  pauseTaskInterrupt,
-  propagatePauseTaskInterrupt,
-  readPauseTaskInterrupt,
-  readPauseTaskInterruptSignal,
-} from './pauseTaskInterrupt';
-export type {
-  PausedSubagentState,
-  PauseTaskInterruptCommand,
-  PauseTaskInterruptPayload,
-  PauseTaskInterruptResolution,
-} from './pauseTaskInterrupt';
-export {
   HUMAN_REVIEW_INTERRUPT_KIND,
   readPendingInterrupt,
-  readPendingInterruptInputPolicy,
   UnknownInterruptPayloadError,
 } from './readPendingInterrupt';
 export type {
   PendingInterrupt,
-  PendingInterruptInputPolicy,
   PendingInterruptPayload,
 } from './readPendingInterrupt';
 export { settleAbortedRun } from './settleAbortedRun';

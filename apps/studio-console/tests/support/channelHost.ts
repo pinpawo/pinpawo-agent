@@ -20,6 +20,7 @@ const http = createStudioHttpPlugin({ port: Number(process.env.CHANNEL_HOST_TEST
 const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite') });
 const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
 const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
+const petNames = process.env.CHANNEL_HOST_TEST_DUPLICATE_NAMES ? ['Analyst', 'Analyst'] : ['Alpha', 'Beta'];
 for (const petId of ['alpha', 'beta']) {
   const runtimeConfig = buildHostRuntimeConfig(join(root, petId));
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
@@ -57,8 +58,17 @@ for (const petId of ['alpha', 'beta']) {
   }));
 }
 const studio = await createStudio({ studioId: 'console-browser', entryPetId: 'alpha', plugins: [channel, http],
-  pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: ['Alpha', 'Beta'][index]! }, dispatch: host.resident.dispatch })),
+  pets: hosts.map((host, index) => ({ registration: { petId: ['alpha', 'beta'][index]!, name: petNames[index]! }, dispatch: host.resident.dispatch })),
 });
+// Historical fixture data lives only in this temporary database. No model calls.
+if (process.env.CHANNEL_HOST_TEST_LAYOUT_SEED) {
+  const goal = channel.service.createChannel({ title: 'Layout investigation', goal: 'Review public evidence and choose the next round.', scope: 'Keep real request and output associations visible.' }, { kind: 'human', id: 'studio-operator' });
+  const binding = channel.service.reserveBinding(goal.channelId, 'retired-pet', () => 'retired-session');
+  channel.service.confirmBinding(binding);
+  const source = { petId: binding.petId, sessionId: binding.sessionId, invocationId: 'retired-invocation' };
+  channel.service.recordExecution(goal.channelId, source, 'completed', new Date().toISOString());
+  channel.service.recordOutput(goal.channelId, source, 'Historical public delivery from a Pet that is no longer registered.');
+}
 console.log(JSON.stringify({ ready: true, url: `http://127.0.0.1:${http.address()!.port}`, token }));
 let closing = false;
 const close = async () => {

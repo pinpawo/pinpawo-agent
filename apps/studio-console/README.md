@@ -12,6 +12,18 @@ session. New requests in the same Channel/Pet pair reuse that session. Notes and
 `@` text do not execute Pets. Public delivery bodies remain fully visible; they
 do not certify that a model supplied every needed handoff detail.
 
+The Channel page uses a 232px navigation column, a flexible conversation and a
+collapsible 320px activity column. Only the conversation history scrolls above
+its composer. Activity becomes a modal drawer below 1101px; Channel navigation
+becomes a drawer below 701px. Both drawers and the creation dialog contain
+keyboard focus, close with Escape, and return focus to the opening control.
+Registered Pet names appear in messages and history. Duplicate names include
+IDs in the selector; historical unregistered Pets retain their ID and a removed
+marker. Message/session/invocation IDs stay in expandable technical details.
+Quotes locate their original message, and activity links locate the stored
+request and outputs for that exact invocation. Ordinary consecutive notes may
+share a visual author group; every stored message retains its own ID and body.
+
 Execution history records the latest observed state, including failure reasons.
 Refresh reads persisted facts; it does not recover or resubmit work. Unfinished
 records from an earlier Host instance show status unknown. Review notices are
@@ -25,9 +37,11 @@ From the repository root:
 
 ```sh
 npm test -w @pinpawo/studio-console
+npm run typecheck -w @pinpawo/studio-console
 npm run build -w @pinpawo/studio-console
 npm exec -w @pinpawo/studio-console -- playwright install chromium
 npm run test:browser -w @pinpawo/studio-console
+npm run test:browser:layout -w @pinpawo/studio-console
 ```
 
 The browser test starts this Console on port 5199 and a temporary production
@@ -41,3 +55,13 @@ state. Screenshots default to `/tmp/channel-console-screenshots`; override with
 `CHANNEL_SCREENSHOTS`. `PLAYWRIGHT_BROWSERS_PATH` can select a writable browser
 cache in restricted environments. Existing Host listeners on port 5199 must be
 stopped before the test; the test does not replace them.
+
+The layout browser test uses two independent temporary Hosts and stored fixture
+history, including duplicate registered names and a removed Pet. It checks long
+Markdown/code, 1440/900/390/320px layouts, fixed input, reading position across
+SSE updates and global navigation, ID copying, quotes, request/output links,
+drawer/modal keyboard focus, reply cancellation, Channel/Host switching, and
+401/404 failures. It also makes zero LLM calls. Its screenshots stay local under
+`/tmp/channel-console-layout-screenshots` (or `CHANNEL_SCREENSHOTS`); it does not
+upload them. Run the two browser tests sequentially because both reserve port
+5199. These fixtures do not validate live provider behavior or user acceptance.

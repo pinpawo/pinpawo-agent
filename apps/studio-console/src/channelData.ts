@@ -25,8 +25,56 @@ export type ChannelContext = {
 export type ChannelNotice = {
   sequence: number; occurredAt: string;
   source: { petId: string; sessionId: string; invocationId: string };
-  pendingInterrupt: { payload: { interactions: { view: { kind: string; body?: string; title?: string } }[] } };
+  pendingInterrupt: { interruptId?: string; payload: { interactions: { view: { kind: string; body?: string; title?: string } }[] } };
 };
+
+export type ChannelPet = { petId: string; name: string };
+
+/** Names are presentation only; stable Pet IDs remain the routing identity. */
+export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKnown = true) {
+  const pet = pets.find(item => item.petId === petId);
+  const name = pet?.name.trim() || petId;
+  const duplicate = pets.filter(item => (item.name.trim() || item.petId) === name).length > 1;
+  return { name, removed: registryKnown && !pet, optionLabel: duplicate ? `${name} (${petId})` : name };
+}
+
+export function channelMessageIdentity(message: ChannelMessage, pets: ChannelPet[], registryKnown = true) {
+  return message.author.kind === 'pet'
+    ? channelPetIdentity(message.author.id, pets, registryKnown)
+    : { name: message.author.id === 'studio-operator' ? 'Studio operator' : message.author.id, removed: false };
+}
+
+export function channelMessageExecution(message: ChannelMessage, executions: ChannelExecution[]) {
+  return executions.find(item => item.channelId === message.channelId && (item.messageId === message.messageId
+    || (!!message.source && item.invocationId === message.source.invocationId
+      && item.petId === message.source.petId && item.sessionId === message.source.sessionId)));
+}
+
+export function channelExecutionOutputs(execution: ChannelExecution, entries: ChannelEntry[]): ChannelMessage[] {
+  return entries.filter((item): item is ChannelMessage => item.kind === 'message' && item.channelId === execution.channelId
+    && !!item.source && !!execution.invocationId && item.source.invocationId === execution.invocationId
+    && item.source.petId === execution.petId && item.source.sessionId === execution.sessionId);
+}
+
+export function channelDateKey(occurredAt: string): string {
+  const date = new Date(occurredAt);
+  return Number.isFinite(date.getTime()) ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` : occurredAt;
+}
+
+export function channelMessagesGroup(previous: ChannelEntry | undefined, current: ChannelEntry, executions: ChannelExecution[]): boolean {
+  if (!previous || previous.kind !== 'message' || current.kind !== 'message') return false;
+  if (previous.source || current.source || previous.replyTo || current.replyTo
+    || channelMessageExecution(previous, executions) || channelMessageExecution(current, executions)) return false;
+  const gap = Date.parse(current.occurredAt) - Date.parse(previous.occurredAt);
+  return previous.channelId === current.channelId && previous.author.kind === current.author.kind
+    && previous.author.id === current.author.id && channelDateKey(previous.occurredAt) === channelDateKey(current.occurredAt)
+    && gap >= 0 && gap < 5 * 60_000;
+}
+
+export function channelQuote(body: string): string {
+  const text = body.replace(/\s+/g, ' ').trim();
+  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+}
 
 /** Load every ordered page; reject a broken cursor rather than hiding recent results. */
 export async function readChannelPages<T>(read: (path: string) => Promise<unknown>, path: string, key: string): Promise<T[]> {

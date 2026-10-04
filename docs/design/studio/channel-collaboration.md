@@ -115,3 +115,28 @@ schema v3 增加 channel_interrupt_notifications；Channel 将该公开投影保
 Channel 尚未正式运行；旧 pause 检查点及旧 Channel 绑定不在兼容范围，不新增迁移、
 重绑或恢复 API，不删除或改写存量数据。未知/非法原生 interrupt 仍明确报错，
 真实 human_review 不得绕过授权。
+
+### 原 Console 整合与执行观测（后续片，2026-10-04）
+
+在 `apps/studio-console` 增加固定 Channel 页面，复用原连接、Bearer、SSE 和样式；
+不建立第二套 UI。提供目标列表/创建、完整分页消息时间线、公开产物引用、明确选择
+Pet 的单轮执行、针对公开回复的 replyTo。replyTo 由后端解析原 Pet/session，不能改为
+另一位 Pet；给其他 Pet 的交接使用新的显式请求。公开正文完整显示，不只显示摘要，
+不据此保证模型自身不会遗漏交接信息。创建与保存笔记不触发执行。
+
+schema v4 增加 `channel_executions`，只保存接纳和最近一次生命周期观测，不是持久队列。
+只读 `GET /channels/executions?channelId=...` 支持 after/limit。记录关联请求 messageId、
+receipt invocationId、Pet/session、发生时间、失败原因及输出/通知保存错误。生命周期
+可能早于 receipt 到达，两者事务合并，不让迟到 queued receipt 覆盖终态。记录不会
+进入模型 `readContext`，不复制 checkpoint 或新增审批权威状态。
+
+Console 复用原 SSE 刷新领域快照，并在正在执行时显式补读；页面完整读取历史分页。
+失败记录可在浏览器刷新和 Host 重启后查看。来自旧 service 实例的未结束记录标为
+观测中断/状态未知，不能称仍在执行、自动重试或恢复；waiting 是发生过的审批通知，
+需在原 Pet TUI 和原 session 检查当前真实状态。断线期间 Console 不允许提交执行。
+completed 只表示该 invocation 结束，不表示目标完成；Channel 持久化错误单独显示，
+磁盘完全不可写时仍只能由 live 通知/Host 日志报告。
+
+本片不新增默认模板的自动协作、mention Trigger、审批恢复、持久 outbox、重放或
+自动运行恢复。测试用原 HTTP Plugin、Channel SQLite、生产 resident Host/turn runner
+与确定性 LangGraph 节点驱动真实浏览器；这些浏览器交互测试不宣称调用了真实模型。

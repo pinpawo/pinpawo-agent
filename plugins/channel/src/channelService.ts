@@ -55,12 +55,19 @@ export type ChannelInterruptNotification = {
 };
 export type ChannelEntry = ChannelRevision | ChannelMessage;
 export type ChannelPage = { entries: ChannelEntry[]; nextAfter: number; hasMore: boolean };
+export type ChannelExecutionState = 'admitting' | 'queued' | 'running' | 'waiting' | 'completed' | 'interrupted' | 'failed';
+export type ChannelExecution = {
+  executionId: string; channelId: string; petId: string; sessionId: string;
+  messageId?: string; invocationId?: string; state: ChannelExecutionState;
+  occurredAt: string; error?: string; deliveryError?: string; observerId: string;
+};
 
 /** One append-only journal is the source of truth, including goal revisions.
  * Notifications are best effort after commit, not a durable delivery guarantee.
  */
 export class ChannelService {
   private db: DatabaseSync | undefined;
+  private observerId = randomUUID();
   private readonly listeners = new Set<(entry: ChannelEntry) => void>();
 
   constructor(private readonly databasePath: string = ':memory:') {}
@@ -73,7 +80,7 @@ export class ChannelService {
       if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
       db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
       const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error(`Unsupported Channel schema version ${version}.`);
+      if (![0, 1, 2, 3, 4].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS channel_entries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,8 +108,14 @@ export class ChannelService {
           UNIQUE(pet_id, session_id, invocation_id, interrupt_id)
         );
         CREATE INDEX IF NOT EXISTS channel_interrupt_history ON channel_interrupt_notifications(channel_id, sequence);
-        PRAGMA user_version=3;
+        CREATE TABLE IF NOT EXISTS channel_executions (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT, execution_id TEXT UNIQUE NOT NULL,
+          channel_id TEXT NOT NULL, invocation_id TEXT UNIQUE, data TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS channel_execution_history ON channel_executions(channel_id, sequence);
+        PRAGMA user_version=4;
       `);
+      this.observerId = randomUUID();
       this.db = db;
     } catch (error) { db.close(); throw error; }
   }
@@ -299,5 +312,72 @@ export class ChannelService {
   }
   readContext(channelId: string, page: unknown = {}) {
     return this.transaction(() => ({ channel: this.getChannel(channelId), history: this.readHistory(channelId, page), sessions: this.listBindings(channelId) }), true);
+  }
+
+  private saveExecution(value: ChannelExecution): ChannelExecution {
+    this.database().prepare(`INSERT INTO channel_executions(execution_id, channel_id, invocation_id, data)
+      VALUES (?, ?, ?, ?) ON CONFLICT(execution_id) DO UPDATE SET invocation_id=excluded.invocation_id, data=excluded.data`)
+      .run(value.executionId, value.channelId, value.invocationId ?? null, JSON.stringify(value));
+    return value;
+  }
+  private executionRow(executionId: string): ChannelExecution | null {
+    const row = this.database().prepare('SELECT data FROM channel_executions WHERE execution_id=?').get(executionId) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : null;
+  }
+  beginExecution(channelId: string, source: { petId: string; sessionId: string }, messageId: string): ChannelExecution {
+    const binding = this.requireOutputBinding(channelId, { ...source, invocationId: '' });
+    this.getMessage(binding.channelId, messageId);
+    return this.saveExecution({ petId: source.petId, sessionId: source.sessionId, channelId: binding.channelId, executionId: messageId, messageId,
+      state: 'admitting', occurredAt: new Date().toISOString(), observerId: this.observerId });
+  }
+  acceptExecution(messageId: string, invocationId: string): ChannelExecution {
+    return this.transaction(() => {
+      const pending = this.executionRow(messageId);
+      if (!pending) throw new Error('Unknown Channel execution request.');
+      const observed = this.database().prepare('SELECT execution_id, data FROM channel_executions WHERE invocation_id=?')
+        .get(invocationId) as { execution_id: string; data: string } | undefined;
+      if (observed && observed.execution_id !== messageId) {
+        const value = JSON.parse(observed.data) as ChannelExecution;
+        if (value.channelId !== pending.channelId || value.petId !== pending.petId || value.sessionId !== pending.sessionId) {
+          throw new Error('Channel execution receipt does not match its observation.');
+        }
+        this.database().prepare('DELETE FROM channel_executions WHERE execution_id=?').run(observed.execution_id);
+        return this.saveExecution({ ...pending, ...value, executionId: messageId, messageId });
+      }
+      return this.saveExecution({ ...pending, invocationId, state: pending.state === 'admitting' ? 'queued' : pending.state });
+    });
+  }
+  failExecution(messageId: string, error: string): void {
+    const value = this.executionRow(messageId);
+    if (!value) throw new Error('Unknown Channel execution request.');
+    this.saveExecution({ ...value, state: 'failed', error, occurredAt: new Date().toISOString() });
+  }
+  recordExecution(channelId: string, source: ChannelMessageSource, state: Exclude<ChannelExecutionState, 'admitting'>, occurredAt: string, error?: string): ChannelExecution {
+    const binding = this.requireOutputBinding(channelId, source);
+    const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(source.invocationId) as { data: string } | undefined;
+    const existing = row ? JSON.parse(row.data) as ChannelExecution : null;
+    if (existing && (existing.channelId !== binding.channelId || existing.petId !== source.petId || existing.sessionId !== source.sessionId)) {
+      throw new Error('Channel execution identity does not match its original observation.');
+    }
+    if (existing && ['waiting', 'completed', 'interrupted', 'failed'].includes(existing.state)) return existing;
+    return this.saveExecution({ ...(existing ?? {}), ...source, channelId: binding.channelId,
+      executionId: existing?.executionId ?? `dispatch:${source.invocationId}`, state, occurredAt,
+      ...(error ? { error } : {}), observerId: this.observerId });
+  }
+  recordDeliveryFailure(invocationId: string, error: string): void {
+    const row = this.database().prepare('SELECT data FROM channel_executions WHERE invocation_id=?').get(invocationId) as { data: string } | undefined;
+    if (row) this.saveExecution({ ...JSON.parse(row.data), deliveryError: error });
+  }
+  readExecutions(channelId: string, page: unknown = {}) {
+    const { after, limit } = channelPageSchema.parse(page);
+    const channel = this.getChannel(channelId);
+    const rows = this.database().prepare('SELECT sequence, data FROM channel_executions WHERE channel_id=? AND sequence>? ORDER BY sequence LIMIT ?')
+      .all(channel.channelId, after, limit + 1) as { sequence: number; data: string }[];
+    const executions = rows.slice(0, limit).map(row => {
+      const { observerId, ...value } = JSON.parse(row.data) as ChannelExecution;
+      return { ...value, sequence: row.sequence,
+        observationLost: observerId !== this.observerId && ['admitting', 'queued', 'running', 'waiting'].includes(value.state) };
+    });
+    return { executions, nextAfter: executions.at(-1)?.sequence ?? after, hasMore: rows.length > limit };
   }
 }

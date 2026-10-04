@@ -162,6 +162,16 @@ test('storage failure is observable and interrupt history is operator-only, read
     assert.equal((await fetch(`${base}/channels/interrupts?channelId=${id}`, { method: 'POST', headers })).status, 405);
     const context = await (await fetch(`${base}/channels/context?channelId=${id}`, { headers })).json();
     assert.ok(!JSON.stringify(context).includes('pendingInterrupt'));
+    studio.notify({ source: 'resident-pet', type: 'dispatch.failed', occurredAt: new Date().toISOString(),
+      payload: { ...source, invocationId: 'provider-failure', scope: { namespace: 'channel', id }, error: 'Provider rejected request (403).' } });
+    await waitFor(() => channel.service.readExecutions(id).executions.some(item => item.state === 'failed'));
+    assert.equal((await fetch(`${base}/channels/executions?channelId=${id}`)).status, 401);
+    const executionResponse = await fetch(`${base}/channels/executions?channelId=${id}`, { headers });
+    assert.equal(executionResponse.status, 200);
+    const executionPage = await executionResponse.json() as { executions: Array<{ state: string; error?: string; sessionId: string }> };
+    assert.equal(executionPage.executions.find(item => item.state === 'failed')?.error, 'Provider rejected request (403).');
+    assert.ok(executionPage.executions.every(item => item.sessionId === binding.sessionId));
+    assert.equal((await fetch(`${base}/channels/executions?channelId=${id}`, { method: 'POST', headers })).status, 405);
     channel.service.recordOutput = () => { throw new Error('disk unavailable'); };
     studio.notify({ source: 'resident-pet', type: 'dispatch.completed', occurredAt: new Date().toISOString(),
       payload: { ...source, scope: { namespace: 'channel', id }, reply: 'not saved' } });

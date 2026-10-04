@@ -1,0 +1,4 @@
+{
+  "extends": "../../tests/studio-e2e/tsconfig.json",
+  "include": ["tests/support/*.ts"]
+}

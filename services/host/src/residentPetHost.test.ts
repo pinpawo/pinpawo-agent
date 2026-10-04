@@ -983,7 +983,7 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
   const petId = 'pet-target';
   const sessionId = `${petId}:abcdef12`;
   let readFails = false;
-  let reviewing = false;
+  let reviewingThread: string | null = null;
   const turns: string[] = [];
   const graphService = {
     readThreadState: async (setup: { input: { threadId: string } }) => {
@@ -991,7 +991,7 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
       if (isTarget && readFails) throw new Error('checkpoint unavailable');
       return {
         messages: [],
-        pendingInterrupt: isTarget && reviewing
+        pendingInterrupt: setup.input.threadId === reviewingThread
           ? { interruptId: 'interrupt-review', payload: { kind: 'human_review' as const, reviews: [] } }
           : null,
         acceptsResume: false,
@@ -1031,11 +1031,14 @@ test('targeted dispatch survives a transient checkpoint read and fails visibly o
     await waitFor(() => lifecycle.includes('transient:completed'), 'retained work did not run after the next scan');
     assert.deepEqual(turns, ['transient']);
 
-    reviewing = true;
-    await resident.dispatch.dispatch({ request: 'orphaned', session: { id: sessionId } });
+    // Dispatch-owned sessions cannot be deleted from the TUI, but a dispatch may
+    // still target an existing TUI-owned session, which a TUI reset can delete.
+    const tuiSession = context.sessions.createNewSession(petId);
+    reviewingThread = tuiSession.threadId;
+    await resident.dispatch.dispatch({ request: 'orphaned', session: { id: tuiSession.id } });
     await waitFor(() => resident.dispatch.getQueueSnapshot().state === 'waiting', 'a reviewed target did not wait');
-    await context.sessions.resumeSession(context.runtimeDeps.get(), sessionId);
     await context.sessions.resetSession(petId, { deletePrevious: true });
+    assert.equal(context.sessions.getSession(petId, tuiSession.id), null);
     await context.coordinator.refreshState();
     await waitFor(() => lifecycle.includes('orphaned:failed'), 'work for a deleted session stayed parked');
     assert.equal(resident.dispatch.getQueueSnapshot().queuedDispatches, 0);

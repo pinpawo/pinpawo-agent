@@ -18,6 +18,11 @@ export type TuiSessionRecord = {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Set when a one-way dispatch reserved this session. Its dispatcher (e.g. a
+   * Channel binding) owns its lifetime: the TUI may leave it, never delete it.
+   */
+  owner?: 'dispatch';
 };
 
 export type TuiSessionState = {
@@ -95,7 +100,7 @@ export function ensureDispatchSession(state: TuiSessionState, petId: string,
   const record: TuiSessionRecord = {
     id: sessionId, petId, suffix, threadId: buildTuiChatThreadId({ petId, sessionSuffix: suffix }),
     modelProfileId: defaultModelProfileId, requiredInputModalities: ['text'],
-    title: '新会话', messageCount: 0, createdAt: timestamp, updatedAt: timestamp,
+    title: '新会话', messageCount: 0, createdAt: timestamp, updatedAt: timestamp, owner: 'dispatch',
   };
   state.sessions[sessionId] = record;
   return record;
@@ -316,6 +321,7 @@ function parseSessionRecord(
     messageCount,
     createdAt,
     updatedAt,
+    ...(record.owner === 'dispatch' ? { owner: 'dispatch' as const } : {}),
   };
 }
 

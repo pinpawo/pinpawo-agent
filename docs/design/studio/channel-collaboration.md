@@ -29,7 +29,10 @@ Host session 注册表和图 checkpoint 仍属于 Host，Channel 只保存映射
 不改变活动 TUI session；保存注册记录失败时回滚内存插入。接纳成功后 Channel 将 registered
 置为 true，后续仅发送 session:{id}。创建中断后的重试复用预留身份。
 已注册 session 缺失或属于其他 Pet 时失败，不回退到活动 session，也不新建会话掩盖失效。
-原 TUI 显式删除/错误恢复删除会话的行为不改；此后对应 Channel 绑定保留并报告失效。
+经 create:true 注册的会话标记为 dispatch 所有（owner: 'dispatch'），生命周期归调度方：
+TUI 的错误恢复重置（工具协议历史损坏时 resetSession deletePrevious）只离开该会话、切到新会话，
+不删除其记录和 thread。TUI 自有会话仍按原逻辑删除；dispatch 显式指向 TUI 自有会话时，
+该会话被删后对应绑定保留并报告失效。标记之前创建的旧会话不补标，不在兼容范围。
 
 ## 显式执行与普通问答
 

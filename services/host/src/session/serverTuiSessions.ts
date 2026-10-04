@@ -197,7 +197,8 @@ export class ServerTuiSessionService {
       petId,
       this.defaultModelProfileId,
     );
-    if (options.deletePrevious) {
+    // A dispatch-owned session belongs to its dispatcher; leaving it is enough.
+    if (options.deletePrevious && previous.owner !== 'dispatch') {
       await this.checkpointer.deleteThread(previous.threadId);
       delete this.state.sessions[previous.id];
     }

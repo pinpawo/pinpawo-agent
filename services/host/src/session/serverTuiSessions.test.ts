@@ -10,7 +10,12 @@ import {
 import test from 'node:test';
 import { MemorySaver } from '@langchain/langgraph';
 import { setAgentMessageMetadata } from '../../../../packages/pet-agent/src/agent/messages';
-import { createEmptyTuiSessionState } from './tuiSessionRegistry';
+import {
+  createEmptyTuiSessionState,
+  loadTuiSessionState,
+  resumeTuiSession,
+  saveTuiSessionState,
+} from './tuiSessionRegistry';
 import {
   ServerTuiSessionService,
   readTuiCheckpointInputModalities,
@@ -308,4 +313,47 @@ test('reserved dispatch sessions retry failed persistence without changing the a
   assert.throws(() => service.ensureDispatchSession('pet-b', id), /another Pet/);
   delete state.sessions[id];
   assert.throws(() => service.ensureDispatchSession('pet-a', id), /no longer exists/);
+});
+
+test('a TUI reset leaves a dispatch-owned session instead of deleting its binding target', async () => {
+  const state = createEmptyTuiSessionState();
+  const deletedThreads: string[] = [];
+  const service = new ServerTuiSessionService({ state, runtimeConfig: buildHostRuntimeConfig('/tmp/pinpawo-owned-test'),
+    saveState: () => undefined,
+    checkpointer: { deleteThread: async (threadId: string) => { deletedThreads.push(threadId); } } as TuiSessionCheckpointer,
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  service.getActiveSession('pet-a');
+  const owned = service.ensureDispatchSession('pet-a', 'pet-a:12345678', true);
+  assert.equal(owned.owner, 'dispatch');
+  // An operator opens the Channel session in the TUI, e.g. to answer a review.
+  resumeTuiSession(state, 'pet-a', owned.id);
+
+  const next = await service.resetSession('pet-a', { deletePrevious: true });
+  assert.equal(service.getActiveSessionId('pet-a'), next.id);
+  assert.equal(state.sessions[owned.id]?.owner, 'dispatch');
+  assert.deepEqual(deletedThreads, []);
+  assert.equal(service.ensureDispatchSession('pet-a', owned.id), state.sessions[owned.id]);
+
+  // TUI-owned sessions keep the existing recovery behavior.
+  const tuiOwned = await service.resetSession('pet-a', { deletePrevious: true });
+  assert.equal(state.sessions[next.id], undefined);
+  assert.deepEqual(deletedThreads, [next.threadId]);
+  assert.equal(service.getActiveSessionId('pet-a'), tuiOwned.id);
+});
+
+test('dispatch ownership survives a session-state reload', async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'pinpawo-owned-state-'));
+  const filePath = join(root, 'sessions.json');
+  const state = createEmptyTuiSessionState();
+  const service = new ServerTuiSessionService({ state, runtimeConfig: buildHostRuntimeConfig(root),
+    saveState: (value) => saveTuiSessionState(value, filePath),
+    checkpointer: new MemorySaver(),
+    defaultModelProfileId: TEST_MODEL_PROFILE_ID,
+  });
+  const tuiSession = service.getActiveSession('pet-a');
+  const owned = service.ensureDispatchSession('pet-a', 'pet-a:abcdef12', true);
+  const reloaded = loadTuiSessionState(TEST_MODEL_PROFILE_ID, filePath);
+  assert.equal(reloaded.sessions[owned.id]?.owner, 'dispatch');
+  assert.equal(reloaded.sessions[tuiSession.id]?.owner, undefined);
 });

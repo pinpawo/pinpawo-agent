@@ -1,5 +1,10 @@
 # Kanban task graph (draft)
 
+> **Historical — Kanban retired.** This document preserves the former design,
+> not a supported runtime or migration API. The Plugin, tools, and routes have
+> been removed; stored history is left untouched. Current configuration and manual
+> migration guidance are in [Studio configuration](../../studio/configuration.md#retired-kanban-workdirs).
+
 ## Problem
 
 `dependsOn` mixes two different concerns: a planner's statement that two

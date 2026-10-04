@@ -3,7 +3,7 @@
 ## Purpose
 
 Surface resident Pet dispatch queues that require attention without making Studio
-Core, Kanban, or Scheduler responsible for each other’s domains.
+Core, Channel, or Scheduler responsible for each other’s domains.
 
 The first use case is a periodic audit: a Studio operator wants to know when a
 Pet queue remains `waiting` for input or `blocked` behind an unfinished continuation.
@@ -79,7 +79,7 @@ Notice rules are separately configured and only match event facts:
 
 - Notice does not retry or unblock a Pet queue.
 - Scheduler does not infer task status from a queue or dispatch a recovery task.
-- Kanban does not inspect Pets or notification channels.
+- Channel does not own queue audit or notification policy.
 - This draft does not define acknowledgement, escalation, deduplication, or
   external delivery adapters. Those become explicit Notice capabilities only
   when a concrete consumer requires them.

@@ -39,7 +39,7 @@ flowchart TB
   C --> K["Toolkit tools"]
   K --> L["Local filesystem, shell, browser, or configured services"]
   O --> A["Checkpoint and artifact refs"]
-  H --> ST["Optional Studio runtime\npackages/studio + plugins/kanban"]
+  H --> ST["Optional Studio runtime\npackages/studio + plugins/channel"]
   ST --> O
 ```
 
@@ -66,7 +66,7 @@ layer. See the accepted
 | Collaboration | `packages/studio/` | Studio Host, dispatch, read-only per-Pet dispatch-queue observation (including admission state), and the standalone process entry. |
 | Local host | `services/host/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
-| Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/kanban/`, including their runtime lifecycles. |
+| Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/channel/`, including their runtime lifecycles. |
 | Desktop companion | `tools/agent-macos/` | macOS supervision and configuration UI. |
 
 ## Request lifecycle

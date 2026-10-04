@@ -116,7 +116,7 @@ The main boundaries are:
 | `tests/studio-e2e/` | Cross-package Studio dispatch/event acceptance tests. |
 | `plugins/studio-http/` | Optional Studio HTTP dispatch and SSE event Plugin. |
 | `toolkits/browser/` | Browser Toolkit, drivers, extension, and Native Messaging host. |
-| `plugins/kanban/` | Optional Kanban Plugin and its Agent Toolkit. |
+| `plugins/channel/` | Persistent goal Channels, Pet session bindings, and public results. |
 | `plugins/scheduler/` | Optional durable one-shot Scheduler Plugin. |
 | `plugins/notice/` | Optional durable Studio notice projection Plugin. |
 | `plugins/trigger/` | Optional event-condition Trigger Plugin for Pet dispatch. |

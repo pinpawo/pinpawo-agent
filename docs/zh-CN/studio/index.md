@@ -36,9 +36,9 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
 
 任务如何拆分、依赖和进度如何保存、何时重试、scheduler / webhook / UI / 传输如何
 工作，都不属于 Studio。Pet 直接对话、Agent Session projection 与 TUI transport 也由
-host 负责。可选 `@pinpawo-plugin/kanban` package 提供一个 Plugin：它定义供 Pet
-使用的 Kanban Toolkit，并在自己的生命周期内根据看板状态派活或发事件。Plugin 本身
-不是 Toolkit。
+host 负责。可选 `@pinpawo-plugin/channel` 拥有目标修订、公开结果及每个 Channel/Pet
+的持久会话绑定；执行显式选择 Pet，Toolkit 读取本次已接纳的 Channel 上下文。
+Scheduler 和 Trigger 继续通过各自的 Plugin 边界组合。
 
 可选 `@pinpawo-plugin/studio-http` package 是另一个具体 Plugin。它不定义 Toolkit，只把
 `context.dispatch()` 和 `context.subscribe()` 投射成带鉴权的 loopback HTTP/SSE

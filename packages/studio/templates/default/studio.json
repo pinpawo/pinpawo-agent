@@ -31,7 +31,7 @@
         ]
       }
     },
-    { "id": "@pinpawo-plugin/kanban" },
+    { "id": "@pinpawo-plugin/channel" },
     {
       "id": "@pinpawo-plugin/scheduler",
       "options": {
@@ -49,46 +49,10 @@
           {
             "triggerId": "external-request",
             "petId": "planner",
-            "request": "Plan the following external request with Kanban.",
+            "request": "Plan the following external request. Return a concrete proposal with scope, evidence, and completion criteria.",
             "source": {
               "kind": "http",
               "secretEnv": "PINPAWO_STUDIO_TRIGGER_SECRET"
-            }
-          },
-          {
-            "triggerId": "wiki-on-task-done",
-            "petId": "wiki",
-            "request": {
-              "template": "Reconcile project knowledge after {{event.type}} for task {{payload.taskId}}.",
-              "context": [
-                "payload.taskId",
-                "payload.petId",
-                "payload.note",
-                "payload.sequence",
-                "event.occurredAt"
-              ]
-            },
-            "source": {
-              "kind": "studio_event",
-              "eventSource": "kanban",
-              "type": "task.done"
-            }
-          },
-          {
-            "triggerId": "dispatch-assigned-kanban-task",
-            "target": {
-              "kind": "event_payload",
-              "path": "payload.assigneeId",
-              "allowedPetIds": ["executor", "reviewer"]
-            },
-            "request": {
-              "template": "You were assigned Kanban task {{payload.taskId}}.\n\nTitle: {{payload.title}}\n\n{{payload.detail}}\n\nBefore work, call kanban_task_start with this taskId. Then report completion or a block with the same taskId.",
-              "context": ["payload.taskId", "payload.title", "payload.detail", "payload.assignmentNote"]
-            },
-            "source": {
-              "kind": "studio_event",
-              "eventSource": "kanban",
-              "type": "task.assigned"
             }
           }
         ]

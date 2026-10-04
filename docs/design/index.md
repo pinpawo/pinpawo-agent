@@ -39,15 +39,15 @@ contracts in [reference/](../reference/index.md).
 ## Studio applications and Plugins
 
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
-  Kanban, Scheduler, and Trigger APIs
+  Channel, Scheduler, Notice, Trigger, and Knowledge APIs
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
   for dispatch, events, and Plugin routes
 - [Studio automation Plugins](studio/automation-plugins.md) — durable Scheduler and
   Trigger domain/API boundaries
 
-## Kanban
+## Historical Kanban designs
 
-- [Kanban SQLite task store](kanban/sqlite-task-store.md) — independent Kanban
-  task, dependency, history, transaction, and recovery design
+- [Kanban SQLite task store](kanban/sqlite-task-store.md) — retired design retained for
+  historical task, dependency, history, transaction, and recovery context
 
 Completed or superseded work belongs in [history/](../history/index.md).

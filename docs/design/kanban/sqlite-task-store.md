@@ -1,5 +1,10 @@
 # Kanban SQLite Task Store
 
+> **Historical — Kanban retired.** This document preserves the former design,
+> not a supported runtime or migration API. The Plugin, tools, and routes have
+> been removed; stored history is left untouched. Current configuration and manual
+> migration guidance are in [Studio configuration](../../studio/configuration.md#retired-kanban-workdirs).
+
 > 状态：历史设计（schema v5 及以前），不是当前接口合同
 > 当前 task 关联、删除和 Planner 确认流程见 [Task graph draft](task-graph.md)。
 

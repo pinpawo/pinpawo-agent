@@ -95,7 +95,7 @@ and execution failures. It is not a durable queue or a recovery API. Unfinished
 records from a restarted service and disconnected live observations are unknown;
 known terminal facts remain visible. Review history guides the user to the original
 Pet TUI/session and does not offer approval or infer a current pending review.
-The default template still requires explicit Channel Plugin enablement. No separate
+The default template enables the Channel Plugin. No separate
 viewer, frontend Plugin system, identity scheme or automatic Pet scheduler is added.
 
 ## Console Kanban 入口退役（2026-10-04）
@@ -104,7 +104,9 @@ Channel 为默认页面；Console 移除 Kanban 导航、任务流/关联/分配
 样式/测试和 `/kanban` snapshot/history/control 请求。通用 dispatch、SSE、Scheduler、
 Notice、Trigger、Knowledge 与 Channel 保留，不将它们当作 Kanban 专属能力删除。
 
-此片仅退役 Console 入口。默认 Studio 模板仍装配 `@pinpawo-plugin/kanban`，其 Planner/
-Executor/Reviewer Capability、任务分配 Trigger 和 task.done → Wiki 流程仍是实际消费者。
-后端 Plugin、CLI/template 与相关测试/安装验收需要单独迁移后才能删除。
-现有 Kanban SQLite、历史和其他用户/测试数据不迁移、不删除，不执行 schema/table 清理。
+完整退役进一步移除后端 Plugin、API、Toolkit、默认角色的 Kanban 调用、两条
+Kanban 事件规则及专属测试评估与安装依赖。四个 Pet 通过显式请求或现有 Channel
+执行，普通答复交付结果。Wiki 更新需明确请求，不新增自动触发规则。
+
+现有 Kanban SQLite、快照、历史和其他用户数据不迁移、不删除，不执行 schema/table
+清理。旧工作区对照模板手动迁移配置与能力，见[配置指引](../../studio/configuration.md#retired-kanban-workdirs)。

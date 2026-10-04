@@ -51,7 +51,7 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
         template: 'Update the project Wiki after {{event.type}} for {{payload.taskId}}.',
         context: ['payload.taskId', 'event.occurredAt'],
       },
-      source: { kind: 'studio_event', eventSource: 'kanban', typePrefix: 'task.' },
+      source: { kind: 'studio_event', eventSource: 'example-work', typePrefix: 'task.' },
     }],
   });
   const studio = await createStudio({
@@ -73,13 +73,13 @@ test('Trigger dispatches when a configured Studio event condition matches', asyn
   t.after(() => studio.shutdown());
 
   studio.notify({
-    source: 'kanban',
+    source: 'example-work',
     type: 'task.completed',
     payload: { taskId: 'task-1', ignored: 'must not be appended' },
     occurredAt: '2026-08-28T00:00:00.000Z',
   });
   studio.notify({
-    source: 'kanban',
+    source: 'example-work',
     type: 'assignee.changed',
     occurredAt: '2026-08-28T00:00:01.000Z',
   });
@@ -99,7 +99,7 @@ test('Trigger resolves an explicit event payload target and records a retryable 
       triggerId: 'assigned-task',
       target: { kind: 'event_payload', path: 'payload.assigneeId', allowedPetIds: ['executor'] },
       request: { template: 'Start {{payload.taskId}}', context: ['payload.taskId'] },
-      source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.assigned' },
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.assigned' },
     }],
   });
   const studio = await createStudio({
@@ -122,7 +122,7 @@ test('Trigger resolves an explicit event payload target and records a retryable 
   });
   t.after(() => studio.shutdown());
   studio.notify({
-    source: 'kanban', type: 'task.assigned', occurredAt: '2026-09-02T00:00:00.000Z',
+    source: 'example-work', type: 'task.assigned', occurredAt: '2026-09-02T00:00:00.000Z',
     payload: { taskId: 'task-1', assigneeId: 'executor', sequence: 1 },
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -142,7 +142,7 @@ test('Trigger request templates reject invalid expressions and duplicate context
       triggerId: 'invalid-template',
       petId: 'worker',
       request: { template: 'Handle {{payload[taskId]}}' },
-      source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.done' },
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   }), /invalid expression/);
 
@@ -155,7 +155,7 @@ test('Trigger request templates reject invalid expressions and duplicate context
         template: 'Handle task',
         context: ['payload.taskId', 'payload.taskId'],
       },
-      source: { kind: 'studio_event', eventSource: 'kanban', type: 'task.done' },
+      source: { kind: 'studio_event', eventSource: 'example-work', type: 'task.done' },
     }],
   }), /must be unique/);
 });

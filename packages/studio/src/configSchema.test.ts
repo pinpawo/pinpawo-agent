@@ -167,14 +167,14 @@ test('parseStudioLocalConfig passes plugin options through without interpreting 
       entryPetId: 'p1',
       pets: ['p1'],
       plugins: [
-        { id: 'kanban' },
+        { id: 'example-work' },
         { id: 'scheduler', options: { timezone: 'Asia/Shanghai', nested: { any: 1 } } },
       ],
     },
     'src',
   );
 
-  assert.deepEqual(cfg.plugins?.map((plugin) => plugin.id), ['kanban', 'scheduler']);
+  assert.deepEqual(cfg.plugins?.map((plugin) => plugin.id), ['example-work', 'scheduler']);
   assert.equal(cfg.plugins?.[0]?.options, undefined);
   assert.deepEqual(cfg.plugins?.[1]?.options, {
     timezone: 'Asia/Shanghai',
@@ -185,11 +185,11 @@ test('parseStudioLocalConfig passes plugin options through without interpreting 
 test('parseStudioLocalConfig rejects malformed plugin entries', () => {
   const base = { studioId: 's1', entryPetId: 'p1', pets: ['p1'] };
   assert.throws(
-    () => parseStudio({ ...base, plugins: 'kanban' }, 'src'),
+    () => parseStudio({ ...base, plugins: 'example-work' }, 'src'),
     /"plugins" must be an array when present/,
   );
   assert.throws(
-    () => parseStudio({ ...base, plugins: ['kanban'] }, 'src'),
+    () => parseStudio({ ...base, plugins: ['example-work'] }, 'src'),
     /"plugins\[0\]" must be an object/,
   );
   assert.throws(
@@ -197,7 +197,7 @@ test('parseStudioLocalConfig rejects malformed plugin entries', () => {
     /"plugins\[0\]\.id" must be a non-empty string/,
   );
   assert.throws(
-    () => parseStudio({ ...base, plugins: [{ id: 'kanban', options: [] }] }, 'src'),
+    () => parseStudio({ ...base, plugins: [{ id: 'example-work', options: [] }] }, 'src'),
     /"plugins\[0\]\.options" must be an object when present/,
   );
 });

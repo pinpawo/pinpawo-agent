@@ -21,7 +21,7 @@ Scheduler SQLite -> due claim -> context.dispatch()
 event source -> Trigger binding condition -> context.dispatch()
 
 Scheduler/Trigger -X-> Agent / thread / checkpoint / Agent Session
-Scheduler/Trigger -X-> Kanban database or service
+Scheduler/Trigger -X-> another Plugin database or service
 Studio core       -X-> Scheduler/Trigger concrete package
 ```
 
@@ -58,7 +58,7 @@ parser。
 - `studio_event`：Studio event bus 上匹配 `eventSource` 及精确 `type` 或 `typePrefix`
   的事件。
 
-因此 Kanban 的 `task.*` 事件、未来 GitHub Plugin 发布的 `pull_request.*` 事件，都可以
+因此由已配置 Plugin 发布的事件或 GitHub `pull_request.*` 事件，都可以
 作为 Trigger 的条件；它们不需要为“什么时候 dispatch”各自实现一个薄插件。外部事件源
 由其 owning Plugin 通过 `notify()` 发布，Trigger 只匹配并派发，不解释事件领域内容。
 
@@ -75,7 +75,7 @@ source 的 secret 校验。相同 delivery 会按 Trigger binding 去重；签�
 `event/action` 的消息返回 `202` 并忽略，避免 GitHub 重试无关事件。
 
 `studio_event` binding 没有独立 durable queue：它响应一次已经发生的 Studio event。事件源
-自身需要 durability/replay 时，应由其 owning Plugin 提供；Trigger 不复制 Kanban、GitHub
+自身需要 durability/replay 时，应由其 owning Plugin 提供；Trigger 不复制其他领域、GitHub
 或其他领域的事实源。
 
 Trigger source 负责“何时触发”，request template 负责“发送什么”，`petId` 负责“发给谁”。
@@ -90,4 +90,10 @@ Trigger source 负责“何时触发”，request template 负责“发送什么
 
 Plugin 在 `start()` 时通过 `listPets()` 验证目标 Pet。运行中所有 dispatch 都使用标准
 `context.dispatch()`，所有事件只包含领域 identity/status，不向 Agent execution metadata
-注入 scheduler/trigger/kanban 字段。
+注入 scheduler/trigger/channel 字段。
+
+## Kanban 退役后的默认装配
+
+通用 Trigger 不依赖 Kanban。默认 `task.assigned` 派发与 `task.done` → Wiki 两条
+规则已移除，保留外部请求 → Planner 的显式 HTTP 规则。Wiki 文档读写与 Knowledge
+只读 API 保持独立；Wiki 更新由明确请求发起，不以 `dispatch.completed` 替代交付完成。

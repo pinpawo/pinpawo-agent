@@ -47,7 +47,7 @@ host (Chat + shared surface)  ←  @pinpawo/studio  ←  concrete Plugins
                               application composition root
 ```
 
-Studio 不 import kanban 或任何具体 Plugin。配置中的 Plugin id 由外部
+Studio 不 import 任何具体 Plugin。配置中的 Plugin id 由外部
 `StudioPluginResolver` 解析；未安装 resolver 或找不到 Plugin 时 fail fast。Plugin 是
 Studio control-plane lifecycle 的扩展单元。Plugin 可定义 Agent Toolkit；Host 将 definitions
 与其他来源一起放入统一 inventory，再由 Agent Capability 选择。Plugin lifecycle 只通过
@@ -220,6 +220,6 @@ resolver 只加载配置明确命名且已经安装的 package，并要求 packa
 - scheduler；它仍由 #638/#645 继续设计。
 - Plugin 的安装、版本管理与分发；显式 package resolver 只负责装配已安装 Plugin。
 
-Kanban 持久化与 task 结果由可选 Plugin 自己实现，见
-[Kanban SQLite task store](../kanban/sqlite-task-store.md)。Kanban 只在 dispatch admission
-失败时处理投递错误；接纳之后只能由 Kanban Toolkit/domain mutation 完成或阻塞 task。
+Channel 持久化、公开结果和每个 Channel/Pet 的会话绑定由可选 Plugin 拥有，见
+[Channel collaboration](channel-collaboration.md)。执行显式选择 Pet；通用 dispatch
+不携带 Channel scope 时不会将结果发布到 Channel。Wiki 更新需要明确请求。

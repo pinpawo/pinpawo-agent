@@ -51,7 +51,15 @@ export function createInstalledStudioPluginResolver(
     const packageName = requirePackageName(id);
     let loaded = packages.get(packageName);
     if (!loaded) {
-      loaded = importPlugin(packageName).then((value) => readPluginPackage(value, packageName));
+      loaded = importPlugin(packageName).catch((cause: unknown) => {
+        throw new Error(
+          `Cannot load configured Studio Plugin package "${packageName}". `
+          + 'Check the plugins list in your studio.json against the current template; '
+          + 'remove retired Plugin entries and update dependent Pet Capabilities and Trigger rules manually. '
+          + 'This resolver does not rewrite configuration or stored data.',
+          { cause },
+        );
+      }).then((value) => readPluginPackage(value, packageName));
       packages.set(packageName, loaded);
     }
     const pluginPackage = await loaded;

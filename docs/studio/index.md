@@ -57,11 +57,10 @@ The following are plugin or host responsibilities, not Studio concepts:
 - direct Pet conversation, Agent Session projection, and TUI transport;
 - shared knowledge stores or private agent scratch state.
 
-The optional `@pinpawo-plugin/kanban` package is the first example: its Plugin defines a
-Toolkit that pets use to manage Kanban tasks, while the Plugin lifecycle dispatches
-tasks whose dependencies are ready. The Plugin is not itself a Toolkit. Future
-scheduler or trigger integrations must use the same Plugin boundary rather than
-enlarge the Studio contract.
+The optional `@pinpawo-plugin/channel` package owns persistent goal revisions,
+public results, and per-Channel/Pet session bindings. Its Toolkit reads admitted
+Channel context; execution targets a Pet explicitly. Scheduler and Trigger keep
+their own Plugin boundaries rather than enlarging the Studio contract.
 
 The optional `@pinpawo-plugin/studio-http` package is another concrete Plugin. It defines no
 Toolkit; it projects `context.dispatch()` and `context.subscribe()` to an

@@ -21,7 +21,6 @@ def main():
     parser.add_argument('--token-file', default=str(Path.home() / '.pinpawo/local-server-token'))
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('pets')
-    sub.add_parser('kanban')
     snap = sub.add_parser('snapshot')
     snap.add_argument('pet')
     snap.add_argument('--full', action='store_true')
@@ -32,10 +31,6 @@ def main():
         command = sub.add_parser(name)
         command.add_argument('pet')
         command.add_argument('--file', required=True, help='Text for dispatch, JSON for send; - reads stdin')
-    assign = sub.add_parser('assign')
-    assign.add_argument('task_id')
-    assign.add_argument('pet')
-    assign.add_argument('--note')
     args = parser.parse_args()
     if args.command == 'events' and not 0 < args.seconds <= 60:
         parser.error('--seconds must be in (0, 60]')
@@ -43,13 +38,8 @@ def main():
     headers = {'Authorization': 'Bearer ' + token}
     body = None
     base = args.studio_url.rstrip('/')
-    if args.command in ('pets', 'kanban'):
-        path = '/' + args.command
-    elif args.command == 'assign':
-        path = '/kanban/control'
-        body = {'action': 'assign', 'taskId': args.task_id, 'assigneeId': args.pet}
-        if args.note:
-            body['assignmentNote'] = args.note
+    if args.command == 'pets':
+        path = '/pets'
     else:
         text = None
         if args.command in ('dispatch', 'send'):

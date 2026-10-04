@@ -1,6 +1,6 @@
 ---
 name: studio
-description: 'Operate a running PinPawo Studio: inspect Pet progress and pending reviews, dispatch work, manage Kanban assignments, and follow execution through HTTP and SSE.'
+description: 'Operate a running PinPawo Studio: inspect Pet progress and pending reviews, dispatch work, and follow execution through HTTP and SSE.'
 ---
 
 # Studio
@@ -14,11 +14,9 @@ Agent Session HTTP `http://127.0.0.1:3212`. Override with `--studio-url`,
 
 ```sh
 python3 scripts/studio.py pets
-python3 scripts/studio.py kanban
 python3 scripts/studio.py snapshot executor
 python3 scripts/studio.py events executor --seconds 30
 python3 scripts/studio.py dispatch planner --file /tmp/task.txt
-python3 scripts/studio.py assign TASK_ID executor --note 'Start this task'
 ```
 
 Resolve the script relative to this skill directory. Snapshot prints a compact
@@ -26,15 +24,12 @@ projection including the full pending interrupt; use `--full` for delivered
 tool messages and other session evidence. Read actual code/test artifacts when
 assessing delivery quality; a completed invocation alone is not acceptance.
 
-`assigned` / a dispatch receipt only mean work was submitted. Look for the
-session's active run, live events, and Kanban transitions to establish execution.
+A dispatch receipt only means work was submitted. Look for the session's active
+run, live events, and actual delivery evidence to establish execution.
 Queue `waiting` means pending interrupt; queue `blocked` means the Host could not
-read settled session state. Kanban status is independent: restart recovery can
-mark a task blocked while the session is still waiting for review.
-
-Kanban relationships are not execution dependencies. Assign the next ready task
-after its prerequisites are delivered. Preserve the user's scope; do not turn a
-request for status into a new task or an approval.
+read settled session state. Preserve the user's scope; do not turn a request for
+status into new work or an approval. The Console supports explicit Channel Pet
+execution and replies; generic dispatch does not publish into a Channel.
 
 ## Review and continue
 

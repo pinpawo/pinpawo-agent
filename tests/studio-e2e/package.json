@@ -5,14 +5,11 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)",
-    "eval:studio-planner-flow": "node --env-file-if-exists=../agent-evals/.env --import tsx/esm src/studioPlannerFlow.eval.ts",
-    "eval:studio-planning": "node --env-file-if-exists=../agent-evals/.env --import tsx/esm src/studioPlanning.eval.ts"
+    "test": "node --import tsx/esm --test $(find src -name '*.test.ts' | sort)"
   },
   "devDependencies": {
     "@langchain/core": "^1.2.1",
     "@pinpawo-plugin/studio-http": "*",
-    "@pinpawo-plugin/kanban": "*",
     "@pinpawo-plugin/notice": "*",
     "@pinpawo-plugin/project-files": "*",
     "@pinpawo-plugin/scheduler": "*",

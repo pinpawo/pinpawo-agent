@@ -72,4 +72,4 @@ blindly resubmit accepted mutations. Legacy `new_session` without a request ID
 is not an HTTP command; use the current `session.new` protocol instead.
 
 The repository's [Studio skill](../../../skills/studio/SKILL.md) includes a
-standard-library client for these endpoints and Studio dispatch/Kanban.
+standard-library client for these endpoints and Studio dispatch.

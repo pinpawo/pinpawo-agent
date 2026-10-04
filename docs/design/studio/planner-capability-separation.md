@@ -1,54 +1,28 @@
-# Studio Planner Capability Separation
-
-> 状态：Draft
-> 更新：2026-09-14
+# Planner Capability Separation
 
 ## 当前职责
 
-Planner 的交付是任务草稿或共享 Kanban 任务，不是源文件实现、审阅或 Wiki 写入。
-Supervisor 根据当前输入和已有事实选择 Capability；不增加固定的探索、规划顺序。
+Planner 负责围绕用户目标返回有依据的计划，保留探索和规划两个独立能力。
+`studio_exploration` 使用 `studio-context`、`project-inspection` 和 `channel`，
+按需只读探索；`studio_planning` 使用 `studio-context` 和 `channel`，输出范围、
+完成标准、建议负责人和未决输入，不写看板、不自动派发。
 
-- `studio_exploration` 使用 Host 的只读 `project-inspection`，交付有来源的事实摘要。
-- `studio_planning` 使用 Kanban Plugin 的 `kanban-planning`，创建和维护任务图。
-- 两者可使用 Studio Host 提供的 `studio-context`，通过 `studio_pet_list` 查询实际
-  resident Pet 的标识与名称。这个列表不是本 Pet 的 Capability 列表，也不赋予跨 Pet 执行权限。
-- PET.md 保留现有的草稿确认流程，并说明默认模板的人工 assignment 和会话交接方式。
-  Capability 的 description 在 Supervisor 选择前就表达可交付内容与只读边界。
+用户通过明确 Pet 请求或 Channel 选择 executor、reviewer 或 wiki。Executor 执行，
+Reviewer 独立核验，二者以普通答复交付完整结果和证据。Wiki 基于明确交接的代码、
+审查和公开结果维护 Markdown。Channel 执行中读取当前目标与历史；独立请求不假定
+存在 Channel，通用 dispatch 不会自动发布到 Channel。
 
-## 供给边界
+## 退役边界
 
-`studio-context` 属于 Studio Host 的装配层，和 host 提供的项目只读工具同样通过
-Host inventory 供给，由 Capability.uses 选择。它在调用时读取当前 Studio registry，
-只返回 `petId/name`，不暴露配置凭据、其他 Pet 文档、工具、会话或 checkpoint。
+旧 Kanban 规划、开始、反馈与观察 Toolkit，以及 task.assigned 派发和 task.done → Wiki
+默认规则已删除。原 `studio_reporting` 只负责写任务状态，随专属消费者删除；
+交付现在通过普通公开答复完成。调用结束不表示目标已经验收，不自动更新 Wiki。
 
-Studio core 不增加工具、调度策略或状态存储；Kanban 不依赖 Pet 名录；也不把具体
-Plugin 的接口注入其他 Plugin。名录查询不推断 Pet 的业务职责或当前可接纳状态。
-
-## 默认模板的执行交接
-
-Kanban 创建的 task 尚未分配执行者。默认 Trigger 仍消费 `task.assigned` 后派发，
-Wiki 仍由默认 `task.done` Trigger 驱动。2026-10-04 Console 已移除 Kanban assignment
-入口；这些默认模板 Capability/Trigger 尚未迁移，不能再通过 Console 分配旧 task。
-这些是默认模板的装配事实，不是通用 Studio 或 Kanban 的内建规则。任务关联只是上下文
-关联，不是自动执行依赖。旧草稿描述的 Planner 自行分配、依赖 claim 流程已不适用。
-
-Console dispatch 是单向 admission。Planner 的自然回复可能是草稿、追问或交接，
-不等同于任务已经创建或项目目标完成。详细回复和确认通过 Planner 自己的会话进行。
+通用 Agent / Capability / Toolkit 契约、Studio Pet 名录、dispatch/events、工作区隔离与
+Wiki 文档读写保留。旧工作区手动对照模板迁移，历史数据库及文件不变。
 
 ## 验证
 
-- Host 装配测试确认名录工具进入 inventory；只披露实际 registry 的公开字段。
-- 模型 eval 使用默认 PET.md/Capability 文档和生产 Kanban Toolkit，验证草稿、修改、确认。
-- 完整图 eval 使用真实 Supervisor、Capability 执行与自然回复，读取隔离的合成工作区，
-  验证探索证据、Pet 发现、确认后创建未分配任务且不修改项目文件。
-- 工具调用与任务快照作为行为证据，不用提示词字符串匹配验证模型行为。
-
-现有 workdir 的 PET.md/Capability 文档由用户维护；模板升级不覆盖已有文档。
-
-## Studio 配置文案检查（2026-09-14）
-
-文案整理仅针对默认 Studio 的 Pet 说明与能力配置，使用目标、可用操作、所需输入和
-交付结果描述工作，减少不必要的内部术语。保留工具名称、参数名，以及 Git worktree、
-Kanban、PR 等实际工作对象，保证配置仍能准确指导工具调用与任务交接。
-
-通用 orchestrator、执行与摘要提示词，以及 Kanban 和本地工具说明不在本次整理范围内。
+模板测试核验四个角色的能力和 Toolkit 绑定，安装 smoke 验证实际已安装 Plugin 装配，
+现有 Channel E2E 验证显式执行和公开结果。移除仅验证旧 Kanban 创建/反馈的评估，
+不通过字面提示词断言替代模型行为验证。

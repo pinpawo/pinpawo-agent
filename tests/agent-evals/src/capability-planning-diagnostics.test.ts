@@ -10,7 +10,7 @@ test('capability search diagnostics report traced calls, rounds, queries, and re
   const collector = createCapabilityDetailsDiagnosticsCollector();
   await collector.callback.handleToolStart?.(
     { name: 'capability_details' } as never,
-    JSON.stringify({ names: ['kanban', 'task registration'] }),
+    JSON.stringify({ names: ['example-work', 'task registration'] }),
     'search-run-1',
     'supervisor-run',
     [],
@@ -33,7 +33,7 @@ test('capability search diagnostics report traced calls, rounds, queries, and re
         tool_calls: [{
           id: 'search-call-1',
           name: 'capability_details',
-          args: { names: ['kanban', 'task registration'] },
+          args: { names: ['example-work', 'task registration'] },
         }],
       }),
     }]],
@@ -42,7 +42,7 @@ test('capability search diagnostics report traced calls, rounds, queries, and re
   assert.deepEqual(collector.read(), {
     detailCalls: 1,
     detailRounds: 1,
-    detailRequests: [['kanban', 'task registration']],
+    detailRequests: [['example-work', 'task registration']],
     detailResults: [{
       ok: true,
       data: { matches: [{ path: 'studio/SKILL.md' }] },
@@ -59,14 +59,14 @@ test('capability search diagnostics recognize real tool callback events', async 
   });
 
   await search.invoke(
-    { names: ['kanban'] },
+    { names: ['example-work'] },
     { callbacks: [collector.callback] },
   );
 
   assert.deepEqual(collector.read(), {
     detailCalls: 1,
     detailRounds: 0,
-    detailRequests: [['kanban']],
-    detailResults: [{ ok: true, names: ['kanban'] }],
+    detailRequests: [['example-work']],
+    detailResults: [{ ok: true, names: ['example-work'] }],
   });
 });

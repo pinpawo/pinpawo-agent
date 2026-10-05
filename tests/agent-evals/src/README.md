@@ -497,3 +497,28 @@ documentation-only commit. Once available, it uses the configured default profil
 (override with `PROMPT_EVAL_PROFILE_ID`) and disables tracing. It sends framework
 prompts and synthetic Capability documents to that model. The proposed checks
 remain unverified.
+
+## Git shell tool selection
+
+The existing `eval:subagent` runner includes eight real-model cases. Reads
+(`git status/log/diff`, `gh pr checks`) may use `inspect_shell` or the matching
+`git_shell` / `gh_shell`, since none of these is reviewed. Writes (hard reset,
+clean, force push, PR comment) must use `git_shell` / `gh_shell`; the first
+three are reviewed there, the PR comment is an everyday write that is not. The fixture uses production descriptions and schemas for
+`inspect_shell`, `run_shell`, `start_process`, `git_shell` and `gh_shell`,
+with deterministic tool outputs. No command is executed, and neither runtime
+admission nor review filters mistakes before scoring. The scorer checks the
+tool and the explicitly requested command, including wrong-tool negative
+controls; preparatory inspection is allowed for write cases.
+
+```sh
+SUBAGENT_EVAL_WRITE_LANGFUSE=false \
+SUBAGENT_EVAL_CASES=git-status-inspect,git-log-inspect,git-diff-inspect,git-reset-run,git-clean-run,git-force-push-run,gh-pr-checks-inspect,gh-pr-comment-run \
+  npm run eval:subagent -w @pinpawo-tests/agent-evals
+```
+
+This needs a configured Host model profile and credentials; set
+`SUBAGENT_EVAL_PROFILE` to select a profile. Real model calls may incur provider
+charges. Disabling Langfuse avoids dataset/trace storage, not the model call.
+The fixture/scorer unit tests run offline and are **not** model eval results.
+These evals measure tool choice, not runtime prevention or approval behavior.

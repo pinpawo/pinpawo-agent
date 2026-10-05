@@ -188,7 +188,11 @@ export function createEntryAnswerSubgraph(config: OrchestratorConfig) {
   if (!answerModel.bindTools) {
     throw new Error('Entry Answer model must support tool binding.');
   }
-  const model = answerModel.bindTools([planRequest, continuePlan]);
+  // Ask for one routing call. A provider that still returns several fails the
+  // protocol check below; the hint is not paired with a repair turn.
+  const routingOptions: Parameters<NonNullable<typeof answerModel.bindTools>>[1]
+    & { parallel_tool_calls: boolean } = { parallel_tool_calls: false };
+  const model = answerModel.bindTools([planRequest, continuePlan], routingOptions);
   const routingTools = new ToolNode<typeof OrchestratorState.State>([planRequest, continuePlan]);
 
   const invokeModel = async (

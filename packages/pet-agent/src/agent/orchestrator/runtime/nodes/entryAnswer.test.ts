@@ -306,8 +306,9 @@ test('Entry Answer receives an accepted delegation result as execution data, not
 
 function routingScript(turns: AIMessage[]) {
   const seen: BaseMessage[][] = [];
+  const bindOptions: unknown[] = [];
   const model = {
-    bindTools: () => ({
+    bindTools: (_tools: unknown, options?: unknown) => (bindOptions.push(options), {
       invoke: async (messages: BaseMessage[]) => {
         seen.push(messages);
         const next = turns[seen.length - 1];
@@ -322,8 +323,13 @@ function routingScript(turns: AIMessage[]) {
     models: { act: model, answer: model },
     runSupervisorRunner: { async invoke(input) { requests.push(input.userRequest); return { reply: 'done' }; } },
   });
-  return { graph, seen, requests };
+  return { graph, seen, requests, bindOptions };
 }
+
+test('Entry routing asks the provider for a single routing call', () => {
+  const { bindOptions } = routingScript([]);
+  assert.deepEqual(bindOptions, [{ parallel_tool_calls: false }]);
+});
 
 test('Entry routing accepts a tool call whose provider omitted the id', async () => {
   const { graph, seen, requests } = routingScript([new AIMessage({

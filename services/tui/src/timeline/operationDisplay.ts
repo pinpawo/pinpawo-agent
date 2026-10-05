@@ -99,6 +99,9 @@ export function buildOperationDisplayLines(
   }, ...buildOperationPayloadLines(entry, width), ...buildOperationOutputLines(entry, width)];
 }
 
+/** Tools whose summary is the command itself, shown in full rather than as a path. */
+const SHELL_TOOL_LABELS = ['run_shell', 'inspect_shell', 'start_process', 'git_shell', 'gh_shell'];
+
 function buildOperationHeader(
   entry: AgentOperationEntry,
   now: number,
@@ -111,7 +114,7 @@ function buildOperationHeader(
   const target = entry.target?.trim();
   if (stringWidth(body + suffix) > limit && target?.includes('/')
     && !target.includes(' ') && !target.includes('://')
-    && !['run_shell', 'inspect_shell', 'start_process'].includes(operationToolLabel(entry))) {
+    && !SHELL_TOOL_LABELS.includes(operationToolLabel(entry))) {
     body = `${operationToolLabel(entry)} · …/${target.split('/').at(-1)}`;
   }
   return buildOperationHeaderText(body, entry, now, limit);
@@ -120,7 +123,7 @@ function buildOperationHeader(
 /** Compact, factual activity label; full arguments remain in the pager. */
 export function operationActivityText(entry: AgentOperationEntry) {
   const label = operationToolLabel(entry);
-  const shell = ['run_shell', 'inspect_shell', 'start_process'].includes(label);
+  const shell = SHELL_TOOL_LABELS.includes(label);
   let argument = shell ? entry.summary?.trim() || entry.target?.trim() : entry.target?.trim() || entry.summary?.trim();
   if (argument && shell) {
     // Shorten only a leading working-directory setup; do not interpret shell

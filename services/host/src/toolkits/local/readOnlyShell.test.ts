@@ -1,67 +1,78 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyReadOnlyShellCommand } from './readOnlyShell';
+import { classifyReadOnlyShellCommand as classify } from './readOnlyShell';
 
-/**
- * `inspect_shell` runs without review, so these cases are the safety boundary
- * itself. A command that reaches execution here reaches it unreviewed.
- */
-test('read-only shell refuses anything that can change state', () => {
-  const refused = [
-    // outright mutation
-    'rm -rf /', 'mv a b', 'cp a b', 'chmod +x f', 'kill -9 1', 'npm install',
-    // mutation hidden behind an allowed head
-    'cd /repo && rm -rf build', 'git log && rm -rf .', 'ls; rm -rf /',
-    // writes through redirection
-    'echo hi > /tmp/f', 'cat a >> b', 'cat f | tee out.txt',
-    // arbitrary execution through an inline interpreter
-    'bash -c "rm x"', 'sh evil.sh', 'node -e "process.exit()"',
-    'python3 -c "import os"', 'eval "rm x"',
-    // arbitrary execution through substitution
-    'echo `whoami`', 'echo $(rm -rf /)', 'cat <(rm x)',
-    // read-only heads with an executing argument
-    'find . -exec rm {} \\;', 'find . -delete', 'sed -i "s/a/b/" f',
-    // git subcommands that write
-    'git push', 'git commit -m x', 'git checkout main', 'git reset --hard',
-    // an env prefix hides the real head
-    'FOO=1 rm x',
-  ];
-  for (const command of refused) {
-    const verdict = classifyReadOnlyShellCommand(command);
-    assert.equal(verdict.allowed, false, `should refuse: ${command}`);
+function allows(command: string, expected = true) {
+  const result = classify(command);
+  assert.equal(result.allowed, expected, `${command}: ${JSON.stringify(result)}`);
+}
+
+function redirects(command: string, tool: RegExp) {
+  const result = classify(command);
+  assert.equal(result.allowed, false, command);
+  assert.match(result.allowed ? '' : result.redirect, tool, command);
+}
+
+test('inspection commands outside the blocklist are trusted, quoted operators included', () => {
+  for (const command of [
+    'ls -la', 'nc -vz example.com 443', 'ossutil ls oss://pinet/ 2>&1 | head',
+    'custom-inspector --status', 'cat file | jq ".events | map(.type)"', "jq '.events\n| map(.type)' file",
+    "echo 'rm file | sudo ls; kill -9 1'", 'echo "rm | kill"', 'echo ok # ; rm file',
+    'cd /repo && rg -n "foo" | head -20', 'cd /repo\nrg -n foo', 'find . -name "*.ts" | xargs wc -l',
+    'find . -name "*.ts" -exec grep -l foo {} \\;', 'rm --help', 'command -v rm',
+    'kill -0 123', 'kill -l', 'pkill -0 node', 'if test -f file; then cat file; else ls; fi',
+    'bash -c "ls -la"', 'echo hi > file', 'npm install',
+  ]) allows(command);
+});
+
+for (const separator of ['|', '&&', '||', ';', '&', '|&', '\n']) {
+  test(`checks every command on both sides of ${JSON.stringify(separator)}`, () => {
+    allows(`printf ok ${separator} stat file`);
+    for (const dangerous of ['rm file', '/bin/rm file', 'env FOO=1 command rm file', 'kill -9 123',
+      'git reset --hard', 'gh pr merge 1 --squash']) {
+      allows(`printf ok ${separator} ${dangerous}`, false);
+      allows(`${dangerous} ${separator} head`, false);
+    }
+  });
+}
+
+test('bottom-line operations are refused at direct, prefixed and wrapped heads', () => {
+  for (const command of [
+    'rm file', 'rm -- --help', 'shred file', 'dd if=image of=/dev/disk0', 'mkfs.ext4 /dev/sda',
+    'sudo ls', 'reboot', 'FOO=1 rm file', "'r'm file", 'r\\m file', 'env -u FOO /bin/rm file',
+    'exec -a label rm file', 'kill -KILL 123', 'kill -s KILL 123', 'kill --signal=9 123',
+    'pkill -9 node', 'killall -KILL node',
+    'if rm file; then ls; fi', 'if false; then ls; else rm file; fi',
+    // a newline is a separator even though shell-quote reads it as whitespace
+    'cd /repo\nrm -rf build', 'ls # comment\nrm file',
+    // one level of indirection hiding the same head
+    'bash -c "rm -rf build"', 'sh -lc "cd x && rm y"', 'find . -delete', 'find . -name x -exec rm {} \\;',
+    'find . | xargs rm', 'xargs -0 -n 1 rm < list', 'bash -c "git reset --hard"',
+  ]) allows(command, false);
+  allows('', false);
+});
+
+test('git and gh writes are refused and pointed at their permissioned tools', () => {
+  for (const command of ['git reset --hard', 'git -C /repo clean -fd', 'git push --force', 'git commit -m x',
+    'git branch -D main', 'git stash', 'cd /repo && git checkout main']) {
+    redirects(command, /git_shell/);
+  }
+  for (const command of ['gh pr merge 1 --squash', 'gh pr comment 1 --body x', 'gh api -X POST repos/o/r/issues']) {
+    redirects(command, /gh_shell/);
+  }
+  redirects('rm -rf build', /run_shell/);
+  for (const command of ['git status', 'git log --oneline | head', 'git diff --stat', 'git -C /repo branch -a',
+    'gh pr checks 1', 'gh api repos/o/r/pulls | jq length']) {
+    allows(command);
   }
 });
 
-test('read-only shell admits the inspection commands agents actually run', () => {
-  const allowed = [
-    'ls -la',
-    'pwd',
-    'git status',
-    'git log --oneline -20',
-    'git diff main HEAD',
-    'git rev-parse --abbrev-ref HEAD',
-    'git show HEAD --stat',
-    // cd prefixes and pipes are the common real shape
-    'cd /repo && grep -rn "foo" src',
-    'cd /repo && git log --oneline | head -20',
-    'cat package.json | jq .name',
-    'find . -name "*.ts" | head',
-    'echo "=== section ===" && sed -n "1,40p" file.ts',
-    'wc -l src/index.ts',
-  ];
-  for (const command of allowed) {
-    const verdict = classifyReadOnlyShellCommand(command);
-    assert.equal(
-      verdict.allowed,
-      true,
-      `should admit: ${command}${verdict.allowed ? '' : ` (${verdict.reason})`}`,
-    );
-  }
-});
-
-test('read-only shell explains a refusal so the agent can retry correctly', () => {
-  const verdict = classifyReadOnlyShellCommand('cd /repo && rm -rf build');
-  assert.equal(verdict.allowed, false);
-  assert.match(verdict.allowed ? '' : verdict.reason, /rm/);
-  assert.equal(classifyReadOnlyShellCommand('   ').allowed, false);
+test('variables stay placeholders instead of expanding from the Host environment', () => {
+  // Erasing $PREFIX would change the first executable into rm.
+  allows('$PREFIX"rm" file');
+  allows('echo "$VALUE | rm file"');
+  allows('echo $VALUE | rm file', false);
+  allows('FOO=$VALUE rm file', false);
+  // An unknown git subcommand is not read-only, so it goes to git_shell.
+  allows('git $SUBCOMMAND', false);
 });

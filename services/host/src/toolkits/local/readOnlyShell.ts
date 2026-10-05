@@ -1,187 +1,138 @@
+import { parse } from 'shell-quote';
+import { classifyGhArgs, classifyGitArgs } from './vcsCommands';
+
 /**
- * Admission control for `inspect_shell`.
+ * Admission for `inspect_shell`: a blocklist, not an allowlist.
  *
- * `inspect_shell` carries no review policy, so this module — not a model — is
- * what keeps it from running something with side effects. It is therefore an
- * allowlist in the strict sense: anything it does not positively recognise is
- * refused, and the caller falls back to the reviewed `run_shell`. A rejection
- * costs one retry; a wrong acceptance runs an unreviewed command, so every
- * rule here fails closed.
+ * The model is trusted to keep mutations out of `inspect_shell`; its tool
+ * description says so. This check only refuses the bottom line — operations
+ * with obvious irreversible effects, and git/gh writes, which belong to
+ * `git_shell` / `gh_shell` where risky forms are reviewed — and names the tool
+ * to use instead.
+ * It is not a shell parser or a sandbox: loop and case bodies, scripts and
+ * dynamic code are not inspected.
  */
-
-/** Commands that only read. Anything absent from this set is refused. */
-const READ_ONLY_COMMANDS = new Set([
-  // navigation and trivia
-  'cd', 'pwd', 'echo', 'true', 'false', 'basename', 'dirname', 'realpath',
-  // reading files
-  'cat', 'head', 'tail', 'less', 'more', 'nl', 'strings', 'file',
-  // listing and locating
-  'ls', 'find', 'tree', 'stat', 'readlink', 'which', 'type', 'whereis',
-  // searching
-  'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack',
-  // text processing (read-only usages; see REFUSED_ARGUMENTS for the rest)
-  'sed', 'awk', 'cut', 'sort', 'uniq', 'wc', 'tr', 'column', 'paste', 'comm',
-  'diff', 'cmp', 'rev', 'fold', 'expand', 'unexpand',
-  // structured data
-  'jq', 'yq', 'xmllint',
-  // version control (inspection only)
-  'git', 'gh',
-  // environment
-  'env', 'printenv', 'date', 'uname', 'hostname', 'whoami', 'id', 'uptime',
-  'df', 'du', 'ps', 'top', 'wc', 'locale',
-  // checksums
-  'md5', 'md5sum', 'shasum', 'sha1sum', 'sha256sum', 'cksum',
-  // package metadata (read-only subcommands only; see SUBCOMMAND_ALLOWLIST)
-  'npm', 'node', 'python3', 'python',
-]);
-
-/**
- * Commands whose safety depends on the subcommand. `git log` reads; `git push`
- * does not. Only the listed subcommands are accepted.
- */
-const SUBCOMMAND_ALLOWLIST: Record<string, ReadonlySet<string>> = {
-  git: new Set([
-    'log', 'status', 'diff', 'show', 'branch', 'tag', 'blame', 'describe',
-    'rev-parse', 'rev-list', 'ls-files', 'ls-tree', 'cat-file', 'shortlog',
-    'config', 'remote', 'stash', 'reflog', 'whatchanged', 'grep', 'worktree',
-  ]),
-  gh: new Set([
-    'pr', 'issue', 'repo', 'api', 'release', 'run', 'search', 'label',
-  ]),
-  npm: new Set(['ls', 'list', 'view', 'info', 'outdated', 'why', 'root', 'prefix', 'config']),
-};
-
-/**
- * Arguments that turn an otherwise read-only command into an executor or a
- * writer. These are matched anywhere in the command's own arguments.
- */
-const REFUSED_ARGUMENTS: Record<string, readonly string[]> = {
-  // find spawns processes and deletes
-  find: ['-exec', '-execdir', '-delete', '-ok', '-okdir', '-fprint', '-fprintf', '-fls'],
-  // sed/awk/perl write files or shell out
-  sed: ['-i', '--in-place', 'w', 'W'],
-  awk: ['-i', '--in-place'],
-  // git subcommands that mutate even under an allowed head
-  git: ['--exec-path', '-c'],
-  gh: ['--jq'],
-  // node/python inline code is arbitrary execution
-  node: ['-e', '--eval', '-p', '--print'],
-  python: ['-c'],
-  python3: ['-c'],
-  npm: ['--ignore-scripts=false'],
-};
-
-/**
- * Subcommands that mutate despite living under an allowed command. Checked
- * against the first non-flag argument.
- */
-const REFUSED_SUBCOMMANDS: Record<string, readonly string[]> = {
-  git: ['push', 'commit', 'add', 'rm', 'mv', 'merge', 'rebase', 'reset', 'checkout',
-    'switch', 'restore', 'clean', 'apply', 'am', 'cherry-pick', 'revert', 'fetch',
-    'pull', 'clone', 'init', 'gc', 'prune', 'filter-branch', 'update-ref', 'submodule'],
-  gh: ['auth'],
-};
-
-/** Shell metacharacters that can introduce an unchecked command or a write. */
-const REFUSED_SYNTAX: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\$\(/, reason: '命令替换 $(...)' },
-  { pattern: /`/, reason: '反引号命令替换' },
-  { pattern: /(^|[^0-9<>&])>/, reason: '输出重定向' },
-  { pattern: />>/, reason: '追加重定向' },
-  { pattern: /<\(/, reason: '进程替换' },
-  { pattern: />\(/, reason: '进程替换' },
-  { pattern: /\$\{[^}]*[:#%/]/, reason: '带操作符的参数展开' },
-  { pattern: /&\s*$/, reason: '后台执行' },
-];
-
 export type ReadOnlyShellVerdict =
   | { allowed: true }
-  | { allowed: false; reason: string };
+  | { allowed: false; reason: string; redirect: string };
 
-/**
- * Whether the command is recognisably read-only.
- *
- * Splits on the separators the allowlist tolerates (`&&`, `||`, `;`, `|`) and
- * requires every segment to pass on its own, so one refused segment refuses
- * the whole command.
- */
+type Refusal = { reason: string; redirect: string };
+
+const RUN_SHELL = '需要执行时改用 run_shell，它会走工具审批。';
+const GIT_TOOLS = 'git 写操作改用 git_* 工具或 git_shell，它们按操作走审批；没有 git toolkit 时用 run_shell。';
+const GH_TOOLS = 'GitHub 写操作改用 gh_* 工具或 gh_shell，它们按操作走审批；没有 git toolkit 时用 run_shell。';
+
+const DESTRUCTIVE_COMMANDS = new Set(['rm', 'shred', 'dd', 'mkfs', 'sudo', 'su', 'doas', 'shutdown', 'reboot']);
+const KILL_COMMANDS = new Set(['kill', 'pkill', 'killall']);
+const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'time', 'nohup']);
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+const SEPARATORS = new Set(['|', '&&', '||', ';', '&', '|&']);
+const XARGS_VALUE_FLAGS = new Set(['-I', '-n', '-P', '-L', '-d', '-E', '-s', '-a',
+  '--max-args', '--max-procs', '--max-lines', '--delimiter', '--eof', '--max-chars', '--arg-file']);
+const FIND_EXEC_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir']);
+/** `sh -c "…"` is followed this many levels deep. */
+const MAX_NESTING = 3;
+
+const basename = (word: string = '') => word.replace(/^.*\//, '');
+const assignment = (word: string = '') => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
+const beforeDoubleDash = (args: string[]) => (args.includes('--') ? args.slice(0, args.indexOf('--')) : args);
+
+function forcesKill(args: string[]) {
+  return args.some((arg, index) => /^-(?:9|(?:sig)?kill)$/i.test(arg)
+    || /^--signal=(?:9|(?:sig)?kill)$/i.test(arg)
+    || (['-s', '--signal'].includes(arg) && /^(?:9|(?:sig)?kill)$/i.test(args[index + 1] ?? '')));
+}
+
+function checkCommand(words: string[], depth: number): Refusal | undefined {
+  const tokens = [...words];
+  while (['if', 'then', 'else', 'elif', '!'].includes(tokens[0])) tokens.shift();
+  // Resolve transparent wrappers repeatedly; quoted arguments remain arguments.
+  while (true) {
+    while (assignment(tokens[0])) tokens.shift();
+    if (!WRAPPERS.has(basename(tokens[0]))) break;
+    const wrapper = basename(tokens.shift());
+    if (wrapper === 'command' && ['-v', '-V'].includes(tokens[0])) return;
+    while (tokens[0]?.startsWith('-') || assignment(tokens[0])) {
+      const flag = tokens.shift()!;
+      if ((wrapper === 'env' && ['-u', '--unset', '-C', '--chdir'].includes(flag)) || (wrapper === 'exec' && flag === '-a')) tokens.shift();
+      if (flag === '--') break;
+    }
+  }
+  const name = basename(tokens.shift());
+  const options = beforeDoubleDash(tokens);
+
+  if ((DESTRUCTIVE_COMMANDS.has(name) || /^mkfs\./.test(name))
+    && !options.some((arg) => ['--help', '--version'].includes(arg))) {
+    return { reason: `${name} 有不可逆副作用`, redirect: RUN_SHELL };
+  }
+  if (KILL_COMMANDS.has(name) && forcesKill(options)) {
+    return { reason: `${name} 强制终止进程`, redirect: RUN_SHELL };
+  }
+  if (name === 'git') {
+    const verdict = classifyGitArgs(tokens);
+    return verdict.level === 'read' ? undefined : { reason: verdict.reason, redirect: GIT_TOOLS };
+  }
+  if (name === 'gh') {
+    const verdict = classifyGhArgs(tokens);
+    return verdict.level === 'read' ? undefined : { reason: verdict.reason, redirect: GH_TOOLS };
+  }
+  // One level of indirection that hides the same heads.
+  if (name === 'find') {
+    if (tokens.includes('-delete')) return { reason: 'find -delete 会删除文件', redirect: RUN_SHELL };
+    for (let index = 0; index < tokens.length; index += 1) {
+      if (!FIND_EXEC_ACTIONS.has(tokens[index])) continue;
+      const end = tokens.findIndex((arg, at) => at > index && (arg === ';' || arg === '+'));
+      const refusal = checkCommand(tokens.slice(index + 1, end === -1 ? undefined : end), depth);
+      if (refusal) return refusal;
+    }
+  }
+  if (name === 'xargs') {
+    let index = 0;
+    while (tokens[index]?.startsWith('-')) index += XARGS_VALUE_FLAGS.has(tokens[index]) ? 2 : 1;
+    if (index < tokens.length) return checkCommand(tokens.slice(index), depth);
+  }
+  if (SHELLS.has(name) && depth < MAX_NESTING) {
+    const flag = options.findIndex((arg) => /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
+    const script = flag === -1 ? undefined : options[flag + 1];
+    if (script) return checkSource(script, depth + 1);
+  }
+  return undefined;
+}
+
+/** Split on the separators shell-quote exposes and check every command head. */
+function checkSource(source: string, depth: number): Refusal | undefined {
+  // shell-quote reads a newline as plain whitespace, so each line is also
+  // checked alone; otherwise `cd x⏎rm -rf y` would hide `rm` as an argument.
+  const sources = source.includes('\n') ? [source, ...source.split('\n')] : [source];
+  for (const text of sources) {
+    let tokens: ReturnType<typeof parse<never>>;
+    try {
+      // Never expand from Host env or erase unknown variables into different heads.
+      tokens = parse(text, (name) => '${' + name + '}');
+    } catch {
+      // Syntax validity belongs to the executing shell, not this check.
+      continue;
+    }
+    let words: string[] = [];
+    for (const token of tokens) {
+      if (typeof token === 'string') { words.push(token); continue; }
+      if ('comment' in token) break;
+      if (!SEPARATORS.has(token.op)) {
+        words.push(token.op === 'glob' && 'pattern' in token ? token.pattern : token.op);
+        continue;
+      }
+      const refusal = checkCommand(words, depth);
+      if (refusal) return refusal;
+      words = [];
+    }
+    const refusal = checkCommand(words, depth);
+    if (refusal) return refusal;
+  }
+  return undefined;
+}
+
 export function classifyReadOnlyShellCommand(command: string): ReadOnlyShellVerdict {
-  const trimmed = command.trim();
-  if (!trimmed) return { allowed: false, reason: '空命令' };
-
-  for (const { pattern, reason } of REFUSED_SYNTAX) {
-    if (pattern.test(trimmed)) {
-      return { allowed: false, reason: `不支持${reason}` };
-    }
-  }
-  // A newline is a statement separator like `;`, but it also hides heredoc
-  // bodies whose content this module cannot vet.
-  if (/<<-?\s*['"]?\w/.test(trimmed)) {
-    return { allowed: false, reason: '不支持 heredoc' };
-  }
-
-  for (const segment of splitSegments(trimmed)) {
-    const verdict = classifySegment(segment);
-    if (!verdict.allowed) return verdict;
-  }
-  return { allowed: true };
-}
-
-function splitSegments(command: string) {
-  return command
-    .split(/\|\||&&|[;|\n]/)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-}
-
-function classifySegment(segment: string): ReadOnlyShellVerdict {
-  const tokens = tokenize(segment);
-  const head = tokens[0];
-  if (!head) return { allowed: false, reason: '空命令段' };
-  // `VAR=x cmd` prefixes hide the real head; refuse rather than guess.
-  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(head)) {
-    return { allowed: false, reason: '不支持环境变量前缀赋值' };
-  }
-  const name = head.replace(/^.*\//, '');
-  if (!READ_ONLY_COMMANDS.has(name)) {
-    return { allowed: false, reason: `命令 "${name}" 不在只读白名单内` };
-  }
-
-  const args = tokens.slice(1);
-  const refusedArgs = REFUSED_ARGUMENTS[name];
-  if (refusedArgs) {
-    const hit = args.find((arg) => refusedArgs.some((refused) => (
-      arg === refused || arg.startsWith(`${refused}=`)
-    )));
-    if (hit) {
-      return { allowed: false, reason: `"${name}" 的参数 "${hit}" 可能产生副作用` };
-    }
-  }
-
-  const subcommand = args.find((arg) => !arg.startsWith('-'));
-  const refusedSubcommands = REFUSED_SUBCOMMANDS[name];
-  if (subcommand && refusedSubcommands?.includes(subcommand)) {
-    return { allowed: false, reason: `"${name} ${subcommand}" 会修改状态` };
-  }
-  const allowedSubcommands = SUBCOMMAND_ALLOWLIST[name];
-  if (allowedSubcommands) {
-    if (!subcommand) {
-      return { allowed: false, reason: `"${name}" 需要一个只读子命令` };
-    }
-    if (!allowedSubcommands.has(subcommand)) {
-      return { allowed: false, reason: `"${name} ${subcommand}" 不在只读白名单内` };
-    }
-  }
-  return { allowed: true };
-}
-
-/** Split on whitespace, keeping quoted runs together. */
-function tokenize(segment: string) {
-  const tokens: string[] = [];
-  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(segment)) !== null) {
-    tokens.push(match[1] ?? match[2] ?? match[3] ?? '');
-  }
-  return tokens;
+  if (!command.trim()) return { allowed: false, reason: '空命令', redirect: '请提供要执行的检查命令。' };
+  const refusal = checkSource(command, 0);
+  return refusal ? { allowed: false, ...refusal } : { allowed: true };
 }

@@ -58,6 +58,25 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 [授权契约](../../reference/runtime/authorization-matcher.md)。
 全局审核策略与具体批准、拒绝、暂停、恢复的语义以下文为准。
 
+### 风险控制原则
+
+整体偏宽松。风险靠工具划分控制，不靠逐条命令设卡：
+
+1. **用 Toolkit 和工具设计引导 LLM 选对工具。** 工具按权限定位拆分，描述写清
+   "适合做什么、不该放什么、该去哪个工具"。LLM 被信任会按描述选工具。
+2. **定位为需要审核的工具，放心让 LLM 调用。** 审核就是这类工具的防线，描述里
+   不再额外限制 LLM 的使用时机。例如 `run_shell`、`start_process`。
+3. **定位为免审核或少审核的工具，用黑名单兜底。** 黑名单只拦底线，即不可逆、
+   改写共享历史、影响他人或凭据的操作，并提示改用哪个工具；不追求完整，不是沙箱。
+   - `inspect_shell`（免审核）：拦截 rm/dd/提权/强制 kill 等，并把 git/gh 写操作
+     导向 git toolkit。见 `services/host/src/toolkits/local/readOnlyShell.ts`。
+   - `git_shell` / `gh_shell`（按调用审核）：查询和日常写操作直接执行，只有黑名单
+     命中的高风险形式和无法识别的子命令走审核。见
+     `services/host/src/toolkits/local/vcsCommands.ts`。
+   - 专用工具（`git_add`、`git_commit`、`git_push`、`gh_pr_create`、
+     `gh_issue_create` 等）的危险能力由 schema 排除（例如 `git_push` 不接受 force
+     或删除 refspec），因此不审核。
+
 ## Auto review 领域边界
 
 [autoReview](../../../packages/pet-agent/src/autoReview/index.ts) 承载静态 policy、

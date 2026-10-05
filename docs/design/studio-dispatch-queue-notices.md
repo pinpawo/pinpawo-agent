@@ -1,40 +1,24 @@
-# Studio Dispatch Queue Notices (Draft)
+# Studio Dispatch Queue Notices
 
-## Purpose
+Status: implemented opt-in audit. Queue facts come from resident runtime through
+`Studio.listDispatchQueues()`; the [Studio API](../reference/api/studio.md#global-dispatch-observation)
+defines the snapshot. This audit is separate from Channel's immediate queue UI
+and deferred automatic send acknowledgement.
 
-Surface resident Pet dispatch queues that require attention without making Studio
-Core, Channel, or Scheduler responsible for each other’s domains.
+Scheduler owns when to audit; Notice owns durable notification projection.
+Neither schedules recovery work, retries dispatch, unblocks a Pet or changes gate state.
+The event is a repeated fact, not a persisted queue or acknowledgement protocol.
 
-The first use case is a periodic audit: a Studio operator wants to know when a
-Pet queue remains `waiting` for input or `blocked` behind an unfinished continuation.
-
-## Boundaries
-
-- The resident runtime owns the complete dispatch queue: pending dispatches,
-  conversation priority, active work, and admission state are one state machine.
-- Studio Core exposes a read-only, instantaneous `listDispatchQueues()` snapshot
-  to Plugins. It does not persist, interpret, or recover queue state.
-- Scheduler owns the time policy. Its optional `dispatchQueueAudit` configuration
-  decides when to inspect queues and which states require attention.
-- Scheduler publishes a fact event, `dispatch.queues_attention_required`; it
-  does not select a notification channel.
-- Notice owns durable notification projection. It subscribes to configured
-  Studio-event rules, stores notices, and makes them visible through its HTTP
-  route. It does not change gate state or dispatch work.
-- Console is one Notice consumer. Future desktop, email, or chat delivery can
-  consume the same persisted notice or event without changing Scheduler.
-
-This keeps the flow unidirectional:
-
-```
-resident Pet dispatch queue -> Studio read-only snapshot -> Scheduler audit event
-                                            -> Notice projection -> Console
+```text
+resident snapshot → Scheduler audit event → configured Notice rule → Console
 ```
 
 ## Configuration
 
-Scheduler auditing is opt-in so ordinary Studio deployments do not acquire a
-background health policy accidentally:
+Audit is off unless explicitly configured. It runs once at startup and at each
+interval; with affected states it emits `dispatch.queues_attention_required` containing
+`queues`, `attentionStates` and `checkedAt`. Healthy snapshots emit nothing.
+Repeated intervals deliberately repeat the fact while the condition remains.
 
 ```json
 {
@@ -48,14 +32,7 @@ background health policy accidentally:
 }
 ```
 
-The audit also runs once at Scheduler startup. If a configured attention state
-is present, Scheduler emits one event with the affected queue snapshot: `petId`,
-state, active operation, and pending counts. It
-emits no event for a healthy snapshot. Repeated intervals intentionally produce
-repeated facts while the condition remains, so an unavailable Console does not
-silently erase the operational signal.
-
-Notice rules are separately configured and only match event facts:
+Notice delivery is selected independently:
 
 ```json
 {
@@ -75,11 +52,6 @@ Notice rules are separately configured and only match event facts:
 }
 ```
 
-## Non-goals
-
-- Notice does not retry or unblock a Pet queue.
-- Scheduler does not infer task status from a queue or dispatch a recovery task.
-- Channel does not own queue audit or notification policy.
-- This draft does not define acknowledgement, escalation, deduplication, or
-  external delivery adapters. Those become explicit Notice capabilities only
-  when a concrete consumer requires them.
+Channel does not own this audit policy. Acknowledgement, escalation, deduplication
+and external notification adapters require explicit Notice capabilities; none are implied.
+See [Automation Plugins](studio/automation-plugins.md) for scheduling and event boundaries.

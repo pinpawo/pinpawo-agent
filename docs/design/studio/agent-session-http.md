@@ -1,6 +1,6 @@
 # Agent Session HTTP / SSE
 
-状态：Draft，2026-09-16。
+状态：当前 Host adapter 边界，2026-10-05。
 
 为外部 coding agent 的 Studio skill 提供会话观察和审批入口。实现放在
 host 的 Agent Session listener，与 WebSocket 共用 Pet registry、鉴权、
@@ -8,15 +8,9 @@ host 的 Agent Session listener，与 WebSocket 共用 Pet registry、鉴权、
 
 ## 接口
 
-基址为 Agent Session 端口（默认 3212），不是 Studio Plugin HTTP 端口（3211）。
-所有请求使用现有 Bearer token，并保留 Origin 校验。
-
-- GET `/agent-session/pets/:petId/snapshot`：现有 snapshot result envelope，加 `queue`。
-- GET `/agent-session/pets/:petId/events`：SSE，`event: message`，data 为现有
-  AgentServerMessage。仅直播，无持久重放；订阅后读取 snapshot，断线后重新读取。
-- POST `/agent-session/pets/:petId/messages`：现有 AgentClientMessage JSON，要求
-  requestId；返回 202 表示接收，执行结果通过 SSE / snapshot 观察，不代表完成。
-  包括 `interrupt.resume`，value 保持由 interrupt kind 定义，不增加审批 REST schema。
+路由、payload、端口与响应集中在 [Studio API](../../reference/api/studio.md#host-agent-session-http)。
+Agent Session 端口默认 3212，独立于 Studio Plugin HTTP 3211；共用现有 Bearer、Origin
+和协议校验。202 只表示接纳，SSE 无重放，断线后重读 snapshot，不盲目重发变更。
 
 ## 所有权
 

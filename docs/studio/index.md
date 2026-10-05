@@ -36,50 +36,30 @@ Toolkits and state.
   and Plugin injection.
 - [Studio API reference](../reference/api/studio.md) — exported TypeScript
   types and exact method semantics.
+- [Channel design](../design/studio/channel-addressing-and-execution.md) — current
+  message, session, source and queue-observation semantics.
 - [HTTP Plugin design](../design/studio/http-plugin.md) — the single HTTP/SSE
   control plane and contributed-route boundary.
 
-## What Studio currently owns
+## Ownership and limits
 
-- Validating the configured pet registry and the default `entryPetId`.
-- Accepting dispatches unless Studio is stopped or the Pet is unknown.
-- One admission identity per accepted dispatch.
-- Starting configured plugins in order, stopping them in reverse order, and
-  broadcasting plugin notifications without interpreting their payloads.
+Studio validates the live registry and entryPetId, admits dispatch and allocates
+invocation identities, starts/stops Plugins and broadcasts their events.
+Resident runtime owns queue/gate, conversation, checkpoints and session recovery.
+Plugins own domain history, scheduling, trigger policy and knowledge projection.
+In-memory admission records and live events do not provide execution results,
+automatic retry, timeout or durable replay. Exact contracts live in the API reference.
 
-## What belongs elsewhere
+Channel owns goals, public messages and fixed Channel/Pet bindings. Its single
+[current design](../design/studio/channel-addressing-and-execution.md) covers
+participant addressing, default Reply, trusted source and observation limits.
+Scheduler/Trigger remain independent Plugins; [queue auditing](../design/studio-dispatch-queue-notices.md)
+is an opt-in policy, not Channel queue ownership.
 
-The following are plugin or host responsibilities, not Studio concepts:
+The HTTP Plugin provides the authenticated control plane through dispatch/events
+and contributed domain routes. A separate Host Pet listener provides Agent Session
+HTTP/SSE and WebSocket conversation, without entering Studio core.
 
-- task shapes, dependencies, progress, retries, timeout policy, and persistence;
-- choosing which pet receives work (including planning);
-- schedules, webhooks, concrete HTTP adapters, UI state, and authentication;
-- direct Pet conversation, Agent Session projection, and TUI transport;
-- shared knowledge stores or private agent scratch state.
-
-The optional `@pinpawo-plugin/channel` package owns persistent goal revisions,
-public results, and per-Channel/Pet session bindings. Its Toolkit reads admitted
-Channel context; execution targets a Pet explicitly. Scheduler and Trigger keep
-their own Plugin boundaries rather than enlarging the Studio contract.
-
-The optional `@pinpawo-plugin/studio-http` package is another concrete Plugin. It defines no
-Toolkit; it projects `context.dispatch()` and `context.subscribe()` to an
-authenticated loopback HTTP/SSE boundary. Studio core owns the lightweight
-in-process Plugin event bus; HTTP is an ordinary subscriber and owns no database,
-event queue, or domain history.
-
-The Host registers only currently live, eagerly started
-Pets. Studio neither reports lazy/disabled Pets nor publishes active Agent
-Session thread identity. The HTTP Plugin becomes the Studio control-plane
-transport; a separate host Agent Session WebSocket in the same Host
-process handles direct Pet conversation without entering Studio core.
-
-## Operational limits
-
-Idempotency records and event subscriptions are process-local and in memory.
-Studio dispatch has no execution result, automatic retry, timeout, or durable
-event replay. Resident queue/gate state, Pet checkpoints, and active Agent
-Session threads belong to host rather than those Studio projections.
-
-The former run-controller, due-run scheduler, and shared-wiki designs are kept
-only in [Studio history](../history/studio/) and do not define present behavior.
+Earlier designs and milestones are retained in [Studio history](../history/index.md).
+Workdir initialization does not upgrade existing projects; use the explicit
+[configuration migration guide](configuration.md#retired-kanban-workdirs).

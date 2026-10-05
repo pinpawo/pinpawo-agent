@@ -48,8 +48,12 @@ standalone CLI 把 Plugin id 作为已安装 package 名交给 `StudioPluginReso
 启动过程不会联网下载。Plugin 可以定义 Toolkit，但 Capability 属于 Agent，并只从每个
 Pet 的约定目录加载。
 
-Studio 只登记 Pet 的公开名称、角色、服务摘要和 `PetDispatchPort`。Agent 私有字段、
+Studio 只登记 Pet 的稳定 id、公开名称和 `PetDispatchPort`。Agent 私有字段、
 Capability inventory、Agent Session 与 checkpoint 都不进入 Studio 注册表。
+
+当前 Channel 寻址、Reply 默认与可信来源见[统一设计入口](../../design/studio/channel-addressing-and-execution.md)。
+既有工作区需手动对照新版 PET.md / Capability，保留本地约定；设计文档链接不能替代
+Host 实际加载的运行时指令，编辑后重启生效。
 
 ## 旧 Kanban 工作区迁移
 
@@ -57,10 +61,7 @@ Kanban Plugin、API、工具和默认任务分配／任务完成后 Wiki 自动�
 新模板启用现有 Channel；Planner 返回计划，Executor/Reviewer 返回结果与证据，
 Wiki 由明确请求更新。通用 Trigger、Knowledge 和直接 Pet 请求继续可用。
 
-启动和 `init` 不会自动改写旧配置。手动移除 `studio.json` 中的旧 Kanban Plugin、
-`dispatch-assigned-kanban-task` 与 `wiki-on-task-done`，安装并启用 Channel；对照新模板
-更新各 Pet 文档，移除所有 `kanban*` Toolkit 调用及只写任务状态的 `studio_reporting`
-能力，保留项目自己的约定。完整步骤见[迁移指引](../../studio/configuration.md#retired-kanban-workdirs)。
-
-历史 `.pinpawo/kanban/`、JSON 快照、任务历史、Wiki 和其他用户数据原样保留；
-不清理 schema、不自动迁移、不提供空壳插件。调用结束不等于目标验收完成，不触发 Wiki。
+启动和 `init` 不自动改写既有文件。完整步骤只维护在
+[迁移指引](../../studio/configuration.md#retired-kanban-workdirs)，按该指引更新配置与能力，
+保留项目约定、历史 `.pinpawo/kanban/`、快照、任务历史、Wiki 和其他用户数据。
+调用结束不等于目标验收，不自动触发 Wiki。

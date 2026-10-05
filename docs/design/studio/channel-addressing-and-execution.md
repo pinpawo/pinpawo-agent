@@ -105,7 +105,11 @@ Channel 负责带唯一标识的有效 @ 解析、参与者寻址和目标校验
 语义由 Channel 协议决定，
 Console 不另定义一套 @ 语义或按名称反查身份的规则。Capability 需说明可寻址对象的唯一
 标识、@ 的具体输出格式，以及回复可以带或不带 @；Pet 根据本轮工作自主决定。
-默认 Pet 的 Channel Capability 已补充该格式与自主决定 @ 的说明。
+默认 Studio Pet 的外部 PET.md 定义主对话最终公开回复的 Channel 规则，
+外部 Capability 文档定义执行侧的寻址格式与交付边界。PET.md 由 Host 作为每次调用的
+公共 system prompt section 传入 Entry、Supervisor 和执行侧；Capability 指令作为执行
+system prompt 只在对应执行侧加载，Supervisor 仍可按需读取职责文档。pet-agent 不内嵌
+Studio / Channel 协议，不强制主对话读取或执行全部能力指令。
 Capability 内部交付通过主对话汇总为最终公开回复，内部生成链接不代表派发。
 主对话选择采用本轮主动交接时，须在最终公开正文保留完整链接与交接任务，不能把有效寻址
 归纳成只有名称或交接声明，也不能放入代码或引用。历史、引用和示例仍不构成交接意图，

@@ -1,11 +1,8 @@
 import { definePromptTemplate } from '../../../../prompts/template';
-import { PUBLIC_REPLY_DELIVERY_PROTOCOL } from './publicReplyDelivery';
 
 const SUPERVISOR_TOOL_SCOPE = `只能调用本轮实际提供的工具。规划和调整时，一个 Capability 能完整完成的工作放在同一个任务中，不按调查、执行、验证等内部步骤拆分；这些步骤由执行方自行安排。只有需要不同能力协作，或用户明确要求分开交付时，才拆成多个任务。每项的 objective 只用一句简短的话写明交付结果，像任务标题，不写背景、步骤、约束或验收细节；这些内容在委派时写进 briefing。执行当前项前，再根据用户要求、主会话中的已有交付和当前进度，为 delegate_capability 准备 briefing：说明剩余工作、可复用结论与必要约束，不扩展目标，也不准备后续项的细节。briefing 是唯一的委派参数；任务身份、当前目标和已有交付目录由运行时从 state 提供，不需要填写交付 ID。交付正文已在主会话中，不复制全文。每次委派都是独立的 Capability 调用，不自动继承上次内部执行历史。根据刚返回的结果，把接下来需要做的工作、可复用结论和必要反馈写入本次 briefing，按需渐进披露；为补充 briefing 或引用新交付，无需重排计划。历史记录和 Capability 文档中出现的其他工具名称不代表你当前可以调用它们，不直接调用执行方内部的业务工具。
 
-delegate_capability 返回结果中的 delivery.text 是执行方的交付正文，artifacts 是产物引用。
-
-${PUBLIC_REPLY_DELIVERY_PROTOCOL}`;
+delegate_capability 返回结果中的 delivery.text 是执行方的交付正文，artifacts 是产物引用。`;
 
 export const RUN_SUPERVISOR_ENTRY_SYSTEM_PROMPT = definePromptTemplate<{}>(`你是 root 的 Supervisor，当前处于 Entry。根据用户目标和 main messages，选择合适的 Capability，形成可逐项验收的简短计划。每项交付应落在所选 Capability 的职责与工具能力内，按实际能力边界安排任务。
 

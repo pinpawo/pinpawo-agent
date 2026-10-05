@@ -122,6 +122,12 @@ Toolkit 用原始参数和该上下文在执行时解释目标：local 工具经
   [Process Runtime 草稿](../../design/host/process-runtime.md)。
 - bash、git、project-inspection 共享 Host 的同一个 ShellRS 实例。git/gh 以 argv
   经 ShellRS 运行。
+- 权限按工具划分。`inspect_shell` 免审批，只用黑名单拦底线：不可逆操作（rm、dd、
+  提权、强制 kill 等）提示改用 `run_shell`；git/gh 写操作提示改用 git toolkit。
+  git toolkit 的 `git_shell` / `gh_shell` 接受任意子命令的 argv，按调用判定审批，
+  整体偏宽松：`vcsCommands.ts` 分 read / change / risky 三级，查询和日常写操作
+  （commit、rebase、普通 push、评论、review、关闭 PR 等）直接执行；只有丢数据、
+  改写共享历史、合并、删除、发布、凭据与权限，以及无法识别的子命令走审批。
 - 外部命令只经 ShellRS 执行。代码搜索和 JSON 查询没有专用工具（原 `grep_search` /
   `glob_search` / `jq_query` 已删除），由 `inspect_shell` 运行 `rg` / `jq`；
   project-inspection 也提供 `inspect_shell`。

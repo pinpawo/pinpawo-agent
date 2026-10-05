@@ -35,7 +35,7 @@ import {
   networkOperationMetadata,
   normalizeHttpFetchAuthorizationInput,
 } from './networkTools';
-import { createGitTools, gitOperationMetadata } from './gitTools';
+import { createGitTools, gitOperationMetadata, vcsShellCallNeedsReview } from './gitTools';
 import { parsePatch, PatchParseError } from './applyPatch';
 import {
   createProcessTools,
@@ -153,7 +153,7 @@ export function createArtifactDiscoveryToolkit(params: {
 
 const bashToolkitInstructions = [
   '你可以使用本地文件、搜索、下载和 shell 工具完成任务。',
-  '短查询只查看不修改的（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道）用 inspect_shell，它免审批；短命令需要写入、删除、推送或内联执行时用 run_shell；安装依赖、完整构建、长测试和持续运行任务用 start_process。短查询优先 inspect_shell。',
+  '短查询只查看不修改的（rg、grep、sed -n、cat、ls、find、wc、jq、git log/status/diff 等，可含 cd 与管道）用 inspect_shell，它免审批；不要把会修改状态的命令放进 inspect_shell。短命令需要写入、删除或内联执行时用 run_shell；安装依赖、完整构建、长测试和持续运行任务用 start_process。短查询优先 inspect_shell。',
   '读取代码、Markdown、JSON、配置等可读文本时优先使用 view_file_chunk；read_file 只用于 PDF、Word、表格、图片等非文本文件的分析。',
   '优先使用语义具体的文件工具：view_file_chunk、read_file、list_dir。',
   '搜索代码和文件用 inspect_shell 运行 rg：`rg -n \'pattern\' src` 搜内容，`rg --files -g \'*.ts\'` 找文件，`rg -l` 只列文件名；分析 JSON 用 inspect_shell 运行 jq。不要用 run_shell 或临时 Python 脚本做这些查询。',
@@ -162,9 +162,9 @@ const bashToolkitInstructions = [
   '联网取内容优先用 http_fetch：静态页面、REST API、RSS、天气或汇率这类公开接口一次请求即可拿到结果，不要为此逐步驱动浏览器。只有确实需要登录态、页面交互或 JS 动态渲染时才用浏览器。同一站点首次获批后，后续同源同方法的请求不再重复审批。',
   'run_shell 只作为兜底工具；不要用它替代已有的读写、移动、复制、下载或 HTTP 工具。',
   'run_shell / inspect_shell 超时会终止进程组，返回超时结果，不转后台。超时不回滚副作用；确认终止并检查已有结果后再决定是否用 start_process 重试。start_process 启动即返回进程 id，用 wait_process 跟进、terminate_process 终止、list_processes 找回当前会话任务；不要重复启动。',
-  '常规 git 操作由 git toolkit 提供；不要用 run_shell 包装这些常规 git 操作。',
+  'git 和 GitHub 操作由 git toolkit 提供（git_*、git_shell、gh_*、gh_shell），写操作在那里按操作审批；不要用 run_shell 或 inspect_shell 执行 git/gh 写操作，只有当前没有 git toolkit 时才用 run_shell。',
   '执行高风险 shell 命令时必须遵守 toolkit 的人类审批流程，不要绕过审批。',
-  '修改文件前先读取现状；修改后优先用 validate_structured_file、inspect_shell 或 run_shell 做必要验证。',
+  '修改文件前先读取现状；修改后做必要验证：结构化文件用 validate_structured_file，只读检查用 inspect_shell，跑测试或构建用 run_shell 或 start_process。',
 ];
 
 const bashToolkitOperations = {
@@ -179,10 +179,11 @@ const gitToolkitInstructions = [
   '你可以使用 gh_pr_create、gh_pr_view、gh_pr_comments、gh_pr_diff、gh_issue_create、gh_issue_list、gh_issue_view、gh_issue_comments、gh_read_content 创建或渐进式查看 GitHub PR/issue。',
   '先用 gh_pr_view 查看 PR 概览；只有确实需要 review 或评论时才用 gh_pr_comments。',
   '先用 gh_issue_view 查看 issue 正文和评论总数；只有确实需要评论时才用 gh_issue_comments 小页翻阅；它返回文件交付时用 gh_read_content 分块读取。',
-  '查看状态、diff、历史和提交内容时优先使用这些 git 工具，不要用 run_shell 包装 git 命令。',
+  '专用工具没有覆盖的 git 操作用 git_shell，GitHub 操作用 gh_shell；查询和日常操作直接执行，只有会丢数据、改写共享历史、合并、删除、发布或改权限的操作要审批。这类操作确是任务需要时再做，先确认影响范围，能保留数据时优先用可恢复的做法。',
+  '查看状态、diff、历史和提交内容时优先使用这些 git 工具；需要管道组合的只读查询可以用 inspect_shell。不要用 run_shell 包装 git/gh 命令。',
   '做代码 review、PR review 或 diff 审查时，优先使用 gh_pr_view 和 gh_pr_diff；不要用 browser 或 http_fetch 拉取 GitHub PR 页面/diff。',
   'git_add 必须显式传 pathspecs；不要隐式暂存整个仓库。',
-  'git_commit 只创建本地提交；需要推送时继续使用 git_push。git_push 不支持 force push 或删除远端引用。',
+  'git_commit 只创建本地提交；需要推送时继续使用 git_push。git_push 不支持 force push 或删除远端引用，确有需要时用 git_shell，会走审批。git_add、git_commit、git_push、gh_pr_create、gh_issue_create 直接执行，不需要审批。',
 ];
 
 const projectInspectionInstructions = [
@@ -306,17 +307,31 @@ export function createProjectInspectionToolkit(deps: ShellToolkitDependencies): 
   });
 }
 
+/**
+ * git_shell / gh_shell take any subcommand, so review is decided per call:
+ * reads and everyday writes run directly, risky forms get the base review.
+ */
+function reviewRiskyCallsOnly(
+  toolName: 'git_shell' | 'gh_shell',
+  base: ToolReviewPolicy,
+): ToolReviewPolicy {
+  return ReviewPolicies.custom({
+    ...base,
+    request: (ctx) => (vcsShellCallNeedsReview(toolName, ctx.input) ? base.request(ctx) : null),
+  });
+}
+
 export function createGitToolkit(deps: ShellToolkitDependencies): AgentToolkit {
+  // Dedicated tools exclude dangerous forms by schema (no force push, no
+  // implicit `git add .`), so they run unreviewed like everyday git_shell /
+  // gh_shell writes. Only the risky forms of the two shells are reviewed.
   const reviews = {
-    git_add: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    git_commit: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    git_push: ReviewPolicies.externalAccess({ authorization: 'exact' }),
-    gh_pr_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
-    gh_issue_create: ReviewPolicies.externalAccess({ authorization: 'exact' }),
+    git_shell: reviewRiskyCallsOnly('git_shell', ReviewPolicies.commandExecution({ authorization: 'exact' })),
+    gh_shell: reviewRiskyCallsOnly('gh_shell', ReviewPolicies.externalAccess({ authorization: 'exact' })),
   };
   return defineToolkit({
     name: 'git',
-    description: '本地 git 仓库查看、暂存、提交和普通推送，以及 GitHub PR/issue 创建与查看工具。',
+    description: '本地 git 仓库查看、暂存、提交和推送，GitHub PR/issue 创建与查看，以及按操作审批的 git_shell / gh_shell。',
     tools: createToolDefinitions(
       executionScoped(createGitTools(deps.shell).gitTools),
       gitOperationMetadata,
@@ -325,7 +340,7 @@ export function createGitToolkit(deps: ShellToolkitDependencies): AgentToolkit {
     instructions: gitToolkitInstructions.join('\n'),
     reviewGuidance: {
       allow: 'Local Git edits and ordinary remote collaboration can be recoverable; assess the actual target and effect.',
-      ask: 'Shared-history rewrites, access changes, and releases require human review.',
+      ask: 'Discarding uncommitted work (reset --hard, clean, checkout/restore over changes, stash drop/clear), force-deleting branches or deleting tags, shared-history rewrites (force push, remote ref deletion), merging PRs, deleting repositories or releases, secrets and access changes, and releases require human review.',
     },
     requires: shellRequirement,
     availability: shellAvailability(deps.shell),

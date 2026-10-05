@@ -245,8 +245,9 @@ test('createGitToolkit exposes git operation metadata with the toolkit definitio
 
   assert.equal(definition(toolkit, 'git_status')?.operation?.title, '查看 git 状态');
   assert.equal(definition(toolkit, 'git_commit')?.operation?.title, '创建 git commit');
-  assert.equal(Boolean(definition(toolkit, 'git_add')?.review), true);
-  assert.equal(Boolean(definition(toolkit, 'git_commit')?.review), true);
+  assert.equal(definition(toolkit, 'git_add')?.review, undefined);
+  assert.equal(definition(toolkit, 'git_commit')?.review, undefined);
+  assert.ok(definition(toolkit, 'git_shell')?.review);
 });
 
 test('createBrowserToolkit exposes browser operation metadata', () => {

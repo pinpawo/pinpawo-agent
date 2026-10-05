@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { ToolMessage } from '@langchain/core/messages';
 import { tool, type ToolRuntime } from '@langchain/core/tools';
+import { quote } from 'shell-quote';
 import {
   createAbortError,
   type NamedStructuredTool,
@@ -13,6 +14,7 @@ import { readBoolean, readRecord, readString } from '../operationMetadata';
 import { requireAgentSession } from './executionContext';
 import { readTextFileChunkResult } from './fileTools';
 import type { ShellExecResult, ShellRS } from './shellRS';
+import { classifyGhArgs, classifyGitArgs } from './vcsCommands';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;
 const MAX_GH_BODY_CHARS = 60_000;
@@ -28,6 +30,14 @@ const DEFAULT_GIT_TIMEOUT_MS = 15_000;
 const GIT_PUSH_TIMEOUT_MS = 120_000;
 const MAX_GIT_CAPTURE_CHARS = 1024 * 256;
 const GH_TIMEOUT_MS = 20_000;
+/** git_shell / gh_shell cover fetch, pull, push and run logs, so they get longer. */
+const VCS_SHELL_TIMEOUT_MS = 120_000;
+/**
+ * Non-interactive by construction: a command that would open an editor or a
+ * credential/confirmation prompt fails instead of hanging until the timeout.
+ */
+const GIT_SHELL_ENV = { GIT_EDITOR: 'false', GIT_SEQUENCE_EDITOR: 'false', GIT_TERMINAL_PROMPT: '0' };
+const GH_SHELL_ENV = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GIT_TERMINAL_PROMPT: '0' };
 
 /**
  * Runs one CLI invocation as argv through ShellRS, on behalf of the Agent
@@ -129,13 +139,14 @@ export async function runGit(
   args: string[],
   cwd?: string,
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
+  env: Readonly<Record<string, string>> = {},
 ) {
   const repo = cwd?.trim() || process.cwd();
   let result: ShellExecResult;
   try {
     result = await cli(['git', ...args], {
       cwd: repo,
-      env: { LC_ALL: 'C' },
+      env: { LC_ALL: 'C', ...env },
       timeoutMs,
       maxOutputChars: MAX_GIT_CAPTURE_CHARS,
     });
@@ -173,14 +184,18 @@ function resolveGhWorkdir(cwd?: string) {
   return cwd?.trim() || process.cwd();
 }
 
-async function executeGh(cli: CliRunner, args: string[], cwd?: string) {
+type GhExecOptions = { timeoutMs?: number; env?: Readonly<Record<string, string>> };
+
+async function executeGh(cli: CliRunner, args: string[], cwd?: string, options: GhExecOptions = {}) {
   const repo = resolveGhWorkdir(cwd);
+  const timeoutMs = options.timeoutMs ?? GH_TIMEOUT_MS;
   let result: ShellExecResult;
   try {
     result = await cli(['gh', ...args], {
       cwd: repo,
-      timeoutMs: GH_TIMEOUT_MS,
+      timeoutMs,
       maxOutputChars: MAX_GH_BUFFER_BYTES,
+      ...(options.env ? { env: options.env } : {}),
     });
   } catch (err) {
     throw formatGhError(err);
@@ -199,7 +214,7 @@ async function executeGh(cli: CliRunner, args: string[], cwd?: string) {
       return { stdout: result.stdout, stderr: result.stderr } satisfies GitCommandResult;
     case 'timeout':
       throw formatGhError(Object.assign(
-        new Error(`timed out after ${(GH_TIMEOUT_MS / 1000).toString()}s`),
+        new Error(`timed out after ${(timeoutMs / 1000).toString()}s`),
         { stdout: result.stdout, stderr: result.stderr },
       ));
     case 'aborted':
@@ -211,8 +226,14 @@ async function executeGh(cli: CliRunner, args: string[], cwd?: string) {
   }
 }
 
-async function runGh(cli: CliRunner, args: string[], cwd?: string, emptyOutput?: string) {
-  const result = await executeGh(cli, args, cwd);
+async function runGh(
+  cli: CliRunner,
+  args: string[],
+  cwd?: string,
+  emptyOutput?: string,
+  options?: GhExecOptions,
+) {
+  const result = await executeGh(cli, args, cwd, options);
 
   const output = formatGitResult(result);
   if (output === '(no output)') {
@@ -553,6 +574,33 @@ function normalizeGhTarget(value: string | undefined, label: string) {
 }
 
 const gitPathspecSchema = z.array(z.string().min(1)).optional();
+
+/** Arguments after the program name, exactly as the model gave them. */
+function readCliArgs(input: unknown): string[] {
+  const args = readRecord(input)?.args;
+  return Array.isArray(args) ? args.filter((arg): arg is string => typeof arg === 'string') : [];
+}
+
+/** Only risky git_shell / gh_shell calls are reviewed; reads and everyday writes run directly. */
+export function vcsShellCallNeedsReview(toolName: 'git_shell' | 'gh_shell', input: unknown) {
+  const args = readCliArgs(input);
+  return (toolName === 'git_shell' ? classifyGitArgs(args) : classifyGhArgs(args)).level === 'risky';
+}
+
+function summarizeCliCall(program: 'git' | 'gh', input: unknown) {
+  const record = readRecord(input);
+  const args = readCliArgs(input);
+  return {
+    target: readString(record, 'cwd'),
+    summary: quote([program, ...args]),
+    details: { level: (program === 'git' ? classifyGitArgs(args) : classifyGhArgs(args)).level },
+  };
+}
+
+const cliArgsSchema = (program: 'git' | 'gh', example: string) => z.array(z.string())
+  .min(1)
+  .refine((args) => args[0] !== program, { message: `args 不包含 ${program} 本身` })
+  .describe(`${program} 之后的参数数组，每个参数一项，不经 shell 解析，例如 ${example}`);
 
 /**
  * Git and GitHub tools, running every git/gh invocation as argv through the
@@ -977,6 +1025,46 @@ export function createGitTools(shell: ShellRS) {
     },
   );
 
+  const gitShellTool = tool(
+    async ({ cwd, args }: { cwd?: string; args: string[] }, runtime: ToolRuntime) =>
+      runGit(cliFor(runtime), args, cwd, VCS_SHELL_TIMEOUT_MS, GIT_SHELL_ENV),
+    {
+      name: 'git_shell',
+      description: '执行一条 git 命令，用于 git_* 专用工具没有覆盖的操作。直接以参数数组执行，不经 shell：不支持管道、重定向或 && 串联；需要配合管道的只读查询用 inspect_shell。'
+        + '查询和日常操作（commit、checkout/switch 分支、stash、fetch、pull、merge、rebase、普通 push 等）直接执行。'
+        + '会丢数据或改写共享历史的操作要审批：reset --hard、clean、checkout/restore 覆盖改动、stash drop/clear、强制删除分支、删除标签、强推或删除远端引用。这类操作确是任务需要时再做，执行前先用 git status / git log 看清影响；能保留数据时优先用可恢复的做法（先 stash；强推用 --force-with-lease）。被拒绝后不要换工具绕过。'
+        + '不会打开编辑器或凭据提示：rebase -i、不带 -m 的 commit 这类需要交互的命令会直接失败。仓库目录用 cwd 指定，不要用 -c 注入配置。超时 120 秒。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        args: cliArgsSchema('git', '["reset", "--hard", "HEAD"]'),
+      }),
+    },
+  );
+
+  const ghShellTool = tool(
+    async ({ cwd, args }: { cwd?: string; args: string[] }, runtime: ToolRuntime) => {
+      try {
+        return await runGh(cliFor(runtime), args, cwd, '(no output)', {
+          timeoutMs: VCS_SHELL_TIMEOUT_MS,
+          env: GH_SHELL_ENV,
+        });
+      } catch (error) {
+        return createGhToolError('gh_shell', error, runtime);
+      }
+    },
+    {
+      name: 'gh_shell',
+      description: '执行一条 GitHub CLI（gh）命令，用于 gh_* 专用工具没有覆盖的操作，例如 pr checks、pr list、CI 运行日志、PR 评论与 review、search、api。直接以参数数组执行，不经 shell。查看 PR 概览、diff、评论和 issue 时仍优先用对应 gh_* 工具。'
+        + '查询和日常协作（创建 PR/issue、评论、review、编辑、关闭/重开、重跑 CI 等）直接执行。'
+        + '合并 PR、删除、发布 release、改 secret/权限/仓库设置、登录凭据、扩展，以及写入类 api 要审批。被拒绝后不要换工具绕过。'
+        + '不会弹出交互提示：缺少必需参数时命令直接失败，例如 pr merge 需显式给出 --merge、--squash 或 --rebase。不要用 --web 打开浏览器。超时 120 秒。',
+      schema: z.object({
+        cwd: z.string().optional().describe('仓库目录；默认当前 workdir'),
+        args: cliArgsSchema('gh', '["pr", "checks", "123"]'),
+      }),
+    },
+  );
+
   const gitTools = [
     gitStatusTool as NamedStructuredTool<'git_status'>,
     gitDiffTool as NamedStructuredTool<'git_diff'>,
@@ -986,6 +1074,7 @@ export function createGitTools(shell: ShellRS) {
     gitAddTool as NamedStructuredTool<'git_add'>,
     gitCommitTool as NamedStructuredTool<'git_commit'>,
     gitPushTool as NamedStructuredTool<'git_push'>,
+    gitShellTool as NamedStructuredTool<'git_shell'>,
     ghPrCreateTool as NamedStructuredTool<'gh_pr_create'>,
     ghPrViewTool as NamedStructuredTool<'gh_pr_view'>,
     ghPrCommentsTool as NamedStructuredTool<'gh_pr_comments'>,
@@ -995,6 +1084,7 @@ export function createGitTools(shell: ShellRS) {
     ghIssueViewTool as NamedStructuredTool<'gh_issue_view'>,
     ghIssueCommentsTool as NamedStructuredTool<'gh_issue_comments'>,
     ghReadContentTool as NamedStructuredTool<'gh_read_content'>,
+    ghShellTool as NamedStructuredTool<'gh_shell'>,
   ] as const;
 
   const gitInspectionTools = [
@@ -1084,6 +1174,14 @@ export const gitOperationMetadata = {
         },
       };
     },
+  },
+  git_shell: {
+    title: '执行 git 命令',
+    summarizeInput: (input) => summarizeCliCall('git', input),
+  },
+  gh_shell: {
+    title: '执行 gh 命令',
+    summarizeInput: (input) => summarizeCliCall('gh', input),
   },
   gh_pr_create: {
     title: '创建 GitHub PR',

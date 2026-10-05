@@ -273,7 +273,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                   <select aria-label="Channel recipient" disabled={pending} value={recipientId} onChange={event => setRecipientId(event.target.value)}>
                     <option value="">No @ recipient</option>{(context.participants ?? []).map(participant =>
                       <option key={participant.participantId} value={participant.participantId}>
-                        {participant.participantId === context.viewerParticipantId ? 'Me' : participant.label}
+                        {participant.participantId === context.viewerParticipantId ? 'Me' : participant.label} · {participant.participantId}
                       </option>)}
                   </select>
                 </label>

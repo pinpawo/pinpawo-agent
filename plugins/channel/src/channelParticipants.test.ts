@@ -21,10 +21,11 @@ test('identity-bearing mentions route independently of duplicate and changed lab
 
 test('code, quoted reports, Markdown quotations and bare labels never address participants', () => {
   const mention = '[@Same name](participant:pet:one)';
-  for (const body of ['@one', '`'+mention+'`', '```md\n'+mention+'\n```', '> '+mention, 'They wrote "'+mention+'".', '转述：“'+mention+'”']) {
+  for (const body of ['@one', '`'+mention+'`', '```md\n'+mention+'\n```', '> '+mention, 'They wrote "'+mention+'".', "They wrote '"+mention+"'.", '转述：“'+mention+'”', '转述：‘'+mention+'’']) {
     assert.deepEqual(parseChannelMentions(body, [], participants), [], body);
   }
   assert.equal(parseChannelMentions('Example:\n> '+mention+'\n\n'+mention+' do this.', [], participants).length, 1);
+  assert.equal(parseChannelMentions("It's ready. "+mention+" Don't delay.", [], participants).length, 1);
   assert.throws(() => parseChannelMentions('[@Same name](participant:pet:missing)', [], participants), /Unknown Channel participant/);
   assert.throws(() => parseChannelMentions('work', [{ participantId: 'pet:missing' }], participants), /Unknown Channel participant/);
 });

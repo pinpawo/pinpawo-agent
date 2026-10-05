@@ -61,6 +61,15 @@ test('global queue rendering uses runtime entries from every Channel and hides p
       ] }]} />);
   assert.ok(markup.includes('2 queued')); assert.ok(markup.includes('Other Channel'));
   assert.ok(markup.includes('Other session')); assert.ok(!markup.includes('private-session'));
+  const queues = [{ petId: 'worker', state: 'waiting' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 1,
+    activeDispatch: { dispatchId: 'active', enqueuedAt: message.occurredAt, sessionId: 'private-session' } }];
+  const waiting = renderToStaticMarkup(<ChannelDispatchQueues connected={true} pets={[]} channels={[]} queues={queues} />);
+  assert.ok(waiting.includes('>waiting<')); assert.ok(!waiting.includes('review requested'));
+  for (const props of [{ connected: false }, { connected: true, error: 'Read unavailable' }]) {
+    const stale = renderToStaticMarkup(<ChannelDispatchQueues {...props} pets={[]} channels={[]} queues={queues} />);
+    assert.ok(stale.includes('status unknown')); assert.ok(stale.includes('Last observed'));
+    assert.ok(!stale.includes('Working')); assert.ok(!stale.includes('private-session'));
+  }
 });
 
 test('registered names are consistent while routing IDs, duplicates and removed history remain distinguishable', () => {

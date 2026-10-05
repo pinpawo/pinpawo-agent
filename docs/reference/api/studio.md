@@ -51,6 +51,12 @@ state, active operation, queue counts, and optional active / queued dispatch ide
 Queue entries include dispatch ID, enqueue time, and admitted session / scope
 correlation, with no request text or model content. Conversation holds are counts,
 not a second dispatch queue. This read-only endpoint neither schedules nor restores work.
+The local operator's existing Bearer authority can observe all configured Pets;
+the JSON includes other Channels' scope IDs and session / dispatch correlation IDs.
+There is no new per-Channel ACL. Console shows known Channel titles or generic
+source labels, never another session's ID or request body. Model context does not
+include this queue endpoint. Disconnected or failed reads show the last observed
+queue as unknown; a global waiting gate alone does not establish a human review.
 
 ## Channel messages and addressing
 
@@ -58,6 +64,10 @@ The Channel Plugin supplies `GET /channels/participants` and participants in Cha
 context. A participant has a unique `participantId`, label, existing identity and
 response adapter kind. The configured local operator and Pets share one protocol;
 the viewer identity affects the display label only.
+IDs are `kind:encodeURIComponent(id)`: Pets use the unique Studio registration
+`petId`; the one local operator uses Channel Plugin `operatorId` (default
+`studio-operator`). This is not a multi-user identity registry, and different
+browser clients with the same Bearer token share that operator identity.
 
 `POST /channels/messages` accepts a body, optional replyTo, artifacts and
 `mentions: [{participantId}]`. A direct Markdown mention
@@ -67,6 +77,12 @@ Channel validates and saves the message, then calls dispatch for each Pet target
 using that target's fixed Channel session. Human targets read and respond in the UI.
 The response retains the message fields and includes per-target delivery receipts
 or admission failures; execution completion is observed separately.
+Repeated targets within one message normalize to one recipient. A repeated
+completed observation reuses the saved output ID and dispatch's process-local
+idempotency key. Two independent HTTP message submissions receive different
+message IDs; equal bodies are not a reliable execution identity. Reload / SSE
+reconnect only read observations. No pending input is replayed automatically after
+restart, and there is no cross-restart exactly-once or saved-message recovery guarantee.
 
 Host-authenticated Pet completed replies enter this same addressing path. Pets
 choose whether to @ according to Capability instructions. replyTo is context and

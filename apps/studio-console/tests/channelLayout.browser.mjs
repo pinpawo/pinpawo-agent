@@ -88,7 +88,7 @@ try {
   await page.getByRole('heading', { name: channel.title, exact: true }).waitFor();
   const input = page.getByLabel('Message', { exact: true });
   await input.waitFor();
-  assert.deepEqual(await page.getByLabel('Channel recipient').locator('option').allTextContents(), ['No @ recipient', 'Me', 'Analyst', 'Analyst']);
+  assert.deepEqual(await page.getByLabel('Channel recipient').locator('option').allTextContents(), ['No @ recipient', 'Me · human:studio-operator', 'Analyst · pet:alpha', 'Analyst · pet:beta']);
   assert.equal(await page.getByRole('button', { name: 'Reply to retired-pet', exact: true }).isDisabled(), false);
   assert.ok(await page.locator('.channel-message').filter({ hasText: 'Historical public delivery' }).getByText('Removed Pet', { exact: true }).count());
   const snapshot = await context();

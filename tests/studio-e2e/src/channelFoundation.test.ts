@@ -45,6 +45,11 @@ test('HTTP authenticates operators, preserves notes and dispatches only explicit
     const { channelId, sequence } = await created.json() as { channelId: string; sequence: number };
     assert.equal(dispatches, 0);
     assert.equal((await post('/channels/messages', { channelId, body: 'spoof', author: { kind: 'pet', id: 'reviewer' } })).status, 400);
+    for (const forged of [
+      { source: { petId: 'reviewer', sessionId: 'forged', invocationId: 'forged' } },
+      { scope: { namespace: 'channel', id: channelId } },
+      { participantId: 'pet:reviewer' },
+    ]) assert.equal((await post('/channels/messages', { channelId, body: 'spoof', ...forged })).status, 400);
     assert.equal((await post('/channels/messages', { channelId, body: 'unknown', mentions: [{ petId: 'missing' }] })).status, 409);
     const plain = await (await post('/channels/messages', { channelId, body: 'quoted @reviewer' })).json() as ChannelMessage;
     assert.deepEqual(plain.author, { kind: 'human', id: 'studio-operator' });
@@ -66,6 +71,12 @@ test('HTTP authenticates operators, preserves notes and dispatches only explicit
     assert.equal(execution.status, 202);
     assert.equal(dispatches, 2);
     assert.ok(channel.service.getBinding(channelId, 'reviewer')?.registered);
+    const sameInput = { channelId, body: 'Same text, two new messages', mentions: [{ participantId: 'pet:reviewer' }] };
+    const independent = await Promise.all([post('/channels/messages', sameInput), post('/channels/messages', sameInput)]);
+    assert.ok(independent.every(response => response.status === 201));
+    const messages = await Promise.all(independent.map(response => response.json() as Promise<ChannelMessage>));
+    assert.notEqual(messages[0]!.messageId, messages[1]!.messageId);
+    assert.equal(dispatches, 4, 'independent messages have distinct identities; equal text is not an execution retry');
   } finally { await studio.shutdown(); }
 });
 

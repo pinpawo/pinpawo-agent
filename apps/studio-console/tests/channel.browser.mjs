@@ -148,10 +148,16 @@ try {
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await api(`/channels/interrupts?channelId=${firstId}`)).notifications.length === 1, 'review notice persisted');
   await page.locator('.channel-executions').getByText('review requested', { exact: true }).waitFor();
+  const beforeReconnect = {
+    executionIds: (await executions()).executions.map(item => item.executionId),
+    outputIds: (await publicMessages()).map(item => item.messageId),
+  };
   await page.reload();
   await page.locator('.connection-state.connected').waitFor();
   await page.getByRole('button', { name: 'channel', exact: true }).click();
   await page.locator('.channel-executions').getByText('Deterministic provider denied request (403).', { exact: true }).waitFor();
+  assert.deepEqual((await executions()).executions.map(item => item.executionId), beforeReconnect.executionIds, 'page reload creates no dispatch');
+  assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect.outputIds);
   await page.getByText('Review notification history (1)', { exact: true }).waitFor();
   await page.getByText('Review notification history (1)', { exact: true }).click();
   assert.equal(await page.getByRole('button', { name: 'Approve', exact: true }).count(), 0);
@@ -165,6 +171,8 @@ try {
   await page.locator('.connection-state.connected').waitFor();
   await page.locator('.channel-executions').getByText('status unknown', { exact: true }).waitFor();
   await page.locator('.channel-executions').getByText('Deterministic provider denied request (403).', { exact: true }).waitFor();
+  assert.deepEqual((await executions()).executions.map(item => item.executionId), beforeReconnect.executionIds, 'Host restart and SSE reconnect create no dispatch');
+  assert.deepEqual((await publicMessages()).map(item => item.messageId), beforeReconnect.outputIds);
   await page.getByLabel('Channel recipient').selectOption('pet:alpha');
   await page.getByLabel('Message', { exact: true }).fill('Continue after Host restart.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();

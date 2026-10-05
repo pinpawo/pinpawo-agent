@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
 import { requireAgentSession } from './executionContext';
-import { classifyReadOnlyShellCommand } from './readOnlyShell';
+import { classifyReadOnlyShellCommand, type ReadOnlyShellVerdict } from './readOnlyShell';
 import { ShellRSError, type ShellExecResult, type ShellRS } from './shellRS';
 
 
@@ -115,7 +115,7 @@ export function createRunShellTool(
   variant?: {
     name: string;
     description: string;
-    admit: (command: string) => { allowed: true } | { allowed: false; reason: string };
+    admit: (command: string) => ReadOnlyShellVerdict;
   },
 ) {
   return tool(
@@ -134,8 +134,7 @@ export function createRunShellTool(
       if (variant) {
         const verdict = variant.admit(shellAction.command);
         if (!verdict.allowed) {
-          return `Error: ${variant.name} 拦截了需要审批的操作（${verdict.reason}）。`
-            + '需要执行该命令时改用 run_shell，它会走工具审批。';
+          return `Error: ${variant.name} 不执行该命令（${verdict.reason}）。${verdict.redirect}`;
         }
       }
 
@@ -203,7 +202,7 @@ export function createRunShellTool(
     },
     {
       name: variant?.name ?? 'run_shell',
-      description: variant?.description ?? '短命令兜底工具：执行有时限的非交互 shell 命令并等待结果，每次调用都要经过工具审批，因此明显慢于 inspect_shell。命令如果只是查看而不修改任何状态（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道），改用 inspect_shell，不要用本工具。只有确实会写入、安装、删除、推送，或需要重定向、heredoc、bash -c/node -e 这类内联执行时才用它。只有没有更具体的专用工具覆盖时才使用；不要用它替代 view_file_chunk/read_file/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/http_fetch/download_file；搜索代码（rg）和查询 JSON（jq）用 inspect_shell。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。超时会终止进程组并返回结构化超时结果，不会自动转后台。安装依赖、完整构建、长测试或开发服务器等预计耗时或持续运行的任务用 start_process。超时不回滚已产生的副作用，改用 start_process 前先检查执行结果；终止未确认或结果未知时不要重复启动。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
+      description: variant?.description ?? '短命令兜底工具：执行有时限的非交互 shell 命令并等待结果，每次调用都要经过工具审批，因此明显慢于 inspect_shell。命令如果只是查看而不修改任何状态（grep、sed -n、cat、ls、find、wc、git log/status/diff 等，可含 cd 与管道），改用 inspect_shell，不要用本工具。只有确实会写入、安装、删除、推送，或需要重定向、heredoc、bash -c/node -e 这类内联执行时才用它。只有没有更具体的专用工具覆盖时才使用；git 和 GitHub 操作优先用 git toolkit 的 git_*、git_shell、gh_*、gh_shell；不要用它替代 view_file_chunk/read_file/write_file/apply_patch/move_path/copy_path/mkdir_path/list_dir/http_fetch/download_file；搜索代码（rg）和查询 JSON（jq）用 inspect_shell。默认在当前 workdir 执行，相对路径也默认相对于该目录；如有需要可显式传 cwd 覆盖。支持命令自身携带内容的 heredoc 和输出重定向，写入效果仍受 toolkit 审批约束。默认超时 60s，可通过 timeoutSeconds 调整（上限 600s）；输出过长时保留开头和结尾并标注截断。超时会终止进程组并返回结构化超时结果，不会自动转后台。安装依赖、完整构建、长测试或开发服务器等预计耗时或持续运行的任务用 start_process。超时不回滚已产生的副作用，改用 start_process 前先检查执行结果；终止未确认或结果未知时不要重复启动。不要用于需要交互输入或全屏 TTY 的命令。命令会先进入 toolkit 审批，可批准、拒绝或给出新的处理方向。',
       schema: z.object({
         command: z.string().describe('要执行的 shell 命令'),
         cwd: z.string().optional().describe('命令执行目录；默认当前 workdir'),
@@ -270,18 +269,20 @@ export function createStartProcessTool(shell: ShellRS) {
 }
 
 /**
- * Inspection shell with a heuristic high-risk mistake check, without review.
+ * Inspection shell: runs without review, behind a bottom-line blocklist.
  *
- * `run_shell` costs a model-driven review on every call, and most of what an
- * agent actually runs is inspection — `cd x && grep ...`, `git log | head`.
- * This tool carries no review policy, so `classifyReadOnlyShellCommand` is the
- * admission check. It blocks high-risk operations while trusting unfamiliar
- * inspection commands. It is a best-effort denylist, not a shell sandbox.
+ * `run_shell` costs a review on every call, and most of what an agent runs is
+ * inspection — `cd x && rg ...`, `git log | head`. The description tells the
+ * model to keep mutations out; `classifyReadOnlyShellCommand` only refuses
+ * obviously irreversible operations and git/gh writes, pointing at the tool
+ * that owns their permission. It is not a sandbox.
  */
 export function createInspectShellTool(shell: ShellRS) {
   return createRunShellTool(shell, {
     name: 'inspect_shell',
-    description: '检查用途 shell：执行短检查命令，无需工具审批。搜索代码和文件优先用 rg，查询 JSON 用 jq。支持常见 shell 组合，例如 `if test -f package.json; then cat package.json; else ls; fi` 和 `cd src && rg -n "foo" | head -20`。仅用少数高危规则提醒明显误操作，如删除、提权、磁盘破坏；命中时拒绝本次执行，改用 run_shell 审批。由 shell-quote 分词，仅检查 |、&&、||、; 等连接符分隔的命令头及简单 if/then/else 前缀；包括 kill 的 SIGKILL 强制终止。不验证语法，不逐条审查完整脚本；换行、注释跨行、前置文件描述符、循环和嵌套语法可能漏检，quoted 关键字可能误判。变量保留为占位符，不读取 Host 环境展开。动态命令与脚本内部行为不保证识别，也不保证只读。放行后直接在 Host 执行环境运行，本工具不提供额外沙箱。你应确认命令用于检查；主动修改状态时用 run_shell，不要把修改命令送进 inspect_shell 试探是否会被拦截；长任务用 start_process。默认在当前 workdir 执行，可传 cwd 覆盖。超时会终止进程组，不转后台。',
+    description: '检查用 shell：执行只读的检查命令并直接返回结果，无需审批。适合 rg、grep、cat、ls、find、wc、jq、git status/log/diff/show、gh pr view/checks 这类查询，可用 cd、管道和 && 组合，例如 `cd src && rg -n "foo" | head -20`。搜索代码优先 `rg -n`（-F 字面匹配、-i 忽略大小写、-C 2 带上下文、-g "*.ts" 限定文件、--files 按文件名找），查 JSON 用 jq。'
+      + '只放检查命令，不要放任何会修改状态的命令：git 写操作（commit、reset、checkout、stash、rebase、push 等）用 git_* 工具或 git_shell；GitHub 写操作（评论、review、合并、关闭、编辑等）用 gh_* 工具或 gh_shell；写文件、安装依赖、删除、结束进程等用 run_shell；执行脚本或下载内容（`curl … | sh`、`bash -c`、`node`/`python` 跑脚本）、测试和构建不算检查，用 run_shell 或 start_process；长任务用 start_process；没有对应工具时用 run_shell。'
+      + 'git/gh 写操作和少数高危命令（删除、提权、磁盘操作、强制 kill）会被拒绝并提示改用的工具；这只是底线拦截，不是审批，不要用它试探命令能否执行。默认在当前 workdir 执行，可传 cwd 覆盖；超时会终止进程组，不转后台。',
     admit: classifyReadOnlyShellCommand,
   });
 }

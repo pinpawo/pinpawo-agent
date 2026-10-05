@@ -304,5 +304,7 @@ test('inspect_shell forwards unfamiliar inspection commands but never executes b
     'if rm file; then ls; fi', 'ls || rm file', 'ls | rm file']) {
     assert.match(String(await inspect.invoke({ command }, inSession)), /run_shell/);
   }
+  assert.match(String(await inspect.invoke({ command: 'git reset --hard' }, inSession)), /git_shell/);
+  assert.match(String(await inspect.invoke({ command: 'gh pr merge 1 --squash' }, inSession)), /gh_shell/);
   assert.deepEqual(commands, ['nc -vz -w 5 example.com 443', "jq '.events | map(.type)' state.json | head", control]);
 });

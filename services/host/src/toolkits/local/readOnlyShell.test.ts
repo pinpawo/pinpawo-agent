@@ -7,72 +7,72 @@ function allows(command: string, expected = true) {
   assert.equal(result.allowed, expected, `${command}: ${JSON.stringify(result)}`);
 }
 
-test('ordinary commands, quoted queries and empty arguments are not dangerous heads', () => {
+function redirects(command: string, tool: RegExp) {
+  const result = classify(command);
+  assert.equal(result.allowed, false, command);
+  assert.match(result.allowed ? '' : result.redirect, tool, command);
+}
+
+test('inspection commands outside the blocklist are trusted, quoted operators included', () => {
   for (const command of [
     'ls -la', 'nc -vz example.com 443', 'ossutil ls oss://pinet/ 2>&1 | head',
-    'git check-ignore -v file', 'custom-inspector --status', 'git log --grep=rm',
-    'cat file | jq ".events | map(.type)"', "jq '.events\n| map(.type)' file",
-    "echo 'rm file | sudo ls; kill -9 1'", 'echo "rm | kill"',
-    "'' rm file", '"" rm file', "echo ''#text", 'echo ok # ; rm file',
-    'cp a b', 'npm install', 'git commit -m x', 'git push', 'git reset --soft HEAD',
-    'echo hi > file', 'cat < file', 'rm --help', 'command -v rm',
-    'kill -0 123', 'kill -l', 'kill -- -9',
+    'custom-inspector --status', 'cat file | jq ".events | map(.type)"', "jq '.events\n| map(.type)' file",
+    "echo 'rm file | sudo ls; kill -9 1'", 'echo "rm | kill"', 'echo ok # ; rm file',
+    'cd /repo && rg -n "foo" | head -20', 'cd /repo\nrg -n foo', 'find . -name "*.ts" | xargs wc -l',
+    'find . -name "*.ts" -exec grep -l foo {} \\;', 'rm --help', 'command -v rm',
+    'kill -0 123', 'kill -l', 'pkill -0 node', 'if test -f file; then cat file; else ls; fi',
+    'bash -c "ls -la"', 'echo hi > file', 'npm install',
   ]) allows(command);
 });
 
-for (const separator of ['|', '&&', '||', ';', '&', '|&']) {
-  test(`checks both sides of ${separator} without interpreting quoted operators`, () => {
+for (const separator of ['|', '&&', '||', ';', '&', '|&', '\n']) {
+  test(`checks every command on both sides of ${JSON.stringify(separator)}`, () => {
     allows(`printf ok ${separator} stat file`);
-    for (const dangerous of ['rm file', '/bin/rm file', 'env FOO=1 command rm file',
-      'kill -9 123']) {
+    for (const dangerous of ['rm file', '/bin/rm file', 'env FOO=1 command rm file', 'kill -9 123',
+      'git reset --hard', 'gh pr merge 1 --squash']) {
       allows(`printf ok ${separator} ${dangerous}`, false);
       allows(`${dangerous} ${separator} head`, false);
     }
-    allows(`echo '${separator} rm file' ${separator} head`);
   });
 }
 
-test('small dangerous-operation rules apply at direct and common prefixed heads', () => {
+test('bottom-line operations are refused at direct, prefixed and wrapped heads', () => {
   for (const command of [
-    'rm file', 'rm -- --help', 'shred file', 'dd if=image of=/dev/disk0',
-    'mkfs.ext4 /dev/sda', 'sudo ls', 'reboot', 'FOO=1 rm file',
-    "'r'm file", 'r\\m file', 'env -u FOO /bin/rm file', 'exec -a label rm file',
-    'kill -KILL 123', 'kill -SIGKILL 123', 'kill -s KILL 123', 'kill --signal=9 123',
-    'if rm file; then ls; fi', 'if true; then rm file; else ls; fi',
-    'if false; then ls; else rm file; fi',
+    'rm file', 'rm -- --help', 'shred file', 'dd if=image of=/dev/disk0', 'mkfs.ext4 /dev/sda',
+    'sudo ls', 'reboot', 'FOO=1 rm file', "'r'm file", 'r\\m file', 'env -u FOO /bin/rm file',
+    'exec -a label rm file', 'kill -KILL 123', 'kill -s KILL 123', 'kill --signal=9 123',
+    'pkill -9 node', 'killall -KILL node',
+    'if rm file; then ls; fi', 'if false; then ls; else rm file; fi',
+    // a newline is a separator even though shell-quote reads it as whitespace
+    'cd /repo\nrm -rf build', 'ls # comment\nrm file',
+    // one level of indirection hiding the same head
+    'bash -c "rm -rf build"', 'sh -lc "cd x && rm y"', 'find . -delete', 'find . -name x -exec rm {} \\;',
+    'find . | xargs rm', 'xargs -0 -n 1 rm < list', 'bash -c "git reset --hard"',
   ]) allows(command, false);
-  allows('if test -f file; then cat file; else ls; fi');
   allows('', false);
 });
 
-test('variable placeholders do not disappear or expand using the Host environment', () => {
+test('git and gh writes are refused and pointed at their permissioned tools', () => {
+  for (const command of ['git reset --hard', 'git -C /repo clean -fd', 'git push --force', 'git commit -m x',
+    'git branch -D main', 'git stash', 'cd /repo && git checkout main']) {
+    redirects(command, /git_shell/);
+  }
+  for (const command of ['gh pr merge 1 --squash', 'gh pr comment 1 --body x', 'gh api -X POST repos/o/r/issues']) {
+    redirects(command, /gh_shell/);
+  }
+  redirects('rm -rf build', /run_shell/);
+  for (const command of ['git status', 'git log --oneline | head', 'git diff --stat', 'git -C /repo branch -a',
+    'gh pr checks 1', 'gh api repos/o/r/pulls | jq length']) {
+    allows(command);
+  }
+});
+
+test('variables stay placeholders instead of expanding from the Host environment', () => {
   // Erasing $PREFIX would change the first executable into rm.
   allows('$PREFIX"rm" file');
   allows('echo "$VALUE | rm file"');
   allows('echo $VALUE | rm file', false);
   allows('FOO=$VALUE rm file', false);
-});
-
-test('library information loss and indirect execution are explicit out-of-scope cases', () => {
-  // No source rescanner: newlines, comment termination, FD adjacency and loop
-  // bodies are not promised. These strings are classified, never executed.
-  for (const command of [
-    'ls\nrm file', 'ls # comment\nrm file', '2>/dev/null rm file',
-    'r\\\nm file', 'for f in a; do rm file; done',
-    'case x in x) rm file ;; esac', '(rm file)',
-    'bash -c "rm file"', 'node cleanup.js', 'echo "$(rm file)"',
-    'echo ${bad substitution}; rm file', 'echo "unterminated',
-  ]) allows(command);
-  // shell-quote removes quote provenance; the cheap prefix handling may reject
-  // a quoted keyword as well. Do not claim complete shell semantics.
-  allows("'if' rm file", false);
-});
-
-
-test('Git semantics are a model tool-selection responsibility, not admission rules', () => {
-  for (const command of ['git status', 'git log', 'git diff', 'git reset --hard',
-    'git -C /repo reset --hard', 'git clean -fd', 'git push --force', 'git branch -D main']) {
-    allows(command);
-  }
-  allows('git status | rm file', false);
+  // An unknown git subcommand is not read-only, so it goes to git_shell.
+  allows('git $SUBCOMMAND', false);
 });

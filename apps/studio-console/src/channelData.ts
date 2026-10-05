@@ -31,12 +31,15 @@ export type DispatchQueue = {
   queuedConversations: number; queuedDispatches: number; entries?: DispatchQueueEntry[]; activeDispatch?: DispatchQueueEntry;
 };
 
-export function channelAuthorParticipantId(author: ChannelMessage['author']): string {
-  return `${author.kind}:${encodeURIComponent(author.id)}`;
+export function channelAuthorParticipantId(author: ChannelMessage['author'], participants: ChannelParticipant[] = []): string {
+  const registered = participants.find(item => item.kind === author.kind && item.id === author.id);
+  if (registered) return registered.participantId;
+  const encoded = encodeURIComponent(author.id).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${author.kind}:${encoded}`;
 }
 
 export function channelMentionLabel(mention: ChannelMessage['mentions'][number], participants: ChannelParticipant[], pets: ChannelPet[], viewerParticipantId?: string): string {
-  const id = mention.participantId ?? `pet:${encodeURIComponent(mention.petId ?? '')}`;
+  const id = mention.participantId ?? channelAuthorParticipantId({ kind: 'pet', id: mention.petId ?? '' }, participants);
   if (id === viewerParticipantId) return 'Me';
   const participant = participants.find(item => item.participantId === id);
   if (participant) return participant.label;
@@ -69,7 +72,7 @@ export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKn
 
 export function channelMessageIdentity(message: ChannelMessage, pets: ChannelPet[], registryKnown = true,
   participants: ChannelParticipant[] = [], viewerParticipantId?: string) {
-  const participantId = channelAuthorParticipantId(message.author);
+  const participantId = channelAuthorParticipantId(message.author, participants);
   if (participantId === viewerParticipantId) return { name: 'Me', removed: false };
   const participant = participants.find(item => item.participantId === participantId);
   if (participant) return { name: participant.label, removed: false };

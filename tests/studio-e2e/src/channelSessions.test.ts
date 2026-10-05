@@ -20,7 +20,7 @@ async function waitFor(done: () => boolean) {
 }
 const human = { kind: 'human', id: 'owner' } as const;
 const goal = { title: 'Goal', goal: 'Long term', scope: 'This round' };
-async function fixture(root: string, pets = ['one']) {
+async function fixture(root: string, pets = ['one'], reply?: (input: string) => string) {
   const channel = createChannelPlugin({ databasePath: join(root, 'channels.sqlite'), httpRoute: false });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const calls: Array<{ petId: string; thread: string; text: string; count: number }> = [];
@@ -42,7 +42,7 @@ async function fixture(root: string, pets = ['one']) {
         const invocation = readPetInvocationContext();
         const count = state.messages.filter(m => m._getType() === 'human').length;
         calls.push({ petId, thread: invocation?.sessionId ?? 'tui', text: last, count });
-        return { messages: [new AIMessage(last === 'ask' ? 'Which destination?' : `Answer ${count}: ${last}`)] };
+        return { messages: [new AIMessage(reply ? reply(last) : last === 'ask' ? 'Which destination?' : `Answer ${count}: ${last}`)] };
       } finally { active--; }
     }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
     const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
@@ -74,6 +74,20 @@ async function fixture(root: string, pets = ['one']) {
 function outputs(f: Awaited<ReturnType<typeof fixture>>, channelId: string) {
   return f.channel.service.readHistory(channelId).entries.filter((m): m is ChannelMessage => m.kind === 'message' && !!m.source);
 }
+
+test('Markdown targets a legal special Pet identity without dispatching its registered prefix', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-special-identity-'));
+  const f = await fixture(root, ['a', 'a)b'], () => 'Special identity delivery.');
+  try {
+    const id = f.channel.service.createChannel(goal, human).channelId;
+    const result = await f.channel.sendMessage(id, { body: '[@Same name](participant:pet:a%29b) Inspect this.' });
+    assert.equal(result.deliveries[0]?.participantId, 'pet:a%29b');
+    await waitFor(() => outputs(f, id).length === 1);
+    assert.deepEqual(f.calls.map(call => call.petId), ['a)b']);
+    assert.equal(outputs(f, id)[0]!.author.id, 'a)b');
+    assert.equal(f.channel.service.getBinding(id, 'a'), null);
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('Channel pair sessions survive new tasks, replies and restart; four Pets keep independent threads', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-sessions-'));

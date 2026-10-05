@@ -1,6 +1,6 @@
 # Channel 寻址、执行与状态设计
 
-状态：设计与本地实现草案，2026-10-05。本文固化用户已确认的产品语义，并列出建议、必要接口和
+状态：设计与实现草案，2026-10-05。本文固化用户已确认的产品语义，并列出建议、必要接口和
 具体实施形式。人和 Pet 是地位平等的 Channel 参与者；@ 语义统一属于 Channel，
 执行接纳、可靠性与全局队列属于 dispatch，Channel 调用并展示其事实。
 本设计不涉及 Trigger 插件变更。它不是实现完成说明，也不授权发布、迁移用户配置或更新本地服务。
@@ -22,7 +22,7 @@ Channel 会话绑定、接纳校验和权限边界，不引入 LLM check 或泛�
 | PR #901 head `3269b07c`，对应已合并历史 `155299cc` | Console 三栏、保存笔记、显式执行、原 Pet/session 回复与执行历史；这是用户昨天试用的代码版本，未据此核查其实际 Mac 日志或配置。 |
 | PR #903 讨论开始时的远端 head `4c191c43` | 仅退役 Console Kanban 入口与专属 UI；后续提交与 CI 状态以 PR 为准。 |
 | `1e4f3938`，讨论开始时仅本地 | 完整 Kanban 退役，默认模板启用现有 Channel，移除任务分配及 task.done → Wiki 规则；进入 PR 不等于已部署。 |
-| 新分支 `codex/892-channel-participant-loop` | 从 #903 merge `c996ed23` 开始，先纳入六点修订，再实现统一 @、全局队列观察和 Console。仍为本地工作，不代表发布或部署。 |
+| 新分支 `codex/892-channel-participant-loop`，[Draft PR #904](https://github.com/pinpawo/pinpawo-agent/pull/904) | 从 #903 merge `c996ed23` 开始，先纳入六点修订，再实现统一 @、全局队列观察和 Console。当前供 review，不代表已合并、发布或部署。 |
 
 上述远端信息是讨论中已核对的基线，不代表本稿重新检查了最新 main 或用户运行状态。
 
@@ -58,7 +58,8 @@ Channel 使用统一的参与者（participant）抽象。人和 Pet 在消息�
 | 身份类型与响应适配 | 人通过 UI 阅读并响应，Pet 通过 runtime 接纳并执行；这影响送达与响应方式，不改变参与者地位。 |
 | 权限与能力 | 权限可正交配置；平等不等于权限相同或跳过鉴权、工具审核、人工审批及能力边界。 |
 
-新分支采用统一的 `participantId` 引用，形式为 `kind:encodeURIComponent(id)`，
+新分支采用统一的 `participantId` 引用，形式为 `kind:<RFC3986 百分号编码的 id>`，
+在 `encodeURIComponent` 基础上也编码 `!'()*`，避免合法身份中的括号截断 Markdown 链接。
 例如 `pet:reviewer`、`human:studio-operator`。前缀只是现有身份与响应适配的引用，
 不能因此拆成两套协作协议。
 现有 `petId` 与固定 session 是 Pet runtime 的适配事实；人不需要伪造 Pet session 才能

@@ -14,7 +14,10 @@ export const channelMentionSchema = z.object({
 export type ChannelMention = z.infer<typeof channelMentionSchema>;
 
 export function channelParticipantId(kind: ChannelParticipant['kind'], id: string): string {
-  return `${kind}:${encodeURIComponent(id)}`;
+  // encodeURIComponent leaves Markdown delimiters such as parentheses intact.
+  // Encode them too so every registered identity is safe in a direct link.
+  const encoded = encodeURIComponent(id).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${kind}:${encoded}`;
 }
 export function channelMentionId(mention: ChannelMention): string {
   return mention.participantId ?? channelParticipantId('pet', mention.petId!);
@@ -26,7 +29,7 @@ export function channelMentionId(mention: ChannelMention): string {
  */
 export function parseChannelMentions(body: string, explicit: ChannelMention[], participants: ChannelParticipant[]): ChannelMention[] {
   const candidates = explicit.map(channelMentionId);
-  const quotes = [...body.matchAll(/"[^"\n]*"|“[^”]*”|‘[^’]*’|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])/gu)]
+  const quotes = [...body.matchAll(/"[^"\n]*"|“[^”]*”|‘(?:[^’]|(?<=[\p{L}\p{N}])’(?=[\p{L}\p{N}]))*’|(?<![\p{L}\p{N}])'(?:[^'\n]|(?<=[\p{L}\p{N}])'(?=[\p{L}\p{N}]))*'(?![\p{L}\p{N}])/gu)]
     .map(match => [match.index, match.index + match[0].length] as const);
   function visit(node: Nodes): void {
     if (['blockquote', 'code', 'inlineCode', 'html'].includes(node.type)) return;

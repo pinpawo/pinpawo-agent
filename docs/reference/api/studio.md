@@ -64,7 +64,8 @@ The Channel Plugin supplies `GET /channels/participants` and participants in Cha
 context. A participant has a unique `participantId`, label, existing identity and
 response adapter kind. The configured local operator and Pets share one protocol;
 the viewer identity affects the display label only.
-IDs are `kind:encodeURIComponent(id)`: Pets use the unique Studio registration
+IDs are `kind:<RFC3986 percent-encoded id>` (including `!'()*`, which
+`encodeURIComponent` leaves unescaped, so Markdown links stay intact). Pets use the unique Studio registration
 `petId`; the one local operator uses Channel Plugin `operatorId` (default
 `studio-operator`). This is not a multi-user identity registry, and different
 browser clients with the same Bearer token share that operator identity.

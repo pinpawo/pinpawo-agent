@@ -17,15 +17,23 @@ test('identity-bearing mentions route independently of duplicate and changed lab
   assert.equal(parseChannelMentions(body, [], renamed)[0]?.participantId, 'pet:two');
   assert.equal(parseChannelMentions(body, [], renamed)[0]?.label, 'Renamed');
   assert.equal(channelParticipantId('pet', 'id with /'), 'pet:id%20with%20%2F');
+  for (const kind of ['human', 'pet'] as const) for (const id of ['a)b', 'a(b', "a'b", 'a*b', 'id !()/ 中文']) {
+    const participant = { participantId: channelParticipantId(kind, id), kind, id, label: 'Same name' };
+    const prefix = { participantId: channelParticipantId(kind, 'a'), kind, id: 'a', label: 'Same name' };
+    const serialized = `[@Same name](participant:${participant.participantId})`;
+    assert.deepEqual(parseChannelMentions(serialized, [], [prefix, participant]), [{ participantId: participant.participantId, label: participant.label }]);
+    if (kind === 'pet') assert.deepEqual(parseChannelMentions('work', [{ petId: id }], [participant]), [{ participantId: participant.participantId, label: participant.label }]);
+  }
 });
 
 test('code, quoted reports, Markdown quotations and bare labels never address participants', () => {
   const mention = '[@Same name](participant:pet:one)';
-  for (const body of ['@one', '`'+mention+'`', '```md\n'+mention+'\n```', '> '+mention, 'They wrote "'+mention+'".', "They wrote '"+mention+"'.", '转述：“'+mention+'”', '转述：‘'+mention+'’']) {
+  for (const body of ['@one', '`'+mention+'`', '```md\n'+mention+'\n```', '> '+mention, 'They wrote "'+mention+'".', "They wrote '"+mention+"'.", "They wrote 'Please don't forget "+mention+"'", "They wrote '[@O'Neil](participant:pet:one)'", 'They wrote ‘Please don’t forget '+mention+'’', 'They wrote ‘[@O’Neil](participant:pet:one)’', '转述：“'+mention+'”', '转述：‘'+mention+'’']) {
     assert.deepEqual(parseChannelMentions(body, [], participants), [], body);
   }
   assert.equal(parseChannelMentions('Example:\n> '+mention+'\n\n'+mention+' do this.', [], participants).length, 1);
   assert.equal(parseChannelMentions("It's ready. "+mention+" Don't delay.", [], participants).length, 1);
+  assert.equal(parseChannelMentions('It’s ready. '+mention+' Don’t delay.', [], participants).length, 1);
   assert.throws(() => parseChannelMentions('[@Same name](participant:pet:missing)', [], participants), /Unknown Channel participant/);
   assert.throws(() => parseChannelMentions('work', [{ participantId: 'pet:missing' }], participants), /Unknown Channel participant/);
 });

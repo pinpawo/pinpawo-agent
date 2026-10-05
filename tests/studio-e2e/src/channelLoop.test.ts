@@ -21,14 +21,18 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
 test('one participant protocol drives a normal Pet loop, same-session inputs and actual global queue observations', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-loop-'));
   const channel = createChannelPlugin({ databasePath: join(root, 'channel.sqlite') });
+  const read = channel.toolkits[0]!.tools.find(entry => entry.tool.name === 'channel_read_context')!.tool;
   const http = createStudioHttpPlugin({ port: 0, authToken: 'channel-loop-test-only' });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
   const calls: Array<{ petId: string; sessionId: string; text: string; count: number }> = [];
+  const modelContexts: Array<{ channelId: string; text: string; view: any }> = [];
   const running = new Map<string, number>();
   let release!: () => void;
   const hold = new Promise<void>(resolve => { release = resolve; });
   const firstReply = '[@Same name](participant:pet:beta) Please inspect.';
   const secondReply = '[@Same name](participant:pet:alpha) Inspection complete.';
+  const directHandoff = '[@Same name](participant:pet:beta) Deliver directly to human.';
+  const selfHandoff = '[@Same name](participant:pet:alpha) Finish self handoff.';
   for (const petId of ['alpha', 'beta']) {
     const config = buildHostRuntimeConfig(join(root, petId));
     const checkpointer = new FileSaver(config.checkpointPath);
@@ -40,10 +44,17 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
       assert.equal(running.get(petId), 1, 'same Pet never overlaps across Channels');
       calls.push({ petId, sessionId: invocation.sessionId!, text, count: state.messages.length });
       try {
+        const view = JSON.parse(await read.invoke({ limit: 200 }) as string);
+        assert.equal(view.channel.channelId, invocation.scope!.id);
+        assert.equal(view.participants.length, 3);
+        assert.ok(!Object.hasOwn(view, 'queues') && !Object.hasOwn(view, 'interrupts'));
+        modelContexts.push({ channelId: view.channel.channelId, text, view });
         if (text === 'hold-private-input') await hold;
         if (text === 'fail' && petId === 'alpha') throw new Error('Deterministic execution failure.');
         const reply = text === 'start-loop' ? firstReply : text === firstReply ? secondReply
-          : text === secondReply ? '[@Me](participant:human:studio-operator) Result delivered.' : 'Public result.';
+          : text === 'start-direct-human' ? directHandoff : text === 'start-self-handoff' ? selfHandoff
+          : text === 'unknown-output-target' ? '[@Missing](participant:pet:missing) Inspect this.'
+          : [secondReply, directHandoff, selfHandoff].includes(text) ? '[@Me](participant:human:studio-operator) Result delivered.' : 'Public result.';
         return { messages: [new AIMessage(reply)] };
       } finally { running.set(petId, running.get(petId)! - 1); }
     }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
@@ -83,7 +94,7 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     const humanResult = await channel.sendMessage(a, { body: '[@Me](participant:human:studio-operator) Human input.' });
     assert.deepEqual(humanResult.deliveries.map(delivery => delivery.state), ['delivered']);
     assert.equal(calls.length, 0);
-    await channel.sendMessage(a, { body: '> [@Same name](participant:pet:alpha) quoted\n\n`[@Same name](participant:pet:beta)`' });
+    await channel.sendMessage(a, { body: '> [@Same name](participant:pet:alpha) quoted\n\n`[@Same name](participant:pet:beta)`\n\nThey wrote \'Please don\'t forget [@Same name](participant:pet:alpha)\'\n\nThey wrote ‘Please don’t forget [@Same name](participant:pet:beta)’' });
     assert.equal(calls.length, 0);
     await channel.sendMessage(a, { body: 'start-loop', mentions: [{ participantId: 'pet:alpha' }, { participantId: 'pet:alpha' }] });
     await waitFor(() => outputs(a).length === 3);
@@ -114,8 +125,13 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
     assert.equal(alpha.entries[0].sessionId, channel.service.getBinding(b, 'alpha')!.sessionId);
     assert.notEqual(alpha.entries[0].sessionId, calls[0]!.sessionId);
     assert.ok(!JSON.stringify(queues).includes('hold-private-input'), 'global observation exposes no request text');
+    const beforeReads = calls.length;
+    await Promise.all(Array.from({ length: 8 }, () => get(`/channels/context?channelId=${b}`)));
+    assert.equal(calls.length, beforeReads, 'reading context never dispatches or replays inputs');
+    assert.equal((await get('/dispatch/queues')).queues.find((queue: any) => queue.petId === 'alpha').queuedDispatches, 1);
     release();
     await waitFor(() => outputs(a).length === 5 && outputs(b).length === 1);
+    assert.ok(!JSON.stringify(modelContexts.find(item => item.channelId === b)!.view).includes('hold-private-input'));
     await channel.sendMessage(a, { body: 'follow up', replyTo: outputs(a)[0]!.messageId, mentions: [{ participantId: 'pet:beta' }] });
     await waitFor(() => outputs(a).length === 6);
     assert.equal(outputs(a).at(-1)!.source!.sessionId, calls[1]!.sessionId, 'reference to alpha does not borrow its session for beta');
@@ -128,6 +144,20 @@ test('one participant protocol drives a normal Pet loop, same-session inputs and
       return executions.length === 2 && executions.some(execution => execution.petId === 'alpha' && execution.state === 'failed')
         && executions.some(execution => execution.petId === 'beta' && execution.state === 'completed');
     });
+    for (const [body, targets] of [
+      ['start-direct-human', ['alpha', 'beta']], ['start-self-handoff', ['alpha', 'alpha']],
+    ] as const) {
+      const beforeOutputs: number = outputs(a).length;
+      const beforeCalls: number = calls.length;
+      await channel.sendMessage(a, { body, mentions: [{ participantId: 'pet:alpha' }] });
+      await waitFor(() => outputs(a).length === beforeOutputs + 2);
+      assert.deepEqual(calls.slice(beforeCalls).map(call => call.petId), targets);
+      assert.equal(outputs(a).at(-1)!.mentions[0]?.participantId, 'human:studio-operator');
+    }
+    const invalidOutput = await channel.sendMessage(a, { body: 'unknown-output-target', mentions: [{ participantId: 'pet:alpha' }] });
+    await waitFor(() => channel.service.readExecutions(a).executions.some(execution => execution.messageId === invalidOutput.message.messageId && execution.deliveryError?.includes('Unknown Channel participant')));
+    assert.ok(outputs(a).at(-1)!.body.includes('participant:pet:missing'), 'an invalid model address does not discard the public reply');
+    assert.deepEqual(outputs(a).at(-1)!.mentions, []);
     const before = channel.service.readHistory(a).entries.length;
     await assert.rejects(channel.sendMessage(a, { body: '[@Same name](participant:pet:missing)' }), /Unknown/);
     assert.equal(channel.service.readHistory(a).entries.length, before);

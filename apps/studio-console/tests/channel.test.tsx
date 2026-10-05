@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readChannelPages, executionLabel, channelPetIdentity, channelMessageIdentity, channelMessageExecution,
-  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelMessageExecutions, type ChannelExecution, type ChannelMessage } from '../src/channelData';
+  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
 import { ChannelTimeline, ChannelExecutionHistory } from '../src/ChannelPanel';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
@@ -80,6 +80,13 @@ test('registered names are consistent while routing IDs, duplicates and removed 
   assert.deepEqual(channelPetIdentity('retired', pets), { name: 'retired', removed: true, optionLabel: 'retired' });
   assert.equal(channelPetIdentity('worker', [], false).removed, false, 'a registry still loading is not proof of removal');
   assert.equal(channelMessageInput('a', 'pet:worker', 'next').mentions?.[0]?.participantId, 'pet:worker', 'presentation cannot change routing');
+  const participants = [
+    { participantId: 'human:operator%29', kind: 'human', id: 'operator)', label: 'Operator' },
+    { participantId: 'pet:a%29b', kind: 'pet', id: 'a)b', label: 'Analyst' },
+  ];
+  assert.equal(channelMessageIdentity({ ...message, author: { kind: 'human', id: 'operator)' } }, pets, true, participants, 'human:operator%29').name, 'Me');
+  assert.equal(channelMessageIdentity({ ...message, author: { kind: 'pet', id: 'a)b' } }, [], true, participants).name, 'Analyst');
+  assert.equal(channelMentionLabel({ petId: 'a)b' }, participants, []), 'Analyst');
 });
 
 test('grouping applies only to nearby notes and keeps request, reply, output and date boundaries', () => {

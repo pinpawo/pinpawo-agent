@@ -7,6 +7,8 @@
     "bun": ">=1.3.0"
   },
   "scripts": {
+    "brand:generate": "node scripts/generateWelcomeLogo.ts",
+    "brand:check": "node scripts/generateWelcomeLogo.ts --check",
     "build": "bun build --compile src/main.ts --outfile dist/pinpawo-tui",
     "build:distribution": "bun run scripts/buildDistribution.ts",
     "build:spike": "bun build --compile src/probes/viewportProbe.ts --outfile dist/pinpawo-tui-spike",

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import stringWidth from 'string-width';
 import type { AgentSession } from '@pinpawo/agent-session';
 import { TUI_VERSION } from '../version';
 import { buildWelcomeLines } from './welcomeModel';
+import { PRIMARY_LOGO_LINES, PRIMARY_LOGO_SOURCE_SHA256 } from './primaryLogo.generated';
 
 const SESSION: AgentSession = {
   sessionId: 'chat:one',
@@ -33,8 +35,8 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
     },
   });
   assert.equal(lines[0], ' '.repeat(80));
-  assert.ok(lines.some((line) => line.includes('██    ██')));
-  assert.ok(lines.some((line) => line.includes('████████████')));
+  assert.ok(lines.some((line) => line.includes('████        ████')));
+  assert.ok(lines.some((line) => line.includes('▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄')));
   assert.ok(lines.some((line) => line.includes('PinPawo TUI v2')));
   assert.ok(lines.some((line) => line.includes('v0.1.0')));
   assert.ok(lines.some((line) => line.includes('host v0.2.0')));
@@ -63,6 +65,18 @@ test('welcome remains single-row safe in a narrow terminal', () => {
   }
   assert.equal(lines[0], ' '.repeat(24));
   assert.equal(lines.at(-2), ' '.repeat(24));
+  assert.ok(lines.some((line) => line.includes('PinPawo TUI v2')));
+  assert.ok(lines.every((line) => !/[█▀▄]/.test(line)), 'omit a mark that cannot fit intact');
+});
+
+test('welcome mark retains the selected SVG provenance and half-unit pad edges', () => {
+  const svg = readFileSync(new URL('../../../../assets/brand/pinpawo-primary-black.svg', import.meta.url), 'utf8');
+  assert.equal(PRIMARY_LOGO_SOURCE_SHA256, createHash('sha256').update(svg).digest('hex'));
+  assert.equal(PRIMARY_LOGO_LINES.length, 12);
+  assert.ok(PRIMARY_LOGO_LINES.every((line) => stringWidth(line) === 24));
+  assert.equal(PRIMARY_LOGO_LINES[5], '    ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄    ');
+  assert.equal(PRIMARY_LOGO_LINES[11], '      ▀▀▀▀▀▀▀▀▀▀▀▀      ');
+  assert.ok(PRIMARY_LOGO_LINES.every((line) => line === [...line].reverse().join('')));
 });
 
 test('welcome keeps an unsafe actor label on one terminal row', () => {

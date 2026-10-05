@@ -1,5 +1,11 @@
 # PinPawo Agent
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/pinpawo-primary-white-lockup.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/brand/pinpawo-primary-black-lockup.svg">
+  <img alt="PinPawo" src="assets/brand/pinpawo-primary-black-lockup.svg" width="320">
+</picture>
+
 Open-source agent runtime, local CLI/TUI, browser Toolkit, and Studio for PinPawo.
 The public stack runs locally; the private app and hosted backend live elsewhere.
 

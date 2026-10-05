@@ -5,21 +5,13 @@ import { sessionActorLabel } from '../session/sessionDisplay';
 import { formatRuntimeModel } from '../status/statusModel';
 import { truncateTerminalLine } from '../text/terminalText';
 import { TUI_VERSION } from '../version';
+import { PRIMARY_LOGO_LINES } from './primaryLogo.generated';
 
 /**
- * Pixel-art paw print. One square pixel is two columns wide because terminal
- * cells are twice as tall as they are wide, so every run starts on an even
- * column and spans an even width. Square corners only: half-block bevels read
- * as mush at this size.
+ * Derived from the selected primary SVG. Half blocks retain the half-unit
+ * vertical gap and pad edges in terminals with the usual 1:2 cell aspect.
  */
-const PAW_LINES = [
-  '  ██    ██  ',
-  '██        ██',
-  '            ',
-  '  ████████  ',
-  '████████████',
-  '  ████████  ',
-] as const;
+const PAW_LINES = PRIMARY_LOGO_LINES;
 
 export const WELCOME_LOGO_HEIGHT = PAW_LINES.length;
 export const WELCOME_LOGO_WIDTH = terminalBlockWidth(PAW_LINES);
@@ -70,7 +62,10 @@ export function buildWelcomeLines(input: {
     `model         ${model}`,
     `directory     ${cwd}`,
   ];
-  const identity = sideBySide
+  const identity = contentWidth < WELCOME_LOGO_WIDTH
+    // Keep the selected mark intact rather than clipping it in small panes.
+    ? details
+    : sideBySide
     ? joinTerminalColumns(PAW_LINES, details, contentWidth, 4)
     : [
         ...PAW_LINES,

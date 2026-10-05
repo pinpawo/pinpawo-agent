@@ -312,18 +312,24 @@ test('welcome is committed once before the first timeline rows', async () => {
 });
 
 test('welcome paints solid raster cells without font line-height seams', async () => {
-  const setup = await createTimelineRenderer(20);
+  const setup = await createTimelineRenderer(80);
   const timeline = new TimelineScrollback(setup.renderer);
   try {
-    timeline.renderWelcome(['█ paw']);
-    assert.equal(setup.cellOutput.takeText(), '  paw');
+    timeline.renderWelcome(buildWelcomeLines({
+      session: session([]), width: 80, connection: 'connected',
+    }));
 
     const spans = setup.styleOutput.take().flatMap((lines) =>
       lines.flatMap((line) => line.spans)
     );
-    const solidCell = spans.find((span) => span.text === ' ');
+    const solidCell = spans.find((span) => (
+      /^ +$/.test(span.text) && span.bg.equals(RGBA.fromHex('#ffffff'))
+    ));
     assert.ok(solidCell);
-    assert.ok(solidCell.bg.equals(RGBA.fromHex('#69c0c8')));
+    const halfCell = spans.find((span) => span.text.includes('▄'));
+    assert.ok(halfCell);
+    assert.ok(halfCell.fg.equals(RGBA.fromHex('#ffffff')));
+    assert.ok(halfCell.bg.equals(RGBA.fromHex('#22272e')));
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
@@ -349,14 +355,14 @@ test('welcome uses visual hierarchy for identity, metadata, and shortcuts', asyn
       lines.flatMap((line) => line.spans)
     );
     const title = spans.find((span) => (
-      span.fg.equals(RGBA.fromHex('#efa6ca'))
+      span.fg.equals(RGBA.fromHex('#ffffff'))
       && (span.attributes & TextAttributes.BOLD) !== 0
     ));
     const status = spans.find((span) =>
       span.fg.equals(RGBA.fromHex('#7fcf9b'))
     );
     const muted = spans.filter((span) => (
-      span.fg.equals(RGBA.fromHex('#789da3'))
+      span.fg.equals(RGBA.fromHex('#bcc2c9'))
       && (span.attributes & TextAttributes.DIM) !== 0
     ));
     assert.ok(title);
@@ -365,6 +371,47 @@ test('welcome uses visual hierarchy for identity, metadata, and shortcuts', asyn
   } finally {
     timeline.destroy();
     setup.renderer.destroy();
+  }
+});
+
+test('welcome renders a black primary mark and readable identity on a light terminal', async () => {
+  const setup = await createTimelineRenderer(80);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    setup.mockInput.pressKey('\x1b]10;rgb:0000/0000/0000\x07\x1b]11;rgb:ffff/ffff/ffff\x07');
+    assert.equal(await setup.renderer.waitForThemeMode(200), 'light');
+    timeline.renderWelcome(buildWelcomeLines({
+      session: session([]), width: 80, connection: 'connected',
+    }));
+    const rows = setup.styleOutput.take().flat();
+    const spans = rows.flatMap((row) => row.spans);
+    assert.ok(spans.some((span) => /^ +$/.test(span.text) && span.bg.equals(RGBA.fromHex('#000000'))));
+    assert.ok(spans.some((span) => span.text.includes('▄')
+      && span.fg.equals(RGBA.fromHex('#000000'))
+      && span.bg.equals(RGBA.fromHex('#f2f3f5'))));
+    assert.ok(spans.some((span) => span.text.includes('PinPawo TUI v2')
+      && span.fg.equals(RGBA.fromHex('#000000'))
+      && (span.attributes & TextAttributes.BOLD) !== 0));
+    assert.ok(spans.some((span) => span.text.includes('connected')
+      && span.fg.equals(RGBA.fromHex('#226d40'))));
+  } finally {
+    timeline.destroy(); setup.renderer.destroy();
+  }
+});
+
+test('welcome omits an oversized mark without losing identity styling', async () => {
+  const setup = await createTimelineRenderer(24);
+  const timeline = new TimelineScrollback(setup.renderer);
+  try {
+    timeline.renderWelcome(buildWelcomeLines({
+      session: session([]), width: 24, connection: 'connected',
+    }));
+    const spans = setup.styleOutput.take().flatMap((rows) => rows.flatMap((row) => row.spans));
+    assert.ok(spans.some((span) => span.text.includes('PinPawo TUI v2')
+      && (span.attributes & TextAttributes.BOLD) !== 0));
+    assert.ok(spans.every((span) => !/[█▀▄]/.test(span.text)));
+  } finally {
+    timeline.destroy(); setup.renderer.destroy();
   }
 });
 

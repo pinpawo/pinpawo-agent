@@ -1,128 +1,56 @@
 # Studio Console
 
-> 状态：Draft implementation contract
-> 更新：2026-10-04
+状态：当前实现设计，2026-10-05。
 
-Studio Console 是独立的纯前端应用，不是 Studio Plugin，也不由任何 Plugin 打包或托管。
-它只消费 HTTP Plugin 及领域 Plugin 贡献的 API：
+Console 是独立纯前端，消费 HTTP Plugin 和领域 Plugin API，不是 Plugin，也不访问
+Studio core、Agent、checkpoint、hook 或 SQLite。连接地址与 Bearer 是运行时输入。
+固定页面没有动态前端 Plugin 系统；缺少某领域 Plugin 时该页显示 unavailable。
 
-```text
-apps/studio-console
-  ├─ Studio     -> /pets /dispatch /dispatch/queues /events
-  ├─ Channel    -> /channels /channels/context /channels/participants /channels/messages /channels/executions /channels/interrupts
-  ├─ Notice     -> /notices
-  ├─ Scheduler  -> /scheduler /scheduler/events
-  ├─ Trigger    -> /triggers /triggers/events
-  └─ Knowledge  -> /knowledge /knowledge/document (Project Files Plugin)
+| 页面/操作 | API 与范围 |
+|---|---|
+| Channel（默认页） | `/channels/*`；消息与协作语义统一见 [Channel 设计](channel-addressing-and-execution.md)。 |
+| 直接 Pet 请求 | `/pets`、`/dispatch`、`/dispatch/queues`；只对自身 HTTP 失败请求创建新的 retry dispatch。 |
+| Scheduler | `/scheduler`、`/scheduler/events`；创建一次性计划与取消未触发计划。 |
+| Notice | `/notices`；读取持久通知，不控制运行。 |
+| Trigger | `/triggers`、`/triggers/events`；查看定义、交付历史与外部接收说明。 |
+| Knowledge | Project Files 的 `/knowledge*` 只读 Markdown；显式刷新，不提供编辑或图索引。 |
 
-Console -X-> Studio core / Agent / checkpoint / Plugin hook / SQLite
-Plugin  -X-> Console assets or frontend module
-```
+## Channel 布局与交互
 
-Console 使用固定页面，不实现前端 Plugin 系统。后端没有装配某个领域 Plugin 时，对应页面
-显示 unavailable；这不影响其他页面。连接地址和 Studio Bearer token 是运行时输入，不在
-构建时绑定某个 Studio 实例。
+左侧 232px 列表、中间独立滚动消息与固定 composer、右侧可折叠 320px Activity。
+低于 1101px 时 Activity 为 modal drawer，低于 701px 时列表也为 drawer。
+抽屉和创建弹窗限制键盘焦点，Escape/背景关闭，关闭后恢复触发控件焦点。
 
-## 第一版
+正文完整显示；宽代码在块内滚动。普通连续笔记可视觉分组，执行请求、输出与引用
+保留独立边界。每条消息保留稳定 ID，引用只展示一层摘要并定位原文；Activity 按
+invocation 定位请求/输出。技术身份放在展开详情和复制操作。
+登记 label 用于显示，同名选择器携带身份，移除作者标明历史身份。
 
-- Studio：列出存活 Pet、提交单向 dispatch，并以 live `dispatch.queued`、`running`、
-  `waiting`、`completed`、`interrupted`、`failed` 显示该次 dispatch 的生命周期。`accepted`
-  仍只说明 admission；Console 只对自己通过 HTTP 直接发起的失败 dispatch，以保存的
-  Pet/request 创建一次全新的 retry dispatch，不恢复、取消或控制原运行。Scheduler
-  与 Trigger 的失败由各自的领域 control/history 处理；
-- Scheduler：查看 schedule、创建一次性 schedule、取消尚未触发的 schedule；
-- Trigger：查看 trigger 定义和 delivery history、复制外部接收说明；
-- Knowledge：通过 Project Files Plugin 的独立只读 API 列出和读取受限 Markdown；不实现
-  graph、索引或文件写入。该 Plugin 只向 HTTP `routes` hook 贡献 API，不依赖 Console，
-  不接触 Agent、dispatch、checkpoint 或其他领域数据库。文件写入本身不进入 Studio event
-  bus；页面提供显式 refresh，并在刷新时重新读取当前文档。
+Reply 预选、改选/清除、全局队列、失败与审批历史按 Channel 设计处理。
+未发送草稿不派发；重复提交保护只防本次表单并发提交，不承诺网络重试恰好一次。
+阅读旧消息时 SSE 不移动阅读位置；切换全局页保留位置，切换 Channel/Host 清除草稿、
+引用与目标。拒绝提交保留草稿，不自动重试。
 
-第一版不实现动态 UI module、Plugin 静态资源 hook、传统泳道/拖拽看板、Agent Session、
-HITL resume 或 checkpoint 操作。Console 的 dispatch 成功只表示 Studio 已接受输入；
-后续 lifecycle 是 live observation，不是可恢复的 execution handle，页面不得等待或控制
-Agent completion。
+## 连接与观察
 
-## 数据恢复
+每个 Host/credential 只有一个 SSE 连接；刷新与 POST 不重建它。
+先建立观察再允许提交，订阅后刷新领域 snapshot/history；瞬时失败有限退避重连，
+鉴权失败要求更正凭证。token 保存在浏览器 session，不写入 URL。
 
-领域页面先读取 snapshot/history，再订阅 live `/events`。Studio dispatch lifecycle（包括
-`dispatch.accepted`）是 live-only；
-Channel、Scheduler 和 Trigger 各自的 SQLite history 才是断线恢复事实源。Console 不用
-Studio SSE 重建领域状态。
+SSE 是 live-only，断线后重读各领域自己的持久事实，不用事件流重建历史。
+Channel 完整读取分页，执行时补读观察。未结束的旧 Host 记录、丢失的 live 观察显示
+status unknown；已知终态保留。completed 不代表业务目标验收。
+直接 dispatch 的 receipt 只表示接纳，不是可恢复 execution handle。
 
-## 安全
+Console 不接管独占 TUI WebSocket，不读 checkpoint，也不提供审批、resume、cancel
+或其他 Agent Session 控制。Channel Review 仅为历史通知，当前审批在原 Pet TUI/session。
+Agent Session HTTP 工具是独立操作入口，见 [API](../../reference/api/studio.md#host-agent-session-http)。
 
-管理 API 使用 HTTP Plugin 的 Studio Bearer 与 Origin/CORS 边界。Console 不把 token
-写入 URL；第一版只保存在当前浏览器 session。Trigger 的外部接收凭证属于 Trigger 领域，
-不复用 Studio Bearer。
+## 验证与迁移
 
-## E2E observation repair (2026-09-14 draft)
+启动与验证命令集中在 [应用 README](../../../apps/studio-console/README.md)。
+确定性浏览器覆盖长正文、默认 Reply、真实队列、失败/断线/重启与 1440/900/390/320px，
+不替代真实模型验收；按 head 的运行记录见 [#904](https://github.com/pinpawo/pinpawo-agent/pull/904)。
 
-The Console owns one SSE connection per selected Host/credential. Resource
-refresh and successful POSTs do not restart it. Establish observation before
-allowing dispatch, refresh domain snapshots after subscribing, and keep reading
-events while those requests run. Transient failures reconnect with bounded
-backoff; authentication failures require updated credentials. Reconnect is not
-replay: unfinished activity rows become observation-unknown until another
-lifecycle fact arrives. Known terminal facts remain visible. Explicit reconnect
-to the same URL retains the current browser view; selecting another Host clears
-its activity. This is not durable history or proof of a restarted Host's identity.
-
-`completed` means the invocation ended, not that the requested business goal was
-achieved. Replies, clarification and approvals belong to the Pet session. The
-current HTTP `/pets` and lifecycle payloads do not expose pending interrupts or
-Agent Session connection descriptors. Agent Session `session.snapshot.get` does
-contain `pendingInterrupt`, but the existing WebSocket requires Bearer headers
-and its own allowed Origin, and admits a single interactive client. Console must
-not probe it as an extra observer or move credentials into URLs. This repair
-therefore provides waiting/result guidance to the Pet TUI using the Host startup
-connection instructions; direct interrupt rendering and approval remain deferred.
-
-Verification covers receipt/lifecycle ordering, loss of observation, fragmented
-SSE frames, transient retry, authentication failure and abort without reconnect.
-
-## Channel integration (2026-10-04)
-
-The existing Console adds one fixed Channel page against the optional Channel
-Plugin APIs. It lists and creates long-term goals, reads the full paginated
-message/revision timeline, saves notes without execution, and explicitly sends
-one round to a selected Pet. Reply uses the source message's original Pet/session;
-it is not cross-Pet routing. Full public Markdown and artifact references remain
-visible for handoff and inspection.
-
-The same Console SSE connection refreshes Channel snapshots. Execution history
-comes from `/channels/executions`, a SQLite observation record including admission
-and execution failures. It is not a durable queue or a recovery API. Unfinished
-records from a restarted service and disconnected live observations are unknown;
-known terminal facts remain visible. Review history guides the user to the original
-Pet TUI/session and does not offer approval or infer a current pending review.
-The default template enables the Channel Plugin. No separate
-viewer, frontend Plugin system, identity scheme or automatic Pet scheduler is added.
-
-## Console Kanban 入口退役（2026-10-04）
-
-Channel 为默认页面；Console 移除 Kanban 导航、任务流/关联/分配 UI、专属类型/状态/
-样式/测试和 `/kanban` snapshot/history/control 请求。通用 dispatch、SSE、Scheduler、
-Notice、Trigger、Knowledge 与 Channel 保留，不将它们当作 Kanban 专属能力删除。
-
-完整退役进一步移除后端 Plugin、API、Toolkit、默认角色的 Kanban 调用、两条
-Kanban 事件规则及专属测试评估与安装依赖。四个 Pet 通过显式请求或现有 Channel
-执行，普通答复交付结果。Wiki 更新需明确请求，不新增自动触发规则。
-
-现有 Kanban SQLite、快照、历史和其他用户数据不迁移、不删除，不执行 schema/table
-清理。旧工作区对照模板手动迁移配置与能力，见[配置指引](../../studio/configuration.md#retired-kanban-workdirs)。
-
-## Unified Channel participants and global dispatch observation (2026-10-05)
-
-The local participant-loop branch follows [Channel addressing and execution](channel-addressing-and-execution.md).
-People and Pets share the same message, reply and addressing protocol. Identity-bearing
-mentions select recipients; labels are presentation. The viewer's own label is “Me”.
-The composer sends through `/channels/messages`; choosing a recipient and replyTo
-are separate. Pets choose their own @ in public replies, with the format specified in
-Capability instructions. All participant messages can be quoted and replied to.
-
-After sending, Activity shows each Pet's real global state and queue through
-`/dispatch/queues`, including work from other Channels. This consumes runtime
-facts, never derives queue entries from message history. The composer shows no busy
-hint. Timeline displays actual @ recipients, every target's execution observations
-and failures without adding retry controls. System queue acknowledgements are deferred.
-The existing TUI review guidance remains separate from ordinary next-session inputs.
+Kanban 专属页/API/消费者已退役；迁移只按[配置步骤](../../studio/configuration.md#retired-kanban-workdirs)
+手动操作，不清理用户数据。早期 Console 观察修复与阶段说明见[历史记录](../../history/studio/channel-evolution.md)。

@@ -1,7 +1,7 @@
 # Studio Automation Plugins
 
-> 状态：Draft implementation contract
-> 更新：2026-08-28
+> 状态：当前实现边界
+> 更新：2026-10-05
 
 Scheduler 与 Trigger 是两个可选 Studio Plugin。Scheduler 表达时间条件；Trigger
 表达“满足某个事件源条件时，向哪个 Pet 派发什么请求”。二者只通过
@@ -12,6 +12,16 @@ Trigger envelope 投射成一条 dispatch request；它不选择 Capability、To
 或 Agent prompt。结构化形式支持 `{{payload.taskId}}` 这类无逻辑点路径替换，并通过
 `context` 显式选择附加字段。它不提供条件、循环或任意表达式，也不会默认把完整 GitHub
 payload 塞给 Agent。静态字符串继续保留原有的“固定 request + 完整 Trigger context”兼容语义。
+
+
+```json
+{
+  "request": {
+    "template": "Inspect change {{payload.changeId}} after {{event.type}}.",
+    "context": ["payload.changeId", "payload.note", "event.occurredAt"]
+  }
+}
+```
 
 领域 Service 是 committed-mutation 的唯一出口。Plugin 订阅这个出口并统一投射 Studio
 event；HTTP route、应用代码或其他 adapter 调用 Service 时不各自补发事件。
@@ -94,6 +104,6 @@ Plugin 在 `start()` 时通过 `listPets()` 验证目标 Pet。运行中所有 d
 
 ## Kanban 退役后的默认装配
 
-通用 Trigger 不依赖 Kanban。默认 `task.assigned` 派发与 `task.done` → Wiki 两条
-规则已移除，保留外部请求 → Planner 的显式 HTTP 规则。Wiki 文档读写与 Knowledge
-只读 API 保持独立；Wiki 更新由明确请求发起，不以 `dispatch.completed` 替代交付完成。
+默认仅保留外部请求 → Planner 的显式 HTTP 规则；Wiki 更新需要明确请求，
+不以 dispatch.completed 替代交付验收。旧规则迁移见[配置](../../studio/configuration.md#retired-kanban-workdirs)，
+可选周期队列巡检见[Queue Notices](../studio-dispatch-queue-notices.md)。

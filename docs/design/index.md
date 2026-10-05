@@ -38,9 +38,9 @@ contracts in [reference/](../reference/index.md).
 
 ## Studio applications and Plugins
 
-- [Channel 寻址、执行与状态](studio/channel-addressing-and-execution.md) — 2026-10-05
-  平等参与者、唯一身份 @、dispatch 全局状态与队列、正常协作 loop 及失败展示
-- [Channel 基础草案](studio/channel-collaboration.md) — 已有 session、显式执行与观察边界
+- [Channel 寻址、执行与状态](studio/channel-addressing-and-execution.md) — 唯一当前设计入口，
+  参与者协议、固定 session、可信来源、公开回复、全局观察与现有限制；阶段原文见
+  [Channel 历史](../history/studio/channel-evolution.md)
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
   Channel, Scheduler, Notice, Trigger, and Knowledge APIs
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container

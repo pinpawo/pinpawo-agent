@@ -61,19 +61,11 @@ Each Pet's authored identity and working conventions belong in
 Pet configuration directory). The Host loads the document at startup; restart
 it after changing the document.
 
-Pet JSON retains `petId`, `name`, `modelProfileId` and
-`defaultCapabilityName`. The former `role` and `serviceSummary` are removed; no
-consumer read them. Move former `personality`, `species` and `stage` values
-into PET.md prose and remove those JSON fields. Remove `serverBinding`; the
-local Host no longer consumes cloud Pet bindings. The parser reports these
-retired fields instead of silently ignoring them. The implicit Pet Profile
-Toolkit and cloud profile/history hydration have also been removed; conversation
-history remains owned by the session checkpoint. Programmatic resident Hosts use
-`petId` and `petName`; optional `traceUserId` is consumed only by Host tracing.
-They also receive resolved `HostExecutionConfig` settings from the composing Host;
-use `resolveHostExecutionConfig(runtimeConfig, settings)` from `pinpawo/host-runtime`.
-Review policy belongs to these Host settings, not to model profiles. A resident's
-conversation and dispatch surfaces share subsequent policy updates.
+Pet JSON and directory rules are defined in [Studio configuration](../../docs/studio/configuration.md).
+Keep identity and working conventions in PET.md, execution responsibilities in
+CAPABILITY.md, and machine settings in JSON. Programmatic resident Hosts receive
+resolved Host settings through `resolveHostExecutionConfig()` from
+`pinpawo/host-runtime`; review policy belongs to those settings, not model profiles.
 
 Per-Pet Capability directories are optional. The Host supplies the `general`
 fallback only when a Pet does not configure `defaultCapabilityName`.
@@ -92,24 +84,12 @@ when it is not already running, then opens the page. A published Studio CLI can
 instead open a separately deployed Console with `pinpawo-studio console --url
 <origin>`.
 
-## Retired Kanban configuration
+## Channel and migration
 
-The Kanban Plugin, API, tools, and default task-assignment / task-completion
-Trigger rules have been removed. The default template now enables Channel.
-Planner returns proposals, Executor and Reviewer return delivery evidence,
-and Wiki updates require an explicit request. Dispatch completion does not
-imply accepted delivery and does not trigger Wiki maintenance.
+The default template enables Channel. Its [current design](../../docs/design/studio/channel-addressing-and-execution.md)
+explains participant handoff, Reply defaults, trusted input and fixed sessions.
+Wiki maintenance requires an explicit request; dispatch completion is not goal acceptance.
 
-Existing projects are not rewritten by startup or `init`. Before restarting an
-old workdir, manually remove `@pinpawo-plugin/kanban` from `studio.json`, add the
-installed `@pinpawo-plugin/channel` package, remove `wiki-on-task-done` and
-`dispatch-assigned-kanban-task`, and update Pet documents / Capabilities against
-the current template. Remove all `kanban*` Toolkit bindings and the old
-`studio_reporting` Capability that only wrote task state; delivery now uses the
-normal public reply. Preserve project-specific instructions while comparing
-files. Rewrite the external-request planning prompt if it still requires a board.
-
-Historical `.pinpawo/kanban/` databases, JSON snapshots, task history, and Wiki
-files are left untouched. No schema cleanup, automatic migration, or no-op
-compatibility Plugin is provided. See the [configuration migration guidance](
-../../docs/studio/configuration.md#retired-kanban-workdirs).
+Existing workdirs are never rewritten by startup or `init`. Follow the single
+[configuration migration guide](../../docs/studio/configuration.md#retired-kanban-workdirs),
+preserving local instructions and historical databases, snapshots and Wiki files.

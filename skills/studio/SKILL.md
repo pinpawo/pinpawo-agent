@@ -28,8 +28,10 @@ A dispatch receipt only means work was submitted. Look for the session's active
 run, live events, and actual delivery evidence to establish execution.
 Queue `waiting` means pending interrupt; queue `blocked` means the Host could not
 read settled session state. Preserve the user's scope; do not turn a request for
-status into new work or an approval. The Console supports explicit Channel Pet
-execution and replies; generic dispatch does not publish into a Channel.
+status into new work or an approval. Console Reply defaults to its registered
+author, while valid Channel addressing selects recipients; generic dispatch does not publish into a Channel. See the
+[Channel design](../../docs/design/studio/channel-addressing-and-execution.md) for
+message/source semantics; keep the operational review rules below.
 
 ## Review and continue
 

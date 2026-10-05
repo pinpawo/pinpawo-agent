@@ -19,10 +19,15 @@ type StudioPetBinding = {
 type StudioDispatchRequest = {
   petId: string;
   request: string;
+  session?: { id: string; create?: boolean }; // in-process Plugin only
+  scope?: { namespace: string; id: string }; // in-process Plugin only
   metadata?: JsonObject;
   idempotencyKey?: string;
 };
 ```
+
+The HTTP wire form omits `session` and `scope`; unknown targeting fields are
+rejected. They are trusted Plugin-to-Host fields, not client metadata.
 
 `Studio.dispatch()` validates the live Pet, allocates an `invocationId`, and
 returns an admission receipt after the resident dispatch port accepts the input.
@@ -60,38 +65,29 @@ queue as unknown; a global waiting gate alone does not establish a human review.
 
 ## Channel messages and addressing
 
-The Channel Plugin supplies `GET /channels/participants` and participants in Channel
-context. A participant has a unique `participantId`, label, existing identity and
-response adapter kind. The configured local operator and Pets share one protocol;
-the viewer identity affects the display label only.
-IDs are `kind:<RFC3986 percent-encoded id>` (including `!'()*`, which
-`encodeURIComponent` leaves unescaped, so Markdown links stay intact). Pets use the unique Studio registration
-`petId`; the one local operator uses Channel Plugin `operatorId` (default
-`studio-operator`). This is not a multi-user identity registry, and different
-browser clients with the same Bearer token share that operator identity.
+Channel contributes these routes to the HTTP Plugin under Studio Bearer:
 
-`POST /channels/messages` accepts a body, optional replyTo, artifacts and
-`mentions: [{participantId}]`. A direct Markdown mention
-`[@label](participant:pet:reviewer)` carries the same unique identity; labels never
-route requests. Plain `@label`, code and quoted examples do not address a target.
-Channel validates and saves the message, then calls dispatch for each Pet target
-using that target's fixed Channel session. Human targets read and respond in the UI.
-The response retains the message fields and includes per-target delivery receipts
-or admission failures; execution completion is observed separately.
-Repeated targets within one message normalize to one recipient. A repeated
-completed observation reuses the saved output ID and dispatch's process-local
-idempotency key. Two independent HTTP message submissions receive different
-message IDs; equal bodies are not a reliable execution identity. Reload / SSE
-reconnect only read observations. No pending input is replayed automatically after
-restart, and there is no cross-restart exactly-once or saved-message recovery guarantee.
+| Route | Input / result |
+|---|---|
+| `GET /channels` | Paginated current goals. |
+| `POST /channels` | `title`, `goal`, `scope`, optional references. |
+| `POST /channels/revisions` | `channelId`, goal fields, `expectedRevision`, `reason`, optional `sourceMessageId`. |
+| `GET /channels/participants` | Registry plus viewerParticipantId. |
+| `GET /channels/context?channelId=...` | Current revision, bindings, paginated history and participants. |
+| `POST /channels/messages` | `channelId`, `body`, optional `replyTo`, `mentions`, `artifacts`; message plus per-target deliveries. |
+| `POST /channels/execute` | Legacy explicit `petId` or replyTo-only original-session action; admission receipt and binding. |
+| `GET /channels/executions?channelId=...` | Per-target lifecycle / failure observations, not queue state. |
+| `GET /channels/interrupts?channelId=...` | Read-only historical PendingInterruptProjection notifications. |
 
-Host-authenticated Pet completed replies enter this same addressing path. Pets
-choose whether to @ according to Capability instructions. replyTo is context and
-does not choose the unified message recipient. The old `/channels/execute` action
-remains compatible, including its replyTo-only original-session action.
+Pagination uses `after` / `limit` and returns `nextAfter` / `hasMore`; schemas and
+limits are defined by [ChannelService](../../../plugins/channel/src/channelService.ts).
+`mentions: [{participantId}]` and direct Markdown `[@label](participant:pet:reviewer)`
+share one parser; request-body author, source and scope claims are rejected.
+Addressing, default Reply, source envelopes, fixed sessions, publication and
+reliability limits are specified once in the [Channel design](../../design/studio/channel-addressing-and-execution.md).
+Delivery acceptance is not execution completion or goal acceptance.
 
-Per-target execution observations and failures remain available through
-`GET /channels/executions`; they are not an authoritative queue or reliability engine.
+## Host lifecycle
 
 `StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls
 the whole Host back. `startStudioHost()` also starts the host Pet-scoped

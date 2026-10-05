@@ -28,33 +28,19 @@ Plugin   ── dispatch(request) ──> Studio ── PetDispatchPort ──> 
 - [HTTP Plugin 设计](../../design/studio/http-plugin.md) — 唯一 HTTP/SSE control plane
   与 Plugin route 边界。
 
-## Studio 当前负责什么
+## 职责与限制
 
-- 校验 Pet 注册表与默认 `entryPetId`；
-- 校验并交付 dispatch，为每次已接纳输入分配 invocation identity；
-- 按配置顺序启动插件、逆序停止插件，并广播插件通知而不解释内容。
+Studio 校验存活 Pet 和 entryPetId、接纳输入并分配 invocation identity、管理 Plugin
+生命周期与事件广播。resident 拥有运行槽/队列、对话、checkpoint 与 session 恢复；
+Plugin 拥有领域历史、调度与知识投影。精确接口以 API 为准，进程内幂等和 live 事件
+不提供执行结果、自动重试、超时或持久重放。
 
-任务如何拆分、依赖和进度如何保存、何时重试、scheduler / webhook / UI / 传输如何
-工作，都不属于 Studio。Pet 直接对话、Agent Session projection 与 TUI transport 也由
-host 负责。可选 `@pinpawo-plugin/channel` 拥有目标修订、公开结果及每个 Channel/Pet
-的持久会话绑定；执行显式选择 Pet，Toolkit 读取本次已接纳的 Channel 上下文。
-Scheduler 和 Trigger 继续通过各自的 Plugin 边界组合。
+Channel 的唯一[当前设计](../../design/studio/channel-addressing-and-execution.md)定义
+目标/消息、参与者寻址、默认 Reply、可信来源与固定 session。
+Scheduler/Trigger 仍为独立 Plugin；[队列巡检](../../design/studio-dispatch-queue-notices.md)
+是可选策略，不把队列所有权交给 Channel。
+HTTP Plugin 提供 control plane；同进程独立的 Host Pet listener 提供 Agent Session
+HTTP/SSE 与 WebSocket/TUI，不进入 Studio core。
 
-可选 `@pinpawo-plugin/studio-http` package 是另一个具体 Plugin。它不定义 Toolkit，只把
-`context.dispatch()` 和 `context.subscribe()` 投射成带鉴权的 loopback HTTP/SSE
-边界。轻量的进程内 Plugin event bus 由 Studio core 统一持有；HTTP 只是普通 subscriber，
-不拥有数据库、event queue 或领域 history。
-
-Host 只注册当前存活且 eager-start 的 Pet；Studio 不报告
-lazy/disabled Pet，也不公开 Agent Session active thread identity。HTTP Plugin 成为 Studio
-control-plane transport；同一 Host 进程内另行运行 host Agent Session WebSocket，
-负责直接 Pet conversation，但不进入 Studio core。
-
-## 运行限制
-
-幂等记录与事件订阅都只存在于当前进程内。Studio 不提供 execution result、自动重试、
-超时或 durable event replay。resident queue/gate、Pet checkpoint 与 Agent Session active
-thread 不依赖这些 Studio 投射，可以跨 Host 重启恢复。
-
-旧的 run controller、due-run scheduler 和 shared wiki 方案已经移到
-[Studio 历史记录](../../history/studio/)，不再代表当前行为。
+旧设计与阶段验收留在[历史目录](../../history/index.md)。init 不升级已有工作区，
+迁移按[配置指引](../../studio/configuration.md#retired-kanban-workdirs)显式进行。

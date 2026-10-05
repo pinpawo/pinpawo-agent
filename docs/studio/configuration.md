@@ -60,7 +60,7 @@ is its lifecycle and event-source identity inside Studio.
   "petId": "writer",
   "name": "Writer",
   "modelProfileId": "qwen-max",
-  "defaultCapabilityName": "studio-planning"
+  "defaultCapabilityName": "studio_planning"
 }
 ```
 
@@ -94,20 +94,12 @@ Studio owns this per-Pet location. The ordinary single-Pet Chat Host resolves
 the same document contract from `<workdir>/PET.md`; the agent receives a
 `PetDocument` and does not interpret either filesystem convention.
 
-It is the Pet's canonical root document, occupying the same place
-for a Pet that `AGENTS.md` or `CLAUDE.md` occupies for an agent. Define the
-Pet's identity, responsibilities, operating principles, boundaries, and durable
-working conventions here. The complete document applies to direct Chat replies,
-Run Supervisor decisions, Capability execution, and final answers.
-
-Keep executable responsibilities and Toolkit dependencies in `CAPABILITY.md`,
-machine settings in the Pet JSON, and repository-owned development rules in
-`AGENTS.md`.
-
-Studio reads `PET.md` once while the Host starts. Restart the Host after editing
-it. The document is supplied as authored root context. Tools and
-Capabilities still come from the compiled registry, while framework lifecycle
-and security contracts remain authoritative.
+PET.md defines identity, responsibilities, principles and durable conventions;
+CAPABILITY.md owns executable responsibilities and Toolkit dependencies, JSON owns
+machine settings, and repository AGENTS.md owns project development rules.
+The full model-scope contract is in [Pet root document](../design/pet-document.md).
+Studio snapshots PET.md at startup; restart after edits. Tools and Capabilities
+still come from the compiled registry, and framework security remains authoritative.
 
 ## Per-Pet Capability directory
 
@@ -147,38 +139,19 @@ that resolver entirely. Options pass through unchanged for the Plugin to validat
 Install each configured package beside `@pinpawo/studio`; configuration does not
 download missing packages at startup.
 
-`@pinpawo-plugin/channel` provides persistent goal revisions, public Markdown
-messages, and one session binding per Channel/Pet. Execution is explicit through
-`POST /channels/execute`; ordinary public replies are saved by the Host. The
-`channel` Toolkit exposes `channel_read_context` only to a Host-admitted Channel
-invocation. Direct Pet requests and generic dispatch remain independent.
+`@pinpawo-plugin/channel` owns goal/message history and fixed Channel/Pet sessions.
+Its [current design](../design/studio/channel-addressing-and-execution.md) specifies
+unified message addressing, Reply defaults, server-assigned source envelopes and limits.
+Default PET.md and Capability templates contain the runtime protocol; existing
+workdirs must compare and update those files manually, preserving local instructions.
+A link to a design document does not replace the instructions loaded by the Host.
 
-`@pinpawo-plugin/trigger` binds an HTTP, GitHub, or configured Studio event source
-to one Pet dispatch. Wiki is a Pet maintaining ordinary workdir Markdown through
-bash/git; its updates require an explicit request. No default task-completion or
-dispatch-completion rule triggers Wiki. See the
-[Studio automation Plugins draft](../design/studio/automation-plugins.md).
-
-A Trigger `request` may remain a string, or use a logic-free template with an
-explicit context projection:
-
-```json
-{
-  "request": {
-    "template": "Inspect change {{payload.changeId}} after {{event.type}}.",
-    "context": ["payload.changeId", "payload.note", "event.occurredAt"]
-  }
-}
-```
-
-The normalized template envelope contains `triggerId`, `source`, optional
-`event`, and `payload`. Templates only render the outgoing dispatch request;
-they do not select Agent Capabilities, Toolkits, models, or threads.
-
-A GitHub webhook binding uses `source.kind: "github"`, a `secretEnv`, and the
-GitHub webhook `event` (plus optional payload `action`). GitHub sends it to
-`POST /triggers/github`; the Trigger Plugin verifies `X-Hub-Signature-256` and
-deduplicates `X-GitHub-Delivery` before dispatching the configured Pet.
+`@pinpawo-plugin/trigger` binds an HTTP, signed GitHub webhook or Studio event source
+to a Pet request. Static strings and logic-free templates remain supported; source
+credentials, template projection, deduplication and endpoints are documented once in
+[Automation Plugins](../design/studio/automation-plugins.md). The default external
+request Trigger requires `PINPAWO_STUDIO_TRIGGER_SECRET`; it does not automatically
+update Wiki on task or dispatch completion.
 
 `@pinpawo-plugin/project-files` is an optional, read-only projection of Markdown
 under a workdir-relative directory (default `wiki`). It contributes

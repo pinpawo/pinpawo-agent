@@ -1,7 +1,7 @@
 # Studio HTTP Plugin
 
-> 状态：Draft implementation contract
-> 更新：2026-08-27
+> 状态：当前实现边界
+> 更新：2026-10-05
 
 HTTP 是一个具体 `StudioPlugin`，不是 Studio core 的内置 server。目标 Studio Host
 composition 把它作为唯一 control-plane transport 装配；它把 dispatch/event 通道投射到
@@ -36,7 +36,7 @@ route 背后的领域。
 
 ### `POST /dispatch`
 
-请求体就是 transport-neutral `StudioDispatchRequest` 的 JSON 形态：
+请求体是 `StudioWireDispatchRequest` 的 JSON 形态：
 
 ```json
 {
@@ -55,9 +55,9 @@ HTTP Plugin 校验结构后调用 `context.dispatch()`。接受成功返回 `202
 Plugin 不为 HTTP、前端或领域 Plugin 生成额外关联字段，也不等待 Agent execution；Studio
 receipt 本身就没有 completion，HTTP 连接也不是 cancellation owner。
 调用方如需观察完整 Agent execution（消息、工具、review 或结果），应连接目标 Pet 的
-Agent Session event stream。Studio event bus 还会转发与 receipt 关联、无模型内容的
-dispatch lifecycle observation，供 Console 显示 queued/running/failed 并发起新的 retry
-dispatch；Console 只重试自己经 HTTP 直接发起的请求，Plugin-owned dispatch 由来源 Plugin
+Agent Session event stream。Studio event bus 转发与 receipt 关联的 dispatch lifecycle，
+可含本轮请求、公开 reply 和 waiting 投影，仍不等于完整 Agent stream 或执行控制。
+Console 可显示 queued/running/failed 并发起新的 retry dispatch；Console 只重试自己经 HTTP 直接发起的请求，Plugin-owned dispatch 由来源 Plugin
 处理。它不能替代 Agent Session，也不能从 receipt 推导 Plugin 领域状态。
 
 ### `GET /events`
@@ -70,8 +70,8 @@ dispatch；Console 只重试自己经 HTTP 直接发起的请求，Plugin-owned 
 这是 live-only projection：不生成 durable event id，不实现 `Last-Event-ID` replay，断线
 期间的 event 会丢失。heartbeat 只是 HTTP transport 保活，不进入 Studio event bus。
 Console 每次重连都重新读取当前领域自己的 snapshot/history；Channel 的 SQLite
-是 Channel 事实源，HTTP Plugin 不拥有数据库或领域 history。2026-10-04 Console
-已移除 Kanban 入口和请求；完整退役同时删除专属后端及消费者，历史数据保持原样。
+是 Channel 事实源，HTTP Plugin 不拥有数据库或领域 history。
+Channel 的消息与可靠性边界见[统一设计](channel-addressing-and-execution.md)。
 
 Studio core 为每个 subscriber 隔离 FIFO delivery；HTTP 的异步 SSE 写入只阻塞 HTTP
 subscriber 自己，不阻塞其他 Plugin。Studio 还会按 Plugin lifecycle owner 自动释放该

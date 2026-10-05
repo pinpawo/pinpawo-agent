@@ -41,7 +41,11 @@ export function buildWelcomeLines(input: {
   const hostVersion = formatVersion(
     input.hostMetadata?.hostVersion,
   );
-  const shortcuts = contentWidth >= 54
+  const sideBySide = contentWidth >= 64;
+  const shortcutWidth = sideBySide
+    ? contentWidth - WELCOME_LOGO_WIDTH - 4
+    : contentWidth;
+  const shortcuts = shortcutWidth >= 54
     ? [
         '/ commands · PgUp history · Enter send',
         'Ctrl+J newline · Ctrl+R sessions · Esc interrupt · Ctrl+C exit',
@@ -53,7 +57,6 @@ export function buildWelcomeLines(input: {
         'Esc interrupt',
         'Ctrl+C exit',
   ];
-  const sideBySide = contentWidth >= 64;
   const details = [
     `PinPawo TUI v2 · ${actor}`,
     `v${version} · host ${hostVersion}`,
@@ -66,7 +69,7 @@ export function buildWelcomeLines(input: {
     // Keep the selected mark intact rather than clipping it in small panes.
     ? details
     : sideBySide
-    ? joinTerminalColumns(PAW_LINES, details, contentWidth, 4)
+    ? joinTerminalColumns(PAW_LINES, [...details, '', ...shortcuts], contentWidth, 4)
     : [
         ...PAW_LINES,
         '',
@@ -74,9 +77,7 @@ export function buildWelcomeLines(input: {
       ];
   const content = [
     ...identity,
-    '',
-    ...shortcuts,
-    '',
+    ...sideBySide ? [] : ['', ...shortcuts, ''],
   ].map((line) => truncateTerminalLine(line, contentWidth));
   if (!padded) return content;
   const gutter = ' '.repeat(WELCOME_PAD_COLUMNS);

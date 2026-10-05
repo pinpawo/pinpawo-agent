@@ -47,6 +47,9 @@ test('welcome includes the raster paw, version, runtime, and shortcuts', () => {
   assert.ok(lines.some((line) => line.includes('Ctrl+R sessions')));
   assert.ok(lines.some((line) => line.includes('Enter send')));
   assert.ok(lines.some((line) => line.includes('Ctrl+J newline')));
+  assert.ok(lines.some((line) => line.includes('Esc interrupt')));
+  assert.ok(lines.some((line) => line.includes('Ctrl+C exit')));
+  assert.ok(lines.length <= 15, 'welcome fits a 24-row terminal above its 9-row footer');
   assert.equal(lines.at(-2), ' '.repeat(80));
   for (const line of lines.slice(0, -1)) {
     assert.equal(stringWidth(line), 80, line);

@@ -7,6 +7,9 @@ const source = new URL('../../../assets/brand/pinpawo-primary-black.svg', import
 const output = new URL('../src/welcome/primaryLogo.generated.ts', import.meta.url);
 const svg = readFileSync(source, 'utf8');
 if (!svg.includes('viewBox="0 0 12 12"')) throw new Error('Unexpected primary mark viewBox');
+if (/\b(?:transform|rx|ry)=|<(?:use|circle|ellipse)\b/.test(svg)) {
+  throw new Error('Primary mark contains unsupported transformed or rounded geometry');
+}
 const group = svg.match(/<g shape-rendering="crispEdges">(.*?)<\/g>/)?.[1];
 if (!group) throw new Error('Primary mark geometry is missing');
 type Point = readonly [number, number];

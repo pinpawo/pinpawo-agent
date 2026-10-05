@@ -19,10 +19,22 @@ local host 完全运行在你的机器上，不需要 PinPawo 账号或后端，
 ```bash
 npm install -g pinpawo
 pinpawo init
+```
+
+`pinpawo init` 会创建 `~/.pinpawo/.env`、带有默认模型 profile 的
+`~/.pinpawo/config.json`、本地 Capability 目录与 `hello-pinpawo` 示例。
+
+打开 `~/.pinpawo/config.json`，在 `models` 段配置端点和凭证。
+Host 从存储的 profile 读取模型配置；`~/.pinpawo/.env` 只放运行时设置。
+
+检查缺失配置：
+
+```bash
 pinpawo setup
 ```
 
-`pinpawo init` 会创建 `~/.pinpawo/.env`、带有可编辑默认模型 profile 的 `~/.pinpawo/config.json`、本地 Capability 目录与 `hello-pinpawo` 示例。凭证与端点写在 `~/.pinpawo/config.json` 的 `models` 段，只从存储的 profile 读取，不来自环境变量；`~/.pinpawo/.env` 只放运行时设置。`pinpawo setup` 用于诊断缺失配置；profile 格式见[模型 profile 配置](../../guides/model-profiles.md)。
+如果 setup 报告模型配置缺失，按[模型 profile 配置](../../guides/model-profiles.md)
+修改后，再运行 setup。
 
 ## 验证示例
 

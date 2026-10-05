@@ -187,7 +187,7 @@ npm run typecheck && npm test
 | C9 | queue recovery 每 host generation 一次 | 靠 module-level `restoredRunQueuePaths` Set 近似 | `studioRuntime.ts:89-104`（已移除文件） |
 | C10 | 并行 wiki 提交有序列化策略 | 无；依赖当前恰好串行 | `agent/studio/wikiCurator.ts` |
 | C11 | 事件带完整 correlation identity | `StudioTurnEvent` 带 `taskIndex`/`petId`/`petRunId`，缺 `runId`/`invocationId` | `types.ts` `StudioTurnEvent` |
-| C12 | server 单一主模式 | 无 mode 概念；`run` 命令无 `--mode`，Studio 是 chat session 内的 `/studio` toggle | [cli.ts:96](../../../services/local-agent/src/cli.ts#L96)、[composerIntent.ts:78-84](../../../services/tui/src/commands/composerIntent.ts#L78) |
+| C12 | server 单一主模式 | 无 mode 概念；`run` 命令无 `--mode`，Studio 是 chat session 内的 `/studio` toggle | Phase 0 审计提交 `3cca27aa`：[cli.ts:96](https://github.com/pinpawo/pinpawo-agent/blob/3cca27aa33a258f9448cd079c7ec5cd6fe7b3b6a/services/local-agent/src/cli.ts#L96)、[composerIntent.ts:78-84](https://github.com/pinpawo/pinpawo-agent/blob/3cca27aa33a258f9448cd079c7ec5cd6fe7b3b6a/services/tui/src/commands/composerIntent.ts#L78-L84) |
 | C13 | studio 配置非法时 fail fast | 抛 `StudioNotConfiguredError`，但在**第一次请求时**才抛，不是启动时 | `studioRuntime.ts:44`（已移除文件） |
 
 ### 4.1 Phase 1 的处置状态

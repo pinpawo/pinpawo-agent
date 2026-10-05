@@ -1,61 +1,40 @@
 # API Reference
 
-> **Status: current reference index.** API pages are organized by the boundary
-> that owns the behavior; do not use historical design pages as API contracts.
+> **Status: current reference index.** Choose the boundary that owns the behavior.
 
 [简体中文](../../zh-CN/reference/api/index.md)
 
-This index covers PinPawo Agent's public programming, CLI, and extension
-surfaces. It is reference material: for the system model and architecture, read
-[Core Concepts](../../concepts/core-concepts.md) and [Architecture](../../concepts/architecture.md) first.
+Start with the [API overview](overview.md) for ownership across packages.
+For the system model, read [Core concepts](../../concepts/core-concepts.md) and
+[Architecture](../../concepts/architecture.md).
 
 ## Choose an integration surface
 
 | You need to… | Reference |
 |---|---|
-| Compose a resident Pet Host | [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) (accepted boundary, design layer) |
-| Coordinate multiple pet runtimes | [Studio API](studio.md) |
-| Author a task-specific extension | [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md) |
-| Load a local `CAPABILITY.md` extension | [Capability directory protocol](../extensions/capability-directory.md) |
+| Compose a resident Pet Host | [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md) — accepted and implemented; path retained in the design layer |
+| Coordinate multiple Pets | [Studio API](studio.md) |
+| Author a task-specific extension | [Capability / Toolkit contract](../extensions/capability-toolkit.md) |
+| Load a local `CAPABILITY.md` | [Capability directory protocol](../extensions/capability-directory.md) |
 | Render tool activity or approval UI | [Events and human review API](events-and-review.md) |
-| Operate through a terminal or process | [CLI reference](cli.md) |
+| Use a terminal or process | [CLI reference](cli.md) |
 | Diagnose failures or record safe telemetry | [Error handling and observability](error-handling.md) |
 
 ## Public surface map
 
-- [API overview](overview.md) — ownership boundaries across the
-  runtime, local host, extensions, and Studio.
-- [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)
-  (an accepted design boundary, not a reference contract) —
-  resident runtime, dispatch, Agent Session interaction, and lifecycle ownership.
-- [Studio API](studio.md) — multi-pet dispatch, runtime-gate, event, and plugin
-  interfaces.
-- [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md) —
-  current extension and tool-authority contract.
-- [Capability directory protocol](../extensions/capability-directory.md) — local
-  extension file format and lifecycle restriction.
-- [Events and human review API](events-and-review.md) — operational
-  events, review actions, and interaction boundaries.
-- [CLI reference](cli.md) — `pinpawo` commands and
-  runtime modes.
-- [Error handling and observability](error-handling.md) — error
-  classes, diagnostics, and disclosure boundaries.
+The table above is the surface catalog. The [API overview](overview.md) maps each
+surface to its package owner.
 
 ## Related current contracts
 
-- [Host session projection](../runtime/session-projection.md) — shared
-  checkpoint-to-client session contract.
-- [Capability Artifact Pipeline](../artifacts/index.md) —
-  durable Capability output contract.
-- [Model profile configuration](../../guides/model-profiles.md) — model identity
-  and non-secret configuration handling.
+- [Session projection](../runtime/session-projection.md) — checkpoint-to-client state.
+- [Capability artifacts](../artifacts/index.md) — durable Capability output.
+- [Model profiles](../runtime/model-profiles.md) — identity, fields, and modality rules.
+- [Runtime contracts](../runtime/index.md) — authorization, guards, and context boundaries.
 
 ## Design background
 
-Some API behavior is motivated by detailed design records. They explain why a
-boundary exists but do not override a current contract:
-
-- [Capability / Toolkit contract](../extensions/capability-toolkit.md)
-- [Studio independent Host runtime](../../design/studio/independent-host-runtime.md)
-- [Capability Artifact Store design](../artifacts/store.md)
-- [Documentation index](../../index.md) for the full design-record catalog
+Use [Design records](../../design/index.md) for proposals and accepted rationale,
+including the [Studio Host](../../design/studio/independent-host-runtime.md).
+A design record's explicit status determines its role. The
+[documentation index](../../index.md#how-to-read-document-status) explains source authority.

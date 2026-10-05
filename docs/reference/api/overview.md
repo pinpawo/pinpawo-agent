@@ -44,12 +44,6 @@ cross-host ownership rules are recorded in
 
 ## Start from your goal
 
-- Compose a resident Pet Host: [Resident Pet Host ports](../../design/agent-runtime/resident-pet-host-ports.md)
-- Run multi-agent coordination: [Studio API](studio.md)
-- Build an extension: [Capability / Toolkit V2 contract](../extensions/capability-toolkit.md)
-- Add a local Capability: [Capability directory protocol](../extensions/capability-directory.md)
-- Consume tool activity or approval requests: [Events and human review API](events-and-review.md)
-- Operate the local binary: [CLI reference](cli.md)
-- Handle errors safely: [Error handling and observability](error-handling.md)
-
-The complete list is maintained in the [API reference](index.md).
+Use the [API reference](index.md#choose-an-integration-surface) to select the
+contract for your integration task. This page owns the package and boundary map;
+the index owns the task catalog.

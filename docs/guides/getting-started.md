@@ -1,12 +1,12 @@
 # Getting Started
 
-> **Status: current operator guide.** This is the supported path for a local
-> installation; detailed interfaces live in [Reference](../reference/index.md).
+> **Status: current first-use guide.** Detailed interfaces live in
+> [Reference](../reference/index.md).
 
 [简体中文](../zh-CN/guides/getting-started.md)
 
-This guide gets a local PinPawo Agent running, verifies the generated extension
-scaffold, and points you to the next integration path.
+Use this guide to install a local agent and validate its generated Capability.
+You will then choose a TUI or server entry point.
 
 ## Prerequisites
 
@@ -21,18 +21,30 @@ backend — only the model configuration above.
 
 ```bash
 npm install -g pinpawo
+```
+
+Initialize local configuration:
+
+```bash
 pinpawo init
-pinpawo setup
 ```
 
 `pinpawo init` creates `~/.pinpawo/.env`, `~/.pinpawo/config.json` with an
 editable default model profile, a local Capability directory, and a small
-`hello-pinpawo` example. Edit the `models` section of `~/.pinpawo/config.json` to
-configure credentials and endpoints; they are read only from the stored profile,
-not from environment variables. Keep `~/.pinpawo/.env` for runtime settings.
-Use `pinpawo setup` whenever you want a concise diagnostic of missing
-configuration. See [Model profile configuration](model-profiles.md) for the
-stored profile format.
+`hello-pinpawo` example.
+
+Open `~/.pinpawo/config.json`. Configure the model endpoint and credentials in
+its `models` section. The Host reads these from the stored profile. Keep
+`~/.pinpawo/.env` for runtime settings.
+
+Check for missing configuration:
+
+```bash
+pinpawo setup
+```
+
+If setup reports missing model configuration, follow
+[Model profile configuration](model-profiles.md), then run setup again.
 
 ## Verify the scaffold
 
@@ -41,9 +53,10 @@ pinpawo capability validate ~/.pinpawo/capabilities/hello-pinpawo
 pinpawo capability list
 ```
 
-The example is a `CAPABILITY.md` document. A Capability describes its user
-facing task and the Toolkits it is allowed to use; it is not an arbitrary code
-plugin. Read [Core Concepts](../concepts/core-concepts.md) before building a larger one.
+The validator returns JSON with `ok: true` when validation succeeds.
+The list command shows installed Capabilities. Before creating your own, read
+[Core concepts](../concepts/core-concepts.md) and the
+[Capability directory protocol](../reference/extensions/capability-directory.md).
 
 ## Run the agent
 

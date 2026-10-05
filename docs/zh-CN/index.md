@@ -15,6 +15,18 @@ PinPawo Agent 是一个本地优先的开源 Agent 框架：工具权限显式�
 | 编写 Capability 或 Toolkit | [扩展契约](reference/extensions/capability-toolkit.md) |
 | 使用多 Agent Studio | [Studio](studio/index.md) |
 
+## 按阅读目的选择
+
+| 目的 | 入口 |
+|---|---|
+| 第一次动手 | [快速开始](guides/getting-started.md) |
+| 完成配置或操作 | [指南](guides/index.md)、[Studio 配置](studio/configuration.md) |
+| 查字段、命令和协议 | [参考](reference/index.md) |
+| 理解模型与设计理由 | [概念](concepts/index.md)、[设计记录](../design/index.md) |
+
+阅读目的与技术领域结合使用。设计记录的状态决定它是提案还是已接受的设计；
+不能只根据目录判断权威性。分类与写法见[文档维护指南（英文）](../contributing.md)。
+
 ## 文档语言与范围
 
 当前公开阅读路径同时提供英文和简体中文。`design/` 与 `history/` 保留设计、审计和迁移发生时的原始语言，以免翻译改变证据含义；它们不是首次阅读入口，也不替代当前契约。

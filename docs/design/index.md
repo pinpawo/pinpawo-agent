@@ -1,8 +1,11 @@
 # Design Records
 
 These documents record active proposals, implementation choices, and rationale.
-They may be draft or implementation-oriented; they do not override the public
-contracts in [reference/](../reference/index.md).
+Check the status on each page. Drafts describe proposals; accepted records
+preserve decisions. Some accepted and implemented contracts, such as Resident
+Pet Host ports and Channel, retain their existing paths here. Use their explicit
+status and implementation sources; a directory name alone does not establish authority.
+See [Reference](../reference/index.md) for the current public reading path.
 
 ## Cross-cutting architecture
 
@@ -50,7 +53,7 @@ contracts in [reference/](../reference/index.md).
 
 ## Historical Kanban designs
 
-- [Kanban SQLite task store](kanban/sqlite-task-store.md) — retired design retained for
-  historical task, dependency, history, transaction, and recovery context
+The retired records remain at their referenced paths. Find them in the
+[history catalog](../history/index.md#artifacts-studio-and-tui).
 
 Completed or superseded work belongs in [history/](../history/index.md).

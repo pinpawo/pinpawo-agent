@@ -206,6 +206,9 @@ const renderer = await createCliRenderer({
   externalOutputMode: 'capture-stdout',
   consoleMode: 'disabled',
 });
+// Query the terminal's theme before committing the welcome block to scrollback.
+// Unreported themes retain a readable dark welcome surface.
+await renderer.waitForThemeMode(200);
 const root = new BoxRenderable(renderer, {
   id: 'pinpawo-tui',
   width: '100%',

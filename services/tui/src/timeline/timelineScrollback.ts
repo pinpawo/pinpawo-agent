@@ -23,6 +23,7 @@ import {
   WELCOME_PAD_COLUMNS,
   WELCOME_PAD_ROWS,
 } from '../welcome/welcomeModel';
+import { welcomeColors, type WelcomeColors } from '../welcome/welcomeTheme';
 import {
   countSettledTimelinePrefix,
   buildTimelineDisplayLines,
@@ -36,11 +37,6 @@ import {
 } from './assistantMarkdown';
 import { isDelegationEntry } from './operationDisplay';
 
-const WELCOME_COLOR = '#69c0c8';
-const WELCOME_BACKGROUND = '#22272e';
-const WELCOME_MUTED_COLOR = '#789da3';
-const WELCOME_STATUS_COLOR = '#7fcf9b';
-const WELCOME_TITLE_COLOR = '#efa6ca';
 const USER_MESSAGE_BACKGROUND = '#272c33';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
 const USER_MESSAGE_TEXT_COLOR = '#e7ecee';
@@ -78,6 +74,7 @@ export class TimelineScrollback {
 
   renderWelcome(lines: readonly string[]) {
     if (this.welcomeRendered || lines.length === 0) return;
+    const colors = welcomeColors(this.renderer.themeMode);
     this.renderer.writeToScrollback((context) => {
       const root = new BoxRenderable(context.renderContext, {
         id: 'pinpawo-welcome',
@@ -90,8 +87,8 @@ export class TimelineScrollback {
           id: `pinpawo-welcome:${index}`,
           width: '100%',
           height: 1,
-          content: styleWelcomeLine(line || ' ', index),
-          fg: WELCOME_COLOR,
+          content: styleWelcomeLine(line || ' ', index, colors),
+          fg: colors.foreground,
         }));
       });
       return {
@@ -350,76 +347,72 @@ export class TimelineScrollback {
   }
 }
 
-function styleWelcomeLine(line: string, row: number) {
+/** Every unpainted welcome cell inherits the theme's welcome background. */
+function styleWelcomeLine(line: string, row: number, colors: WelcomeColors) {
   return new StyledText(
-    styleWelcomeContent(line, row).map(withWelcomeBackground),
+    styleWelcomeContent(line, row, colors).map((chunk) =>
+      chunk.bg ? chunk : { ...chunk, bg: parseColor(colors.background) },
+    ),
   );
 }
 
-/**
- * The welcome block has no drawn border: a shared background is what separates
- * it from the transcript, so every chunk that does not set its own background
- * inherits it.
- */
-function withWelcomeBackground(chunk: TextChunk): TextChunk {
-  return chunk.bg ? chunk : { ...chunk, bg: parseColor(WELCOME_BACKGROUND) };
-}
-
-function styleWelcomeContent(line: string, row: number) {
+function styleWelcomeContent(line: string, row: number, colors: WelcomeColors) {
   const chunks: TextChunk[] = [];
   let remainder = line;
   const logoEnd = WELCOME_PAD_COLUMNS + WELCOME_LOGO_WIDTH;
   if (row >= WELCOME_PAD_ROWS && row < WELCOME_PAD_ROWS + WELCOME_LOGO_HEIGHT) {
     const logo = line.slice(0, logoEnd);
-    chunks.push(...styleWelcomeLogo(logo));
-    remainder = line.slice(logoEnd);
+    if (/^[ █▀▄]+$/.test(logo)) {
+      chunks.push(...styleWelcomeLogo(logo, colors));
+      remainder = line.slice(logoEnd);
+    }
   }
-  chunks.push(...styleWelcomeText(remainder));
+  chunks.push(...styleWelcomeText(remainder, colors));
   return chunks;
 }
 
-/** The paw is solid pixels, so each run is painted as filled cells. */
-function styleWelcomeLogo(logo: string): TextChunk[] {
+/** Full cells use backgrounds; half blocks retain the SVG's half-unit edges. */
+function styleWelcomeLogo(logo: string, colors: WelcomeColors): TextChunk[] {
   return logo
-    .split(/(█+)/)
+    .split(/(█+|[▀▄]+)/)
     .filter(Boolean)
     .map((value) => value[0] === '█'
-      ? bg(WELCOME_COLOR)(' '.repeat(value.length))
-      : fg(WELCOME_COLOR)(value));
+      ? bg(colors.foreground)(' '.repeat(value.length))
+      : fg(colors.foreground)(value));
 }
 
-function styleWelcomeText(text: string): TextChunk[] {
+function styleWelcomeText(text: string, colors: WelcomeColors): TextChunk[] {
   if (!text) return [];
   const leading = text.match(/^\s*/)?.[0] ?? '';
   const value = text.slice(leading.length);
-  const chunks: TextChunk[] = leading ? [fg(WELCOME_COLOR)(leading)] : [];
+  const chunks: TextChunk[] = leading ? [fg(colors.foreground)(leading)] : [];
 
   if (value.startsWith('PinPawo TUI v2')) {
-    chunks.push(bold(fg(WELCOME_TITLE_COLOR)(value)));
+    chunks.push(bold(fg(colors.foreground)(value)));
     return chunks;
   }
   if (/^v\S+\s+·\s+host\b/.test(value)) {
-    chunks.push(dim(fg(WELCOME_MUTED_COLOR)(value)));
+    chunks.push(dim(fg(colors.muted)(value)));
     return chunks;
   }
   if (/^(?:connected|connecting|reconnecting|disconnected)\b/.test(value)) {
-    chunks.push(fg(WELCOME_STATUS_COLOR)(value));
+    chunks.push(fg(colors.status)(value));
     return chunks;
   }
   const detail = value.match(/^(model|directory|capabilities)(\s+)(.*)$/);
   if (detail) {
     chunks.push(
-      dim(fg(WELCOME_MUTED_COLOR)(detail[1]!)),
-      fg(WELCOME_MUTED_COLOR)(detail[2]!),
-      fg(WELCOME_COLOR)(detail[3]!),
+      dim(fg(colors.muted)(detail[1]!)),
+      fg(colors.muted)(detail[2]!),
+      fg(colors.foreground)(detail[3]!),
     );
     return chunks;
   }
   if (value.startsWith('/ commands') || value.startsWith('Ctrl+')) {
-    chunks.push(dim(fg(WELCOME_MUTED_COLOR)(value)));
+    chunks.push(dim(fg(colors.muted)(value)));
     return chunks;
   }
-  chunks.push(fg(WELCOME_COLOR)(value));
+  chunks.push(fg(colors.foreground)(value));
   return chunks;
 }
 

@@ -412,3 +412,38 @@ test('compaction separates current-task evidence from older history and folds ea
     assert.equal(request.includes('KEEP_VERBATIM'), false);
   }
 });
+
+test('task-split summaries run concurrently, keep group order and cancel each other on failure', async () => {
+  const task = (message: BaseMessage) => setAgentMessageMetadata(message, { taskId: 'current-goal' });
+  const messages: BaseMessage[] = [new HumanMessage('OLDER_FACT'), task(new HumanMessage('CURRENT_FACT')),
+    task(new HumanMessage('Continue.'))];
+  const options = { taskId: 'current-goal', keepMessages: 1 };
+  // The current-task summary finishes first; output order still follows the groups.
+  let releaseOlder!: () => void;
+  const olderGate = new Promise<void>((resolve) => { releaseOlder = resolve; });
+  const ordered = { invoke: async (input: BaseMessage[]) => {
+    const text = String(input.at(-1)?.content);
+    if (text.includes('OLDER_FACT')) await olderGate;
+    else releaseOlder();
+    return new AIMessage(text.includes('OLDER_FACT') ? 'older summary' : 'current summary');
+  } } as unknown as BaseChatModel;
+  const result = await compactOrchestratorMessages({ messages, model: ordered, options });
+  const summaries = result.messages.filter(isContextCompactionMessage);
+  assert.equal(summaries.length, 2);
+  assert.match(String(summaries[0].content), /older summary/);
+  assert.equal(getAgentMessageMetadata(summaries[0]).taskId, undefined);
+  assert.match(String(summaries[1].content), /current summary/);
+  assert.equal(getAgentMessageMetadata(summaries[1]).taskId, 'current-goal');
+
+  let siblingAborted = false;
+  const failing = { invoke: async (input: BaseMessage[], config?: RunnableConfig) => {
+    if (String(input.at(-1)?.content).includes('OLDER_FACT')) throw new Error('provider down');
+    await new Promise<void>((resolve) => config?.signal?.addEventListener('abort', () => {
+      siblingAborted = true;
+      resolve();
+    }, { once: true }));
+    throw config?.signal?.reason;
+  } } as unknown as BaseChatModel;
+  await assert.rejects(compactOrchestratorMessages({ messages, model: failing, options }), /provider down/);
+  assert.equal(siblingAborted, true);
+});

@@ -1,11 +1,7 @@
-import type {
-  TokenUsageSnapshot,
-  ToolAuthorizationSafetyLevel,
-} from '@pinpawo/agent-contracts';
+import type { TokenUsageSnapshot } from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
 import {
   isHumanReviewRequest,
-  isToolAuthorizationSafetyLevel,
   parseTokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 
@@ -23,12 +19,6 @@ export function isAgentTokenUsageSnapshot(
   value: unknown,
 ): value is TokenUsageSnapshot {
   return parseTokenUsageSnapshot(value) !== null;
-}
-
-export function isAutoAuthorizationSafetyLevel(
-  value: unknown,
-): value is ToolAuthorizationSafetyLevel {
-  return isToolAuthorizationSafetyLevel(value);
 }
 
 export function parseAgentPlan(value: unknown): AgentPlan | null {

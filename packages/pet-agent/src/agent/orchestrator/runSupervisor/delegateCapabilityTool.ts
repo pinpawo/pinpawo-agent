@@ -4,7 +4,7 @@ import { buildReviewStopMessage } from '../interrupt/reviewStop';
 import { z } from 'zod';
 import type { CapabilityExecutionInput } from './protocol';
 import { SupervisorDecisionError, identity, type SupervisorControlContext } from './controlContext';
-import { currentSupervisorTask } from './state';
+import { currentSupervisorTask, requirePlanGoal } from './state';
 import type { OrchestratorStateType } from '../state';
 import { createCapabilityExecutor, type CapabilityExecutionOptions } from '../capabilityExecution';
 import { getInvokeOptions, getInvokeRegistry } from '../runtime/config';
@@ -30,10 +30,7 @@ export function createDelegateCapabilityTool(options: CapabilityExecutionOptions
     const input = buildCapabilityExecutionInput({
       state: state.runSupervisorState, runId: state.runId, allowedCapabilityNames: catalog.capabilityNames,
     }, args, runtime.toolCallId);
-    // Every path that writes a plan also writes its goal, so a plan without one
-    // is an invariant violation rather than something to fall back from.
-    const userRequest = state.runSupervisorState.goal;
-    if (!userRequest) throw new Error('Capability execution requires the plan goal.');
+    const userRequest = requirePlanGoal(state.runSupervisorState);
     const compiledCapability = registry.capabilities.find(({ capability }) => capability.name === input.capability)!;
     const execution = await executeCapability({
       capability: compiledCapability,

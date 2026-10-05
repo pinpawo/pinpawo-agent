@@ -112,6 +112,24 @@ test('adjustment preserves completed work, supersedes replaced executions and ch
   assert.equal(replaced.plan[0].id, input.state.plan[0].id);
 });
 
+test('a boundary re-plan keeps the established goal instead of the run request', () => {
+  const carried = { runId: 'r1', goal: 'Refactor the parser.', plan: [{ ...taskA, id: 'old', status: 'completed' as const }] };
+  // Entry establishes the goal from this run's resolved request.
+  assert.equal(submitPlan(context({ state: carried }), { tasks: [taskB] }, 'entry').goal, 'Inspect the project.');
+  // After continue the run request is just the continuation utterance.
+  const continued = context({ state: carried, mode: 'boundary', userRequest: '继续' });
+  assert.equal(submitPlan(continued, { tasks: [taskB] }, 'boundary').goal, 'Refactor the parser.');
+  assert.equal(submitPlan({ ...continued, hasNewUserInput: false }, { tasks: [taskB] }, 'later').goal, 'Refactor the parser.');
+});
+
+test('review fails the run when a planned task has lost its goal', () => {
+  const input = returned();
+  assert.throws(() => reviewCurrent({ ...input, state: { ...input.state, goal: null } }, { completed: false, reason: 'Retry' }),
+    /no goal/);
+  assert.throws(() => reviewCurrent({ ...input, state: { runId: 'r1', goal: null, plan: [] } }, { completed: false, reason: 'Retry' }),
+    /no task to review/, 'a missing plan stays a correctable decision');
+});
+
 test('work projection scopes delegation IDs per run without changing arguments or the original message', () => {
   const request = control('delegate_capability', { briefing: 'Execute the current objective.' }, 'native-call');
   const projected = supervisorWorkMessages(context(), [request], true);

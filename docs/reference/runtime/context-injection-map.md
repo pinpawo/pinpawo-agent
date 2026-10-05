@@ -310,13 +310,14 @@ Two state values with different owners. They start equal and can diverge:
 | Value | Written by | Meaning | Model projection |
 |---|---|---|---|
 | `runUserRequest` | `captureRunUserRequest` seeds the latest human message (provisional); `plan_request(goal)` replaces it with the resolved request; `continue` keeps the provisional capture | What the user asked in this run. On `continue` it can be a bare continuation utterance such as "继续". | Supervisor `<run_user_request>` in the run context |
-| `runSupervisorState.goal` | `submit_plan` (set to the run request); `adjust_plan` (only with fresh user input); carried into a new run unchanged by Entry `continue` | The goal the plan executes and is accepted against. | Capability briefing `<run_user_request role="goal_context">`; Supervisor `<supervisor_plan>`; Entry `<supervisor_snapshot>` |
+| `runSupervisorState.goal` | `submit_plan` at Entry (set to the run request); `submit_plan` at a boundary keeps the established goal; `adjust_plan` (sets its `goal` argument, which may differ from the current goal only with fresh user input); carried into a new run unchanged by Entry `continue` | The goal the plan executes and is accepted against. | Capability briefing `<run_user_request role="goal_context">`; Supervisor `<supervisor_plan>`; Entry `<supervisor_snapshot>` |
 
 A non-empty plan always carries a goal: every writer of a plan also writes or
-preserves its goal. Execution and acceptance read the plan goal and never fall
-back to the run request — on `continue` that fallback would hand the executor a
-continuation utterance as its goal. A missing goal on a planned task is an
-invariant violation and fails the run.
+preserves its goal. Execution, acceptance and boundary re-planning read the plan
+goal and never fall back to the run request — on `continue` that fallback would
+hand the executor a continuation utterance as its goal. A missing goal on a
+planned task is an invariant violation: `delegate_capability` and
+`review_current` fail the run (`requirePlanGoal`).
 
 Why the run request is model-authored: the last human message is often a continuation
 utterance ("嗯。开始吧") that states no goal. EntryAnswer resolves the initial goal from conversation; Supervisor uses the

@@ -3,7 +3,7 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { Command } from '@langchain/langgraph';
 import { z } from 'zod';
 import { SupervisorDecisionError, type SupervisorControlContext } from './controlContext';
-import { currentSupervisorTask, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
+import { currentSupervisorTask, requirePlanGoal, updateSupervisorTask, type RunSupervisorState, type SupervisorAgentState } from './state';
 import { executionsForPlanItem } from '../executionMessages';
 
 export const reviewCurrentSchema = z.object({
@@ -34,11 +34,11 @@ export function reviewCurrent(
   context: SupervisorControlContext,
   args: ReviewCurrentArgs,
 ): RunSupervisorState {
-  // A plan always carries its goal; review only advances progress.
-  let state: SupervisorControlContext['state'] = { runId: context.runId,
-    goal: context.state.goal, plan: [...context.state.plan] };
-  const current = currentSupervisorTask(state);
+  const current = currentSupervisorTask(context.state);
   if (!current) throw new SupervisorDecisionError('There is no task to review.');
+  // Review only advances progress; the plan's goal is carried, never re-derived.
+  let state: SupervisorControlContext['state'] = { runId: context.runId,
+    goal: requirePlanGoal(context.state), plan: [...context.state.plan] };
   if (args.completed) {
     const latestResult = executionsForPlanItem(context, current.id).at(-1)?.result;
     if (!latestResult || latestResult.status !== 'returned' || !latestResult.delivery) {

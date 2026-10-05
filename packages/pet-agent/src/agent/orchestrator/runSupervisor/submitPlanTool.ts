@@ -40,7 +40,12 @@ export function submitPlan(
   if (currentSupervisorTask(context.state) && !context.hasNewUserInput) {
     throw new SupervisorDecisionError('Replacing unfinished work requires fresh user input.');
   }
-  return { runId: context.runId, goal: context.userRequest, plan: args.tasks.map((task, index) => ({
+  // Entry establishes the goal from this run's resolved request. At a boundary
+  // the run already owns a goal — carried in by continue or set by adjust_plan —
+  // and only adjust_plan may change it; on continue the run request is just the
+  // continuation utterance.
+  const goal = context.mode === 'boundary' && context.state.goal ? context.state.goal : context.userRequest;
+  return { runId: context.runId, goal, plan: args.tasks.map((task, index) => ({
     ...task, id: identity('task', context.runId, callId, String(index)), status: 'pending',
   })) };
 }

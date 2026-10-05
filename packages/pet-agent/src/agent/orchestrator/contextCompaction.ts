@@ -175,9 +175,22 @@ export async function compactOrchestratorMessages(params: {
   ] : [messagesToSummarize];
   // The groups are independent, so their summaries are generated concurrently;
   // output keeps the group order (older history first, then the current task).
+  // Either failure fails the compaction, so it also cancels the other request.
+  const sibling = new AbortController();
+  const callerSignal = params.runnableConfig?.signal;
+  const runnableConfig: RunnableConfig = {
+    ...params.runnableConfig,
+    signal: callerSignal ? AbortSignal.any([callerSignal, sibling.signal]) : sibling.signal,
+  };
   const summaries = (await Promise.all(groups.map(async (group, index) => {
     if (group.length === 0) return null;
-    const summary = await summarizeMessages({ model, messages: group, runnableConfig: params.runnableConfig });
+    let summary: string | null;
+    try {
+      summary = await summarizeMessages({ model, messages: group, runnableConfig });
+    } catch (error) {
+      sibling.abort(error);
+      throw error;
+    }
     if (summary === null) return null;
     const message = createContextCompactionMessage(summary, mainConversationMessages(group).length);
     if (taskId && index === 1) setAgentMessageMetadata(message, { taskId });

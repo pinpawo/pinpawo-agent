@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createBashToolkit, createGitToolkit, createProjectInspectionToolkit } from './index';
+import { createBashToolkit, createGitToolkit, createProjectInspectionToolkit } from '../local/index';
 import { PosixShellRS } from './posixShellRS';
 import { SHELL_RS_REQUIREMENT, ShellRSError } from './shellRS';
 

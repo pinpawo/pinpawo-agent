@@ -11,9 +11,9 @@ import {
   createGitToolkit,
   createProjectInspectionToolkit,
   PosixShellRS,
-} from './index';
+} from '../local/index';
 import { createGitTools } from './gitTools';
-import type { ShellRS } from './shellRS';
+import type { ShellRS } from '../shellRS/shellRS';
 
 const sessionContext = {
   executionScope: {

@@ -7,7 +7,7 @@ import { RSServiceConnection } from '../../rsService/connection';
 import type { RSContractClient } from '../../rsService/contractClient';
 import { ensureToken, resolveRSServicePaths } from '../../rsService/paths';
 import { startRSService } from '../../rsService/server';
-import { createBashToolkit } from './index';
+import { createBashToolkit } from '../local/index';
 import { PosixShellRS } from './posixShellRS';
 import { ShellRSClient } from './shellRSClient';
 import { SHELL_RS_CONTRACT, SHELL_RS_VERSION, ShellRSError } from './shellRS';

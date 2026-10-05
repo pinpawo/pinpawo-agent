@@ -13,7 +13,7 @@ import {
   shellOperationMetadata,
   truncateShellOutput,
 } from './shellTools';
-import { createBashToolkit, PosixShellRS } from './index';
+import { createBashToolkit, PosixShellRS } from '../local/index';
 
 const runShellTool = createRunShellTool(new PosixShellRS());
 /** A call made within an Agent session, as the Host supplies it. */
@@ -250,7 +250,7 @@ test('start_process is reviewed with the original command and cwd', async () => 
 });
 
 test('shell tools keep connection uncertainty distinct from timeout', async () => {
-  const { ShellRSError } = await import('./shellRS');
+  const { ShellRSError } = await import('../shellRS/shellRS');
   const { createStartProcessTool } = await import('./shellTools');
   const shell = new PosixShellRS();
   shell.exec = async () => { throw new ShellRSError('result_unknown', 'connection lost'); };

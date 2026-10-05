@@ -11,9 +11,9 @@ import {
 } from '@pinpawo/pet-agent';
 import { z } from 'zod';
 import { readBoolean, readRecord, readString } from '../operationMetadata';
-import { requireAgentSession } from './executionContext';
-import { readTextFileChunkResult } from './fileTools';
-import type { ShellExecResult, ShellRS } from './shellRS';
+import { requireAgentSession } from '../executionContext';
+import { readTextFileChunkResult } from '../files/fileTools';
+import type { ShellExecResult, ShellRS } from '../shellRS/shellRS';
 import { classifyGhArgs, classifyGitArgs } from './vcsCommands';
 
 const MAX_GIT_OUTPUT_CHARS = 30_000;

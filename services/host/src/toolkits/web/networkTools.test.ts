@@ -8,7 +8,7 @@ import {
   sanitizeFilename,
   normalizeHttpFetchAuthorizationInput,
 } from './networkTools';
-import { createBashToolkit, PosixShellRS } from './index';
+import { createBashToolkit, PosixShellRS } from '../local/index';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
   return toolkit.tools.find((item) => item.tool.name === toolName);

@@ -128,8 +128,8 @@ wire 保留连接与请求的路由关系，把断连转换成取消对应执行
 - `residentPetAgentSessionTransport.ts` 名字里有 transport，实际解析
   `/agent-session/pets/<id>` 路由 → `wire/`。已落地为 `wire/agentSessionRoute.ts`。
 - 迁入 `wire/` 时一并去掉历史 `local` 前缀（`hostProtocol` → `protocol`、
-  `localServerPeer` → `peer` 等）。`toolkits/local/` 的 `local` 是「本机工具」的
-  真实语义，不在此列，保留。导出符号名（`sendLocalServerPeerEvent` 等）是跨包
+  `localServerPeer` → `peer` 等）。`toolkits/local/` 不在此列，它按 #907 拆为按作用
+  对象划分的 `files/`、`shell/`、`web/`、`git/` 等目录，ShellRS 实现在 `shellRS/`。导出符号名（`sendLocalServerPeerEvent` 等）是跨包
   公开 API，单独处理。
 
 ---

@@ -2,8 +2,8 @@ import { tool, type StructuredTool, type ToolRuntime } from '@langchain/core/too
 import { z } from 'zod';
 import type { ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { requireAgentSession } from './executionContext';
-import type { ShellProcessSnapshot, ShellRS } from './shellRS';
+import { requireAgentSession } from '../executionContext';
+import type { ShellProcessSnapshot, ShellRS } from '../shellRS/shellRS';
 import { truncateShellOutput } from './shellTools';
 
 /**

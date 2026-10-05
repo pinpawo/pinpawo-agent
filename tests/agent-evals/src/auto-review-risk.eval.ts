@@ -18,7 +18,7 @@
 import { buildReviewSpec } from '../../../packages/pet-agent/src/types/reviewSpec.ts';
 import { assessAutoReviewRisk } from '../../../packages/pet-agent/src/autoReview/autoReviewer.ts';
 import { createBashToolkit, PosixShellRS } from '../../../services/host/src/toolkits/local/index.ts';
-import { shellOperationMetadata } from '../../../services/host/src/toolkits/local/shellTools.ts';
+import { shellOperationMetadata } from '../../../services/host/src/toolkits/shell/shellTools.ts';
 import { createDecisionEvalModel } from './scripts/decision-eval-model.ts';
 
 const workdir = '/Users/eval/Projects/pinpawo-agent';

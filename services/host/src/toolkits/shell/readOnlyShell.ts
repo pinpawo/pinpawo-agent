@@ -1,5 +1,5 @@
 import { parse } from 'shell-quote';
-import { classifyGhArgs, classifyGitArgs } from './vcsCommands';
+import { classifyGhArgs, classifyGitArgs } from '../git/vcsCommands';
 
 /**
  * Admission for `inspect_shell`: a blocklist, not an allowlist.

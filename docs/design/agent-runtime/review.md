@@ -71,10 +71,10 @@ Host 显式提供 `reviewCapabilities`，调用方可通过 `unavailable: 'allow
 3. **定位为免审核或少审核的工具，用黑名单兜底。** 黑名单只拦底线，即不可逆、
    改写共享历史、影响他人或凭据的操作，并提示改用哪个工具；不追求完整，不是沙箱。
    - `inspect_shell`（免审核）：拦截 rm/dd/提权/强制 kill 等，并把 git/gh 写操作
-     导向 git toolkit。见 `services/host/src/toolkits/local/readOnlyShell.ts`。
+     导向 git toolkit。见 `services/host/src/toolkits/shell/readOnlyShell.ts`。
    - `git_shell` / `gh_shell`（按调用审核）：查询和日常写操作直接执行，只有黑名单
      命中的高风险形式和无法识别的子命令走审核。见
-     `services/host/src/toolkits/local/vcsCommands.ts`。
+     `services/host/src/toolkits/git/vcsCommands.ts`。
    - 专用工具（`git_add`、`git_commit`、`git_push`、`gh_pr_create`、
      `gh_issue_create` 等）的危险能力由 schema 排除（例如 `git_push` 不接受 force
      或删除 refspec），因此不审核。

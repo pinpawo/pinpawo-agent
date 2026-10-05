@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
-import { createBashToolkit, PosixShellRS } from './index';
+import { createBashToolkit, PosixShellRS } from '../local/index';
 import {
   applyPatchTool as rawApplyPatchTool,
   copyPathTool,

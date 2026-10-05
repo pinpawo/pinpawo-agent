@@ -9,7 +9,7 @@ import {
   WAIT_PROCESS_TOOL_NAME,
 } from './processTools';
 import { createRunShellTool, createStartProcessTool } from './shellTools';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './index';
+import { createBashToolkit, createGitToolkit, PosixShellRS } from '../local/index';
 
 // End-to-end through the POSIX executor (sh commands, pgrep/pkill probes).
 const isWindows = process.platform === 'win32';

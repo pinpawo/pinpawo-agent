@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createOperationRegistry } from './events/operationRegistry';
 import { ToolOperationTracker } from './toolOperationTracker';
-import { shellOperationMetadata } from './toolkits/local/shellTools';
+import { shellOperationMetadata } from './toolkits/shell/shellTools';
 
 test('run_shell events without repeated input retain the summary without warnings', (t) => {
   const warn = t.mock.method(console, 'warn', () => {});

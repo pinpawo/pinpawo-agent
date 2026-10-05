@@ -3,7 +3,7 @@ import {
   readToolExecutionContext,
   type NamedStructuredTool,
 } from '@pinpawo/pet-agent';
-import { parsePatch } from './applyPatch';
+import { parsePatch } from './files/applyPatch';
 
 /**
  * The Agent session a shell-dependent tool acts for.

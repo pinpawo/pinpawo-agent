@@ -2,9 +2,9 @@ import { tool, type ToolRuntime } from '@langchain/core/tools';
 import { z } from 'zod';
 import { createAbortError, type ToolOperationMetadata } from '@pinpawo/pet-agent';
 import { readRecord, readString } from '../operationMetadata';
-import { requireAgentSession } from './executionContext';
+import { requireAgentSession } from '../executionContext';
 import { classifyReadOnlyShellCommand, type ReadOnlyShellVerdict } from './readOnlyShell';
-import { ShellRSError, type ShellExecResult, type ShellRS } from './shellRS';
+import { ShellRSError, type ShellExecResult, type ShellRS } from '../shellRS/shellRS';
 
 
 function readShellActionInput(input: unknown) {

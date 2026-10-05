@@ -1,7 +1,7 @@
 import { tool } from '@langchain/core/tools';
-import { createGitTools } from '../../../services/host/src/toolkits/local/gitTools';
-import { createInspectShellTool, createRunShellTool, createStartProcessTool } from '../../../services/host/src/toolkits/local/shellTools';
-import type { ShellRS } from '../../../services/host/src/toolkits/local/shellRS';
+import { createGitTools } from '../../../services/host/src/toolkits/git/gitTools';
+import { createInspectShellTool, createRunShellTool, createStartProcessTool } from '../../../services/host/src/toolkits/shell/shellTools';
+import type { ShellRS } from '../../../services/host/src/toolkits/shellRS/shellRS';
 
 type ShellCall = { name: string; args: Record<string, unknown> };
 type ExpectedCall = { names: readonly string[]; command: string };

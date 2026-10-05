@@ -11,8 +11,8 @@
   [`types/toolExecution.ts`](../../../packages/pet-agent/src/types/toolExecution.ts)
   （`readToolExecutionContext`）。
 - ShellRS 契约与 POSIX 实现：
-  [`services/host/src/toolkits/local/shellRS.ts`](../../../services/host/src/toolkits/local/shellRS.ts)、
-  [`posixShellRS.ts`](../../../services/host/src/toolkits/local/posixShellRS.ts)。
+  [`services/host/src/toolkits/shellRS/shellRS.ts`](../../../services/host/src/toolkits/shellRS/shellRS.ts)、
+  [`posixShellRS.ts`](../../../services/host/src/toolkits/shellRS/posixShellRS.ts)。
 - BrowserRS 契约与 Chrome Extension 实现：
   [`toolkits/browser/src/browserRS.ts`](../../../toolkits/browser/src/browserRS.ts)、
   [`chromeExtensionBrowserRS.ts`](../../../toolkits/browser/src/chromeExtensionBrowserRS.ts)；
@@ -21,8 +21,8 @@
 - Host 端连接的公共部分：[`rsService/contractClient.ts`](../../../services/host/src/rsService/contractClient.ts)。
 - ShellRS 独立服务：服务框架
   [`services/host/src/rsService/`](../../../services/host/src/rsService/)、
-  服务端 [`shellRSService.ts`](../../../services/host/src/toolkits/local/shellRSService.ts)、
-  Host 端连接 [`shellRSClient.ts`](../../../services/host/src/toolkits/local/shellRSClient.ts)、
+  服务端 [`shellRSService.ts`](../../../services/host/src/toolkits/shellRS/shellRSService.ts)、
+  Host 端连接 [`shellRSClient.ts`](../../../services/host/src/toolkits/shellRS/shellRSClient.ts)、
   入口 [`rsServiceEntry.ts`](../../../services/host/src/rsServiceEntry.ts)、
   管理命令 [`commands/rs.ts`](../../../services/host/src/commands/rs.ts)。
 - Host 装配：[`services/host/src/toolkits/hostRS.ts`](../../../services/host/src/toolkits/hostRS.ts)。

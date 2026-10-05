@@ -18,8 +18,8 @@ import { resolve } from 'node:path';
 import { createSubagent } from '@pinpawo/pet-agent';
 import { buildHostModels } from '../src/agent/agentModels';
 import { buildLocalModelProfileRegistry } from '../src/config/llmConfig';
-import { parsePatch } from '../src/toolkits/local/applyPatch';
-import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/local/fileTools';
+import { parsePatch } from '../src/toolkits/files/applyPatch';
+import { applyPatchTool, viewFileChunkTool } from '../src/toolkits/files/fileTools';
 
 type Scenario = {
   name: string;

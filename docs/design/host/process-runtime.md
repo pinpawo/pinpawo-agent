@@ -57,7 +57,7 @@ PR #551 已修掉其中一半：超时/abort 现在终止整个进程组，且�
 
 ## 2. 已落地的基础
 
-PR #551 引入了 `runShellCommand`（`toolkits/local/processTree.ts`）：
+PR #551 引入了 `runShellCommand`（`toolkits/shellRS/processTree.ts`）：
 
 - `spawn` + `detached: true`，命令拥有自己的进程组
 - SIGTERM → 宽限期 → SIGKILL，作用于整个组

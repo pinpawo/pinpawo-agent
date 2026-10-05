@@ -27,20 +27,20 @@ import {
   viewFileChunkTool,
   writeFileTool,
   fileOperationMetadata,
-} from './fileTools';
-import { createArtifactDiscoveryTools } from './artifactDiscoveryTools';
+} from '../files/fileTools';
+import { createArtifactDiscoveryTools } from '../artifactDiscovery/artifactDiscoveryTools';
 import {
   downloadFileTool,
   httpFetchTool,
   networkOperationMetadata,
   normalizeHttpFetchAuthorizationInput,
-} from './networkTools';
-import { createGitTools, gitOperationMetadata, vcsShellCallNeedsReview } from './gitTools';
-import { parsePatch, PatchParseError } from './applyPatch';
+} from '../web/networkTools';
+import { createGitTools, gitOperationMetadata, vcsShellCallNeedsReview } from '../git/gitTools';
+import { parsePatch, PatchParseError } from '../files/applyPatch';
 import {
   createProcessTools,
   processOperationMetadata,
-} from './processTools';
+} from '../shell/processTools';
 import {
   createRunShellTool,
   createStartProcessTool,
@@ -48,9 +48,9 @@ import {
   normalizeShellAuthorizationInput,
   createInspectShellTool,
   shellOperationMetadata,
-} from './shellTools';
-import { withExecutionWorkdir } from './executionContext';
-import { SHELL_RS_REQUIREMENT, type ShellRS } from './shellRS';
+} from '../shell/shellTools';
+import { withExecutionWorkdir } from '../executionContext';
+import { SHELL_RS_REQUIREMENT, type ShellRS } from '../shellRS/shellRS';
 
 export {
   SHELL_RS_CONTRACT,
@@ -63,13 +63,13 @@ export {
   type ShellProcessOutput,
   type ShellProcessSnapshot,
   type ShellRS,
-} from './shellRS';
+} from '../shellRS/shellRS';
 export {
   PosixShellRS,
   type PosixShellRSOptions,
   type ShellManagedProcess,
-} from './posixShellRS';
-export { ShellRSClient, type ShellRSClientOptions } from './shellRSClient';
+} from '../shellRS/posixShellRS';
+export { ShellRSClient, type ShellRSClientOptions } from '../shellRS/shellRSClient';
 
 const localUtilityTools: StructuredTool[] = [
   readFileTool,

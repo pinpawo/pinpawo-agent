@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { PosixShellRS } from './posixShellRS';
-import { classifyReadOnlyShellCommand } from './readOnlyShell';
+import { classifyReadOnlyShellCommand } from '../shell/readOnlyShell';
 import { prepareShellCommandDir } from './shellCommandDir';
 
 const isWindows = process.platform === 'win32';

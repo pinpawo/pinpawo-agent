@@ -36,6 +36,7 @@ export {
   type PetDispatchLifecycleState,
   type PetDispatchPort,
   type PetDispatchQueueSnapshot,
+  type PetDispatchQueueEntry,
   type PetDispatchRequest,
   type PetDispatchSettledState,
   type PetDispatchState,

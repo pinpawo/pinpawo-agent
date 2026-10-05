@@ -25,6 +25,16 @@ export type PetDispatchQueueSnapshot = {
   activeOperation: 'conversation' | 'dispatch' | null;
   queuedConversations: number;
   queuedDispatches: number;
+  /** Runtime-owned entries in their current queue order; never includes input text. */
+  entries?: PetDispatchQueueEntry[];
+  activeDispatch?: PetDispatchQueueEntry;
+};
+
+export type PetDispatchQueueEntry = {
+  dispatchId: string;
+  enqueuedAt: string;
+  sessionId?: string;
+  scope?: PetInvocationScope;
 };
 
 /**
@@ -114,6 +124,7 @@ export type QueuedOperation = {
   run: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+  observation?: PetDispatchQueueEntry;
 };
 
 /** A second interactive client tried to attach to a Host that already has one. */

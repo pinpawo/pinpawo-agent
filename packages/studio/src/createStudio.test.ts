@@ -191,6 +191,27 @@ test('idempotency returns the same receipt and invokes the port once', async () 
   await studio.shutdown();
 });
 
+test('dispatch owns simultaneous admission deduplication and isolates producer keys', async () => {
+  const gate = deferred();
+  let calls = 0;
+  const plugins: StudioPlugin[] = [];
+  const receipts: Array<Promise<unknown>> = [];
+  for (const name of ['channel', 'http']) plugins.push({ name, toolkits: [], start: context => {
+    receipts.push(context.dispatch({ petId: 'worker', request: 'same text', idempotencyKey: 'same-key' }));
+  } });
+  const studio = await createStudio({ studioId: 's', entryPetId: 'worker', plugins,
+    pets: [binding('worker', async () => { calls++; await gate.promise; })] });
+  const request = { petId: 'worker', request: 'work', idempotencyKey: 'concurrent' };
+  const first = studio.dispatch(request);
+  const second = studio.dispatch(request);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls, 3, 'two producers are distinct, simultaneous retries share one port admission');
+  gate.resolve();
+  assert.equal(await first, await second);
+  await Promise.all(receipts);
+  await studio.shutdown();
+});
+
 test('dispatch rejects when the Pet cannot accept the input', async () => {
   const studio = await createStudio({
     studioId: 's1',

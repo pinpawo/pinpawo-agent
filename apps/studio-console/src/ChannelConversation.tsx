@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  channelDateKey, channelExecutionOutputs, channelMessageExecution, channelMessageIdentity,
+  channelDateKey, channelExecutionOutputs, channelMessageExecutions, channelMessageIdentity, channelMentionLabel,
   channelMessagesGroup, channelPetIdentity, channelQuote, executionLabel,
-  type ChannelEntry, type ChannelExecution, type ChannelMessage, type ChannelPet,
+  type ChannelEntry, type ChannelExecution, type ChannelMessage, type ChannelPet, type ChannelParticipant,
 } from './channelData';
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
@@ -33,10 +33,11 @@ type TimelineProps = {
   entries: ChannelEntry[]; pending: boolean; onReply: (item: ChannelMessage) => void;
   pets?: ChannelPet[]; petsReady?: boolean; executions?: ChannelExecution[]; connected?: boolean; highlighted?: string;
   onLocateMessage?: (messageId: string) => void; onLocateExecution?: (executionId: string) => void;
+  participants?: ChannelParticipant[]; viewerParticipantId?: string;
 };
 
 export function ChannelTimeline({ entries, pending, onReply, pets = [], petsReady = true, executions = [], connected = true,
-  highlighted, onLocateMessage, onLocateExecution }: TimelineProps) {
+  highlighted, onLocateMessage, onLocateExecution, participants = [], viewerParticipantId }: TimelineProps) {
   const messages = new Map(entries.filter((item): item is ChannelMessage => item.kind === 'message').map(item => [item.messageId, item]));
   return <div className="channel-timeline">{entries.map((item, index) => {
     const previous = entries[index - 1];
@@ -46,9 +47,9 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
     if (item.kind === 'revision') return <React.Fragment key={item.sequence}>{separator}<details className="channel-revision">
       <summary>Goal revision · {item.reason} · {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</summary><p>{item.goal}</p><p>{item.scope}</p>
     </details></React.Fragment>;
-    const identity = channelMessageIdentity(item, pets, petsReady);
+    const identity = channelMessageIdentity(item, pets, petsReady, participants, viewerParticipantId);
     const grouped = channelMessagesGroup(previous, item, executions);
-    const execution = channelMessageExecution(item, executions);
+    const messageExecutions = channelMessageExecutions(item, executions);
     const original = item.replyTo ? messages.get(item.replyTo) : undefined;
     const avatar = identity.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase();
     return <React.Fragment key={item.messageId}>{separator}<article id={'message-' + item.messageId} tabIndex={-1}
@@ -58,19 +59,29 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
       <div className="channel-message-content">
         <div className="channel-message-head">{!grouped && <><strong>{identity.name}</strong>{identity.removed && <span className="channel-removed">Removed Pet</span>}</>}
           <time dateTime={item.occurredAt} title={date.toLocaleString()}>{date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
-          {execution && <span className={'channel-inline-state ' + execution.state}>{executionLabel(execution, connected)}</span>}
+          {messageExecutions.map(execution => <span key={execution.executionId} className={'channel-inline-state ' + execution.state}>
+            {channelPetIdentity(execution.petId, pets, petsReady).name} · {executionLabel(execution, connected)}</span>)}
         </div>
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
-          <strong>{original ? channelMessageIdentity(original, pets, petsReady).name : 'Referenced message'}</strong><span>{original ? channelQuote(original.body) : 'Locate the original message'}</span>
+          <strong>{original ? channelMessageIdentity(original, pets, petsReady, participants, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelQuote(original.body) : 'Locate the original message'}</span>
         </button>}
-        <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{item.body}</ReactMarkdown></div>
+        {item.mentions.length > 0 && <div className="channel-mentions" aria-label="Addressed participants">{item.mentions.map((mention, index) =>
+          <span className="channel-mention" key={index}>@{channelMentionLabel(mention, participants, pets, viewerParticipantId)}</span>)}</div>}
+        <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
+          urlTransform={url => url.startsWith('participant:') ? url : defaultUrlTransform(url)}
+          components={{ a: ({ href, children }) => href?.startsWith('participant:')
+            ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, participants, pets, viewerParticipantId)}</span>
+            : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{item.body}</ReactMarkdown></div>
+        {messageExecutions.filter(execution => execution.error || execution.deliveryError).map(execution =>
+          <p className="channel-record-error" role="alert" key={execution.executionId}>
+            {channelPetIdentity(execution.petId, pets, petsReady).name}: {execution.error ?? execution.deliveryError}</p>)}
         {item.artifacts.map((artifact, artifactIndex) => <div className="channel-artifact" key={artifactIndex}>
           {/^https?:\/\//i.test(artifact.uri) ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label ?? artifact.uri}</a> : <code>{artifact.label ?? artifact.uri}</code>}
           {artifact.version && <span> · {artifact.version}</span>}
         </div>)}
         <div className="channel-message-actions">
-          {item.source && <button type="button" disabled={pending || identity.removed} title={identity.removed ? 'This Pet is no longer registered on this Host.' : undefined} onClick={() => onReply(item)}>{'Reply to ' + identity.name}</button>}
-          {execution && <button type="button" onClick={() => onLocateExecution?.(execution.executionId)}>View execution</button>}
+          <button type="button" disabled={pending} onClick={() => onReply(item)}>{'Reply to ' + identity.name}</button>
+          {messageExecutions.map(execution => <button type="button" key={execution.executionId} onClick={() => onLocateExecution?.(execution.executionId)}>View {channelPetIdentity(execution.petId, pets, petsReady).name} execution</button>)}
           <ChannelTechnicalDetails message={item} />
         </div>
       </div>

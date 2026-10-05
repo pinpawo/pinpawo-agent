@@ -8,8 +8,8 @@ Studio Console 是独立的纯前端应用，不是 Studio Plugin，也不由任
 
 ```text
 apps/studio-console
-  ├─ Studio     -> /pets /dispatch /events
-  ├─ Channel    -> /channels /channels/context /channels/execute /channels/executions /channels/interrupts
+  ├─ Studio     -> /pets /dispatch /dispatch/queues /events
+  ├─ Channel    -> /channels /channels/context /channels/participants /channels/messages /channels/executions /channels/interrupts
   ├─ Notice     -> /notices
   ├─ Scheduler  -> /scheduler /scheduler/events
   ├─ Trigger    -> /triggers /triggers/events
@@ -110,3 +110,19 @@ Kanban 事件规则及专属测试评估与安装依赖。四个 Pet 通过显�
 
 现有 Kanban SQLite、快照、历史和其他用户数据不迁移、不删除，不执行 schema/table
 清理。旧工作区对照模板手动迁移配置与能力，见[配置指引](../../studio/configuration.md#retired-kanban-workdirs)。
+
+## Unified Channel participants and global dispatch observation (2026-10-05)
+
+The local participant-loop branch follows [Channel addressing and execution](channel-addressing-and-execution.md).
+People and Pets share the same message, reply and addressing protocol. Identity-bearing
+mentions select recipients; labels are presentation. The viewer's own label is “Me”.
+The composer sends through `/channels/messages`; choosing a recipient and replyTo
+are separate. Pets choose their own @ in public replies, with the format specified in
+Capability instructions. All participant messages can be quoted and replied to.
+
+After sending, Activity shows each Pet's real global state and queue through
+`/dispatch/queues`, including work from other Channels. This consumes runtime
+facts, never derives queue entries from message history. The composer shows no busy
+hint. Timeline displays actual @ recipients, every target's execution observations
+and failures without adding retry controls. System queue acknowledgements are deferred.
+The existing TUI review guidance remains separate from ordinary next-session inputs.

@@ -1,6 +1,7 @@
 import {
   ResidentPetOperationCancelledError,
   type PetDispatchQueueSnapshot,
+  type PetDispatchQueueEntry,
   type PetDispatchSettledState,
   type PetDispatchState,
   type QueuedOperation,
@@ -23,6 +24,7 @@ export class ResidentPetCoordinator {
   private state: PetDispatchState;
   private active: Promise<void> | null = null;
   private activeOperation: PetDispatchQueueSnapshot['activeOperation'] = null;
+  private activeDispatch: PetDispatchQueueEntry | undefined;
   private refreshing: Promise<PetDispatchState> | null = null;
   private closing = false;
   /** Admission/refresh changes observed while an asynchronous scan owns the slot. */
@@ -47,6 +49,10 @@ export class ResidentPetCoordinator {
       // publishes the field.
       queuedConversations: this.conversations,
       queuedDispatches: this.dispatchQueue.length,
+      ...(this.dispatchQueue.some(entry => entry.observation) ? {
+        entries: this.dispatchQueue.flatMap(entry => entry.observation ? [structuredClone(entry.observation)] : []),
+      } : {}),
+      ...(this.activeDispatch ? { activeDispatch: structuredClone(this.activeDispatch) } : {}),
     };
   }
 
@@ -121,11 +127,11 @@ export class ResidentPetCoordinator {
   }
 
   /** Accept a one-way dispatch and own every later execution outcome inside the runtime. */
-  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>): void {
+  submitDispatch(operation: () => Promise<void>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry): void {
     if (this.closing) {
       throw new ResidentPetOperationCancelledError('Resident Pet Host is closing.');
     }
-    void this.enqueue(operation, ready).catch((error) => {
+    void this.enqueue(operation, ready, observation).catch((error) => {
       if (error instanceof ResidentPetOperationCancelledError) return;
       this.logError('[resident-pet] dispatch execution failed:', error);
     });
@@ -168,7 +174,7 @@ export class ResidentPetCoordinator {
     await Promise.all([this.active, this.refreshing]);
   }
 
-  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>): Promise<T> {
+  private enqueue<T>(operation: () => Promise<T>, ready?: () => Promise<boolean>, observation?: PetDispatchQueueEntry): Promise<T> {
     if (this.closing) {
       return Promise.reject(new ResidentPetOperationCancelledError());
     }
@@ -180,6 +186,7 @@ export class ResidentPetCoordinator {
         run: operation,
         resolve: (value) => resolve(value as T),
         reject,
+        ...(observation ? { observation: structuredClone(observation) } : {}),
       });
       this.publishQueueSnapshot();
       this.drain();
@@ -216,6 +223,7 @@ export class ResidentPetCoordinator {
           this.dispatchQueue.splice(index, 1);
           ran = true;
           this.activeOperation = candidate.kind;
+          this.activeDispatch = candidate.observation;
           this.setState('busy');
           await this.run(candidate);
           return;
@@ -224,7 +232,7 @@ export class ResidentPetCoordinator {
       });
       this.active = active;
       void active.finally(() => {
-        if (this.active === active) { this.active = null; this.activeOperation = null; }
+        if (this.active === active) { this.active = null; this.activeOperation = null; this.activeDispatch = undefined; }
         this.publishQueueSnapshot();
         if (ran || this.schedulingVersion !== schedulingVersion) this.drain();
       });
@@ -233,6 +241,7 @@ export class ResidentPetCoordinator {
     const entry = this.state === 'open' ? this.dispatchQueue.shift() : undefined;
     if (!entry) return;
     this.activeOperation = entry.kind;
+    this.activeDispatch = entry.observation;
     const active = Promise.resolve().then(() => this.run(entry));
     this.active = active;
     this.setState('busy');
@@ -240,6 +249,7 @@ export class ResidentPetCoordinator {
       if (this.active === active) {
         this.active = null;
         this.activeOperation = null;
+        this.activeDispatch = undefined;
         this.publishQueueSnapshot();
       }
       this.drain();

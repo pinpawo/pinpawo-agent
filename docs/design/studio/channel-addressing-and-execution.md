@@ -1,13 +1,13 @@
 # Channel 寻址、执行与状态设计
 
-状态：讨论收敛稿，2026-10-05。本文固化用户已确认的产品语义，并列出建议、技术待核实项和
+状态：设计与本地实现草案，2026-10-05。本文固化用户已确认的产品语义，并列出建议、必要接口和
 具体实施形式。人和 Pet 是地位平等的 Channel 参与者；@ 语义统一属于 Channel，
 执行接纳、可靠性与全局队列属于 dispatch，Channel 调用并展示其事实。
 本设计不涉及 Trigger 插件变更。它不是实现完成说明，也不授权发布、迁移用户配置或更新本地服务。
 
 本文承接 [Channel 基础草案](channel-collaboration.md) 与 [Console 设计](console.md)。
-基础草案记录第一片的显式执行实现；本稿描述下一阶段要求。二者的差异按下文标明，不把
-未来的有效 @ 路由行为写成当前代码已经具备的能力。
+基础草案记录第一片的显式执行实现；本稿记录后续设计和新分支的实施范围。
+本地实现与已合并 / 部署版本分别说明，不把本地行为写成用户运行中的事实。
 
 ## 目标与现状
 
@@ -22,18 +22,18 @@ Channel 会话绑定、接纳校验和权限边界，不引入 LLM check 或泛�
 | PR #901 head `3269b07c`，对应已合并历史 `155299cc` | Console 三栏、保存笔记、显式执行、原 Pet/session 回复与执行历史；这是用户昨天试用的代码版本，未据此核查其实际 Mac 日志或配置。 |
 | PR #903 讨论开始时的远端 head `4c191c43` | 仅退役 Console Kanban 入口与专属 UI；后续提交与 CI 状态以 PR 为准。 |
 | `1e4f3938`，讨论开始时仅本地 | 完整 Kanban 退役，默认模板启用现有 Channel，移除任务分配及 task.done → Wiki 规则；进入 PR 不等于已部署。 |
-| 本文 | 仅设计文档。有效 @ 交接、完整排队列表及相关接纳扩展尚未实施。 |
+| 新分支 `codex/892-channel-participant-loop` | 从 #903 merge `c996ed23` 开始，先纳入六点修订，再实现统一 @、全局队列观察和 Console。仍为本地工作，不代表发布或部署。 |
 
 上述远端信息是讨论中已核对的基线，不代表本稿重新检查了最新 main 或用户运行状态。
 
-当前代码事实：
+第一片的实现基线：
 
 - [ChannelPanel](../../../apps/studio-console/src/ChannelPanel.tsx) 的 Save note 调用
   `/channels/messages`；Send to Pet 与 Send reply 调用 `/channels/execute`。
 - [Channel Plugin](../../../plugins/channel/src/channelPlugin.ts) 的 `execute()` 保存消息后直接
   调用 `context.dispatch()`，由 Channel 确定 Pet、session 和可信 scope。
 - 消息落库后发布 `channel.message.created`，用于领域通知。正文 @ 和已有 `mentions`
-  当前不自动启动 Pet；新的寻址接纳协议尚未实现。
+  第一片不自动启动 Pet；新分支的带唯一标识 @ 处理见“本地实施范围”。
 - 显式 execute 保存的请求没有填入目标 mentions；[时间线](../../../apps/studio-console/src/ChannelConversation.tsx)
   也未渲染 mentions，因此选择了目标仍看不到 @。
 - [ResidentPetCoordinator](../../../services/host/src/host/residentPetCoordinator.ts) 持有每个
@@ -58,10 +58,11 @@ Channel 使用统一的参与者（participant）抽象。人和 Pet 在消息�
 | 身份类型与响应适配 | 人通过 UI 阅读并响应，Pet 通过 runtime 接纳并执行；这影响送达与响应方式，不改变参与者地位。 |
 | 权限与能力 | 权限可正交配置；平等不等于权限相同或跳过鉴权、工具审核、人工审批及能力边界。 |
 
-`participantId` 在本文仅表示统一稳定身份的设计概念，不是已选定的 wire 字段。
-使用 `userId` / `petId` 或其他引用形式仍是实现建议，不能因此拆成两套协作协议。
+新分支采用统一的 `participantId` 引用，形式为 `kind:encodeURIComponent(id)`，
+例如 `pet:reviewer`、`human:studio-operator`。前缀只是现有身份与响应适配的引用，
+不能因此拆成两套协作协议。
 现有 `petId` 与固定 session 是 Pet runtime 的适配事实；人不需要伪造 Pet session 才能
-被寻址。本稿不新增账号、多租户或权限系统，也不宣称统一参与者模型已落地。
+被寻址。本片只登记配置中的本地 operator 和 Pet，不新增账号、多租户或权限系统。
 
 ## 术语与已确认的消息协议
 
@@ -97,10 +98,13 @@ Channel 使用统一的参与者（participant）抽象。人和 Pet 在消息�
 Channel 负责带唯一标识的有效 @ 解析、参与者寻址和目标校验。现有
 `mentions: [{petId}]` 只记录 Pet，能否演进为统一参与者引用需明确；它不是两套协议的依据。
 正文和可见 @ 标识保持一致；纯 `@label` 文本不能代替带唯一标识的 mention。
-具体文本语法、编辑器标记与 wire schema 尚需在实施前写清；最终语义由 Channel 协议决定，
+本片的正文格式为 `[@label](participant:participantId)`，结构化字段为
+`mentions: [{participantId}]`；label 不参与寻址。旧 `{petId}` 引用在 Channel 边界归一到
+同一身份协议，不创建另一套接纳路径。引用 / 示例应明确使用 Markdown 引用、代码或引号。
+语义由 Channel 协议决定，
 Console 不另定义一套 @ 语义或按名称反查身份的规则。Capability 需说明可寻址对象的唯一
 标识、@ 的具体输出格式，以及回复可以带或不带 @；Pet 根据本轮工作自主决定。
-本稿不直接修改 Capability 或选定具体 wire schema。
+默认 Pet 的 Channel Capability 已补充该格式与自主决定 @ 的说明。
 
 ### 笔记、请求与回复
 
@@ -113,12 +117,13 @@ Console 不另定义一套 @ 语义或按名称反查身份的规则。Capabilit
 
 现有 `/channels/execute` 的 replyTo 只允许原 Pet/session，是当前实现的收窄契约。
 下一阶段若支持“引用 A、寻址 B”，必须使用 B 的 Channel 绑定并明确传递引用上下文，
-不能通过篡改已有 source 或放宽 session 校验达成。具体兼容入口尚未决定。
+不能通过篡改已有 source 或放宽 session 校验达成。统一消息入口独立使用显式收件人；
+旧 execute 的 replyTo-only 动作保留原 Pet 的严格绑定校验，作为显式旧接口兼容。
 
 多目标的“独立送达、不隐含顺序”是已定语义；首片是否一次支持所有目标、按何顺序显示，
 尚需落实到实施范围。执行调度沿用 Host，不由 Channel 重建。若分期限制入口数量，
 必须明确提示，不能静默只送第一个目标。
-参与者间持续交接是 Channel loop 的正常组成；具体有效 @ 接线仍是待实现设计。
+参与者间持续交接是 Channel loop 的正常组成；本片已接入可信 Pet 公开回复中的有效 @。
 
 ## Channel 语义与 dispatch 职责
 
@@ -247,11 +252,29 @@ Pet 自己回复“已排队”是可选行为，不是状态展示的必要条�
 | 分类 | 内容 |
 |---|---|
 | 用户已定 | 人和 Pet 是地位平等的参与者，统一消息 / 回复 / @ / 协作协议；“我”仅为查看者显示称呼；@ 自带唯一标识、名称只是 label；Pet 自主决定回复是否 @，Capability 说明格式；@ 语义归 Channel，接纳 / 全局队列 / 执行去重 / 可靠性归 dispatch；同一消息重复目标表达一次请求；多目标独立送达；引用与收件人分开；权限不扩大；Pet 忙时可排队；发送前不提示忙闲；发送后显示全局 Pet 状态与全局队列；失败进 timeline；等待就是同 session 下一条 human message；正常多轮交接属于 Channel loop。 |
-| 建议待定 | 展示区默认在右侧；系统自动排队回执及合并方式；带唯一标识的 @ 文本 / wire 具体形式；多目标首片实现范围。 |
-| 必要接口依赖 | 统一参与者引用与现有 Pet 字段的兼容；人的 UI 响应适配；dispatch 的全局状态 / 队列只读接口、每目标请求关联和接纳 / 失败结果；现有 execute 与统一消息协议的兼容形式。 |
+| 建议待定 | 系统自动排队回执及合并方式，暂缓；本片沿用右侧 Activity 和窄屏抽屉展示全局状态与队列。 |
+| 必要接口依赖 | 消费 dispatch 的每目标请求关联、接纳结果和生命周期；原 Coordinator 补队列条目只读投影，HTTP 提供 `/dispatch/queues`。其他可靠性保证仍属于 dispatch，本片不额外实现。 |
 | 不列为本期必做 | 新账号、多租户或权限系统；排队取消、插队、运行中 steer / 中断；Wiki 新自动触发、LLM check、泛化 workflow 或额外 handoff 工具。dispatch 可靠性依赖不能扩成 Channel 内的持久队列、重试、重放、恢复或执行去重引擎；不新增等待回信系统或限制正常交接 loop。 |
 
-## 最小分阶段实施建议
+## 本地实施范围
+
+- `GET /channels/participants` 和 Channel context 提供本地参与者、唯一身份与 label；
+  context 的 viewerParticipantId 只用于 Console 将自己的 label 显示为“Me”。
+- `POST /channels/messages` 统一保存笔记、引用与明确寻址；已验证的有效 Pet 目标交给
+  原 Channel execute 逻辑与 dispatch。人的目标留在同一公开消息协议，由 UI 阅读响应。
+  有效 @ 在可信 Pet 的 completed 公开回复中同样处理，不新增写消息工具或两套输出。
+- 每 Pet 目标使用自己的 `(channelId, petId)` session，并关联自己的 execution / invocation。
+  dispatch 的现有幂等入口接收稳定消息 / 目标键；并发接纳共享同一 Promise，producer 的
+  键空间分开。只处理进程内接纳，不新增持久可靠队列或跨重启执行保证。
+- Coordinator 队列投影直接读取实际排队条目和活动 dispatch，包含身份、入队时间与
+  已有 scope / session 关联，不带请求正文。Studio Bearer 仍代表现有本地 operator 权限；
+  Console 用可见 Channel 标题标识来源，其他工作显示 Other session，不公开私有内容。
+- Console 发送后显示全局 Pet 状态和实际队列，timeline 呈现 @ 与每目标执行 / 失败；
+  回复引用与收件人分别选择。没有 composer 忙闲提示、特殊 retry 或自动排队回执。
+- 未改变审批恢复、其他服务或 macOS companion，也不以确定性测试证明真实模型会
+  自主选择合适交接。真实模型的选择与输出质量不属于此次零模型调用验收。
+
+## 实施与验证顺序
 
 1. **Channel 协议与接纳边界**：明确统一参与者引用、有效 @ 的表示、身份校验、引用排除、
    重复目标表达与发送动作；Capability 明确 @ 格式。由 Channel 统一处理人和 Pet 消息，
@@ -265,7 +288,7 @@ Pet 自己回复“已排队”是可选行为，不是状态展示的必要条�
 4. **验收与可选回执**：运行下列行为验收；自动排队回执只有在形式确认后加入，否则保留
    已要求的状态与队列。明确实际覆盖，不以确定性测试声称真实模型协作已验证。
 
-这些是建议实施顺序，不意味着全部阶段已经批准开发或发布。此次文档提交不含实现。
+本轮已获准从 #903 合并后的 main 推进本地实现；新 PR 发布、合并与部署另需明确授权。
 
 ## 验收清单
 

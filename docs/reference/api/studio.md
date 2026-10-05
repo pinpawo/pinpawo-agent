@@ -35,11 +35,46 @@ After admission, Studio publishes a live `dispatch.accepted` event with the
 `invocationId`, target `petId`, request text, and producer name. This is an
 observability fact on the same non-durable event bus, not a completion signal or
 a dispatch result store. Idempotent replay returns the original receipt without
-publishing another accepted event.
+publishing another accepted event. Simultaneous submissions share the pending
+admission Promise. Keys are scoped to producer and Pet; a failed admission releases
+the process-local reservation. This is not a durable replay or exactly-once guarantee.
 
-Plugins receive only `dispatch`, `notify`, `subscribe`, `listPets`, and Plugin
+Plugins receive `dispatch`, `notify`, `subscribe`, `listPets`, `listDispatchQueues`, and Plugin
 hook installation. A Plugin may define Toolkits, but it cannot construct a Pet,
 inspect a runtime, or participate in Agent Session conversation.
+
+## Global dispatch observation
+
+The Studio HTTP Plugin exposes `GET /dispatch/queues` under the existing Studio
+Bearer authority. It forwards each resident Pet's actual global admission snapshot:
+state, active operation, queue counts, and optional active / queued dispatch identities.
+Queue entries include dispatch ID, enqueue time, and admitted session / scope
+correlation, with no request text or model content. Conversation holds are counts,
+not a second dispatch queue. This read-only endpoint neither schedules nor restores work.
+
+## Channel messages and addressing
+
+The Channel Plugin supplies `GET /channels/participants` and participants in Channel
+context. A participant has a unique `participantId`, label, existing identity and
+response adapter kind. The configured local operator and Pets share one protocol;
+the viewer identity affects the display label only.
+
+`POST /channels/messages` accepts a body, optional replyTo, artifacts and
+`mentions: [{participantId}]`. A direct Markdown mention
+`[@label](participant:pet:reviewer)` carries the same unique identity; labels never
+route requests. Plain `@label`, code and quoted examples do not address a target.
+Channel validates and saves the message, then calls dispatch for each Pet target
+using that target's fixed Channel session. Human targets read and respond in the UI.
+The response retains the message fields and includes per-target delivery receipts
+or admission failures; execution completion is observed separately.
+
+Host-authenticated Pet completed replies enter this same addressing path. Pets
+choose whether to @ according to Capability instructions. replyTo is context and
+does not choose the unified message recipient. The old `/channels/execute` action
+remains compatible, including its replyTo-only original-session action.
+
+Per-target execution observations and failures remain available through
+`GET /channels/executions`; they are not an authoritative queue or reliability engine.
 
 `StudioHost` eagerly builds every configured Pet. Any Pet startup failure rolls
 the whole Host back. `startStudioHost()` also starts the host Pet-scoped

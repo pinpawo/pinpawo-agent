@@ -272,3 +272,12 @@ footer { display: flex; align-items: center; padding: 0 22px; color: #849496; bo
 @media (hover: none) {
   .channel-message-actions { opacity: 1; }
 }
+.channel-mentions { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.channel-mention { color: #9adcd6; background: rgba(75, 188, 177, .12); border-radius: 5px; padding: 1px 5px; overflow-wrap: anywhere; }
+.channel-global-queues { margin-bottom: 20px; }
+.channel-queue { padding: 10px 0; border-bottom: 1px solid rgba(120, 130, 150, .16); }
+.channel-queue p { font-size: 12px; margin: 5px 0; }
+.channel-queue ol { margin: 6px 0 0; padding-left: 22px; }
+.channel-queue li { font-size: 12px; padding: 4px 0; }
+.channel-queue li time { display: block; opacity: .65; font-size: 11px; }
+.channel-send-error { margin: 12px 24px; }

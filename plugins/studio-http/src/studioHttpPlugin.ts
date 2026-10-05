@@ -24,7 +24,7 @@ const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_EVENT_CLIENTS = 100;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 export const STUDIO_HTTP_ROUTES_HOOK_NAME = 'routes';
-const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/events', '/pets']);
+const RESERVED_ROUTE_PATHS = new Set(['/dispatch', '/dispatch/queues', '/events', '/pets']);
 
 type StudioHttpEnvironment = { Bindings: HttpBindings };
 type StudioHttpContext = Context<StudioHttpEnvironment>;
@@ -74,14 +74,14 @@ export type CreateStudioHttpPluginOptions = {
 };
 
 /**
- * The HTTP surface forwards dispatch and Pet listing and subscribes to the
- * event bus. Narrowing the start parameter keeps out what it must not reach,
- * such as dispatch-queue observation, which belongs to domain Plugins.
+ * HTTP forwards dispatch and read-only runtime queue observations without
+ * storing entries or deciding admission. Older narrow adapters can omit the
+ * observation port; its route then reports unavailable rather than inventing facts.
  */
 export type StudioHttpPluginContext = Pick<
   StudioPluginContext,
   'dispatch' | 'listPets' | 'subscribe' | 'hooks'
->;
+> & Partial<Pick<StudioPluginContext, 'listDispatchQueues'>>;
 
 export type StudioHttpPlugin = StudioPlugin & {
   address: () => StudioHttpPluginAddress | null;
@@ -426,6 +426,14 @@ export function createStudioHttpPlugin(options: CreateStudioHttpPluginOptions): 
       }
     });
     app.all('/dispatch', (requestContext) => methodNotAllowed(requestContext, ['POST']));
+
+    // Bearer-authorized operator observation of the existing global dispatch domain.
+    // Runtime entries contain identities only, never private request/model content.
+    app.get('/dispatch/queues', (requestContext) => {
+      if (!context?.listDispatchQueues) throw new HttpRequestError(503, 'Dispatch queue observation is unavailable.');
+      return requestContext.json({ queues: context.listDispatchQueues() });
+    });
+    app.all('/dispatch/queues', (requestContext) => methodNotAllowed(requestContext, ['GET']));
 
     app.get('/pets', (requestContext) => {
       if (!context) throw new HttpRequestError(503, 'Studio HTTP Plugin is not running.');

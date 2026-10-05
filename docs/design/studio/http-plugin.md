@@ -27,6 +27,13 @@ route 背后的领域。
 
 ## 1. HTTP contract
 
+### `GET /dispatch/queues`
+
+使用现有 Studio Bearer，直接转发 `context.listDispatchQueues()` 的只读全局投影。
+队列来自原 resident Coordinator，不在 HTTP 保存或估算。条目只含 dispatch 身份、
+入队时间与已有 session/scope 关联，不含请求正文或模型内容。缺少观察 port 时返回
+`503`，不制造空闲或空队列；不支持通过这个接口修改队列。
+
 ### `POST /dispatch`
 
 请求体就是 transport-neutral `StudioDispatchRequest` 的 JSON 形态：

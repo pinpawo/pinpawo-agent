@@ -91,9 +91,9 @@ test('Channel pair sessions survive new tasks, replies and restart; four Pets ke
     await waitFor(() => outputs(f, a).length === 5);
     assert.match(outputs(f, a).at(-1)!.body, /^Answer 2: Reply to Channel message/);
     assert.ok(outputs(f, a).at(-1)!.body.includes(question.messageId));
-    assert.ok(outputs(f, a).at(-1)!.body.endsWith('User reply:\nstaging'));
+    assert.ok(outputs(f, a).at(-1)!.body.endsWith('Participant reply:\nstaging'));
     await assert.rejects(f.channel.execute(b, { replyTo: question.messageId, body: 'wrong Channel' }), /reference/);
-    await assert.rejects(f.channel.execute(a, { petId: 'two', replyTo: question.messageId, body: 'wrong Pet' }), /Pet/);
+    await assert.rejects(f.channel.execute(a, { petId: 'missing', replyTo: question.messageId, body: 'unknown target' }), /Unknown/);
     await f.channel.execute(b, { petId: 'one', body: 'new Channel' });
     await waitFor(() => outputs(f, b).length === 1);
     assert.notEqual(f.channel.service.getBinding(b, 'one')!.sessionId, bindings[0]!.sessionId);

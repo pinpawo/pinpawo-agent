@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChannelCopy, ChannelTimeline, ChannelExecutionHistory } from './ChannelConversation';
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
+import { ChannelDispatchQueues } from './ChannelDispatchQueues';
 import {
-  channelExecuteInput, channelMessageIdentity, channelPetIdentity, channelQuote, readChannelPages,
-  type ChannelGoal, type ChannelContext, type ChannelEntry, type ChannelMessage, type ChannelExecution, type ChannelNotice,
+  channelMessageInput, channelMessageIdentity, channelPetIdentity, channelQuote, readChannelPages,
+  type ChannelGoal, type ChannelContext, type ChannelEntry, type ChannelMessage, type ChannelExecution, type ChannelNotice, type DispatchQueue,
 } from './channelData';
 
 type Props = {
@@ -30,7 +31,9 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const [goal, setGoal] = useState('');
   const [scope, setScope] = useState('');
   const [body, setBody] = useState('');
-  const [petId, setPetId] = useState('');
+  const [recipientId, setRecipientId] = useState('');
+  const [queues, setQueues] = useState<DispatchQueue[]>([]);
+  const [queueError, setQueueError] = useState('');
   const [reply, setReply] = useState<ChannelMessage | undefined>();
   const [localVersion, setLocalVersion] = useState(0);
   const submitting = useRef(false);
@@ -68,6 +71,21 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     return value;
   }, [url, token]);
   const refresh = () => setLocalVersion(value => value + 1);
+
+  useEffect(() => {
+    if (!connected || !active) return;
+    const abort = new AbortController();
+    const load = async () => {
+      try {
+        const value = await read('/dispatch/queues', abort.signal) as { queues: DispatchQueue[] };
+        if (!Array.isArray(value.queues)) throw new Error('Invalid dispatch queue response.');
+        if (!abort.signal.aborted) { setQueues(value.queues); setQueueError(''); }
+      } catch (reason) { if (!abort.signal.aborted) setQueueError(String(reason)); }
+    };
+    void load();
+    const timer = setInterval(() => { void load(); }, 1500);
+    return () => { abort.abort(); clearInterval(timer); };
+  }, [connected, active, refreshVersion, localVersion, read]);
 
   useEffect(() => {
     if (!connected) return;
@@ -118,7 +136,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
   const selectChannel = (id: string) => {
     if (submitting.current) return;
     setSelected(id); setContext(null); setEntries([]); setExecutions([]); setNotices([]);
-    setReply(undefined); setBody(''); setPetId(''); setError('');
+    setReply(undefined); setBody(''); setRecipientId(''); setError('');
     setHighlightedMessage(''); setHighlightedExecution(''); setNavigationOpen(false);
     followLatest.current = true; setAtLatest(true);
   };
@@ -145,7 +163,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       const value = await post('/channels', { title: title.trim(), goal: goal.trim(), scope: scope.trim() }) as ChannelGoal;
       setChannels(current => [...current, value]); setSelected(value.channelId); setContext(null);
       setEntries([]); setExecutions([]); setNotices([]); setReply(undefined); setBody('');
-      setPetId('');
+      setRecipientId('');
       followLatest.current = true; focusComposer.current = true; setAtLatest(true);
       setHighlightedMessage(''); setHighlightedExecution(''); setNavigationOpen(false);
       setCreating(false); setTitle(''); setGoal(''); setScope('');
@@ -155,16 +173,10 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
     event.preventDefault();
     void submit(async () => {
       followLatest.current = true;
-      await post('/channels/execute', channelExecuteInput(selected, petId, body, reply));
-      setBody(''); setReply(undefined);
+      await post('/channels/messages', channelMessageInput(selected, recipientId, body, reply));
+      setBody(''); setReply(undefined); setRecipientId('');
     });
   };
-  const saveNote = () => void submit(async () => {
-    if (!body.trim()) return;
-    followLatest.current = true;
-    await post('/channels/messages', { channelId: selected, body: body.trim() });
-    setBody('');
-  });
 
   const lastSequence = entries.at(-1)?.sequence;
   useEffect(() => {
@@ -211,7 +223,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           onClick={() => selectChannel(item.channelId)}><strong><span aria-hidden="true">#</span> {item.title}</strong><span>{item.scope}</span></button>)}
         {!channels.length && <div className="compact-empty">{connected ? 'No Channels yet.' : 'Connect to read your Channels.'}</div>}
       </div>
-      <div className="channel-sidebar-foot">{connected ? 'Notes stay here. Execution is explicit.' : 'Disconnected · submissions disabled'}</div>
+      <div className="channel-sidebar-foot">{connected ? 'One conversation for all participants.' : 'Disconnected · submissions disabled'}</div>
     </aside>
     <section className="channel-detail" aria-label="Channel conversation" aria-busy={loading} inert={modalOpen}>
       <div className="channel-conversation-head">
@@ -235,8 +247,11 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 followLatest.current = latest; setAtLatest(latest);
               }}>
               <ChannelTimeline entries={entries} pets={pets} petsReady={petsReady} executions={executions} connected={connected} highlighted={highlightedMessage}
+                participants={context.participants} viewerParticipantId={context.viewerParticipantId}
                 pending={pending || !connected} onLocateMessage={locateMessage} onLocateExecution={locateExecution}
-                onReply={item => { setReply(item); setPetId(item.source!.petId); setBody(''); composer.current?.focus(); }} />
+                onReply={item => { setReply(item); setRecipientId(''); setBody(''); composer.current?.focus(); }} />
+              {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}
+              {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>Channel delivery failed: {item.error}</p>)}
             </div>
             {!atLatest && <button className="channel-jump" type="button" onClick={() => {
               followLatest.current = true; setAtLatest(true);
@@ -244,28 +259,37 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
             }}>Back to latest ↓</button>}
           </div>
           <form className="channel-composer" onSubmit={execute}>
-            {error && <div className="channel-record-error" role="alert">{error}</div>}
             {reply && <div className="channel-composer-quote">
               <button className="channel-quote" type="button" onClick={() => locateMessage(reply.messageId)}>
-                <strong>{'Reply to ' + channelMessageIdentity(reply, pets, petsReady).name + ' · same session'}</strong><span>{channelQuote(reply.body)}</span>
+                <strong>{'Reply to ' + channelMessageIdentity(reply, pets, petsReady, context.participants, context.viewerParticipantId).name}</strong><span>{channelQuote(reply.body)}</span>
               </button>
               <button type="button" aria-label="Cancel reply" disabled={pending} onClick={() => { setReply(undefined); composer.current?.focus(); }}>×</button>
             </div>}
             <div className="chat-input"><label htmlFor="channel-message">Message</label>
               <textarea ref={composer} id="channel-message" disabled={pending} value={body} onChange={event => setBody(event.target.value)}
-                placeholder={reply ? 'Reply to this Pet…' : 'Describe this round of work, or save a note…'} rows={3} />
+                placeholder={reply ? 'Write a reply…' : 'Write a message or address a participant…'} rows={3} />
               <div className="channel-composer-controls">
-                <label className="composer-target"><span>{reply ? 'Reply to Pet' : 'Execute with Pet'}</span>
-                  <select aria-label="Channel target Pet" disabled={pending || !!reply} value={petId} onChange={event => setPetId(event.target.value)}>
-                    <option value="">Select a Pet…</option>{pets.map(pet => <option key={pet.petId} value={pet.petId}>{channelPetIdentity(pet.petId, pets).optionLabel}</option>)}
+                <label className="composer-target"><span>@ participant</span>
+                  <select aria-label="Channel recipient" disabled={pending} value={recipientId} onChange={event => setRecipientId(event.target.value)}>
+                    <option value="">No @ recipient</option>{(context.participants ?? []).map(participant =>
+                      <option key={participant.participantId} value={participant.participantId}>
+                        {participant.participantId === context.viewerParticipantId ? 'Me' : participant.label}
+                      </option>)}
                   </select>
                 </label>
-                <div className="channel-send-actions">{!reply && <button type="button" disabled={pending || !connected || !body.trim()} onClick={saveNote}>Save note</button>}
-                  <button disabled={pending || !connected || !body.trim() || (!reply && !petId)}>{pending ? 'Sending…' : reply ? 'Send reply' : 'Send to Pet'}</button>
+                <div className="channel-send-actions">
+                  <button type="button" disabled={pending || !recipientId} onClick={() => {
+                    const participant = context.participants?.find(item => item.participantId === recipientId);
+                    if (!participant) return;
+                    const label = (participant.participantId === context.viewerParticipantId ? 'Me' : participant.label).replace(/[\[\]\\]/g, '');
+                    setBody(value => `${value}${value && !value.endsWith(' ') ? ' ' : ''}[@${label}](participant:${participant.participantId}) `);
+                    setRecipientId(''); composer.current?.focus();
+                  }}>Insert @</button>
+                  <button disabled={pending || !connected || !body.trim()}>{pending ? 'Sending…' : 'Send message'}</button>
                 </div>
               </div>
             </div>
-            <p className="channel-composer-hint">Notes and @ text do not run Pets. Sending starts one round.</p>
+            <p className="channel-composer-hint">Choose a participant to address them. Messages without @ stay in the conversation.</p>
           </form>
         </> : <div className="empty-state"><strong>{loading ? 'Loading Channel…' : 'Start a Channel'}</strong>
           <span>Keep the goal and public work together across rounds.</span>
@@ -278,6 +302,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
       className={'channel-activity' + (activityModal ? ' channel-drawer right' : '')}>
       <div className="channel-sidebar-head"><h2>Activity & details</h2><button type="button" aria-label="Close execution details" onClick={() => setActivityOpen(false)}>×</button></div>
       <div className="channel-activity-scroll">
+        {entries.some(entry => entry.kind === 'message') && <ChannelDispatchQueues queues={queues} pets={pets} channels={channels} connected={connected} error={queueError} />}
         <div className="channel-activity-section"><div className="channel-section-label"><h3>Execution history</h3><span>{executions.length}</span></div>
           <p className="channel-history-hint">Last recorded observations. An ended invocation does not mean the goal is complete.</p>
           <ChannelExecutionHistory executions={executions} pets={pets} petsReady={petsReady} entries={entries} connected={connected}

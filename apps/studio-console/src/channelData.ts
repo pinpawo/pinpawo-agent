@@ -8,7 +8,7 @@ export type ChannelMessage = {
   kind: 'message'; channelId: string; sequence: number; messageId: string; body: string;
   author: { kind: string; id: string }; occurredAt: string; revision: number; replyTo?: string;
   source?: { petId: string; sessionId: string; invocationId: string };
-  artifacts: ArtifactReference[]; mentions: { petId: string }[];
+  artifacts: ArtifactReference[]; mentions: { participantId?: string; petId?: string; label?: string }[];
 };
 export type ChannelEntry = ChannelGoal | ChannelMessage;
 export type ChannelExecution = {
@@ -21,7 +21,36 @@ export type ChannelContext = {
   channel: ChannelGoal;
   sessions: { petId: string; sessionId: string; registered: boolean }[];
   history: { entries: ChannelEntry[]; nextAfter: number; hasMore: boolean };
+  participants?: ChannelParticipant[];
+  viewerParticipantId?: string;
 };
+export type ChannelParticipant = { participantId: string; kind: string; id: string; label: string };
+export type DispatchQueueEntry = { dispatchId: string; enqueuedAt: string; sessionId?: string; scope?: { namespace: string; id: string } };
+export type DispatchQueue = {
+  petId: string; state: 'open' | 'busy' | 'waiting' | 'blocked'; activeOperation: 'conversation' | 'dispatch' | null;
+  queuedConversations: number; queuedDispatches: number; entries?: DispatchQueueEntry[]; activeDispatch?: DispatchQueueEntry;
+};
+
+export function channelAuthorParticipantId(author: ChannelMessage['author']): string {
+  return `${author.kind}:${encodeURIComponent(author.id)}`;
+}
+
+export function channelMentionLabel(mention: ChannelMessage['mentions'][number], participants: ChannelParticipant[], pets: ChannelPet[], viewerParticipantId?: string): string {
+  const id = mention.participantId ?? `pet:${encodeURIComponent(mention.petId ?? '')}`;
+  if (id === viewerParticipantId) return 'Me';
+  const participant = participants.find(item => item.participantId === id);
+  if (participant) return participant.label;
+  if (mention.petId) return channelPetIdentity(mention.petId, pets).name;
+  return mention.label ?? id;
+}
+
+/** Composer serializes an explicit identity. Channel owns parsing and validation. */
+export function channelMessageInput(channelId: string, participantId: string, body: string, reply?: ChannelMessage) {
+  if (!body.trim()) throw new Error('Enter a message.');
+  if (reply && reply.channelId !== channelId) throw new Error('Reply target is outside this Channel.');
+  return { channelId, body: body.trim(), ...(participantId ? { mentions: [{ participantId }] } : {}),
+    ...(reply ? { replyTo: reply.messageId } : {}) };
+}
 export type ChannelNotice = {
   sequence: number; occurredAt: string;
   source: { petId: string; sessionId: string; invocationId: string };
@@ -38,14 +67,23 @@ export function channelPetIdentity(petId: string, pets: ChannelPet[], registryKn
   return { name, removed: registryKnown && !pet, optionLabel: duplicate ? `${name} (${petId})` : name };
 }
 
-export function channelMessageIdentity(message: ChannelMessage, pets: ChannelPet[], registryKnown = true) {
+export function channelMessageIdentity(message: ChannelMessage, pets: ChannelPet[], registryKnown = true,
+  participants: ChannelParticipant[] = [], viewerParticipantId?: string) {
+  const participantId = channelAuthorParticipantId(message.author);
+  if (participantId === viewerParticipantId) return { name: 'Me', removed: false };
+  const participant = participants.find(item => item.participantId === participantId);
+  if (participant) return { name: participant.label, removed: false };
   return message.author.kind === 'pet'
     ? channelPetIdentity(message.author.id, pets, registryKnown)
     : { name: message.author.id === 'studio-operator' ? 'Studio operator' : message.author.id, removed: false };
 }
 
 export function channelMessageExecution(message: ChannelMessage, executions: ChannelExecution[]) {
-  return executions.find(item => item.channelId === message.channelId && (item.messageId === message.messageId
+  return channelMessageExecutions(message, executions)[0];
+}
+
+export function channelMessageExecutions(message: ChannelMessage, executions: ChannelExecution[]) {
+  return executions.filter(item => item.channelId === message.channelId && (item.messageId === message.messageId
     || (!!message.source && item.invocationId === message.source.invocationId
       && item.petId === message.source.petId && item.sessionId === message.source.sessionId)));
 }
@@ -91,16 +129,6 @@ export async function readChannelPages<T>(read: (path: string) => Promise<unknow
     if (page.nextAfter <= after || !Number.isSafeInteger(page.nextAfter)) throw new Error('Channel history cursor did not advance.');
     after = page.nextAfter;
   }
-}
-
-export function channelExecuteInput(channelId: string, petId: string, body: string, reply?: ChannelMessage) {
-  if (!body.trim()) throw new Error('Enter a message.');
-  if (reply) {
-    if (reply.channelId !== channelId || !reply.source) throw new Error('Reply target has no execution in this Channel.');
-    return { channelId, body: body.trim(), replyTo: reply.messageId };
-  }
-  if (!petId) throw new Error('Select a Pet explicitly.');
-  return { channelId, petId, body: body.trim() };
 }
 
 export function executionLabel(execution: ChannelExecution, connected: boolean): string {

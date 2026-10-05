@@ -10,12 +10,12 @@ import {
 import { loadStoredConfig } from '../storage';
 import {
   GLOBAL_REVIEW_POLICY_MODE,
-  type BuiltinGlobalReviewPolicyMode,
 } from '@pinpawo/pet-agent';
 import {
   DEFAULT_TOOL_AUTHORIZATION_SAFETY_LEVEL,
   isToolAuthorizationSafetyLevel,
   type ToolAuthorizationSafetyLevel,
+  type ToolAuthorizationMode,
 } from '@pinpawo/agent-contracts';
 
 function parseDotEnv(content: string) {
@@ -73,7 +73,7 @@ function getBoolean(envKey: string, storedKey: keyof typeof stored): boolean | u
   return resolveBooleanConfigValue(process.env[envKey], stored[storedKey]);
 }
 
-function resolveGlobalReviewPolicyMode(raw: string | undefined): BuiltinGlobalReviewPolicyMode | undefined {
+function resolveGlobalReviewPolicyMode(raw: string | undefined): ToolAuthorizationMode | undefined {
   const normalized = raw?.trim().toLowerCase().replace(/_/g, '-');
   if (!normalized) return undefined;
   if ([
@@ -111,7 +111,7 @@ function resolveGlobalReviewPolicyMode(raw: string | undefined): BuiltinGlobalRe
   return undefined;
 }
 
-function getGlobalReviewPolicyMode(): BuiltinGlobalReviewPolicyMode {
+function getGlobalReviewPolicyMode(): ToolAuthorizationMode {
   return resolveGlobalReviewPolicyMode(process.env.PINPAWO_GLOBAL_REVIEW_POLICY)
     ?? resolveGlobalReviewPolicyMode(typeof stored.global_review_policy === 'string'
       ? stored.global_review_policy
@@ -137,7 +137,7 @@ export type Config = Readonly<{
   modelProfileFingerprint: string;
   structuredOutputAutoRepair?: boolean;
   structuredOutputRepairMaxRetries?: number;
-  globalReviewPolicyMode: BuiltinGlobalReviewPolicyMode;
+  globalReviewPolicyMode: ToolAuthorizationMode;
   autoAuthorizationSafetyLevel: ToolAuthorizationSafetyLevel;
   workdir: string;
   localServerPort: number;

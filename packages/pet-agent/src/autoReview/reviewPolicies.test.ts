@@ -42,8 +42,8 @@ function authorizationContext(
   };
 }
 
-test('localMutation builds ReviewSpec from operation metadata', async () => {
-  const policy = ReviewPolicies.localMutation();
+test('required review builds ReviewSpec from operation metadata', async () => {
+  const policy = ReviewPolicies.required();
 
   const review = await policy.request(reviewContext());
 
@@ -59,7 +59,7 @@ test('localMutation builds ReviewSpec from operation metadata', async () => {
 });
 
 test('presets can opt into exact authorization without retaining raw input', async () => {
-  const policy = ReviewPolicies.localMutation({ authorization: 'exact' });
+  const policy = ReviewPolicies.required({ authorization: 'exact' });
   const buildMatcher = policy.authorization?.buildMatcher;
   assert.ok(buildMatcher);
   const matcher = await buildMatcher(authorizationContext());
@@ -80,7 +80,7 @@ test('presets can opt into exact authorization without retaining raw input', asy
 });
 
 test('exact authorization supports a tool-owned minimal subject', async () => {
-  const policy = ReviewPolicies.commandExecution({
+  const policy = ReviewPolicies.required({
     authorization: AuthorizationPolicies.exact({
       subject: ({ input }) => {
         const command = input as {
@@ -114,8 +114,8 @@ test('exact authorization supports a tool-owned minimal subject', async () => {
   assert.notDeepEqual(first, changedCwd);
 });
 
-test('externalAccess can opt into URL origin authorization', async () => {
-  const policy = ReviewPolicies.externalAccess({ authorization: 'url_origin' });
+test('required review can opt into URL origin authorization', async () => {
+  const policy = ReviewPolicies.required({ authorization: 'url_origin' });
   const buildMatcher = policy.authorization?.buildMatcher;
   assert.ok(buildMatcher);
   const matcher = await buildMatcher(authorizationContext({
@@ -139,7 +139,7 @@ test('externalAccess can opt into URL origin authorization', async () => {
 });
 
 test('a null matcher does not expose approve-and-authorize', async () => {
-  const policy = ReviewPolicies.localMutation({
+  const policy = ReviewPolicies.required({
     authorization: AuthorizationPolicies.exact({
       subject: () => null,
     }),
@@ -158,8 +158,8 @@ test('a null matcher does not expose approve-and-authorize', async () => {
   );
 });
 
-test('commandExecution requires HITL once configured', async () => {
-  const policy = ReviewPolicies.commandExecution();
+test('required review asks for review once configured', async () => {
+  const policy = ReviewPolicies.required();
 
   const review = await policy.request(reviewContext({
     toolName: 'run_shell',
@@ -177,8 +177,8 @@ test('commandExecution requires HITL once configured', async () => {
   );
 });
 
-test('localMutation blocks when HITL is unavailable by default', async () => {
-  const policy = ReviewPolicies.localMutation();
+test('required review blocks when human review is unavailable by default', async () => {
+  const policy = ReviewPolicies.required();
 
   const review = await policy.request(reviewContext({
     reviewCapabilities: {

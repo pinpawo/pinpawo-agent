@@ -82,7 +82,7 @@ These are assembled by several nodes. Defined in
 
 | Block | Class | Built by | Notes |
 |---|---|---|---|
-| `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor uses the shared top-level block. Capability embeds the same state value as goal context inside its briefing; see §8. |
+| `<run_user_request>` | `RUN-STABLE` / `BOUNDARY`* | `buildRunUserRequestContext(userRequest)` | Supervisor renders this run request in its run context. Capability briefings carry the plan goal instead (`runSupervisorState.goal`), which can differ from it; see §8. |
 | `<delegation_briefing>` | `RUN-STABLE` / `BOUNDARY` | `materializeDelegation()` | Capability-only projection: nested `<run_user_request>` + `<task>` + `<briefing>`. Each invocation uses the same shape. |
 | `<context_summary>` | `DYNAMIC` / `HISTORY` | `createContextCompactionMessage()` | Replaces swept history. Carries `source="compaction"`, `authority="none"`. |
 
@@ -303,33 +303,23 @@ Historical replay is not a terminal-finalization responsibility. A later request
 to re-show a result is an ordinary conversational request handled by Entry
 Answer from canonical main history and any compaction summary.
 
-## 8. `runUserRequest`: one state value, three projections
+## 8. Run request and plan goal
 
-The same canonical string reaches three nodes with these responsibilities:
+Two state values with different owners. They start equal and can diverge:
 
-| Consumer | Role in practice |
-|---|---|
-| runSupervisor | **Input body.** This is what the Supervisor steers against. |
-| capability | **Nested background.** `<run_user_request role="goal_context">` lives inside the briefing; `<task>` is the real boundary (§6). |
-| current terminal node | **Continuation.** Retained with unfinished work; no model projection. |
+| Value | Written by | Meaning | Model projection |
+|---|---|---|---|
+| `runUserRequest` | `captureRunUserRequest` seeds the latest human message (provisional); `plan_request(goal)` replaces it with the resolved request; `continue` keeps the provisional capture | What the user asked in this run. On `continue` it can be a bare continuation utterance such as "继续". | Supervisor `<run_user_request>` in the run context |
+| `runSupervisorState.goal` | `submit_plan` at Entry (set to the run request); `submit_plan` at a boundary keeps the established goal; `adjust_plan` (sets its `goal` argument, which may differ from the current goal only with fresh user input); carried into a new run unchanged by Entry `continue` | The goal the plan executes and is accepted against. | Capability briefing `<run_user_request role="goal_context">`; Supervisor `<supervisor_plan>`; Entry `<supervisor_snapshot>` |
 
-**Lifecycle:**
+A non-empty plan always carries a goal: every writer of a plan also writes or
+preserves its goal. Execution, acceptance and boundary re-planning read the plan
+goal and never fall back to the run request — on `continue` that fallback would
+hand the executor a continuation utterance as its goal. A missing goal on a
+planned task is an invariant violation: `delegate_capability` and
+`review_current` fail the run (`requirePlanGoal`).
 
-1. `captureRunUserRequest` — seeds a *provisional* value (last human message) so
-   the state invariant holds. Not authoritative.
-2. `plan_request(goal)` → committed by `runSupervisor` on the entry path —
-   the authoritative initial goal.
-3. `activeDelegationTransition` on resume — replays
-   `activeDelegation.userRequest`, a **snapshot**, never a re-capture.
-
-4. `adjust_plan(goal, ...)` — a user-directed Boundary decision atomically updates
-   the goal and active delegation snapshot with the pending plan.
-
-Resume replays the latest snapshot. New text alone does not overwrite the goal:
-Supervisor interprets it first and may preserve or explicitly adjust the goal.
-`supersede_active` remains available for starting an unrelated fresh request.
-
-Why the goal is model-authored: the last human message is often a continuation
+Why the run request is model-authored: the last human message is often a continuation
 utterance ("嗯。开始吧") that states no goal. EntryAnswer resolves the initial goal from conversation; Supervisor uses the
 existing goal and current task conversation to interpret later adjustments. Verbatim text is still preserved
 when the resolved goal equals the current message, so formatting-sensitive

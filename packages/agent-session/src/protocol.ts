@@ -1,10 +1,12 @@
+import {
+  isToolAuthorizationMode,
+  isToolAuthorizationSafetyLevel,
+  type JsonObject as ContractJsonObject,
+  type ToolAuthorizationMode,
+  type ToolAuthorizationSafetyLevel,
+} from '@pinpawo/agent-contracts';
 import { parsePendingInterruptProjection } from './review';
 import { parseResultReferences } from './resultReferences';
-import type {
-  JsonObject as ContractJsonObject,
-  ToolAuthorizationMode,
-  ToolAuthorizationSafetyLevel,
-} from '@pinpawo/agent-contracts';
 import type {
   ReviewResponse,
   ReviewSpec,
@@ -31,8 +33,6 @@ import {
 } from './parser';
 import {
   isAgentReviewSpecValue,
-  isAutoAuthorizationSafetyLevel,
-  isBuiltinGlobalReviewPolicyMode,
   parseAgentPlan,
   parseAgentTokenUsageSnapshot,
 } from './validation';
@@ -472,20 +472,20 @@ function readReviewResponses(record: Record<string, unknown>, key: string): Revi
   return responses as ReviewResponse[];
 }
 
-function readBuiltinGlobalReviewPolicyMode(
+function readToolAuthorizationMode(
   record: Record<string, unknown>,
   key: string,
 ): ToolAuthorizationMode | null {
   const value = readString(record, key);
-  return isBuiltinGlobalReviewPolicyMode(value) ? value : null;
+  return isToolAuthorizationMode(value) ? value : null;
 }
 
-function readAutoAuthorizationSafetyLevel(
+function readToolAuthorizationSafetyLevel(
   record: Record<string, unknown>,
   key: string,
 ): ToolAuthorizationSafetyLevel | null {
   const value = readString(record, key);
-  return isAutoAuthorizationSafetyLevel(value) ? value : null;
+  return isToolAuthorizationSafetyLevel(value) ? value : null;
 }
 
 export function readAgentClientMessageEnvelope(raw: unknown): AgentClientMessageEnvelope | null {
@@ -784,9 +784,9 @@ export function parseAgentClientMessage(raw: unknown): AgentClientMessage | null
     ])) return null;
     const requestId = readOptionalString(record, 'requestId');
     if ('requestId' in record && !requestId) return null;
-    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(record, 'globalReviewPolicyMode');
+    const globalReviewPolicyMode = readToolAuthorizationMode(record, 'globalReviewPolicyMode');
     const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
-      ? readAutoAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
+      ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
       : undefined;
     if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
     return globalReviewPolicyMode
@@ -958,12 +958,12 @@ function parseAgentServerRecord(record: Record<string, unknown>): AgentServerMes
       'globalReviewPolicyMode',
       'autoAuthorizationSafetyLevel',
     ])) return null;
-    const globalReviewPolicyMode = readBuiltinGlobalReviewPolicyMode(
+    const globalReviewPolicyMode = readToolAuthorizationMode(
       record,
       'globalReviewPolicyMode',
     );
     const autoAuthorizationSafetyLevel = 'autoAuthorizationSafetyLevel' in record
-      ? readAutoAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
+      ? readToolAuthorizationSafetyLevel(record, 'autoAuthorizationSafetyLevel')
       : undefined;
     if ('autoAuthorizationSafetyLevel' in record && !autoAuthorizationSafetyLevel) return null;
     return globalReviewPolicyMode

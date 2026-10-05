@@ -239,29 +239,29 @@ export type ShellToolkitDependencies = Readonly<{
 export function createBashToolkit(deps: ShellToolkitDependencies): AgentToolkit {
   const { shell } = deps;
   const reviews = {
-    write_file: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    apply_patch: ReviewPolicies.localMutation({
+    write_file: ReviewPolicies.required({ authorization: 'exact' }),
+    apply_patch: ReviewPolicies.required({
       canAutoApprove: authorizeApplyPatch,
     }),
-    move_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    copy_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    mkdir_path: ReviewPolicies.localMutation({ authorization: 'exact' }),
-    http_fetch: ReviewPolicies.externalAccess({
+    move_path: ReviewPolicies.required({ authorization: 'exact' }),
+    copy_path: ReviewPolicies.required({ authorization: 'exact' }),
+    mkdir_path: ReviewPolicies.required({ authorization: 'exact' }),
+    http_fetch: ReviewPolicies.required({
       authorization: AuthorizationPolicies.exact({
         // Same origin and method stay within the approved scope.
         reuseAutoReview: true,
         subject: ({ input }) => normalizeHttpFetchAuthorizationInput(input),
       }),
     }),
-    download_file: ReviewPolicies.externalAccess({ authorization: 'exact' }),
-    run_shell: ReviewPolicies.commandExecution({
+    download_file: ReviewPolicies.required({ authorization: 'exact' }),
+    run_shell: ReviewPolicies.required({
       authorization: AuthorizationPolicies.exact({
         // Timeout does not change the command/cwd authorization scope.
         reuseAutoReview: true,
         subject: ({ input }) => normalizeShellAuthorizationInput(input),
       }),
     }),
-    start_process: ReviewPolicies.commandExecution({
+    start_process: ReviewPolicies.required({
       authorization: AuthorizationPolicies.exact({
         reuseAutoReview: true,
         subject: ({ input }) => normalizeShellAuthorizationInput(input),
@@ -326,8 +326,8 @@ export function createGitToolkit(deps: ShellToolkitDependencies): AgentToolkit {
   // implicit `git add .`), so they run unreviewed like everyday git_shell /
   // gh_shell writes. Only the risky forms of the two shells are reviewed.
   const reviews = {
-    git_shell: reviewRiskyCallsOnly('git_shell', ReviewPolicies.commandExecution({ authorization: 'exact' })),
-    gh_shell: reviewRiskyCallsOnly('gh_shell', ReviewPolicies.externalAccess({ authorization: 'exact' })),
+    git_shell: reviewRiskyCallsOnly('git_shell', ReviewPolicies.required({ authorization: 'exact' })),
+    gh_shell: reviewRiskyCallsOnly('gh_shell', ReviewPolicies.required({ authorization: 'exact' })),
   };
   return defineToolkit({
     name: 'git',

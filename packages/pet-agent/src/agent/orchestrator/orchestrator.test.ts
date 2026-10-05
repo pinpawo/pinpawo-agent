@@ -2097,7 +2097,7 @@ test('global review policy full_access bypasses toolkit review prompts', async (
     tools: [reviewedTool(rawTool, {
       request: () => {
         reviewCount += 1;
-        return ReviewPolicies.localMutation().request({
+        return ReviewPolicies.required().request({
               toolkitName: 'local',
               toolName: 'write_file',
               input: { path: 'notes.md', content: 'hello' },
@@ -2147,7 +2147,7 @@ test('global review policy auto_authorization authorizes safe reviewed tool call
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
+    tools: [reviewedTool(rawTool, ReviewPolicies.required())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -2222,13 +2222,13 @@ test('global auto policy sends only unresolved actions to the model and executes
     name: 'local',
     description: 'local tools',
     tools: [
-      reviewedTool(rawTool, ReviewPolicies.localMutation({
+      reviewedTool(rawTool, ReviewPolicies.required({
         canAutoApprove: ({ input, workdir }) => (
           workdir === '/repo'
           && (input as { path?: unknown }).path === 'notes.md'
         ),
       })),
-      reviewedTool(otherTool, ReviewPolicies.localMutation()),
+      reviewedTool(otherTool, ReviewPolicies.required()),
     ],
   }];
   const autoModel = {
@@ -2315,7 +2315,7 @@ test('global review policy reuses an exact auto authorization in the same sessio
     description: 'bash tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.commandExecution({ authorization: 'exact' }),
+      ReviewPolicies.required({ authorization: 'exact' }),
     )],
   }];
   const autoModel = {
@@ -2450,7 +2450,7 @@ test('quick approval coexists with matcher reuse and defers on false or error', 
     });
     const resources = await resolveToolkitExecution([{
       name: 'local', description: 'local tools',
-      tools: [reviewedTool(rawTool, ReviewPolicies.requireHitl({
+      tools: [reviewedTool(rawTool, ReviewPolicies.required({
         canAutoApprove: () => {
           quickChecks += 1;
           if (outcome === 'error') throw new Error('Cannot determine scope');
@@ -2496,7 +2496,7 @@ test('projected exact authorization requires opt-in for automatic grant writes a
       });
       const resources = await resolveToolkitExecution([{
         name: 'local', description: 'local tools',
-        tools: [reviewedTool(rawTool, ReviewPolicies.requireHitl({
+        tools: [reviewedTool(rawTool, ReviewPolicies.required({
           authorization: AuthorizationPolicies.exact({
             subject: ({ input }) => ({ path: (input as { path: string }).path }),
             reuseAutoReview,
@@ -2544,7 +2544,7 @@ test('exact auto authorization survives graph rebuild but expires on registry re
     description: 'bash tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.commandExecution({ authorization: 'exact' }),
+      ReviewPolicies.required({ authorization: 'exact' }),
     )],
   }];
   const routeModel = {
@@ -2666,7 +2666,7 @@ test('exact auto authorization survives graph rebuild but expires on registry re
     description: 'bash tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.commandExecution({
+      ReviewPolicies.required({
         authorization: AuthorizationPolicies.exact({
           reuseAutoReview: true,
           subject: ({ input }) => input,
@@ -2717,7 +2717,7 @@ test('global review policy does not record auto grants for policies without sess
   const toolkits: AgentToolkit[] = [{
     name: 'bash',
     description: 'bash tools',
-    tools: [reviewedTool(rawTool, ReviewPolicies.commandExecution())],
+    tools: [reviewedTool(rawTool, ReviewPolicies.required())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -2776,7 +2776,7 @@ test('auto review never persists url_origin grants', async () => {
     description: 'browser tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.externalAccess({ authorization: 'url_origin' }),
+      ReviewPolicies.required({ authorization: 'url_origin' }),
     )],
   }];
   const autoModel = {
@@ -2831,7 +2831,7 @@ test('matcher builder failures fail closed into review and never persist a grant
     description: 'bash tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.commandExecution({
+      ReviewPolicies.required({
         authorization: AuthorizationPolicies.exact({
           subject: () => {
             throw new Error('invalid authorization subject');
@@ -2901,8 +2901,8 @@ test('global review policy auto_authorization evaluates a tool-call batch once',
     name: 'local',
     description: 'local tools',
     tools: [
-      reviewedTool(firstTool, ReviewPolicies.localMutation()),
-      reviewedTool(secondTool, ReviewPolicies.localMutation()),
+      reviewedTool(firstTool, ReviewPolicies.required()),
+      reviewedTool(secondTool, ReviewPolicies.required()),
     ],
     reviewGuidance: {
       allow: 'Allow narrow writes to user-requested files.',
@@ -2997,7 +2997,7 @@ test('global review policy auto_authorization requires human authorization when 
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
+    tools: [reviewedTool(rawTool, ReviewPolicies.required())],
   }];
   const autoModel = {
     withStructuredOutput: () => ({
@@ -3060,7 +3060,7 @@ test('global review policy custom resolver can authorize reviewed tool calls', a
   const toolkits: AgentToolkit[] = [{
     name: 'local',
     description: 'local tools',
-    tools: [reviewedTool(rawTool, ReviewPolicies.localMutation())],
+    tools: [reviewedTool(rawTool, ReviewPolicies.required())],
   }];
 
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
@@ -3106,7 +3106,7 @@ test('custom review policy explicitly opts in before reusing auto grants', async
     description: 'local tools',
     tools: [reviewedTool(
       rawTool,
-      ReviewPolicies.localMutation({ authorization: 'exact' }),
+      ReviewPolicies.required({ authorization: 'exact' }),
     )],
   }];
   const resources = await resolveToolkitExecution(toolkits, ['local'], {
@@ -4264,7 +4264,7 @@ test('one compiled graph preserves execution scopes without actor metadata', asy
   }, { name: 'inspect_context', description: 'Inspect invocation context.', schema: z.object({}) });
   const toolkit: AgentToolkit = {
     name: 'inspection', description: 'Inspect context',
-    tools: [reviewedTool(inspect, ReviewPolicies.localMutation())],
+    tools: [reviewedTool(inspect, ReviewPolicies.required())],
   };
   const item = {
     ...capability('inspect', 'Inspect context', ['inspection']),

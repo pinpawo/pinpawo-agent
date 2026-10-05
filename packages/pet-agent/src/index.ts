@@ -274,11 +274,10 @@ export type {
   AuthorizationMode,
   ExactAuthorizationPolicyOptions,
   ExactAuthorizationSubjectBuilder,
-  HitlPresetOptions,
+  RequiredReviewOptions,
   ReviewUnavailableBehavior,
 } from './autoReview/reviewPolicies';
 export type {
-  BuiltinGlobalReviewPolicyMode,
   GlobalReviewPolicy,
   GlobalReviewPolicyContext,
   GlobalReviewPolicyMode,

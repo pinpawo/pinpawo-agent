@@ -1,5 +1,7 @@
 import { parseResultReferences } from './resultReferences';
 import {
+  isToolAuthorizationMode,
+  isToolAuthorizationSafetyLevel,
   HUMAN_REVIEW_REQUEST_SCHEMA_VERSION,
   parseHumanReviewRequest,
   type HumanReviewRequest,
@@ -21,8 +23,6 @@ import type {
 import { isJsonValue } from './snapshot';
 import {
   isAgentTokenUsageSnapshot,
-  isAutoAuthorizationSafetyLevel,
-  isBuiltinGlobalReviewPolicyMode,
   parseAgentPlan,
 } from './validation';
 
@@ -228,13 +228,13 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
   }
   if (
     value.globalReviewPolicyMode !== undefined
-    && !isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
+    && !isToolAuthorizationMode(value.globalReviewPolicyMode)
   ) {
     return null;
   }
   if (
     value.autoAuthorizationSafetyLevel !== undefined
-    && !isAutoAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
+    && !isToolAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
   ) {
     return null;
   }
@@ -264,10 +264,10 @@ function parseAgentRuntime(value: unknown): AgentRuntimeView | null {
             value.requiredInputModalities as AgentRuntimeView['requiredInputModalities'],
         }
       : {}),
-    ...(isBuiltinGlobalReviewPolicyMode(value.globalReviewPolicyMode)
+    ...(isToolAuthorizationMode(value.globalReviewPolicyMode)
       ? { globalReviewPolicyMode: value.globalReviewPolicyMode }
       : {}),
-    ...(isAutoAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
+    ...(isToolAuthorizationSafetyLevel(value.autoAuthorizationSafetyLevel)
       ? { autoAuthorizationSafetyLevel: value.autoAuthorizationSafetyLevel }
       : {}),
     ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),

@@ -29,6 +29,15 @@ export function currentSupervisorTask(state: RunSupervisorState): SupervisorPlan
   return state.plan.find((task) => task.status !== 'completed' && task.status !== 'superseded') ?? null;
 }
 
+/**
+ * Every writer of a plan also writes or preserves its goal, so a planned task
+ * without one is an invariant violation, not something to fall back from.
+ */
+export function requirePlanGoal(state: RunSupervisorState): string {
+  if (!state.goal) throw new Error('Supervisor plan has no goal.');
+  return state.goal;
+}
+
 export function updateSupervisorTask(
   state: RunSupervisorState,
   planItemId: string,

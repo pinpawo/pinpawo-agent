@@ -20,7 +20,7 @@
   终止 POSIX 进程组，返回结构化 `status: timeout`、输出及终止确认状态；不转后台。
   超时不回滚副作用；改用长任务入口前应检查已有结果。断连保留 `result_unknown`，
   不伪装成超时，不自动重放命令。
-- `start_process(command, cwd?)`：经过 commandExecution 审核，启动非交互受管任务，
+- `start_process(command, cwd?)`：经过 `ReviewPolicies.required()` 审核，启动非交互受管任务，
   不提供等待时限参数。启动成功即返回结构化 processId / process 状态，快速退出的
   命令也有句柄。之后用 wait_process / list_processes / terminate_process 操作。
   兼容尚在运行的旧 RS 服务：若旧实现零等待时已返回退出结果，保留该结果，不能

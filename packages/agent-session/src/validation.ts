@@ -1,28 +1,14 @@
-import type {
-  TokenUsageSnapshot,
-  ToolAuthorizationMode,
-  ToolAuthorizationSafetyLevel,
-} from '@pinpawo/agent-contracts';
+import type { TokenUsageSnapshot } from '@pinpawo/agent-contracts';
 import type { AgentPlan } from './domain';
 import {
   isHumanReviewRequest,
-  isToolAuthorizationMode,
-  isToolAuthorizationSafetyLevel,
   parseTokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
 
-/** @deprecated Use ToolAuthorizationMode from @pinpawo/agent-contracts. */
-export type BuiltinGlobalReviewPolicyMode = ToolAuthorizationMode;
 export type {
   ToolAuthorizationMode,
   ToolAuthorizationSafetyLevel,
 } from '@pinpawo/agent-contracts';
-
-export const BUILTIN_GLOBAL_REVIEW_POLICY_MODES = {
-  require_authorization: true,
-  auto_authorization: true,
-  full_access: true,
-} as const satisfies Record<BuiltinGlobalReviewPolicyMode, true>;
 
 export {
   isHumanReviewRequest as isAgentReviewSpecValue,
@@ -33,18 +19,6 @@ export function isAgentTokenUsageSnapshot(
   value: unknown,
 ): value is TokenUsageSnapshot {
   return parseTokenUsageSnapshot(value) !== null;
-}
-
-export function isBuiltinGlobalReviewPolicyMode(
-  value: unknown,
-): value is BuiltinGlobalReviewPolicyMode {
-  return isToolAuthorizationMode(value);
-}
-
-export function isAutoAuthorizationSafetyLevel(
-  value: unknown,
-): value is ToolAuthorizationSafetyLevel {
-  return isToolAuthorizationSafetyLevel(value);
 }
 
 export function parseAgentPlan(value: unknown): AgentPlan | null {

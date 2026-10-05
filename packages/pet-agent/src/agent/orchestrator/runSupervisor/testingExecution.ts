@@ -25,8 +25,7 @@ export function readCapabilityCall(state: Pick<OrchestratorStateType, 'messages'
     throw new Error('Capability call already has a result.');
   }
   return { id: call.id, ...buildCapabilityExecutionInput({
-    state: state.runSupervisorState, messages: state.messages, runId: state.runId, taskId: state.taskId,
-    userRequest: state.runSupervisorState.goal!, mode: 'boundary', hasNewUserInput: false,
+    state: state.runSupervisorState, runId: state.runId,
     allowedCapabilityNames: state.runSupervisorState.plan.map(task => task.capability),
   }, delegateCapabilitySchema.parse(call.args), call.id) };
 }

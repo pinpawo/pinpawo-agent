@@ -38,6 +38,9 @@ contracts in [reference/](../reference/index.md).
 
 ## Studio applications and Plugins
 
+- [Channel 寻址、执行与状态](studio/channel-addressing-and-execution.md) — 2026-10-05
+  用户已定的 @、排队与失败展示语义，及尚未定案的 Trigger / 直接派发选择
+- [Channel 基础草案](studio/channel-collaboration.md) — 已有 session、显式执行与观察边界
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
   Channel, Scheduler, Notice, Trigger, and Knowledge APIs
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container

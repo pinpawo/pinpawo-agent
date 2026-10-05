@@ -4,6 +4,10 @@
 与[产品方向补充](https://github.com/pinpawo/pinpawo-agent/issues/892#issuecomment-5921068589)，
 以及用户明确的“同 Channel 每个 Pet 固定持久 session；同 Pet 串行执行”修订。
 
+后续产品语义见 [Channel 寻址、执行与状态设计](channel-addressing-and-execution.md)
+（2026-10-05）。本文的“不因 @ 自动执行”和原 Pet/session 回复描述记录第一片实现；
+后续有效 @、收件人与引用分离、忙时排队及队列 UI 要求尚未实施，具体路由架构未定。
+
 长期方向：人向 Bot 表达目标与授权范围，Bot 关注多个 Channel，Pet 执行当前一轮工作并
 通过消息、文档、PR 交付。交付不等于目标完成，Pet 反馈不构成新的用户授权。
 本片不实现完整 Bot、跨 Channel 协调、Trigger 调度、同 Pet 并发执行或 Supervisor 重构。
@@ -70,8 +74,9 @@ TUI 审批恢复不会继承 Channel ALS，恢复执行中的 Channel 工具目�
 Studio Bearer 保护 GET /channels、GET /channels/context，POST /channels、
 /channels/revisions、/channels/messages、/channels/execute；历史支持 after/limit。
 模型工具 channel_read_context 不接受作者或 Channel 参数；普通公开回复自动保存。
-默认模板不启用该插件；显式启用配置为 {"id":"@pinpawo-plugin/channel"}，Pet capability
-的 uses 中按需加入 channel。
+第一片默认模板不启用该插件；显式启用配置为 {"id":"@pinpawo-plugin/channel"}，
+Pet capability 的 uses 中按需加入 channel。本地后续 Kanban 退役片已启用该配置，
+尚未发布，范围见本文末尾。
 
 COMMIT 后才发消息/修订通知。Studio bus、Host dispatch 队列及生命周期通知仍是内存机制，
 没有持久 outbox、执行重放或 exactly-once 交付保证。完成事件丢失不会自动从 checkpoint

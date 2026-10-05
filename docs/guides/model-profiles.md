@@ -1,206 +1,87 @@
 # Model Profile Configuration
 
-PinPawo separates built-in model defaults from runnable user configuration:
+**Audience:** operators who need to configure a model or change the model for a
+TUI session. The [Model profile contract](../reference/runtime/model-profiles.md)
+owns stored fields, selection rules, and credential handling.
 
-- A **ModelPreset** is a code-defined template with model defaults and declared input modalities.
-- A **ModelProfile** is a runnable identity with a stable ID, endpoint, credential, model, context limits, and input modalities.
+## Configure the default profile
 
-Model names are not identities. Two profiles may use the same model name with different endpoints or accounts.
+1. Run `pinpawo init` if local configuration does not exist.
+2. Open `~/.pinpawo/config.json`.
+3. In `models.profiles`, configure the profile's endpoint, API key, and model.
+4. Set `models.defaultProfileId` to that profile's ID.
+5. Run `pinpawo setup` to diagnose missing configuration.
+
+Use the [stored-format example](../reference/runtime/model-profiles.md#stored-contract).
+The record key must match the profile's `id`. Keep the API key in local
+configuration; do not commit it or copy it into reports.
+
+Model credentials and endpoints come from stored profiles. Use
+`~/.pinpawo/.env` for runtime settings.
+
+## Select a profile at startup
+
+If the profile already exists, select it for the process:
+
+```sh
+PINPAWO_MODEL_PROFILE=primary pinpawo tui
+```
+
+Replace `primary` with the stored profile ID. This selection does not change
+`models.defaultProfileId`. An invalid selected profile blocks startup.
+
+## Change the current TUI session
+
+1. Wait until the session has no active run or pending human review.
+2. Enter `/model` in the TUI.
+3. Select an available profile that supports the session's input modalities.
+4. Wait for the Host acknowledgement before continuing.
+
+The session retains its selected profile when resumed. If the profile has been
+removed or is invalid, select a valid replacement. For image-bearing sessions,
+choose a profile that supports both text and image input.
+
+## Look up contract details
+
+The headings below preserve earlier links. Each points to the single current
+reference; they do not duplicate the contract.
 
 ## Stored contract
 
-`~/.pinpawo/config.json` stores model profiles in a versioned section:
-
-```json
-{
-  "models": {
-    "version": 1,
-    "defaultProfileId": "primary",
-    "profiles": {
-      "primary": {
-        "id": "primary",
-        "label": "Primary",
-        "provider": "aliyun",
-        "sourcePreset": "qwen",
-        "model": "qwen3.7-max",
-        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "apiKey": "replace-with-a-local-secret",
-        "contextWindowTokens": 1000000,
-        "structuredOutputMethod": "jsonMode",
-        "inputModalities": ["text"]
-      }
-    }
-  }
-}
-```
-
-The API key is host-private. It must never be included in client protocol payloads, logs, reports, or telemetry.
-
-Profile IDs use 1–64 lowercase letters, digits, dots, underscores, or hyphens. The record key must match the profile's `id`.
-
-`inputModalities` is authoritative. Custom profiles with no modality metadata are treated as text-only. Runtime code must not infer image support from a model name.
-
-`provider` is display/provenance metadata. When omitted, it is derived from a known `sourcePreset` or the endpoint host.
+See [Stored contract](../reference/runtime/model-profiles.md#stored-contract).
 
 ## Resolution
 
-- The configured default profile is used unless a host or session supplies another profile ID.
-- `PINPAWO_MODEL_PROFILE` selects a stored profile without changing the configured default.
-- Runnable model configuration is read from stored profiles; it is no longer constructed from environment variables. When `pinpawo init` finds a complete legacy `.env` model tuple and no `config.json`, it migrates that tuple into a versioned stored profile.
-- An invalid non-default profile is isolated with diagnostics.
-- An invalid or missing default/selected profile blocks startup; no other profile is selected silently.
+See [Resolution](../reference/runtime/model-profiles.md#resolution).
 
 ## Legacy migration
 
-When the versioned section is absent, the legacy `llm_*` fields are read as a synthesized `legacy-default` profile. The next successful interactive model configuration write persists the versioned section and removes those legacy fields. The two formats are not maintained as parallel writable sources.
-
-Known presets carry explicit input-modality metadata into the synthesized profile. Unknown legacy/custom models remain text-only.
+See [Legacy migration](../reference/runtime/model-profiles.md#legacy-migration).
 
 ## Safe identity
 
-Runtime consumers may use:
-
-- the stable profile ID; and
-- a SHA-256 fingerprint of the resolved, non-secret behavior configuration.
-
-The fingerprint covers provider, model, sanitized endpoint, context/output limits, structured-output behavior, and input modalities. It excludes API keys, URL credentials, query parameters, and fragments.
+See [Safe identity](../reference/runtime/model-profiles.md#safe-identity).
 
 ## Runtime and session ownership
 
-The Host loads one immutable profile-registry snapshot. Local chat,
-hosted chat, Studio, and scheduled Studio work all resolve complete profiles
-from that registry; they do not keep separate model/endpoint/key tuples.
-
-TUI chat stores a `modelProfileId` on each session:
-
-- a new session inherits the host default;
-- resuming a session restores its stored selection;
-- one run resolves and captures the session profile at admission;
-- selection is rejected while a run or human-review transition is active; and
-- a removed or invalid selected profile blocks execution until the user
-  explicitly selects a valid replacement.
-
-Read-only checkpoint inspection may construct a graph with the valid host
-default so an unavailable session remains resumable and repairable. This does
-not change the session selection and is never used to invoke a model.
-
-Graph cache identity includes both the stable profile ID and the sanitized
-resolved-profile fingerprint. Profiles using the same model name against
-different endpoints or behavior settings therefore cannot share a graph
-generation accidentally.
-
-Studio pet configuration uses `modelProfileId`. The former raw `model` override
-is rejected because changing only a model name while retaining another
-profile's endpoint and credential is not a runnable identity.
+See [Runtime and session ownership](../reference/runtime/model-profiles.md#runtime-and-session-ownership).
 
 ## Local model-selection protocol
 
-Trusted local clients use correlated protocol messages:
-
-```text
-model.list
-model.list.result
-model.select
-model.select.result
-model.select.error
-```
-
-The list result includes the default ID, selected session profile, required
-input modalities, and sanitized profile summaries. Summaries expose only
-display metadata such as label, model, endpoint host, context window,
-modalities, availability, compatibility, and diagnostics. They never expose
-API keys, full endpoint paths, query parameters, or credential objects.
-
-A successful selection is persisted before `model.select.result` is sent. The
-client updates visible state from that acknowledgement and its authoritative
-session snapshot, not from its original request.
+See [Local model-selection protocol](../reference/runtime/model-profiles.md#local-model-selection-protocol).
 
 ## TUI model selection
 
-`/model` opens the current session's model-profile picker. The picker shows the
-stable profile ID and sanitized provider/model/endpoint metadata, marks the
-host default and current selection, and identifies image-capable profiles.
-Unavailable profiles and profiles incompatible with the session modality
-ledger remain visible with diagnostics, but cannot be selected.
-
-The TUI correlates list and selection requests over the trusted local
-protocol. It changes the visible runtime model only after receiving
-`model.select.result` and applying its authoritative snapshot. A disconnect,
-active run, pending review, unavailable profile, or incompatible modality
-produces an explicit error; none of these paths silently change or fall back
-from the session's selected profile.
+See [TUI model selection](../reference/runtime/model-profiles.md#tui-model-selection).
 
 ## Session modality ledger
 
-Each TUI session persists a monotonic `requiredInputModalities` ledger. New and
-pre-ledger sessions start with `["text"]`. Once a real image content block is
-admitted, the ledger becomes `["text", "image"]` and never downgrades, even if
-later context compaction removes or summarizes the original image.
-
-A model profile is compatible only when it supports every modality already
-required by the session. This subset check runs both when selecting a profile
-and at run admission. A text-only profile therefore remains usable for a new
-text session, but cannot be selected for—or silently used by—an image-bearing
-session. `model.list.result` and session snapshots expose the durable
-requirement so clients can explain disabled choices.
-
-Model-input guards apply to tool-produced image blocks as well as user
-attachments. The ledger is persisted before the next provider invocation.
+See [Session modality ledger](../reference/runtime/model-profiles.md#session-modality-ledger).
 
 ## Canonical local image admission
 
-Local path attachments are classified by the host from file signatures, never
-from the client-provided extension. V1 accepts PNG, JPEG, and WebP, with these
-limits:
-
-- at most 4 images per message;
-- at most 10 MiB per image; and
-- at most 20 MiB of images per message.
-
-Accepted bytes are copied into the local state root as content-addressed,
-SHA-256-verified objects. Checkpoint messages contain a
-`pinpawo-local-image://sha256/<digest>` content-block reference plus bounded
-metadata (MIME type, byte size, digest, and filename). They do not contain an
-absolute source path or base64 image payload.
-
-Immediately before a provider invocation, the local model adapter verifies the
-session/profile modality contract, reads and hashes the local object, and
-rehydrates that reference into a transient image data URL. The durable
-checkpoint remains reference-based. Transcript projection shows only the
-attachment filename.
+See [Canonical local image admission](../reference/runtime/model-profiles.md#canonical-local-image-admission).
 
 ## Eval profile matrix
 
-Prompt and lifecycle evals resolve explicit Model Profile IDs from the same
-versioned configuration. They do not construct a runnable model by partially
-overlaying `LLM_*` values.
-
-One subject report:
-
-```sh
-PROMPT_EVAL_MODEL_PROFILE_ID=qwen-max \
-PROMPT_EVAL_JUDGE_PROFILE_ID=gpt-judge \
-  npm run eval:prompt-stability
-```
-
-Sequential cross-model matrix:
-
-```sh
-PROMPT_EVAL_MODEL_PROFILE_IDS=deepseek-pro,qwen-max \
-PROMPT_EVAL_JUDGE_PROFILE_ID=gpt-judge \
-PROMPT_EVAL_MATRIX_MAX_RUNS=300 \
-  npm run eval:prompt-matrix
-```
-
-Every child remains an ordinary single-profile prompt report for same-profile
-regression comparison. Its subject and fixed judge each carry a stable profile
-ID, role, sanitized fingerprint, endpoint origin, runtime settings, and declared
-modalities. Raw credentials and full endpoint paths never enter reports or
-Langfuse metadata.
-
-The matrix manifest references those child reports and aggregates pass rate,
-latency, subject/judge token usage, cost coverage, schema/invocation failures,
-and modality results. Text-only profiles explicitly skip the known-image case
-as `unsupported-modality`; image-capable profiles run it. Cross-model ranking
-uses the matrix manifest, while the existing prompt comparator rejects different
-subject fingerprints or judge/harness identities.
+See [Eval profile matrix](../reference/runtime/model-profiles.md#eval-profile-matrix).

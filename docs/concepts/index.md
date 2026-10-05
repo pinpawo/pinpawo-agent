@@ -7,6 +7,7 @@ stable model used throughout the project.
 
 - [Core concepts](core-concepts.md) — the Pet agent, Capability, Toolkit,
   review, checkpoint, session projection, artifact, Studio, and workdir.
+- [Why an agent harness](agent-harness.md) — project vision and the repeated agent loop.
 - [Architecture](architecture.md) — package boundaries, request lifecycle,
   state ownership, deployment modes, and security boundaries.
 

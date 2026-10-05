@@ -19,19 +19,20 @@ record of an earlier implementation.
 | Integrate a runtime or client | [API reference](reference/api/index.md) |
 | Coordinate multiple specialized agents | [Studio](studio/index.md) |
 
-## Why PinPawo Agent
+## Choose a reading mode
 
-- **Local control:** the host, tools, browser bridge, and runtime state run on
-  the machine chosen by the operator; model-provider choice remains yours.
-- **Explicit authority:** each Capability has a declared Toolkit allowlist, and
-  Toolkit policy can pause an operation for a human decision.
-- **Recoverable work:** durable checkpoints and one session projection make
-  review, reconnection, and client rendering predictable.
-- **Composable extensions:** task instructions live in reviewable Markdown;
-  executable behavior and side-effect policy live in typed Toolkits.
-- **A practical route to multi-agent work:** Studio provides a shared dispatch
-  channel and plugin boundary without making every worker share private scratch
-  state.
+<a id="why-pinpawo-agent"></a>
+
+| Reader need | Start here | Purpose |
+|---|---|---|
+| Learn by doing | [Getting started](guides/getting-started.md) | First installation and scaffold validation |
+| Complete a task | [Guides](guides/index.md) and [Studio configuration](studio/configuration.md) | Configuration and operations |
+| Look up facts | [Reference](reference/index.md) | Fields, commands, protocols, and ownership contracts |
+| Understand why | [Concepts](concepts/index.md) and [Design records](design/index.md) | System model, rationale, and proposals |
+
+These modes follow [Diátaxis](https://www.diataxis.fr/start-here/). They describe
+page purpose; they do not require four new directories. A design proposal's
+status still determines whether its claims are accepted.
 
 ## Documentation map
 
@@ -61,20 +62,16 @@ When two pages appear to disagree, use this order of authority:
 4. Pages in `history/` explain previous decisions and must not override a
    current contract.
 
-There are no compatibility redirects in this directory. Current pages use their
-categorized, lowercase paths directly; obsolete implementations are retained
-only under `history/`.
-
-Interrupt and Resident Pet design work is split by boundary. [Pending interrupt
-in Chat](design/host/pending-interrupt-chat.md) defines the checkpoint,
-projection, and resume boundary for Agent Session conversation. [Resident Pet
-Host ports](design/agent-runtime/resident-pet-host-ports.md) defines the shared
-host runtime boundary, while [Studio Independent Host Runtime](design/studio/independent-host-runtime.md)
-defines how Studio consumes dispatch and composes its process. Together they make
-dispatch one-way, leave active-thread/continuation ownership in Agent Session,
-and give conversation non-preemptive scheduling priority.
+Some current contracts remain at accepted design paths, including
+[Resident Pet Host ports](design/agent-runtime/resident-pet-host-ports.md) and
+[Channel](design/studio/channel-addressing-and-execution.md). Read their explicit
+status rather than inferring authority from the directory alone. Historical
+Kanban records also retain their old paths. Old-path summaries and section links
+point to successors when a page is reorganized.
 
 ## Documentation maintenance
+
+For ordinary edits, follow [Writing and maintenance](contributing.md).
 
 `docs/` is the source-document layer. The synthesized wiki under `docs/wiki/` was
 removed as unmaintained; the append-only [maintenance log](log.md) is kept for the

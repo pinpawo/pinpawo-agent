@@ -52,7 +52,8 @@ project-inspection and Git Toolkit bindings resolve supported relative paths and
 relative or omitted `cwd` against the execution workdir. Absolute paths remain
 absolute. These bindings do not change the process-wide cwd; independent Hosts
 can therefore keep separate execution scopes in one process. The implementation
-is [workdirBinding.ts](../../../services/host/src/toolkits/local/workdirBinding.ts).
+is `withExecutionWorkdir()` in
+[executionContext.ts](../../../services/host/src/toolkits/local/executionContext.ts).
 
 See [Studio configuration](../../studio/configuration.md) for the files Studio
 actually reads, and [the workspace proposal](../../design/host/workspace-runtime-config.md)

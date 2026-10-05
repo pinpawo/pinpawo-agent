@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { channelExecuteInput, readChannelPages, executionLabel, channelPetIdentity, channelMessageIdentity, channelMessageExecution,
-  channelExecutionOutputs, channelMessagesGroup, channelQuote, type ChannelExecution, type ChannelMessage } from '../src/channelData';
+import { readChannelPages, executionLabel, channelPetIdentity, channelMessageIdentity, channelMessageExecution,
+  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelReplyRecipientId, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
 import { ChannelTimeline, ChannelExecutionHistory } from '../src/ChannelPanel';
+import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
 const message: ChannelMessage = { kind: 'message', channelId: 'a', sequence: 2, messageId: 'm', body: 'Full public delivery.\n\nMissing work remains.\n\n```ts\nconst evidence = 42;\n```',
   author: { kind: 'pet', id: 'worker' }, occurredAt: '2026-10-04T00:00:00Z', revision: 1,
@@ -12,13 +13,22 @@ const message: ChannelMessage = { kind: 'message', channelId: 'a', sequence: 2, 
 const execution: ChannelExecution = { sequence: 1, executionId: 'e', channelId: 'a', petId: 'worker', sessionId: 'worker:same',
   state: 'running', occurredAt: '2026-10-04T00:00:00Z', observationLost: false };
 
-test('explicit execution requires a Pet; reply routing uses source and rejects foreign or unbound messages', () => {
-  assert.deepEqual(channelExecuteInput('a', 'worker', ' next '), { channelId: 'a', petId: 'worker', body: 'next' });
-  assert.throws(() => channelExecuteInput('a', '', 'next'), /Select a Pet/);
-  assert.deepEqual(channelExecuteInput('a', 'other', 'answer', message), { channelId: 'a', replyTo: 'm', body: 'answer' });
-  assert.throws(() => channelExecuteInput('b', 'worker', 'answer', message), /this Channel/);
-  assert.throws(() => channelExecuteInput('a', 'worker', 'answer', { ...message, source: undefined }), /execution/);
-  assert.throws(() => channelExecuteInput('a', 'worker', '   '), /message/);
+test('Reply defaults to the registered original author while changes and clearing stay explicit', () => {
+  const participants = [
+    { participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' },
+    { participantId: 'pet:a%29b', kind: 'pet', id: 'a)b', label: 'Analyst' },
+    { participantId: 'human:worker', kind: 'human', id: 'worker', label: 'Analyst' },
+  ];
+  const target = channelReplyRecipientId(message.author, participants);
+  assert.equal(target, 'pet:worker');
+  assert.deepEqual(channelMessageInput('a', target, 'next', message).mentions, [{ participantId: 'pet:worker' }]);
+  assert.equal(channelReplyRecipientId({ kind: 'pet', id: 'a)b' }, participants), 'pet:a%29b');
+  assert.equal(channelReplyRecipientId({ kind: 'human', id: 'worker' }, participants), 'human:worker');
+  assert.equal(channelReplyRecipientId({ kind: 'pet', id: 'removed' }, participants), '');
+  assert.equal(channelReplyRecipientId(undefined, participants), '');
+  assert.equal(channelReplyRecipientId(message.author), '');
+  assert.deepEqual(channelMessageInput('a', 'pet:a%29b', 'changed', message).mentions, [{ participantId: 'pet:a%29b' }]);
+  assert.deepEqual(channelMessageInput('a', '', 'saved', message), { channelId: 'a', body: 'saved', replyTo: 'm' });
 });
 
 test('history loading follows every cursor to include recent deliveries and fails on a nonadvancing page', async () => {
@@ -32,11 +42,52 @@ test('history loading follows every cursor to include recent deliveries and fail
   await assert.rejects(readChannelPages(async () => ({ entries: [], nextAfter: 0, hasMore: true }), '/history', 'entries'), /advance/);
 });
 
-test('timeline renders full handoff body and safe references; only execution outputs offer reply', () => {
+test('timeline renders full handoff body and safe references; all participant messages offer reply', () => {
   const markup = renderToStaticMarkup(<ChannelTimeline entries={[message, { ...message, messageId: 'note', source: undefined, body: '<script>bad()</script>' }]} pending={false} onReply={() => undefined} />);
   assert.ok(markup.includes('Missing work remains.')); assert.ok(markup.includes('evidence = 42'));
-  assert.equal((markup.match(/>Reply to /g) ?? []).length, 1);
+  assert.equal((markup.match(/>Reply to /g) ?? []).length, 2);
   assert.ok(!markup.includes('href="javascript:')); assert.ok(!markup.includes('<script>'));
+});
+
+test('unified messages separate reply context from recipients and display target identities and failures in the timeline', () => {
+  assert.deepEqual(channelMessageInput('a', 'pet:other', ' answer ', message), {
+    channelId: 'a', body: 'answer', mentions: [{ participantId: 'pet:other' }], replyTo: 'm',
+  });
+  assert.deepEqual(channelMessageInput('a', '', 'note', { ...message, source: undefined }), { channelId: 'a', body: 'note', replyTo: 'm' });
+  assert.throws(() => channelMessageInput('b', '', 'reply', message), /outside/);
+  assert.throws(() => channelMessageInput('a', 'pet:worker', '   '), /message/);
+  const human = { ...message, source: undefined, author: { kind: 'human', id: 'owner' }, mentions: [{ participantId: 'pet:other', label: 'Old label' }] };
+  const runs = [
+    { ...execution, messageId: 'm', executionId: 'one', state: 'failed' as const, error: 'Admission denied.' },
+    { ...execution, messageId: 'm', executionId: 'two', petId: 'other', state: 'queued' as const },
+  ];
+  assert.equal(channelMessageExecutions(human, runs).length, 2);
+  const markup = renderToStaticMarkup(<ChannelTimeline entries={[human]} executions={runs} pending={false} onReply={() => undefined}
+    participants={[{ participantId: 'pet:other', kind: 'pet', id: 'other', label: 'New label' }]} viewerParticipantId="human:owner" />);
+  assert.ok(markup.includes('Me')); assert.ok(markup.includes('@New label'));
+  assert.ok(markup.includes('Admission denied.')); assert.ok(markup.includes('queued'));
+  assert.ok(!markup.includes('retry'));
+});
+
+test('global queue rendering uses runtime entries from every Channel and hides private request context', () => {
+  const markup = renderToStaticMarkup(<ChannelDispatchQueues connected={true} pets={[{ petId: 'worker', name: 'Worker' }]}
+    channels={[{ kind: 'revision', channelId: 'b', sequence: 1, title: 'Other Channel', goal: 'goal', scope: 'scope', reason: 'created', occurredAt: 'now', author: { kind: 'human', id: 'owner' }, references: [] }]}
+    queues={[{ petId: 'worker', state: 'busy', activeOperation: 'dispatch', queuedConversations: 0, queuedDispatches: 2,
+      entries: [
+        { dispatchId: 'one', enqueuedAt: message.occurredAt, scope: { namespace: 'channel', id: 'b' } },
+        { dispatchId: 'two', enqueuedAt: message.occurredAt, sessionId: 'private-session' },
+      ] }]} />);
+  assert.ok(markup.includes('2 queued')); assert.ok(markup.includes('Other Channel'));
+  assert.ok(markup.includes('Other session')); assert.ok(!markup.includes('private-session'));
+  const queues = [{ petId: 'worker', state: 'waiting' as const, activeOperation: null, queuedConversations: 0, queuedDispatches: 1,
+    activeDispatch: { dispatchId: 'active', enqueuedAt: message.occurredAt, sessionId: 'private-session' } }];
+  const waiting = renderToStaticMarkup(<ChannelDispatchQueues connected={true} pets={[]} channels={[]} queues={queues} />);
+  assert.ok(waiting.includes('>waiting<')); assert.ok(!waiting.includes('review requested'));
+  for (const props of [{ connected: false }, { connected: true, error: 'Read unavailable' }]) {
+    const stale = renderToStaticMarkup(<ChannelDispatchQueues {...props} pets={[]} channels={[]} queues={queues} />);
+    assert.ok(stale.includes('status unknown')); assert.ok(stale.includes('Last observed'));
+    assert.ok(!stale.includes('Working')); assert.ok(!stale.includes('private-session'));
+  }
 });
 
 test('registered names are consistent while routing IDs, duplicates and removed history remain distinguishable', () => {
@@ -46,7 +97,14 @@ test('registered names are consistent while routing IDs, duplicates and removed 
   assert.equal(channelMessageIdentity(message, pets).name, 'Analyst');
   assert.deepEqual(channelPetIdentity('retired', pets), { name: 'retired', removed: true, optionLabel: 'retired' });
   assert.equal(channelPetIdentity('worker', [], false).removed, false, 'a registry still loading is not proof of removal');
-  assert.equal(channelExecuteInput('a', 'worker', 'next').petId, 'worker', 'presentation cannot change routing');
+  assert.equal(channelMessageInput('a', 'pet:worker', 'next').mentions?.[0]?.participantId, 'pet:worker', 'presentation cannot change routing');
+  const participants = [
+    { participantId: 'human:operator%29', kind: 'human', id: 'operator)', label: 'Operator' },
+    { participantId: 'pet:a%29b', kind: 'pet', id: 'a)b', label: 'Analyst' },
+  ];
+  assert.equal(channelMessageIdentity({ ...message, author: { kind: 'human', id: 'operator)' } }, pets, true, participants, 'human:operator%29').name, 'Me');
+  assert.equal(channelMessageIdentity({ ...message, author: { kind: 'pet', id: 'a)b' } }, [], true, participants).name, 'Analyst');
+  assert.equal(channelMentionLabel({ petId: 'a)b' }, participants, []), 'Analyst');
 });
 
 test('grouping applies only to nearby notes and keeps request, reply, output and date boundaries', () => {

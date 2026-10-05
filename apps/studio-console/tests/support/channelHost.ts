@@ -1,3 +1,4 @@
+import { readChannelTestInput } from '../../../../tests/support/channelDispatchInput';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,20 +27,29 @@ for (const petId of ['alpha', 'beta']) {
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
   const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
   const graph = new StateGraph(State).addNode('reply', async state => {
-    const last = state.messages.at(-1)!.text;
+    const raw = state.messages.at(-1)!.text;
+    const input = /^`{3,}json\n/.test(raw) ? readChannelTestInput(raw) : undefined;
+    const last = input?.body ?? raw;
     if (last === 'fail-provider') throw new Error('Deterministic provider denied request (403).');
     if (last === 'review') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'fixture-review',
       view: { kind: 'plain', body: 'Authorize fixture tool?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' },
         effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
     }) });
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, last === 'queue-hold' ? 5000 : 300));
     const invocation = readPetInvocationContext()!;
     if (invocation.scope?.namespace !== 'channel') {
       return { messages: [new AIMessage('Standalone deterministic reply. Inspect this Pet session for the result.')] };
     }
+    if (last === 'handoff' || last === 'handoff [@Alpha](participant:pet:alpha)') return { messages: [new AIMessage('[@Beta](participant:pet:beta) Please inspect this delivery.')] };
+    if (last === '[@Beta](participant:pet:beta) Please inspect this delivery.') {
+      return { messages: [new AIMessage('[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.')] };
+    }
+    if (last === '[@Alpha](participant:pet:alpha) Inspection complete; deliver the result.') {
+      return { messages: [new AIMessage('[@Me](participant:human:studio-operator) Result delivered.')] };
+    }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string);
     const prior = snapshot.history.entries.filter((entry: { kind: string; source?: unknown }) => entry.kind === 'message' && entry.source);
-    return { messages: [new AIMessage(`Public delivery from ${petId}.\n\nRequest: ${last}\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the current Channel goal and scope. Remaining work: user acceptance.`)] };
+    return { messages: [new AIMessage(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nInput source: ${input?.author.participantId}. Message: ${input?.messageId}. Referenced message: ${input?.replyTo?.messageId ?? 'none'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the current Channel goal and scope. Remaining work: user acceptance.`)] };
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
   hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,

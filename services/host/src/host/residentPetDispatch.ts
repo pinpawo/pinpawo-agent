@@ -217,7 +217,11 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         if (!sessions.getSession(petId, target.id)) return true;
         // Read failures propagate: the Coordinator keeps this work queued.
         return !(await graphService.readThreadState(await readTargetSetup())).pendingInterrupt;
-      } : undefined);
+      } : undefined, {
+        dispatchId, enqueuedAt: new Date().toISOString(),
+        ...(target ? { sessionId: target.id } : {}),
+        ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
+      });
       publishLifecycle({ dispatchId, request, state: 'queued' });
     },
   };

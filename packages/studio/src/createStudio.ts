@@ -55,7 +55,7 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
   }
 
   const eventBus = new StudioEventBus();
-  const idempotencyRecords = new Map<string, StudioDispatchReceipt>();
+  const idempotencyRecords = new Map<string, Promise<StudioDispatchReceipt>>();
   const stopDispatchLifecycleObservers: Array<() => void> = [];
   const pluginHooks = new StudioPluginHookRegistry();
   const startedPlugins: StudioPlugin[] = [];
@@ -113,44 +113,53 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
       throw new Error('Studio dispatch idempotencyKey must not be empty.');
     }
     const idempotencyRecordKey = idempotencyKey
-      ? JSON.stringify([request.petId, idempotencyKey])
+      ? JSON.stringify([source ?? 'studio', request.petId, idempotencyKey])
       : null;
     const existing = idempotencyRecordKey
       ? idempotencyRecords.get(idempotencyRecordKey)
       : undefined;
     if (existing) return existing;
 
-    const invocationId = randomUUID();
-    const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
+    // Reserve before awaiting the port: simultaneous deliveries share one
+    // admission. Failed admissions release the reservation, in this domain.
+    const admission = Promise.resolve().then(async () => {
+      const invocationId = randomUUID();
+      const metadata = request.metadata ? Object.freeze({ ...request.metadata }) : undefined;
 
-    console.log(
-      `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
-    );
-    await pet.dispatch.dispatch({
-      request: request.request,
-      dispatchId: invocationId,
-      ...(request.session ? { session: { ...request.session } } : {}),
-      ...(request.scope ? { scope: { ...request.scope } } : {}),
-    });
-
-    const receipt: StudioDispatchReceipt = Object.freeze({
-      petId: request.petId,
-      invocationId,
-      ...(metadata ? { metadata } : {}),
-    });
-    if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, receipt);
-    notify({
-      type: 'dispatch.accepted',
-      source: 'studio',
-      occurredAt: new Date().toISOString(),
-      payload: {
-        invocationId,
-        petId: request.petId,
+      console.log(
+        `[studio] dispatch petId=${request.petId} source=${source ?? 'studio'} invocation=${invocationId}`,
+      );
+      await pet.dispatch.dispatch({
         request: request.request,
-        producer: source ?? 'studio',
-      },
+        dispatchId: invocationId,
+        ...(request.session ? { session: { ...request.session } } : {}),
+        ...(request.scope ? { scope: { ...request.scope } } : {}),
+      });
+
+      const receipt: StudioDispatchReceipt = Object.freeze({
+        petId: request.petId,
+        invocationId,
+        ...(metadata ? { metadata } : {}),
+      });
+      notify({
+        type: 'dispatch.accepted',
+        source: 'studio',
+        occurredAt: new Date().toISOString(),
+        payload: {
+          invocationId,
+          petId: request.petId,
+          request: request.request,
+          producer: source ?? 'studio',
+        },
+      });
+      return receipt;
     });
-    return receipt;
+    if (idempotencyRecordKey) idempotencyRecords.set(idempotencyRecordKey, admission);
+    try { return await admission; }
+    catch (error) {
+      if (idempotencyRecordKey && idempotencyRecords.get(idempotencyRecordKey) === admission) idempotencyRecords.delete(idempotencyRecordKey);
+      throw error;
+    }
   }
 
   function buildPluginContext(plugin: StudioPlugin): StudioPluginContext {

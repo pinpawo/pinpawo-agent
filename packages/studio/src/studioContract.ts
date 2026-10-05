@@ -105,6 +105,8 @@ export type StudioDispatchQueue = {
   activeOperation: 'conversation' | 'dispatch' | null;
   queuedConversations: number;
   queuedDispatches: number;
+  entries?: import('pinpawo/host-runtime').PetDispatchQueueEntry[];
+  activeDispatch?: import('pinpawo/host-runtime').PetDispatchQueueEntry;
 };
 
 /**

@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
+import { channelMentionSchema, channelMentionId, type ChannelMention } from './channelParticipants';
 
 const identifier = z.string().trim().min(1).max(256);
 export const channelAuthorSchema = z.object({
@@ -29,7 +30,7 @@ export const channelRevisionSchema = channelGoalSchema.extend({
 export const channelMessageSchema = z.object({
   body: z.string().trim().min(1).max(100_000),
   replyTo: identifier.optional(),
-  mentions: z.array(z.object({ petId: identifier }).strict()).max(100).default([]),
+  mentions: z.array(channelMentionSchema).max(100).default([]),
   artifacts: z.array(artifactReferenceSchema).max(100).default([]),
 }).strict();
 export const channelPageSchema = z.object({
@@ -202,7 +203,11 @@ export class ChannelService {
     const message = channelMessageSchema.parse(input);
     const trustedAuthor = channelAuthorSchema.parse(author);
     const seen = new Set<string>();
-    if (message.mentions.some(({ petId }) => seen.has(petId) || !seen.add(petId))) throw new Error('Duplicate mention.');
+    message.mentions = message.mentions.filter(mention => {
+      const id = channelMentionId(mention);
+      if (seen.has(id)) return false;
+      seen.add(id); return true;
+    });
     const entry = this.transaction(() => {
       const channel = this.getChannel(channelId);
       if (message.replyTo) this.getMessage(channel.channelId, message.replyTo);
@@ -251,7 +256,7 @@ export class ChannelService {
     if (!binding || binding.sessionId !== source.sessionId) throw new Error('Output destination does not match Channel binding.');
     return binding;
   }
-  recordOutput(channelId: string, source: ChannelMessageSource, body: string): ChannelMessage {
+  recordOutput(channelId: string, source: ChannelMessageSource, body: string, mentions: ChannelMention[] = []): ChannelMessage {
     const binding = this.requireOutputBinding(channelId, source);
     let created = false;
     const entry = this.transaction(() => {
@@ -259,7 +264,7 @@ export class ChannelService {
         .get(source.petId, source.sessionId, source.invocationId) as { message_id: string } | undefined;
       if (saved) return this.getMessage(binding.channelId, saved.message_id);
       const channel = this.getChannel(binding.channelId);
-      const message = this.append({ ...channelMessageSchema.parse({ body }), kind: 'message',
+      const message = this.append({ ...channelMessageSchema.parse({ body, mentions }), kind: 'message',
         channelId: channel.channelId, messageId: randomUUID(), revision: channel.sequence,
         author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
       }) as ChannelMessage;
@@ -324,25 +329,27 @@ export class ChannelService {
     const row = this.database().prepare('SELECT data FROM channel_executions WHERE execution_id=?').get(executionId) as { data: string } | undefined;
     return row ? JSON.parse(row.data) : null;
   }
-  beginExecution(channelId: string, source: { petId: string; sessionId: string }, messageId: string): ChannelExecution {
+  beginExecution(channelId: string, source: { petId: string; sessionId: string }, messageId: string, executionId = messageId): ChannelExecution {
     const binding = this.requireOutputBinding(channelId, { ...source, invocationId: '' });
     this.getMessage(binding.channelId, messageId);
-    return this.saveExecution({ petId: source.petId, sessionId: source.sessionId, channelId: binding.channelId, executionId: messageId, messageId,
+    const existing = this.executionRow(executionId);
+    if (existing) return existing;
+    return this.saveExecution({ petId: source.petId, sessionId: source.sessionId, channelId: binding.channelId, executionId, messageId,
       state: 'admitting', occurredAt: new Date().toISOString(), observerId: this.observerId });
   }
-  acceptExecution(messageId: string, invocationId: string): ChannelExecution {
+  acceptExecution(executionId: string, invocationId: string): ChannelExecution {
     return this.transaction(() => {
-      const pending = this.executionRow(messageId);
+      const pending = this.executionRow(executionId);
       if (!pending) throw new Error('Unknown Channel execution request.');
       const observed = this.database().prepare('SELECT execution_id, data FROM channel_executions WHERE invocation_id=?')
         .get(invocationId) as { execution_id: string; data: string } | undefined;
-      if (observed && observed.execution_id !== messageId) {
+      if (observed && observed.execution_id !== executionId) {
         const value = JSON.parse(observed.data) as ChannelExecution;
         if (value.channelId !== pending.channelId || value.petId !== pending.petId || value.sessionId !== pending.sessionId) {
           throw new Error('Channel execution receipt does not match its observation.');
         }
         this.database().prepare('DELETE FROM channel_executions WHERE execution_id=?').run(observed.execution_id);
-        return this.saveExecution({ ...pending, ...value, executionId: messageId, messageId });
+        return this.saveExecution({ ...pending, ...value, executionId, messageId: pending.messageId });
       }
       return this.saveExecution({ ...pending, invocationId, state: pending.state === 'admitting' ? 'queued' : pending.state });
     });

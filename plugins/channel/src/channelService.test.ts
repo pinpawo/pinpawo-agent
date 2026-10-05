@@ -141,7 +141,6 @@ test('rejects cross-Channel references, spoofed fields, stale revisions and malf
       { body: 'spoof', author: human },
       { body: 'spoof', channelId: a.channelId },
       { body: '   ' },
-      { body: 'duplicate', mentions: [{ petId: 'executor' }, { petId: ' executor ' }] },
     ]) assert.throws(() => service.sendMessage(b.channelId, input, pet));
     assert.throws(() => service.reviseChannel(b.channelId, {
       ...goal, expectedRevision: b.sequence, reason: 'wrong source', sourceMessageId: message.messageId,
@@ -149,6 +148,8 @@ test('rejects cross-Channel references, spoofed fields, stale revisions and malf
     service.reviseChannel(a.channelId, { ...goal, expectedRevision: a.sequence, reason: 'changed' }, human);
     assert.throws(() => service.reviseChannel(a.channelId, { ...goal, expectedRevision: a.sequence, reason: 'stale' }, human), /conflict/);
     assert.deepEqual(service.readHistory(b.channelId), before);
+    const addressed = service.sendMessage(b.channelId, { body: 'one target', mentions: [{ petId: 'executor' }, { petId: ' executor ' }] }, pet);
+    assert.deepEqual(addressed.mentions, [{ petId: 'executor' }], 'repeating an identity expresses one target');
     for (const page of [{ limit: 0 }, { limit: 201 }, { after: -1 }, { after: 1.5 }]) {
       assert.throws(() => service.readHistory(a.channelId, page));
     }

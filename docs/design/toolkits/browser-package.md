@@ -101,7 +101,7 @@ services/host/
 作为默认宿主：
 
 - 读取用户配置，并通过显式 options 创建 Browser Toolkit；
-- 将 Browser Toolkit 加入 PinPawo 默认发行组合；它与 bash、git 等默认 Toolkit 一样只是一个预设，不是 host 的特权能力；
+- 将 Browser Toolkit 加入 PinPawo 默认发行组合；它与 files、shell、git 等默认 Toolkit 一样只是一个预设，不是 host 的特权能力；
 - 启动通用 `ToolkitRuntimeManager`，不直接管理 Browser session；
 - Browser CLI 只调用 Browser 包公开的 extension 安装和状态接口。
 
@@ -109,7 +109,7 @@ services/host/
 
 用户扩展遵循同一组合模型：外部插件提供 Toolkit，用户 Capability 在 `CAPABILITY.md` 的 `uses` 中声明所需 Toolkit。host 负责加载并校验这两类配置；它不会把 Browser 或任何默认 Toolkit 当成用户 Capability 的隐式依赖。
 
-`general` 是默认集合中的 host baseline，始终由 host 加载且缺失时启动失败，但不作为可关闭的设置项展示。它只声明稳定的本地 `bash` 和 `git` Toolkit；每次 run 才产生的 profile、artifact 等上下文能力不再成为它的隐式依赖。
+`general` 是默认集合中的 host baseline，始终由 host 加载且缺失时启动失败，但不作为可关闭的设置项展示。它只声明稳定的本机 Toolkit：`files`、`shell`、`web`、`git`、`github`；每次 run 才产生的 profile、artifact 等上下文能力不再成为它的隐式依赖。
 
 `/health` 不追加 Browser 专属 bridge、tab 或 extension 字段。运行时观测来自
 `ToolkitRuntimeManager.diagnose()` 的统一 projection；Browser 只通过通用

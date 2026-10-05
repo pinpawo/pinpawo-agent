@@ -2,7 +2,9 @@
 name: capability_creator
 description: "设计、生成、修改并验证用户自定义 Capability；包含 CAPABILITY.md、Toolkit 权限、执行流程、路由描述与边界契约。"
 uses:
-  - bash
+  - files
+  - shell
+  - web
   - capability_creator
 version: 1
 icon: wand.and.stars

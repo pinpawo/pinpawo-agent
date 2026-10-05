@@ -2,7 +2,9 @@
 name: web_research_brief
 description: "公开网页和 URL 调研，HTTP 内容抓取，多来源摘要，事实核查，引用链接整理；适合阅读用户提供的网页、API JSON、RSS 或静态公开页面并输出结构化简报。"
 uses:
-  - bash
+  - files
+  - shell
+  - web
 version: 1
 icon: doc.text.magnifyingglass
 color: green

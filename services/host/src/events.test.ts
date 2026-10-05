@@ -12,7 +12,10 @@ import {
   createOperationRegistryFromToolkits,
 } from './events/operationRegistry';
 import { createBrowserToolkit, ChromeExtensionBrowserRS } from '@pinpawo-toolkit/browser';
-import { createBashToolkit, createGitToolkit, PosixShellRS } from './toolkits/local';
+import { createFilesToolkit } from './toolkits/files';
+import { createGitToolkit } from './toolkits/git';
+import { createShellToolkit } from './toolkits/shell';
+import { PosixShellRS } from './toolkits/shellRS';
 import { createOperationRegistryForAgentSetup } from './runtimeOperationRegistry';
 
 function definition(toolkit: AgentToolkit, toolName: string) {
@@ -21,7 +24,8 @@ function definition(toolkit: AgentToolkit, toolName: string) {
 
 const sharedShell = new PosixShellRS();
 const localToolOperationRegistry = createOperationRegistryFromToolkits([
-  createBashToolkit({ shell: sharedShell }),
+  createFilesToolkit(),
+  createShellToolkit({ shell: sharedShell }),
   createGitToolkit({ shell: sharedShell }),
 ]);
 
@@ -43,14 +47,14 @@ test('normalizes LangGraph tool stream events with toolkit operation metadata', 
     phase: 'started',
     operation: {
       id: 'call-1',
-      kind: 'bash.read_file',
+      kind: 'files.read_file',
       title: '析文档',
       target: '/tmp/example.md',
       summary: undefined,
       details: undefined,
       source: {
         provider: 'toolkit',
-        name: 'bash',
+        name: 'files',
         toolName: 'read_file',
         callId: 'call-1',
       },
@@ -167,13 +171,13 @@ test('buildToolOperationEvent uses explicit toolkit metadata', () => {
 
   assert.equal(event.type, 'operation');
   assert.equal(event.phase, 'started');
-  assert.equal(event.operation.kind, 'bash.run_shell');
+  assert.equal(event.operation.kind, 'shell.run_shell');
   assert.equal(event.operation.title, '执行命令');
   assert.equal(event.operation.target, '/repo');
   assert.equal(event.operation.summary, 'git status --short');
   assert.deepEqual(event.operation.source, {
     provider: 'toolkit',
-    name: 'bash',
+    name: 'shell',
     toolName: 'run_shell',
     callId: 'call-1',
   });
@@ -231,13 +235,14 @@ test('buildToolOperationEvent uses git toolkit metadata', () => {
   });
 });
 
-test('createBashToolkit exposes operation metadata with the toolkit definition', () => {
-  const toolkit = createBashToolkit({ shell: new PosixShellRS() });
+test('files and shell Toolkits expose operation metadata with their definitions', () => {
+  const files = createFilesToolkit();
+  const shell = createShellToolkit({ shell: new PosixShellRS() });
 
-  assert.equal(definition(toolkit, 'read_file')?.operation?.title, '析文档');
-  assert.equal(definition(toolkit, 'inspect_shell')?.operation?.title, '只读命令');
-  assert.equal(definition(toolkit, 'run_shell')?.operation?.title, '执行命令');
-  assert.equal(definition(toolkit, 'git_status'), undefined);
+  assert.equal(definition(files, 'read_file')?.operation?.title, '析文档');
+  assert.equal(definition(shell, 'inspect_shell')?.operation?.title, '只读命令');
+  assert.equal(definition(shell, 'run_shell')?.operation?.title, '执行命令');
+  assert.equal(definition(shell, 'git_status'), undefined);
 });
 
 test('createGitToolkit exposes git operation metadata with the toolkit definition', () => {

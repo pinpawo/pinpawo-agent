@@ -2,8 +2,11 @@
 name: studio_execution
 description: 执行用户明确交接的工作区任务，交付可独立验证的结果和证据。
 uses:
-  - bash
+  - files
+  - shell
+  - web
   - git
+  - github
   - channel
 version: 1
 ---

@@ -3,7 +3,12 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createBashToolkit, createGitToolkit, createProjectInspectionToolkit } from '../local/index';
+import { createFilesToolkit } from '../files';
+import { createGitToolkit } from '../git';
+import { createGithubToolkit } from '../github';
+import { createProjectInspectionToolkit } from '../projectInspection';
+import { createShellToolkit } from '../shell';
+import { createWebToolkit } from '../web';
 import { PosixShellRS } from './posixShellRS';
 import { SHELL_RS_REQUIREMENT, ShellRSError } from './shellRS';
 
@@ -66,7 +71,7 @@ test('a yielded command is held in the logical session of its Agent session', { 
   assert.equal(terminated.status, 'terminated');
 });
 
-test('ShellRS reports itself unavailable on Windows, and so do shell Toolkits', async () => {
+test('ShellRS reports itself unavailable on Windows, and so do the Toolkits built on it', async () => {
   const shell = new PosixShellRS({ platform: 'win32' });
   const availability = shell.status();
   assert.equal(availability.available, false);
@@ -74,12 +79,18 @@ test('ShellRS reports itself unavailable on Windows, and so do shell Toolkits', 
   assert.throws(() => shell.ensureSession('s1'), /Windows/);
 
   for (const toolkit of [
-    createBashToolkit({ shell }),
+    createShellToolkit({ shell }),
     createGitToolkit({ shell }),
+    createGithubToolkit({ shell }),
     createProjectInspectionToolkit({ shell }),
   ]) {
     assert.deepEqual(toolkit.requires, { shell: SHELL_RS_REQUIREMENT });
     assert.equal((await toolkit.availability?.())?.available, false, toolkit.name);
+  }
+  // Files and web run in the Host process: no ShellRS, always available.
+  for (const toolkit of [createFilesToolkit(), createWebToolkit()]) {
+    assert.equal(toolkit.requires, undefined, toolkit.name);
+    assert.equal(toolkit.availability, undefined, toolkit.name);
   }
 });
 

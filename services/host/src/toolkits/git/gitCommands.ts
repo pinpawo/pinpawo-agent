@@ -1,39 +1,12 @@
-/**
- * Permission levels of git and gh invocations.
- *
- * - `read`: only reads. Runs anywhere without review, `inspect_shell` included.
- * - `change`: an everyday, recoverable write. Runs in `git_shell` / `gh_shell`
- *   without review; `inspect_shell` redirects it there.
- * - `risky`: loses data, rewrites shared history, or affects others or
- *   credentials. Reviewed in `git_shell` / `gh_shell`.
- *
- * The policy leans permissive: only clearly irreversible or shared-impact forms
- * are `risky`. Unrecognized subcommands and aliases are `risky` too, because
- * their effect is unknown; the cost of a wrong "risky" is one review.
- */
-export type VcsLevel = 'read' | 'change' | 'risky';
-export type VcsVerdict = { level: 'read' } | { level: 'change' | 'risky'; reason: string };
-
-const READ: VcsVerdict = { level: 'read' };
-const change = (reason: string): VcsVerdict => ({ level: 'change', reason });
-const risky = (reason: string): VcsVerdict => ({ level: 'risky', reason });
-
-/** Flags that end option parsing; everything after is a pathspec or operand. */
-function beforeDoubleDash(args: readonly string[]) {
-  const end = args.indexOf('--');
-  return end === -1 ? args : args.slice(0, end);
-}
-
-/** A bundle like `-vv` or `-dr`, checked one letter at a time. */
-function shortBundle(arg: string) {
-  return /^-[A-Za-z]+$/.test(arg) ? arg.slice(1).split('') : [];
-}
-
-/** Whether any option (before `--`) is one of the long names or short letters. */
-function hasOption(args: readonly string[], long: readonly string[], short = '') {
-  return beforeDoubleDash(args).some((arg) => long.includes(arg.split('=')[0])
-    || shortBundle(arg).some((letter) => short.includes(letter)));
-}
+import {
+  beforeDoubleDash,
+  change,
+  type CliVerdict,
+  hasOption,
+  READ,
+  risky,
+  shortBundle,
+} from '../cli/cliLevels';
 
 /**
  * Listing form of `git branch` / `git tag`. Positional names create a ref
@@ -161,7 +134,7 @@ const GIT_GLOBAL_READ_OPTIONS = new Set(['--no-pager', '-P', '--no-optional-lock
 const GIT_GLOBAL_PATH_OPTIONS = new Set(['-C', '--git-dir', '--work-tree']);
 
 /** `args` excludes the leading `git`. */
-export function classifyGitArgs(args: readonly string[]): VcsVerdict {
+export function classifyGitArgs(args: readonly string[]): CliVerdict {
   let index = 0;
   while (index < args.length && args[index].startsWith('-')) {
     const arg = args[index];
@@ -187,73 +160,4 @@ export function classifyGitArgs(args: readonly string[]): VcsVerdict {
   if (!GIT_CHANGE_SUBCOMMANDS.has(subcommand)) return risky(`git ${subcommand} 不是已知的 git 子命令`);
   const danger = GIT_RISKY_FORMS[subcommand]?.(rest);
   return danger ? risky(danger) : change(`git ${subcommand} 会修改仓库状态`);
-}
-
-const GH_READ_ACTIONS: Record<string, ReadonlySet<string> | 'any'> = {
-  pr: new Set(['list', 'view', 'diff', 'checks', 'status']),
-  issue: new Set(['list', 'view', 'status']),
-  run: new Set(['list', 'view']),
-  workflow: new Set(['list', 'view']),
-  release: new Set(['list', 'view']),
-  repo: new Set(['list', 'view']),
-  label: new Set(['list']),
-  cache: new Set(['list']),
-  gist: new Set(['list', 'view']),
-  ruleset: new Set(['list', 'view', 'check']),
-  secret: new Set(['list']),
-  variable: new Set(['list']),
-  auth: new Set(['status']),
-  search: 'any',
-};
-
-/** Everyday collaboration: comments, reviews, edits, CI reruns, local clones. */
-const GH_CHANGE_ACTIONS: Record<string, ReadonlySet<string>> = {
-  pr: new Set(['create', 'comment', 'review', 'edit', 'ready', 'close', 'reopen', 'checkout',
-    'lock', 'unlock', 'update-branch']),
-  issue: new Set(['create', 'comment', 'edit', 'close', 'reopen', 'pin', 'unpin', 'lock',
-    'unlock', 'develop']),
-  label: new Set(['create', 'edit', 'clone']),
-  run: new Set(['rerun', 'cancel', 'download', 'watch']),
-  workflow: new Set(['run', 'enable', 'disable']),
-  release: new Set(['download']),
-  repo: new Set(['clone', 'fork']),
-  gist: new Set(['create', 'edit', 'clone']),
-};
-
-/** `gh api` reads only as a GET without request fields (fields imply POST). */
-function ghApiReadOnly(args: readonly string[]) {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (/^(?:-f|-F|--field|--raw-field|--input)(?:=|$)/.test(arg) || /^-[fF]./.test(arg)) return false;
-    const method = arg === '-X' || arg === '--method'
-      ? args[index + 1]
-      : /^-X(.+)$/.exec(arg)?.[1] ?? /^--method=(.+)$/.exec(arg)?.[1];
-    if (method !== undefined && method.toUpperCase() !== 'GET') return false;
-  }
-  return true;
-}
-
-/** `args` excludes the leading `gh`. */
-export function classifyGhArgs(args: readonly string[]): VcsVerdict {
-  const [group, action] = args;
-  if (!group) return risky('缺少 gh 子命令');
-  if (['--version', '--help', 'version', 'help', 'status'].includes(group)) return READ;
-  if (group === 'api') {
-    // The endpoint decides the effect, which this check cannot see.
-    return ghApiReadOnly(args.slice(1)) ? READ : risky('gh api 写请求的影响取决于具体接口');
-  }
-  if (group === 'auth' && args.some((arg) => arg === '--show-token' || arg === '-t')) {
-    return risky('gh auth status --show-token 会输出凭据');
-  }
-  const name = `gh ${[group, action].filter(Boolean).join(' ')}`;
-  const reads = GH_READ_ACTIONS[group];
-  if (reads === 'any' || reads?.has(action ?? '')) {
-    // `--web` opens a browser on the Host; `-w` means --web except on `run list`.
-    return args.some((arg) => arg === '--web' || (arg === '-w' && !(group === 'run' && action === 'list')))
-      ? change(`${name} --web 会在 Host 上打开浏览器`)
-      : READ;
-  }
-  if (GH_CHANGE_ACTIONS[group]?.has(action ?? '')) return change(`${name} 会修改 GitHub 状态`);
-  // Merging, deleting, releasing, secrets, credentials, settings and extensions.
-  return risky(`${name} 影响共享状态、凭据或无法撤销`);
 }

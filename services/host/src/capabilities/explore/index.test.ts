@@ -6,7 +6,7 @@ test('explore capability declares immutable instructions and host Toolkits stati
   const defaultCapability = createExploreCapability();
   assert.deepEqual(
     defaultCapability.uses,
-    ['bash', 'git', 'artifact_discovery'],
+    ['files', 'shell', 'web', 'git', 'github', 'artifact_discovery'],
   );
   assert.equal(defaultCapability.lifecycle, undefined);
 

@@ -9,7 +9,7 @@ export const scaffoldCapabilityPluginInputSchema = z.object({
     .max(16)
     .refine((items) => new Set(items).size === items.length, '不能包含重复 Toolkit')
     .optional()
-    .describe('完整 Toolkit 权限边界；默认 ["bash"]，不需要工具时传 []'),
+    .describe('完整 Toolkit 权限边界；默认 ["files", "shell", "web"]，不需要工具时传 []'),
   workflow: z.array(z.string().trim().min(1)).max(12).optional()
     .describe('面向实际任务的有序执行步骤'),
   boundaries: z.array(z.string().trim().min(1)).max(12).optional()

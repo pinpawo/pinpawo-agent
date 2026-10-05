@@ -32,11 +32,12 @@ import {
 import {
   createTestHostToolkitInventory,
 } from '../../../host/src/testing/toolkitInventory';
-import {
-  createBashToolkit,
-  createGitToolkit,
-  PosixShellRS,
-} from '../../../host/src/toolkits/local/index';
+import { createFilesToolkit } from '../../../host/src/toolkits/files/index';
+import { createGitToolkit } from '../../../host/src/toolkits/git/index';
+import { createGithubToolkit } from '../../../host/src/toolkits/github/index';
+import { createShellToolkit } from '../../../host/src/toolkits/shell/index';
+import { PosixShellRS } from '../../../host/src/toolkits/shellRS/index';
+import { createWebToolkit } from '../../../host/src/toolkits/web/index';
 import { createHostGraphFixture } from './hostGraphFixture';
 
 const sharedShell = new PosixShellRS();
@@ -64,8 +65,7 @@ const handlers = createLocalServerHandlers(
       contextWindowTokens: 32_000,
     }),
     toolkitInventory: createTestHostToolkitInventory([
-      createBashToolkit({ shell: sharedShell }),
-      createGitToolkit({ shell: sharedShell }),
+      createFilesToolkit(), createShellToolkit({ shell: sharedShell }), createWebToolkit(), createGitToolkit({ shell: sharedShell }), createGithubToolkit({ shell: sharedShell }),
     ]),
     capabilityArtifactStore: new FileCapabilityArtifactStore(
       runtimeConfig.capabilityArtifactRoot,

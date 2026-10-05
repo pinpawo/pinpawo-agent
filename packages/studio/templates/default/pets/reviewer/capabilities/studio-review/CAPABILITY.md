@@ -2,8 +2,11 @@
 name: studio_review
 description: 独立审查明确交接的代码与交付证据，返回可追溯的结论。
 uses:
-  - bash
+  - files
+  - shell
+  - web
   - git
+  - github
   - channel
 version: 1
 ---

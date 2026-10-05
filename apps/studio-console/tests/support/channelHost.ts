@@ -1,3 +1,4 @@
+import { readChannelTestInput } from '../../../../tests/support/channelDispatchInput';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,7 +27,9 @@ for (const petId of ['alpha', 'beta']) {
   const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
   const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
   const graph = new StateGraph(State).addNode('reply', async state => {
-    const last = state.messages.at(-1)!.text;
+    const raw = state.messages.at(-1)!.text;
+    const input = /^`{3,}json\n/.test(raw) ? readChannelTestInput(raw) : undefined;
+    const last = input?.body ?? raw;
     if (last === 'fail-provider') throw new Error('Deterministic provider denied request (403).');
     if (last === 'review') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'fixture-review',
       view: { kind: 'plain', body: 'Authorize fixture tool?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' },
@@ -46,7 +49,7 @@ for (const petId of ['alpha', 'beta']) {
     }
     const snapshot = JSON.parse(await read.invoke({ limit: 200 }) as string);
     const prior = snapshot.history.entries.filter((entry: { kind: string; source?: unknown }) => entry.kind === 'message' && entry.source);
-    return { messages: [new AIMessage(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the current Channel goal and scope. Remaining work: user acceptance.`)] };
+    return { messages: [new AIMessage(`Public delivery from ${petId}.\n\nQuoted request:\n> ${last.replace(/\n/g, '\n> ')}\n\nInput source: ${input?.author.participantId}. Message: ${input?.messageId}. Referenced message: ${input?.replyTo?.messageId ?? 'none'}.\n\nSession: ${invocation.sessionId}\n\nPrior public deliveries read: ${prior.length}.\n\nFull handoff evidence: checked the current Channel goal and scope. Remaining work: user acceptance.`)] };
   }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
   const config = (setup: AgentChannelSetup) => ({ configurable: { thread_id: setup.input.threadId } });
   hosts.push(await createResidentPetHost({ petId, petName: petId, runtimeConfig,

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readChannelTestInput, type ChannelTestInput } from '../../support/channelDispatchInput';
 import test from 'node:test';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -23,7 +24,7 @@ const goal = { title: 'Goal', goal: 'Long term', scope: 'This round' };
 async function fixture(root: string, pets = ['one'], reply?: (input: string) => string) {
   const channel = createChannelPlugin({ databasePath: join(root, 'channels.sqlite'), httpRoute: false });
   const hosts: Awaited<ReturnType<typeof createResidentPetHost>>[] = [];
-  const calls: Array<{ petId: string; thread: string; text: string; count: number }> = [];
+  const calls: Array<{ petId: string; thread: string; text: string; count: number; input?: ChannelTestInput }> = [];
   let active = 0, maxActive = 0;
   const barrier: { wait?: Promise<void> } = {};
   for (const petId of pets) {
@@ -31,7 +32,9 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
     const checkpointer = new FileSaver(runtimeConfig.checkpointPath);
     const State = Annotation.Root({ messages: Annotation<BaseMessage[]>({ reducer: (a, b) => [...a, ...b], default: () => [] }) });
     const graph = new StateGraph(State).addNode('reply', async (state) => {
-      const last = state.messages.at(-1)!.text;
+      const raw = state.messages.at(-1)!.text;
+      const input = /^`{3,}json\n/.test(raw) ? readChannelTestInput(raw) : undefined;
+      const last = input?.body ?? raw;
       if (last === 'approval') interrupt({ kind: 'review', review: buildReviewSpec({ id: 'approval',
         view: { kind: 'plain', body: 'Authorize?' }, options: [{ id: 'approve', label: 'Approve', decision: { type: 'approve' }, effects: [{ type: 'graph.authorize_tool_action', scope: 'thread' }] }],
       }) });
@@ -41,7 +44,7 @@ async function fixture(root: string, pets = ['one'], reply?: (input: string) => 
         await new Promise(r => setTimeout(r, 20));
         const invocation = readPetInvocationContext();
         const count = state.messages.filter(m => m._getType() === 'human').length;
-        calls.push({ petId, thread: invocation?.sessionId ?? 'tui', text: last, count });
+        calls.push({ petId, thread: invocation?.sessionId ?? 'tui', text: last, count, input });
         return { messages: [new AIMessage(reply ? reply(last) : last === 'ask' ? 'Which destination?' : `Answer ${count}: ${last}`)] };
       } finally { active--; }
     }).addEdge(START, 'reply').addEdge('reply', END).compile({ checkpointer });
@@ -103,9 +106,11 @@ test('Channel pair sessions survive new tasks, replies and restart; four Pets ke
     const question = outputs(f, a).find(m => m.author.id === 'one')!;
     await f.channel.execute(` ${a} `, { replyTo: question.messageId, body: 'staging' });
     await waitFor(() => outputs(f, a).length === 5);
-    assert.match(outputs(f, a).at(-1)!.body, /^Answer 2: Reply to Channel message/);
-    assert.ok(outputs(f, a).at(-1)!.body.includes(question.messageId));
-    assert.ok(outputs(f, a).at(-1)!.body.endsWith('Participant reply:\nstaging'));
+    assert.equal(outputs(f, a).at(-1)!.body, 'Answer 2: staging');
+    assert.deepEqual(f.calls.at(-1)!.input?.replyTo, {
+      messageId: question.messageId, author: { participantId: 'pet:one', kind: 'pet' }, body: question.body,
+    });
+    assert.deepEqual(f.calls.at(-1)!.input?.author, { participantId: 'human:studio-operator', kind: 'human' });
     await assert.rejects(f.channel.execute(b, { replyTo: question.messageId, body: 'wrong Channel' }), /reference/);
     await assert.rejects(f.channel.execute(a, { petId: 'missing', replyTo: question.messageId, body: 'unknown target' }), /Unknown/);
     await f.channel.execute(b, { petId: 'one', body: 'new Channel' });

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readChannelPages, executionLabel, channelPetIdentity, channelMessageIdentity, channelMessageExecution,
-  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
+  channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelReplyRecipientId, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
 import { ChannelTimeline, ChannelExecutionHistory } from '../src/ChannelPanel';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
@@ -12,6 +12,24 @@ const message: ChannelMessage = { kind: 'message', channelId: 'a', sequence: 2, 
   source: { petId: 'worker', sessionId: 'worker:same', invocationId: 'i' }, artifacts: [{ uri: 'javascript:alert(1)', label: 'unsafe' }], mentions: [] };
 const execution: ChannelExecution = { sequence: 1, executionId: 'e', channelId: 'a', petId: 'worker', sessionId: 'worker:same',
   state: 'running', occurredAt: '2026-10-04T00:00:00Z', observationLost: false };
+
+test('Reply defaults to the registered original author while changes and clearing stay explicit', () => {
+  const participants = [
+    { participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' },
+    { participantId: 'pet:a%29b', kind: 'pet', id: 'a)b', label: 'Analyst' },
+    { participantId: 'human:worker', kind: 'human', id: 'worker', label: 'Analyst' },
+  ];
+  const target = channelReplyRecipientId(message.author, participants);
+  assert.equal(target, 'pet:worker');
+  assert.deepEqual(channelMessageInput('a', target, 'next', message).mentions, [{ participantId: 'pet:worker' }]);
+  assert.equal(channelReplyRecipientId({ kind: 'pet', id: 'a)b' }, participants), 'pet:a%29b');
+  assert.equal(channelReplyRecipientId({ kind: 'human', id: 'worker' }, participants), 'human:worker');
+  assert.equal(channelReplyRecipientId({ kind: 'pet', id: 'removed' }, participants), '');
+  assert.equal(channelReplyRecipientId(undefined, participants), '');
+  assert.equal(channelReplyRecipientId(message.author), '');
+  assert.deepEqual(channelMessageInput('a', 'pet:a%29b', 'changed', message).mentions, [{ participantId: 'pet:a%29b' }]);
+  assert.deepEqual(channelMessageInput('a', '', 'saved', message), { channelId: 'a', body: 'saved', replyTo: 'm' });
+});
 
 test('history loading follows every cursor to include recent deliveries and fails on a nonadvancing page', async () => {
   const paths: string[] = [];

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { channelDispatchInput } from './channelDispatchInput';
 import { tool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { AgentToolkit } from '@pinpawo/pet-agent';
@@ -58,9 +59,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
     const host = context;
     const registry = new Map(participants().map(participant => [participant.participantId, participant]));
     const original = message.replyTo ? service.getMessage(message.channelId, message.replyTo) : undefined;
-    const request = original
-      ? `Reply to Channel message ${original.messageId}:\n${original.body}\n\nParticipant reply:\n${message.body}`
-      : message.body;
+    const request = channelDispatchInput(message, original);
     return Promise.all(message.mentions.map(async mention => {
       const participantId = channelMentionId(mention);
       const target = registry.get(participantId);

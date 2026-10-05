@@ -121,7 +121,7 @@ Capability 内部交付通过主对话汇总为最终公开回复，内部生成
 |---|---|---|
 | 纯笔记 | 没有有效收件人，不启动 Pet；其中引用或代码里的 @ 仍是普通内容。 | 现有 Save note 如何明确区分文字示例和有效寻址。 |
 | 明确 @ 请求 | Channel 统一解析正文与结构化目标，发送后按目标送达与接纳；Pet 忙时可排队。 | Pet 复用现有 Channel 执行入口；人使用 UI 响应适配。消息 ingress 与 execute 的具体兼容形式需写清，但不再存在不同模块的路由候选。 |
-| 回复 | 保留引用上下文；replyTo 不自动补 @。Pet 自己决定是否 @ 以及目标，显式收件人与引用分开。 | Capability 明确 @ 格式；Console 展示实际携带的目标，不替 Pet 作回复寻址决策。 |
+| 回复 | 人的 Console Reply 预选已登记原作者，可改选或清除；backend replyTo 仍只作引用，不自动补 @。Pet 自己决定是否 @ 及目标。 | Console 显示收件人及清除后的仅保存条件；Capability 明确 @ 格式，不替 Pet 作回复寻址决策。 |
 | Pet @ 交接 | Channel 使用与用户消息相同的协议校验有效目标、绑定与授权，交接与结果可追溯。 | 从本轮可信公开回复进入同一 Channel 寻址接纳流程的接口形式。 |
 
 现有 `/channels/execute` 的 replyTo 只允许原 Pet/session，是当前实现的收窄契约。
@@ -279,7 +279,7 @@ Pet 自己回复“已排队”是可选行为，不是状态展示的必要条�
   已有 scope / session 关联，不带请求正文。Studio Bearer 仍代表现有本地 operator 权限；
   Console 用可见 Channel 标题标识来源，其他工作显示 Other session，不公开私有内容。
 - Console 发送后显示全局 Pet 状态和实际队列，timeline 呈现 @ 与每目标执行 / 失败；
-  回复引用与收件人分别选择。没有 composer 忙闲提示、特殊 retry 或自动排队回执。
+  人的 Reply 默认预选原作者的已登记 participantId，允许改选或清除；清除且正文无有效 @ 时仅保存、不唤醒 Pet。replyTo 与收件人在 backend 仍独立，Pet 输出不自动补 @。没有 composer 忙闲提示、特殊 retry 或自动排队回执。
 - 未改变审批恢复、其他服务或 macOS companion，也不以确定性测试证明真实模型会
   自主选择合适交接。真实模型的选择与输出质量不属于此次零模型调用验收。
 
@@ -319,3 +319,19 @@ Pet 自己回复“已排队”是可选行为，不是状态展示的必要条�
 | Channel loop | A ↔ B 持续生成新的有效交接消息可以正常往返，不以防循环名义禁用；重复同一请求仍由 dispatch 契约处理。 |
 | 自动排队回执 | 若确认加入，零模型调用、明确系统标记，不构成新的有效 @ 请求；回执不是必做，真实交接按正常 loop 处理。 |
 | 职责边界 | Console 不另定义 @ 语义；人和 Pet ingress 共用 Channel 校验与执行入口；session / scope 来自可信绑定；接纳、队列、可靠性和执行去重归 dispatch。 |
+
+## Reply 默认行为与交接来源（本轮批准修复）
+
+人的 Console Reply 使用原作者 kind / 原始 id 查当前参与者登记表，预选其稳定 participantId；
+同名、改名和编码特殊字符不改变目标。用户可以改选或清除，已移除 / 未登记作者没有默认目标。
+人作者默认选择登记的人，只有明确有效的 Pet 收件人才派发 Pet。清除且正文没有有效 @ 时
+仅保存消息；正文有效 @ 保留原有 Channel 寻址语义。此 UI 默认不改变 backend 的 replyTo
+引用语义或 Pet 自主交接行为。
+
+Channel deliver 从已保存的当前消息和可选引用消息生成 fenced JSON 输入：
+`type: channel_message`、`version: 1`、channelId、messageId、author（participantId / kind）和 body；
+replyTo 包含引用消息的 messageId、author 和 body。来源由 Channel operator 或 Host 验证的 Pet
+事件确定，不读取正文 / metadata 自称。JSON 字符串隔离正文，围栏长度超过输入中的反引号，
+原样公开封装不会让其中的历史 / 示例链接触发主动寻址。此格式不构成额外鉴权或用户授权。
+其解释放在默认外部 PET.md 和 Capability 文档，通用 pet-agent 不承载 Studio 规则。
+仅更新默认模板；已有用户 PET.md / Capability 仍需自行迁移，真实模型遵循情况须按新 head 验收。

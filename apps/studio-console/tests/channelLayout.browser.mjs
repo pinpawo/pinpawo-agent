@@ -106,6 +106,9 @@ try {
   };
   await fits();
   await until(() => page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop > 0), 'initial latest scroll');
+  await page.getByRole('button', { name: 'Reply to retired-pet', exact: true }).click();
+  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'removed author has no guessed recipient');
+  await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
   await page.locator('.channel-timeline-scroll').evaluate(node => { node.scrollTop = 0; });
   await page.getByRole('button', { name: 'Back to latest ↓', exact: true }).waitFor();
   const scrollBefore = await page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop);
@@ -130,8 +133,7 @@ try {
   await message(output.messageId).getByRole('button', { name: 'Reply to Analyst', exact: true }).click();
   await input.fill('Keep this draft when cancelling the reply.');
   assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'reply context does not auto-address anyone');
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
+  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'pet:alpha', 'duplicate labels preserve the exact original author');
   await page.getByRole('button', { name: 'Cancel reply', exact: true }).click();
   assert.equal(await input.inputValue(), 'Keep this draft when cancelling the reply.');
   assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);

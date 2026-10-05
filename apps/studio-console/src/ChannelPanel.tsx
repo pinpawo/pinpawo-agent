@@ -3,7 +3,7 @@ import { ChannelCopy, ChannelTimeline, ChannelExecutionHistory } from './Channel
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
 import { ChannelDispatchQueues } from './ChannelDispatchQueues';
 import {
-  channelMessageInput, channelMessageIdentity, channelPetIdentity, channelQuote, readChannelPages,
+  channelMessageInput, channelMessageIdentity, channelPetIdentity, channelQuote, channelReplyRecipientId, readChannelPages,
   type ChannelGoal, type ChannelContext, type ChannelEntry, type ChannelMessage, type ChannelExecution, type ChannelNotice, type DispatchQueue,
 } from './channelData';
 
@@ -249,7 +249,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
               <ChannelTimeline entries={entries} pets={pets} petsReady={petsReady} executions={executions} connected={connected} highlighted={highlightedMessage}
                 participants={context.participants} viewerParticipantId={context.viewerParticipantId}
                 pending={pending || !connected} onLocateMessage={locateMessage} onLocateExecution={locateExecution}
-                onReply={item => { setReply(item); setRecipientId(''); setBody(''); composer.current?.focus(); }} />
+                onReply={item => { setReply(item); setRecipientId(channelReplyRecipientId(item.author, context.participants)); setBody(''); composer.current?.focus(); }} />
               {error && <p className="channel-record-error channel-send-error" role="alert">Message was not delivered: {error}</p>}
               {selectedFailures.map((item, index) => <p className="channel-record-error" role="alert" key={index}>Channel delivery failed: {item.error}</p>)}
             </div>
@@ -289,7 +289,9 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
                 </div>
               </div>
             </div>
-            <p className="channel-composer-hint">Choose a participant to address them. Messages without @ stay in the conversation.</p>
+            <p className="channel-composer-hint">{!recipientId
+              ? 'No recipient selected. Without a valid @ in the message, this saves only and will not wake a Pet.'
+              : 'Send to the selected participant. You can change or clear the recipient; valid @ links in the message also address participants.'}</p>
           </form>
         </> : <div className="empty-state"><strong>{loading ? 'Loading Channel…' : 'Start a Channel'}</strong>
           <span>Keep the goal and public work together across rounds.</span>

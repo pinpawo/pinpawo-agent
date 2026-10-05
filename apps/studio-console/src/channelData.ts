@@ -31,6 +31,11 @@ export type DispatchQueue = {
   queuedConversations: number; queuedDispatches: number; entries?: DispatchQueueEntry[]; activeDispatch?: DispatchQueueEntry;
 };
 
+/** Reply preselects a registered author; labels and removed identities never route. */
+export function channelReplyRecipientId(author: ChannelMessage['author'] | undefined, participants: ChannelParticipant[] = []): string {
+  return participants.find(item => item.kind === author?.kind && item.id === author?.id)?.participantId ?? '';
+}
+
 export function channelAuthorParticipantId(author: ChannelMessage['author'], participants: ChannelParticipant[] = []): string {
   const registered = participants.find(item => item.kind === author.kind && item.id === author.id);
   if (registered) return registered.participantId;

@@ -106,13 +106,14 @@ try {
   const originalSession = (await context()).sessions.find(item => item.petId === 'alpha').sessionId;
   await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
   assert.equal(await page.getByLabel('Channel recipient').isDisabled(), false);
-  assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'reply context does not auto-address anyone');
-  await page.getByLabel('Channel recipient').selectOption('pet:alpha');
+  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'pet:alpha', 'Reply preselects the original author without manual selection');
   await page.getByLabel('Message', { exact: true }).fill('Continue with the same evidence.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await waitFor(async () => (await publicMessages()).length === 2, 'reply completed');
   assert.equal((await publicMessages())[1].source.sessionId, originalSession);
-  assert.ok((await publicMessages())[1].body.includes('Reply to Channel message'));
+  assert.ok((await publicMessages())[1].body.includes('Continue with the same evidence.'));
+  assert.ok((await publicMessages())[1].body.includes(`Referenced message: ${(await publicMessages())[0].messageId}.`));
+  assert.ok((await publicMessages())[1].body.includes('Input source: human:studio-operator.'));
   await page.getByLabel('Channel recipient').selectOption('pet:beta');
   await page.getByLabel('Message', { exact: true }).fill('Read prior public evidence and review the delivery.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -120,6 +121,32 @@ try {
   assert.ok((await publicMessages())[2].body.includes('Prior public deliveries read: 2.'));
   assert.notEqual((await context()).sessions.find(item => item.petId === 'beta').sessionId, originalSession);
   await page.screenshot({ path: resolve(screenshotDir, '01-channel-timeline.png'), fullPage: true });
+  // Override and clear the default through the real UI and inspect actual Host execution.
+  await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
+  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'pet:alpha');
+  await page.getByLabel('Channel recipient').selectOption('pet:beta');
+  await page.getByLabel('Message', { exact: true }).fill('Changed recipient, same quoted Alpha message.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await waitFor(async () => (await publicMessages()).length === 4, 'changed reply target executes Beta');
+  assert.equal((await publicMessages()).at(-1).author.id, 'beta');
+  assert.equal((await publicMessages()).at(-1).source.sessionId, (await context()).sessions.find(item => item.petId === 'beta').sessionId);
+  await page.getByRole('button', { name: 'Reply to Alpha', exact: true }).first().click();
+  await page.getByLabel('Channel recipient').selectOption('');
+  await page.getByText('No recipient selected. Without a valid @ in the message, this saves only and will not wake a Pet.', { exact: true }).waitFor();
+  const beforeClear = (await executions()).executions.length;
+  await page.getByLabel('Message', { exact: true }).fill('Saved reply with recipient cleared.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText('Saved reply with recipient cleared.', { exact: true }).waitFor();
+  assert.equal((await executions()).executions.length, beforeClear);
+  const saved = (await context()).history.entries.find(item => item.body === 'Saved reply with recipient cleared.');
+  assert.ok(saved.replyTo); assert.deepEqual(saved.mentions, []);
+  await page.locator(`[data-message-id="${saved.messageId}"]`).getByRole('button', { name: 'Reply to Me', exact: true }).click();
+  assert.equal(await page.getByLabel('Channel recipient').inputValue(), 'human:studio-operator');
+  await page.getByLabel('Message', { exact: true }).fill('Human author reply stays public.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await page.getByText('Human author reply stays public.', { exact: true }).waitFor();
+  assert.equal((await executions()).executions.length, beforeClear);
+
 
   await create('Separate investigation');
   assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'new Channel requires a fresh explicit Pet selection');
@@ -176,8 +203,8 @@ try {
   await page.getByLabel('Channel recipient').selectOption('pet:alpha');
   await page.getByLabel('Message', { exact: true }).fill('Continue after Host restart.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await waitFor(async () => (await publicMessages()).length === 4, 'execution after Host restart');
-  assert.equal((await publicMessages())[3].source.sessionId, originalSession);
+  await waitFor(async () => (await publicMessages()).length === 5, 'execution after Host restart');
+  assert.equal((await publicMessages())[4].source.sessionId, originalSession);
   await page.screenshot({ path: resolve(screenshotDir, '04-channel-host-restart.png'), fullPage: true });
 
   await create('Participant loop');
@@ -217,7 +244,7 @@ try {
   await waitFor(async () => (await loopOutputs()).length === 4, 'queued input starts after global work finishes');
   assert.equal((await loopOutputs()).at(-1).source.sessionId, (await loopContext()).sessions.find(item => item.petId === 'alpha').sessionId);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['unified identity-bearing participant protocol', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile queue UI', 'no pre-send status hint', 'create duplicate guard', 'note does not execute', 'same-session reply', 'cross-Channel isolation', 'failure timeline persists after reload and restart', 'original review guidance', 'disconnect disables submission', 'restart preserves session identity'], screenshots: screenshotDir }));
+  console.log(JSON.stringify({ result: 'passed', modelCalls: 0, coverage: ['unified identity-bearing participant protocol', 'normal Alpha-Beta-Alpha handoff', 'Pet addresses human without automatic response', 'actual global active work and queue across Channels', 'desktop and mobile queue UI', 'no pre-send status hint', 'create duplicate guard', 'note does not execute', 'default Reply without manual recipient selection', 'changed and cleared Reply recipients', 'human Reply without Pet execution', 'same-session reply', 'cross-Channel isolation', 'failure timeline persists after reload and restart', 'original review guidance', 'disconnect disables submission', 'restart preserves session identity'], screenshots: screenshotDir }));
 } finally {
   await browser?.close();
   for (const child of children) { if (child.exitCode === null) child.kill('SIGTERM'); }

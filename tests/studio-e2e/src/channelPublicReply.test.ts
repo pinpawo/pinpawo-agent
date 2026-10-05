@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readChannelTestInput, type ChannelTestInput } from '../../support/channelDispatchInput';
 import test from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -46,6 +47,7 @@ test('capability handoff reaches Channel only through the selected final root re
   const petMarkers = new Map(['acceptance-a', 'acceptance-b'].map(id => [id, randomUUID()]));
   const capabilityMarker = randomUUID();
   const seenContexts: Array<{ petId: string; stage: string }> = [];
+  const entryInputs: Array<{ petId: string; input: ChannelTestInput }> = [];
   const observeContext = (messages: BaseMessage[], petId: string, stage: string) => {
     const system = messages[0]!;
     assert.equal(system._getType(), 'system');
@@ -82,6 +84,8 @@ test('capability handoff reaches Channel only through the selected final root re
       assert.ok(petDocument);
       const entry = new ScriptedModel((messages, index) => {
         observeContext(messages, petId, 'entry');
+        const current = [...messages].reverse().find(message => message._getType() === 'human')!;
+        entryInputs.push({ petId, input: readChannelTestInput(current.text) });
         if (petId === 'acceptance-b') { betaCalls++; return new AIMessage('Independent review complete.'); }
         // A later direct Entry reply must also use the public protocol, without rerunning a Capability.
         return index < replies.length ? call('plan_request', { goal: 'Publish the plan.' }, `entry-${index}`) : new AIMessage(handoff);
@@ -155,6 +159,14 @@ test('capability handoff reaches Channel only through the selected final root re
     assert.ok(outputs().every(message => !message.body.includes('Internal analysis only.')));
     assert.deepEqual(['entry', 'supervisor', 'capability'].map(stage => seenContexts.filter(context => context.petId === 'acceptance-a' && context.stage === stage).length), [5, 16, 4]);
     assert.equal(seenContexts.filter(context => context.petId === 'acceptance-b' && context.stage === 'entry').length, 2);
+    for (const { petId, input } of entryInputs) {
+      assert.equal(input.channelId, id);
+      const stored = channel.service.getMessage(id, input.messageId)!;
+      assert.equal(input.body, stored.body);
+      assert.deepEqual(input.author, petId === 'acceptance-a'
+        ? { participantId: 'human:studio-operator', kind: 'human' }
+        : { participantId: 'pet:acceptance-a', kind: 'pet' });
+    }
   } finally {
     release(); await Promise.all(hosts.map(host => host.close())); await studio?.shutdown();
     await rm(root, { recursive: true, force: true });

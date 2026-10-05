@@ -1,7 +1,7 @@
 # Studio Console
 
 The existing browser Console consumes Studio HTTP and optional domain Plugin
-APIs. Channel is a fixed page in this app, alongside Kanban, Scheduler, Notice,
+APIs. Channel is the default page in this app, alongside Scheduler, Notice,
 Trigger and Knowledge. Enable `@pinpawo-plugin/channel` on the Studio Host and
 allow the Console's origin in the HTTP Plugin configuration. Enter the Host URL
 and existing Studio Bearer token through the Console connection dialog.
@@ -61,7 +61,8 @@ history, including duplicate registered names and a removed Pet. It checks long
 Markdown/code, 1440/900/390/320px layouts, fixed input, reading position across
 SSE updates and global navigation, ID copying, quotes, request/output links,
 drawer/modal keyboard focus, reply cancellation, Channel/Host switching, and
-401/404 failures. It also makes zero LLM calls. Its screenshots stay local under
+401/404 failures, navigation without the retired task page, and standalone
+dispatch without publishing to Channel. It also makes zero LLM calls. Its screenshots stay local under
 `/tmp/channel-console-layout-screenshots` (or `CHANNEL_SCREENSHOTS`); it does not
 upload them. Run the two browser tests sequentially because both reserve port
 5199. These fixtures do not validate live provider behavior or user acceptance.

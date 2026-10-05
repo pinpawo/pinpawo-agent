@@ -14,7 +14,7 @@
   "pets": ["planner", "writer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
-    { "id": "@pinpawo-plugin/kanban" }
+    { "id": "@pinpawo-plugin/channel" }
   ]
 }
 ```
@@ -50,3 +50,17 @@ Pet 的约定目录加载。
 
 Studio 只登记 Pet 的公开名称、角色、服务摘要和 `PetDispatchPort`。Agent 私有字段、
 Capability inventory、Agent Session 与 checkpoint 都不进入 Studio 注册表。
+
+## 旧 Kanban 工作区迁移
+
+Kanban Plugin、API、工具和默认任务分配／任务完成后 Wiki 自动更新规则已退役。
+新模板启用现有 Channel；Planner 返回计划，Executor/Reviewer 返回结果与证据，
+Wiki 由明确请求更新。通用 Trigger、Knowledge 和直接 Pet 请求继续可用。
+
+启动和 `init` 不会自动改写旧配置。手动移除 `studio.json` 中的旧 Kanban Plugin、
+`dispatch-assigned-kanban-task` 与 `wiki-on-task-done`，安装并启用 Channel；对照新模板
+更新各 Pet 文档，移除所有 `kanban*` Toolkit 调用及只写任务状态的 `studio_reporting`
+能力，保留项目自己的约定。完整步骤见[迁移指引](../../studio/configuration.md#retired-kanban-workdirs)。
+
+历史 `.pinpawo/kanban/`、JSON 快照、任务历史、Wiki 和其他用户数据原样保留；
+不清理 schema、不自动迁移、不提供空壳插件。调用结束不等于目标验收完成，不触发 Wiki。

@@ -4,6 +4,7 @@ description: 只读探索项目、Git 与 GitHub，查询 Studio 中的 Pet，�
 uses:
   - studio-context
   - project-inspection
+  - channel
 version: 1
 ---
 
@@ -15,5 +16,7 @@ version: 1
 - 已确认事实关联到具体文件、Git 状态、GitHub 条目或外部来源，使后续规划可以直接引用。
 - 探索结果区分事实、推断与仍待确认的信息，并说明这些信息如何影响后续任务规划。
 - 已有上下文足以支持规划时，直接复用已有事实；需要补充时，以最小范围完成必要探索。
+
+Channel 执行中可读取当前目标与公开结果；独立请求使用已提供的上下文，不假定存在 Channel。
 
 交付可用于任务规划的事实与证据摘要。

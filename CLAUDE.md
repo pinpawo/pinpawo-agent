@@ -26,7 +26,7 @@ Run from repo root:
 
 - `npm install` — install all workspaces.
 - `npm run typecheck` — typecheck every workspace.
-- `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: kanban, scheduler, notice, trigger, project-files, studio-http; then studio-e2e and agent-evals) and ends with host `test:unit`.
+- `npm test` — runs every workspace's tests in turn (agent-contracts, pet-agent, studio, agent-session, tui, browser toolkit, the six plugins: channel, scheduler, notice, trigger, project-files, studio-http; then studio-e2e and agent-evals) and ends with host `test:unit`.
 - `npm run build` — tsup-bundles `pinpawo` into `services/host/dist/` and generates manifest.
 
 Per-workspace (use `-w <pkg>` or `cd`):

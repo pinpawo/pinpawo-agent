@@ -191,7 +191,7 @@ Browser、bash、git 都是普通 Toolkit：
    两个 Host 各自持有独立 checkpoint root，不共享 writer ownership、transport
    composition 或 Chat session state。依赖方向只能是 Studio → host public
    surfaces；host Chat 路径不得反向 import Studio。
-7. Studio Host 只声明 `StudioPluginResolver` port，不静态 import kanban、scheduler
+7. Studio Host 只声明 `StudioPluginResolver` port，不静态 import channel、scheduler
    或其他具体 Plugin。Plugin 实现可以依赖 Studio contract，并由应用 composition root
    注入；“配置中出现 Plugin id”不等于 Studio package 依赖该 Plugin。Resolver 只返回
    Plugin，不返回 Capability；Plugin 定义的 Toolkit 必须在 resident Pet 构建前进入

@@ -110,7 +110,7 @@ export type StudioDispatchQueue = {
 /**
  * Studio 插件 —— 决定"什么时候派谁"，并可为 Agent 定义 Toolkit。
  *
- * kanban(依据任务依赖与进度)、scheduler(依据时间)、trigger(依据外部
+ * channel(显式目标与公开结果)、scheduler(依据时间)、trigger(依据外部
  * 事件)都是同级的实现;studio 对它们一视同仁,不为任何一个特殊设计。
  *
  * Plugin 高于 Toolkit，但不是 Toolkit。Plugin 的 Studio lifecycle 使用
@@ -118,9 +118,9 @@ export type StudioDispatchQueue = {
  * Agent Toolkit inventory，由 Capability.uses 在 Agent 侧选择。
  *
  * ```ts
- * const kanbanPlugin: StudioPlugin = {
- *   name: 'kanban',
- *   toolkits: [kanbanToolkit],
+ * const channelPlugin: StudioPlugin = {
+ *   name: 'channel',
+ *   toolkits: [channelToolkit],
  *   start: (ctx) => { ... },
  * };
  * ```

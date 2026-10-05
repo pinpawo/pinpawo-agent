@@ -16,7 +16,7 @@ Each Pet selects its Agent Capabilities through its conventional directory:
 npm install --global \
   @pinpawo/studio \
   @pinpawo-plugin/studio-http \
-  @pinpawo-plugin/kanban \
+  @pinpawo-plugin/channel \
   @pinpawo-plugin/scheduler \
   @pinpawo-plugin/notice \
   @pinpawo-plugin/project-files \
@@ -91,3 +91,25 @@ source checkout, `pinpawo-studio console` starts its local development server
 when it is not already running, then opens the page. A published Studio CLI can
 instead open a separately deployed Console with `pinpawo-studio console --url
 <origin>`.
+
+## Retired Kanban configuration
+
+The Kanban Plugin, API, tools, and default task-assignment / task-completion
+Trigger rules have been removed. The default template now enables Channel.
+Planner returns proposals, Executor and Reviewer return delivery evidence,
+and Wiki updates require an explicit request. Dispatch completion does not
+imply accepted delivery and does not trigger Wiki maintenance.
+
+Existing projects are not rewritten by startup or `init`. Before restarting an
+old workdir, manually remove `@pinpawo-plugin/kanban` from `studio.json`, add the
+installed `@pinpawo-plugin/channel` package, remove `wiki-on-task-done` and
+`dispatch-assigned-kanban-task`, and update Pet documents / Capabilities against
+the current template. Remove all `kanban*` Toolkit bindings and the old
+`studio_reporting` Capability that only wrote task state; delivery now uses the
+normal public reply. Preserve project-specific instructions while comparing
+files. Rewrite the external-request planning prompt if it still requires a board.
+
+Historical `.pinpawo/kanban/` databases, JSON snapshots, task history, and Wiki
+files are left untouched. No schema cleanup, automatic migration, or no-op
+compatibility Plugin is provided. See the [configuration migration guidance](
+../../docs/studio/configuration.md#retired-kanban-workdirs).

@@ -40,3 +40,19 @@ test('installed Plugin resolver rejects paths and packages without a Plugin fact
   await assert.rejects(async () => resolver('../plugin'), /installed package name/);
   await assert.rejects(async () => resolver('example-plugin'), /createStudioPlugin/);
 });
+
+test('a missing configured Plugin reports manual migration guidance and retains the import failure', async () => {
+  const cause = new Error('Package is not installed');
+  const resolver = createInstalledStudioPluginResolver({
+    workdir: '/workspace',
+    importPlugin: async () => { throw cause; },
+  });
+  await assert.rejects(async () => resolver('@example/retired-plugin'), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.cause, cause);
+    assert.match(error.message, /@example\/retired-plugin/);
+    assert.match(error.message, /studio\.json/);
+    assert.match(error.message, /update dependent Pet Capabilities and Trigger rules manually/);
+    return true;
+  });
+});

@@ -84,7 +84,7 @@ graph 长什么样。**
 
 ### 3. dispatch 是 Studio 的概念；Host 只提供「Agent 可用」这道 gate
 
-dispatch **不是 host 的 domain**。它由 Studio 插件（kanban / scheduler /
+dispatch **不是 host 的 domain**。它由 Studio 插件（channel / scheduler /
 trigger）发起，是更下游的调度概念。host 这一层只向上暴露一道 gate。
 
 **gate 与会话无关，它表达的是 Agent 的可用状态。** 现有实现说得很清楚

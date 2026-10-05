@@ -181,8 +181,7 @@ because preparation, execution, and reporting belong to one workspace boundary.
    stabilized on one model before cross-model validation.
 
    For the current pet-agent core lifecycle check, select the eight generic
-   scenarios explicitly. The Kanban-specific regression remains available but
-   is excluded from this run:
+   scenarios explicitly. The former board-specific regression has been retired:
 
    ```sh
    LIFECYCLE_EVAL_CASES=direct-answer,single-task-completion,dynamic-multi-task,continues-incomplete-task,ignores-misleading-continue-in-announce,user-input-required,resume-after-user-input,capability-unavailable \
@@ -208,7 +207,7 @@ because preparation, execution, and reporting belong to one workspace boundary.
    settings. No run reported a runtime timeout or controlled-executor exhaustion.
    All eight cases thus have passing observations, but this is not an 8/8 clean
    first run or a multi-model stability claim. Eval typechecking and six focused
-   harness/evaluation tests passed. Kanban was not run.
+   harness/evaluation tests passed. The former board-specific case was not part of that historical run.
 
    Main integration follow-up (base `e14c6b9e`, same models and defaults): 6/8
    achieved on the first core run. `resume-after-user-input` had a judge score

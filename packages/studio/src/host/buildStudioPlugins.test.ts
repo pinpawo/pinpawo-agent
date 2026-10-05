@@ -27,13 +27,13 @@ import {
 } from 'pinpawo/host-runtime';
 import { HostToolkitInventoryStore } from '../../../../services/host/src/toolkits/toolkitInventory';
 
-function fakePlugin(name = 'kanban'): StudioPlugin {
+function fakePlugin(name = 'example-work'): StudioPlugin {
   const toolkit: AgentToolkit = {
-    name: 'kanban-toolkit',
+    name: 'example-work-toolkit',
     description: 'Fake plugin.',
     tools: [{
       tool: tool(async () => 'ok', {
-        name: 'kanban_noop',
+        name: 'example-work_noop',
         description: 'No-op test tool.',
         schema: z.object({}),
       }),
@@ -122,14 +122,14 @@ async function writeStudioConfig(plugins: unknown[]): Promise<string> {
 
 test('plugin options from studio.json reach the injected resolver', async () => {
   const workdir = await writeStudioConfig([
-    { id: 'kanban', options: { timezone: 'Asia/Shanghai' } },
+    { id: 'example-work', options: { timezone: 'Asia/Shanghai' } },
   ]);
 
   const seen: unknown[] = [];
   const configuration = await resolveStudioHostConfig({
     workdir,
     resolvePlugin: (id, options) => {
-      assert.equal(id, 'kanban');
+      assert.equal(id, 'example-work');
       seen.push(options);
       return fakePlugin();
     },
@@ -147,13 +147,13 @@ test('plugin options from studio.json reach the injected resolver', async () => 
 });
 
 test('a plugin declared without options still builds', async () => {
-  const workdir = await writeStudioConfig([{ id: 'kanban' }]);
+  const workdir = await writeStudioConfig([{ id: 'example-work' }]);
 
   const seen: unknown[] = [];
   const configuration = await resolveStudioHostConfig({
     workdir,
     resolvePlugin: (id, options) => {
-      assert.equal(id, 'kanban');
+      assert.equal(id, 'example-work');
       seen.push(options);
       return fakePlugin();
     },

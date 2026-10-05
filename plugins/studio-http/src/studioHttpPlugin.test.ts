@@ -400,14 +400,14 @@ test('HTTP Plugin projects live Studio events over SSE and releases the subscrip
 
   const event: StudioEvent = {
     type: 'task.done',
-    source: 'kanban',
+    source: 'example-work',
     payload: { taskId: 'task-1' },
     occurredAt: '2026-08-23T00:00:00.000Z',
   };
   await harness.emit(event);
   const stream = await readStreamUntil(reader, (text) => text.includes('task.done'));
   assert.match(stream, /event: studio\.event/);
-  assert.match(stream, /"source":"kanban"/);
+  assert.match(stream, /"source":"example-work"/);
 
   await plugin.stop();
   assert.equal(plugin.address(), null);

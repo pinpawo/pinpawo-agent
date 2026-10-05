@@ -25,7 +25,7 @@ cross-Capability behavior in `<workdir>/.pinpawo/pets/<petId>/PET.md`.
   "pets": ["planner", "writer", "reviewer"],
   "plugins": [
     { "id": "@pinpawo-plugin/studio-http", "options": { "port": 3211 } },
-    { "id": "@pinpawo-plugin/kanban" },
+    { "id": "@pinpawo-plugin/channel" },
     { "id": "@pinpawo-plugin/project-files", "options": { "directory": "wiki" } }
   ]
 }
@@ -130,7 +130,7 @@ name, while duplicates inside one Pet remain an error.
 
 The Host merges normal Toolkits and Toolkits defined by configured Studio Plugins
 into its unified Toolkit inventory. Each loaded Capability's `uses` declaration
-selects the tools available to that Pet. A Toolkit such as `kanban` is therefore
+selects the tools available to that Pet. A Toolkit such as `channel` is therefore
 named in `CAPABILITY.md` under `uses`, never in Pet JSON.
 
 Run `pinpawo-studio init --workdir <directory>` to create the initial layout in
@@ -147,33 +147,16 @@ that resolver entirely. Options pass through unchanged for the Plugin to validat
 Install each configured package beside `@pinpawo/studio`; configuration does not
 download missing packages at startup.
 
-`@pinpawo-plugin/kanban` provides a concrete Kanban Plugin and is not a
-Studio dependency. The Plugin defines its Kanban Toolkit but does not contribute
-the matching `studio_planning` Capability. A Pet selects that independent Agent
-Capability by placing its `CAPABILITY.md` directory under the conventional
-per-Pet root. The resolver loads only packages named explicitly by configuration;
-it does not scan directories or discover Plugins implicitly.
+`@pinpawo-plugin/channel` provides persistent goal revisions, public Markdown
+messages, and one session binding per Channel/Pet. Execution is explicit through
+`POST /channels/execute`; ordinary public replies are saved by the Host. The
+`channel` Toolkit exposes `channel_read_context` only to a Host-admitted Channel
+invocation. Direct Pet requests and generic dispatch remain independent.
 
-Durable Plugin state remains Plugin-owned. The installed Kanban package defaults
-to `<workdir>/.pinpawo/kanban/tasks.sqlite`; an embedded application can instead
-construct `createKanbanPlugin({ databasePath: ... })` with an absolute path such as
-`<workdir>/.pinpawo/kanban/<instance>/kanban.sqlite`; Studio core neither derives
-that path nor reads task state. Direct `createKanbanPlugin()` remains explicitly
-in-memory. A larger Kanban application can instead own a
-`KanbanTaskService` itself and inject it into the Studio adapter.
-
-Kanban dispatch defaults to `"automatic"`: each dependency-ready task is claimed
-and sent through Studio dispatch. Set Plugin option `"dispatchMode": "manual"`
-to keep ready tasks queued until an operator calls `POST /kanban/control` with
-`{"action":"start","taskId":"..."}`. The same explicit start can retry a
-blocked task after its dependencies are complete. This control remains Kanban
-domain/API behavior; Studio core does not interpret task state.
-
-`@pinpawo-plugin/trigger` binds either an HTTP source or a Studio event
-condition to one Pet dispatch. For example, a `studio_event` trigger matching
-Kanban `task.*` can dispatch a Wiki Pet; the Pet maintains ordinary workdir
-Markdown through its own Capability rather than through a Wiki-specific
-Toolkit or Plugin. Its current contract is documented in the
+`@pinpawo-plugin/trigger` binds an HTTP, GitHub, or configured Studio event source
+to one Pet dispatch. Wiki is a Pet maintaining ordinary workdir Markdown through
+bash/git; its updates require an explicit request. No default task-completion or
+dispatch-completion rule triggers Wiki. See the
 [Studio automation Plugins draft](../design/studio/automation-plugins.md).
 
 A Trigger `request` may remain a string, or use a logic-free template with an
@@ -182,8 +165,8 @@ explicit context projection:
 ```json
 {
   "request": {
-    "template": "Reconcile task {{payload.taskId}} after {{event.type}}.",
-    "context": ["payload.taskId", "payload.note", "event.occurredAt"]
+    "template": "Inspect change {{payload.changeId}} after {{event.type}}.",
+    "context": ["payload.changeId", "payload.note", "event.occurredAt"]
   }
 }
 ```
@@ -203,17 +186,39 @@ under a workdir-relative directory (default `wiki`). It contributes
 hook. It defines no Toolkit, does not write files, and does not make Studio or
 the HTTP Plugin own project knowledge.
 
-Existing file-backed `kanban.json` state is not loaded implicitly. Before changing
-an existing resolver to `databasePath`, run the explicit
-`migrateKanbanSnapshotToSqlite({ snapshotFile, databaseFile })` export once; it
-keeps the JSON source and refuses to write into a non-empty destination.
-
 Installed Plugins may compose through the opaque `StudioPluginContext.hooks`
-broker. Studio only matches Plugin and hook names and owns lifecycle cleanup; it
-does not import or interpret extension contracts. The HTTP Plugin exposes a
-`routes` hook, while Kanban optionally contributes its `/kanban` snapshot,
-history, and control routes.
-Kanban remains valid when HTTP is absent, and HTTP never depends on Kanban.
+broker. Studio matches Plugin and hook names and owns lifecycle cleanup without
+importing or interpreting extension contracts. The HTTP Plugin exposes a
+`routes` hook; Channel, Scheduler, Trigger, Notice, and Project Files can
+contribute their own routes. Each Plugin retains ownership of its stored data.
+
+## Retired Kanban workdirs
+
+The Kanban package, API, tools, task assignment pipeline, and task completion
+Wiki Trigger have been retired. Keep existing databases and snapshots as history;
+startup does not read, migrate, delete, or clean their schemas.
+
+For an existing workdir, manually compare its files with the shipped template:
+
+1. Remove `@pinpawo-plugin/kanban` from `.pinpawo/studio.json`; install and enable
+   `@pinpawo-plugin/channel` when adopting the current Pet template.
+2. Remove `dispatch-assigned-kanban-task` and `wiki-on-task-done`. Rewrite any
+   external-request prompt that still requires planning into a board.
+3. Update Pet `PET.md` and `CAPABILITY.md` documents, preserving local instructions.
+   Remove `kanban`, `kanban-planning`, `kanban-execution`, `kanban-reporting`, and
+   `kanban-observation` bindings and calls. The old `studio_reporting` Capability
+   can be removed: confirmed results now return through the ordinary public reply.
+4. Keep the four roles and their valid defaults: `studio_planning`,
+   `studio_execution`, `studio_review`, and `wiki_maintenance`. Explicitly request
+   work through a Pet session, generic dispatch, or Channel execution. Request
+   Wiki maintenance with the changes and evidence that should be reconciled.
+5. Preserve `.pinpawo/kanban/`, any `kanban.json`, existing Wiki, and other user data.
+   Restart the Host after reviewing the configuration changes.
+
+`init` refuses to overwrite an existing workdir. No empty compatibility Plugin,
+automatic assignment replacement, or implicit Wiki trigger is installed. A
+missing configured package reports its name and manual configuration guidance.
+A completed invocation is execution evidence, not acceptance of the goal.
 
 The Host first calls `resolveStudioHostConfig()` to read files and resolve Plugins,
 then initializes its unified Toolkit inventory, and finally calls `buildStudio()`

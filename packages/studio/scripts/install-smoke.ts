@@ -23,7 +23,6 @@ const packageRoots = [
   resolve(workspaceRoot, 'services', 'host'),
   studioRoot,
   resolve(workspaceRoot, 'plugins', 'studio-http'),
-  resolve(workspaceRoot, 'plugins', 'kanban'),
   resolve(workspaceRoot, 'plugins', 'channel'),
   resolve(workspaceRoot, 'plugins', 'scheduler'),
   resolve(workspaceRoot, 'plugins', 'notice'),
@@ -174,7 +173,7 @@ try {
       '  resolvePlugin: studio.createInstalledStudioPluginResolver({ workdir }),',
       '});',
       'const names = configuration.plugins.map(({ name }) => name);',
-      "const expected = ['http', 'notice', 'kanban', 'scheduler', 'project-files', 'trigger'];",
+      "const expected = ['http', 'notice', 'channel', 'scheduler', 'project-files', 'trigger'];",
       "if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error(`unexpected Plugins: ${JSON.stringify(names)}`);",
       "process.stdout.write(`${names.join(',')}\\n`);",
     ].join('\n'),
@@ -184,7 +183,7 @@ try {
     HOME: smokeHome,
     USERPROFILE: smokeHome,
   });
-  assert.equal(resolvedKickstart.stdout.trim(), 'http,notice,kanban,scheduler,project-files,trigger');
+  assert.equal(resolvedKickstart.stdout.trim(), 'http,notice,channel,scheduler,project-files,trigger');
   assert.equal(resolvedKickstart.stderr, '');
   process.stdout.write('[studio:install-smoke] installed library and CLI passed\n');
 } finally {

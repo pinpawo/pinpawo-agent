@@ -59,7 +59,7 @@ test('Studio init preflights conflicts before copying any file', async () => {
   assert.equal(await readFile(path.join(workdir, 'wiki', 'PROJECT.md'), 'utf8'), 'keep me\n');
 });
 
-test('shipped Pet Capabilities separate planning, execution, and Wiki observation', async () => {
+test('shipped Pet Capabilities support explicit planning, execution, review, and Wiki requests', async () => {
   const workdir = await mkdtemp(path.join(tmpdir(), 'pinpawo-studio-shipped-template-'));
   await initStudioWorkdir({ workdir });
 
@@ -76,8 +76,8 @@ test('shipped Pet Capabilities separate planning, execution, and Wiki observatio
       uses: capability.uses,
     })),
     [
-      { name: 'studio_exploration', uses: ['studio-context', 'project-inspection'] },
-      { name: 'studio_planning', uses: ['studio-context', 'kanban-planning'] },
+      { name: 'studio_exploration', uses: ['studio-context', 'project-inspection', 'channel'] },
+      { name: 'studio_planning', uses: ['studio-context', 'channel'] },
     ],
   );
 
@@ -85,8 +85,10 @@ test('shipped Pet Capabilities separate planning, execution, and Wiki observatio
     path.join(workdir, '.pinpawo', 'studio.json'),
     'utf8',
   )) as { plugins: Array<{ id: string; options?: Record<string, unknown> }> };
-  const kanban = studioConfig.plugins.find(({ id }) => id === '@pinpawo-plugin/kanban');
-  assert.equal(kanban?.options, undefined);
+  assert.deepEqual(studioConfig.plugins.map(({ id }) => id), [
+    '@pinpawo-plugin/studio-http', '@pinpawo-plugin/notice', '@pinpawo-plugin/channel',
+    '@pinpawo-plugin/scheduler', '@pinpawo-plugin/project-files', '@pinpawo-plugin/trigger',
+  ]);
   const scheduler = studioConfig.plugins.find(({ id }) => id === '@pinpawo-plugin/scheduler');
   assert.deepEqual(scheduler?.options, {
     dispatchQueueAudit: {
@@ -130,14 +132,12 @@ test('shipped Pet Capabilities separate planning, execution, and Wiki observatio
     'capabilities',
   ));
   assert.deepEqual(executorCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
-    { name: 'studio_execution', uses: ['bash', 'git', 'kanban-execution'] },
-    { name: 'studio_reporting', uses: ['kanban-reporting'] },
+    { name: 'studio_execution', uses: ['bash', 'git', 'channel'] },
   ]);
   assert.deepEqual(reviewerCapabilities.map(({ capability }) => ({ name: capability.name, uses: capability.uses })), [
-    { name: 'studio_reporting', uses: ['kanban-reporting'] },
-    { name: 'studio_review', uses: ['bash', 'git', 'kanban-execution'] },
+    { name: 'studio_review', uses: ['bash', 'git', 'channel'] },
   ]);
   assert.deepEqual(wikiCapabilities.map(({ capability }) => capability.uses), [
-    ['bash', 'git', 'kanban-observation'],
+    ['bash', 'git', 'channel'],
   ]);
 });

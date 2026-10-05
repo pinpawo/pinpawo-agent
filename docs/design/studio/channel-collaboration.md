@@ -4,6 +4,14 @@
 与[产品方向补充](https://github.com/pinpawo/pinpawo-agent/issues/892#issuecomment-5921068589)，
 以及用户明确的“同 Channel 每个 Pet 固定持久 session；同 Pet 串行执行”修订。
 
+后续产品语义见 [Channel 寻址、执行与状态设计](channel-addressing-and-execution.md)
+（2026-10-05）。本文的“不因 @ 自动执行”和原 Pet/session 回复描述记录第一片实现；
+后续有效 @、收件人与引用分离、忙时排队及队列 UI 要求尚未实施；@ 协议与接纳已明确
+归 Channel，Pet 执行复用现有 dispatch / Host 队列，Console 负责编辑展示。
+后续设计采用地位平等的统一参与者协议；人和 Pet 的响应适配及权限与协议地位分开，
+“我”仅是当前查看者的显示称呼。本草案中的 Pet 字段和人 / Bot 分工记录原实现范围，
+不构成后续设计的固定主从角色。
+
 长期方向：人向 Bot 表达目标与授权范围，Bot 关注多个 Channel，Pet 执行当前一轮工作并
 通过消息、文档、PR 交付。交付不等于目标完成，Pet 反馈不构成新的用户授权。
 本片不实现完整 Bot、跨 Channel 协调、Trigger 调度、同 Pet 并发执行或 Supervisor 重构。
@@ -12,7 +20,7 @@ Kanban 历史原样保留，不迁移、不双写；不修改 Wiki，不恢复 m
 ## 持久事实与会话归属
 
 `@pinpawo-plugin/channel` 在独立 `.pinpawo/channel/channels.sqlite` 使用 node:sqlite、WAL、
-事务，沿用 Kanban 本地 SQLite 方式，不复用其业务表或数据库 user_version。
+事务，使用本地 SQLite，不复用其他 Plugin 的业务表或数据库 user_version。
 channel_entries 是目标修订和公共消息的追加日志；修订保存目标、当前范围、作者、时间、
 原因及可选 sourceMessageId，通过 expectedRevision 防止覆盖。消息保存 messageId、revision、
 body、replyTo、结构化 mentions、产物 URI/label/version；引用必须属于同一 Channel。
@@ -70,8 +78,9 @@ TUI 审批恢复不会继承 Channel ALS，恢复执行中的 Channel 工具目�
 Studio Bearer 保护 GET /channels、GET /channels/context，POST /channels、
 /channels/revisions、/channels/messages、/channels/execute；历史支持 after/limit。
 模型工具 channel_read_context 不接受作者或 Channel 参数；普通公开回复自动保存。
-默认模板不启用该插件；显式启用配置为 {"id":"@pinpawo-plugin/channel"}，Pet capability
-的 uses 中按需加入 channel。
+第一片默认模板不启用该插件；显式启用配置为 {"id":"@pinpawo-plugin/channel"}，
+Pet capability 的 uses 中按需加入 channel。本地后续 Kanban 退役片已启用该配置，
+尚未发布，范围见本文末尾。
 
 COMMIT 后才发消息/修订通知。Studio bus、Host dispatch 队列及生命周期通知仍是内存机制，
 没有持久 outbox、执行重放或 exactly-once 交付保证。完成事件丢失不会自动从 checkpoint
@@ -127,6 +136,8 @@ Channel 尚未正式运行；旧 pause 检查点及旧 Channel 绑定不在兼�
 归属关联；技术 id 收在详情/复制操作，不新增工具日志、审批动作或执行语义。
 
 在 `apps/studio-console` 增加固定 Channel 页面，复用原连接、Bearer、SSE 和样式；
+2026-10-04 后续片将其作为默认页面并退役 Console Kanban 入口及专属代码；
+后续退役删除后端 Kanban Plugin、API、工具和默认消费者；历史数据原样保留。
 不建立第二套 UI。提供目标列表/创建、完整分页消息时间线、公开产物引用、明确选择
 Pet 的单轮执行、针对公开回复的 replyTo。replyTo 由后端解析原 Pet/session，不能改为
 另一位 Pet；给其他 Pet 的交接使用新的显式请求。公开正文完整显示，不只显示摘要，
@@ -148,3 +159,13 @@ completed 只表示该 invocation 结束，不表示目标完成；Channel 持�
 本片不新增默认模板的自动协作、mention Trigger、审批恢复、持久 outbox、重放或
 自动运行恢复。测试用原 HTTP Plugin、Channel SQLite、生产 resident Host/turn runner
 与确定性 LangGraph 节点驱动真实浏览器；这些浏览器交互测试不宣称调用了真实模型。
+
+## Kanban 完整退役
+
+旧 Plugin、专属 API/Toolkit、任务分配与 task.done → Wiki 规则、专属测试评估和安装
+依赖一并移除。默认模板启用现有 Channel；四个 Pet 使用明确请求与公开答复，保留
+规划、执行、独立审查、Wiki 更新职责，不新增自动协作机制。
+
+Wiki 更新需要用户明确请求并交接变化与证据；调用结束不代表目标验收完成。通用
+Trigger、Knowledge、Scheduler、Notice、dispatch/events 与 Agent runtime 保留。
+旧配置手动对照模板迁移，不静默改写；`.pinpawo/kanban/`、快照与用户数据保持原样。

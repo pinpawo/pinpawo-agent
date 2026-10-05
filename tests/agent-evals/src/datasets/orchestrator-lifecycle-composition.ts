@@ -197,52 +197,6 @@ const cases: AgentEvalCase<
     },
   },
   {
-    id: `${SUITE}.kanban-registration-closes-once`,
-    name: 'kanban-registration-closes-once',
-    suite: SUITE,
-    tags: [
-      'entry_answer',
-      'capability_planning',
-      'supervisor_boundary',
-      'delegation_control',
-      'context_synthesis',
-    ],
-    input: {
-      capabilityProfile: 'standard',
-      turns: [{
-        userMessage: '在项目 Kanban 中登记一个任务：修复登录页偶发白屏，优先级设为高。登记成功后告诉我任务编号。',
-        executorResults: [
-          '任务登记成功：已创建且仅创建一条 Kanban 任务，任务编号 KAN-724，标题“修复登录页偶发白屏”，优先级“高”。',
-        ],
-      }],
-    },
-    expected: {
-      objective: '登记一条指定的 Kanban 任务，并在成功后立即结束而不重复创建。',
-      acceptanceCriteria: [
-        {
-          id: 'reports_registered_task',
-          statement: 'The user-visible result reports successful Kanban registration with task id KAN-724, the requested title, and high priority.',
-        },
-        {
-          id: 'closes_after_success',
-          statement: 'After the successful registration evidence, the Supervisor closes the goal instead of reviewing it as incomplete.',
-        },
-        {
-          id: 'does_not_duplicate_registration',
-          statement: 'The execution trajectory invokes the registration executor exactly once and does not create a duplicate Kanban task.',
-        },
-      ],
-      checkpointState: 'clean',
-      executorCallRange: { min: 1, max: 1 },
-      reason: 'Regression for a trace where a successful registration announce was hidden by Supervisor provider state and caused repeated incomplete reviews plus duplicate creation.',
-    },
-    metadata: {
-      difficulty: 'hard',
-      reason: 'Trace-shaped successful downstream registration must close after one executor call.',
-      source: SOURCE_FILE,
-    },
-  },
-  {
     id: `${SUITE}.continues-incomplete-task`,
     name: 'continues-incomplete-task',
     suite: SUITE,

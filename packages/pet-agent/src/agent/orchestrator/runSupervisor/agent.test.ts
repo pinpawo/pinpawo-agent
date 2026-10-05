@@ -906,10 +906,10 @@ test('Supervisor identifies the configured default without preloading its docume
       description: 'Handle ordinary work.',
       instructions: 'Use general tools.',
     }),
-    kanban_planning: capabilityDocument({
-      name: 'kanban_planning',
-      description: 'Plan work on the Kanban board.',
-      instructions: 'Decompose the goal and create Kanban tasks.',
+    specialist_planning: capabilityDocument({
+      name: 'specialist_planning',
+      description: 'Plan specialist work.',
+      instructions: 'Decompose the goal and prepare specialist proposals.',
     }),
   });
   const model = new ScriptedSupervisorModel([{
@@ -917,8 +917,8 @@ test('Supervisor identifies the configured default without preloading its docume
       kind: 'plan',
       args: {
         tasks: [{
-          capability: 'kanban_planning',
-          objective: 'Create a task plan on the board.',
+          capability: 'specialist_planning',
+          objective: 'Create a concrete proposal.',
         }],
       },
     },
@@ -926,7 +926,7 @@ test('Supervisor identifies the configured default without preloading its docume
 
   const result = await createRunSupervisorAgent({
     model,
-    defaultCapabilityName: 'kanban_planning',
+    defaultCapabilityName: 'specialist_planning',
   }).invoke(supervisorInput(catalog, {
     capabilityDisclosure: createCapabilityDisclosureState({
       catalog,
@@ -937,8 +937,8 @@ test('Supervisor identifies the configured default without preloading its docume
   assert.deepEqual(commandOnly(result), {
     name: 'submit_plan', args: {
       tasks: [{
-        capability: 'kanban_planning',
-        objective: 'Create a task plan on the board.',
+        capability: 'specialist_planning',
+        objective: 'Create a concrete proposal.',
       }]
     }
   });
@@ -948,10 +948,10 @@ test('Supervisor identifies the configured default without preloading its docume
   assert.ok(supervisorInputMessage instanceof HumanMessage);
   assert.match(
     readMessageText(supervisorInputMessage),
-    /<capability name="kanban_planning">/,
+    /<capability name="specialist_planning">/,
   );
-  assert.match(readMessageText(supervisorInputMessage), /Plan work on the Kanban board/);
-  assert.doesNotMatch(readMessageText(supervisorInputMessage), /create Kanban tasks/);
+  assert.match(readMessageText(supervisorInputMessage), /Plan specialist work/);
+  assert.doesNotMatch(readMessageText(supervisorInputMessage), /prepare specialist proposals/);
   assert.doesNotMatch(readMessageText(supervisorInputMessage), /Use general tools/);
 });
 

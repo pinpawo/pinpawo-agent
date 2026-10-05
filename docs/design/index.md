@@ -38,16 +38,19 @@ contracts in [reference/](../reference/index.md).
 
 ## Studio applications and Plugins
 
+- [Channel 寻址、执行与状态](studio/channel-addressing-and-execution.md) — 2026-10-05
+  平等参与者、Channel @ 协议与接纳所有权、真实队列及失败展示要求
+- [Channel 基础草案](studio/channel-collaboration.md) — 已有 session、显式执行与观察边界
 - [Studio Console](studio/console.md) — independent pure frontend for fixed Studio,
-  Kanban, Scheduler, and Trigger APIs
+  Channel, Scheduler, Notice, Trigger, and Knowledge APIs
 - [Studio HTTP Plugin](studio/http-plugin.md) — one HTTP control-plane container
   for dispatch, events, and Plugin routes
 - [Studio automation Plugins](studio/automation-plugins.md) — durable Scheduler and
   Trigger domain/API boundaries
 
-## Kanban
+## Historical Kanban designs
 
-- [Kanban SQLite task store](kanban/sqlite-task-store.md) — independent Kanban
-  task, dependency, history, transaction, and recovery design
+- [Kanban SQLite task store](kanban/sqlite-task-store.md) — retired design retained for
+  historical task, dependency, history, transaction, and recovery context
 
 Completed or superseded work belongs in [history/](../history/index.md).

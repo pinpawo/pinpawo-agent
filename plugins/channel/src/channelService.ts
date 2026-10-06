@@ -366,7 +366,8 @@ export class ChannelService {
     if (existing && (existing.channelId !== binding.channelId || existing.petId !== source.petId || existing.sessionId !== source.sessionId)) {
       throw new Error('Channel execution identity does not match its original observation.');
     }
-    if (existing && ['waiting', 'completed', 'interrupted', 'failed'].includes(existing.state)) return existing;
+    // A waiting execution continues when its review is answered.
+    if (existing && ['completed', 'interrupted', 'failed'].includes(existing.state)) return existing;
     return this.saveExecution({ ...(existing ?? {}), ...source, channelId: binding.channelId,
       executionId: existing?.executionId ?? `dispatch:${source.invocationId}`, state, occurredAt,
       ...(error ? { error } : {}), observerId: this.observerId });

@@ -182,12 +182,45 @@ test('waiting target is skipped; background execution does not pollute active TU
     assert.equal(stillWaiting.snapshot.session.pendingInterrupt?.interruptId, pending.interruptId);
     await host.interaction.request({ type: 'interrupt.resume', requestId: 'approve-a', interruptId: pending.interruptId,
       value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
-    await waitFor(() => outputs(f, a).length === 1);
-    assert.equal(outputs(f, a)[0]?.body, 'Answer 2: after approval');
+    // Approving the review continues the original dispatch: its reply returns to
+    // the Channel, under the original scope, before the queued follow-up runs.
+    await waitFor(() => outputs(f, a).length === 2);
+    assert.deepEqual(outputs(f, a).map(m => m.body), ['Answer 1: approval', 'Answer 2: after approval']);
+    assert.equal(outputs(f, a)[0]?.source?.invocationId, notice.source.invocationId);
+    assert.ok(f.calls.some(call => call.text === 'approval' && call.thread === binding.sessionId), 'continuation keeps dispatch attribution');
+    const executions = f.channel.service.readExecutions(a).executions;
+    assert.equal(executions.find(e => e.invocationId === notice.source.invocationId)?.state, 'completed');
     stop();
   } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+
+test('a review answered after Host restart still returns the dispatch result to its Channel', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'channel-restart-approval-'));
+  let f = await fixture(root);
+  try {
+    const a = f.channel.service.createChannel(goal, human).channelId;
+    await f.channel.execute(a, { petId: 'one', body: 'approval' });
+    await waitFor(() => f.channel.service.readInterruptNotifications(a).notifications.length === 1);
+    const notice = f.channel.service.readInterruptNotifications(a).notifications[0]!;
+    await f.close();
+    f = await fixture(root);
+    const host = f.hosts[0]!;
+    await host.interaction.request({ type: 'session.resume', requestId: 'select', sessionId: notice.source.sessionId });
+    const selected = await host.interaction.snapshot();
+    if (selected.type !== 'session.snapshot.result') throw Error('snapshot');
+    const pending = selected.snapshot.session.pendingInterrupt;
+    assert.ok(pending);
+    await host.interaction.request({ type: 'interrupt.resume', requestId: 'approve', interruptId: pending.interruptId,
+      value: { decisions: [{ interactionId: 'approval', selectedOptionId: 'approve' }] } });
+    await waitFor(() => outputs(f, a).length === 1);
+    assert.equal(outputs(f, a)[0]?.body, 'Answer 1: approval');
+    assert.equal(outputs(f, a)[0]?.source?.invocationId, notice.source.invocationId);
+    assert.equal(f.calls[0]?.thread, notice.source.sessionId, 'restored scope reaches Channel tools');
+    const execution = f.channel.service.readExecutions(a).executions.find(e => e.invocationId === notice.source.invocationId);
+    assert.equal(execution?.state, 'completed');
+  } finally { await f.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 test('concurrent first use reserves one session; queued targets survive a TUI switch and snapshots exclude background runs', async () => {
   const root = await mkdtemp(join(tmpdir(), 'channel-target-'));

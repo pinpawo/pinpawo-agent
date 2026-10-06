@@ -114,11 +114,16 @@ for (const decision of ['reject', 'cancel'] as const) {
         value: decision === 'cancel' ? { action: 'cancel' }
           : { decisions: [{ interactionId: 'tool-review:reviewed_action:reviewed-action', selectedOptionId: 'reject' }] },
       });
-      await waitFor(() => outputs(id).length === 3 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
+      await waitFor(() => outputs(id).length === 4 && host.resident.dispatch.getQueueSnapshot().queuedDispatches === 0);
       assert.deepEqual([entryCalls, supervisorCalls, toolRuns, finalizes], [4, 3, 0, 0]);
       assert.equal(channel.service.getBinding(id, 'one')?.sessionId, binding.sessionId);
-      assert.ok(outputs(id)[1]!.body.includes('Continue with different constraints.'));
-      assert.ok(outputs(id)[2]!.body.includes('Use staging.'));
+      // The declined dispatch reports its own ending to the Channel before queued work runs.
+      const notice = channel.service.readInterruptNotifications(id).notifications[0]!;
+      assert.equal(outputs(id)[1]!.source?.invocationId, notice.source.invocationId);
+      assert.equal(channel.service.readExecutions(id).executions
+        .find(execution => execution.invocationId === notice.source.invocationId)?.state, 'completed');
+      assert.ok(outputs(id)[2]!.body.includes('Continue with different constraints.'));
+      assert.ok(outputs(id)[3]!.body.includes('Use staging.'));
       assert.equal(channel.service.readInterruptNotifications(id).notifications.length, 1);
       const completed = await host.interaction.snapshot();
       if (completed.type !== 'session.snapshot.result') throw Error('snapshot');

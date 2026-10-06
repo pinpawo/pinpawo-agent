@@ -119,5 +119,9 @@ before sending commands and reread the snapshot after reconnecting. Do not
 blindly resubmit accepted mutations. Legacy `new_session` without a request ID
 is not an HTTP command; use the current `session.new` protocol instead.
 
-The repository's [Studio skill](../../../skills/studio/SKILL.md) includes a
-standard-library client for these endpoints and Studio dispatch.
+The repository's [Studio skill](../../../skills/studio/SKILL.md) provides
+usage guidance for the project Node.js CLI. `pinpawo-studio channels`,
+`pets`, `queues`, `snapshot`, `events`, `dispatch`, and `send` wrap existing
+HTTP endpoints; they do not start a Host. The former Python helper has been
+replaced. See the [CLI commands](../../../packages/studio/README.md#operate-a-running-host)
+for connection flags and pagination.

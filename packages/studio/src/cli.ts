@@ -1,3 +1,4 @@
+import { parseStudioOperatorArgs, runStudioOperator, STUDIO_OPERATOR_HELP } from './studioOperatorCli';
 import {
   runStudioHostProcess,
   type StudioHostProcessOptions,
@@ -37,6 +38,8 @@ Wiki files in the selected workdir without overwriting existing files.
 Tmux connects to an existing Host and builds a tiled TUI for its Pets. Console
 starts the separately served Studio Console Web when needed, then opens it in
 the default browser.
+
+${STUDIO_OPERATOR_HELP}
 `;
 
 export type StudioHostCliHandlers = {
@@ -197,6 +200,11 @@ export async function runStudioHostCli(
   argv = process.argv.slice(2),
   handlers: StudioHostCliHandlers = {},
 ): Promise<void> {
+  const operation = parseStudioOperatorArgs(argv);
+  if (operation) {
+    await runStudioOperator(operation, { writeOutput: handlers.writeOutput });
+    return;
+  }
   const parsed = parseStudioHostCliArgs(argv);
   if (parsed.help) {
     (handlers.writeOutput ?? process.stdout.write.bind(process.stdout))(HELP);

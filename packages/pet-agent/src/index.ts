@@ -1,4 +1,5 @@
-export { readCapabilityExecutions, readCapabilityExecutionCall } from './agent/orchestrator/executionMessages';
+export { readCapabilityExecutions, readCapabilityExecutionCall, readDelegationPreview } from './agent/orchestrator/executionMessages';
+export type { DelegationPreview } from './agent/orchestrator/executionMessages';
 
 export type {
   AgentModels,

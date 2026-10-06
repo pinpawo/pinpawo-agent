@@ -132,13 +132,19 @@ test('capability handoff reaches Channel only through the selected final root re
     });
     const id = channel.service.createChannel({ title: 'Plan', goal: 'Plan and review.', scope: 'Round' }, { kind: 'human', id: 'studio-operator' }).channelId;
     const outputs = () => channel.service.readHistory(id).entries
-      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && Boolean(entry.source));
+      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && Boolean(entry.source) && !entry.progress);
+    const progress = () => channel.service.readHistory(id).entries
+      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && Boolean(entry.progress));
     const alphaOutputs = () => outputs().filter(message => message.author.id === 'acceptance-a');
     const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] });
     await send('Produce the plan and selected handoff.');
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
     assert.equal(outputs().length, 0, 'internal delivery and Supervisor work are not published');
+    // The delegation itself is announced before the final reply, without addressing anyone.
+    assert.deepEqual(progress().map(message => [message.author.id, message.body, message.progress?.briefing, message.mentions.length]), [
+      ['acceptance-a', '开始：Produce a plan.', 'Produce a plan with the chosen handoff.', 0],
+    ]);
     assert.equal(betaCalls, 0, 'internal @ is not a dispatch');
     release();
     await waitFor(() => outputs().length === 2 && betaCalls === 1);

@@ -22,6 +22,7 @@ import {
   ResidentPetCoordinator,
   ResidentPetInteractionBusyError,
   type AgentSessionPeer,
+  type PetDispatchLifecycleEvent,
   type PetDispatchState,
 } from './residentPetHost';
 import { FileSaver } from './fileSaver';
@@ -1083,3 +1084,29 @@ for (const wakeup of ['enqueue', 'refresh'] as const) {
     } finally { release.resolve(); await coordinator.close(); }
   });
 }
+
+test('a dispatch reports each delegation as non-terminal progress', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pinpawo-dispatch-progress-'));
+  const runtimeConfig = buildHostRuntimeConfig(root);
+  const progress = { messageId: 'm1', planItemId: 'p1', capability: 'general', objective: 'Inspect B.', briefing: 'Do B.' };
+  const host = await createResidentPetHost({
+    petId: 'progress-pet', petName: 'Progress', modelProfiles: createTestModelProfiles(),
+    runtimeConfig, globalReviewPolicyMode: 'full_access', autoAuthorizationSafetyLevel: 'strict',
+    capabilities: [], toolkitInventory: new HostToolkitInventoryStore(), capabilityArtifactStore: testArtifactStore,
+    checkpointer: new FileSaver(runtimeConfig.checkpointPath), sessionStatePath: runtimeConfig.tuiSessionPath,
+    graphService: { readThreadState: async () => ({ messages: [], pendingInterrupt: null, acceptsResume: false, currentPlan: null }) } as never,
+    runAgentTurn: async ({ acceptDelegationStarted }) => {
+      acceptDelegationStarted?.(progress);
+      return { status: 'completed', reply: 'done' };
+    },
+  });
+  const lifecycle: PetDispatchLifecycleEvent[] = [];
+  host.resident.dispatch.onDispatchLifecycle((event) => lifecycle.push(event));
+  try {
+    await host.resident.dispatch.dispatch({ request: 'inspect', scope: { namespace: 'channel', id: 'ch-1' } });
+    await waitFor(() => lifecycle.some(event => event.state === 'completed'), 'the dispatch did not complete');
+    assert.deepEqual(lifecycle.map(event => event.state), ['queued', 'running', 'progress', 'completed']);
+    assert.deepEqual(lifecycle[2].progress, progress);
+    assert.equal(lifecycle[2].scope?.id, 'ch-1');
+  } finally { await host.close(); }
+});

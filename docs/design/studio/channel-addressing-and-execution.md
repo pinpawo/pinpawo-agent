@@ -76,6 +76,13 @@ Channel 给 dispatch 的 `scope:{namespace:'channel',id}` 由 Host 在接纳时�
 私有 Capability 交付、工具结果、旧 checkpoint 回复与无 scope 的通用 dispatch 不自动发布。
 没有 `channel_send_message` 第二条输出路径。
 
+执行中的委派动态单独入库：Supervisor 每次 `delegate_capability`，派发消息在 metadata 记下
+当前计划项（`delegationPreview`），Root 提交后、Capability 执行前 Host 发布非终态的
+`dispatch.progress`（payload `progress`：派发消息 id、计划项、Capability、objective、briefing），
+续跑同样发布。Channel 按 `(invocation, 派发消息 id)` 幂等记一条带 `progress` 的 Pet 消息，
+正文为 `开始：<objective>`，briefing 只放在 `progress` 中；不解析 @、不派发，不改变执行记录状态。
+它是观察，不是交付或回复：交接仍只由 `dispatch.completed.reply` 触发。
+
 唯一 Channel Toolkit 入口 `channel_read_context` 只读本轮已接纳 Channel 的目标/范围、
 分页历史、绑定和参与者，不接受作者或 Channel 参数。执行/审批历史是独立观察 API，
 不进入模型上下文；该工具不派发或恢复工作。

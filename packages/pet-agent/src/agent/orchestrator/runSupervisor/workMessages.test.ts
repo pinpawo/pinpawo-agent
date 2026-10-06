@@ -10,7 +10,7 @@ import { adjustPlan } from './adjustPlanTool';
 import { buildCapabilityExecutionInput } from './delegateCapabilityTool';
 import { identity, type SupervisorControlContext } from './controlContext';
 import { supervisorWorkMessages } from './workMessages';
-import { createCapabilityExecutionMessage, readCapabilityExecutions, type CapabilityExecutionRecord } from '../executionMessages';
+import { createCapabilityExecutionMessage, readCapabilityExecutions, readDelegationPreview, type CapabilityExecutionRecord } from '../executionMessages';
 import { createRunSupervisorProbe } from './testing';
 import { createCapabilityCatalog } from './capabilityCatalog';
 import { createCapabilityDisclosureState } from './capabilityDisclosure';
@@ -142,6 +142,21 @@ test('work projection scopes delegation IDs per run without changing arguments o
   assert.equal(queryAgentMessages(projected).main().select().messages.length, 1);
 });
 
+test('only the main delegation request carries the plan item it announces', () => {
+  const input = { ...context(), state: submitPlan(context(), { tasks: [taskA] }, 'plan') };
+  const task = input.state.plan[0];
+  const [lane, dispatch] = supervisorWorkMessages(input, [
+    new AIMessage({ id: 'note', content: 'Checking the plan.' }),
+    control('delegate_capability', { briefing: 'Inspect A only.' }, 'native-call'),
+  ], true, task);
+  assert.equal(readDelegationPreview(lane), null);
+  assert.equal(getAgentMessageMetadata(lane).delegationPreview, undefined);
+  assert.deepEqual(readDelegationPreview(dispatch), {
+    planItemId: task.id, capability: 'general', objective: taskA.objective, briefing: 'Inspect A only.', runId: 'r1', taskId: 't1',
+  });
+  assert.equal(readDelegationPreview(supervisorWorkMessages(input, [dispatch], false)[0]), null);
+});
+
 class Model extends BaseChatModel {
   readonly inputs: BaseMessage[][] = [];
   constructor(private readonly responses: AIMessage[]) { super({}); }
@@ -188,6 +203,11 @@ test('review then adjustment shares current plan state before native handoff', a
     control('delegate_capability', { briefing: 'Execute the current objective.' }, 'execute'),
   ]);
   assert.deepEqual(result.runSupervisorState.plan.map(t => t.status), ['completed', 'pending']);
+  // The announced plan item is the one this turn's latest plan will execute.
+  const preview = readDelegationPreview(result.messages.at(-1)!);
+  assert.equal(preview?.objective, taskB.objective);
+  assert.equal(preview?.briefing, 'Execute the current objective.');
+  assert.equal(result.messages.slice(0, -1).some(message => readDelegationPreview(message)), false);
 });
 
 test('a natural question commits the plan without dispatching it', async () => {

@@ -33,7 +33,7 @@ export function continueSuspendedDispatch(options: {
 
     const { dispatchId, request, scope } = suspended;
     const requestId = turn.request.requestId;
-    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt'>) => publishLifecycle({
+    const report = (event: Pick<PetDispatchLifecycleEvent, 'state' | 'reply' | 'error' | 'pendingInterrupt' | 'progress'>) => publishLifecycle({
       ...event, dispatchId, request, requestId, sessionId: session.id, ...(scope ? { scope } : {}),
     });
     const suspend = (pendingInterrupt: PendingInterruptProjection) => {
@@ -62,6 +62,10 @@ export function continueSuspendedDispatch(options: {
           emitEvent: (event) => {
             if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
             turn.emitEvent(event);
+          },
+          acceptDelegationStarted: (progress) => {
+            turn.acceptDelegationStarted?.(progress);
+            report({ state: 'progress', progress });
           },
         }),
       );

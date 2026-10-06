@@ -44,8 +44,18 @@ export type ChannelRevision = z.infer<typeof channelGoalSchema> & {
 };
 export type ChannelSessionBinding = { channelId: string; petId: string; sessionId: string; registered: boolean };
 export type ChannelMessageSource = { petId: string; sessionId: string; invocationId: string };
+export const channelProgressSchema = z.object({
+  messageId: identifier,
+  planItemId: identifier,
+  capability: identifier,
+  objective: z.string().trim().min(1).max(10_000),
+  briefing: z.string().max(100_000),
+}).strict();
+/** A plan item a running Pet handed to a Capability; observation, never a request. */
+export type ChannelProgress = z.infer<typeof channelProgressSchema>;
 export type ChannelMessage = z.infer<typeof channelMessageSchema> & {
   source?: ChannelMessageSource;
+  progress?: ChannelProgress;
   kind: 'message'; channelId: string; sequence: number; messageId: string;
   author: ChannelAuthor; occurredAt: string; revision: number;
 };
@@ -81,7 +91,7 @@ export class ChannelService {
       if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
       db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
       const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (![0, 1, 2, 3, 4].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
+      if (![0, 1, 2, 3, 4, 5].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS channel_entries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +124,12 @@ export class ChannelService {
           channel_id TEXT NOT NULL, invocation_id TEXT UNIQUE, data TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS channel_execution_history ON channel_executions(channel_id, sequence);
-        PRAGMA user_version=4;
+        CREATE TABLE IF NOT EXISTS channel_progress (
+          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
+          progress_id TEXT NOT NULL, message_id TEXT NOT NULL,
+          PRIMARY KEY(pet_id, session_id, invocation_id, progress_id)
+        );
+        PRAGMA user_version=5;
       `);
       this.observerId = randomUUID();
       this.db = db;
@@ -270,6 +285,32 @@ export class ChannelService {
       }) as ChannelMessage;
       this.database().prepare('INSERT INTO channel_outputs VALUES (?, ?, ?, ?)')
         .run(source.petId, source.sessionId, source.invocationId, message.messageId);
+      created = true;
+      return message;
+    });
+    return created ? this.publish(entry) : entry;
+  }
+  /**
+   * One message per announced delegation, keyed by the delegation's own message
+   * so a replayed observation reuses it. It addresses nobody: only the final
+   * output routes work to other participants.
+   */
+  recordProgress(channelId: string, source: ChannelMessageSource, value: unknown): ChannelMessage {
+    const binding = this.requireOutputBinding(channelId, source);
+    const progress = channelProgressSchema.parse(value);
+    let created = false;
+    const entry = this.transaction(() => {
+      const saved = this.database().prepare(`SELECT message_id FROM channel_progress
+        WHERE pet_id=? AND session_id=? AND invocation_id=? AND progress_id=?`)
+        .get(source.petId, source.sessionId, source.invocationId, progress.messageId) as { message_id: string } | undefined;
+      if (saved) return this.getMessage(binding.channelId, saved.message_id);
+      const channel = this.getChannel(binding.channelId);
+      const message = this.append({ ...channelMessageSchema.parse({ body: `开始：${progress.objective}` }), progress, kind: 'message',
+        channelId: channel.channelId, messageId: randomUUID(), revision: channel.sequence,
+        author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
+      }) as ChannelMessage;
+      this.database().prepare('INSERT INTO channel_progress VALUES (?, ?, ?, ?, ?)')
+        .run(source.petId, source.sessionId, source.invocationId, progress.messageId, message.messageId);
       created = true;
       return message;
     });

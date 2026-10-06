@@ -28,7 +28,10 @@ export function createSupervisorControlValidationMiddleware(input: RunSupervisor
           runCapabilityDisclosure: mergeCapabilityDisclosure(input.capabilityDisclosure,
             request.state.disclosedCapabilityNames ?? []),
           ...(input.inputId.startsWith('human:') ? { runSupervisorUserMessageId: input.inputId } : {}),
-          messages: supervisorWorkMessages(supervisorControlContext(input), request.state.messages.slice(messageCount), true),
+          // The latest plan, not this invocation's input: a plan submitted in the
+          // same turn is the one Root's delegate_capability will execute.
+          messages: supervisorWorkMessages(supervisorControlContext(input), request.state.messages.slice(messageCount), true,
+            currentSupervisorTask(request.state.runSupervisorState)),
         } });
       }
       try {

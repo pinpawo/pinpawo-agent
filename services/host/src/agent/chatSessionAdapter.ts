@@ -32,6 +32,7 @@ import {
 import {
   adaptRootStream,
   type RootProtocolEvent,
+  type RootStreamDelegation,
 } from '../events/rootStreamEventAdapter';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
 import {
@@ -72,6 +73,11 @@ export type AgentSessionTurnOptions = {
    * delegation-scoped toolkit tools (#322 Phase 4).
    */
   acceptDelegationOperations?: (operations: Record<string, SubagentToolOperationMetadata>) => void;
+  /**
+   * Receives each Supervisor delegation Root commits in this turn, before its
+   * Capability runs. Dispatch observers use it to report progress.
+   */
+  acceptDelegationStarted?: (delegation: RootStreamDelegation) => void;
   /**
    * Host admission hook for durable local attachments. It runs only after
    * pending-review checks and before graph invocation.
@@ -284,6 +290,7 @@ export async function runAgentSessionTurn(
     emitEvent,
     emitToolEvent,
     acceptDelegationOperations,
+    acceptDelegationStarted,
   } = options;
   const { requestId } = request;
   const isResumeRequest = request.kind === 'resume';
@@ -419,6 +426,11 @@ export async function runAgentSessionTurn(
               message: notice,
             });
           }
+          break;
+        }
+        case 'delegation.started': {
+          const { messageId, planItemId, capability, objective, briefing } = chatEvent;
+          acceptDelegationStarted?.({ messageId, planItemId, capability, objective, briefing });
           break;
         }
         case 'guard.decision':

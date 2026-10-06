@@ -84,6 +84,26 @@ export function readCapabilityExecutionCall(message: BaseMessage) {
   return { call, metadata };
 }
 
+const delegationPreviewSchema = z.object({
+  planItemId: z.string().min(1), capability: z.string().min(1), objective: z.string().min(1),
+}).strict();
+
+/**
+ * What a main delegate_capability request announces before it executes: the
+ * plan item stamped by the Supervisor and the briefing it handed over. Null for
+ * any other message.
+ */
+export function readDelegationPreview(message: BaseMessage) {
+  const invocation = readCapabilityExecutionCall(message);
+  if (!invocation) return null;
+  const preview = delegationPreviewSchema.safeParse(invocation.metadata.delegationPreview);
+  const briefing = invocation.call.args?.briefing;
+  if (!preview.success || typeof briefing !== 'string') return null;
+  return { ...preview.data, briefing, runId: invocation.metadata.runId as string, taskId: invocation.metadata.taskId as string };
+}
+
+export type DelegationPreview = NonNullable<ReturnType<typeof readDelegationPreview>>;
+
 function corrupted(resultMessage: ToolMessage, reason: string): never {
   throw new Error(`Corrupted ${DELEGATE_CAPABILITY_TOOL_NAME} record for call ${resultMessage.tool_call_id}: ${reason}.`);
 }

@@ -433,6 +433,14 @@ export async function runAgentSessionTurn(
           acceptDelegationStarted?.({ messageId, planItemId, capability, objective, briefing });
           break;
         }
+        case 'tool_calls.message':
+          emitEvent({ type: 'message.tool_calls', requestId, messageId: chatEvent.messageId,
+            text: chatEvent.text, toolCalls: chatEvent.toolCalls });
+          break;
+        case 'tool_call.settled':
+          emitEvent({ type: 'tool_call.settled', requestId, messageId: chatEvent.messageId,
+            callId: chatEvent.callId, status: chatEvent.status });
+          break;
         case 'guard.decision':
           // Decision records are observability, not chat surface — parity
           // with the legacy path, which did not consume the custom mode.

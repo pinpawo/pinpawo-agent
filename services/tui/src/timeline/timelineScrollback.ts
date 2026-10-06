@@ -14,6 +14,7 @@ import {
   type TextChunk,
 } from '@opentui/core';
 import type {
+  AgentMessageEntry,
   AgentSession,
   AgentTimelineEntry,
 } from '@pinpawo/agent-session';
@@ -35,7 +36,7 @@ import {
   createAssistantMarkdownSurface,
   type AssistantMarkdownSurface,
 } from './assistantMarkdown';
-import { isDelegationEntry } from './operationDisplay';
+import { hasOpenToolCalls, isToolCallMessageEntry } from './messageDisplay';
 
 const USER_MESSAGE_BACKGROUND = '#272c33';
 const USER_MESSAGE_LABEL_COLOR = '#9fcbd2';
@@ -482,6 +483,8 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
       entry.role,
       normalizeText(entry.text),
       entry.status,
+      // Titles only: a call's outcome does not rewrite the committed line.
+      ...(entry.toolCalls ?? []).map(call => normalizeText(call.title)),
     ]);
   }
   return JSON.stringify([
@@ -490,11 +493,7 @@ export function timelineFingerprint(entry: AgentTimelineEntry) {
     normalizeText(entry.title),
     normalizeText(entry.target ?? ''),
     normalizeText(entry.summary ?? ''),
-    // A delegation's committed heading is its task alone, so its phase does not
-    // change the rows already in the transcript. Keeping phase out of the
-    // fingerprint is what stops the whole block being re-committed when the
-    // delegation finally settles.
-    isDelegationEntry(entry) ? 'delegation' : entry.phase,
+    entry.phase,
   ]);
 }
 
@@ -601,10 +600,10 @@ function populateTimelineRoot(
     }));
   };
 
-  // A delegation owns the operations that follow it until it settles: they are
-  // its content, not its peers. The stream delivers them contiguously behind
-  // it (the delegation's own terminal event arrives last), so tracking one
-  // open scope is enough to nest them.
+  // A message's open tool calls own the operations that follow it until they
+  // settle: those are their content, not its peers. The stream delivers them
+  // contiguously behind the message, so tracking one open scope is enough to
+  // nest them.
   let delegationScope: BoxRenderable | null = null;
 
   entries.forEach((entry, entryIndex) => {
@@ -647,13 +646,16 @@ function populateTimelineRoot(
         syntaxStyle: assistantMarkdownStyle,
       });
       detailSurface.add(assistantMarkdown.container);
+      if (isToolCallMessageEntry(entry)) {
+        lines.slice(-entry.toolCalls!.length).forEach(line => addLine(line, detailSurface));
+        openToolCallScope(entry);
+      }
       if (root.getChildrenCount() > childCountBeforeEntry) {
         addTimelineEntrySpacing(entry);
       }
       return;
     }
-    const openingDelegation = isDelegationEntry(entry);
-    const scopeParent = openingDelegation ? root : delegationScope ?? root;
+    const scopeParent = entry.type === 'operation' ? delegationScope ?? root : root;
     const detailSurface = lines.length > 0 && isDetailEntry(entry)
       ? createDetailEntrySurface(context, scopeParent, entryIndex, entry.id)
       : scopeParent;
@@ -665,22 +667,24 @@ function populateTimelineRoot(
         detailSurface,
       );
     });
-    if (openingDelegation) {
-      // Leave the scope open only while the delegation is still running; a
-      // settled one has no more content coming.
-      delegationScope = isSettledTimelineEntry(entry)
-        ? null
-        : createDelegationScopeSurface(context, root, entryIndex, entry.id);
-    }
+    if (isToolCallMessageEntry(entry)) openToolCallScope(entry);
     if (root.getChildrenCount() > childCountBeforeEntry) {
       addTimelineEntrySpacing(entry);
     }
   });
   return { assistantMarkdown };
 
+  function openToolCallScope(entry: AgentMessageEntry) {
+    // Leave the scope open only while a call still runs; settled calls have
+    // no more content coming.
+    delegationScope = hasOpenToolCalls(entry)
+      ? createDelegationScopeSurface(context, root, entries.indexOf(entry), entry.id)
+      : null;
+  }
+
   function addTimelineEntrySpacing(entry: AgentTimelineEntry) {
     if (!isSettledTimelineEntry(entry)) return;
-    if (entry.type === 'operation' && !isDelegationEntry(entry)) return;
+    if (entry.type === 'operation') return;
     addLine({ text: ' ', tone: 'muted' });
   }
 }
@@ -706,9 +710,9 @@ function createDelegationScopeSurface(
   return surface;
 }
 
-/** Operations render as a delegation's content; messages end its scope. */
+/** Operations render as open tool calls' content; messages end their scope. */
 function isDelegationScopeChild(entry: AgentTimelineEntry) {
-  return entry.type === 'operation' && !isDelegationEntry(entry);
+  return entry.type === 'operation';
 }
 
 function createDetailEntrySurface(

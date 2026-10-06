@@ -9,7 +9,6 @@ import { LOADING_CELL_WIDTH } from '../visuals/loadingCells';
 import { buildMessageDisplayLines } from './messageDisplay';
 import {
   buildOperationDisplayLines,
-  isDelegationEntry,
   operationActivityText,
 } from './operationDisplay';
 import { truncateTerminalLine } from '../text/terminalText';
@@ -42,13 +41,13 @@ export function isSettledTimelineEntry(entry: AgentTimelineEntry) {
 /**
  * Whether the transcript may commit the entry now.
  *
- * Distinct from having finished: a running delegation is committable because
- * its committed form — the task alone, with no status or elapsed time — is
- * already final. Admitting it is what lets the tools behind it commit as they
- * finish, instead of the whole block appearing at once when it returns.
+ * A message that calls tools is completed as soon as it arrives, while its
+ * calls still run: its committed form, each call's title, is already final.
+ * Committing it is what lets the tools behind it commit as they finish,
+ * instead of the whole block appearing at once when the calls return.
  */
 export function isCommittableTimelineEntry(entry: AgentTimelineEntry) {
-  return isSettledTimelineEntry(entry) || isDelegationEntry(entry);
+  return isSettledTimelineEntry(entry);
 }
 
 export function countSettledTimelinePrefix(
@@ -70,6 +69,7 @@ export function latestCompletedAssistantReply(session: AgentSession) {
       entry?.type === 'message'
       && entry.role === 'assistant'
       && entry.status === 'completed'
+      && !entry.toolCalls?.length
       && entry.text.trim()
     ) {
       return entry.text;
@@ -140,14 +140,11 @@ export function formatLiveSession(
         sessionActorLabel(session),
       );
     }
-    if (pending.operationSource?.toolName === 'delegate_capability'
-      || pending.kind === 'runtime.delegate_capability') {
-      const current = session.currentPlan?.items.find(item => item.status === 'active')
-        ?? session.currentPlan?.items.find(item => item.status === 'pending');
-      return current ? truncateTerminalLine(singleLine(current.task), maxCodePoints) : 'using tool';
-    }
     return singleLine(operationActivityText(pending));
   }
+  // Between the tools it starts, a call the agent made names what is running.
+  const openCall = run ? findLastOpenToolCall(session.timeline) : undefined;
+  if (openCall) return truncateTerminalLine(singleLine(openCall.title), maxCodePoints);
   if (!run) {
     if (session.pendingInterrupt?.payload.kind === 'human_review') {
       return 'waiting for review';
@@ -272,6 +269,15 @@ function formatElapsed(startedAt: number | undefined, now: number) {
 
 function appendElapsed(activity: string, suffix: string, activityWidth: number) {
   return `${truncateTerminalLine(activity, activityWidth)}${suffix}`;
+}
+
+function findLastOpenToolCall(timeline: readonly AgentTimelineEntry[]) {
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const entry = timeline[index];
+    const call = entry?.type === 'message' ? entry.toolCalls?.filter(c => c.status === 'running').at(-1) : undefined;
+    if (call) return call;
+  }
+  return undefined;
 }
 
 function findLastPendingEntry(timeline: readonly AgentTimelineEntry[]) {

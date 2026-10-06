@@ -1,5 +1,7 @@
 export { readCapabilityExecutions, readCapabilityExecutionCall, readDelegationPreview } from './agent/orchestrator/executionMessages';
 export type { DelegationPreview } from './agent/orchestrator/executionMessages';
+export { readMainToolCallMessages } from './agent/orchestrator/mainToolCalls';
+export type { MainToolCall, MainToolCallMessage, MainToolCallStatus } from './agent/orchestrator/mainToolCalls';
 
 export type {
   AgentModels,

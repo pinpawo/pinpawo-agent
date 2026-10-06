@@ -1,9 +1,12 @@
 import { readFinalMessageText } from '../agent/agentStreamEvents';
-import { AIMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messages';
 import {
   GUARD_DECISION_EVENT,
   isOrchestratorInternalAiStreamNode,
   readDelegationPreview,
+  readMainToolCallMessages,
+  type MainToolCall,
+  type RunSupervisorState,
   SUBAGENT_GUARD_DECISION_EVENT,
   type GuardDecisionRecord,
 } from '@pinpawo/pet-agent';
@@ -74,6 +77,10 @@ export type RootStreamChatEvent =
   | { type: 'runtime.custom'; streamSequence: number; name: string; data: unknown }
   /** A Supervisor delegation Root just committed, before its Capability runs. */
   | ({ type: 'delegation.started' } & RootStreamDelegation)
+  /** Root committed a main message that calls tools; the run continues. */
+  | { type: 'tool_calls.message'; messageId: string; text: string; toolCalls: Array<Omit<MainToolCall, 'status'>> }
+  /** A main tool call announced in this stream, or open when it began, reached its outcome. */
+  | { type: 'tool_call.settled'; messageId: string; callId: string; status: Exclude<MainToolCall['status'], 'running'> }
   /** Root state snapshot (drives final-messages tracking). */
   | { type: 'values'; values: Record<string, unknown> }
   /** The run paused on an interrupt (human review etc.). */
@@ -271,6 +278,11 @@ export function readRootStreamChatEvent(
       if (!data) {
         return null;
       }
+      // Root's own tool node runs the calls of main messages, which reach the
+      // conversation as those messages rather than as operations.
+      if (namespace.length === 1) {
+        return null;
+      }
       // Supervisor file exploration tools are framework internals, not Capability
       // Toolkit activity exposed to the chat surface.
       if (isInternalOrchestratorNamespace(namespace)) {
@@ -342,6 +354,9 @@ export async function* adaptRootStream(
   const state: RootStreamAdapterState = new Map();
   let assistantReply = '';
   const seenMessages = new Set<string>();
+  // Main tool calls whose outcome this stream still owes: announced here, or
+  // already open in the first snapshot (a run resumed after a review).
+  const openToolCalls = new Map<string, string>();
   let receivedInitialValues = false;
   for await (const event of protocolEvents) {
     const chatEvent = readRootStreamChatEvent(event, state, options);
@@ -375,6 +390,7 @@ export async function* adaptRootStream(
           assistantReply += text;
         }
       }
+      yield* projectMainToolCalls(chatEvent.values, messages, seenMessages, openToolCalls, receivedInitialValues);
       for (const message of messages) {
         const id = readRecord(message)?.id;
         if (typeof id !== 'string' || seenMessages.has(id)) continue;
@@ -390,5 +406,31 @@ export async function* adaptRootStream(
       receivedInitialValues = true;
     }
     yield chatEvent;
+  }
+}
+
+function* projectMainToolCalls(
+  values: Record<string, unknown>,
+  messages: readonly unknown[],
+  seenMessages: ReadonlySet<string>,
+  openToolCalls: Map<string, string>,
+  announce: boolean,
+): Generator<RootStreamChatEvent> {
+  const committed = messages.filter((message): message is BaseMessage => AIMessage.isInstance(message) || ToolMessage.isInstance(message));
+  const runSupervisorState = readRecord(values.runSupervisorState) as RunSupervisorState | null;
+  for (const message of readMainToolCallMessages(committed, { runSupervisorState })) {
+    const current = message.runId !== null && message.runId === values.runId;
+    if (announce && current && !seenMessages.has(message.messageId)) {
+      yield { type: 'tool_calls.message', messageId: message.messageId, text: message.text,
+        toolCalls: message.toolCalls.map(({ status: _status, ...call }) => call) };
+      for (const call of message.toolCalls) openToolCalls.set(call.id, message.messageId);
+    } else if (!announce && current) {
+      for (const call of message.toolCalls) if (call.status === 'running') openToolCalls.set(call.id, message.messageId);
+    }
+    for (const call of message.toolCalls) {
+      if (call.status === 'running' || openToolCalls.get(call.id) !== message.messageId) continue;
+      openToolCalls.delete(call.id);
+      yield { type: 'tool_call.settled', messageId: message.messageId, callId: call.id, status: call.status };
+    }
   }
 }

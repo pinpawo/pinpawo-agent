@@ -13,7 +13,7 @@ import {
 } from './transcriptProjection';
 import { createLocalChatHumanMessage } from '../agent/chatMessageInput';
 
-test('readTuiCheckpointMessages keeps visible conversation without replaying Capability deliveries', () => {
+test('readTuiCheckpointMessages keeps visible conversation and delegations without replaying Capability deliveries', () => {
   const userMessage = stampAgentMessageCreatedAt(
     new HumanMessage(' hello '),
     '2026-06-01T01:00:00.000Z',
@@ -36,6 +36,8 @@ test('readTuiCheckpointMessages keeps visible conversation without replaying Cap
 
   assert.deepEqual(messages, [
     { role: 'user', text: 'hello', createdAt: '2026-06-01T01:00:00.000Z' },
+    { role: 'assistant', text: '', createdAt: '2026-06-01T01:00:00.000Z', toolCalls: [{ id: 'call:delivery-1',
+      name: 'delegate_capability', title: 'Close issue', input: 'Fixture plan', status: 'returned' }] },
     { role: 'assistant', text: 'assistant reply', createdAt: '2026-06-01T01:00:01.000Z' },
   ]);
 });

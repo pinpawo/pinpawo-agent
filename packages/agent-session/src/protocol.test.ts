@@ -338,3 +338,24 @@ test('interrupt.resume requires an interrupt id', () => {
     value: { action: 'continue' },
   }), null);
 });
+
+test('main tool-call messages and their settlements round-trip; malformed ones are refused', () => {
+  const event = (body: Record<string, unknown>) => ({ type: 'event' as const, requestId: 'r', event: { requestId: 'r', ...body } });
+  const announced = event({ type: 'message.tool_calls', messageId: 'm', text: '',
+    toolCalls: [{ id: 'c', name: 'delegate_capability', title: 'Inspect B.', input: 'Look at B.' }] });
+  assert.deepEqual(parseAgentServerMessage(announced), announced);
+  const settled = event({ type: 'tool_call.settled', messageId: 'm', callId: 'c', status: 'returned' });
+  assert.deepEqual(parseAgentServerMessage(settled), settled);
+  for (const bad of [
+    event({ type: 'message.tool_calls', messageId: 'm', text: '', toolCalls: [] }),
+    event({ type: 'message.tool_calls', messageId: 'm', text: '', toolCalls: [{ id: 'c', name: 'x', title: 'x', status: 'running' }] }),
+    event({ type: 'tool_call.settled', messageId: 'm', callId: 'c', status: 'running' }),
+    event({ type: 'tool_call.settled', messageId: 'm', callId: 'c', status: 'done' }),
+  ]) assert.equal(parseAgentServerMessage(bad), null);
+  const snapshot = createAgentSessionSnapshot({ sessionId: 's', kind: 'chat', activeRun: null, pendingInterrupt: null, timeline: [{
+    id: 'e', type: 'message', role: 'assistant', text: '', status: 'completed',
+    toolCalls: [{ id: 'c', name: 'delegate_capability', title: 'Inspect B.', status: 'interrupted' }],
+  }] });
+  const result = { type: 'session.snapshot.result' as const, requestId: 'q', snapshot };
+  assert.deepEqual(parseAgentServerMessage(result), result);
+});

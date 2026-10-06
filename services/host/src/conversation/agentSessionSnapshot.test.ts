@@ -155,3 +155,20 @@ test('buildHostSessionSnapshot preserves an in-flight running request', () => {
   assert.equal(snapshot.session.pendingInterrupt, null);
   assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
 });
+
+test('buildHostSessionSnapshot keeps only the live run\'s unanswered tool call open', () => {
+  const call = (id: string) => ({ id, name: 'delegate_capability', title: id, status: 'running' as const });
+  const messages = [
+    { role: 'assistant' as const, text: '', toolCalls: [call('earlier')] },
+    { role: 'assistant' as const, text: 'Starting.', toolCalls: [call('latest')] },
+  ];
+  const deps = { petId: 'pet-a', ...createTestModelServerDeps(), runtimeConfig: { workdir: '/tmp/work',
+    stateRoot: '/tmp/work/.pinpawo' } } as unknown as ServerDeps;
+  const statuses = (activeRun: Parameters<typeof buildHostSessionSnapshot>[0]['activeRun']) => {
+    const snapshot = buildHostSessionSnapshot({ sessionId: 'chat:pet-a', kind: 'chat', messages, deps, activeRun });
+    assert.ok(parseAgentSessionSnapshot(JSON.parse(JSON.stringify(snapshot))));
+    return snapshot.session.timeline.flatMap(entry => entry.type === 'message' ? entry.toolCalls?.map(c => c.status) ?? [] : []);
+  };
+  assert.deepEqual(statuses(null), ['interrupted', 'interrupted']);
+  assert.deepEqual(statuses({ requestId: 'r', state: 'running', activity: 'using_tool', startedAt: 1 }), ['interrupted', 'running']);
+});

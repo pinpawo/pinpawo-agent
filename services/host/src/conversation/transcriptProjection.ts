@@ -4,10 +4,11 @@ import {
   readCapabilityExecutions,
   readAgentMessageCreatedAt,
   readLatestProviderInputTokens,
+  readMainToolCallMessages,
   readMessagesTokenUsage,
   type TokenUsageSnapshot,
 } from '@pinpawo/pet-agent';
-import type { AgentInputModality, AgentResultReference } from '@pinpawo/agent-session';
+import type { AgentInputModality, AgentMessageToolCall, AgentResultReference } from '@pinpawo/agent-session';
 import { readLocalChatDisplayText } from './chatDisplayText';
 import { readFinalMessageText } from '../agent/agentStreamEvents';
 
@@ -23,6 +24,8 @@ import { readFinalMessageText } from '../agent/agentStreamEvents';
 export type TuiCheckpointMessage = {
   role: 'user' | 'assistant';
   resultReferences?: AgentResultReference[];
+  /** Tools Root called in this main message; `running` means no result is checkpointed yet. */
+  toolCalls?: AgentMessageToolCall[];
   text: string;
   createdAt?: string;
 };
@@ -33,11 +36,14 @@ export type TuiCheckpointTokenUsage = (TokenUsageSnapshot & { scope: 'session' }
 
 export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpointMessage[] {
   // Tool results remain execution evidence; never replay deliveries as chat messages.
+  const toolCallsByMessage = new Map(readMainToolCallMessages(messages)
+    .map(({ messageId, toolCalls }) => [messageId, toolCalls]));
   return messages.flatMap<TuiCheckpointMessage>((message) => {
     const source = readTuiCheckpointMessageSource(message);
     if (!source) return [];
     const text = readLocalChatDisplayText(message) ?? readFinalMessageText(message);
-    if (!text) {
+    const toolCalls = source.role === 'assistant' && message.id ? toolCallsByMessage.get(message.id) : undefined;
+    if (!text && !toolCalls) {
       return [];
     }
     const createdAt = readAgentMessageCreatedAt(message);
@@ -47,6 +53,7 @@ export function readTuiCheckpointMessages(messages: BaseMessage[]): TuiCheckpoin
       ...source,
       text,
       ...(resultReferences.length ? { resultReferences } : {}),
+      ...(toolCalls ? { toolCalls } : {}),
       ...(createdAt ? { createdAt } : {}),
     }];
   });

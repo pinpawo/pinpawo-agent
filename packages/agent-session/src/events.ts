@@ -1,13 +1,15 @@
 import type {
   TokenUsageSnapshot,
 } from '@pinpawo/agent-contracts';
-import type { AgentPlan, AgentResultReference } from './domain';
+import type { AgentMessageToolCall, AgentPlan, AgentResultReference, AgentToolCallStatus } from './domain';
 import type { PendingInterruptProjection } from './review';
 
 export type AgentRuntimeEvent =
   | AgentRunStartedEvent
   | AgentRunInterruptedEvent
   | AgentAssistantMessageEvent
+  | AgentToolCallMessageEvent
+  | AgentToolCallSettledEvent
   | AgentSubagentMessageCompletedEvent
   | AgentOperationEvent
   | AgentPlanUpdatedEvent
@@ -74,6 +76,28 @@ export type AgentMessageCompletedEvent = {
   role: 'assistant';
   text: string;
   usage?: TokenUsageSnapshot;
+};
+
+/**
+ * The main agent committed a message that calls tools. Unlike
+ * `message.completed` it does not end the run: the calls are about to execute.
+ */
+export type AgentToolCallMessageEvent = {
+  type: 'message.tool_calls';
+  requestId: string;
+  /** The committed message's id; settlements refer to it. */
+  messageId: string;
+  text: string;
+  toolCalls: Array<Omit<AgentMessageToolCall, 'status'>>;
+};
+
+/** One of a message's tool calls reached its outcome. */
+export type AgentToolCallSettledEvent = {
+  type: 'tool_call.settled';
+  requestId: string;
+  messageId: string;
+  callId: string;
+  status: Exclude<AgentToolCallStatus, 'running'>;
 };
 
 export type AgentOperationPhase =

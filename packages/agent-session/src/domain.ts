@@ -18,11 +18,32 @@ export type AgentResultReference = {
   text: string;
 };
 
+export type AgentToolCallStatus =
+  | 'running'
+  | 'returned'
+  | 'missing'
+  | 'declined'
+  | 'failed'
+  | 'interrupted';
+
+/** A tool the main agent called in this message, shown as part of what it said. */
+export type AgentMessageToolCall = {
+  id: string;
+  name: string;
+  /** One display line, such as the plan item a delegation carries out. */
+  title: string;
+  /** Display detail, such as a delegation's briefing. */
+  input?: string;
+  status: AgentToolCallStatus;
+};
+
 export type AgentMessageEntry = {
   id: string;
   type: 'message';
   role: 'user' | 'assistant' | 'system' | 'subagent';
   text: string;
+  /** Assistant only. A message that calls tools may have no text. */
+  toolCalls?: AgentMessageToolCall[];
   resultReferences?: AgentResultReference[];
   status: 'streaming' | 'completed';
   requestId?: string;

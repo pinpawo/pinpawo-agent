@@ -45,67 +45,46 @@ const assistant: AgentTimelineEntry = {
   status: 'completed',
 };
 
-test('live delegation shows only its objective and disappears after the run ends', () => {
+test('a running tool call the agent made names the live activity until the run ends', () => {
   const session: AgentSession = {
     sessionId: 'session', kind: 'chat', pendingInterrupt: null,
     activeRun: { requestId: 'request', state: 'running', activity: 'using_tool' },
-    currentPlan: { items: [{ id: 'task', capability: 'general', task: 'Verify contract extraction', status: 'active' }] },
-    timeline: [{ ...operation, kind: 'runtime.delegate_capability', title: 'delegate_capability',
-      raw: { input: { briefing: 'Long private execution instructions' } } }],
+    timeline: [{ ...assistant, text: '', toolCalls: [{ id: 'call', name: 'delegate_capability',
+      title: 'Verify contract extraction', input: 'Long private execution instructions', status: 'running' }] }],
   };
   assert.equal(formatLiveSession(session), 'Verify contract extraction');
   assert.equal(formatLiveSession({ ...session, activeRun: null }), 'idle');
-  assert.equal(formatLiveSession({ ...session, currentPlan: null }), 'using tool');
   assert.equal(formatLiveSession({ ...session, timeline: [...session.timeline, {
     ...operation, id: 'inner', title: 'Read file',
   }] }), 'Read file');
+  // The call is work in progress, never the reply.
+  assert.equal(latestCompletedAssistantReply(session), null);
 });
 
-test('a delegation is headed by its task and keeps its failure reason', () => {
-  const delegation: AgentTimelineEntry = {
-    ...operation,
-    id: 'delegation',
-    operationKey: 'delegation',
-    kind: 'runtime.delegate_capability',
-    title: 'delegate_capability',
-    raw: { input: { briefing: '读取 issue #826\n并定位相关代码' } },
-  };
-  // The heading names the task, on one row, instead of the tool call.
-  const header = formatTimelineEntry(delegation, { width: 80 });
-  assert.match(header, /任务 读取 issue #826 并定位相关代码/);
-  assert.doesNotMatch(header, /delegate_capability/);
-  assert.equal(header.split('\n').length, 1);
+test('a message\'s tool calls head their work and commit before they return', () => {
+  const call = { id: 'call', name: 'delegate_capability', title: '读取 issue #826\n并定位相关代码', input: 'briefing', status: 'running' as const };
+  const message: AgentTimelineEntry = { ...assistant, id: 'dispatch', text: '先看 issue。', toolCalls: [call] };
+  const lines = formatTimelineEntry(message, { width: 80 }).split('\n');
+  assert.deepEqual(lines, ['| 先看 issue。', '▸ 读取 issue #826 并定位相关代码']);
+  assert.doesNotMatch(lines.join('\n'), /delegate_capability|briefing/);
+  assert.equal(formatTimelineEntry({ ...message, text: '' }), '▸ 读取 issue #826 并定位相关代码');
+  assert.match(formatTimelineEntry({ ...message, toolCalls: [{ ...call, status: 'declined' }] }), /（未通过）/);
 
-  // A failed delegation still reports why: the briefing replaces the payload
-  // rows, never the output ones.
-  const failed = formatTimelineEntry({
-    ...delegation,
-    phase: 'failed',
-    raw: { input: { briefing: '读取 issue' }, error: 'capability crashed' },
-  }, { width: 80 });
-  assert.match(failed, /capability crashed/);
-
-  // A running delegation has not finished, but its committed heading — the
-  // task alone — is already final, so the transcript may commit it and the
-  // finished tools behind it while the capability keeps working.
-  assert.equal(isSettledTimelineEntry(delegation), false);
+  // Its calls still run, but their committed form — the titles alone — is
+  // final, so the transcript commits it and the finished tools behind it.
   assert.equal(
     countSettledTimelinePrefix([
       user,
-      delegation,
+      message,
       { ...operation, id: 'done', operationKey: 'done', phase: 'completed' },
       operation,
     ]),
     3,
   );
-  // Its heading carries no status or elapsed time while it runs, which is what
-  // makes those rows safe to commit.
-  assert.doesNotMatch(header, /进行中|完成|失败/);
-  // Settling must not rewrite what was committed, or the block is emitted a
-  // second time when the delegation returns.
+  // A call settling must not rewrite what was committed.
   assert.equal(
-    timelineFingerprint(delegation),
-    timelineFingerprint({ ...delegation, phase: 'completed' }),
+    timelineFingerprint(message),
+    timelineFingerprint({ ...message, toolCalls: [{ ...call, status: 'returned' }] }),
   );
 });
 

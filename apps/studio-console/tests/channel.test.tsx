@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readChannelPages, executionLabel, channelPetIdentity, channelMessageIdentity, channelMessageExecution,
   channelExecutionOutputs, channelMessagesGroup, channelQuote, channelMessageInput, channelReplyRecipientId, channelMessageExecutions, channelMentionLabel, type ChannelExecution, type ChannelMessage } from '../src/channelData';
 import { ChannelTimeline, ChannelExecutionHistory } from '../src/ChannelPanel';
+import { ChannelMessageMarkdown } from '../src/ChannelConversation';
 import { ChannelDispatchQueues } from '../src/ChannelDispatchQueues';
 
 const message: ChannelMessage = { kind: 'message', channelId: 'a', sequence: 2, messageId: 'm', body: 'Full public delivery.\n\nMissing work remains.\n\n```ts\nconst evidence = 42;\n```',
@@ -154,4 +155,17 @@ test('unfinished observations become unknown after disconnection or restart; wai
   ]} />);
   assert.ok(markup.includes('Provider returned 403.')); assert.ok(markup.includes('disk unavailable'));
   assert.ok(markup.includes('worker:same')); assert.ok(markup.includes('not the current approval state'));
+});
+
+
+test('message reader shares safe Markdown and participant identity rendering with the Timeline', () => {
+  const markup = renderToStaticMarkup(<ChannelMessageMarkdown body={'# Evidence\n\n[Analyst](participant:pet:worker)\n\n| Item | Value |\n| --- | --- |\n| test | passed |\n\n```ts\nconst n = 42;\n```\n\n[unsafe](javascript:alert(1))\n\n<script>bad()</script>'}
+    participants={[{ participantId: 'pet:worker', kind: 'pet', id: 'worker', label: 'Analyst' }]} pets={[]} />);
+  assert.ok(markup.includes('<h1>Evidence</h1>'));
+  assert.ok(markup.includes('<table>'));
+  assert.ok(markup.includes('@Analyst'));
+  assert.ok(markup.includes('const n = 42;'));
+  assert.ok(!markup.includes('href="participant:'));
+  assert.ok(!markup.includes('href="javascript:'));
+  assert.ok(!markup.includes('<script>'));
 });

@@ -281,3 +281,22 @@ footer { display: flex; align-items: center; padding: 0 22px; color: #849496; bo
 .channel-queue li { font-size: 12px; padding: 4px 0; }
 .channel-queue li time { display: block; opacity: .65; font-size: 11px; }
 .channel-send-error { margin: 12px 24px; }
+
+/* Native modal top layer keeps the Console inert without changing Timeline layout. */
+.channel-message-expand { display: block; height: 24px; padding: 0; border: 0; color: #8bbdbc; background: transparent; font-size: 11px; }
+.channel-message-expand:hover { color: #c0e6e2; text-decoration: underline; }
+.channel-message-viewer { position: fixed; inset: 0; width: 100%; max-width: none; height: 100%; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; color: #c2d0cc; background: #11191b; }
+.channel-message-viewer[open] { display: flex; flex-direction: column; }
+.channel-message-viewer::backdrop { background: rgba(3, 7, 8, .8); }
+.channel-message-viewer-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid #334246; }
+.channel-message-viewer-head > div { min-width: 0; }
+.channel-message-viewer-head h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.channel-message-viewer-head p { margin: 4px 0 0; color: #819594; font-size: 11px; overflow-wrap: anywhere; }
+.channel-message-viewer-head button { flex: none; }
+.channel-message-viewer-scroll { flex: 1; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 20px; }
+.channel-message-viewer-scroll > .channel-message-body { max-width: 1000px; margin: 0 auto; }
+.channel-message-viewer-scroll img, .channel-message-body img { max-width: 100%; height: auto; }
+@media (max-width: 700px), (max-height: 400px) {
+  .channel-message-viewer-head { padding: 8px 12px; }
+  .channel-message-viewer-scroll { padding: 12px; }
+}

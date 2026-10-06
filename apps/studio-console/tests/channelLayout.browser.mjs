@@ -67,7 +67,7 @@ try {
   await execute('Summarize public evidence.');
   await until(async () => (await context()).history.entries.some(item => item.source?.petId === 'alpha'), 'public output');
   for (let i = 0; i < 18; i++) await note('Progress note ' + i + '. Evidence remains available for the next round.');
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.CHANNEL_BROWSER_CHANNEL ? { channel: process.env.CHANNEL_BROWSER_CHANNEL } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
   const retiredRequests = [];
@@ -105,6 +105,75 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1), true, 'document does not scroll');
   };
   await fits();
+  const shortWindowChannel = await api('/channels', { title: 'Short-window second Channel', goal: 'Verify independent scrolling.', scope: 'Layout fixture only.' });
+  for (let i = 0; i < 20; i++) await api('/channels/messages', { channelId: shortWindowChannel.channelId, body: 'Second Channel evidence ' + i + '. ' + 'Review observation. '.repeat(20) });
+  const layoutEvidence = [];
+  for (const target of [channel, shortWindowChannel]) {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const targetButton = page.locator('.channel-list button').filter({ hasText: target.title });
+    if (await targetButton.getAttribute('aria-current') !== 'page') await targetButton.click();
+    await page.getByRole('heading', { name: target.title, exact: true }).waitFor();
+    await page.locator('.channel-timeline-scroll').waitFor();
+    await input.waitFor();
+    for (const height of [833, 400, 300]) {
+      await page.setViewportSize({ width: 1440, height });
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const geometry = await page.evaluate(() => ({ height: innerHeight, documentHeight: document.documentElement.scrollHeight,
+        timelineHeight: document.querySelector('.channel-timeline-scroll').clientHeight,
+        contentHeight: document.querySelector('.channel-content').clientHeight,
+        contentScrollHeight: document.querySelector('.channel-content').scrollHeight }));
+      assert.ok(geometry.timelineHeight >= 180, 'messages retain usable height');
+      assert.ok(geometry.contentScrollHeight <= geometry.contentHeight + 1, 'outer content does not clip its children');
+      assert.equal(geometry.documentHeight > height, height < 640, 'short window gains document scrolling');
+      const timeline = page.locator('.channel-timeline-scroll');
+      await timeline.evaluate(node => { node.scrollTop = 0; });
+      await timeline.hover();
+      await page.waitForTimeout(250); // Let Chromium's preceding wheel/auto-scroll settle.
+      const windowBeforeTimelineWheel = await page.evaluate(() => scrollY);
+      await page.mouse.wheel(0, 250);
+      await until(() => timeline.evaluate(node => node.scrollTop > 0), 'short-window timeline wheel');
+      await page.waitForTimeout(250);
+      assert.equal(await page.evaluate(() => scrollY), windowBeforeTimelineWheel, 'timeline scrolling remains independent');
+      for (const selector of ['.channel-list', '.channel-activity-scroll']) {
+        const column = page.locator(selector);
+        if (await column.evaluate(node => node.scrollHeight > node.clientHeight)) {
+          await column.evaluate(node => { node.scrollTop = 0; });
+          await column.hover();
+          await page.waitForTimeout(250);
+          const windowBeforeColumnWheel = await page.evaluate(() => scrollY);
+          await page.mouse.wheel(0, 250);
+          await until(() => column.evaluate(node => node.scrollTop > 0), selector + ' independent wheel');
+          await page.waitForTimeout(250);
+          assert.equal(await page.evaluate(() => scrollY), windowBeforeColumnWheel, selector + ' wheel does not move document');
+        }
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.mouse.move(700, 135);
+      await page.mouse.wheel(0, 900);
+      if (height < 640) await until(() => page.evaluate(() => scrollY > 0), 'document wheel');
+      await page.waitForTimeout(250);
+      await input.scrollIntoViewIfNeeded();
+      const composer = page.locator('.channel-composer');
+      await page.getByRole('button', { name: 'Send message', exact: true }).scrollIntoViewIfNeeded();
+      const buttonBox = await page.getByRole('button', { name: 'Send message', exact: true }).boundingBox();
+      assert.ok(buttonBox && buttonBox.y >= 0 && buttonBox.y + buttonBox.height <= height, 'send control remains reachable');
+      assert.equal(await composer.evaluate(node => {
+        const controls = node.querySelector('.channel-composer-controls').getBoundingClientRect();
+        const hint = node.querySelector('.channel-composer-hint').getBoundingClientRect();
+        return controls.bottom <= hint.top + 1;
+      }), true, 'composer controls and hint do not overlap');
+      layoutEvidence.push({ channel: target.title, ...geometry });
+      await page.screenshot({ path: resolve(screenshots, 'short-window-' + target.channelId + '-' + height + '.png'), fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 720, height: 416 });
+  await page.getByRole('button', { name: 'Send message', exact: true }).scrollIntoViewIfNeeded();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight), '200% zoom equivalent CSS viewport gains document scrolling');
+  await page.screenshot({ path: resolve(screenshots, 'short-window-200-percent-viewport.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.locator('.channel-list button').filter({ hasText: channel.title }).click();
+  console.log(JSON.stringify({ shortWindowLayout: layoutEvidence }));
   await until(() => page.locator('.channel-timeline-scroll').evaluate(node => node.scrollTop > 0), 'initial latest scroll');
   await page.getByRole('button', { name: 'Reply to retired-pet', exact: true }).click();
   assert.equal(await page.getByLabel('Channel recipient').inputValue(), '', 'removed author has no guessed recipient');
@@ -263,7 +332,7 @@ try {
     coverage: ['long Markdown and internal code scrolling', 'fixed composer and independent timeline', 'SSE preserves older reading position',
       'duplicate Pet names and removed Pet', 'real request/output association', 'reply cancel retains draft and focus', 'one-level quote location',
       'copy stored message ID', 'global navigation retains reading position', 'create modal keyboard focus', 'collapsible activity', '900/390/320px drawers and focus/Escape/backdrop',
-      'drawer execution/output focus', '401 retains draft without retry', 'Channel and Host switch clear history/reply/draft/target', '404 plugin unavailable',
+      'drawer execution/output focus', '833/400/300px heights across two Channels with document and column wheels', 'reachable composer controls without overlap', '200% zoom equivalent CSS viewport', '401 retains draft without retry', 'Channel and Host switch clear history/reply/draft/target', '404 plugin unavailable',
       'Channel default and navigation without Kanban', 'no Kanban API requests across pages/reload/Host switch', 'standalone dispatch duplicate guard and Channel isolation'] }));
 } finally {
   await browser?.close();

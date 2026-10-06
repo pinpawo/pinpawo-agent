@@ -25,7 +25,7 @@ nav { display: flex; align-items: end; padding: 0 18px; border-bottom: 1px solid
 nav button { height: 41px; min-width: 110px; color: #819194; border: 0; border-bottom: 2px solid transparent; background: transparent; text-transform: uppercase; font: 11px/1 ui-monospace, monospace; letter-spacing: .08em; }
 nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .content { min-height: 0; overflow: auto; padding: 18px 22px 40px; }
-.channel-shell { height: 100dvh; min-height: 0; }
+.channel-shell { height: 100dvh; min-height: 640px; }
 .channel-content { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .channel-page { flex: 1; min-height: 0; }
 .channel-page[hidden], .channel-navigation[hidden], .channel-activity[hidden] { display: none; }
@@ -54,7 +54,7 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .channel-panel-toggle { flex: none; height: 30px; border-color: #334648; background: transparent; font-size: 12px; }
 .channel-panel-toggle span { margin-left: 5px; color: #789092; }
 .channel-connection-note { flex: none; padding: 9px 22px; color: #c5b18c; background: #29251b; font-size: 11px; line-height: 1.45; }
-.channel-timeline-region { position: relative; flex: 1; min-height: 0; }
+.channel-timeline-region { position: relative; flex: 1; min-height: 180px; }
 .channel-timeline-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; padding: 8px 6px 20px; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .channel-timeline { min-width: 0; }
 .channel-date { display: flex; align-items: center; gap: 14px; margin: 16px 16px 10px; color: #92a6a1; font-size: 11px; }
@@ -114,8 +114,8 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .channel-revision p { white-space: pre-wrap; line-height: 1.5; }
 .channel-artifact { margin-top: 8px; color: #9fb8ae; overflow-wrap: anywhere; font-size: 11px; }
 .channel-jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); height: 28px; color: #c4e5df; border-color: #4a7d7b; border-radius: 16px; background: #193234; box-shadow: 0 3px 14px #0005; font-size: 11px; }
-.channel-composer { flex: none; display: grid; gap: 8px; max-height: 42vh; overflow-y: auto; margin: 0; padding: 12px 22px 10px; border-top: 1px solid #2a3a3b; background: #11191b; }
-.channel-composer .chat-input { min-height: 0; grid-template-rows: auto auto auto; }
+.channel-composer { flex: none; display: grid; grid-auto-rows: min-content; gap: 8px; max-height: 42vh; overflow-y: auto; margin: 0; padding: 12px 22px 10px; border-top: 1px solid #2a3a3b; background: #11191b; }
+.channel-composer .chat-input { min-height: min-content; grid-template-rows: auto auto auto; }
 .channel-composer .chat-input > label { padding-top: 10px; }
 .channel-composer .chat-input textarea { min-height: 74px; max-height: 170px; height: 74px; padding-block: 8px; font-size: 13px; }
 .channel-composer-controls { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 10px 12px; border-top: 1px solid #2c3c3d; }

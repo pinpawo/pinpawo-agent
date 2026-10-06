@@ -47,8 +47,8 @@ Context is supplied again on every invocation, including checkpoint resume. It
 is not restored from conversation history, and the generic agent runtime does not
 infer a directory from process globals.
 
-Workdir is a path-resolution base, not a filesystem sandbox. The local bash,
-project-inspection and Git Toolkit bindings resolve supported relative paths and
+Workdir is a path-resolution base, not a filesystem sandbox. The files, shell,
+web, git, github and project-inspection Toolkit bindings resolve supported relative paths and
 relative or omitted `cwd` against the execution workdir. Absolute paths remain
 absolute. These bindings do not change the process-wide cwd; independent Hosts
 can therefore keep separate execution scopes in one process. The implementation

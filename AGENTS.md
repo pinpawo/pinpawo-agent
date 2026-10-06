@@ -8,14 +8,7 @@
 - `services/host/` contains the local CLI/TUI, local server, plugin loading, browser tools, and local config.
 - `tests/studio-e2e/` contains cross-package Studio acceptance tests; concrete Plugins must remain independent of each other.
 - `toolkits/` contains concrete Agent Toolkits and Toolkit-owned runtimes.
-- `tools/agent-macos/` contains the macOS desktop companion.
 - `docs/` contains public architecture and capability design notes.
-
-## macOS Companion Status
-
-- All functionality under `tools/agent-macos/` is suspended until the user explicitly reactivates it.
-- Do not treat the macOS companion as an active consumer, compatibility constraint, migration target, or acceptance-test scope for feature work and architectural refactors.
-- Refactors may change or remove interfaces used by the macOS companion without preserving or updating its integration. Do not proactively modify or test macOS companion code unless the user explicitly requests it.
 
 ## Commands
 
@@ -30,7 +23,7 @@
 - TypeScript uses 2-space indentation and semicolons.
 - Prefer single quotes in TS/TSX imports and strings.
 - Keep runtime-independent agent logic in `packages/pet-agent/`.
-- Keep local machine, CLI, browser, and desktop integration in `services/host/` or `tools/agent-macos/`.
+- Keep local machine, CLI, browser, and desktop integration in `services/host/`.
 
 ## Testing
 

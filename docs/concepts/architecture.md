@@ -32,7 +32,7 @@ systems:
 
 ```mermaid
 flowchart TB
-  U["User, TUI, desktop app, or stdio client"] --> H["Local Host\nservices/host"]
+  U["User, TUI, Console, or stdio client"] --> H["Local Host\nservices/host"]
   H --> O["Pet-agent orchestrator\npackages/pet-agent"]
   H --> S["Session projection\npackages/agent-session"]
   O --> C["Capability lane"]
@@ -67,7 +67,6 @@ layer. See the accepted
 | Local host | `services/host/` | CLI, configuration, runtime composition, and local transports. |
 | Terminal UI | `services/tui/` | OpenTUI client and packaged distribution. |
 | Tool integrations | `toolkits/` | The Browser Toolkit plus Plugin-defined Toolkits such as `plugins/channel/`, including their runtime lifecycles. |
-| Desktop companion | `tools/agent-macos/` | macOS supervision and configuration UI. |
 
 ## Request lifecycle
 

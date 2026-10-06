@@ -1,7 +1,7 @@
 # Host Event Pipeline
 
 This document describes how tool-call activity inside `pet-agent` becomes
-`operation` events that reach a TUI or the macOS companion.
+`operation` events that reach a TUI.
 
 Egress is single and local. The hosted-app relay was removed along with its
 `audience`/redaction split: every peer reaches this host over 127.0.0.1 and
@@ -25,13 +25,11 @@ flowchart LR
 
   subgraph trusted[Local clients]
     TUI[TUI]
-    MAC[macOS companion]
   end
 
   LG --> NORM --> TRK --> REG
   REG --> LOCOUT
   LOCOUT -- "raw preserved" --> TUI
-  LOCOUT -- "raw preserved" --> MAC
 ```
 
 One physical egress point exists:
@@ -74,7 +72,7 @@ sequenceDiagram
   participant Track as ToolOperationTracker
   participant Act as operationActivityState
   participant Send as sendHostEvent
-  participant Local as TUI / companion
+  participant Local as TUI
 
   Graph->>Norm: on_tool_start { name, input, toolCallId }
   Norm->>Track: accept(payload)
@@ -98,7 +96,7 @@ that didn't naturally complete; they go through the same egress.
 - `localServerOperationEvents.ts` — pretty-prints `raw.input/error` into the
   host log (truncated). Lives inside the agent process; doesn't cross
   any wire.
-- TUI / companion clients receive `event.operation.raw` through the local WS
+- TUI clients receive `event.operation.raw` through the local WS
   parser (`parseHostServerMessage`) and may use it for diff/inspection
   rendering. UIs that don't need raw can simply ignore it.
 

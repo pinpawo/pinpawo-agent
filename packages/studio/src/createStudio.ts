@@ -94,7 +94,6 @@ export function prepareStudio(input: CreateStudioInput): PreparedStudio {
           ...(event.scope ? { scope: { ...event.scope } } : {}),
           ...(event.pendingInterrupt ? { pendingInterrupt: event.pendingInterrupt } : {}),
           ...(event.reply !== undefined ? { reply: event.reply } : {}),
-          ...(event.progress ? { progress: { ...event.progress } } : {}),
           ...(event.error ? { error: event.error } : {}),
         },
       });

@@ -56,19 +56,7 @@ export type PetDispatchLifecycleState =
   | 'waiting'
   | 'completed'
   | 'interrupted'
-  | 'failed'
-  /** Non-terminal: the running dispatch handed one plan item to a Capability. */
-  | 'progress';
-
-/** A Supervisor delegation announced before its Capability runs. */
-export type PetDispatchProgress = {
-  /** The committed delegation message; stable across observers and replays. */
-  messageId: string;
-  planItemId: string;
-  capability: string;
-  objective: string;
-  briefing: string;
-};
+  | 'failed';
 
 /**
  * Observation-only lifecycle for one admitted dispatch. This is not an Agent
@@ -82,8 +70,6 @@ export type PetDispatchLifecycleEvent = {
   error?: string;
   sessionId?: string;
   reply?: string;
-  /** Present only on `progress`, which never changes the dispatch's state. */
-  progress?: PetDispatchProgress;
   scope?: PetInvocationScope;
   pendingInterrupt?: PendingInterruptProjection;
 };

@@ -93,7 +93,7 @@ for (const decision of ['reject', 'cancel'] as const) {
       pets: [{ registration: { petId: 'one', name: 'One' }, dispatch: host.resident.dispatch }],
     });
     const outputs = (id: string) => channel.service.readHistory(id).entries
-      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && !!entry.source && !entry.progress);
+      .filter((entry): entry is ChannelMessage => entry.kind === 'message' && !!entry.source);
     try {
       const id = channel.service.createChannel({ title: 'Goal', goal: 'Inspect.', scope: 'Round' }, { kind: 'human', id: 'owner' }).channelId;
       await channel.execute(id, { petId: 'one', body: 'Which destination?' });

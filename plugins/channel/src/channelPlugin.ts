@@ -129,7 +129,7 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
       service.init();
       context = host;
       host.subscribe(async (event) => {
-        if (event.source !== 'resident-pet' || !['dispatch.queued', 'dispatch.running', 'dispatch.progress', 'dispatch.completed', 'dispatch.waiting', 'dispatch.failed', 'dispatch.interrupted'].includes(event.type)) return;
+        if (event.source !== 'resident-pet' || !['dispatch.queued', 'dispatch.running', 'dispatch.completed', 'dispatch.waiting', 'dispatch.failed', 'dispatch.interrupted'].includes(event.type)) return;
         // Scope is captured by Host for this invocation, never inferred from a bound session.
         const envelope = z.object({ scope: z.object({ namespace: z.literal('channel'), id: z.string().min(1) }) }).safeParse(event.payload);
         if (!envelope.success) return;
@@ -137,12 +137,6 @@ export function createChannelPlugin(options: CreateChannelPluginOptions = {}): C
         try {
           const { petId, sessionId, invocationId } = z.object({ petId: z.string().min(1), sessionId: z.string().min(1), invocationId: z.string().min(1) }).parse(event.payload);
           const source = { petId, sessionId, invocationId };
-          if (event.type === 'dispatch.progress') {
-            // Progress leaves the execution state alone and addresses nobody.
-            const { progress } = z.object({ progress: z.unknown() }).parse(event.payload);
-            service.recordProgress(channelId, source, progress);
-            return;
-          }
           const state = event.type.slice('dispatch.'.length) as 'queued' | 'running' | 'completed' | 'waiting' | 'failed' | 'interrupted';
           const error = z.object({ error: z.string().optional() }).parse(event.payload).error;
           service.recordExecution(channelId, source, state, event.occurredAt, error);

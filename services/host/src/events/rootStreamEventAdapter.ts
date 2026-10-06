@@ -3,7 +3,6 @@ import { AIMessage, ToolMessage, type BaseMessage } from '@langchain/core/messag
 import {
   GUARD_DECISION_EVENT,
   isOrchestratorInternalAiStreamNode,
-  readDelegationPreview,
   readMainToolCallMessages,
   type MainToolCall,
   type RunSupervisorState,
@@ -55,15 +54,6 @@ export type RootProtocolEvent = {
   };
 };
 
-/** A Supervisor delegation as Root committed it, before its Capability runs. */
-export type RootStreamDelegation = {
-  messageId: string;
-  planItemId: string;
-  capability: string;
-  objective: string;
-  briefing: string;
-};
-
 export type RootStreamChatEvent =
   /** Main-conversation assistant tokens (the user-facing reply stream). */
   | { type: 'assistant.delta'; messageId: string; node: string | null; text: string }
@@ -75,8 +65,6 @@ export type RootStreamChatEvent =
   | { type: 'guard.decision'; record: GuardDecisionRecord }
   /** Raw custom-channel event; known names are projected downstream and unknown names are ignored. */
   | { type: 'runtime.custom'; streamSequence: number; name: string; data: unknown }
-  /** A Supervisor delegation Root just committed, before its Capability runs. */
-  | ({ type: 'delegation.started' } & RootStreamDelegation)
   /** Root committed a main message that calls tools; the run continues. */
   | { type: 'tool_calls.message'; messageId: string; text: string; toolCalls: Array<Omit<MainToolCall, 'status'>> }
   /** A main tool call announced in this stream, or open when it began, reached its outcome. */
@@ -393,15 +381,7 @@ export async function* adaptRootStream(
       yield* projectMainToolCalls(chatEvent.values, messages, seenMessages, openToolCalls, receivedInitialValues);
       for (const message of messages) {
         const id = readRecord(message)?.id;
-        if (typeof id !== 'string' || seenMessages.has(id)) continue;
-        seenMessages.add(id);
-        // Like the reply, only a delegation committed during this stream is
-        // news; history and a resumed checkpoint replay are not.
-        const preview = receivedInitialValues && AIMessage.isInstance(message) ? readDelegationPreview(message) : null;
-        if (preview && preview.runId === chatEvent.values.runId) {
-          yield { type: 'delegation.started', messageId: id, planItemId: preview.planItemId,
-            capability: preview.capability, objective: preview.objective, briefing: preview.briefing };
-        }
+        if (typeof id === 'string') seenMessages.add(id);
       }
       receivedInitialValues = true;
     }

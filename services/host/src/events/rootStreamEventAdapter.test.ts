@@ -498,28 +498,6 @@ test('committed Supervisor reply publishes once with its identity while private 
   assert.equal(events.some(e => e.type === 'subagent.message'), false);
 });
 
-test('a Supervisor delegation committed in this stream is announced once; history is not', async () => {
-  const delegation = (id: string, objective: string) => setAgentMessageMetadata(new AIMessage({ id, content: '', tool_calls: [{
-    name: 'delegate_capability', id: `call:${id}`, type: 'tool_call', args: { briefing: `Do ${objective}` },
-  }] }), { runId: 'current', taskId: 'task', source: 'supervisor',
-    delegationPreview: { planItemId: `item:${id}`, capability: 'general', objective } });
-  const state = Annotation.Root({ ...MessagesAnnotation.spec, runId: Annotation<string>() });
-  const graph = new StateGraph(state)
-    .addNode('runSupervisor', () => ({ messages: [delegation('new-dispatch', 'Inspect B.')] }))
-    .addNode('settled', () => ({}))
-    .addEdge(START, 'runSupervisor').addEdge('runSupervisor', 'settled').addEdge('settled', END).compile();
-  const run = await graph.streamEvents({ runId: 'current', messages: [
-    new HumanMessage('Proceed'), delegation('old-dispatch', 'Inspect A.'),
-  ] }, { version: 'v3' });
-  const events: RootStreamChatEvent[] = [];
-  for await (const event of adaptRootStream(run as AsyncIterable<RootProtocolEvent>)) events.push(event);
-  assert.deepEqual(events.filter(e => e.type === 'delegation.started'), [{
-    type: 'delegation.started', messageId: 'new-dispatch', planItemId: 'item:new-dispatch',
-    capability: 'general', objective: 'Inspect B.', briefing: 'Do Inspect B.',
-  }]);
-  assert.equal(events.some(e => e.type === 'assistant.delta'), false);
-});
-
 test('main tool calls reach the conversation as messages and settle, including calls open when a run resumes', async () => {
   const call = (id: string) => setAgentMessageMetadata(new AIMessage({ id, content: id === 'new' ? 'Looking it up.' : '',
     tool_calls: [{ name: 'lookup', id: `call:${id}`, type: 'tool_call', args: { q: id } }] }), { runId: 'current' });

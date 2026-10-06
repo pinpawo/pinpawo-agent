@@ -20,7 +20,6 @@ export type {
   CreateResidentPetRuntimeOptions,
   PetDispatchLifecycleEvent,
   PetDispatchLifecycleState,
-  PetDispatchProgress,
   PetDispatchPort,
   PetDispatchQueueSnapshot,
   PetDispatchQueueEntry,

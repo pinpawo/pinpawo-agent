@@ -165,10 +165,6 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               acceptDelegationOperations: (operations) => {
                 overlayInflightDelegationOperations(run, operations);
               },
-              // Reported whether or not this session is the active one.
-              acceptDelegationStarted: (progress) => {
-                publishLifecycle({ dispatchId, request, requestId, state: 'progress', progress });
-              },
             }));
             if (result.status === 'waiting') {
               if (!pendingInterrupt) {

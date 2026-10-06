@@ -122,18 +122,3 @@ test('an unreadable outcome keeps the suspension so a retry still continues the 
   assert.deepEqual([h.events.at(-1)?.state, h.events.at(-1)?.dispatchId, h.events.at(-1)?.scope?.id], ['completed', 'dispatch-1', 'ch-1']);
   assert.equal(h.session.pendingDispatch, undefined);
 });
-
-test('a delegation in the continued run reports progress under the original dispatch', async () => {
-  const h = harness();
-  const progress = { messageId: 'm1', planItemId: 'p1', capability: 'general', objective: 'Inspect B.', briefing: 'Do B.' };
-  await continueSuspendedDispatch({
-    petId: 'pet', sessions: { findSessionByThread: () => h.session, setPendingDispatch: () => {} } as never,
-    publishLifecycle: (event) => h.events.push(event),
-    run: async (options) => { options.acceptDelegationStarted?.(progress); return { status: 'completed', reply: 'done' }; },
-  })(h.turn('review-1'));
-  assert.deepEqual(h.events.map((event) => [event.state, event.dispatchId, event.scope?.id, event.progress?.objective]), [
-    ['running', 'dispatch-1', 'ch-1', undefined],
-    ['progress', 'dispatch-1', 'ch-1', 'Inspect B.'],
-    ['completed', 'dispatch-1', 'ch-1', undefined],
-  ]);
-});

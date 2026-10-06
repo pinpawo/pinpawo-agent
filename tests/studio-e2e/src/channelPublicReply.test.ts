@@ -131,14 +131,20 @@ test('capability handoff reaches Channel only through the selected final root re
         dispatch: host.resident.dispatch })),
     });
     const id = channel.service.createChannel({ title: 'Plan', goal: 'Plan and review.', scope: 'Round' }, { kind: 'human', id: 'studio-operator' }).channelId;
-    const outputs = () => channel.service.readHistory(id).entries
+    const published = () => channel.service.readHistory(id).entries
       .filter((entry): entry is ChannelMessage => entry.kind === 'message' && Boolean(entry.source));
+    const outputs = () => published().filter(message => !message.toolCalls);
     const alphaOutputs = () => outputs().filter(message => message.author.id === 'acceptance-a');
     const send = (body: string) => channel.sendMessage(id, { body, mentions: [{ participantId: 'pet:acceptance-a' }] });
     await send('Produce the plan and selected handoff.');
     await waitFor(() => arrivedAtFinal);
     assert.deepEqual(boundaryDeliveries, [privateDelivery]);
     assert.equal(outputs().length, 0, 'internal delivery and Supervisor work are not published');
+    // The Pet's own tool calls are its conversation: they reach the Channel while it runs, in their own shape.
+    assert.deepEqual(published().map(message => [message.body, message.mentions, message.toolCalls?.map(call => [call.name, call.args, call.status])]), [
+      ['', [], [['plan_request', { goal: 'Publish the plan.' }, 'completed']]],
+      ['', [], [['delegate_capability', { briefing: 'Produce a plan with the chosen handoff.' }, 'completed']]],
+    ]);
     assert.equal(betaCalls, 0, 'internal @ is not a dispatch');
     release();
     await waitFor(() => outputs().length === 2 && betaCalls === 1);

@@ -3,9 +3,28 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   channelDateKey, channelExecutionOutputs, channelMessageExecutions, channelMessageIdentity, channelMentionLabel,
-  channelMessagesGroup, channelPetIdentity, channelQuote, executionLabel,
-  type ChannelEntry, type ChannelExecution, type ChannelMessage, type ChannelPet, type ChannelParticipant,
+  channelMessagesGroup, channelMessageSummary, channelPetIdentity, channelToolCallDetail, channelToolCallTitle, executionLabel,
+  type ChannelEntry, type ChannelExecution, type ChannelMessage, type ChannelPet, type ChannelParticipant, type ChannelToolCall,
 } from './channelData';
+
+const TOOL_CALL_STATUS: Record<ChannelToolCall['status'], string> = {
+  running: 'Running', completed: 'Done', failed: 'Failed', interrupted: 'Interrupted',
+};
+
+/** Each call the Pet made, rendered from its own structure. */
+export function ChannelToolCalls({ calls }: { calls: ChannelToolCall[] }) {
+  return <ul className="channel-tool-calls" aria-label="Tool calls">{calls.map(call => {
+    const detail = channelToolCallDetail(call);
+    const head = <><span className="channel-tool-call-title">{channelToolCallTitle(call)}</span>
+      <span className={'channel-tool-call-state ' + call.status}>{TOOL_CALL_STATUS[call.status]}</span></>;
+    return <li key={call.id} className="channel-tool-call" data-tool={call.name}>
+      {detail.markdown || detail.json ? <details><summary>{head}</summary>
+        {detail.markdown ? <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.markdown}</ReactMarkdown></div>
+          : <pre><code>{detail.json}</code></pre>}
+      </details> : <div className="channel-tool-call-head">{head}</div>}
+    </li>;
+  })}</ul>;
+}
 
 export function ChannelCopy({ label, value }: { label: string; value: string }) {
   const [result, setResult] = useState('');
@@ -63,15 +82,16 @@ export function ChannelTimeline({ entries, pending, onReply, pets = [], petsRead
             {channelPetIdentity(execution.petId, pets, petsReady).name} · {executionLabel(execution, connected)}</span>)}
         </div>
         {item.replyTo && <button className="channel-quote" type="button" onClick={() => onLocateMessage?.(item.replyTo!)}>
-          <strong>{original ? channelMessageIdentity(original, pets, petsReady, participants, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelQuote(original.body) : 'Locate the original message'}</span>
+          <strong>{original ? channelMessageIdentity(original, pets, petsReady, participants, viewerParticipantId).name : 'Referenced message'}</strong><span>{original ? channelMessageSummary(original) : 'Locate the original message'}</span>
         </button>}
         {item.mentions.length > 0 && <div className="channel-mentions" aria-label="Addressed participants">{item.mentions.map((mention, index) =>
           <span className="channel-mention" key={index}>@{channelMentionLabel(mention, participants, pets, viewerParticipantId)}</span>)}</div>}
-        <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
+        {item.body.trim() && <div className="channel-message-body"><ReactMarkdown remarkPlugins={[remarkGfm]}
           urlTransform={url => url.startsWith('participant:') ? url : defaultUrlTransform(url)}
           components={{ a: ({ href, children }) => href?.startsWith('participant:')
             ? <span className="channel-mention">@{channelMentionLabel({ participantId: href.slice('participant:'.length) }, participants, pets, viewerParticipantId)}</span>
-            : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{item.body}</ReactMarkdown></div>
+            : <a href={href} target="_blank" rel="noreferrer">{children}</a> }}>{item.body}</ReactMarkdown></div>}
+        {item.toolCalls?.length ? <ChannelToolCalls calls={item.toolCalls} /> : null}
         {messageExecutions.filter(execution => execution.error || execution.deliveryError).map(execution =>
           <p className="channel-record-error" role="alert" key={execution.executionId}>
             {channelPetIdentity(execution.petId, pets, petsReady).name}: {execution.error ?? execution.deliveryError}</p>)}

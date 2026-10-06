@@ -112,6 +112,16 @@ nav button.active { color: #66d3d7; border-color: #66d3d7; }
 .channel-revision { margin: 12px 16px 12px 64px; padding-left: 12px; border-left: 2px solid #3d5e5e; color: #819b98; font-size: 11px; }
 .channel-revision summary { cursor: pointer; }
 .channel-revision p { white-space: pre-wrap; line-height: 1.5; }
+.channel-tool-calls { margin: 6px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.channel-tool-call { border: 1px solid #2e4143; border-radius: 5px; background: #0f191a; font-size: 12px; color: #c2d0cc; }
+.channel-tool-call summary, .channel-tool-call-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: default; }
+.channel-tool-call summary { cursor: pointer; }
+.channel-tool-call details > :not(summary) { margin: 0; padding: 0 10px 8px; }
+.channel-tool-call pre { max-width: 100%; overflow: auto; color: #ccd9b0; font: 11px/1.55 ui-monospace, monospace; }
+.channel-tool-call-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.channel-tool-call-state { flex: none; font-size: 11px; color: #9fb8ae; }
+.channel-tool-call-state.running { color: #73c9c9; }
+.channel-tool-call-state.failed, .channel-tool-call-state.interrupted { color: #e09a8a; }
 .channel-artifact { margin-top: 8px; color: #9fb8ae; overflow-wrap: anywhere; font-size: 11px; }
 .channel-jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); height: 28px; color: #c4e5df; border-color: #4a7d7b; border-radius: 16px; background: #193234; box-shadow: 0 3px 14px #0005; font-size: 11px; }
 .channel-composer { flex: none; display: grid; grid-auto-rows: min-content; gap: 8px; max-height: 42vh; overflow-y: auto; margin: 0; padding: 12px 22px 10px; border-top: 1px solid #2a3a3b; background: #11191b; }

@@ -1,4 +1,4 @@
-import { parsePendingInterruptProjection, type PendingInterruptProjection } from '@pinpawo/agent-session';
+import { parsePendingInterruptProjection, type AgentMessageToolCall, type PendingInterruptProjection } from '@pinpawo/agent-session';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -44,8 +44,22 @@ export type ChannelRevision = z.infer<typeof channelGoalSchema> & {
 };
 export type ChannelSessionBinding = { channelId: string; petId: string; sessionId: string; registered: boolean };
 export type ChannelMessageSource = { petId: string; sessionId: string; invocationId: string };
+/** A Pet conversation message that called tools, as Agent Session carries it. */
+export const channelToolCallMessageSchema = z.object({
+  messageId: identifier,
+  text: z.string().max(100_000),
+  toolCalls: z.array(z.object({ id: identifier, name: identifier, args: z.record(z.unknown()) }).strict()).min(1).max(100),
+}).strict();
+export const channelToolCallSettlementSchema = z.object({
+  messageId: identifier,
+  callId: identifier,
+  status: z.enum(['completed', 'failed']),
+}).strict();
+export type ChannelToolCall = AgentMessageToolCall;
 export type ChannelMessage = z.infer<typeof channelMessageSchema> & {
   source?: ChannelMessageSource;
+  /** Tools the Pet called in this message, in their own shape; the body may then be empty. */
+  toolCalls?: ChannelToolCall[];
   kind: 'message'; channelId: string; sequence: number; messageId: string;
   author: ChannelAuthor; occurredAt: string; revision: number;
 };
@@ -81,7 +95,7 @@ export class ChannelService {
       if (this.databasePath !== ':memory:') chmodSync(this.databasePath, 0o600);
       db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;');
       const version = (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
-      if (![0, 1, 2, 3, 4].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
+      if (![0, 1, 2, 3, 4, 5].includes(version)) throw new Error(`Unsupported Channel schema version ${version}.`);
       db.exec(`
         CREATE TABLE IF NOT EXISTS channel_entries (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +128,16 @@ export class ChannelService {
           channel_id TEXT NOT NULL, invocation_id TEXT UNIQUE, data TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS channel_execution_history ON channel_executions(channel_id, sequence);
-        PRAGMA user_version=4;
+        CREATE TABLE IF NOT EXISTS channel_tool_call_messages (
+          pet_id TEXT NOT NULL, session_id TEXT NOT NULL, session_message_id TEXT NOT NULL,
+          invocation_id TEXT NOT NULL, message_id TEXT NOT NULL,
+          PRIMARY KEY(pet_id, session_id, session_message_id)
+        );
+        CREATE TABLE IF NOT EXISTS channel_tool_calls (
+          message_id TEXT NOT NULL, call_id TEXT NOT NULL, status TEXT NOT NULL,
+          PRIMARY KEY(message_id, call_id)
+        );
+        PRAGMA user_version=5;
       `);
       this.observerId = randomUUID();
       this.db = db;
@@ -129,7 +152,12 @@ export class ChannelService {
   private decode(row: unknown): ChannelEntry | null {
     if (!row) return null;
     const value = row as { sequence: number; data: string };
-    return { ...JSON.parse(value.data), sequence: value.sequence } as ChannelEntry;
+    const entry = { ...JSON.parse(value.data), sequence: value.sequence } as ChannelEntry;
+    if (entry.kind !== 'message' || !entry.toolCalls) return entry;
+    // The message is the journal's; each call's outcome is observed afterwards.
+    const statuses = new Map((this.database().prepare('SELECT call_id, status FROM channel_tool_calls WHERE message_id=?')
+      .all(entry.messageId) as { call_id: string; status: ChannelToolCall['status'] }[]).map(row => [row.call_id, row.status]));
+    return { ...entry, toolCalls: entry.toolCalls.map(call => ({ ...call, status: statuses.get(call.id) ?? 'running' })) };
   }
   private transaction<T>(run: () => T, readOnly = false): T {
     const db = this.database();
@@ -274,6 +302,52 @@ export class ChannelService {
       return message;
     });
     return created ? this.publish(entry) : entry;
+  }
+  /**
+   * Record a conversation message in which the Pet called tools. It addresses
+   * nobody; routing stays with the final reply. Idempotent per session message.
+   */
+  recordToolCallMessage(channelId: string, source: ChannelMessageSource, value: unknown): ChannelMessage {
+    const binding = this.requireOutputBinding(channelId, source);
+    const { messageId, text, toolCalls } = channelToolCallMessageSchema.parse(value);
+    let created = false;
+    const entry = this.transaction(() => {
+      const saved = this.database().prepare('SELECT message_id FROM channel_tool_call_messages WHERE pet_id=? AND session_id=? AND session_message_id=?')
+        .get(source.petId, source.sessionId, messageId) as { message_id: string } | undefined;
+      if (saved) return this.getMessage(binding.channelId, saved.message_id);
+      const channel = this.getChannel(binding.channelId);
+      const message = this.append({ body: text.trim(), mentions: [], artifacts: [], toolCalls: toolCalls as ChannelToolCall[], kind: 'message',
+        channelId: channel.channelId, messageId: randomUUID(), revision: channel.sequence,
+        author: { kind: 'pet', id: source.petId }, source, occurredAt: new Date().toISOString(),
+      }) as ChannelMessage;
+      this.database().prepare('INSERT INTO channel_tool_call_messages VALUES (?, ?, ?, ?, ?)')
+        .run(source.petId, source.sessionId, messageId, source.invocationId, message.messageId);
+      created = true;
+      return this.getMessage(binding.channelId, message.messageId);
+    });
+    return created ? this.publish(entry) : entry;
+  }
+  /** Record one call's outcome. A call this Channel never saw is not its to record. */
+  settleToolCall(channelId: string, source: ChannelMessageSource, value: unknown): void {
+    this.requireOutputBinding(channelId, source);
+    const { messageId, callId, status } = channelToolCallSettlementSchema.parse(value);
+    const saved = this.database().prepare('SELECT message_id FROM channel_tool_call_messages WHERE pet_id=? AND session_id=? AND session_message_id=?')
+      .get(source.petId, source.sessionId, messageId) as { message_id: string } | undefined;
+    if (!saved) return;
+    this.database().prepare(`INSERT INTO channel_tool_calls VALUES (?, ?, ?)
+      ON CONFLICT(message_id, call_id) DO UPDATE SET status=excluded.status`).run(saved.message_id, callId, status);
+  }
+  /** An invocation that stopped leaves its open calls interrupted. */
+  interruptToolCalls(source: ChannelMessageSource): void {
+    const db = this.database();
+    const rows = db.prepare('SELECT message_id FROM channel_tool_call_messages WHERE pet_id=? AND session_id=? AND invocation_id=?')
+      .all(source.petId, source.sessionId, source.invocationId) as { message_id: string }[];
+    for (const { message_id } of rows) {
+      const entry = this.decode(db.prepare("SELECT sequence, data FROM channel_entries WHERE message_id=? AND kind='message'").get(message_id));
+      for (const call of entry?.kind === 'message' ? entry.toolCalls ?? [] : []) {
+        if (call.status === 'running') db.prepare('INSERT OR IGNORE INTO channel_tool_calls VALUES (?, ?, ?)').run(message_id, call.id, 'interrupted');
+      }
+    }
   }
   recordInterrupt(channelId: string, source: ChannelMessageSource, value: unknown): ChannelInterruptNotification {
     const binding = this.requireOutputBinding(channelId, source);

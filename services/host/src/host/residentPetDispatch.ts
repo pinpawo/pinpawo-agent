@@ -14,7 +14,7 @@ import {
 import { emitLocalServerToolOperationEvent } from '../serverOperationEvents';
 import { createOperationRegistryForAgentSetup } from '../runtimeOperationRegistry';
 import type { ActiveRun } from '../agent/activeRunRegister';
-import type { PetDispatchPort, ResidentPet } from './contracts';
+import { readPetDispatchMessage, type PetDispatchPort, type ResidentPet } from './contracts';
 import {
   readResidentPetRuntimeContext,
   type ResidentPetRuntime,
@@ -65,15 +65,18 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         ? sessions.ensureDispatchSession(petId, suppliedSession.id, suppliedSession.create === true)
         : undefined;
       let pendingInterrupt: PendingInterruptProjection | undefined;
-      const publishRuntimeEvent: typeof publishActiveSessionEvent = (event) => {
-        if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
-        if (!target || sessions.getActiveSessionId(petId) === target.id) publishActiveSessionEvent(event);
-      };
       const publishLifecycle: typeof publishDispatchLifecycle = (event) => publishDispatchLifecycle({
         ...event, ...(scope ? { scope: copyPetInvocationScope(scope) } : {}),
         ...(event.state === 'waiting' && pendingInterrupt ? { pendingInterrupt } : {}),
         ...(target ? { sessionId: target.id } : {}),
       });
+      const publishRuntimeEvent: typeof publishActiveSessionEvent = (event) => {
+        if (event.type === 'interrupt.requested') pendingInterrupt = event.pendingInterrupt;
+        // Dispatch observers follow the conversation whichever session is on screen.
+        const message = readPetDispatchMessage(event);
+        if (message) publishLifecycle({ dispatchId, request, requestId: event.requestId, state: 'message', message });
+        if (!target || sessions.getActiveSessionId(petId) === target.id) publishActiveSessionEvent(event);
+      };
       const readTargetSetup = async () => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(petId), target!.id);
       // Whoever resumes this review continues the dispatch; see continueSuspendedDispatch.
       const suspend = (setup: AgentChannelSetup, pending: PendingInterruptProjection) => {

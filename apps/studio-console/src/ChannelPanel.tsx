@@ -3,7 +3,7 @@ import { ChannelCopy, ChannelTimeline, ChannelExecutionHistory } from './Channel
 import { useChannelBreakpoint, useChannelDialogFocus } from './channelFocus';
 import { ChannelDispatchQueues } from './ChannelDispatchQueues';
 import {
-  channelMessageInput, channelMessageIdentity, channelPetIdentity, channelQuote, channelReplyRecipientId, readChannelPages,
+  channelMessageInput, channelMessageIdentity, channelPetIdentity, channelMessageSummary, channelReplyRecipientId, readChannelPages,
   type ChannelGoal, type ChannelContext, type ChannelEntry, type ChannelMessage, type ChannelExecution, type ChannelNotice, type DispatchQueue,
 } from './channelData';
 
@@ -261,7 +261,7 @@ export function ChannelPanel({ url, token, connected, refreshVersion, active = t
           <form className="channel-composer" onSubmit={execute}>
             {reply && <div className="channel-composer-quote">
               <button className="channel-quote" type="button" onClick={() => locateMessage(reply.messageId)}>
-                <strong>{'Reply to ' + channelMessageIdentity(reply, pets, petsReady, context.participants, context.viewerParticipantId).name}</strong><span>{channelQuote(reply.body)}</span>
+                <strong>{'Reply to ' + channelMessageIdentity(reply, pets, petsReady, context.participants, context.viewerParticipantId).name}</strong><span>{channelMessageSummary(reply)}</span>
               </button>
               <button type="button" aria-label="Cancel reply" disabled={pending} onClick={() => { setReply(undefined); composer.current?.focus(); }}>×</button>
             </div>}

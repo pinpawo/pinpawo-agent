@@ -85,6 +85,9 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
       assert.ok(dispatchId);
       lifecycleListener?.({ dispatchId, request, state: 'queued' });
       lifecycleListener?.({ dispatchId, request, requestId: 'host-1', state: 'running' });
+      lifecycleListener?.({ dispatchId, request, requestId: 'host-1', state: 'message', message: {
+        type: 'message.tool_calls', messageId: 'm1', text: '', toolCalls: [{ id: 'c1', name: 'lookup', args: { q: 'x' } }],
+      } });
       lifecycleListener?.({
         dispatchId,
         request,
@@ -113,10 +116,14 @@ test('Studio relays resident dispatch lifecycle observations without owning exec
   })), [
     { type: 'dispatch.queued', source: 'resident-pet' },
     { type: 'dispatch.running', source: 'resident-pet' },
+    { type: 'dispatch.message', source: 'resident-pet' },
     { type: 'dispatch.failed', source: 'resident-pet' },
     { type: 'dispatch.accepted', source: 'studio' },
   ]);
-  assert.deepEqual((events[2] as { payload: unknown }).payload, {
+  assert.deepEqual((events[2] as { payload: { message?: unknown } }).payload.message, {
+    type: 'message.tool_calls', messageId: 'm1', text: '', toolCalls: [{ id: 'c1', name: 'lookup', args: { q: 'x' } }],
+  });
+  assert.deepEqual((events[3] as { payload: unknown }).payload, {
     invocationId: receipt.invocationId,
     petId: 'worker',
     request: 'draft',

@@ -121,8 +121,12 @@ session/scope 关联，不含请求/模型正文；当前 Bearer 可观察所有
 正常 A↔B / self handoff 不新增次数限制或协作等待状态机。
 
 waiting 复用 `PendingInterruptProjection`，独立只读通知不进入消息或模型 context。
-用户在原 Pet TUI/session 检查并处理当前审批；TUI resume 不继承 Channel scope，
-恢复输出没有自动 Channel 回程。拒绝/取消结束本轮，不二次暂停；非法 interrupt 仍报错。
+用户在原 Pet TUI/session 检查并处理当前审批。dispatch 停在审批时，Host 在该 session 记录
+上保存 `pendingDispatch`（interruptId → 原 dispatchId/request/scope），随 session 注册表持久化。
+回答同一 interrupt 的 resume 即该 dispatch 的续跑：恢复原 Channel scope，按原 dispatchId 发布
+running/completed/failed/interrupted，再次停在审批则改记新 interruptId 并发布 waiting；
+其他 resume 仍是普通对话。所以 waiting 不是终态，审批后的回复（含拒绝/取消后的结束语）
+回到原 Channel，重启后再审批同样成立。拒绝/取消结束本轮，不二次暂停；非法 interrupt 仍报错。
 
 Studio 幂等接纳按 producer/Pet 隔离、并发共享 Promise，只在进程内有效。
 两次独立消息提交有不同 messageId；重复 completed 复用输出与派发键。

@@ -11,6 +11,7 @@ import {
   loadTuiSessionState,
   resumeTuiSession,
   saveTuiSessionState,
+  setTuiSessionPendingDispatch,
   updateTuiSessionSummary,
 } from './tuiSessionRegistry';
 
@@ -217,4 +218,27 @@ test('tui session registry migrates v3 sessions to a text-only requirement', asy
     restored.sessions[sessionId]?.requiredInputModalities,
     ['text'],
   );
+});
+
+test('tui session registry persists a suspended dispatch across restart and summary updates', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'tui-pending-dispatch-'));
+  const filePath = path.join(dir, 'sessions.json');
+  const state = loadTuiSessionState('test-profile', filePath);
+  const session = ensureActiveTuiSession(state, 'pet', 'test-profile');
+  const pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'do it', scope: { namespace: 'channel', id: 'ch-1' } };
+  setTuiSessionPendingDispatch(state, session.id, pendingDispatch);
+  updateTuiSessionSummary(state, session.id, { title: 'renamed' });
+  saveTuiSessionState(state, filePath);
+  assert.deepEqual(loadTuiSessionState('test-profile', filePath).sessions[session.id]?.pendingDispatch, pendingDispatch);
+
+  setTuiSessionPendingDispatch(state, session.id, null);
+  saveTuiSessionState(state, filePath);
+  assert.equal('pendingDispatch' in loadTuiSessionState('test-profile', filePath).sessions[session.id]!, false);
+
+  const raw = JSON.parse(await readFile(filePath, 'utf-8'));
+  raw.sessions[session.id].pendingDispatch = { interruptId: 'review-1', dispatchId: 'dispatch-1', request: 'x', scope: { namespace: '' } };
+  await writeFile(filePath, JSON.stringify(raw));
+  const reloaded = loadTuiSessionState('test-profile', filePath).sessions[session.id];
+  assert.ok(reloaded, 'a malformed suspension does not drop the session');
+  assert.equal(reloaded.pendingDispatch, undefined);
 });

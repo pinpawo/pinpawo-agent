@@ -75,6 +75,14 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
         ...(target ? { sessionId: target.id } : {}),
       });
       const readTargetSetup = async () => sessions.buildSessionSetup(runtimeDeps.get(), await loadContext(petId), target!.id);
+      // Whoever resumes this review continues the dispatch; see continueSuspendedDispatch.
+      const suspend = (setup: AgentChannelSetup, pending: PendingInterruptProjection) => {
+        const session = target ?? sessions.findSessionByThread(petId, setup.input.threadId);
+        if (!session) throw new Error('A waiting dispatch has no session to resume from.');
+        sessions.setPendingDispatch(session.id, {
+          interruptId: pending.interruptId, dispatchId, request, ...(scope ? { scope } : {}),
+        });
+      };
 
       coordinator.submitDispatch(() => AsyncLocalStorageProviderSingleton.runWithConfig(
         { callbacks: [] },
@@ -103,11 +111,13 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               ? await graphService.settleAbortedRun(params.setup)
               : null;
             if (settled) {
+              const pending = projectPendingInterrupt(settled);
               publishRuntimeEvent({
                 type: 'interrupt.requested',
                 requestId,
-                pendingInterrupt: projectPendingInterrupt(settled),
+                pendingInterrupt: pending,
               });
+              suspend(params.setup!, pending);
               publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;
             }
@@ -157,6 +167,12 @@ export function createResidentPet(runtime: ResidentPetRuntime): ResidentPet {
               },
             }));
             if (result.status === 'waiting') {
+              if (!pendingInterrupt) {
+                const pending = (await graphService.readThreadState(setup)).pendingInterrupt;
+                if (pending) pendingInterrupt = projectPendingInterrupt(pending);
+              }
+              if (!pendingInterrupt) throw new Error('A waiting dispatch has no pending interrupt.');
+              suspend(setup, pendingInterrupt);
               finishInflightOperations(run, 'interrupted', publishRuntimeEvent);
               publishLifecycle({ dispatchId, request, requestId, state: 'waiting' });
               return;

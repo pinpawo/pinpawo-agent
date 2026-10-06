@@ -1,4 +1,5 @@
 import { withoutPetInvocationContext } from './host/petInvocationContext';
+import { continueSuspendedDispatch } from './host/dispatchContinuation';
 import { ActiveRunRegister } from './agent/activeRunRegister';
 import { HostGraphService } from './agent/agentGraphService';
 import { runAgentSessionTurn } from './agent/chatSessionAdapter';
@@ -224,12 +225,15 @@ export async function createResidentPetRuntime(
     }
   };
   const runAgentTurn = options.runAgentTurn ?? runAgentSessionTurn;
+  const runConversationTurn = continueSuspendedDispatch({
+    petId: deps.petId, sessions, publishLifecycle: publishDispatchLifecycle, run: runAgentTurn,
+  });
   const localHandlers: ReturnType<typeof createLocalServerHandlers> = createLocalServerHandlers(runtimeDeps, {
     persistGlobalReviewPolicyMode: options.persistGlobalReviewPolicyMode,
     chatGraphService: graphService,
     tuiSessions: sessions,
     loadContext,
-    runAgentTurn: (input) => withoutPetInvocationContext(() => runAgentTurn(input)),
+    runAgentTurn: (input) => withoutPetInvocationContext(() => runConversationTurn(input)),
     publishRuntimeEvent: (_origin, event) => publishRuntimeEvent(event),
     activeRuns,
     interruptHostRun: (requestId) => {

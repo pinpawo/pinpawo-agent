@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentInputModality } from '@pinpawo/agent-session';
 import { buildTuiChatThreadId } from '../chatInterface';
+import type { PetInvocationScope } from '../host/petInvocationContext';
 
 export const DEFAULT_TUI_SESSION_STATE_PATH = resolve(homedir(), '.pinpawo', 'tui-sessions.json');
 
@@ -18,6 +19,20 @@ export type TuiSessionRecord = {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+  /** The dispatch waiting on this session's pending interrupt, if one is. */
+  pendingDispatch?: TuiSessionPendingDispatch;
+};
+
+/**
+ * A dispatch stopped on a review belongs to whoever resumes that review. The
+ * session keeps it beside its pending interrupt: resuming the same interrupt
+ * continues the dispatch under its original identity and scope.
+ */
+export type TuiSessionPendingDispatch = {
+  interruptId: string;
+  dispatchId: string;
+  request: string;
+  scope?: PetInvocationScope;
 };
 
 export type TuiSessionState = {
@@ -220,6 +235,18 @@ export function updateTuiSessionModelProfile(
   return next;
 }
 
+export function setTuiSessionPendingDispatch(
+  state: TuiSessionState,
+  sessionId: string,
+  pendingDispatch: TuiSessionPendingDispatch | null,
+) {
+  const record = state.sessions[sessionId];
+  if (!record) return null;
+  const { pendingDispatch: _previous, ...rest } = record;
+  const next: TuiSessionRecord = pendingDispatch ? { ...rest, pendingDispatch } : rest;
+  state.sessions[sessionId] = next;
+  return next;
+}
 
 function parseTuiSessionState(
   value: unknown,
@@ -289,6 +316,7 @@ function parseSessionRecord(
   const messageCount = readNonNegativeInteger(record.messageCount);
   const createdAt = readString(record.createdAt);
   const updatedAt = readString(record.updatedAt);
+  const pendingDispatch = readPendingDispatch(record.pendingDispatch);
   if (
     !recordId
     || recordId !== id
@@ -316,6 +344,28 @@ function parseSessionRecord(
     messageCount,
     createdAt,
     updatedAt,
+    ...(pendingDispatch ? { pendingDispatch } : {}),
+  };
+}
+
+function readPendingDispatch(value: unknown): TuiSessionPendingDispatch | null {
+  const record = readRecord(value);
+  if (!record) return null;
+  const interruptId = readString(record.interruptId);
+  const dispatchId = readString(record.dispatchId);
+  const request = readString(record.request);
+  const scope = record.scope === undefined ? undefined : readRecord(record.scope);
+  const namespace = readString(scope?.namespace);
+  const scopeId = readString(scope?.id);
+  if (!interruptId || !dispatchId || request === null || scope === null
+    || (scope && (!namespace || !scopeId))) {
+    return null;
+  }
+  return {
+    interruptId,
+    dispatchId,
+    request,
+    ...(namespace && scopeId ? { scope: { namespace, id: scopeId } } : {}),
   };
 }
 

@@ -41,8 +41,10 @@ import {
   loadTuiSessionState,
   resumeTuiSession,
   saveTuiSessionState,
+  setTuiSessionPendingDispatch,
   updateTuiSessionModelProfile,
   updateTuiSessionSummary,
+  type TuiSessionPendingDispatch,
   type TuiSessionRecord,
   type TuiSessionState,
 } from './tuiSessionRegistry';
@@ -160,6 +162,23 @@ export class ServerTuiSessionService {
   getSession(petId: string, sessionId: string) {
     const session = this.state.sessions[sessionId];
     return session?.petId === petId ? session : null;
+  }
+
+  findSessionByThread(petId: string, threadId: string | undefined) {
+    if (!threadId) return null;
+    return Object.values(this.state.sessions)
+      .find((session) => session.petId === petId && session.threadId === threadId) ?? null;
+  }
+
+  setPendingDispatch(sessionId: string, pendingDispatch: TuiSessionPendingDispatch | null) {
+    const previous = this.state.sessions[sessionId];
+    if (!previous) throw new Error('session not found');
+    setTuiSessionPendingDispatch(this.state, sessionId, pendingDispatch);
+    try { this.save(); }
+    catch (error) {
+      this.state.sessions[sessionId] = previous;
+      throw error;
+    }
   }
 
   ensureDispatchSession(petId: string, sessionId: string, create = false) {
